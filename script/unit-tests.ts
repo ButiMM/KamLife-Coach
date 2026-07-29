@@ -44,6 +44,7 @@ import { readLifeContext, lifeContextReply, pausesTargets, quietDays, type LifeC
 import { comebackPlan } from "../server/adaptive-training";
 import { bandFor, assessClients, dropOffCurve, silenceTriggers, summariseEngagement, type ActivityRow } from "../server/engagement";
 import { analyseSurface, classifyIntent } from "../server/surface";
+import { TEMPLATES, validateTemplate, invalidTemplates, placeholders, templateSid, WINDOW_RECOVERY_TEMPLATE } from "../server/whatsapp-templates";
 import { fadeState, fadingClients } from "../server/engagement";
 import { guardMalformed, safeFallback, recordGuardResult, guardStats, guardStatsLine, GUARD_ESCALATION_THRESHOLD } from "../server/malformed-guard";
 import { calorieCeiling } from "../server/adaptive-targets";
@@ -7052,6 +7053,95 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     const out = unloggedFoodNotice("kota and a stony", ["Chips"]);
     assert.notEqual(out, "");
     assert.match(out, /kota/i);
+  });
+}
+
+// ── WhatsApp templates: catch Meta's rejections offline, not one per day ─────────────────────
+// Each Meta rejection costs a day of review. Every rule tested here is a real rejection cause,
+// so a template that fails one of these must never reach a submission.
+{
+  test("templates: the shipped pack would be accepted by Meta", () => {
+    const bad = invalidTemplates();
+    assert.deepEqual(bad, [], `templates would be rejected: ${JSON.stringify(bad, null, 2)}`);
+  });
+
+  test("templates: the 24h-window recovery template takes NO variables", () => {
+    // sendWhatsApp's 63016 handler calls sendWhatsAppTemplate with no contentVariables — it
+    // only knows a phone number there. A placeholder added here renders blank or is rejected,
+    // turning the one route back into a silent chat into a second silent failure.
+    const t = TEMPLATES.find(x => x.name === WINDOW_RECOVERY_TEMPLATE)!;
+    assert.ok(t, "the window-recovery template must exist in the registry");
+    assert.equal(placeholders(t.body).length, 0, "window-recovery template must have no {{n}} placeholders");
+  });
+
+  test("templates: every entry names the Railway variable its SID lands in", () => {
+    for (const t of TEMPLATES) {
+      assert.match(t.env, /^TWILIO_[A-Z_]+_SID$/, `${t.name} has an odd env var: ${t.env}`);
+    }
+    const envs = TEMPLATES.map(t => t.env);
+    assert.equal(new Set(envs).size, envs.length, "two templates share one env var — one would overwrite the other");
+  });
+
+  test("templates: a body opening on a placeholder is rejected", () => {
+    const p = validateTemplate({
+      name: "t", category: "UTILITY", env: "TWILIO_X_SID", unblocks: "",
+      body: "{{1}}, your plan is ready.", vars: ["name"], samples: ["Thandi"],
+    });
+    assert.ok(p.some(x => /starts with a placeholder/.test(x)), p.join("; "));
+  });
+
+  test("templates: a gap in the placeholder numbering is rejected", () => {
+    const p = validateTemplate({
+      name: "t", category: "UTILITY", env: "TWILIO_X_SID", unblocks: "",
+      body: "Hi {{1}} your total is {{3}} today.", vars: ["a", "b"], samples: ["x", "y"],
+    });
+    assert.ok(p.some(x => /no gaps/.test(x)), p.join("; "));
+  });
+
+  test("templates: adjacent placeholders are rejected", () => {
+    const p = validateTemplate({
+      name: "t", category: "UTILITY", env: "TWILIO_X_SID", unblocks: "",
+      body: "Hi {{1}} {{2}} — welcome aboard.", vars: ["a", "b"], samples: ["x", "y"],
+    });
+    assert.ok(p.some(x => /adjacent/.test(x)), p.join("; "));
+  });
+
+  test("templates: a missing sample value is rejected — Meta requires one per placeholder", () => {
+    const p = validateTemplate({
+      name: "t", category: "UTILITY", env: "TWILIO_X_SID", unblocks: "",
+      body: "Hi {{1}}, your plan is ready.", vars: ["name"], samples: [],
+    });
+    assert.ok(p.some(x => /sample value/.test(x)), p.join("; "));
+  });
+
+  test("templates: promotional wording in a UTILITY template is caught before Meta re-categorises it", () => {
+    const p = validateTemplate({
+      name: "t", category: "UTILITY", env: "TWILIO_X_SID", unblocks: "",
+      body: "Hi {{1}} — get 50% off today, limited time only.", vars: ["name"], samples: ["Thandi"],
+    });
+    assert.ok(p.some(x => /re-categorise/.test(x)), p.join("; "));
+  });
+
+  test("templates: an uppercase template name is rejected", () => {
+    const p = validateTemplate({
+      name: "KamLife_Daily", category: "UTILITY", env: "TWILIO_X_SID", unblocks: "",
+      body: "Hi there, your plan is ready.", vars: [], samples: [],
+    });
+    assert.ok(p.some(x => /lowercase/.test(x)), p.join("; "));
+  });
+
+  test("templates: templateSid reads the env var, and unwired means unreachable", () => {
+    const t = TEMPLATES[0];
+    const prev = process.env[t.env];
+    delete process.env[t.env];
+    assert.equal(templateSid(t.name), "", "no env var set must read as unwired");
+    process.env[t.env] = "HX00000000000000000000000000000000";
+    assert.equal(templateSid(t.name), "HX00000000000000000000000000000000");
+    if (prev === undefined) delete process.env[t.env]; else process.env[t.env] = prev;
+  });
+
+  test("templates: an unknown name never resolves to some other template's SID", () => {
+    assert.equal(templateSid("kamlife_does_not_exist"), "");
   });
 }
 

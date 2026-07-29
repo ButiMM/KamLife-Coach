@@ -13,6 +13,7 @@ import { join } from "path";
 import { schedulerState } from "../../shared/schema";
 import { routineNudgeAllowed, dayOfYearSAST } from "./nudge-policy";
 import { checkOutboundMessage } from "../verifiers/proactive-gate";
+import { templateSid, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
 
 export { db, pool };
 export { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles };
@@ -337,7 +338,11 @@ const SMS_FROM = process.env.TWILIO_SMS_NUMBER || "";
 // WhatsApp allows outside that window. Empty until you have an approved template —
 // when unset, behaviour is unchanged (the 63016 path goes straight to SMS fallback).
 // Production-only: the sandbox has no templates, so this is a no-op there.
-const REENGAGE_TEMPLATE_SID = process.env.TWILIO_REENGAGE_TEMPLATE_SID || "";
+//
+// Read through the registry rather than straight off process.env (2026-07-29): the text that
+// gets approved and the SID that gets used must be the same object, or the coach sends a
+// template nobody reviewed. server/whatsapp-templates.ts owns both.
+const reengageTemplateSid = () => templateSid(WINDOW_RECOVERY_TEMPLATE);
 
 // Twilio error codes that mean "WhatsApp channel is unavailable for this recipient"
 // (not transient network errors — these won't resolve with retry)
@@ -537,10 +542,10 @@ async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | unde
         // re-engagement template is configured, send THAT first — it re-opens the WhatsApp
         // thread (preferred over SMS). Only on its failure do we drop to SMS. Other channel
         // errors (not opted in, region blocked) go straight to SMS as before.
-        if (e.code === 63016 && REENGAGE_TEMPLATE_SID) {
+        if (e.code === 63016 && reengageTemplateSid()) {
           console.warn(`[WA:WINDOW] outside 24h window for ${to.slice(-8)} — sending re-engagement template`);
           try {
-            await sendWhatsAppTemplate(to, REENGAGE_TEMPLATE_SID, undefined, { fallbackText: smsFallbackText });
+            await sendWhatsAppTemplate(to, reengageTemplateSid(), undefined, { fallbackText: smsFallbackText });
             return "fallback"; // template path logs history + handles its own SMS fallback
           } catch {
             console.warn(`[WA:WINDOW] re-engagement template failed for ${to.slice(-8)} — falling back to SMS`);

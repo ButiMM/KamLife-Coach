@@ -25,6 +25,7 @@
 import { FFMPEG_AVAILABLE } from "./video-frames";
 import { uploadedGifCount } from "./exercise-media";
 import { cardFontLoaded } from "./macro-card";
+import { templatesReady } from "./whatsapp-templates";
 
 export type Severity = "critical" | "degraded" | "cosmetic";
 
@@ -67,6 +68,17 @@ export function capabilities(): Capability[] {
       severity: "critical",
       fix: "Set PAYFAST_MERCHANT_ID and APP_URL in Railway.",
       ok: () => has("PAYFAST_MERCHANT_ID") && has("APP_URL"),
+    },
+    {
+      // 2026-07-29. The engagement report named a client quiet 5 days — i.e. one the coach
+      // could not reach at all. WhatsApp rejects freeform outside 24 hours of the client's
+      // last message; only an approved template gets through. Every proactive job is dark for
+      // exactly the clients who most need reaching, and the rejection is a log line.
+      name: "Reaching quiet clients (24h+)",
+      impact: "Every client who hasn't messaged in 24 hours is unreachable. Morning messages, weekly checks and payment alerts are rejected by WhatsApp and reach nobody.",
+      severity: "critical",
+      fix: "Run `npx tsx script/template-pack.ts`, submit each template in Twilio, then paste the approved HX… SIDs into Railway.",
+      ok: () => templatesReady(),
     },
 
     // ── DEGRADED: the client silently gets less than they paid for. ─────────────────────────
