@@ -4998,6 +4998,7 @@ test("next move: the instruction can never contradict the pill", async () => {
     loggedToday: o.loggedToday ?? true, proteinPct: o.prot ?? 0.9, caloriePct: o.cal ?? 0.9,
     sessionsThisWeek: o.sess ?? 3, sessionsTarget: o.sessTarget ?? 3,
     stepsToday: o.steps ?? 9000, stepsTarget: o.stepsTarget ?? 8000, sick: o.sick, hour: o.hour ?? 18,
+    atKeyboard: o.atKeyboard,
   });
 
   test("one action: what matters most wins, whatever else is also wrong", async () => {
@@ -5015,6 +5016,19 @@ test("next move: the instruction can never contradict the pill", async () => {
     assert.equal(chooseAction(day({ goal: "muscle_gain", prot: 0.3 })).kind, "protein");
     // A brand-new client isn't chased for a weigh-in on day one.
     assert.notEqual(chooseAction(day({ weighed: null, weeks: 0 })).kind, "weigh");
+  });
+
+  test("one action: someone typing to me is never told to come back", async () => {
+    const { chooseAction } = await import("../server/one-action");
+    // Every come_back line is written for an ABSENT person — "Just say hi. That's the whole ask
+    // today." Sent as a REPLY it asks for the thing they have just done, which reads as the coach
+    // not noticing they spoke. atKeyboard means this is a reply, so the branch is skipped.
+    const gone = { silent: 40, loggedToday: false, weighed: null, weeks: 6 };
+    assert.equal(chooseAction(day(gone)).kind, "come_back", "a proactive nudge still chases them");
+    const replying = chooseAction(day({ ...gone, atKeyboard: true } as any));
+    assert.notEqual(replying.kind, "come_back", "a reply must not ask a present person to come back");
+    assert.ok(!/say hi/i.test(replying.todo), `must not ask them to say hi: "${replying.todo}"`);
+    assert.ok(replying.todo.trim().length > 0, "they must still leave with something to do");
   });
 
   test("one action: silence escalates — three days is not six weeks", async () => {

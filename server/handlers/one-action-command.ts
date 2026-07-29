@@ -67,10 +67,15 @@ export async function buildDayState(user: any): Promise<DayState> {
   };
 }
 
-export async function oneActionCommand(user: any): Promise<string> {
+/**
+ * `atKeyboard` — set it when this goes out as a REPLY to something the client just sent, so the
+ * decision does not ask an obviously-present person to come back. Leave it off for proactive
+ * sends (the morning message), where they genuinely are not here.
+ */
+export async function oneActionCommand(user: any, opts?: { atKeyboard?: boolean }): Promise<string> {
   const firstName = String(user?.name || "").trim().split(/\s+/)[0] || undefined;
   try {
-    return formatOneAction(chooseAction(await buildDayState(user)), firstName);
+    return formatOneAction(chooseAction({ ...await buildDayState(user), atKeyboard: !!opts?.atKeyboard }), firstName);
   } catch (e: any) {
     console.error("[ONE_ACTION]", e?.message || e);
     // A real instruction, not an apology. Protein is the safest single action for every goal we

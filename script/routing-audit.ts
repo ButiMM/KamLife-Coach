@@ -598,6 +598,15 @@ const CASES: Case[] = [
         { reject: [SICK_TPL] }),
       x("hypothetical fever question", "Can you train with a fever or is that dangerous?",
         { reject: [SICK_TPL] }),
+      // SWEEP 2026-07-29. A confused client got the entire help menu — a sitemap in answer to
+      // "I don't understand" — whenever their last reply was over 30 minutes old, which on
+      // WhatsApp is the common case, not the rare one. Confusion now returns ONE plain action.
+      x("confusion never returns the help menu", "I don't understand",
+        { reject: [/Reply with a number|Here'?s what I can do|📋|Quick actions/i] }),
+      x("asking for it simpler is heard as confusion", "explain that again please",
+        { reject: [/didn'?t quite catch that/i] }),
+      x("no idea what this means is heard as confusion", "I don't know what any of this means",
+        { reject: [/didn'?t quite catch that/i] }),
       // LIVE 2026-07-29. "Today is lower 1 after my illness. How do I go about it?" — a
       // TRAINING question about resuming after being unwell, using this product's own day
       // names (Lower A / Lower B are in its 4-day split). It reached no handler and the model

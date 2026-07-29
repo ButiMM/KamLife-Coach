@@ -1225,27 +1225,52 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // Only fires for genuinely ambiguous single-word or short confusion signals.
   // Specific questions ("how many calories", "what should i eat") are handled earlier.
   const CONFUSED_EXACT = new Set(["what", "what?", "huh", "huh?", "???", "??", "!?", "?", "what now", "lost", "confused", "help me", "i'm lost", "im lost"]);
+  // BROADENED 2026-07-29. The old list caught "don't understand" and "don't get it" but not
+  // "I don't know what any of this means" or "explain that again" — so the most literal requests
+  // for a simpler explanation fell through to the generic "I didn't quite catch that", which
+  // tells a confused client that THEY were unclear. Shape, not enumeration: not-knowing or
+  // not-following, or an explicit ask to have it put more simply.
+  const ASKS_FOR_SIMPLER = /\b(?:explain (?:that|this|it)(?: again)?|say (?:that|it) again|what does (?:that|this|it) mean|in simple (?:terms|english)|simpler|dumb it down|i don.?t know what (?:any of )?(?:this|that|it) means?|makes? no sense|too (?:complicated|confusing|much))\b/i;
   const isConfused = CONFUSED_EXACT.has(m)
     || /^(\?{2,}|!{2,}|\?!+)$/.test(m)
-    || /\b(i.?m (lost|confused|not sure)|don.?t (understand|get it)|what do i do( now)?|not sure what to (do|say|send)|how does this work)\b/i.test(m);
+    || /\b(i.?m (lost|confused|not sure)|don.?t (understand|get it)|what do i do( now)?|not sure what to (do|say|send)|how does this work)\b/i.test(m)
+    || ASKS_FOR_SIMPLER.test(m);
   if (isConfused) {
-    // "What?" / "Huh?" right after a bad reply is a REACTION to that reply, not a request for
-    // the sitemap (2026-07-27 live: a nonsense answer got "What?" and the client received the
-    // entire help menu, which reads as the bot ignoring them twice). If there is something to
-    // react to, own it and ask what they needed. The menu is for someone genuinely starting.
+    // NEITHER BRANCH USED TO ANSWER THE QUESTION (2026-07-29 sweep). "I don't understand" got
+    // the entire help menu when the last reply was over 30 minutes old — and on WhatsApp people
+    // answer hours later, so that was the common case, not the rare one. Under 30 minutes it got
+    // "Sorry, I didn't quite catch that", which is the coach saying IT was confused when the
+    // CLIENT is the one asking to be helped. A menu is a sitemap and a shrug is a shrug; neither
+    // is simpler, and simpler is the entire ask.
+    //
+    // A confused client wants ONE concrete thing to do, in words, with no jargon — which is
+    // exactly what one-action.ts produces. So confusion now returns the day's single action.
+    // The acknowledgement still leads when there is something to react to, so it never reads as
+    // the bot ignoring what just happened.
     const [lastOut] = await db.select({ messageOut: chatHistory.messageOut })
       .from(chatHistory)
-      .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, new Date(Date.now() - 30 * 60_000))))
+      .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, new Date(Date.now() - 6 * 3_600_000))))
       .orderBy(desc(chatHistory.createdAt)).limit(1);
-    if (lastOut?.messageOut) {
-      const { bareReactionFallback } = await import("../reaction-guard");
-      const reply = bareReactionFallback(user.name?.split(" ")[0] || "");
-      await logChat(user.id, message, reply, "CONFUSED_REACTION");
-      return reply;
+    let action = "";
+    try {
+      const { oneActionCommand } = await import("./one-action-command");
+      action = (await oneActionCommand(user, { atKeyboard: true })).replace(/\[BUTTONS:[^\]]+\]/g, "").trim();
+    } catch (e) {
+      console.warn("[CONFUSED] one-action failed:", (e as any)?.message || e);
     }
-    const menuReply = await getMenuText(user, { showCommands: true });
-    await logChat(user.id, message, menuReply.replace(/\[BUTTONS:[^\]]+\]/g, "").trim(), "CONFUSED_RECOVERY");
-    return menuReply;
+    const lead = lastOut?.messageOut
+      ? `That's on me${firstName ? ", " + firstName : ""} — let me put it simply.`
+      : `No stress${firstName ? ", " + firstName : ""} — let me put it simply.`;
+    // Only fall back to the menu if the one action could not be built at all. A sitemap is a
+    // worse answer than a plain instruction, so it is the last resort, never the first.
+    if (!action) {
+      const menuReply = await getMenuText(user, { showCommands: true });
+      await logChat(user.id, message, menuReply.replace(/\[BUTTONS:[^\]]+\]/g, "").trim(), "CONFUSED_RECOVERY");
+      return menuReply;
+    }
+    const reply = `${lead}\n\n${action}`;
+    await logChat(user.id, message, reply, "CONFUSED_ONE_ACTION");
+    return reply;
   }
 
   return null;

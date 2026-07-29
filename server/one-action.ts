@@ -52,6 +52,16 @@ export interface DayState {
   sick?: boolean;
   /** SAST hour, 0–23 — a "log your dinner" nudge at 9am is noise. */
   hour: number;
+  /**
+   * They are typing to me RIGHT NOW — this action is going out as a reply, not as a nudge.
+   *
+   * (2026-07-29 sweep.) Every come_back action is written for someone who is absent: "Just say
+   * hi. That's the whole ask today." Sent to a client who has just messaged, it asks for
+   * something they have already done, which reads as the coach not registering that they spoke.
+   * When this is set the come_back branch is skipped — they came back, that is what this
+   * message IS — and they get the next real action instead.
+   */
+  atKeyboard?: boolean;
 }
 
 export type ActionKind =
@@ -121,7 +131,8 @@ export function chooseAction(s: DayState): OneAction {
 
   // 1. NOTHING ELSE MATTERS IF THEY ARE GONE. A protein tip to someone who vanished four days
   //    ago is a coach talking to an empty room.
-  if (s.daysSinceAnyLog >= 3) {
+  //    Unless they are on the other end of the line as this is written — see atKeyboard.
+  if (s.daysSinceAnyLog >= 3 && !s.atKeyboard) {
     // SILENCE ESCALATES (2026-07-29). Three days away and six weeks away used to get the same
     // sentence. They are not the same person: someone gone three days needs a nudge, someone
     // gone six weeks has usually decided they failed and is embarrassed to come back. The longer
