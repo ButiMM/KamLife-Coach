@@ -21,7 +21,7 @@
  */
 
 import { isBareReaction, readsAsTherapySpeak } from "../reaction-guard";
-import { hasDeadPromise } from "../reply-hygiene";
+import { hasDeadPromise, platitudeCount } from "../reply-hygiene";
 import { inventedQualifiers } from "../food-naming";
 
 export interface ReplyDefect {
@@ -177,7 +177,7 @@ export function scanReply(turn: AuditTurn): ReplyDefect[] {
     found.push({ code: "listicle", detail: `${enumerated} numbered points — a coach answers, it doesn't publish a list` });
   }
 
-  const generic = GENERIC_WELLNESS.filter(re => re.test(out)).length;
+  const generic = platitudeCount(out);
   if (generic >= 2) {
     found.push({ code: "generic-advice", detail: `${generic} pieces of advice that would fit any client — nothing here is about THEM` });
   }
@@ -185,23 +185,6 @@ export function scanReply(turn: AuditTurn): ReplyDefect[] {
   return found;
 }
 
-/**
- * Advice so general it could go to a stranger. Any one of these can be legitimate; TWO of them
- * in one reply means nothing in it came from this client's data — which is precisely what
- * "it's generic, it's a bot" has meant every time it has been said about this product.
- */
-const GENERIC_WELLNESS: RegExp[] = [
-  /\blisten to your body\b/i,
-  /\b(?:stay hydrated|drink (?:plenty of|more|lots of) water|keep drinking water|hydration is key)\b/i,
-  /\btake it (?:one (?:day|step) at a time|slow|easy)\b/i,
-  /\byou'?re not alone\b/i,
-  /\byou'?(?:ve| have) got this\b/i,
-  /\bbe (?:kind|gentle) (?:to|with) yourself\b/i,
-  /\b(?:gentle movement|light stretching|gentle stretches)\b/i,
-  /\bdon'?t (?:rush|push too hard|overdo it)\b/i,
-  /\bget (?:enough|plenty of) (?:rest|sleep)\b/i,
-  /\blet me know how you feel\b/i,
-];
 
 // Verb-first, or carrying one of the action verbs this coach actually uses.
 const INSTRUCTION_RE = /^(?:add|eat|get|make|keep|log|walk|drink|grill|have|go|send|stand|tell|finish|hit|push|swap|rest|do)\b|\b(?:add|eat|get|make|keep|log|walk|drink|grill) (?:a|an|one|your|some|it|more|today)\b/i;

@@ -7234,8 +7234,11 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     const codes = scanReply({ messageIn: "help", messageOut: after }).map(d => d.code);
     assert.ok(!codes.includes("listicle"), `listicle must be gone: ${codes.join(",")}`);
     assert.ok(!codes.includes("wall-of-text"), `wall-of-text must be gone: ${codes.join(",")}`);
-    assert.match(after, /\n• \*Finish Strong:\*/, "each point on its own bulleted line");
-    assert.ok(after.includes("Post-Workout Meal"), "no content may be lost — only the shape changes");
+    assert.match(after, /\n• \*Post-Workout Meal:\*/, "each surviving point on its own bulleted line");
+    // The SPECIFIC survives and the generic goes. "pilchards with pap" is real coaching for this
+    // market; "do some gentle stretches" is what you'd tell a stranger.
+    assert.ok(after.includes("pilchards with pap"), "specific advice must survive");
+    assert.ok(!/gentle stretches to help ease/i.test(after), "the platitude bullet must go");
   });
 
   test("hygiene: reshaping never mangles decimals, ranges or a lone number", async () => {
@@ -7245,6 +7248,35 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
       "Week 2-3: back to full weight. Session 1 is 60% of your old weights.",
       "Two things today. 1. Log lunch. That's it.",
     ]) assert.equal(humanizeReply(s), s, `must be untouched: "${s}"`);
+  });
+
+  test("hygiene: stranger-advice is stripped once there are two or more", async () => {
+    const { humanizeReply } = await import("../server/reply-hygiene");
+    const { scanReply } = await import("../server/audit/reply-defects");
+    // Verbatim from production 14:29 — three defects at once.
+    const live = "Shame, Kam, it's tough coming back after being unwell. Your body is still recovering from the illness. Here's what to do: 1. *Listen to Your Body:* If you're feeling too winded or weak, it's okay to stop and rest. 2. *Ease Back In:* Start with lighter weights or fewer reps than usual. 3. *Focus on Nutrition:* Make sure you're eating enough protein and calories to support your recovery. 4. *Hydration:* Keep drinking water throughout the day to help your body recover. Take it one step at a time, and don't rush.";
+    const after = humanizeReply(live);
+    assert.deepEqual(scanReply({ messageIn: "help", messageOut: after }), [], `should be clean: ${JSON.stringify(after)}`);
+    assert.ok(after.includes("Ease Back In"), "the SPECIFIC advice must survive");
+    assert.ok(!/listen to your body/i.test(after), "the platitude must go");
+  });
+
+  test("hygiene: ONE honest platitude survives — a water answer may talk about water", async () => {
+    const { humanizeReply, platitudeCount } = await import("../server/reply-hygiene");
+    const one = "Drink plenty of water today — about 2L. That's it.";
+    assert.equal(platitudeCount(one), 1);
+    assert.equal(humanizeReply(one), one, "a single honest use is not a platitude problem");
+  });
+
+  test("hygiene: a bullet always starts its own line", async () => {
+    const { humanizeReply } = await import("../server/reply-hygiene");
+    // Removing a platitude used to take the NEXT bullet's line break with it, leaving
+    // "…from the illness. • *Ease Back In:*" inline — the unreadability the reshape prevents,
+    // reintroduced by a later step in the same chain.
+    const out = humanizeReply("Right. Here's the plan: 1. *Listen to your body:* rest if you need. 2. *Ease Back In:* lighter weights. 3. *Protein:* eggs or pilchards. Take it one day at a time.");
+    for (const line of out.split("\n")) {
+      assert.ok(!/\S\s+• /.test(line), `bullet must start its line: "${line}"`);
+    }
   });
 
   test("hygiene: ordinary single-line replies are unchanged", async () => {

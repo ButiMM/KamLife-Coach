@@ -95,10 +95,65 @@ export function reshapeNumberedList(text: string): string {
     .trim();
 }
 
+// ── PLATITUDES ───────────────────────────────────────────────────────────────────────────────
+// Advice so general it could go to a stranger: "listen to your body", "stay hydrated", "take it
+// one day at a time", "you've got this". Any ONE of these can be honest — a hydration question
+// deserves a hydration answer. TWO in one reply means nothing in it came from this client's data,
+// which is exactly what "it's generic, it's a bot" has meant every time it has been said here.
+//
+// Constitution Law 3 already requires the opposite: "Remember the person, not the message —
+// reference who they are and where they are." The model agreed and then wrote "keep drinking
+// water" to a man with twenty years of training behind him. Same story as the numbered list:
+// the law was real, the enforcement was not.
+//
+// ONE OWNER (2026-07-29). The audit scanner needs this list to COUNT platitudes and hygiene
+// needs it to REMOVE them. Two copies of one idea is the defect this whole day has been about,
+// so it is defined here and imported there.
+export const PLATITUDES: RegExp[] = [
+  /\blisten to your body\b/i,
+  /\b(?:stay hydrated|drink (?:plenty of|more|lots of) water|keep drinking water|hydration is key)\b/i,
+  /\btake it (?:one (?:day|step) at a time|slow|easy)\b/i,
+  /\byou'?re not alone\b/i,
+  /\byou'?(?:ve| have) got this\b/i,
+  /\bbe (?:kind|gentle) (?:to|with) yourself\b/i,
+  /\b(?:gentle movement|light stretching|gentle stretches)\b/i,
+  /\bdon'?t (?:rush|push too hard|overdo it)\b/i,
+  /\bget (?:enough|plenty of) (?:rest|sleep)\b/i,
+  /\blet me know how you feel\b/i,
+];
+
+/** How many pieces of stranger-advice are in this reply. Two or more is the defect threshold. */
+export function platitudeCount(text: string): number {
+  return PLATITUDES.filter(re => re.test(text || "")).length;
+}
+
+/**
+ * Remove platitude SENTENCES — but only once a reply has two or more, so a single honest
+ * "drink plenty of water" survives in an answer that is genuinely about water.
+ *
+ * This makes a generic reply shorter and less bot-like. It does NOT make it personal: only the
+ * engine using the client's real snapshot can do that. Removing what is empty is worth doing on
+ * its own, and pretending it is the whole fix would be the same overreach as every prompt line
+ * that told the model to be specific and was ignored.
+ */
+export function stripPlatitudes(text: string): string {
+  if (platitudeCount(text) < 2) return text || "";
+  return dropSentences(text, new RegExp(PLATITUDES.map(r => r.source).join("|"), "i"));
+}
+
 // The full humanize pass — strip stalls AND corporate filler in one go. This is what
 // sanitizeCoachReply calls, so every AI reply gets to the point like a real coach.
 export function humanizeReply(text: string): string {
-  return reshapeNumberedList(stripFiller(stripDeadPromises(text)));
+  return normaliseBullets(stripPlatitudes(reshapeNumberedList(stripFiller(stripDeadPromises(text)))));
+}
+
+/**
+ * A bullet always starts a line. Removing a platitude can take the line break before the NEXT
+ * bullet with it, which left "…recovering from the illness. • *Ease Back In:*" running inline —
+ * the same unreadability the reshape exists to prevent, reintroduced by a later step.
+ */
+function normaliseBullets(text: string): string {
+  return (text || "").replace(/([^\n])[ \t]*• /g, "$1\n• ").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 // ── THE VOICE-NOTE DENIAL ────────────────────────────────────────────────────────────────────
