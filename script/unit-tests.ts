@@ -7150,6 +7150,32 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ── "Remove last meal it's wrong!!!!" — the documented command, beaten by frustration ────────
+{
+  test("removal: the shipped remove-last patterns cover angry phrasings", async () => {
+    const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+    // Mirrors the guard in food-log-mgmt.ts: trailing words are COMMENTARY only when they name
+    // no food, no meal slot, and no second instruction.
+    const commentary = (rest: string) => {
+      const r = (rest || "").replace(/[!?.,]+/g, " ").trim();
+      if (!r) return true;
+      if (/\b(breakfast|lunch|dinner|supper|snack|brunch|yesterday|morning|afternoon|evening)\b/i.test(r)) return false;
+      if (/\b(remove|delete|add|log|instead|and)\b/i.test(r)) return false;
+      if (scanForSAFoods(r).length > 0) return false;
+      return r.split(/\s+/).length <= 6;
+    };
+    // The live failure: no comma, so the old rule refused it and hunted for a food called
+    // "last meal it's wrong".
+    assert.ok(commentary("it's wrong!!!!"), "frustration is commentary");
+    assert.ok(commentary("that was a mistake"), "a reason is commentary");
+    assert.ok(commentary(""), "nothing trailing is fine");
+    // …but these change WHICH meal, or add an instruction, and must fall through.
+    assert.ok(!commentary("I had for lunch"), "a meal slot picks a different meal");
+    assert.ok(!commentary("and add chicken"), "a second instruction is not commentary");
+    assert.ok(!commentary("the rice"), "a named food is not commentary");
+  });
+}
+
 // ── A REQUEST IS NOT A MEAL (2026-07-29 live, the worst defect of the day) ───────────────────
 // "Give me a dinner suggestion to finish off the night" logged a tin of pilchards: 789 kcal the
 // client never ate, his day's totals corrupted, his fat pushed over target. Two independent

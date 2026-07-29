@@ -313,8 +313,24 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   // "logged") and "…one meal, remove it" dead-ended as fake food lookups
   // ("I don't see 'last meal's' / 'it.'") on 2026-07-06. Question-guarded so
   // "should I remove it?" never deletes.
+  // ANGRY PEOPLE DO NOT PUNCTUATE (2026-07-29 live). The rule above already tolerated a reason
+  // clause — but only behind a comma or dash. "Remove last meal it's wrong!!!!" has neither, so
+  // the documented command fell into the specific-food matcher and dead-ended on «I don't see
+  // "last meal it's wrong"». Three words of frustration defeated the command we tell people to
+  // use. The separator is now optional, and the trailing words are accepted as COMMENTARY only
+  // when they name no food, no meal slot, and no second instruction — so "remove the meal I had
+  // for lunch" still falls through to the specific-meal matcher where it belongs.
+  const removeMatch = /^(no\s+)?(remove|delete|undo|scratch|take off|take out|get rid of)\s+(it|that|that one|that meal|that entry|last|last one|last meal'?s?|last entry|the last|the meal|the last one|the last entry|the last meal'?s?|meal|that food|what i just logged|what i logged)\b(?:\s+(logged|entry|log))?(?:\s*[,\-—.]?\s*(.*))?$/i.exec(m.trim());
+  const trailingIsCommentary = (rest: string): boolean => {
+    const r = (rest || "").replace(/[!?.,]+/g, " ").trim();
+    if (!r) return true;
+    if (/\b(breakfast|lunch|dinner|supper|snack|brunch|yesterday|morning|afternoon|evening)\b/i.test(r)) return false;
+    if (/\b(remove|delete|add|log|instead|and)\b/i.test(r)) return false;
+    if (scanForSAFoods(r).length > 0) return false;
+    return r.split(/\s+/).length <= 6;
+  };
   const isRemoveLast = !looksLikeQuestion(m) && (
-    /^(no\s+)?(remove|delete|undo|scratch|take off|take out|get rid of)\s+(it|that|that one|that meal|that entry|last|last one|last meal'?s?|last entry|the last|the meal|the last one|the last entry|the last meal'?s?|meal|that food|what i just logged|what i logged)\b(?:\s+(logged|entry|log))?(?:\s*[,\-—.].*)?$/i.test(m.trim())
+    (!!removeMatch && trailingIsCommentary(removeMatch[5] || ""))
     || /^(remove|delete|undo|scratch)$/i.test(m.trim())
     || /\b(scratch that|undo that|take that off|remove (that|it)|delete (that|it)|take it (off|out)|that was wrong|wrong entry|wrong meal|logged.*wrong|that.?s a mistake|mistake.*log)\b/i.test(m));
   if (isRemoveLast) {
