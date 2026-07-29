@@ -114,6 +114,39 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
     await logChat(user.id, message, aboveNeckReply, "SICK_ABOVE_NECK");
     return aboveNeckReply;
   }
+  // THE COMEBACK QUESTION IS ASKED BY SOMEONE WHO IS NO LONGER SICK (2026-07-29 live).
+  // This branch used to live INSIDE `if (isSick)` below, which made it unreachable by the only
+  // people it was written for: `looksSickMention` deliberately returns false for a PAST illness
+  // reference, so it can't re-open sick mode for someone reminiscing — and "how do I train after
+  // my illness" is a past illness reference. The guard against re-opening sick mode and the
+  // comeback question are the same sentence shape with opposite intent, so the comeback question
+  // was swallowed and fell through to the model, which answered a training question with food.
+  //
+  // It is hoisted, not duplicated. Still gated on illness vocabulary by the detectors themselves,
+  // and it still records a first-person report before answering, so nothing is lost either way.
+  const notesEarly = user.profileNotes || "";
+  const sickMatchEarly = notesEarly.match(/sick_until:(\d{4}-\d{2}-\d{2})/);
+  const alreadySickEarly = !!sickMatchEarly && new Date(sickMatchEarly[1]) >= new Date(new Date().toISOString().slice(0, 10));
+  // Hoisting cost us one guard that `looksSickMention` used to apply on this path: it rejects
+  // an illness that belongs to somebody else. "My wife, after the flu — how do I help?" must
+  // never come back with YOUR comeback plan. Re-applied explicitly rather than assumed.
+  if (!aboutSomeoneElse(m) && (isReturnFromSicknessQuestion(m) || looksLikeComebackQuestion(m))) {
+    // Answering the question must not LOSE the report — "I can't walk today, I'm sick... how
+    // does that affect my progress?" both declares and asks. Record first, then answer.
+    let backDate = sickMatchEarly ? sickMatchEarly[1] : null;
+    let heldLine = "";
+    if (!alreadySickEarly && FIRST_PERSON_SICK.test(m)) {
+      const rec = await recordSickState(user, notesEarly, m);
+      if (rec) {
+        backDate = rec.sickUntil;
+        heldLine = `I've paused your check-ins for ~${rec.sickDays} day${rec.sickDays !== 1 ? "s" : ""} so I'm not nagging you while you rest. `;
+      }
+    }
+    const comebackReply = `Good question — here's your comeback plan${capName ? ", " + capName : ""}:\n\n${comebackPlan()}\n\n*Food while sick still counts* — keep logging what you can, no calorie pressure.\n\n${backDate ? `${heldLine}I've got you resting until around *${backDate}*. ` : ""}When you're ready, just say *I'm back* and I'll set up your first session.`;
+    await logChat(user.id, message, comebackReply, "SICK_COMEBACK_PLAN");
+    return comebackReply;
+  }
+
   if (isSick) {
     // SICK FLOW REWORK (2026-07-13, the flu screenshots): the old handler fired the
     // SAME template on ANY sickness mention — four verbatim sends in one day, twice in
@@ -148,23 +181,8 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
       return ackReply;
     }
 
-    if (isReturnFromSicknessQuestion(m) || looksLikeComebackQuestion(m)) {
-      // Answering the question must not LOSE the report — "I can't walk today, I'm
-      // sick... how does that affect my progress? ...next 5 days" both declares and
-      // asks. Record first, then answer.
-      let backDate = sickMatch ? sickMatch[1] : null;
-      let heldLine = "";
-      if (!alreadySick && FIRST_PERSON_SICK.test(m)) {
-        const rec = await recordSickState(user, notes, m);
-        if (rec) {
-          backDate = rec.sickUntil;
-          heldLine = `I've paused your check-ins for ~${rec.sickDays} day${rec.sickDays !== 1 ? "s" : ""} so I'm not nagging you while you rest. `;
-        }
-      }
-      const comebackReply = `Good question — here's your comeback plan${capName ? ", " + capName : ""}:\n\n${comebackPlan()}\n\n*Food while sick still counts* — keep logging what you can, no calorie pressure.\n\n${backDate ? `${heldLine}I've got you resting until around *${backDate}*. ` : ""}When you're ready, just say *I'm back* and I'll set up your first session.`;
-      await logChat(user.id, message, comebackReply, "SICK_COMEBACK_PLAN");
-      return comebackReply;
-    }
+    // (The comeback branch used to sit here. It is now hoisted above the isSick gate — see the
+    // note there — because the people asking it are by definition no longer sick.)
 
     // A QUESTION that isn't a comeback question never gets a template — templates
     // answering something the person didn't ask WAS the flu-screenshot failure.

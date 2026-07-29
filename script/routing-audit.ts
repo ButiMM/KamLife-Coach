@@ -598,6 +598,24 @@ const CASES: Case[] = [
         { reject: [SICK_TPL] }),
       x("hypothetical fever question", "Can you train with a fever or is that dangerous?",
         { reject: [SICK_TPL] }),
+      // LIVE 2026-07-29. "Today is lower 1 after my illness. How do I go about it?" — a
+      // TRAINING question about resuming after being unwell, using this product's own day
+      // names (Lower A / Lower B are in its 4-day split). It reached no handler and the model
+      // read "lower" as a MOOD: "I see you're feeling lower after being unwell… aim for gentle
+      // meals… keep hydration up." A training question answered with eggs and water.
+      x("comeback question after illness gets the TRAINING protocol",
+        "Today is lower 1 after my illness How do I go about it?",
+        { expect: [/comeback plan/i, /60%/], reject: [/feeling lower/i, /gentle meals/i, /hydration/i] }),
+      x("comeback question, bare phrasing", "how do I go about it after my illness",
+        { expect: [/comeback plan/i] }),
+      x("comeback question, post-flu phrasing", "post flu what do I do",
+        { expect: [/comeback plan/i] }),
+      // The comeback branch now sits OUTSIDE the still-sick gate, so these guard the new reach.
+      x("no illness means no comeback plan", "how do I go about my workout today",
+        { reject: [/comeback plan/i] }),
+      x("someone else's illness is never YOUR comeback plan",
+        "My wife is struggling after the flu, how do I help her?",
+        { reject: [/comeback plan/i, /60% of your old weights/i] }),
       // overeating "feel sick" is regret, not illness — must not pause check-ins for 3 days
       x("ate too much feel sick", "Ate so much at the party last night, I feel sick",
         { reject: [SICK_TPL] }),

@@ -798,8 +798,13 @@ export async function buildFoodLogReply(p: {
   // duplicate-inflated day (2026-07-06). PLAIN LANGUAGE (2026-07-14 tester: "I don't understand
   // calories"): every "X remaining" is paired with what it means as FOOD via remainingInMeals.
   const mealsLeft = effectiveRemaining > 0 ? remainingInMeals(effectiveRemaining, mealLabel) : "";
+  // ONE INSTRUCTION PER REPLY, CONTINUED (2026-07-29 live). The 07-28 fix muted the day
+  // assessment and the add-on when a card was coming but left two surfaces speaking, so one log
+  // still gave the same order three times: the headline, this parenthetical, and the card's
+  // next-move band. The card owns the move; the total states the number and stops.
+  const mealsLeftClause = p.cardComing ? "" : mealsLeft;
   const runningLine = prevCals > 0 && runningTotalSane
-    ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} to go${mealsLeft ? ` — ${mealsLeft}` : ""}${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
+    ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} to go${mealsLeftClause ? ` — ${mealsLeftClause}` : ""}${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
     : prevCals > 0
     ? `Today's total (~${runningCals} kcal) looks high for this time of day — if something was logged twice, send *my meals* to check, then *remove the duplicates*.`
     : `Remaining today: ~${Math.max(0, effectiveRemaining)} kcal${stepsNote}`;
@@ -1165,7 +1170,11 @@ export async function buildFoodLogReply(p: {
           ? "🟢 Right on track for today."
           : dinnerIsLogged(mealLabel)
             ? "🟢 Nicely done — dinner's in and you're inside your day."
-            : `🟢 Nicely done — still room for ${(mealsLeft || "a bit more").replace(/^room for /, "")} today.`)
+            // A verdict, not an order: "still room for two proper meals" is an instruction in
+            // a verdict's clothes, and the card already says it. Card coming → confirm and stop.
+            : p.cardComing
+              ? "🟢 Nicely done."
+              : `🟢 Nicely done — still room for ${(mealsLeft || "a bit more").replace(/^room for /, "")} today.`)
     : "";
   const head = verdictHeadline ? `${verdictHeadline}\n\n` : "";
 

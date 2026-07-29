@@ -819,10 +819,29 @@ export function looksLikeComebackQuestion(m: string): boolean {
   return asking;
 }
 
+// "Today is lower 1 after my illness. How do I go about it?" (2026-07-29 live) reached none of
+// this and fell through to the model, which read "lower" as a MOOD and answered a training
+// question with eggs and hydration. The client had used the product's own vocabulary — Lower A
+// and Lower B are day names in its own 4-day split — and been told he seemed down.
+//
+// The cause was one word. The list below had "sickness" but not "illness", and "the" but not
+// "my", so `after my illness` matched nothing. That is an enumeration of phrasings pretending
+// to be a detector: it can only ever catch the wordings someone thought of.
+//
+// So the SHAPE is detected separately: an illness word placed BEHIND the speaker, plus a
+// request for direction. Additive — the original list still fires on its own, so nothing that
+// worked before changes.
+const AFTER_ILLNESS = /\b(?:after|since|post|following|coming out of|back from|over)\s+(?:the\s+|my\s+|this\s+|a\s+|an\s+|being\s+|been\s+)*(?:sick(?:ness)?|ill(?:ness)?|flu|flue|fever|covid|bug|virus|infection|surgery|op(?:eration)?)\b/i;
+
+const ASKING_FOR_DIRECTION = /\b(?:how (?:do|should|would|can) (?:i|we)|how do i go about|what (?:do|should|must|can) (?:i|we) do|what now|what'?s next|where (?:do|to) (?:i|we) start|what'?s the plan|next steps?|do i (?:still|need to|have to))\b/i;
+
 export function isReturnFromSicknessQuestion(m: string): boolean {
   const s = m || "";
   if (!/\b(sick|ill|flu|flue|fever|covid|better|recover)/i.test(s)) return false;
-  return /\b(when i (?:come|get|'?m) back|come back from|after (?:the )?(?:flu|sickness|being sick|i recover|i'?m better)|what happens? then|what happens? (?:when|after)|how (?:does|will) (?:that|this|it) affect|affect my (?:progress|week|programme|plan)|what (?:do|must|should) i do (?:when|after|once)|when i'?m (?:better|recovered|well)|back to training|resume|pick (?:it )?(?:back )?up)\b/i.test(s);
+  if (/\b(when i (?:come|get|'?m) back|come back from|after (?:the )?(?:flu|sickness|being sick|i recover|i'?m better)|what happens? then|what happens? (?:when|after)|how (?:does|will) (?:that|this|it) affect|affect my (?:progress|week|programme|plan)|what (?:do|must|should) i do (?:when|after|once)|when i'?m (?:better|recovered|well)|back to training|resume|pick (?:it )?(?:back )?up)\b/i.test(s)) return true;
+  // The shape: the illness is behind them AND they are asking what to do about it. Both halves
+  // are required — "I felt rough after the flu" is a report, not a request for a plan.
+  return AFTER_ILLNESS.test(s) && (ASKING_FOR_DIRECTION.test(s) || /\?/.test(s));
 }
 
 // WORKOUT REQUEST — natural phrasings must reach the deterministic programme, never the
