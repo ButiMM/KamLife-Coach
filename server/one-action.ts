@@ -122,6 +122,25 @@ export function chooseAction(s: DayState): OneAction {
   // 1. NOTHING ELSE MATTERS IF THEY ARE GONE. A protein tip to someone who vanished four days
   //    ago is a coach talking to an empty room.
   if (s.daysSinceAnyLog >= 3) {
+    // SILENCE ESCALATES (2026-07-29). Three days away and six weeks away used to get the same
+    // sentence. They are not the same person: someone gone three days needs a nudge, someone
+    // gone six weeks has usually decided they failed and is embarrassed to come back. The longer
+    // they have been gone, the smaller the ask and the more explicit the absolution.
+    const weeks = Math.floor(s.daysSinceAnyLog / 7);
+    if (weeks >= 4) {
+      return {
+        kind: "come_back",
+        todo: "Just say hi. That's the whole ask today.",
+        why: why(`It's been about ${weeks === 4 ? "a month" : `${weeks} weeks`}, and you haven't blown anything — that's the story people tell themselves and it stops them coming back. Your numbers are exactly where you left them.`, s.dreamGoal),
+      };
+    }
+    if (weeks >= 1) {
+      return {
+        kind: "come_back",
+        todo: struggle === "time" ? "Tell me one thing you ate this week." : "Log one meal today. Any meal.",
+        why: why("No catching up, no starting over. One meal puts you straight back in.", s.dreamGoal),
+      };
+    }
     return {
       kind: "come_back",
       todo: struggle === "time"

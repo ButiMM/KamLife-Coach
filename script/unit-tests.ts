@@ -5014,6 +5014,29 @@ test("next move: the instruction can never contradict the pill", async () => {
     assert.notEqual(chooseAction(day({ weighed: null, weeks: 0 })).kind, "weigh");
   });
 
+  test("one action: silence escalates — three days is not six weeks", async () => {
+    const { chooseAction } = await import("../server/one-action");
+    const gone = (d: number) => chooseAction(day({ silent: d, loggedToday: false }));
+    // All still route to come_back — but the ASK shrinks as the absence grows.
+    for (const d of [4, 10, 45]) assert.equal(gone(d).kind, "come_back");
+
+    // A month or more: the smallest possible ask, and the shame is named directly, because
+    // "I've blown it" is what actually stops someone coming back — not the difficulty.
+    const long = gone(45);
+    assert.match(long.todo, /just say hi/i);
+    assert.match(long.why, /haven't blown anything/i);
+    // "Smaller" means EASIER, not shorter — someone gone six weeks is asked for no logging at
+    // all, just a word. Character count is the wrong measure and said the opposite.
+    assert.doesNotMatch(long.todo, /\blog\b/i, "six weeks away should not be asked to log anything");
+    assert.match(gone(4).todo, /\blog\b/i, "a few days away is still just a normal log");
+
+    // A week or two: still a meal, but explicitly no catching up.
+    assert.match(gone(10).why, /no catching up|starting over/i);
+    // A few days: nothing dramatic — they haven't gone anywhere yet.
+    assert.match(gone(4).why, /nothing resets/i);
+    assert.doesNotMatch(gone(4).todo, /just say hi/i, "three days does not get the six-week treatment");
+  });
+
   test("one action: it never nags someone who is doing everything right", async () => {
     const { chooseAction, formatOneAction } = await import("../server/one-action");
     const a = chooseAction(day({}));

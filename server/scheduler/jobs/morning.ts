@@ -482,7 +482,25 @@ export async function runMorningCheckin(): Promise<void> {
         // via the --- markers — a wall of three bot bubbles before the client is even
         // awake, and 3× the Twilio cost on the biggest daily fan-out. Same content,
         // one message, breakfast question last so it reads as the ask.
-        const breakfastAsk = `🍳 What's for breakfast?${repeatSuggestion || ""}`;
+        // THE ONE ACTION, NOT A GENERIC ASK (2026-07-29). This slot used to be
+        // "🍳 What's for breakfast?" — the same sentence to every client every morning,
+        // whether they were on a 6-day streak, three weeks silent, sick, or had never once
+        // stood on a scale. The decision that reads all of that already existed and was wired
+        // to a command nobody knows to type; this is where it reaches people.
+        //
+        // It REPLACES the breakfast question rather than joining it. Two asks in one message is
+        // two decisions for someone who hasn't had coffee, and the whole point is one.
+        // Fail-open: any error and the old ask goes out unchanged.
+        let breakfastAsk = `🍳 What's for breakfast?${repeatSuggestion || ""}`;
+        try {
+          const { buildDayState } = await import("../../handlers/one-action-command");
+          const { chooseAction } = await import("../../one-action");
+          const act = chooseAction({ ...(await buildDayState(client)), hour: 7 });
+          // "hold" means nothing needs changing — then the breakfast question IS the right ask.
+          if (act.kind !== "hold") breakfastAsk = `*${act.todo}*\n\n_${act.why}_`;
+        } catch (e) {
+          console.warn("[MORNING] one-action skipped:", (e as any)?.message || e);
+        }
         const fullMessage = targetFixLine + parts.join(" ") + "\n\n" + todaySection.join("\n") + "\n\n" + breakfastAsk;
         await sendWhatsApp(phone, fullMessage);
       }
