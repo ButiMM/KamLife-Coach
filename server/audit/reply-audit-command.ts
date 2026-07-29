@@ -58,7 +58,14 @@ export async function replyAuditCommand(message: string, _user?: unknown): Promi
   const recent = turns.slice(0, Math.min(200, turns.length));
   const rs = summarise(recent);
   const recentPct = rs.scanned ? ((rs.defects / rs.scanned) * 100).toFixed(1) : "0.0";
-  const trend = `\n\n📈 *Last ${rs.scanned} replies:* ${rs.defects} defective (${recentPct}%) — vs ${pct}% over the whole sample. This is the number that shows whether a fix landed.`;
+  // WHICH defects are still happening, not just how many (2026-07-29). The lifetime breakdown
+  // said 43 of 56 defects were one class — but the code that caused it was fixed on 27 July, so
+  // most of those were dead history. Reporting a total without naming the live classes sends you
+  // to fix a ghost. A defect that appears lifetime but NOT here is already dead; leave it alone.
+  const recentLines = rs.byCode.length
+    ? `\n${rs.byCode.map(r => `  • *${r.count}×* ${LABELS[r.code] || r.code}`).join("\n")}`
+    : `\n  ✅ None of the known patterns — every lifetime defect is history.`;
+  const trend = `\n\n📈 *Last ${rs.scanned} replies:* ${rs.defects} defective (${recentPct}%) — vs ${pct}% lifetime.${recentLines}\n\n_Only the list directly above is still happening. Anything in the lifetime list but not here is already fixed._`;
 
   // Don't invite a wider scan once every stored reply has been read.
   const hitCeiling = turns.length < limit;
@@ -82,10 +89,14 @@ export async function replyAuditCommand(message: string, _user?: unknown): Promi
     return `*${r.count}×* ${label}`;
   }).join("\n");
 
-  const worst = s.byCode[0];
+  // Show a LIVE example, not a fossil. The lifetime worst class can be one that was fixed weeks
+  // ago, and pasting its example under a "worst one" heading sends someone hunting a bug that no
+  // longer exists — which is exactly what happened on 27 July and again today. Recent first.
+  const worst = rs.byCode[0] || s.byCode[0];
   const ex = worst.examples[0];
+  const stillLive = !!rs.byCode[0];
   const example = ex
-    ? `\n\n*Worst one — ${LABELS[worst.code] || worst.code}:*\nThey said: _"${ex.in || "(nothing)"}"_\nCoach said: _"${ex.out.replace(/\n/g, " ").slice(0, 160)}"_`
+    ? `\n\n*${stillLive ? "Still happening" : "Worst on record (not seen recently)"} — ${LABELS[worst.code] || worst.code}:*\nThey said: _"${ex.in || "(nothing)"}"_\nCoach said: _"${ex.out.replace(/\n/g, " ").slice(0, 160)}"_`
     : "";
 
   return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies — *${s.defects}* carry a defect (${pct}%).\n\n${lines}${trend}${example}\n\n${guardStatsLine()}\n\n${jobs}${wider}`;
