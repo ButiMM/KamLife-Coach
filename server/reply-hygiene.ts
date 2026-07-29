@@ -67,10 +67,38 @@ export function stripFiller(text: string): string {
   return dropSentences(text, FILLER_RE);
 }
 
+// ── THE NUMBERED LISTICLE ────────────────────────────────────────────────────────────────────
+// The audit over 1988 real replies: 63 answered with a numbered list instead of coaching and 48
+// were a wall of text — 111 of 166 defects, two thirds of everything wrong with this product.
+//
+// The Constitution ALREADY forbids it, in those words: "NEVER numbered markdown headings like
+// '1. *Breakfast:*' — they render broken." The model ignored it sixty-three times, which is the
+// whole reason this file exists: "Enforced in code, not left to a prompt line the model ignores."
+//
+// So the rule gets hands. An inline run of "1. … 2. … 3. …" becomes the bulleted short lines the
+// Constitution asks for. This does not shorten the reply or change a word of its content — it
+// makes what the coach already said readable on a phone, which is the complaint underneath every
+// "it's too much" this product has received.
+//
+// Conservative on purpose: three or more markers before anything is touched, each must be a low
+// single digit followed by a capital or a bold marker, and a decimal ("1.5kg") can never match.
+const ENUM_MARKER = /(^|[^\d\n])([1-9])\.\s+(?=[A-Z*])/g;
+
+export function reshapeNumberedList(text: string): string {
+  const t = text || "";
+  const markers = t.match(ENUM_MARKER);
+  if (!markers || markers.length < 3) return t;
+  return t
+    .replace(ENUM_MARKER, (_m, before: string) => `${before.trimEnd()}\n• `)
+    .replace(/\n• \s*/g, "\n• ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 // The full humanize pass — strip stalls AND corporate filler in one go. This is what
 // sanitizeCoachReply calls, so every AI reply gets to the point like a real coach.
 export function humanizeReply(text: string): string {
-  return stripFiller(stripDeadPromises(text));
+  return reshapeNumberedList(stripFiller(stripDeadPromises(text)));
 }
 
 // ── THE VOICE-NOTE DENIAL ────────────────────────────────────────────────────────────────────

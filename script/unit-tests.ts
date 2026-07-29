@@ -85,13 +85,32 @@ let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-  } catch (err: any) {
+/**
+ * (2026-07-29.) This harness declared `fn: () => void` and never awaited anything. An `async`
+ * test returns a Promise, so `fn()` came back immediately, the try/catch could not see the
+ * rejection, and `passed++` ran whether or not the assertions held. 274 of the tests in this
+ * file are async. Every one of them has been reporting a pass it never earned — the only sign
+ * was the process dying with an unhandled rejection AFTER printing "all checks passed".
+ *
+ * A suite that cannot fail is worse than no suite: it is a green light wired to nothing. The
+ * same defect was found and fixed in script/food-scanner-tests.ts; it was never fixed here.
+ */
+const pending: Array<Promise<void>> = [];
+
+function test(name: string, fn: () => void | Promise<void>) {
+  const fail = (err: any) => {
     failed++;
-    failures.push(`  ✗ ${name}\n    ${err.message}`);
+    failures.push(`  ✗ ${name}\n    ${err?.message || err}`);
+  };
+  try {
+    const result = fn();
+    if (result && typeof (result as Promise<void>).then === "function") {
+      pending.push((result as Promise<void>).then(() => { passed++; }, fail));
+    } else {
+      passed++;
+    }
+  } catch (err: any) {
+    fail(err);
   }
 }
 
@@ -7203,6 +7222,31 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.match(out, /1\. Log lunch\.\n2\. Get a walk in\./, "the surrounding list must be untouched");
   });
 
+  test("hygiene: an inline numbered listicle becomes readable bullets", async () => {
+    const { humanizeReply } = await import("../server/reply-hygiene");
+    const { scanReply } = await import("../server/audit/reply-defects");
+    // Verbatim from production 14:35. The audit over 1988 replies counted 63 of these and 48
+    // walls of text — two thirds of every defect on record.
+    const live = "I get it, Kam! You're pushing through, and that's commendable. Here's what you can do today: 1. *Finish Strong:* Complete your workout, but don't push too hard. Listen to your body. If you need to stop, do it. 2. *Post-Workout Meal:* Have a protein-rich meal afterward, like scrambled eggs with some bread or pilchards with pap. 3. *Hydrate:* Aim for at least 1L of water today to help recovery. 4. *Light Stretching:* After your workout, do some gentle stretches to help ease any tightness. 5. *Plan for Tomorrow:* Think about a light walk or some easy stretches to keep moving without overdoing it.";
+    const before = scanReply({ messageIn: "help", messageOut: live }).map(d => d.code);
+    assert.ok(before.includes("listicle") && before.includes("wall-of-text"), `setup: ${before.join(",")}`);
+    const after = humanizeReply(live);
+    const codes = scanReply({ messageIn: "help", messageOut: after }).map(d => d.code);
+    assert.ok(!codes.includes("listicle"), `listicle must be gone: ${codes.join(",")}`);
+    assert.ok(!codes.includes("wall-of-text"), `wall-of-text must be gone: ${codes.join(",")}`);
+    assert.match(after, /\n• \*Finish Strong:\*/, "each point on its own bulleted line");
+    assert.ok(after.includes("Post-Workout Meal"), "no content may be lost — only the shape changes");
+  });
+
+  test("hygiene: reshaping never mangles decimals, ranges or a lone number", async () => {
+    const { humanizeReply } = await import("../server/reply-hygiene");
+    for (const s of [
+      "You lost 1.5kg this week. That's 0.5kg above target.",
+      "Week 2-3: back to full weight. Session 1 is 60% of your old weights.",
+      "Two things today. 1. Log lunch. That's it.",
+    ]) assert.equal(humanizeReply(s), s, `must be untouched: "${s}"`);
+  });
+
   test("hygiene: ordinary single-line replies are unchanged", async () => {
     const { humanizeReply } = await import("../server/reply-hygiene");
     const plain = "Logged — pap and chicken. Protein's on track for today.";
@@ -7443,6 +7487,9 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.equal(templateSid("kamlife_does_not_exist"), "");
   });
 }
+
+// Every async test must finish before a single number is printed — see the note on test().
+await Promise.all(pending);
 
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
