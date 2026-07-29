@@ -214,7 +214,11 @@ export function dayStatusPill(rows: Row[], isBulk: boolean): { text: string; ton
   }
 
   if (isBulk) {
-    if (calR < 0.6) return { text: "Eat more", tone: "warn" };
+    // A STATE, NOT AN INSTRUCTION (2026-07-29 live: the pill read "Eat more" directly above
+    // "Eat more today — add a proper meal" and "Still room to build — add a proper meal". Three
+    // surfaces, one order, on a single card). The pill says where they ARE; the band below says
+    // what to DO. The moment the pill starts giving orders it is competing with the band.
+    if (calR < 0.6) return { text: "Under target", tone: "warn" };
     if (protHit && calR >= 0.9) return { text: "Perfect day", tone: "good" };
     return { text: "On track", tone: "good" };
   }
@@ -272,8 +276,11 @@ export function distinctHint(hint: string, nextMove: string): string {
   if (!h || !n) return hint;
   const subject = hintSubject(hint);
   if (subject && subject === hintSubject(nextMove)) return WHY_LINE[subject] || "";
+  // TWO shared words, not three (2026-07-29): "Eat more today — add a proper meal" over "Still
+  // room to build — add a proper meal" shares only "proper" and "meal" and sailed through. Two
+  // long words in common is already the same sentence wearing a different hat.
   const shared = n.split(" ").filter(w => w.length > 3 && h.includes(w)).length;
-  return shared >= 3 ? "" : hint;
+  return shared >= 2 ? "" : hint;
 }
 
 /** Render an achievement card and return its media marker, or "" if it can't be served. */

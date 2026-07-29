@@ -353,9 +353,18 @@ export function mealDateLabel(date: Date): string {
   return days[mealSAST.getUTCDay()] || `${diffDays} days ago`;
 }
 
+/**
+ * FIRST NAME ONLY (2026-07-29). This returned the full stored name, so a client called Thandi
+ * Mokoena was greeted "Good morning Thandi Mokoena", told "3 sessions didn't happen, Thandi
+ * Mokoena", and asked "Three questions Thandi Mokoena before I give you advice". Nobody's coach
+ * says their surname. It reads like a bank, and it appeared in every greeting, every progress
+ * report and every nudge — the single most-repeated wrong note in the product.
+ */
 export function getDisplayName(user: any): string {
-  if (!user.name || user.name.length < 2 || INVALID_NAMES.has((user.name || "").toUpperCase())) return "";
-  return user.name;
+  const raw = String(user?.name || "").trim();
+  if (raw.length < 2 || INVALID_NAMES.has(raw.toUpperCase())) return "";
+  const first = raw.split(/\s+/)[0];
+  return first.length >= 2 ? first : raw;
 }
 
 // Per-user GPT rate limiter — sliding window, 10 calls per 60 seconds

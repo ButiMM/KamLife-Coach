@@ -4848,7 +4848,11 @@ test("dayStatusPill: a plain verdict, never a number, and it matches the bars", 
   assert.equal(dayStatusPill(rows({ cal: 600 }), false).text, "On track", "early and under is on track, not a warning");
   // A bulk client is never told "over" for eating, and is chased when under-fuelled.
   assert.equal(dayStatusPill(rows({ cal: 2200 }), true).tone, "good");
-  assert.equal(dayStatusPill(rows({ cal: 500 }), true).text, "Eat more");
+  // The pill states WHERE THEY ARE; the next-move band says what to do. When the pill said
+  // "Eat more" it competed with "Eat more today — add a proper meal" on the same card.
+  assert.equal(dayStatusPill(rows({ cal: 500 }), true).text, "Under target");
+  assert.doesNotMatch(dayStatusPill(rows({ cal: 500 }), true).text, /^(?:eat|add|get|make|keep)\b/i,
+    "a verb-first pill is an instruction, and the instruction belongs to the band");
 });
 
 // ONE INSTRUCTION PER CARD (2026-07-28). The band gives the action; the footer must not give
