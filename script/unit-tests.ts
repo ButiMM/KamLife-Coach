@@ -5090,6 +5090,26 @@ test("next move: the instruction can never contradict the pill", async () => {
   });
 }
 
+// MULTI-PART ASKS (2026-07-29, live, and the worst failure this product has produced). A voice
+// note asking four things got one answered and three silently dropped — then the coach told the
+// client it hadn't caught the voice note, directly below its own transcript of it.
+test("multi-part ask: a four-part voice note never reaches a single-fact handler", async () => {
+  const { isMultiPartAsk } = await import("../server/utils");
+  // The exact message, verbatim.
+  assert.equal(isMultiPartAsk(
+    "So how many workouts have I done this week and what is the way forward since when I'm coming back from illness? Right? And tell me about my calories and what I need to do and everything. The food that I need to eat"
+  ), true, "the real voice note that broke the founder must be seen as multi-part");
+
+  assert.equal(isMultiPartAsk("How am I doing this week and what should I eat tonight? Also how many sessions?"), true);
+
+  // A short single ask must STILL get its fast deterministic answer — the fix must not push
+  // ordinary questions to the model, which is the mistake that would trade one bug for another.
+  for (const single of [
+    "how many calories do I have left?", "my calories", "today's progress",
+    "what's left for today", "calories left", "how much protein do I still need",
+  ]) assert.equal(isMultiPartAsk(single), false, `must stay deterministic: "${single}"`);
+});
+
 // SELF-CHECK (2026-07-28, founder: "things being promised to clients, things being promised to
 // me, that are not going through"). The defect is SILENT FAIL-OPEN: 174 swallowed failures and 48
 // env-gated capabilities, each warning going to a Railway log nobody reads.

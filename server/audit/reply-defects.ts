@@ -147,7 +147,58 @@ export function scanReply(turn: AuditTurn): ReplyDefect[] {
     found.push({ code: "duplicate-claim", detail: `"protein target hit" printed ${hitCount} times` });
   }
 
+  // 12. THE SAME INSTRUCTION, TWICE, IN DIFFERENT WORDS.
+  //
+  // (2026-07-29.) This is the defect that kept coming back all night — "eat a protein meal" said
+  // by the text head, the day assessment, the nudge, the card band and the card footer, none of
+  // which knew the others existed. It was fixed three times, each time at the one call site in
+  // front of us, because detector 11 above only ever looked for the literal string "protein
+  // target hit". That is an instance detector wearing a class detector's name.
+  //
+  // This one is about SHAPE, not vocabulary: two imperative sentences that share their meaningful
+  // words are the same order in a different hat, whichever component emitted them.
+  const dup = repeatedInstruction(out);
+  if (dup) found.push({ code: "repeated-instruction", detail: dup });
+
   return found;
+}
+
+// Verb-first, or carrying one of the action verbs this coach actually uses.
+const INSTRUCTION_RE = /^(?:add|eat|get|make|keep|log|walk|drink|grill|have|go|send|stand|tell|finish|hit|push|swap|rest|do)\b|\b(?:add|eat|get|make|keep|log|walk|drink|grill) (?:a|an|one|your|some|it|more|today)\b/i;
+
+// Words that carry no instruction meaning — two sentences sharing only these are not duplicates.
+const FILLER = new Set(["today","your","that","this","with","from","have","just","some","them","then","take","into","next","more","much","only","also","what","when","will","been","they","their","about","after","before","every","still","room","thing","things","need","needs","make","makes","doing","done"]);
+
+/** The shape of an instruction: its meaningful words, lowercased and deduplicated. */
+function instructionShape(sentence: string): Set<string> {
+  const words = sentence.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/)
+    .filter(w => w.length > 3 && !FILLER.has(w));
+  return new Set(words);
+}
+
+/**
+ * Two instructions in one reply that mean the same thing. Returns a description, or "".
+ * Deliberately conservative — a detector that fires on healthy replies trains everyone to
+ * ignore the report, which is how detector 11 ended up useless.
+ */
+export function repeatedInstruction(reply: string): string {
+  const sentences = (reply || "")
+    .replace(/\[(?:MEDIA|BUTTONS):[^\]]*\]/g, " ")   // markers are not sentences
+    .split(/(?:\n+|(?<=[.!?])\s+)/)
+    .map(x => x.replace(/[*_~`]/g, "").trim())
+    .filter(x => x.length > 12 && INSTRUCTION_RE.test(x));
+
+  for (let i = 0; i < sentences.length; i++) {
+    for (let j = i + 1; j < sentences.length; j++) {
+      const a = instructionShape(sentences[i]), b = instructionShape(sentences[j]);
+      if (a.size < 2 || b.size < 2) continue;
+      const shared = [...a].filter(w => b.has(w));
+      if (shared.length >= 2) {
+        return `"${sentences[i].slice(0, 48)}" and "${sentences[j].slice(0, 48)}" are the same instruction`;
+      }
+    }
+  }
+  return "";
 }
 
 /** Roll a batch of turns into counts per defect code, worst first. */

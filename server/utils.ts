@@ -360,6 +360,31 @@ export function mealDateLabel(date: Date): string {
  * says their surname. It reads like a bank, and it appeared in every greeting, every progress
  * report and every nudge — the single most-repeated wrong note in the product.
  */
+/**
+ * Is this message asking for SEVERAL things at once?
+ *
+ * (2026-07-29.) A deterministic gate answers exactly one question. When a client sends a long
+ * voice note asking four — workouts this week, what to do coming back from illness, calories,
+ * what to eat — a gate that matches on one of those words answers that one and silently drops
+ * the rest. The client then reasonably concludes the coach ignored them, which is what happened
+ * and it is the worst failure this product has produced.
+ *
+ * Multi-part asks belong to the brain, which can hold all of them in one answer. Conservative on
+ * purpose: two clear asks, or a genuinely long message with a question in it. A short "how many
+ * calories left?" must still reach its fast deterministic answer.
+ */
+export function isMultiPartAsk(message: string): boolean {
+  const s = (message || "").trim();
+  if (s.length < 60) return false;                       // short asks are single asks
+  const words = s.split(/\s+/).length;
+  const questionMarks = (s.match(/\?/g) || []).length;
+  if (questionMarks >= 2) return true;                   // literally asked twice
+  // "and tell me…", "and what…", "also…" — a second request bolted onto the first.
+  const joiners = (s.match(/\b(?:and (?:tell me|what|how|why|when|also|then)|also,? (?:tell|what|how)|as well as)\b/gi) || []).length;
+  if (joiners >= 1 && words >= 20) return true;
+  return words >= 35 && questionMarks >= 1;              // a long question is rarely just one
+}
+
 export function getDisplayName(user: any): string {
   const raw = String(user?.name || "").trim();
   if (raw.length < 2 || INVALID_NAMES.has(raw.toUpperCase())) return "";

@@ -22,7 +22,7 @@ import { replyWithButtons } from "../twilio-interactive";
 const MENU_BUTTONS = ["Log food", "Today's workout", "My progress"];
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, nextDayDate } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, nextDayDate, isMultiPartAsk } from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
@@ -145,6 +145,17 @@ export async function handleEarlyCommands(ctx: {
   if (
     /\b(daily calories|calorie target|calories target|my calories|my calorie|kcal target|daily kcal)\b/i.test(m) ||
     /\b(calorie|calories|kcal)\b.*\b(target|goal|limit|daily|mine|my|remaining|left|still|remain)\b/i.test(m) ||
+    // A SINGLE-FACT HANDLER MAY NOT CLAIM A MULTI-PART QUESTION (2026-07-29 live, and this is
+    // the worst thing this product has done). A voice note asking four things — "how many
+    // workouts have I done this week, what's the way forward coming back from illness, tell me
+    // about my calories and what I need to eat" — matched `how many .* calories` because the
+    // `.*` spans the whole message. It answered the calorie part and silently discarded the
+    // rest, then told the client it hadn't caught the voice note. It had; it printed the
+    // transcript directly above.
+    //
+    // A long message with several asks belongs to the brain, which can hold all of them. These
+    // gates only claim a message that is actually just this one question.
+    !isMultiPartAsk(m) && (
     /\b(daily|my|total|remaining)\b.*\b(calorie|calories|kcal)\b/i.test(m) ||
     /\b(how many|how much).*(calorie|calories|kcal|left|remaining)\b/i.test(m) ||
     /\b(calories today|today.?s calories|today calories|calories for today|protein today|what.?s left|whats left|calories left|calories remaining|remaining calories|total remaining|how much.*left|how much.*remaining|can i still eat|what can i eat|how much more|am i over|what (have|did) i (eat|ate|log|track)|food today|what i (ate|ate today|had today)|today.?s food|today.?s intake|today.?s totals?|total today|totals today|macros today|today.?s macros?|today.?s progress|progress today|daily progress|today.?s summary|my day so far|how.?s my day|how is my day|how am i doing today|where am i today)\b/i.test(m) ||
@@ -155,6 +166,7 @@ export async function handleEarlyCommands(ctx: {
     // the one thing that must never happen. The button says "My progress" and means the week;
     // anything carrying "today" means today, and today is the card.)
     m === "today's progress" || m === "todays progress"
+    )
   ) {
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
