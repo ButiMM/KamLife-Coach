@@ -29,7 +29,7 @@ import { getGroceryPersonalization } from "../grocery-personalize";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
 import { sendCriticalAlert } from "../scheduler/shared";
-import { sastToday, sastDayStart, proteinOptions , commaName, spaceName, getDisplayName} from "../utils";
+import { isAskingNotReporting, sastToday, sastDayStart, proteinOptions , commaName, spaceName, getDisplayName} from "../utils";
 import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
 import { scanForSAFoods, weeklyNetLine } from "./food-scanner";
@@ -1815,7 +1815,11 @@ export async function handleLifecycle(ctx: {
   // database — try "I had today's for lunch"». A request to SEE the day was answered as an
   // unknown food.) A progress/summary/status request never logs anything.
   const isDataRequest = /\b(progress|summary|total|totals|status|report|so far|how am i|where am i|my (?:day|week|numbers|stats|card)|show me|what have i|recap)\b/i.test(m);
-  const seemsFoodLogAttempt = hasLogTrigger && !hasActualFood && !isQuestion && !isFrustration && !isDataRequest;
+  // THIRD place today that re-derived "is this an ask" and got it wrong (2026-07-29). A request
+  // for a dinner SUGGESTION carries the trigger word "dinner" and no food, so it looked like a
+  // failed log and was answered "I don't have *give suggestion* in my SA database".
+  const seemsFoodLogAttempt = hasLogTrigger && !hasActualFood && !isQuestion && !isFrustration
+    && !isDataRequest && !isAskingNotReporting(m);
   if (seemsFoodLogAttempt) {
     // Compute candidate word count — if very short we can't do much
     const wordCount = m.split(/\s+/).length;

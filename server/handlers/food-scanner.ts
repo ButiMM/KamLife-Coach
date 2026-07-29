@@ -416,7 +416,7 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
         const lenRatio = Math.min(combo.length, alias.length) / Math.max(combo.length, alias.length);
         if (lenRatio < 0.8) continue;
         const dist = levenshtein(combo, alias);
-        const allowed = maxDistance(alias.length);
+        const allowed = maxDistance(Math.min(combo.length, alias.length)); // budget on the TYPED word: alias.length let "finish" match "tinfish" (2026-07-29)
         if (dist <= allowed && dist < bestScore) {
           bestScore = dist;
         }

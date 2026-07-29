@@ -26,7 +26,7 @@ import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from 
 import { logChat, withTimeout } from "./chat-log";
 import { unloggedFoodNotice } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
-import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt , spaceName} from "../utils";
+import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
 import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, type PortionStat, type SlotContext } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
@@ -753,14 +753,14 @@ export async function handleFoodContext(ctx: {
     && (m.split(/\s+/).length <= 12 || (m.split(/\s+/).length <= 22 && exactFoodCount >= 3))
     && exactFoodCount >= 1
     && (exactFoodCount >= 2 || hasQuantityWord);
-  // foodLogOverride: bypass the isQuestion guard ONLY for a past-eating statement with a
-  // trivial trailing "?" ("I had eggs?") — never for a real question ("is that enough
-  // protein?"), which logging would silently discard instead of answering.
+  // foodLogOverride bypasses the isQuestion guard ONLY for a past-eating statement with a
+  // trivial trailing "?" ("I had eggs?") — never for a real question, which would be discarded.
   const hasSubstantiveQuestion = classifierQuestion
     || /\b(is that enough|how much|how many|is it (ok|good|healthy|bad|enough|too much)|good for|bad for|enough protein|enough calories|too (many|much)|any good|is this (ok|good|healthy|bad|enough)|is (that|this) (bad|good|ok|healthy)|have protein|contain protein|much protein|has protein)\b/i.test(m)
     // Opinion / advice questions that MENTION food but aren't logging it.
     || /\b(what do you think|what.?s your (take|opinion|view)|thoughts on|your opinion|opinion on|is it (advisable|worth|better|okay|fine)|do you (recommend|think|reckon)|would you (recommend|say)|what about (having|eating|adding)|better to (have|eat)|is it bad to)\b/i.test(m)
-    || /^(is |does |do |will |can |should |are |have |has |what |why |which )\b/i.test(m);
+    || /^(is |does |do |will |can |should |are |have |has |what |why |which )\b/i.test(m)
+    || isAskingNotReporting(m); // one owner for "is this an ask" — this gate logged a meal nobody ate
   const foodLogOverride = hasLogTrigger && hasActualFood && !hasSubstantiveQuestion && !classifierQuestion;
 
   // Diagnostic: any message containing recognised foods logs its gate state — when a

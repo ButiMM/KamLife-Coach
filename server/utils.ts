@@ -1061,6 +1061,16 @@ export function isAskingNotReporting(message: string): boolean {
   if (/\b(does|will|would) (this|that|it) (fit|work|count|help|hurt|matter|affect)\b/i.test(s)) return true;
   if (/\bfits? (?:in(?:to)?|within)? ?(?:my|the) (calories|macros|kcal|goal|diet|plan|budget|numbers|targets?|deficit|surplus)\b/i.test(s)) return true;
   if (/\b(what do you think|your thoughts|thoughts on|verdict|yay or nay|good or bad|good idea|bad idea|am i allowed|allowed to have|not sure if|any advice|help me decide|wondering if)\b/i.test(s)) return true;
+  // AN IMPERATIVE REQUEST IS NOT A REPORT (2026-07-29 live, the worst defect of the day).
+  // "Give me a dinner suggestion to finish off the night" reached the food logger, which invented
+  // a meal, logged 789 kcal the client never ate, corrupted his day's totals and pushed his fat
+  // over target. Every rule above catches an INTERROGATIVE — what, can I, is that. Nobody had
+  // written down that a person can ask by instructing. Nobody reports a meal by saying "give me".
+  if (/^(?:please\s+)?(?:give|send|show|share)\s+me\b/i.test(s)) return true;
+  if (/^(?:please\s+)?(?:suggest|recommend)\b/i.test(s)) return true;
+  if (/\b(?:suggest|recommend)\s+(?:me\s+)?(?:a|an|some|any)\b/i.test(s)) return true;
+  if (/\b(?:any|some|a few)\s+(?:suggestions?|ideas?|options?|recommendations?)\b/i.test(s)) return true;
+  if (/\b(?:suggestion|recommendation)s?\b/i.test(s) && !/\bi (?:had|ate|have eaten|just had)\b/i.test(s)) return true;
   return false;
 }
 

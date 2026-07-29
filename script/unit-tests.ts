@@ -7150,6 +7150,46 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ── A REQUEST IS NOT A MEAL (2026-07-29 live, the worst defect of the day) ───────────────────
+// "Give me a dinner suggestion to finish off the night" logged a tin of pilchards: 789 kcal the
+// client never ate, his day's totals corrupted, his fat pushed over target. Two independent
+// failures had to line up, and both are here.
+{
+  test("ask: an imperative request is heard as an ask, not a report", async () => {
+    const { isAskingNotReporting } = await import("../server/utils");
+    for (const m of [
+      "Give me a dinner suggestion to finish off the night",
+      "give me a dinner idea",
+      "suggest a dinner",
+      "recommend a meal for tonight",
+      "any ideas for supper",
+      "send me some options",
+    ]) assert.ok(isAskingNotReporting(m), `must be heard as an ask: "${m}"`);
+  });
+
+  test("ask: a real food report is still a report", async () => {
+    const { isAskingNotReporting } = await import("../server/utils");
+    // Over-claiming here would break logging, which is the one thing that must never break.
+    for (const m of [
+      "I had pilchards and pap for dinner",
+      "2 slices brown bread and peanut butter",
+      "chicken and rice for lunch",
+      "pap and chicken stew",
+    ]) assert.ok(!isAskingNotReporting(m), `must stay a report: "${m}"`);
+  });
+
+  test("fuzzy: the typo budget follows what they TYPED, not the food's name", async () => {
+    const { levenshtein, maxDistance } = await import("../server/food-fuzzy");
+    // "finish" sits two edits from the alias "tinfish". Budgeted on the alias (7 chars) two edits
+    // are allowed and a request becomes a fish. Budgeted on the shorter word, one is.
+    assert.equal(levenshtein("finish", "tinfish"), 2);
+    assert.equal(maxDistance(Math.min("finish".length, "tinfish".length)), 1, "must NOT admit finish→tinfish");
+    // A genuine typo must still be forgiven.
+    assert.ok(levenshtein("pilchads", "pilchards") <= maxDistance(Math.min(8, 9)), "real typos still match");
+    assert.ok(levenshtein("chiken", "chicken") <= maxDistance(Math.min(6, 7)), "real typos still match");
+  });
+}
+
 // ── The engine's own failures, detectable from stored history ────────────────────────────────
 // Every earlier detector was written for a deterministic handler. The engine now answers most
 // conversation, and none of them could see it. These read reply text only, so `audit` finds them
