@@ -850,7 +850,11 @@ export function looksLikeComebackQuestion(m: string): boolean {
 // So the SHAPE is detected separately: an illness word placed BEHIND the speaker, plus a
 // request for direction. Additive — the original list still fires on its own, so nothing that
 // worked before changes.
-const AFTER_ILLNESS = /\b(?:after|since|post|following|coming out of|back from|over)\s+(?:the\s+|my\s+|this\s+|a\s+|an\s+|being\s+|been\s+)*(?:sick(?:ness)?|ill(?:ness)?|flu|flue|fever|covid|bug|virus|infection|surgery|op(?:eration)?)\b/i;
+// 2026-07-29, second live miss: "Is this because of my 3 weeks of illness? How do I go about
+// this?" A fixed list of determiners could not span "my 3 weeks of", so the enumeration failed
+// again in a new place — and "because of" was not a preposition it knew. Any short run of words
+// between the preposition and the illness noun now counts, which is what a person actually says.
+const AFTER_ILLNESS = /\b(?:after|since|post|following|because of|due to|coming out of|back from|recovering from|over)\s+(?:\w+\s+){0,4}?(?:sick(?:ness)?|ill(?:ness)?|flu|flue|fever|covid|bug|virus|infection|surgery|op(?:eration)?)\b/i;
 
 const ASKING_FOR_DIRECTION = /\b(?:how (?:do|should|would|can) (?:i|we)|how do i go about|what (?:do|should|must|can) (?:i|we) do|what now|what'?s next|where (?:do|to) (?:i|we) start|what'?s the plan|next steps?|do i (?:still|need to|have to))\b/i;
 

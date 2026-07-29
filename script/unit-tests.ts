@@ -7131,6 +7131,53 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ── What the engine is not allowed to take ───────────────────────────────────────────────────
+// With ENGINE_LIVE=on the engine runs BEFORE the Misc and Lifecycle handlers, so anything it is
+// willing to answer never reaches them. Every entry here is a question with one right answer
+// that is already written down.
+{
+  test("engine: the live comeback question stays deterministic", async () => {
+    const { mustStayDeterministic } = await import("../server/understanding/action-router");
+    // Verbatim from production, 2026-07-29 14:29 — answered by the engine with four numbered
+    // bullets ending "keep drinking water", to a man with 20 years of training behind him.
+    const live = `This workout is killing me, I feel like I have never trained\nIn weak, winded\nIs this because of my 3 weeks of illness?\nHow do I go about this? Tell me step by step`;
+    assert.ok(mustStayDeterministic(live), "a comeback question must never reach the engine");
+  });
+
+  test("engine: comeback phrasings the old back-marker detector missed", async () => {
+    const { mustStayDeterministic } = await import("../server/understanding/action-router");
+    for (const m of [
+      "Is this because of my 3 weeks of illness? How do I go about this?",
+      "how do I go about it after my illness",
+      "recovering from covid, what should I do?",
+      "since my flu everything feels heavy, what now?",
+    ]) assert.ok(mustStayDeterministic(m), `must stay deterministic: "${m}"`);
+  });
+
+  test("engine: DESPAIR belongs to the engine, not to a template", async () => {
+    const { mustStayDeterministic } = await import("../server/understanding/action-router");
+    // Guards a decision I tried to reverse and should not have. The deterministic despair and
+    // plateau replies are the ENGINE_LIVE=off fallback; live, Coach K owns these moments because
+    // its understand-first Constitution measurably beat the template here. If a later change
+    // routes them deterministically again, that is a product decision to argue for on purpose —
+    // not a side effect of making some other fix visible.
+    for (const m of ["this isn't working", "I feel like giving up", "I'm not losing weight"]) {
+      assert.ok(!mustStayDeterministic(m), `Coach K should own: "${m}"`);
+    }
+  });
+
+  test("engine: real conversation still belongs to the engine", async () => {
+    const { mustStayDeterministic } = await import("../server/understanding/action-router");
+    // Over-claiming here is its own bug: it would hand warm, open-ended talk to a template.
+    for (const m of [
+      "what do you think about intermittent fasting",
+      "I feel like giving up on my career",
+      "how was your day",
+      "why do people say carbs are bad",
+    ]) assert.ok(!mustStayDeterministic(m), `the engine should own: "${m}"`);
+  });
+}
+
 // ── The voice-note denial: never say we missed what we are quoting ───────────────────────────
 {
   test("voice: the exact live reply loses its denial and its ask to retype", async () => {

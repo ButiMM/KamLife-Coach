@@ -18,7 +18,8 @@
  * only decides whether Coach K gets FIRST crack or the deterministic pipeline does.
  */
 
-import { looksLikeComebackQuestion } from "../utils";
+import { looksLikeComebackQuestion, isReturnFromSicknessQuestion } from "../utils";
+import { isDespairNotAQuestion } from "../despair";
 
 // Actions / commands / data / transactions / health-safety / billing — the deterministic
 // keepers. NOT the advisory templates (plate method, myth-busters, meal timing) — those are
@@ -67,9 +68,23 @@ const DETERMINISTIC_ACTION = new RegExp([
  * owns it. Biased toward "true" (keep deterministic) so a log is never lost to the engine.
  */
 export function mustStayDeterministic(message: string): boolean {
+  const s = message || "";
   // A COMEBACK question has one correct answer — a fixed physiological ramp — so the engine must
   // never take it (2026-07-28 live: it answered "would you like to focus on strength training, or
   // incorporate some running?" to a client who said "tell me how we are going to approach this").
-  if (looksLikeComebackQuestion(message || "")) return true;
-  return DETERMINISTIC_ACTION.test(message || "");
+  //
+  // TWO DETECTORS FOR ONE IDEA (2026-07-29 live). This checked only looksLikeComebackQuestion,
+  // which needs a "back" marker ("first day back", "coming back"). The sick handler used a
+  // different, wider one. So "Is this because of my 3 weeks of illness? How do I go about this?"
+  // passed both — no back marker for one, no recognised phrasing for the other — and the engine
+  // answered a 20-year lifter's comeback with four numbered bullets ending "stay hydrated".
+  // Both are asked now, so the narrower can no longer let something through the wider would keep.
+  if (looksLikeComebackQuestion(s) || isReturnFromSicknessQuestion(s)) return true;
+  // DESPAIR IS DELIBERATELY *NOT* HERE. A first draft added "this isn't working" and "I'm not
+  // losing weight", reasoning that both have a right answer already written in the deterministic
+  // handlers. The suite rejected it: "i feel like giving up" is asserted to belong to Coach K,
+  // whose understand-first Constitution won that exact moment 2.3→9.0 in scoring. Those rewrites
+  // are the ENGINE_LIVE=off fallback, which is the revert path, not the live one — and quietly
+  // reversing a measured decision to make my own change visible would have been the wrong trade.
+  return DETERMINISTIC_ACTION.test(s);
 }

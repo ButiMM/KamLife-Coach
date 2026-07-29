@@ -45,7 +45,13 @@ export function saysNotWorking(m: string): boolean {
  * saysNotWorking on purpose — a scorecard is the wrong reply to any of these, whoever ends up
  * handling it.
  */
+// "Giving up" and "I'm done" are only OURS when they are about this. "I feel like giving up on
+// my career" is a conversation, and forcing it onto deterministic rails would hand a person
+// venting about their job a fitness scorecard. So these fire only when the phrase ENDS the
+// clause, or is aimed at the programme — never when it is aimed at something else in their life.
+const QUITTING = /\b(?:i give up|giving up|i.?m done|i am done)\b(?=[.!?,]|\s*$|\s+on\s+(?:this|it|everything|the (?:programme|program|plan|diet|gym)))/i;
+
 export function isDespairNotAQuestion(m: string): boolean {
   const s = m || "";
-  return saysNotWorking(s) || /\b(?:is\s*n.?t|.?s not|isn.?t|ain.?t|not)\s+working\b|\bgiving up\b|\bi give up\b|\bi.?m done\b/i.test(s);
+  return saysNotWorking(s) || /\b(?:is\s*n.?t|.?s not|isn.?t|ain.?t|not)\s+working\b/i.test(s) || QUITTING.test(s);
 }
