@@ -7820,6 +7820,45 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ============================================================
+// PLATITUDE STRIP MUST NOT EAT COACHING (2026-07-30). Found by running a REAL defective reply
+// from the audit through the pipeline rather than trusting it. Dropping the whole sentence was
+// survivable while hygiene reached one caller; applied to every reply it deleted the instruction
+// and left the platitude's neighbours behind.
+// ============================================================
+{
+  const { humanizeReply, stripPlatitudes } = await import("../server/reply-hygiene");
+  // Verbatim from the audit's "still happening" example.
+  const REAL = "I get it, Kam! You're pushing through, and that's commendable. Here's what you can do today: "
+    + "1. *Finish Strong:* Complete your workout, but listen to your body. "
+    + "2. *Hydrate:* Drink plenty of water through the session. "
+    + "3. *Refuel:* Get protein in within the hour after you train.";
+
+  test("platitudes: THE INSTRUCTION SURVIVES — 'Complete your workout' must not die with 'listen to your body'", () => {
+    const out = humanizeReply(REAL);
+    assert.match(out, /Complete your workout/, "the client must still be told to train");
+    assert.match(out, /Get protein in within the hour/, "and to refuel");
+    assert.doesNotMatch(out, /listen to your body/i);
+    assert.doesNotMatch(out, /drink plenty of water/i);
+  });
+  test("platitudes: no wreckage — a residue that was ONLY a platitude is removed whole", () => {
+    const out = humanizeReply(REAL);
+    assert.doesNotMatch(out, /\*Hydrate:\*\s*through the session/, "a dangling fragment reads worse than silence");
+  });
+  test("platitudes: the listicle still becomes bullets", () => {
+    assert.match(humanizeReply(REAL), /^• /m);
+  });
+  test("platitudes: a single platitude is left alone — a hydration question deserves a hydration answer", () => {
+    const one = "Drink plenty of water today.";
+    assert.equal(stripPlatitudes(one), one);
+  });
+  test("platitudes: a whole-sentence platitude with nothing else still goes", () => {
+    const out = stripPlatitudes("Your protein is at 120g. Stay hydrated and listen to your body.");
+    assert.match(out, /120g/);
+    assert.doesNotMatch(out, /hydrated|listen to your body/i);
+  });
+}
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

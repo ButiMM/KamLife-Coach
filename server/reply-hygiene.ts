@@ -146,9 +146,56 @@ export function platitudeCount(text: string): number {
  * its own, and pretending it is the whole fix would be the same overreach as every prompt line
  * that told the model to be specific and was ignored.
  */
+/**
+ * A PLATITUDE IS A CLAUSE, NOT A SENTENCE (2026-07-30, found by running a real defective reply
+ * through the pipeline instead of trusting it).
+ *
+ * This used to drop the whole sentence. That was survivable while it reached one caller and
+ * mostly prose. The moment hygiene ran on every reply it started eating coaching: a real bullet,
+ * "*Finish Strong:* Complete your workout, but listen to your body", lost the instruction along
+ * with the platitude — the client was told to refuel and never told to train.
+ *
+ * So the platitude phrase is cut out and what the coach actually said is kept. Only when nothing
+ * of substance is left does the line go entirely.
+ */
+const SUBSTANCE_MIN_CHARS = 18;
+
 export function stripPlatitudes(text: string): string {
   if (platitudeCount(text) < 2) return text || "";
-  return dropSentences(text, new RegExp(PLATITUDES.map(r => r.source).join("|"), "i"));
+  const re = new RegExp(PLATITUDES.map(r => r.source).join("|"), "gi");
+  const parts = splitSentences((text || "").trim());
+  let out = "";
+  for (let i = 0; i < parts.length; i += 2) {
+    const sentence = parts[i];
+    const sep = parts[i + 1] ?? "";
+    if (!sentence) continue;
+    re.lastIndex = 0;
+    if (!re.test(sentence)) { out += sentence + sep; continue; }
+    // Cut the phrase, then tidy the connective it was hanging off ("…, but ", "…, and ").
+    const residue = sentence
+      .replace(new RegExp(re.source, "gi"), "")
+      .replace(/[ \t]*[,;]?[ \t]*\b(?:but|and|so|then|also|plus)\b[ \t]*(?=[.!?]|$)/gi, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/[ \t]+([.!?,])/g, "$1")
+      .replace(/^[\s,;:—-]+/, "")
+      .replace(/[\s,;:]+([.!?])/, "$1")
+      .trim();
+    // Strip leading bullet/bold scaffolding before judging whether anything survived.
+    // Order matters: take the bullet marker FIRST but never the asterisk, or the bold label's
+    // opening "*" is consumed and the label survives into the substance count.
+    const meat = residue
+      .replace(/^\s*[•\-]\s*/, "")
+      .replace(/^\*[^*]{0,40}\*:?\s*/, "")
+      .replace(/^[•\-*\s]+/, "")
+      .trim();
+    // Nothing left worth sending: too short, or a dangling fragment. A residue that opens with a
+    // preposition ("through the session") is what remains when the platitude WAS the instruction —
+    // it is not coaching, it is wreckage, and it reads worse than saying nothing.
+    const isFragment = /^(?:through|with|for|in|at|on|by|from|during|to|of|and|but|so)\b/i.test(meat);
+    if (isFragment || meat.replace(/[^A-Za-z]/g, "").length < SUBSTANCE_MIN_CHARS) continue;
+    out += residue + sep;
+  }
+  return out.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 // ── THE WALL OF TEXT ─────────────────────────────────────────────────────────────────────────

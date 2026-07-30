@@ -36,7 +36,7 @@ const BUDGET = {
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
-  regexLiterals: 337,
+  regexLiterals: 338,
 };
 
 /**
@@ -53,13 +53,16 @@ const BUDGET = {
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
   {
-    key: "regexLiterals", from: 333, to: 337, date: "2026-07-30",
+    key: "regexLiterals", from: 333, to: 338, date: "2026-07-30",
     why: "Provenance gate — the coach may not assert a fact it cannot trace to a stored row. "
       + "5 patterns to recognise the 3 claim kinds that have actually shipped as defects "
       + "(weight trend, meal eaten, calorie target). Tried first: merged 2 patterns into 1 with "
       + "lookaheads, searched for dead regex constants (none) and exact duplicates (none). "
       + "PAY THIS BACK by moving claim recognition onto the meaning engine's structured output, "
-      + "which already parses these three things and needs no patterns at all.",
+      + "which already parses these three things and needs no patterns at all. "
+      + "+1 later the same day: the platitude strip needed a fragment test after it was caught "
+      + "DELETING COACHING ('Complete your workout' died with 'listen to your body'). Shipping "
+      + "a reply-eating bug to save a regex would have been the wrong trade.",
   },
 ];
 
