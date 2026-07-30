@@ -7782,6 +7782,44 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ============================================================
+// THE WALL OF TEXT (2026-07-30). 6 of the last 16 live defects. The content is usually right —
+// this is a typography failure, not a thinking one. Nobody reads a paragraph on a phone.
+// ============================================================
+{
+  const { breakWallOfText, humanizeReply } = await import("../server/reply-hygiene");
+
+  test("wall: a long unbroken paragraph is broken into readable blocks", () => {
+    const wall = "Morning Kam. Your protein is sitting at 120g which is under where I want you. "
+      + "Add eggs at breakfast and you close most of that gap. Steps are strong this week at 9200 a day. "
+      + "Keep that going and the fat comes off without touching your food again.";
+    const out = breakWallOfText(wall);
+    assert.ok(out.includes("\n"), "must break");
+    assert.equal(out.replace(/\s+/g, " "), wall.replace(/\s+/g, " "), "not one word may change");
+  });
+  test("wall: a short reply is never touched — a coach sends short lines", () => {
+    const short = "Logged. Protein is where I want it.";
+    assert.equal(breakWallOfText(short), short);
+  });
+  test("wall: a reply that already has line breaks is left alone", () => {
+    const ok = "Morning Kam.\n\nProtein is low — add eggs at breakfast and you close the gap today, easily done.\n\nSteps are strong.";
+    assert.equal(breakWallOfText(ok), ok);
+  });
+  test("wall: two sentences is a coach talking, not a wall", () => {
+    const two = "Your protein is sitting at 120g today which is a good way under where I want you to be for this phase. Add eggs at breakfast and that gap closes.";
+    assert.equal(breakWallOfText(two), two);
+  });
+  test("wall: humanizeReply now ends with the break, so hygiene output is phone-shaped", () => {
+    const wall = "I appreciate your patience. Your protein is at 120g and that is a fair way under the target I set for you. "
+      + "Add eggs at breakfast and a tin of pilchards at lunch and you close that gap without thinking about it. "
+      + "Steps are strong at 9200 a day this week, which is the best run you have put together so far. "
+      + "Keep going exactly as you are and we do not touch the food again this week.";
+    const out = humanizeReply(wall);
+    assert.doesNotMatch(out, /appreciate your patience/i, "filler still stripped");
+    assert.ok(out.includes("\n"), "and the survivor is broken up");
+  });
+}
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

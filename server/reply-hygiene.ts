@@ -151,10 +151,33 @@ export function stripPlatitudes(text: string): string {
   return dropSentences(text, new RegExp(PLATITUDES.map(r => r.source).join("|"), "i"));
 }
 
+// ── THE WALL OF TEXT ─────────────────────────────────────────────────────────────────────────
+// (2026-07-30.) The single most common live defect: 6 of the last 16. A reply that is four or
+// five sentences long with no line break in it is a paragraph, and nobody reads a paragraph on a
+// phone. The content is often right — this is not a thinking failure, it is a typography one.
+//
+// A real coach on WhatsApp sends short blocks. So a long unbroken run gets broken at a sentence
+// boundary, roughly every two sentences. Nothing is added, removed or reworded; only where the
+// newlines fall changes. Deliberately conservative: short replies and anything that already has
+// line breaks or bullets are left exactly as they are.
+const WALL_MIN_CHARS = 220;
+
+export function breakWallOfText(text: string): string {
+  const t = (text || "").trim();
+  if (t.length < WALL_MIN_CHARS || t.includes("\n")) return t;
+  const parts = splitSentences(t);
+  const sentences: string[] = [];
+  for (let i = 0; i < parts.length; i += 2) if (parts[i]) sentences.push(parts[i]);
+  if (sentences.length < 3) return t;
+  const blocks: string[] = [];
+  for (let i = 0; i < sentences.length; i += 2) blocks.push(sentences.slice(i, i + 2).join(" "));
+  return blocks.join("\n\n");
+}
+
 // The full humanize pass — strip stalls AND corporate filler in one go. This is what
 // sanitizeCoachReply calls, so every AI reply gets to the point like a real coach.
 export function humanizeReply(text: string): string {
-  return normaliseBullets(stripPlatitudes(reshapeNumberedList(stripFiller(stripDeadPromises(text)))));
+  return breakWallOfText(normaliseBullets(stripPlatitudes(reshapeNumberedList(stripFiller(stripDeadPromises(text))))));
 }
 
 /**

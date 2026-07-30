@@ -14,6 +14,7 @@ import { schedulerState } from "../../shared/schema";
 import { routineNudgeAllowed, dayOfYearSAST } from "./nudge-policy";
 import { checkOutboundMessage } from "../verifiers/proactive-gate";
 import { provenanceGate } from "../verifiers/response-gate";
+import { humanizeReply } from "../reply-hygiene";
 import { templateSid, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
 
 export { db, pool };
@@ -484,7 +485,17 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   //
   // Runs before the bubble split so a claim spanning a "---" boundary is still one sentence.
   const checked = await provenanceGate(to, body);
-  const parts = splitWhatsAppBody(checked);
+  // VOICE, ENFORCED (2026-07-30). humanizeReply — the numbered-list reshape, the platitude strip,
+  // the wall-of-text break — existed since 22 July and was wired into exactly ONE caller
+  // (food-scanner.ts). Every brain reply, every engine reply and all 68 scheduler jobs went out
+  // unhygienised, which is why 94% of recent defects were wall-of-text, listicles and generic
+  // advice: the rules were real, the enforcement reached almost nothing.
+  //
+  // Reports are left alone. `audit` and `replay` quote real replies back at the founder, and a
+  // pass that rewrote those quotes would corrupt the instrument that measures this — the same
+  // rule the provenance gate follows.
+  const shaped = checked.includes('_"') ? checked : humanizeReply(checked);
+  const parts = splitWhatsAppBody(shaped);
   for (let i = 0; i < parts.length; i++) {
     const remainingText = parts.slice(i).join("\n\n");
     const outcome = await sendOneWhatsApp(to, parts[i], i === parts.length - 1 ? mediaUrl : undefined, remainingText);
