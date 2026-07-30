@@ -7,7 +7,7 @@
 import { db } from "../db";
 import { users } from "../../shared/schema";
 import { eq } from "drizzle-orm";
-import { comebackPlan } from "../adaptive-training";
+import { comebackPlan, trainingStateFromUser } from "../adaptive-training";
 import { logChat } from "./chat-log";
 import { parseSickDays, isReturnFromSicknessQuestion, looksLikeComebackQuestion } from "../utils";
 import { scheduleReturnNudge, cancelReturnNudges } from "../reminders";
@@ -142,7 +142,16 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
         heldLine = `I've paused your check-ins for ~${rec.sickDays} day${rec.sickDays !== 1 ? "s" : ""} so I'm not nagging you while you rest. `;
       }
     }
-    const comebackReply = `Good question — here's your comeback plan${capName ? ", " + capName : ""}:\n\n${comebackPlan()}\n\n*Food while sick still counts* — keep logging what you can, no calorie pressure.\n\n${backDate ? `${heldLine}I've got you resting until around *${backDate}*. ` : ""}When you're ready, just say *I'm back* and I'll set up your first session.`;
+    // ALREADY BACK? (2026-07-30 live.) This closed with "when you're ready, just say I'm back and
+    // I'll set up your first session" to a man who replied "I've already had two sessions this
+    // week, today is my third." The plan assumed session zero because nothing here ever asked
+    // whether he had started. trainingStateFromUser owns that question — so ask it.
+    const backState = trainingStateFromUser(user);
+    const alreadyTraining = backState.daysSinceLastWorkout > 0 && backState.daysSinceLastWorkout <= 7;
+    const closer = alreadyTraining
+      ? `You're clearly already back in it — so ignore session one and pick up at the stage that matches what you've done. Tell me how today feels and I'll set the loads.`
+      : `When you're ready, just say *I'm back* and I'll set up your first session.`;
+    const comebackReply = `Good question — here's your comeback plan${capName ? ", " + capName : ""}:\n\n${comebackPlan()}\n\n*Food while sick still counts* — keep logging what you can, no calorie pressure.\n\n${backDate ? `${heldLine}I've got you resting until around *${backDate}*. ` : ""}${closer}`;
     await logChat(user.id, message, comebackReply, "SICK_COMEBACK_PLAN");
     return comebackReply;
   }

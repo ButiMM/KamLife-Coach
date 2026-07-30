@@ -7991,6 +7991,42 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ============================================================
+// THE COMEBACK PLAN ASSUMED SESSION ZERO (2026-07-30 live). It closed with "when you're ready,
+// just say I'm back and I'll set up your first session" to a man who answered: "I've already had
+// two sessions this week. Today is my third."
+// ============================================================
+{
+  const { readFileSync } = await import("node:fs");
+  const { trainingStateFromUser } = await import("../server/adaptive-training");
+  const flow = readFileSync("server/handlers/sick-flow.ts", "utf-8");
+  const now = Date.now();
+  const daysAgo = (n: number) => new Date(now - n * 86_400_000).toISOString();
+
+  test("comeback: the plan asks whether they have already started", () => {
+    const block = flow.slice(flow.indexOf("const backState"), flow.indexOf("const comebackReply"));
+    assert.match(block, /trainingStateFromUser\(/, "must consult the training-state owner");
+    assert.match(block, /alreadyTraining/, "and branch on it");
+  });
+  test("comeback: someone training this week is not at session one", () => {
+    const st = trainingStateFromUser({ lastWorkoutDate: daysAgo(2) }, now);
+    assert.ok(st.daysSinceLastWorkout > 0 && st.daysSinceLastWorkout <= 7, "already back");
+  });
+  test("comeback: a genuine 3-week layoff still gets session one", () => {
+    const st = trainingStateFromUser({ lastWorkoutDate: daysAgo(22) }, now);
+    assert.ok(st.daysSinceLastWorkout > 7, "still session zero");
+  });
+  // KNOWN GAP, deliberately asserted so it cannot be forgotten: the fix above reads the LOG, and
+  // a session the client only TELLS us about never reaches the log. "I've already had two sessions
+  // this week" matches nothing in the session parser, so the database still says 22 days. Until
+  // that statement is captured, the coach and the client disagree about his own week.
+  test("comeback: KNOWN GAP — a spoken session count is still not captured", async () => {
+    const { parseSessionReport } = await import("../server/session-report");
+    assert.equal(parseSessionReport("I have already had two sessions this week"), null,
+      "if this ever returns a report, capture it and delete this test");
+  });
+}
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 
