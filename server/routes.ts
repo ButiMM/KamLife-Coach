@@ -836,6 +836,16 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const reminderResult = await handleReminderCommand({ phone, message, m, user });
   if (reminderResult !== null) return reminderResult;
 
+  // THE HOIST (2026-07-30): Coach K runs BEFORE early-commands, media, workout and water. They
+  // had first refusal; the coach was eighth — which is why ENGINE_ACTIONS has been `on` for weeks
+  // with an EMPTY action log. Food logs still fall through to food-context below.
+  const tag = (reply: string, src: string) => { recordReplyPath(src); return isCoach ? `${reply}\n\n_· ${src} ·_` : reply; }; // tag() is the one chokepoint all model paths cross
+  if (engineLive() && !mustStayDeterministic(m) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)
+      && !(!normalizedQuestion && scanForSAFoods(m).length > 0)) { // a food LOG stays on the rails; a food QUESTION is the coach's
+    const engineFront = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
+    if (engineFront !== null) return tag(engineFront, "🧠 new engine");
+  }
+
   const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
   if (earlyResult !== null) return earlyResult;
 
@@ -1031,20 +1041,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // stays the fallback (ENGINE_LIVE=off reverts instantly). Advisory-only, so nothing is
   // lost by deferring it.
 
-  // ================= THE INVERSION (Phase 1 — Coach K is the FRONT DOOR) =================
-  // Coach K now runs BEFORE the Misc/Lifecycle template handlers, not after them. Genuine
-  // CONVERSATION (questions, feelings, advice, myths, any SA language) goes to Coach K first,
-  // so no hardcoded template can front-run understanding. Only ACTIONS —
-  // mustStayDeterministic(m): logging, data lookups, commands, health/safety, billing — skip
-  // Coach K and stay on the deterministic rails below. Fail-open: if Coach K declines (null),
-  // the deterministic handlers still run as fallback, so a log/command is NEVER lost.
-  // Flag-gated (ENGINE_LIVE=on) and instantly reversible (ENGINE_LIVE=off).
-  const tag = (reply: string, src: string) => { recordReplyPath(src); return isCoach ? `${reply}\n\n_· ${src} ·_` : reply; }; // tag() is the one chokepoint all 3 model paths cross
-  if (engineLive() && !mustStayDeterministic(m) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const engineFront = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
-    if (engineFront !== null) return tag(engineFront, "🧠 new engine");
-  }
-
   const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion });
   if (miscResult !== null) return miscResult;
 
@@ -1053,11 +1049,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (lifecycleResult !== null) return lifecycleResult;
 
 
-  // ---- MODEL BRAIN / ENGINE LIVE — the conversation layer, LAST RESORT before GPT fallback.
-  // Every deterministic handler outranks the brain (2026-07-13): it only sees messages no
-  // handler claimed. This TAIL is the final backstop — a message that stayed deterministic
-  // (mustStayDeterministic) but that no Misc/Lifecycle handler claimed gets one last crack at
-  // Coach K. Flag-gated (ENGINE_LIVE=on), fail-open — a null defers to the brain/gpt-block.
+  // ---- ENGINE, second pass: the backstop for what the handlers above declined. Fail-open.
   if (engineLive() && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
     if (engineReply !== null) return tag(engineReply, "🧠 new engine");
