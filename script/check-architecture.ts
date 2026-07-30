@@ -28,7 +28,7 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 242,
+  modules: 234,
   handlerFiles: 29,
   cronRegistrations: 27,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
@@ -36,7 +36,7 @@ const BUDGET = {
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
-  regexLiterals: 336,
+  regexLiterals: 334,
 };
 
 
@@ -102,7 +102,7 @@ const AT_RISK_BUDGET = 3;
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
   {
-    key: "regexLiterals", from: 333, to: 336, date: "2026-07-30",
+    key: "regexLiterals", from: 333, to: 334, date: "2026-07-30",
     why: "Provenance gate — the coach may not assert a fact it cannot trace to a stored row. "
       + "5 patterns to recognise the 3 claim kinds that have actually shipped as defects "
       + "(weight trend, meal eaten, calorie target). Tried first: merged 2 patterns into 1 with "
@@ -190,7 +190,7 @@ for (const [key, budget] of Object.entries(BUDGET) as Array<[keyof typeof BUDGET
 
 // A budget above its original frozen value must have a logged, dated reason. This is what stops
 // "just bump it by one" from being the path of least resistance.
-const FROZEN = { modules: 242, handlerFiles: 29, cronRegistrations: 27, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333 };
+const FROZEN = { modules: 234, handlerFiles: 29, cronRegistrations: 27, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333 };
 for (const [key, frozen] of Object.entries(FROZEN) as Array<[keyof typeof BUDGET, number]>) {
   if (BUDGET[key] <= frozen) continue;
   const logged = RAISES.filter(r => r.key === key).sort((a, b) => a.to - b.to).pop();

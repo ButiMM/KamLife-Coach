@@ -47,7 +47,6 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { runShadowEval, shadowEnabled } from "./understanding/shadow";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
@@ -215,79 +214,6 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     if (/^(?:reply\s+)?audit(?:\s+\d{2,5})?$/i.test(m.trim())) return await (await import("./audit/reply-audit-command")).replyAuditCommand(m);
     if (/^(?:outcomes?|results?|does it work)(?:\s+\d{1,2})?$/i.test(m.trim())) return await (await import("./audit/outcomes-command")).outcomesCommand(m);
     if (/^(?:self.?check|what.?s (?:broken|off)|health)$/i.test(m.trim())) { const sc = await import("./self-check"); return sc.formatSelfCheck(sc.runSelfCheck()); }
-
-    const rc = m.trim().match(/^replay(?:\s+scorecard)?(?:\s+(\d{1,3}))?$/i) || m.trim().match(/^(?:run\s+)?scorecard(?:\s+(\d{1,3}))?$/i);
-    if (rc) {
-      const limit = Math.max(10, Math.min(200, parseInt(rc[1] || "60", 10) || 60));
-      (async () => {
-        try {
-          const { runReplayScorecard } = await import("./eval/replay");
-          const card = await runReplayScorecard(openai, limit);
-          await sendWhatsApp(phone, card.whatsappText.slice(0, 1500));
-        } catch (e: any) {
-          await sendWhatsApp(phone, `Replay hit a snag: ${e?.message || e}`).catch(() => {});
-        }
-      })();
-      return `📊 Running the scorecard over your last ${limit} real conversations — replaying each through the new engine and grading it against what the coach actually said. This takes a few minutes; I'll text you the results here.`;
-    }
-
-    // ---- COACH COMMAND: "action replay" → grade Coach K against the HAND-VERIFIED truth ----
-    // Scores whether Coach K picks the RIGHT ACTION against the gold set, NOT production's noisy
-    // intent labels. A decisive pass IS the gate — the gold set is fixed, so no calendar to wait
-    // out. Reports missed actions + (dangerous) false writes.
-    if (/^action[\s-]?replay$/i.test(m.trim()) || /^replay[\s-]?actions?$/i.test(m.trim()) || /^action[\s-]?gold$/i.test(m.trim())) {
-      (async () => {
-        try {
-          const { runGoldReplay } = await import("./eval/action-replay");
-          // NEVER-SILENT: a hard cap guarantees a reply even if the run stalls.
-          const report = await Promise.race([
-            runGoldReplay(openai),
-            new Promise<null>(res => setTimeout(() => res(null), 100_000)),
-          ]);
-          await sendWhatsApp(phone, report
-            ? report.whatsappText.slice(0, 1500)
-            : "⏱️ Action replay is taking longer than usual (the AI calls are slow right now). Give it a minute and send *action replay* again.");
-        } catch (e: any) {
-          await sendWhatsApp(phone, `Action replay hit a snag: ${e?.message || e}`).catch(() => {});
-        }
-      })();
-      return `🎯 Grading Coach K against the *truth set* — real messages with human-verified right answers. Checking he picks the right action and never a wrong write. A moment; result lands here.`;
-    }
-
-    // ---- COACH COMMAND: "field replay [N]" → the breadth check over real history ----
-    // Runs the engine over the last N real messages. Useful for SPOTTING new shapes in the
-    // wild, but its ground truth is the production classifier (noisy), so it's a signal, NOT
-    // the gate. The gate is "action replay" (the truth set) above.
-    const fr = m.trim().match(/^field[\s-]?replay(?:\s+(\d{1,3}))?$/i);
-    if (fr) {
-      const limit = Math.max(20, Math.min(200, parseInt(fr[1] || "80", 10) || 80));
-      (async () => {
-        try {
-          const { runActionReplay } = await import("./eval/action-replay");
-          const report = await runActionReplay(openai, limit);
-          await sendWhatsApp(phone, report.whatsappText.slice(0, 1500));
-        } catch (e: any) {
-          await sendWhatsApp(phone, `Field replay hit a snag: ${e?.message || e}`).catch(() => {});
-        }
-      })();
-      return `🌍 Running the *field* replay over your last ${limit} real messages (a breadth signal — noisy ground truth, not the gate). Results land here.`;
-    }
-
-    // ---- COACH COMMAND: "gate" → the ENGINE_ACTIONS=on decision, read from the day-log ----
-    // The operational definition of "5 winning days", answered from stored replay verdicts —
-    // no replay run, no guessing. Says exactly how many winning days we have and what's left.
-    if (/^gate(\s+status)?$/i.test(m.trim())) {
-      (async () => {
-        try {
-          const { actionGateStatus } = await import("./eval/action-replay");
-          const g = await actionGateStatus();
-          await sendWhatsApp(phone, `${g.open ? "🟢 *ENGINE_ACTIONS gate: OPEN*" : "⏳ *ENGINE_ACTIONS gate: closed*"}\n\n${g.reason}\n\nStreak: ${g.streak}/5 winning days · ${g.windowSamples} samples in window.`);
-        } catch (e: any) {
-          await sendWhatsApp(phone, `Gate check hit a snag: ${e?.message || e}`).catch(() => {});
-        }
-      })();
-      return `⏳ Checking the ENGINE_ACTIONS gate…`;
-    }
 
     // ---- COACH COMMAND: "shadow" → review the engine's live action-decisions ----
     // The confirmation lap: in ENGINE_ACTIONS=shadow every real message's would-be action is
@@ -1058,7 +984,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // MODEL_BRAIN path deleted 2026-07-30. Two paths answer a client: the engine, then gpt-block.
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
   const gptReply = await handleGptBlock({ phone, message, m, user, intentPromise });
-  if (shadowEnabled()) runShadowEval({ openai, user, phone, message, productionReply: gptReply });
   return tag(gptReply, "gpt fallback");
 
 
