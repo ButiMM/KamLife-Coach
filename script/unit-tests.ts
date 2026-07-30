@@ -7627,6 +7627,161 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ============================================================
+// PROVENANCE GATE (2026-07-30, founder: "I know the numbers, I can see the mistakes. A normal
+// person doesn't know anything. They're going to trust the bot.") The client cannot check
+// whether 2,530 kcal is right for her body. She CAN check confidence. So the rule is that the
+// coach may not assert a fact it cannot trace to a stored row — and when the row is missing, the
+// claim becomes the question that would earn the evidence.
+// ============================================================
+{
+  const { weightTrendUsable } = await import("../server/adaptive-targets");
+  const { classifyClaim, applyProvenance } = await import("../server/verifiers/response-gate");
+  const DAY = 86_400_000;
+  const now = Date.parse("2026-07-30T09:00:00Z");
+  const ago = (d: number) => now - d * DAY;
+
+  // ── The trend rule, now owned in one place and shared with the nightly job ──
+  test("provenance: a healthy span with two recent weigh-ins IS a usable trend", () => {
+    const v = weightTrendUsable({ count: 2, newestAt: ago(2), oldestAt: ago(12), now });
+    assert.equal(v.usable, true);
+  });
+  test("provenance: THE FOUNDER'S CASE — weighed 8 and 24 days ago, sick 21→4 days ago", () => {
+    const v = weightTrendUsable({
+      count: 2, newestAt: ago(8), oldestAt: ago(24), now,
+      sickSince: ago(21), sickUntil: ago(4),
+    });
+    assert.equal(v.usable, false);
+    assert.equal(v.usable === false && v.why, "illness");
+  });
+  test("provenance: an OLD illness does not poison a fresh span", () => {
+    const v = weightTrendUsable({
+      count: 2, newestAt: ago(2), oldestAt: ago(12), now,
+      sickSince: ago(90), sickUntil: ago(80),
+    });
+    assert.equal(v.usable, true);
+  });
+  test("provenance: an illness with no end date is still running — never usable", () => {
+    const v = weightTrendUsable({ count: 2, newestAt: ago(2), oldestAt: ago(12), now, sickSince: ago(5) });
+    assert.equal(v.usable, false);
+    assert.equal(v.usable === false && v.why, "illness");
+  });
+  test("provenance: stale weigh-ins are refused even with no illness at all", () => {
+    const v = weightTrendUsable({ count: 2, newestAt: ago(20), oldestAt: ago(27), now });
+    assert.equal(v.usable, false);
+    assert.equal(v.usable === false && v.why, "stale");
+  });
+  test("provenance: one weigh-in is never a trend", () => {
+    assert.equal(weightTrendUsable({ count: 1, newestAt: ago(1), oldestAt: ago(1), now }).usable, false);
+  });
+  test("provenance: two weigh-ins a day apart is noise, not a trend", () => {
+    const v = weightTrendUsable({ count: 2, newestAt: ago(1), oldestAt: ago(2), now });
+    assert.equal(v.usable === false && v.why, "too_short");
+  });
+
+  // ── What counts as a claim. Over-firing here would make the coach useless. ──
+  test("provenance: a QUESTION is never a claim — asking is the behaviour we want", () => {
+    assert.equal(classifyClaim("What did you have for lunch?"), null);
+    assert.equal(classifyClaim("Did you weigh in this week?"), null);
+  });
+  test("provenance: encouragement is not a weight claim", () => {
+    assert.equal(classifyClaim("Keep it up."), null);
+    assert.equal(classifyClaim("Don't give up now."), null);
+    assert.equal(classifyClaim("You're gaining strength every session."), null);
+  });
+  test("provenance: 'you had a rough day' is not a meal log", () => {
+    assert.equal(classifyClaim("You had a rough day yesterday."), null);
+  });
+  test("provenance: the calories IN A FOOD are not a target claim", () => {
+    assert.equal(classifyClaim("A chicken breast is about 250 kcal."), null);
+  });
+  test("provenance: the three real claim shapes are caught", () => {
+    assert.equal(classifyClaim("You're down 1.2kg this week."), "weight-trend");
+    assert.equal(classifyClaim("You ate 450 kcal at lunch."), "meal-eaten");
+    assert.equal(classifyClaim("Bumping your target to 2,250 cal."), "target-value");
+  });
+
+  const backed = { trend: { usable: true } as const, mealsLoggedToday: 2, calorieTarget: 2250 };
+
+  test("provenance: a backed reply ships BYTE-IDENTICAL — the gate is invisible when right", () => {
+    const draft = "You're down 1.2kg this week.\n\nYou ate 450 kcal at lunch.\n\nBumping your target to 2,250 cal.";
+    const r = applyProvenance(draft, backed);
+    assert.equal(r.text, draft);
+    assert.deepEqual(r.rewrites, []);
+  });
+
+  test("provenance: a trend claimed during illness becomes a scale request, naming why", () => {
+    const r = applyProvenance("You're gaining quicker than muscle can build. I've trimmed you to 2,250 cal.", {
+      trend: { usable: false, why: "illness" }, mealsLoggedToday: 1, calorieTarget: 2250,
+    });
+    assert.deepEqual(r.rewrites, ["weight-trend"]);
+    assert.doesNotMatch(r.text, /gaining quicker/i, "the unbacked claim must be GONE");
+    assert.match(r.text, /ill/i, "and it must say why, not just refuse");
+    assert.match(r.text, /scale/i);
+    assert.match(r.text, /2,250 cal/, "the backed sentence survives untouched");
+  });
+
+  test("provenance: a meal the client never logged becomes a question", () => {
+    const r = applyProvenance("You ate 450 kcal at lunch.", { ...backed, mealsLoggedToday: 0 });
+    assert.deepEqual(r.rewrites, ["meal-eaten"]);
+    assert.doesNotMatch(r.text, /450/);
+    assert.match(r.text, /what did you eat/i);
+  });
+
+  test("provenance: THE CONTRADICTION — a target announced that the database never took", () => {
+    const r = applyProvenance("Bumping your target to 2,530 cal to keep it moving.", { ...backed, calorieTarget: 2800 });
+    assert.deepEqual(r.rewrites, ["target-value"]);
+    assert.doesNotMatch(r.text, /2,530/, "the number that was never stored must not ship");
+    assert.match(r.text, /2800/, "the client is told the number that IS stored");
+  });
+
+  test("provenance: a target quoted correctly passes — small rounding is not a lie", () => {
+    const r = applyProvenance("Your target is 2,250 kcal today.", { ...backed, calorieTarget: 2230 });
+    assert.deepEqual(r.rewrites, []);
+  });
+
+  test("provenance: mixed evidence rewrites ONLY the unbacked sentence", () => {
+    const draft = "Nice work logging that. You're down 1.2kg this week. Protein is where I want it.";
+    const r = applyProvenance(draft, { ...backed, trend: { usable: false, why: "too_few" } });
+    assert.deepEqual(r.rewrites, ["weight-trend"]);
+    assert.match(r.text, /Nice work logging that\./);
+    assert.match(r.text, /Protein is where I want it\./);
+    assert.doesNotMatch(r.text, /down 1\.2kg/);
+  });
+
+  test("provenance: two unbacked claims of one kind ask ONCE, never nag twice", () => {
+    const draft = "You're down 1.2kg this week. You're losing faster than I'd like.";
+    const r = applyProvenance(draft, { ...backed, trend: { usable: false, why: "stale" } });
+    assert.equal(r.rewrites.length, 2, "both are counted for the metric");
+    assert.equal((r.text.match(/scale/gi) || []).length, 1, "but the client is asked once");
+  });
+
+  test("provenance: a reply that was ENTIRELY unbacked still says something useful", () => {
+    const r = applyProvenance("You're down 1.2kg this week.", { ...backed, trend: { usable: false, why: "too_few" } });
+    assert.ok(r.text.trim().length > 20, `must not send an empty message: "${r.text}"`);
+    assert.match(r.text, /scale/i);
+  });
+
+  test("provenance: line breaks survive — the reply is still WhatsApp-shaped", () => {
+    const draft = "Morning Kam.\n\nYou ate 450 kcal at lunch.\n\nSteps are on track.";
+    const r = applyProvenance(draft, { ...backed, mealsLoggedToday: 0 });
+    assert.match(r.text, /Morning Kam\./);
+    assert.match(r.text, /Steps are on track\./);
+    assert.ok(r.text.includes("\n"), "must not flatten into one paragraph");
+  });
+
+  test("provenance: QUOTED text is never rewritten — the audit report quotes real replies back", () => {
+    const report = 'They said: _"how am I doing"_\nCoach said: _"You\'re down 1.2kg this week."_';
+    const r = applyProvenance(report, { ...backed, trend: { usable: false, why: "illness" } });
+    assert.deepEqual(r.rewrites, [], "a report about defects must not become a defect");
+    assert.equal(r.text, report);
+  });
+
+  test("provenance: an empty draft is left alone", () => {
+    assert.equal(applyProvenance("", backed).text, "");
+  });
+}
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

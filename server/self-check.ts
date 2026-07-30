@@ -26,6 +26,7 @@ import { FFMPEG_AVAILABLE } from "./video-frames";
 import { uploadedGifCount } from "./exercise-media";
 import { cardFontLoaded } from "./macro-card";
 import { templatesReady } from "./whatsapp-templates";
+import { provenanceMode } from "./verifiers/response-gate";
 
 // ── WHICH BRAIN ANSWERED? ────────────────────────────────────────────────────────────────────
 // (2026-07-30, reviewer: "why does an unconditional fallback exist at all? A system that cannot
@@ -120,6 +121,18 @@ export function capabilities(): Capability[] {
       severity: "critical",
       fix: "Run `npx tsx script/template-pack.ts`, submit each template in Twilio, then paste the approved HX… SIDs into Railway.",
       ok: () => templatesReady(),
+    },
+
+    {
+      // 2026-07-30. The founder's own words: "a normal person doesn't know anything, they're
+      // going to trust the bot." They cannot check a number; they can only check confidence.
+      // With this off, the coach can assert a weight trend, a meal or a calorie target with
+      // nothing behind it — and the client has no way to tell.
+      name: "Truth gate (provenance)",
+      impact: "The coach can state things about a client's body with no data behind them — a weight trend from no weigh-ins, a meal they never logged, a target the database never took.",
+      severity: "critical",
+      fix: "PROVENANCE_GATE is set to off in Railway — unset it to resume.",
+      ok: () => provenanceMode() !== "off",
     },
 
     // ── DEGRADED: the client silently gets less than they paid for. ─────────────────────────

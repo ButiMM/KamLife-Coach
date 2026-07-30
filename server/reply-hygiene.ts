@@ -28,10 +28,20 @@ const DEAD_PROMISE_RE =
  * Splitting with a CAPTURING group keeps the original separators, so a filter can remove a
  * sentence without reformatting everything around it.
  */
+/**
+ * [sentence, separator, sentence, separator, …] — separators preserved so a caller can drop or
+ * REPLACE one sentence without reformatting the reply around it. Exported because the provenance
+ * gate rewrites individual sentences and must split them exactly the way this file does; a second
+ * splitter would eventually disagree with this one about where a sentence ends.
+ */
+export function splitSentences(text: string): string[] {
+  return (text || "").trim().split(/(?<=[.!?])(\s+)/);
+}
+
 function dropSentences(text: string, re: RegExp): string {
   const t = (text || "").trim();
   if (!t) return "";
-  const parts = t.split(/(?<=[.!?])(\s+)/); // [sentence, sep, sentence, sep, …]
+  const parts = splitSentences(t); // [sentence, sep, sentence, sep, …]
   let out = "";
   for (let i = 0; i < parts.length; i += 2) {
     const sentence = parts[i];

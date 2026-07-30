@@ -231,7 +231,13 @@ function HeroChat() {
           {step >= 17 && (
             <motion.div key="m7" {...enter} className="flex justify-start">
               <div style={IN} className="px-2.5 py-2 max-w-[90%] shadow-sm">
-                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Now <span className="font-semibold">that's</span> progress 🔥 Core's tightening up — abs starting to show. You're down <span className="font-semibold">1.2kg this week</span>, 12 days straight. Bumping your target to 2,250 cal to keep it moving.</p>
+                {/* NO IMPLIED RESULT (2026-07-30). This bubble used to say "you're down 1.2kg this
+                    week" and announce a target change. In a marketing mock-up that reads as a
+                    typical outcome, which is a claim we cannot substantiate and exactly what the
+                    Consumer Protection Act polices. It is also the one thing the coach itself is
+                    now forbidden to say without weigh-ins behind it — the landing page should not
+                    promise what the product correctly refuses to assert. */}
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Photo saved 📸 I'll line it up against your day-one shot at month end. Weigh in tomorrow morning and I'll tell you exactly which way you're heading.</p>
                 <span className="text-[9px] block text-right mt-1" style={{ color: "#667781" }}>18:07</span>
               </div>
             </motion.div>
@@ -464,6 +470,12 @@ export default function LandingPage() {
                   </div>
                 </div>
               </div>
+              {/* Says out loud what the mock-up is. The PERSONAS block below is already careful to
+                  be archetypes rather than testimonials; this animated chat is the other place a
+                  visitor could reasonably read a promise into an illustration. */}
+              <p className="mt-3 text-center text-[11px] leading-snug text-white/35">
+                Illustration of how Coach K works — not a real client, and not a promise of results.
+              </p>
             </div>
           </motion.div>
         </div>

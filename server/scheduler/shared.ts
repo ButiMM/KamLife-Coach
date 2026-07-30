@@ -13,6 +13,7 @@ import { join } from "path";
 import { schedulerState } from "../../shared/schema";
 import { routineNudgeAllowed, dayOfYearSAST } from "./nudge-policy";
 import { checkOutboundMessage } from "../verifiers/proactive-gate";
+import { provenanceGate } from "../verifiers/response-gate";
 import { templateSid, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
 
 export { db, pool };
@@ -476,11 +477,14 @@ async function logOutboundToHistory(to: string, body: string): Promise<void> {
 }
 
 export async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
-  // Honor the codebase-wide \n\n---\n\n bubble convention (the reactive path already
-  // does). Before this, scheduler messages rendered literal "---" lines in one crammed
-  // bubble, and bodies over Twilio's 1600-char cap were rejected outright (21617) —
-  // which silently killed the Sunday meal plan. Media rides on the last bubble.
-  const parts = splitWhatsAppBody(body);
+  // PROVENANCE FIRST (2026-07-30). Every outbound message — reactive reply, morning check-in,
+  // weekly review — crosses this function, which makes it the only place a claim can be checked
+  // for ALL of them. The gate had to go here rather than on the reply paths because the worst
+  // false claim this product ever made was sent by a cron job.
+  //
+  // Runs before the bubble split so a claim spanning a "---" boundary is still one sentence.
+  const checked = await provenanceGate(to, body);
+  const parts = splitWhatsAppBody(checked);
   for (let i = 0; i < parts.length; i++) {
     const remainingText = parts.slice(i).join("\n\n");
     const outcome = await sendOneWhatsApp(to, parts[i], i === parts.length - 1 ? mediaUrl : undefined, remainingText);

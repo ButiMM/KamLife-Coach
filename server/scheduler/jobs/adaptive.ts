@@ -13,7 +13,7 @@
  */
 
 import { db, users, weightLogs, stepLogs, eq, and, gte, desc, sql, getActiveClients, sendWhatsApp, saveState, todaySAST, hasRunToday } from "../shared";
-import { adaptTargets, type AdaptiveInput } from "../../adaptive-targets";
+import { adaptTargets, weightTrendUsable, type AdaptiveInput } from "../../adaptive-targets";
 
 /** Weeks of no meaningful weight movement (<0.3kg swing) from a series, newest first. */
 function stalledWeeksFrom(weights: number[]): number {
@@ -59,21 +59,23 @@ export async function runAdaptiveTargets(): Promise<void> {
         // while": it knew the data was stale and used it anyway. Illness moves weight through
         // fluid and inactivity, which is exactly the reading this then acts on.
         // AND THE ILLNESS MUST NOT BE INSIDE IT (2026-07-30, founder: "I've been sick for three
-        // weeks. It didn't even take that into consideration"). He is right, and the shape is
-        // worse than a missed check: illness EXPIRES from the state (sick_until, plus 3 days of
-        // "recovering") while the weight it produced keeps driving decisions for 28. So the job
-        // reads sick-weight as diet-weight. Weight during and just after illness moves on fluid,
-        // appetite and inactivity — it says nothing about whether the food target is right, and
-        // acting on it cut a recovering man's calories. If any illness overlaps the span, there
-        // is no usable trend; the scale prompt in the morning message is the correct response.
+        // weeks. It didn't even take that into consideration"). Illness EXPIRES from the state
+        // (sick_until, plus 3 days of "recovering") while the weight it produced keeps driving
+        // decisions for 28 — so the job read sick-weight as diet-weight and cut a recovering
+        // man's calories.
+        //
+        // The rule now lives in adaptive-targets.ts and is shared with the provenance gate, so a
+        // reply can never assert a trend this job has refused to compute. It used to be inline
+        // here, reachable by nobody else, which is exactly how the two disagreed.
         const newestAt = new Date(wRows[0].at as Date).getTime();
         const oldestAt = new Date(wRows[wRows.length - 1].at as Date).getTime();
-        const illnessTouchesSpan = !!sickSince
-          && new Date(sickSince).getTime() <= newestAt
-          && (sickUntil ? new Date(sickUntil).getTime() + 7 * 86_400_000 : Date.now()) >= oldestAt;
-        const newestAgeDays = (Date.now() - newestAt) / 86_400_000;
         const spanDays = Math.max(1, (newestAt - oldestAt) / 86_400_000);
-        if (spanDays >= 5 && newestAgeDays <= 10 && !illnessTouchesSpan) {
+        const verdict = weightTrendUsable({
+          count: weights.length, newestAt, oldestAt, now: Date.now(),
+          sickSince: sickSince ? new Date(sickSince).getTime() : undefined,
+          sickUntil: sickUntil ? new Date(sickUntil).getTime() : undefined,
+        });
+        if (verdict.usable) {
           weeklyKgChange = ((weights[0] - weights[weights.length - 1]) / spanDays) * 7;
         }
       }

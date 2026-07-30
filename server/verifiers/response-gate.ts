@@ -11,12 +11,24 @@
  *      the client's medical conditions (diabetes, hypertension)?
  *   3. Calorie target consistency — if the response cites a specific kcal target,
  *      does it match the client's stored target (within 100 kcal)?
+ *   4. PROVENANCE — may the coach assert this at all? See the block at the bottom.
+ *
+ * This module owns ONE question: "may we send this?" Checks 1-3 answer it for safety, and
+ * safetyGate runs on the two model paths that build a reply. Check 4 answers it for truth, and
+ * runs at the outbound chokepoint instead, so it also covers the scheduler jobs — which is where
+ * the worst false claim actually came from.
  *
  * Always fail-open: any unhandled error returns the original draft unchanged.
  */
 
 import OpenAI from "openai";
 import { extractBodyParts, checkExercisesAgainstInjuries } from "./injury-rules";
+import { splitSentences } from "../reply-hygiene";
+import { weightTrendUsable, type TrendVerdict } from "../adaptive-targets";
+import { eq, and, gte, desc } from "drizzle-orm";
+import { db } from "../db";
+import { users, weightLogs, mealLogs } from "../../shared/schema";
+import { sastDayStart } from "../sast";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
@@ -56,10 +68,12 @@ function checkMedicalConflicts(response: string, conditions: string): string[] {
 }
 
 // ── Calorie target consistency (soft check — warn only) ──────────────────────
+// SUPERSEDED for enforcement by the provenance gate below, which rewrites the claim instead of
+// logging it. Kept here because safetyGate reports it in `issues` and the shadow evaluator reads
+// that list; the provenance gate is the thing that actually stops the number reaching a client.
 function checkCalorieConsistency(response: string, calorieTarget?: number | null): string | null {
   if (!calorieTarget || calorieTarget <= 0) return null;
-  // Look for explicit kcal numbers in the response: "1 400 kcal", "1400kcal", "1,400 calories"
-  const matches = response.match(/(\d[\d,\s]{2,4})\s*(?:kcal|calories?|cal\b)/gi);
+  const matches = response.match(new RegExp(KCAL_NUMBER.source, "gi"));
   if (!matches) return null;
   for (const m of matches) {
     const num = parseInt(m.replace(/[^\d]/g, ""), 10);
@@ -180,5 +194,277 @@ export async function safetyGate(
   } catch (e) {
     console.warn("[RESPONSE_GATE] unhandled error — passing through:", e instanceof Error ? e.message : e);
     return { response: draft, passed: true, issues: [], revised: false };
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// PROVENANCE GATE — the coach may not assert a fact it cannot trace to a stored row.
+//
+// (2026-07-30, founder: "I know the numbers, I can see the mistakes. A normal person doesn't
+// know anything. They're going to trust the bot.") That asymmetry is the whole problem. A client
+// cannot check whether 2,530 kcal is right for her body — she was never going to. What she CAN
+// check, instantly and correctly, is confidence. Everyone can tell the difference between a coach
+// that says "you're down 1.2kg this week" and one that says "I don't have a clean weigh-in yet".
+//
+// So the defect class this closes is not inaccuracy. It is FALSE CONFIDENCE: a claim about the
+// client's own body, stated flatly, with nothing behind it. That is what gets screenshotted, and
+// it is what the founder has been sending in for weeks — a phantom tin of pilchards, a weight
+// trend read off weights taken during a three-week illness, a "new target" that contradicts the
+// target actually stored.
+//
+// THE RULE: every claim below must trace to a row. When the row is missing the claim is not
+// deleted and not softened — it is REPLACED WITH THE QUESTION THAT WOULD EARN THE EVIDENCE. A
+// coach that asks is doing its job; a coach that guesses is the liability.
+//
+// Deliberately narrow. Three claim kinds, each one a defect that has actually shipped. This does
+// not try to verify everything the coach says — an unbounded checker would fire on coaching
+// advice and would itself become the hand-written blacklist this codebase keeps dying of.
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+
+export type ClaimKind = "weight-trend" | "meal-eaten" | "target-value";
+
+/**
+ * Never an assertion, so always passes:
+ *  - a QUESTION, which is the behaviour this whole gate exists to produce more of;
+ *  - a conditional or hypothetical ("if you had lunch…");
+ *  - QUOTED text. The founder-facing reports (`audit`, `replay`) quote real replies back at him,
+ *    and a gate that rewrote the quotes would corrupt the instrument used to measure the gate.
+ *    That exact mistake has been made here before — the replay harness carried its own drifting
+ *    copy of a routing rule and graded the engine on messages production never sends it.
+ */
+const NOT_AN_ASSERTION = /\?\s*$|_"|^\s*[">]|^\s*(?:if|when|once|unless|should|would|could|did|do|does|have|has|are|is|was|were|can|shall|let|want|try)\b/i;
+
+/** A direction word bound to a kg quantity, or an explicit statement about their weight moving. */
+const WEIGHT_TREND = /\b(?:down|up|lost|gained|dropped|added)\s+(?:about\s+|around\s+|roughly\s+)?\d[\d.,]*\s*kgs?\b|\byou(?:'re| are)\s+(?:losing|gaining|dropping)\b(?!\s+(?:strength|muscle|confidence|momentum|motivation|focus|interest|inches|cm|form|ground)\b)|\b(?:losing|gaining)\s+(?:weight|too\s+fast|quicker|faster)\b/i;
+
+/**
+ * An assertion that they ate something. BOTH halves must be present — the eating verb and a food
+ * signal — or "you had a rough day" becomes a phantom meal. Written as two lookaheads rather than
+ * two constants so there is one pattern to read, one to test, and one to change.
+ */
+const MEAL_EATEN = /(?=.*(?:\byou(?:'ve)?\s+(?:ate|had|logged|eaten)\b|\byour\s+(?:breakfast|lunch|dinner|supper|snack)\s+(?:was|came|hit|landed)\b))(?=.*(?:\d[\d,\s]*\s*(?:kcal|calories?|g\s+(?:of\s+)?protein)|\b(?:breakfast|lunch|dinner|supper|snack|meal)\b))/i;
+
+/** A number presented as THEIR daily target, not as the calories in a piece of chicken. */
+const TARGET_CONTEXT = /\b(?:your|new|daily)\s+(?:calorie\s+)?(?:target|goal|calories|intake)\b|\b(?:bump(?:ing|ed)?|adjust(?:ing|ed)?|mov(?:ing|ed)|sett?(?:ing)?|drop(?:ping|ped)|rais(?:ing|ed)|cut(?:ting)?)\b[^.!?]{0,30}\bto\b/i;
+const KCAL_NUMBER = /(\d[\d,\s]{2,4})\s*(?:kcal|calories?|cal\b)/i;
+
+/** What the coach is allowed to know, read from the client's actual rows. */
+export interface Evidence {
+  /** Verdict from the ONE owner of this question, server/adaptive-targets.ts. */
+  trend: TrendVerdict;
+  /** Meals logged so far in the current SAST day. */
+  mealsLoggedToday: number;
+  /** The target actually persisted on the user row. */
+  calorieTarget: number | null;
+}
+
+/** Which claim, if any, this one sentence is making. */
+export function classifyClaim(sentence: string): ClaimKind | null {
+  const s = (sentence || "").trim();
+  if (!s || NOT_AN_ASSERTION.test(s)) return null;
+  if (WEIGHT_TREND.test(s)) return "weight-trend";
+  if (MEAL_EATEN.test(s)) return "meal-eaten";
+  if (TARGET_CONTEXT.test(s) && KCAL_NUMBER.test(s)) return "target-value";
+  return null;
+}
+
+/** Is the evidence for this claim actually on file? */
+function isBacked(kind: ClaimKind, sentence: string, ev: Evidence): boolean {
+  if (kind === "weight-trend") return ev.trend.usable;
+  if (kind === "meal-eaten") return ev.mealsLoggedToday > 0;
+  // target-value: the number quoted must be the number stored. A reply announcing a change the
+  // database never took is the contradiction the founder screenshotted — two messages, two
+  // different targets, on the same morning.
+  if (!ev.calorieTarget) return true; // nothing to contradict
+  const m = KCAL_NUMBER.exec(sentence);
+  if (!m) return true;
+  const cited = parseInt(m[1].replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(cited) || cited < 500 || cited > 5000) return true; // not a daily target
+  return Math.abs(cited - ev.calorieTarget) <= 50;
+}
+
+/**
+ * The honest ask that replaces an unbacked claim. Never an apology, never a hedge on the same
+ * claim — a specific request for the one thing that would let the coach answer properly.
+ */
+function askInstead(kind: ClaimKind, ev: Evidence): string {
+  if (kind === "weight-trend") {
+    const why = ev.trend.usable ? "" : ev.trend.why;
+    if (why === "illness") {
+      return "I'm not going to call a trend off those weigh-ins — they sit around the time you were ill, and weight moves on fluid and appetite then, not on food. Hop on the scale in the morning and I'll give you a straight read.";
+    }
+    if (why === "stale") {
+      return "Your last weigh-in is too far back for me to read anything into it. Jump on the scale in the morning and I'll tell you exactly where you're going.";
+    }
+    return "I don't have enough weigh-ins yet to call which way you're going. Get on the scale in the morning and again next week, and I'll give you a straight read.";
+  }
+  if (kind === "meal-eaten") {
+    return "I don't have a meal logged for you today. What did you eat?";
+  }
+  return `Your target is still ${ev.calorieTarget} kcal a day — I haven't moved it.`;
+}
+
+export interface ProvenanceResult {
+  text: string;
+  /** One entry per claim rewritten. Empty = the reply shipped untouched. */
+  rewrites: ClaimKind[];
+}
+
+/**
+ * Pure. Rewrites every unbacked claim in the draft, leaving everything else byte-identical.
+ *
+ * Sentence-level on purpose: a reply is usually one bad sentence inside four good ones, and
+ * dropping the whole reply would cost the client the coaching they did earn. The first unbacked
+ * claim of a kind becomes the ask; later ones of the same kind are dropped rather than repeating
+ * the same request twice in one message.
+ */
+export function applyProvenance(draft: string, ev: Evidence): ProvenanceResult {
+  const t = (draft || "").trim();
+  if (!t) return { text: draft, rewrites: [] };
+  const parts = splitSentences(t); // [sentence, sep, sentence, sep, …]
+  const rewrites: ClaimKind[] = [];
+  const asked = new Set<ClaimKind>();
+  let out = "";
+
+  for (let i = 0; i < parts.length; i += 2) {
+    const sentence = parts[i];
+    const sep = parts[i + 1] ?? "";
+    if (!sentence) continue;
+    const kind = classifyClaim(sentence);
+    if (!kind || isBacked(kind, sentence, ev)) { out += sentence + sep; continue; }
+
+    rewrites.push(kind);
+    if (asked.has(kind)) continue; // already asked for this evidence — don't nag twice
+    asked.add(kind);
+    // Keep the leading whitespace/indent of the sentence we are replacing so bullets survive.
+    const indent = (sentence.match(/^\s*/) || [""])[0];
+    out += indent + askInstead(kind, ev) + sep;
+  }
+
+  const text = out.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  // A reply that was ENTIRELY unbacked still has to say something. The ask is the reply.
+  if (!text && rewrites.length > 0) return { text: askInstead(rewrites[0], ev), rewrites };
+  return { text: text || draft, rewrites };
+}
+
+// ── Evidence loader + the gate itself ────────────────────────────────────────────────────────
+// Runs at the outbound chokepoint (sendWhatsApp), not on the reply paths, for one reason: the
+// worst false claim this product has made — a calorie cut announced off weights taken during a
+// three-week illness — was sent by a CRON JOB. It never touched handleMessage, so a gate on the
+// reply paths would have watched it go out.
+//
+// Cost control: extraction is pure string work and exits before any query when the message makes
+// no claim, which is the overwhelming majority of messages. Only a message that actually asserts
+// something about the client's body pays for a lookup.
+
+/**
+ * Modes: on (default — rewrite), shadow (log only, ship unchanged), off.
+ *
+ * DEFAULT ON, opt-out — deliberately not the opt-in flag the spec asked for. A truth gate that
+ * ships switched off is not a gate, it is a file; and this codebase's documented disease is
+ * exactly that — capabilities silently inert while everyone believes they are running. It is
+ * listed in self-check.ts as CRITICAL, so if it is ever turned off that shows up in the report
+ * rather than being discovered by a client.
+ */
+export function provenanceMode(): "on" | "shadow" | "off" {
+  const v = (process.env.PROVENANCE_GATE || "").trim().toLowerCase();
+  return v === "off" ? "off" : v === "shadow" ? "shadow" : "on";
+}
+
+let _checked = 0;
+let _rewritten = 0;
+const _byKind = new Map<ClaimKind, number>();
+
+export function provenanceStats(): { checked: number; rewritten: number; rate: number; byKind: Array<[ClaimKind, number]> } {
+  return {
+    checked: _checked,
+    rewritten: _rewritten,
+    rate: _checked > 0 ? _rewritten / _checked : 0,
+    byKind: [..._byKind.entries()].sort((a, b) => b[1] - a[1]),
+  };
+}
+
+export function _resetProvenanceStats(): void { _checked = 0; _rewritten = 0; _byKind.clear(); }
+
+/** One line for the founder-facing audit — the calibration metric. */
+export function provenanceStatsLine(): string {
+  const s = provenanceStats();
+  const mode = provenanceMode();
+  if (mode === "off") return "🔎 *Provenance gate:* SWITCHED OFF — the coach can assert anything.";
+  if (s.checked === 0) return "🔎 *Provenance gate:* no claims checked since restart.";
+  const pct = (s.rate * 100).toFixed(1);
+  const kinds = s.byKind.map(([k, n]) => `  • ${k.replace("-", " ")}: *${n}*`).join("\n");
+  const head = `🔎 *Provenance gate${mode === "shadow" ? " (SHADOW — not rewriting)" : ""}:* caught *${s.rewritten}* unbacked claim(s) in ${s.checked} messages carrying one (${pct}%).`;
+  return s.rewritten === 0 ? head : `${head}\n${kinds}`;
+}
+
+/**
+ * Load only the evidence the draft's claims actually need, then apply the gate.
+ * Fail-open: any error ships the original text. A gate that eats messages is worse than the bug.
+ */
+export async function provenanceGate(phone: string, body: string): Promise<string> {
+  if (provenanceMode() === "off") return body;
+  try {
+    const t = (body || "").trim();
+    if (!t) return body;
+
+    // Cheap pre-scan: does this message assert anything at all? Almost always no.
+    const kinds = new Set<ClaimKind>();
+    const parts = splitSentences(t);
+    for (let i = 0; i < parts.length; i += 2) {
+      const k = classifyClaim(parts[i]);
+      if (k) kinds.add(k);
+    }
+    if (kinds.size === 0) return body;
+
+    const [u] = await db.select({
+      id: users.id, calorieTarget: users.calorieTarget, profileNotes: users.profileNotes,
+    }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    if (!u) return body; // not a client we know — nothing to verify against
+
+    const notes = String(u.profileNotes || "");
+    const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
+    const sickSince = notes.match(/sick_since:(\d{4}-\d{2}-\d{2})/)?.[1];
+
+    let trend: TrendVerdict = { usable: false, why: "too_few" };
+    if (kinds.has("weight-trend")) {
+      const wRows = await db.select({ at: weightLogs.loggedAt })
+        .from(weightLogs)
+        .where(and(eq(weightLogs.userId, u.id), gte(weightLogs.loggedAt, new Date(Date.now() - 28 * 86_400_000))))
+        .orderBy(desc(weightLogs.loggedAt)).limit(12);
+      if (wRows.length >= 2) {
+        trend = weightTrendUsable({
+          count: wRows.length,
+          newestAt: new Date(wRows[0].at as Date).getTime(),
+          oldestAt: new Date(wRows[wRows.length - 1].at as Date).getTime(),
+          now: Date.now(),
+          sickSince: sickSince ? new Date(sickSince).getTime() : undefined,
+          sickUntil: sickUntil ? new Date(sickUntil).getTime() : undefined,
+        });
+      }
+    }
+
+    let mealsLoggedToday = 0;
+    if (kinds.has("meal-eaten")) {
+      const meals = await db.select({ id: mealLogs.id })
+        .from(mealLogs)
+        .where(and(eq(mealLogs.userId, u.id), gte(mealLogs.loggedAt, sastDayStart())))
+        .limit(1);
+      mealsLoggedToday = meals.length;
+    }
+
+    const ev: Evidence = { trend, mealsLoggedToday, calorieTarget: u.calorieTarget ?? null };
+    const result = applyProvenance(t, ev);
+
+    _checked++;
+    if (result.rewrites.length > 0) {
+      _rewritten++;
+      for (const k of result.rewrites) _byKind.set(k, (_byKind.get(k) || 0) + 1);
+      console.warn(`[PROVENANCE_GATE] ${provenanceMode() === "shadow" ? "WOULD REWRITE" : "REWROTE"} ${result.rewrites.length} unbacked claim(s) [${result.rewrites.join(", ")}] to ${phone.slice(-8)}`);
+    }
+    return provenanceMode() === "shadow" ? body : result.text;
+  } catch (e) {
+    console.warn("[PROVENANCE_GATE] error — passing through:", e instanceof Error ? e.message : e);
+    return body;
   }
 }

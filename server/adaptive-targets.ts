@@ -179,3 +179,48 @@ export function adaptTargets(inp: AdaptiveInput): AdaptiveTargets {
 
   return unchanged();
 }
+
+// ── IS A WEIGHT TREND USABLE? ────────────────────────────────────────────────────────────────
+// ONE OWNER (2026-07-30). This rule already existed — inline, inside the nightly adaptive job —
+// and nothing else could reach it. So the job could correctly refuse to claim a trend while a
+// reply, reading the same weigh-ins, asserted one anyway. Two answers to one question is how the
+// founder got a morning message announcing a calorie adjustment from weights taken while he was
+// sick, with his stored target never moving.
+//
+// Weight during and just after an illness moves on fluid, appetite and inactivity. It says
+// nothing about whether the food target is right, so no caller may read a trend out of it.
+export interface TrendWindow {
+  /** Number of weigh-ins in the window. */
+  count: number;
+  /** Newest and oldest weigh-in, epoch ms. */
+  newestAt: number;
+  oldestAt: number;
+  /** sick_since / sick_until from profileNotes, epoch ms. undefined = no illness on record. */
+  sickSince?: number;
+  sickUntil?: number;
+  now: number;
+}
+
+export type TrendVerdict =
+  | { usable: true }
+  | { usable: false; why: "too_few" | "too_short" | "stale" | "illness" };
+
+/** Fluid and appetite keep moving weight for about a week after an illness ends. */
+export const ILLNESS_TAIL_MS = 7 * 86_400_000;
+/** Shorter than this and the reading is noise, not a trend. */
+export const MIN_TREND_SPAN_DAYS = 5;
+/** Older than this and it describes a body that has moved on. */
+export const MAX_TREND_AGE_DAYS = 10;
+
+export function weightTrendUsable(w: TrendWindow): TrendVerdict {
+  if (w.count < 2) return { usable: false, why: "too_few" };
+  if ((w.newestAt - w.oldestAt) / 86_400_000 < MIN_TREND_SPAN_DAYS) return { usable: false, why: "too_short" };
+  if ((w.now - w.newestAt) / 86_400_000 > MAX_TREND_AGE_DAYS) return { usable: false, why: "stale" };
+  // An illness overlaps the span if it began before the newest weigh-in and had not yet finished
+  // (plus its tail) by the oldest. An illness with no end date is still running.
+  const illnessEnds = w.sickUntil !== undefined ? w.sickUntil + ILLNESS_TAIL_MS : w.now;
+  if (w.sickSince !== undefined && w.sickSince <= w.newestAt && illnessEnds >= w.oldestAt) {
+    return { usable: false, why: "illness" };
+  }
+  return { usable: true };
+}
