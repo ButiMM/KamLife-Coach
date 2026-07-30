@@ -32,11 +32,11 @@ const BUDGET = {
   handlerFiles: 30,
   cronRegistrations: 68,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
-  messageDeciders: 30,
+  messageDeciders: 29,
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
-  regexLiterals: 338,
+  regexLiterals: 337,
 };
 
 
@@ -83,15 +83,10 @@ const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT 
   "server/handlers/early-commands.ts": "AT RISK",   // trainingMode, trainingDaysPerWeek, targetWeightKg
   "server/handlers/advice-commands.ts": "AT RISK",  // stepsTarget
   "server/handlers/misc-commands.ts": "AT RISK",    // injuries
-  // Declared bookkeeping for about thirty seconds until the classification was checked against
-  // what it actually writes: mealLogs and exerciseLogs. The model logs a client's food and
-  // training on its own judgement, with no deterministic ask-guard in front of it. Whether the
-  // brain prompt is sufficient is a real question and it has not been answered, so it is named.
-  "server/brain/coach-brain.ts": "AT RISK",         // mealLogs, exerciseLogs — model judgement
 };
 
 /** May only fall. Every entry above must be worked to guarded/must-act/bookkeeping. */
-const AT_RISK_BUDGET = 4;
+const AT_RISK_BUDGET = 3;
 
 /**
  * THE ONLY LEGITIMATE WAY TO RAISE A BUDGET.
@@ -107,7 +102,7 @@ const AT_RISK_BUDGET = 4;
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
   {
-    key: "regexLiterals", from: 333, to: 338, date: "2026-07-30",
+    key: "regexLiterals", from: 333, to: 337, date: "2026-07-30",
     why: "Provenance gate — the coach may not assert a fact it cannot trace to a stored row. "
       + "5 patterns to recognise the 3 claim kinds that have actually shipped as defects "
       + "(weight trend, meal eaten, calorie target). Tried first: merged 2 patterns into 1 with "
@@ -195,7 +190,7 @@ for (const [key, budget] of Object.entries(BUDGET) as Array<[keyof typeof BUDGET
 
 // A budget above its original frozen value must have a logged, dated reason. This is what stops
 // "just bump it by one" from being the path of least resistance.
-const FROZEN = { modules: 251, handlerFiles: 30, cronRegistrations: 68, messageDeciders: 30, looksLikePredicates: 20, regexLiterals: 333 };
+const FROZEN = { modules: 251, handlerFiles: 30, cronRegistrations: 68, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333 };
 for (const [key, frozen] of Object.entries(FROZEN) as Array<[keyof typeof BUDGET, number]>) {
   if (BUDGET[key] <= frozen) continue;
   const logged = RAISES.filter(r => r.key === key).sort((a, b) => a.to - b.to).pop();

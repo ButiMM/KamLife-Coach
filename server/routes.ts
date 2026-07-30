@@ -47,7 +47,6 @@ import { handleMiscCommands } from "./handlers/misc-commands";
 import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
-import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runShadowEval, shadowEnabled } from "./understanding/shadow";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
@@ -1075,15 +1074,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     if (engineReply !== null) return tag(engineReply, "🧠 new engine");
   }
 
-  if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const brainReply = await runCoachBrain({ phone, message, m, user, openai });
-    if (brainReply !== null) {
-      // SHADOW (Days 1-10): score the new Meaning Engine against what the client got.
-      // Flag-gated, fire-and-forget — never delays or changes this reply.
-      if (shadowEnabled()) runShadowEval({ openai, user, phone, message, productionReply: brainReply });
-      return tag(brainReply, "old brain");
-    }
-  }
+  // The MODEL_BRAIN path was deleted on 2026-07-30 — see server/brain/coach-brain.ts. Two paths
+  // answer a client now: the meaning engine above, and the gpt-block below it.
 
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
   const gptReply = await handleGptBlock({ phone, message, m, user, intentPromise });
