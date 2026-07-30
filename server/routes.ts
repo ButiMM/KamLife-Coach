@@ -516,7 +516,7 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   // Days 31-40: when the engine is live it owns frustration/pushback moments — its
   // understand-first + "reduce shame" Constitution beats this ad-hoc prompt (the scorecard
   // won big here: "Okay no problem" 2.3→9.0). Deterministic frustration stays the fallback.
-  if (!engineLive() && (STRONG_FRUSTRATION || frustrationSignalCount >= 2) && !HAS_CLEAR_ACTION) {
+  if ((STRONG_FRUSTRATION || (!engineLive() && frustrationSignalCount >= 2)) && !HAS_CLEAR_ACTION) { // replay 30 Jul: engine lost ALL 3 pushback cases ("I'm not sick" 4.0 vs 5.7) — strong frustration keeps its prompt
     captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "strong frustration / bot complaint" });
     const firstName = user.name?.split(" ")[0] || "";
     const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
