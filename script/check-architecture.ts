@@ -28,8 +28,8 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 251,
-  handlerFiles: 30,
+  modules: 250,
+  handlerFiles: 29,
   cronRegistrations: 68,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
   messageDeciders: 29,
@@ -190,7 +190,7 @@ for (const [key, budget] of Object.entries(BUDGET) as Array<[keyof typeof BUDGET
 
 // A budget above its original frozen value must have a logged, dated reason. This is what stops
 // "just bump it by one" from being the path of least resistance.
-const FROZEN = { modules: 251, handlerFiles: 30, cronRegistrations: 68, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333 };
+const FROZEN = { modules: 250, handlerFiles: 29, cronRegistrations: 68, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333 };
 for (const [key, frozen] of Object.entries(FROZEN) as Array<[keyof typeof BUDGET, number]>) {
   if (BUDGET[key] <= frozen) continue;
   const logged = RAISES.filter(r => r.key === key).sort((a, b) => a.to - b.to).pop();

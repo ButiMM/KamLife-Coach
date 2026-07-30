@@ -36,7 +36,6 @@ import { handleWater, tryLogWater } from "./handlers/water";
 import { handleFoodContext } from "./handlers/food-context";
 import { stripSignupSource } from "./signup-source";
 import { captureSignupSource } from "./signup-capture";
-import { handleProgressCheck } from "./handlers/progress";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, getProgressiveOverloadContext, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
 import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
@@ -1037,10 +1036,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // the old advisory template's training-push at a sick client. The deterministic progress
   // stays the fallback (ENGINE_LIVE=off reverts instantly). Advisory-only, so nothing is
   // lost by deferring it.
-  if (!engineLive()) {
-    const progressResult = await handleProgressCheck({ phone, message, m, user });
-    if (progressResult !== null) return progressResult;
-  }
 
   // ================= THE INVERSION (Phase 1 — Coach K is the FRONT DOOR) =================
   // Coach K now runs BEFORE the Misc/Lifecycle template handlers, not after them. Genuine
