@@ -37,22 +37,61 @@ const BUDGET = {
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
   regexLiterals: 338,
-  /**
-   * Files that BOTH match on the client's message AND write to the database, while consulting
-   * none of the guards that ask whether the client was actually asking rather than reporting.
-   *
-   * (2026-07-30.) This is the shape of the worst defect of the day: the founder photographed a
-   * machine in his gym and asked "Do I have this in my workout today?", the substring "i have
-   * this" matched an ownership pattern, and he was handed a bodyweight session. isAskingNotReporting
-   * already answered that correctly. It was never called — and the same file guards a different
-   * equipment branch with it 180 lines away.
-   *
-   * Not every file here is wrong: onboarding is a state machine where a question is the expected
-   * input, and safety must act whatever the phrasing. So this is a BACKLOG, not an accusation —
-   * frozen at today's count so the class cannot grow while it is worked off.
-   */
-  unguardedActionFiles: 12,
 };
+
+
+/**
+ * ACTION FILES — every file that BOTH matches on the client's message AND writes to the database
+ * is classified here, or the build fails.
+ *
+ * (2026-07-30.) The worst defect of the day was not a missing rule: the founder photographed a
+ * machine in his gym, asked "Do I have this in my workout today?", and got a bodyweight session
+ * because the substring "i have this" matched an ownership pattern. isAskingNotReporting already
+ * answered that correctly. Nobody called it. Two more of the same were found by counting rather
+ * than testing — a question could log a meal, and a question could log a beer.
+ *
+ * A bare count was the first version of this and it was too weak: it let a file look compliant
+ * because the guard's NAME appeared in a comment. So each file is now declared.
+ *
+ *   "guarded" — calls one of the ask/negation/future guards before it acts.
+ *   "must-act" — acts whatever the phrasing, on purpose. Safety and triage cannot wait for
+ *                grammar, and onboarding is a state machine where a question IS the input.
+ *   "bookkeeping" — writes accounting or conversation state, never the client's plan.
+ *   "AT RISK" — a real mutation of the client's plan that no guard protects yet. This is the
+ *               backlog, and it is named rather than counted so nobody has to rediscover it.
+ */
+const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT RISK"> = {
+  "server/handlers/meal-repeat.ts": "guarded",
+  "server/handlers/food-commands.ts": "guarded",
+  "server/handlers/food-context.ts": "guarded",
+  "server/handlers/food-log-mgmt.ts": "guarded",
+  "server/handlers/media.ts": "guarded",
+  "server/handlers/workout.ts": "guarded",
+  "server/handlers/water.ts": "guarded",
+  "server/handlers/sick-flow.ts": "guarded",
+  "server/handlers/lifecycle.ts": "guarded",
+  "server/routes.ts": "guarded",
+  "server/handlers/safety.ts": "must-act",
+  "server/handlers/pain-triage.ts": "must-act",
+  "server/onboarding.ts": "must-act",
+  "server/handlers/reminders-handler.ts": "must-act",
+  "server/gpt.ts": "bookkeeping",
+  "server/handlers/gpt-block.ts": "bookkeeping",
+  "server/understanding/live.ts": "bookkeeping",
+  "server/handlers/numbers-literacy.ts": "bookkeeping",
+  // Named backlog. Each mutates something the client feels, from a message match, with no guard:
+  "server/handlers/early-commands.ts": "AT RISK",   // trainingMode, trainingDaysPerWeek, targetWeightKg
+  "server/handlers/advice-commands.ts": "AT RISK",  // stepsTarget
+  "server/handlers/misc-commands.ts": "AT RISK",    // injuries
+  // Declared bookkeeping for about thirty seconds until the classification was checked against
+  // what it actually writes: mealLogs and exerciseLogs. The model logs a client's food and
+  // training on its own judgement, with no deterministic ask-guard in front of it. Whether the
+  // brain prompt is sufficient is a real question and it has not been answered, so it is named.
+  "server/brain/coach-brain.ts": "AT RISK",         // mealLogs, exerciseLogs — model judgement
+};
+
+/** May only fall. Every entry above must be worked to guarded/must-act/bookkeeping. */
+const AT_RISK_BUDGET = 4;
 
 /**
  * THE ONLY LEGITIMATE WAY TO RAISE A BUDGET.
@@ -130,11 +169,15 @@ const actual = {
   messageDeciders: all.filter(s => /\.test\(m\)/.test(s)).length,
   looksLikePredicates: new Set(all.join("\n").match(/function looksLike[A-Za-z]*/g) || []).size,
   regexLiterals: all.join("\n").match(/= \/[^/\n]{10,}\/[gimsuy]*/g)?.length || 0,
-  unguardedActionFiles: files.filter(f => {
+  _unusedActionCount: files.filter(f => {
     const src = read(f);
     if (!/db\s*\.\s*(insert|update)\s*\(/.test(src)) return false;      // does it act?
     if (!/\.test\((?:m|message|lower)\b/.test(src)) return false;        // on the message?
-    return !/isAskingNotReporting|isFutureIntent|mentionsNotDone|looksLikeQuestion|aboutSomeoneElse/.test(src);
+    // A CALL, not a mention. The first version matched the name anywhere, so writing the guard's
+    // name in a COMMENT marked the file compliant — which it duly did for a file whose import was
+    // missing and which did not even compile. A guard you can satisfy by talking about it is not
+    // a guard; that is the whole disease this file exists to stop.
+    return !/(?:isAskingNotReporting|isFutureIntent|mentionsNotDone|looksLikeQuestion|aboutSomeoneElse)\s*\(/.test(src);
   }).length,
 };
 
@@ -152,7 +195,7 @@ for (const [key, budget] of Object.entries(BUDGET) as Array<[keyof typeof BUDGET
 
 // A budget above its original frozen value must have a logged, dated reason. This is what stops
 // "just bump it by one" from being the path of least resistance.
-const FROZEN = { unguardedActionFiles: 12, modules: 251, handlerFiles: 30, cronRegistrations: 68, messageDeciders: 30, looksLikePredicates: 20, regexLiterals: 333 };
+const FROZEN = { modules: 251, handlerFiles: 30, cronRegistrations: 68, messageDeciders: 30, looksLikePredicates: 20, regexLiterals: 333 };
 for (const [key, frozen] of Object.entries(FROZEN) as Array<[keyof typeof BUDGET, number]>) {
   if (BUDGET[key] <= frozen) continue;
   const logged = RAISES.filter(r => r.key === key).sort((a, b) => a.to - b.to).pop();
@@ -160,6 +203,27 @@ for (const [key, frozen] of Object.entries(FROZEN) as Array<[keyof typeof BUDGET
     problems.push(`  ✗ BUDGET.${key} is ${BUDGET[key]}, above the frozen ${frozen}, with no matching entry in RAISES.`);
     problems.push(`    Add one — dated, saying what you tried first and how it gets paid back — or put the budget back.`);
   }
+}
+
+// Every action file is declared, and the AT RISK list may only shrink.
+const actionFiles = files.filter(f => {
+  const src = read(f);
+  return /db\s*\.\s*(insert|update)\s*\(/.test(src) && /\.test\((?:m|message|lower)\b/.test(src);
+});
+for (const f of actionFiles) {
+  if (!(f in ACTION_FILES)) {
+    problems.push(`  ✗ ${f} acts on the client's message and writes to the database, undeclared.`);
+    problems.push(`    Classify it in ACTION_FILES: guarded / must-act / bookkeeping / AT RISK.`);
+  }
+}
+for (const f of Object.keys(ACTION_FILES)) {
+  if (!actionFiles.includes(f)) problems.push(`  ↓ ${f} no longer acts on a message — remove it from ACTION_FILES.`);
+}
+const atRisk = Object.entries(ACTION_FILES).filter(([, v]) => v === "AT RISK").map(([k]) => k);
+if (atRisk.length > AT_RISK_BUDGET) {
+  problems.push(`  ✗ ${atRisk.length} files AT RISK — budget ${AT_RISK_BUDGET}. A question can change a client's plan.`);
+} else if (atRisk.length < AT_RISK_BUDGET) {
+  wins.push(`  ↓ AT RISK: ${atRisk.length} (budget ${AT_RISK_BUDGET}) — lower AT_RISK_BUDGET to ${atRisk.length}.`);
 }
 
 // One-owner violations: the question is answered in a file that does not own it.
@@ -188,7 +252,7 @@ if (wins.length > 0) {
 }
 
 console.log(`architecture guard: ${actual.modules} modules, ${actual.regexLiterals} regexes, ${actual.messageDeciders} message deciders, ${actual.cronRegistrations} cron jobs — all at budget.`);
-console.log(`  ${ONE_OWNER.length} questions have exactly one owner. ${actual.unguardedActionFiles} files act on a message without asking whether it was a question — backlog, may only fall.`);
+console.log(`  ${ONE_OWNER.length} questions have exactly one owner. ${actionFiles.length} action files declared, ${atRisk.length} AT RISK: ${atRisk.map(f => f.split("/").pop()).join(", ")}`);
 // Printed on EVERY green run, on purpose. A debt you are reminded of is a debt you repay.
 for (const r of RAISES) {
   console.log(`  ⚠ debt: ${r.key} raised ${r.from}→${r.to} on ${r.date}. ${r.why}`);

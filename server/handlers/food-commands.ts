@@ -10,6 +10,7 @@ import { db } from "../db";
 import { users, mealLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, desc, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
+import { isAskingNotReporting } from "../utils";
 import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { getGroceryPersonalization } from "../grocery-personalize";
@@ -61,7 +62,11 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
   const alcoholMatch = /\b(\d+)?\s*(beers?|wines?|glasses?\s*(?:of\s*)?wine|brandies?|brandy|whiskey|whisky|vodka|gin|rum|ciders?|savanna|hunters|castle|black label|heineken|windhoek|amstel|stellenbosch|nederburg|four cousins|robertson|4th street|smirnoff|jameson|jack daniel|gordons|captain morgan)\b/i.test(mNoVinegar);
   const hasAlcoholVerb = /\b(had|drank|drinking|having|drinks?|tonight|last night|yesterday|at the braai|at the party|weekend)\b/i.test(mNoVinegar);
   const isDirectAlcoholQty = /^(\d+\s*)?(beers?|wines?|glasses?\s*(of\s*)?(wine|beer|brandy|whisky|whiskey|vodka|gin|rum|cider)|shots?|doubles?)\b/i.test(m.trim());
-  const isAlcoholLog = alcoholMatch && (hasAlcoholVerb || isDirectAlcoholQty);
+  // AND IT MUST BE A REPORT, NOT A QUESTION (2026-07-30). "Can I have a beer tonight?" matches
+  // the drink AND the verb ("tonight"), so it logged 200 kcal the client never drank — and then
+  // the day's totals, the card and the evening coaching were all wrong off a question about
+  // permission. Same class as the phantom pilchards. isAskingNotReporting owns this.
+  const isAlcoholLog = alcoholMatch && (hasAlcoholVerb || isDirectAlcoholQty) && !isAskingNotReporting(m);
   if (isAlcoholLog) {
     const qtyMatch = m.match(/(\d+)\s*(?:beers?|wines?|glasses?|brandies?|ciders?|shots?|doubles?|bottles?)/i);
     const qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
