@@ -52,6 +52,9 @@ const ONE_OWNER: Array<{ question: string; owner: string; definedBy: RegExp }> =
   { question: "what counts as a platitude?", owner: "server/reply-hygiene.ts", definedBy: /export const PLATITUDES/ },
   { question: "which name do we call them?", owner: "server/utils.ts", definedBy: /export function getDisplayName/ },
   { question: "when is a SAST day?", owner: "server/sast.ts", definedBy: /export function sastDayKey/ },
+  // Added 30 July: the replay harness kept its OWN list of what stays deterministic, drifted from
+  // the router's, and graded the engine on messages production never sends it.
+  { question: "what stays deterministic?", owner: "server/understanding/action-router.ts", definedBy: /export function mustStayDeterministic/ },
 ];
 
 function walk(dir: string, out: string[] = []): string[] {

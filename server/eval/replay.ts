@@ -16,6 +16,7 @@ import { chatHistory, users } from "../../shared/schema";
 import { buildClientSnapshot } from "../brain/client-snapshot";
 import { seedUnderstanding } from "../understanding/seed";
 import { evaluateTurn } from "./evaluate";
+import { mustStayDeterministic } from "../understanding/action-router";
 import type { UnderstandingState } from "../understanding/state";
 
 // Skip the turns that STAY deterministic in the rollout — the engine will never own
@@ -24,6 +25,12 @@ import type { UnderstandingState } from "../understanding/state";
 // transactions/commands (logging, payment, workout + programme delivery, equipment) stay
 // on the deterministic rails. What's left is the engine's real territory.
 const SKIP_INTENT = /(_LOG$|_OK$|_ACK$|_DONE$|PAYMENT|MEDIA_|STEP_|WATER_|FOOD_LOG|WEIGHT|SUPPLEMENT_LOG|EQUIPMENT|PROFILE_UPDATE|SYSTEM|SICK|OVERTRAIN|RETURN_PLAN|INJURY|DOMS|PAIN|LOAD_SHEDDING|PROGRAMME|WORKOUT|EXERCISE|DEMO|FORM_CHECK|VIDEO|PORTION_GUIDE|SUPPLEMENT_GUIDE)/i;
+// SECOND OWNER FOR THE SAME QUESTION (2026-07-30). SKIP_INTENT above is a hand-written list of
+// what "stays deterministic" — and server/understanding/action-router.ts already answers exactly
+// that, for the live router. The two drifted, so replay graded the engine on messages production
+// never gives it: "Today is lower 1 after my illness" was routed deterministically on 29 July and
+// still appeared as an engine LOSS, dragging the score down and pointing attention at a
+// non-problem. The router's answer is the authoritative one; this now asks it.
 const isMarker = (s: string) => /^\s*\[/.test(s || "");
 
 interface Turn { userId: string; messageIn: string; messageOut: string; intent: string | null }
@@ -57,7 +64,7 @@ export async function runReplayScorecard(openai: OpenAI, limit = 100): Promise<R
 
   const turns: Turn[] = rows
     .filter(r => r.userId && r.messageIn?.trim() && r.messageOut?.trim())
-    .filter(r => !SKIP_INTENT.test(r.intent || "") && !isMarker(r.messageIn!) && !isMarker(r.messageOut!))
+    .filter(r => !SKIP_INTENT.test(r.intent || "") && !mustStayDeterministic(r.messageIn || "") && !isMarker(r.messageIn!) && !isMarker(r.messageOut!))
     .map(r => ({ userId: r.userId!, messageIn: r.messageIn!, messageOut: r.messageOut!, intent: r.intent ?? null }))
     .slice(0, limit);
 
