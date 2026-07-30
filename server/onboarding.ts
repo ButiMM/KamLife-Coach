@@ -15,7 +15,7 @@ import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { getDisplayName, sastDayStart, timeGreeting } from "./utils";
 import { getTodayWorkoutState } from "./workout-state";
 import { parseFirstName } from "./onboarding-name";
-import { bodyPhotoAsk, MEDICAL_QUESTION } from "./onboarding-physique";
+import { MEDICAL_QUESTION } from "./onboarding-physique";
 
 // ============================================================
 // ONBOARDING STATE MACHINE — valid states (CTO audit #17/#41)
@@ -26,14 +26,14 @@ import { bodyPhotoAsk, MEDICAL_QUESTION } from "./onboarding-physique";
 // ============================================================
 export const ONBOARDING_STATES = new Set<string>([
   "START", "PRE_ONBOARD", "ASK_POPIA", "WELCOME", "COMPLETE", "BLOCKED_UNDERAGE",
-  "AWAITING_MEDICAL_NOTES",
-  "ASK_GENDER", "ASK_AGE", "ASK_AGE_NEW", "ASK_GOAL", "ASK_EXPERIENCE",
-  "ASK_TRAINING_DAYS", "ASK_SITUATION", "ASK_WORK_SCHEDULE", "ASK_EQUIPMENT",
-  "ASK_GYM_SETUP", "ASK_GYM_NAME", "ASK_HOME_EQUIPMENT", "ASK_WEIGHT_HEIGHT",
-  "ASK_WEIGHT_HEIGHT_FAST", "ASK_MEDICAL", "ASK_INJURIES", "ASK_DIETARY",
-  "ASK_FOODS", "ASK_VISION",
-  "ASK_BUDGET", "ASK_EMAIL", "ASK_FEMALE_FOCUS", "ASK_POSTPARTUM",
-  "ASK_BODY_PHOTOS", "ASK_GOAL_CONFIRM",
+  
+  "ASK_GENDER", "ASK_AGE_NEW", "ASK_GOAL", "ASK_EXPERIENCE",
+  "ASK_EQUIPMENT",
+  "ASK_GYM_SETUP", "ASK_HOME_EQUIPMENT", "ASK_WEIGHT_HEIGHT",
+  "ASK_WEIGHT_HEIGHT_FAST", "ASK_MEDICAL", "ASK_INJURIES",
+  
+  "ASK_BUDGET", "ASK_FEMALE_FOCUS", "ASK_POSTPARTUM",
+  "ASK_GOAL_CONFIRM",
 ]);
 
 // ============================================================
@@ -144,6 +144,24 @@ export { getOnboardingMealPlan } from "./onboarding-meal-plan";
 // ONBOARDING COMPLETION HELPER
 // Called from ASK_BUDGET (legacy path) and ASK_EXPERIENCE (fast-track path)
 // ============================================================
+
+/**
+ * DEFERRED-CAPTURE DEFAULTS (2026-07-30, founder: onboarding is the biggest distribution leak).
+ *
+ * Onboarding was 18 turns for a man and 21 for a woman — an interrogation before anyone has been
+ * given a single thing of value. Every question below used to be asked BEFORE the programme was
+ * built; none of them changes whether the programme can be built at all. So they are defaulted
+ * here and asked in conversation once the client is already getting value: grocery budget the
+ * first time meal ideas come up, experience the first time a session is delivered, food likes
+ * the first time a swap is asked for, photos whenever they want.
+ *
+ * The rule: NOTHING that is safety-relevant or that changes the maths is deferred. Weight,
+ * height, age, gender, goal and medical conditions are all still asked up front, because the
+ * calorie target and the safety gates cannot be honest without them.
+ */
+const DEFERRED_BUDGET = "100_300";
+const DEFERRED_BUDGET_LEVEL = "medium";
+const DEFERRED_EXPERIENCE = "beginner";
 
 async function completeOnboarding(phone: string, u: any, budget: string, budgetLevel: string, exp: string): Promise<string> {
   const actualWeight = parseFloat(u.currentWeight || "75");
@@ -489,32 +507,20 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     await db.update(users).set({
       age,
       elderlyClient: isElderly,
-      onboardingState: "ASK_EMAIL",
+      onboardingState: "ASK_WEIGHT_HEIGHT",
     }).where(eq(users.phoneNumber, phone));
 
     // Age-appropriate response
     if (isYouth) {
-      return `${age} — sharp, young legend. 💪 What's your email address? (Type *skip* to continue without one.)`;
+      return `${age} — sharp, young legend. 💪 What's your weight and height?\n\nExample: *78kg, 1.72m*`;
     }
     if (isElderly) {
-      return `${age} — respect. I'll make sure your programme is joint-friendly and safe. What's your email? (Type *skip* to continue without one.)`;
+      return `${age} — respect. I'll keep your programme joint-friendly and safe.\n\nWhat's your weight and height?\n\nExample: *78kg, 1.72m*`;
     }
-    return `Got it. What's your email address? (Backup contact if WhatsApp has issues — type *skip* if you'd rather not.)`;
+    return `Got it.\n\nWhat's your weight and height?\n\nExample: *78kg, 1.72m*`;
   }
 
   // ---- ASK_EMAIL — optional, backup contact ----
-  if (state === "ASK_EMAIL") {
-    const lower = msg.toLowerCase().trim();
-    const isSkip = lower === "skip" || lower === "no" || lower === "nope" || lower === "n/a" || lower === "none";
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!isSkip && !emailRegex.test(msg.trim())) {
-      return `Just your email address, or type *skip* to continue without one.`;
-    }
-    const emailVal = isSkip ? null : msg.trim().toLowerCase();
-    await db.update(users).set({ ...(emailVal ? { email: emailVal } : {}), onboardingState: "ASK_WEIGHT_HEIGHT" }).where(eq(users.phoneNumber, phone));
-    return `${emailVal ? "Got it." : "No problem."} What's your weight and height?\n\nExample: *78kg, 1.72m*`;
-  }
-
   // ---- ASK_GOAL ----
   if (state === "ASK_GOAL") {
     // Goal detection is pure + tested in goal-profiles.ts. Health-led goals (general /
@@ -533,7 +539,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       await db.update(users).set({
         goalType: goal,
         proteinTarget: goalProt,
-        onboardingState: "ASK_BODY_PHOTOS",
+        onboardingState: "ASK_MEDICAL",
       }).where(eq(users.phoneNumber, phone));
       const goalLabel = goal === "muscle_gain" ? "Build muscle"
         : goal === "recomposition" ? "Lose fat and build muscle"
@@ -544,7 +550,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       const confirmLead = healthLed
         ? `Love that — *${goalLabel}*. No scales, no calorie stress. We build steady energy, good food, and movement — at your pace.${goal === "health_condition" ? ` I'll coach your food, movement, and daily habits — and for anything about your condition, keep following your doctor.` : ""}`
         : `Goal locked in: *${goalLabel}*.`;
-      return `${confirmLead}\n\n${bodyPhotoAsk(!!user.heightCm)}`;
+      return `${confirmLead}\n\n${MEDICAL_QUESTION}`;
     }
 
     await db.update(users).set({ goalType: goal, onboardingState: "ASK_WEIGHT_HEIGHT_FAST" }).where(eq(users.phoneNumber, phone));
@@ -564,9 +570,9 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
         heightCm: null,
         bmi: null,
         proteinTarget: skipProt,
-        onboardingState: "ASK_BODY_PHOTOS",
+        onboardingState: "ASK_MEDICAL",
       }).where(eq(users.phoneNumber, phone));
-      return `No stress. I will start with baseline targets and adjust once you log weight.\n\n${bodyPhotoAsk(false)}`;
+      return `No stress. I will start with baseline targets and adjust once you log weight.\n\n${MEDICAL_QUESTION}`;
     }
 
     const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*kg/i);
@@ -608,23 +614,14 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       heightCm: heightCmVal,
       bmi: bmiVal,
       proteinTarget: weightProt,
-      onboardingState: "ASK_BODY_PHOTOS",
+      onboardingState: "ASK_MEDICAL",
     }).where(eq(users.phoneNumber, phone));
 
-    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\n${bodyPhotoAsk(!!heightCmVal)}`;
+    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\n${MEDICAL_QUESTION}`;
   }
 
   // ---- ASK_BODY_PHOTOS — day-zero physique read; the PHOTOS arrive via routes.ts
   // (this text handler covers skip and stray text while the state is open) ----
-  if (state === "ASK_BODY_PHOTOS") {
-    const bpLower = msg.toLowerCase().trim();
-    if (/^(skip|no|not comfortable|later|nope|next|pass|rather not)\b/.test(bpLower)) {
-      await db.update(users).set({ onboardingState: "ASK_MEDICAL" }).where(eq(users.phoneNumber, phone));
-      return `No problem at all — you can add before-photos any time later, just by sending them.\n\n${MEDICAL_QUESTION}`;
-    }
-    return `Just send the photos as normal WhatsApp pictures (1–3: front, side, back) — or reply *skip* and we carry straight on.`;
-  }
-
   // ---- ASK_GOAL_CONFIRM — the photo read recommended a DIFFERENT phase; they decide ----
   if (state === "ASK_GOAL_CONFIRM") {
     const gcLower = msg.toLowerCase();
@@ -660,17 +657,17 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
         || /\b(doctor|injury|injured|medical|heart|prescribed|told\s+to)\b/i.test(lower);
       const baseNotes = (user.profileNotes || "").replace(/\bwalk:\w+\b/g, "").trim();
       const flag = isMedicalWalk ? "walk:medical" : "walk:lifestyle";
-      await db.update(users).set({ trainingMode: "walk_only", gymName: null, profileNotes: baseNotes ? `${baseNotes} ${flag}` : flag, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
+      await db.update(users).set({ trainingMode: "walk_only", gymName: null, profileNotes: baseNotes ? `${baseNotes} ${flag}` : flag, }).where(eq(users.phoneNumber, phone));
       const walkMsg = isMedicalWalk
         ? `Noted — walking only, kept gentle and safe. Your protein protects your muscle.`
         : `Walking + eating right is a real plan — busy people lose fat exactly this way. I'll add two optional 10-min tone-ups a week so the weight you lose is fat, not muscle.`;
-      return `${walkMsg}\n\nWhat's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
+      return `${walkMsg}\n\n---\n\n${await completeOnboarding(phone, { ...user, trainingMode: "walk_only", homeEquipment: user.homeEquipment }, DEFERRED_BUDGET, DEFERRED_BUDGET_LEVEL, DEFERRED_EXPERIENCE)}`;
     }
 
     // "No equipment" quick path — bodyweight only, skip sub-question
     if (/no equipment|bodyweight only|nothing|no gear/i.test(lower)) {
-      await db.update(users).set({ trainingMode: "home", homeEquipment: "bodyweight_only", gymName: null, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
-      return `Bodyweight programme — no equipment needed.\n\nWhat's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
+      await db.update(users).set({ trainingMode: "home", homeEquipment: "bodyweight_only", gymName: null }).where(eq(users.phoneNumber, phone));
+      return `Bodyweight programme — no equipment needed.\n\n---\n\n${await completeOnboarding(phone, { ...user, trainingMode: "home", homeEquipment: "bodyweight_only" }, DEFERRED_BUDGET, DEFERRED_BUDGET_LEVEL, DEFERRED_EXPERIENCE)}`;
     }
 
     // Home training → ask what equipment they have
@@ -711,10 +708,10 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     }
     // default: bodyweight_only, mode=home
 
-    await db.update(users).set({ trainingMode: mode, homeEquipment, gymName: null, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
+    await db.update(users).set({ trainingMode: mode, homeEquipment, gymName: null }).where(eq(users.phoneNumber, phone));
 
     const equipLabel = homeEquipment === "dumbbells" ? "Dumbbell" : homeEquipment === "bands" ? "Resistance band" : homeEquipment === "mix" ? "Dumbbell + band" : "Bodyweight";
-    return `${equipLabel} programme locked in.\n\nWhat's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
+    return `${equipLabel} programme locked in.\n\n---\n\n${await completeOnboarding(phone, { ...user, trainingMode: mode, homeEquipment: homeEquipment }, DEFERRED_BUDGET, DEFERRED_BUDGET_LEVEL, DEFERRED_EXPERIENCE)}`;
   }
 
   // ---- ASK_GYM_SETUP — full gym vs dumbbells only ----
@@ -722,9 +719,9 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const lower = msg.toLowerCase();
     const mode = /dumbbell|dumbbells only|db only|no machine|basic/i.test(lower) ? "gym_dumbbell" : "gym";
 
-    await db.update(users).set({ trainingMode: mode, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
+    await db.update(users).set({ trainingMode: mode }).where(eq(users.phoneNumber, phone));
 
-    return `What's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
+    return `${await completeOnboarding(phone, { ...user, trainingMode: mode, homeEquipment: user.homeEquipment }, DEFERRED_BUDGET, DEFERRED_BUDGET_LEVEL, DEFERRED_EXPERIENCE)}`;
   }
 
   // ---- ASK_BUDGET — grocery budget tier ----
@@ -763,15 +760,6 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
   // These handle clients who started onboarding before the 3-question rewrite
 
   // Legacy ASK_AGE — route into the new 3-question flow so stranded users converge.
-  if (state === "ASK_AGE") {
-    const age = parseInt(msg.replace(/[^0-9]/g, ""));
-    if (isNaN(age) || age < 10 || age > 110) return `Just your age. For example: 28`;
-    if (age < 14) return `Coach K is designed for ages 14 and up.`;
-    const isElderly = age >= 60;
-    await db.update(users).set({ age, elderlyClient: isElderly, onboardingState: "ASK_EMAIL" }).where(eq(users.phoneNumber, phone));
-    return `Got it. What's your email address? (Backup contact if WhatsApp has issues — type *skip* if you'd rather not.)`;
-  }
-
   if (state === "ASK_WEIGHT_HEIGHT") {
     const lowerMsg = msg.toLowerCase().trim();
     const isFemale = user.gender === "female";
@@ -864,12 +852,6 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     return `${weight}kg, ${heightCmVal}cm — got it. Main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
   }
 
-  if (state === "ASK_SITUATION") {
-    // Legacy — skip to medical
-    await db.update(users).set({ onboardingState: "ASK_MEDICAL" }).where(eq(users.phoneNumber, phone));
-    return `Any medical conditions I must know about?\n\n1️⃣ Diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ PCOS\n6️⃣ None of the above`;
-  }
-
   if (state === "ASK_MEDICAL") {
     const lower = msg.toLowerCase();
     const isNone = lower.includes("none") || lower.includes("nothing") || msg.includes("6") || msg.includes("8");
@@ -905,82 +887,18 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     return `Any injuries? Bad knees, back, shoulder? Or say None.`;
   }
 
-  if (state === "AWAITING_MEDICAL_NOTES") {
-    await db.update(users).set({ otherMedicalNotes: msg, onboardingState: "ASK_MEDICAL" }).where(eq(users.phoneNumber, phone));
-    return `Got it. Any of these: 1 Diabetes, 2 Hypertension, 3 Heart, 4 HIV/ARVs, 5 PCOS, 6 None`;
-  }
-
   if (state === "ASK_INJURIES") {
     const lower = msg.toLowerCase().trim();
     const isClearNone = lower === "none" || lower === "no" || lower === "n/a" || lower === "nil" || lower === "nope" || lower === "nothing";
     const injuries = isClearNone ? "" : msg;
-    await db.update(users).set({ injuries, onboardingState: "ASK_DIETARY" }).where(eq(users.phoneNumber, phone));
-    return `Any dietary restrictions?\n\n1️⃣ None — I eat everything\n2️⃣ Halal — no pork or alcohol in food\n3️⃣ Vegetarian — no meat or fish\n4️⃣ Vegan — no animal products at all`;
-  }
-
-  if (state === "ASK_DIETARY") {
-    const lower = msg.toLowerCase().trim();
-    let dietFlag: string | null = null;
-    if (msg.includes("2") || /\b(halal|muslim|islam|haram)\b/i.test(lower)) {
-      dietFlag = "diet:halal";
-    } else if (msg.includes("4") || /\bvegan\b/i.test(lower)) {
-      dietFlag = "diet:vegan";
-    } else if (msg.includes("3") || /\b(vegetarian|veggie|no meat|meatless|meat.?free|plant.?based)\b/i.test(lower)) {
-      dietFlag = "diet:vegetarian";
-    }
-    const existingNotes = (user.profileNotes || "").replace(/\bdiet:\w+\b/g, "").trim();
-    const updatedNotes = dietFlag ? (existingNotes ? `${existingNotes} ${dietFlag}` : dietFlag) : existingNotes;
-    await db.update(users).set({
-      profileNotes: updatedNotes || null,
-      onboardingState: "ASK_FOODS",
-    }).where(eq(users.phoneNumber, phone));
-    return `Now the fun part — food. 🍽️\n\nAny foods you *love*, or any you really *can't stand*? So I never put something you hate on your plate.\n\n_e.g. "Love pap, chicken and eggs — can't stand broccoli or chicken breast."_\n\n(Type *skip* if nothing comes to mind.)`;
+    await db.update(users).set({ injuries, onboardingState: "ASK_EQUIPMENT" }).where(eq(users.phoneNumber, phone));
+    return `How do you want to train?[BUTTONS:Gym|Home|No equipment|Just walking]`;
   }
 
   // ---- ASK_FOODS — foods loved / hated (2026-07-12). Stored raw and light-split into
   // likes/dislikes; the grocery list uses dislikes so it never suggests a hated food. ----
-  if (state === "ASK_FOODS") {
-    const { foodLikes, foodDislikes } = parseFoodPreferences(msg);
-    await db.update(users).set({
-      foodLikes, foodDislikes,
-      onboardingState: "ASK_VISION",
-    }).where(eq(users.phoneNumber, phone));
-    return `Love it${foodLikes ? " — noted" : ""}. 🙌\n\nLast thing before I build your plan, and it's the most important:\n\n*In your own words — what's your 3-month dream, and the ONE thing you struggle with most?*\n\n_e.g. "Lose my belly and keep my muscle. I struggle with snacking at night."_`;
-  }
-
   // ---- ASK_VISION — 3-month dream + biggest struggle in their words (2026-07-12). The
   // motivation anchor + how to coach them; fed to the brain so every reply knows their why.
-  if (state === "ASK_VISION") {
-    const { dreamGoal, biggestStruggle } = parseVisionAnswer(msg);
-    await db.update(users).set({
-      dreamGoal, biggestStruggle,
-      onboardingState: "ASK_EQUIPMENT",
-    }).where(eq(users.phoneNumber, phone));
-    return `That's exactly what I needed. I've got your *why* now, and I'll hold you to it. 💪\n\nHow do you want to train?[BUTTONS:Gym|Home|No equipment|Just walking]`;
-  }
-
-  if (state === "ASK_GYM_NAME") {
-    const gymMap: Record<string, string> = { "1": "Virgin Active", "2": "Planet Fitness", "3": "Curves", "4": "Local gym", "5": "Other" };
-    const lower = msg.toLowerCase();
-    let gymName = gymMap[msg.trim()] || msg.trim();
-    if (!gymMap[msg.trim()]) {
-      if (lower.includes("virgin")) gymName = "Virgin Active";
-      else if (lower.includes("planet")) gymName = "Planet Fitness";
-      else if (lower.includes("curves")) gymName = "Curves";
-    }
-    await db.update(users).set({ gymName, onboardingState: "ASK_TRAINING_DAYS" }).where(eq(users.phoneNumber, phone));
-    return `How many days per week?\n\n1️⃣ 2 days\n2️⃣ 3 days\n3️⃣ 4 days\n4️⃣ 5 days`;
-  }
-
-  if (state === "ASK_TRAINING_DAYS") {
-    const dayMap: Record<string, number> = { "1": 2, "2": 3, "3": 4, "4": 5, "5": 6 };
-    let days = dayMap[msg.trim()] || 3;
-    const numMatch = msg.match(/\b([2-6])\b/);
-    if (numMatch && !dayMap[msg.trim()]) days = parseInt(numMatch[1]);
-    await db.update(users).set({ trainingDaysPerWeek: days, onboardingState: "ASK_EXPERIENCE" }).where(eq(users.phoneNumber, phone));
-    return `Training experience?\n\n1️⃣ Beginner\n2️⃣ Some experience\n3️⃣ Intermediate (1-2 years)\n4️⃣ Advanced (2+ years)`;
-  }
-
   if (state === "ASK_EXPERIENCE") {
     const lower = msg.toLowerCase();
     let exp = "beginner";
@@ -1001,93 +919,6 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
   // Duplicate ASK_BUDGET handler removed — it was dead code shadowed by main handler at line ~606.
 
   // ---- ASK_WORK_SCHEDULE → COMPLETE ----
-  if (state === "ASK_WORK_SCHEDULE") {
-    const lower = msg.toLowerCase();
-    const hasSchedNumber = /[1-5]/.test(msg);
-    const hasSchedKeyword = lower.includes("standard") || lower.includes("8am") || lower.includes("8 am") || lower.includes("early") || lower.includes("night") || lower.includes("irregular") || lower.includes("change") || lower.includes("home") || lower.includes("wfh") || lower.includes("shift");
-    if (!hasSchedNumber && !hasSchedKeyword) {
-      return `Work schedule?\n\n1️⃣ Standard (8am–5pm)\n2️⃣ Early shift\n3️⃣ Night shift\n4️⃣ Irregular\n5️⃣ Work from home`;
-    }
-    const scheduleMap: Record<string, string> = {
-      "1": "standard", "2": "early_shift", "3": "night_shift", "4": "irregular", "5": "work_from_home",
-    };
-    let schedule = scheduleMap[msg.trim()] || "standard";
-    if (!scheduleMap[msg.trim()]) {
-      if (lower.includes("night")) schedule = "night_shift";
-      else if (lower.includes("early")) schedule = "early_shift";
-      else if (lower.includes("irregular") || lower.includes("changes")) schedule = "irregular";
-      else if (lower.includes("home") || lower.includes("wfh")) schedule = "work_from_home";
-    }
-
-    const freshUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const u = freshUser[0];
-    const weight = parseFloat(u.currentWeight || "75");
-    const goal = u.goalType || "fat_loss";
-    const exp = u.trainingExperience || "beginner";
-
-    const { calorieTarget, proteinTarget } = calculateTargets(
-      weight, goal, u.lifeSituation || "office", u.trainingDaysPerWeek || 3,
-      u.gender || "male", u.age || 30, u.heightCm || 170, exp
-    );
-
-    const stepsTarget = calculateStepsTarget(weight, u.age || 30, u.heightCm || 170, exp, goal);
-    const startPhase = exp === "beginner" ? 1 : 2;
-
-    await db.update(users).set({
-      workSchedule: schedule,
-      calorieTarget,
-      proteinTarget,
-      stepsTarget,
-      programmePhase: startPhase,
-      programmeWeek: 1,
-      programmeDayInWeek: 1,
-      programmeStartDate: new Date(),
-      // PAY-TO-START by default (TRIALS_ENABLED=false): status inactive, betaBypassUntil
-      // set non-null to mark "onboarded" and close the restart exploit. TRIAL_DAYS>0
-      // reinstates a free trial. (Mirrors the fast-track path above.)
-      ...(!u.betaBypassUntil ? (TRIALS_ENABLED ? {
-        subscriptionStatus: "trial",
-        betaBypassUntil: new Date(Date.now() + TRIAL_DAYS * 86_400_000),
-      } : {
-        subscriptionStatus: "inactive",
-        betaBypassUntil: new Date(),
-      }) : {}),
-      onboardingState: "COMPLETE",
-      popiConsent: true,
-      popiConsentAt: new Date(),
-    }).where(eq(users.phoneNumber, phone));
-
-    const finalUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const f = finalUser[0];
-    // Already COMPLETE above — never let programme generation throw away the welcome.
-    let programme: string;
-    try {
-      programme = getKamlifeProgramme(f);
-    } catch (e) {
-      console.error("[ONBOARDING] getKamlifeProgramme failed in ASK_WORK_SCHEDULE — using fallback:", e);
-      programme = `Your Day 1 workout is ready — reply *1* or *workout* and I'll send it straight through.`;
-    }
-    const goalLabel: Record<string, string> = {
-      fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Body recomposition",
-      general: "General fitness", health_condition: "Health management",
-    };
-    const nightNote = schedule === "night_shift"
-      ? `\n\n⚠️ *Night shift note:* Your meal timing and training windows are adjusted for your schedule. Pre-shift = breakfast. Post-shift = dinner.`
-      : "";
-    const heartNote = u.doctorClearanceRequired
-      ? `\n\n⚠️ *Heart condition noted:* Please get doctor clearance before starting the strength programme. Walking and light activity are safe to begin now.`
-      : "";
-
-    const appUrlLeg = process.env.APP_URL || "https://kamlifecoach.co.za";
-    const merchantIdLeg = process.env.PAYFAST_MERCHANT_ID;
-    const cleanPhoneLeg = phone.replace(/^whatsapp:/, "");
-    const payLinkLeg = merchantIdLeg ? `${appUrlLeg}/api/payfast/link?phone=${encodeURIComponent(cleanPhoneLeg)}` : appUrlLeg;
-    const legCalExplainer = goal === "muscle_gain"
-      ? `*What ${calorieTarget} kcal means:* This is a surplus above maintenance — fuel to build muscle. Don't undershoot it. 1 egg = ~6g protein. 100g chicken = ~31g. Hit ${proteinTarget}g protein daily and the programme works.`
-      : `*What ${calorieTarget} kcal means:* A plate of pap with stew is ~550 kcal. Your body burns ~1,200–1,500 kcal just to breathe before you move. Eat at this target and you lose fat without starving. Hit ${proteinTarget}g protein and hunger drops.`;
-    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n${legCalExplainer}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice._\n\n---\n\n${programme}\n\n---\n\nYour personalised shopping list and weekly meal plan are ready.\n\nPay to unlock them — and Day 2 drops the moment you finish today's session.\n\n*R199/month — cancel anytime:*\n${payLinkLeg}\n\n_R6.63/day. Not satisfied after your first week? Message us and we'll make it right._\n\n---\n\n*From today, send me everything you eat.* Breakfast. Lunch. Dinner. A photo or a few words — I do the maths.\n\nSend your step count at the end of each day. Even if you missed the target — especially then.\n\n📸 *Progress photos* — front, side, back. Natural light, same position every time. Send them now to set your baseline. You will thank yourself in 8 weeks.`;
-  }
-
   return await getMenuText(user);
 }
 

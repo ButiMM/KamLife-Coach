@@ -74,20 +74,13 @@ const FLOW_A: Flow = {
     { send: "yes", expectState: "WELCOME", expectReply: [/name/i] },
     { send: "Thabo", expectState: "ASK_GENDER", expectReply: [/male or female/i] },
     { send: "male", expectState: "ASK_AGE_NEW", expectReply: [/old/i] },
-    { send: "30", expectState: "ASK_EMAIL", expectReply: [/email/i] },
-    { send: "skip", expectState: "ASK_WEIGHT_HEIGHT", expectReply: [/weight and height/i] },
+    { send: "30", expectState: "ASK_WEIGHT_HEIGHT", expectReply: [/weight and height/i] },
     { send: "83kg, 1.75m", expectState: "ASK_GOAL", expectReply: [/83kg, 175cm/, /goal/i] },
-    { send: "1", expectState: "ASK_BODY_PHOTOS", expectReply: [/Goal locked in.*Lose fat/i, /photos/i] },
-    { send: "skip", expectState: "ASK_MEDICAL", expectReply: [/medical/i] },
+    { send: "1", expectState: "ASK_MEDICAL", expectReply: [/Goal locked in.*Lose fat/i, /medical/i] },
     { send: "6", expectState: "ASK_INJURIES", expectReply: [/injuries/i] },
-    { send: "none", expectState: "ASK_DIETARY", expectReply: [/dietary/i] },
-    { send: "1", expectState: "ASK_FOODS", expectReply: [/foods you \*love\*/i] },
-    { send: "Love pap, chicken and eggs — can't stand broccoli", expectState: "ASK_VISION", expectReply: [/dream/i] },
-    { send: "Lose my belly and keep my muscle. I struggle with snacking at night.", expectState: "ASK_EQUIPMENT", expectReply: [/how do you want to train/i] },
+    { send: "none", expectState: "ASK_EQUIPMENT", expectReply: [/how do you want to train/i] },
     { send: "gym", expectState: "ASK_GYM_SETUP", expectReply: [/what does your gym have/i] },
-    { send: "Full gym (machines)", expectState: "ASK_BUDGET", expectReply: [/budget/i] },
-    { send: "2", expectState: "ASK_EXPERIENCE", expectReply: [/experience/i] },
-    { send: "1", expectState: "COMPLETE", expectReply: [/programme is built/i, /The next 30 days, honestly/i, /kcal\/day/i, /steps\/day/i, /How this works/i, /take one photo/i] },
+    { send: "Full gym (machines)", expectState: "COMPLETE", expectReply: [/programme is built/i, /The next 30 days, honestly/i, /kcal\/day/i, /steps\/day/i, /How this works/i, /take one photo/i] },
   ],
   final: {
     name: "Thabo", gender: "male", age: 30, currentWeight: "83", heightCm: 175, bmi: "27.1",
@@ -109,29 +102,22 @@ const FLOW_B: Flow = {
     { send: "female", expectState: "ASK_FEMALE_FOCUS", expectReply: [/training focus/i] },
     { send: "2", expectState: "ASK_POSTPARTUM", expectReply: [/pregnant|postpartum|breastfeeding/i] },
     { send: "2", expectState: "ASK_AGE_NEW" },
-    { send: "27", expectState: "ASK_EMAIL" },
-    { send: "naledi@example.com", expectState: "ASK_WEIGHT_HEIGHT" },
+    { send: "27", expectState: "ASK_WEIGHT_HEIGHT" },
     // weight only — must SAVE the weight and offer the height-estimate menu, not loop
     { send: "68kg", expectState: "ASK_WEIGHT_HEIGHT", expectReply: [/68kg/, /height/i, /Average/i] },
     { send: "2", expectState: "ASK_GOAL", expectReply: [/163cm/] },
-    { send: "3", expectState: "ASK_BODY_PHOTOS", expectReply: [/Lose fat and build muscle/i, /photos/i] },
-    { send: "skip", expectState: "ASK_MEDICAL", expectReply: [/medical/i] },
+    { send: "3", expectState: "ASK_MEDICAL", expectReply: [/Lose fat and build muscle/i, /medical/i] },
     { send: "5", expectState: "ASK_INJURIES" },
-    { send: "bad knees", expectState: "ASK_DIETARY" },
-    { send: "4", expectState: "ASK_FOODS" },
-    { send: "skip", expectState: "ASK_VISION" },
-    { send: "Fit into my old jeans again. I struggle with consistency on weekends.", expectState: "ASK_EQUIPMENT" },
+    { send: "bad knees", expectState: "ASK_EQUIPMENT" },
     { send: "home", expectState: "ASK_HOME_EQUIPMENT", expectReply: [/what do you have at home/i] },
-    { send: "Dumbbells", expectState: "ASK_BUDGET", expectReply: [/Dumbbell programme locked in/i] },
-    { send: "1", expectState: "ASK_EXPERIENCE" },
-    { send: "2", expectState: "COMPLETE", expectReply: [/programme is built/i, /The next 30 days, honestly/i] },
+    { send: "Dumbbells", expectState: "COMPLETE", expectReply: [/Dumbbell programme locked in/i], expectReply: [/programme is built/i, /The next 30 days, honestly/i] },
   ],
   final: {
     name: "Naledi", gender: "female", age: 27, currentWeight: "68", heightCm: 163,
     goalType: "recomposition", medicalConditions: "pcos", injuries: "bad knees",
     primaryFocusArea: "glutes_legs",
     trainingMode: "gym_dumbbell", homeEquipment: "dumbbells",
-    weeklyFoodBudget: "under_100", budgetLevel: "low",
+    weeklyFoodBudget: "100_300", budgetLevel: "medium",
     trainingExperience: "beginner", subscriptionStatus: "inactive",
   },
   targetInputs: { weight: 68, goal: "recomposition", situation: "office", days: 4, gender: "female", age: 27, heightCm: 163, exp: "beginner" },
@@ -145,8 +131,7 @@ const FLOW_C: Flow = {
     { send: "yes", expectState: "WELCOME" },
     { send: "Sipho", expectState: "ASK_GENDER" },
     { send: "male", expectState: "ASK_AGE_NEW" },
-    { send: "45", expectState: "ASK_EMAIL" },
-    { send: "skip", expectState: "ASK_WEIGHT_HEIGHT" },
+    { send: "45", expectState: "ASK_WEIGHT_HEIGHT" },
     // CAPTURE BUG (found by this suite, 2026-07-14): "100kg" alone used to store
     // height 100cm ("68kg" alone stored 6'8"=203cm via the loose ft-in regex).
     // Must save the weight and offer the height menu instead.
@@ -154,16 +139,10 @@ const FLOW_C: Flow = {
     // CAPTURE BUG 2: the menu says "Or type it: *1.72m*" — typing that used to be
     // read as weight 1.72 and rejected ("172cm" as weight 172kg). Must be height.
     { send: "1.72m", expectState: "ASK_GOAL", expectReply: [/100kg, 172cm/] },
-    { send: "2", expectState: "ASK_BODY_PHOTOS", expectReply: [/Build muscle/i, /photos/i] },
-    { send: "skip", expectState: "ASK_MEDICAL", expectReply: [/medical/i] },
+    { send: "2", expectState: "ASK_MEDICAL", expectReply: [/Build muscle/i, /medical/i] },
     { send: "2", expectState: "ASK_INJURIES" },
-    { send: "none", expectState: "ASK_DIETARY" },
-    { send: "2", expectState: "ASK_FOODS" },
-    { send: "skip", expectState: "ASK_VISION" },
-    { send: "Get stronger without a gym. I struggle with time.", expectState: "ASK_EQUIPMENT" },
-    { send: "Just walking", expectState: "ASK_BUDGET", expectReply: [/walking/i] },
-    { send: "4", expectState: "ASK_EXPERIENCE" },
-    { send: "4", expectState: "COMPLETE" },
+    { send: "none", expectState: "ASK_EQUIPMENT" },
+    { send: "Just walking", expectState: "COMPLETE", expectReply: [/walking/i] },
   ],
   // GOAL-REALITY GATE (2026-07-21): Sipho is 100kg at BMI 33.8 and chose "build muscle" — the
   // gate correctly steers an obese client off a bulk and into fat-loss-first (he can override).
@@ -172,10 +151,10 @@ const FLOW_C: Flow = {
   final: {
     name: "Sipho", gender: "male", age: 45, currentWeight: "100", heightCm: 172, bmi: "33.8",
     goalType: "fat_loss", medicalConditions: "hypertension",
-    trainingMode: "walk_only", weeklyFoodBudget: "over_600", budgetLevel: "premium",
-    trainingExperience: "advanced", subscriptionStatus: "inactive",
+    trainingMode: "walk_only", weeklyFoodBudget: "100_300", budgetLevel: "medium",
+    trainingExperience: "beginner", subscriptionStatus: "inactive",
   },
-  targetInputs: { weight: 100, goal: "fat_loss", situation: "office", days: 4, gender: "male", age: 45, heightCm: 172, exp: "advanced" },
+  targetInputs: { weight: 100, goal: "fat_loss", situation: "office", days: 4, gender: "male", age: 45, heightCm: 172, exp: "beginner" },
 };
 
 let failures = 0;
@@ -218,16 +197,10 @@ async function runFlow(flow: Flow): Promise<void> {
   }
   // Free-text intake must have landed as non-empty strings
   if (flow === FLOW_A) {
-    if (!u.foodDislikes || !/broccoli/i.test(u.foodDislikes)) fail(flow.name, `foodDislikes should mention broccoli, got ${JSON.stringify(u.foodDislikes)}`);
-    if (!u.foodLikes) fail(flow.name, `foodLikes should be captured, got ${JSON.stringify(u.foodLikes)}`);
-    if (!u.dreamGoal) fail(flow.name, `dreamGoal should be captured`);
-    if (!u.biggestStruggle) fail(flow.name, `biggestStruggle should be captured`);
   }
   if (flow === FLOW_B) {
-    if (!/diet:vegan/.test(u.profileNotes || "")) fail(flow.name, `profileNotes should carry diet:vegan, got ${JSON.stringify(u.profileNotes)}`);
   }
   if (flow === FLOW_C) {
-    if (!/diet:halal/.test(u.profileNotes || "")) fail(flow.name, `profileNotes should carry diet:halal, got ${JSON.stringify(u.profileNotes)}`);
     if (!/walk:lifestyle/.test(u.profileNotes || "")) fail(flow.name, `profileNotes should carry walk:lifestyle, got ${JSON.stringify(u.profileNotes)}`);
   }
   // betaBypassUntil is set (non-null) to mark "onboarded" and close the restart
