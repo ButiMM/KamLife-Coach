@@ -43,7 +43,7 @@ const IN_DOMAIN_RE = new RegExp(
     // was bounced as off-topic, twice; no gym word may ever leave the lane)
     "workout|train|training|gym|exercise|run(?:ning)?|walk(?:ing)?|steps?|cardio|lift(?:ing)?|weights?|reps?|\\bsets?\\b|squat|deadlift|bench|glute|abs\\b|core|stretch|mobility|rest day|recover|recovery|doms|sore|soreness|injur|\\bpain\\b|\\bform\\b|programme|routine|session|leg day|push day|pull day|\\bpress\\b|\\bcurl|\\brow\\b|\\braise\\b|lunge|plank|push.?up|pull.?up|pulldown|\\bfly\\b|\\bdip\\b|crunch|\\brdl\\b|kettlebell|dumbbell|barbell|\\bdemo\\b",
     // nutrition / food
-    "eat|ate|eating|food|meal|breakfast|lunch|dinner|supper|snack|protein|carbs?|calorie|kilojoule|\\bkj\\b|diet|nutrition|water|hydrate|shake|supplement|creatine|vitamin|\\bpap\\b|samp|morogo|pilchard|wors|braai|veg|fruit|sugar|craving|hungry|portion|shopping list|grocer|chicken|beef|mince|\\bfish\\b|\\begg|bread|rice|potato|afford|cheap",
+    "\\beat|\\bate\\b|\\beating|food|meal|breakfast|lunch|dinner|supper|snack|protein|carbs?|calorie|kilojoule|\\bkj\\b|diet|nutrition|water|hydrate|shake|supplement|creatine|vitamin|\\bpap\\b|samp|morogo|pilchard|wors|braai|veg|fruit|sugar|craving|hungry|portion|shopping list|grocer|chicken|beef|mince|\\bfish\\b|\\begg|bread|rice|potato|afford|cheap",
     // body / health / state
     "weight|\\bkg\\b|scale|\\bbody\\b|\\bfat\\b|muscle|slim|belly|tummy|health|healthy|sick|\\bill\\b|\\bflu\\b|fever|exhaust|energy|sleep|stress|anxious|anxiety|mood|motivat|discourag|struggl|progress|result|goal|habit|consistent|consistency|streak|check.?in|measure|recomp",
     // coaching relationship / commands / journey pleasantries
@@ -71,8 +71,17 @@ export function isObviouslyInDomain(message: string): boolean {
   // — is a reaction in an ongoing coaching chat, NEVER an off-topic request. Cold-redirecting it
   // ("I'm Coach K, here for your fitness journey") on a frustrated one-word reply is a trust
   // breach (2026-07-21 live miss). Count real words, ignoring emoji/punctuation.
+  //
+  // FOUR, NOT TWO (2026-07-30 live). The threshold was 2 while the comment above it offered
+  // "come on man" — three words — as the thing it caught. It never did. The founder, mid-argument
+  // with the coach about a contradictory workout, sent "What the hell??" and got the brochure:
+  // "I'm Coach K — I'm here for your health and fitness journey." Three words, so it missed by one.
+  //
+  // Raising it cannot refuse anybody: this gate only decides whether to SKIP the classifier and
+  // answer normally. A genuine short off-topic ask ("write me a poem") still meets STAY IN YOUR
+  // LANE in the coach prompt and is declined warmly, in context — which is the better decline.
   const words = (t.toLowerCase().match(/[a-z']+/g) || []);
-  if (words.length <= 2) return true;
+  if (words.length <= 4) return true;
   // A CONVERSATIONAL CONTINUATION is never off-topic in an active coaching chat. A message that
   // refers back to something already discussed (them/it/that/those/these) or is a follow-up aimed
   // at the coach ("do better", "tell me more", "like what", "what about", "how should I take

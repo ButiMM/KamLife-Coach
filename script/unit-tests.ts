@@ -7964,6 +7964,33 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ============================================================
+// THE BROCHURE ON A REACTION (2026-07-30 live). Mid-argument about a contradictory workout the
+// founder sent "What the hell??" and got: "I'm Coach K — I'm here for your health and fitness
+// journey." The reaction rule was set at 2 words while its own comment offered "come on man" —
+// three words — as the case it caught. It never did.
+// ============================================================
+{
+  const { isObviouslyInDomain } = await import("../server/understanding/domain-guard");
+
+  test("domain: a short REACTION never gets the brochure", () => {
+    for (const m of ["What the hell??", "come on man", "you are confused", "This is nonsense", "Read‼️‼️"]) {
+      assert.equal(isObviouslyInDomain(m), true, `cold-redirected: "${m}"`);
+    }
+  });
+  test("domain: real coaching talk stays in-domain", () => {
+    assert.equal(isObviouslyInDomain("I ate rice and chicken for lunch today"), true);
+    assert.equal(isObviouslyInDomain("what should I be eating after training tonight"), true);
+  });
+  test("domain: 'weather' is not 'eat' — substring match sent the weather in-domain", () => {
+    assert.equal(isObviouslyInDomain("what is the weather in Cape Town tomorrow"), false);
+    assert.equal(isObviouslyInDomain("sweaty weather makes me lazy about training"), true, "but training still counts");
+  });
+  test("domain: a genuine off-topic REQUEST still reaches the classifier", () => {
+    assert.equal(isObviouslyInDomain("write me a poem about the ocean please"), false);
+  });
+}
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 
