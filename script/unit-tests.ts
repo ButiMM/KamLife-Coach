@@ -7899,6 +7899,45 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ============================================================
+// ONE OWNER FOR TRAINING STATE (2026-07-30). The founder was sent, in ONE message: "machine chest
+// fly: 125kg (22d ago) -> aim 127.5kg" and, two lines above it, "It's been 21 days. Start at 60%
+// of your old weights." Two files answering "what should he lift today?".
+// ============================================================
+{
+  const { trainingStateFromUser, adaptTraining } = await import("../server/adaptive-training");
+  const now = Date.parse("2026-07-30T10:00:00Z");
+  const days = (n: number) => new Date(now - n * 86_400_000).toISOString();
+
+  test("training state: THE FOUNDER'S CASE — 22 days since a session is a comeback, not a PB attempt", () => {
+    const st = trainingStateFromUser({ profileNotes: "sick_since:2026-07-09 | sick_until:2026-07-26", lastWorkoutDate: days(22) }, now);
+    assert.equal(st.daysSinceLastWorkout, 22);
+    const adj = adaptTraining(st as any);
+    assert.equal(adj.loadPct, 60, "the load rule and the lift block must agree");
+    assert.ok(adj.changed);
+  });
+  test("training state: reads profileNotes AND the legacy `notes` spelling", () => {
+    const a = trainingStateFromUser({ profileNotes: "sick_until:2026-08-05" }, now);
+    const b = trainingStateFromUser({ notes: "sick_until:2026-08-05" }, now);
+    assert.equal(a.sick, true, "profileNotes is the real column");
+    assert.equal(b.sick, true, "and the old spelling must not silently report healthy");
+  });
+  test("training state: a healthy client two days off still gets progressive overload", () => {
+    const st = trainingStateFromUser({ profileNotes: "", lastWorkoutDate: days(2) }, now);
+    assert.equal(adaptTraining(st as any).loadPct, 100, "never hold back someone who is progressing");
+  });
+  test("training state: no illness on record and no last session is not a layoff", () => {
+    const st = trainingStateFromUser({}, now);
+    assert.equal(st.sick, false);
+    assert.equal(st.daysSinceLastWorkout, 0);
+  });
+  test("training state: 60% of a 125kg lift is 75kg, not 127.5kg", () => {
+    const st = trainingStateFromUser({ lastWorkoutDate: days(22) }, now);
+    const adj = adaptTraining(st as any);
+    assert.equal(Math.round(125 * adj.loadPct / 100 * 2) / 2, 75);
+  });
+}
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

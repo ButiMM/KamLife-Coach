@@ -124,3 +124,29 @@ export function comebackPlan(firstName = ""): string {
   const fn = firstName ? `${firstName}, ` : "";
   return `${fn}here's exactly how we do this — no guessing.\n\n${returnProtocolLines()}\n\n*Nothing resets.* Your programme, your week and your streak are exactly where you left them.\n\nStrength comes back faster than it left, but it takes 2–3 weeks — not one session. Rushing it is how people get hurt in week one.`;
 }
+
+/**
+ * ONE OWNER: what training state is this client in? (2026-07-30.)
+ *
+ * This derivation lived inline in programme.ts and nowhere else could reach it, so the
+ * progressive-overload block in checks.ts computed "aim 127.5kg" from the last session while the
+ * session header two lines above said "start at 60% of your old weights". Both shipped in the
+ * same message to the founder, 21 days into a layoff.
+ *
+ * It also read `user.notes`. The column is `profileNotes` — so on that path the illness state was
+ * very often simply absent. Both spellings are accepted here rather than silently returning
+ * "healthy" for everyone.
+ */
+export interface TrainingState { sick: boolean; recovering: boolean; daysSinceLastWorkout: number }
+
+export function trainingStateFromUser(user: any, now: number = Date.now()): TrainingState {
+  const notes = String(user?.profileNotes ?? user?.notes ?? "");
+  const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
+  const today = new Date(now).toISOString().slice(0, 10);
+  const sick = !!sickUntil && new Date(sickUntil) >= new Date(today);
+  const recovering = !sick && !!sickUntil && (now - new Date(sickUntil).getTime()) / 86_400_000 <= 3;
+  const daysSinceLastWorkout = user?.lastWorkoutDate
+    ? Math.floor((now - new Date(user.lastWorkoutDate).getTime()) / 86_400_000)
+    : 0;
+  return { sick, recovering, daysSinceLastWorkout };
+}

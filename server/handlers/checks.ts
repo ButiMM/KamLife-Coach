@@ -1,8 +1,9 @@
 import { db } from "../db";
-import { chatHistory, mealLogs, workoutLogs, stepLogs, exerciseLogs } from "../../shared/schema";
+import { chatHistory, mealLogs, workoutLogs, stepLogs, exerciseLogs, users } from "../../shared/schema";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
 import { sastDayStart } from "../utils";
 import { cleanExerciseName, canonicalLiftKey } from "../programme";
+import { adaptTraining, trainingStateFromUser, type TrainingInput } from "../adaptive-training";
 
 export const JUNK_WORDS = [
   "kfc", "niknaks", "cool drink", "fanta",
@@ -106,6 +107,16 @@ export async function getDamageControlNote(userId: string, message: string): Pro
 
 export async function getProgressiveOverloadContext(userId: string): Promise<string> {
   try {
+    // ASK THE OWNER WHAT TODAY'S LOAD IS (2026-07-30). This block used to print "→ aim 127.5kg"
+    // straight off the last session while the header two lines above said "start at 60% of your
+    // old weights" — both in one message, to a man 21 days into a layoff. Progressive overload is
+    // only the right instruction for someone who is actually progressing.
+    const [u] = await db.select({
+      profileNotes: users.profileNotes, lastWorkoutDate: users.lastWorkoutDate,
+    }).from(users).where(eq(users.id, userId)).limit(1);
+    const adjust = u ? adaptTraining(trainingStateFromUser(u) as TrainingInput) : null;
+    const heldBack = !!adjust && adjust.loadPct < 100;
+
     const recentLifts = await db.select().from(exerciseLogs)
       .where(eq(exerciseLogs.userId, userId))
       .orderBy(desc(exerciseLogs.loggedAt))
@@ -131,14 +142,21 @@ export async function getProgressiveOverloadContext(userId: string): Promise<str
         const repsStr = lift.sets && lift.reps
           ? ` ${lift.sets}×${lift.reps} reps`
           : lift.reps ? ` ×${lift.reps} reps` : "";
-        const nextW = (w + 2.5).toFixed(1).replace(".0", "");
         const daysAgo = Math.floor((Date.now() - new Date(lift.loggedAt || "").getTime()) / 86_400_000);
         const when = daysAgo === 0 ? "today" : daysAgo === 1 ? "yesterday" : `${daysAgo}d ago`;
+        if (heldBack && adjust) {
+          const todayW = Math.round((w * adjust.loadPct) / 100 * 2) / 2; // nearest 0.5kg
+          return `• ${name}: ${w}kg${repsStr} (${when}) → today ${todayW}kg (${adjust.loadPct}%)`;
+        }
+        const nextW = (w + 2.5).toFixed(1).replace(".0", "");
         return `• ${name}: ${w}kg${repsStr} (${when}) → aim ${nextW}kg or add 1–2 reps`;
       });
 
     if (lines.length === 0) return "";
-    return `*Your Targets — Based on Last Session:*\n${lines.join("\n")}\n\n`;
+    const head = heldBack
+      ? "*Your Lifts — eased back for today:*"
+      : "*Your Targets — Based on Last Session:*";
+    return `${head}\n${lines.join("\n")}\n\n`;
   } catch (e) {
     console.warn("[non-fatal]", e);
     return "";

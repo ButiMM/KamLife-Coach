@@ -5,7 +5,7 @@
 
 import { resolveExerciseSlug } from "./exercise-media";
 import { validateProgramme } from "./verifiers/programme-validator";
-import { adaptTraining, trainingAdjustHeader, applySetsDelta, type TrainingInput } from "./adaptive-training";
+import { adaptTraining, trainingAdjustHeader, applySetsDelta, trainingStateFromUser, type TrainingInput } from "./adaptive-training";
 
 // Verify pass — appends an injury-safety note when the delivered workout still
 // contains a movement that loads a flagged injury. The programme builder already
@@ -29,16 +29,7 @@ function withSafetyNote(text: string, user: any): string {
  */
 function withStateAdjustment(text: string, user: any): string {
   try {
-    const notes = String(user?.notes || "");
-    const today = new Date().toISOString().slice(0, 10);
-    const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
-    const sick = !!sickUntil && new Date(sickUntil) >= new Date(today);
-    const recovering = !sick && !!sickUntil
-      && (Date.now() - new Date(sickUntil).getTime()) / 86_400_000 <= 3;
-    const daysSinceLastWorkout = user?.lastWorkoutDate
-      ? Math.floor((Date.now() - new Date(user.lastWorkoutDate).getTime()) / 86_400_000)
-      : 0;
-    const adj = adaptTraining({ sick, recovering, daysSinceLastWorkout } as TrainingInput);
+    const adj = adaptTraining(trainingStateFromUser(user) as TrainingInput);
     if (!adj.changed) return text;
     return trainingAdjustHeader(adj) + applySetsDelta(text, adj.setsDelta);
   } catch {

@@ -88,6 +88,10 @@ const ONE_OWNER: Array<{ question: string; owner: string; definedBy: RegExp }> =
   // weeks. One owner, two callers: the job and the provenance gate.
   { question: "is a weight trend usable?", owner: "server/adaptive-targets.ts", definedBy: /export function weightTrendUsable/ },
   { question: "may the coach assert this?", owner: "server/verifiers/response-gate.ts", definedBy: /export function applyProvenance/ },
+  // Added 30 July: derived inline in programme.ts, reachable by nobody, and reading `user.notes`
+  // when the column is `profileNotes`. So the session header said "60% of your old weights" while
+  // the lift block under it said "aim 127.5kg" — one message, 21 days into a layoff.
+  { question: "what training state is this client in?", owner: "server/adaptive-training.ts", definedBy: /export function trainingStateFromUser/ },
 ];
 
 function walk(dir: string, out: string[] = []): string[] {
