@@ -8039,6 +8039,29 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ============================================================
+// A QUESTION MUST NEVER COPY A MEAL (2026-07-30). meal-repeat carried two hand-written lists of
+// ways to say "don't repeat it", built one live defect at a time, and never asked the owner of
+// "is this an ask, not a report?". So a question logged food.
+// ============================================================
+{
+  const { readFileSync } = await import("node:fs");
+  const { isAskingNotReporting } = await import("../server/utils");
+  const src = readFileSync("server/handlers/meal-repeat.ts", "utf-8");
+
+  test("meal-repeat: the bail-out consults the ask owner", () => {
+    assert.match(src, /if \(!sameAsMatch \|\| wantsNotRepeat \|\| isProtest \|\| isAskingNotReporting\(m\)\)/);
+  });
+  test("meal-repeat: questions about repeating a meal never reach the log", () => {
+    assert.equal(isAskingNotReporting("Should my dinner be the same as my lunch?"), true);
+    assert.equal(isAskingNotReporting("Can I have the same as yesterdays dinner?"), true);
+  });
+  test("meal-repeat: a genuine report still logs", () => {
+    assert.equal(isAskingNotReporting("My dinner is the same as my lunch"), false);
+    assert.equal(isAskingNotReporting("Same as yesterdays dinner"), false);
+  });
+}
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

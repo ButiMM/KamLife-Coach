@@ -37,6 +37,21 @@ const BUDGET = {
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
   regexLiterals: 338,
+  /**
+   * Files that BOTH match on the client's message AND write to the database, while consulting
+   * none of the guards that ask whether the client was actually asking rather than reporting.
+   *
+   * (2026-07-30.) This is the shape of the worst defect of the day: the founder photographed a
+   * machine in his gym and asked "Do I have this in my workout today?", the substring "i have
+   * this" matched an ownership pattern, and he was handed a bodyweight session. isAskingNotReporting
+   * already answered that correctly. It was never called — and the same file guards a different
+   * equipment branch with it 180 lines away.
+   *
+   * Not every file here is wrong: onboarding is a state machine where a question is the expected
+   * input, and safety must act whatever the phrasing. So this is a BACKLOG, not an accusation —
+   * frozen at today's count so the class cannot grow while it is worked off.
+   */
+  unguardedActionFiles: 12,
 };
 
 /**
@@ -115,6 +130,12 @@ const actual = {
   messageDeciders: all.filter(s => /\.test\(m\)/.test(s)).length,
   looksLikePredicates: new Set(all.join("\n").match(/function looksLike[A-Za-z]*/g) || []).size,
   regexLiterals: all.join("\n").match(/= \/[^/\n]{10,}\/[gimsuy]*/g)?.length || 0,
+  unguardedActionFiles: files.filter(f => {
+    const src = read(f);
+    if (!/db\s*\.\s*(insert|update)\s*\(/.test(src)) return false;      // does it act?
+    if (!/\.test\((?:m|message|lower)\b/.test(src)) return false;        // on the message?
+    return !/isAskingNotReporting|isFutureIntent|mentionsNotDone|looksLikeQuestion|aboutSomeoneElse/.test(src);
+  }).length,
 };
 
 const problems: string[] = [];
@@ -131,7 +152,7 @@ for (const [key, budget] of Object.entries(BUDGET) as Array<[keyof typeof BUDGET
 
 // A budget above its original frozen value must have a logged, dated reason. This is what stops
 // "just bump it by one" from being the path of least resistance.
-const FROZEN = { modules: 251, handlerFiles: 30, cronRegistrations: 68, messageDeciders: 30, looksLikePredicates: 20, regexLiterals: 333 };
+const FROZEN = { unguardedActionFiles: 12, modules: 251, handlerFiles: 30, cronRegistrations: 68, messageDeciders: 30, looksLikePredicates: 20, regexLiterals: 333 };
 for (const [key, frozen] of Object.entries(FROZEN) as Array<[keyof typeof BUDGET, number]>) {
   if (BUDGET[key] <= frozen) continue;
   const logged = RAISES.filter(r => r.key === key).sort((a, b) => a.to - b.to).pop();
@@ -167,7 +188,7 @@ if (wins.length > 0) {
 }
 
 console.log(`architecture guard: ${actual.modules} modules, ${actual.regexLiterals} regexes, ${actual.messageDeciders} message deciders, ${actual.cronRegistrations} cron jobs — all at budget.`);
-console.log(`  ${ONE_OWNER.length} questions have exactly one owner.`);
+console.log(`  ${ONE_OWNER.length} questions have exactly one owner. ${actual.unguardedActionFiles} files act on a message without asking whether it was a question — backlog, may only fall.`);
 // Printed on EVERY green run, on purpose. A debt you are reminded of is a debt you repay.
 for (const r of RAISES) {
   console.log(`  ⚠ debt: ${r.key} raised ${r.from}→${r.to} on ${r.date}. ${r.why}`);

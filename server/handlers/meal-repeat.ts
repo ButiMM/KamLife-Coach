@@ -18,6 +18,7 @@ import { sastDayStart, slotFromSastHour } from "../utils";
 import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../meal-select";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 import { logChat } from "./chat-log";
+import { isAskingNotReporting } from "../utils";
 import { dailyMacroCardMarker } from "../macro-card-attach";
 
 export async function handleMealRepeat(ctx: {
@@ -52,7 +53,12 @@ export async function handleMealRepeat(ctx: {
     // (2026-07-10 voice note). Talking ABOUT repetition is never a request to repeat.
     || /\b(have you forgot(?:ten)?|i (?:already|just) told you|come on,? man|you and i|we (?:had|have) a discussion|we discussed|why (?:are|do|did) you|you keep|you'?re not listening|repeating the same)\b/i.test(m);
 
-  if (!sameAsMatch || wantsNotRepeat || isProtest) return null;
+  // AND ASK THE OWNER (2026-07-30). Above this line sit two hand-written lists of ways to say
+  // "don't repeat it" — built one live defect at a time — while isAskingNotReporting, which owns
+  // "is this an ask, not a report?", was never called. So "Should my dinner be the same as my
+  // lunch?" and "Can I have the same as yesterday's dinner?" both COPIED a meal into the log from
+  // a question. That is the phantom-food class the food logger was inverted to kill in June.
+  if (!sameAsMatch || wantsNotRepeat || isProtest || isAskingNotReporting(m)) return null;
 
   // Which meal is copied and where it goes (pure — unit-tested in script/unit-tests.ts).
   const { crossish, targetLabel, sourceHint } = parseMealRepeatTarget(m);
