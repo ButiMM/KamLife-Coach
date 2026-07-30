@@ -33,8 +33,18 @@ export interface SessionReport {
 
 // Past-tense training report. "I'm training today" is deliberately absent — present
 // continuous reads as a plan, and isFutureIntent at the call site catches the rest.
+//
+// A SESSION COUNT IS A SESSION REPORT (2026-07-30 live). "I've already had two sessions this
+// week. Today is my third." matched nothing here, so the log still said 22 days since his last
+// session and the coach argued with him about his own week — "Friday and Monday and Tuesday
+// didn't happen", "say I'm back and I'll set up your first session".
+//
+// No new pattern list and no new handler: this is one alternative on the existing constant, and
+// the TODAY_REF gate below already does the safety work — a bare "I had two sessions this week"
+// on a rest day has no today-reference, so it still falls through untouched.
+// (The old alternation also listed trained|trained today|trained again; the first covers all three.)
 const TRAINED_PAST =
-  /\b(?:i\s+)?(?:trained|trained\s+today|worked\s+out|trained\s+again)\b/i;
+  /\b(?:trained|worked\s+out)\b|\bhad\s+(?:\d+|one|two|three|four|five|six|another)\s+(?:more\s+)?(?:sessions?|workouts?)\b/i;
 const WENT_TO_GYM =
   /\b(?:went|been|got\s+back)\s+(?:to\s+|from\s+)?(?:the\s+)?(?:gym|training|session)\b|\bhit\s+the\s+gym\b|\bwas\s+at\s+(?:the\s+)?gym\b/i;
 const DID_SESSION =

@@ -8016,14 +8016,26 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     const st = trainingStateFromUser({ lastWorkoutDate: daysAgo(22) }, now);
     assert.ok(st.daysSinceLastWorkout > 7, "still session zero");
   });
-  // KNOWN GAP, deliberately asserted so it cannot be forgotten: the fix above reads the LOG, and
-  // a session the client only TELLS us about never reaches the log. "I've already had two sessions
-  // this week" matches nothing in the session parser, so the database still says 22 days. Until
-  // that statement is captured, the coach and the client disagree about his own week.
-  test("comeback: KNOWN GAP — a spoken session count is still not captured", async () => {
+  // GAP CLOSED. The test that used to sit here asserted the sentence was NOT captured, and said
+  // "if this ever returns a report, capture it and delete this test." It does, so it is deleted
+  // and replaced with the opposite assertion.
+  test("comeback: THE FOUNDER'S SENTENCE is now a session report", async () => {
     const { parseSessionReport } = await import("../server/session-report");
-    assert.equal(parseSessionReport("I have already had two sessions this week"), null,
-      "if this ever returns a report, capture it and delete this test");
+    const r = parseSessionReport("I have already had two sessions this week\nToday is my third\nBut damn I feel soo weak and winded all the time");
+    assert.ok(r, "a spoken session count with a today-reference must reach the log");
+    assert.equal(r!.trainedToday, true);
+  });
+  test("comeback: a session count with NO today-reference still falls through", async () => {
+    const { parseSessionReport } = await import("../server/session-report");
+    assert.equal(parseSessionReport("I had two sessions this week"), null,
+      "reporting the week on a rest day must not log a session today");
+  });
+  test("comeback: the call-site guards still hold — negation and future intent", async () => {
+    const { parseSessionReport } = await import("../server/session-report");
+    const { mentionsNotDone, isFutureIntent, looksLikeQuestion } = await import("../server/utils");
+    const passes = (c: string) => !!parseSessionReport(c) && !looksLikeQuestion(c) && !isFutureIntent(c) && !mentionsNotDone(c);
+    assert.equal(passes("I havent had any sessions this week"), false);
+    assert.equal(passes("Will I have two sessions this week?"), false);
   });
 }
 
