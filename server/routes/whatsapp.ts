@@ -8,6 +8,8 @@ import { processedWebhooks, users } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { captureQualitySignal } from "../quality-signals";
 import { recordMediaJob, completeMediaJob } from "../media-jobs";
+import { provenanceGate } from "../verifiers/response-gate";
+import { humanizeReply } from "../reply-hygiene";
 
 // COMEBACK RECOGNITION (2026-07-13 retention P0): when a client messages after ≥3 days
 // of silence, their FIRST reply back opens with a warm welcome — the return must feel
@@ -28,6 +30,35 @@ async function comebackPrefix(phone: string): Promise<string> {
 const TWILIO_FROM = () => process.env.TWILIO_WHATSAPP_NUMBER
   ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
   : "";
+
+/**
+ * THE REACTIVE CHOKEPOINT (2026-07-30).
+ *
+ * The provenance gate and the hygiene pass were wired into sendWhatsApp earlier today and the
+ * commit messages claimed they covered every outbound message. They did not. Replies to a client
+ * are delivered by sendParts, which calls Twilio directly and never touches sendWhatsApp — so
+ * both gates reached the 68 scheduler jobs and NOTHING a client actually said hello to.
+ *
+ * Proof arrived 27 minutes after that deploy: a five-sentence wall of text with no line break in
+ * it, containing "listen to your body", went to the founder mid-conversation. The fix was live.
+ * It just was not on this path.
+ *
+ * Everything reactive now goes through here, before the message is split into bubbles — a claim
+ * or a paragraph can straddle a split, so shaping has to happen on the whole reply.
+ */
+async function sendFinal(phone: string, text: string, media: string | string[] | null): Promise<void> {
+  let out = text;
+  try {
+    out = await provenanceGate(phone, out);
+    // Founder-facing reports quote real replies back (audit, replay). Rewriting the quotes would
+    // corrupt the instrument that measures this — same exemption the provenance gate uses.
+    if (!out.includes('_"')) out = humanizeReply(out);
+  } catch (e: any) {
+    console.warn("[SEND_FINAL] shaping failed, sending raw:", e?.message || e);
+    out = text;
+  }
+  await sendParts(phone, splitMessage(out), media);
+}
 
 async function sendParts(
   phone: string,
@@ -142,7 +173,7 @@ async function processTextAsync(
       return;
     }
 
-    await sendParts(phone, splitMessage(cleanReply), replyMediaUrls);
+    await sendFinal(phone, cleanReply, replyMediaUrls);
   } catch (err: any) {
     console.error("[TEXT_ASYNC] failed:", err?.message || err);
     // For image messages: resolve inflight so the buffer doesn't hang, then send the error.
@@ -175,9 +206,8 @@ async function processVoiceAsync(
     const text = rawVoiceText && rawVoiceText.trim().length > 0
       ? welcomeBack + rawVoiceText
       : `I heard your voice note but couldn't work out what to do with it — say it once more, or type it.`;
-    const parts = splitMessage(text);
-    await sendParts(phone, parts, media);
-    console.log(`[VOICE_ASYNC] delivered ${parts.length} part(s) to ${phone.slice(-4)}`);
+    await sendFinal(phone, text, media);
+    console.log(`[VOICE_ASYNC] delivered reply to ${phone.slice(-4)}`);
   } catch (err: any) {
     console.error("[VOICE_ASYNC] failed:", err?.message || err);
     await sendParts(phone, ["I got your voice note but had a moment — please send it again or type your message."], null).catch(() => {});
@@ -270,7 +300,7 @@ function bumpImageInflight(phone: string): void {
 
 async function resolveImageInflight(phone: string, reply: string | null): Promise<void> {
   const e = photoReplyBuffer.get(phone);
-  if (!e) { if (reply) await sendParts(phone, splitMessage(reply), null); return; }
+  if (!e) { if (reply) await sendFinal(phone, reply, null); return; }
   if (reply) e.parts.push(reply); else e.failedCount++;
   e.inflight = Math.max(0, e.inflight - 1);
   if (e.inflight === 0) {
@@ -285,7 +315,7 @@ async function flushPhotoBuffer(phone: string): Promise<void> {
   const { parts, failedCount } = entry;
   if (parts.length === 0) return; // all failed — errors already sent individually
   if (parts.length === 1 && failedCount === 0) {
-    await sendParts(phone, splitMessage(parts[0]), null);
+    await sendFinal(phone, parts[0], null);
     return;
   }
   // Multiple parts: strip "Today so far" footer from all but the last (the last has
@@ -295,7 +325,7 @@ async function flushPhotoBuffer(phone: string): Promise<void> {
   const batchNote = `\n\n_${parts.length} photo${parts.length > 1 ? "s" : ""} — all logged._`;
   const failNote = failedCount > 0 ? `\n_(${failedCount} unclear — resend in better light if needed)_` : "";
   const combined = bodies.join("\n\n") + batchNote + failNote;
-  await sendParts(phone, splitMessage(combined), null);
+  await sendFinal(phone, combined, null);
 }
 
 export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "handleMessage" | "checkRateLimit">) {

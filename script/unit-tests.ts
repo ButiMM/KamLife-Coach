@@ -7859,6 +7859,46 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ============================================================
+// THE REACTIVE PATH IS SHAPED (2026-07-30). Both gates were wired into sendWhatsApp and the
+// commit claimed they covered every outbound message. They covered the 68 cron jobs and nothing
+// a client said hello to — replies go out through sendParts, which calls Twilio directly. The
+// proof was a wall of text delivered 27 minutes AFTER the fix deployed.
+// ============================================================
+{
+  const { readFileSync } = await import("node:fs");
+  const wa = readFileSync("server/routes/whatsapp.ts", "utf-8");
+  const { humanizeReply } = await import("../server/reply-hygiene");
+
+  test("reactive: no reply is delivered without passing through sendFinal", () => {
+    // Every delivery must shape first. A raw sendParts(splitMessage(...)) is the bug returning.
+    // Everything except the single terminal call inside sendFinal itself.
+    const outside = wa.slice(0, wa.indexOf("async function sendFinal")) + wa.slice(wa.indexOf("async function sendParts"));
+    const raw = outside.match(/sendParts\(phone,\s*splitMessage\(/g) || [];
+    assert.equal(raw.length, 0, `${raw.length} un-shaped delivery path(s) — route them through sendFinal`);
+  });
+  test("reactive: sendFinal runs BOTH gates before splitting into bubbles", () => {
+    const fn = wa.slice(wa.indexOf("async function sendFinal"), wa.indexOf("async function sendParts"));
+    assert.match(fn, /provenanceGate\(phone/, "truth gate");
+    assert.match(fn, /humanizeReply\(/, "voice gate");
+    assert.ok(fn.indexOf("humanizeReply") < fn.indexOf("splitMessage"), "shape the whole reply, not each bubble");
+  });
+  test("reactive: THE 12:40 REPLY — the live wall of text is now broken into blocks", () => {
+    const real = "Feeling weak and winded isn't easy, especially coming back from being ill. For today's session, "
+      + "keep it light and focus on movement. Reduce weights to about 60% of what you usually lift, and consider "
+      + "cutting back on the number of sets. Listen to your body — if it feels too much, it's okay to stop early. "
+      + "Recovery is key, and you'll build strength back up soon. After today, let's reassess how you feel and "
+      + "adjust the rest of the week accordingly.";
+    const out = humanizeReply(real);
+    assert.ok(out.split("\n\n").length >= 3, "must become readable blocks on a phone");
+    assert.equal(out.replace(/\s+/g, " "), real.replace(/\s+/g, " "), "and not one word may change");
+  });
+  test("reactive: a numbered WORKOUT keeps its numbers — order is information there", () => {
+    const workout = "Week 1 — Session 21\n\n1. Chest Fly — 2x12 reps\n2. Lat Pulldown — 2x12 reps\n3. Shoulder Press — 2x12 reps";
+    assert.equal(humanizeReply(workout), workout, "line-start numbers are a list, not a listicle");
+  });
+}
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 
