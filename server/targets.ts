@@ -258,6 +258,7 @@ export function auditStoredTargets(u: {
   calorieTarget?: number | null;
   proteinTarget?: number | null;
   dietBreakEndsAt?: Date | string | null;
+  profileNotes?: string | null;
 }): TargetAudit {
   const weight = typeof u.currentWeight === "string" ? parseFloat(u.currentWeight) : (u.currentWeight ?? NaN);
   const { calorieTarget: expectedCal, proteinTarget: expectedProt } = calculateTargets(
@@ -272,6 +273,15 @@ export function auditStoredTargets(u: {
   );
   // An active diet break deliberately runs a higher temporary target — leave it alone.
   if (u.dietBreakEndsAt && new Date(u.dietBreakEndsAt).getTime() > Date.now()) {
+    return { ok: true, expectedCal, expectedProt };
+  }
+  // NEITHER IS AN ADAPTIVE ADJUSTMENT (2026-07-30 live). The adaptive job trimmed a client to
+  // 2530 at 05:45; this audit saw 332 kcal off the profile figure, called it corruption, wrote
+  // 2862 back and announced "I've fine-tuned your daily targets" — two systems owning one number,
+  // one silently undoing the other every morning. Adaptation had probably never survived to
+  // lunchtime. A marked adjustment is deliberate, exactly like the diet break above.
+  const adapted = (u.profileNotes || "").match(/adapted_until:(\d{4}-\d{2}-\d{2})/);
+  if (adapted && new Date(`${adapted[1]}T23:59:59+02:00`).getTime() >= Date.now()) {
     return { ok: true, expectedCal, expectedProt };
   }
   const storedCal = u.calorieTarget ?? 0;

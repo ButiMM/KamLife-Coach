@@ -52,8 +52,15 @@ export async function runAdaptiveTargets(): Promise<void> {
       const weights = wRows.map(r => parseFloat(String(r.w))).filter(n => Number.isFinite(n));
       let weeklyKgChange: number | undefined;
       if (weights.length >= 2) {
+        // A TREND NEEDS A RECENT NUMBER (2026-07-30 live). Two weigh-ins anywhere inside 28 days
+        // used to be enough, so a client who last stood on a scale three weeks ago — before and
+        // during an illness — was told "you're gaining quicker than muscle can build" and had his
+        // food cut 6%. The same morning message asked him to weigh himself because "it's been a
+        // while": it knew the data was stale and used it anyway. Illness moves weight through
+        // fluid and inactivity, which is exactly the reading this then acts on.
+        const newestAgeDays = (Date.now() - new Date(wRows[0].at as Date).getTime()) / 86_400_000;
         const spanDays = Math.max(1, (new Date(wRows[0].at as Date).getTime() - new Date(wRows[wRows.length - 1].at as Date).getTime()) / 86_400_000);
-        if (spanDays >= 5) weeklyKgChange = ((weights[0] - weights[weights.length - 1]) / spanDays) * 7;
+        if (spanDays >= 5 && newestAgeDays <= 10) weeklyKgChange = ((weights[0] - weights[weights.length - 1]) / spanDays) * 7;
       }
 
       const [stepAgg] = await db.select({ avg: sql<number>`COALESCE(AVG(${stepLogs.steps}),0)::int` })
@@ -79,10 +86,17 @@ export async function runAdaptiveTargets(): Promise<void> {
       if (out.calorieTarget === input.baseCalories && out.proteinTarget === input.baseProtein
           && out.stepsTarget === input.baseSteps) continue;
 
+      // MARK IT DELIBERATE, or the morning sanity audit reverts it before lunch (2026-07-30
+      // live: this job wrote 2530, morning.ts saw 332 kcal off the profile figure, called it
+      // corruption and wrote 2862 back with an announcement). Same durable profileNotes token
+      // pattern as sick_until, and the same exemption a diet break already gets.
+      const keptNotes = (notes || "").replace(/\s*\badapted_until:\d{4}-\d{2}-\d{2}\b/g, "").trim();
+      const adaptedUntil = new Date(Date.now() + 13 * 86_400_000).toISOString().slice(0, 10);
       await db.update(users).set({
         calorieTarget: out.calorieTarget,
         proteinTarget: out.proteinTarget,
         stepsTarget: out.stepsTarget,
+        profileNotes: `${keptNotes} adapted_until:${adaptedUntil}`.trim(),
       }).where(eq(users.id, c.id));
 
       if (out.note) {

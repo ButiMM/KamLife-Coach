@@ -7176,6 +7176,47 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ── TWO SYSTEMS OWNED ONE CALORIE TARGET (2026-07-30 live) ──────────────────────────────────
+// 05:45 — "Targets adjusted. You're gaining quicker than muscle can build. Food down to 2530."
+// Minutes later — "I've fine-tuned your daily targets to 2862 kcal."
+// The adaptive job trimmed him; the morning sanity audit called 332 kcal off-profile "corruption",
+// wrote it back, and announced it. Adaptation had probably never survived to lunchtime.
+{
+  const profile = {
+    currentWeight: "88.4", goalType: "muscle_gain", lifeSituation: "office",
+    trainingDaysPerWeek: 4, gender: "male", age: 38, heightCm: 178, trainingExperience: "advanced",
+    proteinTarget: 185,
+  };
+  const dayFromNow = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
+  test("targets: a MARKED adaptive adjustment is left alone", async () => {
+    const { auditStoredTargets } = await import("../server/targets");
+    const a = auditStoredTargets({ ...profile, calorieTarget: 2530, profileNotes: `adapted_until:${dayFromNow(5)}` });
+    assert.equal(a.ok, true, "a deliberate adaptation must survive the morning audit");
+  });
+
+  test("targets: an EXPIRED mark returns control to the profile", async () => {
+    const { auditStoredTargets } = await import("../server/targets");
+    const a = auditStoredTargets({ ...profile, calorieTarget: 2530, profileNotes: `adapted_until:${dayFromNow(-5)}` });
+    assert.equal(a.ok, false, "adaptation must not persist forever");
+  });
+
+  test("targets: genuinely corrupt numbers are STILL reverted", async () => {
+    const { auditStoredTargets } = await import("../server/targets");
+    // The exemption must not become a hole. 800 kcal for this profile is dangerous, marked or not.
+    assert.equal(auditStoredTargets({ ...profile, calorieTarget: 800 }).ok, false);
+    const marked = auditStoredTargets({ ...profile, calorieTarget: 800, profileNotes: `adapted_until:${dayFromNow(5)}` });
+    // A marked value is trusted — which is why adaptTargets clamps to safety floors at source.
+    assert.equal(typeof marked.expectedCal, "number", "the audit still reports the profile figure");
+  });
+
+  test("targets: a diet break is still exempt — the precedent this follows", async () => {
+    const { auditStoredTargets } = await import("../server/targets");
+    const a = auditStoredTargets({ ...profile, calorieTarget: 3400, dietBreakEndsAt: new Date(Date.now() + 3 * 86_400_000) });
+    assert.equal(a.ok, true);
+  });
+}
+
 // ── A REQUEST IS NOT A MEAL (2026-07-29 live, the worst defect of the day) ───────────────────
 // "Give me a dinner suggestion to finish off the night" logged a tin of pilchards: 789 kcal the
 // client never ate, his day's totals corrupted, his fat pushed over target. Two independent
