@@ -7938,6 +7938,32 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ============================================================
+// A QUESTION IS NOT A CLAIM OF OWNERSHIP (2026-07-30, live). The founder photographed a machine
+// shoulder press in his gym: "Do I have this in my workout today?". The substring "i have this"
+// matched the home-kit caption pattern, so he was handed a bodyweight session telling him to row
+// under a sturdy table — then his real programme arrived with Machine Shoulder Press as move 3.
+// ============================================================
+{
+  const { readFileSync } = await import("node:fs");
+  const { isAskingNotReporting } = await import("../server/utils");
+  const media = readFileSync("server/handlers/media.ts", "utf-8");
+
+  test("equipment photo: THE GYM CAPTION — 'Do I have this in my workout today?' is an ASK", () => {
+    assert.equal(isAskingNotReporting("Do I have this in my workout today?"), true);
+    assert.equal(isAskingNotReporting("Do I have these in my plan?"), true);
+    assert.equal(isAskingNotReporting("Is this in my program?"), true);
+  });
+  test("equipment photo: genuine ownership statements still read as ownership", () => {
+    assert.equal(isAskingNotReporting("I have this at home, build me a session"), false);
+    assert.equal(isAskingNotReporting("these are my dumbbells"), false);
+  });
+  test("equipment photo: the home-kit caption gate consults the ask owner", () => {
+    const gate = media.slice(media.indexOf("const hasEquipCaption"), media.indexOf("const hasEquipCaption") + 1400);
+    assert.match(gate, /!isAskingNotReporting\(/, "a question must never be read as 'this is my kit'");
+  });
+}
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

@@ -303,7 +303,12 @@ export async function handleMediaMessage(ctx: {
           }
           if ((uncaptionedType as any) === "equipment") {
             // HOME/TRAVEL KIT ("this is my kit") → read it, hand back a full adapted session.
-            const hasEquipCaption = /\b(i have (this|these|a set|dumbbell|band|kettlebell|barbell)|my (own )?(equipment|kit|gym|setup|weights)|i (just )?(got|bought) (this|these|a|some|new)|these are my|this is (my|what) (equipment|kit|gym|setup|home|i have|he has|she has)|at home|on holiday|travel(?:ling|ing)?|away (?:for|on)|hotel (?:gym|room))\b/i.test(message || "");
+            // A QUESTION IS NOT A CLAIM OF OWNERSHIP (2026-07-30 live). "Do I have this in my
+            // workout today?" contains "i have this", so a gym machine photo was read as "this is
+            // my home kit" and the founder was told to row under a sturdy table. isAskingNotReporting
+            // owns this question and already returned true — it just was not asked.
+            const hasEquipCaption = /\b(i have (this|these|a set|dumbbell|band|kettlebell|barbell)|my (own )?(equipment|kit|gym|setup|weights)|i (just )?(got|bought) (this|these|a|some|new)|these are my|this is (my|what) (equipment|kit|gym|setup|home|i have|he has|she has)|at home|on holiday|travel(?:ling|ing)?|away (?:for|on)|hotel (?:gym|room))\b/i.test(message || "")
+              && !isAskingNotReporting(message || "");
             if (hasEquipCaption) {
               const equipReply = await coachHomeEquipmentFromPhoto(openai, user, base64, contentType, message);
               await logChat(user.id, "[Equipment Photo]", equipReply, "HOME_WORKOUT");
