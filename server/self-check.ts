@@ -27,6 +27,47 @@ import { uploadedGifCount } from "./exercise-media";
 import { cardFontLoaded } from "./macro-card";
 import { templatesReady } from "./whatsapp-templates";
 
+// ── WHICH BRAIN ANSWERED? ────────────────────────────────────────────────────────────────────
+// (2026-07-30, reviewer: "why does an unconditional fallback exist at all? A system that cannot
+// say 'I don't know' is cowardice dressed as redundancy.")
+//
+// That is the best technical point in ten reviews and it needs no permission to act on — but it
+// does need a number first, and NOT one I choose the threshold for. routes.ts can answer a
+// client from three places: the meaning engine (gated on ENGINE_LIVE), coach-brain (gated on
+// MODEL_BRAIN), and gpt-block at line 1089 with no gate at all, catching everything the first
+// two decline. Nobody knows what share of real messages that third path is carrying.
+//
+// If it is 2%, it can be replaced with "I didn't understand that — say it another way" tomorrow.
+// If it is 40%, deleting it would break the product for nearly half of every conversation. That
+// is the difference between a safe deletion and a catastrophe, and it is not a matter of
+// opinion. It is counted here, from real client traffic, and read by the founder — not
+// interpreted by me against a threshold I invented.
+//
+// In-memory, so it resets on every deploy. Honest about that: the label says "since restart".
+const replyPaths = new Map<string, number>();
+let messagesSeen = 0;
+
+/** Every inbound message, counted at the door — the denominator. */
+export function recordMessageSeen(): void { messagesSeen++; }
+
+/** Which of the three model paths produced this reply. Deterministic handlers never call this. */
+export function recordReplyPath(source: string): void {
+  replyPaths.set(source, (replyPaths.get(source) || 0) + 1);
+}
+
+export function _resetReplyPaths(): void { replyPaths.clear(); messagesSeen = 0; }
+
+/** The founder-facing breakdown. Deterministic = everything no model path claimed. */
+export function replyPathLines(): string {
+  if (messagesSeen === 0) return "🧠 *Which brain answered:* nothing since the last restart.";
+  const pct = (n: number) => `${((n / messagesSeen) * 100).toFixed(0)}%`;
+  const byModel = [...replyPaths.entries()].sort((a, b) => b[1] - a[1]);
+  const modelTotal = byModel.reduce((s, [, n]) => s + n, 0);
+  const lines = byModel.map(([src, n]) => `  • ${src.replace(/[^\w\s]/g, "").trim()}: *${n}* (${pct(n)})`);
+  lines.push(`  • deterministic handlers: *${messagesSeen - modelTotal}* (${pct(messagesSeen - modelTotal)})`);
+  return `🧠 *Which brain answered* — ${messagesSeen} messages since restart:\n${lines.join("\n")}`;
+}
+
 export type Severity = "critical" | "degraded" | "cosmetic";
 
 export interface Capability {
