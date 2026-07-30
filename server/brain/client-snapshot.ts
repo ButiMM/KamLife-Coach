@@ -13,7 +13,7 @@
 
 import { db } from "../db";
 import { weightLogs, workoutLogs, mealLogs, stepLogs, chatHistory } from "../../shared/schema";
-import { eq, gte, desc, and } from "drizzle-orm";
+import { eq, gte, desc, asc, and } from "drizzle-orm";
 import { weeklyTrendSlopeKg } from "../handlers/weight";
 import { getPhaseNames } from "../programme";
 import { energyFrameLine, waterTargetLitres } from "../targets";
@@ -171,9 +171,9 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     }
 
     // ── Protein adherence, last 7 days (per-day average) ──
-    const meals = await db.select({ proteinInt: mealLogs.proteinInt, loggedAt: mealLogs.loggedAt })
+    const meals = await db.select({ proteinInt: mealLogs.proteinInt, kcalInt: mealLogs.kcalInt, loggedAt: mealLogs.loggedAt, mealLabel: mealLogs.mealLabel, items: mealLogs.items, rawMessage: mealLogs.rawMessage })
       .from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, since(7))))
-      .catch(() => [] as { proteinInt: number; loggedAt: Date | null }[]);
+      .catch(() => [] as any[]);
     if (meals.length > 0) {
       const byDay = new Map<string, number>();
       for (const row of meals) {
@@ -211,6 +211,52 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     const waterTarget = waterTargetLitres(String(user.currentWeight || "75"));
     const todayWater = user.waterLastResetDate === sastToday() ? (Number(user.todayWater) || 0) : 0;
     lines.push(`Water today: ${todayWater}L of ${waterTarget}L target.`);
+
+    // ── THE STORY — the last 7 days as prose, not rows. Everything above is a column: a
+    // coach who has been there remembers WHAT HAPPENED and WHAT THEY SAID. "last_weight:
+    // 82.4" is data; "she weighed 82.4kg Thursday and said her knee hurt in squats" is
+    // memory. Built from rows already fetched — one extra query for their own words.
+    const said = await db.select({ messageIn: chatHistory.messageIn, createdAt: chatHistory.createdAt })
+      .from(chatHistory).where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, since(7))))
+      .orderBy(asc(chatHistory.createdAt)).limit(200).catch(() => [] as any[]);
+    const sastKey = (d: Date | null) => new Date(new Date(d || now).getTime() + 2 * 3_600_000).toISOString().slice(0, 10);
+    type Day = { ate: string[]; kcal: number; steps: number; kg: number | null; trained: boolean; said: string[] };
+    const story = new Map<string, Day>();
+    const slot = (k: string): Day => story.get(k) ?? (story.set(k, { ate: [], kcal: 0, steps: 0, kg: null, trained: false, said: [] }), story.get(k)!);
+    for (const r of meals as any[]) {
+      const e = slot(sastKey(r.loggedAt));
+      e.kcal += r.kcalInt || 0;
+      const names: string[] = Array.isArray(r.items) ? r.items.map((i: any) => String(i?.name || "").trim()).filter(Boolean)
+        : r.rawMessage && r.rawMessage !== "[Photo]" ? [String(r.rawMessage).slice(0, 30)] : [];
+      if (names.length) e.ate.push(`${r.mealLabel ? `${r.mealLabel} — ` : ""}${names.slice(0, 3).join(", ")}`);
+    }
+    for (const r of stepRows) { const e = slot(sastKey(r.loggedAt)); e.steps = Math.max(e.steps, r.steps || 0); }
+    for (const w of wLogs) if (w.loggedAt && new Date(w.loggedAt).getTime() >= now - 7 * DAY) slot(sastKey(w.loggedAt)).trained = true;
+    for (const r of wl) if (r.loggedAt && new Date(r.loggedAt).getTime() >= now - 7 * DAY) slot(sastKey(r.loggedAt)).kg = parseFloat(String(r.weight));
+    // Their own words — the disclosures a coach would remember ("my knee hurt", "work was
+    // mad this week"). Skip short/numeric turns: those are logs, already counted above.
+    for (const r of said as any[]) {
+      const t = String(r.messageIn || "").replace(/\s+/g, " ").trim();
+      const e = slot(sastKey(r.createdAt));
+      if (t.length > 28 && e.said.length < 2 && !/^\d/.test(t)) e.said.push(t.slice(0, 90));
+    }
+    const todayKey = sastToday();
+    const sentences: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const k = sastKey(new Date(now - i * DAY));
+      const e = story.get(k);
+      const when = k === todayKey ? "TODAY" : new Date(`${k}T12:00:00Z`).toLocaleDateString("en-ZA", { weekday: "long" });
+      if (!e) { sentences.push(`${when}: silent — nothing logged, nothing said.`); continue; }
+      const bits: string[] = [];
+      if (e.ate.length) bits.push(`ate ${e.ate.slice(0, 4).join("; ")}${e.kcal ? ` (~${e.kcal} kcal)` : ""}`);
+      else bits.push("logged no food");
+      if (e.trained) bits.push("trained");
+      if (e.steps) bits.push(`walked ${e.steps.toLocaleString()} steps`);
+      if (e.kg !== null) bits.push(`weighed ${e.kg}kg`);
+      if (e.said.length) bits.push(`told you: "${e.said.join(`" and "`)}"`);
+      sentences.push(`${when}: ${bits.join(", ")}.`);
+    }
+    lines.push(`THE LAST 7 DAYS — WHAT YOU REMEMBER (read it as a story, not a table). Reference a SPECIFIC day or something they actually said, the way a coach who was there would. Never recite the whole list back at them, never quote a day they were silent as if they told you something:\n${sentences.join("\n")}`);
 
     // ── Last automated (proactive) message — the scheduler talks to the client too.
     // Without this the brain argues with its own system: client says "but you told me

@@ -1313,13 +1313,6 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(pay, /referredBy/, "keys off the referred friend");
     assert.match(pay, /You have earned one free month/i, "referrer is notified");
   });
-  test("anti-churn: weight-stall intervention job is wired + scheduled", () => {
-    const r = readFileSync(join("server", "scheduler", "jobs", "retention.ts"), "utf-8");
-    assert.match(r, /export async function runWeightStallIntervention/);
-    assert.match(r, /detectWeightStall/, "uses the deterministic detector");
-    const sched = readFileSync(join("server", "scheduler.ts"), "utf-8");
-    assert.match(sched, /runWeightStallIntervention/, "scheduled");
-  });
   test("retention: the Sunday report card carries the forward forecast (visible progress)", () => {
     const w = readFileSync(join("server", "scheduler", "jobs", "weekly.ts"), "utf-8");
     assert.match(w, /getTrajectoryForUser/, "the report pulls the trajectory");
@@ -6984,14 +6977,6 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.match(out, /thought they'd blown it/i);
   });
 
-  test("fade: the job is registered and gated like every other proactive job", () => {
-    const sched = readFileSync(join("server", "scheduler.ts"), "utf-8");
-    assert.match(sched, /runFadeDetection/, "must be wired into the cron table");
-    const job = readFileSync(join("server", "scheduler", "jobs", "retention.ts"), "utf-8");
-    assert.match(job, /claimProactive\(client\.id, "fade_nudge"/, "goes through the shared budget");
-    assert.match(job, /isProactivePaused\(\)/, "honours the global killswitch");
-    assert.match(job, /if \(isPaused\(client\)\) continue;/, "honours a paused client");
-  });
 }
 
 // MALFORMED-OUTPUT GUARD — the cheap D6 mitigation. Catches breakage, never tone.
