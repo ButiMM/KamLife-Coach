@@ -26,6 +26,9 @@ import { FFMPEG_AVAILABLE } from "./video-frames";
 import { uploadedGifCount } from "./exercise-media";
 import { cardFontLoaded } from "./macro-card";
 import { templatesReady } from "./whatsapp-templates";
+import { db } from "./db";
+import { schedulerState } from "../shared/schema";
+import { like, sql } from "drizzle-orm";
 import { provenanceMode } from "./verifiers/response-gate";
 
 // ── WHICH BRAIN ANSWERED? ────────────────────────────────────────────────────────────────────
@@ -44,29 +47,63 @@ import { provenanceMode } from "./verifiers/response-gate";
 // opinion. It is counted here, from real client traffic, and read by the founder — not
 // interpreted by me against a threshold I invented.
 //
-// In-memory, so it resets on every deploy. Honest about that: the label says "since restart".
+// DURABLE (2026-07-30). This was in-memory, so it reset on every deploy — the founder ran it
+// minutes after a boot and got "1 message, 100% deterministic", which is not data. It is the
+// number three reviews said decides whether the next month is deleting handlers or improving the
+// engine, and it was unreadable for exactly that reason.
+//
+// No new table and no migration: schedulerState is an existing key/value store, and the counts
+// are upserted into it under a replypath: prefix. Fire-and-forget — a counter must never delay
+// or fail a client's reply.
 const replyPaths = new Map<string, number>();
 let messagesSeen = 0;
 
-/** Every inbound message, counted at the door — the denominator. */
-export function recordMessageSeen(): void { messagesSeen++; }
+const SEEN_KEY = "replypath:_seen";
+const keyFor = (src: string) => `replypath:${src.replace(/[^\w\s]/g, "").trim() || "unknown"}`;
 
-/** Which of the three model paths produced this reply. Deterministic handlers never call this. */
+function bump(key: string): void {
+  db.insert(schedulerState)
+    .values({ key, value: "1", updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: schedulerState.key,
+      set: { value: sql`(COALESCE(${schedulerState.value}, '0')::bigint + 1)::text`, updatedAt: new Date() },
+    })
+    .catch(() => { /* a counter never breaks a reply */ });
+}
+
+/** Every inbound message, counted at the door — the denominator. */
+export function recordMessageSeen(): void { messagesSeen++; bump(SEEN_KEY); }
+
+/** Which of the model paths produced this reply. Deterministic handlers never call this. */
 export function recordReplyPath(source: string): void {
   replyPaths.set(source, (replyPaths.get(source) || 0) + 1);
+  bump(keyFor(source));
 }
 
 export function _resetReplyPaths(): void { replyPaths.clear(); messagesSeen = 0; }
 
-/** The founder-facing breakdown. Deterministic = everything no model path claimed. */
-export function replyPathLines(): string {
-  if (messagesSeen === 0) return "🧠 *Which brain answered:* nothing since the last restart.";
-  const pct = (n: number) => `${((n / messagesSeen) * 100).toFixed(0)}%`;
-  const byModel = [...replyPaths.entries()].sort((a, b) => b[1] - a[1]);
-  const modelTotal = byModel.reduce((s, [, n]) => s + n, 0);
-  const lines = byModel.map(([src, n]) => `  • ${src.replace(/[^\w\s]/g, "").trim()}: *${n}* (${pct(n)})`);
-  lines.push(`  • deterministic handlers: *${messagesSeen - modelTotal}* (${pct(messagesSeen - modelTotal)})`);
-  return `🧠 *Which brain answered* — ${messagesSeen} messages since restart:\n${lines.join("\n")}`;
+/**
+ * The founder-facing breakdown, over ALL traffic rather than since the last boot.
+ * Deterministic = everything no model path claimed.
+ */
+export async function replyPathLines(): Promise<string> {
+  try {
+    const rows = await db.select().from(schedulerState).where(like(schedulerState.key, "replypath:%"));
+    const seen = Number(rows.find(r => r.key === SEEN_KEY)?.value || 0);
+    if (!seen) return "🧠 *Which brain answered:* nothing recorded yet.";
+    const byModel = rows
+      .filter(r => r.key !== SEEN_KEY)
+      .map(r => [r.key.replace("replypath:", ""), Number(r.value || 0)] as [string, number])
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1]);
+    const pct = (n: number) => `${((n / seen) * 100).toFixed(0)}%`;
+    const modelTotal = byModel.reduce((t, [, n]) => t + n, 0);
+    const lines = byModel.map(([src, n]) => `  • ${src}: *${n}* (${pct(n)})`);
+    lines.push(`  • deterministic handlers: *${seen - modelTotal}* (${pct(seen - modelTotal)})`);
+    return `🧠 *Which brain answered* — ${seen} messages, all time:\n${lines.join("\n")}`;
+  } catch {
+    return "🧠 *Which brain answered:* counter unavailable.";
+  }
 }
 
 export type Severity = "critical" | "degraded" | "cosmetic";

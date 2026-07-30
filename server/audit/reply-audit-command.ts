@@ -86,7 +86,7 @@ export async function replyAuditCommand(message: string, _user?: unknown): Promi
   const jobs = jobHealthLines(assessJobs(snaps, Date.now(), Date.now() - schedulerStartedAt), snaps.length);
 
   if (s.byCode.length === 0) {
-    return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies.\n\n✅ No defects detected.\n\nThat means none of the ${Object.keys(LABELS).length} known failure patterns appear. It does not mean the coach is perfect — it means these specific bugs are not recurring.\n\n${guardStatsLine()}\n\n${replyPathLines()}\n\n${provenanceStatsLine()}\n\n${jobs}`;
+    return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies.\n\n✅ No defects detected.\n\nThat means none of the ${Object.keys(LABELS).length} known failure patterns appear. It does not mean the coach is perfect — it means these specific bugs are not recurring.\n\n${guardStatsLine()}\n\n${await replyPathLines()}\n\n${provenanceStatsLine()}\n\n${jobs}`;
   }
 
   const lines = s.byCode.map(r => {
@@ -104,5 +104,5 @@ export async function replyAuditCommand(message: string, _user?: unknown): Promi
     ? `\n\n*${stillLive ? "Still happening" : "Worst on record (not seen recently)"} — ${LABELS[worst.code] || worst.code}:*\nThey said: _"${ex.in || "(nothing)"}"_\nCoach said: _"${ex.out.replace(/\n/g, " ").slice(0, 160)}"_`
     : "";
 
-  return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies — *${s.defects}* carry a defect (${pct}%).\n\n${lines}${trend}${example}\n\n${guardStatsLine()}\n\n${replyPathLines()}\n\n${provenanceStatsLine()}\n\n${jobs}${wider}`;
+  return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies — *${s.defects}* carry a defect (${pct}%).\n\n${lines}${trend}${example}\n\n${guardStatsLine()}\n\n${await replyPathLines()}\n\n${provenanceStatsLine()}\n\n${jobs}${wider}`;
 }
