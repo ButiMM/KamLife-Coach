@@ -777,12 +777,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     return deferReply;
   }
 
-  // ---- MODEL BRAIN (coaching conversation, flag-gated) ----
-  // Inert unless MODEL_BRAIN=on. When on, a tool-calling model handles the CONVERSATION
-  // (progress, questions, motivation, workout/nutrition Q&A) reading one clean stats
-  // snapshot, and defers TRANSACTIONS (logging, billing) and any error back to the
-  // handlers below — it can only add a reply, never remove the deterministic fallback.
-  // See docs/architecture-bet.md.
   // TRANSACTION PREFLIGHT: a plain steps report must reach the deterministic logger
   // below. The prompt tells the brain to defer these, but on 2026-07-06 it answered
   // "Steps are 10000" from the snapshot (sounding perfectly right) and logged
@@ -1069,9 +1063,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     if (engineReply !== null) return tag(engineReply, "🧠 new engine");
   }
 
-  // The MODEL_BRAIN path was deleted on 2026-07-30 — see server/brain/coach-brain.ts. Two paths
-  // answer a client now: the meaning engine above, and the gpt-block below it.
-
+  // MODEL_BRAIN path deleted 2026-07-30. Two paths answer a client: the engine, then gpt-block.
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
   const gptReply = await handleGptBlock({ phone, message, m, user, intentPromise });
   if (shadowEnabled()) runShadowEval({ openai, user, phone, message, productionReply: gptReply });

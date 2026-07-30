@@ -17,7 +17,7 @@
  * keeps growing.
  */
 
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { chatHistory, users } from "../../shared/schema";
 import { buildClientSnapshot } from "../brain/client-snapshot";
@@ -113,20 +113,27 @@ export async function resumeEngineConfirm(ctx: {
 // wrong decision before flipping ENGINE_ACTIONS=on — no Railway logs needed.
 export async function recentShadowDecisions(limit = 15): Promise<string> {
   try {
-    const rows = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
+    // BOTH LABELS (2026-07-30): a REAL execution logs as ENGINE_ACTION, and ENGINE_ACTIONS has
+    // been `on`. Reading only the SHADOW label reported "nothing logged" while every genuine
+    // engine write sat in the table under the other name.
+    const rows = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, intent: chatHistory.intent })
       .from(chatHistory)
-      .where(eq(chatHistory.intent, "ENGINE_ACTION_SHADOW"))
+      .where(inArray(chatHistory.intent, ["ENGINE_ACTION", "ENGINE_ACTION_SHADOW"]))
       .orderBy(desc(chatHistory.createdAt))
       .limit(Math.max(5, Math.min(40, limit)));
     if (!rows.length) {
       return "🕶️ *Shadow* — no action-decisions logged yet.\n\nSet *ENGINE_ACTIONS=shadow* in Railway; once real messages come in, Coach K's would-be actions show here (dry-run — nothing is written).";
     }
+    const liveCount = rows.filter(r => r.intent === "ENGINE_ACTION").length;
     const lines = rows.map(r => {
       const msg = (r.messageIn || "").replace(/\s+/g, " ").slice(0, 42);
       const decision = (r.messageOut || "").replace(/\s*→\s*\w+(\(dup\))?\s*$/i, "").trim() || "(reply)";
-      return `• "${msg}" → *${decision}*`;
+      return `${r.intent === "ENGINE_ACTION" ? "🔴" : "🕶️"} "${msg}" → *${decision}*`;
     });
-    return `🕶️ *Shadow — last ${rows.length} action-decisions* (dry-run, nothing written)\n\n${lines.join("\n")}\n\n_These are the actions Coach K WOULD take on real messages. Scan for a wrong write; if it's clean, flip ENGINE_ACTIONS=on._`;
+    const head = liveCount > 0
+      ? `🔴 *Engine actions — last ${rows.length}* · ${liveCount} REALLY EXECUTED, ${rows.length - liveCount} dry-run`
+      : `🕶️ *Shadow — last ${rows.length} action-decisions* (dry-run, nothing written)`;
+    return `${head}\n\n${lines.join("\n")}\n\n${liveCount > 0 ? "_🔴 = a real write to this client's data. Scan for a wrong one._" : "_Dry-run. Scan for a wrong write, then flip ENGINE_ACTIONS=on._"}`;
   } catch (e) {
     return `Shadow read hit a snag: ${(e as any)?.message || e}`;
   }

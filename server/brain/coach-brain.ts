@@ -10,7 +10,6 @@
  * model call replaces the old normalizer, it does not add a call per transaction.
  *
  * SAFETY / "don't break anything":
- *  - Inert unless MODEL_BRAIN=on (returns before any model/DB call).
  *  - Fails OPEN: any error, a defer, an empty reply, or a guardrail decline returns null
  *    and the existing handlers run. It can only ADD a reply, never remove the fallback.
  *  - Runs AFTER the deterministic safety layer (crisis/medical/injection), so those are
@@ -213,8 +212,7 @@ export const TOOLS = [
 // thing — collapse them — and the whole of today was spent adding guards to the rails instead.
 //
 // runCoachBrain, its tool executor and its history reader are deleted: 326 lines. Nothing falls
-// through the hole, because the path BELOW it (gpt-block) is unconditional and catches everything
-// this one would have. It was inert without MODEL_BRAIN=on in any case.
+// through the hole — the path BELOW it (gpt-block) is unconditional and catches everything.
 //
 // What stays is the part that matters and was never the problem: BRAIN_SYSTEM — the founder's 27
 // coaching scenarios — which the meaning engine reads, and TOOLS, which the nightly drill battery

@@ -38,7 +38,7 @@ import { provenanceMode } from "./verifiers/response-gate";
 // That is the best technical point in ten reviews and it needs no permission to act on — but it
 // does need a number first, and NOT one I choose the threshold for. routes.ts can answer a
 // client from three places: the meaning engine (gated on ENGINE_LIVE), coach-brain (gated on
-// MODEL_BRAIN), and gpt-block at line 1089 with no gate at all, catching everything the first
+// and gpt-block with no gate at all, catching everything the first
 // two decline. Nobody knows what share of real messages that third path is carrying.
 //
 // If it is 2%, it can be replaced with "I didn't understand that — say it another way" tomorrow.
