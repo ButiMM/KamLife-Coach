@@ -8062,6 +8062,37 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ============================================================
+// THE CARD TITLE (2026-07-30 live). The founder's card read "tasty lunch of mince pasta! I'd
+// estimate that" — the coach's own sentence printed as the name of his food. And because
+// findDuplicateMealToday matches on NAME OVERLAP, a prose title can never match an earlier log,
+// so a photo of a meal he had ALREADY logged was logged a second time. One string, two defects.
+// ============================================================
+{
+  const { mealTitleFromReply } = await import("../server/macro-card-attach");
+
+  test("card title: THE LIVE ONE — prose becomes the food, not the sentence", () => {
+    assert.equal(mealTitleFromReply("Looks like a tasty lunch of mince pasta! I'd estimate that as macaroni with mince (~300g): roughly 600 kcal and 30g protein."), "mince pasta");
+  });
+  test("card title: a reply ending in ! or ? is still cut to one sentence", () => {
+    assert.equal(mealTitleFromReply("That looks like chicken and rice, about 550 kcal."), "chicken and rice");
+    assert.doesNotMatch(mealTitleFromReply("Looks like eggs on toast! Nicely done."), /Nicely done/);
+  });
+  test("card title: bulleted items still win over prose", () => {
+    assert.equal(mealTitleFromReply("Nicely done.\n• Bread: ~225 kcal\n• Eggs: ~150 kcal"), "Bread, Eggs");
+  });
+  test("card title: plain SA meals survive untouched", () => {
+    assert.equal(mealTitleFromReply("This is pap and wors."), "pap and wors");
+    assert.equal(mealTitleFromReply("Got it, samp and beans logged."), "samp and beans");
+  });
+  test("card title: never leaks the coach's flattery or its estimate", () => {
+    for (const s of ["Looks like a tasty lunch of mince pasta!", "That looks like chicken and rice, about 550 kcal."]) {
+      const t = mealTitleFromReply(s);
+      assert.doesNotMatch(t, /tasty|looks like|estimate|kcal|about \d/i, `leaked: ${t}`);
+    }
+  });
+}
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

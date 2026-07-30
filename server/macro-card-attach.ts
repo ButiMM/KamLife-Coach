@@ -85,11 +85,23 @@ export function mealTitleFromReply(text: string): string {
   }
   if (names.length) return names.join(", ").slice(0, 46);
   const firstLine = (text || "Meal").replace(/[*_`#]/g, "").split("\n").find(l => l.trim().length > 3) || "Meal";
+  // (2026-07-30 live.) This produced the card title "tasty lunch of mince pasta! I'd estimate that"
+  // — the coach's own sentence, printed as the name of the client's food. Two bugs, both here:
+  // the sentence cut split on ". " so a reply ending in "!" was never trimmed, and the lead-in
+  // list had "that's" but not "That looks like".
+  //
+  // It is worse than ugly. findDuplicateMealToday matches on NAME OVERLAP, so a prose title can
+  // never match an earlier log — which is why a photo of a meal he had ALREADY logged was logged
+  // a second time. One bad string, two defects.
   const cleaned = firstLine
-    .replace(/\.\s.*$/, "")                                                       // keep just the first sentence
+    .replace(/[.!?]\s.*$/, "").replace(/[.!?]+$/, "")                             // first sentence only
     .replace(/^\s*based on\b.*?\b(?:looks?|seems?)\b\s*(?:like|as though|to be)?\s*/i, "") // "Based on…, it looks like "
-    .replace(/^\s*(this is|that'?s|it'?s|here'?s|i (?:can )?see|looks like|got it)[,:]?\s*/i, "")
+    .replace(/^\s*(?:that|this|it|here)?\s*(?:is|'?s)?\s*(?:looks?|seems?)\s+(?:like|to be)\s*/i, "") // "That looks like ", "Looks like "
+    .replace(/^\s*(this is|that'?s|it'?s|here'?s|i (?:can )?see|got it)[,:]?\s*/i, "")
     .replace(/^(a|an|the)\s+/i, "")                                               // leading article
+    .replace(/^(?:tasty|lovely|nice|good|great|solid|hearty|delicious)\s+/i, "")   // flattery is not a food
+    .replace(/^(?:breakfast|lunch|dinner|supper|snack|meal|plate)\s+of\s+/i, "")   // "lunch of mince pasta"
+    .replace(/,?\s*(?:about|roughly|around|approx\w*|~)\s*\d.*$/i, "")            // ", about 550 kcal"
     .replace(/\blogged\b.*$/i, "").replace(/[,:]\s*$/, "").trim().slice(0, 46);
   return stripWrapQuotes(cleaned) || "Meal";
 }
