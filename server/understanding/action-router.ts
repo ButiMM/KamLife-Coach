@@ -30,10 +30,6 @@ const DETERMINISTIC_ACTION = new RegExp([
   "\\b(remove|delete|undo|scrap|erase)\\b.{0,30}\\b(meal|food|log|breakfast|lunch|dinner|supper|snack|entry|that|last)\\b",
   "double.?logg?ed", "logged (it |that )?(twice|again|double)", "\\bduplicate\\b", "\\breset today\\b",
   "\\bmy meals\\b", "what (did|have) i (eat|eaten|logg?ed)", "show me today'?s? (food|meals?)", "\\b(meal|food) log\\b",
-  // ── logging & reports (numbers that must be recorded exactly) ──
-  "\\b\\d{3,5}\\s*steps?\\b", "\\bsteps?\\b.*\\b\\d{3,5}\\b", "\\b\\d+(?:\\.\\d+)?\\s*(?:kg|kgs|kilos?)\\b",
-  "\\b\\d+(?:\\.\\d+)?\\s*(?:l|litres?|liters?|ml|glasses?|cups?)\\b.*water|water.*\\b\\d",
-  "\\blog\\b", "\\btrack\\b", "\\brecord\\b", "\\bweigh(?:ed|t)?\\s*in\\b",
   // ── data displays / lookups (need the real DB, which Coach K can't read) ──
   "\\bstats?\\b", "\\bmy progress\\b", "how am i doing", "\\bprogress\\b",
   // weight forecast / trajectory — deterministic energy math, never the LLM (Law 4)
@@ -62,13 +58,33 @@ const DETERMINISTIC_ACTION = new RegExp([
   "\\breactivate\\b", "\\brefund\\b", "\\bupgrade\\b", "\\bprice\\b", "\\bbilling\\b",
 ].join("|"), "i");
 
+// A REPORTED NUMBER — a log, and only a log. Split out of the list above on 2026-07-31
+// after this went live: Kam asked, by voice, "I used to do 10,000, now you've pulled it to
+// 6,000 — what's the rationale, how does it help my goal?" The old list matched
+// `steps.*\d{3,5}`, declared it deterministic, and the engine never saw it. A template
+// answered instead: "let me put it simply" followed by nothing simple, then "stand on a
+// scale". He asked WHY his target moved and was told to weigh himself.
+// A number a client REPORTS is a log. The same number inside a QUESTION is conversation,
+// and conversation is the coach's. The deterministic logger keeps its own question guard,
+// so a genuine log is still never lost.
+const REPORTED_NUMBER = new RegExp([
+  "\\b\\d{3,5}\\s*steps?\\b", "\\bsteps?\\b.*\\b\\d{3,5}\\b", "\\b\\d+(?:\\.\\d+)?\\s*(?:kg|kgs|kilos?)\\b",
+  "\\b\\d+(?:\\.\\d+)?\\s*(?:l|litres?|liters?|ml|glasses?|cups?)\\b.*water|water.*\\b\\d",
+  "\\blog\\b", "\\btrack\\b", "\\brecord\\b", "\\bweigh(?:ed|t)?\\s*in\\b",
+].join("|"), "i");
+
 /**
  * True → this message is an ACTION/command/data/transaction/safety/billing and must stay on
  * the deterministic pipeline (Coach K does not get it). False → it's conversation; Coach K
  * owns it. Biased toward "true" (keep deterministic) so a log is never lost to the engine.
  */
-export function mustStayDeterministic(message: string): boolean {
+export function mustStayDeterministic(message: string, isQuestion?: boolean): boolean {
   const s = message || "";
+  // A reported number is a log; the same number inside a question is conversation. `?` is the
+  // fallback signal — routes.ts passes the classifier's verdict, which is what catches a voice
+  // transcript that carries no punctuation at all.
+  const asking = isQuestion === true || /\?/.test(s);
+  if (REPORTED_NUMBER.test(s) && !asking) return true;
   // A COMEBACK question has one correct answer — a fixed physiological ramp — so the engine must
   // never take it (2026-07-28 live: it answered "would you like to focus on strength training, or
   // incorporate some running?" to a client who said "tell me how we are going to approach this").
