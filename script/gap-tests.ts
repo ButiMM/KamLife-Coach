@@ -29,7 +29,6 @@ const { scalePortionDescription, extractMealLabel, adjustFoodsForSegment } = awa
 const { parseLiftLog } = await import("../server/handlers/workout");
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
-const { getMachineSlug, buildMachineIdPrompt } = await import("../server/handlers/equipment-vision");
 const { scanForSAFoods } = await import("../server/handlers/food-scanner");
 
 let passed = 0;
@@ -1031,24 +1030,8 @@ test("workout viewer: walk-only user has no cards (null, not a crash)", () => {
   assert.equal(buildViewerCards({ trainingMode: "walk_only" }), null);
 });
 
-// MACHINE PHOTO + CAPTION (2026-07-10) — "Shoulder press" captioned on a weight-stack
-// photo was a lift being logged; the caption was ignored and vision guessed generic
-// tips. The caption must beat vision and prime the lift log — with NO vision call.
-const { coachGymMachineFromPhoto } = await import("../server/handlers/equipment-vision");
 
-test("machine photo: caption naming the exercise beats vision and primes a lift log", async () => {
-  // dummy openai that would crash if vision were called — proves the caption short-circuits
-  const dummy = { chat: { completions: { create: async () => { throw new Error("vision must not run"); } } } } as any;
-  const r = await coachGymMachineFromPhoto(dummy, LC_USER, "", "image/jpeg", "Shoulder press");
-  assert.ok(r !== null && /shoulder press/i.test(r!), `caption exercise must be recognised: ${r}`);
-  assert.ok(/weight and reps/i.test(r!), `must prime the lift log: ${r}`);
-});
 
-test("machine photo: non-machine caption falls through to vision (null when vision fails)", async () => {
-  const dummy = { chat: { completions: { create: async () => { throw new Error("offline"); } } } } as any;
-  const r = await coachGymMachineFromPhoto(dummy, LC_USER, "", "image/jpeg", "was late this morning");
-  assert.equal(r, null, "no machine words in caption → vision path → fails offline → null, never a crash");
-});
 
 // MEAL-REPEAT META-COMPLAINT GUARD (2026-07-10) — a voice complaint "I already told
 // you what's the plan for lunch. Have you forgotten? We are repeating the same things"
@@ -1275,37 +1258,8 @@ test("media: sticker (image/webp, no caption) → sticker detection message, no 
 });
 
 // ============================================================
-// MACHINE VISION (2026-07-12, Kam: "the vision doesn't recognize any machines, it
-// makes mistakes"). Lock the slug mapping's key distinctions and the discriminating
-// prompt, so the plate-loaded-row-called-a-hack-squat failure can't silently return.
-// ============================================================
-test("machine slug: the commonly-confused machines map distinctly", () => {
-  assert.equal(getMachineSlug("leg press machine"), "leg-press");
-  assert.equal(getMachineSlug("hack squat machine"), "hack-squat");
-  assert.equal(getMachineSlug("seated row machine"), "seated-row");
-  assert.equal(getMachineSlug("seated cable row"), "seated-row");
-  assert.equal(getMachineSlug("lat pulldown"), "lat-pulldown");
-  assert.equal(getMachineSlug("leg extension machine"), "leg-extension");
-  assert.equal(getMachineSlug("leg curl machine"), "leg-curl");
-});
 
-test("machine slug: a bare '… row' still lands on a row, not a fallback guess", () => {
-  assert.equal(getMachineSlug("chest supported row"), "seated-row");
-  assert.equal(getMachineSlug("t-bar row"), "seated-row");
-  assert.equal(getMachineSlug("unknown thing"), null);
-});
 
-test("machine id prompt: teaches the tells for the machines that get confused", () => {
-  const p = buildMachineIdPrompt().toLowerCase();
-  // The three that get mixed up must each carry a distinguishing feature.
-  assert.ok(p.includes("hack squat") && p.includes("shoulder pad"), "hack squat tell present");
-  assert.ok(p.includes("leg press") && p.includes("foot platform"), "leg press tell present");
-  assert.ok(p.includes("row") && p.includes("pull"), "row = pulling motion present");
-  // Never judge by the plates (the exact cause of the row/hack-squat mixup).
-  assert.ok(/never by the weight plates|not by the plates|never.*plates/i.test(p), "must warn against judging by plates");
-  // Must ask for a confidence so a shaky guess can be de-escalated.
-  assert.ok(p.includes("confidence") && p.includes("low"), "asks for a confidence signal");
-});
 
 // ============================================================
 // FOOD SCANNER PRECISION (2026-07-12, Kam: "go deep" on calorie precision). The scanner

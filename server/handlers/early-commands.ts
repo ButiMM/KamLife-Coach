@@ -1258,9 +1258,13 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     } catch (e) {
       console.warn("[CONFUSED] one-action failed:", (e as any)?.message || e);
     }
-    const lead = lastOut?.messageOut
-      ? `That's on me${firstName ? ", " + firstName : ""} — let me put it simply.`
-      : `No stress${firstName ? ", " + firstName : ""} — let me put it simply.`;
+    // A QUESTION IS NEVER CONFUSION (2026-07-31 live). Kam asked by voice why his step
+    // target moved from 10,000 to 6,000; this branch called it confusion, promised "let me
+    // put it simply", explained nothing, and told him to stand on a scale. Never answer a
+    // real question with the day's action. Defer — the engine is ahead of this now.
+    if (ctx.isQuestion || /\?/.test(message)) return null;
+    // And no preamble that promises a simplification the next line does not deliver.
+    const lead = firstName ? `${firstName} — here's the one that matters:` : `Here's the one that matters:`;
     // Only fall back to the menu if the one action could not be built at all. A sitemap is a
     // worse answer than a plain instruction, so it is the last resort, never the first.
     if (!action) {

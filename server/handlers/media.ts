@@ -43,7 +43,7 @@ import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { remainingInMeals, goalStatusLine } from "../education";
 import { firstActionCelebration } from "../activation";
 import { sendWhatsApp } from "../scheduler/shared";
-import { coachGymMachineFromPhoto, coachHomeEquipmentFromPhoto } from "./equipment-vision";
+import { coachHomeEquipmentFromPhoto } from "./equipment-vision";
 import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
 import { downscaleForVision } from "../image-downscale";
 import { checkVoiceLength } from "../media-limits";
@@ -315,9 +315,10 @@ export async function handleMediaMessage(ctx: {
               return equipReply;
             }
 
-            // Smart machine identification → matched against today's real plan (exact / substitute / not on the plan). The prescription comes from their real programme, so the photo reply can never contradict their workout text.
-            const equipReply = (await coachGymMachineFromPhoto(openai, user, base64, contentType, message))
-              || `Nice. Reply *workout* for today's session, or type *show me* followed by any exercise name for a form demo.`;
+            // Machine ID from a photo DELETED 2026-07-31: a vision call on every gym photo,
+            // and it answered a machine photo with a bodyweight workout. Their real programme
+            // already knows the machines — point at it instead of guessing from pixels.
+            const equipReply = `Nice. Reply *workout* for today's session, or type *show me* followed by any exercise name for a form demo.`;
             await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_ID");
             return equipReply;
           }
@@ -871,15 +872,9 @@ export async function handleMediaMessage(ctx: {
           console.log(`[FOOD_VISION] not_food photo but caption has food — logging from caption user=${user.id.slice(-6)}`);
           return handleMessage(phone, message);
         }
-        // Misclassified gym photo? The first classifier didn't route it to equipment and
-        // food vision says it isn't food — try machine coaching before giving up (gym machine never dead-ends on "send a photo of your plate").
         if (noCaption) {
-          const machineReply = await coachGymMachineFromPhoto(openai, user, base64, contentType);
-          if (machineReply) {
-            console.log(`[FOOD_VISION] not_food recovered as gym machine user=${user.id.slice(-6)}`);
-            await logChat(user.id, "[Equipment Photo]", machineReply, "EQUIPMENT_ID");
-            return machineReply;
-          }
+          await logChat(user.id, "[Equipment Photo]", "", "EQUIPMENT_ID");
+          return `That's not food. If it's gym kit, reply *workout* for today's session, or *show me* + an exercise name for a form demo.`;
         }
         return mealLabelMatch ? mealAsk : "That photo doesn't look like food to me. Send a photo of your plate or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
       }
@@ -1426,8 +1421,11 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       await logMediaSuccess(user.id, "voice", voiceTotalMs);
       await cleanupTmp();
       // Echo confirms transcription (never parrot a rant/profanity; trim at a WORD boundary).
-      const cut = transcribedText.length > 220 ? transcribedText.slice(0, 217) : "";
-      const echoTrimmed = cut ? cut.slice(0, Math.max(cut.lastIndexOf(" "), 150)) + " …" : transcribedText;
+      // SHORT receipt, not a transcript (2026-07-31 live: a 15-second note came back as 60
+      // bold words of the client's own speech before the answer — a wall, and the coach is
+      // told never to recite a client's message back). Enough to prove we heard it, no more.
+      const cut = transcribedText.length > 90 ? transcribedText.slice(0, 87) : "";
+      const echoTrimmed = cut ? cut.slice(0, Math.max(cut.lastIndexOf(" "), 60)) + " …" : transcribedText;
       const echoClean = echoTrimmed.replace(/\b(f+u+c+k\w*|s+h+i+t\w*|bull\s*shit|kak|poes|bitch\w*|bastard|dammit|idiot)\b/gi, "***");
       // NEVER DENY A VOICE NOTE WE ARE QUOTING (2026-07-29 live): handleMessage got only the
       // transcript, so a client complaining theirs was ignored reads as a failure report, and the
