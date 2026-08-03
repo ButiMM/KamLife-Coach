@@ -827,10 +827,16 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
       /process\.env\.ENGINE_LIVE !== "on" && isBereaved/,
       /process\.env\.ENGINE_LIVE !== "on" && looksLikeLowMobility\(m\)/,
       /process\.env\.ENGINE_LIVE !== "on" && looksLikeDefeatedNoResults\(m\)/,
-      /process\.env\.ENGINE_LIVE !== "on" && looksLikeDigestiveIssue\(m\)/,
       /process\.env\.ENGINE_LIVE !== "on" && looksLikeFoodDislike\(m\)/,
       /process\.env\.ENGINE_LIVE !== "on" && looksLikeOvertrainingPlan\(m\)/,
     ]) assert.match(src, guard, `judgment handler gated behind the brain: ${guard}`);
+    // MEDICAL SCOPE IS NOT A JUDGMENT CALL (2026-08-03). These two carry a doctor-referral
+    // boundary, so they must run for EVERY client, not only when the engine is off. They were
+    // gated for weeks, which meant a client asking whether weight loss fixes their blood
+    // pressure never got the honest timeline or the "medication stays with your doctor" line.
+    assert.doesNotMatch(src, /ENGINE_LIVE !== "on" && isHealthQuickFix/, "health scope must not be flag-gated");
+    assert.doesNotMatch(src, /ENGINE_LIVE !== "on" && looksLikeDigestiveIssue/, "digestive scope must not be flag-gated");
+    assert.match(src, /medication decisions stay with them/, "the doctor boundary is still in the reply");
     // The brain (live engine prompt) must actually carry that voice now, or gating regresses it.
     const brain = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8");
     assert.match(brain, /BEREAVEMENT \/ A DEATH/, "brain carries the bereavement masterclass");

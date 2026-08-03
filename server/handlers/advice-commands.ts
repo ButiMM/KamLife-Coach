@@ -268,7 +268,9 @@ export async function handleAdviceCommands(ctx: { message: string; m: string; us
   // ---- DIGESTIVE ISSUES — bloating / acid reflux / heartburn / indigestion (2026-07-12
   // onboarding screenshot). Care first, practical food guidance, and a defer-to-doctor
   // safety line. Detector (utils.looksLikeDigestiveIssue) excludes period + check-in noise.
-  if (process.env.ENGINE_LIVE !== "on" && looksLikeDigestiveIssue(m)) {
+  // NOT GATED — same reason: it carries the "check with your doctor, I work alongside
+  // them, never instead of them" line, which is a scope boundary, not coaching flavour.
+  if (looksLikeDigestiveIssue(m)) {
     const giReply = `Thanks for telling me${capName ? ", " + capName : ""} — that matters, and we can work with it. 💛\n\nBloating, reflux and heartburn are really common. What helps most people:\n• *Smaller meals, more often* — big meals overload the gut.\n• Eat *slower*, sit up, and don't lie down for 2–3 hours after eating.\n• Common triggers: fizzy drinks, very fatty/fried food, too much dairy, big late-night meals, eating in a rush.\n• Sip water *between* meals, not gulping during.\n\nI'll keep your meals lighter and easier on your stomach. If it's regular or you're already on tablets for it, please also check in with your doctor — I work *alongside* them, never instead of them.\n\nTell me when it hits worst and I'll help you spot the trigger.`;
     await logChat(user.id, message, giReply, "DIGESTIVE_ISSUE");
     return giReply;
@@ -377,7 +379,12 @@ export async function handleAdviceCommands(ctx: { message: string; m: string; us
     /\b(blood\s*pressure|bp|diabetes|diabetic|sugar\s+(?:is|levels?|problem)|cholesterol|knees?\s+(?:pain|hurt|problem))\b/i.test(m)
     && /\b(fix|cure|heal|sort(?:\s+out)?|go\s+away|reverse|help)\b/i.test(m)
     && /\b(weight|fat|slim|lose|losing|kg)\b/i.test(m);
-  if (process.env.ENGINE_LIVE !== "on" && isHealthQuickFix) {
+  // NOT GATED (2026-08-03). This carries a MEDICAL-SCOPE GUARANTEE — the honest timeline and
+  // "medication decisions stay with your doctor". It sat behind ENGINE_LIVE !== "on", which has
+  // been "on" in production for weeks, so it never ran: a client asking whether losing weight
+  // fixes their blood pressure got whatever the model improvised, with no guaranteed doctor
+  // referral. A safety guarantee must never depend on a feature flag being off.
+  if (isHealthQuickFix) {
     const healthReply = `${capName}, straight answer: *yes, losing weight genuinely improves this* — blood pressure, sugar control, joint load all respond to fat loss. Doctors see it every day.\n\nBut I owe you the honest timeline: the real improvements show up after roughly *5–10% of your body weight* comes off and stays off — that's a *12-week-plus steady project*, not a two-week fix. Anyone promising faster is selling something.\n\nWhat you'll notice early (weeks 1–3): better energy, better sleep, clothes easing. The clinic numbers follow the consistency.\n\nTwo rules while we work:\n• Keep seeing your doctor — medication decisions stay with them, always.\n• Our lane: food logged, steps walked, strength trained — every day, boring, effective.\n\nIf you're in for the real timeline, I'm in with you the whole way.`;
     await logChat(user.id, message, healthReply, "HEALTH_QUICK_FIX");
     return healthReply;
