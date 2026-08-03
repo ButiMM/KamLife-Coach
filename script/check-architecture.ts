@@ -36,7 +36,7 @@ const BUDGET = {
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
-  regexLiterals: 334,
+  regexLiterals: 330,
 };
 
 
@@ -102,7 +102,7 @@ const AT_RISK_BUDGET = 3;
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
   {
-    key: "regexLiterals", from: 333, to: 334, date: "2026-07-30",
+    key: "regexLiterals", from: 333, to: 330, date: "2026-07-30",
     why: "Provenance gate — the coach may not assert a fact it cannot trace to a stored row. "
       + "5 patterns to recognise the 3 claim kinds that have actually shipped as defects "
       + "(weight trend, meal eaten, calorie target). Tried first: merged 2 patterns into 1 with "

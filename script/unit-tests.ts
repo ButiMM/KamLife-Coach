@@ -742,15 +742,13 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(src, /tempEquipmentMode\.has\(phone\) \|\| \(user\.awaitingInputType \|\| ""\)\.startsWith\("holiday_equipment"\)/, "fires only when real holiday state exists to clear");
     assert.match(src, /startsWith\("holiday_equipment"\)\) && !skipBackToGym &&/, "holiday-state AND the safety guard both gate the trigger");
   });
-  test("holiday-equipment: JUDGMENT deferred to the brain, never hijacks a food/grocery message (the vacation shitshow, 2026-07-18)", () => {
+  test("holiday-equipment: the JUDGMENT branch is DELETED, not gated — the brain owns it (the vacation shitshow, 2026-07-18)", () => {
     const src = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
-    // The equipment-question template must NOT fire on a food/grocery context, must require a
-    // real training intent, and must stand down entirely when the brain is the live front-door.
-    assert.match(src, /isFoodOrGroceryContext/, "a food/grocery guard exists");
-    assert.match(src, /if \(isHolidayMention && isWorkoutRequestInMessage && !isFoodOrGroceryContext && process\.env\.ENGINE_LIVE !== "on"\)/, "food-guarded, training-gated, and deferred to the brain when live");
+    // It used to stand down behind ENGINE_LIVE. Standing down is a promise; deletion is a fact.
+    assert.ok(!/ENGINE_LIVE !== "on"/.test(src), "no engine-gated dead branch may remain here");
+    assert.ok(!/isHolidayMention && isWorkoutRequestInMessage/.test(src), "the equipment-question template is gone");
     const FOOD = /\b(grocer|grocery|shopping list|meal|meals|eat|eating|food|snack|breakfast|lunch|dinner|portion|calorie|protein|recipe|cook|diet|fridge|cupboard|pantry)\b/i;
     assert.ok(FOOD.test("I need you to adjust my grocery list while I'm on vacation"), "the exact live miss is a food context");
-    assert.ok(FOOD.test("what should I be eating on holiday"), "eating-on-holiday is a food context");
     assert.ok(!FOOD.test("gym is closed this week, what workout can I do"), "a pure training-away message is not a food context");
   });
 
@@ -905,9 +903,12 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   test("shadow-retire sweep: the last ungated judgment handlers now defer to the brain when live", () => {
     const lc = readFileSync(join("server", "handlers", "lifecycle.ts"), "utf-8");
     // Open coaching advice ("what should I focus on next week") — the brain's job when live.
-    assert.match(lc, /process\.env\.ENGINE_LIVE !== "on" && \/\/ JUDGMENT: the brain owns open coaching advice/, "COACHING_ADVICE is gated");
-    // Stress/overwhelm — emotional, the brain owns it (SADAG crisis net still runs first in the pipeline).
-    assert.match(lc, /if \(process\.env\.ENGINE_LIVE !== "on" && isStressMsg\)/, "STRESS is gated");
+    // DELETED, not gated (2026-08-03). These branches were dead in production for weeks —
+    // ENGINE_LIVE has been "on", so the brain already owned open coaching advice and stress.
+    // Dead code that only runs on the revert path is weight, not a safety net.
+    assert.ok(!/ENGINE_LIVE !== "on"/.test(lc), "lifecycle carries no engine-gated dead branch");
+    const fc = readFileSync(join("server", "handlers", "food-context.ts"), "utf-8");
+    assert.ok(!/ENGINE_LIVE !== "on"/.test(fc), "food-context carries no engine-gated dead branch");
   });
   test("code-level intent bouncer: strategy/emotional turns withhold action tools; logs keep them (review Q1)", async () => {
     const { isStrategyOrEmotional } = await import("../server/understanding/actions");

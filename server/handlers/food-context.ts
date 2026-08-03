@@ -648,24 +648,6 @@ export async function handleFoodContext(ctx: {
 
   // ---- BRAAI / SOCIAL EVENT GUIDE ----
   const hasSocialEventKeyword = /\b(braai|braaing|braaiing|party|wedding|funeral|umemulo|umkhosi|stokvel|church.*food|family.*gathering|get.?together|celebration)\b/i.test(m);
-  if (process.env.ENGINE_LIVE !== "on" && hasSocialEventKeyword && !isQuestion && !isFrustration) {
-    const goal = user.goalType || "fat_loss";
-    const name = user.name?.split(" ")[0] || "";
-    const isBraai = /braai/i.test(m);
-
-    let eventReply = "";
-    if (isBraai) {
-      eventReply = goal === "muscle_gain"
-        ? `*Braai Protocol — Muscle Mode* 🔥\n\n• Chicken pieces: BEST — 28g protein each, skin off after cooking\n• Wors: 1-2 rolls (20-30g protein) ✅ Keep it\n• Boerewors chops: high fat but solid protein — 1 portion\n• Pap + sous: fine — keep butter small\n• Potato salad: small portion or skip\n\n*Your plate:* 3 chicken pieces + 1 wors + small pap = ~750 kcal, ~55g protein. Sorted.\n\nDrink: Water first. Max 2 beers — after food, not before.`
-        : `*Braai Protocol — Fat Loss Mode* 🔥\n\n• Chicken pieces: BEST option — remove skin, 165 kcal, 28g protein each\n• Wors: 1 roll max — not every braai\n• Pap: small portion, no extra butter\n• Potato salad, coleslaw: skip — not worth the calories\n• Braai broodjie: 1 is fine. 3 is not.\n\n*Your plate:* 2-3 chicken pieces + small pap + salad = ~550 kcal, ~45g protein. Win.\n\n⚠️ Beers are the silent killer at braais — 1 Castle = 150 kcal, nobody has just one. Water between drinks minimum.`;
-    } else {
-      eventReply = `*Social Event Strategy* 🎉\n\n${name ? name + ", " : ""}Go. Enjoy. Do not avoid social events because of your plan.\n\n*Before:*\n• Eat a high-protein meal before you go — 2 eggs, chicken, pilchards\n• This kills hunger so you are not eating everything in sight\n\n*During:*\n• Plate protein FIRST — chicken, meat, fish\n• One plate, not three. Serve yourself once.\n• Water between drinks. Every time.\n• ${goal === "fat_loss" ? "Skip the starch if you can — focus on meat and salad" : "Eat the starch — you need the fuel. Just one serving."}\n\n*After:*\n• Log what you ate tomorrow morning — I will be here\n• No guilt. One event does not undo weeks of work\n• Back on plan the next meal. Not Monday. The next meal.`;
-    }
-
-    eventReply += `\n\n_Send me what you ate tomorrow morning — no judgment, just logging. I will help you get back on track._`;
-    await logChat(user.id, message, eventReply, "SOCIAL_EVENT");
-    return eventReply;
-  }
 
   // ---- EATING OUT GUIDE — SA fast food and restaurant coaching ----
   const eatingOutPlace =

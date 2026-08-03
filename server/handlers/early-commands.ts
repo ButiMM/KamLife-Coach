@@ -314,14 +314,6 @@ export async function handleEarlyCommands(ctx: {
   // messages (2026-07-18: "adjust my groceries on vacation" → a workout). Fallback: no food context, real training intent.
   const isWorkoutRequestInMessage = /\b(workout|training|session|programme|program|exercise|gym|train|send me|my workout|today)\b/i.test(m);
   const isFoodOrGroceryContext = /\b(grocer|grocery|shopping list|meal|meals|eat|eating|food|snack|breakfast|lunch|dinner|portion|calorie|protein|recipe|cook|diet|fridge|cupboard|pantry)\b/i.test(m);
-  if (isHolidayMention && isWorkoutRequestInMessage && !isFoodOrGroceryContext && process.env.ENGINE_LIVE !== "on") {
-    awaitingEquipmentAnswer.set(phone, true);
-    user.awaitingInputType = "equipment";
-    await db.update(users).set({ awaitingInputType: "equipment" }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] set equipment failed:", e));
-    const equipQ = `${firstName ? firstName + ", w" : "W"}hat do you have access to where you are? Reply:\n\n*1 — gym* — full machines and cables\n*2 — dumbbells* — dumbbells only\n*3 — nothing* — no equipment, bodyweight only`;
-    await logChat(user.id, message, equipQ, "EQUIPMENT_QUESTION");
-    return equipQ;
-  }
 
   // ---- PERMANENT EQUIPMENT UPDATE ----
   // When user tells us they've changed their setup (joined a gym, bought dumbbells, etc.)

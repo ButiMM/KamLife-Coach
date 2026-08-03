@@ -1104,87 +1104,8 @@ export async function handleLifecycle(ctx: {
   // Days 31-40: this is the SECOND "how am I doing" handler (the duplicate that caused the
   // whack-a-mole — redirecting progress.ts alone didn't fix it because this one grabbed it
   // next, pushing "complete 4 more workouts" at a sick client). Gated to the engine too.
-  if (process.env.ENGINE_LIVE !== "on" && /\b(am i on track|on track\??|how am i doing|progress check|my status|status check|how have i been|weekly status|how.?s my progress|how is my progress|tell me.*progress|my progress on kamlife|kamlife progress|progress.*this week|check my progress|show.*progress|any progress|how far am i)\b/i.test(m)) {
-    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-    const todayStart = sastDayStart();
-    const [stepLogsWeek, workoutLogsWeek, weightLogsRecent, foodLogsToday] = await Promise.all([
-      db.select().from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
-      db.select({ id: workoutLogs.id }).from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
-      db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, sevenDaysAgo))).orderBy(desc(weightLogs.loggedAt)).limit(3),
-      db.select({ id: chatHistory.id }).from(chatHistory).where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart))),
-    ]);
-    const avgSteps = stepLogsWeek.length > 0 ? Math.round(stepLogsWeek.reduce((s: number, l: any) => s + l.steps, 0) / stepLogsWeek.length) : 0;
-    const stepsTarget = user.stepsTarget || 8500;
-    const workoutsDone = workoutLogsWeek.length;
-    const workoutsTarget = user.trainingDaysPerWeek || 3;
-    const stepsOk = avgSteps >= stepsTarget * 0.9;
-    const workoutsOk = workoutsDone >= workoutsTarget;
-    let weightNote = "";
-    if (weightLogsRecent.length >= 2) {
-      const diff = parseFloat(String(weightLogsRecent[0].weight)) - parseFloat(String(weightLogsRecent[weightLogsRecent.length - 1].weight));
-      if (Math.abs(diff) < 0.2) weightNote = "Weight holding steady.";
-      else if (diff < 0) weightNote = `Weight down ${Math.abs(diff).toFixed(1)}kg this week.`;
-      else weightNote = `Weight up ${diff.toFixed(1)}kg this week.`;
-    } else if (weightLogsRecent.length === 0) {
-      weightNote = "No weight logged this week — log your weight.";
-    }
-    const allGood = stepsOk && workoutsOk;
-    const bothBad = !stepsOk && !workoutsOk;
-    const verdict = allGood ? "ON TRACK" : bothBad ? "NEEDS ATTENTION" : "CLOSE";
-    const action = allGood
-      ? "Keep this up for the rest of the week."
-      : !workoutsOk
-      ? `Complete ${workoutsTarget - workoutsDone} more workout${workoutsTarget - workoutsDone > 1 ? "s" : ""} this week.`
-      : `Get your daily steps above ${stepsTarget.toLocaleString()}.`;
-    const statusReply = `*7-Day Status — ${user.name || "you"}*\n\nWorkouts: ${workoutsDone}/${workoutsTarget} this week\nAvg steps: ${avgSteps.toLocaleString()} / ${stepsTarget.toLocaleString()} target\nFood logged today: ${foodLogsToday.length} ${foodLogsToday.length === 1 ? "meal" : "meals"}${weightNote ? `\n${weightNote}` : ""}\n\n*Verdict: ${verdict}*\n\n${action}`;
-    await logChat(user.id, message, statusReply, "STATUS_CHECK");
-    return statusReply;
-  }
 
   // ---- "WHAT SHOULD I DO NEXT WEEK / COACHING ADVICE?" — no GPT, data-driven ----
-  if (
-    process.env.ENGINE_LIVE !== "on" && // JUDGMENT: the brain owns open coaching advice when live
-    /\b(what should i do (next week|this week|differently|better)|any (suggestions?|advice|tips?) (for next week|for this week|going forward|to improve|coach)|what do you (think|recommend|suggest) (coach|k|next week|this week)?|coach.?k.{0,15}(what|how|should|suggest|recommend|advice|think)|how can i (do better|improve|get better|be better|be more consistent)|what.?s? (my |the )?(focus|priority|plan) (for |this |next )(week|week\?)?|what should i focus on|where should i focus|help me (plan|improve|get better|do better)|what would you (suggest|recommend)|what.?s? (next|the plan|my plan)|give me (advice|a suggestion|a tip)|any (tips?|pointers?) for me)\b/i.test(m) &&
-    !/\b(eat|food|meal|protein|calories|gym|exercise|workout|steps|water|weight|sleep)\b/i.test(m)
-  ) {
-    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-    const [recentW, recentS, recentWt] = await Promise.all([
-      db.select({ id: workoutLogs.id }).from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
-      db.select().from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
-      db.select({ weight: weightLogs.weight }).from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(1),
-    ]);
-    const fn = (user.name || "").split(" ")[0];
-    const namePart = fn ? ` ${fn}` : "";
-    const sessions = recentW.length;
-    const sessionsTarget = user.trainingDaysPerWeek || 3;
-    const avgSteps = recentS.length > 0 ? Math.round(recentS.reduce((s: number, l: any) => s + l.steps, 0) / recentS.length) : 0;
-    const stepsTarget = user.stepsTarget || 8500;
-    const hasWeight = recentWt.length > 0;
-    const todayStr = sastToday(); // must match how todayCaloriesDate is stored (YYYY-MM-DD); en-ZA toLocaleDateString gives DD-MM-YYYY and never matched
-    const todayProtein = user.todayCaloriesDate === todayStr ? (user.todayProteinG || 0) : 0;
-    const todayCalsForAdvice = user.todayCaloriesDate === todayStr ? (user.todayCalories || 0) : 0;
-    const protTarget = user.proteinTarget || 120;
-    type Gap = { action: string };
-    const gaps: Gap[] = [];
-    if (sessions < sessionsTarget) gaps.push({ action: `Complete your ${sessionsTarget} training sessions this week — you have done ${sessions}. Even a 30-minute session counts.` });
-    if (avgSteps > 0 && avgSteps < stepsTarget * 0.85) gaps.push({ action: `Get your steps up to ${stepsTarget.toLocaleString()}/day — you are averaging ${avgSteps.toLocaleString()}. Park further, walk at lunch, take the stairs.` });
-    if (!hasWeight) gaps.push({ action: `Log your weight. Step on the scale tomorrow morning (after bathroom, before eating) and send me the number. I need data to coach you.` });
-    if (todayProtein > 0 && todayProtein < protTarget * 0.65) {
-      const calCeiling = (user.calorieTarget || 0) > 0 && (todayCalsForAdvice - (user.calorieTarget || 0)) >= 100;
-      gaps.push({ action: calCeiling
-        ? `Protein was ${protTarget - todayProtein}g short today — carry it into tomorrow's first meal. Aim for ${protTarget}g tomorrow.`
-        : `Hit your ${protTarget}g protein target — you are only at ${todayProtein}g today. Eggs, chicken, pilchards, or a protein shake before bed.` });
-    }
-    let adviceReply: string;
-    if (gaps.length === 0) {
-      adviceReply = `${fn ? fn + ", you" : "You"} are doing the work — sessions, steps, and data are all consistent.\n\n*Next gear:* Pick one exercise this week and add weight or reps to what you did last time. That is progressive overload. That is where results compound.\n\nKeep it simple. Same programme, slightly harder. Update me after your next session.`;
-    } else {
-      const [top, second] = gaps;
-      adviceReply = `*Top priority for next week${namePart}:*\n\n${top.action}${second ? `\n\n*Also fix:* ${second.action}` : ""}\n\nDo not change five things at once. Fix the top one first. Everything else stays the same.`;
-    }
-    await logChat(user.id, message, adviceReply, "COACHING_ADVICE");
-    return adviceReply;
-  }
 
   // ---- FOOD DIARY SUMMARY — "what did I eat today?" / "today's calories?" — no GPT ----
   if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meal log|meal logs|today.?s?\s*meal\s*logs?|meals today|melas today|melas|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
@@ -1432,29 +1353,12 @@ export async function handleLifecycle(ctx: {
     /\b(craving|cravings|craving sugar|craving chocolate|craving sweets|craving junk|want.*chocolate|want.*sweets|want.*chips|want.*biscuits|want.*cake|want.*ice cream|want.*pizza|dying for.*chocolate|dying for.*sweets|need.*chocolate|need.*sugar|sugar craving|sweet tooth|can.?t stop craving|want to eat junk|want.*takeaway|want.*kfc|want.*mcdonalds|want.*burger king)\b/i.test(m) &&
     !/\b(i.?m hungry|starving)\b/i.test(m); // Don't double-fire with hunger handler
 
-  if (process.env.ENGINE_LIVE !== "on" && isCravingMsg) {
-    const name = commaName(user);
-    const goal = user.goalType || "fat_loss";
-    const isSugar = /\b(sugar|sweet|chocolate|sweets|biscuit|cake|ice cream)\b/i.test(m);
-    const cravingReply = isSugar
-      ? `Sugar cravings are not weakness${name} — they are a signal.\n\n*Most common causes:*\n1. *Low protein* — when protein is under target, your body craves fast energy (sugar). Fix: eat protein NOW — eggs, biltong, chicken, cottage cheese.\n2. *Skipped meals* — blood sugar crashed. Your body wants the fastest fix. Fix: eat a proper meal, do not try to resist on an empty stomach.\n3. *Poor sleep* — under 7 hours spikes ghrelin and makes you crave carbs. Fix: tonight, bed by 10pm.\n4. *Habit* — if you always eat sweets at 3pm, your body expects it. Fix: replace with Greek yoghurt and peanut butter — sweet, filling, high protein.\n\n*The 10-minute rule:* When the craving hits, eat protein first and wait 10 minutes. Most cravings pass. If it is still there after 10 min — eat a small portion of what you want. No guilt. Log it. Move on.`
-      : `Craving junk food${name}? That is normal — especially when you are eating clean consistently.\n\n*The move:*\n1. Eat protein first — RIGHT NOW. Eggs, biltong, chicken. A full stomach craves nothing.\n2. If you still want it after — have a small portion. One slice, not a whole pizza. One serving, not the bag.\n3. Log it honestly. One takeaway meal is 800-1200 kcal. Your daily target is ${user.calorieTarget || 1800} kcal. Adjust the rest of the day.\n\nBanning food creates binges. Managing portions creates results.`;
-    await logChat(user.id, message, cravingReply, "CRAVINGS");
-    return cravingReply;
-  }
 
   // ---- SOCIAL EVENT / PARTY / WEDDING / DECEMBER HANDLER ----
   const isSocialEvent =
     /\b(party|parties|wedding|matric dance|year.?end|december|festive|christmas|new year|birthday.*party|birthday.*eat|function|work function|office party|team building|dinner out|dinner party|family gathering|family dinner|lobola|umemulo|funeral.*food|after tears|stokvel|meat day|shisa nyama)\b/i.test(m) &&
     /\b(eat|eating|what should|how do i|tips|going to|this weekend|tonight|tomorrow|coming up|worried|nervous|scared|what do i do)\b/i.test(m);
 
-  if (process.env.ENGINE_LIVE !== "on" && isSocialEvent) {
-    const name = commaName(user);
-    const goal = user.goalType || "fat_loss";
-    const socialReply = `Social events are part of life${name} — not an excuse to abandon the programme and not a reason to feel guilty.\n\n*Before the event:*\n• Eat a high-protein meal 2 hours before — eggs, chicken, anything filling. Arriving hungry is how you overeat.\n• Decide in advance: "I will have one plate" — not a restriction, a plan.\n\n*At the event:*\n• Protein first on the plate — meat, chicken, fish. Then vegetables. Then carbs/starch last.\n• One plate, not three. Enjoy it fully — no guilt.\n• Alcohol: alternate with water. Every second drink is water.\n\n*After the event:*\n• Do NOT skip meals the next day to "make up for it". That starts a restrict-binge cycle.\n• Normal meals tomorrow. Hit your protein. Train if scheduled.\n• One event does not break a programme. Seven events with no plan in between does.\n\n${goal === "fat_loss" ? "Your deficit runs across weeks, not one meal. Enjoy it and get back on track." : "Extra calories at an event are fuel — use them in your next session."}`;
-    await logChat(user.id, message, socialReply, "SOCIAL_EVENT");
-    return socialReply;
-  }
 
   // ---- UNDER-EATING WARNING — client logs very low calories ----
   const todayCalCheck = (user.todayCaloriesDate === sastToday()) ? (user.todayCalories || 0) : 0; // toISOString() is UTC — drifts from SAST 00:00–02:00; sastToday() matches stored format
@@ -1528,13 +1432,6 @@ export async function handleLifecycle(ctx: {
   const isStressMsg =
     /\b(i.?m stressed|so stressed|very stressed|feeling stressed|work stress|life stress|stressed out|anxious|anxiety|overwhelmed|too much going on|can.?t cope|everything is too much|mental health|burnout|burned out|burnt out|exhausted mentally|emotionally drained)\b/i.test(m);
 
-  if (process.env.ENGINE_LIVE !== "on" && isStressMsg) { // JUDGMENT/EMOTIONAL: the brain owns this when live (its low-mood guard keeps the SADAG net)
-    const name = spaceName(user);
-    const goal = user.goalType || "fat_loss";
-    const stressReply = `Stress is not just a feeling${name} — it is a physical event that directly blocks fat loss.\n\nWhen you are chronically stressed, cortisol stays elevated. Cortisol tells your body to store fat, especially belly fat, break down muscle, spike hunger, and crave carbs and sugar. This is biology, not weakness.\n\n*What to do right now:*\n1. *Walk* — 20 minutes outside. Not for fitness. To drop cortisol. It works within minutes.\n2. *Eat your protein* — stress eats muscle. Protect it. Eggs, chicken, or tinned tuna right now.\n3. *Sleep tonight* — cortisol from one bad night undoes two good training days. Bed by 10pm.\n4. *Training still counts* — a 30-minute session is better than nothing. Lower weight, same movement.\n\n${goal === "fat_loss" ? "Stress is the hidden reason most people plateau. Fix the stress and the fat loss often restarts on its own." : "Cortisol and muscle gain are opposites — manage the stress or the gains slow down."}\n\nWhat is actually causing the stress right now?`;
-    await logChat(user.id, message, stressReply, "STRESS");
-    return stressReply;
-  }
 
   // ---- TIRED / LOW ENERGY HANDLER ----
   const isTiredMsg =
@@ -1641,59 +1538,12 @@ export async function handleLifecycle(ctx: {
   const isWorkoutNutrition =
     /\b(what.*eat.*(?:before|pre).?(?:gym|workout|training|session)|(?:before|pre).?(?:gym|workout|training).*(?:eat|food|meal|snack)|pre.?workout.*(?:food|meal|eat|nutrition)|what.*eat.*after.*(?:gym|workout|training)|post.?workout.*(?:food|meal|eat|nutrition)|after.*gym.*eat|eat.*after.*training)\b/i.test(m);
 
-  if (process.env.ENGINE_LIVE !== "on" && isWorkoutNutrition) {
-    const name = spaceName(user);
-    const goal = user.goalType || "fat_loss";
-    const isPre = /\b(before|pre.?workout|pre.?gym)\b/i.test(m);
-    const isPost = /\b(after|post.?workout|post.?gym)\b/i.test(m);
-
-    if (isPre && !isPost) {
-      const preReply = `Pre-workout nutrition${name}:\n\n*60-90 minutes before training:*\n🍠 *Carbs* — fuel the session. Sweet potato, oats, brown rice, banana. Enough to fill your tank.\n🥩 *Protein* — 20-30g to protect muscle. Eggs, chicken, or a protein shake.\n💧 *Water* — 500ml before you start. Dehydration drops performance by 10-20%.\n\n*SA quick options:*\n• 2 eggs + 1 slice brown bread — 280 kcal, 18g protein ✅\n• Oats + milk — 320 kcal, 12g protein ✅\n• Sweet potato + chicken — 400 kcal, 30g protein ✅\n\n*Avoid:* Fatty foods (slows digestion), heavy meals within 45 minutes, training completely fasted if strength is the goal.\n\n${goal === "fat_loss" ? "For fat loss: eat light but eat. A small pre-workout meal does NOT block fat burning." : "For muscle gain: bigger pre-workout meal, more carbs — your muscles need the fuel."}`;
-      await logChat(user.id, message, preReply, "PRE_WORKOUT_NUTRITION");
-      return preReply;
-    }
-
-    const postReply = `Post-workout nutrition${name}:\n\n*Within 60 minutes after training:*\n🥩 *Protein first* — 30-40g to start muscle repair. This is the most important window.\n🍠 *Carbs* — replenish glycogen. Sweet potato, rice, oats, fruit.\n💧 *Water* — replace what you sweated out.\n\n*SA quick options:*\n• Pilchards + sweet potato — 380 kcal, 35g protein ✅\n• 3 eggs + pap — 420 kcal, 28g protein ✅\n• Chicken + rice — 500 kcal, 40g protein ✅\n• Protein shake + banana (if no time) — 300 kcal, 30g protein ✅\n\n*The rule:* Protein is non-negotiable post-workout. Skip the carbs if you must — never skip the protein.\n\n${goal === "fat_loss" ? "Post-workout is not the time to restrict — eat your protein. The rest of the day you can be in a deficit." : "Post-workout is the most important meal of the day for muscle gain. Eat big here."}`;
-    await logChat(user.id, message, postReply, "POST_WORKOUT_NUTRITION");
-    return postReply;
-  }
 
   // ---- MEAL-SPECIFIC PLATE METHOD ("what to eat for breakfast/lunch/dinner") ----
   const isMealSpecificQ =
     /\b(what.*(?:eat|have|make|cook).*(?:for|at)?\s*(?:breakfast|lunch|dinner|supper|snack)|(?:breakfast|lunch|dinner|supper|snack).*(?:ideas?|option|suggestion|help|advice)|what.*(?:breakfast|lunch|dinner|supper)|good.*(?:breakfast|lunch|dinner|supper))\b/i.test(m) &&
     !/\b(i had|i ate|i have|just had|just ate)\b/i.test(m); // exclude food logs
 
-  if (process.env.ENGINE_LIVE !== "on" && isMealSpecificQ) {
-    const goal = user.goalType || "fat_loss";
-    const budget = user.weeklyFoodBudget || "100_300";
-    const name = spaceName(user);
-    const isMealBreakfast = /breakfast/i.test(m);
-    const isMealLunch = /lunch/i.test(m);
-    const isMealDinner = /dinner|supper/i.test(m);
-    const isSnack = /snack/i.test(m);
-
-    let mealReply = "";
-    if (isMealBreakfast) {
-      mealReply = `Breakfast${name} — the meal that sets your protein baseline for the day:\n\n${budget === "under_100"
-        ? "• *2 boiled eggs + pap* — 310 kcal, 18g protein. Cheapest solid breakfast in SA.\n• *Oats + water + peanut butter* — 350 kcal, 12g protein. R5 a bowl.\n• *3 eggs scrambled* — 250 kcal, 21g protein. Nothing beats it."
-        : "• *3 eggs + 1 slice brown bread* — 320 kcal, 22g protein\n• *Oats + low fat milk + boiled egg* — 380 kcal, 20g protein\n• *Greek yoghurt + banana + handful nuts* — 350 kcal, 18g protein"}\n\n${goal === "fat_loss" ? "Protein first at breakfast kills hunger for 4 hours. No protein = cravings by 10am." : "Bigger breakfast for muscle gain — add an extra egg or a scoop of protein."}`;
-    } else if (isMealLunch) {
-      mealReply = `Lunch${name} — your biggest protein hit of the day:\n\n${budget === "under_100"
-        ? "• *Pilchards + pap + cabbage* — 420 kcal, 30g protein. R15 total.\n• *2 eggs + pap + spinach* — 340 kcal, 18g protein. R6 total.\n• *Tinned tuna + bread + tomato* — 360 kcal, 26g protein. R18 total."
-        : "• *Chicken breast + sweet potato + salad* — 480 kcal, 38g protein ✅ Best option\n• *Tuna + brown rice + cucumber* — 400 kcal, 32g protein\n• *Mince + pap + morogo* — 500 kcal, 35g protein"}\n\n${goal === "fat_loss" ? "Make lunch your biggest meal — front-loading calories earlier means less hunger at night." : "This is where muscle gain happens — eat big and get your protein in."}`;
-    } else if (isMealDinner) {
-      mealReply = `Dinner${name}:\n\n${goal === "fat_loss"
-        ? "• Smaller carb portion than lunch — protein and vegetables carry the meal\n• *Chicken + cabbage + tomato* — 350 kcal, 32g protein ✅\n• *Hake + spinach* — 280 kcal, 35g protein ✅\n• *Pilchards + salad* — 250 kcal, 26g protein ✅\n\nAfter 6pm: cut carbs in half, double the vegetables. Not zero carbs — half."
-        : "• *Beef mince + pap + chakalaka* — 600 kcal, 40g protein\n• *Chicken thighs + rice + broccoli* — 580 kcal, 42g protein\n• Keep carbs in — your muscles recover overnight and need glycogen."}\n\nProtein at every dinner, every night. That is non-negotiable.`;
-    } else if (isSnack) {
-      mealReply = `Snacks${name} — only if you have calories left:\n\n✅ *High-protein snacks:*\n• Biltong 30g — 90 kcal, 18g protein\n• Boiled egg — 80 kcal, 6g protein\n• Cottage cheese ½ cup — 100 kcal, 14g protein\n• Pilchards half tin — 100 kcal, 12g protein\n\n❌ *Avoid:* Chips, biscuits, chocolate, rusks — calories with almost zero protein.\n\n${goal === "fat_loss" ? "If you are hungry between meals, your previous meal did not have enough protein. Fix the meal — do not add snacks." : "Between meals: protein shake or Greek yoghurt to keep amino acids flowing."}`;
-    }
-
-    if (mealReply) {
-      await logChat(user.id, message, mealReply, "MEAL_ADVICE");
-      return mealReply;
-    }
-  }
 
   // ============================================================
   // MYTH BUSTERS — hardcoded, zero GPT cost
@@ -1705,76 +1555,35 @@ export async function handleLifecycle(ctx: {
     /\b(belly fat exercise|lose belly fat|burn belly fat|target belly|target.*stomach|stomach exercise|lose.*stomach|tummy.*exercise|waist.*exercise|ab.*fat|fat.*ab|six pack.*fat|lose.*tummy|shrink.*belly|reduce.*waist|flatten.*stomach|exercises.*for.*belly|exercises.*for.*stomach)\b/i.test(m) ||
     (/\b(ab|abs|sit.?up|crunch|plank)\b/i.test(m) && /\b(lose|burn|fat|belly|stomach|weight)\b/i.test(m));
 
-  if (process.env.ENGINE_LIVE !== "on" && isSpotReductionMsg) {
-    const goal = user.goalType || "fat_loss";
-    const name = commaName(user);
-    const spotReply = `*The truth about belly fat${name}:*\n\nYou cannot choose where your body burns fat. Spot reduction is not real — no exercise burns fat from one specific area. Not crunches, not planks, not waist trainers, not anything.\n\nBelly fat is the LAST place most people lose it and the first place they gain it. That is genetics, not a technique problem.\n\n*What actually works:*\n• Calorie deficit — eat less than you burn\n• Strength training — builds muscle that burns fat 24/7\n• Steps — 8,500+ daily keeps your metabolism active\n• Sleep — poor sleep spikes cortisol which stores fat around the belly\n\nSit-ups build ab muscles. They do not burn belly fat. You need to lose fat OVER the abs — that happens through your diet and overall activity, not through any specific exercise.\n\n${goal === "fat_loss" ? `Your calorie target is ${user.calorieTarget || 1800} kcal/day. Hit that consistently for 8 weeks and the belly changes — no special exercise needed.` : `Keep training and eating at your targets — the belly responds when the overall programme is consistent.`}`;
-    await logChat(user.id, message, spotReply, "MYTH_BUSTER");
-    return spotReply;
-  }
 
   // ---- TIKTOK TEAS / DETOX / SLIMMING TEA MYTH ----
   const isTeaMythMsg =
     /\b(slimming tea|weight loss tea|detox tea|flat tummy tea|belly fat tea|green tea.*weight|teatox|skinny tea|herbal.*weight loss|fat burning tea|lemon water.*weight|apple cider.*weight|acv.*weight|detox.*drink|cleanse.*weight|lemon.*detox|boil.*lemon|boil.*cinnamon|boil.*ginger.*lose|fat burner.*drink)\b/i.test(m) ||
     (/\btiktok\b/i.test(m) && /\b(tea|drink|weight|fat|slim|detox|lose)\b/i.test(m));
 
-  if (process.env.ENGINE_LIVE !== "on" && isTeaMythMsg) {
-    const name = commaName(user);
-    const teaReply = `Eish${name} — that is one of the biggest myths in the industry.\n\n*Slimming teas, detox teas, and TikTok weight loss drinks do not work.*\n\nThere is no tea, drink, or "detox" that burns fat. Not green tea. Not lemon water. Not apple cider vinegar. Not anything boiled with cinnamon and ginger.\n\n*What they actually do:*\n• Most are strong laxatives — you lose water weight, not fat\n• The weight comes back within 48 hours\n• Some damage your gut bacteria long-term\n• All of them are a waste of money\n\nThe companies selling these products are targeting people who want a shortcut. There is no shortcut.\n\n*What burns fat:*\n1. Consistent calorie deficit over weeks\n2. Strength training 3x per week\n3. 8,500+ steps daily\n4. 7-9 hours sleep\n\nThat is it. Your programme already has all four. Trust the process.`;
-    await logChat(user.id, message, teaReply, "MYTH_BUSTER");
-    return teaReply;
-  }
 
   // ---- OZEMPIC / SEMAGLUTIDE / WEIGHT LOSS INJECTION ----
   const isOzempicMsg =
     /\b(ozempic|semaglutide|wegovy|mounjaro|tirzepatide|weight loss injection|slimming injection|slimming jab|fat jab|skinny jab|injection.*weight|weight.*injection)\b/i.test(m);
 
-  if (process.env.ENGINE_LIVE !== "on" && isOzempicMsg) {
-    const name = commaName(user);
-    const ozempicReply = `Sharp question${name}.\n\n*The truth about Ozempic and weight loss injections:*\n\nOzempic (semaglutide) is a real medication — it works by reducing appetite and slowing digestion. Studies show real weight loss. It is not a scam.\n\n*But here is what nobody on TikTok tells you:*\n\n• It does not replace the basics. You still need to eat right, walk daily, and strength train — or the moment you stop taking it, the weight comes back\n• Side effects are real — nausea, vomiting, gut issues, and it is extremely expensive (R2,000-R8,000/month in SA)\n• It was designed for diabetics with severe obesity — not general weight loss\n• You cannot build muscle on Ozempic alone without strength training\n• Without resistance training you lose muscle with the fat — this makes long-term maintenance harder\n\n*My position:* Build the habits first. Walk. Train. Eat right. Sleep. If after 3 months of real effort you are still not moving, speak to a doctor about whether medication is appropriate for you. But medication without the habits is just expensive weight you will regain.\n\nYour programme already works — if you are consistent. Are you hitting your sessions this week?`;
-    await logChat(user.id, message, ozempicReply, "MYTH_BUSTER");
-    return ozempicReply;
-  }
 
   // ---- RUNNING CLUBS / MARATHON FOR WEIGHT LOSS → redirect to walking + strength ----
   const isRunningClubMsg =
     /\b(running club|run.*club|marathon.*weight|running.*lose weight|run.*lose.*fat|jogging.*lose.*fat|run.*fat loss|5k.*weight|10k.*weight|half marathon|full marathon|park run|parkrun)\b/i.test(m) ||
     (/\b(running|jogging|run)\b/i.test(m) && /\b(weight loss|lose weight|fat loss|get fit|get in shape|burn fat|lose fat)\b/i.test(m));
 
-  if (process.env.ENGINE_LIVE !== "on" && isRunningClubMsg) {
-    const name = commaName(user);
-    const steps = user.stepsTarget || 8500;
-    const runningReply = `Real talk${name}.\n\n*Running for weight loss is one of the most common mistakes I see.*\n\nHere is what actually happens: you join a running club, you burn 400 calories on the run, you come home starving and eat 600 calories extra. Net result — weight gain.\n\nRunning also:\n• Is hard on joints, especially if you are overweight\n• Does not build muscle — which is what drives long-term fat loss\n• Makes you HUNGRY — harder to maintain a deficit\n• People get injured in the first 6 weeks before any real progress\n\n*What I use instead:*\n✅ *Walking* — 8,500-15,000 steps daily. Low intensity, sustainable, burns fat without spiking hunger, protects joints. A 10,000 step day burns 400-500 extra calories without making you ravenous.\n✅ *Strength training* — 3 days per week. Builds muscle. Muscle burns calories 24/7, even while you sleep. This is the engine.\n\nYou can run if you enjoy it — that is great for your heart and mental health. But do not depend on running to lose weight. Depend on your programme and your daily steps.\n\nYour target is ${steps.toLocaleString()} steps per day. Are you hitting that consistently?`;
-    await logChat(user.id, message, runningReply, "MYTH_BUSTER");
-    return runningReply;
-  }
 
   // ---- AVOCADO CALORIE CONTEXT ----
   const isAvocadoMsg =
     /\b(avocado|avo)\b/i.test(m) &&
     /\b(healthy|good|eat|can i|is it|diet|weight|fat|daily|every day|all the time|meal plan|lunch|breakfast)\b/i.test(m);
 
-  if (process.env.ENGINE_LIVE !== "on" && isAvocadoMsg) {
-    const goal = user.goalType || "fat_loss";
-    const name = commaName(user);
-    const avoReply = goal === "fat_loss"
-      ? `Yes avocados are healthy${name} — but they are calorie-dense and that matters when you are trying to lose fat.\n\n*Avocado calorie reality:*\n• Half an avo: ~160 kcal, 2g protein\n• Full avo: ~320 kcal, 4g protein\n• That is 18% of your daily calorie budget in one fruit\n\nHealthy fats are still calories. An avo on toast with eggs can easily be 600 kcal before 8am.\n\n*My rule:* Half an avo, 2-3 times a week maximum when you are cutting. The healthy fat is real — but so are the calories. Pair it with eggs for protein. Never as a snack on its own.`
-      : `Avocados are excellent${name} — healthy fats that support hormone production, which matters for muscle building.\n\nFull avo is ~320 kcal, 30g healthy fat. In a muscle gain phase, fat calories are your friend. Use it freely — just track it as a fat source, not a protein source. Pair with eggs or chicken.`;
-    await logChat(user.id, message, avoReply, "MYTH_BUSTER");
-    return avoReply;
-  }
 
   // ---- SOCIAL MEDIA / TIKTOK MISINFORMATION ----
   const isSocialMediaMythMsg =
     /\b(i saw on tiktok|tiktok says|tiktok said|saw on instagram|instagram says|instagram said|social media.*says|youtube says|youtube said|i read.*that|someone told me.*that|my friend.*told me|my sister.*told me|my mom.*told me)\b/i.test(m) &&
     /\b(lose weight|fat loss|diet|exercise|burn fat|slim|weight loss|calories|protein|carb|food|workout|supplement|detox|cleanse|tea|drink)\b/i.test(m);
 
-  if (process.env.ENGINE_LIVE !== "on" && isSocialMediaMythMsg) {
-    const name = commaName(user);
-    const socialReply = `Eish${name} — this is important.\n\nSocial media fitness advice is almost always wrong, exaggerated, or selling something.\n\n*The algorithm rewards:* drama, extreme claims, quick fixes, and shocking content. It does NOT reward: "eat protein, walk daily, strength train 3 times a week, sleep 8 hours" — because that is boring and it does not sell anything.\n\n*Real results come from boring basics:*\n1. Consistent strength training 3-4 days\n2. 8,500-15,000 steps daily\n3. Enough protein every meal\n4. 7-9 hours sleep\n5. Patience\n\nAnything promising faster than 0.5-1kg per week is either a lie or dangerous. What specifically did you see — I will tell you whether it is real or rubbish.`;
-    await logChat(user.id, message, socialReply, "MYTH_BUSTER");
-    return socialReply;
-  }
 
   // ---- DOUBLE CARB CORRECTION — pap AND rice AND bread in same meal ----
   const carbonWords = (m.match(/\b(pap|samp|rice|bread|potato|sweet potato|butternut|maize)\b/gi) || []);
@@ -1791,14 +1600,6 @@ export async function handleLifecycle(ctx: {
     /\b(what should i eat|what do i eat|how should i eat|what to eat|healthy eating|eating right|how to eat|my diet|best way to eat|eating habits|what foods|food choices|nutritional advice|nutrition advice|diet advice)\b/i.test(m) &&
     !/\b(today|tonight|breakfast|lunch|dinner|meal plan|shopping)\b/i.test(m);
 
-  if (process.env.ENGINE_LIVE !== "on" && isPlateMethodQ) {
-    const goal = user.goalType || "fat_loss";
-    const budget = user.weeklyFoodBudget || "100_300";
-    const name = commaName(user);
-    const plateReply = `*The Coach K plate method${name}:*\n\nForget calorie counting. I don't count calories, I make the right choices. Here is the whole system:\n\n*Every meal, every time:*\n🥩 *Protein first* — takes up half your plate. Eggs, chicken, pilchards, mince, beans. If there is no protein on the plate, it is not a meal.\n🍠 *One carb* — takes up a quarter of your plate. Pap, brown rice, sweet potato, oats. ONE — not all three.\n🥬 *Vegetables* — fills the rest. Spinach, cabbage, morogo, tomatoes, cucumber. Unlimited. The more the better.\n\n*That is it.* No app. No scale. No counting. Just: protein + one carb + vegetables.\n\nDo this for every meal and your body does the rest.\n\n${goal === "fat_loss" ? "For fat loss: make the protein portion bigger and the carb portion smaller." : "For muscle gain: make the carb portion bigger, especially before and after training."}\n\n${budget === "under_100" ? "At your budget: eggs + pap + spinach. Pilchards + pap + cabbage. Repeat. Simple and it works." : "Best SA options: pilchards, eggs, chicken thigh, tinned tuna — paired with sweet potato or pap and whatever vegetable you have."}`;
-    await logChat(user.id, message, plateReply, "PLATE_METHOD");
-    return plateReply;
-  }
 
   // Variables for food format recovery check
   const hasLogTrigger = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|just had|just ate|i had|i ate|meal)\b/i.test(m);
