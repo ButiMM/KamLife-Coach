@@ -336,10 +336,10 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
     const allAliases = [food.name.toLowerCase(), ...food.aliases.map(a => a.toLowerCase())];
     let longestHit = "";
     for (const alias of allAliases) {
-      // PLURAL-TOLERANT (2026-07-17 live: "two beef bacon burgers" logged only the
-      // bacon — \bburger\b cannot see "burgers", so the whole table was blind to
-      // plural speech). Optional s/es suffix; alias text itself stays the match key.
-      const re = new RegExp(`\\b${escapeRegex(alias)}(?:es|s)?\\b`, "i");
+      // PLURAL-TOLERANT ("burgers") and PREFIX-TOLERANT: Nguni/Sotho fuse the linking
+      // particle onto the noun, so "inkukhu NEPAPA" (chicken AND PAP) used to drop the pap.
+      // The leading \b anchors it — an English word can't split into prefix + alias.
+      const re = new RegExp(`\\b(?:na|ne|no|nga|nge|ka|le|ku|se|di|ma)?${escapeRegex(alias)}(?:es|s)?\\b`, "i");
       if (re.test(lower) && alias.length > longestHit.length) {
         longestHit = alias;
       }
