@@ -77,8 +77,11 @@ export async function getMenuText(user: any, opts?: { showCommands?: boolean }):
   // Full command list only when explicitly asked (menu/help) or the user is lost.
   // A greeting gets a coach, not a sitemap.
   // Gym users: surface the photograph-a-machine feature. Dumbbell/home users don't need it.
+  // Machine-identification-from-a-photo was deleted 2026-07-31 (a vision call on every gym
+  // photo that answered a machine with a bodyweight workout). This line promised it anyway —
+  // the first message a gym client reads was selling a feature that no longer exists.
   const machineLine = mode === "gym"
-    ? `\n📸 *At the gym?* Send a photo of any machine — I'll tell you if it's right for today and how to use it.`
+    ? `\n🏋️ *At the gym?* Type *show me* and any exercise name — I'll send you the form demo.`
     : "";
   const commandsBlock = opts?.showCommands
     // FOUR THINGS, NOT TWELVE (2026-07-28). The menu used to promote shopping lists, meal prep,
@@ -410,7 +413,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     // POPIA + data deletion, and Terms/Privacy links — mirrors the pattern the SA gov health bot
     // used to pass Meta. Tapping "Yes, I agree" (or typing yes/agree) consents; "No thanks" deletes.
     return replyWithButtons(
-      `I'm Coach K. I help you lose weight and get fit using the food you already eat — right here on WhatsApp. No gym. No app. No expensive diet.\n\nSend me a photo of your plate, I tell you if it's on track. I check in every day so you actually stick to it.\n\nR199/month — R6.63 a day, less than a coffee. Cancel anytime.\n\n*Before we start:*\n✅ You're 18 or older.\n✅ I'm an AI coach, not a doctor — for any medical condition, follow your doctor.\n🤝 A real coach may check in on you if a message suggests you need extra support.\n🔒 Your info is stored under POPIA — only for your coaching, never sold. Reply *delete my data* anytime.\nTerms: kamlifecoach.co.za/terms · Privacy: kamlifecoach.co.za/privacy\n\nTap *Yes, I agree* and I'll build your plan.`,
+      `I'm Coach K. I help you lose weight and get fit using the food you already eat — right here on WhatsApp. No gym. No app. No expensive diet.\n\nJust tell me what you ate — "pap and chicken" — and I'll log it. I check in every day so you actually stick to it.\n\nR199/month — R6.63 a day, less than a coffee. Cancel anytime.\n\n*Before we start:*\n✅ You're 18 or older.\n✅ I'm an AI coach, not a doctor — for any medical condition, follow your doctor.\n🤝 A real coach may check in on you if a message suggests you need extra support.\n🔒 Your info is stored under POPIA — only for your coaching, never sold. Reply *delete my data* anytime.\nTerms: kamlifecoach.co.za/terms · Privacy: kamlifecoach.co.za/privacy\n\nTap *Yes, I agree* and I'll build your plan.`,
       ["Yes, I agree", "No thanks"],
     );
   }

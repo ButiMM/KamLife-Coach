@@ -4434,7 +4434,11 @@ test("domain-guard: the coach prompt itself refuses off-topic requests and bridg
 test("onboarding: signup pitch is outcome-led (not feature-speak) and keeps the disclaimer", () => {
   const src = readFileSync(join("server", "onboarding.ts"), "utf-8");
   assert.match(src, /lose weight and get fit using the food you already eat/i, "leads with the outcome");
-  assert.match(src, /photo of your plate, I tell you if it's on track/i, "concrete, no jargon");
+  // TEXT-FIRST, not photo-first (2026-08-03, from production data): photo logs went to ZERO
+  // across the last three weeks while text logs rose from 11 to ~50/week. The pitch used to
+  // lead with "send me a photo of your plate" — selling the one behaviour the data says dies.
+  assert.match(src, /Just tell me what you ate[\s\S]{0,40}I'll log it/i, "concrete, text-first, no jargon");
+  assert.doesNotMatch(src, /Send me a photo of your plate, I tell you/i, "the photo-first pitch is gone");
   assert.doesNotMatch(src, /personalised programme, food guidance, daily accountability/i, "old feature-speak is gone");
   // Meta-parity consent gate: age 18+, AI disclosure, human check-in path, POPIA, ToU/Privacy links.
   assert.match(src, /You're 18 or older/i, "age gate present");
