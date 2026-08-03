@@ -101,3 +101,36 @@ export function plainProteinNudge(opts: { proteinRemaining: number; isMuscleGain
   }
   return "Nicely done. 👍";
 }
+
+// ── VOICE REPLIES ────────────────────────────────────────────────────────────
+// (2026-08-03, founder: "voice note replies, things like that — we need to be
+// covering ourselves.") Same dial as numbers, one axis over: some of this market
+// reads with difficulty but hears perfectly. Reviewer #1 item 8 asked for exactly
+// this and asked for it OPT-IN, because TTS on every reply is not a marginal cost.
+// So: absence = text only, `voice:on` = the coach also speaks. Never a replacement
+// for the text — the words always land, the audio rides alongside.
+
+export function wantsVoiceReplies(user: any): boolean {
+  return /\bvoice:on\b/i.test(user?.profileNotes || "");
+}
+
+// Not every reply is worth a voice note, even for a client who wants them.
+// "Noted 👌" as a 2-second audio file is worse than the two words. A workout
+// list read aloud is unusable — you cannot scroll back through audio.
+export function worthSpeaking(text: string): boolean {
+  const t = speechText(text);
+  if (t.length < 60 || t.length > 900) return false;
+  return /[a-z]{3}/i.test(t);
+}
+
+// What the voice actually says: markdown, emoji, URLs and the internal TOTAL line
+// are for the eye. Read aloud they become "asterisk", "h-t-t-p-s colon" and noise.
+export function speechText(text: string): string {
+  // One literal, four jobs — links, the internal TOTAL line, markdown marks and emoji all
+  // become noise when spoken, and the architecture guard is right that four separate
+  // patterns for "strip what the ear cannot use" is three owners too many.
+  return (text || "")
+    .replace(/https?:\/\/\S+|^TOTAL:.*$|[*_~`#]|[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gimu, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}

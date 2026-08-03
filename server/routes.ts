@@ -28,7 +28,7 @@ import { getSleepResponse } from "./handlers/sleep";
 import { handleMediaMessage, bumpVoiceFailure, clearVoiceFailure } from "./handlers/media";
 import { runSafetyGuards } from "./handlers/safety";
 import { handleFoodLogMgmt } from "./handlers/food-log-mgmt";
-import { bumpNumericFluency } from "./handlers/numbers-literacy";
+import { bumpNumericFluency, bumpVoiceNoteUse } from "./handlers/numbers-literacy";
 import { handleOnboardingBodyPhotos } from "./onboarding-physique";
 import { verifyBrainReply } from "./brain/reply-verifier";
 import { cardFontLoaded } from "./macro-card";
@@ -176,6 +176,9 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   // kcal/macros three times gets full numbers turned on automatically, with a
   // one-time notice sent separately. Never blocks or alters this reply. ----
   if (!mediaUrl && message.length >= 2) void bumpNumericFluency(user, m, phone);
+  // Same shape for the other delivery dial: three inbound voice notes earns an OFFER
+  // of voice replies (never an automatic switch — audio costs money per reply).
+  if (mediaContentType?.startsWith("audio/")) void bumpVoiceNoteUse(user, phone);
 
   // ---- COACH / OWNER BYPASS — never paywall the coach's own number ----
   // Checks COACH_ALERT_PHONE and ADMIN_PHONE_OVERRIDE (either env var works)

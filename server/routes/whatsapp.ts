@@ -3,6 +3,7 @@ import twilio from "twilio";
 import type { RouteDeps } from "./types";
 import { requireAdminKey } from "./auth";
 import { sendWhatsAppButtons } from "../twilio-interactive";
+import { voiceReplyFor } from "../tts";
 import { db } from "../db";
 import { processedWebhooks, users } from "../../shared/schema";
 import { eq } from "drizzle-orm";
@@ -57,7 +58,13 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
     console.warn("[SEND_FINAL] shaping failed, sending raw:", e?.message || e);
     out = text;
   }
-  await sendParts(phone, splitMessage(out), media);
+  // VOICE REPLY (2026-08-03) — for a client who opted in, the coach also speaks. The
+  // text is sent either way and first: audio is additive, and a TTS failure must never
+  // turn into a silent coach. Returns null instantly for everyone else.
+  let outMedia = media;
+  const spoken = await voiceReplyFor(phone, out);
+  if (spoken) outMedia = [...(Array.isArray(media) ? media : media ? [media] : []), spoken];
+  await sendParts(phone, splitMessage(out), outMedia);
 }
 
 async function sendParts(

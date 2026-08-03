@@ -12,7 +12,7 @@ import { users, stepLogs } from "../../shared/schema";
 import { eq, and, gte } from "drizzle-orm";
 import { logChat } from "./chat-log";
 import { detectToneSignal } from "../tone-mode";
-import { messageSpeaksNumbers } from "../numbers-mode";
+import { messageSpeaksNumbers, wantsVoiceReplies } from "../numbers-mode";
 import { sendWhatsApp } from "../scheduler";
 import { sastDayStart, looksLikeSurplusDeficitQuestion } from "../utils";
 
@@ -157,4 +157,69 @@ export async function handleNumbersLiteracy(ctx: { message: string; m: string; u
   }
 
   return null;
+}
+
+// VOICE REPLIES (2026-08-03) — the second delivery dial, and the one this market
+// actually needs. Kam's clients send him voice notes because typing is work; the
+// coach has only ever written back. Reviewer #1 item 8 asked for this as an OPT-IN,
+// not a default, because TTS on every reply is not a marginal cost — so the token
+// is `voice:on` and its absence means text only, exactly like numbers:full.
+// ONE regex, two directions (the architecture guard refused a second literal, correctly —
+// "does the client want voice?" is one question and one question gets one owner).
+const VOICE_PREF = /\b(?<on>talk to me|speak to me|voice ?note me|send (?:me )?voice ?notes?|reply (?:with|in) (?:a )?voice|answer (?:me )?(?:with|in) voice|read it to me|say it out loud|i (?:can.?t|cannot|struggle to) read|i don.?t read (?:well|good)|voice ?notes? please)|(?<off>text only|no voice ?notes?|stop the voice ?notes?|don.?t send (?:me )?voice|no more voice|just (?:type|write|text)(?: it)?|writing only)\b/i;
+
+export async function handleVoiceReplyPreference(ctx: { message: string; m: string; user: any; capName: string; phone: string }): Promise<string | null> {
+  const { message, m, user, capName, phone } = ctx;
+  const on = wantsVoiceReplies(user);
+  const said = VOICE_PREF.exec(m)?.groups;
+  if (!said) return null;
+  const cap = capName ? `, ${capName}` : "";
+  const setNotes = async (value: string | null) => {
+    const base = (user.profileNotes || "").replace(/\s*\bvoice:on\b/gi, "").trim();
+    const next = value ? (base ? `${base} ${value}` : value) : (base || null);
+    await db.update(users).set({ profileNotes: next }).where(eq(users.phoneNumber, phone));
+  };
+
+  // ON. "I can't read" is deliberately in here: a client admitting that is the exact
+  // person this feature exists for, and asking them to find a magic phrase would be
+  // the opposite of the point.
+  if (!on && said.on) {
+    try { await setNotes("voice:on"); } catch (e) { console.error("[VOICE_MODE] on failed:", e); }
+    const reply = `Done${cap} 🎤 — I'll send you a voice note with my replies from now on, and the text underneath so you can look back at it.\n\nIf you ever want just the writing, say *"text only"*.`;
+    await logChat(user.id, message, reply, "VOICE_ON");
+    return reply;
+  }
+
+  // OFF.
+  if (on && said.off) {
+    try { await setNotes(null); } catch (e) { console.error("[VOICE_MODE] off failed:", e); }
+    const reply = `Got it${cap} — writing only from now on. Say *"talk to me"* any time you want the voice back.`;
+    await logChat(user.id, message, reply, "VOICE_OFF");
+    return reply;
+  }
+
+  return null;
+}
+
+// AUTO-OFFER, never auto-enable. A client who has sent THREE voice notes has told us
+// how they prefer to communicate — but voice costs money per reply, so we ask instead
+// of assuming. Same counter shape as numfluent: a profileNotes token, no migration,
+// fire-and-forget from the audio branch so it never delays a reply.
+export async function bumpVoiceNoteUse(user: any, phone: string): Promise<void> {
+  try {
+    const notes = user?.profileNotes || "";
+    if (/\bvoice:(on|asked)\b/i.test(notes)) return; // already on, or already offered once
+    const count = parseInt((notes.match(/\bvoicein:(\d+)\b/i) || [])[1] || "0", 10) + 1;
+    const base = notes.replace(/\s*\bvoicein:\d+\b/gi, "").trim();
+    if (count >= 3) {
+      await db.update(users).set({ profileNotes: base ? `${base} voice:asked` : "voice:asked" }).where(eq(users.phoneNumber, phone));
+      const offer = `I've noticed you prefer talking over typing 🎤\n\nWant me to reply in voice notes too? Just say *"talk to me"* and I'll speak my answers — the writing still comes with it.`;
+      await sendWhatsApp(phone, offer);
+      await logChat(user.id, "[system: voice-note preference detected]", offer, "VOICE_OFFER");
+    } else {
+      await db.update(users).set({ profileNotes: base ? `${base} voicein:${count}` : `voicein:${count}` }).where(eq(users.phoneNumber, phone));
+    }
+  } catch (e) {
+    console.warn("[VOICE_PREF] non-fatal:", (e as Error)?.message || e);
+  }
 }

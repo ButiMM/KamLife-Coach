@@ -29,7 +29,7 @@ import { generateMealPlan } from "../meal-plan";
 import { handleMealRepeat } from "./meal-repeat";
 import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
-import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion } from "./numbers-literacy";
+import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion, handleVoiceReplyPreference } from "./numbers-literacy";
 import { answerSwapAsk } from "../food-swaps";
 import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
 import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from "../street-food";
@@ -1043,6 +1043,9 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // ---- ADAPTIVE DELIVERY (numbers-literacy.ts): numbers on/off, confusion, tone dial ----
   const toneReply = await handleToneSignal({ message, m, user, capName, phone });
   if (toneReply !== null) return toneReply;
+  const voicePrefReply = await handleVoiceReplyPreference({ message, m, user, capName, phone });
+  if (voicePrefReply) return voicePrefReply;
+
   const literacyReply = await handleNumbersLiteracy({ message, m, user, capName, phone });
   if (literacyReply !== null) return literacyReply;
 

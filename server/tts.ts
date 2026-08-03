@@ -13,6 +13,7 @@ import { randomUUID } from "crypto";
 import { textToSpeech as elevenLabsTTS, isElevenLabsConfigured, type VoiceEmotion } from "./elevenlabs";
 import { recordServiceCost, voiceCostUsd } from "./cost-tracking";
 import { allowExpensiveOp } from "./usage-governor";
+import { wantsVoiceReplies, worthSpeaking, speechText } from "./numbers-mode";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -88,4 +89,34 @@ export function getVoiceFilePath(id: string): string {
 
 export function voiceFileExists(id: string): boolean {
   return existsSync(getVoiceFilePath(id));
+}
+
+/**
+ * VOICE REPLY FOR AN OPTED-IN CLIENT (2026-08-03) — the one call site that turns a
+ * normal coaching reply into audio as well as text.
+ *
+ * Deliberately ordered cheapest-check-first: worthSpeaking() is a pure string test and
+ * rejects the short acknowledgements that make up most replies, so the DB is never
+ * touched for a "Noted 👌". Only a substantial reply costs a lookup, and only an
+ * opted-in client costs a generation. Every existing brake still applies underneath —
+ * TTS=off, the daily voice budget, the ElevenLabs→OpenAI fallback.
+ *
+ * Returns null for everyone else, and on any failure. The caller sends the text
+ * regardless: audio is additive, never a substitute. A silent TTS failure must never
+ * become a silent coach.
+ */
+export async function voiceReplyFor(phone: string, text: string): Promise<string | null> {
+  try {
+    if (!worthSpeaking(text)) return null;
+    const { db } = await import("./db");
+    const { users } = await import("../shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const [u] = await db.select({ id: users.id, profileNotes: users.profileNotes })
+      .from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    if (!u || !wantsVoiceReplies(u)) return null;
+    return await generateVoiceNote(speechText(text), "warm", u.id);
+  } catch (e) {
+    console.warn("[TTS] voice reply skipped:", (e as Error)?.message || e);
+    return null;
+  }
 }

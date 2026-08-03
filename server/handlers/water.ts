@@ -20,6 +20,10 @@ import { scanForSAFoods } from "./food-scanner";
  * "2 litres of water and 10g of creatine") can still log the water instead of
  * silently dropping it.
  */
+// One owner for "does this message mention water at all" — the same literal was
+// declared twice in this file, which is two owners for one question.
+const WATER_WORDS = /\b(water|drank|drank water|drank some|had water|drank my water|water intake|drinking water|water today|glass|glasses|bottle|bottles)\b/i;
+
 export async function tryLogWater(ctx: {
   phone: string;
   message: string;
@@ -32,7 +36,7 @@ export async function tryLogWater(ctx: {
 
   // ---- WATER LOGGING HANDLER — no GPT ----
   const waterMatch = m.match(/(\d+(?:\.\d+)?)\s*(l|litre|liter|litres|liters|ml|millilitre|milliliter|glass(?:es)?|cup(?:s)?|bottle(?:s)?)\b/i);
-  const hasWaterKeyword = /\b(water|drank|drank water|drank some|had water|drank my water|water intake|drinking water|water today|glass|glasses|bottle|bottles)\b/i.test(m);
+  const hasWaterKeyword = WATER_WORDS.test(m);
   const isNonWaterDrink = /\b(wine|beer|whisky|brandy|rum|vodka|gin|shots?|alcohol|henny|hennessy|smirnoff|hunters|savanna|castle|black label|flying fish|brutal fruit|cider|juice|coffee|tea|milo|milk|cooldrink|cool drink|fanta|sprite|coke|pepsi|energy drink|redbull|monster|cream soda|softdrink|soda water|tonic)\b/i.test(m);
   // Question ("is 500ml enough water?", "how much is 2 litres?") must NOT log — reaches
   // the water-question handler below or GPT. Negation/intent ("haven't had my 2L of water
@@ -139,7 +143,7 @@ export async function handleWater(ctx: {
   // Re-derive the signals the fall-through blocks need (the logging block above lives
   // in tryLogWater now, so these are no longer in scope here).
   const waterMatch = m.match(/(\d+(?:\.\d+)?)\s*(l|litre|liter|litres|liters|ml|millilitre|milliliter|glass(?:es)?|cup(?:s)?|bottle(?:s)?)\b/i);
-  const hasWaterKeyword = /\b(water|drank|drank water|drank some|had water|drank my water|water intake|drinking water|water today|glass|glasses|bottle|bottles)\b/i.test(m);
+  const hasWaterKeyword = WATER_WORDS.test(m);
   const waterIsQuestion = m.includes("?") || /\b(how much|how many|should i|do i need|is\s+\d|enough|too much|target|recommend)\b/i.test(m);
   const waterNotConsumed = mentionsNotDone(m)  // couldn't/skipped/didn't finish my water — never consumed
     || /\b(need\s+to|should\s+(?:i|drink)|must\s+drink|gonna|going\s+to|will\s+drink|plan\s+to|trying\s+to|still\s+need)\b/i.test(m);
