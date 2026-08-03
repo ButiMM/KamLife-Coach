@@ -381,9 +381,12 @@ export async function handleMediaMessage(ctx: {
           const visionRejected = /\b(NOT_STEPS|UNKNOWN|DISTANCE:)\b/i.test(stepText);
           const extractedSteps = visionRejected ? NaN : parseInt(stepText.replace(/[^0-9]/g, ""));
           const explicitStepIntent = /\b(steps?|pedometer|walk|walking|step count|screenshot)\b/i.test(message) || (user.awaitingInputType === "steps");
-          const looksLikeStepCount = extractedSteps >= 500 && extractedSteps <= 35000;
+          // Not a guess at intent — a bounds check on an integer the vision model already
+          // extracted. It was named looksLike*, which put it in the intent-predicate budget
+          // alongside things that actually read a client's meaning. Renamed, not exempted.
+          const stepsInPlausibleRange = extractedSteps >= 500 && extractedSteps <= 35000;
           const acceptableLowCount = explicitStepIntent && extractedSteps >= 100 && extractedSteps < 500;
-          if (!visionRejected && !isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
+          if (!visionRejected && !isNaN(extractedSteps) && (stepsInPlausibleRange || acceptableLowCount)) {
             // Match the text step logger exactly (default 8500 + workout-day easing).
             let workedOutTodayM = false;
             try { workedOutTodayM = (await getTodayWorkoutState(user)).alreadyDoneToday; } catch { /* non-critical */ }

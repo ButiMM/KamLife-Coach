@@ -572,7 +572,7 @@ const mealWords = (s: string) => new Set((s.toLowerCase().match(/[a-z]{4,}/g) ||
  * merely share eggs overlap ~a third). Preserves the original fix (a photo of a just-logged
  * plate) while never blocking a genuinely different meal.
  */
-export function looksLikeSameMeal(a: string, b: string): boolean {
+export function mealsOverlap(a: string, b: string): boolean {
   const A = mealWords(a), B = mealWords(b);
   if (A.size < 2 || B.size < 2) return false;
   let shared = 0;
@@ -589,7 +589,7 @@ export async function findDuplicateMealToday(userId: string, desc: string): Prom
       .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, sastDayStart())))
       .limit(20);
     for (const r of rows) {
-      if (looksLikeSameMeal(desc, r.rawMessage || "")) {
+      if (mealsOverlap(desc, r.rawMessage || "")) {
         return {
           desc: (r.rawMessage || "that meal").replace(/\s+/g, " ").trim().slice(0, 70),
           slot: (r.mealLabel || "lunch").toString(),

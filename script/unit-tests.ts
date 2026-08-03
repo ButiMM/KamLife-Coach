@@ -11,7 +11,7 @@ import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFram
 import { predictTrajectory } from "../server/trajectory";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
-import { parseFoodPreferences, parseVisionAnswer } from "../server/onboarding-intake";
+import { parseFoodPreferences, parseVisionAnswer, looksLikeBulkIntake, applyIntakeBrake, describeIntake } from "../server/onboarding-intake";
 import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodProfile } from "../server/grocery-personalize";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
@@ -967,17 +967,17 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   // DUPLICATE-MEAL GUARD (2026-07-22 live: a granola/yogurt/grapefruit breakfast photo was
   // refused as a duplicate of a bread/fish-fingers breakfast — both had "boiled eggs", so 2
   // shared words wrongly flagged them as the same dish, and the new meal never logged).
-  test("looksLikeSameMeal: needs a real proportion of overlap, not just two common words", async () => {
-    const { looksLikeSameMeal } = await import("../server/handlers/food-scanner");
+  test("mealsOverlap: needs a real proportion of overlap, not just two common words", async () => {
+    const { mealsOverlap } = await import("../server/handlers/food-scanner");
     // THE BUG: two different breakfasts that merely share "boiled eggs" are NOT the same meal.
     assert.strictEqual(
-      looksLikeSameMeal("granola greek yogurt blueberries boiled eggs grapefruit", "3 slices of bread, 3 boiled eggs and 3 fish fingers"),
+      mealsOverlap("granola greek yogurt blueberries boiled eggs grapefruit", "3 slices of bread, 3 boiled eggs and 3 fish fingers"),
       false, "different meals sharing only boiled eggs must NOT be a duplicate");
     // The original guard still works: a photo of a just-logged plate (high overlap) IS a dup.
-    assert.strictEqual(looksLikeSameMeal("bread, boiled eggs, fish fingers", "3 slices of bread, 3 boiled eggs and 3 fish fingers"), true);
-    assert.strictEqual(looksLikeSameMeal("chicken rice broccoli", "chicken rice broccoli"), true);
+    assert.strictEqual(mealsOverlap("bread, boiled eggs, fish fingers", "3 slices of bread, 3 boiled eggs and 3 fish fingers"), true);
+    assert.strictEqual(mealsOverlap("chicken rice broccoli", "chicken rice broccoli"), true);
     // Totally different meals are never duplicates.
-    assert.strictEqual(looksLikeSameMeal("chicken rice broccoli", "beef pasta salad"), false);
+    assert.strictEqual(mealsOverlap("chicken rice broccoli", "beef pasta salad"), false);
   });
   test("voice: a bullet-dump coaching reply is reflowed into coach prose (IMG_6144), short lists left alone", async () => {
     const { collapseBulletDump } = await import("../server/handlers/food-scanner");
@@ -2404,6 +2404,59 @@ test("intake: food preferences split into likes and dislikes", () => {
   assert.equal(c.foodDislikes, null);
   const d = parseFoodPreferences("skip");
   assert.deepEqual(d, { foodLikes: null, foodDislikes: null });
+});
+
+// BULK INTAKE (2026-08-03) — the golden case is a real client's first message. She sent
+// thirteen facts in one paste and the FSM filed the whole thing under "name". These lock
+// the detector's two jobs: catch that blob, and never touch an ordinary message.
+const NATASHA = "Natasha:29:90kg:fat loss:70 to 75 dream goal:No gym at the moment:have trailmil at home:I dnt have track of my steps:sit most of the day as am woe from home office work:beginner training experience:no medical condition and no past injuries:I normally eat from from lunch:I love protein food and hate dairy:I drink occasionally:want to start anytime";
+
+test("bulk intake: the golden blob is detected", () => {
+  assert.equal(looksLikeBulkIntake(NATASHA), true);
+});
+
+test("bulk intake: ordinary messages are NOT detected", () => {
+  // A food log, however long — this is the message class that would be damaged.
+  assert.equal(looksLikeBulkIntake("I had eggs and pap for breakfast this morning, then a chicken salad for lunch with some rice on the side and a yoghurt in the afternoon"), false);
+  // A short first message.
+  assert.equal(looksLikeBulkIntake("Natasha"), false);
+  // A long chatty question with no intake density.
+  assert.equal(looksLikeBulkIntake("Hi coach, I saw your status and I wanted to ask how this whole thing works before I pay anything, because I have tried a lot of these apps before and none of them ever really worked for me"), false);
+});
+
+test("bulk intake: the hallucination brake drops anything not in the message", () => {
+  const kept = applyIntakeBrake({
+    name: "Natasha", age: 29, weightKg: 90, goalType: "fat_loss",
+    targetWeightKg: 75, trainingExperience: "beginner", foodDislikes: "dairy",
+  }, NATASHA);
+  assert.equal(kept.name, "Natasha");
+  assert.equal(kept.age, 29);
+  assert.equal(kept.weightKg, 90);
+  assert.equal(kept.goalType, "fat_loss");
+  assert.equal(kept.targetWeightKg, 75);
+  assert.match(kept.foodDislikes || "", /dairy/i);
+
+  // Invented values must not survive: a height she never gave, and a BMI worked out
+  // from it — the exact failure that would set her calorie target wrong forever.
+  const braked = applyIntakeBrake({ heightCm: 165, weightKg: 90, injuries: "torn rotator cuff" }, NATASHA);
+  assert.equal(braked.heightCm, undefined, "height was never stated — must be dropped");
+  assert.equal(braked.injuries, undefined, "an injury she never mentioned must be dropped");
+  assert.equal(braked.weightKg, 90, "a stated weight survives");
+});
+
+test("bulk intake: the whole blob landing in `name` is rejected", () => {
+  // The original production bug, now impossible: a sentence is not a name.
+  const bad = applyIntakeBrake({ name: NATASHA.slice(0, 60) }, NATASHA);
+  assert.equal(bad.name, undefined);
+  const good = applyIntakeBrake({ name: "Natasha" }, NATASHA);
+  assert.equal(good.name, "Natasha");
+});
+
+test("bulk intake: the summary reads back what was captured", () => {
+  const text = describeIntake({ name: "Natasha", age: 29, weightKg: 90, goalType: "fat_loss", targetWeightKg: 75 });
+  assert.match(text, /Natasha/);
+  assert.match(text, /90kg/);
+  assert.match(text, /lose fat/i);
 });
 
 test("intake: vision answer keeps the dream and captures a named struggle", () => {

@@ -2,7 +2,7 @@ import { db } from "./db";
 import { users, weightLogs, chatHistory, stepLogs, escalations } from "../shared/schema";
 import { escalationSLA } from "./safety-detection";
 import { generateReferralCode } from "./onboarding-referral";
-import { parseFoodPreferences, parseVisionAnswer } from "./onboarding-intake";
+import { parseFoodPreferences, parseVisionAnswer, looksLikeBulkIntake, applyIntakeBrake, describeIntake, type BulkIntake } from "./onboarding-intake";
 import { TRIAL_DAYS, TRIALS_ENABLED } from "./pricing-config";
 import { buildActivationBrief } from "./activation";
 import { eq, and, desc, gte } from "drizzle-orm";
@@ -348,6 +348,117 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
 // Everything else collected progressively through coaching
 // ============================================================
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// BULK INTAKE — extraction and the FSM jump (2026-08-03)
+//
+// Detection, the hallucination brake and the summary are pure and unit-tested in
+// onboarding-intake.ts. What lives here is the part that cannot be pure: the model
+// call, the write, and deciding which question the client still has to answer.
+//
+// Deviation from the 2026-07-07 spec, stated deliberately: the spec asked for a
+// YES-to-confirm round trip before committing. This writes first and SHOWS what it
+// captured instead. Two reasons. A tired client pasting thirteen facts at 9pm should
+// not then have to pass a quiz on them; and every one of these fields is already
+// correctable in plain language ("change my goal to muscle gain", "I'm 92kg") through
+// the normalizer, which did not exist when the spec was written. Nothing is silent —
+// the client reads back exactly what was stored, in the same message.
+//
+// POPIA is untouched: WELCOME is only reachable after explicit consent. The underage
+// gate is re-applied below on the extracted age, so a blob cannot walk around it.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const BULK_SYSTEM = `You extract a South African fitness client's intake details from one message they pasted.
+Return JSON only, with any of these keys you can find, and NO others:
+name, gender ("male"|"female"), age, weightKg, heightCm, goalType ("fat_loss"|"muscle_gain"), targetWeightKg, medicalConditions, injuries, gymName, homeEquipment, trainingExperience, foodDislikes, notes.
+RULES: omit a key entirely rather than guessing it. Never calculate a value they did not state. Copy free text in their own words. "tone up"/"slim"/"lose"/"cut" = fat_loss; "build"/"bulk"/"gain muscle" = muscle_gain. If they name a weight range to reach, targetWeightKg is the HIGHER number. Name is one or two words only.`;
+
+async function extractBulkIntake(text: string): Promise<BulkIntake | null> {
+  try {
+    const { default: OpenAI } = await import("openai");
+    const client = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY });
+    // gpt-4o, not mini: this fires at most once per client, on the first impression,
+    // and a mis-parsed intake is paid for in every reply that follows it.
+    const resp = await client.chat.completions.create({
+      model: "gpt-4o", temperature: 0, max_tokens: 400,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: BULK_SYSTEM },
+        { role: "user", content: text.slice(0, 1500) },
+      ],
+    });
+    const raw = JSON.parse(resp.choices[0]?.message?.content || "{}");
+    return applyIntakeBrake(raw as BulkIntake, text);
+  } catch (e) {
+    console.warn("[BULK_INTAKE] extraction failed, falling back to the normal flow:", (e as Error)?.message || e);
+    return null;
+  }
+}
+
+/**
+ * The states a client still has to walk, in FSM order, each with the test for
+ * "did the blob already answer this?" and the question to ask if it did not.
+ *
+ * This table is the jump. It is declared rather than derived so that adding a state
+ * to the FSM without deciding what a blob does about it is a visible omission here,
+ * not a client silently skipping a question.
+ */
+const BULK_RESUME: Array<{ state: string; missing: (u: any) => boolean; ask: (u: any) => string }> = [
+  { state: "ASK_GENDER", missing: u => !u.gender, ask: () => `Male or female?` },
+  { state: "ASK_AGE_NEW", missing: u => !u.age, ask: () => `How old are you?` },
+  { state: "ASK_WEIGHT_HEIGHT", missing: u => !u.currentWeight || !u.heightCm, ask: u => u.currentWeight && !u.heightCm ? `And your height?\n\nExample: *1.72m* or *172cm*` : `What's your weight and height?\n\nExample: *78kg, 1.72m*` },
+  { state: "ASK_GOAL", missing: u => !u.goalType, ask: () => `Main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both` },
+  { state: "ASK_MEDICAL", missing: u => u.medicalConditions == null, ask: () => MEDICAL_QUESTION },
+  { state: "ASK_INJURIES", missing: u => u.injuries == null, ask: () => `Any injuries or joints I should train around? Reply *none* if not.` },
+  { state: "ASK_EQUIPMENT", missing: u => !u.gymName && !u.homeEquipment, ask: () => `Where will you train — a gym, or at home?` },
+  { state: "ASK_EXPERIENCE", missing: u => !u.trainingExperience, ask: () => `How much training have you done before — beginner, some experience, or advanced?` },
+];
+
+async function commitBulkIntake(user: any, bulk: BulkIntake, source: string, phone: string): Promise<string> {
+  // UNDERAGE GATE, re-applied. A blob must not be a way around the age check.
+  if (typeof bulk.age === "number" && bulk.age < 14) {
+    await db.update(users).set({ onboardingState: "BLOCKED_UNDERAGE" }).where(eq(users.phoneNumber, phone));
+    return `Coach K is for ages 14 and up. Chat to a parent or guardian about getting started together.`;
+  }
+  const set: Record<string, unknown> = {};
+  if (bulk.name) set.name = bulk.name;
+  if (bulk.gender) set.gender = bulk.gender;
+  if (bulk.age) set.age = bulk.age;
+  if (bulk.weightKg) set.currentWeight = String(bulk.weightKg);
+  if (bulk.heightCm) set.heightCm = bulk.heightCm;
+  if (bulk.goalType) set.goalType = bulk.goalType;
+  if (bulk.targetWeightKg) set.targetWeightKg = String(bulk.targetWeightKg);
+  if (bulk.medicalConditions) set.medicalConditions = bulk.medicalConditions;
+  if (bulk.injuries) set.injuries = bulk.injuries;
+  if (bulk.gymName) set.gymName = bulk.gymName;
+  if (bulk.homeEquipment) set.homeEquipment = bulk.homeEquipment;
+  if (bulk.trainingExperience) set.trainingExperience = bulk.trainingExperience;
+  if (bulk.foodDislikes) set.foodDislikes = bulk.foodDislikes;
+  if (bulk.weightKg && bulk.heightCm) {
+    const hM = bulk.heightCm / 100;
+    set.bmi = String(Math.round((bulk.weightKg / (hM * hM)) * 10) / 10);
+  }
+
+  const merged = { ...user, ...set, currentWeight: set.currentWeight ?? user.currentWeight };
+  const next = BULK_RESUME.find(r => r.missing(merged));
+  set.onboardingState = next ? next.state : "ASK_MEDICAL";
+  await db.update(users).set(set).where(eq(users.phoneNumber, phone));
+
+  // A dislike is a preference that has to outlive onboarding — every meal suggestion
+  // from here on must respect it, so it goes to durable memory, not just a column.
+  if (bulk.foodDislikes) {
+    try {
+      const { storeMemory } = await import("./memory");
+      await storeMemory(phone, `Does not eat / dislikes: ${bulk.foodDislikes}`, "preference");
+    } catch { /* memory is best-effort; the column still holds it */ }
+  }
+
+  const who = bulk.name ? ` ${bulk.name}` : "";
+  const captured = describeIntake(bulk);
+  const question = next ? next.ask(merged) : MEDICAL_QUESTION;
+  console.log(`[BULK_INTAKE] ${phone.slice(-4)} — ${Object.keys(set).length - 1} fields from one message, resuming at ${set.onboardingState}`);
+  return `Sharp${who} 👌 I got all of that — you don't have to type it again.\n\n${captured}\n\nAnything wrong there, just tell me and I'll fix it.\n\n---\n\n${question}`;
+}
+
 export async function handleOnboarding(user: any, message: string, phone: string): Promise<string> {
   const state = user.onboardingState || "START";
   const msg = message.trim();
@@ -440,8 +551,16 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     return `I need your agreement before I can coach you. Your data is used only for your coaching — never sold. Reply *yes* to continue.`;
   }
 
-  // ---- WELCOME — name ----
+  // ---- WELCOME — name, OR the whole intake in one paste ----
   if (state === "WELCOME") {
+    // BULK INTAKE: this is the exact point the production failure happened — the client
+    // pastes thirteen facts and the FSM files the lot under "name". Detection is free and
+    // deterministic; only a message that already looks like a blob ever costs a model call.
+    if (process.env.BULK_INTAKE !== "off" && looksLikeBulkIntake(msg)) {
+      const bulk = await extractBulkIntake(msg);
+      if (bulk && Object.keys(bulk).length >= 3) return await commitBulkIntake(user, bulk, msg, phone);
+      // Nothing usable → fall through to the ordinary name question. Nothing is lost.
+    }
     const name = parseFirstName(msg);
     if (!name) return `Almost — just your first name. What do people call you? 🙂`;
     await db.update(users).set({ name, onboardingState: "ASK_GENDER" }).where(eq(users.phoneNumber, phone));
