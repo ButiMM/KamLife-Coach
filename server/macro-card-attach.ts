@@ -20,7 +20,7 @@ import { achievementFor, renderAchievementCard, type AchievementCardData } from 
 import { putCard } from "./card-store";
 import { waterTargetLitres } from "./targets";
 import { getNumbersMode, stripNumbersFromProse } from "./numbers-mode";
-import { cardWillAttach } from "./card-policy";
+import { cardWillAttach, cardSuppressedByDump, noteCardSent } from "./card-policy";
 
 // Shared: the public base URL (forced to https:// — see below) or "" when a card can't be
 // served. APP_URL was stored WITHOUT a scheme, so the first live marker leaked as a text link
@@ -382,6 +382,9 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
     // every other card and costs a render. The log still happens — only the picture is skipped.
     const base = cardBaseUrl();
     if (!cardWillAttach(opts.user, opts.mealKcal, !!base)) return "";
+    // ONE DUMP, ONE CARD — six photos in ninety seconds used to render six near-identical
+    // cards of the same day's totals. The meal is still logged; only the picture is skipped.
+    if (cardSuppressedByDump(opts.user?.id)) return "";
     const retro = opts.forDate ? isPastSastDay(opts.forDate) : false;
     const t = await todayRows(opts.user, false, retro ? opts.forDate : undefined);
     if (!t) return "";
@@ -407,6 +410,7 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
       // "Eat more today — add a proper meal" above "Still room to build — add a proper meal").
       hint: cardProse(distinctHint(coachingHint(t.rows, t.isBulk), nextMoveLine(t.rows, t.isBulk)), numbersOff),
     });
+    noteCardSent(opts.user?.id);
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
   } catch (e) {
     console.warn("[MACRO_CARD] skipped:", (e as any)?.message || e);

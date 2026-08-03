@@ -4756,6 +4756,22 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
     assert.ok(CARD_MIN_KCAL === 50);
   });
 
+  // THE DUMP WINDOW (2026-08-03, founder: clients don't log as they eat — they dump the whole
+  // day at 9pm as a bundle of photos). Six photos used to render six near-identical cards.
+  test("dump window: one dump, one card — later logs in the same bundle are silent", async () => {
+    const { noteCardSent, cardSuppressedByDump, DUMP_WINDOW_MS, _resetDumpWindow } = await import("../server/card-policy");
+    _resetDumpWindow();
+    const t0 = 1_700_000_000_000;
+    assert.equal(cardSuppressedByDump("u1", t0), false, "the FIRST log of a dump gets its card");
+    noteCardSent("u1", t0);
+    assert.equal(cardSuppressedByDump("u1", t0 + 5_000), true, "5s later — same bundle, no second card");
+    assert.equal(cardSuppressedByDump("u1", t0 + DUMP_WINDOW_MS - 1), true, "still inside the window");
+    assert.equal(cardSuppressedByDump("u1", t0 + DUMP_WINDOW_MS + 1), false, "a later, separate meal gets its own card");
+    assert.equal(cardSuppressedByDump("u2", t0 + 5_000), false, "one client's dump never silences another's");
+    _resetDumpWindow();
+    assert.equal(cardSuppressedByDump("u1", t0 + 5_000), false, "a restart costs at most one extra card, never a log");
+  });
+
   test("food reply: the day's instruction appears once, not five times", async () => {
     const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
     const base = {

@@ -40,3 +40,33 @@ export function cardWillAttach(user: any, mealKcal: number, hasBaseUrl: boolean)
   if (!getGoalProfile(user?.goalType).usesMacros) return false;   // wellness → no card, ever
   return Number(user?.calorieTarget) > 0 && Number(user?.proteinTarget) > 0;
 }
+
+// THE DUMP WINDOW (2026-08-03, founder: "they don't send it when they're eating, they send it
+// when it's convenient — long voice notes, or bundles of photos of things they ate yesterday").
+//
+// The product assumed a client logs one meal at a time, as they eat it. They do not. They dump
+// the whole day at 9pm: six photos in ninety seconds. Each one was a separate log, so each one
+// rendered its own full macro card — six near-identical pictures of the same day's totals,
+// arriving in a row. That is a receipt printer, not a coach.
+//
+// One dump, one card: the FIRST log in a window gets the picture, the rest are logged silently
+// and roll into the same day's numbers. Nothing is lost — every meal still counts, the card the
+// client does see is simply the most complete one. In-memory and short-lived on purpose; a
+// restart at worst costs one extra card, never a log.
+const _lastCard = new Map<string, number>();
+export const DUMP_WINDOW_MS = 4 * 60_000;
+
+export function noteCardSent(userId: string, at = Date.now()): void {
+  if (!userId) return;
+  _lastCard.set(userId, at);
+  if (_lastCard.size > 5000) _lastCard.clear();
+}
+
+/** True → a card went to this client moments ago; this log is part of the same dump. */
+export function cardSuppressedByDump(userId: string, at = Date.now()): boolean {
+  const last = _lastCard.get(userId);
+  return last !== undefined && at - last < DUMP_WINDOW_MS;
+}
+
+/** Test/ops hook — clear the dump memory. */
+export function _resetDumpWindow(): void { _lastCard.clear(); }
