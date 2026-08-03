@@ -102,7 +102,7 @@ export function mealTitleFromReply(text: string): string {
     .replace(/^(?:tasty|lovely|nice|good|great|solid|hearty|delicious)\s+/i, "")   // flattery is not a food
     .replace(/^(?:breakfast|lunch|dinner|supper|snack|meal|plate)\s+of\s+/i, "")   // "lunch of mince pasta"
     .replace(/,?\s*(?:about|roughly|around|approx\w*|~)\s*\d.*$/i, "")            // ", about 550 kcal"
-    .replace(/\blogged\b.*$/i, "").replace(/[,:]\s*$/, "").trim().slice(0, 46);
+    .replace(/\blogged\b.*$/i, "").replace(/[,:—–-]+\s*$/, "").trim().slice(0, 46);
   return stripWrapQuotes(cleaned) || "Meal";
 }
 
@@ -388,8 +388,16 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
     const verdict = dayStatusPill(t.rows, t.isBulk);
     const numbersOff = cardNumbersOff(opts.user);
     const png = renderMacroCard({
-      title: (opts.mealName || "Meal").slice(0, 42),
-      subtitle: retro ? "Logged to yesterday" : "Meal logged",
+      title: (opts.mealName || "Meal").replace(/[,:—–-]+\s*$/, "").trim().slice(0, 42) || "Meal",
+      // WHAT DID *THIS* COST? (2026-07-31 live: a Monster Energy drink logged, and the card
+      // said "Meal logged", "Under target", "Eat more today — add a proper meal". Every number
+      // on it was the DAY. A client who knows nothing read a green tick and an instruction to
+      // eat more, and never learned what the energy drink cost them.) The card's own header
+      // claims a meal was logged, so it must say what was logged. This is the one number that
+      // teaches; the day bars below are context, not the lesson.
+      subtitle: opts.mealKcal > 0
+        ? `${retro ? "Yesterday" : "Logged"} · ${Math.round(opts.mealKcal)} kcal`
+        : (retro ? "Logged to yesterday" : "Meal logged"),
       pill: verdict.text,
       pillTone: verdict.tone,
       rows: t.rows,
