@@ -16,6 +16,7 @@ import { getDisplayName, sastDayStart, timeGreeting } from "./utils";
 import { getTodayWorkoutState } from "./workout-state";
 import { parseFirstName } from "./onboarding-name";
 import { MEDICAL_QUESTION } from "./onboarding-physique";
+import { welcomeAvatarMarker } from "./macro-card-attach";
 
 // ============================================================
 // ONBOARDING STATE MACHINE — valid states (CTO audit #17/#41)
@@ -339,7 +340,17 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   // habit in the first five minutes.
   const activationBrief = buildActivationBrief(u.name?.split(" ")[0]);
   const msg4 = `${activationBrief}\n\n📸 *Right now, take one photo of your next meal or snack and send it.* That single act is your first win — and the whole habit in one move.\n\n_I keep it simple and plain — no confusing numbers. Love the detail? Just say *"show me the numbers"* anytime._`;
-  return `${underweightNote}${goalRealityNote}${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}\n\n---\n\n${msg4}`;
+  // THE ONE WELCOME CARD (2026-08-04, card policy locked: "signup — one welcome card, never
+  // repeated"). renderWelcomeCard has existed since 22 July and welcomeAvatarMarker had NO
+  // caller anywhere in the server — a branded Coach K card, built, tested, and never once sent
+  // to a human. Signup is the moment it was made for.
+  //
+  // Rides on the LAST bubble so it lands after the plan rather than interrupting it, and it is
+  // fail-open by construction: welcomeAvatarMarker returns "" when the media host is unset, so
+  // a missing MEDIA_BASE_URL can never block an onboarding. Never repeated — this function runs
+  // once per client, at the only moment there is nothing true to celebrate yet.
+  const welcomeCard = welcomeAvatarMarker();
+  return `${underweightNote}${goalRealityNote}${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}\n\n---\n\n${msg4}${welcomeCard}`;
 }
 
 // ============================================================

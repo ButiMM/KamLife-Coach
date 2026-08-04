@@ -62,7 +62,7 @@ export function qrMatrix(text: string): boolean[][] {
 
 // Draw the QR into a square of `box` px at (ox, oy). Modules are snapped to integers so the
 // code stays crisp (blurred modules fail to scan). A white quiet-zone border is included.
-function drawQr(ctx: SKRSContext2D, text: string, ox: number, oy: number, box: number): void {
+export function drawQr(ctx: SKRSContext2D, text: string, ox: number, oy: number, box: number): void {
   const grid = qrMatrix(text);
   const n = grid.length;
   const quiet = 4; // modules of quiet zone each side (spec minimum)

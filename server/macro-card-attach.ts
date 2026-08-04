@@ -14,7 +14,7 @@ import { eq, and, gte, lt, sql, asc } from "drizzle-orm";
 import { isPastSastDay } from "./sast";
 
 import { getGoalProfile } from "./goal-profiles";
-import { renderMacroCard, renderWelcomeCard } from "./macro-card";
+import { renderWelcomeCard } from "./macro-card";
 import { achievementFor, shareAchievement, renderAchievementCard, type AchievementCardData } from "./achievement-card";
 import { putCard } from "./card-store";
 import { waterTargetLitres } from "./targets";
@@ -132,39 +132,6 @@ function stripWrapQuotes(s: string): string {
   return (s || "").replace(/^["'“”‘’]+\s*/, "").replace(/\s*["'“”‘’]+$/, "").trim();
 }
 
-// PLAIN-LANGUAGE COACHING on the card (2026-07-22, founder: the card must TEACH, and it must
-// KEEP CHANGING — a fresh, indirectly-educational cue for THIS day's state, celebrating a goal
-// reached and flagging anything out of the ordinary). No jargon, no emoji (the card font can't
-// render it). One short line, most-important-first; a couple of variants per state so it varies.
-export function coachingHint(rows: Row[], isBulk: boolean): string {
-  const r = (label: string) => rows.find(x => x.label === label);
-  const ratio = (x?: Row) => (x && x.target > 0 ? x.current / x.target : 0);
-  const cal = r("Calories"), prot = r("Protein"), carb = r("Carbs"), fat = r("Fat");
-  const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
-  const proteinHit = !!(prot && prot.current >= prot.target);
-  // Out of the ordinary — a big overshoot on a limiting macro. Teach WHY, kindly, not just "over".
-  if (ratio(fat) > 1.25) return pick(["Fat ran high — it's the densest fuel, so it adds up fast. Keep it grilled from here.", "Lots of fat today — nothing wrong, just filling. Lean protein and veg next."]);
-  if (ratio(fat) > 1.1) return pick(["Fat ran a bit high — keep the rest lean. Grilled, not fried.", "Watch the fat from here — small change, big calorie saving."]);
-  if (ratio(carb) > 1.1) return pick(["Carbs are maxed — protein and veg from here, ease the starch.", "Plenty of starch in today — lean on protein and veg next."]);
-  if (!isBulk && ratio(cal) > 1.25) return pick(["Over for today — no drama, one meal never undoes a week. Light and lean tomorrow.", "Past your food today. It happens — a walk helps, and tomorrow resets clean."]);
-  if (!isBulk && ratio(cal) > 1.05) return pick(["Over your food for today — go light and lean next meal.", "Just past target — keep the next one small and protein-first."]);
-  if (isBulk && ratio(cal) < 0.6) return pick(["Under your building fuel — eat more, muscle needs it.", "Still room to build — add a proper meal."]);
-  // Goal reached — celebrate AND teach why it matters.
-  if (proteinHit && !isBulk && ratio(cal) >= 0.9 && ratio(cal) <= 1.05) return pick(["Textbook day — protein in, calories on point. This is exactly it.", "Nailed it: enough protein, right calories. Repeat this and results follow."]);
-  if (proteinHit) return pick(["Protein hit — the one that matters most. It protects muscle while you lean out.", "Protein's in — that's the win that keeps you full and strong."]);
-  // SPECIFIC NEXT MOVE, not a platitude (2026-07-23, founder + reviewers: "it's the same
-  // generic thing over and over — it doesn't coach"). A coach names the gap and what closes
-  // it; "One good choice at a time" is a fridge magnet. Use THEIR real remaining numbers.
-  const protLeft = prot ? Math.round(prot.target - prot.current) : 0;
-  const calLeft = cal ? Math.round(cal.target - cal.current) : 0;
-  if (protLeft > 0) {
-    const fix = protLeft >= 60 ? "two protein meals" : protLeft >= 35 ? "a proper protein meal" : protLeft >= 18 ? "eggs, tin fish or a shake" : "a yoghurt or a boiled egg";
-    if (calLeft < 200 && calLeft > -200) return `${protLeft}g protein to go — ${fix}, easy on the oil.`;
-    return `${protLeft}g protein to go — ${fix} closes it.`;
-  }
-  if (calLeft > 400) return `${calLeft} kcal still to eat — your body needs the fuel.`;
-  return pick(["Everything's in for today — logged, on target, done. Repeat tomorrow.", "Targets met and logged. This is the day that builds the result."]);
-}
 
 
 /**
@@ -312,38 +279,8 @@ const HINT_SUBJECTS: Array<[string, RegExp]> = [
   ["calories", /\bcalorie|\bkcal\b|\beat more\b|\bfuel\b/i],
 ];
 
-// One plain sentence of education per subject. A fact, never a second instruction. Kept short
-// enough to render whole — a footer that ends in "…" teaches nobody anything.
-export const WHY_LINE: Record<string, string> = {
-  protein: "Protein protects your muscle while you lose fat.",
-  fat: "Fat is the densest fuel — oil adds up fastest.",
-  carbs: "Starch isn't the problem. The portion size is.",
-  calories: "Your body reads the week, not one single meal.",
-};
 
-// EARLIEST mention wins, not list order — a line's subject is what it opens with. "Carbs are
-// maxed — protein and veg from here" is about carbs; scanning in list order would call it protein.
-function hintSubject(s: string): string | null {
-  let best: string | null = null, at = Infinity;
-  for (const [name, re] of HINT_SUBJECTS) {
-    const m = re.exec(s || "");
-    if (m && m.index < at) { at = m.index; best = name; }
-  }
-  return best;
-}
 
-export function distinctHint(hint: string, nextMove: string): string {
-  const norm = (x: string) => (x || "").toLowerCase().replace(/[^a-z ]/g, "").trim();
-  const h = norm(hint), n = norm(nextMove);
-  if (!h || !n) return hint;
-  const subject = hintSubject(hint);
-  if (subject && subject === hintSubject(nextMove)) return WHY_LINE[subject] || "";
-  // TWO shared words, not three (2026-07-29): "Eat more today — add a proper meal" over "Still
-  // room to build — add a proper meal" shares only "proper" and "meal" and sailed through. Two
-  // long words in common is already the same sentence wearing a different hat.
-  const shared = n.split(" ").filter(w => w.length > 3 && h.includes(w)).length;
-  return shared >= 2 ? "" : hint;
-}
 
 /**
  * kg changed since their first weigh-in — NEGATIVE when they have lost weight, matching
@@ -439,59 +376,39 @@ export function cardProse(text: string, numbersOff: boolean): string {
   return stripNumbersFromProse(text || "").trim();
 }
 
+/**
+ * A LOG IS NOT A CARD MOMENT (2026-08-04, card policy locked).
+ *
+ * This function used to attach a picture to every meal. Two reasons that was wrong, and neither
+ * shows up in a screenshot:
+ *
+ *   1. EVERY IMAGE COSTS THE CLIENT DATA. Prepaid, R199/month, three to five PNGs a day. That
+ *      is a cost we push onto them silently and it would churn someone while looking like
+ *      "it got boring".
+ *   2. A CARD ON EVERY LOG MAKES THE CARD WORTHLESS. The thing we want them to show people
+ *      cannot also be the thing they get for logging a black coffee. Rarity is the mechanic.
+ *
+ * So the locked policy is: signup (once), a real milestone, the weekly Sunday summary, and on
+ * demand. A regular log gets two sentences and nothing else — which is also what the voice rules
+ * ask for. The milestone branch below is the ONLY card this path can still produce.
+ */
 export async function macroCardMarker(opts: { user: any; mealName: string; mealKcal: number; forDate?: Date; achievementStreak?: number }): Promise<string> {
   try {
-    // ON A MILESTONE DAY THE RECEIPT STANDS ASIDE (2026-07-28, marketing review: "people don't
-    // share a receipt, they share an achievement"). The macro card is useful and nobody has ever
-    // forwarded one. Seven days straight is about the person, and that is the thing they show
-    // someone. One card, so the moment isn't split — the numbers are still in the text reply.
+    // A MILESTONE IS A MOMENT (2026-07-28, marketing review: "people don't share a receipt,
+    // they share an achievement"). Seven days straight is about the person, and that is the
+    // thing they show someone. achievementFor is the milestone gate — it returns null on an
+    // ordinary day, which is now the whole of the rest of this function.
     const ach = opts.achievementStreak
       ? achievementFor({ firstName: firstNameOf(opts.user), streak: opts.achievementStreak })
       : null;
-    if (ach) {
-      const b = cardBaseUrl();
-      if (b) return ` [MEDIA:${b}/card/${putCard(renderAchievementCard(ach))}.png]`;
-    }
-    // NO CARD FOR A TRIVIAL ITEM (2026-07-28 live: a full four-bar macro card rendered for a
-    // 10 kcal black coffee). A card is a moment; spending one on a zero-calorie drink cheapens
-    // every other card and costs a render. The log still happens — only the picture is skipped.
+    if (!ach) return "";
+    if (cardSuppressedByDump(opts.user?.id)) return "";   // six photos in ninety seconds → one card
     const base = cardBaseUrl();
-    if (!cardWillAttach(opts.user, opts.mealKcal, !!base)) return "";
-    // ONE DUMP, ONE CARD — six photos in ninety seconds used to render six near-identical
-    // cards of the same day's totals. The meal is still logged; only the picture is skipped.
-    if (cardSuppressedByDump(opts.user?.id)) return "";
-    const retro = opts.forDate ? isPastSastDay(opts.forDate) : false;
-    const t = await todayRows(opts.user, false, retro ? opts.forDate : undefined);
-    if (!t) return "";
-    const verdict = dayStatusPill(t.rows, t.isBulk);
-    // THE CARD IS THE SHAREABLE WIN, NOT THE DASHBOARD (2026-08-04, Slice 3).
-    //
-    // Every version of this card until now answered "how is your day going against target?" —
-    // a protein bar, a next move computed from a gap, a subtitle of Today or Yesterday. That is
-    // a dashboard, and the spec is explicit about what it must be instead: the most encouraging
-    // TRUE progress for this client, one next move, their name, the watermark. Nobody has ever
-    // forwarded a progress bar to a group chat.
-    //
-    // shareAchievement already answers exactly that question — strongest real number, ranked by
-    // what a person is actually proud of — and it has been sitting behind the `share my progress`
-    // command since 28 July while the log path rendered bars. This is not a new card; it is the
-    // right card finally reaching the moment that matters.
-    //
-    // Null means there is genuinely nothing true to celebrate yet (day one, no weigh-in, no
-    // streak). Then NO card. A fabricated milestone is worse than none — that is the same rule
-    // the provenance gate enforces on words, applied to pictures.
-    const progress = shareAchievement({
-      firstName: firstNameOf(opts.user),
-      streak: opts.achievementStreak,
-      weightChangeKg: await weightChangeSinceStart(opts.user?.id),
-      sessions: opts.user?.totalWorkoutsCompleted ?? undefined,
-    });
-    if (!progress) return "";
-    const png = renderAchievementCard(progress);
+    if (!base) return "";
     noteCardSent(opts.user?.id);
-    return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
+    return ` [MEDIA:${base}/card/${putCard(renderAchievementCard(ach))}.png]`;
   } catch (e) {
-    console.warn("[MACRO_CARD] skipped:", (e as any)?.message || e);
+    console.warn("[MILESTONE_CARD] skipped:", (e as any)?.message || e);
     return "";
   }
 }

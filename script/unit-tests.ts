@@ -50,7 +50,7 @@ import { comebackPlan } from "../server/adaptive-training";
 import { bandFor, assessClients, dropOffCurve, silenceTriggers, summariseEngagement, type ActivityRow } from "../server/engagement";
 import { analyseSurface, classifyIntent } from "../server/surface";
 import { TEMPLATES, validateTemplate, invalidTemplates, placeholders, templateSid, WINDOW_RECOVERY_TEMPLATE } from "../server/whatsapp-templates";
-import { wrapLines, renderMacroCard } from "../server/macro-card";
+import { wrapLines } from "../server/macro-card";
 import { cardNumbersOff, cardProse } from "../server/macro-card-attach";
 import { fadeState, fadingClients } from "../server/engagement";
 import { guardMalformed, safeFallback, recordGuardResult, guardStats, guardStatsLine, GUARD_ESCALATION_THRESHOLD } from "../server/malformed-guard";
@@ -76,7 +76,7 @@ import { mustStayDeterministic } from "../server/understanding/action-router";
 import { decayObservations } from "../server/understanding/state";
 import { digitizeSpokenAmounts } from "../server/utils";
 import { goalStatusLine, progressBar, macroBarsBlock } from "../server/education";
-import { renderMacroCard } from "../server/macro-card";
+import { renderAchievementCard, achievementShareLine } from "../server/achievement-card";
 
 // Some pure helpers live in modules that also import db.ts (e.g. activation.ts) — the
 // stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
@@ -4763,104 +4763,39 @@ test("goalStatus: muscle_gain way over gets the flood warning; under gets fuel p
 
 // MACRO PROGRESS BARS (2026-07-21, founder wants the marketing graphic on the real log).
 // The bar logic is shared by the image-card renderer and the emoji-text fallback — lock it.
-// MACRO CARD IMAGE (2026-07-21): the crisp branded card the bot sends on a meal log renders
-// to a real PNG — the marketing graphic, delivered. Smoke test: valid, non-trivial PNG out.
-test("renderMacroCard: produces a valid PNG image", () => {
-  const png = renderMacroCard({
-    title: "Pilchards + pap", subtitle: "Meal logged", pill: "+420 cal",
-    rows: [
-      { label: "Calories", current: 847, target: 2100, unit: "" },
-      { label: "Protein", current: 98, target: 150, unit: "g" },
-      { label: "Carbs", current: 142, target: 200, unit: "g" },
-      { label: "Fat", current: 41, target: 70, unit: "g" },
-    ],
-    hint: "Protein first",
+// THE CARD IS THE ACHIEVEMENT NOW (2026-08-04, card policy locked). renderMacroCard — the
+// bar-chart dashboard image — is deleted; a regular log gets two sentences and no picture.
+// What must still render is the ONE card that exists to be shared.
+test("renderAchievementCard: produces a valid PNG image", () => {
+  const png = renderAchievementCard({ figure: "3kg", unit: "down", line: "Kam is 3kg lighter.", sub: "Not a diet." });
+  assert.ok(Buffer.isBuffer(png) && png.length > 5000, "a real, non-trivial PNG");
+  assert.equal(png.subarray(0, 4).toString("hex"), "89504e47", "PNG magic bytes");
+});
+
+test("renderAchievementCard: a long line still renders (wrap, never truncate)", () => {
+  const png = renderAchievementCard({
+    figure: "30", unit: "days in a row",
+    line: "Koketso logged food thirty days in a row without missing a single one of them.",
+    sub: "That is not willpower any more. That is a habit.",
   });
-  assert.ok(Buffer.isBuffer(png) && png.length > 5000, "a real PNG buffer of reasonable size");
-  assert.strictEqual(png[0], 0x89, "PNG magic byte 1");
-  assert.strictEqual(png.slice(1, 4).toString("ascii"), "PNG", "PNG signature");
+  assert.ok(Buffer.isBuffer(png) && png.length > 5000, "long copy must not break the render");
 });
-// A LONG meal title must not run under the pill (2026-07-22 live: "…Pomegranate" overlapped
-// "+0 cal"). We can't diff pixels here, but a very long title must still render a valid PNG
-// without throwing — the truncation path is exercised. Premium = no overlap, ever.
-// WEEKLY / MONTHLY REPORT CARD (2026-07-22) — shareable scorecard, goal-aware, not overwhelming.
-test("welcome-card: renderWelcomeCard produces a valid branded PNG", async () => {
-  const { renderWelcomeCard } = await import("../server/macro-card");
-  const png = renderWelcomeCard({ name: "Coach K", tagline: "Your fitness coach on WhatsApp" });
-  assert.ok(Buffer.isBuffer(png) && png.length > 5000);
-  assert.strictEqual(png.slice(1, 4).toString("ascii"), "PNG");
-});
-test("report-card: renderReportCard produces a valid PNG", async () => {
-  const { renderReportCard } = await import("../server/macro-card");
-  const png = renderReportCard({
-    title: "Koketso's month", subtitle: "July so far", pill: "30 days",
-    stats: [
-      { label: "Avg calories / day", value: "1980", sub: "target 2100" },
-      { label: "Avg protein / day", value: "138g", sub: "target 150g", tone: "good" },
-      { label: "Workouts", value: "14", sub: "target ~13", tone: "good" },
-      { label: "Avg steps / day", value: "8,200", sub: "target 8,500" },
-      { label: "Days on track", value: "24", sub: "of 30", tone: "good" },
-      { label: "Weight change", value: "-2.1kg", tone: "good" },
-    ],
-    hint: "Down 2.1kg this month — the plan's working. Keep it steady.",
-  });
-  assert.ok(Buffer.isBuffer(png) && png.length > 5000);
-  assert.strictEqual(png.slice(1, 4).toString("ascii"), "PNG");
-});
-test("report-card: stats are goal-aware — wellness gets habits, not macros", async () => {
-  const { buildReportStats } = await import("../server/report-card");
-  const data = { days: 7, distinctDaysLogged: 5, avgKcal: 0, avgProtein: 0, workouts: 3, avgSteps: 7000, totalMeals: 12, weightChange: null };
-  const wellness = buildReportStats({ goalType: "general", stepsTarget: 8000, trainingDaysPerWeek: 3 }, data as any);
-  assert.ok(wellness.some(s => /showed up|meals/i.test(s.label)), "wellness = habit tiles");
-  assert.ok(!wellness.some(s => /protein/i.test(s.label)), "no protein target pushed at wellness");
-  const macro = buildReportStats({ goalType: "fat_loss", calorieTarget: 2000, proteinTarget: 150, stepsTarget: 8000, trainingDaysPerWeek: 3 }, { ...data, avgKcal: 1900, avgProtein: 140 } as any);
-  assert.ok(macro.some(s => /protein/i.test(s.label)), "macro goal shows protein");
-});
-test("report-card: coaching line leads with the strongest thing, one plain sentence", async () => {
-  const { reportCoachingLine } = await import("../server/report-card");
-  const line = reportCoachingLine({ goalType: "fat_loss", proteinTarget: 150, stepsTarget: 8000, trainingDaysPerWeek: 3, weightIsGoal: true },
-    { days: 7, distinctDaysLogged: 6, avgKcal: 1900, avgProtein: 140, workouts: 3, avgSteps: 9000, totalMeals: 18, weightChange: -0.8 } as any, "week");
-  assert.match(line, /down 0\.8kg|working/i);
-  assert.ok(line.length < 140, "not overwhelming");
-});
-test("renderMacroCard: a long title + pill still renders cleanly (truncation path)", () => {
-  const png = renderMacroCard({
-    title: "This is a Switch Cranberry & Pomegranate + Zinc sugar-free drink", pill: "+0 cal",
-    rows: [{ label: "Calories", current: 918, target: 2862, unit: "" }, { label: "Protein", current: 47, target: 185, unit: "g" }],
-    hint: "Under your building fuel — eat more, muscle needs it.",
-  });
-  assert.ok(Buffer.isBuffer(png) && png.length > 5000, "valid PNG even with a very long title");
-  assert.strictEqual(png.slice(1, 4).toString("ascii"), "PNG");
+
+// THE REFERRAL HALF A QR CANNOT DO. The card is scannable in the room; forwarded into a chat
+// the recipient is HOLDING the screen the code is on, so the message text must carry a
+// tappable link. If this line ever loses its link the in-chat share silently dies.
+test("achievementShareLine: carries a tappable join link, in one sentence", () => {
+  const line = achievementShareLine("gymA");
+  assert.match(line, /https?:\/\/(wa\.me|api\.whatsapp)/i, "must contain a tappable wa.me link");
+  assert.ok(line.split(/(?<=[.!?])\s+/).filter(Boolean).length === 1, `one sentence only: "${line}"`);
+  assert.ok(!/share this with your friends/i.test(line), "no marketing voice in the ask");
 });
 
 // COACHING CARD (2026-07-22, founder: the card must TEACH, not just count — plain language,
-// every goal, over or under). The bottom line adapts to the day's state.
-test("coachingHint: plain-language, goal-aware over/under coaching", async () => {
-  const { coachingHint } = await import("../server/macro-card-attach");
-  const rows = (o: any) => [
-    { label: "Calories", current: o.cal ?? 1000, target: 2000, unit: "", overIsBad: true },
-    { label: "Protein", current: o.prot ?? 100, target: 150, unit: "g", overIsBad: false },
-    { label: "Carbs", current: o.carb ?? 100, target: 200, unit: "g", overIsBad: true },
-    { label: "Fat", current: o.fat ?? 30, target: 60, unit: "g", overIsBad: true },
-  ];
-  // Variety: a couple of educational variants per state — assert on the state keyword, run a few
-  // times so a bad variant can't sneak through, and confirm the cue actually changes across calls.
-  const many = (fn: () => string) => new Set(Array.from({ length: 40 }, fn));
-  for (const h of many(() => coachingHint(rows({ fat: 80 }), false))) assert.match(h, /fat/i);
-  for (const h of many(() => coachingHint(rows({ carb: 260 }), false))) assert.match(h, /carb|starch/i);
-  for (const h of many(() => coachingHint(rows({ cal: 2200 }), false))) assert.match(h, /over|past|light|lean/i);
-  for (const h of many(() => coachingHint(rows({ prot: 160, cal: 1200 }), false))) assert.match(h, /protein|nail|textbook/i);
-  for (const h of many(() => coachingHint(rows({ cal: 400, prot: 40 }), false))) assert.match(h, /room|day left|protein/i);
-  for (const h of many(() => coachingHint(rows({ cal: 800, prot: 40 }), true))) assert.match(h, /build|fuel|muscle/i);
-  // SPECIFIC, not varied (2026-07-23, founder + reviewers: "the same generic thing over and
-  // over — it doesn't coach"). The default cue must now name the REAL gap and what closes it;
-  // a rotating platitude ("One good choice at a time") is a fridge magnet, not coaching.
-  const dflt = coachingHint(rows({ cal: 900, prot: 40 }), false);
-  assert.match(dflt, /\d+g protein to go/i, `must name the actual gap: ${dflt}`);
-  assert.doesNotMatch(dflt, /one good choice|small steady|consistency beats/i, "no platitudes");
-  // 110g protein short vs 10g short must give DIFFERENT next moves — advice scales to the gap.
-  assert.notEqual(coachingHint(rows({ cal: 900, prot: 40 }), false), coachingHint(rows({ cal: 900, prot: 140 }), false));
-});
+// coachingHint / distinctHint / hintSubject DELETED 2026-08-04 with the dashboard card they
+// fed. They answered "what should the bar chart say about your macros?" — a question the
+// product no longer asks. Their tests went with them rather than being kept alive to guard
+// code nothing calls.
 
 // THE VERDICT PILL (2026-07-28, founder: "clarity without confusing them, but giving them what
 // they want"). The loudest corner of the card must answer "am I okay today", not restate a
@@ -4899,23 +4834,6 @@ test("dayStatusPill: a plain verdict, never a number, and it matches the bars", 
 });
 
 // ONE INSTRUCTION PER CARD (2026-07-28). The band gives the action; the footer must not give
-// the same action back in different words — it gives the reason instead.
-test("distinctHint: same subject twice becomes action + reason, never the order twice", async () => {
-  const { distinctHint, WHY_LINE } = await import("../server/macro-card-attach");
-  const out = distinctHint("62g protein to go — two protein meals closes it.", "Get protein into your next two meals");
-  assert.equal(out, WHY_LINE.protein, "the repeat becomes the WHY");
-  assert.doesNotMatch(out, /\b(?:add|get|make|eat|keep|grill)\b/i, "the footer teaches, it never gives a second order");
-  assert.equal(
-    distinctHint("Fat ran a bit high — keep the rest lean. Grilled, not fried.", "Grill it, don't fry it — that's the whole fix today"),
-    WHY_LINE.fat,
-  );
-  // Different subjects are left alone — that footer is earning its space. A line's subject is
-  // what it OPENS with, so this one is about carbs even though it mentions protein later.
-  const kept = "Carbs are maxed — protein and veg from here.";
-  assert.equal(distinctHint(kept, "Eat more today — add a proper meal"), kept);
-  // Every WHY line must fit the card's footer width — a truncated fact teaches nothing.
-  for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
-});
 
 // ONE INSTRUCTION PER REPLY (2026-07-28, founder looking at one real log: "what the hell is going
 // on here?"). That single meal told him to eat a protein meal FIVE times — text head, text
@@ -5033,8 +4951,13 @@ test("next move: the instruction can never contradict the pill", async () => {
     { label: "Carbs", current: 203, target: 337, unit: "g", overIsBad: true },
     { label: "Fat", current: 94, target: 86, unit: "g", overIsBad: true },
   ];
+  // HOUR PINNED (2026-08-04). Both this and the sibling test below called nextMoveLine() with
+  // no hour, so they read the wall clock and only passed during the SAST day — at 22:00 the
+  // "day's done, tomorrow…" branch fires and the assertion breaks. They were green when written
+  // and red every night since, including in the 4am nightly CI. A test that depends on when you
+  // run it is not a test. 14:00 is the midday case these were written for.
   const pill = dayStatusPill(rows, true);
-  const move = nextMoveLine(rows, true);
+  const move = nextMoveLine(rows, true, 14);
   assert.match(pill.text, /Fat over/i);
   assert.match(move, /lean|grilled/i, `pill says "${pill.text}" — the move must agree: "${move}"`);
   assert.doesNotMatch(move, /^Eat more today — add a proper meal$/, "a bare 'eat more' contradicts a blown fat bar");
@@ -6730,8 +6653,10 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     // "Add it, don't eat the skin", "3 eggs 🥚 2 slices". A layman does not eat "protein".
     assert.match(big, /protein|chicken|eggs?|fish|yoghurt|meat/i, "an action in food, not a macro");
     assert.doesNotMatch(big, /\d/, "the layman's line must carry no numbers");
-    assert.match(nextMoveLine(rows(185, 185, 3400, 2862), false), /lean|light/i);
-    assert.match(nextMoveLine(rows(185, 185, 2800, 2862), false), /done/i);
+    // Pinned for the same reason as the line above — these two read the wall clock and went
+    // red every evening. 19:00 is the "over on calories, still in the day" case they assert.
+    assert.match(nextMoveLine(rows(185, 185, 3400, 2862), false, 19), /lean|light/i);
+    assert.match(nextMoveLine(rows(185, 185, 2800, 2862), false, 19), /done/i);
   });
 
   test("life: the clinical edge still refers", () => {
@@ -7207,18 +7132,7 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.ok(!/\d/.test(free), `a number-free client must see no digit: "${free}"`);
   });
 
-  test("card: numbersOff actually reaches the renderer — the picture differs", () => {
-    // Without this the flag can be defined, documented, tested at the policy layer, and never
-    // passed through — which is exactly how the card drifted from the text in the first place.
-    const rows = [
-      { label: "Calories", current: 1180, target: 1750, unit: "kcal", overIsBad: true },
-      { label: "Protein", current: 71, target: 130, unit: "g" },
-    ];
-    const base = { title: "Chicken and rice", pill: "On track" as const, rows, nextMove: "Eat more today" };
-    const withNums = renderMacroCard({ ...base, numbersOff: false });
-    const without = renderMacroCard({ ...base, numbersOff: true });
-    assert.ok(without.length < withNums.length, "the number-free card must render less ink, not the same card");
-  });
+
 }
 
 // ── "Remove last meal it's wrong!!!!" — the documented command, beaten by frustration ────────

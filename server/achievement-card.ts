@@ -18,6 +18,8 @@
  */
 
 import { createCanvas } from "@napi-rs/canvas";
+import { drawQr } from "./join-qr";
+import { buildJoinLink } from "./signup-source";
 import { CARD_FONT as FONT, CARD_COLOURS as C, roundRect } from "./macro-card";
 
 export interface AchievementCardData {
@@ -29,6 +31,8 @@ export interface AchievementCardData {
   line: string;
   /** Optional smaller line under it — the meaning, not another stat. */
   sub?: string;
+  /** Where a scan of this card should be attributed (gym / flyer / referral). */
+  sourceTag?: string | null;
 }
 
 /**
@@ -49,6 +53,27 @@ function publicAddress(): string {
   return /railway|herokuapp|vercel\.app|onrender|localhost|\d+\.\d+\.\d+\.\d+/i.test(clean) ? BRAND_DOMAIN : clean;
 }
 
+/**
+ * THE REFERRAL ENGINE, FINISHED (2026-08-04, card policy locked).
+ *
+ * The card already carried the brand address, and an address on a picture asks a stranger to
+ * read it off someone's phone, remember it, and type it — five steps, and you lose people at
+ * every one. Meanwhile a working QR renderer has sat in join-qr.ts since it was written,
+ * serving exactly one caller: an admin page.
+ *
+ * A CARD HAS TWO SHARING CONTEXTS AND THEY NEED DIFFERENT AFFORDANCES:
+ *
+ *   IN THE ROOM — at the gym, in a taxi, at church — one phone held up to another face. The
+ *   QR is for this, and it is the only thing that works here: point, scan, in WhatsApp.
+ *
+ *   IN A CHAT — the card forwarded to a group. A QR is USELESS here, and this is the part
+ *   most people get wrong: the person receiving it is HOLDING the screen the code is on, so
+ *   they cannot scan it. That share needs a tappable wa.me link, and a link cannot live
+ *   inside a PNG — it has to be in the message text next to it. See achievementShareLine().
+ *
+ * So: QR on the image for the room, link in the message for the chat, address on both for
+ * anyone who does neither.
+ */
 export function renderAchievementCard(d: AchievementCardData): Buffer {
   const W = 1080, H = 1080, M = 40;
   const cardX = M, cardW = W - M * 2, cardH = H - M * 2;
@@ -125,23 +150,55 @@ export function renderAchievementCard(d: AchievementCardData): Buffer {
     drawWrapped(ctx, d.sub, cx, y + 34, cardW - 200, 46);
   }
 
+  // ── The QR. Bottom-right, small but never below the scan floor: 190px at 1080 wide keeps
+  // every module above one screen pixel on a mid-range phone held at arm's length. Placed
+  // opposite the wordmark so neither crowds the other.
+  const qrBox = 190;
+  const qrX = cardX + cardW - qrBox - 56, qrY = M + cardH - qrBox - 56;
+  try {
+    drawQr(ctx, buildJoinLink(d.sourceTag), qrX, qrY, qrBox);
+    ctx.fillStyle = "#6f7581";
+    ctx.font = `500 22px "${FONT}"`;
+    ctx.textAlign = "center";
+    ctx.fillText("Scan to join", qrX + qrBox / 2, qrY + qrBox + 30);
+  } catch (e) {
+    // A card without a QR is still a good card. A card that failed to render is not.
+    console.warn("[ACHIEVEMENT_CARD] QR skipped:", (e as any)?.message || e);
+  }
+
   // ── Wordmark + address. A screenshot with no address is a free advert thrown away. ──
   const wy = M + cardH - 108;
   ctx.font = `bold 46px "${FONT}"`;
   const kamW = ctx.measureText("KAM").width, lifeW = ctx.measureText("LIFE").width;
-  const startX = cx - (kamW + lifeW) / 2;
+  // Left-anchored now that the QR owns the bottom-right corner (it used to be centred).
+  const startX = cardX + 56;
   ctx.textAlign = "left";
   ctx.fillStyle = "#ffffff";
   ctx.fillText("KAM", startX, wy);
   ctx.fillStyle = C.ORANGE;
   ctx.fillText("LIFE", startX + kamW, wy);
-  ctx.textAlign = "center";
+  ctx.textAlign = "left";
   ctx.fillStyle = "#6f7581";
   ctx.font = `500 28px "${FONT}"`;
-  ctx.fillText(publicAddress(), cx, wy + 48);
+  ctx.fillText(publicAddress(), startX, wy + 48);
 
   ctx.textAlign = "left";
   return canvas.toBuffer("image/png");
+}
+
+/**
+ * The line that rides WITH the card in the message, carrying the half a QR cannot do.
+ *
+ * Kept to one sentence on purpose. This is the only place in the product that asks a client for
+ * anything, and an ask that reads like marketing gets ignored by the exact person most likely to
+ * refer — someone who just did something they are proud of. So: name the win, hand them the
+ * link, stop talking. No "share this with your friends!", no emoji wall, no second sentence.
+ *
+ * Only ever attached to a MILESTONE card. Asking on every log trains people to ignore the ask.
+ */
+export function achievementShareLine(sourceTag?: string | null): string {
+  const link = buildJoinLink(sourceTag);
+  return `Show someone — they scan the code, or tap ${link} and they're in.`;
 }
 
 /** Centre-wrap text inside `maxW`; returns the baseline after the last line drawn. */

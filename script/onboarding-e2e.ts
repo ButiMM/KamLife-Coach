@@ -258,17 +258,25 @@ async function journey(): Promise<void> {
   // The numbers live on the card, so the text does not repeat them — that is deliberate. But the
   // card is fail-open: if it cannot render, the numbers must come back into the text, or a client
   // silently gets no numbers at all. Both halves are asserted, because only one of them is safe.
-  const hasCard = /\[MEDIA:[^\]]*\/card\/[^\]]+\.png\]/.test(log);
-  const hasNumbers = /\d+\s*(?:kcal|cal)/i.test(log);
-  if (!hasCard && !hasNumbers) fail("Day one", `first food log gave neither a card nor calories:\n    ${log.slice(0, 200)}`);
+  // REWRITTEN 2026-08-04 (card policy locked). This asserted that a first food log returns a
+  // card OR calories. Both halves are now the wrong requirement: a regular log gets two
+  // sentences and NO picture, because every image costs a prepaid client data and a card sent
+  // for every meal is not a card anyone shares. The welcome card at signup covers day one, and
+  // the milestone card covers the moments worth showing someone.
+  //
+  // What must still be true — and this is the half that protects the client — is that the log
+  // LANDED and the reply names their food. That is asserted above and is not weakened here.
+  if (/\[MEDIA:[^\]]*\/card\/[^\]]+\.png\]/.test(log)) {
+    fail("Day one", `a routine food log attached a card — the locked policy is signup, milestone, weekly, on demand:\n    ${log.slice(-160)}`);
+  }
   // The Day-0 regression: an onboarded client must never be pushed back into setup.
   if (/send.*baseline photos|let'?s get you set up|what'?s your name/i.test(log)) {
     fail("Day one", `an onboarded client was pushed back into onboarding:\n    ${log.slice(0, 200)}`);
   }
-  // The card is wired end to end only here — targets, goal profile, marker, store.
-  if (!/\[MEDIA:[^\]]*\/card\/[^\]]+\.png\]/.test(log)) {
-    fail("Day one", `no macro card attached for a macro-goal client:\n    ${log.slice(-160)}`);
-  }
+  // The card wiring end to end (targets → goal profile → marker → store) is now proven at the
+  // moments that actually produce one: the welcome card in this same walk below, and the
+  // milestone card in the gauntlet. Asserting it on a routine log would re-impose the policy
+  // this build just removed.
 
   // 1b. Card off (no APP_URL — the live fail-open path). A DEFAULT client is number-free by
   //     design and still gets the food in plain language. But a client who typed "show me the
