@@ -121,7 +121,7 @@ export async function tryLogWater(ctx: {
       ]);
     }
     await logChat(user.id, message, waterReply, "WATER_LOG");
-    return `${waterReply}[BUTTONS:Log food|My progress]`;
+    return `${waterReply}`;
   }
 
   return null;

@@ -173,5 +173,5 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
   const eduNoteSteps = user ? educationNote(user, { event: "steps", burnKcal: burnEst }) : "";
   const stepsAddOn = [streakNote, goalNote, eduNoteSteps].find(s => s && s.trim()) || "";
 
-  return `${response}${stepsAddOn}[BUTTONS:Log food|Today's workout]`;
+  return `${response}${stepsAddOn}`;
 }
