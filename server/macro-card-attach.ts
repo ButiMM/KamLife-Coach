@@ -449,17 +449,24 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
       // eat more, and never learned what the energy drink cost them.) The card's own header
       // claims a meal was logged, so it must say what was logged. This is the one number that
       // teaches; the day bars below are context, not the lesson.
-      subtitle: opts.mealKcal > 0
-        ? `${retro ? "Yesterday" : "Logged"} · ${Math.round(opts.mealKcal)} kcal`
-        : (retro ? "Logged to yesterday" : "Meal logged"),
-      pill: verdict.text,
-      pillTone: verdict.tone,
-      rows: t.rows,
+      // THE WHITEBOARD, NOT THE CALCULATOR (2026-08-04, founder's decision: "fix, not remove —
+      // rebuild it to my July spec"). He specified a NEXT-MOVE artifact for a layman: "most
+      // people don't care about calories, they just want to lose the belly." What it had become
+      // was a dashboard that handed one client three tones in one rectangle — a badge saying
+      // "Under target" (alarm), a next move saying "Good start" (praise), and a footer saying
+      // "Still room to build" (criticism), at 09:34, to a muscle-gain client whose job is to eat
+      // MORE. A lost person cannot tell from that whether they did well or badly.
+      //
+      // So: the day it is logging, the meal in their words, ONE instruction, ONE simple visual.
+      // No badge, no calorie subtitle, no five bars, no footer. The text reply is the person and
+      // carries the coaching sentence; the card is the whiteboard and carries the next move.
+      // They never say the same thing, so they can no longer contradict each other.
+      subtitle: retro ? "Yesterday" : "Today",
+      // ONE visual, and protein is the one that actually moves the result — the lever he coaches
+      // on in his own transcripts ("3 eggs 🥚 2 slices", "Add it, don't eat the skin").
+      rows: t.rows.filter(r => r.label === "Protein"),
       numbersOff,
       nextMove: cardProse(nextMoveLine(t.rows, t.isBulk), numbersOff),
-      // The next-move band and the footer must never say the same thing twice (2026-07-28 live:
-      // "Eat more today — add a proper meal" above "Still room to build — add a proper meal").
-      hint: cardProse(distinctHint(coachingHint(t.rows, t.isBulk), nextMoveLine(t.rows, t.isBulk)), numbersOff),
     });
     noteCardSent(opts.user?.id);
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
