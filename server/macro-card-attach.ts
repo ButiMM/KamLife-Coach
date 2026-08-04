@@ -181,6 +181,10 @@ export function coachingHint(rows: Row[], isBulk: boolean): string {
  * Rules: an ACTION (verb first), in food, never a macro name, never a number the reader has to
  * interpret. "Add eggs or tin fish to your next meal" — not "43g protein remaining".
  */
+// NO EMOJI IN CARD LINES. The card is rendered to an image by a font that has no emoji glyphs,
+// so "Good start 👌" reached the founder as "Good start ☐" (2026-08-04 live, one hour after I
+// put them in). Emoji belong in the CHAT text, where WhatsApp renders them; on the card they
+// are a tofu box. His register survives without them — the words were always the voice.
 export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour()): string {
   const r = (label: string) => rows.find(x => x.label === label);
   const ratio = (x?: Row) => (x && x.target > 0 ? x.current / x.target : 0);
@@ -199,16 +203,16 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour()): s
   // report arrived rather than from an ideal real-time flow nobody actually lives.
   if (hour >= 20) {
     return !isBulk && ratio(cal) > 1.05 ? "Day's done. Tomorrow, first meal before you leave the house"
-      : protLeft >= 35 ? "That's the day. Tomorrow get a real protein in at breakfast 🍳"
+      : protLeft >= 35 ? "That's the day. Tomorrow get a real protein in at breakfast"
       : isBulk && calLeft > 500 ? "Day's wrapped. Tomorrow, eat earlier — that's the whole fix"
-      : "That's the day wrapped 👌 same again tomorrow";
+      : "That's the day wrapped — same again tomorrow";
   }
 
   // Over the day's food — the move is about the NEXT meal, never guilt about the last one.
   if (!isBulk && ratio(cal) > 1.05) {
-    return calLeft < -400 ? "Keep tonight light 🥗 protein and veg only" : "Go lean next meal — grilled, no starch";
+    return calLeft < -400 ? "Keep tonight light — protein and veg only" : "Go lean next meal — grilled, no starch";
   }
-  if (ratio(fat) > 1.25) return "Grill it, don't fry it 🍖 that's the whole fix today";
+  if (ratio(fat) > 1.25) return "Grill it, don't fry it — that's the whole fix today";
 
   // Building and under-fuelled — but NEVER a bare "eat more" when a limiting macro is already
   // blown (2026-07-28 live: the pill read "Fat over" directly above "Eat more today — add a
@@ -227,14 +231,14 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour()): s
   if (isBulk && calLeft > 500) {
     const fatOver = !!fat && fat.target > 0 && fat.current > fat.target;
     if (fatOver) return "Eat more — but make it lean. Grilled, not fried";
-    return earlyDay ? "Good start 👌 keep it coming at lunch" : "Eat more today — add a proper meal";
+    return earlyDay ? "Good start — keep it coming at lunch" : "Eat more today — add a proper meal";
   }
 
   // Protein is the one that actually moves the result, so it owns the instruction.
-  if (protLeft >= 60) return earlyDay ? "Chicken or eggs at lunch AND supper 🍗" : "Get a real protein into your next two meals";
+  if (protLeft >= 60) return earlyDay ? "Chicken or eggs at lunch AND supper" : "Get a real protein into your next two meals";
   if (protLeft >= 35) return earlyDay ? "Make lunch a proper protein — chicken, fish or eggs" : "Make your next meal a proper protein — chicken, fish or eggs";
-  if (protLeft >= 18) return "Add eggs 🥚 tin fish or a shake today";
-  if (protLeft > 0) return "One yoghurt or a boiled egg and you're done 👌";
+  if (protLeft >= 18) return "Add eggs, tin fish or a shake today";
+  if (protLeft > 0) return "One yoghurt or a boiled egg and you're done";
 
   if (calLeft > 400) return "Eat a proper meal — you're short on food today";
   return "Nothing left to do — today is done properly";
