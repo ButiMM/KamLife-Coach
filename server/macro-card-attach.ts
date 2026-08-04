@@ -487,15 +487,14 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
     const numbersOff = cardNumbersOff(user);
     const png = renderMacroCard({
       title: user?.name ? `${String(user.name).split(" ")[0]}'s day so far` : "Your day so far",
-      subtitle: "Today so far",
-      pill: verdict.text,
-      pillTone: verdict.tone,
-      rows: t.rows,
+      // THE SAME WHITEBOARD RULE AS THE MEAL CARD. This one was missed an hour ago and it is
+      // the card he actually screenshotted — "Kam's day so far", badge, five bars, footer.
+      // Rebuilding one of two call sites and calling the card fixed is exactly the disease
+      // this codebase keeps naming: one owner per question, or the second one keeps talking.
+      subtitle: "Today",
+      rows: t.rows.filter(r => r.label === "Protein"),
       numbersOff,
       nextMove: cardProse(nextMoveLine(t.rows, t.isBulk), numbersOff),
-      // The next-move band and the footer must never say the same thing twice (2026-07-28 live:
-      // "Eat more today — add a proper meal" above "Still room to build — add a proper meal").
-      hint: cardProse(distinctHint(coachingHint(t.rows, t.isBulk), nextMoveLine(t.rows, t.isBulk)), numbersOff),
     });
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
   } catch (e) {
