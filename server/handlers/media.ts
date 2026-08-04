@@ -40,6 +40,7 @@ import { stripVoiceDenial } from "../reply-hygiene";
 import { detectVoiceLanguageNote } from "../voice-language";
 import { extractMealLabel } from "./food-context";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
+import { cardWillAttach } from "../card-policy";
 import { remainingInMeals, goalStatusLine } from "../education";
 import { firstActionCelebration } from "../activation";
 import { sendWhatsApp } from "../scheduler/shared";
@@ -775,6 +776,7 @@ export async function handleMediaMessage(ctx: {
         || /\b(is this ok|is this good|is this fine|can i eat|can i have|should i eat|good or bad|ok for me|okay for me|allowed|this ok|this good|fits? my (goal|diet|plan)|for my goal)\b/i.test(message || "");
       // Number-free delivery for a numbers:low client (prompt omits figures + scrub net).
       const photoNumbersLow = getNumbersMode(user) === "low";
+      const photoCardComing = cardWillAttach(user, 999, !!(process.env.APP_URL || process.env.APP_BASE_URL));
 
       const todayStartPhoto = sastDayStart();
       const photoCountResult = await db.select({ count: sql`count(*)` })
@@ -809,14 +811,14 @@ export async function handleMediaMessage(ctx: {
         messages: [
           {
             role: "system",
-            content: buildFoodVisionSystemPrompt({ clientName, goal, liveCal, liveProt, isApprovalCaption, numbersLow: photoNumbersLow }),
+            content: buildFoodVisionSystemPrompt({ clientName, goal, liveCal, liveProt, isApprovalCaption, numbersLow: photoNumbersLow, cardComing: photoCardComing }),
           },
           {
             role: "user",
             content: [
               {
                 type: "text",
-                text: buildFoodVisionUserPrompt({ message, isApprovalCaption, liveCal, liveProt, numbersLow: photoNumbersLow, remainingToday }),
+                text: buildFoodVisionUserPrompt({ message, isApprovalCaption, liveCal, liveProt, numbersLow: photoNumbersLow, remainingToday, cardComing: photoCardComing }),
               },
               { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: foodVisionDecision.detail } },
             ],

@@ -4997,9 +4997,30 @@ test("next move: the instruction can never contradict the pill", async () => {
   assert.match(move, /lean|grilled/i, `pill says "${pill.text}" — the move must agree: "${move}"`);
   assert.doesNotMatch(move, /^Eat more today — add a proper meal$/, "a bare 'eat more' contradicts a blown fat bar");
 
-  // With fat in range, the plain instruction is still right.
+  // With fat in range, the plain instruction is still right — but only once enough of the day
+  // has gone. The hour is now PINNED: this assertion used to pass purely because the suite
+  // happened to run in the afternoon, which is a test that reports the clock, not the code.
   const clean = [...rows.slice(0, 3), { label: "Fat", current: 40, target: 86, unit: "g", overIsBad: true }];
-  assert.match(nextMoveLine(clean, true), /Eat more today/);
+  assert.match(nextMoveLine(clean, true, 19), /Eat more today/, "evening: the day's verdict is due");
+});
+
+// THE CLOCK, NOT JUST THE LEDGER (2026-08-04) — the founder's first gauntlet message. 08:25,
+// one minute after he photographed toast, eggs and viennas, the card told him to "eat more
+// today — add a proper meal". True of the ledger, absurd of the morning. Nobody has eaten
+// their day's food at breakfast, and no coach tells a man who just ate to go and eat.
+test("next move: at breakfast, being behind is not a finding", () => {
+  const breakfast = [
+    { label: "Calories", current: 680, target: 2849, unit: "", overIsBad: false },
+    { label: "Protein", current: 24, target: 183, unit: "g", overIsBad: false },
+    { label: "Carbs", current: 85, target: 338, unit: "g", overIsBad: true },
+    { label: "Fat", current: 27, target: 85, unit: "g", overIsBad: true },
+  ];
+  const morning = nextMoveLine(breakfast, true, 8);
+  assert.doesNotMatch(morning, /add a proper meal/i, "he just ate one — the exact live defect");
+  assert.match(morning, /lunch|start/i, "the move at breakfast points forward, and is still an action");
+
+  // The same numbers in the evening DO deserve the verdict — the day really is nearly gone.
+  assert.match(nextMoveLine(breakfast, true, 19), /Eat more today/, "evening: now it is a finding");
 });
 
 // THE ONE ACTION (2026-07-28, founder: "what is the single thing Coach K should make this person

@@ -21,6 +21,7 @@ import { putCard } from "./card-store";
 import { waterTargetLitres } from "./targets";
 import { getNumbersMode, stripNumbersFromProse } from "./numbers-mode";
 import { cardWillAttach, cardSuppressedByDump, noteCardSent } from "./card-policy";
+import { sastHour } from "./sast";
 
 // Shared: the public base URL (forced to https:// — see below) or "" when a card can't be
 // served. APP_URL was stored WITHOUT a scheme, so the first live marker leaked as a text link
@@ -161,7 +162,7 @@ export function coachingHint(rows: Row[], isBulk: boolean): string {
  * Rules: an ACTION (verb first), in food, never a macro name, never a number the reader has to
  * interpret. "Add eggs or tin fish to your next meal" — not "43g protein remaining".
  */
-export function nextMoveLine(rows: Row[], isBulk: boolean): string {
+export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour()): string {
   const r = (label: string) => rows.find(x => x.label === label);
   const ratio = (x?: Row) => (x && x.target > 0 ? x.current / x.target : 0);
   const cal = r("Calories"), prot = r("Protein"), fat = r("Fat");
@@ -178,14 +179,25 @@ export function nextMoveLine(rows: Row[], isBulk: boolean): string {
   // blown (2026-07-28 live: the pill read "Fat over" directly above "Eat more today — add a
   // proper meal"). Calories left and fat over are both true; the instruction has to hold both,
   // or the card argues with itself and the client trusts neither half.
+  // THE CLOCK, NOT JUST THE LEDGER (2026-08-04, the founder's first gauntlet message).
+  // 08:25. He photographed toast, eggs and viennas — breakfast — and one minute later the card
+  // told him "Eat more today — add a proper meal". Both halves were true of the ledger (680 of
+  // 2849) and the sentence was still absurd: nobody has eaten their day's food at breakfast.
+  // A human coach never tells a man who just ate a meal to go and eat a meal.
+  //
+  // "Behind target" only becomes a finding once enough of the day has gone. Before then the
+  // move is forward — carry it into the next meal — which is true at 8am and still an action.
+  const earlyDay = hour < 11;
+
   if (isBulk && calLeft > 500) {
     const fatOver = !!fat && fat.target > 0 && fat.current > fat.target;
-    return fatOver ? "Eat more — but make it lean. Grilled, not fried" : "Eat more today — add a proper meal";
+    if (fatOver) return "Eat more — but make it lean. Grilled, not fried";
+    return earlyDay ? "Good start — keep it coming at lunch" : "Eat more today — add a proper meal";
   }
 
   // Protein is the one that actually moves the result, so it owns the instruction.
-  if (protLeft >= 60) return "Get protein into your next two meals";
-  if (protLeft >= 35) return "Make your next meal a proper protein meal";
+  if (protLeft >= 60) return earlyDay ? "Protein at lunch and supper — that's the day" : "Get protein into your next two meals";
+  if (protLeft >= 35) return earlyDay ? "Make lunch a proper protein meal" : "Make your next meal a proper protein meal";
   if (protLeft >= 18) return "Add eggs, tin fish or a shake today";
   if (protLeft > 0) return "One yoghurt or a boiled egg finishes today";
 
