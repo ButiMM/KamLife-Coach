@@ -22,7 +22,7 @@
  * (handlers are lazy-loaded) so the safety core is unit-testable without the DB chain.
  */
 
-import { type CoachAction, actionFingerprint, shouldAutoExecute, writesState, describeAction } from "./actions";
+import { type CoachAction, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported } from "./actions";
 
 export interface ExecuteContext {
   user: any;
@@ -33,6 +33,11 @@ export interface ExecuteContext {
   confidence: number;
   /** replay/shadow: decide + report, NEVER write. */
   dryRun?: boolean;
+  /** The client's own words. A numeric write must trace its number back to these. */
+  clientMessage?: string;
+  /** Resuming a parked action after an explicit "yes". The number was already checked
+   *  against the message that proposed it, and "yes" carries no digits of its own. */
+  preConfirmed?: boolean;
 }
 
 export interface ExecuteResult {
@@ -98,6 +103,13 @@ function confirmQuestion(action: CoachAction, user: any): string {
 }
 
 export async function executeAction(action: CoachAction, ctx: ExecuteContext): Promise<ExecuteResult> {
+  // NUMBER BRAKE — a step count, weight or water volume the client never said is not a log,
+  // it is the model filling in a schema from context. Refuse it and let the pipeline run:
+  // the deterministic loggers are still behind us and they read the real message.
+  if (!ctx.preConfirmed && !actionNumberIsClientReported(action, ctx.clientMessage || "")) {
+    console.warn(`[ENGINE_ACTION] REFUSED ${action.type} — its number is not in the client's message: "${(ctx.clientMessage || "").slice(0, 80)}"`);
+    return { performed: false, confirmed: false, skipped: true, reply: "", fingerprint: actionFingerprint(action, ctx.user?.id || "?", ctx.sourceMessageId) };
+  }
   const fingerprint = actionFingerprint(action, ctx.user?.id || "?", ctx.sourceMessageId);
   const base = { confirmed: false, skipped: false, performed: false, fingerprint };
 

@@ -53,6 +53,20 @@ const DETERMINISTIC_ACTION = new RegExp([
   "\\bsupplements?\\b", "\\bcreatine\\b", "protein powder", "\\bwhey\\b", "\\bbcaa\\b",
   "\\binjur(?:y|ed|ies)\\b", "\\bsharp pain\\b", "\\bstabbing\\b", "\\bpulled (?:a )?muscle\\b",
   "\\bperiod\\b", "\\bmenstru", "\\bpms\\b", "\\bcycle\\b",
+  // ── retroactive training reports (2026-08-04 live, by voice: "Yesterday I did have a
+  //    session. I did the session for yesterday. Can you just mark it." The engine took it
+  //    and answered with a step count. workout.ts has owned backdated sessions since
+  //    2026-07 and was never called — a client told the coach he trained and was ignored,
+  //    which is the single thing this product cannot do.) ──
+  "\\b(?:yesterday|last night)\\b.{0,40}\\b(?:session|workout|train(?:ed|ing)?|gym)\\b",
+  "\\b(?:session|workout|train(?:ed|ing)?|gym)\\b.{0,40}\\b(?:yesterday|last night)\\b",
+  // ── delivery preferences (2026-08-04 live: "talk to me" reached the engine, which has no
+  //    action for it, so it re-sent its previous reply verbatim and the toggle never fired.
+  //    These are SETTINGS — they change how the coach speaks, and only the deterministic
+  //    handlers can write the preference. Anchored where the phrase could otherwise appear
+  //    inside real feeling ("I just need someone to talk to me"). ──
+  "^\\s*(?:please\\s+)?talk to me\\b", "^\\s*(?:text only|no voice)\\b", "\\bvoice ?notes?\\b",
+  "show me the (?:numbers|calories|macros)", "\\bkeep it simple\\b",
   // ── billing / account ──
   "\\bpay\\b", "\\bcancel\\b", "\\bsubscri", "\\bunsubscribe\\b", "\\bpause\\b", "\\bresume\\b",
   "\\breactivate\\b", "\\brefund\\b", "\\bupgrade\\b", "\\bprice\\b", "\\bbilling\\b",

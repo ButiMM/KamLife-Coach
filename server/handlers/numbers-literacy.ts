@@ -171,6 +171,10 @@ const VOICE_PREF = /\b(?<on>talk to me|speak to me|voice ?note me|send (?:me )?v
 export async function handleVoiceReplyPreference(ctx: { message: string; m: string; user: any; capName: string; phone: string }): Promise<string | null> {
   const { message, m, user, capName, phone } = ctx;
   const on = wantsVoiceReplies(user);
+  // A delivery preference is a COMMAND, not a paragraph. Without this, "I just need someone
+  // to talk to me" from a client in a bad place would be answered with a settings
+  // confirmation — the exact opposite of what that moment needs.
+  if (m.length > 60) return null;
   const said = VOICE_PREF.exec(m)?.groups;
   if (!said) return null;
   const cap = capName ? `, ${capName}` : "";

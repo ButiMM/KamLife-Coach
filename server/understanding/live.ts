@@ -97,6 +97,7 @@ export async function resumeEngineConfirm(ctx: {
   const cohortLive = ctx.actionsLive === true || engineActionsAll();
   const exec = await executeAction(pending, {
     user, phone: ctx.phone,
+    preConfirmed: true, // they said yes to a number we already validated when we offered it
     sourceMessageId: ctx.sourceMessageId || deriveSourceId(user.id, ctx.message),
     confidence: 0.99, // the client explicitly confirmed
     dryRun: !cohortLive,
@@ -240,6 +241,7 @@ export async function runMeaningEngineLive(ctx: {
           user, phone: ctx.phone,
           sourceMessageId: ctx.sourceMessageId || deriveSourceId(user.id, message),
           confidence: 0.9, // placeholder until replay calibrates the distribution
+          clientMessage: message,
           dryRun: runDry,
         });
         await logChat(user.id, message,

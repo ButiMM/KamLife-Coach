@@ -12,6 +12,7 @@ import { predictTrajectory } from "../server/trajectory";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { parseFoodPreferences, parseVisionAnswer, looksLikeBulkIntake, applyIntakeBrake, describeIntake } from "../server/onboarding-intake";
+import { actionNumberIsClientReported } from "../server/understanding/actions";
 import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodProfile } from "../server/grocery-personalize";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
@@ -2404,6 +2405,33 @@ test("intake: food preferences split into likes and dislikes", () => {
   assert.equal(c.foodDislikes, null);
   const d = parseFoodPreferences("skip");
   assert.deepEqual(d, { foodLikes: null, foodDislikes: null });
+});
+
+// THE NUMBER BRAKE (2026-08-04) — the live defect, in the founder's own chat. He said, by
+// voice, "Yesterday I did have a session, can you just mark it" and was told he had walked
+// 6,000 steps. Then he typed "talk to me" and was told the same thing again, word for word.
+// Both were LOG_STEPS(6000) — and 6,000 was the number in the coach's own morning message,
+// never his. A model handed `count: number` will fill it from whatever is in front of it.
+test("number brake: an action keeps a number the client actually said", () => {
+  assert.equal(actionNumberIsClientReported({ type: "LOG_STEPS", count: 8200 }, "did 8200 steps today"), true);
+  assert.equal(actionNumberIsClientReported({ type: "LOG_WEIGHT", kg: 90 }, "I am 90kg this morning"), true, "90kg has no word boundary before the unit");
+  assert.equal(actionNumberIsClientReported({ type: "LOG_WATER", litres: 1.5 }, "drank 1.5 litres"), true);
+  assert.equal(actionNumberIsClientReported({ type: "LOG_STEPS", count: 6000 }, "6k steps done"), true, "6k is 6000");
+});
+
+test("number brake: an action does NOT keep a number the client never said", () => {
+  // The exact live messages.
+  assert.equal(actionNumberIsClientReported({ type: "LOG_STEPS", count: 6000 },
+    "Yesterday I did have a session. I did the session for yesterday. Can you just mark it"), false);
+  assert.equal(actionNumberIsClientReported({ type: "LOG_STEPS", count: 6000 }, "talk to me"), false);
+  // And the same class for the other two writers.
+  assert.equal(actionNumberIsClientReported({ type: "LOG_WEIGHT", kg: 84.2 }, "how am I doing this week"), false);
+  assert.equal(actionNumberIsClientReported({ type: "LOG_WATER", litres: 2 }, "I need to drink more water"), false);
+});
+
+test("number brake: non-numeric actions are never blocked by it", () => {
+  assert.equal(actionNumberIsClientReported({ type: "JUST_REPLY" } as any, "anything at all"), true);
+  assert.equal(actionNumberIsClientReported({ type: "LOG_MEAL", foodText: "pap and chicken", needsConfirmation: false } as any, "pap and chicken"), true);
 });
 
 // BULK INTAKE (2026-08-03) — the golden case is a real client's first message. She sent

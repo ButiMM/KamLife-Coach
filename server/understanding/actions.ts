@@ -264,6 +264,44 @@ export function shouldAutoExecute(action: CoachAction, confidence: number): bool
  * two genuinely-separate "2 eggs" messages (different ids) both log honestly. The executor
  * skips a fingerprint it has already performed.
  */
+/**
+ * THE NUMBER BRAKE (2026-08-04, live, in the founder's own chat).
+ *
+ * He sent a voice note: "Yesterday I did have a session. I did the session for yesterday.
+ * Can you just mark it." The coach replied "6,000 steps — you smashed the 6,000 target."
+ * He then typed "talk to me" and got the SAME message, word for word, again.
+ *
+ * It was not a conversation failing twice. It was the engine emitting LOG_STEPS(6000) twice —
+ * a deterministic executor reply, which is why it was byte-identical. And 6,000 was not a
+ * number he had said. It was the number in the coach's OWN morning message, sitting in the
+ * snapshot, which the model dutifully packed into the schema it had been handed.
+ *
+ * A model asked to fill `count: number` will fill it. So a numeric write action is only
+ * allowed to carry a number the CLIENT actually typed or said. The digits must be present in
+ * their message; if they are not, the action is not theirs and must not touch their data.
+ *
+ * The same rule already guards bulk intake. It was never applied to the actions that write.
+ * This is the one that matters more: an invented intake field gets corrected in the next
+ * message; an invented step log silently becomes their history.
+ */
+export function actionNumberIsClientReported(action: CoachAction, clientMessage: string): boolean {
+  const n = action.type === "LOG_STEPS" ? action.count
+    : action.type === "LOG_WATER" ? action.litres
+    : action.type === "LOG_WEIGHT" ? action.kg
+    : null;
+  if (n === null) return true;                       // not a numeric write — nothing to check
+  const src = (clientMessage || "").toLowerCase();
+  // Digit-boundary, not word-boundary: "90kg" and "6000steps" have no word boundary before
+  // the unit, and rejecting those would break the logs this product exists to take.
+  const present = (v: number) => new RegExp(`(?<!\\d)${v}(?!\\d)`).test(src);
+  if (present(Math.round(n))) return true;
+  // Spoken and shorthand forms of the same number: "6k", "6 thousand", "1.5 litres" → 1.5,
+  // "six thousand" is handled upstream by digitizeSpokenAmounts before this ever runs.
+  if (Number.isInteger(n) && n % 1000 === 0 && present(n / 1000)) return true;   // 6000 ← "6k"
+  if (!Number.isInteger(n) && present(Math.round(n * 10) / 10)) return true;
+  return false;
+}
+
 export function actionFingerprint(action: CoachAction, userId: string, sourceMessageId: string): string {
   return `${userId}:${sourceMessageId}:${action.type}`;
 }
