@@ -1194,38 +1194,38 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
-// JUNK-AWARE VERDICT (2026-07-17 live: "beef bacon burger with fries" got "🟢 Nicely
-// done / Good protein 👍" — bacon's protein category cancelled the junk read, so a
-// takeaway looked like a clean win. The MEAL is judged now, not one item on the plate.)
+// THE VERDICT IS GONE (2026-08-04, Slice 4). buildFoodLogReply used to decide what to SAY
+// about a meal — a verdict headline, protein praise, a junk read, a running total, a nudge.
+// All of it is deleted; the coach says the sentence now and this function is only the
+// never-silent net. These tests asserted the shape of the verdict, so they assert the shape
+// of the net instead: it must stay short, carry no numbers, and use the CLIENT'S words.
 {
   const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
-  const junkMeal = (goal: string, notes: string, junkDominant: boolean) => buildFoodLogReply({
-    foodLines: "• Burger\n• Chips\n• Bacon", mealLabel: "lunch",
+  const reply = (userMessage: string, foodLines: string) => buildFoodLogReply({
+    foodLines, mealLabel: "lunch",
     totalMealCals: 1425, totalMealProtein: 55, runningCals: 1425, runningProtein: 55,
     calorieTarget: 2400, proteinTarget: 150, prevCals: 200, hasGoodProteins: true,
-    junkDominant, user: { goalType: goal, profileNotes: notes },
+    junkDominant: true, user: { goalType: "fat_loss", profileNotes: "numbers:full" },
+    userMessage,
+  } as any);
+
+  test("food reply: no verdict, no praise, no numbers — not even for a numbers:full client", async () => {
+    const r = await reply("I had a burger and chips", "• Burger (generic)\n• Chips (slap chips)");
+    assert.ok(!/\d/.test(r), `the net must carry no figures at all: "${r}"`);
+    assert.ok(!/nicely done|good protein|takeaway/i.test(r), `no verdict language: "${r}"`);
+    assert.ok(r.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, `at most two sentences: "${r}"`);
   });
-  test("junk verdict: a takeaway never gets 🟢 'Nicely done' or protein praise (fat loss)", async () => {
-    const r = await junkMeal("fat_loss", "numbers:full", true);
-    assert.ok(/takeaway/i.test(r) && !/Nicely done/i.test(r), `honest treat verdict: ${r.split("\n")[0]}`);
-    assert.ok(!/Good protein in that one/i.test(r), "no praise on junk protein");
+
+  test("food reply: says THEIR word, never the database's", async () => {
+    const r = await reply("chicken for lunch", "• Chicken thigh (1 large thigh (150g cooked))");
+    assert.match(r, /chicken/i, "names the food they gave");
+    assert.ok(!/thigh|150g|cooked/i.test(r), `the scanner's qualifiers must not reach them: "${r}"`);
   });
-  test("junk verdict: number-free path also honest, with a forward-coaching nudge", async () => {
-    const r = await junkMeal("fat_loss", "", true);
-    assert.ok(/takeaway/i.test(r) && /protein.*next meal|more protein/i.test(r), `plain honest: ${r}`);
-    assert.ok(!/Good protein in that one/i.test(r));
-  });
-  test("junk verdict: muscle gain — fuel acknowledged, pushed to whole-food protein", async () => {
-    assert.ok(/whole.?food protein|actually builds/i.test(await junkMeal("muscle_gain", "numbers:full", true)));
-  });
-  test("junk verdict: a CLEAN meal still keeps the green light", async () => {
-    const r = await buildFoodLogReply({
-      foodLines: "• Chicken\n• Rice", mealLabel: "lunch",
-      totalMealCals: 500, totalMealProtein: 40, runningCals: 500, runningProtein: 40,
-      calorieTarget: 2400, proteinTarget: 150, prevCals: 200, hasGoodProteins: true,
-      junkDominant: false, user: { goalType: "fat_loss", profileNotes: "numbers:full" },
-    });
-    assert.ok(/Nicely done|Right on track/.test(r), "clean meal is not punished");
+
+  test("food reply: a client carrying shame is answered, not audited", async () => {
+    const r = await reply("I had a burger, I feel like I ruined everything", "• Burger (generic)");
+    assert.match(r, /one meal doesn'?t break a week/i, "voice rule 9, and deterministic — the model may be down");
+    assert.ok(!/\d/.test(r), "no figures in front of someone who feels they failed");
   });
 }
 
@@ -2297,18 +2297,6 @@ test("home-workout: inventory vision prompt asks for the specific equipment word
 // WELLNESS FOOD-LOG REPLY — the no-numbers client ("just get healthier") must be coached in
 // habits and plain language, never calories/grams (2026-07-22 reviewer: "teach even the no-numbers
 // user"; tester: "it talks in calories and I don't understand calories").
-test("food-log: a wellness client's reply carries NO calorie/gram numbers, coaches the habit", async () => {
-  const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
-  const reply = await buildFoodLogReply({
-    foodLines: "🍗 Chicken and pap", mealLabel: "lunch", totalMealCals: 600, totalMealProtein: 35,
-    runningCals: 1200, runningProtein: 60, calorieTarget: 0, proteinTarget: 0, prevCals: 600,
-    user: { goalType: "general", name: "Lerato" },
-  });
-  assert.doesNotMatch(reply, /\bkcal\b|calorie|\d+\s*g\b|target/i, "no numbers for the no-numbers client");
-  assert.match(reply, /protein/i, "still gives a plain quality nudge");
-  assert.match(reply, /Lerato/);
-  assert.match(reply, /✅/, "reinforces the habit");
-});
 test("food-log: a fat-loss client does NOT take the wellness branch (macro path unchanged)", async () => {
   const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
   const reply = await buildFoodLogReply({
@@ -4894,27 +4882,6 @@ test("dayStatusPill: a plain verdict, never a number, and it matches the bars", 
     assert.equal(cardSuppressedByDump("u1", t0 + 5_000), false, "a restart costs at most one extra card, never a log");
   });
 
-  test("food reply: the day's instruction appears once, not five times", async () => {
-    const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
-    const base = {
-      foodLines: "• Beef mince\n• Bacon\n• Cream", mealLabel: "Meal total",
-      totalMealCals: 722, totalMealProtein: 61, runningCals: 2353, runningProtein: 149,
-      calorieTarget: 2860, proteinTarget: 185, prevCals: 1631,
-      user: { goalType: "muscle_gain", calorieTarget: 2860, proteinTarget: 185, profileNotes: "numbers:full" },
-    };
-    const withCard = await buildFoodLogReply({ ...base, cardComing: true });
-    const withoutCard = await buildFoodLogReply({ ...base, cardComing: false });
-
-    // The log confirmation survives either way — the client must always see what was recorded.
-    for (const r of [withCard, withoutCard]) {
-      assert.match(r, /Beef mince/);
-      assert.match(r, /722 kcal/);
-    }
-    // With a card coming, the text stops instructing; the card carries the next move.
-    assert.ok(withCard.length < withoutCard.length, "the card-bearing reply must be the shorter one");
-    // Without a card the client would otherwise get NO guidance, so the day lines stay.
-    assert.ok(withoutCard.length > withCard.length);
-  });
 }
 
 // EVERY CARD PATH, NOT THE ONE I HAPPENED TO BE LOOKING AT (2026-07-28).

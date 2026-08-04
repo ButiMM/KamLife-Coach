@@ -1633,7 +1633,12 @@ export async function handleLifecycle(ctx: {
       const firstNoun = nounWords.length >= 2 && nounWords[0].length <= 4 ? `${nounWords[0]} ${nounWords[1]}` : nounWords[0] || "";
       const foodHint = firstNoun ? ` (like "${firstNoun}")` : "";
       const foodLabel = firstNoun ? `*${firstNoun}*` : "that food";
-      const formatReply = `I don't have ${foodLabel} in my SA database yet — send it as a full description and I'll log an estimate:\n\n"I had ${firstNoun || "the food"} for lunch"\n"Chicken thigh, sweet potato and spinach for dinner"\n\nInclude the name, rough amount, and which meal. I'll get the kcal and protein back to you instantly.`;
+      // SHORTENED 2026-08-04 (Slice 4). Five sentences, two worked examples and a promise about
+      // kcal — sent to someone whose message we failed to parse. "Work is stressing me out and
+      // I ate takeaways" came back as «I don't have *work stressing* in my SA database yet»,
+      // which reads as the machine blaming the client for its own miss. Ask the one question.
+      void firstNoun;
+      const formatReply = `I didn't catch that one — what was it, roughly?`;
       await logChat(user.id, message, formatReply, "FOOD_FORMAT_GUIDE");
       return formatReply;
     }

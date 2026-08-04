@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { stepLogs } from "../../shared/schema";
 import { eq, desc, and, gte, lt } from "drizzle-orm";
+import { neverSilentLine } from "../reply-hygiene";
 import { educationNote } from "../education";
 import { stepBurnKcal } from "../targets";
 import { sastDayStart } from "../utils";
@@ -104,74 +105,14 @@ function _stepEquivalent(burnKcal: number): string {
 }
 
 export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0, weeklyAvg?: number, user?: any, isWorkoutDay = false): string {
-  if (!target || target <= 0) target = 8500;
-  const idx = Math.floor(Math.random() * 5);
-  const burnEst = stepBurnKcal(steps, weightKg);
-  const burnNote = steps >= 3000 ? ` (~${burnEst} kcal burned)` : "";
-  const equivalent = steps >= 4000 ? _stepEquivalent(burnEst) : "";
-
-  // Resolve goal context from user record — drives messaging tone
-  const goalRaw = ((user?.goalType as string) || "fat_loss").toLowerCase();
-  const goalContext: "fat_loss" | "muscle_gain" | "recomp" =
-    goalRaw === "muscle_gain" ? "muscle_gain"
-    : (goalRaw === "fat_loss" || goalRaw === "weight_loss") ? "fat_loss"
-    : "recomp";
-
-  let base: string;
-  if (steps >= target) {
-    base = STEP_RESPONSES_TARGET[idx % STEP_RESPONSES_TARGET.length](steps, target);
-  } else if (steps >= target * 0.75) {
-    base = STEP_RESPONSES_GOOD[idx % STEP_RESPONSES_GOOD.length](steps, target);
-  } else {
-    const remaining = target - steps;
-    base = STEP_RESPONSES_LOW[idx % STEP_RESPONSES_LOW.length](steps, remaining, target);
-  }
-
-  // Insert burn note after first sentence
-  const firstDot = base.indexOf(".");
-  let response = (firstDot > 0 && burnNote)
-    ? base.slice(0, firstDot + 1) + burnNote + base.slice(firstDot + 1)
-    : base + burnNote;
-
-  if (equivalent) response += ` ${equivalent}`;
-
-  // ONE add-on per reply (2026-07-10 friction audit): this used to stack goal note +
-  // 7-day average + streak + education in one bubble. The count and the 7-day average
-  // are DATA and stay; then ONE note rides along — celebration beats coaching beats
-  // teaching (streak > goal note > education).
-  let goalNote = "";
-  if (steps >= 2000) {
-    if (goalContext === "fat_loss") {
-      goalNote = isWorkoutDay
-        ? `\n\n_Gym session already burned. These steps add to it — you're burning even more than your food already saves._`
-        : `\n\n_Your food + these steps mean you're burning more than you eat today. That's the weight coming off._`;
-    } else if (goalContext === "muscle_gain") {
-      goalNote = isWorkoutDay
-        ? `\n\n_Session done. Light movement for recovery — that's all you need. Keep eating enough to build._`
-        : `\n\n_Movement for health, not to burn. Your food is doing the building work._`;
-    }
-  }
-
-  // 7-day average context — within ~3% of target is ON target for coaching purposes.
-  if (weeklyAvg && weeklyAvg > 0) {
-    const nearTargetBand = Math.max(300, Math.round(target * 0.03));
-    const vsTarget = weeklyAvg >= target
-      ? `above target — keep it up.`
-      : (target - weeklyAvg) <= nearTargetBand
-        ? `that's your ${target.toLocaleString()} target hit, day in day out. This consistency is what changes bodies.`
-        : `${(target - weeklyAvg).toLocaleString()} below your ${target.toLocaleString()} target.`;
-    response += `\n\n_7-day average: ${weeklyAvg.toLocaleString()} steps — ${vsTarget}_`;
-  }
-
-  let streakNote = "";
-  if (streak >= 7) {
-    streakNote = `\n\n🔥 *${streak}-day step streak.* ${streak >= 14 ? "Two weeks of movement. This is a habit now." : "A full week of steps. Don't break it."}`;
-  } else if (streak >= 3 && steps >= target) {
-    streakNote = `\n\n🔥 ${streak} days in a row hitting target. Keep the streak alive.`;
-  }
-
-  const eduNoteSteps = user ? educationNote(user, { event: "steps", burnKcal: burnEst }) : "";
-  const stepsAddOn = [streakNote, goalNote, eduNoteSteps].find(s => s && s.trim()) || "";
-
-  return `${response}${stepsAddOn}`;
+  // DELETED 2026-08-04 (Slice 4). What stood here built, for every step log, forever: a random
+  // pick from three response banks, an invented "~237 kcal burned", a "that's a Coke and a half"
+  // equivalence, a goal note, a 7-day average, a streak note and an education note. Six sentences
+  // and four numbers the client never said, written by a handler wearing the coach's voice.
+  //
+  // The coach writes the sentence now. This is the never-silent net for the turn the engine did
+  // not answer — one line, their number, nothing else. The parameters stay because callers pass
+  // them and the signature is not the point; the VOICE was the point, and it has one owner.
+  void target; void weightKg; void streak; void weeklyAvg; void user; void isWorkoutDay;
+  return neverSilentLine("steps", { amount: steps.toLocaleString("en-ZA") });
 }

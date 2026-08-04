@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { users, weightLogs, escalations } from "../../shared/schema";
+import { neverSilentLine } from "../reply-hygiene";
 import { escalationSLA } from "../safety-detection";
 import { eq, and, gte, lt, asc, desc } from "drizzle-orm";
 import { calculateTargets } from "../targets";
@@ -433,5 +434,16 @@ export async function handleWeightLog(
   const weightAddOn = [milestoneCelebration, plateauNote, predictionNote, streakNote]
     .find(s => s && s.trim()) || "";
 
-  return `Weight logged: *${newKg}kg.*${changeNote}${trendLine}${targetsLine}${underweightFlipNote}${weightAddOn}[BUTTONS:My progress|Today's workout]`;
+  // DELETED 2026-08-04 (Slice 4). This returned, on every weigh-in: "Weight logged: *83kg.*",
+  // a change note, a trend label, a targets block naming two figures the client never asked
+  // for, an italic paragraph explaining why their plan changed, one of four add-ons, and a
+  // button menu. A person stood on a scale and got a printout.
+  //
+  // THE SAFETY NOTE IS THE ONE THING THAT STILL SPEAKS. underweightFlipNote is a duty-of-care
+  // message — it fires when a client is under a healthy BMI and the plan has been flipped to
+  // building UP. That is not coaching voice, it is the same class as the crisis routing, and
+  // it must reach the person whether or not the engine wrote anything. Everything else that
+  // used to be concatenated here is now the coach's job, or the card's.
+  void changeNote; void trendLine; void targetsLine; void weightAddOn;
+  return `${neverSilentLine("weight", { amount: `${newKg}kg` })}${underweightFlipNote}`;
 }

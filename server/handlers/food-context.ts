@@ -707,7 +707,12 @@ export async function handleFoodContext(ctx: {
   // meals with a "yesterday" prefix so the meal parser dates them to yesterday, not today.
   if (isRetroLogRequest && scanForSAFoods(message).length === 0) {
     const nm = user.name ? `${user.name.split(" ")[0]}, ` : "";
-    return `${nm}sure — what did you eat yesterday? Send it starting with *yesterday*, e.g. *"yesterday I had 2 eggs and pap for breakfast, chicken and rice for lunch"* — and I'll log it to yesterday, not today.`;
+    // SHORTENED 2026-08-04 (Slice 4). This used to hand over a worked template — "Send it
+    // starting with *yesterday*, e.g. …" — with a two-meal example and a closing clause. Three
+    // sentences teaching a client the syntax of a product that is supposed to understand them,
+    // and the retro token now carries the day across the turn anyway, so the instruction was
+    // not even true any more. They can just answer.
+    return `${nm}go ahead — what did you eat yesterday?`;
   }
 
 

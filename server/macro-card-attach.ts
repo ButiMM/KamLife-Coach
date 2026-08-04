@@ -348,11 +348,16 @@ export function achievementCardShown(user: any, streak: number | undefined, mark
  * numbers dial rather than overriding it — see numbers-mode.ts.
  */
 export function cardOrTotals(marker: string, kcal: number, protein: number, user?: any): string {
-  if (marker) return marker;
-  if (!(kcal > 0)) return "";
-  if (getNumbersMode(user) !== "normal") return ""; // number-free client — the words are the reply
-  const p = Math.round(protein) > 0 ? ` | *${Math.round(protein)}g* protein` : "";
-  return `\n\n_${Math.round(kcal)} kcal${p}_`;
+  // THE LAST TOTALS LINE (2026-08-04, Slice 4). This existed as the card's understudy: no card
+  // attached, so print "_300 kcal | 10g protein_" instead. Under the locked card policy a
+  // regular log never gets a card — so the understudy was about to go on stage for EVERY meal,
+  // which is the receipt coming back through the side door the day after it was deleted.
+  //
+  // The numbers are not lost: they are written to the client's record, they drive the targets,
+  // and they are on the card at the moments a card is earned. They are simply no longer read
+  // aloud at someone who told us they ate bread.
+  void kcal; void protein; void user;
+  return marker;
 }
 
 /** Meal-log card marker: " [MEDIA:…]" for a macro-goal client, else "". `forDate` (the meal's

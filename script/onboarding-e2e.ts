@@ -291,9 +291,10 @@ async function journey(): Promise<void> {
   const noCardOptedIn = await say("2 eggs and brown bread");
   process.env.APP_URL = appUrl;
   u.profileNotes = (u.profileNotes || "").replace(/\s*numbers:full/, "");
-  if (!/\d+\s*kcal/i.test(noCardOptedIn)) {
-    fail("Day one", `card off and a numbers:full client got no figures at all:\n    ${noCardOptedIn.slice(0, 200)}`);
-  }
+  // DELETED 2026-08-04 (Slice 4), same change as routing-audit's numbers-mode case: a regular
+  // log is two sentences for everyone now, opted-in included. Their figures live in their
+  // record, on an earned card, and one question away — not stapled to every meal.
+  void noCardOptedIn;
 
   // 2. The quit moment, through the whole pipeline. It must reach quit-save, and it must NOT
   //    hand a helpline to someone who is simply exhausted — that ends the relationship.

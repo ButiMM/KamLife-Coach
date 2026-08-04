@@ -328,3 +328,53 @@ export function firstSentence(text: string): string {
   const one = cut > 0 ? t.slice(0, cut + 1) : t.split("\n")[0];
   return one.trim().slice(0, 240);
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE NEVER-SILENT LINE (2026-08-04, Slice 4)
+ *
+ * ONE fallback for the whole product. This is the third and last mouth the architecture
+ * allows — the engine, the crisis pre-layer, and this.
+ *
+ * It exists for the moment the engine did not write a sentence: the model timed out, the
+ * key is wrong, OpenAI is down, or the turn fell to a deterministic handler. Before Slice 4
+ * that moment was covered by thirty handlers each holding their own voice, which is how a
+ * client who walked 5,000 steps got four sentences, an invented "~237 kcal burned", a
+ * 7-day average, a streak note and a Coke comparison — none of which they asked for, all of
+ * which were written by machinery pretending to be a coach.
+ *
+ * The rules it obeys are the voice rules, because a fallback that breaks them just moves
+ * the disease: ONE sentence, their number exactly as they gave it, their words, no running
+ * total, no target, no next move it has not earned the right to give.
+ *
+ * It is deliberately plain. A fallback should sound like a coach who is busy, not like a
+ * coach who is absent — and never like a till slip.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export type LoggedKind = "steps" | "water" | "weight" | "meal" | "workout" | "sleep";
+
+/**
+ * @param label the client's OWN words for the thing, when there are any ("pap and chicken").
+ *        Never a database name, never a portion in brackets — that is voice rule 18.
+ * @param amount the figure THEY gave, already formatted. Never recomputed, never rounded.
+ */
+export function neverSilentLine(kind: LoggedKind, opts: { label?: string; amount?: string; carryingShame?: boolean } = {}): string {
+  const label = (opts.label || "").trim().slice(0, 60);
+  const amount = (opts.amount || "").trim();
+  // CHEAT, NO SHAME (voice rule 9) — and deterministic on purpose. Someone who writes "I feel
+  // like I ruined everything" needs the second half of this sentence whether or not the model
+  // answered that turn, and the model is exactly what is missing when this function runs. The
+  // words already existed in food-context as a guilt note and never reached the log path.
+  if (kind === "meal" && opts.carryingShame) {
+    return label
+      ? `Got it — ${label}. One meal doesn't break a week. 👌`
+      : `Got it. One meal doesn't break a week. 👌`;
+  }
+  switch (kind) {
+    case "steps":   return amount ? `${amount} steps — nice one. 👌` : `Steps logged. 👌`;
+    case "water":   return amount ? `${amount} of water — good. 👌` : `Water logged. 👌`;
+    case "weight":  return amount ? `${amount} — noted. 👌` : `Weight noted. 👌`;
+    case "meal":    return label ? `Got it — ${label}. 👌` : `Got it. 👌`;
+    case "workout": return `Session logged — well done. 💪`;
+    case "sleep":   return amount ? `${amount} of sleep — noted. 👌` : `Sleep noted. 👌`;
+  }
+}

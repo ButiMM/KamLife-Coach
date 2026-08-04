@@ -5,6 +5,7 @@
 
 import { db } from "../db";
 import { users } from "../../shared/schema";
+import { neverSilentLine } from "../reply-hygiene";
 import { eq, sql } from "drizzle-orm";
 import { logChat } from "./chat-log";
 import { sastToday, mentionsNotDone, digitizeSpokenAmounts } from "../utils";
@@ -89,37 +90,11 @@ export async function tryLogWater(ctx: {
     const targetHit = newTotal >= waterTarget;
     const fn = (user.name || "").split(" ")[0] || "there";
     const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-    let waterReply: string;
-    if (targetHit) {
-      if (crossedTarget && newWaterStreak >= 7) {
-        waterReply = `${newTotal}L — water target hit. ✅ ${fn}, ${newWaterStreak} days straight. Your kidneys, skin, and metabolism are all working better than they were a week ago. Keep it exactly like this.`;
-      } else if (crossedTarget && newWaterStreak >= 3) {
-        waterReply = `${newTotal}L — water target hit. ✅ ${newWaterStreak} days in a row, ${fn}. Hydration is a habit now. Do it again tomorrow.`;
-      } else if (crossedTarget) {
-        waterReply = `${newTotal}L — daily water target hit. ✅ ${pick([
-          `That is what it looks like, ${fn}. Do it again tomorrow.`,
-          `Sorted. Same again tomorrow, ${fn}.`,
-          `${fn}, hydration done. Now food and training.`,
-          `Clean. Hit it again tomorrow.`,
-        ])}`;
-      } else {
-        waterReply = pick([
-          `${newTotal}L logged. Water target done for today. ✅`,
-          `${newTotal}L in — target hit. ✅`,
-          `Water target reached at ${newTotal}L. ✅`,
-        ]);
-      }
-    } else {
-      const bottleSizeHint = (unit === "bottle" || unit === "bottles")
-        ? ` _(if your bottle is not 500ml, say "750ml bottle" or "1L bottle")_`
-        : "";
-      waterReply = pick([
-        `Logged ${litres}L.${bottleSizeHint} Total today: ${newTotal}L / ${waterTarget}L — ${remaining}L to go.`,
-        `${litres}L added.${bottleSizeHint} Running total: ${newTotal}L / ${waterTarget}L target. ${remaining}L left.`,
-        `Water logged: ${newTotal}L today.${bottleSizeHint} ${remaining}L still to hit your target.`,
-        `${newTotal}L so far today.${bottleSizeHint} ${remaining}L to reach ${waterTarget}L.`,
-      ]);
-    }
+    // DELETED 2026-08-04 (Slice 4). Twelve hand-written variants lived here, and the ones a
+    // client actually saw most were the running totals: "2L added. Running total: 0L / 2.7L
+    // target. 2.7L left." Three numbers, two of them targets the client never asked about, on
+    // the day they drank some water. The coach writes the sentence now; this is the net.
+    const waterReply = neverSilentLine("water", { amount: `${litres}L` });
     await logChat(user.id, message, waterReply, "WATER_LOG");
     return `${waterReply}`;
   }

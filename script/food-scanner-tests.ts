@@ -1,3 +1,6 @@
+// 'target hit' / 'push for 20g+' DELETED 2026-08-04 with the verdict they described.
+// buildFoodLogReply no longer says anything about protein targets — the coach does, and the
+// card carries the picture. Two tests that guarded the phrasing of a deleted sentence.
 /**
  * Food scanner regression tests — exercises the REAL production scanForSAFoods
  * (not an inlined mirror) so it can never silently drift from foods.ts.
@@ -283,19 +286,6 @@ const logReply = (over: Record<string, any>) => buildFoodLogReply({
   ...over,
 });
 
-test("a ≥20g meal that crosses the protein target declares 'target hit' exactly once", async () => {
-  for (let i = 0; i < 80; i++) {
-    const r = await logReply({});
-    assert.equal(protHitCount(r), 1, `expected exactly one 'target hit', got ${protHitCount(r)}:\n${r}`);
-  }
-});
-test("a 10–20g meal with target already hit never says 'push for 20g+' next to 'target hit'", async () => {
-  for (let i = 0; i < 80; i++) {
-    const r = await logReply({ totalMealProtein: 15 });
-    assert.equal(protHitCount(r), 1, `expected exactly one 'target hit', got ${protHitCount(r)}:\n${r}`);
-    assert.ok(!/20g\+/.test(r), `self-contradicting 'push for 20g+' present:\n${r}`);
-  }
-});
 
 // ── Portion default-count divisor — gram-led descriptions are 1 serving ──────
 // Guards the "2 chicken livers" → ~3 kcal bug: a "150g portion" must NOT be read

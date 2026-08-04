@@ -535,7 +535,9 @@ const STATIC_CHECKS: StaticCheck[] = [
         [/NEVER PRINT A RECEIPT ON A LOG/i, "no receipt on a log"],
         [/ECHO THEIR NUMBER EXACTLY/i, "echo their number, never invent"],
         [/TWO SENTENCES\. ONE NEXT MOVE/i, "≤2 sentences, one next move"],
-        [/NO bullet points, NO numbered lists/i, "no lists"],
+        // Whitespace-tolerant: the prompt is a wrapped template literal, so a rule can sit
+        // across a line break. The first version of this check read a real rule as missing.
+        [/NO\s+bullet points,\s*NO\s+numbered lists/i, "no lists"],
         [/THEIR WORDS, NOT THE SCANNER'S/i, "their words, not scanner words"],
       ];
       const missing = required.filter(([re]) => !re.test(src)).map(([, name]) => name);

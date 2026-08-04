@@ -168,14 +168,20 @@ const CASES: Case[] = [
     reject: [/litres? logged|2L added|running total|water target hit/i] },
 
   // ── FOOD LOG ────────────────────────────────────────────────────────────
-  { name: "food: classic 'I had X' logs with numbers", msg: "I had 2 eggs and pap for breakfast",
-    expect: [/kcal/i, /protein/i] },
-  { name: "food: portion label grams scale with quantity — 4 slices is 120g, not 60g (known bug, prior session)", msg: "I had 4 slices of brown bread for breakfast",
-    expect: [/4 slices/i, /120\s*g/i, /kcal/i], reject: [/\(60g\)/i] },
+  // REWRITTEN 2026-08-04 (Slice 4): the kcal/protein receipt is deleted. The routing
+  // guarantee that survives — and the only one that ever mattered here — is that the message
+  // is READ as a food log and answered naming their food.
+  { name: "food: classic 'I had X' is read as a food log", msg: "I had 2 eggs and pap for breakfast",
+    expect: [/eggs|pap/i], reject: [/didn'?t catch/i] },
+  // REWRITTEN 2026-08-04 (Slice 4): the reply no longer prints a portion label, grams or kcal
+  // at all — that was the receipt. The routing guarantee that survives is the one that matters:
+  // the message is READ as a food log and answered in their words, not bounced back.
+  { name: "food: '4 slices of brown bread' is read as a food log and answered in their words", msg: "I had 4 slices of brown bread for breakfast",
+    expect: [/bread/i], reject: [/didn'?t catch/i, /\d+\s*kcal/i] },
   { name: "food: bare list with meal header logs (prod bug 2026-06-11)", msg: "Lunch\nTin fish\nRice\nMixed veggies",
-    expect: [/kcal/i, /protein/i], reject: [/not logged yet/i, /in the making/i] },
+    expect: [/fish|rice|veg/i], reject: [/not logged yet/i, /in the making/i] },
   { name: "food: bare list with TYPO meal header logs (prod bug 2026-06-11)", msg: "Luch\nTin fish\nRice\nMixed veggies",
-    expect: [/kcal/i, /protein/i], reject: [/not logged yet/i, /in the making/i] },
+    expect: [/fish|rice|veg/i], reject: [/not logged yet/i, /in the making/i] },
   { name: "food: future tense stays planned, not logged", msg: "Tonight I'm gonna have chicken and rice for dinner",
     expect: [/not logged yet|in the making|when you'?ve eaten/i], reject: [/Meal total/i] },
   { name: "food: 'ate it' with no pending plan", msg: "ate it",
@@ -230,12 +236,12 @@ const CASES: Case[] = [
 
   // ── RETROACTIVE LOGGING ─────────────────────────────────────────────────
   { name: "retro: yesterday's meal logs with date", msg: "Yesterday I had 2 eggs and pap for dinner",
-    expect: [/kcal/i, /yesterday/i] },
+    expect: [/yesterday/i] },
   { name: "retro: multi-day catch-up logs each day to the correct date (prod gap 2026-06-11)", msg: "Had chicken and rice Wednesday, oats Thursday morning, pap and pilchards Friday dinner",
     expect: [/logged \d+ days|✅/i, /kcal/i],
     reject: [/not logged yet|in the making|planned/i] },
   { name: "retro: multi-day catch-up handles prefix food (food before day name)", msg: "Rice and beef Wednesday and oats with eggs Thursday",
-    expect: [/logged \d+ days|kcal/i],
+    expect: [/logged \d+ days|rice|beef|oats|eggs/i],
     reject: [/not logged yet|planned/i] },
   { name: "retro: 'log yesterday's food' asks what they ate, must NOT relog today (prod bug 2026-06-13)", msg: "I want to log yesterday's food",
     expect: [/what did you eat yesterday|send it starting with/i],
@@ -283,7 +289,7 @@ const CASES: Case[] = [
     expect: [/Removed your last meal|No meal logged yet today/i],
     reject: [/don.?t see "last meal/i] },
   { name: "takeaway: 'I had 4 pieces of KFC with pap' LOGS the meal, never ordering advice (prod bug 2026-07-03)", msg: "I had 4 pieces of KFC with pap",
-    expect: [/Food logged|kcal/i],
+    expect: [/kfc|chicken|pap/i],
     reject: [/Coach K Pick|if you.?re going KFC|Streetwise 2 \(original/i] },
   { name: "takeaway: 'Yes but I had 4 pieces with pap' logs both, not just pap (prod bug 2026-07-03)", msg: "I had 4 pieces of kfc and pap",
     expect: [/kfc|chicken/i, /pap/i] },
@@ -316,7 +322,7 @@ const CASES: Case[] = [
   // ── TAKEAWAY PAST-TENSE (2026-07-27 live: "Had SA breakfast from McDonald's + 2 extra
   // patties + 2 extra eggs" → the ordering guide answered 3× while the coach promised to log) ──
   { name: "takeaway: 'Had breakfast from McDonalds with extra patties' LOGS, never the menu pick", msg: "Had South African breakfast from macdonalds. But I had extra 2 patties and extra 2 eggs with it",
-    expect: [/Food logged|kcal/i],
+    expect: [/breakfast|patt|egg/i],
     reject: [/Coach K Pick|McFeast|Grilled chicken wrap/i] },
   { name: "takeaway: PLANNING at McDonald's still gets the order guide (regression guard)", msg: "Going to McDonalds for lunch, what should I order?",
     expect: [/smart order|Coach K Pick|McFeast|Best for/i],
@@ -814,10 +820,16 @@ const CASES: Case[] = [
     msg: "I had chicken and rice for lunch",
     user: { profileNotes: "" },
     reject: [/\d+\s*kcal/i, /\d+g protein/i] },
-  { name: "numbers mode: opted-in (numbers:full) client DOES get the figures",
+  // CHANGED 2026-08-04 (Slice 4) — and FLAGGED, because it is a real behaviour change for a
+  // real cohort, not a test detail. Under the locked card policy a regular log is two sentences
+  // for EVERYONE, including a numbers:full client. Their figures are not lost: they are written
+  // to their record, they drive their targets, they are on the card at the moments a card is
+  // earned, and they are one question away ("my numbers", "today so far"). But an opted-in
+  // client no longer gets them unprompted on every meal. The founder should confirm this.
+  { name: "numbers mode: even an opted-in client gets the coach's sentence, not a receipt",
     msg: "I had chicken and rice for lunch",
     user: { profileNotes: "numbers:full" },
-    expect: [/kcal/i] },
+    expect: [/chicken|rice/i], reject: [/\d+\s*kcal/i] },
   { name: "numbers mode: 'show me the numbers' opts a default client IN",
     msg: "show me the numbers",
     user: { profileNotes: "" },
@@ -867,11 +879,15 @@ const CASES: Case[] = [
   //  never the "How much?" ask — rather than the echoed amount)
   { name: "playbook: spoken water amount logs — never 'How much?' at a stated amount",
     msg: "just had one litre of water",
-    expect: [/logged|total|added|so far/i],
+    // The running total is deleted; what must never come back is asking for an amount they
+    // already gave.
+    expect: [/water/i],
     reject: [/How much\? Tell me the amount/i] },
   { name: "playbook: compound food+water logs BOTH halves in one reply",
     msg: "I had an apple and a pear and one litre of water",
-    expect: [/apple/i, /pear/i, /2\.7\s?L/i],
+    // Both foods must still be named — that is the multi-intent guarantee and it is the point
+    // of the case. The "2.7L" it used to assert was the water running total, now deleted.
+    expect: [/apple/i, /pear/i],
     reject: [/How much\? Tell me the amount/i] },
   { name: "playbook: compound steps+water — steps log, never dropped",
     msg: "walked 8000 steps and drank 2 litres of water",
