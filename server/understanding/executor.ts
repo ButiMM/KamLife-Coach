@@ -22,7 +22,7 @@
  * (handlers are lazy-loaded) so the safety core is unit-testable without the DB chain.
  */
 
-import { type CoachAction, type ToolOutcome, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported } from "./actions";
+import { type CoachAction, type ToolOutcome, refsAreLabels, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported } from "./actions";
 
 export interface ExecuteContext {
   user: any;
@@ -163,9 +163,43 @@ async function stepsTool(count: number, ctx: ExecuteContext): Promise<ToolOutcom
   };
 }
 
+async function weightTool(kg: number, ctx: ExecuteContext): Promise<ToolOutcome> {
+  const { handleWeightLog } = await import("../handlers/weight");
+  // The handler still owns the WRITE — trend maths, milestone voice notes, the lot. Its
+  // returned sentence is deliberately discarded: that is the whole inversion.
+  await handleWeightLog(ctx.phone, ctx.user, kg);
+  const prev = parseFloat(String(ctx.user.currentWeight)) || 0;
+  return { performed: true, facts: { kg, previousKg: prev || null, changeKg: prev ? Math.round((kg - prev) * 10) / 10 : null } };
+}
+
+async function waterTool(litres: number, ctx: ExecuteContext): Promise<ToolOutcome> {
+  const { tryLogWater } = await import("../handlers/water");
+  const msg = `${litres} litres of water`;
+  await tryLogWater({ phone: ctx.phone, message: msg, m: msg, user: ctx.user });
+  return { performed: true, facts: { litres } };
+}
+
+async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx: ExecuteContext): Promise<ToolOutcome> {
+  const { handleFoodContext } = await import("../handlers/food-context");
+  const text = `${action.foodText}${action.meal ? ` for ${action.meal}` : ""}${action.retro ? ` ${action.retro}` : ""}`;
+  // forceLog: this is an EXPLICIT log action — never let an advisory branch (the restaurant
+  // ordering guide) answer it. The rewritten text carries no past-tense marker, so
+  // "breakfast from McDonald's…" returned a menu pick instead of logging (2026-07-27 live).
+  await handleFoodContext({ phone: ctx.phone, message: text, m: text.toLowerCase(), user: ctx.user, stepReplyPart: "", handleMessage: async () => "", forceLog: true });
+  const refs: Record<string, string> = { mealName: String(action.foodText || "").slice(0, 60) };
+  if (action.meal) refs.slot = String(action.meal).slice(0, 20);
+  if (action.retro) refs.dayLabel = String(action.retro).slice(0, 20);
+  return { performed: true, facts: {}, refs };
+}
+
 /** The engine's sentence wins. The fallback exists so a client is never met with silence. */
 function authored(ctx: ExecuteContext, outcome: ToolOutcome, fallback: () => string): string {
-  void outcome;
+  // The runtime half of Guard #8. Once refs admits strings, the compiler can no longer prove
+  // "no prose" — so a ref that has grown into a sentence is caught here and dropped, loudly.
+  if (!refsAreLabels(outcome.refs)) {
+    console.warn(`[GUARD8] a tool returned prose in refs, not a label: ${JSON.stringify(outcome.refs).slice(0, 120)}`);
+    outcome.refs = undefined;
+  }
   const engine = (ctx.engineReply || "").trim();
   return engine || fallback();
 }
@@ -176,8 +210,11 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
   const { user, phone } = ctx;
   switch (action.type) {
     case "LOG_WEIGHT": {
-      const { handleWeightLog } = await import("../handlers/weight");
-      return handleWeightLog(phone, user, action.kg);
+      const outcome = await weightTool(action.kg, ctx);
+      return authored(ctx, outcome, () => {
+        console.warn("[GUARD8] engine wrote no sentence for LOG_WEIGHT — deterministic fallback used");
+        return `${action.kg}kg logged.`;
+      });
     }
     case "LOG_STEPS": {
       // CONVERTED TO A SILENT TOOL (2026-08-04, Guard #8). It used to end with
@@ -195,19 +232,22 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
       });
     }
     case "LOG_WATER": {
-      const { tryLogWater } = await import("../handlers/water");
-      const msg = `${action.litres} litres of water`;
-      return (await tryLogWater({ phone, message: msg, m: msg, user })) || "Water logged. 💧";
+      const outcome = await waterTool(action.litres, ctx);
+      return authored(ctx, outcome, () => {
+        console.warn("[GUARD8] engine wrote no sentence for LOG_WATER — deterministic fallback used");
+        return `${action.litres}L of water logged.`;
+      });
     }
     case "LOG_MEAL": {
-      const { handleFoodContext } = await import("../handlers/food-context");
-      const text = `${action.foodText}${action.meal ? ` for ${action.meal}` : ""}${action.retro ? ` ${action.retro}` : ""}`;
-      // forceLog: this is an EXPLICIT log action — never let an advisory branch (the
-      // restaurant ordering guide) answer it. The rewritten text carries no past-tense
-      // marker, so "breakfast from McDonald's…" returned a menu pick instead of logging
-      // (2026-07-27 live: three identical guides while the coach promised to log).
-      const reply = await handleFoodContext({ phone, message: text, m: text.toLowerCase(), user, stepReplyPart: "", handleMessage: async () => "", forceLog: true });
-      return reply || "";
+      // The tool that talks the most, converted last and on purpose. It is the one that
+      // needed `refs`: the engine has to be able to name "pap and chicken" back in the
+      // client's own words, which is half of what makes a reply sound like a person.
+      const outcome = await mealTool(action, ctx);
+      return authored(ctx, outcome, () => {
+        console.warn("[GUARD8] engine wrote no sentence for LOG_MEAL — deterministic fallback used");
+        const name = outcome.refs?.mealName;
+        return name ? `Logged — ${name}. 👌` : `Logged. 👌`;
+      });
     }
     case "REMOVE_LAST_MEAL": {
       const { handleFoodLogMgmt } = await import("../handlers/food-log-mgmt");

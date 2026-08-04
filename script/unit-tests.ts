@@ -12,7 +12,7 @@ import { predictTrajectory } from "../server/trajectory";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { parseFoodPreferences, parseVisionAnswer, looksLikeBulkIntake, applyIntakeBrake, describeIntake } from "../server/onboarding-intake";
-import { actionNumberIsClientReported, type ToolFacts } from "../server/understanding/actions";
+import { actionNumberIsClientReported, refsAreLabels, type ToolFacts, type ToolOutcome } from "../server/understanding/actions";
 // Mirrors executor.authored(): the engine's sentence wins; the formatter is the never-silent net.
 const pickAuthored = (engine: string, fallback: string) => (engine || "").trim() || fallback;
 import { stripInternalMarkers, isDuplicateOutbound, _resetOutboundDedupe, firstSentence } from "../server/reply-hygiene";
@@ -2429,6 +2429,26 @@ test("guard 8: the engine's sentence wins over the template", () => {
   // And the client is never met with silence if the engine wrote nothing.
   assert.equal(pickAuthored("", "6,000 steps logged."), "6,000 steps logged.");
   assert.equal(pickAuthored("   ", "6,000 steps logged."), "6,000 steps logged.");
+});
+
+test("guard 8: a tool cannot carry a pre-written client message", () => {
+  // These keys are typed `never`. Uncommenting the line below is a COMPILE error, which is
+  // the point — a future edit cannot smuggle a sentence back through a tool by habit:
+  //   const bad: ToolOutcome = { performed: true, facts: {}, reply: "Lekker!" };
+  const good: ToolOutcome = { performed: true, facts: { steps: 6000, hitTarget: false } };
+  assert.equal(good.performed, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(good, "reply"), false);
+});
+
+test("guard 8: refs are labels, not prose", () => {
+  // The client's own words for a thing — this is what the engine quotes back.
+  assert.equal(refsAreLabels({ mealName: "pap and chicken", slot: "lunch" }), true);
+  assert.equal(refsAreLabels({ sessionName: "Legs", dayLabel: "yesterday" }), true);
+  assert.equal(refsAreLabels(undefined), true);
+  // Prose wearing a label's clothes — the exact leak the type can no longer catch alone.
+  assert.equal(refsAreLabels({ mealName: "Nice balanced meal. Keep it up!" }), false, "two sentences");
+  assert.equal(refsAreLabels({ mealName: "that's a solid plate for your goal" }), false, "addresses the client");
+  assert.equal(refsAreLabels({ mealName: "x".repeat(61) }), false, "a label is short");
 });
 
 // THE DOOR (2026-08-04) — the last hundred milliseconds before a message leaves.

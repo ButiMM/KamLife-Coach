@@ -302,13 +302,54 @@ export function shouldAutoExecute(action: CoachAction, confidence: number): bool
  * traces to a stored row.
  */
 export type ToolFactValue = number | boolean | null;
+/** Measurements. Numbers and booleans — steps, kcal, protein, hitTarget, streak. */
 export type ToolFacts = Record<string, ToolFactValue>;
+/**
+ * LABELS THE ENGINE QUOTES BACK — "pap and chicken", "Legs", "yesterday".
+ *
+ * Added 2026-08-04, before LOG_MEAL was converted, because a numbers-only type would have
+ * forced one of two bad outcomes at the tool that talks the most: widen everything to
+ * string and the guard loses its teeth exactly where it matters, or encode food as IDs and
+ * starve the engine of the words that make a reply sound like a person naming your dinner.
+ *
+ * A ref is the CLIENT'S OWN WORDS for a thing. It is never composed prose — see
+ * `refsAreLabels`, which is the runtime half of the enforcement.
+ */
+export type ToolRefs = Record<string, string>;
 
 export interface ToolOutcome {
   /** Did the write actually happen? */
   performed: boolean;
-  /** What the coach now knows. Data only — the type admits no prose. */
+  /** What the coach now knows. Data only. */
   facts: ToolFacts;
+  /** The client's own words for the thing acted on. Labels, never sentences. */
+  refs?: ToolRefs;
+
+  // THE TEETH. `?: never` means these keys cannot be assigned anything at all, so a tool
+  // structurally CANNOT carry a pre-written client message — not by habit, not by a future
+  // edit nobody reviews, not by copy-paste from an old handler. This is the part the type
+  // system genuinely enforces, and it is worth being precise about its limit: once refs
+  // admits strings, the type alone can no longer prove "no sentences". Three layers, not
+  // one — the compiler here, the [GUARD8] leak counter in the logs, and the gauntlet by ear.
+  message?: never;
+  reply?: never;
+  text?: never;
+  response?: never;
+  body?: never;
+}
+
+/**
+ * The runtime half: a ref is a LABEL. "pap and chicken" passes. "Nice balanced meal — that's
+ * a solid plate, keep it up" is prose wearing a label's clothes, and it fails.
+ */
+export function refsAreLabels(refs: ToolRefs | undefined): boolean {
+  for (const v of Object.values(refs || {})) {
+    if (typeof v !== "string") return false;
+    if (v.length > 60) return false;                     // a label is short
+    if (/[.!?]\s+\S/.test(v)) return false;              // more than one sentence
+    if (/\b(?:you|your|keep it up|well done|great|nice work)\b/i.test(v)) return false;  // addressing the client
+  }
+  return true;
 }
 
 export function actionNumberIsClientReported(action: CoachAction, clientMessage: string): boolean {
