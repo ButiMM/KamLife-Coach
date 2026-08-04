@@ -5018,6 +5018,24 @@ test("next move: the instruction can never contradict the pill", async () => {
 // one minute after he photographed toast, eggs and viennas, the card told him to "eat more
 // today — add a proper meal". True of the ledger, absurd of the morning. Nobody has eaten
 // their day's food at breakfast, and no coach tells a man who just ate to go and eat.
+// BUILT FOR THE DUMP, NOT THE MOMENT (2026-08-04). His clients do not log lunch at lunch —
+// they send the whole day at 9pm. The dump window already collapses six photos into one card.
+// What the card SAID was still written for a day with hours left in it.
+test("next move: after 20:00 the directive faces tomorrow, never this afternoon", () => {
+  const behind = [
+    { label: "Calories", current: 1400, target: 2849, unit: "", overIsBad: false },
+    { label: "Protein", current: 60, target: 183, unit: "g", overIsBad: false },
+    { label: "Fat", current: 40, target: 85, unit: "g", overIsBad: true },
+  ];
+  const late = nextMoveLine(behind, true, 21);
+  assert.match(late, /tomorrow/i, "at 9pm the only useful instruction is about tomorrow");
+  assert.doesNotMatch(late, /afternoon|lunch today|later today/i, "the afternoon is gone");
+
+  // The same numbers at 13:00 still get a to-do — the day is live and can still be fixed.
+  const midday = nextMoveLine(behind, true, 13);
+  assert.doesNotMatch(midday, /tomorrow/i, "midday: today is still winnable");
+});
+
 test("next move: at breakfast, being behind is not a finding", () => {
   const breakfast = [
     { label: "Calories", current: 680, target: 2849, unit: "", overIsBad: false },

@@ -188,6 +188,22 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour()): s
   const protLeft = prot ? Math.round(prot.target - prot.current) : 0;
   const calLeft = cal ? Math.round(cal.target - cal.current) : 0;
 
+  // BUILT FOR THE DUMP, NOT THE MOMENT (2026-08-04, founder). His clients do not log lunch at
+  // lunch — they send the whole day at 9pm, six photos in ninety seconds. The dump window in
+  // card-policy.ts already collapses that into ONE card. What the card SAID was still written
+  // for a day that has hours left in it: "walk this afternoon" at 21:00 is useless, and worse,
+  // it proves the coach is not reading the clock the client is living in.
+  //
+  // So after 20:00 the directive stops being a to-do and becomes a close-out that faces
+  // tomorrow. Same principle — one instruction, one lever, his voice — chosen from WHEN the
+  // report arrived rather than from an ideal real-time flow nobody actually lives.
+  if (hour >= 20) {
+    return !isBulk && ratio(cal) > 1.05 ? "Day's done. Tomorrow, first meal before you leave the house"
+      : protLeft >= 35 ? "That's the day. Tomorrow get a real protein in at breakfast 🍳"
+      : isBulk && calLeft > 500 ? "Day's wrapped. Tomorrow, eat earlier — that's the whole fix"
+      : "That's the day wrapped 👌 same again tomorrow";
+  }
+
   // Over the day's food — the move is about the NEXT meal, never guilt about the last one.
   if (!isBulk && ratio(cal) > 1.05) {
     return calLeft < -400 ? "Keep tonight light 🥗 protein and veg only" : "Go lean next meal — grilled, no starch";
