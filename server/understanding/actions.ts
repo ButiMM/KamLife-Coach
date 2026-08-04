@@ -284,6 +284,33 @@ export function shouldAutoExecute(action: CoachAction, confidence: number): bool
  * This is the one that matters more: an invented intake field gets corrected in the next
  * message; an invented step log silently becomes their history.
  */
+/**
+ * GUARD #8 — THE AUTHORSHIP CONSTRAINT (2026-08-04).
+ *
+ * The inversion moved the engine to the front of the queue. It did NOT move authorship:
+ * the brain read the room and then a template answered the door. That is why one product
+ * has 29 voices and none of them are the founder's.
+ *
+ * The rule is "tools shut up, the engine writes every sentence" — and a rule enforced by a
+ * keyword grep is a rule you can walk past. So it is enforced by the type system instead.
+ * A tool returns ToolFacts: numbers, booleans, short identifiers. There is NOWHERE in this
+ * type to put a sentence. Silence is not a convention a future edit can forget; it is a
+ * compile error.
+ *
+ * Facts are what the coach is allowed to KNOW as a result of acting. The sentence built
+ * from them is the engine's job, and the provenance gate still checks every figure in it
+ * traces to a stored row.
+ */
+export type ToolFactValue = number | boolean | null;
+export type ToolFacts = Record<string, ToolFactValue>;
+
+export interface ToolOutcome {
+  /** Did the write actually happen? */
+  performed: boolean;
+  /** What the coach now knows. Data only — the type admits no prose. */
+  facts: ToolFacts;
+}
+
 export function actionNumberIsClientReported(action: CoachAction, clientMessage: string): boolean {
   const n = action.type === "LOG_STEPS" ? action.count
     : action.type === "LOG_WATER" ? action.litres

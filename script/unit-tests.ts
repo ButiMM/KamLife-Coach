@@ -12,7 +12,9 @@ import { predictTrajectory } from "../server/trajectory";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { parseFoodPreferences, parseVisionAnswer, looksLikeBulkIntake, applyIntakeBrake, describeIntake } from "../server/onboarding-intake";
-import { actionNumberIsClientReported } from "../server/understanding/actions";
+import { actionNumberIsClientReported, type ToolFacts } from "../server/understanding/actions";
+// Mirrors executor.authored(): the engine's sentence wins; the formatter is the never-silent net.
+const pickAuthored = (engine: string, fallback: string) => (engine || "").trim() || fallback;
 import { stripInternalMarkers, isDuplicateOutbound, _resetOutboundDedupe, firstSentence } from "../server/reply-hygiene";
 import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodProfile } from "../server/grocery-personalize";
 import { computeProgressScore } from "../server/progress-score";
@@ -2406,6 +2408,27 @@ test("intake: food preferences split into likes and dislikes", () => {
   assert.equal(c.foodDislikes, null);
   const d = parseFoodPreferences("skip");
   assert.deepEqual(d, { foodLikes: null, foodDislikes: null });
+});
+
+// GUARD #8 — AUTHORSHIP (2026-08-04). The inversion moved the engine to the front of the
+// queue but not to the front of the SENTENCE. These lock the constraint that fixes it.
+test("guard 8: a tool's facts are data, never prose", () => {
+  // ToolFacts admits number | boolean | null. If a future edit tries to smuggle a sentence
+  // back through a tool, this is a compile error, not a test failure — which is the point.
+  const facts: ToolFacts = { steps: 6000, target: 8500, hitTarget: false, streak: 3, burnKcal: 286 };
+  for (const [k, v] of Object.entries(facts)) {
+    assert.ok(typeof v === "number" || typeof v === "boolean" || v === null, `${k} must be data, got ${typeof v}`);
+  }
+});
+
+test("guard 8: the engine's sentence wins over the template", () => {
+  // The live defect: the steps HANDLER wrote "you smashed the target. Lekker. That's a Coke
+  // and a half burned off" — the same words to every client, forever. Now the engine writes.
+  const engineWrote = "Done — yesterday's session is marked. 6,000 steps on top of it.";
+  assert.equal(pickAuthored(engineWrote, "6,000 steps — you smashed the target. Lekker."), engineWrote);
+  // And the client is never met with silence if the engine wrote nothing.
+  assert.equal(pickAuthored("", "6,000 steps logged."), "6,000 steps logged.");
+  assert.equal(pickAuthored("   ", "6,000 steps logged."), "6,000 steps logged.");
 });
 
 // THE DOOR (2026-08-04) — the last hundred milliseconds before a message leaves.

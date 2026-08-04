@@ -22,7 +22,7 @@
  * (handlers are lazy-loaded) so the safety core is unit-testable without the DB chain.
  */
 
-import { type CoachAction, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported } from "./actions";
+import { type CoachAction, type ToolOutcome, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported } from "./actions";
 
 export interface ExecuteContext {
   user: any;
@@ -35,6 +35,10 @@ export interface ExecuteContext {
   dryRun?: boolean;
   /** The client's own words. A numeric write must trace its number back to these. */
   clientMessage?: string;
+  /** The sentence the ENGINE wrote for this turn. Guard #8: converted tools return facts
+   *  only, so this is what the client hears. The deterministic formatter is a never-silent
+   *  fallback, logged when it fires, not the normal path. */
+  engineReply?: string;
   /** Resuming a parked action after an explicit "yes". The number was already checked
    *  against the message that proposed it, and "yes" carries no digits of its own. */
   preConfirmed?: boolean;
@@ -142,6 +146,30 @@ export async function executeAction(action: CoachAction, ctx: ExecuteContext): P
   }
 }
 
+/**
+ * A SILENT TOOL. Note the return type: ToolOutcome admits numbers and booleans and nothing
+ * else, so this function CANNOT hand a sentence back to the client even by accident. That
+ * is Guard #8 — silence by construction, not by keyword search.
+ */
+async function stepsTool(count: number, ctx: ExecuteContext): Promise<ToolOutcome> {
+  const { logStepsForUser, getStepStreak } = await import("../handlers/steps");
+  const logged = await logStepsForUser(ctx.user.id, count);
+  const streak = await getStepStreak(ctx.user.id).catch(() => 0);
+  const target = ctx.user.stepsTarget || 8500;
+  const weightKg = parseFloat(String(ctx.user.currentWeight)) || 75;
+  return {
+    performed: true,
+    facts: { steps: logged, target, streak, hitTarget: logged >= target, burnKcal: Math.round(logged * 0.0005 * weightKg) },
+  };
+}
+
+/** The engine's sentence wins. The fallback exists so a client is never met with silence. */
+function authored(ctx: ExecuteContext, outcome: ToolOutcome, fallback: () => string): string {
+  void outcome;
+  const engine = (ctx.engineReply || "").trim();
+  return engine || fallback();
+}
+
 // FIELD MAPPING: action → the existing, proven handler. Canonical messages reuse the
 // handlers that parse text; structured calls reuse the ones that take values. No rewrites.
 async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string> {
@@ -152,11 +180,19 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
       return handleWeightLog(phone, user, action.kg);
     }
     case "LOG_STEPS": {
-      const { logStepsForUser, getStepResponse, getStepStreak } = await import("../handlers/steps");
-      const logged = await logStepsForUser(user.id, action.count);
-      const streak = await getStepStreak(user.id).catch(() => 0);
-      const wt = parseFloat(String(user.currentWeight)) || 75;
-      return getStepResponse(logged, user.stepsTarget || 8500, wt, streak, undefined, user, false);
+      // CONVERTED TO A SILENT TOOL (2026-08-04, Guard #8). It used to end with
+      // getStepResponse(...) — the steps handler writing "you smashed the target. Lekker.
+      // That's a Coke and a half burned off" in its own voice, to every client, forever.
+      // It now writes the row and reports what happened. The sentence is the engine's.
+      const outcome = await stepsTool(action.count, ctx);
+      return authored(ctx, outcome, () => {
+        // NEVER-SILENT FALLBACK ONLY. If the engine wrote nothing this turn, the client
+        // still hears something true. Logged loudly, because every time this fires it is
+        // authorship leaking back out of the engine.
+        console.warn("[GUARD8] engine wrote no sentence for LOG_STEPS — deterministic fallback used");
+        const s = Number(outcome.facts.steps || 0), t = Number(outcome.facts.target || 8500);
+        return s >= t ? `${s.toLocaleString()} steps — past your ${t.toLocaleString()}. 👏` : `${s.toLocaleString()} steps logged.`;
+      });
     }
     case "LOG_WATER": {
       const { tryLogWater } = await import("../handlers/water");

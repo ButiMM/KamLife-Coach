@@ -242,6 +242,7 @@ export async function runMeaningEngineLive(ctx: {
           sourceMessageId: ctx.sourceMessageId || deriveSourceId(user.id, message),
           confidence: 0.9, // placeholder until replay calibrates the distribution
           clientMessage: message,
+          engineReply: result.reply, // Guard #8: the engine authors; the tool only acts
           dryRun: runDry,
         });
         await logChat(user.id, message,
