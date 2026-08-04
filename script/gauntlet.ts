@@ -524,6 +524,38 @@ const STATIC_CHECKS: StaticCheck[] = [
     },
   },
   {
+    // Slice 3's first deliverable, asserted where it lives. A voice rule that is not in the
+    // prompt is not a rule — it is a paragraph in a document, which is the thing the
+    // architecture guard was written to stop being the answer.
+    slice: 3,
+    label: "the engine prompt carries the voice rules",
+    run: () => {
+      const src = readFileSync("server/understanding/meaning-engine.ts", "utf-8");
+      const required: Array<[RegExp, string]> = [
+        [/NEVER PRINT A RECEIPT ON A LOG/i, "no receipt on a log"],
+        [/ECHO THEIR NUMBER EXACTLY/i, "echo their number, never invent"],
+        [/TWO SENTENCES\. ONE NEXT MOVE/i, "≤2 sentences, one next move"],
+        [/NO bullet points, NO numbered lists/i, "no lists"],
+        [/THEIR WORDS, NOT THE SCANNER'S/i, "their words, not scanner words"],
+      ];
+      const missing = required.filter(([re]) => !re.test(src)).map(([, name]) => name);
+      return missing.length === 0 ? null : `voice rules absent from the engine prompt: ${missing.join(", ")}`;
+    },
+  },
+  {
+    // The card, asserted as reachability rather than as pixels. A renderer nobody calls cannot
+    // put a macro bar in front of a client, and that is the property the spec actually names:
+    // no calories, no macro bars, no "under target", no running totals on the card.
+    slice: 3,
+    label: "no production path renders the dashboard card",
+    run: () => {
+      const callers = [...walk("server")]
+        .filter(f => !f.endsWith("macro-card.ts"))
+        .filter(f => /\brenderMacroCard\s*\(/.test(readFileSync(f, "utf-8")));
+      return callers.length === 0 ? null : `still rendered by: ${callers.join(", ")}`;
+    },
+  },
+  {
     // Slice 4's gate, stated as a number so it cannot be argued with. Counted with the same
     // regex as check-architecture.ts (BUDGET.authorshipPoints) so the two can never disagree.
     //

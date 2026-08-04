@@ -9,14 +9,13 @@
  * the product sets calorie + protein targets only.
  */
 
-import { db } from "./db";
-import { mealLogs } from "../shared/schema";
-import { eq, and, gte, lt, sql } from "drizzle-orm";
+import { mealLogs, weightLogs } from "../shared/schema";
+import { eq, and, gte, lt, sql, asc } from "drizzle-orm";
 import { isPastSastDay } from "./sast";
 
 import { getGoalProfile } from "./goal-profiles";
 import { renderMacroCard, renderWelcomeCard } from "./macro-card";
-import { achievementFor, renderAchievementCard, type AchievementCardData } from "./achievement-card";
+import { achievementFor, shareAchievement, renderAchievementCard, type AchievementCardData } from "./achievement-card";
 import { putCard } from "./card-store";
 import { waterTargetLitres } from "./targets";
 import { getNumbersMode, stripNumbersFromProse } from "./numbers-mode";
@@ -346,6 +345,31 @@ export function distinctHint(hint: string, nextMove: string): string {
   return shared >= 2 ? "" : hint;
 }
 
+/**
+ * kg changed since their first weigh-in — NEGATIVE when they have lost weight, matching
+ * AchievementFacts.weightChangeKg. Undefined when there are fewer than two weigh-ins, because
+ * one reading is a starting point and not yet progress. Fail-open: a DB miss returns undefined
+ * and the card falls back to the next true thing, never to an invented one.
+ */
+async function weightChangeSinceStart(userId?: string): Promise<number | undefined> {
+  if (!userId) return undefined;
+  try {
+    // Imported HERE, not at module scope. This module is statically imported by unit-tests.ts
+    // for its pure helpers, and a top-level `import { db }` makes db.ts evaluate at load —
+    // which demands a real DATABASE_URL and takes the whole pure suite down. (It survived
+    // before only because `db` was imported and never used, so esbuild elided it: a live
+    // import that nothing depended on. The first real use is what exposed it.)
+    const { db } = await import("./db");
+    const rows = await db.select({ weight: weightLogs.weight }).from(weightLogs)
+      .where(eq(weightLogs.userId, userId)).orderBy(asc(weightLogs.loggedAt));
+    if (rows.length < 2) return undefined;
+    const first = parseFloat(String(rows[0].weight));
+    const last = parseFloat(String(rows[rows.length - 1].weight));
+    if (!Number.isFinite(first) || !Number.isFinite(last)) return undefined;
+    return last - first;
+  } catch { return undefined; }
+}
+
 /** Render an achievement card and return its media marker, or "" if it can't be served. */
 export function achievementCardMarker(ach: AchievementCardData): string {
   try {
@@ -440,34 +464,30 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
     const t = await todayRows(opts.user, false, retro ? opts.forDate : undefined);
     if (!t) return "";
     const verdict = dayStatusPill(t.rows, t.isBulk);
-    const numbersOff = cardNumbersOff(opts.user);
-    const png = renderMacroCard({
-      title: (opts.mealName || "Meal").replace(/[,:—–-]+\s*$/, "").trim().slice(0, 42) || "Meal",
-      // WHAT DID *THIS* COST? (2026-07-31 live: a Monster Energy drink logged, and the card
-      // said "Meal logged", "Under target", "Eat more today — add a proper meal". Every number
-      // on it was the DAY. A client who knows nothing read a green tick and an instruction to
-      // eat more, and never learned what the energy drink cost them.) The card's own header
-      // claims a meal was logged, so it must say what was logged. This is the one number that
-      // teaches; the day bars below are context, not the lesson.
-      // THE WHITEBOARD, NOT THE CALCULATOR (2026-08-04, founder's decision: "fix, not remove —
-      // rebuild it to my July spec"). He specified a NEXT-MOVE artifact for a layman: "most
-      // people don't care about calories, they just want to lose the belly." What it had become
-      // was a dashboard that handed one client three tones in one rectangle — a badge saying
-      // "Under target" (alarm), a next move saying "Good start" (praise), and a footer saying
-      // "Still room to build" (criticism), at 09:34, to a muscle-gain client whose job is to eat
-      // MORE. A lost person cannot tell from that whether they did well or badly.
-      //
-      // So: the day it is logging, the meal in their words, ONE instruction, ONE simple visual.
-      // No badge, no calorie subtitle, no five bars, no footer. The text reply is the person and
-      // carries the coaching sentence; the card is the whiteboard and carries the next move.
-      // They never say the same thing, so they can no longer contradict each other.
-      subtitle: retro ? "Yesterday" : "Today",
-      // ONE visual, and protein is the one that actually moves the result — the lever he coaches
-      // on in his own transcripts ("3 eggs 🥚 2 slices", "Add it, don't eat the skin").
-      rows: t.rows.filter(r => r.label === "Protein"),
-      numbersOff,
-      nextMove: cardProse(nextMoveLine(t.rows, t.isBulk), numbersOff),
+    // THE CARD IS THE SHAREABLE WIN, NOT THE DASHBOARD (2026-08-04, Slice 3).
+    //
+    // Every version of this card until now answered "how is your day going against target?" —
+    // a protein bar, a next move computed from a gap, a subtitle of Today or Yesterday. That is
+    // a dashboard, and the spec is explicit about what it must be instead: the most encouraging
+    // TRUE progress for this client, one next move, their name, the watermark. Nobody has ever
+    // forwarded a progress bar to a group chat.
+    //
+    // shareAchievement already answers exactly that question — strongest real number, ranked by
+    // what a person is actually proud of — and it has been sitting behind the `share my progress`
+    // command since 28 July while the log path rendered bars. This is not a new card; it is the
+    // right card finally reaching the moment that matters.
+    //
+    // Null means there is genuinely nothing true to celebrate yet (day one, no weigh-in, no
+    // streak). Then NO card. A fabricated milestone is worse than none — that is the same rule
+    // the provenance gate enforces on words, applied to pictures.
+    const progress = shareAchievement({
+      firstName: firstNameOf(opts.user),
+      streak: opts.achievementStreak,
+      weightChangeKg: await weightChangeSinceStart(opts.user?.id),
+      sessions: opts.user?.totalWorkoutsCompleted ?? undefined,
     });
+    if (!progress) return "";
+    const png = renderAchievementCard(progress);
     noteCardSent(opts.user?.id);
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
   } catch (e) {
@@ -481,21 +501,20 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
   try {
     const base = cardBaseUrl();
     if (!base) return "";
-    const t = await todayRows(user, true); // daily scorecard includes today's water
-    if (!t) return "";
-    const verdict = dayStatusPill(t.rows, t.isBulk);
-    const numbersOff = cardNumbersOff(user);
-    const png = renderMacroCard({
-      title: user?.name ? `${String(user.name).split(" ")[0]}'s day so far` : "Your day so far",
-      // THE SAME WHITEBOARD RULE AS THE MEAL CARD. This one was missed an hour ago and it is
-      // the card he actually screenshotted — "Kam's day so far", badge, five bars, footer.
-      // Rebuilding one of two call sites and calling the card fixed is exactly the disease
-      // this codebase keeps naming: one owner per question, or the second one keeps talking.
-      subtitle: "Today",
-      rows: t.rows.filter(r => r.label === "Protein"),
-      numbersOff,
-      nextMove: cardProse(nextMoveLine(t.rows, t.isBulk), numbersOff),
+    // ONE OWNER, BOTH CALL SITES (2026-08-04, Slice 3). The comment that used to sit here said
+    // it exactly: "rebuilding one of two call sites and calling the card fixed is the disease
+    // this codebase keeps naming." So this path takes the same progress card as the log path.
+    // "My daily calories" now answers with what they have actually done, not a bar chart of what
+    // they have left — the spec forbids calories, macro bars and running totals on the card, and
+    // this was the loudest surviving source of all three.
+    const progress = shareAchievement({
+      firstName: firstNameOf(user),
+      streak: user?.workoutStreak ?? undefined,
+      weightChangeKg: await weightChangeSinceStart(user?.id),
+      sessions: user?.totalWorkoutsCompleted ?? undefined,
     });
+    if (!progress) return "";
+    const png = renderAchievementCard(progress);
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
   } catch (e) {
     console.warn("[DAILY_CARD] skipped:", (e as any)?.message || e);
