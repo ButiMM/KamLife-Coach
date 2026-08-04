@@ -114,7 +114,10 @@ export async function voiceReplyFor(phone: string, text: string): Promise<string
     const [u] = await db.select({ id: users.id, profileNotes: users.profileNotes })
       .from(users).where(eq(users.phoneNumber, phone)).limit(1);
     if (!u || !wantsVoiceReplies(u)) return null;
-    return await generateVoiceNote(speechText(text), "warm", u.id);
+    // The voice says the headline only. Reading a whole coaching message aloud costs twice
+    // and cannot be scrolled back through; the text underneath carries the detail.
+    const { firstSentence } = await import("./reply-hygiene");
+    return await generateVoiceNote(firstSentence(speechText(text)), "warm", u.id);
   } catch (e) {
     console.warn("[TTS] voice reply skipped:", (e as Error)?.message || e);
     return null;

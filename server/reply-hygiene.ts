@@ -274,3 +274,57 @@ export function stripVoiceDenial(text: string): string {
 export function deniesVoiceNote(text: string): boolean {
   return VOICE_DENIAL_RE.test(text || "") || ASK_TO_REPEAT_RE.test(text || "");
 }
+
+// ── THE DOOR (2026-08-04) ────────────────────────────────────────────────────
+// The inbound side was 29 handlers each with an opinion. The outbound side has
+// appenders — a tag appender, a menu appender — and nobody owned the last
+// hundred milliseconds before a message leaves. Provenance checks whether it is
+// TRUE. Hygiene checks whether it is SHAPED like a person. Neither asks: is this
+// internal? have we already said exactly this?
+
+/** Instrumentation markers (`_· 🧠 new engine ·_`) belong in the log row, never in a body. */
+export function stripInternalMarkers(text: string): string {
+  return (text || "")
+    .replace(/^[ \t]*_?·[^\n]*·_?[ \t]*$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// OUTBOUND DEDUPE. Live, in the founder's chat: two different messages produced the
+// identical reply back to back — the second was pure noise and read as a broken machine.
+// Whatever upstream bug produces a repeat, saying the same words twice in ten minutes is
+// never the right outcome, so the door refuses it. Compares on normalised text so a
+// changed timestamp or stray space still counts as the same thing said again.
+const _lastSent = new Map<string, { body: string; at: number }>();
+export const DEDUPE_WINDOW_MS = 10 * 60_000;
+
+export function normaliseForDedupe(text: string): string {
+  return (text || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** True → this exact reply already went to this client moments ago. Do not send it again. */
+export function isDuplicateOutbound(userKey: string, body: string, at = Date.now()): boolean {
+  const key = userKey || "?";
+  const norm = normaliseForDedupe(body);
+  if (!norm) return false;
+  const prev = _lastSent.get(key);
+  const dup = !!prev && prev.body === norm && at - prev.at < DEDUPE_WINDOW_MS;
+  if (!dup) {
+    _lastSent.set(key, { body: norm, at });
+    if (_lastSent.size > 5000) _lastSent.clear();
+  }
+  return dup;
+}
+
+/** Test/ops hook. */
+export function _resetOutboundDedupe(): void { _lastSent.clear(); }
+
+// ONE SENTENCE, SPOKEN. A voice reply that reads the whole coaching message aloud costs
+// twice — once in TTS, once in the client's patience — and you cannot scroll back through
+// audio. The voice says the headline; the text underneath carries the detail.
+export function firstSentence(text: string): string {
+  const t = (text || "").trim();
+  const cut = t.search(/[.!?](\s|$)/);
+  const one = cut > 0 ? t.slice(0, cut + 1) : t.split("\n")[0];
+  return one.trim().slice(0, 240);
+}

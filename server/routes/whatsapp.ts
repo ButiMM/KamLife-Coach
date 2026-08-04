@@ -10,7 +10,7 @@ import { eq } from "drizzle-orm";
 import { captureQualitySignal } from "../quality-signals";
 import { recordMediaJob, completeMediaJob } from "../media-jobs";
 import { provenanceGate } from "../verifiers/response-gate";
-import { humanizeReply } from "../reply-hygiene";
+import { humanizeReply, stripInternalMarkers, isDuplicateOutbound } from "../reply-hygiene";
 
 // COMEBACK RECOGNITION (2026-07-13 retention P0): when a client messages after ≥3 days
 // of silence, their FIRST reply back opens with a warm welcome — the return must feel
@@ -58,6 +58,22 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
     console.warn("[SEND_FINAL] shaping failed, sending raw:", e?.message || e);
     out = text;
   }
+  // THE DOOR (2026-08-04). Provenance asked whether it is true. Hygiene asked whether it
+  // is shaped like a person. These two ask the questions nobody owned: is this internal,
+  // and have we already said exactly this?
+  //
+  // 1. Internal markers never leave. The brain-source tag is gated to the coach's own
+  //    number, so no client has ever seen one — but "gated" is a condition that can be
+  //    edited by mistake, and a backstop at the door cannot be.
+  out = stripInternalMarkers(out);
+  // 2. The same words twice in ten minutes is never the right outcome, whatever upstream
+  //    produced the repeat. Live: two different messages got byte-identical replies.
+  if (isDuplicateOutbound(phone, out)) {
+    console.warn(`[DUPLICATE_SUPPRESSED] ${phone.slice(-4)} — identical reply within the window: "${out.slice(0, 70)}"`);
+    return;
+  }
+  if (!out.trim()) return;
+
   // VOICE REPLY (2026-08-03) — for a client who opted in, the coach also speaks. The
   // text is sent either way and first: audio is additive, and a TTS failure must never
   // turn into a silent coach. Returns null instantly for everyone else.

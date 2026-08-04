@@ -13,6 +13,7 @@ import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExe
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { parseFoodPreferences, parseVisionAnswer, looksLikeBulkIntake, applyIntakeBrake, describeIntake } from "../server/onboarding-intake";
 import { actionNumberIsClientReported } from "../server/understanding/actions";
+import { stripInternalMarkers, isDuplicateOutbound, _resetOutboundDedupe, firstSentence } from "../server/reply-hygiene";
 import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodProfile } from "../server/grocery-personalize";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
@@ -2405,6 +2406,37 @@ test("intake: food preferences split into likes and dislikes", () => {
   assert.equal(c.foodDislikes, null);
   const d = parseFoodPreferences("skip");
   assert.deepEqual(d, { foodLikes: null, foodDislikes: null });
+});
+
+// THE DOOR (2026-08-04) — the last hundred milliseconds before a message leaves.
+test("door: internal markers never reach a client", () => {
+  const withTag = "6,000 steps — you smashed the target.\n\n_· 🧠 new engine ·_";
+  const clean = stripInternalMarkers(withTag);
+  assert.ok(!clean.includes("new engine"), "the brain tag must not survive the door");
+  assert.ok(!clean.includes("·"), "no marker punctuation either");
+  assert.match(clean, /6,000 steps/, "the actual coaching survives untouched");
+  // A mid-sentence interpunct is NOT a marker — bullets and prose keep theirs.
+  assert.match(stripInternalMarkers("Log food · Today's workout"), /Log food · Today's workout/);
+});
+
+test("door: the same reply twice in the window is sent once", () => {
+  _resetOutboundDedupe();
+  const body = "6,000 steps — you smashed the 6,000 target. Lekker.";
+  assert.equal(isDuplicateOutbound("+27650000000", body), false, "first send goes out");
+  assert.equal(isDuplicateOutbound("+27650000000", body), true, "the verbatim repeat is refused");
+  // Whitespace and case are not a different message.
+  assert.equal(isDuplicateOutbound("+27650000000", "6,000 STEPS —  you smashed the 6,000 target.  Lekker."), true);
+  // A different client is unaffected.
+  assert.equal(isDuplicateOutbound("+27650000001", body), false);
+  // A genuinely different reply goes out.
+  assert.equal(isDuplicateOutbound("+27650000000", "Done — yesterday's session is marked ✅"), false);
+});
+
+test("door: the voice note speaks one sentence, not the whole message", () => {
+  const long = "Done, yesterday's session is marked. That's 3 this month and your protein has been solid all week. Same energy tomorrow.";
+  const said = firstSentence(long);
+  assert.equal(said, "Done, yesterday's session is marked.");
+  assert.ok(said.length < long.length / 2, "the text carries the detail, the voice carries the headline");
 });
 
 // THE NUMBER BRAKE (2026-08-04) — the live defect, in the founder's own chat. He said, by
