@@ -179,13 +179,22 @@ async function waterTool(litres: number, ctx: ExecuteContext): Promise<ToolOutco
   return { performed: true, facts: { litres } };
 }
 
+// Set by mealTool, consumed once by the LOG_MEAL case below. Not prose — a media URL.
+let lastCardMarker = "";
+
 async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx: ExecuteContext): Promise<ToolOutcome> {
   const { handleFoodContext } = await import("../handlers/food-context");
   const text = `${action.foodText}${action.meal ? ` for ${action.meal}` : ""}${action.retro ? ` ${action.retro}` : ""}`;
   // forceLog: this is an EXPLICIT log action — never let an advisory branch (the restaurant
   // ordering guide) answer it. The rewritten text carries no past-tense marker, so
   // "breakfast from McDonald's…" returned a menu pick instead of logging (2026-07-27 live).
-  await handleFoodContext({ phone: ctx.phone, message: text, m: text.toLowerCase(), user: ctx.user, stepReplyPart: "", handleMessage: async () => "", forceLog: true });
+  // THE CARD LIVES IN THE DISCARDED REPLY (2026-08-04 live). Silencing this tool meant throwing
+  // the handler's sentence away — correct — but the whiteboard card rides in that same string as
+  // a [MEDIA:…] marker, so the gate flip silently took the card with it. A client logging a meal
+  // got no card at all, which is a regression, not a simplification. The PROSE is still binned;
+  // only the picture is kept.
+  const discarded = await handleFoodContext({ phone: ctx.phone, message: text, m: text.toLowerCase(), user: ctx.user, stepReplyPart: "", handleMessage: async () => "", forceLog: true });
+  lastCardMarker = (String(discarded || "").match(/\[MEDIA:[^\]]+\]/) || [""])[0];
   const refs: Record<string, string> = { mealName: String(action.foodText || "").slice(0, 60) };
   if (action.meal) refs.slot = String(action.meal).slice(0, 20);
   if (action.retro) refs.dayLabel = String(action.retro).slice(0, 20);
@@ -242,8 +251,10 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
       // The tool that talks the most, converted last and on purpose. It is the one that
       // needed `refs`: the engine has to be able to name "pap and chicken" back in the
       // client's own words, which is half of what makes a reply sound like a person.
+      lastCardMarker = "";
       const outcome = await mealTool(action, ctx);
-      return authored(ctx, outcome, () => {
+      const card = lastCardMarker; lastCardMarker = "";
+      return card + authored(ctx, outcome, () => {
         console.warn("[GUARD8] engine wrote no sentence for LOG_MEAL — deterministic fallback used");
         const name = outcome.refs?.mealName;
         return name ? `Logged — ${name}. 👌` : `Logged. 👌`;
