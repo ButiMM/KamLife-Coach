@@ -75,7 +75,26 @@ export async function todayRows(user: any, includeWater = false, forDate?: Date)
 // FOODS out of a food-log reply: the bulleted item lines are the source of truth. Falls back to
 // a filler-stripped first line only when there are no bullets. Shared by every log path so the
 // title reads the same across the board — text log, photo log, on-demand.
+/**
+ * THE CLIENT'S OWN WORDS FOR THEIR FOOD (2026-08-04). The reply used to carry a bulleted
+ * receipt and this function scraped the title out of it — so killing the receipt would have
+ * silently broken the card title AND findDuplicateMealToday, which matches on name overlap
+ * and would have started double-logging again. The model now emits a machine-only ITEMS line
+ * instead: same data, never shown, and phrased the way the client would say it.
+ */
+export function mealTitleFromItemsLine(text: string): string {
+  const m = (text || "").match(/^\s*ITEMS:\s*(.+)$/im);
+  if (!m) return "";
+  const names = m[1].split(",").map(x => x.replace(/[*_`#]/g, "").trim()).filter(x => x.length >= 2 && x.length <= 40);
+  if (!names.length) return "";
+  // A long plate reads "toast, eggs +2", never a truncated "Some…" — a cut-off word is the
+  // machine's language leaking back in, which is the same disease in miniature.
+  return names.length > 3 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", ");
+}
+
 export function mealTitleFromReply(text: string): string {
+  const fromItems = mealTitleFromItemsLine(text);
+  if (fromItems) return fromItems;
   const names: string[] = [];
   for (const raw of (text || "").split("\n")) {
     const m = raw.match(/^\s*[•·\-\*]\s*(.+)/);           // bulleted item line

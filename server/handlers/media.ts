@@ -991,7 +991,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // Strip the internal TOTAL: line, and unwrap a leading scare-quoted food name — the model
       // echoes the caption in quotes ("Skinny hot chocolate" logged!) and it reads as sarcasm.
       const visionDisplay = visionReply
-        .replace(/\nTOTAL:[^\n]*/i, "")
+        .replace(/^[ \t]*(?:TOTAL|ITEMS):[^\n]*$/gim, "")
         .replace(/^["“”‘’]([^"“”\n]{2,40})["“”‘’]/, "$1")
         .trim();
 
@@ -1185,7 +1185,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoReplyRaw = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoCoachNudge}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
       const photoReply = photoNumbersLow ? stripNumbersFromProse(photoReplyRaw) : photoReplyRaw;
       // BRANDED MACRO CARD on the PHOTO log too (2026-07-22 live: photo-logged drink missed it). Same contract as text; title = FOODS logged, not the model's preamble.
-      const cardTitle = mealTitleFromReply(visionDisplay);
+      const cardTitle = mealTitleFromReply(visionReply);
       const photoCard = (!photoNumbersLow && photoDailyTotal) ? await macroCardMarker({ user, mealName: cardTitle, mealKcal: totalPhotoKcal, forDate: photoIsRetro ? photoLoggedAt : undefined }) : "";
       const photoGuardrail = await nutritionGuardrailNudge(user); // "too much of something" nudge
       return `${photoReply}${photoGuardrail}${await firstActionCelebration(user, phone, "meal")}${photoCard}`;

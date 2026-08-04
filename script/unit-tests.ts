@@ -3674,12 +3674,22 @@ test("vision prompt: still contains the greasy-food and TOTAL-format instruction
   assert.ok(/PREPARATION & GREASE/i.test(drinkPrompt));
 });
 
-// PORTION TRANSPARENCY (2026-07-13 precision sweep): photo estimates must state the
-// ASSUMED grams per item so the client can see and correct the assumption — the human
-// calibration loop that closes the photo-portion error bar.
-test("vision prompt: instructs per-item assumed portion grams (correctable estimates)", () => {
-  assert.ok(/ASSUMING in grams/i.test(drinkPrompt), "assumed-grams instruction present");
-  assert.ok(/~150g/.test(drinkPrompt), "worked example present");
+// ESTIMATES ARE BOOKKEEPING, NOT CONVERSATION (2026-08-04). This test used to lock the
+// OPPOSITE contract — per-item assumed grams, printed to the client, as a calibration loop.
+// The founder's first gauntlet message showed what that actually is in the hand: he
+// photographed breakfast and got a till slip. "Bread (~120g total): 320 kcal · Scrambled
+// eggs (~3 large): 210 kcal · Some vienna (~60g): 150 kcal", then the same numbers again on
+// a card. The calibration was real; printing it to a human being was the mistake.
+//
+// The arithmetic still happens and still logs. It goes on the machine-only TOTAL line, and
+// the item NAMES go on a machine-only ITEMS line that titles the card in the client's own
+// words. What the client reads is their food, named, and nothing else.
+test("vision prompt: the client never gets an itemised receipt", () => {
+  assert.doesNotMatch(drinkPrompt, /ASSUMING in grams/i, "the per-item grams receipt is gone");
+  assert.match(drinkPrompt, /ESTIMATES ARE BOOKKEEPING, NOT CONVERSATION/i);
+  assert.match(drinkPrompt, /NOT WRITE AN ITEMISED BREAKDOWN|till slip/i, "the ban is explicit");
+  assert.match(drinkPrompt, /TOTAL: X kcal \| Xg protein/, "the maths still reaches the ledger");
+  assert.match(drinkPrompt, /ITEMS:/, "item names still reach the card, machine-only");
 });
 
 // PHOTO "can I eat this?" → real SA shelf/menu swaps (2026-07-09). The approval verdict
