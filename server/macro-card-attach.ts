@@ -190,9 +190,9 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour()): s
 
   // Over the day's food — the move is about the NEXT meal, never guilt about the last one.
   if (!isBulk && ratio(cal) > 1.05) {
-    return calLeft < -400 ? "Keep tonight light — protein and veg only" : "Go lean at the next meal — grilled, no starch";
+    return calLeft < -400 ? "Keep tonight light 🥗 protein and veg only" : "Go lean next meal — grilled, no starch";
   }
-  if (ratio(fat) > 1.25) return "Grill it, don't fry it — that's the whole fix today";
+  if (ratio(fat) > 1.25) return "Grill it, don't fry it 🍖 that's the whole fix today";
 
   // Building and under-fuelled — but NEVER a bare "eat more" when a limiting macro is already
   // blown (2026-07-28 live: the pill read "Fat over" directly above "Eat more today — add a
@@ -211,14 +211,14 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour()): s
   if (isBulk && calLeft > 500) {
     const fatOver = !!fat && fat.target > 0 && fat.current > fat.target;
     if (fatOver) return "Eat more — but make it lean. Grilled, not fried";
-    return earlyDay ? "Good start — keep it coming at lunch" : "Eat more today — add a proper meal";
+    return earlyDay ? "Good start 👌 keep it coming at lunch" : "Eat more today — add a proper meal";
   }
 
   // Protein is the one that actually moves the result, so it owns the instruction.
-  if (protLeft >= 60) return earlyDay ? "Protein at lunch and supper — that's the day" : "Get protein into your next two meals";
-  if (protLeft >= 35) return earlyDay ? "Make lunch a proper protein meal" : "Make your next meal a proper protein meal";
-  if (protLeft >= 18) return "Add eggs, tin fish or a shake today";
-  if (protLeft > 0) return "One yoghurt or a boiled egg finishes today";
+  if (protLeft >= 60) return earlyDay ? "Chicken or eggs at lunch AND supper 🍗" : "Get a real protein into your next two meals";
+  if (protLeft >= 35) return earlyDay ? "Make lunch a proper protein — chicken, fish or eggs" : "Make your next meal a proper protein — chicken, fish or eggs";
+  if (protLeft >= 18) return "Add eggs 🥚 tin fish or a shake today";
+  if (protLeft > 0) return "One yoghurt or a boiled egg and you're done 👌";
 
   if (calLeft > 400) return "Eat a proper meal — you're short on food today";
   return "Nothing left to do — today is done properly";

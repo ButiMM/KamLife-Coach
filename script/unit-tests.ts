@@ -6674,8 +6674,11 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
       { label: "Protein", current: protCur, target: protTgt, unit: "g", overIsBad: false },
       { label: "Fat", current: 40, target: 80, unit: "g", overIsBad: true },
     ] as any);
-    const big = nextMoveLine(rows(60, 185, 1200, 2862), false);
-    assert.match(big, /protein/i);
+    // Pinned to the evening: the same numbers are not a finding at breakfast (2026-08-04).
+    const big = nextMoveLine(rows(60, 185, 1200, 2862), false, 19);
+    // NAMING THE FOOD beats naming the macro — that is his voice, from his own transcripts:
+    // "Add it, don't eat the skin", "3 eggs 🥚 2 slices". A layman does not eat "protein".
+    assert.match(big, /protein|chicken|eggs?|fish|yoghurt|meat/i, "an action in food, not a macro");
     assert.doesNotMatch(big, /\d/, "the layman's line must carry no numbers");
     assert.match(nextMoveLine(rows(185, 185, 3400, 2862), false), /lean|light/i);
     assert.match(nextMoveLine(rows(185, 185, 2800, 2862), false), /done/i);
