@@ -98,6 +98,15 @@ export function mustStayDeterministic(message: string, isQuestion?: boolean): bo
   // fallback signal — routes.ts passes the classifier's verdict, which is what catches a voice
   // transcript that carries no punctuation at all.
   const asking = isQuestion === true || /\?/.test(s);
+  // A RETRO FOOD REQUEST BELONGS TO THE ENGINE (2026-08-04 live, by voice: "I want to log my
+  // meals for yesterday, not today"). The bare word "log" below made it deterministic, so
+  // food-log-mgmt answered — by printing TODAY's log back at him. He asked about yesterday and
+  // was shown this morning's photo. The engine owns LOG_MEAL, which already carries a retro
+  // field; it was simply never reached. Workouts are excluded: workout.ts owns backdated
+  // sessions and has since July, and that path works.
+  if (/\b(yesterday|last night|day before)\b/i.test(s)
+      && /\b(meal|meals|food|ate|eaten|eating|breakfast|lunch|dinner|supper)\b/i.test(s)
+      && !/\b(session|workout|train(?:ed|ing)?|gym)\b/i.test(s)) return false;
   if (REPORTED_NUMBER.test(s) && !asking) return true;
   // A COMEBACK question has one correct answer — a fixed physiological ramp — so the engine must
   // never take it (2026-07-28 live: it answered "would you like to focus on strength training, or

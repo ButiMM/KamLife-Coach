@@ -12,6 +12,7 @@ import { predictTrajectory } from "../server/trajectory";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { parseFoodPreferences, parseVisionAnswer, looksLikeBulkIntake, applyIntakeBrake, describeIntake } from "../server/onboarding-intake";
+import { mustStayDeterministic } from "../server/understanding/action-router";
 import { actionNumberIsClientReported, refsAreLabels, type ToolFacts, type ToolOutcome } from "../server/understanding/actions";
 // Mirrors executor.authored(): the engine's sentence wins; the formatter is the never-silent net.
 const pickAuthored = (engine: string, fallback: string) => (engine || "").trim() || fallback;
@@ -2480,6 +2481,19 @@ test("door: the voice note speaks one sentence, not the whole message", () => {
   const said = firstSentence(long);
   assert.equal(said, "Done, yesterday's session is marked.");
   assert.ok(said.length < long.length / 2, "the text carries the detail, the voice carries the headline");
+});
+
+// RETRO FOOD (2026-08-04 live, by voice): "I want to log my meals for yesterday, not today."
+// He was shown TODAY's log — this morning's photo — because the bare word "log" routed him to
+// the deterministic display handler. The engine owns LOG_MEAL and it carries a retro field.
+test("retro food requests reach the engine, not today's log", () => {
+  assert.equal(mustStayDeterministic("I want to log my meals for yesterday, not today"), false);
+  assert.equal(mustStayDeterministic("log my meals for yesterday"), false);
+  assert.equal(mustStayDeterministic("I ate pap and chicken yesterday"), false);
+  // Workouts are NOT affected — workout.ts has owned backdated sessions since July.
+  assert.equal(mustStayDeterministic("Yesterday I did have a session, can you mark it"), true);
+  // And an ordinary display request still goes straight to the deterministic handler.
+  assert.equal(mustStayDeterministic("my meals"), true);
 });
 
 // THE NUMBER BRAKE (2026-08-04) — the live defect, in the founder's own chat. He said, by
