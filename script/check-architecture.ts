@@ -37,6 +37,21 @@ const BUDGET = {
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
   regexLiterals: 330,
+  /**
+   * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
+   * something other than the engine can put words in front of a client.
+   *
+   * Guard #8 made tools silent by type. It could not reach handlers, cards, schedulers or
+   * onboarding — 532 of these, counted for the first time today after the founder said the
+   * one thing that mattered: "you're telling me about a patch, we can't even do a simple
+   * thing." He was right that it felt endless, and the reason was that nobody had ever
+   * counted. Mouths were killed by discovery — one screenshot, one patch, one more tomorrow.
+   *
+   * This number is now FROZEN. It can fall and it can never rise, so the long tail can only
+   * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
+   * with [GUARD8] daily: those two numbers are the whole truth about authorship.
+   */
+  authorshipPoints: 532,
 };
 
 
@@ -164,6 +179,7 @@ const actual = {
   messageDeciders: all.filter(s => /\.test\(m\)/.test(s)).length,
   looksLikePredicates: new Set(all.join("\n").match(/function looksLike[A-Za-z]*/g) || []).size,
   regexLiterals: all.join("\n").match(/= \/[^/\n]{10,}\/[gimsuy]*/g)?.length || 0,
+  authorshipPoints: all.join("\n").match(/^\s*return \[?[`"]/gm)?.length || 0,
   _unusedActionCount: files.filter(f => {
     const src = read(f);
     if (!/db\s*\.\s*(insert|update)\s*\(/.test(src)) return false;      // does it act?
@@ -190,7 +206,7 @@ for (const [key, budget] of Object.entries(BUDGET) as Array<[keyof typeof BUDGET
 
 // A budget above its original frozen value must have a logged, dated reason. This is what stops
 // "just bump it by one" from being the path of least resistance.
-const FROZEN = { modules: 234, handlerFiles: 29, cronRegistrations: 27, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333 };
+const FROZEN = { modules: 234, handlerFiles: 29, cronRegistrations: 27, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333, authorshipPoints: 532 };
 for (const [key, frozen] of Object.entries(FROZEN) as Array<[keyof typeof BUDGET, number]>) {
   if (BUDGET[key] <= frozen) continue;
   const logged = RAISES.filter(r => r.key === key).sort((a, b) => a.to - b.to).pop();
@@ -247,6 +263,8 @@ if (wins.length > 0) {
 }
 
 console.log(`architecture guard: ${actual.modules} modules, ${actual.regexLiterals} regexes, ${actual.messageDeciders} message deciders, ${actual.cronRegistrations} cron jobs — all at budget.`);
+// GUARD #9, printed every run so the shrink is VISIBLE rather than claimed (2026-08-04).
+console.log(`authorship: ${actual.authorshipPoints} places other than the engine can put words in front of a client (budget ${BUDGET.authorshipPoints}, frozen — this may only fall).`);
 console.log(`  ${ONE_OWNER.length} questions have exactly one owner. ${actionFiles.length} action files declared, ${atRisk.length} AT RISK: ${atRisk.map(f => f.split("/").pop()).join(", ")}`);
 // Printed on EVERY green run, on purpose. A debt you are reminded of is a debt you repay.
 for (const r of RAISES) {
