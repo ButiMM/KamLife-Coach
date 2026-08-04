@@ -116,6 +116,8 @@ const getStepResponse = _getStepResponse;
 // MAIN MESSAGE HANDLER
 // ============================================================
 
+const RETRO_TURN = /(?<day>\byesterday\b|\blast night\b)|(?<food>\b(?:ate|eat|eaten|had|breakfast|lunch|dinner|supper|snack|meals?)\b)/gi;
+
 export async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[], sourceMessageId?: string): Promise<string> {
   try {
   recordMessageSeen();  let m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
@@ -179,6 +181,36 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   // Same shape for the other delivery dial: three inbound voice notes earns an OFFER
   // of voice replies (never an automatic switch — audio costs money per reply).
   if (mediaContentType?.startsWith("audio/")) void bumpVoiceNoteUse(user, phone);
+
+  // RETRO CONTINUITY — "yesterday" has to survive the turn it was spoken in (2026-08-04 live).
+  // 12:19 he said "I wanna tell you what I ate yesterday" and the coach said "go ahead". 12:21
+  // he listed the food — with no date in it, because he had already given the date — and it was
+  // logged to TODAY. The coach invited him into a conversation and forgot why.
+  //
+  // No new table: a profileNotes token, the same durable migration-free pattern as numbers:full
+  // and voice:on. And no new date plumbing — food-context.ts has parsed "yesterday" out of a
+  // message since July, so the pending day is applied by putting the word back into the message
+  // the client would have said it in. Proven machinery, one token, nothing new to get wrong.
+  if (!mediaUrl) {
+    // One literal, two questions — the architecture guard refuses a second, and "did they name
+    // a past day" and "did they mention eating" are one read of the same sentence.
+    const said = RETRO_TURN.exec(m)?.groups || {};
+    const saidYesterday = !!said.day, hasFoodWords = !!said.food;
+    const pending = (user.profileNotes || "").includes("retro:pending");
+    // They named the day but no food yet ("I want to tell you what I ate yesterday") — hold it.
+    if (saidYesterday && hasFoodWords && scanForSAFoods(m).length === 0) {
+      const base = (user.profileNotes || "").replace(/\s*\bretro:pending\b/gi, "").trim();
+      void db.update(users).set({ profileNotes: base ? `${base} retro:pending` : "retro:pending" })
+        .where(eq(users.phoneNumber, phone)).catch(() => {});
+    } else if (pending && !saidYesterday && scanForSAFoods(m).length > 0) {
+      // The food they promised, with no date on it. Put the day back and spend the token.
+      message = `yesterday ${message}`;
+      m = `yesterday ${m}`;
+      const base = (user.profileNotes || "").replace(/\s*\bretro:pending\b/gi, "").trim();
+      void db.update(users).set({ profileNotes: base || null }).where(eq(users.phoneNumber, phone)).catch(() => {});
+      console.log(`[RETRO_CONTINUITY] ${phone.slice(-4)} — carried "yesterday" across the turn`);
+    }
+  }
 
   // ---- COACH / OWNER BYPASS — never paywall the coach's own number ----
   // Checks COACH_ALERT_PHONE and ADMIN_PHONE_OVERRIDE (either env var works)

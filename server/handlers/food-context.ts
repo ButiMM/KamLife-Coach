@@ -32,6 +32,9 @@ import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
 
+// One owner — this literal was declared twice in this file.
+const TREAT_WORDS = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i;
+
 export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: number | null; protein?: number | null }, user?: any, slotCtx?: SlotContext): string | null {
   const lo = msg.toLowerCase();
   if (/\b(for breakfast|breakfast was|had breakfast|breakfast:|ate breakfast|morning meal)\b/i.test(lo)) return "breakfast";
@@ -1294,7 +1297,7 @@ export async function handleFoodContext(ctx: {
           `• ${f.name}: ~${f.kcal} kcal, ${f.protein_g}g protein (${f.portion_desc})`
         ).join("\n");
         const fbIsSnack = /\bsnack\b/i.test(m) || (gptFallbackResult.totalKcal < 250 && gptFallbackResult.totalProtein <= 4);
-        const fbIsDessert = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i.test(m);
+        const fbIsDessert = TREAT_WORDS.test(m);
         const gptLoggedAt = parseMealDate(message);
         const gptIsRetro = isRetroactiveMeal(message);
         const committed = await commitFoodLog({
@@ -1370,7 +1373,7 @@ export async function handleFoodContext(ctx: {
         `• ${f.name}: ~${f.kcal} kcal, ${f.protein_g}g protein (${f.portion_desc})`
       ).join("\n");
       const fb2IsSnack = /\bsnack\b/i.test(m) || (gptFallbackResult.totalKcal < 250 && gptFallbackResult.totalProtein <= 4);
-      const fb2IsDessert = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i.test(m);
+      const fb2IsDessert = TREAT_WORDS.test(m);
       const fb2LoggedAt = parseMealDate(message);
       const fb2IsRetro = isRetroactiveMeal(message);
       const committed2 = await commitFoodLog({
