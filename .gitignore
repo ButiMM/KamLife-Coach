@@ -30,3 +30,9 @@ tmp/
 
 # Marketing assets (local only — not for repo)
 marketing/
+
+# The standing list must survive the container it was written in (2026-08-04):
+# *.md above silently untracked it, so every "committed and pushed" claim about it was false.
+!OUTSTANDING.md
+!LAUNCH_BLOCKERS.md
+!CLAUDE.md
