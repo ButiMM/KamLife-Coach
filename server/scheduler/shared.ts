@@ -13,7 +13,7 @@ import { join } from "path";
 import { schedulerState } from "../../shared/schema";
 import { routineNudgeAllowed, dayOfYearSAST } from "./nudge-policy";
 import { checkOutboundMessage } from "../verifiers/proactive-gate";
-import { provenanceGate } from "../verifiers/response-gate";
+import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply } from "../reply-hygiene";
 import { templateSid, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
 
@@ -495,6 +495,9 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   // pass that rewrote those quotes would corrupt the instrument that measures this — the same
   // rule the provenance gate follows.
   const shaped = checked.includes('_"') ? checked : humanizeReply(checked);
+  // SHADOW (2026-08-04) — the proactive half of the door. Captured whole, before the bubble
+  // split, so a shadow row holds the message as the client would have read it.
+  if (await shadowDoor(to, shaped, "proactive", "server/scheduler/shared.ts", mediaUrl)) return;
   const parts = splitWhatsAppBody(shaped);
   for (let i = 0; i < parts.length; i++) {
     const remainingText = parts.slice(i).join("\n\n");
@@ -628,7 +631,10 @@ export async function sendWhatsAppTemplate(
     return;
   }
 
+  // SHADOW (2026-08-04) — templates re-open a closed 24h window, so one escaping in staging
+  // is a client pulled back into a conversation the build was not allowed to have.
   const logText = opts?.fallbackText || `[template ${contentSid}]`;
+  if (await shadowDoor(to, logText, "template", "server/scheduler/shared.ts", opts?.mediaUrl)) return;
   const params: Record<string, unknown> = { from: FROM_NUMBER, to, contentSid };
   const cv = buildContentVariables(variables);
   if (cv) params.contentVariables = cv;

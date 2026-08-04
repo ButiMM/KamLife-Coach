@@ -13,6 +13,7 @@
  */
 
 import twilio from "twilio";
+import { shadowDoor } from "./verifiers/response-gate";
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
 const AUTH_TOKEN  = process.env.TWILIO_AUTH_TOKEN  || "";
@@ -76,6 +77,11 @@ export async function sendWhatsAppButtons(
   buttons: string[]
 ): Promise<void> {
   if (!FROM_NUMBER) return;
+
+  // SHADOW (2026-08-04) — the third client-facing door. A button set is a message; if it
+  // could reach a phone while the build is in staging, the mode is a lie.
+  if (await shadowDoor(to, buttons.length > 0 ? `${body}\n\n[BUTTONS:${buttons.slice(0, 3).join("|")}]` : body,
+                       "buttons", "server/twilio-interactive.ts")) return;
 
   if (buttons.length > 0) {
     const contentSid = await _getOrCreateTemplate(buttons.slice(0, 3));

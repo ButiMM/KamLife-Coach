@@ -27,7 +27,7 @@ import { splitSentences } from "../reply-hygiene";
 import { weightTrendUsable, type TrendVerdict } from "../adaptive-targets";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { db } from "../db";
-import { users, weightLogs, mealLogs } from "../../shared/schema";
+import { users, weightLogs, mealLogs, shadowReplies } from "../../shared/schema";
 import { sastDayStart } from "../sast";
 
 const openai = new OpenAI({
@@ -467,4 +467,76 @@ export async function provenanceGate(phone: string, body: string): Promise<strin
     console.warn("[PROVENANCE_GATE] error — passing through:", e instanceof Error ? e.message : e);
     return body;
   }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE SHADOW DOOR (2026-08-04, Slice 1 of the one-brain rebuild)
+ *
+ * Every rewrite of the reply path so far has been proved in production, on the founder's
+ * own phone, by a real client reading a bad answer. That is the only instrument this
+ * product has ever had, and it costs one bad experience per data point.
+ *
+ * SHADOW=on runs the entire pipeline — same handlers, same engine, same gates, same
+ * provenance and hygiene passes — and writes what WOULD have gone out into shadow_replies
+ * instead of calling Twilio. Nothing reaches a human. A rewrite can be watched for a day
+ * against real traffic before it is allowed to speak.
+ *
+ * It lives in this file, and not in a new one, for two reasons. It is the same question
+ * the rest of this module owns — MAY WE SEND THIS? — and the architecture guard is at its
+ * module budget, which is the guard doing its job.
+ *
+ * Contract for callers: `await shadowDoor(...)` returns true when the message was captured,
+ * and a true means DO NOT SEND. Fail-CLOSED on a capture error while shadow is on: if the
+ * row cannot be written we still refuse to send, because the entire purpose of the mode is
+ * that a human does not receive this. Off (the default) it is a boolean read and nothing else.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export type ShadowChannel = "reply" | "proactive" | "template" | "buttons";
+
+/** The staging switch. Off unless SHADOW is explicitly on — never a default, never inferred. */
+export function shadowMode(): boolean {
+  return (process.env.SHADOW || "").trim().toLowerCase() === "on";
+}
+
+let _shadowCaptured = 0;
+
+/**
+ * The single door. Returns TRUE when the message was captured and must NOT be sent.
+ *
+ * @param authorFile the file that is speaking, e.g. "server/routes/whatsapp.ts". This is the
+ *        authorship count measured on live traffic instead of on a regex over the source.
+ */
+export async function shadowDoor(
+  phone: string,
+  body: string,
+  channel: ShadowChannel,
+  authorFile: string,
+  mediaUrls?: string | string[] | null,
+): Promise<boolean> {
+  if (!shadowMode()) return false;
+  const media = Array.isArray(mediaUrls) ? mediaUrls.filter(Boolean) : mediaUrls ? [mediaUrls] : [];
+  try {
+    const [u] = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    await db.insert(shadowReplies).values({
+      userId: u?.id ?? null,
+      phone,
+      channel,
+      authorFile,
+      body: body || "",
+      mediaUrls: media.length > 0 ? media : null,
+      commitSha: (process.env.RAILWAY_GIT_COMMIT_SHA || "").slice(0, 7) || null,
+    });
+    _shadowCaptured++;
+    console.log(`[SHADOW] captured ${channel} from ${authorFile} → ${phone.slice(-4)}: "${(body || "").slice(0, 70)}"`);
+  } catch (e) {
+    // Fail CLOSED. A dropped shadow row is a lost data point; a sent one is a client
+    // receiving a message from a build that was explicitly not allowed to speak.
+    console.error(`[SHADOW] capture FAILED, message still withheld — ${e instanceof Error ? e.message : e}`);
+  }
+  return true;
+}
+
+/** Captured-since-restart, for the founder-facing self-check. */
+export function shadowStats(): { on: boolean; captured: number } {
+  return { on: shadowMode(), captured: _shadowCaptured };
 }

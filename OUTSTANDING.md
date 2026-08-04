@@ -82,7 +82,32 @@ as a brand. Those are two different registers.
 
 Every item names where it came from. Nothing is on this list because it would be nice.
 
-### THE ONE-MIND CHANGE — next session, top, nothing in front of it
+### THE REBUILD — 5 slices, one per session (founder spec, locked 2026-08-04)
+
+One brain, silent hands. The engine is the only file that speaks to a client about their logs.
+
+| Slice | What | Gate | State |
+|---|---|---|---|
+| 1 | `shadow_replies` staging table + the CI gauntlet | Gauntlet runs RED on current code, proving it detects the known defects | ✅ **done 2026-08-04** |
+| 2 | Multi-intent parser + silent tools (JSON only, no text) | Slice 2's gauntlet column turns green | next |
+| 3 | Prompt enforcement + engine-fed card, old dashboard card deleted | Slice 3's column turns green | |
+| 4 | Delete every handler reply send; `authorship:` 532 → ~5 | Slice 4's column turns green | |
+| 5 | Live flip — shadow off, founder sends 3 messages, then 10 beta users | **Fully green gauntlet** | |
+
+`npm run gauntlet`. Today it reports: slice 1 **12/12**, slice 2 5/10, slice 3 25/54, slice 4 0/1.
+Wired into CI as reporting-only; **Slice 5 deletes the `continue-on-error:` line in test.yml.**
+
+Two things to be straight about before slice 4 is planned:
+
+- **The authorship floor is ~5, not 3.** The count is a regex over `return "…"` in `server/` +
+  `shared/`, so it also catches helpers that return a bare string and never reach a client.
+  Three mouths (engine, crisis, never-silent fallback) is the intent; chasing the last two
+  is not worth a session. The gauntlet asserts ≤5.
+- **Shadow mode has one deliberate hole: crisis.** `SHADOW=on` withholds everything else, but a
+  reply carrying the SADAG number still sends. A helpline held back because a build was in
+  staging is not a trade this product makes. The row is still written, so the record is complete.
+
+### THE ONE-MIND CHANGE — folded into slices 2-4 above
 
 **The coach is excluded, by design, from the interaction clients do most.**
 `mustStayDeterministic` returns `true` for every log — food, steps, weight, water, "done" —

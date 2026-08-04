@@ -657,6 +657,46 @@ export const mediaJobs = pgTable(
 );
 export type MediaJob = typeof mediaJobs.$inferSelect;
 
+// === SHADOW REPLIES — staging. What the coach WOULD have said, if it were live. ===
+//
+// (2026-08-04, Slice 1 of the one-brain rebuild.) Every rewrite of the reply path so far
+// was proved in production, on the founder's own phone, by a client reading a bad answer.
+// That is the only instrument this product has ever had and it costs a real person a real
+// bad experience per data point.
+//
+// With SHADOW=on, the outbound door writes here instead of calling Twilio. The whole
+// pipeline runs — same handlers, same engine, same gates — and nothing reaches a human.
+// A rewrite can then be watched for a day against real traffic before it is allowed to
+// speak, and the gauntlet has somewhere to point when it asks "what would this have sent?"
+//
+// `authorFile` is the point of the table. One reply per inbound message is the target
+// shape; while the long tail of handler mouths is still alive this column is what shows,
+// per message, WHO spoke — and how many of them did.
+export const shadowReplies = pgTable(
+  "shadow_replies",
+  {
+    id: serial("id").primaryKey(),
+    // No FK to users: shadow rows must survive a client deletion for a post-mortem, and a
+    // capture must never fail because the phone number has no row yet (onboarding turn 1).
+    userId: uuid("user_id"),
+    phone: text("phone").notNull(),
+    /** 'reply' (reactive, a client is waiting) | 'proactive' (scheduler) | 'template' | 'buttons' */
+    channel: text("channel").notNull(),
+    /** Which file called the door. The authorship count, per message, from live traffic. */
+    authorFile: text("author_file").notNull(),
+    body: text("body").notNull(),
+    mediaUrls: jsonb("media_urls"),
+    /** Running commit, so a shadow row is attributable to code and not to a memory. */
+    commitSha: text("commit_sha"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    phoneIdx: index("shadow_replies_phone_idx").on(table.phone, table.createdAt),
+    createdIdx: index("shadow_replies_created_idx").on(table.createdAt),
+  }),
+);
+export type ShadowReply = typeof shadowReplies.$inferSelect;
+
 export const clientActionsRelations = relations(clientActions, ({ one }) => ({
   user: one(users, { fields: [clientActions.userId], references: [users.id] }),
 }));

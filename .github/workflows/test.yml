@@ -40,3 +40,17 @@ jobs:
         run: npm run check
       - name: Test suite
         run: npm test
+
+      # THE GAUNTLET (2026-08-04) — the verifier for the one-brain rebuild.
+      #
+      # It is RED on purpose right now, and its redness is the proof it works: it detects the
+      # known defects in the build as it stands (receipts, walls, invented numbers, a batch
+      # answered with three messages). Blocking on it today would wedge every unrelated commit
+      # for the length of the rebuild, so it REPORTS rather than blocks — but it runs on every
+      # PR, so a slice that claims a column went green can be checked rather than believed.
+      #
+      # SLICE 5 DELETES THE `continue-on-error` LINE. A fully green gauntlet is the gate on the
+      # live flip; from that moment on, red is a broken build like anything else.
+      - name: Gauntlet (reporting only until Slice 5)
+        run: npm run gauntlet
+        continue-on-error: true

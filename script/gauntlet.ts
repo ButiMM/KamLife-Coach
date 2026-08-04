@@ -1,0 +1,565 @@
+/**
+ * THE GAUNTLET — the one verifier the one-brain rebuild is graded against.
+ *
+ * (2026-08-04, Slice 1.) Every previous rewrite of the reply path was declared finished by
+ * the person who wrote it and disproved by the founder's phone a day later. The suite was
+ * green each time, because the suite asks whether the right HANDLER answered — and the
+ * defect was never routing. It was that a client said "I did 5000 steps" and a machine
+ * read them a receipt.
+ *
+ * So this asks the questions the founder actually asks, mechanically:
+ *
+ *   Is it one message?      Is it two sentences?     Are the numbers HIS?
+ *   Is it his words?        Is there a receipt in it?  Did it answer everything he said?
+ *
+ * WHAT IT IS FOR: it starts RED and it is supposed to. Slices 2, 3 and 4 each own a set of
+ * these assertions, and the gate on each slice is that its own set turns green without any
+ * other set turning red. When every set is green, that — not a builder's opinion — is what
+ * opens the live flip.
+ *
+ * Offline by design, same contract as routing-audit.ts: KAMLIFE_DB_STUB=1, no network, no
+ * postgres, no LLM. That is what lets it run on every PR and mean the same thing every time.
+ * The cases that genuinely cannot be judged without a model (a photo of coffee) are declared
+ * and SKIPPED OUT LOUD rather than quietly dropped — a verifier that hides what it cannot
+ * check is the thing this file exists to replace.
+ *
+ * Run: npm run gauntlet
+ */
+
+// Env BEFORE any server import — module side-effects depend on these.
+process.env.KAMLIFE_DB_STUB = "1";
+process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "sk-test-offline";
+process.env.NORMALIZER = process.env.NORMALIZER || "off";
+process.env.PROACTIVE_PAUSED = "true";
+process.env.TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "ACtest00000000000000000000000000";
+process.env.TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "test";
+process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+27000000000";
+
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+/** Which slice of the rebuild owes this assertion. Slice 1's own must be green TODAY. */
+type Slice = 1 | 2 | 3 | 4;
+
+const SLICE_NAMES: Record<Slice, string> = {
+  1: "staging + gauntlet",
+  2: "multi-intent parser + silent tools",
+  3: "prompt enforcement + engine-fed card",
+  4: "delete handler sends",
+};
+
+const NOW = Date.now();
+
+// The client every conversation below is spoken to. A real one: mid-programme, fat loss,
+// 6,000 step target, number-free by default (profileNotes empty — `numbers:full` is the
+// opt-in power-user mode and is NOT what a working-class client sees).
+const BASE_USER = {
+  id: "test-user-gauntlet",
+  phoneNumber: "whatsapp:+27000000009",
+  name: "Kam",
+  onboardingState: "COMPLETE",
+  subscriptionStatus: "active",
+  popiConsent: true,
+  popiConsentAt: new Date(NOW - 30 * 86_400_000),
+  trialEndsAt: new Date(NOW + 30 * 86_400_000),
+  subscriptionExpiresAt: new Date(NOW + 30 * 86_400_000),
+  goalType: "fat_loss",
+  calorieTarget: 1800,
+  proteinTarget: 130,
+  stepsTarget: 6000,
+  currentWeight: "83",
+  targetWeightKg: null,
+  trainingMode: "gym",
+  trainingDaysPerWeek: 3,
+  trainingExperience: "beginner",
+  programmePhase: 1,
+  programmeWeek: 3,
+  programmeDayInWeek: 2,
+  weeklyFoodBudget: "100_300",
+  lifeSituation: "office",
+  gender: "male",
+  age: 30,
+  heightCm: 175,
+  injuries: "none",
+  medicalConditions: "none",
+  awaitingInputType: null,
+  todayCalories: 0,
+  todayCaloriesDate: null,
+  todaySteps: 0,
+  todayWater: 0,
+  workoutStreak: 2,
+  totalWorkoutsCompleted: 8,
+  buddyId: null,
+  preferredLanguage: "en",
+  profileNotes: "",
+  homeEquipment: "none",
+  gymName: null,
+  lastActiveAt: new Date(NOW - 3_600_000),
+  createdAt: new Date(NOW - 30 * 86_400_000),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE ASSERTION VOCABULARY
+//
+// Each check owns ONE question, names the slice that owes it, and returns a failure
+// reason or null. Nothing here is a judgement call — every one of them is countable,
+// which is the only reason a red build can be trusted over an opinion.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Ctx = {
+  /** The reply to the turn being judged. */
+  reply: string;
+  /** Everything the client has said in this conversation, this turn included. */
+  saidSoFar: string[];
+};
+
+type Check = { slice: Slice; label: string; run: (c: Ctx) => string | null };
+
+/**
+ * Sentences, counted the way a person reading a phone counts them: a full stop ends one,
+ * and so does a line break. Deliberately harsher than reply-hygiene's splitSentences, which
+ * only knows punctuation — four unpunctuated lines is a wall to a reader whatever the
+ * grammar says, and the wall is the defect.
+ */
+function countSentences(text: string): number {
+  const t = (text || "").trim();
+  if (!t) return 0;
+  return t
+    .split(/\n+/)
+    .flatMap(line => line.split(/(?<=[.!?…])\s+/))
+    .map(s => s.trim())
+    .filter(s => s.replace(/[^\p{L}\p{N}]/gu, "").length > 0)
+    .length;
+}
+
+/** Every number in a piece of text, normalised so "5,000" and "5000" are the same number. */
+function numbersIn(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of (text || "").match(/\d[\d\s,]*(?:\.\d+)?/g) || []) {
+    const cleaned = raw.replace(/[\s,]/g, "");
+    if (!cleaned) continue;
+    // Trailing ".0" and leading zeros normalised so 5000 === 5,000 === 5000.0
+    out.push(String(Number(cleaned)));
+  }
+  return out;
+}
+
+const atMostSentences = (n: number): Check => ({
+  slice: 3,
+  label: `≤${n} sentences`,
+  run: ({ reply }) => {
+    const got = countSentences(reply);
+    return got <= n ? null : `${got} sentences — the rule is ${n}`;
+  },
+});
+
+/**
+ * THE RECEIPT. The single defect this whole rebuild exists to delete: a client logs a meal
+ * and a machine reads them back a docket. Every phrase here has been screenshotted in
+ * production by the founder.
+ */
+const RECEIPT_TOKENS: Array<[RegExp, string]> = [
+  [/\blogged\b\s*[:*✅]/i, `"Logged:" / "Logged ✅"`],
+  [/\*logged\b/i, `"*Logged*"`],
+  [/\bestimated\s*:/i, `"Estimated:"`],
+  [/today so far/i, `"Today so far:"`],
+  [/\btarget\s*:/i, `"Target:"`],
+  [/still to eat/i, `"still to eat"`],
+  [/running total/i, `"Running total"`],
+  [/meal total/i, `"Meal total"`],
+  [/remaining today/i, `"remaining today"`],
+  [/\d+\s*kcal\s*[·|,]\s*~?\d+\s*g?\s*protein/i, `a calorie/protein wall`],
+  [/~\d+\s*kcal burned/i, `an invented "kcal burned" figure`],
+  [/\d+\s*L\s*\/\s*[\d.]+\s*L/i, `a water running-total ("2L / 2.7L")`],
+];
+
+const noReceipt: Check = {
+  slice: 3,
+  label: "no receipt",
+  run: ({ reply }) => {
+    const hits = RECEIPT_TOKENS.filter(([re]) => re.test(reply)).map(([, name]) => name);
+    return hits.length === 0 ? null : `receipt language: ${hits.join(", ")}`;
+  },
+};
+
+const noLists: Check = {
+  slice: 3,
+  label: "no bullets or numbered lists",
+  run: ({ reply }) => {
+    const bullet = /^[ \t]*[•▸●○*-]\s+/m.test(reply);
+    const numbered = /^[ \t]*(?:\*?\d+[.)]\*?)\s+\S/m.test(reply);
+    if (bullet && numbered) return "bulleted AND numbered list";
+    if (bullet) return "bulleted list";
+    if (numbered) return "numbered list";
+    return null;
+  },
+};
+
+const noMenu: Check = {
+  slice: 3,
+  label: "no menu nobody asked for",
+  run: ({ reply }) => (/\[BUTTONS:/i.test(reply) ? "offers a button menu" : null),
+};
+
+/**
+ * ONE message. splitMessage() cuts a reply into separate WhatsApp bubbles on the "---"
+ * marker and at 1500 chars, so either one means the client's phone buzzes more than once
+ * for a single thing they said.
+ */
+const oneMessage: Check = {
+  slice: 3,
+  label: "exactly one WhatsApp message",
+  run: ({ reply }) => {
+    if (/\n\n---\n\n/.test(reply)) return "contains the --- split marker (sends as 2+ messages)";
+    if (reply.length > 1500) return `${reply.length} chars — over the 1500 bubble limit, sends as 2+ messages`;
+    return null;
+  },
+};
+
+/**
+ * THE HALLUCINATION BRAKE, as an assertion. Every number the coach says must be a number
+ * the client said, or one explicitly declared here as theirs (a stored target, or plain
+ * arithmetic on it). "~237 kcal burned" is neither, and it is the exact figure the current
+ * build volunteers to someone who only ever mentioned 5,000.
+ */
+const numbersAreTheirs = (alsoAllowed: number[] = []): Check => ({
+  slice: 3,
+  label: "no invented numbers",
+  run: ({ reply, saidSoFar }) => {
+    const allowed = new Set([
+      ...saidSoFar.flatMap(numbersIn),
+      ...alsoAllowed.map(n => String(n)),
+    ]);
+    const invented = numbersIn(reply).filter(n => !allowed.has(n));
+    return invented.length === 0 ? null : `numbers the client never gave: ${[...new Set(invented)].join(", ")}`;
+  },
+});
+
+const mustSay = (slice: Slice, label: string, ...res: RegExp[]): Check => ({
+  slice,
+  label,
+  run: ({ reply }) => {
+    const missing = res.filter(re => !re.test(reply));
+    return missing.length === 0 ? null : `missing ${missing.join(" and ")}`;
+  },
+});
+
+const mustNotSay = (slice: Slice, label: string, ...res: RegExp[]): Check => ({
+  slice,
+  label,
+  run: ({ reply }) => {
+    const hit = res.filter(re => re.test(reply));
+    return hit.length === 0 ? null : `said ${hit.join(" and ")}`;
+  },
+});
+
+/** The floor under everything. A coach who says nothing is worse than one who says it badly. */
+const neverSilent: Check = {
+  slice: 1,
+  label: "never silent",
+  run: ({ reply }) => (reply && reply.trim().length > 0 ? null : "empty reply"),
+};
+
+/** The shape rules that apply to every ordinary coaching reply. */
+const COACH_SHAPE = (sentences = 2, allowNumbers: number[] = []): Check[] => [
+  neverSilent,
+  oneMessage,
+  atMostSentences(sentences),
+  noReceipt,
+  noLists,
+  noMenu,
+  numbersAreTheirs(allowNumbers),
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE CONVERSATIONS
+//
+// Multi-turn and stateful: the turns of one conversation run back-to-back against the same
+// stub client, because the defects that survive longest are the ones that need two turns to
+// see ("yesterday" evaporating between the ask and the answer).
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Turn = { say: string; media?: string; checks: Check[] };
+type Conversation = {
+  name: string;
+  /** Where this case came from. No case is here because it would be nice. */
+  why: string;
+  user?: Record<string, any>;
+  /** Cannot be judged without a real model + network. Skipped OUT LOUD unless GAUNTLET_LLM=1. */
+  needsLLM?: boolean;
+  turns: Turn[];
+};
+
+const CONVERSATIONS: Conversation[] = [
+  // ── FOUNDER ACCEPTANCE 1 ──────────────────────────────────────────────────
+  {
+    name: "acceptance 1 — a photo of black coffee",
+    why: `Founder acceptance test 1. Expected: "Got it — black coffee. Good start." No wall, no "Logged."`,
+    needsLLM: true,
+    turns: [{
+      say: "",
+      media: "https://example.invalid/coffee.jpg",
+      checks: [
+        ...COACH_SHAPE(2),
+        mustSay(3, "names the thing in their words", /coffee/i),
+      ],
+    }],
+  },
+
+  // ── FOUNDER ACCEPTANCE 2 ──────────────────────────────────────────────────
+  {
+    name: "acceptance 2 — a step count",
+    why: `Founder acceptance test 2. Expected: "5,000 — nice. A thousand to go and you're there." Today it answers with four sentences, an invented "~237 kcal burned", a Coke comparison and an italic footer.`,
+    turns: [{
+      say: "I did 5000 steps",
+      checks: [
+        // 6000 is their stored target and 1000 is arithmetic on it — those are HIS numbers.
+        // Anything else in the reply was invented by the machine.
+        ...COACH_SHAPE(2, [6000, 1000]),
+        mustSay(3, "echoes the exact number", /5[,.\s]?000/),
+      ],
+    }],
+  },
+
+  // ── FOUNDER ACCEPTANCE 3 ──────────────────────────────────────────────────
+  {
+    name: "acceptance 3 — three facts in one breath",
+    why: `Founder acceptance test 3 + voice rule 6. One message with many facts gets ONE reply addressing all of them. Today it fires three separate messages, one of them a "*Logged ✅*" bullet list with a button menu stapled underneath.`,
+    turns: [{
+      say: "Pap this morning, chicken for lunch, 5000 steps",
+      checks: [
+        ...COACH_SHAPE(3, [6000, 1000]), // batch gets 2-3 sentences, per the voice rules
+        mustSay(2, "addresses the food", /pap/i),
+        mustSay(2, "addresses the protein", /chicken/i),
+        mustSay(2, "addresses the steps", /5[,.\s]?000/),
+        // Voice rule 3: their words, not scanner words.
+        mustNotSay(3, "keeps their words for pap", /maize meal|maize porridge|stiff maize/i),
+        mustNotSay(3, "keeps their words for chicken", /chicken thigh|poultry/i),
+      ],
+    }],
+  },
+
+  // ── FOUNDER ACCEPTANCE 4 ──────────────────────────────────────────────────
+  {
+    name: "acceptance 4 — yesterday, across two turns",
+    why: `Founder acceptance test 4 + voice rule 7. "I want to log yesterday" → "Go ahead — what did you eat yesterday?" → the food → logged to YESTERDAY. The retro intent has to survive the turn it was spoken in, which is what pending_intent is for.`,
+    turns: [
+      {
+        say: "I want to log yesterday",
+        checks: [
+          ...COACH_SHAPE(2),
+          mustSay(2, "asks what they ate", /what did you eat|what you ate|go ahead/i),
+          // The current reply hands over a worked template example with quote marks and a
+          // formatting instruction. That is a machine teaching syntax, not a coach asking.
+          mustNotSay(3, "no syntax lesson", /send it starting with|e\.g\./i),
+        ],
+      },
+      {
+        say: "Two eggs and pap",
+        checks: [
+          ...COACH_SHAPE(2),
+          mustSay(2, "logs it to yesterday", /yesterday/i),
+          mustSay(3, "their words", /pap/i),
+        ],
+      },
+    ],
+  },
+
+  // ── VOICE RULE 9 — cheat, no shame ────────────────────────────────────────
+  {
+    name: "voice rule 9 — a burger, and the shame that comes with it",
+    why: `Voice rule 9: "You had a burger. Okay. One meal doesn't break a week. Hungry, or convenience?" Today this returns a two-line kcal breakdown, a "✅ Logged to *yesterday*" stamp, and then reads the words "last, feel, like, ruined" as FOOD it could not price.`,
+    turns: [{
+      say: "I had a burger and chips last night, I feel like I ruined everything",
+      checks: [
+        ...COACH_SHAPE(3),
+        mustSay(2, "acknowledges the feeling before coaching", /okay|one meal|doesn'?t break|it'?s fine|no shame|not ruined/i),
+        mustNotSay(2, "never reads their feelings as food it cannot price", /could not price|couldn'?t price/i),
+      ],
+    }],
+  },
+
+  // ── VOICE RULE 8 — feeling first ──────────────────────────────────────────
+  {
+    name: "voice rule 8 — stressed, and not in crisis",
+    why: `Voice rule 8: stressed/frustrated/sad is acknowledged BEFORE any coaching. This phrasing is deliberately NOT a crisis message — the crisis layer must not swallow ordinary bad days, and the coach must not answer one with a protein target.`,
+    turns: [{
+      say: "Work is stressing me out and I ate takeaways again tonight",
+      checks: [
+        ...COACH_SHAPE(3),
+        // The positive half matters more than the negative one here. Today this message gets
+        // "I didn't catch what food that was" — the coach did not hear the person at all, and
+        // a case that only asserts what must NOT appear would have called that a pass.
+        mustSay(2, "hears the day before it coaches", /stress|rough|tough|heavy|hectic|long day|hard day/i),
+        mustNotSay(2, "does not hand a stressed client a helpline", /0800 567 567/),
+        mustNotSay(2, "does not ask them to re-describe their food", /didn'?t catch what food|describe it as something like/i),
+        mustNotSay(3, "does not answer feelings with a target", /protein target|calorie target/i),
+      ],
+    }],
+  },
+
+  // ── ORDINARY LOGS — the shape rules, everywhere ───────────────────────────
+  {
+    name: "ordinary logs — water, then weight",
+    why: `Not an acceptance test — the everyday traffic. Water today answers "2L added. Running total: 0L / 2.7L target. 2.7L left." Three receipts in one breath, and two of the three numbers are ones the client never said.`,
+    turns: [
+      { say: "2 litres of water", checks: [...COACH_SHAPE(2, [2.7])] },
+      { say: "83kg this morning", checks: [...COACH_SHAPE(2, [83])] },
+    ],
+  },
+
+  // ── CRISIS — green today, and must STAY green through every slice ─────────
+  {
+    name: "crisis — the pre-layer, deterministic, never silent",
+    why: `The one path that is exempt from every rule above. A helpline number reaches a person EXACTLY as written: no shaping, no shortening, no engine, no LLM. Green today — this case exists so that slices 2-4 cannot break it while deleting mouths.`,
+    turns: [{
+      say: "I want to kill myself",
+      checks: [
+        neverSilent,
+        mustSay(1, "routes to SADAG, verbatim", /0800 567 567/, /SADAG/i),
+      ],
+    }],
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATIC ASSERTIONS — the ones that read the source rather than a reply.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) walk(full, out);
+    else if (entry.endsWith(".ts")) out.push(full);
+  }
+  return out;
+}
+
+type StaticCheck = { slice: Slice; label: string; run: () => string | null };
+
+const STATIC_CHECKS: StaticCheck[] = [
+  {
+    slice: 1,
+    label: "shadow_replies table exists",
+    run: () => (/pgTable\(\s*\n?\s*"shadow_replies"/.test(readFileSync("shared/schema.ts", "utf-8"))
+      ? null : "no shadow_replies table in shared/schema.ts"),
+  },
+  {
+    // A staging mode with one unguarded door is not a staging mode. These are the four files
+    // check-reach.ts declares as able to put a message in front of a client.
+    slice: 1,
+    label: "every client-facing door is shadow-guarded",
+    run: () => {
+      const doors = [
+        "server/routes/whatsapp.ts",       // sendFinal — every reply
+        "server/scheduler/shared.ts",      // sendWhatsApp + templates — every proactive
+        "server/twilio-interactive.ts",    // button/list payloads
+      ];
+      const unguarded = doors.filter(f => !/shadowDoor\(/.test(readFileSync(f, "utf-8")));
+      return unguarded.length === 0 ? null : `unguarded: ${unguarded.join(", ")}`;
+    },
+  },
+  {
+    // Slice 4's gate, stated as a number so it cannot be argued with. Counted with the same
+    // regex as check-architecture.ts (BUDGET.authorshipPoints) so the two can never disagree.
+    //
+    // The honest floor is THREE mouths: the engine, the crisis pre-layer, and the never-silent
+    // fallback. Five is the tolerance, not the target — a helper that returns a bare string
+    // and is never sent to a client still counts under this regex, and hunting the last two
+    // is not worth a session.
+    slice: 4,
+    label: "authorship has fallen to the floor (≤5)",
+    run: () => {
+      const src = [...walk("server"), ...walk("shared")].map(f => readFileSync(f, "utf-8")).join("\n");
+      const points = src.match(/^\s*return \[?[`"]/gm)?.length || 0;
+      return points <= 5 ? null : `${points} places other than the engine can put words in front of a client`;
+    },
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE RUNNER
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Tally = { green: number; red: number };
+
+async function main() {
+  const { handleMessage } = await import("../server/routes");
+  const runLLM = process.env.GAUNTLET_LLM === "1";
+
+  const tally: Record<Slice, Tally> = { 1: { green: 0, red: 0 }, 2: { green: 0, red: 0 }, 3: { green: 0, red: 0 }, 4: { green: 0, red: 0 } };
+  const failures: string[] = [];
+  const skipped: string[] = [];
+
+  const record = (slice: Slice, reason: string | null, where: string, label: string, reply?: string) => {
+    if (reason === null) { tally[slice].green++; return; }
+    tally[slice].red++;
+    failures.push(
+      `✗ [slice ${slice}] ${where}\n    ${label}: ${reason}` +
+      (reply !== undefined ? `\n    reply: ${JSON.stringify(reply.slice(0, 240))}` : ""),
+    );
+  };
+
+  for (const convo of CONVERSATIONS) {
+    if (convo.needsLLM && !runLLM) {
+      skipped.push(`⊘ ${convo.name} — needs a real model + network (GAUNTLET_LLM=1). ${convo.turns.reduce((n, t) => n + t.checks.length, 0)} assertions not evaluated.`);
+      continue;
+    }
+    // One stub client per conversation; turns mutate it, exactly as production would.
+    (globalThis as any).__KAMLIFE_STUB_USER = { ...BASE_USER, ...(convo.user || {}) };
+    const saidSoFar: string[] = [];
+
+    for (const [i, turn] of convo.turns.entries()) {
+      const where = `${convo.name} · turn ${i + 1}: ${JSON.stringify(turn.say || "[photo]")}`;
+      saidSoFar.push(turn.say);
+      let reply = "";
+      try {
+        reply = await handleMessage(BASE_USER.phoneNumber, turn.say, turn.media);
+      } catch (err: any) {
+        for (const c of turn.checks) record(c.slice, `THREW: ${String(err?.message || err).slice(0, 160)}`, where, c.label);
+        continue;
+      }
+      for (const c of turn.checks) record(c.slice, c.run({ reply, saidSoFar }), where, c.label, reply);
+    }
+  }
+
+  for (const s of STATIC_CHECKS) record(s.slice, s.run(), "static", s.label);
+
+  // ── The report ────────────────────────────────────────────────────────────
+  const line = "─".repeat(72);
+  console.log(`\n${line}\nTHE GAUNTLET${runLLM ? "" : "  (offline tier — no model, no network)"}\n${line}`);
+
+  if (failures.length > 0) console.log(`\n${failures.join("\n\n")}\n`);
+  if (skipped.length > 0) console.log(`\n${skipped.join("\n")}\n`);
+
+  let allGreen = true;
+  for (const s of [1, 2, 3, 4] as Slice[]) {
+    const t = tally[s];
+    const total = t.green + t.red;
+    if (total === 0) continue;
+    if (t.red > 0) allGreen = false;
+    const mark = t.red === 0 ? "✅" : "🔴";
+    console.log(`${mark} SLICE ${s} — ${SLICE_NAMES[s]}: ${t.green}/${total} green`);
+  }
+
+  // Slice 1 owns the verifier itself. If ITS assertions are red, the instrument is broken and
+  // nothing the other three columns say can be believed.
+  if (tally[1].red > 0) {
+    console.log(`\n💥 SLICE 1 IS RED. The verifier itself is broken — fix this before reading anything above.\n`);
+    process.exit(1);
+  }
+
+  if (allGreen) {
+    console.log(`\n✅ FULLY GREEN. This is the gate for the live flip (Slice 5).\n`);
+    process.exit(0);
+  }
+
+  console.log(
+    `\n🔴 RED — and on Slices 2-4 that is currently the CORRECT result.\n` +
+    `   The verifier works: it is detecting the known defects in the build as it stands.\n` +
+    `   Each slice's gate is its own column turning green with no other column going red.\n`,
+  );
+  process.exit(1);
+}
+
+main().catch(e => { console.error(e); process.exit(1); });

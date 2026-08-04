@@ -9,7 +9,7 @@ import { processedWebhooks, users } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { captureQualitySignal } from "../quality-signals";
 import { recordMediaJob, completeMediaJob } from "../media-jobs";
-import { provenanceGate } from "../verifiers/response-gate";
+import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply, stripInternalMarkers, isDuplicateOutbound } from "../reply-hygiene";
 
 // COMEBACK RECOGNITION (2026-07-13 retention P0): when a client messages after ≥3 days
@@ -73,6 +73,23 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
     return;
   }
   if (!out.trim()) return;
+
+  // 3. SHADOW (2026-08-04). Placed here — after the gate, the hygiene pass, the marker
+  //    strip and the dedupe — so what lands in the table is byte-for-byte what the client
+  //    would have received, not a draft. Before the TTS call, which costs money for audio
+  //    nobody will hear. Returns false in a microsecond when the mode is off.
+  //
+  //    CRISIS IS EXEMPT, and this is a deliberate hole in the staging mode. Shadow run
+  //    against live traffic means every client hears silence — which is the point for a
+  //    receipt about pap, and is indefensible for someone who has just said they want to
+  //    die. A helpline number withheld because a build was in staging is not a trade this
+  //    product makes. The row is still captured so the record of the run is complete; only
+  //    the return is skipped, so the message also goes out. Recognised by the SADAG number
+  //    itself rather than a flag threaded through twenty call sites: the number IS the
+  //    payload, it is asserted verbatim by crisis-reply.ts, and safety-audit.ts fails if
+  //    that phrasing ever drifts.
+  const isCrisisOut = out.includes("0800 567 567");
+  if ((await shadowDoor(phone, out, "reply", "server/routes/whatsapp.ts", media)) && !isCrisisOut) return;
 
   // VOICE REPLY (2026-08-03) — for a client who opted in, the coach also speaks. The
   // text is sent either way and first: audio is additive, and a TTS failure must never
