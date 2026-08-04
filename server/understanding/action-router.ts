@@ -107,7 +107,18 @@ export function mustStayDeterministic(message: string, isQuestion?: boolean): bo
   if (/\b(yesterday|last night|day before)\b/i.test(s)
       && /\b(meal|meals|food|ate|eaten|eating|breakfast|lunch|dinner|supper)\b/i.test(s)
       && !/\b(session|workout|train(?:ed|ing)?|gym)\b/i.test(s)) return false;
-  if (REPORTED_NUMBER.test(s) && !asking) return true;
+  // THE COACH IS IN THE ROOM FOR LOGS NOW (2026-08-04, founder: "I want it to coach").
+  // This line used to send every reported number — food, steps, weight, water — straight past
+  // the engine to a handler, so the brain holding his voice and their week only ever spoke when
+  // someone asked a QUESTION. The moment a client did the thing this product exists for, the
+  // coach was routed around and machinery answered with a receipt. That is why it read as a
+  // calculator, and it was the last systemic defect.
+  //
+  // It was defensible when it was written: a model that logs can invent numbers. It is not
+  // defensible now. Tools are silent by type (Guard #8) and actionNumberIsClientReported
+  // refuses any figure the client did not say — that brake caught "6,000 steps" this morning.
+  // The reason for the exclusion was dismantled; the exclusion is now dismantled too.
+  void asking;
   // A COMEBACK question has one correct answer — a fixed physiological ramp — so the engine must
   // never take it (2026-07-28 live: it answered "would you like to focus on strength training, or
   // incorporate some running?" to a client who said "tell me how we are going to approach this").

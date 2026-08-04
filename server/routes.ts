@@ -801,8 +801,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // had first refusal; the coach was eighth — which is why ENGINE_ACTIONS has been `on` for weeks
   // with an EMPTY action log. Food logs still fall through to food-context below.
   const tag = (reply: string, src: string) => { recordReplyPath(src); return isCoach ? `${reply}\n\n_· ${src} ·_` : reply; }; // tag() is the one chokepoint all model paths cross
-  if (engineLive() && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)
-      && !(!normalizedQuestion && scanForSAFoods(m).length > 0)) { // a food LOG stays on the rails; a food QUESTION is the coach's
+  // A FOOD LOG IS A COACHING MOMENT, NOT A RAIL (2026-08-04). The two conditions removed here
+  // — isTransactionReport and "the message names a food" — were the other half of the lockout.
+  // Between them and REPORTED_NUMBER, every single log a client sends bypassed the coach.
+  if (engineLive() && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isBareGreeting(m)) {
     const engineFront = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
     if (engineFront !== null) return tag(engineFront, "🧠 new engine");
   }

@@ -4655,14 +4655,26 @@ test("coach-prompt: exploring clients get a forward-moving question, not a dead-
 // action side is the one that must never regress.
 // ============================================================
 
-test("action-router: logs, commands, data, health & billing STAY deterministic (never lost)", () => {
+// THE COACH IS IN THE ROOM FOR LOGS (2026-08-04). This test used to assert the OPPOSITE for
+// the first four entries — that a client reporting steps, a weight, a meal or water must be
+// answered by a handler, never by the coach. That was the last systemic defect: the brain
+// holding his voice and their week only spoke when someone asked a QUESTION, so the moment a
+// client did the thing this product exists for they got a receipt. The action still fires —
+// the executor runs it — but the SENTENCE is the coach's now.
+//
+// Commands, data displays, health rails and billing stay deterministic, and that has not moved.
+test("action-router: commands, data, health & billing STAY deterministic (never lost)", () => {
   const mustBeDeterministic = [
-    "walked 3000 steps today", "84.5kg", "log my breakfast", "stats", "how am i doing",
-    "my progress", "weight chart", "my workouts", "shopping list", "portions", "fact",
-    "mood 4/10", "started my fast", "broke my fast", "creatine", "my knee is injured",
-    "my period started", "pay", "cancel my subscription", "today's workout", "2.5L water",
+    "stats", "how am i doing", "my progress", "weight chart", "my workouts", "shopping list",
+    "portions", "fact", "mood 4/10", "started my fast", "broke my fast", "creatine",
+    "my knee is injured", "my period started", "pay", "cancel my subscription", "today's workout",
   ];
   for (const m of mustBeDeterministic) assert.ok(mustStayDeterministic(m), `must STAY deterministic (a lost action is unforgivable): "${m}"`);
+});
+
+test("action-router: a LOG now reaches the coach — the action still fires, the sentence is his", () => {
+  const logsReachTheCoach = ["walked 3000 steps today", "84.5kg", "log my breakfast", "2.5L water"];
+  for (const m of logsReachTheCoach) assert.ok(!mustStayDeterministic(m), `a log is a coaching moment, not a rail: "${m}"`);
 });
 
 test("action-router: conversation/advice/feelings/myths (any SA language) go to Coach K", () => {
