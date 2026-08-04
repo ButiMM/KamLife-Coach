@@ -103,7 +103,17 @@ DO NOT call a tool — just talk — when it is NOT a fresh transaction:
 • a REAFFIRMATION or memory grievance of something already true ("but I'm still sick", "why did you forget I'm sick") → acknowledge, do NOT re-write it
 
 BUT a CORRECTION that CHANGES A STORED VALUE is a real write, not talk: "no, resting until MONDAY not Friday" changes the rest date → set_sick with the new day; "it was 2 eggs not 3" changes the log. Update the value with the tool.
-One message = at most ONE tool: pick the single real transaction. In genuine doubt, talk.`;
+
+ONE MESSAGE CAN CARRY SEVERAL TRANSACTIONS — CALL A TOOL FOR EVERY ONE OF THEM. People do not
+send one fact at a time. They say what happened all day, in one breath, and every fact in it is
+real. Dropping one because you already called a tool is the single most common way this coach
+has failed a client: they told you something and you behaved as if they had not spoken.
+• "Pap this morning, chicken for lunch, 5000 steps" → log_meal(pap, breakfast) + log_meal(chicken, lunch) + log_steps(5000). THREE tools.
+• "Black coffee and I did 5000 steps" → log_meal + log_steps. TWO tools.
+• "83kg this morning and 2 litres of water" → log_weight + log_water. TWO tools.
+Call them in the order the client said them. Then write ONE reply that answers everything they
+said — not one reply per tool. In genuine doubt about a single item, talk instead of guessing,
+but never drop an item you DID understand just because another one was unclear.`;
 
 /**
  * MEMORY-GRIEVANCE GUARD — a deterministic net under the LLM's judgement, not a prompt hope.
@@ -223,6 +233,50 @@ export function validateAction(raw: any): CoachAction {
     default:
       return { type: "JUST_REPLY" };
   }
+}
+
+/**
+ * THE PLURAL PARSE (2026-08-04, Slice 2). One message, every transaction in it.
+ *
+ * The singular `validateAction` above is unchanged and still owns what ONE tool call means.
+ * This owns what a LIST of them means, which is a different question with its own failure
+ * modes — and all three below are ones a model actually commits:
+ *
+ *   1. The same tool twice with the same payload (the model restating itself) → one write.
+ *      Two DIFFERENT meals in one message is not a duplicate; that is the pap-and-chicken
+ *      case and it must survive. So the dedup key is the whole action, not the type.
+ *   2. A JUST_REPLY mixed in with real tools → dropped. It means "nothing to do", which is
+ *      false the moment another tool is present.
+ *   3. A wall of calls. Capped at MAX_ACTIONS_PER_MESSAGE: past that it is not a client
+ *      reporting their day, it is a runaway, and a runaway that WRITES is the expensive
+ *      kind. The cap discards the tail rather than the whole message, because the first
+ *      few are usually the real ones.
+ *
+ * Destructive actions are deliberately NOT special-cased here — live.ts vetoes those against
+ * the client's literal words, which is a stronger test than anything this function could do.
+ */
+export const MAX_ACTIONS_PER_MESSAGE = 5;
+
+export function validateActions(raw: unknown): CoachAction[] {
+  if (!Array.isArray(raw)) {
+    const one = validateAction(raw);
+    return one.type === "JUST_REPLY" ? [] : [one];
+  }
+  const out: CoachAction[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (out.length >= MAX_ACTIONS_PER_MESSAGE) {
+      console.warn(`[ACTIONS] capped at ${MAX_ACTIONS_PER_MESSAGE} — discarded ${raw.length - out.length} further call(s)`);
+      break;
+    }
+    const action = validateAction(item);
+    if (action.type === "JUST_REPLY") continue;
+    const key = JSON.stringify(action);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(action);
+  }
+  return out;
 }
 
 // ── EXECUTOR PRECONDITIONS (2026-07-19) — every reviewer converged here, and both map

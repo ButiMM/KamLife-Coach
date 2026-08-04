@@ -60,6 +60,22 @@ const NOISE = new Set([
   "whole","double","piece","pieces","slice","slices","cup","cups","bowl","plate","portion","serving",
   "gram","grams","from","but","then","more","made","make","got","get","went","there","here","been",
 ]);
+/**
+ * Is the client telling us how they FEEL, not just what they ate? (2026-08-04, Slice 2.)
+ *
+ * One owner for one question, because it is asked from two places that both got it wrong in
+ * the same way: the unpriced-food notice read "last, feel, like, ruined" as four menu items,
+ * and the food clarifier answered "work is stressing me out and I ate takeaways" with "can you
+ * describe it as something like chicken breast and rice". Two lists would drift apart within a
+ * week; this one is the shared answer.
+ *
+ * It is deliberately narrow. It gates the two places that ANSWER A FEELING WITH AN AUDIT —
+ * it does not decide whether to log, and it never suppresses a reply.
+ */
+export function carriesFeelingClause(text: string): boolean {
+  return /\b(i feel|i'm feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can'?t cope)\b/i.test(text || "");
+}
+
 export function unloggedFoodWords(message: string, loggedNames: string[]): string[] {
   const logged = loggedNames.join(" ").toLowerCase();
   const words = (message || "").toLowerCase()
@@ -94,6 +110,21 @@ export function clarifyFoodAsk(words: string[]): string {
  */
 export function unloggedFoodNotice(message: string, loggedNames: string[], ask = true): string {
   const lo = (message || "").toLowerCase();
+  // A FEELING IS NOT AN UNPRICED FOOD (2026-08-04, caught by the gauntlet).
+  //
+  // "I had a burger and chips last night, I feel like I ruined everything" came back with
+  // "⚠️ I could not price *last, feel, like, ruined*". The burger and the chips both priced
+  // fine. Those four "foods" are the sentence in which he told us he felt he had ruined
+  // everything — read as menu items, and answered with "was it fried or grilled?".
+  //
+  // The mechanism is unloggedFoodWords: every leftover word over three letters that is not in
+  // NOISE is assumed to be a food. NOISE cannot be completed — that is an infinite list of
+  // English, and extending it word by word is the whack-a-mole this codebase has a guard
+  // against. So the gate is on the CLAUSE instead: when someone is telling us how they feel,
+  // we do not audit their vocabulary for missing calories. A genuinely unpriced food in an
+  // emotional message is now silently uncounted, and that is the right trade — a slightly
+  // low total costs them nothing, and being asked to itemise their shame costs us the client.
+  if (carriesFeelingClause(lo)) return "";
   const place = PLACES.find(p => p.re.test(lo));
   const loggedJoined = loggedNames.join(" ").toLowerCase();
   if (place && !loggedJoined.includes(place.stem)) {

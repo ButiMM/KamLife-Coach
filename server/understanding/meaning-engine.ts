@@ -26,7 +26,7 @@ import { BRAIN_SYSTEM } from "../brain/coach-brain";
 import { type UnderstandingState } from "./state";
 import { compileStateBlurb, compileKeyFacts } from "./compiler";
 import { runPerception } from "./perception";
-import { COACH_ACTION_TOOLS, ACTION_DIRECTIVE, validateAction, isMemoryGrievance, isSickReaffirmation, type CoachAction } from "./actions";
+import { COACH_ACTION_TOOLS, ACTION_DIRECTIVE, validateActions, isMemoryGrievance, isSickReaffirmation, type CoachAction } from "./actions";
 import { verifyBrainReply } from "../brain/reply-verifier";
 
 // COACH K'S CONSTITUTION (final review): the immutable laws every reply obeys. These sit
@@ -114,12 +114,54 @@ export interface MeaningResult {
   reply: string;
   state: UnderstandingState;
   model: string;
-  /** the action Coach K decided on (JUST_REPLY when it chose to just talk). */
+  /** the FIRST action, or JUST_REPLY. Kept for the callers that only ask "did it act?" */
   action: CoachAction;
+  /** EVERY transaction in the message, in the order the client said them (2026-08-04,
+   *  Slice 2). Empty when Coach K chose to just talk. This is the list the executor runs;
+   *  `action` above is a convenience view of its head, never a second source of truth. */
+  actions: CoachAction[];
+}
+
+/**
+ * THE CI SEAM (2026-08-04, Slice 2). Scripted model output, for the offline gauntlet only.
+ *
+ * Slice 2's deliverable is an LLM parser, and an LLM parser cannot be verified by a suite that
+ * has no model. Before this existed, EVERY assertion about multi-intent parsing was either
+ * unrunnable in CI or silently testing the deterministic fallback instead — which is how the engine
+ * came to be gated `on` for weeks with an empty action log and nobody noticed.
+ *
+ * So the model's answer can be scripted: the plumbing under it — several tool calls become
+ * several validated actions become several silent writes become ONE reply — is then verified
+ * on every PR, for free, deterministically. What is NOT verified here is whether the real
+ * model parses well; that is the GAUNTLET_LLM=1 tier and the founder's phone at Slice 5.
+ *
+ * It cannot exist in production: it is inert unless KAMLIFE_DB_STUB=1, which is the offline
+ * test harness's own switch and is never set on Railway. A seam that could fire against a real
+ * client would be a worse bug than the one it tests for.
+ */
+type StubEngineScript = { reply: string; toolCalls?: Array<{ name: string; args: Record<string, unknown> }> };
+
+function readStubEngine(message: string): StubEngineScript | null {
+  if (process.env.KAMLIFE_DB_STUB !== "1") return null;
+  const table = (globalThis as any).__KAMLIFE_STUB_ENGINE as Record<string, StubEngineScript> | undefined;
+  if (!table) return null;
+  return table[message.trim().toLowerCase()] ?? null;
 }
 
 export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResult | null> {
   const { openai, user, message, prior, snapshot, stats, history } = input;
+  // The seam runs before perception so a scripted turn costs no model call at all.
+  const scripted = readStubEngine(message);
+  if (scripted) {
+    const actions = input.emitActions ? validateActions(scripted.toolCalls || []) : [];
+    return {
+      reply: scripted.reply,
+      state: prior,
+      model: "stub",
+      action: actions[0] ?? { type: "JUST_REPLY" },
+      actions,
+    };
+  }
   try {
     // 1. PERCEPTION — update understanding first (the one place text becomes understanding).
     const state = await runPerception(openai, { message, prior, stats, userId: user?.id });
@@ -192,22 +234,33 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
     });
 
     const msg = resp.choices[0]?.message;
-    let action: CoachAction = { type: "JUST_REPLY" };
+    // EVERY transaction in the message, not the first one (2026-08-04, Slice 2). This was
+    // `.find()` — one tool call kept, the rest of what the client said thrown away before
+    // anything downstream could see it. "Black coffee and I did 5000 steps" lost a fact here,
+    // silently, and no amount of prompt work further down could have recovered it.
+    let actions: CoachAction[] = [];
     if (input.emitActions) {
-      const tc: any = (msg?.tool_calls || []).find((t: any) => t.type === "function");
-      if (tc) {
-        let args: any = {};
-        try { args = JSON.parse(tc.function.arguments || "{}"); } catch { /* malformed → validateAction neutralises */ }
-        action = validateAction({ name: tc.function.name, args });
-      }
+      const calls = (msg?.tool_calls || [])
+        .filter((t: any) => t.type === "function")
+        .map((t: any) => {
+          let args: any = {};
+          try { args = JSON.parse(t.function.arguments || "{}"); } catch { /* malformed → validateActions neutralises */ }
+          return { name: t.function.name, args };
+        });
+      actions = validateActions(calls);
       // DETERMINISTIC GUARD (not a prompt hope): a sick message that is NOT a fresh
       // declaration — a memory grievance ("why did you forget I'm sick") or a bare
       // reaffirmation ("but I'm still sick") — can never fire a fresh sick write. Both are
       // acknowledgements, not instructions; this keeps the dangerous write at structural zero.
-      if ((action.type === "SET_SICK" || action.type === "END_SICK") && (isMemoryGrievance(message) || isSickReaffirmation(message))) {
-        action = { type: "JUST_REPLY" };
+      if (isMemoryGrievance(message) || isSickReaffirmation(message)) {
+        const before = actions.length;
+        actions = actions.filter(a => a.type !== "SET_SICK" && a.type !== "END_SICK");
+        if (actions.length !== before) console.log(`[MEANING_ENGINE] sick write vetoed — grievance or reaffirmation, not a fresh declaration`);
       }
     }
+    // The rest of this function still reasons about ONE action in the places where "did the
+    // coach decide to act at all?" is the real question (the verifier, the fail-open).
+    const action: CoachAction = actions[0] ?? { type: "JUST_REPLY" };
     const reply = (msg?.content || "").trim();
     // Nothing to say AND nothing to do → fail-open to the existing pipeline.
     if (!reply && action.type === "JUST_REPLY") return null;
@@ -250,7 +303,7 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
         }
       }
     }
-    return { reply: finalReply, state, model, action };
+    return { reply: finalReply, state, model, action, actions };
   } catch (e) {
     if (!isAiOfflineError(e)) console.warn("[MEANING_ENGINE] failed (deferring):", (e as any)?.message || e);
     return null; // fail-open

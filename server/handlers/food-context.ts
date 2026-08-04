@@ -24,7 +24,7 @@ import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
-import { unloggedFoodNotice } from "../unlogged-notice";
+import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
 import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, type PortionStat, type SlotContext } from "../portion-memory";
@@ -1422,7 +1422,15 @@ export async function handleFoodContext(ctx: {
     // ask them to clarify rather than silently dropping. But if we only got here on the loose
     // bare-statement path, GPT judging it non-food means it probably IS non-food — fall through
     // to normal chat so a non-food message never gets answered with "describe your food".
-    if (hasStrongFoodTrigger) {
+    // …unless they were telling us how they FEEL (2026-08-04, gauntlet). "Work is stressing me
+    // out and I ate takeaways again tonight" got "I didn't catch what food that was — can you
+    // describe it as something like chicken breast and rice?". He said he was not coping and
+    // was handed a data-entry format. Same failure as the unpriced-food notice, same owner:
+    // when the model cannot read the food AND the person is struggling, the reply belongs to
+    // the coach, not to the logger. Falls through to normal chat rather than demanding a format.
+    if (hasStrongFoodTrigger && carriesFeelingClause(message)) {
+      console.log(`[GPT-FOOD-FALLBACK] unreadable food inside a feeling clause — leaving the reply to the coach: "${message.slice(0, 60)}"`);
+    } else if (hasStrongFoodTrigger) {
       console.warn(`[GPT-FOOD-FALLBACK] null result for: "${message.slice(0, 80)}" — asking for clarification`);
       const clarifyReply = `I didn't catch what food that was — can you describe it as something like "chicken breast and rice" or "2 slices of bread with peanut butter"? The more specific, the more accurate your log.`;
       await logChat(user.id, message, clarifyReply, "FOOD_CLARIFY");

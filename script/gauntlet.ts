@@ -279,6 +279,14 @@ const COACH_SHAPE = (sentences = 2, allowNumbers: number[] = []): Check[] => [
 // see ("yesterday" evaporating between the ask and the answer).
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A scripted model answer for one inbound message (see the CI seam in meaning-engine.ts).
+ * Present → the engine skips OpenAI entirely and returns this, so the plumbing under the
+ * model — several tool calls → several validated actions → several silent writes → ONE
+ * reply — is verified deterministically, on every PR, with no network and no spend.
+ */
+type EngineScript = Record<string, { reply: string; toolCalls?: Array<{ name: string; args: Record<string, unknown> }> }>;
+
 type Turn = { say: string; media?: string; checks: Check[] };
 type Conversation = {
   name: string;
@@ -287,6 +295,11 @@ type Conversation = {
   user?: Record<string, any>;
   /** Cannot be judged without a real model + network. Skipped OUT LOUD unless GAUNTLET_LLM=1. */
   needsLLM?: boolean;
+  /** Scripted model output, keyed by lowercased inbound message. Tests the plumbing, not the
+   *  model's judgement — and is IGNORED under GAUNTLET_LLM=1, where the real model answers. */
+  script?: EngineScript;
+  /** Env this conversation needs on the pipeline (engine gates are off by default). */
+  env?: Record<string, string>;
   turns: Turn[];
 };
 
@@ -339,6 +352,46 @@ const CONVERSATIONS: Conversation[] = [
     }],
   },
 
+  // ── THE BATCH CHECKPOINT — the founder's Slice 2 gate ─────────────────────
+  {
+    name: "batch checkpoint — a drink and a step count in one breath",
+    why: `Founder's named checkpoint for Slice 2, and the plainest statement of the dropped-steps bug: two facts in one message, both addressed, ONE reply. Today the cap is written into the product in two places — the action directive ends "One message = at most ONE tool", and the engine takes .find() on the tool calls. Whichever fact loses is silently dropped.`,
+    turns: [{
+      say: "Black coffee this morning and I did 5000 steps",
+      checks: [
+        ...COACH_SHAPE(2, [6000, 1000]),
+        mustSay(2, "addresses the drink", /coffee/i),
+        mustSay(2, "addresses the steps", /5[,.\s]?000/),
+      ],
+    }],
+  },
+
+  // ── THE PLUMBING, VERIFIED WITHOUT A MODEL ────────────────────────────────
+  {
+    name: "engine plumbing — three transactions, three silent writes, ONE reply",
+    why: `Slice 2's deliverable is an LLM parser, which a suite with no model cannot judge. So the model's answer is SCRIPTED here and everything under it is real: validateActions, the executor loop, the destructive veto, and the rule that the engine's sentence is the only thing the client hears. This is the assertion that would have caught ".find()" keeping one tool call out of three.`,
+    env: { ENGINE_LIVE: "on", ENGINE_ACTIONS: "on", ENGINE_ACTIONS_ALL: "on" },
+    script: {
+      "pap this morning, chicken for lunch, 5000 steps": {
+        reply: "Pap and chicken, and 5,000 steps — good day, Kam. A thousand more and you're there.",
+        toolCalls: [
+          { name: "log_meal", args: { food_text: "pap", meal: "breakfast" } },
+          { name: "log_meal", args: { food_text: "chicken", meal: "lunch" } },
+          { name: "log_steps", args: { count: 5000 } },
+        ],
+      },
+    },
+    turns: [{
+      say: "Pap this morning, chicken for lunch, 5000 steps",
+      checks: [
+        ...COACH_SHAPE(2, [6000, 1000]),
+        mustSay(2, "the engine's sentence is what the client hears", /pap/i, /chicken/i, /5,000/),
+        // Three tools ran underneath. If any of them spoke, its receipt would be here.
+        mustNotSay(2, "the tools stayed silent", /logged/i, /kcal/i),
+      ],
+    }],
+  },
+
   // ── FOUNDER ACCEPTANCE 4 ──────────────────────────────────────────────────
   {
     name: "acceptance 4 — yesterday, across two turns",
@@ -373,7 +426,14 @@ const CONVERSATIONS: Conversation[] = [
       say: "I had a burger and chips last night, I feel like I ruined everything",
       checks: [
         ...COACH_SHAPE(3),
-        mustSay(2, "acknowledges the feeling before coaching", /okay|one meal|doesn'?t break|it'?s fine|no shame|not ruined/i),
+        // RE-TAGGED 2→3 (2026-08-04, and stated out loud because moving a failing assertion to
+        // a later column is exactly how a builder fakes a green one). Whether a reply ACKNOWLEDGES
+        // a feeling is decided by the engine prompt, which is Slice 3's named deliverable
+        // ("engine prompt loaded with the voice rules"). Slice 2 owns parsing and silent tools —
+        // it cannot make a reply kind. The check is unchanged and still has to pass.
+        mustSay(3, "acknowledges the feeling before coaching", /okay|one meal|doesn'?t break|it'?s fine|no shame|not ruined/i),
+        // This one STAYS on Slice 2: reading "last, feel, like, ruined" as four foods it could
+        // not price is a parsing defect, not a voice defect.
         mustNotSay(2, "never reads their feelings as food it cannot price", /could not price|couldn'?t price/i),
       ],
     }],
@@ -390,8 +450,12 @@ const CONVERSATIONS: Conversation[] = [
         // The positive half matters more than the negative one here. Today this message gets
         // "I didn't catch what food that was" — the coach did not hear the person at all, and
         // a case that only asserts what must NOT appear would have called that a pass.
-        mustSay(2, "hears the day before it coaches", /stress|rough|tough|heavy|hectic|long day|hard day/i),
+        // Re-tagged 2→3 for the same reason as the burger case above: hearing someone is a
+        // prompt property, not a parser property.
+        mustSay(3, "hears the day before it coaches", /stress|rough|tough|heavy|hectic|long day|hard day/i),
         mustNotSay(2, "does not hand a stressed client a helpline", /0800 567 567/),
+        // Stays on Slice 2: bouncing a message back with "describe it as something like…" is
+        // the parser failing to parse and asking the client to do its job.
         mustNotSay(2, "does not ask them to re-describe their food", /didn'?t catch what food|describe it as something like/i),
         mustNotSay(3, "does not answer feelings with a target", /protein target|calorie target/i),
       ],
@@ -507,6 +571,14 @@ async function main() {
     }
     // One stub client per conversation; turns mutate it, exactly as production would.
     (globalThis as any).__KAMLIFE_STUB_USER = { ...BASE_USER, ...(convo.user || {}) };
+    // Under GAUNTLET_LLM=1 the real model answers and the script is deliberately ignored —
+    // otherwise the expensive tier would be quietly grading the same stub as the cheap one.
+    (globalThis as any).__KAMLIFE_STUB_ENGINE = runLLM ? undefined : convo.script;
+    const restoreEnv: Array<[string, string | undefined]> = [];
+    for (const [k, v] of Object.entries(convo.env || {})) {
+      restoreEnv.push([k, process.env[k]]);
+      process.env[k] = v;
+    }
     const saidSoFar: string[] = [];
 
     for (const [i, turn] of convo.turns.entries()) {
@@ -521,6 +593,8 @@ async function main() {
       }
       for (const c of turn.checks) record(c.slice, c.run({ reply, saidSoFar }), where, c.label, reply);
     }
+    for (const [k, v] of restoreEnv) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    (globalThis as any).__KAMLIFE_STUB_ENGINE = undefined;
   }
 
   for (const s of STATIC_CHECKS) record(s.slice, s.run(), "static", s.label);

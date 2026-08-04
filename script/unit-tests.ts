@@ -599,7 +599,13 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(ACTION_DIRECTIVE, /question/i, "a question stays conversation");
     assert.match(ACTION_DIRECTIVE, /reaffirmation|still true/i, "a reaffirmation must not re-write state");
     assert.match(ACTION_DIRECTIVE, /changes a stored value/i, "but a value-changing correction IS a write (the gold label)");
-    assert.match(ACTION_DIRECTIVE, /at most one tool/i, "one message = one action");
+    // INVERTED 2026-08-04 (Slice 2). This asserted "at most one tool" — it was encoding the
+    // dropped-steps bug as a requirement. A client who says "black coffee and I did 5000 steps"
+    // reported two things and both are real; keeping one was the single most common way this
+    // coach behaved as though someone had not spoken. The directive now teaches the opposite,
+    // and the assertion follows it rather than the other way round.
+    assert.match(ACTION_DIRECTIVE, /call a tool for every one of them/i, "one message can carry several transactions");
+    assert.doesNotMatch(ACTION_DIRECTIVE, /at most one tool/i, "the one-tool cap must not come back");
   });
 }
 

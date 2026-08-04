@@ -214,7 +214,12 @@ export async function runMeaningEngineLive(ctx: {
     // something — never the model's reading of "fix it" / "recalculate" / "that's wrong". If the
     // words aren't there, veto the write and let the conversational reply stand.
     const EXPLICIT_REMOVE_RE = /\b(remove|delete|undo|scrap|erase|unlog|take (?:it|that|them|this) out|take out|get rid of|take (?:it|that) off|don'?t log|cancel (?:that|it|the last))\b/i;
-    const destructiveVetoed = result.action?.type === "REMOVE_LAST_MEAL" && !EXPLICIT_REMOVE_RE.test(message);
+    //
+    // SLICE 2 WIDENED THIS, AND IT HAD TO BE. The check was `result.action?.type` — the FIRST
+    // action only. The moment the engine could emit several, a REMOVE_LAST_MEAL sitting in
+    // position two walked straight past the veto that exists because of a live disaster. The
+    // test is now applied to every action in the message, not the head of the list.
+    const destructiveVetoed = result.actions.some(a => a.type === "REMOVE_LAST_MEAL") && !EXPLICIT_REMOVE_RE.test(message);
     if (destructiveVetoed) {
       console.warn("[ENGINE_ACTION] VETOED REMOVE_LAST_MEAL — no explicit removal words:", message.slice(0, 60));
       // Never relay the model's (likely "Removed…") reply — that would be a lie. "Fix it /
@@ -230,33 +235,52 @@ export async function runMeaningEngineLive(ctx: {
       return reply;
     }
 
-    if (actionMode !== "off" && result.action && result.action.type !== "JUST_REPLY") {
+    if (actionMode !== "off" && result.actions.length > 0) {
       try {
         // Cohort gate: execute for real only in `on` mode AND when this user is allowed
         // (coach/beta-tester, or ENGINE_ACTIONS_ALL). Everyone else runs DRY — so flipping
         // ENGINE_ACTIONS=on can only touch a tester until the gate is deliberately opened.
         const cohortLive = ctx.actionsLive === true || engineActionsAll();
         const runDry = actionMode === "shadow" || !cohortLive;
-        const exec = await executeAction(result.action, {
-          user, phone: ctx.phone,
-          sourceMessageId: ctx.sourceMessageId || deriveSourceId(user.id, message),
-          confidence: 0.9, // placeholder until replay calibrates the distribution
-          clientMessage: message,
-          engineReply: result.reply, // Guard #8: the engine authors; the tool only acts
-          dryRun: runDry,
-        });
-        await logChat(user.id, message,
-          `${describeAction(result.action)} → ${exec.performed ? "performed" : exec.confirmed ? "confirm" : exec.skipped ? "skip(dup)" : exec.error ? "error" : "noop"}`,
-          runDry ? "ENGINE_ACTION_SHADOW" : "ENGINE_ACTION").catch(() => {});
+        // EVERY transaction the client reported, in the order they said them (Slice 2).
+        // Each write is independent: one failing must never swallow the others, because the
+        // client said all of them and a half-logged day is worse than a visibly failed one.
+        let anyPerformed = false;
+        let firstConfirm: { action: CoachAction; reply: string } | null = null;
+        let execReply = "";
+        for (const action of result.actions) {
+          const exec = await executeAction(action, {
+            user, phone: ctx.phone,
+            // Each action needs its OWN idempotency key, or the second write in a batch is
+            // deduped as a retry of the first and the client silently loses a meal.
+            sourceMessageId: `${ctx.sourceMessageId || deriveSourceId(user.id, message)}#${describeAction(action)}`,
+            confidence: 0.9, // placeholder until replay calibrates the distribution
+            clientMessage: message,
+            engineReply: result.reply, // Guard #8: the engine authors; the tool only acts
+            dryRun: runDry,
+          });
+          await logChat(user.id, message,
+            `${describeAction(action)} → ${exec.performed ? "performed" : exec.confirmed ? "confirm" : exec.skipped ? "skip(dup)" : exec.error ? "error" : "noop"}`,
+            runDry ? "ENGINE_ACTION_SHADOW" : "ENGINE_ACTION").catch(() => {});
+          if (exec.performed) anyPerformed = true;
+          if (exec.confirmed && !firstConfirm) firstConfirm = { action, reply: exec.reply };
+          // The never-silent fallback: a tool's own words are only ever used when the engine
+          // wrote nothing. Keep the FIRST one — concatenating them is how a batch turned into
+          // three receipts in the first place.
+          if (!execReply && (exec.performed || exec.confirmed) && exec.reply.trim()) execReply = exec.reply;
+        }
         // Confirmation asked ("reply yes to log it") — PARK the action so the client's next
         // "yes" has somewhere to land. resumeEngineConfirm (called early in the pipeline)
         // picks it up. Without this the "yes" looped forever (2026-07-23 live disaster).
-        if (!runDry && exec.confirmed && result.action) {
-          setPendingConfirm(user.id, result.action);
+        if (!runDry && firstConfirm) {
+          setPendingConfirm(user.id, firstConfirm.action);
           await db.update(users).set({ awaitingInputType: "engine_confirm" }).where(eq(users.id, user.id)).catch(() => {});
         }
-        if (!runDry && (exec.performed || exec.confirmed) && exec.reply.trim()) {
-          return exec.reply; // the deterministic side-effect + its reply
+        // ONE REPLY (Slice 2). The engine's own sentence answers everything the client said;
+        // it wins whenever it exists, and the tools stay silent underneath it.
+        if (!runDry && (anyPerformed || firstConfirm)) {
+          if (result.reply.trim()) return result.reply;
+          if (execReply.trim()) return execReply;
         }
       } catch (e) {
         console.warn("[ENGINE_ACTION] execute failed (deferring):", (e as any)?.message || e);

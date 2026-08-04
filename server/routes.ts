@@ -116,7 +116,9 @@ const getStepResponse = _getStepResponse;
 // MAIN MESSAGE HANDLER
 // ============================================================
 
-const RETRO_TURN = /(?<day>\byesterday\b|\blast night\b)|(?<food>\b(?:ate|eat|eaten|had|breakfast|lunch|dinner|supper|snack|meals?)\b)/gi;
+// "log" and "logging" belong here: "I want to LOG yesterday" is the founder's own acceptance
+// phrasing and named no eating word at all, so the token never armed for it.
+const RETRO_TURN = /(?<day>\byesterday\b|\blast night\b)|(?<food>\b(?:ate|eat|eaten|had|log(?:ging|ged)?|breakfast|lunch|dinner|supper|snack|meals?)\b)/gi;
 
 export async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[], sourceMessageId?: string): Promise<string> {
   try {
@@ -194,8 +196,22 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   if (!mediaUrl) {
     // One literal, two questions — the architecture guard refuses a second, and "did they name
     // a past day" and "did they mention eating" are one read of the same sentence.
-    const said = RETRO_TURN.exec(m)?.groups || {};
-    const saidYesterday = !!said.day, hasFoodWords = !!said.food;
+    //
+    // READ EVERY MATCH, NOT THE FIRST (2026-08-04, caught by the gauntlet the same day this
+    // shipped). This was `RETRO_TURN.exec(m)?.groups`, and a /g regex read once returns only
+    // the FIRST match — so "what I ate yesterday" matched "ate", reported day=undefined, and
+    // never armed the token. The feature written this morning to fix the founder's 12:19/12:21
+    // defect did not fire on the exact sentence it was written for.
+    //
+    // Worse, `exec` on a module-level /g literal ADVANCES lastIndex and keeps it, so the next
+    // client's message started scanning from wherever the previous one stopped. The behaviour
+    // depended on the message before it, across users. matchAll clones the regex internally,
+    // which fixes the leak as well as the read.
+    let saidYesterday = false, hasFoodWords = false;
+    for (const hit of m.matchAll(RETRO_TURN)) {
+      if (hit.groups?.day) saidYesterday = true;
+      if (hit.groups?.food) hasFoodWords = true;
+    }
     const pending = (user.profileNotes || "").includes("retro:pending");
     // They named the day but no food yet ("I want to tell you what I ate yesterday") — hold it.
     if (saidYesterday && hasFoodWords && scanForSAFoods(m).length === 0) {
