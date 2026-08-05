@@ -82,6 +82,44 @@ as a brand. Those are two different registers.
 
 Every item names where it came from. Nothing is on this list because it would be nice.
 
+### THE MATH IS LYING BY ONE NUMBER — next session, top, nothing in front of it
+
+**`maintenanceKcal`'s activity multiplier ignores training.** `office: 1.3` is sedentary-with-no-
+exercise; a client training 3x/week is ~1.55. So maintenance is understated ~380 kcal for EVERY
+client, and every target in the product is built on it.
+
+That one number explains two separate "findings" from the 2026-08-05 audit:
+- muscle_gain read as maintenance (+19 over Mifflin) — the goal adjustment is ALREADY +400 and
+  was never the bug; it was landing on an understated base.
+- fat_loss read as a crash diet (-781) — intended -400, plus the same -381 understatement.
+
+    maintenanceKcal(83kg, male, 30y, 175cm, office, 3 days) = 2376
+    Mifflin BMR 1779 x 1.55 (moderate)                      = 2757   gap: -381
+
+**APPLY IN THIS ORDER. The order is the whole point** — every later number multiplies this one.
+
+1. Fix the activity multipliers so training days are counted. VERIFY maintenance ~2757 for the
+   founder's profile (83kg, male, 30y, 175cm, office, 3 days) before going further.
+2. Then the goal adjustments: `muscle_gain` +300 default (+400 a per-client option for hard
+   gainers and stalls), `fat_loss` -500 and always above the BMR floor.
+3. Then `stepBurnKcal` to the standard ~0.5 kcal/kg/km, and delete the "~237 kcal burned" text.
+4. VERIFY, and report these three exact numbers as work:
+   founder's target **3057** · a fat_loss client at 80kg **TDEE-500** · 5000 steps @83kg **~166**
+5. ONLY THEN the weight-trend auto-adjust audit — it multiplies whatever maintenance says, so it
+   is meaningless until the base is true. Test +0.5kg/week observed: does it dampen, or oscillate?
+
+**BLAST RADIUS — apply atomically, never half.** Correcting the multiplier raises EVERY client's
+target at once, including the two live ones. That is the correction (fat-loss clients get safer
+calories, gain clients get a real surplus) but it is a sudden ~380 kcal jump. One commit, verified,
+or not at all.
+
+Then, in order: grocery adjustment → per-client presentation (the numbers question asked at
+onboarding, cards on a weekly beat plus milestones, buttons on QUESTIONS only, never on a receipt)
+→ Slice 4b (onboarding's 51 mouths are a new client's first impression) before the 10 beta users.
+
+Still open and unfixed: long voice notes truncate; `LOG_STEPS` has no retro field so steps cannot
+be logged to yesterday.
+
 ### THE REBUILD — 5 slices, one per session (founder spec, locked 2026-08-04)
 
 One brain, silent hands. The engine is the only file that speaks to a client about their logs.
