@@ -23,14 +23,14 @@ import { chatHistory, users } from "../../shared/schema";
 import { buildClientSnapshot } from "../brain/client-snapshot";
 import { seedUnderstanding } from "./seed";
 import { loadUnderstanding, saveUnderstanding } from "./store";
-import { runMeaningEngine } from "./meaning-engine";
+import { runMeaningEngine, writeReplyAfterTools } from "./meaning-engine";
 import { classifyDomain } from "./domain-guard";
 import { captureFriction } from "../friction";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { sanitizeCoachReply } from "../handlers/food-scanner";
 import { safetyGate } from "../verifiers/response-gate";
 import { logChat } from "../handlers/chat-log";
-import { executeAction, setPendingConfirm, takePendingConfirm } from "./executor";
+import { executeAction, setPendingConfirm, takePendingConfirm, takeLastToolFacts } from "./executor";
 import { describeAction, isStrategyOrEmotional, type CoachAction } from "./actions";
 import { classifyConfirmReply } from "./confirm-reply";
 export { classifyConfirmReply } from "./confirm-reply";
@@ -245,6 +245,7 @@ export async function runMeaningEngineLive(ctx: {
         // EVERY transaction the client reported, in the order they said them (Slice 2).
         // Each write is independent: one failing must never swallow the others, because the
         // client said all of them and a half-logged day is worse than a visibly failed one.
+        const toolResults: Array<Record<string, unknown>> = [];
         let anyPerformed = false;
         let firstConfirm: { action: CoachAction; reply: string } | null = null;
         let execReply = "";
@@ -268,6 +269,7 @@ export async function runMeaningEngineLive(ctx: {
           // wrote nothing. Keep the FIRST one — concatenating them is how a batch turned into
           // three receipts in the first place.
           if (!execReply && (exec.performed || exec.confirmed) && exec.reply.trim()) execReply = exec.reply;
+          toolResults.push(takeLastToolFacts());
         }
         // Confirmation asked ("reply yes to log it") — PARK the action so the client's next
         // "yes" has somewhere to land. resumeEngineConfirm (called early in the pipeline)
@@ -280,6 +282,28 @@ export async function runMeaningEngineLive(ctx: {
         // it wins whenever it exists, and the tools stay silent underneath it.
         if (!runDry && (anyPerformed || firstConfirm)) {
           if (result.reply.trim()) return result.reply;
+          // THE SECOND ROUND-TRIP (2026-08-05). The model returned tool calls, which means it
+          // returned NO prose — that is how function calling works, and it is why every log
+          // came back as a template while photos came back warm. Now it gets its turn: the
+          // tools have run, their facts go back, and it writes the sentence knowing what
+          // actually happened ("5,000 — a thousand to go") instead of guessing beforehand.
+          //
+          // Fail-open by construction: writeReplyAfterTools returns "" on any error, and the
+          // never-silent line below speaks. A client can hear a plain sentence; not an exception.
+          const afterTools = await writeReplyAfterTools({
+            openai, user, message,
+            priorMessages: result.priorMessages || [],
+            toolCalls: result.toolCalls || [],
+            results: toolResults,
+          }).catch(() => "");
+          if (afterTools.trim()) {
+            const gate2 = await safetyGate(afterTools, user, message);
+            const shaped = sanitizeCoachReply(gate2.response, message, user.weeklyFoodBudget, user.injuries);
+            if (shaped.trim()) {
+              await logChat(user.id, message, shaped, "ENGINE_AFTER_TOOLS").catch(() => {});
+              return shaped;
+            }
+          }
           if (execReply.trim()) return execReply;
         }
       } catch (e) {

@@ -128,6 +128,11 @@ export interface MeaningResult {
   model: string;
   /** the FIRST action, or JUST_REPLY. Kept for the callers that only ask "did it act?" */
   action: CoachAction;
+  /** The raw tool calls, and the exact messages that produced them. THE SECOND ROUND-TRIP
+   *  (2026-08-05) needs both: OpenAI requires the assistant message carrying tool_calls to be
+   *  echoed back, each with a matching role:"tool" result, before the model will write prose. */
+  toolCalls?: Array<{ id: string; name: string; args: string }>;
+  priorMessages?: any[];
   /** EVERY transaction in the message, in the order the client said them (2026-08-04,
    *  Slice 2). Empty when Coach K chose to just talk. This is the list the executor runs;
    *  `action` above is a convenience view of its head, never a second source of truth. */
@@ -151,7 +156,13 @@ export interface MeaningResult {
  * test harness's own switch and is never set on Railway. A seam that could fire against a real
  * client would be a worse bug than the one it tests for.
  */
-type StubEngineScript = { reply: string; toolCalls?: Array<{ name: string; args: Record<string, unknown> }> };
+type StubEngineScript = {
+  reply: string;
+  toolCalls?: Array<{ name: string; args: Record<string, unknown> }>;
+  /** What the model writes on the SECOND round-trip, once it has seen the tool results.
+   *  Scripting this is what finally makes the loop testable offline. */
+  replyAfterTools?: string;
+};
 
 function readStubEngine(message: string): StubEngineScript | null {
   if (process.env.KAMLIFE_DB_STUB !== "1") return null;
@@ -172,6 +183,8 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
       model: "stub",
       action: actions[0] ?? { type: "JUST_REPLY" },
       actions,
+      toolCalls: (scripted.toolCalls || []).map((t, i) => ({ id: `stub_${i}`, name: t.name, args: JSON.stringify(t.args) })),
+      priorMessages: [{ role: "user", content: message }],
     };
   }
   try {
@@ -251,7 +264,11 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
     // anything downstream could see it. "Black coffee and I did 5000 steps" lost a fact here,
     // silently, and no amount of prompt work further down could have recovered it.
     let actions: CoachAction[] = [];
+    let rawToolCalls: Array<{ id: string; name: string; args: string }> = [];
     if (input.emitActions) {
+      rawToolCalls = (msg?.tool_calls || [])
+        .filter((t: any) => t.type === "function")
+        .map((t: any) => ({ id: String(t.id || ""), name: String(t.function?.name || ""), args: String(t.function?.arguments || "{}") }));
       const calls = (msg?.tool_calls || [])
         .filter((t: any) => t.type === "function")
         .map((t: any) => {
@@ -315,9 +332,71 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
         }
       }
     }
-    return { reply: finalReply, state, model, action, actions };
+    return { reply: finalReply, state, model, action, actions, toolCalls: rawToolCalls, priorMessages: messages };
   } catch (e) {
     if (!isAiOfflineError(e)) console.warn("[MEANING_ENGINE] failed (deferring):", (e as any)?.message || e);
     return null; // fail-open
+  }
+}
+
+
+/**
+ * THE SECOND ROUND-TRIP (2026-08-05) — the missing half of the tool loop.
+ *
+ * THE BUG THIS FIXES, stated plainly because it cost four sessions and a live regression:
+ * when a model emits tool_calls, `content` is null. That is not a quirk, it is how function
+ * calling works — the model answers in the NEXT turn, once you hand it the results. This
+ * engine only ever made one call, so on every message that logged something the reply was
+ * empty and the client heard a deterministic template. The coach spoke perfectly on photos
+ * (no tools) and never once on a step count (tools). Same commit, same prompt.
+ *
+ * No amount of prompt editing could have fixed it, and I spent a session trying.
+ *
+ * The tools were already the right shape for this: Guard #8 made them return ToolFacts —
+ * JSON, no prose — which is exactly what a role:"tool" message carries. The loop's input
+ * has existed since 4 August; nothing ever closed it.
+ *
+ * FAIL-OPEN, and this matters more than the feature: two calls mean two chances to fail, so
+ * ANY error here returns "" and the never-silent line speaks. A client can hear a plain
+ * sentence; they cannot hear an exception.
+ */
+export async function writeReplyAfterTools(input: {
+  openai: OpenAI;
+  user: any;
+  message: string;
+  priorMessages: any[];
+  toolCalls: Array<{ id: string; name: string; args: string }>;
+  /** what each tool actually did, in the same order — facts only, never prose. */
+  results: Array<Record<string, unknown>>;
+}): Promise<string> {
+  const { openai, user, priorMessages, toolCalls, results } = input;
+  if (!toolCalls.length) return "";
+  // A scripted second pass, for the offline gauntlet. Same guard as the first: stub mode only.
+  const scripted = readStubEngine(input.message);
+  if (scripted) return (scripted.replyAfterTools || "").trim();
+  try {
+    assertAiOnline("meaning_engine_after_tools");
+    const model = pickModel(input.message);
+    const resp = await openai.chat.completions.create({
+      model,
+      temperature: 0.5,
+      // The whole point is a SHORT sentence. This is also the cost guardrail: one extra call
+      // per logging message, capped, and only when something was actually written.
+      max_tokens: 160,
+      messages: [
+        ...priorMessages,
+        { role: "assistant", content: null, tool_calls: toolCalls.map(t => ({ id: t.id, type: "function", function: { name: t.name, arguments: t.args } })) },
+        ...toolCalls.map((t, i) => ({ role: "tool" as const, tool_call_id: t.id, content: JSON.stringify(results[i] ?? {}) })),
+        { role: "system" as const, content: "The tools have run and their results are above. Now write your reply to the client — ONE or two sentences, their words, their numbers exactly, no receipt, no list, no menu. Do not restate the data back at them." },
+      ] as any,
+    });
+    recordGptCost({
+      userId: user?.id ?? null, model, feature: "meaning_engine_after_tools",
+      promptTokens: resp.usage?.prompt_tokens ?? 0, completionTokens: resp.usage?.completion_tokens ?? 0,
+    });
+    return (resp.choices[0]?.message?.content || "").trim();
+  } catch (e) {
+    if (!isAiOfflineError(e)) console.warn("[AFTER_TOOLS] second pass failed — never-silent line will speak:", (e as any)?.message || e);
+    return "";
   }
 }

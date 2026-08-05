@@ -203,7 +203,13 @@ async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx:
 }
 
 /** The engine's sentence wins. The fallback exists so a client is never met with silence. */
+/** THE SECOND ROUND-TRIP needs what the tool actually did (2026-08-05). Mirrors the existing
+ *  lastCardMarker pattern rather than threading a new return type through every branch. */
+let lastFacts: Record<string, unknown> = {};
+export function takeLastToolFacts(): Record<string, unknown> { const f = lastFacts; lastFacts = {}; return f; }
+
 function authored(ctx: ExecuteContext, outcome: ToolOutcome, fallback: () => string): string {
+  lastFacts = { ...(outcome.facts || {}), ...(outcome.refs || {}) };
   // The runtime half of Guard #8. Once refs admits strings, the compiler can no longer prove
   // "no prose" — so a ref that has grown into a sentence is caught here and dropped, loudly.
   if (!refsAreLabels(outcome.refs)) {

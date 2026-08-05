@@ -369,12 +369,21 @@ const CONVERSATIONS: Conversation[] = [
 
   // ── THE PLUMBING, VERIFIED WITHOUT A MODEL ────────────────────────────────
   {
-    name: "engine plumbing — three transactions, three silent writes, ONE reply",
+    name: "engine plumbing — tool calls with NO prose, then ONE reply from the second round-trip",
     why: `Slice 2's deliverable is an LLM parser, which a suite with no model cannot judge. So the model's answer is SCRIPTED here and everything under it is real: validateActions, the executor loop, the destructive veto, and the rule that the engine's sentence is the only thing the client hears. This is the assertion that would have caught ".find()" keeping one tool call out of three.`,
     env: { ENGINE_LIVE: "on", ENGINE_ACTIONS: "on", ENGINE_ACTIONS_ALL: "on" },
+    // Renamed 2026-08-05: this case now proves the TOOL LOOP closes, not just that several
+    // actions execute. The old version could pass with the loop wide open.
     script: {
       "pap this morning, chicken for lunch, 5000 steps": {
-        reply: "Pap and chicken, and 5,000 steps — good day, Kam. A thousand more and you're there.",
+        // FIRST ROUND-TRIP: the model returns tool calls and NO prose. That is not a defect —
+        // it is how function calling works, and reproducing it here is the whole point. Every
+        // scripted case before 2026-08-05 set a non-empty `reply`, which is exactly why 96
+        // green assertions never saw the bug that made every live log sound like a machine.
+        reply: "",
+        // SECOND ROUND-TRIP: the tools have run, their facts went back, and NOW the coach
+        // writes the sentence. If the loop is not closed this stays unused and the case fails.
+        replyAfterTools: "Pap and chicken, and 5,000 steps — good day, Kam. A thousand more and you're there.",
         toolCalls: [
           { name: "log_meal", args: { food_text: "pap", meal: "breakfast" } },
           { name: "log_meal", args: { food_text: "chicken", meal: "lunch" } },
