@@ -569,6 +569,31 @@ const STATIC_CHECKS: StaticCheck[] = [
     },
   },
   {
+    // THE CONTRADICTION GUARD (2026-08-05, found on the founder's phone, not by this file).
+    //
+    // The prompt told the model two opposite things in one system message: Constitution Law 14
+    // "WHEN YOU CALL A TOOL, YOU STILL WRITE THE SENTENCE", and forty lines below it the action
+    // directive's "when you call a tool you do NOT also write prose". The model obeyed the
+    // second, so every log came back as the executor's template — "5,000 steps logged." — and
+    // the coach the whole rebuild was for never got to speak.
+    //
+    // Nothing offline could catch it: the CI seam scripts a NON-EMPTY reply, so the one case
+    // that matters (a tool call with no words) could not occur in a test. So the assertion is
+    // on the prompt itself, where the defect actually lives.
+    slice: 4,
+    label: "the prompt never tells the coach to stay silent on a tool call",
+    run: () => {
+      const src = readFileSync("server/understanding/actions.ts", "utf-8");
+      const directive = src.slice(src.indexOf("export const ACTION_DIRECTIVE"));
+      const banned = [/do NOT also write prose/i, /don'?t reply in words/i, /without (?:any )?prose/i];
+      const hit = banned.filter(re => re.test(directive.split("`")[1] || ""));
+      if (hit.length) return `the action directive silences the coach: ${hit.join(", ")}`;
+      return /YOU STILL WRITE THE SENTENCE/i.test(directive)
+        ? null
+        : "the action directive no longer requires a sentence with every tool call";
+    },
+  },
+  {
     // The card, asserted as reachability rather than as pixels. A renderer nobody calls cannot
     // put a macro bar in front of a client, and that is the property the spec actually names:
     // no calories, no macro bars, no "under target", no running totals on the card.

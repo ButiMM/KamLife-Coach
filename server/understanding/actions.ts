@@ -77,13 +77,25 @@ export const COACH_ACTION_TOOLS = [
  * ("you have NO hands — tell them the WhatsApp command") and the THINK step ("otherwise you
  * talk") both actively steer AGAINST emitting a tool. That is exactly why the first replay
  * showed "i had a burger for lunch" → JUST_REPLY at an 18% miss rate. When the tools are on,
- * calling one IS the coach's hands — the deterministic executor does the write and sends the
- * confirmation — so this directive reconciles the conflict for transactions, and ONLY for
- * transactions. It stays example-driven off the real misses so the calibration is concrete.
+ * calling one IS the coach's hands — the deterministic executor does the write — so this directive
+ * reconciles the conflict for transactions, and ONLY for transactions.
+ *
+ * 2026-08-05, FOUND ON THE FOUNDER'S PHONE: this directive used to end "so when you call a tool
+ * you do NOT also write prose", and the tool list said "(don't reply in words)". Constitution
+ * Law 14, forty lines above it in the SAME system message, says "WHEN YOU CALL A TOOL, YOU STILL
+ * WRITE THE SENTENCE". The model obeyed the directive — it is later, more specific, and announces
+ * itself as an override — so it called the tool and said nothing, and the client heard the
+ * executor's never-silent template: "5,000 steps logged.", "Logged — 4 fish fingers…".
+ *
+ * The engine was working the whole time. It was instructed to be silent. Every offline test
+ * passed because the CI seam scripts a non-empty reply, so the gauntlet never saw the case that
+ * only a real model can produce: a tool call with no words. It stays example-driven off the real misses so the calibration is concrete.
  */
-export const ACTION_DIRECTIVE = `🎯 YOU CAN ACT NOW — for CONCRETE TRANSACTIONS this overrides Constitution Law 13 ("no hands / tell them the command") and the THINK step's "otherwise you talk". You have real tools. Calling a tool IS your hands: the deterministic system does the numbers, writes the data, and sends the confirmation — so when you call a tool you do NOT also write prose and you do NOT tell them to type a command.
+export const ACTION_DIRECTIVE = `🎯 YOU CAN ACT NOW — for CONCRETE TRANSACTIONS this overrides Constitution Law 13 ("no hands / tell them the command") and the THINK step's "otherwise you talk". You have real tools. Calling a tool IS your hands: the deterministic system does the numbers and writes the data.
 
-WHEN THE CLIENT REPORTS OR REQUESTS A CONCRETE TRANSACTION, CALL THE MATCHING TOOL (don't reply in words):
+⚠️ AND YOU STILL WRITE THE SENTENCE. ALWAYS. A tool call with no words from you is not a reply — the client hears a template, which is the one thing this coach exists to stop. Call the tool AND write your one line, in their words: "Pap and chicken — good day, Kam." / "5,000 — nice, a thousand to go." / "Noted 👌". Never return a tool call alone. Do not tell them to type a command.
+
+WHEN THE CLIENT REPORTS OR REQUESTS A CONCRETE TRANSACTION, CALL THE MATCHING TOOL — AND WRITE YOUR LINE WITH IT:
 • food they ATE — "i had a burger for lunch", "2 eggs and pap" → log_meal
 • "show me my workout", "what's today's session", "my programme" → show_workout
 • "did 9000 steps" → log_steps · "drank 2 litres" → log_water
