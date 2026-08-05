@@ -51,7 +51,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 526,
+  authorshipPoints: 440,
 };
 
 
@@ -168,6 +168,56 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+
+/**
+ * GUARD #9, RECALIBRATED (2026-08-04, founder's call: "redefine the proxy, don't chase the raw
+ * number"). It counted every `return "…"` in server/ and shared/, which meant `return "snack";`
+ * and a prompt fragment scored the same as a sentence sent to a human. Driving THAT number to
+ * the floor would have meant deleting non-client-facing code to satisfy a meter.
+ *
+ * It now counts what the rule was always about: PROSE, on a path a CLIENT can read.
+ *
+ * Be straight about what the recalibration did and did not do — 526 raw became 440 client-facing.
+ * It moved 86. The remaining 440 are real mouths and the number is not an artefact: onboarding
+ * 51, misc-commands 36, media 34, lifecycle 24, food-log-mgmt 21. Slice 4b is a genuine teardown,
+ * not a measurement problem.
+ *
+ * Exclusions are DECLARED, never inferred, so hiding a mouth costs a visible edit with a reason.
+ */
+const NOT_CLIENT_FACING: Array<[string, string]> = [
+  ["server/routes/admin", "admin console — the founder reads these, no client can"],
+  ["server/routes/dashboard", "the web dashboard he runs the business on"],
+  ["server/routes/coach", "coach-facing tooling"],
+  ["server/audit/", "instruments that measure replies; they never send one"],
+  ["server/coach-prompt.ts", "prompt text sent to the MODEL, not to a person"],
+  ["server/brain/coach-brain.ts", "ditto — the system prompt"],
+  ["server/handlers/food-vision-prompt.ts", "ditto"],
+  ["server/form-check-prompt.ts", "ditto"],
+  ["server/verifiers/", "gates that inspect a draft; their strings are reasons, not replies"],
+  ["server/drill-cases.ts", "test fixtures"],
+  ["server/self-check.ts", "boot diagnostics for the founder"],
+  ["server/whatsapp-templates.ts", "Meta-approved template bodies — Meta owns this copy, not us"],
+  ["server/data-export.ts", "POPIA export — a legal record, deliberately verbatim"],
+];
+
+/** A returned literal is a MOUTH when it is a sentence, not a token or an enum value. */
+function isProse(literal: string): boolean {
+  const words = literal.split(/[\s${}]+/).filter(w => w.length > 1).length;
+  return words >= 4 || literal.length >= 30;
+}
+
+function countClientFacingMouths(files: string[]): number {
+  let n = 0;
+  for (const f of files) {
+    if (NOT_CLIENT_FACING.some(([prefix]) => f.startsWith(prefix))) continue;
+    for (const line of readFileSync(f, "utf-8").split("\n")) {
+      const m = /^\s*return \[?[`"](.*)$/.exec(line);
+      if (m && isProse(m[1])) n++;
+    }
+  }
+  return n;
+}
+
 const files = [...walk("server"), ...walk("shared")];
 const read = (f: string) => readFileSync(f, "utf-8");
 const all = files.map(read);
@@ -179,7 +229,7 @@ const actual = {
   messageDeciders: all.filter(s => /\.test\(m\)/.test(s)).length,
   looksLikePredicates: new Set(all.join("\n").match(/function looksLike[A-Za-z]*/g) || []).size,
   regexLiterals: all.join("\n").match(/= \/[^/\n]{10,}\/[gimsuy]*/g)?.length || 0,
-  authorshipPoints: all.join("\n").match(/^\s*return \[?[`"]/gm)?.length || 0,
+  authorshipPoints: countClientFacingMouths(files),
   _unusedActionCount: files.filter(f => {
     const src = read(f);
     if (!/db\s*\.\s*(insert|update)\s*\(/.test(src)) return false;      // does it act?
@@ -206,7 +256,7 @@ for (const [key, budget] of Object.entries(BUDGET) as Array<[keyof typeof BUDGET
 
 // A budget above its original frozen value must have a logged, dated reason. This is what stops
 // "just bump it by one" from being the path of least resistance.
-const FROZEN = { modules: 234, handlerFiles: 29, cronRegistrations: 27, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333, authorshipPoints: 532 };
+const FROZEN = { modules: 234, handlerFiles: 29, cronRegistrations: 27, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333, authorshipPoints: 440 };
 for (const [key, frozen] of Object.entries(FROZEN) as Array<[keyof typeof BUDGET, number]>) {
   if (BUDGET[key] <= frozen) continue;
   const logged = RAISES.filter(r => r.key === key).sort((a, b) => a.to - b.to).pop();
@@ -264,7 +314,7 @@ if (wins.length > 0) {
 
 console.log(`architecture guard: ${actual.modules} modules, ${actual.regexLiterals} regexes, ${actual.messageDeciders} message deciders, ${actual.cronRegistrations} cron jobs — all at budget.`);
 // GUARD #9, printed every run so the shrink is VISIBLE rather than claimed (2026-08-04).
-console.log(`authorship: ${actual.authorshipPoints} places other than the engine can put words in front of a client (budget ${BUDGET.authorshipPoints}, frozen — this may only fall).`);
+console.log(`authorship: ${actual.authorshipPoints} CLIENT-FACING places other than the engine can put words in front of a client (budget ${BUDGET.authorshipPoints}, frozen — this may only fall).`);
 console.log(`  ${ONE_OWNER.length} questions have exactly one owner. ${actionFiles.length} action files declared, ${atRisk.length} AT RISK: ${atRisk.map(f => f.split("/").pop()).join(", ")}`);
 // Printed on EVERY green run, on purpose. A debt you are reminded of is a debt you repay.
 for (const r of RAISES) {
