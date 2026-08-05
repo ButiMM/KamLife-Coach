@@ -8076,6 +8076,20 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
 await Promise.all(pending);
 
 
+  test("retro steps: 'yesterday' survives validation onto the action", async () => {
+    const { validateAction } = await import("../server/understanding/actions");
+    const a: any = validateAction({ name: "log_steps", args: { count: 5000, retro: "yesterday" } });
+    assert.equal(a.type, "LOG_STEPS");
+    assert.equal(a.count, 5000);
+    assert.equal(a.retro, "yesterday", "the day the client named must reach the executor");
+    const today: any = validateAction({ name: "log_steps", args: { count: 5000 } });
+    assert.equal(today.retro, undefined, "no day named → today, as before");
+    // The number is still clamped and the day can never smuggle prose through.
+    const junk: any = validateAction({ name: "log_steps", args: { count: 5000, retro: "x".repeat(80) } });
+    assert.ok(junk.retro.length <= 20, "a retro label is a label, never a paragraph");
+  });
+
+
 // ── THE WEIGHT-TREND AUDIT (2026-08-05) ──────────────────────────────────────────────────
 // This maths silently CHANGES a client's calories, so it was disabled for beta until it could
 // be tested rather than argued about. These are the audit questions, as assertions.

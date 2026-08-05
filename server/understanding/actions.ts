@@ -32,7 +32,11 @@ export type CoachAction =
   | { type: "REMOVE_LAST_MEAL" }
   | { type: "SHOW_MEALS" }
   | { type: "SHOW_WORKOUT" }
-  | { type: "LOG_STEPS"; count: number }
+  // `retro` carries a past day exactly as the client said it ("yesterday"), the same shape
+  // LOG_MEAL has used since July. Without it, "I did 5000 steps yesterday" wrote to TODAY —
+  // the one class of error a client cannot see, because the number they gave is correct and
+  // only the day is wrong.
+  | { type: "LOG_STEPS"; count: number; retro?: string }
   | { type: "LOG_WATER"; litres: number }
   | { type: "LOG_WEIGHT"; kg: number }
   | { type: "SET_SICK"; days: number }
@@ -59,7 +63,7 @@ export const COACH_ACTION_TOOLS = [
   { type: "function", function: { name: "remove_last_meal", description: "The client wants their most recent logged meal removed/undone.", parameters: { type: "object", properties: {} } } },
   { type: "function", function: { name: "show_meals", description: "The client wants to SEE today's logged meals list.", parameters: { type: "object", properties: {} } } },
   { type: "function", function: { name: "show_workout", description: "The client wants today's workout or their programme.", parameters: { type: "object", properties: {} } } },
-  { type: "function", function: { name: "log_steps", description: "The client REPORTED a step count for today.", parameters: { type: "object", required: ["count"], properties: { count: { type: "number" } } } } },
+  { type: "function", function: { name: "log_steps", description: "The client REPORTED a step count. Pass retro when they named a PAST day ('yesterday', 'last night') so it lands on that day, not today.", parameters: { type: "object", required: ["count"], properties: { count: { type: "number" }, retro: { type: "string", description: "a past day if they said one, e.g. 'yesterday'" } } } } },
   { type: "function", function: { name: "log_water", description: "The client REPORTED drinking water (in litres).", parameters: { type: "object", required: ["litres"], properties: { litres: { type: "number" } } } } },
   { type: "function", function: { name: "log_weight", description: "The client REPORTED a body-weight reading (in kg).", parameters: { type: "object", required: ["kg"], properties: { kg: { type: "number" } } } } },
   { type: "function", function: { name: "set_sick", description: "The client says they are sick/unwell and cannot train. days = how long they'll rest (parse 'until Monday', '3 days'); default 3 if unstated.", parameters: { type: "object", required: ["days"], properties: { days: { type: "number" } } } } },
@@ -210,7 +214,9 @@ export function validateAction(raw: any): CoachAction {
     case "END_SICK": return { type: "END_SICK" };
     case "LOG_STEPS": {
       const count = clampNum(a.count, 1, 100_000);
-      return Number.isFinite(count) ? { type: "LOG_STEPS", count: Math.round(count) } : { type: "JUST_REPLY" };
+      if (!Number.isFinite(count)) return { type: "JUST_REPLY" };
+      const retro = typeof a.retro === "string" && a.retro.trim() ? a.retro.trim().slice(0, 20) : undefined;
+      return { type: "LOG_STEPS", count: Math.round(count), retro };
     }
     case "LOG_WATER": {
       const litres = clampNum(a.litres, 0.1, 15);

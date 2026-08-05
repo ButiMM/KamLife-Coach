@@ -152,15 +152,21 @@ export async function executeAction(action: CoachAction, ctx: ExecuteContext): P
  * else, so this function CANNOT hand a sentence back to the client even by accident. That
  * is Guard #8 — silence by construction, not by keyword search.
  */
-async function stepsTool(count: number, ctx: ExecuteContext): Promise<ToolOutcome> {
+async function stepsTool(count: number, ctx: ExecuteContext, retro?: string): Promise<ToolOutcome> {
   const { logStepsForUser, getStepStreak } = await import("../handlers/steps");
-  const logged = await logStepsForUser(ctx.user.id, count);
+  // RETRO STEPS (2026-08-05). logStepsForUser has taken an `at` date since it was written;
+  // nothing ever passed one, so "I did 5000 steps yesterday" landed on today. parseMealDate
+  // is the same resolver the meal path uses — one owner for "which day did they mean".
+  const { parseMealDate } = await import("../utils");
+  const at = retro ? parseMealDate(retro) : undefined;
+  const logged = await logStepsForUser(ctx.user.id, count, at ? { at, correction: true } : undefined);
   const streak = await getStepStreak(ctx.user.id).catch(() => 0);
   const target = ctx.user.stepsTarget || 8500;
   const weightKg = parseFloat(String(ctx.user.currentWeight)) || 75;
   return {
     performed: true,
-    facts: { steps: logged, target, streak, hitTarget: logged >= target, burnKcal: Math.round(logged * 0.0005 * weightKg) },
+    facts: { steps: logged, target, streak, hitTarget: logged >= target, burnKcal: Math.round((logged / 1250) * 0.5 * weightKg) },
+    refs: retro ? { dayLabel: String(retro).slice(0, 20) } : undefined,
   };
 }
 
@@ -237,7 +243,7 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
       // getStepResponse(...) — the steps handler writing "you smashed the target. Lekker.
       // That's a Coke and a half burned off" in its own voice, to every client, forever.
       // It now writes the row and reports what happened. The sentence is the engine's.
-      const outcome = await stepsTool(action.count, ctx);
+      const outcome = await stepsTool(action.count, ctx, action.retro);
       return authored(ctx, outcome, () => {
         // NEVER-SILENT FALLBACK ONLY. If the engine wrote nothing this turn, the client
         // still hears something true. Logged loudly, because every time this fires it is
