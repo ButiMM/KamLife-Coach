@@ -783,8 +783,11 @@ export async function handleMediaMessage(ctx: {
         .from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, todayStartPhoto), eq(chatHistory.intent, "FOOD_LOG"), eq(chatHistory.messageIn, "[Photo]")));
       const photoCountToday = parseInt(String(photoCountResult[0]?.count || 0));
-      if (photoCountToday >= 6) {
-        return `6 food photos logged today — I have a clear picture of how you're eating. Keep it consistent and send me tomorrow's first meal.`;
+      // THE HIDDEN CAP (2026-08-05): at SIX photos this stopped LOOKING — the plate never
+      // reached vision, and a normal logging day got "keep it consistent". Twelve is a runaway;
+      // six is a keen client. Past it we say so plainly and still give them a way to log.
+      if (photoCountToday >= 12) {
+        return `That's a lot of photos today — I can't look at more until tomorrow. Tell me what's on the plate in words and I'll log it.`;
       }
 
       const { calorieTarget: liveCal, proteinTarget: liveProt } = calculateTargets(
