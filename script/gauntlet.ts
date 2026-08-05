@@ -323,6 +323,10 @@ const CONVERSATIONS: Conversation[] = [
   // ── FOUNDER ACCEPTANCE 2 ──────────────────────────────────────────────────
   {
     name: "acceptance 2 — a step count",
+    // ENGINE ON (2026-08-05). Offline this changes nothing — the engine cannot reach a model,
+    // returns null, and the deterministic path answers exactly as before. Under GAUNTLET_LLM=1
+    // it is what lets the REAL model be graded on a steps log, which is half the founder's bar.
+    env: { ENGINE_LIVE: "on", ENGINE_ACTIONS: "on", ENGINE_ACTIONS_ALL: "on" },
     why: `Founder acceptance test 2. Expected: "5,000 — nice. A thousand to go and you're there." Today it answers with four sentences, an invented "~237 kcal burned", a Coke comparison and an italic footer.`,
     turns: [{
       say: "I did 5000 steps",
@@ -338,6 +342,7 @@ const CONVERSATIONS: Conversation[] = [
   // ── FOUNDER ACCEPTANCE 3 ──────────────────────────────────────────────────
   {
     name: "acceptance 3 — three facts in one breath",
+    env: { ENGINE_LIVE: "on", ENGINE_ACTIONS: "on", ENGINE_ACTIONS_ALL: "on" },
     why: `Founder acceptance test 3 + voice rule 6. One message with many facts gets ONE reply addressing all of them. Today it fires three separate messages, one of them a "*Logged ✅*" bullet list with a button menu stapled underneath.`,
     turns: [{
       say: "Pap this morning, chicken for lunch, 5000 steps",
@@ -695,6 +700,7 @@ async function main() {
         for (const c of turn.checks) record(c.slice, `THREW: ${String(err?.message || err).slice(0, 160)}`, where, c.label);
         continue;
       }
+      if (runLLM) console.log(`\n  ▸ ${JSON.stringify(turn.say || "[photo]")}\n    → ${JSON.stringify(reply)}`);
       for (const c of turn.checks) record(c.slice, c.run({ reply, saidSoFar }), where, c.label, reply);
     }
     for (const [k, v] of restoreEnv) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
