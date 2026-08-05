@@ -36,6 +36,7 @@ process.env.TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "test";
 process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+27000000000";
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { stripFoodLoggedClaim } from "../server/utils";
 import { join } from "node:path";
 
 /** Which slice of the rebuild owes this assertion. Slice 1's own must be green TODAY. */
@@ -542,6 +543,29 @@ const STATIC_CHECKS: StaticCheck[] = [
       ];
       const missing = required.filter(([re]) => !re.test(src)).map(([, name]) => name);
       return missing.length === 0 ? null : `voice rules absent from the engine prompt: ${missing.join(", ")}`;
+    },
+  },
+  {
+    // "Black coffee logged ☕" (2026-08-05, found live by the founder, missed by this file).
+    //
+    // THE CASE THAT WAS SKIPPED. The coffee-photo conversation is needsLLM, so it never ran
+    // offline, and the defect was a word the VISION MODEL emits only sometimes — so even the
+    // LLM tier would have needed several runs to catch it. A behavioural case cannot reliably
+    // test a non-deterministic mouth.
+    //
+    // So this asserts the SCRUB instead of the symptom: whatever the model writes, the photo
+    // reply is built from a string that has been through stripFoodLoggedClaim. That is
+    // deterministic, runs on every PR, and cannot be defeated by sampling.
+    slice: 4,
+    label: "the photo path scrubs a model-written 'logged' claim",
+    run: () => {
+      const src = readFileSync("server/handlers/media.ts", "utf-8");
+      if (!/const visionDisplay = stripFoodLoggedClaim\(/.test(src)) {
+        return "visionDisplay is not scrubbed at source — a model-written 'logged' can reach a client";
+      }
+      // And the scrubber must still do its job.
+      const cleaned = stripFoodLoggedClaim("Black coffee logged ☕");
+      return /logged/i.test(cleaned) ? `stripFoodLoggedClaim left "logged" in: "${cleaned}"` : null;
     },
   },
   {

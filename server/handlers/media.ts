@@ -988,12 +988,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
 
       let totalPhotoKcal = extractKcal(visionReply);
       let totalPhotoProt = extractProt(visionReply);
-      // Strip the internal TOTAL: line, and unwrap a leading scare-quoted food name — the model
-      // echoes the caption in quotes ("Skinny hot chocolate" logged!) and it reads as sarcasm.
-      const visionDisplay = visionReply
+      // Strip the internal TOTAL: line; unwrap a leading scare-quoted food name (reads as sarcasm).
+      // "Black coffee logged ☕" (2026-08-05): the model writes the word, so no handler deletion
+      // reached it; the scrub ran on the approval branch only. Scrubbed at source now.
+      const visionDisplay = stripFoodLoggedClaim(visionReply
         .replace(/^[ \t]*(?:TOTAL|ITEMS):[^\n]*$/gim, "")
         .replace(/^["“”‘’]([^"“”\n]{2,40})["“”‘’]/, "$1")
-        .trim();
+        .trim());
 
       // Safety net: food vision returned NOT_FOOD (pre-classifier missed it or wasn't run).
       // Give a helpful response rather than showing "NOT_FOOD" to the user.
@@ -1005,8 +1006,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
 
       // "Can I eat this?" — a PRE-PURCHASE question: give the verdict but NEVER log; "log it" later counts it.
       if (isApprovalCaption) {
-        // Scrub any stray "Logged" claim so it can't contradict the "reply log it" line below.
-        const verdict = stripFoodLoggedClaim(visionDisplay);
+        const verdict = visionDisplay; // already scrubbed at source — see visionDisplay above
         // DETERMINISTIC TODAY-VERDICT: CODE computes "does today allow this?" from real budget.
         let todayLine = "";
         const parsedItem = parseFoodLogTotalsFromMessageOut(visionReply || visionDisplay);
