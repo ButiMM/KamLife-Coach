@@ -123,6 +123,20 @@ export async function handleNumbersLiteracy(ctx: { message: string; m: string; u
     return backReply;
   }
 
+  // ---- "JUST THE PLAN" — the other half of the onboarding question (2026-08-05) ----
+  // Onboarding now ASKS, with buttons, instead of burying the choice in italic small print
+  // nobody read. A client who taps "Just the plan" is ALREADY number-free, so there is no
+  // state to change — but silence on a button they just pressed reads as a broken button.
+  // Confirm the choice and tell them the door back, once.
+  //
+  // Note this must sit AFTER the opt-in branch: "just the plan" trips the isPlanAsk guard
+  // there, which correctly stands that branch down rather than opting them in.
+  if (!isFull && /\b(just the plan|no numbers|keep it simple|plain (words|english)|skip the numbers)\b/i.test(m)) {
+    const planReply = `Perfect${capName ? `, ${capName}` : ""} — plain words it is. I'll tell you what's a good plate and what to eat next, and I'll keep the counting on my side. Want the numbers one day? Just say *"show me the numbers"*.`;
+    await logChat(user.id, message, planReply, "NUMBERS_STAY_OFF");
+    return planReply;
+  }
+
   // ---- KEEP IT SIMPLE — a numbers client turns the figures back off ----
   if (isFull
       && /\b(keep it simple|no numbers|hide the numbers|too many numbers|just tell me|plain (words|english|language)|don.?t show me (numbers|calories)|stop with the (numbers|calories)|turn off the numbers)\b/i.test(m)) {

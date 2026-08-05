@@ -339,7 +339,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   // panic, what to expect, at your own pace), then ONE tiny first action to hook the
   // habit in the first five minutes.
   const activationBrief = buildActivationBrief(u.name?.split(" ")[0]);
-  const msg4 = `${activationBrief}\n\n📸 *Right now, take one photo of your next meal or snack and send it.* That single act is your first win — and the whole habit in one move.\n\n_I keep it simple and plain — no confusing numbers. Love the detail? Just say *"show me the numbers"* anytime._`;
+  const msg4 = `${activationBrief}\n\n📸 *Right now, take one photo of your next meal or snack and send it.* That single act is your first win — and the whole habit in one move.\n\nOne last thing — when you log food, do you want to *see the numbers* (calories, protein), or *just the plan*?[BUTTONS:Show me the numbers|Just the plan]`;
   // THE ONE WELCOME CARD (2026-08-04, card policy locked: "signup — one welcome card, never
   // repeated"). renderWelcomeCard has existed since 22 July and welcomeAvatarMarker had NO
   // caller anywhere in the server — a branded Coach K card, built, tested, and never once sent

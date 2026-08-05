@@ -959,16 +959,32 @@ const CASES: Case[] = [
   { name: "playbook: 'chicken and chips' logs the chips too",
     msg: "chicken and chips for dinner",
     expect: [/[Cc]hips/] },
+  // ── THE NUMBERS QUESTION (2026-08-05) — onboarding now ASKS, with buttons, instead of
+  // burying the choice in italic small print. Both answers must land; a button that does
+  // nothing is worse than no button.
+  // profileNotes "" = the DEFAULT client, which is who onboarding asks. The harness's base
+  // user is numbers:full (a power user), and for them the opt-in correctly stands down.
+  { name: "numbers: 'Show me the numbers' opts a default client IN", msg: "Show me the numbers",
+    user: { profileNotes: "" },
+    expect: [/calories and protein|show the calories/i], reject: [/didn'?t catch/i] },
+  { name: "numbers: 'Just the plan' is ACKNOWLEDGED, never met with silence or a wrong turn", msg: "Just the plan",
+    user: { profileNotes: "" },
+    expect: [/plain words|keep the counting/i], reject: [/didn'?t catch/i, /calories and protein on every meal/i] },
 ];
 
 async function main() {
   const { handleMessage } = await import("../server/routes");
+  // Each case is an independent client turn, not a burst from one impatient person. Without
+  // this, the 10-per-minute GPT limiter starts failing cases on their position in the file
+  // rather than on their behaviour (2026-08-05).
+  const { _resetGptRateLimit } = await import("../server/utils");
 
   let passed = 0;
   const failures: string[] = [];
 
   for (const c of CASES) {
     (globalThis as any).__KAMLIFE_STUB_USER = { ...BASE_USER, ...(c.user || {}) };
+    _resetGptRateLimit();
     let reply = "";
     try {
       reply = await handleMessage(BASE_USER.phoneNumber, c.msg);

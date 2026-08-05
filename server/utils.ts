@@ -496,6 +496,19 @@ export function proteinOptions(user: ProteinUser): string {
   return `${a}, ${b}, or ${c}`;
 }
 
+/**
+ * Test/ops hook — clear the per-user GPT rate-limit window.
+ *
+ * (2026-08-05.) The offline routing harness fires 300+ messages as ONE user in a few seconds.
+ * Past ten that reach the model, every later case came back "You're sending messages very
+ * fast" — so a case added at the END of the file failed for a reason that had nothing to do
+ * with what it was testing, and would have been read as a product defect. Worse, it silently
+ * capped how many model-reaching cases the suite could ever hold.
+ */
+export function _resetGptRateLimit(userId?: string): void {
+  if (userId) gptCallTimestamps.delete(userId); else gptCallTimestamps.clear();
+}
+
 export function checkGptRateLimit(userId: string, maxCalls = 10, windowMs = 60_000): boolean {
   const now = Date.now();
   const timestamps = (gptCallTimestamps.get(userId) || []).filter(t => now - t < windowMs);
