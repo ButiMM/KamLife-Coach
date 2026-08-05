@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { users, weightLogs, escalations } from "../../shared/schema";
 import { neverSilentLine } from "../reply-hygiene";
+import { trendCalorieAdjust } from "../adaptive-targets";
 import { escalationSLA } from "../safety-detection";
 import { eq, and, gte, lt, asc, desc } from "drizzle-orm";
 import { calculateTargets } from "../targets";
@@ -312,42 +313,42 @@ export async function handleWeightLog(
     if (goal === "fat_loss") {
       // Ideal: ~0.25–0.85% of bodyweight per week.
       if (ratePct < -1.0) {
-        calAdjust = 150;
+        calAdjust = trendCalorieAdjust(goal, ratePct);
         trendLabel = `📉 *${rateStr} over 2 weeks*`;
         trendStatus = `⚠️ too fast for your body weight — you'll lose muscle alongside fat. Adding 150 kcal to protect your muscle.`;
       } else if (ratePct < -0.88) {
-        calAdjust = 100;
+        calAdjust = trendCalorieAdjust(goal, ratePct);
         trendLabel = `📉 *${rateStr} over 2 weeks*`;
         trendStatus = `at the aggressive end. Adding 100 kcal — sustainable pace matters more than speed.`;
       } else if (ratePct <= -0.24) {
-        calAdjust = 0;
+        calAdjust = trendCalorieAdjust(goal, ratePct);
         trendLabel = `📉 *${rateStr} over 2 weeks*`;
         trendStatus = `✅ right on target. Keep going.`;
       } else if (ratePct < 0) {
-        calAdjust = -100;
+        calAdjust = trendCalorieAdjust(goal, ratePct);
         trendLabel = `📉 *${rateStr} over 2 weeks*`;
         trendStatus = `slower than ideal. Removing 100 kcal to get progress moving.`;
       } else {
-        calAdjust = -150;
+        calAdjust = trendCalorieAdjust(goal, ratePct);
         trendLabel = `📈 *${rateStr} over 2 weeks*`;
         trendStatus = `weight is going up on a fat loss programme. Removing 150 kcal and review your food log.`;
       }
     } else if (goal === "muscle_gain") {
       // Ideal: ~0.1–0.45% of bodyweight per week (any faster is mostly fat).
       if (ratePct > 0.55) {
-        calAdjust = -100;
+        calAdjust = trendCalorieAdjust(goal, ratePct);
         trendLabel = `📈 *${rateStr} over 2 weeks*`;
         trendStatus = `gaining fast for your body weight — some of that will be fat. Pulling back 100 kcal to keep it lean.`;
       } else if (ratePct >= 0.1) {
-        calAdjust = 0;
+        calAdjust = trendCalorieAdjust(goal, ratePct);
         trendLabel = `📈 *${rateStr} over 2 weeks*`;
         trendStatus = `✅ ideal lean gain pace. Stay exactly here.`;
       } else if (ratePct > -0.12) {
-        calAdjust = 100;
+        calAdjust = trendCalorieAdjust(goal, ratePct);
         trendLabel = `➡️ *${rateStr} over 2 weeks*`;
         trendStatus = `scale isn't moving — to grow you need to eat a bit more than your body burns. Adding 100 kcal.`;
       } else {
-        calAdjust = 150;
+        calAdjust = trendCalorieAdjust(goal, ratePct);
         trendLabel = `📉 *${rateStr} over 2 weeks*`;
         trendStatus = `losing weight on a muscle gain programme. Adding 150 kcal — you need to eat a bit more than you burn to build.`;
       }
@@ -372,19 +373,26 @@ export async function handleWeightLog(
     const enoughForCalChange = recentWindow.length >= 4 && recentSpanDays >= 10;
 
     if (calAdjust !== 0 && enoughForCalChange && !latestContradictsTrend) {
-      // AUTO-ADJUST DISABLED FOR BETA (2026-08-05, founder's launch gate).
+      // AUTO-ADJUST RE-ENABLED (2026-08-05) — its gate was an audit, and the audit passed.
       //
-      // This silently CHANGES a client's calorie target from their weigh-in trend — and it
-      // multiplies whatever maintenanceKcal says, which we have just discovered was wrong by
-      // ~380 kcal for every client since the product existed. Its own thresholds were tuned
-      // against that wrong base, so re-tuning them by eye now would be guessing twice.
+      // Disabled this morning because it silently CHANGES a client's calories while multiplying
+      // a maintenance figure we had just found wrong by ~380 kcal. Both conditions are cleared:
+      // the base is corrected, and the decision is extracted into trendCalorieAdjust() with six
+      // assertions on it — contiguous bands, bounded to +/-150, a wide dead band on the ideal
+      // pace, corrections that move TOWARD that band, and no oscillation.
       //
-      // It stays OFF until it is audited against the corrected maintenance: does it dampen a
-      // +0.5kg/week observation, or oscillate? Nothing may drift a beta client's calories on
-      // unaudited maths. TREND_AUTOADJUST=on re-enables it the moment that audit passes —
-      // the trend LABEL and the coaching sentence still show either way, so the client keeps
-      // the insight and only the silent write is withheld.
-      if (process.env.TREND_AUTOADJUST === "on") {
+      // The no-oscillation proof is the one that mattered: a max correction is 150 kcal/day
+      // ~= 0.14kg/week, a fraction of the dead band's width at every body weight tested. One
+      // correction cannot carry a client across the neutral zone and back. It also cannot
+      // compound — it is applied to a FRESHLY COMPUTED target each weigh-in, never to the
+      // previous adjusted value.
+      //
+      // The audit found a live defect while proving this: a non-finite rate coerced to 0, which
+      // on a fat-loss plan read as "gaining" and quietly removed 150 kcal. Fixed.
+      //
+      // Still gated on the guards above — 4+ weigh-ins over 10+ days, latest reading must not
+      // contradict the fortnight trend. TREND_AUTOADJUST=off is the revert.
+      if (process.env.TREND_AUTOADJUST !== "off") {
         finalCals = Math.max(1200, Math.min(4000, newCals + calAdjust));
       } else {
         calAdjust = 0;

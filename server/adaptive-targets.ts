@@ -224,3 +224,42 @@ export function weightTrendUsable(w: TrendWindow): TrendVerdict {
   }
   return { usable: true };
 }
+
+
+/**
+ * THE TREND ADJUSTMENT, AS A PURE FUNCTION (2026-08-05).
+ *
+ * This decision lived inline in weight.ts, tangled with the message strings, which meant the
+ * one piece of maths that silently CHANGES a client's calories could not be tested at all.
+ * It was disabled for beta on exactly that basis. Here it is, extracted unchanged in
+ * behaviour, so the audit can be run instead of argued.
+ *
+ * Judged on % of BODY WEIGHT per week, not raw kg: 0.85kg/week is too fast for a 70kg person
+ * (1.2%) and a safe pace for a 130kg client (0.65%). The kg figure is still what the client
+ * SEES — only the decision scales.
+ *
+ * Returns the kcal to add to the FRESHLY COMPUTED target. It is never applied to the previous
+ * adjusted value, which is what stops it compounding across weigh-ins.
+ */
+export function trendCalorieAdjust(goalType: string, ratePctPerWeek: number): number {
+  const goal = (goalType || "fat_loss").toLowerCase();
+  // A non-finite rate is NO INFORMATION, and no information must never move a target. The
+  // first draft coerced it to 0, which on a fat-loss plan reads as "gaining" and quietly
+  // removed 150 kcal. Caught by the audit that was written to check this function.
+  if (!Number.isFinite(ratePctPerWeek)) return 0;
+  const r = ratePctPerWeek;
+  if (goal === "fat_loss") {
+    if (r < -1.0) return 150;    // losing too fast for their size — protect muscle
+    if (r < -0.88) return 100;   // aggressive end
+    if (r <= -0.24) return 0;    // the dead band: on target, leave it alone
+    if (r < 0) return -100;      // slower than ideal
+    return -150;                 // gaining on a fat-loss programme
+  }
+  if (goal === "muscle_gain") {
+    if (r > 0.55) return -100;   // gaining fast — some of that is fat
+    if (r >= 0.1) return 0;      // the dead band: ideal lean gain
+    if (r > -0.12) return 100;   // scale stalled
+    return 150;                  // losing on a gain programme
+  }
+  return 0;                      // recomposition coaches with words, never with calories
+}

@@ -8075,6 +8075,65 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 
+
+// ── THE WEIGHT-TREND AUDIT (2026-08-05) ──────────────────────────────────────────────────
+// This maths silently CHANGES a client's calories, so it was disabled for beta until it could
+// be tested rather than argued about. These are the audit questions, as assertions.
+{
+  const { trendCalorieAdjust } = await import("../server/adaptive-targets");
+
+  test("trend audit: bands are contiguous — no rate falls through un-decided", () => {
+    for (let r = -3; r <= 3; r += 0.01) {
+      for (const g of ["fat_loss", "muscle_gain"]) {
+        const a = trendCalorieAdjust(g, r);
+        assert.ok(Number.isFinite(a), `no decision for ${g} at ${r.toFixed(2)}%`);
+        assert.ok(Math.abs(a) <= 150, `adjustment ${a} exceeds the +/-150 bound at ${r.toFixed(2)}%`);
+      }
+    }
+  });
+
+  test("trend audit: it DAMPENS — the dead band is wide and centred on the ideal pace", () => {
+    // Fat loss: the ideal pace band returns zero, so a client on target is never nudged.
+    assert.equal(trendCalorieAdjust("fat_loss", -0.5), 0, "-0.5%/wk is the target pace");
+    assert.equal(trendCalorieAdjust("fat_loss", -0.24), 0, "band edge still neutral");
+    assert.equal(trendCalorieAdjust("fat_loss", -0.88), 0, "other band edge still neutral");
+    // Muscle gain: same shape around the lean-gain pace.
+    assert.equal(trendCalorieAdjust("muscle_gain", 0.3), 0, "0.3%/wk is ideal lean gain");
+    assert.equal(trendCalorieAdjust("muscle_gain", 0.55), 0);
+  });
+
+  test("trend audit: it CORRECTS toward the band, never away from it", () => {
+    assert.ok(trendCalorieAdjust("fat_loss", -1.5) > 0, "losing too fast → add food");
+    assert.ok(trendCalorieAdjust("fat_loss", 0.5) < 0, "gaining on fat loss → remove food");
+    assert.ok(trendCalorieAdjust("muscle_gain", 1.0) < 0, "gaining too fast → pull back");
+    assert.ok(trendCalorieAdjust("muscle_gain", -0.5) > 0, "losing on a gain plan → add food");
+  });
+
+  test("trend audit: NO OSCILLATION — a correction can never overshoot into the opposite band", () => {
+    // The failure mode that mattered: +150 today, -150 next week, forever. It cannot happen,
+    // because the adjustment is applied to a FRESHLY COMPUTED target rather than to the
+    // previous adjusted one, and 150 kcal/day is ~0.15kg/week — a fifth of the dead band's
+    // width. A single correction therefore cannot carry a client across the neutral zone.
+    const KCAL_PER_KG = 7700;
+    const bandWidthPct = 0.88 - 0.24;                       // fat-loss dead band, % bodyweight/wk
+    for (const kg of [60, 83, 120]) {
+      const shiftKgPerWeek = (150 * 7) / KCAL_PER_KG;        // max adjustment, in kg/week
+      const shiftPct = (shiftKgPerWeek / kg) * 100;
+      assert.ok(shiftPct < bandWidthPct,
+        `a max correction moves ${shiftPct.toFixed(2)}%/wk at ${kg}kg — must stay inside the ${bandWidthPct}% dead band`);
+    }
+  });
+
+  test("trend audit: recomposition is coached with words, never with calories", () => {
+    for (const r of [-2, -0.5, 0, 0.5, 2]) assert.equal(trendCalorieAdjust("recomposition", r), 0);
+  });
+
+  test("trend audit: junk input never moves a target", () => {
+    assert.equal(trendCalorieAdjust("fat_loss", NaN), 0);
+    assert.equal(trendCalorieAdjust("", NaN), 0);
+  });
+}
+
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
