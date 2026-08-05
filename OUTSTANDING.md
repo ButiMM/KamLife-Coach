@@ -82,6 +82,33 @@ as a brand. Those are two different registers.
 
 Every item names where it came from. Nothing is on this list because it would be nice.
 
+### FIRST ITEM NEXT SESSION — the stored-target backfill (founder directive, 2026-08-05)
+
+The formula was corrected on `54482ef` and verified: a client onboarding today gets the right
+number. `calorieTarget` is a COLUMN, so the rows written before that commit still hold the old
+figure — the founder's own reads 2849 where the code computes 3057. Three rows: him and the two
+live clients. It does not block the beta (every beta user signs up fresh onto correct math) and
+it must not wait longer than one session.
+
+**Scope:** all existing user rows. Recompute from BMR + the derived activity multiplier + the
+goal adjustment; write `calorieTarget`, `proteinTarget`, `stepsTarget`.
+
+**Tell them, do not just change it.** One note per corrected client: *"Your daily targets have
+been recalibrated for your training schedule — [new target]. Enough to lose fat without losing
+muscle."* A client's calories changing silently is the thing the auto-adjust was disabled for;
+a backfill that does it quietly would be the same sin with a different name.
+
+**Do NOT unlock the auto-adjust** (`TREND_AUTOADJUST` stays off until its own audit passes).
+
+**Verify `my targets` returns 3057 on the founder's phone before anything else.** Keep the logs
+as the audit trail.
+
+Then the scale gate, in order: weight-trend audit → onboarding cleanup (Slice 4b) → batch voice
+truncation → grocery adjustment → per-client number prefs → presentation layer.
+
+Polish, not a blocker: a prompt fragment leaks into the targets reply — *"You're doing great on
+tracking! specific. 👌"*.
+
 ### THE MATH IS LYING BY ONE NUMBER — next session, top, nothing in front of it
 
 **`maintenanceKcal`'s activity multiplier ignores training.** `office: 1.3` is sedentary-with-no-
