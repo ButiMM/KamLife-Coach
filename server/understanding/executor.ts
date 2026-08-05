@@ -23,6 +23,7 @@
  */
 
 import { type CoachAction, type ToolOutcome, refsAreLabels, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported } from "./actions";
+import { neverSilentLine } from "../reply-hygiene";
 
 export interface ExecuteContext {
   user: any;
@@ -222,7 +223,7 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
       const outcome = await weightTool(action.kg, ctx);
       return authored(ctx, outcome, () => {
         console.warn("[GUARD8] engine wrote no sentence for LOG_WEIGHT — deterministic fallback used");
-        return `${action.kg}kg logged.`;
+        return neverSilentLine("weight", { amount: `${action.kg}kg` });
       });
     }
     case "LOG_STEPS": {
@@ -237,14 +238,14 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
         // authorship leaking back out of the engine.
         console.warn("[GUARD8] engine wrote no sentence for LOG_STEPS — deterministic fallback used");
         const s = Number(outcome.facts.steps || 0), t = Number(outcome.facts.target || 8500);
-        return s >= t ? `${s.toLocaleString()} steps — past your ${t.toLocaleString()}. 👏` : `${s.toLocaleString()} steps logged.`;
+        return neverSilentLine("steps", { amount: s.toLocaleString("en-ZA") });
       });
     }
     case "LOG_WATER": {
       const outcome = await waterTool(action.litres, ctx);
       return authored(ctx, outcome, () => {
         console.warn("[GUARD8] engine wrote no sentence for LOG_WATER — deterministic fallback used");
-        return `${action.litres}L of water logged.`;
+        return neverSilentLine("water", { amount: `${action.litres}L` });
       });
     }
     case "LOG_MEAL": {
@@ -257,7 +258,7 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
       return card + authored(ctx, outcome, () => {
         console.warn("[GUARD8] engine wrote no sentence for LOG_MEAL — deterministic fallback used");
         const name = outcome.refs?.mealName;
-        return name ? `Logged — ${name}. 👌` : `Logged. 👌`;
+        return neverSilentLine("meal", { label: name });
       });
     }
     case "REMOVE_LAST_MEAL": {

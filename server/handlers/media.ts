@@ -1138,18 +1138,14 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       }
 
       const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 120)]);
+      // DELETED 2026-08-05, live, on the founder's phone: a photo of black coffee came back with
+      // "Today so far: … Target: … still to eat" — three phrases this rebuild exists to delete.
+      // It is in the MEDIA path (Slice 4b, not yet torn down) and only renders once the day has
+      // food in it, so the same photo was clean at 08:03 and a receipt at 08:33. Totals are still
+      // written below; they are just no longer read aloud at someone who sent a picture.
       let photoDailyTotal = "";
       try {
-        // Totals come from the one write door's result (already recomputed) — no second query.
         const totals = photoCommit ? { calories: photoCommit.runningCals, protein: photoCommit.runningProtein } : await recomputeTodayFoodTotals(user.id);
-        const calTarget = user.calorieTarget || 1800;
-        const protTarget = user.proteinTarget || 120;
-        if (totals.calories > 0) {
-          const remaining = calTarget - totals.calories;
-          photoDailyTotal = photoNumbersLow
-            ? `\n\n_${remaining > 100 ? `Still room for ${remainingInMeals(remaining) || "a bit more"} today.` : remaining >= -100 ? "That's your food for today — nicely done. ✅" : "That's past today's food — kitchen closed. Protein + veg if you must, a 20-minute walk helps, tomorrow resets. One day never breaks a programme."}_`
-            : `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein. ${goalStatusLine(user.goalType, remaining)}_`;
-        }
         await db.update(users).set({
           todayCalories: totals.calories,
           todayProteinG: totals.protein,
