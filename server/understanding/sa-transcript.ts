@@ -16,6 +16,7 @@ import type OpenAI from "openai";
 import { assertAiOnline, isAiOfflineError } from "../ai-offline";
 import { recordGptCost } from "../gpt";
 import { looksLikeRefusal } from "./refusal";
+import { transcriptIsLogList } from "../utils";
 export { looksLikeRefusal } from "./refusal";
 
 const SA_CLEAN_SYSTEM = `You clean South African English voice-note transcripts before a coach reads them. The speaker is an ordinary South African (often a low-literacy, first-language-not-English client) talking about food, training, and how they feel.
@@ -99,7 +100,11 @@ KEEP, exactly as said:
 
 DROP: repetition, filler, side-stories, thinking-out-loud, greetings.
 
-Write it in the FIRST PERSON, plain, short (2-4 sentences). Do NOT answer, do NOT coach, do NOT add anything they didn't say. Return ONLY the condensed message.`;
+Write it in the FIRST PERSON, plain, and as SHORT as it can be WITHOUT LOSING A SINGLE FOOD OR
+NUMBER. If they listed eight things, the result has eight things in it — length is not the goal,
+keeping their day is. Do NOT answer, do NOT coach, do NOT add anything they didn't say. Return
+ONLY the condensed message.`;
+
 
 /**
  * Condense a long, rambling voice transcript to its actionable core (mood, foods, numbers,
@@ -111,12 +116,16 @@ Write it in the FIRST PERSON, plain, short (2-4 sentences). Do NOT answer, do NO
 export async function condenseVoiceRamble(openai: OpenAI, raw: string, userId?: string | null): Promise<string> {
   const text = (raw || "").trim();
   if (killswitchOff() || text.length < 200) return raw; // nothing to condense
+  if (transcriptIsLogList(text)) {
+    console.log(`[VOICE_CONDENSE] skipped — transcript is a log, not a ramble (${text.length} chars)`);
+    return raw;
+  }
   try {
     assertAiOnline("voice_condense");
     const resp = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0,
-      max_tokens: 220,
+      max_tokens: 400,   // a day's food does not fit in 220 — see transcriptIsLogList
       messages: [
         { role: "system", content: CONDENSE_SYSTEM },
         { role: "user", content: text.slice(0, 4000) },

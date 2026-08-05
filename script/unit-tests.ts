@@ -8107,6 +8107,25 @@ await Promise.all(pending);
   });
 
 
+  test("voice: a day's food is NEVER condensed — the condenser is for rambles", async () => {
+    const { transcriptIsLogList } = await import("../server/utils");
+    // The founder's own note. Every word is payload; a summariser can only lose some of it.
+    assert.equal(transcriptIsLogList("Yesterday I had 4 fish fingers, 3 eggs, 3 slices of bread, and a black coffee for breakfast"), true);
+    assert.equal(transcriptIsLogList("I had two eggs and pap this morning and then chicken and rice for lunch"), true, "spoken numbers count too");
+    assert.equal(transcriptIsLogList("I walked 8000 steps, drank 2 litres and weighed in at 83kg"), true);
+    // A genuine ramble — thinking out loud, no quantities — still gets condensed.
+    assert.equal(transcriptIsLogList("So I was thinking about the gym and whether I should go tonight because work has been really heavy and I feel like I am falling behind on everything"), false);
+    assert.equal(transcriptIsLogList(""), false);
+  });
+
+  test("voice: the condense prompt no longer contradicts itself on length", async () => {
+    const src = readFileSync("server/understanding/sa-transcript.ts", "utf-8");
+    assert.ok(!/short \(2-4 sentences\)/i.test(src),
+      "a hard sentence cap fights 'keep every food' — the model obeys the cap and drops meals");
+    assert.match(src, /WITHOUT LOSING A SINGLE FOOD OR/i, "keeping their day must beat being short");
+  });
+
+
 // ── THE WEIGHT-TREND AUDIT (2026-08-05) ──────────────────────────────────────────────────
 // This maths silently CHANGES a client's calories, so it was disabled for beta until it could
 // be tested rather than argued about. These are the audit questions, as assertions.

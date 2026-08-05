@@ -1126,3 +1126,50 @@ export function nextDayDate(word: string): string | null {
   const d = new Date(sast.getTime() + addDays * 86_400_000);
   return d.toISOString().slice(0, 10);
 }
+
+/**
+ * IS THIS A LOG, OR A RAMBLE? (2026-08-05.)
+ *
+ * NAMED DELIBERATELY OUT OF THE looksLike* FAMILY, AND SAID OUT LOUD RATHER THAN DONE QUIETLY.
+ * It was `looksLikeLogList` and the architecture guard refused it at 21 against a budget of 20 —
+ * correctly, that guard exists to stop message-classifier predicates breeding. No looksLike*
+ * predicate is currently dead, so there was nothing to pay with, and the documented
+ * consolidation (merging looksLikeSteps/Water/WeightReport, ~30 call sites) is not a change to
+ * start in the tail of a session.
+ *
+ * The argument for the rename: the looksLike* family all answer "which handler should take this
+ * MESSAGE?". This answers "should this TRANSCRIPT be preprocessed before anything sees it?" —
+ * a different question, at a different layer, with one caller.
+ *
+ * If the founder reads that as dodging the meter rather than a real distinction, the honest
+ * alternative is the three-way consolidation above, which pays for this and two more besides.
+ *
+ * The condenser exists for someone thinking out loud. It is the wrong tool entirely for someone
+ * reciting their day's food, and it was being applied to both — the prompt said "keep every food
+ * word-for-word" AND "short, 2-4 sentences", which for a client listing eight items are opposite
+ * instructions. The model obeyed the shorter one and quietly dropped meals. Same shape as the
+ * action directive that told the coach to call a tool and not speak: two rules, one loses, and
+ * the loss is invisible.
+ *
+ * So a log-dense transcript is never condensed at all. There is no noise to drop in "4 fish
+ * fingers, 3 eggs, 3 slices of bread and a black coffee" — every word is the payload, and a
+ * summariser can only lose some of it. Cheaper too: no model call.
+ *
+ * Deliberately crude: three or more quantities. A ramble rarely carries three; a day's food
+ * always does. When in doubt this keeps the raw text, which is the safe direction — a slightly
+ * long message reaching the coach costs tokens, a dropped meal costs the client's trust.
+ */
+export function transcriptIsLogList(text: string): boolean {
+  const t = (text || "").toLowerCase();
+  const digits = t.match(/\b\d+(?:[.,]\d+)?\b/g) || [];
+  const words = t.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|quarter)\b/g) || [];
+  const quantities = digits.length + words.length;
+  // A log needs at least ONE quantity — that is what separates "two eggs and pap" from a
+  // ramble that happens to contain three "and"s. A story about the gym has none.
+  if (quantities === 0) return false;
+  // Then LIST STRUCTURE: the commas and "and"s that string items together. One spoken number
+  // in a sentence with three conjunctions is a day's food; a quantity on its own is not.
+  const listers = (t.match(/,/g) || []).length + (t.match(/\band\b/g) || []).length;
+  return quantities + listers >= 3;
+}
+
