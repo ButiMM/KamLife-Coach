@@ -372,7 +372,23 @@ export async function handleWeightLog(
     const enoughForCalChange = recentWindow.length >= 4 && recentSpanDays >= 10;
 
     if (calAdjust !== 0 && enoughForCalChange && !latestContradictsTrend) {
-      finalCals = Math.max(1200, Math.min(4000, newCals + calAdjust));
+      // AUTO-ADJUST DISABLED FOR BETA (2026-08-05, founder's launch gate).
+      //
+      // This silently CHANGES a client's calorie target from their weigh-in trend — and it
+      // multiplies whatever maintenanceKcal says, which we have just discovered was wrong by
+      // ~380 kcal for every client since the product existed. Its own thresholds were tuned
+      // against that wrong base, so re-tuning them by eye now would be guessing twice.
+      //
+      // It stays OFF until it is audited against the corrected maintenance: does it dampen a
+      // +0.5kg/week observation, or oscillate? Nothing may drift a beta client's calories on
+      // unaudited maths. TREND_AUTOADJUST=on re-enables it the moment that audit passes —
+      // the trend LABEL and the coaching sentence still show either way, so the client keeps
+      // the insight and only the silent write is withheld.
+      if (process.env.TREND_AUTOADJUST === "on") {
+        finalCals = Math.max(1200, Math.min(4000, newCals + calAdjust));
+      } else {
+        calAdjust = 0;
+      }
       await db.update(users).set({ calorieTarget: finalCals }).where(eq(users.phoneNumber, phone));
     } else if (calAdjust !== 0) {
       // We see a direction but won't act on thin or self-contradictory data — keep targets,
