@@ -224,7 +224,49 @@ export function breakWallOfText(text: string): string {
 // The full humanize pass — strip stalls AND corporate filler in one go. This is what
 // sanitizeCoachReply calls, so every AI reply gets to the point like a real coach.
 export function humanizeReply(text: string): string {
-  return breakWallOfText(normaliseBullets(stripPlatitudes(reshapeNumberedList(stripFiller(stripDeadPromises(text))))));
+  return dropOrphanFragment(breakWallOfText(normaliseBullets(stripPlatitudes(reshapeNumberedList(stripFiller(stripDeadPromises(text)))))));
+}
+
+/**
+ * THE ORPHANED FRAGMENT (2026-08-05, live: "…You're doing great on tracking! specific. 👌").
+ *
+ * "specific." is not a sentence. It is the tail of one — the head of it was either cut by a
+ * token limit or removed by one of the passes above, and what survived reads as gibberish
+ * stapled to a good reply. Chasing which pass produced it is whack-a-mole; every one of them
+ * can leave a tail, and so can the model.
+ *
+ * So this is a DOOR rule, not a producer rule: if the last sentence is one or two words, starts
+ * lowercase, and something complete came before it, it is debris and it goes.
+ *
+ * Deliberately narrow. It requires a preceding sentence, so a whole reply of "Noted 👌" or
+ * "Solid 👌" — which is a complete and very good reply — is never touched. Trailing emoji ride
+ * along with whatever they were attached to rather than being orphaned themselves.
+ */
+export function dropOrphanFragment(text: string): string {
+  const t = (text || "").trim();
+  if (!t) return t;
+  const lines = t.split("\n");
+  const last = lines[lines.length - 1].trim();
+  // Split the final line into sentences; only its TAIL can be an orphan.
+  const parts = last.split(/(?<=[.!?])\s+/).filter(Boolean);
+  if (parts.length < 2) return t;
+  // A trailing emoji splits into its OWN part ("specific." then "👌"), so the orphan is not
+  // always last. Walk back past any emoji-only tail to find the real final sentence, and carry
+  // those emoji forward — they belong to the reply, not to the debris.
+  let end = parts.length - 1;
+  const trailingEmoji: string[] = [];
+  while (end >= 0 && !/[\p{L}\p{N}]/u.test(parts[end])) { trailingEmoji.unshift(parts[end]); end--; }
+  if (end < 1) return t;                       // nothing complete before it → leave it alone
+  const tail = parts[end];
+  const words = tail.replace(/[^\p{L}\p{N}\s']/gu, " ").trim().split(/\s+/).filter(Boolean);
+  const startsLower = /^[a-z]/.test(tail);
+  if (words.length > 0 && words.length <= 2 && startsLower) {
+    const kept = parts.slice(0, end).join(" ").trim();
+    const emoji = [tail.replace(/[\p{L}\p{N}\s.'!?,]/gu, "").trim(), ...trailingEmoji].filter(Boolean).join(" ").trim();
+    lines[lines.length - 1] = emoji ? `${kept} ${emoji}`.trim() : kept;
+    return lines.join("\n").trim();
+  }
+  return t;
 }
 
 /**

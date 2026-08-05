@@ -8090,6 +8090,23 @@ await Promise.all(pending);
   });
 
 
+  test("orphan fragment: a stray sentence tail is dropped, a short reply is never touched", async () => {
+    const { dropOrphanFragment } = await import("../server/reply-hygiene");
+    // The live defect, verbatim.
+    assert.equal(
+      dropOrphanFragment("Your daily targets are 3118 kcal. You're doing great on tracking! specific. 👌"),
+      "Your daily targets are 3118 kcal. You're doing great on tracking! 👌",
+      "the orphan goes, the emoji it carried stays");
+    // A complete short reply is a GOOD reply and must survive untouched.
+    assert.equal(dropOrphanFragment("Noted 👌"), "Noted 👌");
+    assert.equal(dropOrphanFragment("Solid 👌"), "Solid 👌");
+    assert.equal(dropOrphanFragment("Rice, stew, veggies. Looks balanced 👍"), "Rice, stew, veggies. Looks balanced 👍");
+    // A real short final sentence starting with a capital is not debris.
+    assert.equal(dropOrphanFragment("5,000 steps — nice. Keep going."), "5,000 steps — nice. Keep going.");
+    assert.equal(dropOrphanFragment(""), "");
+  });
+
+
 // ── THE WEIGHT-TREND AUDIT (2026-08-05) ──────────────────────────────────────────────────
 // This maths silently CHANGES a client's calories, so it was disabled for beta until it could
 // be tested rather than argued about. These are the audit questions, as assertions.
