@@ -82,13 +82,39 @@ as a brand. Those are two different registers.
 
 Every item names where it came from. Nothing is on this list because it would be nice.
 
+### SLICE 4b IS NOT A DELETION JOB — corrected 2026-08-05 after auditing it
+
+The plan said "onboarding's 51 mouths" as though they were the same disease as the log
+receipts. They are not, and deleting them would have broken signup and removed a legal notice.
+
+    51 prose returns in onboarding.ts
+      25  are the onboarding script's own QUESTIONS — the conversation itself
+       2  are walls, and both are justified: POPIA consent (legally required, verbatim) and
+          the medical-conditions safety note
+      the rest are short scripted steps
+
+Onboarding is a DETERMINISTIC FLOW BY DESIGN. The one-brain rule was about a handler speaking
+over the coach on a LOG — the thing a client does twenty times a week. A scripted signup is not
+that, and CLAUDE.md already says completeOnboarding() is the first impression and must not be
+touched without full understanding.
+
+**So the real Slice 4b is a VOICE AUDIT, not a teardown**: read the onboarding copy against the
+same rules the coach obeys (≤2-3 sentences, no receipt, their words) and fix what reads like
+machinery. Keep the questions. Keep POPIA verbatim. Keep the medical note.
+
+This also means the authorship number will NOT fall much further, and should not be forced to.
+The metric counts a script as competition. The gauntlet's behavioural checks are the real
+detector and they are green.
+
 ### FIRST ITEM NEXT SESSION — the stored-target backfill (founder directive, 2026-08-05)
 
 The formula was corrected on `54482ef` and verified: a client onboarding today gets the right
 number. `calorieTarget` is a COLUMN, so the rows written before that commit still hold the old
 figure — the founder's own reads 2849 where the code computes 3057. Three rows: him and the two
-live clients. It does not block the beta (every beta user signs up fresh onto correct math) and
-it must not wait longer than one session.
+live clients. **RUN 2026-08-05 17:55 and it worked** — 3 rows corrected: Kam 2849→3118, Bonolo 2346→2721,
+Donda 2025→2311. But `0 clients told`: the notes failed on the Twilio suspension that took the
+bot down the same afternoon. THEY STILL DO NOT KNOW. Bonolo was eating 375 kcal/day too little.
+Re-run the notify, or tell them by hand, the moment Twilio is back.
 
 **Scope:** all existing user rows. Recompute from BMR + the derived activity multiplier + the
 goal adjustment; write `calorieTarget`, `proteinTarget`, `stepsTarget`.
