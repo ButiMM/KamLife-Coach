@@ -12,7 +12,19 @@ import { goalStatusLine } from "../education";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine, scanForSAFoods } from "./food-scanner";
 import { parseIdentityCorrection, correctionCandidates, type IdentityCorrection } from "../food-identity-correction";
 
+import { UNAVAILABLE_RE } from "../food-swaps";
+
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
+  // THE SHOP IS NOT THE FOOD LOG (2026-08-05). "They didn't have chicken at the shop" was read
+  // as a removal request and answered «I don't see "chicken at the shop" in today's food log» —
+  // a client telling us what the shop was out of, told their own log disagrees. "Didn't have"
+  // is about a shelf, not an entry, and this handler owns entries. Stand down and let the
+  // substitution table answer it.
+  // ONE OWNER for "did the shop let them down" — food-swaps.ts holds the pattern; this handler
+  // asks it rather than keeping a second copy that would drift within a week.
+  if (UNAVAILABLE_RE.test(m) && !/\b(remove|delete|undo|clear|reset|wipe)\b/i.test(m)) {
+    return null;
+  }
 
   // ---- CONFIRM-GATE for "reset today's food" — wiping the whole day now asks first ----
   if (user.awaitingInputType === "food_reset_confirm") {

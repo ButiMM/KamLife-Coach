@@ -30,7 +30,7 @@ import { handleMealRepeat } from "./meal-repeat";
 import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
 import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion, handleVoiceReplyPreference } from "./numbers-literacy";
-import { answerSwapAsk } from "../food-swaps";
+import { answerSwapAsk, answerUnavailable } from "../food-swaps";
 import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
 import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from "../street-food";
 import { handleAdviceCommands } from "./advice-commands";
@@ -106,6 +106,15 @@ export async function handleEarlyCommands(ctx: {
   // ---- SWAP ASKS ("instead of mayo?") — the swap table answers; before the totals card ----
   const swapAnswer = answerSwapAsk(m, user.goalType);
   if (swapAnswer !== null) { await logChat(user.id, message, swapAnswer, "SWAP_ASK"); return swapAnswer; }
+
+  // ---- "THE SHOP DIDN'T HAVE IT" — a different question from the swap above (2026-08-05).
+  // The swap table answers "this is worse for your goal, eat that instead". This answers
+  // "chicken was finished, is mince alright" — the one a client actually asks, standing in a
+  // Shoprite aisle, needing an answer in one second. Deterministic: substitution is a lookup,
+  // not a judgement, and it costs nothing. Checked AFTER the goal swap so an ordinary
+  // "instead of X" still gets the health answer it always did.
+  const subAnswer = answerUnavailable(message);
+  if (subAnswer !== null) { await logChat(user.id, message, subAnswer, "SUBSTITUTION"); return subAnswer; }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
   // ---- WEEKLY / MONTHLY REPORT CARD (2026-07-22) — the shareable scorecard. Matched BEFORE the

@@ -32,11 +32,11 @@ const BUDGET = {
   handlerFiles: 29,
   cronRegistrations: 27,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
-  messageDeciders: 29,
+  messageDeciders: 30,
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
-  regexLiterals: 329,
+  regexLiterals: 330,
   /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
    * something other than the engine can put words in front of a client.
@@ -51,7 +51,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 439,
+  authorshipPoints: 440,
   twilioCallSites: 18,
 };
 
@@ -117,6 +117,20 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "messageDeciders", from: 29, to: 30, date: "2026-08-05",
+    why: "Shopping substitutions — 'they didn't have chicken at the shop'. This is a DIFFERENT "
+      + "question from the goal-swap table ('fried chicken is worse for you, grill it'), and it "
+      + "is the one clients actually ask: the shelf was empty, what does the same job. Before "
+      + "this it was answered by food-log-mgmt with «I don't see \"chicken at the shop\" in "
+      + "today's food log» — a client telling us what the shop was out of, told their own log "
+      + "disagrees. Tried first: extending the existing swap table (wrong answer — it returns a "
+      + "HEALTH verdict, not an availability one) and the swap-ask regex (wrong shape — no "
+      + "'instead of' in 'they didn't have it'). The two detections share ONE owner: food-log-mgmt "
+      + "stands down by calling into the same predicate, not its own copy. PAY THIS BACK by "
+      + "merging the availability check into the normalizer's intent classification, which "
+      + "already reads every message once and would need no second decider.",
+  },
   {
     key: "regexLiterals", from: 333, to: 330, date: "2026-07-30",
     why: "Provenance gate — the coach may not assert a fact it cannot trace to a stored row. "

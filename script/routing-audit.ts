@@ -970,6 +970,15 @@ const CASES: Case[] = [
   { name: "numbers: 'Just the plan' is ACKNOWLEDGED, never met with silence or a wrong turn", msg: "Just the plan",
     user: { profileNotes: "" },
     expect: [/plain words|keep the counting/i], reject: [/didn'?t catch/i, /calories and protein on every meal/i] },
+  // ── SHOPPING SUBSTITUTIONS (2026-08-05) — "the shop didn't have it" is not "is this healthy".
+  { name: "substitute: 'they didn't have chicken' offers a real alternative, not a lecture", msg: "They didn't have chicken at the shop",
+    expect: [/mince|pilchards|eggs/i], reject: [/didn'?t catch/i, /kcal/i] },
+  { name: "substitute: 'couldn't find spinach' names the cheap green", msg: "I couldn't find spinach",
+    expect: [/cabbage/i] },
+  { name: "substitute: 'rice is too expensive' swaps the starch", msg: "Rice is too expensive this month",
+    expect: [/pap|samp|potato/i] },
+  { name: "substitute: a plain health swap still gets the HEALTH answer, not the shop one", msg: "What can I eat instead of mayonnaise?",
+    expect: [/light mayo/i], reject: [/No stress/i] },
 ];
 
 async function main() {

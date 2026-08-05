@@ -271,3 +271,86 @@ export function answerSwapAsk(message: string, goalType?: string | null): string
   if (!s) return null;
   return `Instead of ${food}: *${s.swap}* — ${s.reason}. 👌`;
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * SHOPPING SUBSTITUTIONS (2026-08-05) — a different question from the swaps above.
+ *
+ * Everything above answers "this is worse for your goal, eat that instead". This answers
+ * "the shop didn't have it / I can't afford it — what does the same job?" Those are not the
+ * same question, and the founder's clients ask the second one far more often: chicken was
+ * finished, mince was there, is that alright.
+ *
+ * Deterministic table, no model. Substitution is a knowledge lookup, not a judgement, and a
+ * client standing in a Shoprite aisle needs an answer in one second for R0.
+ *
+ * Grouped by the JOB the food does — protein, starch, veg, fat, dairy — because that is what
+ * has to be replaced. Amounts are deliberately absent: "same size portion" is what a person
+ * can act on without a scale, and the scanner prices whatever they actually log.
+ * ──────────────────────────────────────────────────────────────────────────── */
+export type Substitution = { alt: string; note: string };
+
+const SUBSTITUTES: Array<{ match: RegExp; sub: Substitution }> = [
+  // ── PROTEIN — the job that matters most, and the one clients panic about ──
+  { match: /\b(chicken breast|chicken|braai pack|drumsticks?)\b/i,
+    sub: { alt: "lean mince, tinned pilchards, or eggs", note: "same protein job, and usually cheaper per gram" } },
+  { match: /\b(beef|steak|mince)\b/i,
+    sub: { alt: "chicken, soya mince, or tinned fish", note: "same protein, lighter on the pocket" } },
+  { match: /\b(fish|hake|snoek|tinned fish|pilchards?|tuna)\b/i,
+    sub: { alt: "eggs, chicken, or tinned baked beans", note: "protein is protein — take what the shop has" } },
+  { match: /\b(eggs?)\b/i,
+    sub: { alt: "tinned pilchards, chicken, or beans", note: "same protein for roughly the same money" } },
+  { match: /\b(biltong|dro[ëe]wors)\b/i,
+    sub: { alt: "boiled eggs or a tin of pilchards", note: "the protein without the biltong price" } },
+  // ── STARCH — filling, cheap, and interchangeable ──
+  { match: /\b(rice)\b/i, sub: { alt: "pap, samp, or potatoes", note: "same job on the plate, same size portion" } },
+  { match: /\b(pap|maize meal|mealie meal)\b/i, sub: { alt: "rice, samp, or potatoes", note: "same job on the plate" } },
+  { match: /\b(bread|brown bread)\b/i, sub: { alt: "provitas, oats, or a potato", note: "same starch, and oats keep you full longer" } },
+  { match: /\b(potatoes?|sweet potatoes?)\b/i, sub: { alt: "rice, pap, or samp", note: "swap freely — they do the same work" } },
+  { match: /\b(oats|porridge)\b/i, sub: { alt: "maltabella, weetbix, or brown bread", note: "same breakfast starch" } },
+  { match: /\b(pasta|macaroni|spaghetti)\b/i, sub: { alt: "rice or samp", note: "same starch, usually cheaper" } },
+  { match: /\b(samp)\b/i, sub: { alt: "rice or pap", note: "same starch, quicker to cook" } },
+  // ── VEG — never skip it because one thing was missing ──
+  { match: /\b(spinach|morogo)\b/i, sub: { alt: "cabbage, or any frozen mixed veg", note: "cabbage is the cheapest green in the shop" } },
+  { match: /\b(broccoli|green beans)\b/i, sub: { alt: "cabbage, carrots, or frozen mixed veg", note: "frozen counts — it is picked riper than fresh" } },
+  { match: /\b(salad|lettuce|tomatoes?)\b/i, sub: { alt: "cucumber, cabbage, or tinned tomatoes", note: "any veg beats no veg" } },
+  { match: /\b(carrots?|butternut|pumpkin)\b/i, sub: { alt: "any frozen mixed veg", note: "same job, keeps for months" } },
+  // ── FAT + DAIRY ──
+  { match: /\b(olive oil|avocado|avo)\b/i, sub: { alt: "sunflower oil used sparingly, or peanut butter", note: "same fat job at a fraction of the price" } },
+  { match: /\b(milk)\b/i, sub: { alt: "long-life milk or maas", note: "same protein and calcium, keeps longer" } },
+  { match: /\b(yoghurt|greek yoghurt)\b/i, sub: { alt: "maas or plain double-cream yoghurt", note: "maas is the SA original and costs less" } },
+  { match: /\b(cheese)\b/i, sub: { alt: "eggs or a tin of pilchards", note: "cheaper protein, less saturated fat" } },
+  { match: /\b(peanut butter)\b/i, sub: { alt: "any nut butter, or eggs for the protein", note: "same fat and protein job" } },
+];
+
+/**
+ * Did they say the shop LET THEM DOWN, rather than asking whether a food is good for them?
+ * "Couldn't find", "they didn't have", "too expensive", "out of stock", "finished".
+ */
+export const UNAVAILABLE_RE = /\b(could ?n[o']?t find|couldn t find|did ?n[o']?t have|don't have|dont have|no more|out of stock|sold out|finished|too expensive|can'?t afford|too pricey|nothing left|they were out)\b/i;
+
+/** The substitution for a named food, or null when we have nothing honest to offer. */
+export function substituteFor(foodName: string): Substitution | null {
+  const f = (foodName || "").toLowerCase().trim();
+  if (!f) return null;
+  for (const row of SUBSTITUTES) if (row.match.test(f)) return row.sub;
+  return null;
+}
+
+/**
+ * A full answer to "the shop didn't have X", or null to let the coach handle it.
+ *
+ * Only fires on an availability/price complaint that NAMES a food we know. Everything else —
+ * including a plain "what should I eat instead of chips" — belongs to the goal-swap table
+ * above, which answers a different question and is checked first by the caller.
+ */
+export function answerUnavailable(message: string): string | null {
+  const m = (message || "");
+  if (!UNAVAILABLE_RE.test(m)) return null;
+  for (const row of SUBSTITUTES) {
+    const hit = m.match(row.match);
+    if (hit) {
+      return `No stress — *${row.sub.alt}* instead. ${row.sub.note.charAt(0).toUpperCase()}${row.sub.note.slice(1)}. 👌`;
+    }
+  }
+  return null;
+}
