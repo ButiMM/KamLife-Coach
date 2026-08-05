@@ -52,6 +52,7 @@ const BUDGET = {
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
   authorshipPoints: 439,
+  twilioCallSites: 18,
 };
 
 
@@ -230,6 +231,16 @@ const actual = {
   looksLikePredicates: new Set(all.join("\n").match(/function looksLike[A-Za-z]*/g) || []).size,
   regexLiterals: all.join("\n").match(/= \/[^/\n]{10,}\/[gimsuy]*/g)?.length || 0,
   authorshipPoints: countClientFacingMouths(files),
+  // EVERY PLACE THAT TALKS TO TWILIO DIRECTLY (2026-08-05).
+  //
+  // Twilio is a reseller of Meta's WhatsApp API, not the destination — OUTSTANDING.md has
+  // said "Meta Business API the day CIPC clears" since it was written. Moving is a decision
+  // if the SDK is called from one place and a migration if it is called from nineteen.
+  //
+  // Frozen here so it can only FALL. scheduler/shared.ts already owns the real adapter —
+  // sendOneWhatsApp, with the retries, the circuit breaker and the SMS fallback. The work is
+  // migrating the other sites onto it, and this number is how that work is measured.
+  twilioCallSites: all.join("\n").match(/messages\s*\.\s*create\s*\(/g)?.length || 0,
   _unusedActionCount: files.filter(f => {
     const src = read(f);
     if (!/db\s*\.\s*(insert|update)\s*\(/.test(src)) return false;      // does it act?
@@ -256,7 +267,7 @@ for (const [key, budget] of Object.entries(BUDGET) as Array<[keyof typeof BUDGET
 
 // A budget above its original frozen value must have a logged, dated reason. This is what stops
 // "just bump it by one" from being the path of least resistance.
-const FROZEN = { modules: 234, handlerFiles: 29, cronRegistrations: 27, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333, authorshipPoints: 440 };
+const FROZEN = { modules: 234, handlerFiles: 29, cronRegistrations: 27, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333, authorshipPoints: 440, twilioCallSites: 18 };
 for (const [key, frozen] of Object.entries(FROZEN) as Array<[keyof typeof BUDGET, number]>) {
   if (BUDGET[key] <= frozen) continue;
   const logged = RAISES.filter(r => r.key === key).sort((a, b) => a.to - b.to).pop();
@@ -314,6 +325,7 @@ if (wins.length > 0) {
 
 console.log(`architecture guard: ${actual.modules} modules, ${actual.regexLiterals} regexes, ${actual.messageDeciders} message deciders, ${actual.cronRegistrations} cron jobs — all at budget.`);
 // GUARD #9, printed every run so the shrink is VISIBLE rather than claimed (2026-08-04).
+console.log(`twilio: ${actual.twilioCallSites} direct SDK call sites (budget ${BUDGET.twilioCallSites}, frozen — may only fall; the adapter is scheduler/shared.sendOneWhatsApp).`);
 console.log(`authorship: ${actual.authorshipPoints} CLIENT-FACING places other than the engine can put words in front of a client (budget ${BUDGET.authorshipPoints}, frozen — this may only fall).`);
 console.log(`  ${ONE_OWNER.length} questions have exactly one owner. ${actionFiles.length} action files declared, ${atRisk.length} AT RISK: ${atRisk.map(f => f.split("/").pop()).join(", ")}`);
 // Printed on EVERY green run, on purpose. A debt you are reminded of is a debt you repay.
