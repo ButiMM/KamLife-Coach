@@ -18,6 +18,7 @@
     "check:pricing": "tsx script/check-pricing.ts",
     "db:push": "drizzle-kit push",
     "backfill:steps": "tsx script/backfill-step-targets.ts",
+    "backfill:targets": "tsx script/backfill-targets.ts",
     "diagnose:voice": "tsx script/diagnose-voice.ts",
     "test:routing": "tsx script/routing-audit.ts",
     "test:onboarding": "tsx script/onboarding-e2e.ts",
