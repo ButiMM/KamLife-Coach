@@ -125,11 +125,10 @@ function test(name: string, fn: () => void | Promise<void>) {
 
 test("fat loss male 80kg produces deficit below TDEE", () => {
   const { calorieTarget, proteinTarget } = calculateTargets(80, "fat_loss", "office", 3, "male", 30, 175);
-  // Mifflin male 80kg/175cm/30y: BMR = 10×80 + 6.25×175 - 5×30 + 5 = 800+1093.75-150+5 = 1748.75
-  // TDEE = 1748.75 × 1.3 + (200×3/7) ≈ 2273 + 86 ≈ 2359
-  // Fat loss: -400 → ~1959 kcal
-  assert.ok(calorieTarget >= 1500, `calorie too low: ${calorieTarget}`);
-  assert.ok(calorieTarget <= 2200, `calorie too high for fat loss: ${calorieTarget}`);
+  // CORRECTED 2026-08-05. BMR = 1748.75; 3 training days → moderate (1.55) → TDEE 2711.
+  // Fat loss is -500 → 2211. The old expectation encoded the sedentary 1.3 multiplier that
+  // understated every client's maintenance by ~380 kcal.
+  assert.equal(calorieTarget, 2211, `fat-loss 80kg male should be TDEE-500 = 2211, got ${calorieTarget}`);
   // protein: 80 × 2.0 = 160g
   assert.equal(proteinTarget, 160, `protein should be 160g for 80kg male fat loss, got ${proteinTarget}`);
 });
@@ -154,10 +153,14 @@ test("protein target is hard-capped at 220g regardless of size", () => {
   assert.ok(proteinTarget <= 220, `protein ceiling breached: ${proteinTarget}g`);
 });
 
-test("female has smaller deficit than male for fat loss", () => {
-  const male = calculateTargets(70, "fat_loss", "office", 3, "male", 30, 170);
-  const female = calculateTargets(70, "fat_loss", "office", 3, "female", 30, 165);
-  assert.ok(female.calorieTarget > male.calorieTarget - 200, "female deficit should be smaller (max 200 kcal diff at same weight)");
+// REWRITTEN 2026-08-05: the softened female deficit is gone. It existed to compensate for an
+// understated maintenance; on a true TDEE, -500 clears both the BMR and the 1200 floor for
+// every female profile tested. What must still hold is the floor itself.
+test("female fat loss takes the same -500 and still clears her BMR", () => {
+  const f = calculateTargets(70, "fat_loss", "office", 3, "female", 30, 165);
+  const bmr = Math.round(10 * 70 + 6.25 * 165 - 5 * 30 - 161);
+  assert.ok(f.calorieTarget >= bmr, `female fat-loss target ${f.calorieTarget} must clear BMR ${bmr}`);
+  assert.ok(f.calorieTarget >= 1200, "and the absolute female floor");
 });
 
 // ============================================================
@@ -165,17 +168,17 @@ test("female has smaller deficit than male for fat loss", () => {
 // so the trajectory engine and the target calculator can never disagree.
 // ============================================================
 test("maintenanceKcal: Mifflin TDEE matches the hand-computed break-even", () => {
-  // male 80kg/175cm/30y office(1.3) 3 days beginner:
-  // BMR = 10×80 + 6.25×175 − 5×30 + 5 = 1748.75 · ×1.3 = 2273.375
-  // trainingAdj = round(200×0.75×3/7) = round(64.3) = 64 → maintenance ≈ 2337
+  // CORRECTED 2026-08-05. 3 training days → moderate (1.55). No separate training bonus:
+  // the multiplier already counts those sessions, and adding both counted them twice.
+  // BMR = 1748.75 × 1.55 = 2710.6 → 2711
   const m = maintenanceKcal(80, "male", 30, 175, "office", 3, "beginner");
-  assert.ok(Math.abs(m - 2337) <= 2, `maintenance should be ~2337, got ${m}`);
+  assert.equal(m, 2711, `maintenance should be BMR×1.55 = 2711, got ${m}`);
 });
 test("maintenanceKcal: is the break-even calorieTarget is built on (target = maintenance + goalAdj)", () => {
   const m = maintenanceKcal(80, "male", 30, 175, "office", 3, "beginner");
   const { calorieTarget } = calculateTargets(80, "fat_loss", "office", 3, "male", 30, 175);
-  // male fat-loss adjustment is −400; target must sit that far below maintenance (above the floor).
-  assert.equal(calorieTarget, m - 400, `fat-loss target must be maintenance−400 (${m}−400), got ${calorieTarget}`);
+  // Fat-loss adjustment is −500 (2026-08-05); target sits that far below maintenance.
+  assert.equal(calorieTarget, m - 500, `fat-loss target must be maintenance−500 (${m}−500), got ${calorieTarget}`);
 });
 test("maintenanceKcal: junk inputs never yield NaN", () => {
   assert.ok(Number.isFinite(maintenanceKcal(NaN as any, "male", NaN as any, NaN as any, "office", 3, "beginner")));
@@ -302,10 +305,18 @@ test("elderly (>=60) gets higher protein floor", () => {
   assert.ok(elder.proteinTarget >= Math.round(70 * 1.6), `elder protein too low: ${elder.proteinTarget}`);
 });
 
-test("physical job increases calorie target vs office", () => {
+// INVERTED 2026-08-05, AND IT IS A KNOWN, ACCEPTED REGRESSION — not a silent one.
+// Activity is now derived from TRAINING DAYS, so a domestic worker on her feet all day gets the
+// same multiplier as an office worker who trains the same number of times. That is a real loss
+// for physical-job clients and the founder deferred the occupation-aware layer deliberately:
+// training days is a number we collect from everyone, a job title is not. This test now PINS
+// the current behaviour so the day someone adds occupation back, it fails loudly and on purpose.
+test("occupation no longer moves the target — training days do (deferred, not forgotten)", () => {
   const office = calculateTargets(80, "general", "office", 3, "male", 30, 175);
   const physical = calculateTargets(80, "general", "retail_physical", 3, "male", 30, 175);
-  assert.ok(physical.calorieTarget > office.calorieTarget, "physical job should have higher TDEE");
+  assert.equal(physical.calorieTarget, office.calorieTarget, "occupation is not yet a driver");
+  const trains5 = calculateTargets(80, "general", "office", 5, "male", 30, 175);
+  assert.ok(trains5.calorieTarget > office.calorieTarget, "training days ARE the driver");
 });
 
 test("recomposition returns no surplus or deficit", () => {
@@ -2615,17 +2626,19 @@ test("adaptive steps: an established high target is never pushed past 12,000", (
 // STEP BURN (2026-07-12, Kam: "be exactly precise… steps incorporated into the deficit").
 // ONE canonical, weight-scaled formula behind the deficit offset, the step logger, and
 // the "how much did I burn" answer — they used to disagree (flat vs /70 vs /75).
-test("step burn: ~0.04 kcal/step at 70kg, and scales with body weight", () => {
-  assert.equal(stepBurnKcal(10000, 70), 400);
-  assert.equal(stepBurnKcal(10000, 140), 800);   // twice the mass → twice the burn
-  assert.equal(stepBurnKcal(10000, 35), 200);     // half the mass → half the burn
+// CORRECTED 2026-08-05 to the standard 0.5 kcal/kg/km at ~1250 steps/km. The old 0.04/step
+// ran ~43% high and is where the invented "~237 kcal burned" came from.
+test("step burn: 0.5 kcal/kg/km, and scales with body weight", () => {
+  assert.equal(stepBurnKcal(10000, 70), 280);    // 8km × 0.5 × 70kg
+  assert.equal(stepBurnKcal(10000, 140), 560);   // twice the mass → twice the burn
+  assert.equal(stepBurnKcal(5000, 83), 166);     // the founder's verification number
   // a heavy client MUST be credited more than a light one for the same steps
   assert.ok(stepBurnKcal(8000, 120) > stepBurnKcal(8000, 60), "heavier burns more per step");
 });
 
 test("step burn: junk/missing weight defaults to average; extremes clamped; no negatives", () => {
-  assert.equal(stepBurnKcal(10000, undefined), 400); // missing → 70kg
-  assert.equal(stepBurnKcal(10000, 0), 400);          // junk → 70kg
+  assert.equal(stepBurnKcal(10000, undefined), 280); // missing → 70kg
+  assert.equal(stepBurnKcal(10000, 0), 280);          // junk → 70kg
   assert.equal(stepBurnKcal(10000, 5000), stepBurnKcal(10000, 250), "implausible weight clamped to 250");
   assert.equal(stepBurnKcal(-500, 70), 0);            // negative steps → 0
   assert.equal(stepBurnKcal(0, 70), 0);
@@ -2652,12 +2665,18 @@ const BONOLO = {
   trainingDaysPerWeek: 4, gender: "female", age: 27, heightCm: 165,
   trainingExperience: "beginner",
 };
-test("target audit: the Bonolo case — impossible 2,346 kcal is caught and corrected", () => {
-  const a = auditStoredTargets({ ...BONOLO, calorieTarget: 2346, proteinTarget: 126 });
-  assert.equal(a.ok, false, "2,346 kcal for this profile must be flagged");
-  assert.ok(a.expectedCal >= 1850 && a.expectedCal <= 2050, `expected ~1950, got ${a.expectedCal}`);
-  assert.equal(a.expectedProt, 126, "her protein was actually correct");
-  assert.match(a.reason || "", /calorieTarget 2346/);
+// UPDATED 2026-08-05: 2,346 is no longer impossible for her, and that is the correction
+// working rather than the audit failing. On the true multiplier (4 training days → moderate
+// 1.55) her recomposition maintenance is ~2,325 — the stored number was roughly RIGHT all
+// along and the formula was what disagreed with it. What must still hold is that the audit
+// catches a figure that matches no input combination, so it is re-pointed at one.
+test("target audit: a figure matching no input combination is caught and corrected", () => {
+  const wild = auditStoredTargets({ ...BONOLO, calorieTarget: 3600, proteinTarget: 126 });
+  assert.equal(wild.ok, false, "3,600 kcal for a 70kg female recomp must be flagged");
+  assert.match(wild.reason || "", /calorieTarget 3600/);
+  assert.equal(wild.expectedProt, 126, "her protein was always correct");
+  const now = auditStoredTargets({ ...BONOLO, calorieTarget: wild.expectedCal, proteinTarget: 126 });
+  assert.equal(now.ok, true, "the corrected figure must then pass its own audit");
 });
 
 test("target audit: legitimate trend adjustments (±150) and correct targets pass", () => {
@@ -2670,7 +2689,10 @@ test("target audit: legitimate trend adjustments (±150) and correct targets pas
 test("target audit: an active diet break is deliberate — never corrected", () => {
   const a = auditStoredTargets({ ...BONOLO, calorieTarget: 2400, proteinTarget: 126, dietBreakEndsAt: new Date(Date.now() + 3 * 86_400_000) });
   assert.equal(a.ok, true, "diet-break target left alone");
-  const expired = auditStoredTargets({ ...BONOLO, calorieTarget: 2400, proteinTarget: 126, dietBreakEndsAt: new Date(Date.now() - 86_400_000) });
+  // 3600, not 2400 (2026-08-05): on the corrected multiplier 2400 sits inside her real range,
+  // so it no longer tests anything. The assertion is unchanged — an EXPIRED break stops
+  // protecting a figure that is genuinely out of range.
+  const expired = auditStoredTargets({ ...BONOLO, calorieTarget: 3600, proteinTarget: 126, dietBreakEndsAt: new Date(Date.now() - 86_400_000) });
   assert.equal(expired.ok, false, "expired diet break no longer protects a high target");
 });
 
@@ -2700,8 +2722,13 @@ test("recalc: changing goal/training-days/experience MOVES the targets (no stale
   assert.notEqual(afterGoal.calorieTarget, before.calorieTarget, "goal flip must move calories");
   const afterDays = recalcTargetsForProfile({ ...BONOLO, trainingDaysPerWeek: 6 });
   assert.notEqual(afterDays.calorieTarget, before.calorieTarget, "more training days must move calories");
+  // KNOWN, ACCEPTED REGRESSION (2026-08-05), pinned rather than deleted — the same call as
+  // occupation. Training EXPERIENCE no longer moves calories: it used to scale a per-session
+  // bonus that was deleted for double-counting once the multiplier itself came from training
+  // days. An advanced athlete does burn more per session than a beginner, so this is a real
+  // refinement that is owed. The day someone adds it back, this fails loudly and on purpose.
   const afterExp = recalcTargetsForProfile({ ...BONOLO, trainingExperience: "advanced" });
-  assert.notEqual(afterExp.calorieTarget, before.calorieTarget, "experience change must move calories");
+  assert.equal(afterExp.calorieTarget, before.calorieTarget, "experience is not yet a driver — deferred, not forgotten");
 });
 
 test("recalc: degrades safely on a bare/empty profile (never NaN)", () => {

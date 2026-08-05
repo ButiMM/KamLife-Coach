@@ -27,31 +27,34 @@ export function maintenanceKcal(
     ? (10 * weightKg) + (6.25 * heightCm) - (5 * age) - 161
     : (10 * weightKg) + (6.25 * heightCm) - (5 * age) + 5;
 
-  const activityMult: Record<string, number> = {
-    office: 1.3,
-    student: 1.35,
-    unemployed: 1.25,
-    retired: 1.2,
-    stay_home_parent: 1.3,
-    retail_physical: 1.5,
-    domestic_worker: 1.45,
-    postpartum_breastfeeding: 1.35,
-    "1": 1.35,  // student
-    "2": 1.3,   // office
-    "3": 1.5,   // physical job
-    "4": 1.25,  // unemployed
-    "5": 1.3,   // stay home parent
-    "6": 1.2,   // retired
+  // ── ACTIVITY, DERIVED FROM TRAINING (2026-08-05) ──────────────────────────────────────
+  //
+  // THE ONE LYING NUMBER. This was a map of LIFE SITUATIONS — `office: 1.3`, which is the
+  // sedentary-with-no-exercise multiplier — and it ignored the fact that the client trains.
+  // So maintenance came out ~380 kcal low for EVERY client, and every target in the product
+  // is built on maintenance. It produced two defects that looked unrelated: a muscle-gain
+  // client fed maintenance (the +400 adjustment was real, it was landing on an understated
+  // base) and a fat-loss client on what read as a crash diet.
+  //
+  // Training days are now the primary driver, which is the standard Mifflin-St Jeor practice
+  // and — unlike a job title — a number we actually collect from every client at onboarding.
+  // An occupation-aware refinement (a domestic worker on her feet all day is not sedentary)
+  // is a later layer, deliberately not built now.
+  const ACTIVITY: Record<string, number> = {
+    sedentary: 1.2, office: 1.375, moderate: 1.55, active: 1.725, very_active: 1.9,
   };
-  const mult = activityMult[lifeSituation] || 1.3;
+  const days = Math.max(0, Math.min(7, Number(trainingDaysPerWeek) || 0));
+  const level = days === 0 ? "sedentary" : days <= 2 ? "office" : days <= 4 ? "moderate" : days <= 6 ? "active" : "very_active";
+  const mult = ACTIVITY[level];
+  void lifeSituation; // no longer drives the multiplier — see the note above
+  void trainingExperience;
 
-  // Training calorie addition (spread over 7 days). Smaller for females (metabolic reality);
-  // beginners work at lower intensity, advanced athletes burn more per session.
-  const calPerSession = isFemale ? 150 : 200;
-  const expMult = trainingExperience === "advanced" ? 1.2 : trainingExperience === "intermediate" ? 1.0 : 0.75;
-  const trainingAdj = Math.round((calPerSession * expMult * Math.min(trainingDaysPerWeek, 7)) / 7);
-
-  const m = Math.round(bmr * mult + trainingAdj);
+  // THE SEPARATE TRAINING BONUS IS DELETED, and this is load-bearing rather than tidying.
+  // It added ~200 kcal/session spread over the week ON TOP of the multiplier. Now that the
+  // multiplier itself is derived from training days, keeping it would count the same sessions
+  // twice — and the founder's verification number only lands if it goes: BMR 1779 x 1.55 is
+  // exactly 2757, with nothing added.
+  const m = Math.round(bmr * mult);
   return Number.isFinite(m) ? m : 2000;
 }
 
@@ -76,8 +79,13 @@ export function calculateTargets(
   // Fat loss deficit is smaller for females to preserve hormonal health
   // Breastfeeding: never create a large deficit — 200 kcal max to protect milk supply
   const goalAdj: Record<string, number> = {
-    fat_loss: isBreastfeeding ? -200 : (isFemale ? -300 : -400),
-    muscle_gain: isFemale ? 250 : 400,
+    // -500 and +300, founder-set 2026-08-05 on a corrected maintenance. The female fat-loss
+    // deficit is no longer softened: it was compensating for an understated base, and with a
+    // true TDEE -500 still clears both the BMR and the 1200 floor asserted below.
+    // BREASTFEEDING KEEPS ITS -200. That is a clinical limit protecting milk supply, not a
+    // preference, and nothing in this correction makes a bigger deficit safe there.
+    fat_loss: isBreastfeeding ? -200 : -500,
+    muscle_gain: 300,
     recomposition: 0,
     general: isFemale ? 50 : 100,
     health_condition: 0,
@@ -91,7 +99,16 @@ export function calculateTargets(
 
   // ── Safety floors by gender ──
   // Breastfeeding: 1,800 kcal is the clinical minimum — below this, milk supply drops
-  const minCal = isBreastfeeding ? 1800 : (isFemale ? 1200 : 1500);
+  // BMR IS A FLOOR, NOT A SUGGESTION (2026-08-05, caught verifying the -500).
+  // A large sedentary client sits on the 1.2 multiplier, so -500 can land UNDER their basal
+  // rate: 120kg/185cm/50y with no training days came out at 2034 against a BMR of 2111. Eating
+  // below basal for weeks is how you lose muscle and stall a metabolism — the one outcome a
+  // fat-loss client is paying us to avoid. The deficit is capped at the floor, never the
+  // client. Only bites on a genuine deficit; a surplus goal can never trigger it.
+  const bmrFloor = Math.round(isFemale
+    ? (10 * weightKg) + (6.25 * heightCm) - (5 * age) - 161
+    : (10 * weightKg) + (6.25 * heightCm) - (5 * age) + 5);
+  const minCal = Math.max(isBreastfeeding ? 1800 : (isFemale ? 1200 : 1500), adj < 0 ? bmrFloor : 0);
   // NaN guard: if any input (weight/age/height/bmr) was non-numeric, never ship "NaN kcal".
   calorieTarget = Number.isFinite(calorieTarget) ? Math.max(minCal, Math.min(4500, calorieTarget)) : minCal;
 
@@ -381,7 +398,10 @@ export function stepBurnKcal(steps: number, weightKg?: number | null): number {
   let w = Number.isFinite(weightKg as number) ? (weightKg as number) : 70;
   if (w < 35) w = 70;      // junk/missing weight → assume an average adult
   else if (w > 250) w = 250; // clamp implausible extremes
-  return Math.round(s * 0.04 * (w / 70));
+  // 0.5 kcal per kg per km, at ~1250 steps/km — the standard walking estimate (2026-08-05).
+  // The old 0.04/step at 70kg ran ~43% high and is where "~237 kcal burned" came from: a
+  // figure no client ever said, printed at them as though it were measured.
+  return Math.round((s / 1250) * 0.5 * w);
 }
 
 // ============================================================
