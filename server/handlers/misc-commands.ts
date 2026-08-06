@@ -711,20 +711,6 @@ export async function handleMiscCommands(ctx: {
     }
   }
 
-  // ---- CHALLENGE A FRIEND ----
-  if (/\b(challenge\s+a?\s*friend|challenge\s+someone|start\s+(a\s+)?challenge|dare\s+a?\s*friend|challenge\s+buddy)\b/i.test(m)) {
-    let code = user.referralCode;
-    if (!code) {
-      const prefix = (user.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
-      code = `${prefix}${Math.floor(1000 + Math.random() * 9000)}`;
-      await db.update(users).set({ referralCode: code }).where(eq(users.phoneNumber, phone));
-    }
-    const wk = user.workoutStreak || 0;
-    const challengeTarget = `${user.trainingDaysPerWeek || 3} workouts + food logged 5 out of 7 days`;
-    const challengeReply = `*This week's challenge: ${challengeTarget}.*\n\nYou're ${wk > 0 ? `on a ${wk}-session streak` : "ready to start a streak"}. Now bring someone else in.\n\nSend your friend this message:\n\n_"I'm doing a weekly fitness challenge on WhatsApp with a real SA coach. Join me — text *join ${code}* to this number: ${process.env.TWILIO_WHATSAPP_NUMBER?.replace("whatsapp:", "") || "[your coach number]"}. There's a 7-day money-back guarantee, so no risk."_\n\nWhen they join, you both get an extra accountability nudge each week.`;
-    await logChat(user.id, message, challengeReply, "CHALLENGE_INVITE");
-    return challengeReply;
-  }
 
   // ---- JOIN CHALLENGE (friend accepting an invite) ----
   if (/^join\s+([A-Z]{3}\d{4})$/i.test(m.trim())) {
@@ -976,73 +962,6 @@ export async function handleMiscCommands(ctx: {
     }
   }
 
-  // ---- ACHIEVEMENTS / BADGES — "badges", "achievements", "my badges" ----
-  if (m === "badges" || m === "achievements" || m === "my badges" || m === "my achievements" || m === "trophies" || /\b(badge|achievement|trophy|unlock|reward)\b/i.test(m)) {
-    const totalWorkouts = user.totalWorkoutsCompleted || 0;
-    const streak = user.workoutStreak || 0;
-    const wsBadgeTodaySAST = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
-    const wsBadgeYestSAST = new Date(Date.now() + 2 * 3_600_000 - 86_400_000).toISOString().slice(0, 10);
-    const waterStreak = (user.waterLastResetDate === wsBadgeTodaySAST || user.waterLastResetDate === wsBadgeYestSAST) ? (user.waterStreak || 0) : 0;
-    const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
-    const name = user.name?.split(" ")[0] || "there";
-
-    // Calculate badges earned
-    const badges: string[] = [];
-    const locked: string[] = [];
-
-    // Workout badges
-    if (totalWorkouts >= 1) badges.push("🏋️ *First Session* — Completed your first workout");
-    else locked.push("🔒 First Session — Complete 1 workout");
-
-    if (totalWorkouts >= 10) badges.push("💪 *Getting Serious* — 10 workouts done");
-    else if (totalWorkouts >= 1) locked.push(`🔒 Getting Serious — Complete 10 workouts (${10 - totalWorkouts} to go)`);
-
-    if (totalWorkouts >= 25) badges.push("🔥 *Quarter Century* — 25 workouts smashed");
-    else if (totalWorkouts >= 10) locked.push(`🔒 Quarter Century — Complete 25 workouts (${25 - totalWorkouts} to go)`);
-
-    if (totalWorkouts >= 50) badges.push("🏆 *Half Ton* — 50 workouts completed");
-    else if (totalWorkouts >= 25) locked.push(`🔒 Half Ton — Complete 50 workouts (${50 - totalWorkouts} to go)`);
-
-    if (totalWorkouts >= 100) badges.push("👑 *Centurion* — 100 workouts. Elite.");
-    else if (totalWorkouts >= 50) locked.push(`🔒 Centurion — Complete 100 workouts (${100 - totalWorkouts} to go)`);
-
-    // Streak badges
-    if (streak >= 7) badges.push("📅 *Week Warrior* — 7-day workout streak");
-    if (streak >= 14) badges.push("⚡ *Two Week Terror* — 14-day streak");
-    if (streak >= 30) badges.push("🌟 *Monthly Machine* — 30-day streak");
-
-    // Water badges
-    if (waterStreak >= 7) badges.push("💧 *Hydration Hero* — 7-day water streak");
-    if (waterStreak >= 14) badges.push("🌊 *Water Warrior* — 14-day water streak");
-
-    // Duration badges
-    if (daysOn >= 7) badges.push("📆 *One Week In* — 7 days on programme");
-    if (daysOn >= 30) badges.push("📅 *One Month Strong* — 30 days committed");
-    if (daysOn >= 90) badges.push("🗓️ *Quarter Year* — 90 days of discipline");
-
-    // Weight loss badge (check weight logs)
-    try {
-      const weightData = await db.select({ weight: weightLogs.weight }).from(weightLogs)
-        .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt));
-      if (weightData.length >= 2) {
-        const first = parseFloat(String(weightData[0].weight));
-        const last = parseFloat(String(weightData[weightData.length - 1].weight));
-        const diff = first - last;
-        if (diff >= 2) badges.push(`⚖️ *Scale Victory* — Down ${diff.toFixed(1)}kg from start`);
-        if (diff >= 5) badges.push(`🎯 *5kg Club* — Dropped 5+ kg`);
-        if (diff >= 10) badges.push(`💎 *10kg Transformation* — Life-changing progress`);
-      }
-    } catch { /* non-fatal */ }
-
-    const totalBadges = badges.length;
-    const reply = `*🏆 ${name}'s Achievements — ${totalBadges} Badge${totalBadges !== 1 ? "s" : ""} Earned*\n\n` +
-      (badges.length > 0 ? badges.join("\n") : "_No badges yet — complete your first workout to start earning._") +
-      (locked.length > 0 ? `\n\n_Next to unlock:_\n${locked.slice(0, 3).join("\n")}` : "") +
-      `\n\n_Keep showing up. Every session counts._`;
-
-    await logChat(user.id, message, reply, "ACHIEVEMENTS");
-    return reply;
-  }
 
   // ---- BODY RECOMPOSITION TRACKER — "my body", "body check", "recomp" ----
   if (m === "my body" || m === "body check" || m === "recomp" || m === "body recomp" || m === "body composition" || /\b(body\s*check|body\s*comp|recomp|my\s*body|body\s*progress)\b/i.test(m)) {
@@ -1233,31 +1152,6 @@ export async function handleMiscCommands(ctx: {
     }
   }
 
-  // ---- DAILY FACT — "fact", "tip", "did you know" ----
-  if (m === "fact" || m === "tip" || m === "daily tip" || m === "did you know" || m === "fitness fact" || m === "coach tip") {
-    const facts = [
-      `Walking 8,000 steps burns roughly 350-400 calories — that is a full meal's worth of energy. Steps are the cheapest fat loss tool you have.`,
-      `Muscle burns 3× more calories at rest than fat. Every kg of muscle you add raises your metabolism permanently. Lift heavy.`,
-      `South Africans eat an average of 52g of protein per day. Your target is ${user.proteinTarget || 120}g. Most people need to double their protein intake to see results.`,
-      `Sleep deprivation increases ghrelin (hunger hormone) by 28%. One bad night = more cravings tomorrow. Protect your sleep like you protect your training.`,
-      `Eggs are the cheapest complete protein in South Africa — R4 per egg, 6g protein each. 3 eggs = 18g protein for R12. No supplement beats that value.`,
-      `It takes 66 days to form a habit, not 21. You are ${user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0} days in. ${(user.programmeStartDate && Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) >= 66) ? "You have crossed the habit line." : "Keep going — the habit is forming."}`,
-      `A 500 calorie daily deficit = 0.5kg fat loss per week. That is 2kg per month. Small, consistent deficit beats extreme dieting every time.`,
-      `Pilchards have more omega-3 than salmon per rand spent. R12 for a tin that gives 22g protein, omega-3, calcium, and vitamin D. The real superfood is in the tin aisle at Shoprite.`,
-      `Your body does not know the difference between a gym machine and a filled water bottle. Home training builds real muscle — equipment is not an excuse.`,
-      `Dehydration drops exercise performance by 25%. If you feel tired during training, drink water before you blame your programme.`,
-      `Pap is not the enemy. Pap + pilchards + spinach = a complete meal under R20 with 25g protein. It is how you build the plate that matters.`,
-      `Cortisol from stress directly increases belly fat storage. Walking 20 minutes drops cortisol by 14%. Steps are stress management.`,
-      `Creatine monohydrate is the most studied supplement in sports science — safe, effective, and R6.63/day from Dis-Chem. 5g daily, every day.`,
-      `Boerewors has 25g protein per 100g but also 26g fat. Grill, do not fry. Drain the fat. Pair with salad, not rolls. Same food, better result.`,
-      `Your metabolism does not "break" from dieting. It adapts. When weight stalls, a small 100-calorie adjustment is all you need — not a crash diet.`,
-    ];
-    const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86_400_000);
-    const todayFact = facts[dayOfYear % facts.length];
-    const reply = `*💡 Coach K Fact of the Day*\n\n${todayFact}`;
-    await logChat(user.id, message, reply, "DAILY_FACT");
-    return reply;
-  }
 
   // ---- WORKOUT HISTORY — "my workouts", "workout history", "workout diary" ----
   if (m === "my workouts" || m === "workout history" || m === "workout diary" || m === "recent workouts" || /\b(workout\s*history|workout\s*diary|my\s*workouts|recent\s*workout|past\s*workout|training\s*history)\b/i.test(m)) {
@@ -1348,40 +1242,6 @@ export async function handleMiscCommands(ctx: {
     return null; // the engine owns this — its own guards keep the SADAG net
   }
 
-  // ---- FASTING TRACKER — "fasting", "intermittent fasting", "IF" ----
-  if (m === "fasting" || m === "intermittent fasting" || m === "if" || m === "fasting window" || /\b(fast(?:ing)?|intermittent\s*fast|eating\s*window|16.?8|18.?6|omad|one\s*meal)\b/i.test(m)) {
-    // Check if logging fast start/end
-    const startFast = /\b(start(?:ed|ing)?\s*(?:my\s*)?fast|fasting\s*now|began?\s*fast|going\s*to\s*fast)\b/i.test(m);
-    const endFast = /\b(broke?\s*(?:my\s*)?fast|end(?:ed|ing)?\s*fast|breaking\s*fast|stopped?\s*fast|ate\s*first\s*meal)\b/i.test(m);
-
-    if (startFast) {
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" });
-      await logChat(user.id, message, `Fast started at ${timeStr}`, "FAST_START");
-      return `Fast started at ${timeStr} ⏱️\n\nI will track it. Tell me when you break your fast — "broke my fast" — and I will log the window.\n\nDuring your fast:\n• Water, black coffee, and plain tea are fine\n• No calories — no milk, no sugar\n• If you feel dizzy or weak, break the fast immediately. Safety first.`;
-    }
-
-    if (endFast) {
-      // Find the most recent fast start
-      const recentStart = await db.select({ date: chatHistory.createdAt }).from(chatHistory)
-        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FAST_START")))
-        .orderBy(desc(chatHistory.createdAt)).limit(1);
-
-      let fastDuration = "";
-      if (recentStart.length > 0 && recentStart[0].date) {
-        const startTime = new Date(recentStart[0].date).getTime();
-        const hours = Math.round((Date.now() - startTime) / 3_600_000 * 10) / 10;
-        fastDuration = ` — *${hours} hours*`;
-        if (hours >= 16) fastDuration += ` ✅ 16:8 achieved`;
-        else if (hours >= 14) fastDuration += ` (close to 16:8 target)`;
-      }
-
-      await logChat(user.id, message, `Fast ended${fastDuration}`, "FAST_END");
-      return `Fast complete${fastDuration} 🍽️\n\nBreak your fast with protein first — eggs, chicken, or pilchards. Protein after fasting maximises muscle retention.\n\nAvoid breaking with sugar or processed carbs — blood sugar will spike and crash hard after a fast.\n\nLog your first meal now: tell me what you ate.`;
-    }
-
-    return null; // the engine owns this — its own guards keep the SADAG net
-  }
 
   // ---- EXERCISE SUBSTITUTION ENGINE — "can't do X", "alternative to X" ----
   if (/\b(can.?t\s+do|cannot\s+do|alternative\s+(?:to|for)|replace\s+(?:squat|bench|deadlift|pull.?up|push.?up|lunge|press|curl|row)|instead\s+of\s+(?:squat|bench|deadlift|pull.?up|push.?up|lunge|press|curl|row))\b/i.test(m)) {
