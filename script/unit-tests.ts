@@ -8126,6 +8126,61 @@ await Promise.all(pending);
   });
 
 
+// ── "CAN I EAT THIS?" (2026-08-05) — the four screenshots the founder sends by hand all day.
+// Grounded means the verdict comes from the LABEL'S numbers and the client's goal. If any of
+// these four returns "sure, in moderation", the feature is fluff and has not been built.
+{
+  const { productVerdict, compareProducts } = await import("../server/food-swaps");
+
+  test("can I eat this: zero-sugar energy drink → yes, any day", () => {
+    const v = productVerdict("G Force Zero", { kcal: 5, sugarG: 0, satFatG: 0 }, "fat_loss")!;
+    assert.equal(v.frequency, "any day");
+    assert.match(v.line, /zero sugar/i);
+    assert.ok(!/moderation/i.test(v.line), "never the fluff answer");
+  });
+
+  test("can I eat this: sugar-free chocolate → yes, but a portion, not the slab", () => {
+    const v = productVerdict("sugar-free chocolate", { kcal: 180, sugarG: 1, satFatG: 6 }, "fat_loss")!;
+    assert.equal(v.frequency, "few times a week");
+    assert.match(v.line, /couple of squares|not the slab/i, "portion must be named");
+    assert.match(v.line, /180/, "grounded in the label's own number");
+  });
+
+  test("can I eat this: a pie → yes, but once a week, said plainly", () => {
+    const v = productVerdict("steak pie", { kcal: 450, sugarG: 3, satFatG: 12 }, "fat_loss")!;
+    assert.equal(v.frequency, "once a week");
+    assert.match(v.line, /once a week/i);
+    assert.ok(v.allowed, "never forbid food outright — that is how clients start lying to you");
+  });
+
+  test("can I eat this: same pie on a building phase reads differently", () => {
+    const cut = productVerdict("steak pie", { kcal: 450, sugarG: 3, satFatG: 12 }, "fat_loss")!;
+    const gain = productVerdict("steak pie", { kcal: 450, sugarG: 3, satFatG: 12 }, "muscle_gain")!;
+    assert.notEqual(cut.line, gain.line, "the client's goal must change the answer");
+    assert.match(gain.line, /fuel/i);
+  });
+
+  test("can I eat this: an unreadable label is NEVER guessed at", () => {
+    assert.equal(productVerdict("mystery snack", {}, "fat_loss"), null);
+    assert.equal(productVerdict("mystery snack", { kcal: null, sugarG: null, satFatG: null }, "fat_loss"), null);
+  });
+
+  test("which one: two margarines — names the winner and why, in one line", () => {
+    const out = compareProducts(
+      { name: "Flora Light", label: { satFatG: 2.1, sugarG: 0, kcal: 360 } },
+      { name: "Rama Original", label: { satFatG: 7.8, sugarG: 0, kcal: 540 } })!;
+    assert.match(out, /Flora Light/);
+    assert.match(out, /saturated fat/i);
+    assert.match(out, /2\.1g vs 7\.8g/, "grounded in both labels, not a preference");
+    assert.ok(out.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 3, "one line, not a lecture");
+  });
+
+  test("which one: nothing readable on either → no verdict rather than a coin flip", () => {
+    assert.equal(compareProducts({ name: "A", label: {} }, { name: "B", label: {} }), null);
+  });
+}
+
+
 // ── THE WEIGHT-TREND AUDIT (2026-08-05) ──────────────────────────────────────────────────
 // This maths silently CHANGES a client's calories, so it was disabled for beta until it could
 // be tested rather than argued about. These are the audit questions, as assertions.

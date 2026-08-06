@@ -354,3 +354,88 @@ export function answerUnavailable(message: string): string | null {
   }
   return null;
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * "CAN I EAT THIS?" — a grounded verdict on a packaged product (2026-08-05).
+ *
+ * The question clients actually send, with a photo of a label: is this cool, can I have it
+ * consistently, which of these two. The founder answers it by hand all day — "anything zero
+ * sugar", "good choice", "let me see the back" — and "let me see the back" is the whole
+ * method: the answer lives in the numbers on the label, not in a feeling about the product.
+ *
+ * So this takes the LABEL'S OWN NUMBERS and that client's goal, and returns yes/no + how
+ * often + how much. Never "sure, in moderation" — that is the fluff this exists to replace.
+ *
+ * Deterministic on purpose. A verdict a client will repeat to themselves in a shop for months
+ * must not change because a model sampled differently on Tuesday.
+ *
+ * Thresholds are per SERVING, and chosen to match how the founder already answers:
+ *   - zero/near-zero sugar drink        → yes, any day
+ *   - sugar-free treat, real fat/kcal   → yes, but a treat: a portion, not the pack
+ *   - a pie, a slab, a fried thing      → yes, but once a week, and say so plainly
+ * ──────────────────────────────────────────────────────────────────────────── */
+export type Label = { kcal?: number | null; sugarG?: number | null; satFatG?: number | null; proteinG?: number | null };
+export type Verdict = { allowed: boolean; frequency: "any day" | "few times a week" | "once a week"; line: string };
+
+/** Grounded verdict for ONE product. Null when the label gave us nothing to judge on. */
+export function productVerdict(name: string, label: Label, goalType?: string | null): Verdict | null {
+  const kcal = num(label.kcal), sugar = num(label.sugarG), sat = num(label.satFatG), prot = num(label.proteinG);
+  if (kcal === null && sugar === null && sat === null) return null; // nothing read → never guess
+  const gain = (goalType || "").toLowerCase() === "muscle_gain";
+  const n = (name || "this").trim();
+
+  // A drink or snack with no sugar and few calories is the easy yes the founder gives daily.
+  if ((sugar ?? 0) <= 1 && (kcal ?? 0) <= 25) {
+    return { allowed: true, frequency: "any day", line: `${cap(n)} — zero sugar, near zero calories. Fits any day, no limit. 👌` };
+  }
+  // Real protein, modest sugar — this is food, not a treat.
+  if ((prot ?? 0) >= 10 && (sugar ?? 0) <= 10) {
+    return { allowed: true, frequency: "any day", line: `${cap(n)} — ${prot}g protein and low sugar. That's a proper choice, have it whenever. 👌` };
+  }
+  // The heavy end: a pie, a slab, anything rich in saturated fat or calories per serving.
+  if ((kcal ?? 0) >= 400 || (sat ?? 0) >= 10) {
+    return {
+      allowed: true, frequency: "once a week",
+      line: gain
+        ? `${cap(n)} — yes, and on a building phase it's fuel. Once a week though, not daily: ${kcal ?? "those"} kcal a serving is a lot of it from one thing.`
+        : `${cap(n)} — yes, but a treat. Once a week, one serving, and eat it after a proper meal so it isn't the meal. 👌`,
+    };
+  }
+  // Sugar-free but still a real treat — the sugar-free chocolate case exactly.
+  if ((sugar ?? 0) <= 5 && (kcal ?? 0) > 25) {
+    return {
+      allowed: true, frequency: "few times a week",
+      line: `${cap(n)} — sugar-free helps, but it still carries ${kcal} kcal a serving. A couple of squares, not the slab. 👌`,
+    };
+  }
+  // Everything else: sugary, low protein.
+  return {
+    allowed: true, frequency: "once a week",
+    line: `${cap(n)} — ${sugar}g sugar a serving, so keep it to once a week and not on a training day. 👌`,
+  };
+}
+
+/**
+ * TWO PRODUCTS, ONE TROLLEY — "which one?" (the margarine screenshot).
+ *
+ * Picks on SATURATED FAT first, then sugar, then calories, and says why in one line. A client
+ * holding two tubs needs the name of the one to put back, not a nutrition lecture.
+ */
+export function compareProducts(a: { name: string; label: Label }, b: { name: string; label: Label }): string | null {
+  const key = (l: Label) => [num(l.satFatG) ?? 99, num(l.sugarG) ?? 99, num(l.kcal) ?? 9999];
+  const [as, ag, ak] = key(a.label), [bs, bg, bk] = key(b.label);
+  if (as === 99 && bs === 99 && ag === 99 && bg === 99) return null; // nothing to compare on
+  const aWins = as !== bs ? as < bs : ag !== bg ? ag < bg : ak <= bk;
+  const win = aWins ? a : b, lose = aWins ? b : a;
+  const reason = as !== bs
+    ? `less saturated fat (${num(win.label.satFatG)}g vs ${num(lose.label.satFatG)}g)`
+    : ag !== bg ? `less sugar (${num(win.label.sugarG)}g vs ${num(lose.label.sugarG)}g)`
+    : `fewer calories`;
+  return `Take the *${win.name.trim()}* — ${reason}. Put the other one back. 👌`;
+}
+
+function num(v: unknown): number | null {
+  const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+  return Number.isFinite(n) ? n : null;
+}
+function cap(s: string): string { return s.charAt(0).toUpperCase() + s.slice(1); }
