@@ -21,7 +21,6 @@ import { replyWithButtons } from "../twilio-interactive";
 // exact label as a message, which the deterministic handlers already understand.
 const MENU_BUTTONS = ["Log food", "Today's workout", "My progress"];
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
-import { getProgressiveOverloadContext } from "./checks";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, nextDayDate, isMultiPartAsk , spaceName} from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
@@ -482,7 +481,7 @@ export async function handleEarlyCommands(ctx: {
     // Walk-only clients never lift — "log bench 80kg 3x10" is noise. Give them a walk-fit closer.
     const doneHint = (effectiveUser.trainingMode === "walk_only" || effectiveUser.trainingMode === "walk")
       ? `Send *done* when you finish, or just tell me how it went (e.g. "25 min, felt strong").`
-      : `Send *done* when finished. Log lifts: "bench 80kg 3x10"`;
+      : `Send *done* when finished.`;
 
     // REST DAY
     if (state.type === "REST") {
@@ -499,14 +498,13 @@ export async function handleEarlyCommands(ctx: {
 
     // ALREADY DONE TODAY
     if (state.type === "ALREADY_DONE") {
-      const poCtx = await getProgressiveOverloadContext(user.id);
       const doneNote = pick([
         `${firstName ? firstName + ", t" : "T"}oday's session is done ✅`,
         `${firstName ? firstName + " — s" : "S"}ession logged ✅`,
         `${firstName ? firstName + ", y" : "Y"}ou've already put today's work in ✅`,
         `${firstName ? firstName + " — t" : "T"}oday is ticked off ✅`,
       ]);
-      const doneReply = `${doneNote}${poCtx ? "\n\n" + poCtx.trim() : ""}\n\nWhat's next?[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
+      const doneReply = `${doneNote}\n\nWhat's next?[BUTTONS:Tomorrow's session|Log food|My progress]`;
       await logChat(user.id, message, doneReply.replace(/\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_ALREADY_DONE");
       return doneReply;
     }
@@ -522,7 +520,6 @@ export async function handleEarlyCommands(ctx: {
       ]);
       const todaySlot = getTodaySlot(user);
       const workout = buildDayWorkout({ ...effectiveUser, programmeDayInWeek: todaySlot });
-      const poContext = await getProgressiveOverloadContext(user.id);
       const week = user.programmeWeek || 1;
       const sessionNum = user.totalWorkoutsCompleted || 0;
       const injuryNote = user.injuries && user.injuries.trim() && user.injuries.toLowerCase() !== "none"
@@ -530,7 +527,7 @@ export async function handleEarlyCommands(ctx: {
         : "";
       const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
       const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-      const missedReply = `${catchupIntro}\n\n*Week ${week} — Session ${sessionNum + 1}*\n\n${poContext}${workout}${injuryNote}\n\n${doneHint}${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+      const missedReply = `${catchupIntro}\n\n*Week ${week} — Session ${sessionNum + 1}*\n\n${workout}${injuryNote}\n\n${doneHint}${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
       await logChat(user.id, message, missedReply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_MISSED_CATCHUP");
       return missedReply;
     }
@@ -538,7 +535,6 @@ export async function handleEarlyCommands(ctx: {
     // NORMAL — scheduled training day, nothing done yet
     const todaySlot = getTodaySlot(user);
     const workout = buildDayWorkout({ ...effectiveUser, programmeDayInWeek: todaySlot });
-    const poContext = await getProgressiveOverloadContext(user.id);
     const week = user.programmeWeek || 1;
     const sessionNum = user.totalWorkoutsCompleted || 0;
     const sessionNote = sessionNum > 0 ? ` — Session ${sessionNum + 1}` : "";
@@ -548,7 +544,7 @@ export async function handleEarlyCommands(ctx: {
       : "";
     const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
     const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-    const reply = `${sickViewHeader}${weekNote}${poContext}${workout}${injuryNote}\n\n${doneHint}${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+    const reply = `${sickViewHeader}${weekNote}${workout}${injuryNote}\n\n${doneHint}${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
     await logChat(user.id, message, reply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_VIEW");
     return reply;
   }

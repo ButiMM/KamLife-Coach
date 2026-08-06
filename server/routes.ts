@@ -36,7 +36,7 @@ import { handleWater, tryLogWater } from "./handlers/water";
 import { handleFoodContext } from "./handlers/food-context";
 import { stripSignupSource } from "./signup-source";
 import { captureSignupSource } from "./signup-capture";
-import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, getProgressiveOverloadContext, checkPerfectDay } from "./handlers/checks";
+import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
 import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";

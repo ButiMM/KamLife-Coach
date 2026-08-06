@@ -7,7 +7,7 @@ import { db } from "../db";
 import { assessWeightRate } from "./weight";
 import {
   users, weightLogs, workoutLogs, stepLogs, chatHistory,
-  mealLogs, exerciseLogs, bodyMeasurements, clothingCheckins,
+  mealLogs, bodyMeasurements, clothingCheckins,
 } from "../../shared/schema";
 import { eq, desc, asc, and, gte, sql } from "drizzle-orm";
 import { SUPPLEMENT_GUIDE } from "../constants";
@@ -28,7 +28,7 @@ import { getOnboardingMealPlan } from "../onboarding";
 import { askCoachK } from "../gpt";
 import { withTimeout, logChat } from "./chat-log";
 import { calculateTargets, waterTargetLitres } from "../targets";
-import { getProgressiveOverloadContext, JUNK_WORDS } from "./checks";
+import { JUNK_WORDS } from "./checks";
 import { getStepStreak } from "./steps";
 import { scanForSAFoods } from "./food-scanner";
 import { storeMemory } from "../memory";
@@ -792,21 +792,19 @@ export async function handleMiscCommands(ctx: {
       const requestedDay = parseInt(dayMatch[1]);
       const dayUser = { ...user, programmeDayInWeek: requestedDay };
       const workout = buildDayWorkout(dayUser);
-      const poCtx = await getProgressiveOverloadContext(user.id);
       const gif1 = getPrimaryWorkoutGifUrl(workout);
-      return `${poCtx}*Day ${requestedDay} Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${viewerLine}${gif1 ? `\n[MEDIA:${gif1}]` : ""}`;
+      return `*Day ${requestedDay} Workout*\n\n${workout}\n\nSend *done* when finished.${viewerLine}${gif1 ? `\n[MEDIA:${gif1}]` : ""}`;
     }
     const workout = buildDayWorkout(user);
     const dayNum = user.programmeDayInWeek || 1;
     const week = user.programmeWeek || 1;
     const totalSessions = user.totalWorkoutsCompleted || 0;
-    const poCtx = await getProgressiveOverloadContext(user.id);
     // programmeWeek is phase-relative (resets to 1 each new phase), so "Week 1 | Session 19"
     // read as broken. Anchor the week to its phase so the two numbers make sense together.
     const phaseName = getPhaseNames()[user.programmePhase || 1] || "Foundation";
     const sessionNote = totalSessions > 0 ? ` · Session ${totalSessions + 1}` : "";
     const gif2 = getPrimaryWorkoutGifUrl(workout);
-    return `*${phaseName} Phase · Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Today's Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${viewerLine}${gif2 ? `\n[MEDIA:${gif2}]` : ""}`;
+    return `*${phaseName} Phase · Week ${week}${sessionNote}*\n\n*Day ${dayNum} — Today's Workout*\n\n${workout}\n\nSend *done* when finished.${viewerLine}${gif2 ? `\n[MEDIA:${gif2}]` : ""}`;
   }
 
   // ---- NEW: NEXT WORKOUT ---- Exact bare phrases PLUS a shape match, so prefixed and voice-transcribed phrasings ("show me tomorrow's workout", "what's tomorrow's session") route here deterministically. "tomorrow" is
@@ -830,7 +828,7 @@ export async function handleMiscCommands(ctx: {
     const nextWorkout = buildDayWorkout(nextDayUser);
     const week = user.programmeWeek || 1;
     const gifNext = getPrimaryWorkoutGifUrl(nextWorkout);
-    return `*Week ${week} — Next Session (Day ${nextDay}):*\n\n${nextWorkout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gifNext ? `\n[MEDIA:${gifNext}]` : ""}`;
+    return `*Week ${week} — Next Session (Day ${nextDay}):*\n\n${nextWorkout}\n\nSend *done* when finished.${gifNext ? `\n[MEDIA:${gifNext}]` : ""}`;
   }
 
   // ---- NEW: STREAK ----
@@ -1157,17 +1155,10 @@ export async function handleMiscCommands(ctx: {
   if (m === "my workouts" || m === "workout history" || m === "workout diary" || m === "recent workouts" || /\b(workout\s*history|workout\s*diary|my\s*workouts|recent\s*workout|past\s*workout|training\s*history)\b/i.test(m)) {
     try {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
-      const [recentWorkouts, recentLifts] = await Promise.all([
-        db.select({ date: workoutLogs.loggedAt, completed: workoutLogs.workoutCompleted })
-          .from(workoutLogs)
-          .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, thirtyDaysAgo)))
-          .orderBy(desc(workoutLogs.loggedAt)),
-        db.select({ exercise: exerciseLogs.exerciseName, weight: exerciseLogs.weightKg, reps: exerciseLogs.reps, sets: exerciseLogs.sets, date: exerciseLogs.loggedAt })
-          .from(exerciseLogs)
-          .where(and(eq(exerciseLogs.userId, user.id), gte(exerciseLogs.loggedAt, thirtyDaysAgo)))
-          .orderBy(desc(exerciseLogs.loggedAt))
-          .limit(30),
-      ]);
+      const recentWorkouts = await db.select({ date: workoutLogs.loggedAt, completed: workoutLogs.workoutCompleted })
+        .from(workoutLogs)
+        .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, thirtyDaysAgo)))
+        .orderBy(desc(workoutLogs.loggedAt));
 
       if (recentWorkouts.length === 0) {
         return `No workouts logged in the last 30 days. Say *workout* to see today's session and get started.`;
@@ -1196,18 +1187,6 @@ export async function handleMiscCommands(ctx: {
         const target = user.trainingDaysPerWeek || 3;
         const emoji = count >= target ? "✅" : count >= target - 1 ? "⚠️" : "🔴";
         history += `• Week of ${week}: ${count}/${target} sessions ${emoji}\n`;
-      }
-
-      // Recent lifts
-      if (recentLifts.length > 0) {
-        const uniqueExercises = [...new Set(recentLifts.map(l => l.exercise))].slice(0, 5);
-        history += `\n*Recent lifts:*\n`;
-        for (const ex of uniqueExercises) {
-          const latest = recentLifts.find(l => l.exercise === ex);
-          if (latest) {
-            history += `• ${ex}: ${latest.weight}kg × ${latest.sets || 3}×${latest.reps || 10}\n`;
-          }
-        }
       }
 
       // Consistency check

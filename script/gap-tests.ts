@@ -5,7 +5,6 @@
  * Functions tested here:
  *   scalePortionDescription  (food-context.ts)
  *   extractMealLabel         (food-context.ts)
- *   parseLiftLog             (workout.ts)
  *   assessWeightRate         (weight.ts)
  *   parseMealDate            (utils.ts) — edge cases beyond routing-audit coverage
  *   isRetroactiveMeal        (utils.ts)
@@ -26,7 +25,6 @@ process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+270
 
 // Dynamic imports — execute after env vars above, unlike static imports which are hoisted.
 const { scalePortionDescription, extractMealLabel, adjustFoodsForSegment } = await import("../server/handlers/food-context");
-const { parseLiftLog } = await import("../server/handlers/workout");
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
 const { scanForSAFoods } = await import("../server/handlers/food-scanner");
@@ -152,119 +150,11 @@ test("extractMealLabel: no time signal — returns null (falls back to time-of-d
   assert.ok(VALID.has(result), `unexpected label: ${result}`);
 });
 
-// ============================================================
-// parseLiftLog — exercise weight log parsing
-// ============================================================
-
-test("parseLiftLog: bench with weight and sets×reps", () => {
-  const r = parseLiftLog("bench press 100kg 4x8");
-  assert.equal(r.length, 1);
-  assert.equal(r[0].name, "bench press");
-  assert.equal(r[0].weight, 100);
-  assert.equal(r[0].sets, 4);
-  assert.equal(r[0].reps, 8);
-});
-
-test("parseLiftLog: squat with weight only (no sets×reps)", () => {
-  const r = parseLiftLog("squat 120kg");
-  assert.equal(r.length, 1);
-  assert.equal(r[0].name, "squat");
-  assert.equal(r[0].weight, 120);
-  assert.equal(r[0].sets, undefined);
-  assert.equal(r[0].reps, undefined);
-});
-
-test("parseLiftLog: multiple exercises comma-separated", () => {
-  const r = parseLiftLog("bench press 80kg 3x10, squat 100kg 3x8");
-  assert.equal(r.length, 2);
-  assert.equal(r[0].name, "bench press");
-  assert.equal(r[1].name, "squat");
-});
-
-test("parseLiftLog: decimal weight parsed correctly", () => {
-  const r = parseLiftLog("lateral raise 12.5kg 3x12");
-  assert.equal(r.length, 1);
-  assert.equal(r[0].weight, 12.5);
-});
-
-test("parseLiftLog: 'kgs' suffix accepted", () => {
-  const r = parseLiftLog("deadlift 140kgs 1x5");
-  assert.equal(r.length, 1);
-  assert.equal(r[0].weight, 140);
-});
-
-test("parseLiftLog: food message rejected — no lifts parsed", () => {
-  const r = parseLiftLog("i had rice and chicken for lunch");
-  assert.equal(r.length, 0);
-});
-
-// Screenshot: "my chest fly is: 116kg → aim 118.5kg". The bug was the garbled NAME
-// ("my chest fly is"), stored verbatim. The WEIGHT is real — a machine/pec-deck fly
-// legitimately runs past 100kg on the stack — so it must be stored, not thrown away.
-test("parseLiftLog: filler stripped from name, heavy machine fly weight kept (116kg)", () => {
-  const r = parseLiftLog("my chest fly is 116kg");
-  assert.equal(r.length, 1);
-  assert.equal(r[0].name, "chest fly");
-  assert.equal(r[0].weight, 116);
-});
-
-test("parseLiftLog: filler words stripped from exercise name", () => {
-  const r = parseLiftLog("my bench press is 80kg 4x8");
-  assert.equal(r.length, 1);
-  assert.equal(r[0].name, "bench press");
-  assert.equal(r[0].weight, 80);
-});
-
-test("parseLiftLog: heavy compound stored as logged (leg press 180kg)", () => {
-  const r = parseLiftLog("leg press 180kg 4x8");
-  assert.equal(r.length, 1);
-  assert.equal(r[0].weight, 180);
-});
-
-test("parseLiftLog: obvious fat-finger still rejected (>500kg)", () => {
-  const r = parseLiftLog("bench press 1160kg");
-  assert.equal(r.length, 0);
-});
-
-test("parseLiftLog: step count message rejected", () => {
-  const r = parseLiftLog("walked 8000 steps today");
-  assert.equal(r.length, 0);
-});
-
-test("parseLiftLog: water message rejected", () => {
-  const r = parseLiftLog("drank 2 litres of water");
-  assert.equal(r.length, 0);
-});
-
-test("parseLiftLog: weight too low (0.5kg) rejected", () => {
-  const r = parseLiftLog("bench press 0.5kg 3x10");
-  assert.equal(r.length, 0);
-});
-
-test("parseLiftLog: weight too high (600kg) rejected", () => {
-  const r = parseLiftLog("squat 600kg 1x1");
-  assert.equal(r.length, 0);
-});
-
-test("parseLiftLog: hip thrust with weight and sets", () => {
-  const r = parseLiftLog("hip thrust 80kg 3x12");
-  assert.equal(r.length, 1);
-  assert.equal(r[0].name, "hip thrust");
-  assert.equal(r[0].weight, 80);
-});
-
-test("parseLiftLog: lat pulldown parsed", () => {
-  const r = parseLiftLog("lat pulldown 60kg 3x10");
-  assert.equal(r.length, 1);
-  assert.equal(r[0].name, "lat pulldown");
-});
-
-test("parseLiftLog: 'rdl 80kg 3x10' parsed as rdl", () => {
-  const r = parseLiftLog("rdl 80kg 3x10");
-  assert.equal(r.length, 1);
-  assert.equal(r[0].name, "rdl");
-  assert.equal(r[0].weight, 80);
-});
+// parseLiftLog tests REMOVED 2026-08-06 with the function. Lift logging is gone: training is
+// tracked by which days and whether they trained. The one thing those tests protected that
+// still matters — a lift message must not be misread as a body weight or a retro session —
+// is now asserted in routing-audit.ts against EXERCISE_PATTERN, which is the guard that
+// survived the deletion precisely for that reason.
 
 // ============================================================
 // assessWeightRate — safe weight-change assessment

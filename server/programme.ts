@@ -1366,33 +1366,10 @@ export function getYoutubeLinkForExercise(name: string): string | undefined {
   return undefined;
 }
 
-// ── Exercise-name normalisation ──────────────────────────────────────────────
-// A lift-log parser scoops up conversational filler — "my chest fly is 116kg" was
-// stored and echoed verbatim as the exercise NAME ("my chest fly is: 116kg → aim…").
-// Strip the filler so the stored/displayed name is the movement itself, which also
-// keeps the same movement tracking consistently for progressive overload.
-//
-// We deliberately do NOT second-guess the WEIGHT. A machine / pec-deck chest fly
-// genuinely runs past 100kg on the stack (it's a plate selection, not a free-weight
-// load), so the client's logged number is stored exactly as given — throwing away a
-// real lift would break the very progressive overload this feeds. Only an obvious
-// fat-finger (>500kg) is rejected, and that check already lives in parseLiftLog.
-export function cleanExerciseName(raw: string): string {
-  return (raw || "").toLowerCase().replace(/\s+/g, " ").trim()
-    .replace(/^(?:(?:my|the|a|on|for|i|just|today'?s?|did|do|done|log|logged)\s+)+/g, "")
-    .replace(/\s+(?:is|was|are|were|at|for|to|today|now|please|done)$/g, "")
-    .trim();
-}
+// cleanExerciseName / canonicalLiftKey REMOVED (2026-08-06). They existed to tidy and group
+// the names clients typed when logging lifts ("my chest fly is" → "chest fly"), and lift
+// logging is gone. Nothing else ever called them.
 
-// Canonical key for grouping the SAME movement logged under different names, so
-// progressive overload actually tracks. "chest fly", "pec deck" and "cable fly" all
-// resolve to the chest-fly slug and share one weight history; an unknown movement
-// falls back to its cleaned name (still consistent for that client). This is what
-// stops a lift fragmenting into several one-off entries that never progress.
-export function canonicalLiftKey(rawName: string): string {
-  const cleaned = cleanExerciseName(rawName);
-  return resolveExerciseSlug(cleaned) || cleaned;
-}
 
 function formatGymDay(
   exercises: Exercise[],

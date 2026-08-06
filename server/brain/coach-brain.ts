@@ -14,15 +14,14 @@
  *    and the existing handlers run. It can only ADD a reply, never remove the fallback.
  *  - Runs AFTER the deterministic safety layer (crisis/medical/injection), so those are
  *    never in the model's hands.
- *  - The only write tool (log_lifts) reuses the maze's parser + insert and is guarded by
- *    looksLikeQuestion. No irreversible advance/goal/billing tool exists here.
+ *  - No irreversible advance/goal/billing tool exists here. The log_lifts write tool was
+ *    removed on 2026-08-06 with the rest of lift tracking.
  */
 
 import { db } from "../db";
-import { exerciseLogs, mealLogs, chatHistory, users } from "../../shared/schema";
+import { mealLogs, chatHistory, users } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { buildDayWorkout, getKamlifeProgramme } from "../programme";
-import { parseLiftLog } from "../handlers/workout";
 import { looksLikeQuestion, sastDayStart, sastToday } from "../utils";
 import { logChat } from "../handlers/chat-log";
 import { invalidatePatternCache } from "../cache";
@@ -140,7 +139,7 @@ NEVER SAY (this is what makes a bot sound like a bot): "How can I help you today
 
 UNDERSTAND BEFORE YOU ACT (the most important rule — it overrides the tool rules below).
 Your FIRST job is to understand what this person MEANS and NEEDS, not to trigger an action. Before you reach for any tool, answer silently: what is happening for them, what do they actually want right now — to be heard, to get an answer, permission, a push, or an action? THEN decide.
-- Do NOT call an ACTION tool (get_todays_workout, get_full_programme, log_lifts, log_repeat_meal, remove_meal) unless the client EXPLICITLY asked for that exact action IN THIS MESSAGE. "Give me today's workout" = yes. "Map out my journey", "what's the plan from here", "how am I doing", "I feel like I should be doing something", "I want to get better" = NO — these are reflective/open/emotional; answer as a coach in words, or ask ONE clarifying question ("Do you mean your workout plan, or your progress from here?"). Never dump a workout or plan onto an open-ended message.
+- Do NOT call an ACTION tool (get_todays_workout, get_full_programme, log_repeat_meal, remove_meal) unless the client EXPLICITLY asked for that exact action IN THIS MESSAGE. "Give me today's workout" = yes. "Map out my journey", "what's the plan from here", "how am I doing", "I feel like I should be doing something", "I want to get better" = NO — these are reflective/open/emotional; answer as a coach in words, or ask ONE clarifying question ("Do you mean your workout plan, or your progress from here?"). Never dump a workout or plan onto an open-ended message.
 - get_client_snapshot is READ-ONLY — always safe to call to understand them. The restraint above is about ACTION tools only.
 - When a client corrects you or says "that's not what I meant" / "don't give me a workout" — STOP, drop the action, and answer the actual point. Never repeat the thing they just rejected.
 - HEALTH OVERRIDE: if the client mentions being sick, ill, flu, recovering, "not well", "after I recover" — even in passing — NEVER push training, steps, a schedule, or a workout tool. Lead with genuine care, hold rest. A sick person is a person first.
@@ -152,7 +151,6 @@ WHAT YOU DO
 - WORKOUTS: when they ask for a session — today's, OR a home/dumbbell/equipment variant ("give me a home workout with two dumbbells", "something with just bands") — call get_todays_workout (it already knows their equipment) for today, or get_full_programme for the whole plan. NEVER hand-write a workout with your own sets×reps: the programme owns the exact sets, and an improvised "3 sets of 12" overrides it and confuses the client. If you genuinely can't serve it from a tool, defer — never freestyle a session.
 - DEMONSTRATIONS / "show me how": the product HAS exercise demos — every workout message carries a "See every move" link that opens a swipe-through demo of each exercise. NEVER tell a client to search online/YouTube for demos. Tell them: reply *workout* and tap *See every move*. For form feedback on THEIR movement: film one set from the side and send it.
 - PROACTIVE OBSERVATION: when the snapshot shows something the client did NOT ask about but a real coach would flag (protein short several days running, steps sliding, weight drifting the wrong way for the goal), add ONE short observation with the next action ("Protein's been under 150 four days now — add eggs to breakfast and it's fixed"). Maximum one per reply, only when genuinely useful, never the same flag twice in a row — a coach who notices beats a coach who waits to be asked.
-- If they REPORT lifts they did (e.g. "bench 80kg 3x10"), call log_lifts.
 - If they say a meal is the SAME as one already logged ("same thing for dinner", "same dinner as lunch today", "same as yesterday"), call log_repeat_meal — this is the fuzzy case the old system got wrong.
 - If they want logged food REMOVED or corrected — any phrasing: "remove the last meal", "delete the rice", "that dinner is wrong", "get rid of the duplicates" — call remove_meal. Never claim something was removed unless the tool just confirmed it.
 
@@ -231,18 +229,6 @@ export const TOOLS = [
       name: "get_full_programme",
       description: "The client's ENTIRE multi-week programme (all training days for the phase). Use when they ask for 'the full plan', 'the whole programme', 'this week's plan', 'everything', not just today. This sends the plan straight to them.",
       parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "log_lifts",
-      description: "Record weights the client says they LIFTED today. Only for a report of completed lifts, never a question or hypothetical.",
-      parameters: {
-        type: "object",
-        properties: { raw: { type: "string", description: "the client's exact lift text, e.g. 'bench 80kg 3x10'" } },
-        required: ["raw"],
-      },
     },
   },
   {

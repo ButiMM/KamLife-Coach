@@ -51,7 +51,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 430,
+  authorshipPoints: 420,
   twilioCallSites: 18,
 };
 
@@ -138,7 +138,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
     // deleted: a raise that vanishes once it is convenient teaches nothing, and the next
     // person should see both that it was taken and that it was settled.
     key: "authorshipPoints", from: 440, to: 443, date: "2026-08-06",
-    why: "[SETTLED 2026-08-06 — budget now 430] THREE new mouths, both for features that legally or clinically cannot be silent. "
+    why: "[SETTLED 2026-08-06 — budget now 420] THREE new mouths, both for features that legally or clinically cannot be silent. "
       + "(1) server/food-swaps.ts +1 — productVerdict answers 'can I eat this?' from the "
       + "nutrition label. (2) server/onboarding.ts +2 — the ASK_BODY_PHOTOS branch, which is "
       + "what finally makes onboarding-physique.ts REACHABLE: that module has existed since "

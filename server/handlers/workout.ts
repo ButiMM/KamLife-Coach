@@ -6,16 +6,15 @@
  */
 
 import { db } from "../db";
-import { users, workoutLogs, exerciseLogs, stepLogs, chatHistory } from "../../shared/schema";
+import { users, workoutLogs, stepLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, lt, desc } from "drizzle-orm";
 import { classifyWorkoutFeedback, workoutFeedbackReply } from "../workout-feedback";
 import { parseSessionReport, sessionReportReply, sessionMemoryLine, type SessionReport } from "../session-report";
 import {
   buildDayWorkout,
   buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES,
-  cleanExerciseName,
 } from "../programme";
-import { checkPerfectDay, getProgressiveOverloadContext } from "./checks";
+import { checkPerfectDay } from "./checks";
 import { storeMemory } from "../memory";
 import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
@@ -28,41 +27,12 @@ import { calculateTargets } from "../targets";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { sendWhatsApp, saveState } from "../scheduler/shared";
 
-// Exercise name keywords used to identify lift-format messages
+// Exercise-name vocabulary. parseLiftLog was deleted with lift logging on 2026-08-06, but
+// this pattern is NOT a parser input — it is a GUARD used twice below, and both uses are the
+// reason it survives: "bench 80kg 3x10" must not be logged as a body weight, and a weight
+// training message must not be logged as cardio. Without it, "bench 80kg" sets the client's
+// weight to 80kg and silently recalculates every target.
 const EXERCISE_PATTERN = /\b(?:bench\s*press?|squat|deadlift|leg\s*press?|leg\s*curl|leg\s*extension|hip\s*thrust|rdl|romanian|lunge|lateral\s*raise|shoulder\s*press?|overhead\s*press?|ohp|lat\s*pull[- ]?down|seated\s*row|cable\s*row|face\s*pull|bicep\s*curl|tricep|pushdown|push[- ]?ups?|pull[- ]?ups?|chin[- ]?ups?|dip|plank|fly|chest\s*press?|incline|decline|cable|barbell|bb|dumbbell|db|calf\s*raise|glute|hip|press|rows?|rdls?|step\s*up|abduction|adduction|pull\s*through|hip\s*hinge)\b/i;
-
-export function parseLiftLog(m: string): Array<{ name: string; weight: number; sets?: number; reps?: number }> {
-  const results: Array<{ name: string; weight: number; sets?: number; reps?: number }> = [];
-
-  const parts = m.split(/\s*(?:,\s*|\s+and\s+)/i);
-  for (const part of parts) {
-    const trimmed = part.trim();
-    // {exercise words} {weight}[kg] [{sets}x{reps}]
-    const match = trimmed.match(
-      /^([a-z][a-z\s\-]{1,30}?)\s+(\d+(?:\.\d+)?)\s*(?:kg|kgs?)?\s*(?:(\d+)\s*[x×]\s*(\d+))?\s*$/i,
-    );
-    if (!match) continue;
-
-    const rawName = match[1].trim().toLowerCase().replace(/\s+/g, " ");
-    const name = cleanExerciseName(rawName) || rawName;  // "my chest fly is" → "chest fly"
-    const weight = parseFloat(match[2]);
-    const sets = match[3] ? parseInt(match[3]) : undefined;
-    const reps = match[4] ? parseInt(match[4]) : undefined;
-
-    if (
-      name.length < 2
-      || !Number.isFinite(weight)
-      || weight < 1
-      || weight > 500
-      || /\b(?:water|steps?|sleep|slept|ate|had|food|weigh|today|morning|kg\s*body|i(?:'m| am)|body)\b/i.test(name)
-      || !EXERCISE_PATTERN.test(name + " " + trimmed)
-    ) continue;  // weight >500 (fat-finger) already handled above; a heavy machine fly is REAL and kept
-
-    results.push({ name, weight, sets, reps });
-  }
-
-  return results;
-}
 
 export async function handleWorkoutCommands(ctx: {
   phone: string;
@@ -108,27 +78,6 @@ export async function handleWorkoutCommands(ctx: {
     }
   }
 
-  // ---- "MY LIFTS" — show recent exercise history ----
-  if (["my lifts", "lifts", "lift history", "my lift history", "my exercises", "exercise history", "log my lifts"].includes(m)) {
-    const recent = await db.select().from(exerciseLogs)
-      .where(eq(exerciseLogs.userId, user.id))
-      .orderBy(desc(exerciseLogs.loggedAt))
-      .limit(30);
-    if (recent.length === 0) {
-      return `No lifts logged yet. After your workout, send "done" then log lifts — e.g. "bench 80kg 3x10".`;
-    }
-    const seen = new Map<string, typeof recent[0]>();
-    for (const lift of recent) {
-      if (!seen.has(lift.exerciseName)) seen.set(lift.exerciseName, lift);
-    }
-    const lines = [...seen.values()].map(lift => {
-      const w = parseFloat(String(lift.weightKg || 0));
-      const setsReps = lift.sets && lift.reps ? ` ${lift.sets}×${lift.reps}` : lift.reps ? ` ×${lift.reps}` : "";
-      const next = (w + 2.5).toFixed(1).replace(".0", "");
-      return `• ${lift.exerciseName}: *${w}kg${setsReps}* → aim ${next}kg next`;
-    });
-    return `*Last logged lifts:*\n\n${lines.join("\n")}\n\n_Log today's lifts: "bench 80kg 3x10"_`;
-  }
 
   // ---- WEIGHT LOG — standalone "84kg" or brief weight check-in ----
   // Only fires if message is clearly about body weight, not exercise weight
@@ -400,8 +349,7 @@ export async function handleWorkoutCommands(ctx: {
       .limit(1);
 
     if (existing.length > 0) {
-      const poCtx = await getProgressiveOverloadContext(user.id, { compact: true });
-      return `${firstName ? firstName + ", " : ""}today's session is already logged. 👌${poCtx ? "\n\n" + poCtx.trim() : ""}`;
+      return `${firstName ? firstName + ", " : ""}today's session is already logged. 👌`;
     }
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
@@ -465,10 +413,7 @@ export async function handleWorkoutCommands(ctx: {
       } catch { /* non-fatal */ }
     }
 
-    const [perfectDay, poCtxDone] = await Promise.all([
-      checkPerfectDay(user.id, user.proteinTarget || 120),
-      getProgressiveOverloadContext(user.id, { compact: true }),
-    ]);
+    const perfectDay = await checkPerfectDay(user.id, user.proteinTarget || 120);
 
     // Week 1 Complete badge — fires once when programme week advances from 1 to 2.
     // Was a five-paragraph second WhatsApp message ("---" splits the bubble); the badge is
@@ -502,9 +447,6 @@ export async function handleWorkoutCommands(ctx: {
       ? ` 📹 Next session, film one set from the side and send it — I'll check your form.`
       : "";
 
-    // Last session's top lift, one sentence (see checks.ts `compact`). No table: they just
-    // walked out of the gym.
-    const liftPrompt = poCtxDone ? poCtxDone.trim() : "";
 
     await logChat(user.id, message, doneResponse, "WORKOUT_DONE");
 
@@ -544,35 +486,15 @@ export async function handleWorkoutCommands(ctx: {
     // has just trained is being asked one thing, so they get the three ways to answer it.
     return [
       `${doneResponse}${doneAddOn}`.trim(),
-      liftPrompt,
       `How did that session feel?[BUTTONS:Too easy|Just right|Too hard]`,
     ].filter(Boolean).join("\n\n");
   }
 
-  // ---- LIFT LOG — parse and store exercise data ----
-  const lifts = parseLiftLog(m);
-  // "should I bench 80kg?" / "can I squat 100kg" parse as lifts but are questions —
-  // don't store a phantom "should i bench" exercise row.
-  if (lifts.length > 0 && !looksLikeQuestion(m)) {
-    const inserts = lifts.map(lift =>
-      db.insert(exerciseLogs).values({
-        userId: user.id,
-        exerciseName: lift.name,
-        weightKg: lift.weight.toString(),
-        sets: lift.sets,
-        reps: lift.reps,
-      }),
-    );
-    await Promise.all(inserts);
 
-    const lines = lifts.map(lift => {
-      const setsReps = lift.sets && lift.reps ? ` ${lift.sets}×${lift.reps}` : lift.reps ? ` ×${lift.reps}` : "";
-      const next = (lift.weight + 2.5).toFixed(1).replace(".0", "");
-      return `${lift.name}: *${lift.weight}kg${setsReps}* → aim *${next}kg* or +1 rep next session`;
-    });
-
-    return `Logged 💪\n\n${lines.join("\n")}\n\n_I'll show these targets before your next session._`;
-  }
+  // LIFT LOGGING REMOVED (2026-08-06, founder's cut-now list). "bench 80kg 3x10", the stored
+  // exercise history and the progressive-overload target table are gone. Training is tracked
+  // the way a working-class client actually tracks it: which days, and did you train. The
+  // exercise_logs table and its rows stay so old data is still deletable under POPIA.
 
   // ---- GOAL CHANGE ----
   const goalChangeMatch = m.match(/\b(?:change|switch|update|new)\s+(?:my\s+)?goal\s+to\s+(fat[\s_]?loss|lose\s+weight|cut|muscle[\s_]?gain|muscle|build|bulk|maintenance|maintain|recomp(?:osition)?)\b/i);

@@ -1,5 +1,5 @@
 import {
-  db, users, chatHistory, stepLogs, workoutLogs, mealLogs, exerciseLogs, escalations,
+  db, users, chatHistory, stepLogs, workoutLogs, mealLogs, escalations,
   eq, gte, and, lt, desc, sql, asc,
   sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot,
   getActiveClients, isPaused, dayStart, getYesterdayLogs,
@@ -149,7 +149,7 @@ export async function runMorningCheckin(): Promise<void> {
 
       const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
       const twentyEightDaysAgo = new Date(Date.now() - 28 * 86_400_000);
-      const [proteinRows, recentStepLogs, yesterdayStepRows, mealSlotRows, monthWorkoutRows, exerciseLogRows] = await Promise.all([
+      const [proteinRows, recentStepLogs, yesterdayStepRows, mealSlotRows, monthWorkoutRows] = await Promise.all([
         db.select({ totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int` })
           .from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, yStart), lt(mealLogs.loggedAt, yEnd)))
           .catch((_e: Error) => [{ totalProt: 0 }]),
@@ -173,14 +173,6 @@ export async function runMorningCheckin(): Promise<void> {
           .from(workoutLogs)
           .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, twentyEightDaysAgo)))
           .catch(() => [{ count: 0 }]),
-        db.select({
-          exerciseName: exerciseLogs.exerciseName,
-          weightKg: exerciseLogs.weightKg,
-          loggedAt: exerciseLogs.loggedAt,
-        }).from(exerciseLogs)
-          .where(and(eq(exerciseLogs.userId, client.id), gte(exerciseLogs.loggedAt, fourteenDaysAgo)))
-          .orderBy(asc(exerciseLogs.loggedAt))
-          .catch(() => [] as { exerciseName: string; weightKg: string | null; loggedAt: Date | null }[]),
       ]);
 
       const totalProtLogged = (proteinRows as { totalProt: number }[])[0]?.totalProt || 0;
@@ -381,35 +373,6 @@ export async function runMorningCheckin(): Promise<void> {
         );
       }
 
-      // Progressive overload hint — only surfaces after a workout, when 3+ sessions at same weight detected
-      if (workoutLogged) {
-        try {
-          const lifts = exerciseLogRows as { exerciseName: string; weightKg: string | null; loggedAt: Date | null }[];
-          const byExercise = new Map<string, { date: string; maxKg: number }[]>();
-          for (const r of lifts) {
-            if (!r.weightKg || !r.exerciseName) continue;
-            const kg = parseFloat(String(r.weightKg));
-            if (!isFinite(kg) || kg <= 0) continue;
-            const d = r.loggedAt ? new Date(new Date(r.loggedAt).getTime() + 2 * 3_600_000).toISOString().slice(0, 10) : "";
-            if (!d) continue;
-            const key = r.exerciseName.toLowerCase().trim();
-            const sessions = byExercise.get(key) || [];
-            const existing = sessions.find(s => s.date === d);
-            if (existing) { existing.maxKg = Math.max(existing.maxKg, kg); }
-            else { sessions.push({ date: d, maxKg: kg }); byExercise.set(key, sessions); }
-          }
-          for (const [exName, sessions] of byExercise.entries()) {
-            if (sessions.length < 3) continue;
-            const sorted = sessions.sort((a, b) => a.date.localeCompare(b.date));
-            const last3 = sorted.slice(-3);
-            if (last3.every(s => s.maxKg === last3[0].maxKg)) {
-              const display = exName.replace(/\b\w/g, c => c.toUpperCase());
-              parts.push(`💡 *${display}*: ${last3[0].maxKg}kg for ${sorted.length >= 4 ? "4+" : "3"} sessions in a row — add 2.5kg next session.`);
-              break;
-            }
-          }
-        } catch { /* non-critical */ }
-      }
 
       // One-tap repeat breakfast suggestion
       let repeatSuggestion = "";

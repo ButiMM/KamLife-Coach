@@ -124,8 +124,13 @@ const CASES: Case[] = [
     reject: [/session logged|workout logged|sessions in total/i] },
   { name: "workout: lift PB share must NOT be read as retro workout (prod bug 2026-06-24)", msg: "Hack squat I did 25kg each side for the first time. 6 reps",
     reject: [/already got yesterday'?s workout logged/i, /logged to yesterday/i] },
-  { name: "workout: lift log 'bench 80kg 3x10' logs lifts, not a retro session", msg: "bench press 80kg 3x10",
-    expect: [/logged|kg|aim|next/i], reject: [/already got yesterday'?s workout logged/i] },
+  // RE-POINTED 2026-08-06. Lift logging is deleted, so this no longer asserts that the lift is
+  // STORED. What it still asserts — and what EXERCISE_PATTERN in workout.ts exists for — is the
+  // damage a lift message does when it is misread: "bench press 80kg" must never be logged as
+  // the client's BODY WEIGHT (which silently recalculates every target off an 80kg bench), and
+  // must never be logged as yesterday's session. The guard survived the deletion for this.
+  { name: "workout: 'bench 80kg 3x10' is not a body weight and not a retro session", msg: "bench press 80kg 3x10",
+    reject: [/weight logged|logged.*80\s*kg.*body|already got yesterday'?s workout logged/i] },
   { name: "cardio: 'went for a 5km run' still logs (regression guard)", msg: "went for a 5km run this morning",
     expect: [/run|cardio|session|logged|good work|active|💪|✅|steps/i], reject: [/didn'?t catch/i] },
   { name: "cardio: question 'should I do 30 min yoga?' must NOT log (audit catch 2026-06-13)", msg: "Should I do 30 minutes of yoga today?",

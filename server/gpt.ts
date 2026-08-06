@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { db } from "./db";
-import { users, chatHistory, weightLogs, stepLogs, workoutLogs, exerciseLogs, mealLogs, gptCosts } from "../shared/schema";
+import { users, chatHistory, weightLogs, stepLogs, workoutLogs, mealLogs, gptCosts } from "../shared/schema";
 import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { getPhaseNames } from "./programme";
@@ -1073,26 +1073,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
     console.warn("[GPT] Could not fetch today's food context:", foodErr);
   }
 
-  let liftContext = "";
-  try {
-    const recentLifts = await db.select().from(exerciseLogs)
-      .where(eq(exerciseLogs.userId, user.id))
-      .orderBy(desc(exerciseLogs.loggedAt))
-      .limit(10);
-    if (recentLifts.length > 0) {
-      const seen = new Map<string, typeof recentLifts[0]>();
-      for (const l of recentLifts) { if (!seen.has(l.exerciseName)) seen.set(l.exerciseName, l); }
-      const lines = [...seen.values()].slice(0, 5).map(l => {
-        const w = parseFloat(String(l.weightKg || 0));
-        const rStr = l.sets && l.reps ? ` ${l.sets}×${l.reps}` : l.reps ? ` ×${l.reps}` : "";
-        const dAgo = Math.floor((Date.now() - new Date(l.loggedAt || "").getTime()) / 86_400_000);
-        return `${l.exerciseName}: ${w}kg${rStr} (${dAgo === 0 ? "today" : dAgo + "d ago"})`;
-      });
-      liftContext = `\n\nCLIENT'S RECENT LIFTS (use these exact numbers — never guess):\n${lines.join("\n")}\nWhen advising on weight/progression, reference these numbers directly.`;
-    }
-  } catch (liftErr) {
-    console.warn("[GPT] Could not fetch lift context:", liftErr);
-  }
+  const liftContext = ""; // lift tracking removed 2026-08-06 — kept as "" so the prompt shape is untouched
 
   const { model, maxTokens } = selectModel(instruction, userMessage);
 
