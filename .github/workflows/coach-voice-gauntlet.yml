@@ -1,0 +1,51 @@
+name: Coach Voice Gauntlet (live model)
+
+# THE TIER NO STUB CAN GRADE (2026-08-06, founder directive: "schedule the real-model gauntlet
+# on a cadence against real traffic — not on demand, and not on your phone alone").
+#
+# The offline gauntlet proves ROUTING and SHAPE with no network: is it one message, two
+# sentences, whose numbers, is there a receipt. What it cannot judge is whether the model's
+# WORDS are any good — so those cases declare `needsLLM` and are skipped OUT LOUD, which is
+# honest but useless if nobody ever runs the other tier.
+#
+# This is the other tier. It runs the same file with GAUNTLET_LLM=1, so the five real exchanges
+# from the founder's phone — the taxi-rank question, calories-left, "coach me", the grocery
+# paragraph, the Zulu-English mix — are graded against the live model every morning instead of
+# being caught by hand in production a week later.
+#
+# Daily at 04:00 SAST: after the model drill (03:00 UTC / 05:00 SAST is the drill; this runs
+# before it at 02:00 UTC) and well clear of the routing suite, so a red build names one cause.
+# Costs real tokens, so it is never on push.
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # 04:00 SAST daily
+  workflow_dispatch: {}
+
+concurrency:
+  group: coach-voice-gauntlet-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gauntlet:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
+      # The engine is the thing being graded, so it must be on — the same as production.
+      ENGINE_LIVE: "on"
+      GAUNTLET_LLM: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Run the gauntlet against the live model (skips if no key)
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::notice::OPENAI_API_KEY not set — skipping the live coach-voice gauntlet."
+            echo "Add it in Settings → Secrets and variables → Actions to enable daily voice grading."
+            exit 0
+          fi
+          npx tsx script/gauntlet.ts
