@@ -842,16 +842,21 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     if (r && r.kind === "set") assert.equal(r.body, "weigh in", "the trailing 'on' is stripped with the day");
   });
 
-  test("keyword-wall sweep: the JUDGMENT handlers defer to the brain when live (voice ported to the brain first, so no regression)", () => {
+  test("keyword-wall sweep: the judgment fallbacks are DELETED, not merely gated", () => {
     const src = readFileSync(join("server", "handlers", "advice-commands.ts"), "utf-8");
-    // Each emotional/coaching-judgment handler must stand down when ENGINE_LIVE is on.
-    for (const guard of [
-      /process\.env\.ENGINE_LIVE !== "on" && isBereaved/,
-      /process\.env\.ENGINE_LIVE !== "on" && looksLikeLowMobility\(m\)/,
-      /process\.env\.ENGINE_LIVE !== "on" && looksLikeDefeatedNoResults\(m\)/,
-      /process\.env\.ENGINE_LIVE !== "on" && looksLikeFoodDislike\(m\)/,
-      /process\.env\.ENGINE_LIVE !== "on" && looksLikeOvertrainingPlan\(m\)/,
-    ]) assert.match(src, guard, `judgment handler gated behind the brain: ${guard}`);
+    // INVERTED 2026-08-06. This used to REQUIRE each fallback to exist behind an
+    // `ENGINE_LIVE !== "on"` gate. The gate was the rollout's revert path; ENGINE_LIVE has
+    // been on for every client for weeks, so those 30 branches could not execute and were
+    // dead code that still had to be read, tested and maintained. Standing down is a
+    // promise; deletion is a fact — so the assertion is now that nothing gated survives.
+    // Comments stripped first: this asserts on CODE. A comment may say the word (the header
+    // explains what was removed and why) — a live gate may not exist.
+    const codeOnly = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    for (const f of ["advice-commands.ts", "misc-commands.ts"]) {
+      const code = codeOnly(f === "advice-commands.ts" ? src : readFileSync(join("server", "handlers", f), "utf-8"));
+      assert.doesNotMatch(code, /ENGINE_LIVE/,
+        `a flag-gated fallback is back in ${f} — the engine owns these, delete it`);
+    }
     // MEDICAL SCOPE IS NOT A JUDGMENT CALL (2026-08-03). These two carry a doctor-referral
     // boundary, so they must run for EVERY client, not only when the engine is off. They were
     // gated for weeks, which meant a client asking whether weight loss fixes their blood
@@ -1318,6 +1323,19 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(suggestSwap("avocado", "muscle_gain"), null, "builders keep the avo");
   });
 }
+
+// THE GAINS-FEAR MASTERCLASS lives in the prompt, not in a keyword template (2026-08-06).
+// The template that used to answer "I'll lose my gains" was gated behind ENGINE_LIVE and was
+// deleted with the other 29 unreachable branches. Deleting a fallback is only safe if the thing
+// it fell back FROM actually carries the coaching — so this asserts exactly that, the same way
+// the brain masterclasses are asserted above.
+test("gains-fear masterclass survived the deletion — it is in the coaching prompt", async () => {
+  const prompt = readFileSync("server/coach-prompt.ts", "utf-8");
+  assert.match(prompt, /LOSING YOUR GAINS IN A DEFICIT/, "the masterclass heading is gone from the prompt");
+  assert.match(prompt, /water and glycogen/i, "the actual reassurance — what they 'lost' last time — is gone");
+  assert.match(prompt, /8.12 weeks/i, "the honest lean-phase timeline is gone");
+  assert.match(prompt, /HIGH PROTEIN/i, "the condition that makes the claim true is gone");
+});
 
 // ONE TRIAL PER NUMBER, EVER (2026-08-06, founder directive after the start→cancel→start
 // →cancel loop). The interesting part is not the rule — it is that the rule has to survive

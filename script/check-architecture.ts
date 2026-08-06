@@ -36,7 +36,7 @@ const BUDGET = {
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
-  regexLiterals: 330,
+  regexLiterals: 311,
   /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
    * something other than the engine can put words in front of a client.

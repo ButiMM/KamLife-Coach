@@ -71,7 +71,10 @@ const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: Conte
   // ── Hard life — the common case ───────────────────────────────────────────────────
   {
     context: "bereavement", refer: false, demand: "pause",
-    re: /\b(?:passed\s+away|passed\s+on|funeral|buried|burial|memorial|lost\s+my\s+(?:mother|mom|mum|father|dad|brother|sister|child|son|daughter|husband|wife|partner|gogo|granny|grandmother|grandfather|friend|aunt|uncle|cousin)|died|death\s+in\s+the\s+family|mourning|grieving|tombstone\s+unveiling)\b/i,
+    // BARE "PASSED" after a relative (2026-08-06). "My gran passed this morning" is ordinary SA
+    // English and matched none of the phrases below — it needed "passed away" or "passed on".
+    // The relative noun is what keeps "I passed my exam" out, so the word alone is never enough.
+    re: /\b(?:passed\s+away|passed\s+on|funeral|buried|burial|memorial|lost\s+my\s+(?:mother|mom|mum|father|dad|brother|sister|child|son|daughter|husband|wife|partner|gogo|granny|gran|grandmother|grandfather|ouma|oupa|friend|aunt|uncle|cousin)|(?:my\s+)?(?:mother|mom|mum|father|dad|brother|sister|child|son|daughter|husband|wife|partner|gogo|granny|gran|grandmother|grandfather|ouma|oupa|aunt|uncle|cousin)\s+(?:has\s+|just\s+)?passed\b|died|death\s+in\s+the\s+family|mourning|grieving|tombstone\s+unveiling)\b/i,
   },
   {
     context: "own_illness", refer: false, demand: "pause",

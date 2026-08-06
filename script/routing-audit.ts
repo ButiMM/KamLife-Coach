@@ -297,11 +297,12 @@ const CASES: Case[] = [
     expect: [/Coach K Pick|Streetwise|2 pieces original/i] },
 
   // ── GAINS-FEAR / HEALTH QUICK-FIX (2026-07-23, Kam's churn buckets) ─────
-  { name: "gains-fear: 'I don't want to get lean, I'll lose my gains' gets the cut-first truth, not a compromise", msg: "I don't want to get lean, last time I did a deficit I lost all my gains",
-    expect: [/do not lose your muscle|protects it|water and glycogen/i, /8.12 weeks|lean phase/i],
-    reject: [/Food logged|kcal \| ~?\d+g protein_/i] },
-  { name: "gains-fear: 'scared of the deficit' lands the same truth", msg: "I'm scared of cutting because I'm worried about losing my muscle",
-    expect: [/do not lose your muscle|water and glycogen|heavy/i] },
+  // MOVED 2026-08-06. The two cases that asserted the gains-fear PROSE tested a keyword template
+  // that stood behind `ENGINE_LIVE !== "on"` and so could not run for any client. The template is
+  // deleted; the masterclass itself lives in coach-prompt.ts and reaches everyone through the
+  // model. An offline audit cannot grade a model's words, so the assertion moved to unit-tests,
+  // which checks the prompt still carries it. What stays here is the ROUTING claim, which is
+  // what this file is for: a weight-loss WIN must never be answered with the gains-fear lecture.
   { name: "gains-fear: 'I lost 2kg' is a WIN, never the gains-fear lecture", msg: "I lost 2kg this week",
     reject: [/water and glycogen|lean phase/i] },
   { name: "health: 'will losing weight fix my blood pressure' gets the honest 12-week timeline", msg: "Will losing weight fix my blood pressure?",

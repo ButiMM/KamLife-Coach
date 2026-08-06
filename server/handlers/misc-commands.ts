@@ -168,31 +168,6 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- FIX 3: HANDLER 3 — Motivation and struggle ----
-  const isHardQuit = m.includes("i want to quit") || m.includes("want to give up") || m.includes("this is too hard") || m.includes("i can't do this") || m.includes("i cant do this") || m.includes("not seeing results") || m.includes("nothing is working") || m.includes("no results") || m.includes("waste of time") || m.includes("doesn't work") || m.includes("not working for me");
-  const isSoftStruggle = /\b(i.?m (really |so |just )?(struggling|falling behind|losing motivation|lost motivation|feeling behind|feeling lost|not sure what i.?m doing|demotivated|unmotivated))\b/.test(m) || /\b(feel like (giving up|i.?m failing|i.?m not making progress|nothing is working|i.?m not getting it right|i.?m behind))\b/.test(m) || /\b(i don.?t (know what.?s happening|know what i.?m doing|know if this is working))\b/.test(m) || /\b(hard (to stay|to keep|to maintain) (motivated|going|consistent))\b/.test(m) || /\b(haven.?t (trained|worked out|been to gym|gone to gym)|didn.?t (train|work out)|no (training|workout|gym) (for |in )?\d+\s*(days?|weeks?))\b/.test(m) || /\bfeeling (down|low|unmotivated|demotivated|flat|defeated|hopeless about (this|my progress|the gym))\b/i.test(m) || /\b(unmotivated|demotivated|lost (my |all )?(motivation|drive)|no motivation|zero motivation)\b/i.test(m)
-    || /\b(lack of (motivation|consistency|discipline|willpower)|not (being |staying )?consistent|(keep|keeps?|kept) (falling off|slipping|missing sessions?|skipping|falling behind)|off track|off (the )?(programme|plan|diet)|can.?t seem to (stay|stick|be|remain) (consistent|motivated|on track|focused)|struggling to (stay|be|remain|keep) (consistent|motivated|on track)|sometimes (i )?(struggle|lack|find it hard|slip))\b/i.test(m);
-  if (process.env.ENGINE_LIVE !== "on" && (isHardQuit || isSoftStruggle)) {
-    try {
-      const [recentW, recentS] = await Promise.all([
-        db.select().from(workoutLogs).where(eq(workoutLogs.userId, user.id)).orderBy(desc(workoutLogs.loggedAt)).limit(10),
-        db.select().from(stepLogs).where(eq(stepLogs.userId, user.id)).orderBy(desc(stepLogs.loggedAt)).limit(7),
-      ]);
-      const totalWorkouts = user.totalWorkoutsCompleted || recentW.length;
-      const avgStepsStruggle = recentS.length > 0 ? Math.round(recentS.reduce((s, r) => s + r.steps, 0) / recentS.length) : 0;
-      let dataPoint = "";
-      if (totalWorkouts > 0) dataPoint = `You have completed ${totalWorkouts} training session${totalWorkouts > 1 ? "s" : ""}.`;
-      else if (avgStepsStruggle > 4000) dataPoint = `You are averaging ${avgStepsStruggle.toLocaleString()} steps per day this week.`;
-      const week3Note = (user.programmeWeek || 1) === 3
-        ? " IMPORTANT — this client is in WEEK 3, which is statistically the highest dropout point. The physical adaptation is happening but is not yet visible. Specifically acknowledge Week 3 by name. Tell them exactly what is happening physiologically this week (muscles adapting, metabolism shifting) and that the visible results come in weeks 4–6 if they do not stop now."
-        : "";
-      const struggleContext = `Client is struggling and said: "${message}". RULES — empathy first in one sentence, no generic motivation speech. Then state this real data point: "${dataPoint || "You showed up and sent this message — that means you have not quit."}". Then give ONE single specific action for today only. Never a list. Never "you've got this" or "believe in yourself". Be real and direct like a coach, not a cheerleader. SA voice.${week3Note}`;
-      const struggleReply = await withTimeout("gpt_struggle", 20000, () => askCoachK(message, user, struggleContext));
-      await logChat(user.id, message, struggleReply, "MOTIVATION");
-      return struggleReply;
-    } catch (e) {
-      console.error("[MOTIVATION]", e);
-    }
-  }
 
   // ---- PAIN TRIAGE — soreness vs. real injury (2026-07-12, Kam: "catch whether it's just
   // sensitivity from a workout or a real injury"). The old handler fired the full STOP-72-HOURS
@@ -568,13 +543,20 @@ export async function handleMiscCommands(ctx: {
   if (["7 day meals", "7day meals", "full meal plan", "day by day meals"].includes(m)) {
     return getOnboardingMealPlan(user);
   }
-  if (process.env.ENGINE_LIVE !== "on" && ["progress", "my progress", "how am i doing"].includes(m)) {
+  // A BUTTON WE OFFER MUST HAVE AN OWNER (2026-08-06). "My progress" is one of the three menu
+  // quick-replies, so tapping it sends this exact text — and this branch used to stand down
+  // whenever the engine was live, which it has been for every client for weeks. The button has
+  // therefore been reaching the model, and the model then writes its own numbers about the
+  // client's body: the one thing the 2026-07-28 note two hundred lines up says must never
+  // happen. Ungated now. Anything carrying "today" still means today and gets the card
+  // (early-commands owns that); bare "progress" means the journey so far.
+  if (["progress", "my progress", "how am i doing"].includes(m)) {
     const daysOn = user.programmeStartDate
       ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86400000)
       : 0;
     const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged";
     const name = getDisplayName(user) || "there";
-    return `*${name}'s Progress*\n\n✅ Workouts completed: *${user.totalWorkoutsCompleted || 0}*\n📅 Days on programme: *${daysOn}*\n📊 Programme week: *${user.programmeWeek || 1}*\n⚖️ Current weight: *${w}*\n\nFor your full 7-day breakdown send *this week*.`;
+    return `*${name}'s Progress*\n\n✅ Workouts: *${user.totalWorkoutsCompleted || 0}*\n📅 Day *${daysOn}*, week *${user.programmeWeek || 1}*\n⚖️ Weight: *${w}*\n\nSend *this week* for the 7-day breakdown.`;
   }
   if (["targets", "my targets", "goals"].includes(m)) {
     const goalLabel: Record<string, string> = {
@@ -624,144 +606,6 @@ export async function handleMiscCommands(ctx: {
 
   // ---- TRAJECTORY: "on track?", "where am I going", "is this working" ----
   // A directional assessment, not a wall of numbers. Gated to the engine when live.
-  if (
-    process.env.ENGINE_LIVE !== "on" && !isDespairNotAQuestion(m) && (
-    /\b(where am i going|on track\??|am i on track|will i reach|when will i see results|how long will this take|is this working|where is my body going|any progress|am i making progress|is it working|heading somewhere|see(ing)? results|showing results|progress\??|working\??)\b/i.test(m)
-    || ["trajectory", "on track", "progress check", "am i progressing", "body check", "check in"].includes(m)
-  )) {
-    try {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-      const goal = user.goalType || "fat_loss";
-      const protTarget = user.proteinTarget || 120;
-      const calTarget = user.calorieTarget || 1800;
-      const stepsTarget = user.stepsTarget || 8500;
-      const trainingDaysPerWeek = user.trainingDaysPerWeek || 3;
-      const firstName = user.name?.split(" ")[0] || "";
-
-      const [mealRows, weekWorkouts, stepRows, weightRows, firstWeightRow] = await Promise.all([
-        db.select({ loggedAt: mealLogs.loggedAt, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt })
-          .from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sevenDaysAgo))),
-        db.select({ id: workoutLogs.id }).from(workoutLogs)
-          .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
-        db.select({ steps: stepLogs.steps }).from(stepLogs)
-          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
-        db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs)
-          .where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(2),
-        db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs)
-          .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt)).limit(1),
-      ]);
-
-      // Aggregate mealLogs by SAST day
-      const dayMap: Record<string, { kcal: number; prot: number }> = {};
-      for (const row of mealRows) {
-        const d = new Date((row.loggedAt?.getTime() || 0) + 2 * 3_600_000);
-        const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
-        if (!dayMap[key]) dayMap[key] = { kcal: 0, prot: 0 };
-        dayMap[key].kcal += row.kcalInt || 0;
-        dayMap[key].prot += row.proteinInt || 0;
-      }
-      const mealDays = Object.values(dayMap);
-      const daysWithFood = mealDays.length;
-      const daysProtHit = mealDays.filter(d => d.prot >= Math.round(protTarget * 0.9)).length;
-      const avgProt = daysWithFood > 0 ? Math.round(mealDays.reduce((s, d) => s + d.prot, 0) / daysWithFood) : 0;
-      const avgCals = daysWithFood > 0 ? Math.round(mealDays.reduce((s, d) => s + d.kcal, 0) / daysWithFood) : 0;
-
-      const workoutsDone = weekWorkouts.length;
-      const stepsAboveTarget = stepRows.filter(s => s.steps >= stepsTarget).length;
-      const avgSteps = stepRows.length > 0 ? Math.round(stepRows.reduce((s, r) => s + r.steps, 0) / stepRows.length) : 0;
-
-      // Score: 2 = fully hit, 1 = partial, 0 = missed
-      const trainScore = workoutsDone >= trainingDaysPerWeek ? 2 : workoutsDone >= Math.ceil(trainingDaysPerWeek * 0.6) ? 1 : 0;
-      const protScore = daysWithFood === 0 ? 0 : daysProtHit >= Math.round(daysWithFood * 0.8) ? 2 : daysProtHit >= Math.round(daysWithFood * 0.5) ? 1 : 0;
-      const score = trainScore + protScore;
-
-      const out: string[] = [];
-      out.push(`*${firstName ? firstName + " — " : ""}Where you're heading:*\n`);
-
-      const wIcon = trainScore === 2 ? "✅" : trainScore === 1 ? "⚠️" : "❌";
-      out.push(`${wIcon} Training: ${workoutsDone}/${trainingDaysPerWeek} sessions this week`);
-
-      if (daysWithFood > 0) {
-        const pIcon = protScore === 2 ? "✅" : protScore === 1 ? "⚠️" : "❌";
-        out.push(`${pIcon} Protein: hit ${daysProtHit}/${daysWithFood} days (avg ${avgProt}g vs ${protTarget}g target)`);
-      } else {
-        out.push(`❓ Protein: no meals logged this week`);
-      }
-
-      if (stepRows.length > 0) {
-        const sIcon = stepsAboveTarget >= 5 ? "✅" : stepsAboveTarget >= 3 ? "⚠️" : "❌";
-        out.push(`${sIcon} Steps: avg ${avgSteps.toLocaleString()} — ${stepsAboveTarget}/${stepRows.length} days at target`);
-      }
-
-      if (weightRows.length >= 1) {
-        const wCurrent = parseFloat(String(weightRows[0].weight));
-        const startRow = firstWeightRow[0];
-        if (startRow && weightRows.length >= 2) {
-          const wStart = parseFloat(String(startRow.weight));
-          const totalChange = wCurrent - wStart;
-          const weeksSinceStart = Math.max(1, (new Date(weightRows[0].loggedAt!).getTime() - new Date(startRow.loggedAt!).getTime()) / (7 * 86_400_000));
-          const rateNote = assessWeightRate(totalChange, weeksSinceStart, user.goalType || "fat_loss", user.proteinTarget || 120, user.calorieTarget || 1800, firstName, wCurrent);
-          if (rateNote) out.push(rateNote);
-          else out.push(`⚖️ Current weight: ${wCurrent.toFixed(1)}kg`);
-        } else {
-          out.push(`⚖️ Current weight: ${wCurrent.toFixed(1)}kg`);
-        }
-      }
-
-      out.push(``);
-
-      if (goal === "fat_loss") {
-        if (score >= 4) {
-          const deficit = avgCals > 0 ? Math.max(0, calTarget - avgCals) : 0;
-          const weeklyLossKg = deficit > 0 ? (deficit * 7 / 7700).toFixed(2) : null;
-          const lossLine = weeklyLossKg && parseFloat(weeklyLossKg) > 0.1
-            ? `~${weeklyLossKg}kg per week at this pace.`
-            : `You are eating at target — the process is working.`;
-          out.push(`*On track for fat loss.* ${lossLine} Protein preserved, fat burning.`);
-        } else if (score === 3) {
-          const gap = daysWithFood > 0 && daysProtHit < Math.round(daysWithFood * 0.8) ? "protein consistency" : "training";
-          out.push(`*Progress is happening — but leaving results behind.* The ${gap} gap is the limiter. Fix that one thing and pace improves.`);
-        } else if (score >= 1) {
-          out.push(`*Direction is right, pace is off.* Fat loss needs both training AND protein consistent. Pick the one that is failing and fix it this week.`);
-        } else {
-          out.push(`*Not enough data yet.* ${daysWithFood === 0 ? "No meals logged this week — start there." : "Habits aren't consistent enough to drive fat loss yet. Nothing changes until the daily habits do."}`);
-        }
-      } else if (goal === "muscle_gain") {
-        if (score >= 4) {
-          out.push(`*On track for muscle gain.* Training stimulus + protein = your body has everything it needs to grow. Trust the process.`);
-        } else if (daysWithFood > 0 && daysProtHit < Math.round(daysWithFood * 0.5)) {
-          const shortfall = protTarget - avgProt;
-          out.push(`*Training is there — protein is not.* Muscle growth stalls without enough protein. You are ${shortfall}g/day short. One more protein meal fixes this.`);
-        } else if (workoutsDone < Math.ceil(trainingDaysPerWeek * 0.6)) {
-          out.push(`*Protein is sorted — training needs work.* Muscle requires the stimulus. ${trainingDaysPerWeek - workoutsDone} more session${trainingDaysPerWeek - workoutsDone > 1 ? "s" : ""} this week changes the trajectory.`);
-        } else {
-          out.push(`*Building.* Results show at the 8-week mark — keep the sessions and protein consistent.`);
-        }
-      } else {
-        out.push(score >= 3 ? `*On track.* Consistent habits — keep going.` : `*Building consistency.* That is the only job right now.`);
-      }
-
-      out.push(``);
-      if (daysWithFood === 0) {
-        out.push(`*First step:* Log every meal this week — even one line. Without data, I am coaching blind.`);
-      } else if (daysProtHit < Math.round(daysWithFood * 0.5) && daysWithFood >= 3) {
-        out.push(`*One fix:* Add protein to every breakfast this week. Morning protein sets the daily target in motion.`);
-      } else if (workoutsDone === 0) {
-        out.push(`*One fix:* One session before Sunday. That is it.`);
-      } else if (stepRows.length === 0) {
-        out.push(`*One fix:* Send your step count daily — "8500 steps". That data matters.`);
-      } else {
-        out.push(`*Keep going.* Same habits, compounding results.`);
-      }
-
-      const trajectoryReply = out.join("\n");
-      await logChat(user.id, message, trajectoryReply, "TRAJECTORY");
-      return trajectoryReply;
-    } catch (e) {
-      console.error("[TRAJECTORY]", e);
-      // fall through to GPT
-    }
-  }
 
   // ---- WEEKLY PROGRESS CARD ----
   if (/\b(my week|weekly stats|progress card|week report|how.*i doing this week|weekly progress|my weekly|weekly card|week card|my stats this week|progress this week)\b/i.test(m)) {
@@ -1313,43 +1157,6 @@ export async function handleMiscCommands(ctx: {
 
   // ---- MEAL TIMING COACH — "when should I eat", "pre workout meal", "post workout" ----
   // Conversational nutrition question (kcal-heavy template) — engine owns it when live.
-  if (process.env.ENGINE_LIVE !== "on" && /\b(pre.?workout|post.?workout|before\s*(?:gym|training|workout)|after\s*(?:gym|training|workout)|when\s*(?:should|must|do)\s*i\s*eat|meal\s*timing|eating\s*before|eating\s*after)\b/i.test(m)) {
-    const goal = user.goalType || "fat_loss";
-    const budget = user.weeklyFoodBudget || "100_300";
-    const name = user.name?.split(" ")[0] || "";
-    const isPreWorkout = /\b(pre.?workout|before\s*(?:gym|training|workout)|eating\s*before)\b/i.test(m);
-    const isPostWorkout = /\b(post.?workout|after\s*(?:gym|training|workout)|eating\s*after)\b/i.test(m);
-
-    let timing = `*🕐 Meal Timing Guide${name ? ` — ${name}` : ""}*\n\n`;
-
-    if (isPreWorkout || (!isPostWorkout)) {
-      timing += `*Pre-Workout (60-90 min before):*\n`;
-      if (budget === "under_100") {
-        timing += goal === "muscle_gain"
-          ? `• 2 slices bread + peanut butter + banana (~350 kcal, 12g protein)\n• Or: pap + 1 egg (~280 kcal, 8g protein)\n`
-          : `• 1 banana + 1 slice bread (~180 kcal)\n• Or: small bowl oats with water (~200 kcal)\n`;
-      } else {
-        timing += goal === "muscle_gain"
-          ? `• Oats + banana + scoop whey (~450 kcal, 30g protein)\n• Or: 2 toast + 2 eggs + banana (~420 kcal, 20g protein)\n`
-          : `• Small banana + handful almonds (~200 kcal)\n• Or: 1 toast + 1 egg (~180 kcal)\n`;
-      }
-      timing += `_Empty stomach training is fine for fat loss walks, but eat before weights._\n\n`;
-    }
-
-    if (isPostWorkout || (!isPreWorkout)) {
-      timing += `*Post-Workout (within 60 min after):*\n`;
-      if (budget === "under_100") {
-        timing += `• 2 eggs + pap + spinach (~380 kcal, 20g protein)\n• Or: tin of pilchards + bread (~350 kcal, 22g protein)\n`;
-      } else {
-        timing += `• Chicken breast + rice + vegetables (~500 kcal, 35g protein)\n• Or: whey shake + banana + oats (~400 kcal, 30g protein)\n`;
-      }
-      timing += `_Protein within 60 minutes after training is the priority. Carbs refuel your muscles._\n`;
-    }
-
-    timing += `\n*Key rule:* Do not train on completely empty if it is a weights session. Even a banana 30 minutes before helps performance.`;
-    await logChat(user.id, message, timing, "MEAL_TIMING");
-    return timing;
-  }
 
   // ---- WEEKLY FOOD AUDIT — "food audit", "eating audit", "diet check" ----
   if (m === "food audit" || m === "diet check" || m === "eating audit" || m === "audit" || /\b(food\s*audit|diet\s*check|eating\s*audit|week.?s?\s*eating|how.?s?\s*my\s*diet|diet\s*review)\b/i.test(m)) {
@@ -1538,22 +1345,7 @@ export async function handleMiscCommands(ctx: {
       return reply;
     }
 
-    if (process.env.ENGINE_LIVE === "on") return null; // engine owns emotional support (its low-mood guard keeps the SADAG net)
-    const name = user.name?.split(" ")[0] || "";
-    const isStressed = /\b(stress|overwhelm|burnt?\s*out|not\s*coping|too\s*much)\b/i.test(m);
-    const isAnxious = /\b(anxious|anxiety|panic|worry|worried)\b/i.test(m);
-    const isLow = /\b(depress|down|low|sad|feeling\s*down|feeling\s*low)\b/i.test(m);
-
-    let moodReply = "";
-    if (isLow) {
-      moodReply = `${name ? name + ", " : ""}I hear you. Low days happen — they do not define you or your progress.\n\nThree things that help:\n1. *Walk outside* for 15 minutes — sunlight and movement shift brain chemistry\n2. *Eat protein* — low blood sugar worsens mood\n3. *Text someone you trust* — not about fitness, just connect\n\nIf this is ongoing and affecting your daily life, please reach out to SADAG (SA Depression & Anxiety Group): 0800 567 567 (free). No shame, real support.\n\nYour training and food log are still here. We continue when you are ready.`;
-    } else if (isAnxious) {
-      moodReply = `${name ? name + ", " : ""}Anxiety spikes cortisol — which blocks fat loss and kills recovery. The best counter:\n\n1. *Box breathing* — breathe in 4 counts, hold 4, out 4, hold 4. Repeat 5 times.\n2. *Walk* — 15 minutes outside, no phone\n3. *Train* — a workout burns anxiety fuel\n\nIf anxiety is persistent, SADAG helpline: 0800 567 567 (free, confidential).\n\nLog your mood: reply "mood 4/10" and I will track it over time.`;
-    } else {
-      moodReply = `${name ? name + ", " : ""}Stress is the silent killer of fitness progress. High cortisol = belly fat storage, poor sleep, muscle breakdown.\n\n*Immediate fixes:*\n1. Walk 20 minutes — drops cortisol 14%\n2. Eat before your next stressor — low blood sugar amplifies stress\n3. Sleep 7+ hours tonight — non-negotiable\n\nStress management IS part of your programme. Do not ignore it.\n\nLog your mood anytime: "mood 5/10" — I will track patterns.`;
-    }
-    await logChat(user.id, message, moodReply, "MOOD_CHECKIN");
-    return moodReply;
+    return null; // the engine owns this — its own guards keep the SADAG net
   }
 
   // ---- FASTING TRACKER — "fasting", "intermittent fasting", "IF" ----
@@ -1588,23 +1380,7 @@ export async function handleMiscCommands(ctx: {
       return `Fast complete${fastDuration} 🍽️\n\nBreak your fast with protein first — eggs, chicken, or pilchards. Protein after fasting maximises muscle retention.\n\nAvoid breaking with sugar or processed carbs — blood sugar will spike and crash hard after a fast.\n\nLog your first meal now: tell me what you ate.`;
     }
 
-    if (process.env.ENGINE_LIVE === "on") return null; // engine owns fasting advice; start/end tracking above stays deterministic
-    const goal = user.goalType || "fat_loss";
-    const name = user.name?.split(" ")[0] || "";
-    let guide = `*⏱️ Intermittent Fasting Guide${name ? ` — ${name}` : ""}*\n\n`;
-    guide += `*16:8 Protocol (recommended):*\n• Eat within an 8-hour window (e.g. 12pm–8pm)\n• Fast for 16 hours (including sleep)\n• During fast: water, black coffee, plain rooibos\n\n`;
-
-    if (goal === "fat_loss") {
-      guide += `*For fat loss:*\n• Fasting naturally reduces calories without counting\n• Train fasted for walks/cardio — eat before weights\n• Break fast with high protein meal\n\n`;
-    } else {
-      guide += `*For muscle gain:*\n• Fasting is NOT ideal for muscle gain — you need frequent protein\n• If you do fast, eat more in your window\n• Break fast with 40g+ protein\n\n`;
-    }
-
-    guide += `*Track it:*\n• Say "starting fast" → I log the start time\n• Say "broke my fast" → I calculate the window\n\n`;
-    guide += `_Fasting is a tool, not a rule. If you are hungry, eat. If you feel dizzy, eat. Never fast to the point of feeling unwell._`;
-
-    await logChat(user.id, message, guide, "FASTING_GUIDE");
-    return guide;
+    return null; // the engine owns this — its own guards keep the SADAG net
   }
 
   // ---- EXERCISE SUBSTITUTION ENGINE — "can't do X", "alternative to X" ----
@@ -1779,71 +1555,6 @@ export async function handleMiscCommands(ctx: {
 
   // ---- SA HOLIDAY MEAL GUIDE — braai, Christmas, Easter, Heritage Day ----
   // Conversational advisory template (no data write) — engine owns it when live.
-  if (process.env.ENGINE_LIVE !== "on" && /\b(braai\s*day|heritage\s*day|christmas\s*(?:meal|food|eat)|easter\s*(?:meal|food|eat)|new\s*year.?s?\s*(?:meal|food|eat)|holiday\s*(?:meal|food|eat)|party\s*food|social\s*eating|eating\s*out\s*(?:guide|tips|help))\b/i.test(m)) {
-    const goal = user.goalType || "fat_loss";
-    const name = user.name?.split(" ")[0] || "";
-    const isBraai = /braai/i.test(m);
-    const isChristmas = /christmas|december/i.test(m);
-    const isEaster = /easter/i.test(m);
-
-    let guide = "";
-    if (isBraai) {
-      guide = `*🔥 Coach K's Braai Survival Guide${name ? ` — ${name}` : ""}*\n\n` +
-        `*Best picks:*\n` +
-        `• Chicken thigh (skin off after cooking) — 25g protein, ~200 kcal\n` +
-        `• Boerewors (1 piece, grilled well) — 25g protein, ~350 kcal\n` +
-        `• Steak (palm-sized) — 30g protein, ~250 kcal\n` +
-        `• Sosatie (3 sticks) — 20g protein, ~280 kcal\n\n` +
-        `*Limit:*\n` +
-        `• Rolls/bread — 1 max (save your carbs for the meat)\n` +
-        `• Pap — 1 serving (fist-sized)\n` +
-        `• Chakalaka — good, it is mostly veg\n` +
-        `• Dumplings/vetkoek — skip or 1 only (250 kcal each)\n\n` +
-        `*Drinks:*\n` +
-        `• Water between every drink\n` +
-        `• 2 beers max (each = 150 kcal of zero nutrition)\n` +
-        `• Brandy & Coke Zero > Brandy & Coke (saves 140 kcal)\n\n` +
-        `*Strategy:* Eat protein first. Fill up on meat and salad. Then add 1 starch. ${goal === "fat_loss" ? "You do not need to eat everything — pick your favourites and enjoy them." : "Load the plate — braai day is a surplus day. Enjoy it, hit the gym Monday."}`;
-    } else if (isChristmas) {
-      guide = `*🎄 Christmas Meal Guide${name ? ` — ${name}` : ""}*\n\n` +
-        `*Best picks:*\n` +
-        `• Roast chicken or turkey — best protein source on the table\n` +
-        `• Ham (lean cuts, trim visible fat)\n` +
-        `• Salads — go heavy on these\n` +
-        `• Roast vegetables — sweet potato, butternut, green beans\n\n` +
-        `*Limit:*\n` +
-        `• Dessert — 1 small serving, enjoy it, then stop\n` +
-        `• Alcohol — water between every drink\n` +
-        `• Starchy sides — 1 serving rice/potato\n\n` +
-        `*Strategy:* Eat slowly. It takes 20 minutes for fullness signals to reach your brain. One plate, no seconds. Enjoy the day — one meal does not break a programme.`;
-    } else if (isEaster) {
-      guide = `*🐣 Easter Eating Guide${name ? ` — ${name}` : ""}*\n\n` +
-        `Easter eggs: 1 small egg = ~200 kcal. That is a full snack.\n\n` +
-        `*Strategy:*\n` +
-        `• Buy ONE egg, enjoy it slowly. Do not buy the 6-pack.\n` +
-        `• Hot cross buns: 1 bun = 200 kcal. Max 1 per day.\n` +
-        `• Keep training through the weekend. A 30-min walk burns off that bun.\n\n` +
-        `*Meal plan stays the same.* The holiday is one day — your programme is every day.`;
-    } else {
-      guide = `*🎉 Social Eating Survival Guide${name ? ` — ${name}` : ""}*\n\n` +
-        `*Before you go:*\n` +
-        `• Eat a high-protein snack (2 eggs or biltong) so you arrive not starving\n` +
-        `• Decide in advance: 1 plate, no seconds\n\n` +
-        `*At the event:*\n` +
-        `• Protein first — meat, chicken, fish\n` +
-        `• Fill half your plate with salad/veg\n` +
-        `• 1 starch portion (fist-sized)\n` +
-        `• Water between every alcoholic drink\n\n` +
-        `*After:*\n` +
-        `• Do NOT skip meals the next day to "make up for it"\n` +
-        `• Train the next morning — sweat it out and move on\n` +
-        `• One meal does not break your programme. Going dark for 3 days after does.\n\n` +
-        `*${goal === "fat_loss" ? "Enjoy the event. Log what you ate tomorrow. We keep going." : "Enjoy the surplus — your muscles will use it. Train hard Monday."}*`;
-    }
-
-    await logChat(user.id, message, guide, "HOLIDAY_GUIDE");
-    return guide;
-  }
 
   return null;
 }

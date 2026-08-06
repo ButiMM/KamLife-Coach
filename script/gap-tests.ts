@@ -946,22 +946,35 @@ test("early-commands: 'my protein target' → returns protein target", async () 
 
 // BEREAVEMENT — "passed on" / "passed" are as common as "passed away" in SA English.
 // A real client (2026-07-08 screenshot) wrote "my grandfather passed on in the wee
-// hours of the morning". Before this fix the live regex only matched "passed away",
-// so this heartbreaking message fell through to generic handling. These lock it.
-test("early-commands: 'grandfather passed on' → bereavement compassion, not generic (2026-07-08 real client)", async () => {
-  const r = await handleEarlyCommands(ec("Hi Koki. I woke up to terrible news, my grandfather passed on in the wee hours of the morning"));
-  assert.ok(r !== null, "'passed on' must reach the bereavement path");
-  assert.ok(/sorry for your loss/i.test(r!), `should be the bereavement reply: ${r?.slice(0, 120)}`);
+// hours of the morning". Before that fix the regex only matched "passed away", so this
+// heartbreaking message fell through to generic handling. These lock it.
+//
+// RE-POINTED 2026-08-06 AT THE REAL OWNER. These used to call handleEarlyCommands, whose
+// bereavement branch stood behind `ENGINE_LIVE !== "on"` — so they were grading a handler
+// that could not run for any client, and they would have stayed green while the live path
+// broke. Bereavement is owned by life-context.ts, ungated, at the very top of the pipeline
+// in runSafetyGuards. That is the code a grieving client actually reaches, so that is what
+// is tested — and its reply is warmer than the template that was deleted.
+test("bereavement: 'grandfather passed on' reaches the life-context path (2026-07-08 real client)", async () => {
+  const { readLifeContext, lifeContextReply } = await import("../server/life-context");
+  const life = readLifeContext("Hi Koki. I woke up to terrible news, my grandfather passed on in the wee hours of the morning");
+  assert.ok(life !== null, "'passed on' must be read as bereavement");
+  assert.equal(life!.context, "bereavement");
+  const reply = lifeContextReply(life!, "Kam");
+  assert.ok(/i'?m so sorry/i.test(reply), `must open with condolence: ${reply.slice(0, 120)}`);
+  assert.ok(/paused/i.test(reply), "must take the targets off, not hand them a protein goal");
 });
 
-test("early-commands: 'my gran passed' → bereavement (passed without on/away)", async () => {
-  const r = await handleEarlyCommands(ec("my gran passed this morning"));
-  assert.ok(r !== null && /sorry for your loss/i.test(r!), `'gran passed' should reach bereavement: ${r?.slice(0, 120)}`);
+test("bereavement: 'my gran passed' is read the same (passed without on/away)", async () => {
+  const { readLifeContext } = await import("../server/life-context");
+  const life = readLifeContext("my gran passed this morning");
+  assert.ok(life !== null && life.context === "bereavement", "'gran passed' must reach bereavement");
 });
 
-test("early-commands: 'I passed my exam' → NOT bereavement (no false positive)", async () => {
-  const r = await handleEarlyCommands(ec("I passed my exam today"));
-  assert.ok(r === null || !/sorry for your loss/i.test(r!), `benign 'passed' must not trigger bereavement: ${r?.slice(0, 120)}`);
+test("bereavement: 'I passed my exam' is NOT bereavement (no false positive)", async () => {
+  const { readLifeContext } = await import("../server/life-context");
+  const life = readLifeContext("I passed my exam today");
+  assert.ok(!life || life.context !== "bereavement", "benign 'passed' must not trigger bereavement");
 });
 
 // TWILIO BALANCE ALARM — pure threshold/format logic (2026-07-09). The bot goes
