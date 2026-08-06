@@ -502,6 +502,88 @@ const CONVERSATIONS: Conversation[] = [
   },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TALK LIKE A COACH — the five real exchanges from the founder's phone (2026-08-06).
+//
+// These are LLM-tier cases: they grade the engine's free-form words, which no offline stub
+// can judge, so they run under GAUNTLET_LLM=1 and are SKIPPED OUT LOUD otherwise. They exist
+// because every one of them is a reply he actually received and read as "not a coach":
+// a question answered with a greeting, a calories-left question answered without the number,
+// "coach me" answered with "what do you think?", and a two-part question half-answered.
+//
+// Laws 19-21 in meaning-engine.ts are the fix; these are the proof.
+// ─────────────────────────────────────────────────────────────────────────────
+const COACH_VOICE: Conversation[] = [
+  {
+    name: "coach voice — a question is answered in the first sentence, with the number",
+    why: "Live: 'how many calories do I have left' came back as a greeting and a paragraph.",
+    needsLLM: true,
+    env: { ENGINE_LIVE: "on" },
+    turns: [{
+      say: "how many calories do I have left today?",
+      checks: [
+        neverSilent,
+        atMostSentences(3),
+        mustNotSay(5, "never greets a question", /^(hi|hey|hello|good (morning|afternoon|evening))\b/i),
+        mustNotSay(5, "never opens with a compliment on the question", /great question|good question/i),
+        noReceipt, noLists,
+      ],
+    }],
+  },
+  {
+    name: "coach voice — 'coach me' gets ONE directive, never a question back",
+    why: "Live: 'I don't want to think, just coach me' was answered with 'What do you think?'",
+    needsLLM: true,
+    env: { ENGINE_LIVE: "on" },
+    turns: [{
+      say: "I don't want to think about it, just coach me — what do I eat tonight?",
+      checks: [
+        neverSilent,
+        atMostSentences(3),
+        mustNotSay(5, "never bounces the decision back", /what do you (think|feel|fancy|want)|which (one )?would you|you (decide|choose)|up to you/i),
+        noLists, noMenu,
+      ],
+    }],
+  },
+  {
+    name: "coach voice — both halves of a two-part question get answered",
+    why: "Live: the taxi-rank question was answered and the calories question was dropped.",
+    needsLLM: true,
+    env: { ENGINE_LIVE: "on" },
+    turns: [{
+      say: "what can I eat at the taxi rank and how many calories do I have left?",
+      checks: [
+        neverSilent,
+        atMostSentences(4),
+        mustSay(5, "answers the FOOD half", /kota|vetkoek|magwinya|chicken|russian|chip|bunny|pap|salad|fruit|braai|meat/i),
+        noReceipt,
+      ],
+    }],
+  },
+  {
+    name: "coach voice — a grocery paragraph gets a short answer, not a matching paragraph",
+    why: "Live: a long grocery message came back as a wall of the same length.",
+    needsLLM: true,
+    env: { ENGINE_LIVE: "on" },
+    turns: [{
+      say: "I'm at Shoprite with about R300 and I need to buy food for the week, I've got rice and pap at home already, what should I put in the trolley?",
+      checks: [neverSilent, atMostSentences(4), oneMessage, noLists],
+    }],
+  },
+  {
+    name: "coach voice — answered in the language they used",
+    why: "Live: a client wrote in Zulu-English mix and got a formal English paragraph back.",
+    needsLLM: true,
+    env: { ENGINE_LIVE: "on" },
+    turns: [{
+      say: "sawubona coach, ngidle ipapa ne chicken namhlanje, is that okay?",
+      checks: [neverSilent, atMostSentences(3), noReceipt, noLists],
+    }],
+  },
+];
+
+CONVERSATIONS.push(...COACH_VOICE);
+
 // ═════════════════════════════════════════════════════════════════════════════
 // SLICE 5 — THE PATH SWEEP
 //

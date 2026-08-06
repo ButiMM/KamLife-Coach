@@ -16,7 +16,7 @@ import type OpenAI from "openai";
 import { assertAiOnline, isAiOfflineError } from "../ai-offline";
 import { recordGptCost } from "../gpt";
 import { looksLikeRefusal } from "./refusal";
-import { transcriptIsLogList } from "../utils";
+import { transcriptIsLogList, transcriptMustPassWhole } from "../utils";
 export { looksLikeRefusal } from "./refusal";
 
 const SA_CLEAN_SYSTEM = `You clean South African English voice-note transcripts before a coach reads them. The speaker is an ordinary South African (often a low-literacy, first-language-not-English client) talking about food, training, and how they feel.
@@ -116,8 +116,8 @@ ONLY the condensed message.`;
 export async function condenseVoiceRamble(openai: OpenAI, raw: string, userId?: string | null): Promise<string> {
   const text = (raw || "").trim();
   if (killswitchOff() || text.length < 200) return raw; // nothing to condense
-  if (transcriptIsLogList(text)) {
-    console.log(`[VOICE_CONDENSE] skipped — transcript is a log, not a ramble (${text.length} chars)`);
+  if (transcriptMustPassWhole(text)) {
+    console.log(`[VOICE_CONDENSE] skipped — must reach the coach whole (${text.length} chars)`);
     return raw;
   }
   try {

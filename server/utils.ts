@@ -1159,6 +1159,29 @@ export function nextDayDate(word: string): string | null {
  * always does. When in doubt this keeps the raw text, which is the safe direction — a slightly
  * long message reaching the coach costs tokens, a dropped meal costs the client's trust.
  */
+/**
+ * MUST THIS TRANSCRIPT REACH THE COACH WHOLE? (2026-08-06, founder's STT audit: he sent a
+ * voice note whose content was literally "read the rest of my transcript".)
+ *
+ * The condenser rightly stops a three-minute ramble reaching the expensive model. What it must
+ * never do is answer half of what someone said. Log lists were already exempt; this adds the
+ * two other shapes where losing the tail is the same defect — a note asking MORE THAN ONE
+ * thing, and one that stacks instructions ("also…", "one more…"). Deliberately generous: a
+ * false positive costs a few cents, a false negative costs a client being ignored.
+ */
+export function transcriptMustPassWhole(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return false;
+  if (transcriptIsLogList(t)) return true;
+  const questions = (t.match(/\?/g) || []).length;
+  if (questions >= 2) return true;
+  // Spoken transcripts often carry no punctuation at all, so count question OPENERS too.
+  const openers = (t.toLowerCase().match(/\b(what|why|how|when|where|which|can i|should i|do i|is it|are they)\b/g) || []).length;
+  if (openers >= 2) return true;
+  const stackers = (t.toLowerCase().match(/\b(also|another thing|one more|and then|secondly|lastly|by the way|plus)\b/g) || []).length;
+  return stackers >= 1 && (questions + openers) >= 1;
+}
+
 export function transcriptIsLogList(text: string): boolean {
   const t = (text || "").toLowerCase();
   const digits = t.match(/\b\d+(?:[.,]\d+)?\b/g) || [];

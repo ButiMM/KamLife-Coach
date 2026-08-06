@@ -939,7 +939,12 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(wedge, /feature: "voice_condense"/, "its cost is tagged so it shows in the CFO report");
     assert.match(wedge, /out\.length >= text\.length \|\| looksLikeRefusal\(out\)\) return raw/, "fail-open: a bad condense keeps the raw transcript");
     const media = readFileSync(join("server", "handlers", "media.ts"), "utf-8");
-    assert.match(media, /wordCount > 90 \? await condenseVoiceRamble/, "only a genuine ramble (>90 words) is condensed; short notes pass through");
+    // RAISED 90 → 150 on 2026-08-06. At 90 words an ordinary "here is my day" note was
+    // summarised before the coach saw it — which is how a client ends up sending a voice note
+    // that says "read the rest of my transcript". The margin guard survives, the half-answer
+    // does not; transcriptMustPassWhole is the second half of that fix.
+    assert.match(media, /wordCount > 150 \? await condenseVoiceRamble/, "only a genuine ramble (>150 words) is condensed");
+    assert.match(media, /transcriptMustPassWhole/, "the whole-transcript guard is referenced in the comment trail");
     assert.match(media, /const forBrain =/, "the condensed text feeds the brain");
     assert.match(media, /echoTrimmed/, "the echo still shows what they actually said, not the condensed version");
   });
@@ -1294,6 +1299,60 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(suggestSwap("cashews", "fat_loss")?.swap || "", /handful|palm/i);
     assert.match(suggestSwap("avocado", "fat_loss")?.swap || "", /half/i);
     assert.equal(suggestSwap("avocado", "muscle_gain"), null, "builders keep the avo");
+  });
+}
+
+// "READ THE REST OF MY TRANSCRIPT" (2026-08-06). The condenser summarises long voice notes to
+// protect the margin, which is right — but it must never answer half of what someone said.
+{
+  const { transcriptMustPassWhole } = await import("../server/utils");
+  test("a note asking TWO things is never condensed", async () => {
+    assert.ok(transcriptMustPassWhole("How much protein should I have today? And what should I eat after gym?"));
+    assert.ok(transcriptMustPassWhole("what can I eat at the taxi rank and how many calories do I have left"),
+      "spoken notes carry no punctuation — question openers must count");
+  });
+  test("a note that stacks an instruction on a question is never condensed", async () => {
+    assert.ok(transcriptMustPassWhole("What should I eat tonight, also can you change my goal to muscle gain"));
+  });
+  test("a day's food list is never condensed (the July regression)", async () => {
+    assert.ok(transcriptMustPassWhole("I had two eggs and pap for breakfast, chicken and rice for lunch, and a banana"));
+  });
+  test("a genuine one-topic ramble IS still condensable — the margin guard survives", async () => {
+    assert.ok(!transcriptMustPassWhole(
+      "Eish coach I am so tired today the traffic was terrible and I did not sleep well at all last night"));
+  });
+}
+
+// STT VOCABULARY BIAS (2026-08-06, founder's STT audit: "rice with ground beef" came back as
+// "chicken with minced beef"). Whisper's prompt is vocabulary bias, and the prompt that shipped
+// until today was 26 EXERCISE names with five food words at the end — so speech was scored
+// against gym equipment while the client was describing dinner. A wrong food name is a wrong
+// meal in the log and wrong numbers for the day, so this locks the bias food-first.
+{
+  const { sttVocabularyPrompt } = await import("../server/foods");
+  test("STT bias is FOOD-first — the confusable names are all in the prompt", async () => {
+    const p = sttVocabularyPrompt().toLowerCase();
+    for (const food of ["rice", "chicken", "mince", "ground beef", "minced beef", "beef",
+                        "pap", "samp", "pilchards", "wors", "eggs", "amasi", "morogo"]) {
+      assert.ok(p.includes(food), `"${food}" missing from the transcription bias`);
+    }
+  });
+  test("STT bias no longer spends its budget on exercise names", async () => {
+    const p = sttVocabularyPrompt().toLowerCase();
+    for (const lift of ["chest fly", "lat pulldown", "romanian deadlift", "bulgarian split squat",
+                        "tricep pushdown", "20kg plates", "sets, reps"]) {
+      assert.ok(!p.includes(lift), `"${lift}" is back in the bias — lift logging is gone, food is what we parse`);
+    }
+  });
+  test("STT bias fits Whisper's ~224-token prompt window", async () => {
+    // ~4 chars/token is the usual rule of thumb; stay well inside it or Whisper truncates
+    // silently and the foods at the END of the list are the ones that get dropped.
+    const chars = sttVocabularyPrompt().length;
+    assert.ok(chars < 850, `bias prompt is ${chars} chars — too long, the tail will be silently cut`);
+  });
+  test("STT bias names the languages a real client speaks", async () => {
+    const p = sttVocabularyPrompt();
+    for (const lang of ["Zulu", "Xhosa", "Afrikaans"]) assert.ok(p.includes(lang), `${lang} missing`);
   });
 }
 

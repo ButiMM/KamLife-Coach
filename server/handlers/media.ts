@@ -1,6 +1,7 @@
 /** Media message handler — images, audio/voice, video. Every branch returns a string. */
 
 import crypto from "crypto";
+import { sttVocabularyPrompt } from "../foods";
 import { tmpdir } from "os";
 import { writeFile, unlink } from "fs/promises";
 import { createReadStream } from "fs";
@@ -1270,9 +1271,9 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const storedLangPref = (user.profileNotes || "").match(/lang:([a-z]{2})/)?.[1];
       const whisperLangMap: Record<string, string> = { zu: "zu", xh: "xh", st: "st", tn: "tn", ts: "ts", af: "af", en: "en" };
       const whisperLang = storedLangPref && whisperLangMap[storedLangPref] ? whisperLangMap[storedLangPref] : undefined;
-      // Whisper uses the prompt as vocabulary bias — exercise names here are the biggest
-      // lever on accuracy ("chest fly" → "Just fly, dude" without them). Natural prose, <224 tokens.
-      const whisperPrompt = "South African gym coaching. Today I did chest flies, cable flies, lat pulldowns, seated rows, single-arm rows, leg press, hip thrusts, Romanian deadlifts, RDLs, squats, Bulgarian split squats, lunges, leg curls, leg extensions, calf raises, shoulder press, lateral raises, face pulls, bicep curls, tricep pushdowns, bench press, incline press, push-ups, pull-ups, planks, dead bugs. Full weight stack, 20kg plates, 10kg plates, 80kg, dumbbells, barbell, cable machine. Sets, reps, protein grams, calories, kcal, steps, gym, pap, pilchards, wors. English, Zulu, Xhosa, Afrikaans.";
+      // Vocabulary bias — biggest lever on accuracy. Lives in foods.ts so it cannot drift from
+      // what the scanner matches. Was 26 EXERCISE names until 2026-08-06 — hence the mishears.
+      const whisperPrompt = sttVocabularyPrompt();
 
       let transcribedText: string | undefined;
       let voiceQuality: { avgLogprob: number; comp: number } | null = null; // Whisper verbose_json only
@@ -1297,7 +1298,6 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       if (!transcribedText) {
         let transcription: { text?: string } = { text: "" };
         // verbose_json gives avg_logprob + compression_ratio — signals for catching garble.
-        console.log(`[VOICE] whisper_attempt_1 bytes=${audioBuffer.byteLength} ext=${audioExt} lang=${whisperLang || "auto"}`);
         try {
           const v: any = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
             file: createReadStream(tmpAudioPath),
@@ -1322,8 +1322,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
               model: "whisper-1",
               prompt: whisperPrompt,
             }));
-            console.log(`[VOICE] whisper_attempt_2_result text="${(transcription.text || "").slice(0, 80)}" len=${transcription.text?.length ?? 0}`);
-          } catch (retryErr: any) {
+            } catch (retryErr: any) {
             console.warn(`[VOICE] whisper_attempt_2_failed error=${retryErr?.message || retryErr}`);
             transcription = { text: "" };
           }
@@ -1342,7 +1341,6 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
               })
             );
             transcribedText = retryTranscription.text?.trim() || "";
-            console.log(`[VOICE] whisper_attempt_3_result text="${transcribedText.slice(0, 80)}" len=${transcribedText.length}`);
           } catch (retryErr: any) {
             console.warn(`[VOICE] whisper_attempt_3_failed error=${retryErr?.message || retryErr}`);
           }
@@ -1412,7 +1410,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       console.log(`[MEDIA][${mediaTrace}] transcribe_ok words=${wordCount} ms=${transcribeMs} lang=${whisperLang || "auto"}${languageNote ? " detected=" + languageNote.split(" ")[4] : ""}`);
 
       // SUMMARISER WEDGE: a long ramble (>90 words) → its actionable core before the brain (comprehension + R199 margin). Short notes untouched; echo still shows the original. Fail-open.
-      const forBrain = wordCount > 90 ? await condenseVoiceRamble(openai, transcribedText, user.id) : transcribedText;
+      // 150, not 90 (2026-08-06): at 90 an ordinary "here is my day" note was summarised
+      // before the coach saw it — hence "read the rest of my transcript". See
+      // transcriptMustPassWhole, which refuses to condense anything asking more than one thing.
+      const forBrain = wordCount > 150 ? await condenseVoiceRamble(openai, transcribedText, user.id) : transcribedText;
 
       voiceStage = "coach_reply";
       voiceStageStart = Date.now();
