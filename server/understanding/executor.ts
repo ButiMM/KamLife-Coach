@@ -24,6 +24,7 @@
 
 import { type CoachAction, type ToolOutcome, refsAreLabels, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported } from "./actions";
 import { neverSilentLine } from "../reply-hygiene";
+import { sastHour } from "../sast";
 
 export interface ExecuteContext {
   user: any;
@@ -191,7 +192,25 @@ let lastCardMarker = "";
 
 async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx: ExecuteContext): Promise<ToolOutcome> {
   const { handleFoodContext } = await import("../handlers/food-context");
-  const text = `${action.foodText}${action.meal ? ` for ${action.meal}` : ""}${action.retro ? ` ${action.retro}` : ""}`;
+  // THE CLOCK OVERRULES THE MODEL'S SLOT (2026-08-06, live: an apple at 19:03 was logged "for
+  // breakfast", and the client's next message was "Breakfast? It's 7pm come on"). The model's
+  // slot was trusted blindly. It is a guess about something we can simply look up, so when the
+  // guess is impossible for the current hour we drop it and let extractMealLabel decide from
+  // the clock and the macros — which would have called a lone apple a snack. A slot the CLIENT
+  // said out loud still wins, because it reaches this as part of foodText.
+  const hourSAST = sastHour();
+  const slotFitsClock = (slot: string): boolean => {
+    const s = slot.toLowerCase();
+    if (s.includes("breakfast")) return hourSAST < 11;
+    if (s.includes("lunch")) return hourSAST >= 10 && hourSAST < 16;
+    if (s.includes("dinner") || s.includes("supper")) return hourSAST >= 16 || hourSAST < 3;
+    return true; // snack, brunch, night meal — plausible at any hour
+  };
+  const slot = action.meal && slotFitsClock(String(action.meal)) ? action.meal : undefined;
+  if (action.meal && !slot) {
+    console.warn(`[ENGINE_ACTION] dropped impossible slot "${action.meal}" at ${hourSAST}h SAST — letting the clock decide`);
+  }
+  const text = `${action.foodText}${slot ? ` for ${slot}` : ""}${action.retro ? ` ${action.retro}` : ""}`;
   // forceLog: this is an EXPLICIT log action — never let an advisory branch (the restaurant
   // ordering guide) answer it. The rewritten text carries no past-tense marker, so
   // "breakfast from McDonald's…" returned a menu pick instead of logging (2026-07-27 live).
@@ -203,7 +222,7 @@ async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx:
   const discarded = await handleFoodContext({ phone: ctx.phone, message: text, m: text.toLowerCase(), user: ctx.user, stepReplyPart: "", handleMessage: async () => "", forceLog: true });
   lastCardMarker = (String(discarded || "").match(/\[MEDIA:[^\]]+\]/) || [""])[0];
   const refs: Record<string, string> = { mealName: String(action.foodText || "").slice(0, 60) };
-  if (action.meal) refs.slot = String(action.meal).slice(0, 20);
+  if (slot) refs.slot = String(slot).slice(0, 20);
   if (action.retro) refs.dayLabel = String(action.retro).slice(0, 20);
   return { performed: true, facts: {}, refs };
 }
@@ -274,7 +293,21 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
       });
     }
     case "REMOVE_LAST_MEAL": {
+      // REMOVE THE MEAL THEY NAMED, NOT THE MOST RECENT ONE (2026-08-06, live on the founder's
+      // phone). He said "the bread, eggs, avocado and black coffee are inaccurate — remove that
+      // meal" and the rice-and-beef dinner was deleted instead: the day dropped by exactly the
+      // 470 kcal of the wrong entry. This branch hardcoded the string "remove last meal", so
+      // the client's actual words never reached the handler.
+      //
+      // food-log-mgmt already knows how to target — by meal label, by food name, by number,
+      // and it ASKS with a numbered list when the reference is ambiguous rather than guessing.
+      // All of that was sitting unused behind a hardcoded string. Passing the real message
+      // turns it on; if nothing in it targets a specific meal the handler still falls through
+      // to last-meal, which is the old behaviour and the right default for a bare "undo".
       const { handleFoodLogMgmt } = await import("../handlers/food-log-mgmt");
+      const said = (ctx.clientMessage || "").trim();
+      const targeted = said ? await handleFoodLogMgmt(user, said.toLowerCase()) : null;
+      if (targeted) return targeted;
       return (await handleFoodLogMgmt(user, "remove last meal")) || "Removed your last meal. ✅";
     }
     case "SHOW_MEALS": {

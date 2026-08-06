@@ -192,6 +192,9 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   }
 
   // Quick-exit: if message has no management keywords at all, skip the whole handler
+  // Set by the referent branch below when two entries match a named-food removal equally
+  // well; read by the numbered-list branch, which owns the "tell me which one" answer.
+  let ambiguousRemoval = false;
   const hasMgmtKeyword = /\b(remove|delete|undo|clear|reset|wipe|scratch|take out|take off|didn.?t (have|eat)|did not (have|eat)|get rid of|cancel.*meal|wrong meal|mistake.*log|log.*mistake|not.*eat|never ate|no\s+just)\b/i.test(m);
   if (!hasMgmtKeyword) return null;
 
@@ -276,7 +279,8 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   // ---- FUZZY MULTI-REMOVE — "the other meals", "meals you mistakenly logged" ----
   // Never guess which ones "the other meals" are: show today's numbered log and let
   // the client point. One message each way beats deleting the wrong entry.
-  if (/\b(?:remove|delete|undo|fix)\b[^.!?]*\b(other|mistaken(?:ly)?|wrong(?:ly)?|extra)\b[^.!?]*\b(meals?|logs?|entries)\b/i.test(m)
+  if (ambiguousRemoval
+    || /\b(?:remove|delete|undo|fix)\b[^.!?]*\b(other|mistaken(?:ly)?|wrong(?:ly)?|extra)\b[^.!?]*\b(meals?|logs?|entries)\b/i.test(m)
     || /\b(?:remove|delete)\b[^.!?]*\bmeals?\b[^.!?]*\bmistaken/i.test(m)) {
     const todayStartFZ = sastDayStart();
     const rowsFZ = await db.select({ rawMessage: mealLogs.rawMessage, kcalInt: mealLogs.kcalInt })
@@ -315,6 +319,53 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     const recomputed = await recomputeTodayFoodTotals(user.id);
     await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
     return `Removed your ${label} from the log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\nRemaining: ~${Math.max(0, (user.calorieTarget || 1800) - recomputed.calories)} kcal | ~${Math.max(0, (user.proteinTarget || 120) - recomputed.protein)}g protein still to go.`;
+  }
+
+  // ---- "THAT MEAL" MEANS THE ONE THEY JUST NAMED ----
+  // (2026-08-06, live on the founder's phone, and the worst kind of bug: a destructive action
+  // on the wrong target.) He said "The bread, eggs, avocado, and black coffee are inaccurate.
+  // Remove that meal." and the rice-and-beef dinner was deleted — the day fell by exactly the
+  // 470 kcal of an entry he never mentioned.
+  //
+  // Why every targeting branch above missed it: they all read what follows the verb. Here the
+  // foods are in the sentence BEFORE it, and what follows is "that meal" — a referent, caught
+  // by the generic filter and dropped through to remove-last. Correct grammar, wrong meal.
+  //
+  // So when a removal ask carries a REFERENT and the message names foods anywhere in it, the
+  // foods are the target. Scored by how many of the named foods a log actually contains, so a
+  // four-food sentence lands on the four-food entry and not on whatever was logged last. A tie
+  // or no match falls through to remove-last, unchanged.
+  // hasMgmtKeyword (above) is this file's ONE owner for "they asked to remove something" —
+  // a second copy of that list is how the two drift apart.
+  const saysReferent = /\b(that|this|those|the)\s+(meal|entry|log|one|meals|entries)\b/i.test(m);
+  if (hasMgmtKeyword && saysReferent && !looksLikeQuestion(m)) {
+    const named = scanForSAFoods(m).map(f => f.name.toLowerCase()).filter(Boolean);
+    if (named.length > 0) {
+      const rowsNM = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage, items: mealLogs.items, kcalInt: mealLogs.kcalInt })
+        .from(mealLogs)
+        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sastDayStart())))
+        .orderBy(desc(mealLogs.loggedAt))
+        .limit(15);
+      const score = (row: typeof rowsNM[number]) => {
+        const hay = `${row.rawMessage || ""} ${(Array.isArray(row.items) ? row.items : [])
+          .map((i: any) => i?.name || i?.foodName || "").join(" ")}`.toLowerCase();
+        return named.filter(n => hay.includes(n)).length;
+      };
+      const ranked = rowsNM.map(r => ({ r, n: score(r) })).sort((a, b) => b.n - a.n);
+      const best = ranked[0];
+      const tied = ranked.filter(x => x.n === best?.n).length > 1;
+      if (best && best.n > 0 && !tied) {
+        await db.delete(mealLogs).where(eq(mealLogs.id, best.r.id));
+        invalidateFoodTotalsCache(user.id);
+        const recNM = await recomputeTodayFoodTotals(user.id);
+        await db.update(users).set({ todayCalories: recNM.calories, todayProteinG: recNM.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+        console.log(`[FOOD_MGMT] removed by named foods (${best.n} matched) user=${user.id.slice(-6)}`);
+        return `Removed that one — *${(best.r.rawMessage || "the meal").slice(0, 45)}*. ✅\n\nToday now: ~${recNM.calories} kcal | ~${recNM.protein}g protein.`;
+      }
+      // Two entries match equally well — ASK, never guess; deleting the wrong one IS the bug.
+      // Falls through to the numbered-list branch below, which already owns this exact answer.
+      if (best && best.n > 0 && tied) ambiguousRemoval = true;
+    }
   }
 
   // ---- REMOVE LAST LOGGED MEAL — any natural expression for "that last entry" ----

@@ -532,8 +532,22 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
     return "What happened? Tell me.";
   }
 
-  if (looksFoodLog && trimmed.length < 60 && !/\d+\s*(kcal|cal|calories|protein|g\s*protein|kj)/i.test(trimmed) && !/food logged|logged ✅|meal total|day total/i.test(trimmed)) {
-    return "Type the meal like this:\n\n\"I had 2 eggs and brown bread for breakfast\"\n\"Chicken and rice for lunch\"\n\nI will give you the full kcal and protein breakdown.";
+  // THIS RULE WAS FIGHTING THE COACH VOICE (2026-08-06, live: "Had an Apple" got a form back).
+  //
+  // It used to fire on ANY food-ish reply under 60 characters with no kcal figure in it — and
+  // since the path sweep, that describes almost every CORRECT reply we now write. "Noted — an
+  // apple 👌" is 21 characters and deliberately number-free, so a client who logged an apple in
+  // three words was handed a template telling them how to type it. The repair was written when
+  // replies were long and number-heavy; it outlived the thing it was repairing.
+  //
+  // The instruction is only right when the reply is genuinely USELESS — an apology, a refusal,
+  // or a stall with no acknowledgement in it. A short confirmation is not broken; it is the goal.
+  // ONE test, not two: an apology or a refusal IS the evidence the reply is useless. A short
+  // confirmation ("Noted — an apple 👌") contains none of these words and now survives.
+  const isUseless = /\b(sorry|i can'?t|cannot|unable|didn'?t catch|not sure what|try again|unclear)\b/i.test(trimmed);
+  if (looksFoodLog && trimmed.length < 60 && isUseless
+    && !/\d+\s*(kcal|cal|calories|protein|g\s*protein|kj)/i.test(trimmed) && !/food logged|logged ✅|meal total|day total/i.test(trimmed)) {
+    return "Tell me what it was and I'll log it — e.g. \"2 eggs and brown bread\" or \"chicken and rice\".";
   }
 
   if (/^(i understand\.?|understood\.?|great\.?|noted\.?|got it\.?|sure\.?|ok\.?|okay\.?)$/i.test(trimmed)) {

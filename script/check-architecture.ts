@@ -36,7 +36,7 @@ const BUDGET = {
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
-  regexLiterals: 309,
+  regexLiterals: 311,
   /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
    * something other than the engine can put words in front of a client.
@@ -51,7 +51,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 420,
+  authorshipPoints: 421,
   twilioCallSites: 18,
 };
 
@@ -117,6 +117,30 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "regexLiterals", from: 309, to: 311, date: "2026-08-06",
+    why: "THE WRONG MEAL WAS DELETED, live, on the founder's phone. He said «the bread, eggs, "
+      + "avocado, and black coffee are inaccurate. Remove that meal» and the rice-and-beef "
+      + "dinner was destroyed instead — the day fell by exactly the 470 kcal of an entry he "
+      + "never named. Two patterns pay for that: `saysReferent` recognises «that meal» as "
+      + "pointing at foods named EARLIER in the sentence (every existing targeting branch reads "
+      + "only what follows the verb, which is why all of them missed it), and `isUseless` "
+      + "replaces a length-only rule that was replacing correct short replies with a form — "
+      + "«Had an Apple» came back as «Type the meal like this». Tried first, and it worked, so it "
+      + "is NOT in this number: the removal-keyword test now reuses hasMgmtKeyword instead of a "
+      + "second copy, the ambiguous-match case falls through to the numbered-list branch that "
+      + "already owns that answer, and the useless/acknowledges pair collapsed to one test. "
+      + "PAY THIS BACK by moving referent resolution onto the normalizer, which already reads "
+      + "every message once and could hand the handler a resolved target instead of a pronoun.",
+  },
+  {
+    key: "authorshipPoints", from: 420, to: 421, date: "2026-08-06",
+    why: "ONE mouth: the confirmation that names WHICH meal was removed. A deletion that does not "
+      + "say what it deleted is how the wrong-meal bug stayed invisible for a whole conversation "
+      + "— «Removed your last meal ✅» was true and useless. PAY THIS BACK with the same move as "
+      + "the raise above: once the engine owns the resolved target it can write this sentence "
+      + "itself, from facts, and the handler goes silent.",
+  },
   {
     key: "messageDeciders", from: 29, to: 30, date: "2026-08-05",
     why: "Shopping substitutions — 'they didn't have chicken at the shop'. This is a DIFFERENT "

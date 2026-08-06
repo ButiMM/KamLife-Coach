@@ -1323,6 +1323,42 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// THE 6 AUGUST PHONE TEST — three live failures, each locked by the founder's exact words.
+{
+  test("removal targets the meal NAMED, not the most recent one", async () => {
+    const src = readFileSync("server/understanding/executor.ts", "utf-8");
+    const branch = src.slice(src.indexOf('case "REMOVE_LAST_MEAL"'));
+    const body = branch.slice(0, branch.indexOf('case "SHOW_MEALS"'));
+    assert.ok(/ctx\.clientMessage/.test(body),
+      "the client's real words must reach food-log-mgmt — hardcoding 'remove last meal' deleted the wrong meal");
+    // food-log-mgmt must be able to resolve a referent against foods named earlier in the message.
+    const mgmt = readFileSync("server/handlers/food-log-mgmt.ts", "utf-8");
+    assert.ok(/THAT MEAL. MEANS THE ONE THEY JUST NAMED/.test(mgmt), "the referent branch is gone");
+    assert.ok(/tied/.test(mgmt), "an ambiguous match must ASK, never guess which meal to delete");
+  });
+
+  test("an impossible meal slot is dropped — no 'breakfast' at 7pm", async () => {
+    const src = readFileSync("server/understanding/executor.ts", "utf-8");
+    assert.ok(/slotFitsClock/.test(src), "the model's meal slot must be checked against the clock");
+    assert.ok(/hourSAST < 11/.test(src), "breakfast must be impossible in the evening");
+  });
+
+  test("a SHORT number-free food reply is never replaced with a form", async () => {
+    // "Had an Apple" came back as "Type the meal like this: …" because the repair rule fired on
+    // any food reply under 60 chars with no kcal in it — which is every correct reply we now write.
+    const src = readFileSync("server/handlers/food-scanner.ts", "utf-8");
+    assert.ok(/const isUseless =/.test(src),
+      "the repair must require EVIDENCE the reply is broken — an apology or a refusal");
+    assert.ok(/looksFoodLog && trimmed\.length < 60 && isUseless/.test(src),
+      "the length test must be ANDed with the uselessness test, never used alone");
+    // The words a correct short reply uses must not appear in the uselessness pattern, or
+    // "Noted 👌" would still be replaced by a form.
+    const rule = src.slice(src.indexOf("const isUseless ="));
+    assert.ok(!/noted|logged|got it/i.test(rule.slice(0, 200)),
+      "an acknowledgement must never count as evidence of a broken reply");
+  });
+}
+
 // REACHABILITY (2026-08-06). Twice in one day a capability was found that existed, passed its
 // own tests, and had never run for a client: the day-zero physique read (no state transition
 // ever set ASK_BODY_PHOTOS) and the label verdict (productVerdict was called from nowhere).
