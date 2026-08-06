@@ -242,10 +242,14 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
     const rec = await recordSickState(user, notes, m);
     const sickDays = rec?.sickDays ?? parseSickDays(m);
 
+    // A SICK PERSON GETS THREE LINES, NOT A PROTOCOL (2026-08-06 sweep). This used to send a
+    // bulleted regimen — sleep, fluids, no steps target — to someone who had just said they
+    // were ill and was probably reading it in bed. What they actually need to know is: stop
+    // training, eat what you can keep down, nothing you built is lost.
     const nutritionLine = goal === "muscle_gain"
-      ? `*Eat even if you have no appetite:* protein matters most right now — muscle breaks down fast when sick. Eggs, protein shake, yoghurt, chicken soup. Even small amounts help.`
-      : `*Eat small, real food:* pap, eggs, toast, yoghurt, soup — whatever you can keep down. No calorie pressure today.`;
-    const sickReply = `${capName}, no training — rest until you're properly better. Your body is fighting right now and that takes everything.\n\n${nutritionLine}\n\n• Sleep as much as you can\n• Fluids — water, Energade, soup, juice\n• No steps target while you're sick\n\n${programmeRef} — nothing resets, and I've paused your check-ins for ~${sickDays} day${sickDays !== 1 ? "s" : ""} so I'm not nagging you while you rest. Say *I'm back* when you're ready, or ask *"what do I do when I'm better?"* for your comeback plan.`;
+      ? `Eat what you can — protein first, even small amounts.`
+      : `Eat small and simple — soup, eggs, toast, whatever stays down. No calorie pressure today.`;
+    const sickReply = `${capName}, no training until you're properly better — your body's busy. ${nutritionLine}\n\n${programmeRef} and nothing resets; I've paused your check-ins for ~${sickDays} day${sickDays !== 1 ? "s" : ""}. Say *I'm back* when you're ready.`;
     await logChat(user.id, message, sickReply, "SICK_DAY");
     return sickReply;
   }

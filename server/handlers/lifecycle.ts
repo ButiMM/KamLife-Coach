@@ -859,8 +859,16 @@ export async function handleLifecycle(ctx: {
   // ---- GOAL TRANSITION — response to 1/2/3 after goal reached message ----
   if (user.awaitingInputType === "goal_transition") {
     const capName = user.name?.split(" ")[0] || "there";
-    const choice = m.trim().replace(/[^123]/g, "");
-    const newGoal = choice === "1" ? "maintenance" : choice === "2" ? "muscle_gain" : choice === "3" ? "recomposition" : null;
+    // WORDS AS WELL AS NUMBERS (2026-08-06). The goal-reached message now offers buttons
+    // ("Maintain this" / "Build muscle" / "Recomposition") instead of a 1/2/3 menu, so a
+    // tapped button arrives as its LABEL. Reading digits only would have left the client
+    // stuck in a loop being asked for a number they were never shown.
+    const said = m.trim().toLowerCase();
+    const choice = said.replace(/[^123]/g, "");
+    const newGoal =
+      choice === "1" || /\bmaintain\b/.test(said) ? "maintenance" :
+      choice === "2" || /\b(build muscle|muscle gain|muscle)\b/.test(said) ? "muscle_gain" :
+      choice === "3" || /\brecomp/.test(said) ? "recomposition" : null;
     if (newGoal) {
       const wt = parseFloat(user.currentWeight || "75");
       let newCals = user.calorieTarget || 1800;
@@ -881,15 +889,15 @@ export async function handleLifecycle(ctx: {
       }).where(eq(users.phoneNumber, phone));
       const goalNames: Record<string, string> = { maintenance: "maintaining your weight", muscle_gain: "building muscle", recomposition: "body recomposition" };
       const goalNotes: Record<string, string> = {
-        maintenance: `Eat at ${newCals} kcal daily. Keep training. Keep logging. Your job now is to hold what you've built.`,
-        muscle_gain: `Eat above ${newCals} kcal on training days — especially carbs around workouts. Hit ${newProt}g protein every day. We're building now.`,
-        recomposition: `Eat at ${newCals} kcal daily. High protein (${newProt}g) with a slight deficit on rest days and maintenance on training days. Body fat drops while muscle grows — slower, but both happen.`,
+        maintenance: `Your job now is to hold what you built — keep training, keep logging.`,
+        muscle_gain: `Eat above that on training days and hit the protein daily. We're building now.`,
+        recomposition: `High protein, slight deficit on rest days. Slower, but fat drops while muscle grows.`,
       };
-      const gtReply = `${capName}, locked in — *${goalNames[newGoal]}*.\n\nNew targets: *${newCals} kcal/day | ${newProt}g protein/day.*\n\n${goalNotes[newGoal]}\n\nReply *programme* for your updated workout plan.`;
+      const gtReply = `${capName}, locked in — *${goalNames[newGoal]}*. New targets: *${newCals} kcal* and *${newProt}g protein* a day.\n\n${goalNotes[newGoal]}\n\nWant your updated plan?[BUTTONS:Show my plan|Not now]`;
       await logChat(user.id, message, gtReply, "GOAL_TRANSITION");
       return gtReply;
     }
-    const gtPrompt = `${capName}, reply with a number:\n1 — Maintain this weight\n2 — Build muscle\n3 — Recomposition`;
+    const gtPrompt = `${capName}, which way do you want to go now?[BUTTONS:Maintain this|Build muscle|Recomposition]`;
     return gtPrompt;
   }
 
@@ -1410,14 +1418,16 @@ export async function handleLifecycle(ctx: {
     // it was true and none of it was the point. A person saying "I'm not losing weight" is at
     // the moment most people quit; they need to hear that they are not doing it wrong, one true
     // reason, and one thing to do. Everything else is a lecture wearing a coach's voice.
-    let scaleReply = `That's the most demoralising part of the whole thing${name} — and it's where most people quit. You're not doing it wrong.\n\nIn the first weeks the scale mostly measures water and food weight, not fat. It moves last, not first.\n\n`;
+    // 2026-08-06 sweep: still eight sentences after the July trim, and two of them said the
+    // same thing ("the scale moves last" / "nothing happens before week 4"). One reason, one job.
+    let scaleReply = `That's where most people quit${name} — and you're not doing it wrong. Early on the scale is mostly measuring water and food, not fat.\n\n`;
 
     if (week <= 3) {
-      scaleReply += `You're in week ${week}. Nothing visible happens before week 4 — that's not you, that's just how it goes.\n\n*This week:* keep logging. That's the whole job.`;
+      scaleReply += `You're in week ${week}; nothing shows before week 4. Keep logging — that's the whole job this week.`;
     } else if (total > 0 && week >= 4) {
-      scaleReply += `*One thing this week:* log your food honestly for three days — portions creep up without anyone noticing, and it's the reason nine times out of ten.\n\nDo that and send me the three days. Then I'll know what to change.`;
+      scaleReply += `Log your food honestly for three days and send them to me — portions creep up without anyone noticing, and that's the reason nine times out of ten.`;
     } else {
-      scaleReply += `*One thing this week:* hit your protein and get your sessions in. Nothing else matters yet.`;
+      scaleReply += `Hit your protein and get your sessions in. Nothing else matters yet.`;
     }
 
     if (goal === "muscle_gain") {
@@ -1482,7 +1492,10 @@ export async function handleLifecycle(ctx: {
     const name = spaceName(user);
     const stepsT = user.stepsTarget || 8500;
     const prot = user.proteinTarget || 120;
-    const restReply = `Rest day is part of the programme${name} — not a break from it.\n\n*What happens on rest days:*\nYour muscles repair and grow. Strength is built during rest, not during the session. Skipping rest days is how people overtrain and plateau.\n\n*Rest day checklist:*\n✅ *Steps* — still hit ${stepsT.toLocaleString()}. Walk, do not train. Low intensity movement speeds recovery.\n✅ *Protein* — still hit ${prot}g. Muscle repair needs amino acids even when you are not lifting.\n✅ *Sleep* — 7-9 hours tonight. This is where the gains actually happen.\n✅ *Stretch* — 10 minutes. Hips, quads, chest, shoulders. Whatever is tight.\n\nCome back to your next session fresher than if you had trained today.`;
+    // TWO SENTENCES (2026-08-06 sweep). This was a 655-character checklist — a lecture on
+    // muscle repair plus four ticked bullets — sent to someone who said "rest day". They know
+    // it's a rest day; they told us. The only thing worth adding is what still counts today.
+    const restReply = `Rest day is part of the programme${name} — not a break from it. Still hit your steps and your ${prot}g protein, sleep well tonight, and come back fresher than if you'd trained. 👌`;
     await logChat(user.id, message, restReply, "REST_DAY");
     return restReply;
   }

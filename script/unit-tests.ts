@@ -1754,9 +1754,15 @@ test("money objection reply contains R6.63", async () => {
 // getSleepResponse — pure function, no DB needed
 // ============================================================
 
-test("sleep: null hours + isBadSleep=true → cortisol advice", async () => {
+// INVERTED 2026-08-06 (path sweep). This used to REQUIRE the word "cortisol" — it was asserting
+// that a client who says they slept badly gets a physiology lesson. The reply now gives them one
+// thing to do tonight instead, so the test asserts the thing that actually matters: a concrete
+// fix, in two sentences, with no lecture. Deleting the test would have left the path unguarded.
+test("sleep: null hours + isBadSleep=true → one concrete fix, no lecture", async () => {
   const r = getSleepResponse(null, true);
-  assert.ok(r.includes("cortisol") || r.includes("fat loss") || r.includes("Cortisol"), `unexpected: ${r}`);
+  assert.ok(/phone|screen|bed/i.test(r), `no actionable fix: ${r}`);
+  assert.ok(!/cortisol|hormone/i.test(r), `still lecturing: ${r}`);
+  assert.ok(r.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, `too long: ${r}`);
 });
 test("sleep: null hours + isBadSleep=false → log prompt", async () => {
   const r = getSleepResponse(null, false);

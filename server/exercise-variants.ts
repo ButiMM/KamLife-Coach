@@ -412,9 +412,11 @@ export function formatVariantGuide(key: string): string {
     `${NUM[i] || `${i + 1}.`} *${v.name}*\n   📍 _Spot it:_ ${v.spot}\n   ▶️ _Do it:_ ${v.howTo}`
   ).join("\n\n");
   const note = fam.note || `Your plan just says "${fam.title.toLowerCase()}" — any ONE of these counts. Use whichever your gym has.`;
+  // ONE closing offer, not two (2026-08-06 path sweep). This ended with a photo prompt AND a
+  // "reply X form" prompt stacked on each other — two calls to action under a list the client
+  // is still reading. The photo one is the better help, so it is the one that stays.
   let out = `*${fam.title} — which one is in your gym?*\n_${fam.muscle}_\n\n${body}\n\n✅ ${note}\n\n`
-    + `📸 Not sure which yours is? Snap the machine and send it — I'll confirm it's right for today.\n`
-    + `🖼️ Reply *${fam.match[0]} form* for a form picture.`;
+    + `📸 Not sure which yours is? Snap the machine and send it — I'll confirm it's right for today.`;
   const img = getExerciseGifUrl(fam.repImageSlug);
   if (img) out += `\n[MEDIA:${img}]`;
   return out;

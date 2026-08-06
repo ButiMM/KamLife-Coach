@@ -105,7 +105,13 @@ export async function getDamageControlNote(userId: string, message: string): Pro
   return `\n\n*Damage control for the next 24 hours:*\nNext meal: lean protein + vegetables only — eggs, chicken, or tinned tuna with cabbage or spinach. No carbs for that one meal. Walk 20 minutes today minimum. Water to 2L. One bad meal is nothing. Back on track right now.`;
 }
 
-export async function getProgressiveOverloadContext(userId: string): Promise<string> {
+/**
+ * @param compact ONE SENTENCE, TOP LIFT ONLY (2026-08-06). The done-confirmation used to staple
+ *        the whole six-line target table onto a reply that was already a wall, and a client who
+ *        has just walked out of the gym does not read a table — they read the first line and the
+ *        buttons. The full list still belongs on "today's workout", where they ASKED for it.
+ */
+export async function getProgressiveOverloadContext(userId: string, opts: { compact?: boolean } = {}): Promise<string> {
   try {
     // ASK THE OWNER WHAT TODAY'S LOAD IS (2026-07-30). This block used to print "→ aim 127.5kg"
     // straight off the last session while the header two lines above said "start at 60% of your
@@ -132,11 +138,25 @@ export async function getProgressiveOverloadContext(userId: string): Promise<str
       if (!seen.has(key)) seen.set(key, lift);
     }
 
-    const lines = [...seen.values()]
+    const ranked = [...seen.values()]
       // cleanExerciseName tidies names like "my chest fly is" that older parser versions
       // stored verbatim. The WEIGHT is echoed exactly as logged — a heavy machine fly is
       // real, and this is the client's own progressive-overload record.
-      .map(lift => ({ lift, name: cleanExerciseName(lift.exerciseName) || lift.exerciseName, w: parseFloat(String(lift.weightKg || 0)) }))
+      .map(lift => ({ lift, name: cleanExerciseName(lift.exerciseName) || lift.exerciseName, w: parseFloat(String(lift.weightKg || 0)) }));
+
+    // COMPACT: the single most recent lift, as one sentence a person actually reads.
+    if (opts.compact) {
+      const top = ranked[0];
+      if (!top || !(top.w > 0)) return "";
+      if (heldBack && adjust) {
+        const todayW = Math.round((top.w * adjust.loadPct) / 100 * 2) / 2;
+        return `Last ${top.name} was ${top.w}kg — keep it to ${todayW}kg today while you ease back in.`;
+      }
+      const nextW = (top.w + 2.5).toFixed(1).replace(".0", "");
+      return `Last ${top.name} was ${top.w}kg — go for ${nextW}kg or an extra rep or two.`;
+    }
+
+    const lines = ranked
       .slice(0, 6)
       .map(({ lift, name, w }) => {
         const repsStr = lift.sets && lift.reps
@@ -186,7 +206,10 @@ export async function checkPerfectDay(userId: string, proteinTarget = 120, steps
     const stepsHit = todayStepCount >= stepsTarget;
 
     if (todayWorkouts.length > 0 && stepsHit && proteinHit) {
-      return `\n\n🏆 *Perfect day!* Workout done. Steps hit (${todayStepCount.toLocaleString()} / ${stepsTarget.toLocaleString()}). Protein target hit (${totalProt}g / ${proteinTarget}g). This is what transformation looks like — remember how this feels and repeat it tomorrow.`;
+      // ONE LINE, NO SCOREBOARD (2026-08-06). This used to read back three ratios — steps
+      // 8,712/8,500, protein 141g/130g — which is a receipt for a day they just lived. They
+      // know they hit it. Saying it well beats saying it twice with the maths attached.
+      return ` 🏆 And that's a perfect day — training, steps and protein all hit.`;
     }
     return null;
   } catch (e) {

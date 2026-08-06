@@ -40,13 +40,14 @@ import { stripFoodLoggedClaim } from "../server/utils";
 import { join } from "node:path";
 
 /** Which slice of the rebuild owes this assertion. Slice 1's own must be green TODAY. */
-type Slice = 1 | 2 | 3 | 4;
+type Slice = 1 | 2 | 3 | 4 | 5;
 
 const SLICE_NAMES: Record<Slice, string> = {
   1: "staging + gauntlet",
   2: "multi-intent parser + silent tools",
   3: "prompt enforcement + engine-fed card",
   4: "delete handler sends",
+  5: "the path sweep — every client-facing reply, not a sample",
 };
 
 const NOW = Date.now();
@@ -501,6 +502,193 @@ const CONVERSATIONS: Conversation[] = [
   },
 ];
 
+// ═════════════════════════════════════════════════════════════════════════════
+// SLICE 5 — THE PATH SWEEP
+//
+// (2026-08-06, founder, after the workout done-reply shipped a wall: "The way to end
+// whack-a-mole is a full sweep, not path-by-path. Enumerate EVERY client-facing reply
+// path... prove it with the gauntlet across ALL enumerated paths, not a sample.")
+//
+// He is right about the cause. Slices 1-4 cleaned the paths they enumerated — steps, meals,
+// photos, voice, grocery — and every path NOT on that list kept the old verbose handler. The
+// list was the bug. So this table is the list, and it is deliberately boring: one row per
+// thing a client can say, with the budget that row is allowed and WHY it gets that budget.
+//
+// Adding a reply path to the product without adding a row here is how the next wall ships.
+//
+// THE BUDGETS. Two sentences is the coaching default and most rows take it. A row gets more
+// only when the client asked for the content that makes it longer — a workout has exercises
+// in it, a menu is a menu — and the reason is written on the row. "It's already like that"
+// is never a reason.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** Re-file a check under a different slice, so the shape vocabulary can be reused as-is. */
+const asSlice = (slice: Slice, c: Check): Check => ({ ...c, slice, run: c.run });
+
+/**
+ * BUTTONS ONLY ON A QUESTION (founder's rule 2). A menu stapled to a confirmation is a
+ * machine changing the subject: the client said "I trained", and the reply offered them
+ * three other topics. When buttons ARE offered they must be the answers to the question
+ * just asked — so the text before them has to end in a question mark.
+ */
+const buttonsOnlyAnswerAQuestion: Check = {
+  slice: 5,
+  label: "buttons only answer a question",
+  run: ({ reply }) => {
+    const i = reply.indexOf("[BUTTONS:");
+    if (i < 0) return null;
+    const before = reply.slice(0, i).trim();
+    if (/\?$/.test(before)) return null;
+    return `buttons offered without asking anything — text before them ends "${before.slice(-40)}"`;
+  },
+};
+
+/** The physiology lecture, by name. Every one of these has been screenshotted in a done-reply. */
+const noLecture: Check = {
+  slice: 5,
+  label: "no physiology lecture",
+  run: ({ reply }) => {
+    const hits = [
+      /\bcortisol\b/i, /\bglycogen\b/i, /\bmuscle fibres?\b/i, /\bendorphins?\b/i,
+      /\bdopamine\b/i, /\bserotonin\b/i, /\bgrowth signals?\b/i, /\bprimed to absorb\b/i,
+      /\banabolic window\b/i, /\bprotein synthesis\b/i,
+    ].filter(re => re.test(reply));
+    return hits.length === 0 ? null : `lectures about ${hits.map(r => r.source.replace(/\\b|\?|s\$/g, "")).join(", ")}`;
+  },
+};
+
+type SweepRow = {
+  /** The path, named the way the founder would name it. */
+  path: string;
+  say: string;
+  /** Why this budget and not two. Required when `sentences` is above the default. */
+  budget?: string;
+  sentences?: number;
+  user?: Record<string, any>;
+  /** Numbers the client did not say but that are demonstrably theirs (a stored target). */
+  allowNumbers?: number[];
+  /** This path legitimately lists things the client asked to see (a programme, a menu). */
+  allowLists?: true;
+  /**
+   * This path deliberately sends more than one WhatsApp bubble. Only a workout does: the
+   * programme builder splits on "---" ON PURPOSE so six exercises arrive as a few human-sized
+   * messages instead of one block WhatsApp hides behind "Read more". Requires a reason.
+   */
+  allowSplit?: string;
+  /**
+   * The figures ARE what was asked for. The receipt rule exists because a client who LOGGED a
+   * meal got a docket back; a client who asked for a meal plan is asking for the kcal and the
+   * protein, and refusing to print them would be answering a different question. Requires a
+   * reason, and no LOGGING path may ever set it.
+   */
+  numbersWereAskedFor?: string;
+};
+
+const SWEEP: SweepRow[] = [
+  // ── TRAINING — the domain that shipped the wall ────────────────────────────
+  { path: "workout · done", say: "I trained this morning", sentences: 4,
+    budget: "confirmation + the one thing worth celebrating, the next lift, the feel question" },
+  { path: "workout · done (bare)", say: "done", sentences: 4,
+    budget: "same reply, reached by the one-word form" },
+  { path: "workout · already logged", say: "done", sentences: 3,
+    budget: "the correction plus the lift they should be aiming at" },
+  { path: "workout · lift log", say: "bench 80kg 3x10" },
+  { path: "workout · today's session", say: "today's workout", sentences: 60, allowLists: true,
+    allowSplit: "the programme builder splits into bubbles on purpose — see buildGymSession",
+    budget: "they asked for the programme — the exercises ARE the answer" },
+  { path: "workout · tomorrow's session", say: "tomorrow's session", sentences: 60, allowLists: true,
+    allowSplit: "same builder, same deliberate split",
+    budget: "same: a session is a list of exercises" },
+  { path: "workout · rest day", say: "is today a rest day" },
+  { path: "workout · skip", say: "I dont want to train today", sentences: 3,
+    budget: "hear them, then the smallest version of the session" },
+
+  // ── LOGGING — cleaned in slices 2-4; here so the sweep can prove it stays clean ──
+  { path: "steps", say: "I did 5000 steps" },
+  { path: "water", say: "2 glasses of water" },
+  { path: "weight", say: "I weigh 82.5kg", sentences: 3,
+    budget: "this stub client's weigh-in HITS their goal — the biggest moment in the product gets the celebration, and then the one question about where they go next" },
+  { path: "sleep", say: "I slept 5 hours" },
+
+  // ── PROGRESS & NUMBERS ─────────────────────────────────────────────────────
+  { path: "progress", say: "my progress", sentences: 8, allowLists: true,
+    numbersWereAskedFor: "'my progress' is a request to see the figures",
+    budget: "they asked to see their numbers — this is the one place the numbers belong" },
+  { path: "targets", say: "my targets", sentences: 8, allowLists: true,
+    numbersWereAskedFor: "'my targets' is a request to see the figures",
+    budget: "same: the figures are the answer to the question" },
+
+  // ── LIFECYCLE & ADMIN ──────────────────────────────────────────────────────
+  { path: "menu", say: "menu", sentences: 14, allowLists: true,
+    budget: "a menu is a list; that is what was asked for" },
+  { path: "help", say: "help", sentences: 14, allowLists: true, budget: "same as menu" },
+  { path: "streak", say: "streak" },
+
+  // ── COACHING QUESTIONS — the old advice handlers, the biggest wall risk ─────
+  { path: "advice · belly fat", say: "how do I lose belly fat", sentences: 6,
+    budget: "a real question deserves a real answer — but six sentences, not sixteen" },
+  { path: "advice · alcohol", say: "can I drink alcohol", sentences: 6, budget: "as above" },
+  { path: "advice · plateau", say: "I am not losing weight", sentences: 6, budget: "as above" },
+  { path: "advice · supplements", say: "should I take creatine", sentences: 6, budget: "as above" },
+  { path: "advice · what to eat", say: "what should I eat for lunch", sentences: 6, budget: "as above" },
+
+  // ── EMOTIONAL — must stay warm; brevity is not coldness ────────────────────
+  { path: "mood · stressed", say: "I am stressed", sentences: 5,
+    budget: "hear them, one thing to do, one door back — never a numbered protocol" },
+  { path: "mood · giving up", say: "I feel like giving up", sentences: 5, budget: "as above" },
+  { path: "injury", say: "my knee is sore", sentences: 5,
+    budget: "what to do now, what to avoid, when to see someone" },
+
+  // ── FOOD SIDE PATHS ────────────────────────────────────────────────────────
+  { path: "food · swap", say: "they didnt have chicken at the shop", sentences: 3,
+    budget: "the swap, and what it costs them — nothing else" },
+  { path: "food · undo", say: "delete my last meal" },
+  { path: "food · meal log", say: "I had pap and chicken", sentences: 3,
+    budget: "the confirmation plus at most one remark about the same plate" },
+  { path: "food · one meal ask", say: "what should I eat for lunch", sentences: 4,
+    budget: "naming food takes a sentence or two — and this must NOT be the 3-day plan" },
+  { path: "food · meal plan", say: "meal plan", sentences: 90, allowLists: true,
+    allowSplit: "a 3-day plan is a document; they asked for it by name",
+    numbersWereAskedFor: "a meal plan without kcal and protein per meal is not a meal plan",
+    budget: "they asked for the plan — the plan is the answer" },
+  { path: "food · water advice", say: "how much water should I drink", sentences: 3,
+    budget: "the target and how to log it" },
+  { path: "food · supplements", say: "should I take creatine", sentences: 4,
+    budget: "verdict, dose, what to buy" },
+
+  // ── REFERENCE & ADMIN — asked for by name ──────────────────────────────────
+  { path: "exercise · form guide", say: "how do I squat properly", sentences: 22, allowLists: true,
+    budget: "a which-machine-is-yours card: each variant needs a spot-it and a do-it line" },
+  { path: "admin · referral", say: "referral", sentences: 6, allowLists: true,
+    budget: "the code, the message they forward, and what they get — the forwardable text is the product" },
+  { path: "admin · billing", say: "how do I pay", sentences: 3, budget: "where, how much, cancel terms" },
+  { path: "admin · reminders", say: "remind me to drink water", sentences: 3,
+    budget: "the question back, with examples of the answer" },
+  { path: "admin · equipment ask", say: "what equipment do I need", sentences: 3,
+    budget: "either an answer or an honest 'say that again' — never a wall" },
+];
+
+/** One conversation per swept path, judged by the shape rules under slice 5. */
+const SWEEP_CONVERSATIONS: Conversation[] = SWEEP.map(row => ({
+  name: `sweep · ${row.path}`,
+  why: row.budget || "the coaching default: two sentences, one next move",
+  user: row.user,
+  turns: [{
+    say: row.say,
+    checks: [
+      asSlice(5, neverSilent),
+      ...(row.allowSplit ? [] : [asSlice(5, oneMessage)]),
+      asSlice(5, atMostSentences(row.sentences ?? 2)),
+      ...(row.numbersWereAskedFor ? [] : [asSlice(5, noReceipt)]),
+      ...(row.allowLists ? [] : [asSlice(5, noLists)]),
+      buttonsOnlyAnswerAQuestion,
+      noLecture,
+    ],
+  }],
+}));
+
+CONVERSATIONS.push(...SWEEP_CONVERSATIONS);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // STATIC ASSERTIONS — the ones that read the source rather than a reply.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -660,7 +848,7 @@ async function main() {
   const { handleMessage } = await import("../server/routes");
   const runLLM = process.env.GAUNTLET_LLM === "1";
 
-  const tally: Record<Slice, Tally> = { 1: { green: 0, red: 0 }, 2: { green: 0, red: 0 }, 3: { green: 0, red: 0 }, 4: { green: 0, red: 0 } };
+  const tally: Record<Slice, Tally> = { 1: { green: 0, red: 0 }, 2: { green: 0, red: 0 }, 3: { green: 0, red: 0 }, 4: { green: 0, red: 0 }, 5: { green: 0, red: 0 } };
   const failures: string[] = [];
   const skipped: string[] = [];
 
@@ -717,7 +905,7 @@ async function main() {
   if (skipped.length > 0) console.log(`\n${skipped.join("\n")}\n`);
 
   let allGreen = true;
-  for (const s of [1, 2, 3, 4] as Slice[]) {
+  for (const s of [1, 2, 3, 4, 5] as Slice[]) {
     const t = tally[s];
     const total = t.green + t.red;
     if (total === 0) continue;

@@ -247,7 +247,10 @@ export async function handleWeightLog(
         .then(({ script, emotion }) => generateVoiceNote(script, emotion, user.id))
         .then(url => { if (url) return sendWhatsApp(phone, "", url); })
         .catch(err => console.warn("[TTS] Goal voice failed:", err));
-      return `🏆 *GOAL REACHED.*\n\nWeight logged: *${newKg}kg.*${changeNote}\n\n${firstName}, you hit your target of ${targetKg}kg. This is real — you did the work.\n\nNow we need a new direction. Reply with a number:\n\n*1* — Maintain this weight\n*2* — Build muscle\n*3* — Recomposition (hold weight, swap fat for muscle)\n\nWhat's next?`;
+      // The biggest moment in the product gets ONE celebration and ONE question (2026-08-06
+      // sweep). It used to be ten lines with a numbered menu underneath — a form to fill in at
+      // the exact moment a person wants to be told they did it.
+      return `🏆 ${firstName}, you hit ${targetKg}kg — that's the goal, done. Real work.\n\nWhere to now?[BUTTONS:Maintain this|Build muscle|Recomposition]`;
     }
   }
 

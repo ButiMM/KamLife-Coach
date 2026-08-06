@@ -89,7 +89,10 @@ export async function getMenuText(user: any, opts?: { showCommands?: boolean }):
     // supplements, badges, referrals, step-connect and pause — surface a beginner does not need
     // and cannot hold. All of it still WORKS when asked for by name; it just isn't pushed. The
     // last line teaches the real interface: talk normally, the coach works it out.
-    ? `\n\n*What you can send me:*\n🍳 Any meal — photo, voice note or plain text. I do the maths.${machineLine}\n💪 _workout_ · _done_\n📊 _my progress_ · _weight 82_\n\n_Or just talk to me normally — tell me what you ate, how you feel, what you need. I'll work it out._`
+    // THREE LINES (2026-08-06 sweep). Even the trimmed list read as a sitemap on a phone —
+    // and the last line is the only one that matters, because talking normally IS the
+    // interface. The command names still work; they are just not recited.
+    ? `\n\n_Send me a meal — photo, voice note or words. Or just talk to me normally and I'll work it out._${machineLine}`
     : "";
 
   const tail = `${commandsBlock}${trialLine}`;
@@ -103,12 +106,12 @@ export async function getMenuText(user: any, opts?: { showCommands?: boolean }):
     const body = todayStepCount !== null && todayStepCount < stepsTarget
       ? `Session done ✅ — ${(stepsTarget - todayStepCount).toLocaleString()} steps to go and today's full.`
       : `Session done ✅ — good work today.`;
-    return `${hey} ${body}${tail}[BUTTONS:Log food|My progress|Tomorrow's session]`;
+    return `${hey} ${body}${tail}\n\nWhat do you need?[BUTTONS:Log food|My progress|Tomorrow's session]`;
   }
 
   // Rest day
   if (workoutState.type === "REST") {
-    return `${hey} ${workoutState.todayName} — rest day. Next session: ${workoutState.nextTrainingName}.\n\nRecovery is where the work pays off. Protein in, water up, walk if you can.${tail}[BUTTONS:Log food|My progress|Tomorrow's session]`;
+    return `${hey} ${workoutState.todayName} — rest day. Next session: ${workoutState.nextTrainingName}.${tail}\n\nWhat do you need?[BUTTONS:Log food|My progress|Tomorrow's session]`;
   }
 
   // Missed sessions — flag it in the greeting
@@ -119,13 +122,13 @@ export async function getMenuText(user: any, opts?: { showCommands?: boolean }):
     const missed = workoutState.missedSessions.length > 0
       ? `You missed ${workoutState.missedSessions.join(" + ")}.`
       : `You've missed ${n} session${n === 1 ? "" : "s"}.`;
-    return `${hey} ${missed} ${workoutState.todayName} is still a training day — let's get it done.${tail}[BUTTONS:Today's workout|Log food|My progress]`;
+    return `${hey} ${missed} ${workoutState.todayName} is still a training day — let's get it done.${tail}\n\nWhat do you need?[BUTTONS:Today's workout|Log food|My progress]`;
   }
 
   // Returning after silence
   if (daysSilent >= 3) {
     const daysText = daysSilent <= 7 ? `${daysSilent} days` : "a while";
-    return `${hey} Been ${daysText} — no lecture. We pick up where you left off.${tail}[BUTTONS:Today's workout|Log food|My progress]`;
+    return `${hey} Been ${daysText} — no lecture. We pick up where you left off.${tail}\n\nWhat do you need?[BUTTONS:Today's workout|Log food|My progress]`;
   }
 
   // Normal training day
@@ -135,7 +138,7 @@ export async function getMenuText(user: any, opts?: { showCommands?: boolean }):
   const trainBody = mode === "walk_only"
     ? `Today's job: ${stepsTarget.toLocaleString()} steps.${stepsSoFar}`
     : `Training day — your session's ready.${stepsSoFar}`;
-  return `${hey} ${trainBody}${tail}[BUTTONS:Today's workout|Log food|My progress]`;
+  return `${hey} ${trainBody}${tail}\n\nWhat do you need?[BUTTONS:Today's workout|Log food|My progress]`;
 }
 
 // ============================================================

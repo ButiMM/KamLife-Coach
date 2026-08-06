@@ -400,8 +400,8 @@ export async function handleWorkoutCommands(ctx: {
       .limit(1);
 
     if (existing.length > 0) {
-      const poCtx = await getProgressiveOverloadContext(user.id);
-      return `${firstName ? firstName + ", " : ""}workout already logged today.${poCtx ? "\n\n" + poCtx.trim() : ""}\n\nLog your lifts: "bench 80kg 3x10" or ask for tomorrow's session.`;
+      const poCtx = await getProgressiveOverloadContext(user.id, { compact: true });
+      return `${firstName ? firstName + ", " : ""}today's session is already logged. 👌${poCtx ? "\n\n" + poCtx.trim() : ""}`;
     }
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
@@ -437,14 +437,16 @@ export async function handleWorkoutCommands(ctx: {
     const doneResponse = WORKOUT_DONE_RESPONSES[newTotal % WORKOUT_DONE_RESPONSES.length](newTotal, todaySlot);
 
     let milestoneMsg = "";
+    // ONE SENTENCE EACH. A milestone is worth saying and not worth a paragraph — the
+    // number is the celebration, the essay dilutes it.
     const MILESTONE_TEXTS: Record<number, string> = {
-      1:   `\n\n🔥 *First workout done.* That's the hardest one — starting. Your body is already adapting. See you tomorrow.`,
-      3:   `\n\n🔥 *3 sessions in.* The habit is forming. Most people who hit 3 make it to 10.`,
-      5:   `\n\n🔥 *5 sessions.* You've officially started. Some people signed up the same day and already quit — you haven't.`,
-      10:  `\n\n🏆 *10 sessions done.* Most people never get here. Don't stop now.`,
-      25:  `\n\n🏆 *25 workouts.* You are not talking about fitness anymore — you are doing it.`,
-      50:  `\n\n🏆 *50 sessions.* Fifty times you showed up when you could have stayed home. That is discipline.`,
-      100: `\n\n🏆 *100 workouts.* One hundred sessions. Whatever happens next — you earned this.`,
+      1:   ` That's the hardest one done — starting.`,
+      3:   ` Three in: the habit is forming.`,
+      5:   ` Five sessions — you've properly started.`,
+      10:  ` Ten sessions. 🏆 Most people never get here.`,
+      25:  ` Twenty-five. 🏆 You're not talking about fitness anymore.`,
+      50:  ` Fifty sessions. 🏆 That's discipline.`,
+      100: ` One hundred. 🏆 Whatever comes next, you earned this.`,
     };
 
     if (MILESTONE_TEXTS[newTotal]) {
@@ -465,13 +467,15 @@ export async function handleWorkoutCommands(ctx: {
 
     const [perfectDay, poCtxDone] = await Promise.all([
       checkPerfectDay(user.id, user.proteinTarget || 120),
-      getProgressiveOverloadContext(user.id),
+      getProgressiveOverloadContext(user.id, { compact: true }),
     ]);
 
-    // Week 1 Complete badge — fires once when programme week advances from 1 to 2
+    // Week 1 Complete badge — fires once when programme week advances from 1 to 2.
+    // Was a five-paragraph second WhatsApp message ("---" splits the bubble); the badge is
+    // worth one line and the split was buzzing a client's phone twice for one thing they did.
     let week1Badge = "";
     if (weekAdvance && newWeek === 2) {
-      week1Badge = `\n\n---\n\n🏆 *WEEK 1 COMPLETE*\n\nYou finished your first full training week. Most people quit before this.\n\nWorkout ${newTotal} is done. Week 2 starts next session — same time, same commitment.\n\nThe gap between who you were and who you're becoming is exactly this: showing up when nobody's watching.`;
+      week1Badge = ` 🏆 That's your first full training week — most people quit before this.`;
     }
 
     // COMMITMENT STREAK (2026-07-14, third-party review): a streak that counts comebacks,
@@ -482,26 +486,25 @@ export async function handleWorkoutCommands(ctx: {
       ? Math.floor((dayStartSAST(new Date()) - dayStartSAST(lastWorkout)) / 86_400_000)
       : 0;
     const comebackNote = (gapDays >= 2 && newTotal > 1 && !MILESTONE_TEXTS[newTotal])
-      ? `\n\n💛 *You came back — that's ${newTotal} sessions of showing up.* Missing a couple of days isn't failure, it's being human. The people who get there are the ones who come back. You just did.`
+      ? ` 💛 And you came back — that's what counts.`
       : "";
 
     // Detect rest-day bonus session (trained on a scheduled rest day)
     const wState = await getTodayWorkoutState(user);
     const bonusNote = wState.type === "REST"
-      ? `\n\n_${wState.todayName} is your rest day — but you trained anyway. Extra credit._`
+      ? ` ${wState.todayName} is your rest day and you trained anyway — extra credit.`
       : "";
 
     // Proactive form check — once, early (2nd session, when they're settled but form
     // habits are still forming). One clip is the closest thing to hands-on coaching we
     // have. Kept to the 2nd session so it doesn't clash with the 1st-session referral nudge.
     const formVideoPrompt = newTotal === 2
-      ? `\n\n📹 _Next session, film ONE set from the side and send it — I'll check your form and give you the one or two things to fix. Better form = faster results and no niggles._`
+      ? ` 📹 Next session, film one set from the side and send it — I'll check your form.`
       : "";
 
-    // Show last session's targets so user knows what to log (only if they have exercise history)
-    const liftPrompt = poCtxDone
-      ? `${poCtxDone.trim()}\n\nLog today's actual weights: "bench 80kg 3x10" (or skip if cardio/bodyweight)`
-      : `Log your lifts: "bench 80kg 3x10" (or skip if cardio/bodyweight)`;
+    // Last session's top lift, one sentence (see checks.ts `compact`). No table: they just
+    // walked out of the gym.
+    const liftPrompt = poCtxDone ? poCtxDone.trim() : "";
 
     await logChat(user.id, message, doneResponse, "WORKOUT_DONE");
 
@@ -535,7 +538,15 @@ export async function handleWorkoutCommands(ctx: {
     // > perfect day > bonus. The feel question + lift prompt stay — they're the loop.
     const doneAddOn = [week1Badge, comebackNote, milestoneMsg, formVideoPrompt, perfectDay || "", bonusNote]
       .find(s => s && s.trim()) || "";
-    return `${doneResponse}${doneAddOn}\n\n_How did that session feel — too easy, just right, or too hard? Tell me and I'll tune the next one._\n\n${liftPrompt}[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
+    // THE SHAPE (2026-08-06). Confirmation + the one thing worth celebrating, then the next
+    // move, then the question — and the answers to that question are the ONLY buttons. Three
+    // buttons offering a menu of other topics is a machine changing the subject; a client who
+    // has just trained is being asked one thing, so they get the three ways to answer it.
+    return [
+      `${doneResponse}${doneAddOn}`.trim(),
+      liftPrompt,
+      `How did that session feel?[BUTTONS:Too easy|Just right|Too hard]`,
+    ].filter(Boolean).join("\n\n");
   }
 
   // ---- LIFT LOG — parse and store exercise data ----
@@ -590,12 +601,15 @@ export async function handleWorkoutCommands(ctx: {
     const nameStr = capFirst ? `Sharp ${capFirst}` : "Sharp";
     const mode = user.trainingMode || "home";
     const sessionWord = mode === "gym" ? "gym session" : "home session";
+    // The new numbers and ONE instruction (2026-08-06 sweep). This used to be seven
+    // sentences: the confirmation, the targets, a paragraph of philosophy per goal, and a
+    // command to type. The targets ARE the news; the philosophy can wait for a question.
     const goalDetail = goalType === "muscle_gain"
-      ? `Eat above ${newTargets.calorieTarget} kcal on training days. Hit ${newTargets.proteinTarget}g protein every day — that is what builds muscle. Add reps or weight every session.\n\nReply *workout* for your first ${sessionWord}.`
+      ? `Eat above that on training days and hit the protein every day — that's what builds muscle.`
       : goalType === "fat_loss"
-      ? `Stay within ${newTargets.calorieTarget} kcal. Hit ${newTargets.proteinTarget}g protein first at every meal — that preserves muscle while you cut.\n\nReply *workout* for today's session.`
-      : `Hold calories at ${newTargets.calorieTarget} kcal. Hit ${newTargets.proteinTarget}g protein. Consistency over the next 8 weeks is what locks the results in.\n\nReply *workout* for today's session.`;
-    return `${nameStr}. Goal updated to *${label}*.\n\nNew targets: *${newTargets.calorieTarget} kcal/day | ${newTargets.proteinTarget}g protein.*\n\n${goalDetail}`;
+      ? `Stay under that and hit the protein first at every meal — it's what keeps the muscle while you cut.`
+      : `Hold it there and hit the protein — consistency is what locks this in.`;
+    return `${nameStr}. Goal updated to *${label}* — new targets are *${newTargets.calorieTarget} kcal* and *${newTargets.proteinTarget}g protein* a day.\n\n${goalDetail}\n\nWant today's ${sessionWord}?[BUTTONS:Today's workout|Not now]`;
   }
 
   return null;

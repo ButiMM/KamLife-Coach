@@ -878,7 +878,15 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // Triggers: "meal plan", "my meal plan", "give me a meal plan", "what should I eat",
   //           "eating plan", "diet plan", "weekly meals"
   // Generates a static 3-day rotating plan — no GPT, instant, personalised.
-  const isMealPlanRequest =
+  // ONE MEAL IS NOT A PLAN (2026-08-06 sweep). "what should I eat for lunch" matched the bare
+  // phrase below and got a 2,031-character three-day rotating meal plan back. A person asking
+  // what to have for lunch wants a sentence naming food, and that is a question for the coach.
+  // Naming a single meal disqualifies the request — unless they also said "meal plan", in which
+  // case they want the plan and merely mentioned a meal in passing.
+  const asksAboutOneMeal =
+    /\b(lunch|breakfast|supper|dinner|brunch|snack)\b/i.test(m)
+    && !/\b(meal|eating|diet|food|nutrition)\s*plan\b/i.test(m);
+  const isMealPlanRequest = !asksAboutOneMeal && (
     ["meal plan", "my meal plan", "mealplan", "eating plan", "diet plan", "weekly meals",
       "what should i eat", "give me a meal plan", "i need a meal plan", "i want a meal plan",
       "food plan", "my food plan", "weekly meal plan",
@@ -886,7 +894,8 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
       // (2026-07-05 audit) — the eating half of the plan had no aliases here.
       "nutrition side", "nutrition side?", "nutrition plan", "my nutrition plan",
       "food side", "food side?", "eating side", "eating side?", "nutrition?"].includes(m)
-    || /\b(give me a meal plan|my meal plan|send.*meal plan|meal plan please|eating plan|what should i eat|i need a meal plan|diet plan|weekly meals|nutrition (side|plan))\b/i.test(m);
+    || /\b(give me a meal plan|my meal plan|send.*meal plan|meal plan please|eating plan|what should i eat|i need a meal plan|diet plan|weekly meals|nutrition (side|plan))\b/i.test(m)
+  );
   if (isMealPlanRequest) {
     // Fetch last 7 days of meal logs to surface recently eaten foods
     let recentFoods: string[] = [];

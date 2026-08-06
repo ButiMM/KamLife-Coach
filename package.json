@@ -9,6 +9,7 @@
     "start": "cross-env NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "gauntlet": "tsx script/gauntlet.ts",
+    "probe": "tsx script/probe-paths.ts",
     "test:golden": "tsx script/golden-regression.ts",
     "test:safety": "tsx script/safety-audit.ts",
     "test:unit": "tsx script/unit-tests.ts",

@@ -1256,7 +1256,9 @@ export async function handleFoodContext(ctx: {
         "Mince and pap":     "Pap and mince — classic muscle meal. 💪 Want to add a veg side? Spinach or chakalaka takes 2 minutes and adds iron without touching your macros.",
         "Pap and pilchards": "Pap and pilchards — the best budget protein meal in SA. 🐟 Add a handful of spinach or chakalaka to round it out.",
         "Pap and wors":      "Pap and wors — solid meal. 🔥 Add chakalaka or morogo to get some fibre in without adding calories.",
-        "Chicken and pap":   "Pap and chicken — good protein. Add spinach or butternut on the side to hit your micronutrients.[BUTTONS:Add veg side|No thanks]",
+        // No buttons (2026-08-06 sweep): they REPORTED a meal, they didn't ask a question, and
+        // a menu under a confirmation is the machine changing the subject. They can say yes.
+        "Chicken and pap":   "Pap and chicken — good protein. Add spinach or butternut on the side to hit your micronutrients.",
         "Pap and stew":      "Pap and stew — high protein combo. Add cabbage or spinach on the side to balance the meal.",
       };
       const comboUpsell = allAdjustedFoods

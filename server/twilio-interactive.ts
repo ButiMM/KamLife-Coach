@@ -123,6 +123,12 @@ export async function sendWhatsAppYesNo(
  * Returns a [BUTTONS:...] marker that whatsapp.ts strips and sends via REST API.
  */
 export function replyWithButtons(body: string, buttons: string[]): string {
+  // ONE MENU PER MESSAGE (2026-08-06, found by sweeping every reply path). `menu` and `help`
+  // both went through getMenuText — which already ends in its own [BUTTONS:…] — and then had a
+  // second block stapled on here, so the live reply carried two. whatsapp.ts renders the first
+  // and leaves the second as literal text at the bottom of the message. If the body already
+  // brought its own buttons, they are the buttons.
+  if (/\[BUTTONS:/i.test(body)) return body;
   const limited = buttons.slice(0, 3).join("|");
   return `${body}\n[BUTTONS:${limited}]`;
 }

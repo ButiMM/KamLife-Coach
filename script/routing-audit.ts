@@ -471,15 +471,20 @@ const CASES: Case[] = [
   // ── WATER LOGGING — production bugs caught 2026-06-23 ───────────────────────────
   // Bug 1: "Water log" fell through to GPT and returned "I can't help you with water"
   // (a core feature). Fixed by catching bare water commands in isWaterStatusCmd.
+  // RE-POINTED 2026-08-06 (path sweep). These matched the literal label "Daily water target:",
+  // which was the receipt phrasing the sweep removed — the reply now answers the question
+  // ("About 2.7L a day for your weight") instead of printing a scoreboard. What the guard is
+  // FOR is unchanged and still asserted: a bare water command must reach the deterministic
+  // water handler and come back with a real litre figure, never a GPT "I can't help with that".
   { name: "water: 'water log' returns summary, not GPT hallucination (prod bug 2026-06-23)", msg: "water log",
-    expect: [/daily water target|water target|you have logged/i],
+    expect: [/\d+(?:\.\d+)?\s*L\b/i, /send me the amount/i],
     reject: [/can'?t help|cannot help|don'?t.*water|sorry/i] },
   { name: "water: 'log water' returns summary (prod bug 2026-06-23)", msg: "log water",
-    expect: [/daily water target|water target|you have logged/i] },
+    expect: [/\d+(?:\.\d+)?\s*L\b/i, /send me the amount/i] },
   { name: "water: 'my water' returns status (regression guard)", msg: "my water",
-    expect: [/daily water target|water target|you have logged/i] },
+    expect: [/\d+(?:\.\d+)?\s*L\b/i, /send me the amount/i] },
   { name: "water: 'water status' returns status (regression guard)", msg: "water status",
-    expect: [/daily water target|water target|you have logged/i] },
+    expect: [/\d+(?:\.\d+)?\s*L\b/i, /send me the amount/i] },
 
   // Bug 2: combined water+supplement messages — supplement handler ran first and returned
   // without logging the water. Fixed by tryLogWater() being called from inside the
@@ -583,7 +588,7 @@ const CASES: Case[] = [
   // else fires that word's handler. Every case here contains an intent word used in
   // a context that intent must NOT own. Grows with every tester screenshot.
   ...(() => {
-    const SICK_TPL = /above-the-neck rule|no training — rest until|paused your check-ins|Still resting —/i;
+    const SICK_TPL = /above-the-neck rule|no training until|paused your check-ins|Still resting —/i;
     const SESSION_SERVE = /Reply \*DONE\* when finished|Next Session \(Day/i;
     const SESSION_LOGGED = /Session \d+ (?:logged|—|in)\b|First workout done|got it, logged to/i;
     const FOOD_LOGGED = /\*Food logged|Food logged ✅|Running total today|Meal total:/i;
@@ -653,7 +658,7 @@ const CASES: Case[] = [
         { reject: [SICK_TPL, SESSION_SERVE] }),
       // genuinely sick — the template SHOULD fire, with the duration remembered
       x("real sick report", "I'm sick with flu, no training for me",
-        { expect: [/no training — rest until/i, /paused your check-ins/i] }),
+        { expect: [/no training until/i, /paused your check-ins/i] }),
       // declares AND asks (Kam's exact class) — answer the question, RECORD the sickness
       x("sick + comeback question records", "I can't walk today, I'm sick. How does that affect my progress? I'll be out for the next 5 days",
         { expect: [/Nothing resets/i, /5 days/i, /paused your check-ins/i] }),
@@ -661,7 +666,7 @@ const CASES: Case[] = [
       x("repeat sick mention", "still feeling sick today",
         { user: { profileNotes: `sick_until:2099-01-01 | paused_until:2099-01-01` },
           // holding-line variants rotate (never verbatim twice) — accept any of the three
-          expect: [/Still resting|Rest is still the job|holding everything for you/i], reject: [/no training — rest until/i] }),
+          expect: [/Still resting|Rest is still the job|holding everything for you/i], reject: [/no training until/i] }),
       // already noted sick: a QUESTION falls to the sick-aware brain, never a template
       x("question while sick", "Can I eat bread while I'm sick?",
         { user: { profileNotes: `sick_until:2099-01-01 | paused_until:2099-01-01` },

@@ -577,7 +577,8 @@ SA voice. Direct. Coach forward, not backward.`;
     const hasObviousWeightSignal = /\b(?:\d{2,3}(?:\.\d+)?\s*kg\b|weigh|scale|body weight)\b/i.test(m);
     const hasObviousWorkout = /\b(?:gym|workout|training|trained|session|lift|squat|bench|press|done|finished)\b/i.test(m);
     if (!hasObviousFoodSignal && !hasObviousStepSignal && !hasObviousWeightSignal && !hasObviousWorkout) {
-      const clarifyReply = `Sorry${user.name ? " " + user.name.split(" ")[0] : ""}, I didn't quite catch that 🙂\n\nTell me what you ate and I'll log it — or pick one:[BUTTONS:Today's workout|Log food|My progress]`;
+      // The buttons DO answer this one — it ends in a question, which is the rule (2026-08-06).
+      const clarifyReply = `Sorry${user.name ? " " + user.name.split(" ")[0] : ""}, I didn't quite catch that 🙂 Say it another way, or what do you need?[BUTTONS:Today's workout|Log food|My progress]`;
       await logChat(user.id, message, clarifyReply, "UNCLEAR");
       return clarifyReply;
     }

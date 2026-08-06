@@ -361,20 +361,20 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
       const goal = user.goalType || "fat_loss";
       let reply = "";
       if (isCreatine) {
-        reply = `*Creatine — yes or no?*\n\nYes. It's the most evidence-backed supplement there is — improves strength, muscle volume, recovery, and even brain function.\n\n*How to take it:* 5g/day, any time, with water. No loading phase needed. Takes 2–4 weeks to feel the full effect.\n\n*What to buy:* Creatine monohydrate only. Nothing fancy. Dis-Chem or Takealot — ~R150/month.\n\n*Works for:* fat loss AND muscle gain. You keep more muscle while cutting. It's not just for bulking.`;
+        reply = `Yes — creatine's the most proven one there is, and it works for fat loss as well as building.\n\n5g a day with water, any time, no loading phase. Buy plain monohydrate at Dis-Chem, about R150 a month — the fancy ones are the same thing at triple the price.`;
       } else if (isWhey) {
         const pTarget = user.proteinTarget || 120;
-        reply = `*Whey protein — do you need it?*\n\nOnly if you can't hit *${pTarget}g protein/day* from food.\n\nIf you're eating chicken, eggs, tuna, pilchards regularly — you probably don't need it.\n\nIf you're consistently 40–50g short: 1 scoop of whey post-workout fills that gap (~25g protein, ~120 kcal).\n\n*What to buy:* Any unflavoured whey from Dis-Chem or Takealot. Avoid the fancy branded ones — same product, triple the price.`;
+        reply = `Only if you can't get your ${pTarget}g from food — if chicken, eggs and pilchards are already in your week, you don't need it.\n\nIf you're short most days, one scoop after training closes the gap. Any plain whey from Dis-Chem does the job.`;
       } else if (isOmega) {
-        reply = `*Omega 3 / Fish oil*\n\nWorth it for most people — reduces inflammation, supports joint health, improves fat metabolism.\n\n*Dose:* 1–2g EPA+DHA per day (check the label — not just "1000mg fish oil").\n\n*Budget pick:* Any generic fish oil capsules from Clicks or Dis-Chem — R60–R80/month. Works identically to premium brands.`;
+        reply = `Worth it for most people — joints and inflammation mainly.\n\n1–2g of EPA+DHA a day (read the label, not the "1000mg fish oil" on the front). Generic capsules from Clicks, R60–R80 a month.`;
       } else if (isMagnesium) {
-        reply = `*Magnesium*\n\nMost people are deficient. Helps with sleep quality, muscle recovery, and reducing cravings — especially at night.\n\n*Best form:* Magnesium glycinate (absorbed better, easier on stomach). Avoid magnesium oxide — cheap but poorly absorbed.\n\n*When:* Take before bed. R80–R120/month at Dis-Chem.`;
+        reply = `Good one for sleep, recovery and night-time cravings — most people are short on it.\n\nGet magnesium glycinate, not oxide, and take it before bed. R80–R120 a month.`;
       } else if (isVitD) {
-        reply = `*Vitamin D3*\n\nMost South Africans are still deficient despite the sun — especially if you work indoors or wear sunscreen all day.\n\nLow vitamin D = lower testosterone, weaker immunity, worse mood, slower recovery.\n\n*Dose:* 2000–4000 IU/day with food. Safe long-term. R50–R80/month.`;
+        reply = `Worth it — most South Africans are short on it despite the sun, especially with an indoor job.\n\n2000–4000 IU a day with food. R50–R80 a month.`;
       } else if (isCollagen) {
-        reply = `*Collagen*\n\nFor joints, skin, and connective tissue. Decent evidence for joint pain reduction — less so for muscle building.\n\nIf you have joint issues or are over 35: worth trying. If you're young and injury-free: protein from food does more.\n\n*If buying:* hydrolysed collagen peptides, 10–15g/day with vitamin C (improves absorption).`;
+        reply = `Decent for joints, not for building muscle — if you're over 35 or your knees complain, worth a try; otherwise food protein does more.\n\nHydrolysed peptides, 10–15g a day with something containing vitamin C.`;
       } else if (isZinc) {
-        reply = `*Zinc*\n\nSupports testosterone, immunity, and recovery. Most people get enough from red meat and eggs.\n\nIf you're plant-based or eating very low meat: worth supplementing. 15–25mg/day — don't overdo it, high doses reduce copper absorption.`;
+        reply = `Most people get enough from red meat and eggs, so only worth it if you eat little or no meat.\n\n15–25mg a day — don't go higher, too much blocks copper absorption.`;
       }
       await logChat(user.id, message, reply, "SUPPLEMENT_GUIDE");
       return reply;

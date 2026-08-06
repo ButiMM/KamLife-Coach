@@ -1429,7 +1429,7 @@ function formatGymDay(
   header += `_${phaseName} Phase${phase === 5 ? " — Recovery Week" : ""}_\n\n`;
   header += `⚡ *Warm-up:* 5 min incline walk or light cardio. Then 1 warm-up set (half weight) on your first lift.\n\n`;
   header += equipNote;
-  header += `📋 *Today's target:* ${wCtx.sets} sets × ${wCtx.reps} reps | Rest ${wCtx.rest} between sets.\n`;
+  header += `📋 ${wCtx.sets} sets × ${wCtx.reps} reps, ${wCtx.rest} rest between sets.\n`;
   header += `_${wCtx.rationale}_`;
   // Reduce an exercise/alt string to its core movement so we can spot a redundant
   // alternative: "Dumbbell RDL" and "Romanian Deadlift" both collapse to the same key.
@@ -1839,37 +1839,33 @@ export function buildFullProgramme(user: any): string {
 // WORKOUT_DONE_RESPONSES
 // ============================================================
 
+/**
+ * ONE OR TWO SHORT SENTENCES (2026-08-06, founder, live screenshot of the done-reply).
+ *
+ * Every one of these used to be a three-paragraph physiology lecture — cortisol dropping,
+ * glycogen depleted, muscle fibres rebuilding thicker — stapled on top of a comeback note,
+ * a target table and a three-button menu. A man who has just finished training does not read
+ * that. The founder's own words to a client who trains are "Lekker. Session 22." and then a
+ * question about how it felt.
+ *
+ * So the count survives, because the count is the thing they earned. The lecture does not.
+ * Keep them SHORT — if a new entry needs a second line, it does not belong here.
+ */
 export const WORKOUT_DONE_RESPONSES = [
-  (total: number, _day: number) =>
-    `CRUSHED IT. 🔥\n\nYour heart rate is settling. Your muscles are flooded with endorphins right now — that calm you're about to feel in 20 minutes? That's your body saying thank you.\n\nDrink water. Eat protein within 2 hours. Session ${total} locked in — no one can take that from you.`,
-  (total: number, day: number) =>
-    `Session ${total} done. Day ${day} banked.\n\nYour muscles are broken down and ready to rebuild — that only happens if you eat. Protein in the next hour. Then rest. Your body does the hard work while you sleep.`,
-  (total: number, _day: number) =>
-    `Lekker work. 💪\n\n${total} sessions in. You showed up when it was hard — that is the whole difference between clients who change and clients who just talk about it.\n\nEat. Rest. Come back.`,
-  (total: number, _day: number) =>
-    `Done. ${total} sessions logged.\n\nThat post-workout feeling you have right now? Endorphins, dopamine, serotonin — your brain just rewarded you for doing the work. It gets easier to come back every time you feel this.\n\nProtein within 2 hours.`,
-  (total: number, day: number) =>
-    `Day ${day} ticked off. Session ${total} on the board. 🏆\n\nMost people skipped today. You didn't. That is the edge — not talent, not a perfect programme. Just showing up.\n\nDrink water. Eat your protein.`,
-  (total: number, _day: number) =>
-    `${total} sessions. That is ${total} times you chose discipline over excuses.\n\nYour body is repairing right now — muscle fibres rebuilding thicker and stronger than before. Feed it: 30-40g protein in the next 2 hours or you waste the session.`,
-  (total: number, _day: number) =>
-    `DONE. 🔥 Session ${total} locked.\n\nYour cortisol is dropping. Your muscles are glycogen-depleted and primed to absorb nutrients. This is the most important meal of your day — protein first, then carbs.\n\nEat. Sleep. Repeat.`,
-  (total: number, day: number) =>
-    `Session ${total} complete. Day ${day} in the books.\n\nYou know that glow you're feeling right now? That's real — your body just released a cocktail of feel-good hormones. Enjoy it. You earned it.\n\nProtein within 2 hours. Water now.`,
-  (total: number, _day: number) =>
-    `${total} sessions with Coach K. 💪\n\nConsistency is a skill — you are getting better at it every single session. The hardest part was starting. You're past that now.\n\nEat your protein. Let your body do the rest.`,
-  (total: number, _day: number) =>
-    `Trained. Logged. Done. Session ${total}.\n\nYour heart rate is coming down. Muscles are warm, blood is pumping, hormones are fired up. In an hour you will feel calm and strong — that is the reward.\n\nDrink water. Eat protein.`,
-  (total: number, _day: number) =>
-    `${total} down. 🏆\n\nThis version of you is stronger than the one who walked in. Not by much — but a little. And a little, stacked ${total} times, is everything.\n\nRemember this feeling next time you want to skip.`,
-  (total: number, day: number) =>
-    `Day ${day} done. Session ${total}.\n\nSmall gains stacked on small gains — that is how bodies change. Not overnight, not in a week. Over ${total} sessions of showing up.\n\nProtein. Water. Rest. See you next session.`,
-  (total: number, _day: number) =>
-    `Eish — ${total} sessions! 🔥\n\nYou are not talking about getting fit anymore. You are actually doing it. Big difference.\n\nPost-workout window: protein within 2 hours, water now, sleep 7-9 hours tonight. Your muscles are rebuilding as you read this.`,
-  (total: number, _day: number) =>
-    `Done is done. Session ${total} logged and locked.\n\nThe soreness you feel tomorrow? That's not damage — that's adaptation. Your body rebuilding stronger. Trust it.\n\nEat your protein. You earned this recovery.`,
-  (total: number, _day: number) =>
-    `Session ${total} banked. No one can take that from you. 💪\n\nYour muscles are broken down and flooded with growth signals right now. This is exactly when nutrition matters most — eat protein, replenish carbs, drink water.\n\nRest well. Come back ready.`,
-  (total: number, day: number) =>
-    `${total} sessions. Day ${day} ticked off.\n\nYou chose the gym when you could have chosen the couch. That decision, made consistently, is why Coach K clients actually change.\n\nProtein within 2 hours. Water. Rest. 🔥`,
+  (total: number, _day: number) => `Crushed it. 🔥 Session ${total} on the board.`,
+  (total: number, day: number) => `Session ${total} done, day ${day} banked. 💪`,
+  (total: number, _day: number) => `Lekker work. 💪 That's ${total} sessions in.`,
+  (total: number, _day: number) => `Done — ${total} sessions logged. 🔥`,
+  (total: number, day: number) => `Day ${day} ticked off, session ${total} on the board. 🏆`,
+  (total: number, _day: number) => `${total} sessions. Most people skipped today — you didn't. 💪`,
+  (total: number, _day: number) => `Done. 🔥 Session ${total} locked.`,
+  (total: number, day: number) => `Session ${total} complete, day ${day} in the books. 💪`,
+  (total: number, _day: number) => `${total} sessions with Coach K. 💪 Nice one.`,
+  (total: number, _day: number) => `Trained, logged, done — session ${total}. 🔥`,
+  (total: number, _day: number) => `${total} down. 🏆 A little stronger than last time.`,
+  (total: number, day: number) => `Day ${day} done. Session ${total}. 💪`,
+  (total: number, _day: number) => `Eish — ${total} sessions! 🔥 You're actually doing it now.`,
+  (total: number, _day: number) => `Done is done. Session ${total} locked. 💪`,
+  (total: number, _day: number) => `Session ${total} banked. No one takes that from you. 💪`,
+  (total: number, day: number) => `${total} sessions, day ${day} ticked off. 🔥`,
 ];

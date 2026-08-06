@@ -149,7 +149,8 @@ export async function handleWater(ctx: {
     const todayW = parseFloat(user.todayWater as string || "0");
     const wTarget = waterTargetLitres(user.currentWeight as string);
     const remaining = Math.max(0, Math.round((wTarget - todayW) * 10) / 10);
-    const waterQReply = `Daily water target: *${wTarget}L* (based on your body weight).\n\nYou have logged ${todayW}L today — ${remaining > 0 ? `${remaining}L still to go.` : `target hit.`}\n\nTo log water, send the amount: "drank 500ml", "had 1L", "2 glasses of water".`;
+    // They asked a question, so answer it — don't hand back a scoreboard (2026-08-06 sweep).
+    const waterQReply = `About *${wTarget}L* a day for your weight.${remaining > 0 ? ` You're ${remaining}L off it today.` : ` You're there already today. 👌`}\n\nJust send me the amount as you go — "drank 500ml", "had 1L".`;
     await logChat(user.id, message, waterQReply, "WATER_QUESTION");
     return waterQReply;
   }

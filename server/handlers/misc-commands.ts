@@ -1008,7 +1008,7 @@ export async function handleMiscCommands(ctx: {
     const streak = await getStepStreak(user.id);
     const workoutCount = user.totalWorkoutsCompleted || 0;
     if (streak === 0) {
-      return `No step streak yet. Log today's steps to start one. Every streak starts at 1.`;
+      return `No step streak yet — log today's steps and it starts at 1. 👟`;
     }
     const streakMsg = streak >= 7
       ? `🔥 ${streak}-day step streak. That is serious consistency — do not stop now.`
