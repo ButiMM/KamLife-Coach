@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres, auditStoredTargets, auditStepsTarget, recalcTargetsForProfile, maintenanceKcal } from "../server/targets";
 import { predictTrajectory } from "../server/trajectory";
@@ -1320,6 +1320,58 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   test("a genuine one-topic ramble IS still condensable — the margin guard survives", async () => {
     assert.ok(!transcriptMustPassWhole(
       "Eish coach I am so tired today the traffic was terrible and I did not sleep well at all last night"));
+  });
+}
+
+// REACHABILITY (2026-08-06). Twice in one day a capability was found that existed, passed its
+// own tests, and had never run for a client: the day-zero physique read (no state transition
+// ever set ASK_BODY_PHOTOS) and the label verdict (productVerdict was called from nowhere).
+// Unit tests cannot see this, because they call the function directly and never ask whether
+// anything else does. So the rule is: a feature is not done until something CALLS it.
+{
+  test("REACHABILITY: every capability with its own tests is actually called in production code", async () => {
+    const srcFiles: string[] = [];
+    const walkDir = (d: string) => {
+      for (const e of readdirSync(d)) {
+        const f = join(d, e);
+        if (statSync(f).isDirectory()) walkDir(f);
+        else if (e.endsWith(".ts")) srcFiles.push(f);
+      }
+    };
+    walkDir("server");
+    const allSrc = srcFiles.map(f => ({ f, src: readFileSync(f, "utf-8") }));
+
+    // Each entry: the exported capability, and the file that must CALL it. Adding a row here
+    // is how a new feature proves it is wired, not merely written.
+    const MUST_BE_CALLED: Array<[fn: string, definedIn: string]> = [
+      ["productVerdict", "server/food-swaps.ts"],           // the "can I eat this?" label verdict
+      ["bodyPhotoAsk", "server/onboarding-physique.ts"],    // the day-zero physique read
+      ["hasTrialedBefore", "server/pricing-config.ts"],     // one trial per number, ever
+      ["sttVocabularyPrompt", "server/foods.ts"],           // the transcription bias
+      ["transcriptMustPassWhole", "server/utils.ts"],       // "read the rest of my transcript"
+      ["neverSilentLine", "server/reply-hygiene.ts"],       // the one fallback mouth
+    ];
+
+    // Follows ONE hop, because a capability may legitimately sit behind an adapter in its own
+    // file (productVerdict is reached through verdictFromLabelLine). What is NOT allowed is a
+    // chain that never leaves the file it was written in — that is the disease.
+    const reachedFromOutside = (fn: string, definedIn: string, depth = 0): boolean => {
+      if (allSrc.some(({ f, src }) => f !== definedIn && new RegExp(`\\b${fn}\\s*\\(`).test(src))) return true;
+      if (depth > 0) return false;
+      const own = allSrc.find(({ f }) => f === definedIn);
+      if (!own) return false;
+      // Who inside the same file calls it? If THEY are reached from outside, so is this.
+      const siblings = [...own.src.matchAll(/export (?:async )?function ([A-Za-z_$][\w$]*)/g)]
+        .map(m => m[1]).filter(n => n !== fn);
+      return siblings.some(sib =>
+        new RegExp(`function ${sib}[\\s\\S]{0,1200}?\\b${fn}\\s*\\(`).test(own.src)
+        && reachedFromOutside(sib, definedIn, depth + 1));
+    };
+
+    for (const [fn, definedIn] of MUST_BE_CALLED) {
+      assert.ok(reachedFromOutside(fn, definedIn),
+        `${fn}() is defined in ${definedIn} and CALLED FROM NOWHERE — it has never run for a client`);
+    }
   });
 }
 

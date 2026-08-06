@@ -439,3 +439,24 @@ function num(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 function cap(s: string): string { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+/**
+ * Read the vision model's "LABEL: kcal=230 sugar=1 satfat=9 protein=3" line and grade it.
+ *
+ * Lives here, next to productVerdict, because reading the label and judging the label are one
+ * job — splitting them across files is how the two drift and a threshold ends up applied to a
+ * number that was parsed differently. Returns null when no label line was emitted (no legible
+ * nutrition table) or when nothing in it could be read: a verdict computed from a guessed
+ * label is worse than no verdict at all.
+ */
+export function verdictFromLabelLine(visionReply: string, name: string, goalType?: string | null): Verdict | null {
+  const line = (String(visionReply || "").match(/^[ \t]*LABEL:([^\n]*)$/im) || [])[1];
+  if (!line) return null;
+  const read = (key: string): number | null => {
+    const m = line.match(new RegExp(`\\b${key}\\s*=\\s*(\\d+(?:\\.\\d+)?)`, "i"));
+    return m ? parseFloat(m[1]) : null;
+  };
+  return productVerdict(name, {
+    kcal: read("kcal"), sugarG: read("sugar"), satFatG: read("satfat"), proteinG: read("protein"),
+  }, goalType);
+}

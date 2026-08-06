@@ -2,6 +2,7 @@
 
 import crypto from "crypto";
 import { sttVocabularyPrompt } from "../foods";
+import { verdictFromLabelLine } from "../food-swaps";
 import { tmpdir } from "os";
 import { writeFile, unlink } from "fs/promises";
 import { createReadStream } from "fs";
@@ -767,15 +768,14 @@ export async function handleMediaMessage(ctx: {
             return bottleReply;
           }
         } catch {
-          // vision failed or not a bottle — fall through to food
+          // not a bottle — fall through to food
         }
       }
 
-      // FOOD PHOTO — an ASKING caption ("can I eat this?") gets a verdict + "reply log
-      // it", never an auto meal log.
+      // FOOD PHOTO — an ASKING caption ("can I eat this?") gets a verdict, never an auto log.
       const isApprovalCaption = isAskingNotReporting(message || "")
         || /\b(is this ok|is this good|is this fine|can i eat|can i have|should i eat|good or bad|ok for me|okay for me|allowed|this ok|this good|fits? my (goal|diet|plan)|for my goal)\b/i.test(message || "");
-      // Number-free delivery for a numbers:low client (prompt omits figures + scrub net).
+
       const photoNumbersLow = getNumbersMode(user) === "low";
       const photoCardComing = cardWillAttach(user, 999, !!(process.env.APP_URL || process.env.APP_BASE_URL));
 
@@ -784,9 +784,8 @@ export async function handleMediaMessage(ctx: {
         .from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, todayStartPhoto), eq(chatHistory.intent, "FOOD_LOG"), eq(chatHistory.messageIn, "[Photo]")));
       const photoCountToday = parseInt(String(photoCountResult[0]?.count || 0));
-      // THE HIDDEN CAP (2026-08-05): at SIX photos this stopped LOOKING — the plate never
-      // reached vision, and a normal logging day got "keep it consistent". Twelve is a runaway;
-      // six is a keen client. Past it we say so plainly and still give them a way to log.
+      // THE HIDDEN CAP (2026-08-05): at SIX photos this stopped LOOKING and a normal logging
+      // day got "keep it consistent". Twelve is a runaway; six is a keen client.
       if (photoCountToday >= 12) {
         return `That's a lot of photos today — I can't look at more until tomorrow. Tell me what's on the plate in words and I'll log it.`;
       }
@@ -794,8 +793,7 @@ export async function handleMediaMessage(ctx: {
       const { calorieTarget: liveCal, proteinTarget: liveProt } = calculateTargets(
         parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner"
       );
-      // "Can I eat this?" needs TODAY'S budget, not just the target — the verdict's second
-      // layer compares the item against what's actually left of the day (founder spec).
+      // "Can I eat this?" needs TODAY'S budget: layer two compares the item to what's left.
       const remainingToday = isApprovalCaption
         ? await recomputeTodayFoodTotals(user.id).then(t => liveCal - t.calories).catch(() => undefined)
         : undefined;
@@ -803,7 +801,7 @@ export async function handleMediaMessage(ctx: {
       if (!foodVisionDecision.allowed) {
         return `${clientName}, your subscription is not currently active. Reactivate at kamlife.co.za to get your meals analysed — or type what you ate and I'll give you an estimate: e.g. "pap, chicken, spinach".`;
       }
-      // AUTOMATIC DAILY VISION CAP — past today's photo budget → ask them to type it (margin-safe; normal use never hits it, a spammer does).
+      // DAILY VISION CAP — past today's budget, ask them to type it. A spammer hits this; nobody else does.
       if (!(await allowExpensiveOp(user.id, "vision"))) {
         return `${clientName}, I've read a lot of your photos today already 📸 — just type what this was (e.g. *chicken and rice*) and I'll log it. Photos reset tomorrow.`;
       }
@@ -835,15 +833,14 @@ export async function handleMediaMessage(ctx: {
       recordServiceCost({ userId: user.id, feature: "vision", costUsd: estimateVisionCostUSD(foodVisionDecision, foodVisionTokens) }); // per-member cost + governor counting
 
       const visionReply = visionResponse.choices[0]?.message?.content?.trim();
-      // Unreadable photo + caption naming real food → log from the caption (text pipeline gates apply; no double log).
+      // Unreadable photo + caption naming food → log from the caption (no double log).
       const captionHasFood = !!(message && message.trim().length > 1 && scanForSAFoods(message).length > 0);
-      // Caption that's just a meal label ("lunch"): ask a targeted question, not a dead-end.
+
       const mealLabelMatch = message ? message.match(/\b(breakfast|lunch|dinner|supper|snack|brunch)\b/i) : null;
       const mealAsk = mealLabelMatch
         ? `I can't make out the photo clearly — what did you have for ${mealLabelMatch[1].toLowerCase()}? Just type it (e.g. "chicken, rice, veg") and I'll log it.`
         : "Eish, I cannot make out the food clearly. Take the photo in better light and send again — or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
-      // Sentinel checks must come before the length guard — "NOT_FOOD" is 8 chars and
-      // "WATER" is 5 chars, both below the < 10 threshold that catches garbled replies.
+      // Sentinels before the length guard: "NOT_FOOD" and "WATER" are under the <10 cutoff.
       const waterSentinelMatch = (visionReply || "").match(/^WATER:(\d+(?:\.\d+)?)\s*ml\b/i);
       if (waterSentinelMatch || /^WATER$/i.test(visionReply || "")) {
         const ml = waterSentinelMatch ? parseFloat(waterSentinelMatch[1]) : 0;
@@ -857,7 +854,6 @@ export async function handleMediaMessage(ctx: {
             return `📸 Read from your photo: ${autoLogged}`;
           }
         }
-        // Bottle looks full or estimation failed — prompt for amount
         const waterReply = `That's water 💧 — good. To log today's intake just type: *water 500ml* (or however much you've had).`;
         await logChat(user.id, "[Water photo]", waterReply, "WATER_LOG");
         return waterReply;
@@ -992,16 +988,14 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
 
       let totalPhotoKcal = extractKcal(visionReply);
       let totalPhotoProt = extractProt(visionReply);
-      // Strip the internal TOTAL: line; unwrap a leading scare-quoted food name (reads as sarcasm).
-      // "Black coffee logged ☕" (2026-08-05): the model writes the word, so no handler deletion
-      // reached it; the scrub ran on the approval branch only. Scrubbed at source now.
+      // Strip internal TOTAL/ITEMS/LABEL lines; unwrap a scare-quoted food name (reads as
+      // sarcasm). "Black coffee logged ☕" (2026-08-05) — scrubbed at source now.
       const visionDisplay = stripFoodLoggedClaim(visionReply
-        .replace(/^[ \t]*(?:TOTAL|ITEMS):[^\n]*$/gim, "")
+        .replace(/^[ \t]*(?:TOTAL|ITEMS|LABEL):[^\n]*$/gim, "")
         .replace(/^["“”‘’]([^"“”\n]{2,40})["“”‘’]/, "$1")
         .trim());
 
-      // Safety net: food vision returned NOT_FOOD (pre-classifier missed it or wasn't run).
-      // Give a helpful response rather than showing "NOT_FOOD" to the user.
+      // Safety net: NOT_FOOD reached here — never show the sentinel to a client.
       if (/^NOT_FOOD\b/i.test(visionDisplay)) {
         const notFoodReply = `I can see that's not a food photo. If you're logging a meal, send a photo of the food or just type what you ate — e.g. *chicken and rice*. For steps, send a screenshot of your step count.`;
         await logChat(user.id, "[Photo]", notFoodReply, "UNRECOGNISED_PHOTO");
@@ -1010,8 +1004,16 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
 
       // "Can I eat this?" — a PRE-PURCHASE question: give the verdict but NEVER log; "log it" later counts it.
       if (isApprovalCaption) {
-        const verdict = visionDisplay; // already scrubbed at source — see visionDisplay above
-        // DETERMINISTIC TODAY-VERDICT: CODE computes "does today allow this?" from real budget.
+        // THE GROUNDED VERDICT (2026-08-06). Legible label → the answer is COMPUTED from the
+        // printed numbers by the founder's own thresholds, not improvised by the model.
+        // Unreadable → null, and the model's prose stands. This is "let me see the back", in code.
+        let verdict = visionDisplay; // already scrubbed at source — see visionDisplay above
+        const graded = verdictFromLabelLine(visionReply, itemsFromVisionText(visionDisplay)[0]?.name || "this", goal);
+        if (graded) {
+          console.log(`[VERDICT] grounded from label user=${user.id.slice(-6)} freq=${graded.frequency}`);
+          verdict = graded.line;
+        }
+        // CODE computes "does today allow this?" from the real budget.
         let todayLine = "";
         const parsedItem = parseFoodLogTotalsFromMessageOut(visionReply || visionDisplay);
         if (typeof remainingToday === "number") {
@@ -1023,8 +1025,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
               ? `\n\n✅ *Today allows it:* ~${Math.max(0, remainingToday)} kcal left${itemKcal !== null ? `, this is ~${itemKcal}` : ""}.`
               : `\n\n⚠️ *Today doesn't really allow it:* ${remainingToday <= 0 ? `you're ~${Math.abs(remainingToday)} kcal over already` : `only ~${remainingToday} kcal left${itemKcal !== null ? ` and this is ~${itemKcal}` : ""}`} — save it for tomorrow, or take half.`);
         }
-        // PARK THE REFERENT (2026-07-23: "reply log it" stored nothing — a dead promise).
-        // referent-log.ts resolves "log it" / "3 handfuls of it" against this next turn.
+        // PARK THE REFERENT (2026-07-23: "reply log it" stored nothing). referent-log.ts
+        // resolves "log it" / "3 handfuls of it" against this next turn.
         try {
           const refItems = itemsFromVisionText(visionDisplay);
           const refName = refItems[0]?.name || "that food";
@@ -1425,10 +1427,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       console.log(`[MEDIA][${mediaTrace}] voice_ok words=${wordCount} coach_reply_ms=${coachReplyMs} total_ms=${voiceTotalMs}`);
       await logMediaSuccess(user.id, "voice", voiceTotalMs);
       await cleanupTmp();
-      // Echo confirms transcription (never parrot a rant/profanity; trim at a WORD boundary).
-      // SHORT receipt, not a transcript (2026-07-31 live: a 15-second note came back as 60
-      // bold words of the client's own speech before the answer — a wall, and the coach is
-      // told never to recite a client's message back). Enough to prove we heard it, no more.
+      // Echo proves we heard it — SHORT, word-boundary trimmed, profanity masked. A 15-second
+      // note used to come back as 60 bold words of their own speech before the answer.
       const cut = transcribedText.length > 90 ? transcribedText.slice(0, 87) : "";
       const echoTrimmed = cut ? cut.slice(0, Math.max(cut.lastIndexOf(" "), 60)) + " …" : transcribedText;
       const echoClean = echoTrimmed.replace(/\b(f+u+c+k\w*|s+h+i+t\w*|bull\s*shit|kak|poes|bitch\w*|bastard|dammit|idiot)\b/gi, "***");

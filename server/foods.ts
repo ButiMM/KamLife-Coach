@@ -1316,18 +1316,17 @@ export async function queryFoodDatabase(foodName: string): Promise<FoodMatch[]> 
 
 /* ────────────────────────────────────────────────────────────────────────────
  * SPEECH-TO-TEXT VOCABULARY BIAS (2026-08-06, founder's STT audit).
- *
  * Whisper's `prompt` is VOCABULARY BIAS. The one that shipped until today was 26 exercise
  * names and plate weights with five food words tacked on the end — so "rice with ground beef"
  * was scored against gym equipment. That is the root cause of the mishears, and a wrong food
  * name is a wrong meal in the log and wrong numbers for the day, not a cosmetic error.
  *
- * Lift logging was deleted the same day, so nothing parses exercise names out of speech any
- * more. Food is what we parse. The bias follows. ~224-token window, so this is the confusable
- * proteins and starches first, then the staples a working-class client actually eats.
+ * Lift logging was deleted the same day, so nothing parses exercise names from speech now.
+ * Food is what we parse; the bias follows. ~224-token window, so: confusable proteins and
+ * starches first, then the staples a working-class client actually eats.
  * ──────────────────────────────────────────────────────────────────────────── */
 
-/** Foods whose names are most often misheard, listed first so they win the bias budget. */
+/** Most-misheard names first — they win the limited bias budget. */
 const STT_PRIORITY_FOODS = [
   "rice", "brown rice", "white rice", "samp", "pap", "mielie pap", "porridge", "oats",
   "chicken", "chicken breast", "chicken thigh", "beef", "mince", "ground beef", "minced beef",
@@ -1338,14 +1337,10 @@ const STT_PRIORITY_FOODS = [
   "peanut butter", "avocado", "banana", "apple", "atchar", "gravy", "salad",
 ];
 
-/**
- * The prompt handed to the transcriber. Deliberately natural prose, not a word list —
- * Whisper biases better on a sentence than on comma-separated tokens.
- */
+/** Natural prose, not a word list — Whisper biases better on sentences than tokens. */
 export function sttVocabularyPrompt(): string {
-  // Assembled into a const rather than returned inline: this string is sent to the
-  // TRANSCRIBER, never to a client, and the authorship guard counts returned prose as a
-  // place that speaks to a person. Same reason coach-prompt.ts is excluded from that count.
+  // Built into a const, not returned inline: this goes to the TRANSCRIBER, never a client,
+  // and the authorship guard counts returned prose as a place that speaks to a person.
   const foods = STT_PRIORITY_FOODS.join(", ");
   const prompt = `South African food and fitness coaching. The client is describing meals they ate, `
     + `in English, Zulu, Xhosa, Sotho or Afrikaans. Common foods: ${foods}. They may also mention `
