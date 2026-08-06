@@ -31,13 +31,32 @@ import {
 
 export const MEDICAL_QUESTION = `Any medical conditions I must know about?\n\n1️⃣ Diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ PCOS\n6️⃣ None of the above`;
 
-// The ask itself — appended to the weight/height step's reply. Optional and warm:
-// body photos are sensitive, so the skip path is offered in the same breath.
+/**
+ * THE ASK — and the CONSENT, in the same breath (2026-08-06, founder directive).
+ *
+ * A body photo is not a meal photo. Under POPIA it is special personal information, and the
+ * general onboarding consent — which covers name, logs, weight, medical conditions — does not
+ * cover it: consent has to be specific to the purpose. So this message carries the four
+ * disclosures the client is entitled to BEFORE any photo exists, in plain words rather than
+ * legal ones: what it is used for, who can see it, that an AI reads it, and that they can have
+ * it deleted whenever they want.
+ *
+ * Sending a photo after reading this is the affirmative act, and *skip* is always the other
+ * answer. There is no photo path that a client can reach without seeing this text first —
+ * which is a stronger guarantee than a YES checkbox that a stray photo could bypass.
+ */
 export function bodyPhotoAsk(heightKnown: boolean): string {
   const why = heightKnown
     ? `so the plan fits YOUR body, not a guess`
     : `it's extra important since we're starting without your height — the photos tell me what the numbers can't`;
-  return `One more step — and it's optional. Send me *1–3 photos of yourself standing* (front, side, back — in whatever you'd train in). I read where you're starting from ${why}, and they become your before-photos so you can SEE the change later.\n\nNot comfortable? Reply *skip* — no problem at all, we go straight on.`;
+  return `One more step — and it's completely optional. Send me *1–3 photos of yourself standing* (front, side, back — in whatever you'd train in). I read where you're starting from ${why}, and they become your before-photos so you can SEE the change later.\n\n🔒 *Before you do, so you know exactly what happens:*\n• Used only to guide your coaching and show your progress — nothing else.\n• Stored securely. Visible only to you and your coach. Never shared, never sold, never used to train any AI.\n• An AI service reads them to estimate body composition. It's an estimate, not a medical measurement.\n• Reply *delete my photos* at any time and they're gone. They're also deleted if you close your account.\n\nSend them when you're ready, or reply *skip* — no problem at all, the coaching works exactly the same without them.`;
+}
+
+/** Consent is recorded the moment a photo is accepted, so it can be shown to a regulator. */
+export function withPhotoConsent(notes: string | null | undefined): string {
+  const base = (notes || "").replace(/\s*\bphotoconsent:\S+/gi, "").trim();
+  const stamp = `photoconsent:${new Date().toISOString().slice(0, 10)}`;
+  return base ? `${base} ${stamp}` : stamp;
 }
 
 const GOAL_LABEL: Record<string, string> = {
@@ -78,6 +97,13 @@ export async function handleOnboardingBodyPhotos(opts: {
         photoBase64: Buffer.from(buf).toString("base64"),
         contentType: r.headers.get("content-type") || "image/jpeg",
       });
+      if (saved === 0) {
+        // Stamp consent on the FIRST accepted photo — the disclosures in bodyPhotoAsk are the
+        // only way this state is ever reached, so sending is the informed affirmative act.
+        const stamped = withPhotoConsent(user.profileNotes);
+        await db.update(users).set({ profileNotes: stamped }).where(eq(users.id, user.id)).catch(() => {});
+        user.profileNotes = stamped;
+      }
       saved++;
     } catch (e) { console.warn("[ONBOARD_PHYSIQUE] photo save failed:", (e as Error)?.message); }
   }

@@ -1353,6 +1353,46 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     for (const known of [true, false]) assert.ok(/\*skip\*/i.test(bodyPhotoAsk(known)), "skip offered");
     assert.ok(/without your height/i.test(bodyPhotoAsk(false)), "height-unknown framing present");
   });
+
+  // THE STEP MUST BE REACHABLE (2026-08-06). Every test above passed for three weeks while
+  // NOTHING in the product ever set onboardingState to ASK_BODY_PHOTOS — the module was dead
+  // code and the tests could not tell, because they called the pure functions directly. This
+  // one reads the wiring, which is the only part that was ever missing.
+  test("physique read is REACHABLE — some state transition actually sets ASK_BODY_PHOTOS", async () => {
+    const src = readFileSync("server/onboarding.ts", "utf-8");
+    assert.ok(/onboardingState:\s*"ASK_BODY_PHOTOS"/.test(src),
+      "nothing sets ASK_BODY_PHOTOS — the day-zero physique read is dead code again");
+    assert.ok(/state === "ASK_BODY_PHOTOS"/.test(src),
+      "no text branch for ASK_BODY_PHOTOS — a client who types 'ok' would be stranded");
+  });
+
+  // POPIA (2026-08-06 founder directive). A body photo is special personal information, so the
+  // general onboarding consent does not cover it: the four disclosures must be on the client's
+  // screen BEFORE any photo can exist, and the deletion right has to be a real command.
+  test("photo consent: purpose, who sees it, AI processing and deletion are all disclosed up front", async () => {
+    for (const known of [true, false]) {
+      const ask = bodyPhotoAsk(known);
+      assert.ok(/only to guide your coaching|only for your coaching/i.test(ask), "purpose limitation missing");
+      assert.ok(/visible only to you and your coach/i.test(ask), "who-can-see-it missing");
+      assert.ok(/never shared, never sold|never used to train/i.test(ask), "no-sharing promise missing");
+      assert.ok(/\bAI\b/.test(ask) && /estimate/i.test(ask), "AI processing not disclosed as an estimate");
+      assert.ok(/delete my photos/i.test(ask), "deletion right not named as a command they can send");
+    }
+  });
+  test("photo consent stamp is recorded and is removable", async () => {
+    const { withPhotoConsent } = await import("../server/onboarding-physique");
+    const stamped = withPhotoConsent("numbers:low");
+    assert.ok(/numbers:low/.test(stamped), "existing notes must survive");
+    assert.ok(/photoconsent:\d{4}-\d{2}-\d{2}/.test(stamped), "consent must be dated");
+    assert.ok(!/photoconsent:.*photoconsent:/.test(withPhotoConsent(stamped)), "must not stack duplicates");
+  });
+  test("'delete my photos' is a real command, separate from deleting the account", async () => {
+    const src = readFileSync("server/handlers/safety.ts", "utf-8");
+    const photoBranch = src.indexOf("POPIA PHOTO DELETE");
+    const dataBranch = src.indexOf("delete my data|forget me");
+    assert.ok(photoBranch > 0, "no photo-only deletion path — the only way out is deleting the account");
+    assert.ok(photoBranch < dataBranch, "photo branch must run BEFORE the account-wide matcher");
+  });
 }
 
 // SURPLUS/DEFICIT QUESTIONS (2026-07-17 nightly drill: third recurrence on the model

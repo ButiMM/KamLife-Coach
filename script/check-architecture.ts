@@ -51,7 +51,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 440,
+  authorshipPoints: 443,
   twilioCallSites: 18,
 };
 
@@ -130,6 +130,27 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "stands down by calling into the same predicate, not its own copy. PAY THIS BACK by "
       + "merging the availability check into the normalizer's intent classification, which "
       + "already reads every message once and would need no second decider.",
+  },
+  {
+    key: "authorshipPoints", from: 440, to: 443, date: "2026-08-06",
+    why: "THREE new mouths, both for features that legally or clinically cannot be silent. "
+      + "(1) server/food-swaps.ts +1 — productVerdict answers 'can I eat this?' from the "
+      + "nutrition label. (2) server/onboarding.ts +2 — the ASK_BODY_PHOTOS branch, which is "
+      + "what finally makes onboarding-physique.ts REACHABLE: that module has existed since "
+      + "17 July and nothing in the product ever set the state, so the day-zero read that "
+      + "stops a client who needs a surplus being put on a deficit had never run for a human "
+      + "being. The branch is a skip confirmation and a wait line, and a client who types "
+      + "'ok' was previously stranded with no path forward. Tried first, and it worked, so it "
+      + "is NOT in this number: the compact overload line collapsed two returns into one; the "
+      + "photo-delete branch stands down with null instead of repeating 'no account found'; "
+      + "the decline list moved to a Set so it stopped being counted as prose; and the whole "
+      + "path sweep in the same session DELETED far more client-facing text than this adds "
+      + "(the workout done-reply alone went from three paragraphs to one line). The count "
+      + "still rises because the sweep SHORTENED strings rather than removing return sites. "
+      + "PAY THIS BACK by moving both to the one brain: the two onboarding lines are exactly "
+      + "the short conversational turn writeReplyAfterTools already writes better, and "
+      + "productVerdict should return ToolFacts and let the engine say the sentence — which "
+      + "is what Guard #8 asks for and would take all three back off this number.",
   },
   {
     key: "regexLiterals", from: 333, to: 330, date: "2026-07-30",

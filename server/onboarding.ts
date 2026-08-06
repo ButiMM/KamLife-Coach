@@ -15,7 +15,22 @@ import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { getDisplayName, sastDayStart, timeGreeting } from "./utils";
 import { getTodayWorkoutState } from "./workout-state";
 import { parseFirstName } from "./onboarding-name";
-import { MEDICAL_QUESTION } from "./onboarding-physique";
+import { MEDICAL_QUESTION, bodyPhotoAsk } from "./onboarding-physique";
+
+/**
+ * "No thanks" to an OPTIONAL onboarding step — one owner, two callers (2026-08-06).
+ *
+ * The height step already had this as four inline string comparisons; the body-photo step
+ * needed the same question answered and would otherwise have grown a second, drifting copy.
+ * String equality rather than a pattern on purpose: these are one-word answers to a direct
+ * question, and a regex here would eventually match a client's real reply by accident.
+ */
+const DECLINES = new Set(["skip", "no", "nope", "nah", "no thanks", "no thank you", "not now",
+  "later", "pass", "rather not", "not sure", "dont know", "don't know", "unknown"]);
+
+function declinesOptionalStep(msg: string): boolean {
+  return DECLINES.has((msg || "").toLowerCase().trim().replace(/[.!]+$/, ""));
+}
 import { welcomeAvatarMarker } from "./macro-card-attach";
 
 // ============================================================
@@ -695,8 +710,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
   // ---- ASK_WEIGHT_HEIGHT_FAST — keep fast flow but avoid generic targets ----
   if (state === "ASK_WEIGHT_HEIGHT_FAST") {
-    const lower = msg.toLowerCase().trim();
-    const isSkip = lower === "skip" || lower === "not sure" || lower === "dont know" || lower === "don't know" || lower === "unknown";
+    const isSkip = declinesOptionalStep(msg);
 
     if (isSkip) {
       const fallbackWeight = user.gender === "female" ? 65 : 75;
@@ -750,14 +764,31 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       heightCm: heightCmVal,
       bmi: bmiVal,
       proteinTarget: weightProt,
-      onboardingState: "ASK_MEDICAL",
+      // THE STEP THAT WAS NEVER REACHABLE (2026-08-06). onboarding-physique.ts — the day-zero
+      // read that catches a client picking a deficit when their body needs a surplus — has
+      // existed since July and NOTHING ever set this state, so the module has never run for a
+      // human being. The unit tests passed because they call bodyPhotoAsk() directly. Wiring
+      // it here is what makes the feature exist. Optional: *skip* goes straight to medical.
+      onboardingState: "ASK_BODY_PHOTOS",
     }).where(eq(users.phoneNumber, phone));
 
-    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\n${MEDICAL_QUESTION}`;
+    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\n${bodyPhotoAsk(!!heightCmVal)}`;
   }
 
-  // ---- ASK_BODY_PHOTOS — day-zero physique read; the PHOTOS arrive via routes.ts
-  // (this text handler covers skip and stray text while the state is open) ----
+  // ---- ASK_BODY_PHOTOS — day-zero physique read. The PHOTOS arrive via routes.ts, which
+  // routes straight to handleOnboardingBodyPhotos; this branch covers everything ELSE that
+  // can be said while the state is open: skip, a yes with no photo yet, or stray text.
+  // Without it a client who typed "ok" would have been stuck with no path forward. ----
+  if (state === "ASK_BODY_PHOTOS") {
+    if (declinesOptionalStep(msg)) {
+      await db.update(users).set({ onboardingState: "ASK_MEDICAL" }).where(eq(users.phoneNumber, phone));
+      return `No problem at all — we do this without photos. 👌\n\n${MEDICAL_QUESTION}`;
+    }
+    // Anything else — "ok", "sending now", or a stray word — means they haven't declined and
+    // nothing has arrived yet. Wait in the state; both doors stay open, and neither reply
+    // pressures them, because a body photo is the one step that must never feel pushed.
+    return `👌 Send them whenever you're ready — front, side and back if you have them. Or reply *skip* and we carry straight on.`;
+  }
   // ---- ASK_GOAL_CONFIRM — the photo read recommended a DIFFERENT phase; they decide ----
   if (state === "ASK_GOAL_CONFIRM") {
     const gcLower = msg.toLowerCase();

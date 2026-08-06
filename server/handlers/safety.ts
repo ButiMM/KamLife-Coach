@@ -242,6 +242,34 @@ export async function runSafetyGuards(
     return reply;
   }
 
+  // ---- DELETE MY PHOTOS (POPIA, narrower than the account wipe) ----
+  // (2026-08-06 founder directive on progress photos: "Deletable anytime — that's the POPIA
+  // right that must actually work.") Before this, the only way to remove a body photo was to
+  // delete the entire account, which is not a right, it is a hostage situation. It runs FIRST
+  // so a photo request can never be swallowed by the broader delete matcher below.
+  //
+  // No capital-DELETE ceremony. A confirmation step on a privacy right is the friction that
+  // makes the right theoretical, and this deletes only what the client named.
+  if (/\b(delete|remove|erase)\b[^.!?]{0,20}\b(my )?(photos?|pictures?|pics?|images?|progress photos?|body photos?)\b/i.test(m)) {
+    const existing = await db.select({ id: users.id, profileNotes: users.profileNotes })
+      .from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    // Unknown number: not this handler's business. Standing down rather than answering
+    // keeps one owner for "no account found" — the branch below already says it.
+    if (existing.length === 0) return null;
+    const uid = existing[0].id;
+    const had = await db.select({ id: progressPhotos.id }).from(progressPhotos).where(eq(progressPhotos.userId, uid));
+    await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
+    // The consent stamp goes with them — it recorded permission to hold photos we no longer hold.
+    await db.update(users).set({
+      profileNotes: (existing[0].profileNotes || "").replace(/\s*\bphotoconsent:\S+/gi, "").trim() || null,
+    }).where(eq(users.id, uid)).catch(() => {});
+    console.log(`[POPIA PHOTO DELETE] user ${uid} removed ${had.length} photo(s) at ${new Date().toISOString()}`);
+    try { await logChat(uid, message, "[progress photos deleted]", "POPIA_PHOTO_DELETE"); } catch (e) { console.warn("[non-fatal]", e); }
+    return had.length === 0
+      ? `You don't have any photos stored with me — nothing to delete. 👌`
+      : `Done — ${had.length === 1 ? "your photo is" : `all ${had.length} of your photos are`} permanently deleted. 👌 Everything else about your coaching stays exactly as it is.`;
+  }
+
   // ---- DELETE MY DATA (POPIA) ----
   if (/delete my data|forget me|remove my account|popia delete|delete me|erase my data/i.test(m)) {
     const existing = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);

@@ -148,12 +148,12 @@ export async function getProgressiveOverloadContext(userId: string, opts: { comp
     if (opts.compact) {
       const top = ranked[0];
       if (!top || !(top.w > 0)) return "";
-      if (heldBack && adjust) {
-        const todayW = Math.round((top.w * adjust.loadPct) / 100 * 2) / 2;
-        return `Last ${top.name} was ${top.w}kg — keep it to ${todayW}kg today while you ease back in.`;
-      }
-      const nextW = (top.w + 2.5).toFixed(1).replace(".0", "");
-      return `Last ${top.name} was ${top.w}kg — go for ${nextW}kg or an extra rep or two.`;
+      // ONE sentence, one exit. Eased-back and progressing differ only in the instruction,
+      // so the instruction is the variable and the sentence is written once.
+      const nextMove = heldBack && adjust
+        ? `keep it to ${Math.round((top.w * adjust.loadPct) / 100 * 2) / 2}kg today while you ease back in`
+        : `go for ${(top.w + 2.5).toFixed(1).replace(".0", "")}kg or an extra rep or two`;
+      return `Last ${top.name} was ${top.w}kg — ${nextMove}.`;
     }
 
     const lines = ranked
