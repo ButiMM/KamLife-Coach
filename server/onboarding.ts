@@ -3,7 +3,7 @@ import { users, weightLogs, chatHistory, stepLogs, escalations } from "../shared
 import { escalationSLA } from "./safety-detection";
 import { generateReferralCode } from "./onboarding-referral";
 import { parseFoodPreferences, parseVisionAnswer, looksLikeBulkIntake, applyIntakeBrake, describeIntake, type BulkIntake } from "./onboarding-intake";
-import { TRIAL_DAYS, TRIALS_ENABLED } from "./pricing-config";
+import { TRIAL_DAYS, TRIALS_ENABLED, hasTrialedBefore, recordTrialGranted, flagSignupVelocity } from "./pricing-config";
 import { buildActivationBrief } from "./activation";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { buildFullProgramme, getKamlifeProgramme } from "./programme";
@@ -245,6 +245,11 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
 
   const referralCode = await generateReferralCode(u.name);
 
+  // ONE TRIAL PER NUMBER, EVER (2026-08-06, founder directive). Decided BEFORE the write so
+  // the grant and the record of the grant cannot disagree — computing it inside the object
+  // spread would have left no way to know afterwards whether a trial was actually handed out.
+  const grantTrial = !u.betaBypassUntil && TRIALS_ENABLED && !(await hasTrialedBefore(phone));
+
   await db.update(users).set({
     trainingDaysPerWeek: trainingDays,
     trainingExperience: exp,
@@ -264,7 +269,10 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     // and closes the trial-restart exploit. PAY-TO-START by default (no free window):
     // status stays inactive so the paywall hits right after the Day-1 taste; set
     // TRIAL_DAYS>0 to reinstate a free trial. (2026-07-14, founder: "I hate trials".)
-    ...(!u.betaBypassUntil ? (TRIALS_ENABLED ? {
+    // ONE TRIAL PER NUMBER, EVER (2026-08-06). betaBypassUntil closes cancel-and-return,
+    // but it dies with the row when a client sends *delete my data* — so the number is
+    // checked against trialed_numbers, which survives deletion. See pricing-config.ts.
+    ...(!u.betaBypassUntil ? (grantTrial ? {
       subscriptionStatus: "trial",
       betaBypassUntil: new Date(Date.now() + TRIAL_DAYS * 86_400_000),
     } : {
@@ -274,6 +282,11 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     onboardingState: "COMPLETE",
     ...(referralCode && !u.referralCode ? { referralCode } : {}),
   }).where(eq(users.phoneNumber, phone));
+
+  // Written AFTER the grant lands, so a failed signup never burns the client's one trial.
+  if (grantTrial) await recordTrialGranted(phone);
+  // Flag, never block (directive item 5). Fire-and-forget: a signup must not wait on an alert.
+  flagSignupVelocity().catch(() => {});
 
   const goalLabel: Record<string, string> = {
     fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Recomposition",

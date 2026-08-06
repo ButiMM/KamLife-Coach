@@ -216,6 +216,14 @@ async function runMigrations(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS progress_photos_user_idx ON progress_photos(user_id)`,
 
+    // ONE TRIAL PER NUMBER, EVER. Deliberately has NO user_id and no foreign key: this row
+    // must outlive the account, because the loop it closes runs through account deletion.
+    // The number is stored as a salted one-way hash — see shared/schema.ts for why.
+    `CREATE TABLE IF NOT EXISTS trialed_numbers (
+      phone_hash TEXT PRIMARY KEY,
+      first_trialed_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
     `CREATE TABLE IF NOT EXISTS escalations (
       id SERIAL PRIMARY KEY,
       user_id UUID NOT NULL REFERENCES users(id),

@@ -793,6 +793,35 @@ export const insertBodyMeasurementSchema = createInsertSchema(
 
 // === EXPLICIT API CONTRACT TYPES ===
 
+/**
+ * TRIALED NUMBERS — one trial per phone number, ever (2026-08-06, founder directive after
+ * the start→cancel→start→cancel loop).
+ *
+ * WHY THIS IS A SEPARATE TABLE AND NOT A COLUMN. The "already onboarded" signal used to live
+ * on users.betaBypassUntil, which closes the cancel-and-return loop correctly — a cancelled
+ * member keeps the row, so returning never re-grants a trial. It does NOT close the loop that
+ * goes through *delete my data*: that path deletes the user row and inserts a fresh one, and
+ * the signal dies with it. A client can therefore reset their own trial using a documented
+ * POPIA command. The anti-abuse record has to outlive the account or it is not a record.
+ *
+ * WHY IT STORES A HASH AND NOT THE NUMBER. Keeping a readable phone number after someone has
+ * asked to be deleted is exactly what the deletion right exists to prevent, and a table of
+ * numbers is a contact list waiting to leak. A salted one-way hash answers the only question
+ * this table is allowed to ask — "has THIS number trialed?" — and answers nothing else. It
+ * cannot be listed, exported, marketed to, or reversed. Retention for fraud prevention is a
+ * legitimate interest under POPIA; retaining more than the question needs is not.
+ *
+ * Nothing else may be added to this table. The moment it carries a name, a date of birth or a
+ * reason, it stops being an anti-abuse record and becomes a shadow profile of deleted users.
+ */
+export const trialedNumbers = pgTable("trialed_numbers", {
+  /** Salted SHA-256 of the normalised MSISDN. See trialHash() in server/pricing-config.ts. */
+  phoneHash: text("phone_hash").primaryKey(),
+  firstTrialedAt: timestamp("first_trialed_at").defaultNow().notNull(),
+});
+
+export type TrialedNumber = typeof trialedNumbers.$inferSelect;
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type WeightLog = typeof weightLogs.$inferSelect;

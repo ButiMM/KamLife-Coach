@@ -1319,6 +1319,45 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// ONE TRIAL PER NUMBER, EVER (2026-08-06, founder directive after the start→cancel→start
+// →cancel loop). The interesting part is not the rule — it is that the rule has to survive
+// the client deleting their own account, because that is the path the loop actually runs on.
+{
+  const { trialHash } = await import("../server/pricing-config");
+  test("trial hash: stable, salted, and the same number in any format hashes the same", async () => {
+    assert.equal(trialHash("whatsapp:+27821234567"), trialHash("0821234567"), "same SA number, two formats");
+    assert.equal(trialHash("+27821234567"), trialHash("27821234567"), "plus sign must not matter");
+    assert.notEqual(trialHash("0821234567"), trialHash("0821234568"), "different numbers must differ");
+    assert.equal(trialHash(""), "", "an unreadable number hashes to nothing");
+    assert.ok(!/\d{7}/.test(trialHash("0821234567")), "the hash must not contain the number");
+  });
+  test("trial record survives account deletion — the loop runs through *delete my data*", async () => {
+    // betaBypassUntil closes cancel-and-return, but it lives on the user row and the row is
+    // deleted by the POPIA path. If trialed_numbers ever joins those transactions, a client
+    // can reset their own trial in two messages and this test is the only thing that notices.
+    for (const f of ["server/handlers/safety.ts", "server/handlers/lifecycle.ts"]) {
+      const src = readFileSync(f, "utf-8");
+      assert.ok(!/delete\((?:tx\.)?trialedNumbers\)|delete\(trialedNumbers\)/.test(src),
+        `${f} deletes the trialed-numbers record — that reopens the start-cancel-start loop`);
+    }
+  });
+  test("trial record holds a hash and nothing else — it outlives deletion, so it must be minimal", async () => {
+    const schema = readFileSync("shared/schema.ts", "utf-8");
+    const table = schema.slice(schema.indexOf('pgTable("trialed_numbers"'));
+    const body = table.slice(0, table.indexOf("});"));
+    assert.ok(/phone_hash/.test(body), "must key on the hash");
+    assert.ok(!/phone_number|\bname\b|user_id/.test(body),
+      "must not store a readable number, a name, or a user id — that would be a shadow profile");
+  });
+  test("the trial lookup fails CLOSED — an error must never hand out a free trial", async () => {
+    const src = readFileSync("server/pricing-config.ts", "utf-8");
+    const fn = src.slice(src.indexOf("export async function hasTrialedBefore"));
+    const body = fn.slice(0, fn.indexOf("\nexport "));
+    assert.ok(/catch[\s\S]{0,200}return true/.test(body), "the catch must return true (refuse the trial)");
+    assert.ok(/if \(!hash\) return true/.test(body), "an unreadable number must also be refused");
+  });
+}
+
 // DAY-ZERO PHYSIQUE READ (2026-07-17, founder: "shouldn't they be sending us pictures
 // before we put people on the wrong program?"). The photo decides the recommendation;
 // the client decides the goal — assist, never override.

@@ -575,6 +575,10 @@ export async function handleLifecycle(ctx: {
       await db.delete(sentProactive).where(eq(sentProactive.userId, uid));
       await db.delete(clientActions).where(eq(clientActions.userId, uid));
       await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
+      // trialed_numbers is NOT deleted here, on purpose (2026-08-06). It holds a salted
+      // one-way hash and no readable personal data, it is the record that makes "one trial
+      // per number, ever" survive this exact command, and deleting it would reopen the
+      // start-cancel-start loop through the POPIA path. Do not add it to this transaction.
       await db.delete(users).where(eq(users.id, uid));
       await db.insert(users).values({
         phoneNumber: phone,
