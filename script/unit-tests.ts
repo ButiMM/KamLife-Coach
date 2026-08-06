@@ -1323,6 +1323,58 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// THE LAST TWO FROM THE 6 AUGUST TRANSCRIPT — the duplicate and the amnesia.
+{
+  test("an AMENDED meal updates the entry, it does not become a second meal", async () => {
+    // His log carried "Bread, Eggs, Fish fingers ~948" AND "Bread, Eggs, Avocado, Coffee
+    // (black), Fish fingers ~1073" — one breakfast counted twice, ~950 phantom kcal, because
+    // he added the avo and the whole meal was re-logged. The exact-match dedupe cannot see it:
+    // an amendment has a different rawMessage AND a different kcal.
+    // The RULE is a pure function, so test it directly rather than reading source for it.
+    const { isMealAmendment } = await import("../server/food-identity-correction");
+    assert.ok(isMealAmendment(["bread", "eggs", "fish fingers"],
+      ["bread", "eggs", "avocado", "coffee (black)", "fish fingers"]), "his actual double-log");
+    assert.ok(!isMealAmendment(["rice", "minced beef"],
+      ["bread", "eggs", "avocado", "coffee (black)", "fish fingers"]), "a different meal must never merge");
+    assert.ok(!isMealAmendment(["bread", "eggs"], ["bread", "eggs"]),
+      "an identical repeat is the exact-dedupe's job, not this one");
+    assert.ok(!isMealAmendment(["bread", "eggs", "cheese"], ["bread", "eggs", "avocado", "coffee"]),
+      "a missing earlier item means these are different meals");
+    assert.ok(!isMealAmendment([], ["bread", "eggs"]), "no earlier items means nothing to amend");
+    // And the write door must actually USE it, with an UPDATE.
+    const ctxSrc = readFileSync("server/handlers/food-context.ts", "utf-8");
+    assert.ok(/amendRecentMeal\(/.test(ctxSrc), "commitFoodLog must ask before inserting");
+    const own = readFileSync("server/food-identity-correction.ts", "utf-8");
+    assert.ok(/db\.update\(mealLogs\)/.test(own), "an amendment must UPDATE the row, never insert a second");
+  });
+
+  test("superset detection: the real log from 6 August resolves to ONE breakfast", () => {
+    // Pure logic check of the rule, on his actual entries.
+    const older = ["bread", "eggs", "fish fingers"];
+    const newer = ["bread", "eggs", "avocado", "coffee (black)", "fish fingers"];
+    const isAmendment = older.length < newer.length
+      && older.every(o => newer.some(n => n.includes(o) || o.includes(n)));
+    assert.ok(isAmendment, "the second entry must be recognised as an amendment of the first");
+    // And a genuinely separate meal must NOT be swallowed.
+    const dinner = ["rice", "minced beef"];
+    const notAmendment = dinner.length < newer.length
+      && dinner.every(o => newer.some(n => n.includes(o) || o.includes(n)));
+    assert.ok(!notAmendment, "rice and minced beef must never be merged into the breakfast");
+  });
+
+  test("a settled meal slot is never asked about again", async () => {
+    // "Done — Rice and minced beef logged for dinner" at 19:02, then "What's on the menu for
+    // dinner?" at 19:04. The snapshot carried the foods and the labels but never said that
+    // asking about a filled slot is wrong.
+    const src = readFileSync("server/brain/client-snapshot.ts", "utf-8");
+    assert.ok(/ALREADY LOGGED AND SETTLED/.test(src), "the filled-slot line is gone");
+    assert.ok(/Do NOT ask what they are having/.test(src),
+      "it must be stated as a prohibition — a fact the model has to infer is one it can miss");
+    assert.ok(/filledSlots/.test(src) && /mealLabel/.test(src),
+      "the slots must come from the rows, not from the model's reading of the conversation");
+  });
+}
+
 // THE 6 AUGUST PHONE TEST — three live failures, each locked by the founder's exact words.
 {
   test("removal targets the meal NAMED, not the most recent one", async () => {

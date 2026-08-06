@@ -129,7 +129,17 @@ export async function buildClientSnapshot(user: any): Promise<string> {
       const foodCore = (profile.usesMacros
         ? `Food TODAY so far: ~${kcal} kcal | ${prot}g protein across ${todayMeals.length} meal${todayMeals.length !== 1 ? "s" : ""}${labels ? ` (${labels})` : ""}.`
         : `Food TODAY so far: ${todayMeals.length} meal${todayMeals.length !== 1 ? "s" : ""} logged${labels ? ` (${labels})` : ""} — coach the QUALITY of the plate (protein first, veg, one carb), never a calorie count.`) + eatenLine;
-      lines.push(`${foodCore}${remaining !== null ? ` ~${remaining} kcal still to eat today — that is the space LEFT in the day, NOT a deficit.` : ""}`);
+      // WHICH SLOTS ARE ALREADY FILLED (2026-08-06, live: rice and minced beef were logged for
+      // dinner at 19:02 and two minutes later the coach asked "What's on the menu for dinner?").
+      // The snapshot carried the foods and the slot labels, but nothing SAID that asking about a
+      // filled slot is wrong — so the model treated a logged dinner as an open question and the
+      // client, who had just told it twice, read it as not listening. Stated as a prohibition,
+      // from the rows, because a fact the model has to infer is a fact it can miss.
+      const filledSlots = [...new Set(todayMeals.map((r: any) => String(r.mealLabel || "").toLowerCase()).filter(Boolean))];
+      const slotLine = filledSlots.length
+        ? `\nALREADY LOGGED AND SETTLED: ${filledSlots.join(", ")}. Do NOT ask what they are having for any of these — it is on file. If they mention one again, they are correcting or adding to it, not reporting a new meal.`
+        : "";
+      lines.push(`${foodCore}${slotLine}${remaining !== null ? ` ~${remaining} kcal still to eat today — that is the space LEFT in the day, NOT a deficit.` : ""}`);
     } else {
       lines.push(`Food TODAY: nothing logged yet — check the time above; early in the day this is normal. Don't scold, don't invent intake.`);
     }

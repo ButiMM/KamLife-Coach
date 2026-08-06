@@ -31,6 +31,7 @@ import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSl
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
+import { amendRecentMeal } from "../food-identity-correction";
 
 // One owner — this literal was declared twice in this file.
 const TREAT_WORDS = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i;
@@ -41,24 +42,18 @@ export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: n
   if (/\b(for lunch|lunch was|had lunch|lunch:|ate lunch|midday)\b/i.test(lo)) return "lunch";
   if (/\b(for dinner|for supper|dinner was|supper was|had dinner|had supper|dinner:|supper:|evening meal)\b/i.test(lo)) return "dinner";
   if (/\bsnack\b/i.test(lo)) return "snack";
-  // Bare keyword at message start — "Lunch rice and beef", "Dinner pap and wors", "Breakfast: eggs"
-  if (/^lunch\b/i.test(lo)) return "lunch";
-  if (/^(?:dinner|supper)\b/i.test(lo)) return "dinner";
-  if (/^breakfast\b/i.test(lo)) return "breakfast";
-  // Bare keyword anywhere in message — "Rice and beef for my lunch", "Had eggs breakfast"
+  // A bare keyword anywhere counts — "Lunch rice and beef", "Rice and beef for my lunch".
   if (/\blunch\b/i.test(lo)) return "lunch";
   if (/\b(?:dinner|supper)\b/i.test(lo)) return "dinner";
   if (/\bbreakfast\b/i.test(lo)) return "breakfast";
-  // A light, low-protein log with no meal keyword (fruit, drink, biscuit) is a SNACK — clock-
-  // slotting it as a meal steals the slot and lets "same breakfast" later copy it (bug 2026-07-01).
+  // A light, low-protein log with no keyword is a SNACK — clock-slotting it steals a main slot
+  // and lets a later "same breakfast" copy it (bug 2026-07-01).
   if (macros && macros.kcal != null && macros.kcal < 250 && (macros.protein ?? 0) <= 4) return "snack";
-  // CAPTION TIME beats the send-clock (a photo diary shot at 11:00 and batch-sent at 19:49 was
-  // mislabelled dinner). See slotFromCaptionTime in utils.
+  // CAPTION TIME beats the send-clock (a diary shot at 11:00, batch-sent at 19:49, read dinner).
   const captionSlot = slotFromCaptionTime(msg);
   if (captionSlot) return captionSlot;
-  // Time-of-day fallback — no keyword. Night-shift/substantial late plate → "night meal", never
-  // a demoted "snack". LEARNED: the client's own hour-pattern beats the clock, and a light
-  // second meal on a used main slot demotes to snack (Review #7, 2026-07-17).
+  // No keyword: night-shift/substantial late plate → "night meal", never a demoted "snack".
+  // Their own hour-pattern beats the clock; a light second meal on a used slot demotes to snack.
   const fallback = slotFromSastHour(atDate, { nightWorker: isNightWorker(user), substantial: (macros?.kcal ?? 0) >= 300 });
   const sastHour = new Date((atDate ? atDate.getTime() : Date.now()) + 2 * 3_600_000).getUTCHours();
   return resolveInferredSlot(fallback, sastHour, slotCtx, macros?.kcal);
@@ -175,8 +170,16 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
     ))
     .limit(1);
 
+  // AN AMENDMENT IS NOT A SECOND MEAL (2026-08-06 live: adding the avo re-logged the whole
+  // breakfast, ~950 phantom kcal). amendRecentMeal owns the rule and the write.
+  const amendedId = await amendRecentMeal(
+    params.userId,
+    (Array.isArray(params.items) ? params.items : []).map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean),
+    { rawMessage: rawSlice, kcalInt: params.kcalInt, proteinInt: params.proteinInt, carbsInt, fatInt, items: params.items, mealLabel: params.mealLabel },
+  );
+  if (amendedId) { invalidatePatternCache(params.userId); invalidateFoodTotalsCache(params.userId); }
   let insertOk = true;
-  const wasDup = recentDup.length > 0;
+  const wasDup = recentDup.length > 0 || !!amendedId;
   if (!wasDup) {
     try {
       await db.insert(mealLogs).values({
@@ -648,7 +651,6 @@ export async function handleFoodContext(ctx: {
     } catch (e) { console.warn("[FOOD_PLANNED] ate-it lookup failed:", e); }
   }
 
-
   // ---- BRAAI / SOCIAL EVENT GUIDE ----
   const hasSocialEventKeyword = /\b(braai|braaing|braaiing|party|wedding|funeral|umemulo|umkhosi|stokvel|church.*food|family.*gathering|get.?together|celebration)\b/i.test(m);
 
@@ -714,7 +716,6 @@ export async function handleFoodContext(ctx: {
     // not even true any more. They can just answer.
     return `${nm}go ahead — what did you eat yesterday?`;
   }
-
 
   // ---- GUILT / SHAME SIGNAL — client is embarrassed about what they ate ----
   // 🙈 (see-no-evil) is the most common "I know, I know" emoji in SA WhatsApp food logs.
@@ -992,7 +993,6 @@ export async function handleFoodContext(ctx: {
       mealSegments.length = 0;
       mealSegments.push({ label: "", text: m });
     }
-
 
     type AdjFood = SAFood & { adjustedCalories: number; adjustedProtein: number; adjustedDescription: string; quantity: number };
     const allAdjustedFoods: AdjFood[] = [];

@@ -95,3 +95,74 @@ export function correctionCandidates(c: IdentityCorrection): { rightNames: strin
   const withSubject = (w: string) => (c.subject && !w.includes(c.subject) ? [`${w} ${c.subject}`, w] : [w]);
   return { rightNames: withSubject(c.right), wrongNames: withSubject(c.wrong) };
 }
+
+/**
+ * IS THIS NEW LOG AN AMENDMENT OF THAT OLDER ONE? (2026-08-06, live on the founder's phone.)
+ *
+ * His day showed "Bread, Eggs, Fish fingers — ~948 kcal" AND "Bread, Eggs, Avocado, Coffee
+ * (black), Fish fingers — ~1073 kcal": one breakfast counted twice, roughly 950 phantom
+ * calories, because he added the avo and the coffee and the whole meal was re-logged with the
+ * additions instead of the additions being added to it.
+ *
+ * The exact-match dedupe at the write door cannot see this — an amendment has a different
+ * rawMessage AND a different kcal, which is the whole point of it. So the question that
+ * actually separates "they added something" from "they ate again" is containment.
+ *
+ * Deliberately strict, in both directions:
+ *   - every earlier item must appear in the new list, so two different meals never merge;
+ *   - the new list must be strictly LARGER, so an identical repeat falls to the exact dedupe
+ *     and a real second helping of the same thing is still counted twice, correctly.
+ *
+ * Substring matching both ways, because the same food arrives named differently by different
+ * paths ("coffee" from the scanner, "Coffee (black)" from vision).
+ *
+ * Pure and here rather than in food-context so the rule is unit-testable on its own, next to
+ * the other question about what a logged food actually IS.
+ */
+export function isMealAmendment(olderItems: string[], newerItems: string[]): boolean {
+  const older = olderItems.map(s => s.toLowerCase().trim()).filter(Boolean);
+  const newer = newerItems.map(s => s.toLowerCase().trim()).filter(Boolean);
+  if (older.length === 0 || newer.length < 2) return false;
+  if (older.length >= newer.length) return false;
+  return older.every(o => newer.some(n => n.includes(o) || o.includes(n)));
+}
+
+/**
+ * Find a recent meal this log AMENDS and update it in place. Returns its id, or null when this
+ * is genuinely a new meal and the caller should insert.
+ *
+ * The DB work lives beside the rule so the whole "is this the same meal again?" question has
+ * one owner. The caller still owns cache invalidation, because it owns the caches.
+ *
+ * Fail-open: any error returns null and the caller inserts, which is the old behaviour. A
+ * broken dedupe must never lose a client's meal.
+ */
+export async function amendRecentMeal(
+  userId: string,
+  newItemNames: string[],
+  patch: Record<string, unknown>,
+): Promise<string | null> {
+  if (newItemNames.length < 2) return null;
+  try {
+    const { db } = await import("./db");
+    const { mealLogs } = await import("../shared/schema");
+    const { eq, and, gte, desc } = await import("drizzle-orm");
+    // 30 minutes: long enough to remember an avocado, short enough that tonight's supper can
+    // never absorb this morning's toast.
+    const rows = await db.select({ id: mealLogs.id, items: mealLogs.items })
+      .from(mealLogs)
+      .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, new Date(Date.now() - 30 * 60 * 1000))))
+      .orderBy(desc(mealLogs.loggedAt))
+      .limit(6);
+    const namesOf = (raw: unknown): string[] => (Array.isArray(raw) ? raw : [])
+      .map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean);
+    const hit = rows.find(r => isMealAmendment(namesOf(r.items), newItemNames));
+    if (!hit) return null;
+    await db.update(mealLogs).set({ ...patch, corrected: true }).where(eq(mealLogs.id, hit.id));
+    console.log(`[MEAL_LOG] AMENDED an existing entry instead of double-logging — user=...${userId.slice(-6)}`);
+    return String(hit.id);
+  } catch (e) {
+    console.warn("[MEAL_AMEND] failed, caller will insert:", (e as any)?.message);
+    return null;
+  }
+}
