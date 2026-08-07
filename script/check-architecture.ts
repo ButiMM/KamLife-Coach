@@ -36,7 +36,7 @@ const BUDGET = {
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
-  regexLiterals: 312,
+  regexLiterals: 315,
   /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
    * something other than the engine can put words in front of a client.
@@ -117,6 +117,26 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "regexLiterals", from: 312, to: 315, date: "2026-08-07",
+    why: "THREE patterns for the three deterministic defects the live-model gauntlet found at "
+      + "04:19, two hours before the founder found the same ones by hand and furious. "
+      + "`alsoAsksFood` makes the calorie handler STAND DOWN when a second question rides along "
+      + "— «what can I eat at the taxi rank and how many calories do I have left» was answered "
+      + "on the calories and the food half was never seen by anything, because a handler that "
+      + "returns early makes constitution law 20 impossible for the engine to obey. "
+      + "`asksTrolley` separates «what do I buy» from «which shop» — the word Shoprite in his "
+      + "message returned eleven sentences of the shop's price directory. `skipStarch` reads "
+      + "what he said he already has at home so the R300 goes on protein instead of a second "
+      + "bag of rice. Tried first, and it worked, so it is NOT in this number: two of the four "
+      + "collapsed into one pattern each (the food-ask and the taxi-rank list; the have-at-home "
+      + "extraction and its starch test), and the store qualifier went inline. Rejected "
+      + "deliberately: inlining the remaining three to dodge the counter — that is optimising "
+      + "for the guard instead of the reader, which is the habit this governor exists to stop. "
+      + "PAY THIS BACK by moving all three onto the normalizer's intent classification, which "
+      + "already reads every message once and would answer «is this two questions?» without a "
+      + "single pattern here.",
+  },
   {
     key: "regexLiterals", from: 311, to: 312, date: "2026-08-06",
     why: "ONE pattern: HANDBACK_QUESTION, the closing questions that hand the work back to the "

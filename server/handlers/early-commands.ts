@@ -185,8 +185,7 @@ export async function handleEarlyCommands(ctx: {
     // part of what they said; a deterministic handler that returns early makes that impossible
     // for the engine to obey. So when a second, non-numeric question rides along, this stands
     // down and lets the coach answer both.
-    const alsoAsksFood = /\b(what|which|where)\b[^?]{0,60}\b(can|should|do) i (eat|have|buy|order|get)\b/i.test(m)
-      || /\b(taxi rank|spaza|shisa nyama|kota|takeaway|restaurant|canteen|braai)\b/i.test(m);
+    const alsoAsksFood = /\b(?:(?:what|which|where)\b[^?]{0,60}\b(?:can|should|do) i (?:eat|have|buy|order|get)|taxi rank|spaza|shisa nyama|kota|takeaway|restaurant|canteen|braai)\b/i.test(m);
     if (alsoAsksFood) return null; // the engine answers both halves — see law 20
 
     try {

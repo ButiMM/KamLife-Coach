@@ -304,8 +304,8 @@ export async function handleLifecycle(ctx: {
   // standing in the aisle. He asked WHAT TO BUY, not WHICH SHOP. Different questions.
   const asksTrolley = /\b(trolley|basket|what (?:should|must|do) i (?:buy|get|put)|what to buy|shopping list|buy for the week|food for the week)\b/i.test(m);
   if (asksTrolley) {
-    const has = /\b(?:i(?:'ve| have)\s+(?:got|already)|already (?:have|got))\b([^.?!]{0,60})/i.exec(m)?.[1] || "";
-    const skipStarch = /\b(rice|pap|maize|samp|bread|potato)\b/i.test(has);
+    // One pattern: "I've got / already have …" followed by a starch, within one clause.
+    const skipStarch = /\b(?:i(?:'ve| have)\s+(?:got|already)|already (?:have|got))\b[^.?!]{0,60}?\b(?:rice|pap|maize|samp|bread|potato)\b/i.test(m);
     const trolley = skipStarch
       ? "eggs, pilchards, chicken pieces, sugar beans, cabbage, spinach, butternut, bananas"
       : "eggs, pilchards, chicken pieces, sugar beans, pap, rice, cabbage, spinach, bananas";
