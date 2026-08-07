@@ -460,3 +460,67 @@ export function verdictFromLabelLine(visionReply: string, name: string, goalType
     kcal: read("kcal"), sugarG: read("sugar"), satFatG: read("satfat"), proteinG: read("protein"),
   }, goalType);
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE IMPORT GUARD — a suggested food must be buyable at a Boxer (2026-08-06).
+ *
+ * Live, at 06:37: a client on muscle gain asked for snacks and was offered "Hummus with carrot
+ * sticks or whole grain crackers". He replied "I live in a poor country idiot. Also, where are
+ * the fruits??? What kind of coach are you?" The next attempt gave him "Pap with a bit of sugar
+ * or honey" — refined carb, no protein, to a man trying to build muscle.
+ *
+ * The prompt has said "meal ideas must be built from THEIR staple foods and budget, never a
+ * generic list" since July. It was ignored, because a rule in a prompt is a suggestion. This is
+ * the law version.
+ *
+ * IT GATES SUGGESTIONS ONLY, AND IT NEVER TOUCHES A LOG. That distinction is the whole design:
+ * if a CLIENT eats hummus, that is a fact about their life and it gets logged with an estimate
+ * like any other food — commitFoodLog is not on this path and must never be. What is forbidden
+ * is the COACH proposing a food this market does not buy. Logging is theirs; suggesting is ours.
+ *
+ * Fail-open on the reply too: an import is REPLACED with the SA staple that does the same job,
+ * never deleted, and if a line cannot be repaired it is left alone rather than eaten. A missing
+ * suggestion is worse than an imperfect one.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Foods that do not belong in a suggestion here, and the local thing that does the same job. */
+const IMPORTS: Array<[RegExp, string]> = [
+  [/\bhummus(?:\s+with\s+[\w\s]{0,20})?\b/gi, "peanut butter on brown bread"],
+  [/\b(?:whole[\s-]?grain\s+)?crackers?\b/gi, "brown bread"],
+  [/\bquinoa\b/gi, "samp"],
+  [/\bkale\b/gi, "morogo"],
+  [/\bgreek yogh?urt\b/gi, "maas"],
+  [/\bcottage cheese\b/gi, "maas"],
+  [/\balmond (?:milk|butter)\b/gi, "peanut butter"],
+  [/\balmonds?\b/gi, "peanuts"],
+  [/\bavocado toast\b/gi, "avo on brown bread"],
+  [/\bberries\b/gi, "banana"],
+  [/\bsalmon\b/gi, "pilchards"],
+  [/\bprotein (?:bar|powder|shake)s?\b/gi, "eggs"],
+  [/\bchia (?:seeds?)?\b/gi, "oats"],
+  [/\bcarrot sticks?\b/gi, "carrots"],
+  // A sugar-first "snack" is not a snack for someone building or cutting — keep the pap,
+  // add the protein.
+  [/\b(?:pap|porridge|oats)\s+with\s+(?:a\s+bit\s+of\s+)?(?:sugar|honey|jam)(?:\s+or\s+(?:sugar|honey|jam))*\b/gi, "pap with peanut butter"],
+  // Cost caveats — the tell that the coach priced the advice AFTER choosing it. Deleted, not
+  // replaced: in this market cost is the frame you start from, never a footnote.
+  [/,?\s*(?:if (?:you can )?afford(?:able)?|if (?:it'?s |they'?re )?(?:in|within) budget|when you can afford (?:it|them))\b/gi, ""],
+];
+
+/**
+ * Rewrite imported foods in a SUGGESTION into the local staple that does the same job.
+ * Returns the text unchanged when nothing foreign is named.
+ */
+export function localiseSuggestion(text: string): string {
+  let out = String(text || "");
+  if (!out.trim()) return text;
+  for (const [re, local] of IMPORTS) { re.lastIndex = 0; out = out.replace(re, local); }
+  return out.replace(/\s{2,}/g, " ").replace(/\s+([.,])/g, "$1").trim();
+}
+
+/** Does this reply still name a food this market cannot buy? Used by the tests, not at runtime. */
+export function namesAnImport(text: string): boolean {
+  // Only the FOOD entries — the trailing two rewrite phrasing, not a food, so a reply that
+  // merely said "if you can afford it" is not naming an import.
+  return IMPORTS.slice(0, -2).some(([re]) => { re.lastIndex = 0; return re.test(String(text || "")); });
+}

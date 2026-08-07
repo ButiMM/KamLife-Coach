@@ -41,11 +41,45 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
-      - name: Run the gauntlet against the live model (skips if no key)
+      # FAIL LOUD, NEVER SKIP GREEN (2026-08-06). The first scheduled run went red at 04:19 and
+      # the result died here where nobody looks — which is exactly the failure this workflow
+      # exists to end. A judge whose verdict reaches no one is not a judge.
+      - name: Run the gauntlet against the live model
+        id: gauntlet
         run: |
           if [ -z "$OPENAI_API_KEY" ]; then
-            echo "::notice::OPENAI_API_KEY not set — skipping the live coach-voice gauntlet."
-            echo "Add it in Settings → Secrets and variables → Actions to enable daily voice grading."
-            exit 0
+            echo "::error::OPENAI_API_KEY is not set, so the coach's WORDS are being graded by nobody."
+            echo "Add it in Settings → Secrets and variables → Actions. Failing on purpose: a silent"
+            echo "skip here is how the founder ends up being the test suite."
+            exit 1
           fi
-          npx tsx script/gauntlet.ts
+          set -o pipefail
+          npx tsx script/gauntlet.ts 2>&1 | tee gauntlet.log
+
+      # The scores reach a human. Written into the run summary so the verdict is readable
+      # without opening logs, and sent to the founder's phone when an alert number is set.
+      - name: Report the verdict
+        if: always()
+        run: |
+          {
+            echo "## Coach voice — live model"
+            echo '```'
+            tail -40 gauntlet.log 2>/dev/null || echo "no output — the run died before grading"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tell the founder when the coach voice goes red
+        if: failure() && env.TWILIO_ACCOUNT_SID != ''
+        env:
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_SMS_NUMBER: ${{ secrets.TWILIO_SMS_NUMBER }}
+          COACH_ALERT_PHONE: ${{ secrets.COACH_ALERT_PHONE }}
+        run: |
+          if [ -z "$COACH_ALERT_PHONE" ]; then exit 0; fi
+          BODY="[COACH VOICE] The live-model gauntlet went RED this morning. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -sS -X POST "https://api.twilio.com/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/Messages.json" \
+            --data-urlencode "To=+${COACH_ALERT_PHONE}" \
+            --data-urlencode "From=${TWILIO_SMS_NUMBER}" \
+            --data-urlencode "Body=${BODY}" \
+            -u "$TWILIO_ACCOUNT_SID:$TWILIO_AUTH_TOKEN" > /dev/null || true

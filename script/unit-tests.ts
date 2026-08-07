@@ -1323,6 +1323,65 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// THE ACCEPTANCE TEST (2026-08-06 final directive: persona in the prompt, law in the code).
+// Four exchanges from the founder's own morning. The persona laws live in the prompt where a
+// model can read them; these assert the LAW half — the part that holds when the model doesn't.
+{
+  const { localiseSuggestion, namesAnImport } = await import("../server/food-swaps");
+  const { tellDontAsk } = await import("../server/reply-hygiene");
+
+  test("acceptance: 'I live in a poor country' — imports become staples, no cost caveat", () => {
+    const bad = "For snacks, try hummus with carrot sticks or whole grain crackers, Greek yoghurt, "
+      + "almonds, and berries if you can afford it.";
+    const out = localiseSuggestion(bad);
+    assert.ok(!namesAnImport(out), `still names an import: ${out}`);
+    assert.match(out, /peanut butter|brown bread|maas|peanuts|banana/i, `must name SA staples: ${out}`);
+    assert.ok(!/afford/i.test(out), `cost is the frame, never a caveat: ${out}`);
+  });
+
+  test("acceptance: pap with sugar is never offered as a snack", () => {
+    const out = localiseSuggestion("For snacks: boiled eggs, a handful of peanuts, pap with a bit of sugar or honey.");
+    assert.ok(!/sugar|honey/i.test(out), `a sugar-first snack is not a snack: ${out}`);
+    assert.match(out, /pap with peanut butter/i, "the local fix keeps the pap and adds the protein");
+  });
+
+  test("acceptance: 'coach me' gets a directive, never a menu handed back", () => {
+    const out = tellDontAsk("Stick with what you like. What do you prefer for your meals?", "Add eggs or tin fish to your next meal");
+    assert.ok(!/what do you prefer/i.test(out), `must not hand back: ${out}`);
+    assert.match(out, /Add eggs or tin fish/, `must carry the directive: ${out}`);
+  });
+
+  test("acceptance: an apple at 19:00 is never logged to breakfast", async () => {
+    // The clock overrules the model's slot — executor.ts slotFitsClock.
+    const src = readFileSync("server/understanding/executor.ts", "utf-8");
+    assert.match(src, /hourSAST < 11/, "breakfast must be impossible in the evening");
+    assert.match(src, /dropped impossible slot/, "and it must say so in the log, not silently accept");
+  });
+
+  test("acceptance: LOGGING is never blocked by the suggestion guard", () => {
+    // DeepSeek's catch, and the one way this feature could do real harm: if a CLIENT eats
+    // hummus that is a fact about their life and it must log with an estimate. The guard runs
+    // on the coach's REPLY only — commitFoodLog must never import it.
+    const ctx = readFileSync("server/handlers/food-context.ts", "utf-8");
+    assert.ok(!/localiseSuggestion/.test(ctx), "the write door must never gate a client's own food");
+    const scanner = readFileSync("server/handlers/food-scanner.ts", "utf-8");
+    assert.ok(!/localiseSuggestion/.test(scanner), "the scanner must never refuse a food it can estimate");
+  });
+
+  test("persona laws are IN the prompt, where the model can read them", () => {
+    const src = readFileSync("server/understanding/meaning-engine.ts", "utf-8");
+    for (const [law, needle] of [
+      ["no hand-back", /NEVER HAND THE WORK BACK/],
+      ["SA default", /SOUTH AFRICA IS THE DEFAULT/],
+      ["no empathy template", /NO EMPATHY TEMPLATE/],
+      ["one next move", /ONE NEXT MOVE PER REPLY/],
+      ["coach don't consult", /WHEN THEY ASK TO BE TOLD, TELL THEM/],
+    ] as Array<[string, RegExp]>) {
+      assert.match(src, needle, `persona law missing from the prompt: ${law}`);
+    }
+  });
+}
+
 // THE 6 AUGUST MORNING — "this is a fucking calculator". Seven replies ending in a question,
 // a weight number for a week he never weighed in, and hummus recommended to a man who said
 // "I live in a poor country".
