@@ -1323,6 +1323,48 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// 7 AUGUST, 11:51–12:01 — the morning he said "I'm about to lose my mind". Two findings, both
+// mine to own: a stale lifetime card on every progress query, and a branch I wrote that DENIED
+// a log four minutes after making it.
+{
+  test("progress query gets a card about TODAY, never the stale lifetime session count", async () => {
+    // shareAchievement is documented "no milestone gate: they asked, so we answer" and falls
+    // through to `sessions >= 3`. Wired to every progress query it returned the SAME number
+    // forever — "telling me for the past two days that I've done twenty two workouts". It is
+    // correct for the explicit share command and must not be the card for a routine question.
+    const src = readFileSync("server/macro-card-attach.ts", "utf-8");
+    const daily = src.slice(src.indexOf("export async function dailyMacroCardMarker"));
+    const body = daily.slice(0, daily.indexOf("\nexport "));
+    assert.ok(!/shareAchievement\(/.test(body),
+      "the daily card is back on shareAchievement — it will repeat one stale fact forever");
+    assert.ok(/mealCard\(/.test(body), "a question about today must get a card about today");
+    // …and shareAchievement itself must still exist for the command that asks for a boast.
+    assert.ok(/export function shareAchievement/.test(readFileSync("server/achievement-card.ts", "utf-8")));
+  });
+
+  test("the coach never DENIES a log that exists", async () => {
+    // 11:51 logged ~600 kcal. 11:55: "nothing logged yet today". He forwarded the coach's own
+    // confirmations back and was told again he had logged nothing. A wrong number is an error;
+    // a denial is the coach calling the client a liar.
+    const src = readFileSync("server/handlers/early-commands.ts", "utf-8");
+    // Anchor on the RETURN, not the phrase — the phrase also appears in the comment above it.
+    const i = src.indexOf("return `${name}all ${cal} kcal");
+    assert.ok(i > 0, "the branch is gone");
+    // The row check sits just above the claim; search the whole branch rather than a fixed window.
+    const branch = src.slice(Math.max(0, i - 2600), i + 200);
+    assert.ok(/COUNT\(\*\)/.test(branch) && /mealLogs/.test(branch),
+      "the claim must be checked against the meal ROWS, not just the cached totals");
+    assert.ok(/rowCheck/.test(branch),
+      "rows existing must divert to an honest answer instead of the denial");
+    assert.ok(/can'?t line up today'?s numbers/.test(src),
+      "when rows and totals disagree, say so — never pick the side that flatters the cache");
+    // ONE owner for that sentence: the DB-error path and the rows-disagree path are the same
+    // admission to a client, so they must not be two different sentences drifting apart.
+    assert.equal(src.match(/can'?t line up today'?s numbers/g)!.length, 1);
+    assert.ok(!/Couldn'?t load today'?s totals/.test(src), "the second copy of that admission is back");
+  });
+}
+
 // THE CALLING CARD IS BACK ON THE MEAL LOG (2026-08-07). It was replaced by a milestone-only
 // card in July, so an ordinary log produced NO picture — which is exactly what the founder
 // described from the outside: "a person sending a card once every seven days."

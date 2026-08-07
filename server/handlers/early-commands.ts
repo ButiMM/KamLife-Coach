@@ -188,6 +188,8 @@ export async function handleEarlyCommands(ctx: {
     const alsoAsksFood = /\b(?:(?:what|which|where)\b[^?]{0,60}\b(?:can|should|do) i (?:eat|have|buy|order|get)|taxi rank|spaza|shisa nyama|kota|takeaway|restaurant|canteen|braai)\b/i.test(m);
     if (alsoAsksFood) return null; // the engine answers both halves — see law 20
 
+    // ONE MOUTH FOR "I CAN'T TRUST TODAY'S NUMBERS" — the read threw, or the read disagrees
+    // with the rows. Both are the same thing to a client and get the same sentence, below.
     try {
       // Always recompute from mealLogs (primary) — covers quick_relog, GPT logs, scanner logs
       const totals = await recomputeTodayFoodTotals(user.id);
@@ -217,16 +219,28 @@ export async function handleEarlyCommands(ctx: {
         }
         return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go${inMeals ? ` — ${inMeals}` : ""}.` : `\nCalorie target reached. ✅${protShortNote}`}${actionLine}${eduNote}`;
       }
-      // ANSWER THE QUESTION THAT WAS ASKED (2026-08-07, live-model gauntlet). "How many calories
-      // do I have left today?" used to be answered with the TARGET — "1800 calories and 130g
-      // protein daily. Hit protein first — everything else follows." — which is a different
-      // number to a different question. Nothing eaten yet means the whole target is left, and
-      // that is the one sentence they asked for.
-      return `${name}all ${cal} kcal — nothing logged yet today.`;
+      // ANSWER THE QUESTION THAT WAS ASKED (2026-08-07). "How many calories do I have left
+      // today?" used to be answered with the TARGET, which is a different number to a different
+      // question. Nothing eaten means the whole target is left, and that is the one sentence.
+      //
+      // BUT NEVER DENY A LOG (2026-08-07, live, and this one was mine): at 11:51 a photo logged
+      // ~600 kcal and at 11:55 this branch said "nothing logged yet today". He then forwarded the
+      // coach's OWN log confirmations back at it and was told again that he had logged nothing.
+      // Telling a client their day is empty when it is not is worse than reciting a target — a
+      // wrong number is an error, a denial is the coach calling them a liar.
+      //
+      // So before making that claim, ASK THE ROWS. A zero total is only ever reported as an
+      // empty day when the table agrees the day is empty; if rows are there, the totals are
+      // what's wrong, and the client hears that instead of being called a liar.
+      const [rowCheck] = await db.select({ n: sql<number>`COUNT(*)::int` }).from(mealLogs)
+        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sastDayStart())))
+        .catch(() => [{ n: 0 }] as any);
+      if ((rowCheck?.n || 0) === 0) return `${name}all ${cal} kcal — nothing logged yet today.`;
+      console.warn(`[CALORIE_QUERY] totals say 0 but ${rowCheck.n} meal row(s) exist today — user=${String(user.id).slice(-6)}`);
     } catch (err) {
       console.error("[CALORIE_QUERY] recomputeTodayFoodTotals failed:", err);
-      return `${name}Target: ${cal} kcal | ${prot}g protein daily.\n\nCouldn't load today's totals right now — try again in a moment.`;
     }
+    return `${name}I can't line up today's numbers right now — send *my meals* and I'll show you exactly what's in your log.`;
   }
 
   if (/\b(protein)\b.*\b(target|goal|daily|mine|my)\b/i.test(m) || m === "my protein" || m === "protein target") {

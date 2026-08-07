@@ -495,14 +495,26 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
     // "My daily calories" now answers with what they have actually done, not a bar chart of what
     // they have left — the spec forbids calories, macro bars and running totals on the card, and
     // this was the loudest surviving source of all three.
-    const progress = shareAchievement({
+    // NOT shareAchievement (2026-08-07). That function is documented "no milestone gate: they
+    // asked, so we answer" — correct for an explicit *share my progress*, and catastrophic here.
+    // It ranks weight → streak → sessions and falls through to `sessions >= 3`, so a client whose
+    // weight has not moved a whole kilo this week gets the SAME lifetime session count on every
+    // progress query, forever. The founder: "that thing has been telling me for the past two days
+    // that I've done twenty two workouts." Two days is what it looked like from outside; the code
+    // would have done it for two years.
+    //
+    // A question about TODAY gets a card about today: what they have eaten, and the next move.
+    // shareAchievement stays exactly as it is, for the one command that asks for a boast.
+    const today = await todayRows(user, false);
+    if (!today) return "";
+    const card = mealCard({
       firstName: firstNameOf(user),
-      streak: user?.workoutStreak ?? undefined,
-      weightChangeKg: await weightChangeSinceStart(user?.id),
-      sessions: user?.totalWorkoutsCompleted ?? undefined,
+      mealName: "Today",
+      rows: today.rows,
+      isBulk: today.isBulk,
+      usesNumbers: getNumbersMode(user) !== "low" && getGoalProfile(user?.goalType).usesMacros,
     });
-    if (!progress) return "";
-    return cardMarker(base, renderAchievementCard(progress));
+    return cardMarker(base, renderAchievementCard(card));
   } catch (e) {
     console.warn("[DAILY_CARD] skipped:", (e as any)?.message || e);
     return "";
