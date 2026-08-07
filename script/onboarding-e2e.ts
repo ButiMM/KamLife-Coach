@@ -266,8 +266,19 @@ async function journey(): Promise<void> {
   //
   // What must still be true — and this is the half that protects the client — is that the log
   // LANDED and the reply names their food. That is asserted above and is not weakened here.
-  if (/\[MEDIA:[^\]]*\/card\/[^\]]+\.png\]/.test(log)) {
-    fail("Day one", `a routine food log attached a card — the locked policy is signup, milestone, weekly, on demand:\n    ${log.slice(-160)}`);
+  // REVERSED 2026-08-07, BY THE FOUNDER, DELIBERATELY. The 4 August policy locked cards to
+  // signup / milestone / weekly / on-demand, on the reasoning that images cost a prepaid client
+  // data and a card sent for every meal is not a card anyone shares. Three days of that policy
+  // produced the thing he then described from the outside without seeing the source: "a person
+  // sending a card once every seven days" — and his ruling is that the meal card is the calling
+  // card, the only thing in this product that travels, and it belongs on the moment a client
+  // has just told us something about their day. The data cost is real and remains the reason
+  // for the 4-minute dump window and the 50 kcal floor, which both stay.
+  //
+  // What must still be true is unchanged and still asserted above: the log LANDED and the reply
+  // names their food. The card is an addition to that, never a replacement for it.
+  if (!/\[MEDIA:[^\]]*\/card\/[^\]]+\.png\]/.test(log)) {
+    fail("Day one", `a routine food log attached NO card — the calling card must ride the log:\n    ${log.slice(-160)}`);
   }
   // The Day-0 regression: an onboarded client must never be pushed back into setup.
   if (/send.*baseline photos|let'?s get you set up|what'?s your name/i.test(log)) {

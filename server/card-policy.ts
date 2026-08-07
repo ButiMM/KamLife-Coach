@@ -37,7 +37,11 @@ export const CARD_MIN_KCAL = 50;
 export function cardWillAttach(user: any, mealKcal: number, hasBaseUrl: boolean): boolean {
   if (!hasBaseUrl) return false;
   if (!((mealKcal || 0) >= CARD_MIN_KCAL)) return false;
-  if (!getGoalProfile(user?.goalType).usesMacros) return false;   // wellness → no card, ever
+  // TWO CAMPS, ONE CARD (2026-08-07, founder: "never two products, never watered down").
+  // This line used to read `if (!usesMacros) return false; // wellness → no card, ever` — so the
+  // simplicity camp, the larger half of this market, was excluded from the calling card by
+  // policy. Not a lesser card: nothing to look at and nothing to share, ever. They get the same
+  // picture now, with a verdict where the macro figure sits (see mealCard in macro-card-attach).
   return Number(user?.calorieTarget) > 0 && Number(user?.proteinTarget) > 0;
 }
 

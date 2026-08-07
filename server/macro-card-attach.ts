@@ -397,21 +397,87 @@ export function cardProse(text: string, numbersOff: boolean): string {
  * demand. A regular log gets two sentences and nothing else — which is also what the voice rules
  * ask for. The milestone branch below is the ONLY card this path can still produce.
  */
+
+/** One owner for "a rendered card, as a WhatsApp media marker". Not prose — a URL. */
+function cardMarker(base: string, png: Buffer | Uint8Array): string {
+  return ` [MEDIA:${base}/card/${putCard(png as any)}.png]`;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE MEAL CARD — the calling card, back on the moment it belongs to (2026-08-07).
+ *
+ * (Founder: "the meal card is our calling card. You can't share screenshots of a bunch of
+ * sentences.") On 28 July the meal card was replaced by a MILESTONE-only card, on a marketing
+ * note that people share achievements, not receipts. That note was right about achievements and
+ * wrong about the consequence: the gate meant that logging a meal — the one moment a client has
+ * just told us something about their day — produced no picture at all. He described the symptom
+ * from the outside without seeing the source: "a person sending a card once every seven days."
+ *
+ * So both are true now. A streak milestone still wins, because it is the more shareable thing.
+ * Every OTHER log gets the meal card, which carries the one instruction the coach computed.
+ *
+ * TWO CAMPS, ONE CARD. The numbers camp reads the protein figure; the simplicity camp reads a
+ * verdict where the figure sits. Same picture, same brain, same next move underneath — nobody
+ * picks a mode and nobody gets a lesser product. Before this, a wellness-goal client was
+ * excluded from cards by policy and had nothing to look at and nothing to share, forever.
+ * ──────────────────────────────────────────────────────────────────────────── */
+export function mealCard(opts: {
+  firstName: string; mealName: string; rows: Row[]; isBulk: boolean; usesNumbers: boolean;
+  hour?: number;
+}): AchievementCardData {
+  const r = (label: string) => opts.rows.find(x => x.label === label);
+  const prot = r("Protein");
+  const cal = r("Calories");
+  const protSoFar = Math.max(0, Math.round(prot?.current ?? 0));
+  const protLeft = Math.round((prot?.target ?? 0) - protSoFar);
+  const calRatio = cal && cal.target > 0 ? cal.current / cal.target : 0;
+
+  // The simplicity camp gets a VERDICT where the number goes — the same judgement the numbers
+  // camp reaches by reading the figure, made for them instead of by them.
+  const verdict = protLeft > 40 ? "MORE"
+    : calRatio > 1.05 && !opts.isBulk ? "EASY"
+    : protLeft <= 0 ? "DONE"
+    : "GOOD";
+
+  return {
+    figure: opts.usesNumbers ? `${protSoFar}g` : verdict,
+    unit: opts.usesNumbers ? "protein today" : "so far today",
+    line: `${opts.firstName ? opts.firstName + ": " : ""}${opts.mealName} logged.`,
+    sub: nextMoveLine(opts.rows, opts.isBulk, opts.hour),
+  };
+}
+
 export async function macroCardMarker(opts: { user: any; mealName: string; mealKcal: number; forDate?: Date; achievementStreak?: number }): Promise<string> {
   try {
     // A MILESTONE IS A MOMENT (2026-07-28, marketing review: "people don't share a receipt,
     // they share an achievement"). Seven days straight is about the person, and that is the
     // thing they show someone. achievementFor is the milestone gate — it returns null on an
     // ordinary day, which is now the whole of the rest of this function.
-    const ach = opts.achievementStreak
-      ? achievementFor({ firstName: firstNameOf(opts.user), streak: opts.achievementStreak })
-      : null;
-    if (!ach) return "";
     if (cardSuppressedByDump(opts.user?.id)) return "";   // six photos in ninety seconds → one card
     const base = cardBaseUrl();
     if (!base) return "";
+
+    // A MILESTONE STILL WINS — it is the more shareable picture, and that July note was right
+    // about that much. What changed is what happens on an ORDINARY day: a card, not silence.
+    const ach = opts.achievementStreak
+      ? achievementFor({ firstName: firstNameOf(opts.user), streak: opts.achievementStreak })
+      : null;
+    if (ach) {
+      noteCardSent(opts.user?.id);
+      return cardMarker(base, renderAchievementCard(ach));
+    }
+
+    const today = await todayRows(opts.user, false, opts.forDate);
+    if (!today) return "";
+    const card = mealCard({
+      firstName: firstNameOf(opts.user),
+      mealName: opts.mealName || "Meal",
+      rows: today.rows,
+      isBulk: today.isBulk,
+      usesNumbers: getNumbersMode(opts.user) !== "low" && getGoalProfile(opts.user?.goalType).usesMacros,
+    });
     noteCardSent(opts.user?.id);
-    return ` [MEDIA:${base}/card/${putCard(renderAchievementCard(ach))}.png]`;
+    return cardMarker(base, renderAchievementCard(card));
   } catch (e) {
     console.warn("[MILESTONE_CARD] skipped:", (e as any)?.message || e);
     return "";
@@ -436,8 +502,7 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
       sessions: user?.totalWorkoutsCompleted ?? undefined,
     });
     if (!progress) return "";
-    const png = renderAchievementCard(progress);
-    return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
+    return cardMarker(base, renderAchievementCard(progress));
   } catch (e) {
     console.warn("[DAILY_CARD] skipped:", (e as any)?.message || e);
     return "";

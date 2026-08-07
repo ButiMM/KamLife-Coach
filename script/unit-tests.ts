@@ -1323,6 +1323,52 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// THE CALLING CARD IS BACK ON THE MEAL LOG (2026-08-07). It was replaced by a milestone-only
+// card in July, so an ordinary log produced NO picture — which is exactly what the founder
+// described from the outside: "a person sending a card once every seven days."
+{
+  const { mealCard } = await import("../server/macro-card-attach");
+  const rows = [
+    { label: "Calories", current: 1200, target: 1800, unit: "kcal" },
+    { label: "Protein", current: 61, target: 130, unit: "g" },
+  ] as any[];
+
+  test("meal card: the numbers camp reads the protein figure", () => {
+    const c = mealCard({ firstName: "Kam", mealName: "Pap and chicken", rows, isBulk: false, usesNumbers: true, hour: 13 });
+    assert.equal(c.figure, "61g");
+    assert.match(c.unit, /protein/i);
+    assert.match(c.line, /Pap and chicken/, "the card names what THEY logged");
+    assert.ok((c.sub || "").length > 0, "the next move must be ON the card");
+    assert.ok(!/\?/.test(c.sub || ""), "a next move is an instruction, never a question");
+  });
+
+  test("meal card: the simplicity camp gets the SAME card with a verdict, not exclusion", () => {
+    const c = mealCard({ firstName: "Kam", mealName: "Pap and chicken", rows, isBulk: false, usesNumbers: false, hour: 13 });
+    assert.match(c.figure, /^(MORE|GOOD|DONE|EASY)$/, `a verdict where the figure sits: ${c.figure}`);
+    assert.ok(!/\d/.test(c.figure), "no numbers for the camp that does not want them");
+    assert.match(c.line, /Pap and chicken/, "same card, same meal, same brain");
+    assert.ok((c.sub || "").length > 0, "and the same next move");
+  });
+
+  test("meal card: 69g short of protein says MORE, a finished day says DONE", () => {
+    const short = mealCard({ firstName: "K", mealName: "Toast", rows, isBulk: false, usesNumbers: false, hour: 13 });
+    assert.equal(short.figure, "MORE", "69g short must not read as GOOD");
+    const doneRows = [{ label: "Calories", current: 1700, target: 1800, unit: "kcal" },
+                      { label: "Protein", current: 135, target: 130, unit: "g" }] as any[];
+    assert.equal(mealCard({ firstName: "K", mealName: "Chicken", rows: doneRows, isBulk: false, usesNumbers: false, hour: 13 }).figure, "DONE");
+  });
+
+  test("meal card FIRES on an ordinary log — the milestone gate no longer swallows it", () => {
+    const src = readFileSync("server/macro-card-attach.ts", "utf-8");
+    const fn = src.slice(src.indexOf("export async function macroCardMarker"));
+    const body = fn.slice(0, fn.indexOf("\nexport "));
+    assert.ok(!/if \(!ach\) return "";/.test(body),
+      "the milestone-only gate is back — an ordinary meal log would produce no card again");
+    assert.ok(/mealCard\(/.test(body), "an ordinary log must render the meal card");
+    assert.ok(/if \(ach\)/.test(body), "a milestone must still win — it is the more shareable picture");
+  });
+}
+
 // THE ACCEPTANCE TEST (2026-08-06 final directive: persona in the prompt, law in the code).
 // Four exchanges from the founder's own morning. The persona laws live in the prompt where a
 // model can read them; these assert the LAW half — the part that holds when the model doesn't.
@@ -5285,8 +5331,12 @@ test("dayStatusPill: a plain verdict, never a number, and it matches the bars", 
     assert.equal(cardWillAttach(macro, 722, true), true);
     assert.equal(cardWillAttach(macro, 10, true), false, "no card for a black coffee");
     assert.equal(cardWillAttach(macro, 722, false), false, "no APP_URL, no card");
-    // A wellness client never gets a card, so their text must KEEP its instruction.
-    assert.equal(cardWillAttach({ goalType: "general", calorieTarget: 2000, proteinTarget: 120 }, 722, true), false);
+    // INVERTED 2026-08-07 (founder: "never two products, never watered down"). A wellness client
+    // used to be excluded from cards BY POLICY — nothing to look at, nothing to share, ever, for
+    // the larger half of this market. They get the same card now, with a verdict where the macro
+    // figure sits, so the rule this test guards still holds: a card attaches, so the TEXT must
+    // stand down and let it carry the next move.
+    assert.equal(cardWillAttach({ goalType: "general", calorieTarget: 2000, proteinTarget: 120 }, 722, true), true);
     // No targets → no card, so again the text has to carry the day.
     assert.equal(cardWillAttach({ goalType: "fat_loss" }, 722, true), false);
     assert.ok(CARD_MIN_KCAL === 50);
