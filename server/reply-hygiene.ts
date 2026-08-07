@@ -420,3 +420,61 @@ export function neverSilentLine(kind: LoggedKind, opts: { label?: string; amount
     case "sleep":   return amount ? `${amount} of sleep — noted. 👌` : `Sleep noted. 👌`;
   }
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * TELL THEM, DON'T ASK THEM (2026-08-06).
+ *
+ * Seven replies in a row ended in a question: "What's your plan for meals today?" "What do you
+ * have at home?" "What do you prefer?" "What do you think?" "What do you think?" "What do you
+ * want to tackle first?" The founder's answer: "People don't wanna think. People wanna be told
+ * what to do, how to do it, when to do it."
+ *
+ * The prompt has forbidden this since July — «never end it with "What do you think?", never
+ * hand back a menu, never ask them to choose». It was ignored anyway, which is the lesson of
+ * the whole rebuild: a rule that lives only in the prompt is a suggestion. The rules that hold
+ * on his phone today are the ones a test enforces.
+ *
+ * So this enforces it. A trailing question is REPLACED by the computed next move — never
+ * merely deleted, because a reply that stops dead is worse than one that asks. When there is
+ * genuinely no move to give, an open question is left alone: a coach who needs one fact to
+ * answer properly should ask for that fact.
+ *
+ * Only the LAST sentence is touched. A question in the middle of a reply is usually the coach
+ * making a point ("Know what actually stalls this?"), and rewriting that would break the voice
+ * this whole sweep exists to protect.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** The closing questions that hand the work back to the client. */
+const HANDBACK_QUESTION = /\b(what do you think|what.?s your plan|what are you (?:planning|having|going to have)|what do you (?:want|prefer|fancy|have at home|feel like)|how does that (?:sound|look)|does that (?:work|sound good)|shall we|would you like|which (?:one )?(?:do you|would you)|what (?:should|shall) we|sound good|let me know what|tell me what you)\b[^.!?]*\?\s*$/i;
+
+/**
+ * Replace a hand-back question at the end of a reply with the instruction the coach computed.
+ *
+ * @param nextMove the output of theNextMove() — "" when there is genuinely nothing to instruct,
+ *        in which case the question survives untouched.
+ */
+export function tellDontAsk(text: string, nextMove: string): string {
+  const t = (text || "").trim();
+  if (!t || !nextMove.trim()) return text;
+  if (!HANDBACK_QUESTION.test(t)) return text;
+
+  const parts = splitSentences(t); // [sentence, sep, sentence, sep, …]
+  // Walk back to the last sentence carrying actual words, and drop it if it is the hand-back.
+  for (let i = parts.length - 1; i >= 0; i -= 2) {
+    const idx = parts[i] !== undefined && parts[i].trim() ? i : i - 1;
+    if (idx < 0 || !parts[idx] || !parts[idx].trim()) continue;
+    if (!HANDBACK_QUESTION.test(parts[idx].trim() + (parts[idx + 1] || ""))) break;
+    const kept = parts.slice(0, idx).join("").trim();
+    const move = nextMove.trim().replace(/\.\s*$/, "");
+    return kept ? `${kept}\n\n${move}.` : `${move}.`;
+  }
+  return text;
+}
+
+/**
+ * Does this reply tell them anything to DO? Used by the test suite rather than at runtime —
+ * a reply that neither instructs nor answers a question is the calculator behaviour.
+ */
+export function endsWithHandback(text: string): boolean {
+  return HANDBACK_QUESTION.test((text || "").trim());
+}

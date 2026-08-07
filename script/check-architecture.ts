@@ -36,7 +36,7 @@ const BUDGET = {
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
-  regexLiterals: 311,
+  regexLiterals: 312,
   /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
    * something other than the engine can put words in front of a client.
@@ -117,6 +117,21 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "regexLiterals", from: 311, to: 312, date: "2026-08-06",
+    why: "ONE pattern: HANDBACK_QUESTION, the closing questions that hand the work back to the "
+      + "client. The founder's most-repeated complaint all day — seven replies in a row ending "
+      + "«What do you think?», «What's your plan?», «What do you have at home?» — against a "
+      + "prompt that has forbidden exactly that since July. That is the lesson of the whole "
+      + "rebuild in one line: a rule that lives only in the prompt is a suggestion, and the "
+      + "rules holding on his phone tonight are the ones a test enforces. Tried first and "
+      + "rejected: reusing looksLikeQuestion (wrong question — it matches every question, and "
+      + "rewriting a coach's genuine one would break the voice this sweep protects) and the "
+      + "PLATITUDES list (wrong action — platitudes are stripped, a hand-back is REPLACED by "
+      + "the computed next move, because a reply that stops dead is worse than one that asks). "
+      + "PAY THIS BACK when the engine emits a structured needsInfo flag: the pattern exists "
+      + "only because we have to infer from prose whether the model was asking or telling.",
+  },
   {
     key: "regexLiterals", from: 309, to: 311, date: "2026-08-06",
     why: "THE WRONG MEAL WAS DELETED, live, on the founder's phone. He said «the bread, eggs, "

@@ -24,6 +24,55 @@ import { buildClientSnapshot } from "../brain/client-snapshot";
 import { seedUnderstanding } from "./seed";
 import { loadUnderstanding, saveUnderstanding } from "./store";
 import { runMeaningEngine, writeReplyAfterTools } from "./meaning-engine";
+import { tellDontAsk } from "../reply-hygiene";
+
+/**
+ * THE COACH'S NEXT MOVE, for the conversation (2026-08-06).
+ *
+ * theNextMove() has computed this since July and only the macro-card image ever said it, so in
+ * chat the engine had nothing to instruct with and filled the gap with a question — seven in a
+ * row on the founder's phone. This reads the same real rows the card reads and hands the answer
+ * to tellDontAsk, which swaps a hand-back question for the instruction.
+ *
+ * Fail-open and silent: any error returns "", the reply ships unchanged, and a client never
+ * loses a message because the coach could not think of a task.
+ */
+async function computeNextMove(user: any): Promise<string> {
+  try {
+    const { theNextMove } = await import("../education");
+    const { recomputeTodayFoodTotals } = await import("../handlers/food-scanner");
+    const { sastHour, sastDayStart } = await import("../sast");
+    const { db } = await import("../db");
+    const { stepLogs, workoutLogs, weightLogs } = await import("../../shared/schema");
+    const { eq, desc, and, gte } = await import("drizzle-orm");
+
+    const [totals, steps, lastSession, lastWeigh] = await Promise.all([
+      recomputeTodayFoodTotals(user.id).catch(() => ({ calories: 0, protein: 0 })),
+      db.select({ steps: stepLogs.steps }).from(stepLogs)
+        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart()))).limit(1).catch(() => []),
+      db.select({ at: workoutLogs.loggedAt }).from(workoutLogs)
+        .where(eq(workoutLogs.userId, user.id)).orderBy(desc(workoutLogs.loggedAt)).limit(1).catch(() => []),
+      db.select({ at: weightLogs.loggedAt }).from(weightLogs)
+        .where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(1).catch(() => []),
+    ]);
+    const daysSince = (rows: any[]): number | null => rows[0]?.at
+      ? Math.floor((Date.now() - new Date(rows[0].at).getTime()) / 86_400_000) : null;
+    const { getTodayWorkoutState } = await import("../workout-state");
+    const wState = await getTodayWorkoutState(user).catch(() => ({ type: "REST" as const }));
+
+    return theNextMove({
+      hourSAST: sastHour(),
+      proteinLeft: (user.proteinTarget || 120) - (totals.protein || 0),
+      calLeft: (user.calorieTarget || 1800) - (totals.calories || 0),
+      stepsToday: steps[0]?.steps ?? 0,
+      stepsTarget: user.stepsTarget || 8500,
+      daysSinceSession: daysSince(lastSession),
+      daysSinceWeighIn: daysSince(lastWeigh),
+      isTrainingDayToday: wState.type !== "REST",
+      building: (user.goalType || "") === "muscle_gain",
+    });
+  } catch { return ""; }
+}
 import { classifyDomain } from "./domain-guard";
 import { captureFriction } from "../friction";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
@@ -298,7 +347,8 @@ export async function runMeaningEngineLive(ctx: {
           }).catch(() => "");
           if (afterTools.trim()) {
             const gate2 = await safetyGate(afterTools, user, message);
-            const shaped = sanitizeCoachReply(gate2.response, message, user.weeklyFoodBudget, user.injuries);
+            let shaped = sanitizeCoachReply(gate2.response, message, user.weeklyFoodBudget, user.injuries);
+            shaped = tellDontAsk(shaped, await computeNextMove(user));
             if (shaped.trim()) {
               await logChat(user.id, message, shaped, "ENGINE_AFTER_TOOLS").catch(() => {});
               return shaped;
@@ -316,6 +366,8 @@ export async function runMeaningEngineLive(ctx: {
     // Same guards production already trusts: safety gate → sanitize → number-free.
     const gate = await safetyGate(result.reply, user, message);
     let reply = sanitizeCoachReply(gate.response, message, user.weeklyFoodBudget, user.injuries);
+    // TELL, DON'T ASK — a hand-back question becomes the computed instruction (2026-08-06).
+    reply = tellDontAsk(reply, await computeNextMove(user));
     if (getNumbersMode(user) === "low") reply = stripNumbersFromProse(reply);
     if (!reply.trim()) return null;
 

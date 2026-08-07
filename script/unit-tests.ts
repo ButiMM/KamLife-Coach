@@ -1323,6 +1323,71 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// THE 6 AUGUST MORNING — "this is a fucking calculator". Seven replies ending in a question,
+// a weight number for a week he never weighed in, and hummus recommended to a man who said
+// "I live in a poor country".
+{
+  const { theNextMove } = await import("../server/education");
+  const { tellDontAsk, endsWithHandback } = await import("../server/reply-hygiene");
+  const base = {
+    hourSAST: 7, proteinLeft: 0, calLeft: 0, stepsToday: 9000, stepsTarget: 8500,
+    daysSinceSession: 0, daysSinceWeighIn: 1, isTrainingDayToday: false, building: true,
+  };
+
+  test("next move: a training day nobody has used outranks everything else", () => {
+    const m = theNextMove({ ...base, isTrainingDayToday: true, daysSinceSession: 3, proteinLeft: 90 });
+    assert.match(m, /session/i, `training must win the triage: ${m}`);
+    assert.ok(!/\?/.test(m), "a next move is never a question");
+  });
+  test("next move: protein is instructed as FOOD, never as a macro number", () => {
+    const m = theNextMove({ ...base, proteinLeft: 60 });
+    assert.match(m, /eggs|tin fish|protein/i, `must name food: ${m}`);
+    assert.ok(!/\d+\s*g\b/i.test(m), `must not hand back a gram figure: ${m}`);
+  });
+  test("next move: after 20:00 it closes the day out instead of setting a task", () => {
+    const m = theNextMove({ ...base, hourSAST: 21, proteinLeft: 60 });
+    assert.match(m, /tomorrow|day wrapped/i, `a to-do at 21:00 proves it can't read the clock: ${m}`);
+  });
+  test("next move: nothing worth saying returns empty — it never invents a task", () => {
+    assert.equal(theNextMove({ ...base }), "", "a client who is on top of everything gets no nag");
+  });
+
+  test("tell don't ask: every hand-back from that morning is replaced by the instruction", () => {
+    const move = "Get today's session done";
+    for (const q of [
+      "Your protein is solid. What's your plan for meals today?",
+      "These are quick and easy. What do you think?",
+      "Let's find the right options together. What do you want to tackle first?",
+      "Focus on protein-rich foods. What do you have at home?",
+      "That was a mistake. What do you prefer for your meals?",
+    ]) {
+      assert.ok(endsWithHandback(q), `must be recognised as a hand-back: ${q}`);
+      const out = tellDontAsk(q, move);
+      assert.ok(!endsWithHandback(out), `must no longer hand back: ${out}`);
+      assert.match(out, /Get today's session done/, `must carry the instruction: ${out}`);
+    }
+  });
+  test("tell don't ask: with no computed move, an honest question survives", () => {
+    const q = "What do you have at home?";
+    assert.equal(tellDontAsk(q, ""), q, "asking is right when there is genuinely nothing to instruct");
+  });
+  test("tell don't ask: a question mid-reply is the coach making a point — left alone", () => {
+    const t = "Know what actually stalls this? Hidden oil. Add eggs to your next meal.";
+    assert.equal(tellDontAsk(t, "Get today's session done"), t, "only the CLOSING question is rewritten");
+  });
+
+  test("provenance: 'this week' needs a weigh-in THIS WEEK, not a usable 10-day trend", async () => {
+    const { applyProvenance } = await import("../server/verifiers/response-gate");
+    const stale = { trend: { usable: true } as const, mealsLoggedToday: 2, calorieTarget: 2250, weighedThisWeek: false };
+    const r = applyProvenance("You've lost 1.0kg this week, bringing you to 83.3kg.", stale);
+    assert.ok(r.rewrites.includes("weight-trend"), "a week he never weighed in must not carry a number");
+    assert.match(r.text, /haven'?t weighed in this week/i, `must say so plainly: ${r.text}`);
+    // …and a trend claim that does NOT name this week still ships on a usable trend.
+    const generic = applyProvenance("You're down 1.2kg since we started.", stale);
+    assert.equal(generic.rewrites.length, 0, "a genuine trend claim is still allowed");
+  });
+}
+
 // THE LAST TWO FROM THE 6 AUGUST TRANSCRIPT — the duplicate and the amnesia.
 {
   test("an AMENDED meal updates the entry, it does not become a second meal", async () => {
@@ -7955,7 +8020,9 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.equal(classifyClaim("Bumping your target to 2,250 cal."), "target-value");
   });
 
-  const backed = { trend: { usable: true } as const, mealsLoggedToday: 2, calorieTarget: 2250 };
+  // weighedThisWeek added 2026-08-06: a claim naming THIS WEEK now needs a weigh-in from this
+  // week, not merely a usable trend. "Backed" means fully backed, so the fixture says so.
+  const backed = { trend: { usable: true } as const, mealsLoggedToday: 2, calorieTarget: 2250, weighedThisWeek: true };
 
   test("provenance: a backed reply ships BYTE-IDENTICAL — the gate is invisible when right", () => {
     const draft = "You're down 1.2kg this week.\n\nYou ate 450 kcal at lunch.\n\nBumping your target to 2,250 cal.";

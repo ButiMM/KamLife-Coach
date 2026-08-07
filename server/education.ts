@@ -230,3 +230,85 @@ export function goalStatusLine(goalType: string | null | undefined, calRemaining
   }
   return `Over by ~${over} kcal. One day never breaks a ${goal === "recomposition" || goal === "maintenance" ? "recomp" : "deficit"} — the WEEK decides. Next meal: protein + veg, and a 20-minute walk claws most of this back.`;
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE NEXT MOVE — the coach's answer to "what do I do now", computed, never invented.
+ *
+ * (2026-08-06, founder, after a morning of this: seven replies in a row ending in a question.
+ * "People don't wanna think. People wanna be told what to do, how to do it, when to do it."
+ * "Where is the brain that I ordered? This is a fucking calculator.")
+ *
+ * He was right, and the cause was not the prompt. nextMoveLine() has computed exactly this
+ * since 27 July — verb first, in food, no macro names, clock-aware — and it was wired to the
+ * macro-card IMAGE only. In chat the engine had nothing computed to say, and a model with
+ * nothing to say fills the space with a question. That is the whole disease.
+ *
+ * So this is the same idea, promoted out of the card and widened past food, because a coach's
+ * next move is not always a meal: it can be the session, the scale, or the walk. One instruction
+ * at a time, chosen by triage, in the order a real coach would pick.
+ *
+ * Rules it inherits: an ACTION, verb first, in things a person can DO — never a macro name,
+ * never a number they have to interpret, never a question. If nothing is genuinely worth
+ * instructing, it returns "" and the caller says nothing rather than inventing a task.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export type NextMoveFacts = {
+  hourSAST: number;
+  /** Protein still to eat today. Negative or 0 = done. */
+  proteinLeft: number;
+  /** Calories still to eat today. Negative = over. */
+  calLeft: number;
+  stepsToday: number;
+  stepsTarget: number;
+  /** Days since their last logged session; null when they have never trained. */
+  daysSinceSession: number | null;
+  /** Days since their last weigh-in; null when they have never weighed. */
+  daysSinceWeighIn: number | null;
+  isTrainingDayToday: boolean;
+  building: boolean;
+};
+
+/**
+ * The moves themselves, as a table rather than a ladder of returns — one place to read the
+ * coach's whole vocabulary of instructions, and one place to change his voice.
+ */
+const MOVES = {
+  breakfastProtein: "Tomorrow, get a real protein in at breakfast — eggs or tin fish",
+  weighTomorrow: "Weigh in first thing tomorrow, before food",
+  sessionTomorrow: "Tomorrow, get the session done before the day takes it",
+  dayWrapped: "That's the day wrapped — same again tomorrow",
+  oneSession: "Get one session in today — just one, and the week turns around",
+  sessionToday: "Get today's session done",
+  addProtein: "Add eggs or tin fish to your next meal",
+  proteinFirst: "Put protein first on your next plate",
+  eatMore: "Eat a proper meal tonight — you're leaving fuel on the table",
+  holdTheLine: "Keep tonight's plate protein and veg — no seconds",
+  walk: "Get a 20-minute walk in today",
+} as const;
+
+export function theNextMove(f: NextMoveFacts): string {
+  const noSessionYet = f.daysSinceSession === null || f.daysSinceSession >= 1;
+  const scaleStale = f.daysSinceWeighIn === null || f.daysSinceWeighIn >= 10;
+
+  // EVENING closes the day out and faces tomorrow — a to-do at 21:00 proves the coach is not
+  // reading the clock the client is living in.
+  if (f.hourSAST >= 20) {
+    return f.proteinLeft >= 35 ? MOVES.breakfastProtein
+      : (f.daysSinceWeighIn === null || f.daysSinceWeighIn >= 7) ? MOVES.weighTomorrow
+      : (f.isTrainingDayToday && noSessionYet) ? MOVES.sessionTomorrow
+      : MOVES.dayWrapped;
+  }
+
+  // TRAINING first on a training day they have not used — the hardest thing to start, the
+  // easiest thing to lose. Then FOOD, always as food. Then movement while there is daylight.
+  // The scale last, and only when genuinely stale, so it never nags.
+  return (f.isTrainingDayToday && noSessionYet)
+      ? (f.daysSinceSession !== null && f.daysSinceSession >= 7 ? MOVES.oneSession : MOVES.sessionToday)
+    : f.proteinLeft >= 30 ? MOVES.addProtein
+    : f.proteinLeft >= 15 ? MOVES.proteinFirst
+    : (f.building && f.calLeft >= 500) ? MOVES.eatMore
+    : (!f.building && f.calLeft <= -200) ? MOVES.holdTheLine
+    : (f.stepsTarget > 0 && f.stepsToday < f.stepsTarget * 0.6 && f.hourSAST < 18) ? MOVES.walk
+    : scaleStale ? MOVES.weighTomorrow
+    : "";
+}

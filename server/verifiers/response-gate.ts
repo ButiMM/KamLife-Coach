@@ -256,6 +256,8 @@ export interface Evidence {
   mealsLoggedToday: number;
   /** The target actually persisted on the user row. */
   calorieTarget: number | null;
+  /** Did they actually step on a scale in the last 7 days? Separate from trend usability. */
+  weighedThisWeek: boolean;
 }
 
 /** Which claim, if any, this one sentence is making. */
@@ -270,7 +272,16 @@ export function classifyClaim(sentence: string): ClaimKind | null {
 
 /** Is the evidence for this claim actually on file? */
 function isBacked(kind: ClaimKind, sentence: string, ev: Evidence): boolean {
-  if (kind === "weight-trend") return ev.trend.usable;
+  if (kind === "weight-trend") {
+    if (!ev.trend.usable) return false;
+    // "THIS WEEK" IS A DIFFERENT QUESTION FROM "IS THERE A TREND" (2026-08-06, live).
+    // The founder asked for his week's progress without weighing in, and got "You've lost
+    // 1.0kg this week, bringing you to 83.3kg." The gate passed it because weightTrendUsable
+    // accepts a weigh-in up to MAX_TREND_AGE_DAYS (10) old — correct for reading a trend, and
+    // wrong for the word "week". A claim that names this week needs a weigh-in from this week.
+    if (/\bthis (?:week|morning|month)\b|\btoday\b/i.test(sentence)) return ev.weighedThisWeek;
+    return true;
+  }
   if (kind === "meal-eaten") return ev.mealsLoggedToday > 0;
   // target-value: the number quoted must be the number stored. A reply announcing a change the
   // database never took is the contradiction the founder screenshotted — two messages, two
@@ -289,6 +300,9 @@ function isBacked(kind: ClaimKind, sentence: string, ev: Evidence): boolean {
  */
 function askInstead(kind: ClaimKind, ev: Evidence): string {
   if (kind === "weight-trend") {
+    if (ev.trend.usable && !ev.weighedThisWeek) {
+      return "You haven't weighed in this week, so I'm not going to put a number on it. Hop on the scale in the morning and I'll tell you exactly where you're going.";
+    }
     const why = ev.trend.usable ? "" : ev.trend.why;
     if (why === "illness") {
       return "I'm not going to call a trend off those weigh-ins — they sit around the time you were ill, and weight moves on fluid and appetite then, not on food. Hop on the scale in the morning and I'll give you a straight read.";
@@ -427,11 +441,13 @@ export async function provenanceGate(phone: string, body: string): Promise<strin
     const sickSince = notes.match(/sick_since:(\d{4}-\d{2}-\d{2})/)?.[1];
 
     let trend: TrendVerdict = { usable: false, why: "too_few" };
+    let weighedThisWeek = false;
     if (kinds.has("weight-trend")) {
       const wRows = await db.select({ at: weightLogs.loggedAt })
         .from(weightLogs)
         .where(and(eq(weightLogs.userId, u.id), gte(weightLogs.loggedAt, new Date(Date.now() - 28 * 86_400_000))))
         .orderBy(desc(weightLogs.loggedAt)).limit(12);
+      weighedThisWeek = wRows.some(r => Date.now() - new Date(r.at as Date).getTime() <= 7 * 86_400_000);
       if (wRows.length >= 2) {
         trend = weightTrendUsable({
           count: wRows.length,
@@ -453,7 +469,7 @@ export async function provenanceGate(phone: string, body: string): Promise<strin
       mealsLoggedToday = meals.length;
     }
 
-    const ev: Evidence = { trend, mealsLoggedToday, calorieTarget: u.calorieTarget ?? null };
+    const ev: Evidence = { trend, mealsLoggedToday, calorieTarget: u.calorieTarget ?? null, weighedThisWeek };
     const result = applyProvenance(t, ev);
 
     _checked++;
