@@ -14,9 +14,9 @@ import { guardMalformed, safeFallback, recordGuardResult } from "../malformed-gu
 import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../food-fuzzy";
 import { usesMacroTargets } from "../goal-profiles";
 import { db } from "../db";
-import { mealLogs, chatHistory } from "../../shared/schema";
-import { eq, and, gte, sql, desc } from "drizzle-orm";
-import { sastDayStart } from "../utils";
+import { mealLogs, chatHistory, users } from "../../shared/schema";
+import { eq, and, gte, sql, desc, inArray } from "drizzle-orm";
+import { sastDayStart, sastToday } from "../utils";
 
 // ── Per-user in-memory cache for recomputeTodayFoodTotals ──────────────────
 // Prevents redundant DB queries when the same totals are read multiple times
@@ -695,6 +695,55 @@ export async function recomputeTodayFoodTotals(userId: string): Promise<{ calori
   const legacyResult = { calories, protein };
   _foodTotalsCache.set(userId, { ...legacyResult, cachedAt: Date.now() });
   return legacyResult;
+}
+
+/**
+ * ONE OWNER FOR REMOVING A MEAL (2026-08-07).
+ *
+ * The founder's day went from «Running total: ~600 kcal» at 11:51 to «nothing logged yet
+ * today» at 11:55, and I could not say why — because eight different branches each deleted a
+ * row with their own hand-written three-line epilogue (delete, invalidate, resync the user
+ * columns). Nothing recorded WHAT was removed, so a day that fell to zero left no trace of the
+ * branch that emptied it. An outside reviewer read that as "they never wrote the code to save
+ * it" — the write works; the disappearance was unaudited, which is indistinguishable from the
+ * outside.
+ *
+ * So every removal comes through here, and every removal leaves a line in the log naming the
+ * reason, the rows, the kcal, and the before → after for the day. The next time a day drops,
+ * Railway says which branch did it in one grep, instead of costing a night of theorising.
+ *
+ * It also makes the epilogue impossible to forget: a delete that skipped the cache
+ * invalidation or the users-table resync used to leave the client's day disagreeing with the
+ * client's log for thirty seconds, which is its own bug class.
+ *
+ * Returns the day's recomputed totals, so callers keep reporting the number they always did.
+ */
+export async function dropMeals(
+  userId: string,
+  ids: string[],
+  reason: string,
+): Promise<{ calories: number; protein: number }> {
+  const before = await recomputeTodayFoodTotals(userId);
+  const keep = ids.filter(Boolean);
+  if (keep.length) {
+    // Read what is about to go BEFORE it goes. An audit line written after the delete can only
+    // say "something left"; this one can say what, and for how many calories.
+    const doomed = await db.select({ id: mealLogs.id, kcal: mealLogs.kcalInt, prot: mealLogs.proteinInt, raw: mealLogs.rawMessage })
+      .from(mealLogs).where(and(eq(mealLogs.userId, userId), inArray(mealLogs.id, keep)))
+      .catch(() => [] as any[]);
+    for (const id of keep) await db.delete(mealLogs).where(eq(mealLogs.id, id));
+    const lostK = doomed.reduce((s: number, r: any) => s + (r.kcal || 0), 0);
+    const lostP = doomed.reduce((s: number, r: any) => s + (r.prot || 0), 0);
+    console.log(`[MEAL_DROP] reason=${reason} rows=${doomed.length}/${keep.length} kcal=-${lostK} prot=-${lostP} `
+      + `user=...${String(userId).slice(-6)} foods=${doomed.map((r: any) => String(r.raw || "?").slice(0, 24)).join(" | ")}`);
+  }
+  invalidateFoodTotalsCache(userId);
+  const after = await recomputeTodayFoodTotals(userId);
+  await db.update(users)
+    .set({ todayCalories: after.calories, todayProteinG: after.protein, todayCaloriesDate: sastToday() })
+    .where(eq(users.id, userId));
+  console.log(`[MEAL_DROP] day ${before.calories}→${after.calories} kcal, ${before.protein}→${after.protein}g protein (reason=${reason})`);
+  return after;
 }
 
 /**

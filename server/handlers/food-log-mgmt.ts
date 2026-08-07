@@ -9,7 +9,7 @@ import { eq, and, gte, desc, asc } from "drizzle-orm";
 import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection } from "../utils";
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
-import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine, scanForSAFoods } from "./food-scanner";
+import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine, scanForSAFoods, dropMeals } from "./food-scanner";
 import { parseIdentityCorrection, correctionCandidates, type IdentityCorrection } from "../food-identity-correction";
 
 import { UNAVAILABLE_RE } from "../food-swaps";
@@ -32,11 +32,16 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     if (/^(yes|yep|yeah|confirm|wipe|do it|clear it|reset|yes wipe)\b/i.test(m.trim())) {
       invalidateFoodTotalsCache(user.id);
       const resetStart = sastDayStart();
-      await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
-      await Promise.all([
-        db.delete(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, resetStart))).catch(e => console.warn("[non-fatal] clear meal_logs:", e)),
-        db.delete(chatHistory).where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, resetStart))).catch(e => console.warn("[non-fatal] clear chat food log:", e)),
-      ]);
+      // Through dropMeals like every other removal — this is the branch that can empty a whole
+      // day, so it is the one that most needs to say in the log exactly what it emptied.
+      const wipeIds = await db.select({ id: mealLogs.id }).from(mealLogs)
+        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, resetStart))).catch(() => []);
+      // chatHistory first: recomputeTodayFoodTotals falls back to legacy FOOD_LOG rows when the
+      // ledger reads zero, so wiping the rows before the history would resync the day to the
+      // legacy total instead of to nothing.
+      await db.delete(chatHistory).where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, resetStart)))
+        .catch(e => console.warn("[non-fatal] clear chat food log:", e));
+      await dropMeals(user.id, wipeIds.map(r => r.id), "day-wipe-confirmed");
       return `Done — today's food log is wiped, counter back to 0. Tell me what you ate to start fresh.`;
     }
     if (/^(no|nope|cancel|keep|stop|don.?t|nvm|nevermind|never mind)\b/i.test(m.trim())) {
@@ -78,6 +83,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
           const logItems = (targetLog.items as Array<{ name?: string; kcal?: number; protein?: number }> | null) || [];
           const deniedItem = logItems.find(i => (i.name || "").toLowerCase().includes(denied));
 
+          const dropIds: string[] = [];
           if (deniedItem && logItems.length > 1) {
             // Subtract just the denied ingredient — keep the rest of the meal
             const newItems = logItems.filter(i => i !== deniedItem);
@@ -85,15 +91,10 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
             const newProt = Math.max(0, targetLog.proteinInt - (deniedItem.protein || 0));
             await db.update(mealLogs).set({ kcalInt: newKcal, proteinInt: newProt, items: newItems, corrected: true }).where(eq(mealLogs.id, targetLog.id));
           } else {
-            // Denied item is the whole meal (or items not stored) — delete the log entry
-            await db.delete(mealLogs).where(eq(mealLogs.id, targetLog.id));
+            // Denied item is the whole meal (or items not stored) — the entry goes
+            dropIds.push(targetLog.id);
           }
-
-          invalidateFoodTotalsCache(user.id);
-          const recomputed = await recomputeTodayFoodTotals(user.id);
-          await db.update(users)
-            .set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() })
-            .where(eq(users.id, user.id));
+          const recomputed = await dropMeals(user.id, dropIds, "ingredient-negation");
           const calTarget = user.calorieTarget || 1800;
           const protTarget = user.proteinTarget || 120;
           const remaining = calTarget - recomputed.calories;
@@ -179,10 +180,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
         }
         // No per-item numbers and no known portion — honest remove-and-relog beats silent
         // bad maths or a double-logged "correction".
-        await db.delete(mealLogs).where(eq(mealLogs.id, targetQC.id));
-        invalidateFoodTotalsCache(user.id);
-        const recQC2 = await recomputeTodayFoodTotals(user.id);
-        await db.update(users).set({ todayCalories: recQC2.calories, todayProteinG: recQC2.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+        const recQC2 = await dropMeals(user.id, [targetQC.id], "qty-correction-no-portion");
         return `That entry had the wrong count, so I removed it. ✅ Send the corrected meal — e.g. "${qc.count} ${qc.food}" plus whatever else was in it — and I'll log it right.\n\nToday now: ~${recQC2.calories} kcal | ~${recQC2.protein}g protein.`;
       }
       return `I don't see ${qc.food} in today's log to correct. Send *my meals* to check what's logged.`;
@@ -208,10 +206,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       .orderBy(desc(mealLogs.loggedAt))
       .limit(1);
     if (lastMealLog.length > 0) {
-      await db.delete(mealLogs).where(eq(mealLogs.id, lastMealLog[0].id));
-      invalidateFoodTotalsCache(user.id);
-      const recomputed = await recomputeTodayFoodTotals(user.id);
-      await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+      await dropMeals(user.id, [lastMealLog[0].id], "no-just-relog");
       const foodName = noJustMatch[1].trim();
       return `Got it — removed the last entry. ✅\n\nNow tell me exactly what you had and I'll log it. You can say: "had ${foodName}".`;
     }
@@ -250,10 +245,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       .orderBy(desc(mealLogs.loggedAt))
       .limit(n);
     if (rowsMR.length === 0) return `No meals logged today to remove.`;
-    for (const r of rowsMR) await db.delete(mealLogs).where(eq(mealLogs.id, r.id));
-    invalidateFoodTotalsCache(user.id);
-    const recMR = await recomputeTodayFoodTotals(user.id);
-    await db.update(users).set({ todayCalories: recMR.calories, todayProteinG: recMR.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+    const recMR = await dropMeals(user.id, rowsMR.map(r => r.id), "remove-last-n");
     return `Removed the last ${rowsMR.length} meal${rowsMR.length > 1 ? "s" : ""} ✅\n${rowsMR.map(r => `• ${(r.rawMessage || "meal").slice(0, 45)}`).join("\n")}\n\nToday now: ~${recMR.calories} kcal | ~${recMR.protein}g protein.`;
   }
 
@@ -269,10 +261,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     const picks = [idxRemove[1], idxRemove[2], idxRemove[3]].filter(Boolean).map(x => parseInt(x!, 10));
     const chosen = picks.map(p => rowsIR[p - 1]).filter(Boolean);
     if (chosen.length === 0) return `Those numbers don't match today's log — send *my meals* for the numbered list, then e.g. *remove 1 and 3*.`;
-    for (const r of chosen) await db.delete(mealLogs).where(eq(mealLogs.id, r.id));
-    invalidateFoodTotalsCache(user.id);
-    const recIR = await recomputeTodayFoodTotals(user.id);
-    await db.update(users).set({ todayCalories: recIR.calories, todayProteinG: recIR.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+    const recIR = await dropMeals(user.id, chosen.map(r => r.id), "remove-by-number");
     return `Removed ${chosen.length} meal${chosen.length > 1 ? "s" : ""} ✅\n${chosen.map(r => `• ${(r.rawMessage || "meal").slice(0, 45)}`).join("\n")}\n\nToday now: ~${recIR.calories} kcal | ~${recIR.protein}g protein.`;
   }
 
@@ -314,10 +303,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
         ? `I couldn't find a "${label}" entry in today's log, so I haven't deleted anything — I won't risk removing the wrong meal. Reply "remove last" to undo your most recent entry, or name the food (e.g. "remove the rice").`
         : `No meal logged yet today to remove.`;
     }
-    await db.delete(mealLogs).where(eq(mealLogs.id, target.id));
-    invalidateFoodTotalsCache(user.id);
-    const recomputed = await recomputeTodayFoodTotals(user.id);
-    await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+    const recomputed = await dropMeals(user.id, [target.id], `remove-by-label:${label}`);
     return `Removed your ${label} from the log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\nRemaining: ~${Math.max(0, (user.calorieTarget || 1800) - recomputed.calories)} kcal | ~${Math.max(0, (user.proteinTarget || 120) - recomputed.protein)}g protein still to go.`;
   }
 
@@ -355,11 +341,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       const best = ranked[0];
       const tied = ranked.filter(x => x.n === best?.n).length > 1;
       if (best && best.n > 0 && !tied) {
-        await db.delete(mealLogs).where(eq(mealLogs.id, best.r.id));
-        invalidateFoodTotalsCache(user.id);
-        const recNM = await recomputeTodayFoodTotals(user.id);
-        await db.update(users).set({ todayCalories: recNM.calories, todayProteinG: recNM.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
-        console.log(`[FOOD_MGMT] removed by named foods (${best.n} matched) user=${user.id.slice(-6)}`);
+        const recNM = await dropMeals(user.id, [best.r.id], `named-foods:${best.n}-matched`);
         return `Removed that one — *${(best.r.rawMessage || "the meal").slice(0, 45)}*. ✅\n\nToday now: ~${recNM.calories} kcal | ~${recNM.protein}g protein.`;
       }
       // Two entries match equally well — ASK, never guess; deleting the wrong one IS the bug.
@@ -407,8 +389,9 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       .orderBy(desc(mealLogs.loggedAt))
       .limit(1);
 
+    const dropLast: string[] = [];
     if (lastMealLog.length > 0) {
-      await db.delete(mealLogs).where(eq(mealLogs.id, lastMealLog[0].id));
+      dropLast.push(lastMealLog[0].id);
     } else {
       const lastFoodLog = await db.select({ id: chatHistory.id })
         .from(chatHistory)
@@ -419,9 +402,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
     }
 
-    invalidateFoodTotalsCache(user.id);
-    const recomputed = await recomputeTodayFoodTotals(user.id);
-    await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+    const recomputed = await dropMeals(user.id, dropLast, "remove-last");
     return `Removed your last meal log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.`;
   }
 
@@ -458,17 +439,16 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
           // (2026-07-06 audit). Only delete the row when the food IS the meal.
           const rsItems = (targetMealLog.items as Array<{ name?: string; foodName?: string; kcal?: number; protein?: number }> | null) || [];
           const rsItem = rsItems.find(i => (i.name || i.foodName || "").toLowerCase().includes(foodToRemove));
+          const dropRS: string[] = [];
           if (rsItem && rsItems.length > 1 && typeof rsItem.kcal === "number") {
             const rsRow = await db.select({ kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt }).from(mealLogs).where(eq(mealLogs.id, targetMealLog.id)).limit(1);
             const newKcalRS = Math.max(0, (rsRow[0]?.kcalInt || 0) - (rsItem.kcal || 0));
             const newProtRS = Math.max(0, (rsRow[0]?.proteinInt || 0) - (rsItem.protein || 0));
             await db.update(mealLogs).set({ kcalInt: newKcalRS, proteinInt: newProtRS, items: rsItems.filter(i => i !== rsItem), corrected: true }).where(eq(mealLogs.id, targetMealLog.id));
           } else {
-            await db.delete(mealLogs).where(eq(mealLogs.id, targetMealLog.id));
+            dropRS.push(targetMealLog.id);
           }
-          invalidateFoodTotalsCache(user.id);
-          const recomputed = await recomputeTodayFoodTotals(user.id);
-          await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+          const recomputed = await dropMeals(user.id, dropRS, `remove-specific-food:${foodToRemove.slice(0, 20)}`);
           const calTarget = user.calorieTarget || 1800;
           const protTarget = user.proteinTarget || 120;
           const calRemaining = calTarget - recomputed.calories;

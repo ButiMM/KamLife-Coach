@@ -1363,6 +1363,31 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(src.match(/can'?t line up today'?s numbers/g)!.length, 1);
     assert.ok(!/Couldn'?t load today'?s totals/.test(src), "the second copy of that admission is back");
   });
+
+  test("every meal removal goes through ONE owner, and that owner writes an audit line", () => {
+    // 11:51 the day was ~600 kcal; 11:55 it was zero and nothing in the logs said which of the
+    // eight delete branches emptied it. A removal nobody recorded is indistinguishable, from
+    // outside, from a write that never happened — which is exactly how a reviewer read it.
+    const scanner = readFileSync("server/handlers/food-scanner.ts", "utf-8");
+    assert.ok(/export async function dropMeals/.test(scanner), "the one owner is gone");
+    const owner = scanner.slice(scanner.indexOf("export async function dropMeals"));
+    const body = owner.slice(0, owner.indexOf("\n}\n") + 2);
+    assert.ok(/MEAL_DROP/.test(body), "a removal that logs nothing cannot be diagnosed");
+    assert.ok(/invalidateFoodTotalsCache/.test(body) && /todayCalories/.test(body),
+      "the owner must also do the epilogue every hand-written delete used to forget");
+    // Reading the rows BEFORE the delete is the whole point: after it, the audit line can only
+    // say that something left, never what or for how many calories.
+    assert.ok(body.indexOf("const doomed") < body.indexOf("db.delete(mealLogs)"),
+      "read what is about to go before it goes");
+
+    // And nowhere else may delete a meal row. If a ninth branch wants to, it calls dropMeals.
+    const mgmt = readFileSync("server/handlers/food-log-mgmt.ts", "utf-8");
+    assert.equal((mgmt.match(/db\.delete\(mealLogs\)/g) || []).length, 0,
+      "a hand-written meal delete is back in food-log-mgmt — route it through dropMeals");
+    for (const f of ["server/handlers/food-context.ts", "server/handlers/media.ts", "server/handlers/food-commands.ts"]) {
+      assert.equal((readFileSync(f, "utf-8").match(/db\.delete\(mealLogs\)/g) || []).length, 0, `${f} deletes meal rows directly`);
+    }
+  });
 }
 
 // THE CALLING CARD IS BACK ON THE MEAL LOG (2026-08-07). It was replaced by a milestone-only

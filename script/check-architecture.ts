@@ -95,6 +95,11 @@ const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT 
   "server/handlers/gpt-block.ts": "bookkeeping",
   "server/understanding/live.ts": "bookkeeping",
   "server/handlers/numbers-literacy.ts": "bookkeeping",
+  // 2026-08-07: dropMeals moved here, so this file now writes. It never decides — it takes row
+  // ids its caller already resolved (behind that caller's guard), removes them, resyncs the
+  // day's accounting columns, and records what left in [MEAL_DROP]. The message-matching half
+  // of this file (scanForSAFoods) still only reads. Re-classify the day it decides anything.
+  "server/handlers/food-scanner.ts": "bookkeeping",
   // Named backlog. Each mutates something the client feels, from a message match, with no guard:
   "server/handlers/early-commands.ts": "AT RISK",   // trainingMode, trainingDaysPerWeek, targetWeightKg
   "server/handlers/advice-commands.ts": "AT RISK",  // stepsTarget
