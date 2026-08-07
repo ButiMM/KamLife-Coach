@@ -297,6 +297,8 @@ type Conversation = {
   user?: Record<string, any>;
   /** Cannot be judged without a real model + network. Skipped OUT LOUD unless GAUNTLET_LLM=1. */
   needsLLM?: boolean;
+  /** Temporarily unjudgeable for a reason that is NOT the product — say why, out loud. */
+  skip?: string;
   /** Scripted model output, keyed by lowercased inbound message. Tests the plumbing, not the
    *  model's judgement — and is IGNORED under GAUNTLET_LLM=1, where the real model answers. */
   script?: EngineScript;
@@ -308,6 +310,10 @@ type Conversation = {
 const CONVERSATIONS: Conversation[] = [
   // ── FOUNDER ACCEPTANCE 1 ──────────────────────────────────────────────────
   {
+    // FIXTURE, NOT A DEFECT: example.invalid cannot resolve on a CI runner, so this graded the
+    // media downloader rather than the coach's words and went red every morning for a reason
+    // that has nothing to do with the voice. Needs a real fixture URL before it can judge again.
+    skip: "no downloadable photo fixture in CI — re-enable with a real hosted image",
     name: "acceptance 1 — a photo of black coffee",
     why: `Founder acceptance test 1. Expected: "Got it — black coffee. Good start." No wall, no "Logged."`,
     needsLLM: true,
@@ -401,7 +407,10 @@ const CONVERSATIONS: Conversation[] = [
       say: "Pap this morning, chicken for lunch, 5000 steps",
       checks: [
         ...COACH_SHAPE(2, [6000, 1000]),
-        mustSay(2, "the engine's sentence is what the client hears", /pap/i, /chicken/i, /5,000/),
+        // 5[thin space]000 is how this product writes thousands (SA convention, and what
+        // toLocaleString produces here). The test demanded a comma and cried wolf on a correct
+        // reply — a judge that flags the right answer teaches everyone to ignore it.
+        mustSay(2, "the engine's sentence is what the client hears", /pap/i, /chicken/i, /5[\s,\u00a0\u2009]?000/),
         // Three tools ran underneath. If any of them spoke, its receipt would be here.
         mustNotSay(2, "the tools stayed silent", /logged/i, /kcal/i),
       ],
@@ -769,6 +778,61 @@ const SWEEP_CONVERSATIONS: Conversation[] = SWEEP.map(row => ({
   }],
 }));
 
+// ═════════════════════════════════════════════════════════════════════════════
+// THE FOUR DEFECTS the live-model gauntlet found at 04:19 on 2026-08-07 — the first
+// morning the machine found them before the founder did.
+//
+// Three are DETERMINISTIC and are graded here, offline, on every run. Only the two-part
+// answer needs a model, so only that one waits for the 04:00 tier.
+// ═════════════════════════════════════════════════════════════════════════════
+CONVERSATIONS.push(
+  {
+    name: "defect 1 — 'calories left' answers the number LEFT, never the target",
+    why: `Live model, 04:19: "how many calories do I have left today?" was answered with the TARGET — "1800 calories and 130g protein daily. Hit protein first" — plus a fourth sentence. A different number to a different question.`,
+    turns: [{
+      say: "how many calories do I have left today?",
+      checks: [
+        neverSilent,
+        asSlice(5, atMostSentences(2)),
+        mustSay(5, "names what is LEFT", /left|nothing logged|still/i),
+        mustNotSay(5, "does not recite the daily target", /daily\b/i, /hit protein first/i),
+      ],
+    }],
+  },
+  {
+    name: "defect 2 — a two-part question keeps BOTH halves alive",
+    why: `Live model, 04:19: "what can I eat at the taxi rank and how many calories do I have left?" got the calories only — the food half was swallowed by the deterministic calorie handler, which returned before anything could answer it. Offline the engine cannot reply, so what is asserted here is that the handler STANDS DOWN and leaves the message answerable.`,
+    turns: [{
+      say: "what can I eat at the taxi rank and how many calories do I have left?",
+      checks: [
+        neverSilent,
+        mustNotSay(5, "the calorie handler did not swallow the food half", /hit protein first — everything else follows/i),
+      ],
+    }],
+  },
+  {
+    name: "defect 3 — a trolley question gets a trolley, not the shop's price list",
+    why: `Live model, 04:19: "I'm at Shoprite with about R300... what should I put in the trolley?" returned eleven sentences of STORE_ADVICE inventory. He asked WHAT TO BUY, not WHICH SHOP.`,
+    turns: [{
+      say: "I'm at Shoprite with about R300 and I need to buy food for the week, I've got rice and pap at home already, what should I put in the trolley?",
+      checks: [
+        neverSilent,
+        asSlice(5, atMostSentences(4)),
+        mustSay(5, "names real SA staples to buy", /eggs|pilchards|chicken|beans|cabbage/i),
+        mustNotSay(5, "not the store price directory", /R35-45|R12-15|marks down/i),
+      ],
+    }],
+  },
+  {
+    name: "defect 4 — a delivered workout does not staple on a menu",
+    why: `Live model, 04:19: "today's workout" ended "Send *done* when finished." and then offered three buttons — a menu nobody was offered, breaking the sweep's own rule on the path that taught us it.`,
+    turns: [{
+      say: "today's workout",
+      checks: [neverSilent, buttonsOnlyAnswerAQuestion],
+    }],
+  },
+);
+
 CONVERSATIONS.push(...SWEEP_CONVERSATIONS);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -944,6 +1008,10 @@ async function main() {
   };
 
   for (const convo of CONVERSATIONS) {
+    if (convo.skip) {
+      skipped.push(`⊘ ${convo.name} — ${convo.skip}. ${convo.turns.reduce((n, t) => n + t.checks.length, 0)} assertions not evaluated.`);
+      continue;
+    }
     if (convo.needsLLM && !runLLM) {
       skipped.push(`⊘ ${convo.name} — needs a real model + network (GAUNTLET_LLM=1). ${convo.turns.reduce((n, t) => n + t.checks.length, 0)} assertions not evaluated.`);
       continue;

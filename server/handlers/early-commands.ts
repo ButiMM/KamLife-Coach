@@ -179,6 +179,16 @@ export async function handleEarlyCommands(ctx: {
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
     const name = user.name ? `${user.name}, ` : "";
+    // DON'T SWALLOW THE OTHER HALF (2026-08-07, live-model gauntlet). "What can I eat at the
+    // taxi rank AND how many calories do I have left?" matched here, answered the calories, and
+    // returned — the food half was never seen by anything. Constitution law 20 says answer every
+    // part of what they said; a deterministic handler that returns early makes that impossible
+    // for the engine to obey. So when a second, non-numeric question rides along, this stands
+    // down and lets the coach answer both.
+    const alsoAsksFood = /\b(what|which|where)\b[^?]{0,60}\b(can|should|do) i (eat|have|buy|order|get)\b/i.test(m)
+      || /\b(taxi rank|spaza|shisa nyama|kota|takeaway|restaurant|canteen|braai)\b/i.test(m);
+    if (alsoAsksFood) return null; // the engine answers both halves — see law 20
+
     try {
       // Always recompute from mealLogs (primary) — covers quick_relog, GPT logs, scanner logs
       const totals = await recomputeTodayFoodTotals(user.id);
@@ -208,7 +218,12 @@ export async function handleEarlyCommands(ctx: {
         }
         return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go${inMeals ? ` — ${inMeals}` : ""}.` : `\nCalorie target reached. ✅${protShortNote}`}${actionLine}${eduNote}`;
       }
-      return `${name}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.\n\nNo food logged yet today. Tell me what you ate.`;
+      // ANSWER THE QUESTION THAT WAS ASKED (2026-08-07, live-model gauntlet). "How many calories
+      // do I have left today?" used to be answered with the TARGET — "1800 calories and 130g
+      // protein daily. Hit protein first — everything else follows." — which is a different
+      // number to a different question. Nothing eaten yet means the whole target is left, and
+      // that is the one sentence they asked for.
+      return `${name}all ${cal} kcal — nothing logged yet today.`;
     } catch (err) {
       console.error("[CALORIE_QUERY] recomputeTodayFoodTotals failed:", err);
       return `${name}Target: ${cal} kcal | ${prot}g protein daily.\n\nCouldn't load today's totals right now — try again in a moment.`;
@@ -527,7 +542,7 @@ export async function handleEarlyCommands(ctx: {
         : "";
       const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
       const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-      const missedReply = `${catchupIntro}\n\n*Week ${week} — Session ${sessionNum + 1}*\n\n${workout}${injuryNote}\n\n${doneHint}${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+      const missedReply = `${catchupIntro}\n\n*Week ${week} — Session ${sessionNum + 1}*\n\n${workout}${injuryNote}\n\n${doneHint}\n\nHow's that looking?${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
       await logChat(user.id, message, missedReply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_MISSED_CATCHUP");
       return missedReply;
     }
@@ -544,7 +559,11 @@ export async function handleEarlyCommands(ctx: {
       : "";
     const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
     const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-    const reply = `${sickViewHeader}${weekNote}${workout}${injuryNote}\n\n${doneHint}${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+    // BUTTONS ANSWER A QUESTION (2026-08-07 live-model gauntlet). A workout is a DELIVERY, and
+    // three buttons under it were a menu nobody was offered. They are the answers to one
+    // question, so the question is now asked — the sweep's rule, applied to the path that
+    // taught us the rule and then broke it.
+    const reply = `${sickViewHeader}${weekNote}${workout}${injuryNote}\n\n${doneHint}\n\nHow's that looking?${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
     await logChat(user.id, message, reply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_VIEW");
     return reply;
   }

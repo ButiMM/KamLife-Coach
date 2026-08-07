@@ -297,9 +297,27 @@ export async function handleLifecycle(ctx: {
     return PORTION_GUIDE;
   }
 
-  // ---- STORE ADVICE (Item 8) — no GPT ----
+  // ---- THE TROLLEY, NOT THE STORE DIRECTORY (2026-08-07, live-model gauntlet) ----
+  // "I'm at Shoprite with about R300 and I need food for the week, I've got rice and pap at
+  // home already, what should I put in the trolley?" matched on the word "Shoprite" and got
+  // back the whole STORE_ADVICE price list — eleven sentences of a shop's inventory to a man
+  // standing in the aisle. He asked WHAT TO BUY, not WHICH SHOP. Different questions.
+  const asksTrolley = /\b(trolley|basket|what (?:should|must|do) i (?:buy|get|put)|what to buy|shopping list|buy for the week|food for the week)\b/i.test(m);
+  if (asksTrolley) {
+    const has = /\b(?:i(?:'ve| have)\s+(?:got|already)|already (?:have|got))\b([^.?!]{0,60})/i.exec(m)?.[1] || "";
+    const skipStarch = /\b(rice|pap|maize|samp|bread|potato)\b/i.test(has);
+    const trolley = skipStarch
+      ? "eggs, pilchards, chicken pieces, sugar beans, cabbage, spinach, butternut, bananas"
+      : "eggs, pilchards, chicken pieces, sugar beans, pap, rice, cabbage, spinach, bananas";
+    const reply = `Trolley: *${trolley}*.${skipStarch ? " You've got the starch covered, so spend it on protein and veg." : ""}\n\nProtein in every trolley first — that's the whole rule. Chicken is cheapest frozen and marked down Tuesday and Thursday afternoons.`;
+    await logChat(user.id, message, reply, "TROLLEY");
+    return reply;
+  }
+
+  // ---- STORE ADVICE (Item 8) — no GPT. Only for "WHICH shop", never "what do I buy". ----
   const storeMatch = Object.keys(STORE_ADVICE).find(store => m.includes(store));
-  if (storeMatch || /where to buy|where can i get|which store|which shop|best store|cheapest store|where do i shop|where should i shop/i.test(m)) {
+  if ((storeMatch && /\b(which|where|best|cheapest|should i (?:go|shop))\b/i.test(m))
+      || /where to buy|where can i get|which store|which shop|best store|cheapest store|where do i shop|where should i shop/i.test(m)) {
     let storeReply: string;
     if (storeMatch) {
       storeReply = STORE_ADVICE[storeMatch];

@@ -353,11 +353,11 @@ const CASES: Case[] = [
   // thing that must never happen. It is also the message someone taps before sharing, so it
   // gets the card, not a paragraph ending in "What do you think?").
   { name: "progress: today's progress is TODAY and deterministic", msg: "Today's progress",
-    expect: [/Today so far|No food logged yet today/i, /protein/i], reject: [/what do you think/i, /how about some/i] },
+    expect: [/Today so far|nothing logged yet today/i], reject: [/what do you think/i, /how about some/i] },
   { name: "progress: progress today", msg: "progress today",
-    expect: [/Today so far|No food logged yet today/i], reject: [/what do you think/i] },
+    expect: [/Today so far|nothing logged yet today/i], reject: [/what do you think/i] },
   { name: "progress: how's my day", msg: "how's my day",
-    expect: [/Today so far|no food logged/i], reject: [/what do you think/i] },
+    expect: [/Today so far|nothing logged yet today/i], reject: [/what do you think/i] },
 
   // THE ONE ACTION — "just tell me what to do" must get ONE instruction, not the whole plan.
   { name: "one action: what should I do today", msg: "what should I do today",
@@ -876,7 +876,7 @@ const CASES: Case[] = [
   // push, so these classes can never silently return.
   { name: "playbook: spoken meal-list request reaches the real list, never 'the app'",
     msg: "Show me today's food, every single meal that I've logged",
-    expect: [/No food logged yet today|Today'?s (meals|food log)/i],
+    expect: [/nothing logged yet today|No food logged|Today'?s (meals|food log)/i],
     reject: [/can'?t show|in the app|check your meal log/i] },
   { name: "playbook: 'No, show me today's meals, all the meals' also reaches the list",
     msg: "No, show me today's meals, all the meals.",
