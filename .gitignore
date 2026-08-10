@@ -36,3 +36,6 @@ marketing/
 !OUTSTANDING.md
 !LAUNCH_BLOCKERS.md
 !CLAUDE.md
+
+# Reality Test run artifacts — evidence, not source
+reality-baseline-*.txt
