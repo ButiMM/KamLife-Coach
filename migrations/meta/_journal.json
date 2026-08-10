@@ -8,6 +8,13 @@
       "when": 1785234780857,
       "tag": "0000_hesitant_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786362702850,
+      "tag": "0001_old_black_bolt",
+      "breakpoints": true
     }
   ]
 }

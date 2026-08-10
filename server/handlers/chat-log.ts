@@ -1,5 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { db } from "../db";
-import { users, chatHistory, escalations } from "../../shared/schema";
+import { users, chatHistory, escalations, turnLedger } from "../../shared/schema";
 import { eq, and } from "drizzle-orm";
 import twilio from "twilio";
 import { classifyMediaFailure } from "../coach-guardrails";
@@ -105,5 +106,88 @@ export async function withTimeout<T>(label: string, ms: number, run: () => Promi
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// TURN LEDGER (2026-08-10 directive, §6) — observability, not architecture.
+//
+// It lives here because this file already owns "record what happened this turn"; a separate
+// module would be a second answer to a question that already has one. See shared/schema.ts for
+// why a turn gets its own row rather than columns on chat_history.
+//
+// AsyncLocalStorage, not a Map keyed by user: two clients are served concurrently on one process,
+// and a module-level Map would let one client's mutations be recorded against another's turn.
+// That is exactly the class of bug this ledger exists to catch, so it must not ship inside it.
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+interface TurnScope {
+  userId: string | null;
+  inputType: string;
+  inputText: string;
+  resolvedDay: string | null;
+  stateRead: Record<string, unknown>;
+  mutations: string[];
+  startedAt: number;
+}
+
+const turnStore = new AsyncLocalStorage<TurnScope>();
+
+/** Run one turn inside its own ledger scope. Returns whatever the turn returns. */
+export function inTurn<T>(inputType: string, inputText: string, fn: () => Promise<T>): Promise<T> {
+  return turnStore.run({
+    userId: null, inputType, inputText: (inputText || "").slice(0, 2000),
+    resolvedDay: null, stateRead: {}, mutations: [], startedAt: Date.now(),
+  }, fn);
+}
+
+/** Attribute the current turn to a client, once it is known. */
+export function turnUser(userId: string): void {
+  const t = turnStore.getStore();
+  if (t) t.userId = userId;
+}
+
+/**
+ * Record a WRITE the turn performed. Called by the writers themselves, in order.
+ *
+ * It also prints, because a mutation worth putting in the ledger is worth having in the logs and
+ * a writer that has to say it twice will eventually say two different things.
+ */
+export function turnMutation(note: string, logPrefix?: string): void {
+  const t = turnStore.getStore();
+  if (t && t.mutations.length < 40) t.mutations.push(note);
+  if (logPrefix) console.log(`${logPrefix} ${note}`);
+}
+
+/** Record facts the turn READ before deciding, and the day it resolved to. */
+export function turnState(facts: Record<string, unknown>, resolvedDay?: string | null): void {
+  const t = turnStore.getStore();
+  if (!t) return;
+  Object.assign(t.stateRead, facts);
+  if (resolvedDay) t.resolvedDay = resolvedDay;
+}
+
+/**
+ * Close the turn out. Fail-open and awaited nowhere near the client's reply — a ledger that can
+ * delay or break an answer is worse than no ledger.
+ */
+export async function recordTurn(reply: string): Promise<void> {
+  const t = turnStore.getStore();
+  if (!t?.userId) return;
+  try {
+    await db.insert(turnLedger).values({
+      userId: t.userId,
+      inputType: t.inputType,
+      inputText: t.inputText,
+      resolvedDay: t.resolvedDay,
+      stateRead: Object.keys(t.stateRead).length ? t.stateRead : null,
+      mutations: t.mutations.length ? t.mutations : null,
+      reply: (reply || "").slice(0, 4000),
+      replyMs: Date.now() - t.startedAt,
+      version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 12) || process.env.APP_VERSION || "dev",
+    });
+  } catch (e) {
+    console.warn("[TURN_LEDGER] non-fatal:", (e as any)?.message);
   }
 }

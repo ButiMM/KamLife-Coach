@@ -254,6 +254,37 @@ export const chatHistory = pgTable("chat_history", {
   userIntentIdx: index("chat_history_user_intent_idx").on(table.userId, table.intent, table.createdAt),
 }));
 
+/**
+ * TURN LEDGER — the forensic record of one conversational turn (2026-08-10 directive, §6).
+ *
+ * Not Pulse, not a router, not a new architecture: observability only. chat_history keeps the
+ * CONVERSATION (what was said); this keeps the MECHANISM (why it was said), because when Coach K
+ * gets something wrong the question is never "what did it reply" — it is whether it misunderstood
+ * the client, held the wrong state, reasoned badly, mutated the wrong row, or communicated poorly.
+ * Today those five answers can only be reconstructed by re-reading server logs, if they still
+ * exist. A turn is not a chat row — one turn can write several chat rows or none — so it gets its
+ * own id and its own row rather than columns bolted onto chat_history.
+ *
+ * Everything except the user, the input and the reply is nullable on purpose: a turn that fails
+ * early must still leave a record, and a half-written ledger row is worth more than none.
+ */
+export const turnLedger = pgTable("turn_ledger", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  inputType: text("input_type"),          // text | photo | voice | video
+  inputText: text("input_text"),          // the raw message, or the transcript for voice
+  resolvedDay: text("resolved_day"),      // the SAST day the turn resolved to (parseMealDate)
+  stateRead: jsonb("state_read"),         // the facts the turn actually read before deciding
+  mutations: jsonb("mutations"),          // every write, in order, as the writers reported them
+  reply: text("reply"),
+  replyMs: integer("reply_ms"),
+  version: text("version"),               // the build that produced this turn
+  failureCategory: text("failure_category"), // STATE | UNDERSTANDING | REASONING | ACTION | RESPONSE
+}, (table) => ({
+  userDateIdx: index("turn_ledger_user_date_idx").on(table.userId, table.createdAt),
+}));
+
 export const clothingCheckins = pgTable(
   "clothing_checkins",
   {

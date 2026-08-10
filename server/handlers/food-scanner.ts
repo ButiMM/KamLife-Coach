@@ -17,6 +17,7 @@ import { db } from "../db";
 import { mealLogs, chatHistory, users } from "../../shared/schema";
 import { eq, and, gte, sql, desc, inArray } from "drizzle-orm";
 import { sastDayStart, sastToday } from "../utils";
+import { turnMutation } from "./chat-log";
 
 // ── Per-user in-memory cache for recomputeTodayFoodTotals ──────────────────
 // Prevents redundant DB queries when the same totals are read multiple times
@@ -753,6 +754,7 @@ export async function dropMeals(
     for (const id of keep) await db.delete(mealLogs).where(eq(mealLogs.id, id));
     const lostK = doomed.reduce((s: number, r: any) => s + (r.kcal || 0), 0);
     const lostP = doomed.reduce((s: number, r: any) => s + (r.prot || 0), 0);
+    turnMutation(`DROP reason=${reason} rows=${doomed.length} kcal=-${lostK}`);
     console.log(`[MEAL_DROP] reason=${reason} rows=${doomed.length}/${keep.length} kcal=-${lostK} prot=-${lostP} `
       + `user=...${String(userId).slice(-6)} foods=${doomed.map((r: any) => String(r.raw || "?").slice(0, 24)).join(" | ")}`);
   }

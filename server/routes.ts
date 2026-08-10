@@ -38,7 +38,7 @@ import { stripSignupSource } from "./signup-source";
 import { captureSignupSource } from "./signup-capture";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
-import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
+import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
 import { handleWorkoutCommands } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
@@ -120,7 +120,24 @@ const getStepResponse = _getStepResponse;
 // phrasing and named no eating word at all, so the token never armed for it.
 const RETRO_TURN = /(?<day>\byesterday\b|\blast night\b)|(?<food>\b(?:ate|eat|eaten|had|log(?:ging|ged)?|breakfast|lunch|dinner|supper|snack|meals?)\b)/gi;
 
+/**
+ * ONE TURN, ONE LEDGER ROW (2026-08-10 directive, §6). This wrapper is the only place that knows
+ * where a turn begins and ends, so it is the only place that can record one. It adds no routing
+ * and no decisions — routeMessage below is the pipeline, unchanged.
+ */
 export async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[], sourceMessageId?: string): Promise<string> {
+  const kind = !mediaUrl ? "text"
+    : /audio|ogg|voice/i.test(mediaContentType || "") ? "voice"
+    : /video/i.test(mediaContentType || "") ? "video" : "photo";
+  return inTurn(kind, message, async () => {
+    const reply = await routeMessage(phone, message, mediaUrl, mediaContentType, allMediaUrls, sourceMessageId);
+    // Never awaited into the client's path: a ledger that can delay an answer is worse than none.
+    void recordTurn(reply);
+    return reply;
+  });
+}
+
+async function routeMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[], sourceMessageId?: string): Promise<string> {
   try {
   recordMessageSeen();  let m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
 
@@ -129,6 +146,7 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   if (safetyResult !== null) return safetyResult;
 
   const user = await getOrCreateUser(phone);
+  turnUser(user.id);
 
   // QR ACQUISITION SOURCE — a scanned join-QR prefills "(ref: gymA)"; capture once, then strip.
   if (!user.signupSource && !mediaUrl && message && (await captureSignupSource(user, phone, message))) {

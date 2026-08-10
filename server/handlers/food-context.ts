@@ -23,7 +23,7 @@ import { captureFriction } from "../friction";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
-import { logChat, withTimeout } from "./chat-log";
+import { logChat, withTimeout, turnMutation } from "./chat-log";
 import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
@@ -196,7 +196,7 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
       });
       invalidatePatternCache(params.userId);
       invalidateFoodTotalsCache(params.userId);
-      console.log(`[MEAL_LOG] saved — user=...${String(params.userId || "").slice(-6)} kcal=${params.kcalInt} prot=${params.proteinInt} label=${params.mealLabel || "none"}`);
+      turnMutation(`INSERT meal kcal=${params.kcalInt} prot=${params.proteinInt} label=${params.mealLabel || "none"} at=${String(effLoggedAt).slice(0, 10)}`, `[MEAL_LOG] user=...${String(params.userId || "").slice(-6)}`);
     } catch (e) {
       console.error("[MEAL_LOG] insert failed — user:", String(params.userId || "").slice(-6), e);
       insertOk = false;

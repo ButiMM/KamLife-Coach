@@ -13,6 +13,7 @@ import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine, sca
 import { parseIdentityCorrection, correctionCandidates, holdForReplacement, isMealDateMove, planCorrection, applyCorrection, type IdentityCorrection } from "../food-identity-correction";
 
 import { UNAVAILABLE_RE } from "../food-swaps";
+import { turnMutation, turnState } from "./chat-log";
 
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
   // THE SHOP IS NOT THE FOOD LOG (2026-08-05). "They didn't have chicken at the shop" was read
@@ -149,6 +150,8 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
         invalidateFoodTotalsCache(user.id);
         const recC = await recomputeTodayFoodTotals(user.id);
         await db.update(users).set({ todayCalories: recC.calories, todayProteinG: recC.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+        turnMutation(`CORRECT removed=[${removed}] added=[${added}] day=${String(row.at).slice(0, 10)}→${mealDateLabel(target)} kcal=${row.kcalInt}→${newKcal}`);
+        turnState({ storedItems: stored.map(i => i.name), newItems: newItems.map(i => i.name) }, mealDateLabel(target));
         console.log(`[MEAL_CORRECT] ${String(row.id).slice(0, 8)} removed=[${removed}] added=[${added}] `
           + `day=${String(row.at).slice(0, 10)}→${mealDateLabel(target)} kcal=${row.kcalInt}→${newKcal} user=...${String(user.id).slice(-6)}`);
         const plate = newItems.map(i => String(i.name || "")).filter(Boolean).join(", ") || "that meal";

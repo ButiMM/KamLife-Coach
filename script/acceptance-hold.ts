@@ -35,7 +35,7 @@ if (!process.env.DATABASE_URL) {
 }
 
 const { db } = await import("../server/db");
-const { users, mealLogs } = await import("../shared/schema");
+const { users, mealLogs, turnLedger } = await import("../shared/schema");
 const { eq, and, gte, desc } = await import("drizzle-orm");
 const { sastDayStart } = await import("../server/utils");
 const { handleMessage } = await import("../server/routes");
@@ -172,6 +172,30 @@ const sum = (rows: Array<{ kcal: number | null }>) => rows.reduce((s, r) => s + 
   check("the reply does not claim it removed anything", !/\bremoved\b|\bdeleted\b/i.test(r), r.slice(0, 140));
   const rQ = await handleMessage(phone, "how many calories do I have left today?");
   check("no denial on the calorie question", !/nothing logged yet today/i.test(rQ), rQ.slice(0, 140));
+}
+
+// §6 — THE TURN LEDGER. Observability only: can we reconstruct WHY a turn behaved as it did,
+// from the database, without re-reading server logs that may no longer exist?
+{
+  console.log("\n── §6 turn ledger: one turn, one reconstructable row ──");
+  const phone = "whatsapp:+27000000106";
+  const u = await freshUser(phone);
+  await handleMessage(phone, "I had rice and chicken for lunch");
+  await handleMessage(phone, "actually no, that was yesterday. and it wasn't rice, it was pap. and I had spinach too");
+  await new Promise(r => setTimeout(r, 900)); // the ledger write is deliberately not awaited
+
+  const turns = await db.select().from(turnLedger).where(eq(turnLedger.userId, u.id)).catch(() => [] as any[]);
+  check("§6 a turn leaves a ledger row", turns.length >= 2, `rows=${turns.length}`);
+  const correction = turns.find((t: any) => /wasn't rice/i.test(String(t.inputText || "")));
+  check("§6 the input is on the record", !!correction, JSON.stringify(turns.map((t: any) => String(t.inputText).slice(0, 30))));
+  check("§6 the RESOLVED DAY is on the record", /yesterday/i.test(String(correction?.resolvedDay || "")), String(correction?.resolvedDay));
+  const muts = JSON.stringify(correction?.mutations || []);
+  check("§6 the MUTATION is on the record — what changed, not just that something did",
+    /removed=\[rice\]/.test(muts) && /added=\[/.test(muts), muts);
+  check("§6 the reply and the build are on the record",
+    String(correction?.reply || "").length > 0 && String(correction?.version || "").length > 0,
+    `version=${correction?.version}`);
+  check("§6 the ledger costs the client nothing measurable", Number(correction?.replyMs || 0) < 5000, `${correction?.replyMs}ms`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
