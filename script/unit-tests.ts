@@ -1400,6 +1400,64 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(/plan\?\.isCorrection/.test(src), "the correction branch must gate on the plan");
   });
 
+  test("normalizer fidelity: the two rewrites the Reality Test caught are REJECTED", async () => {
+    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
+    // J5, verbatim from the baseline run. Tin fish and mixed veggies were invented, the correction
+    // framing was destroyed, and the chicken was dropped because a fresh log has nothing to retain.
+    const j5 = normalizerFidelity(
+      "Actually no, that was yesterday. And it wasn't rice, it was pap. And I had spinach too.",
+      "i had tin fish, pap, spinach and mixed veggies for lunch yesterday");
+    assert.equal(j5.ok, false, "J5's rewrite must not be allowed to speak for the client");
+    assert.match(j5.reason, /CORRECTION/i, `expected the correction gate to fire first: ${j5.reason}`);
+
+    // J4, verbatim. The question and the emotion were discarded pre-routing.
+    const j4 = normalizerFidelity(
+      "Ok so yesterday I had pap and beef stew for supper, and this morning just tea, I think I "
+      + "walked about 6000 steps maybe more I'm not sure, I missed gym on Monday because my back "
+      + "was sore, I'm feeling a bit useless honestly, and tonight there's a family thing with "
+      + "lots of food. What do I do about tonight?",
+      "i had pap and beef stew for supper yesterday");
+    assert.equal(j4.ok, false, "J4's rewrite must not be allowed to speak for the client");
+    assert.match(j4.reason, /question|emotion/i, `expected the question/emotion gate: ${j4.reason}`);
+  });
+
+  test("normalizer fidelity: invention is caught even when the framing is innocent", async () => {
+    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
+    // Every output food must trace to the client's words.
+    assert.equal(normalizerFidelity("Lunch: tin fish and rice", "i had tin fish, rice and mixed veggies for lunch").ok, false);
+    assert.match(normalizerFidelity("Lunch: tin fish and rice", "i had tin fish, rice and avocado for lunch").reason, /invents "avocado"/);
+    // …and a faithful restatement of the SAME words is allowed, which is the feature.
+    assert.equal(normalizerFidelity("Luch\nTin fish\nRice\nMixed veggies", "i had tin fish, rice and mixed veggies for lunch").ok, true);
+    assert.equal(normalizerFidelity("Breakfast, four eggs and a black coffee", "i had 4 eggs and a black coffee for breakfast").ok, true);
+    // Multilingual canonicalisation is a TRANSLATION, not an invention — it must survive.
+    assert.equal(normalizerFidelity("Ngidle ipapa nenyama namuhla", "i had pap and meat").ok, true);
+    assert.equal(normalizerFidelity("Ke jele papa le nama", "i had pap and meat").ok, true);
+    assert.equal(normalizerFidelity("Nditye isonka namaqanda kusasa", "i had bread and eggs for breakfast").ok, true);
+  });
+
+  test("normalizer fidelity: a pure question may still become a lookup", async () => {
+    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
+    // Nothing is discarded when the question IS the whole message, so this rewrite stays legal —
+    // the deterministic totals handler answers it better than the model does.
+    assert.equal(normalizerFidelity("how many calories do I have left?", "today's calories").ok, true);
+    assert.equal(normalizerFidelity("what's my protein today", "today's calories").ok, true);
+    // A bare log with no question and no emotion is untouched by the gate.
+    assert.equal(normalizerFidelity("10000 steps yesterday", "10000 steps yesterday").ok, true);
+  });
+
+  test("normalizer fidelity: it fails CLOSED, never partially", async () => {
+    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
+    assert.equal(normalizerFidelity("anything at all", "").ok, false, "no canonical is not a pass");
+    // The gate is wired at the ONE place the canonical is applied, and rejection drops the whole
+    // rewrite rather than trimming it — half a rewrite is the same defect, smaller.
+    const routes = readFileSync("server/routes.ts", "utf-8");
+    assert.ok(/normalizerFidelity\(/.test(routes), "the gate is not wired");
+    const i = routes.indexOf("normalizerFidelity(");
+    const near = routes.slice(i, i + 420);
+    assert.ok(/canon = ""/.test(near), "a rejected rewrite must drop the canonical entirely");
+    assert.equal((routes.match(/message = canon;/g) || []).length, 1, "the canonical may be applied in exactly ONE place");
+  });
+
   test("a correction is a MUTATION: remove, retain, add, replace, move — composed in one turn", async () => {
     const { planCorrection, applyCorrection } = await import("../server/food-identity-correction");
     // The exact failing turn. Result was "Pap, Rice, Spinach" on yesterday: the negated rice

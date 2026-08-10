@@ -28,7 +28,7 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 234,
+  modules: 235,
   handlerFiles: 29,
   cronRegistrations: 27,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
@@ -122,6 +122,30 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "modules", from: 234, to: 235, date: "2026-08-10",
+    why: "ONE module: server/normalizer-fidelity.ts, the gate that decides whether a normalizer "
+      + "rewrite may speak for the client. The Reality Test proved this is not a style question. "
+      + "«Actually no, that was yesterday. And it wasn't rice, it was pap. And I had spinach too» "
+      + "was rewritten to «i had tin fish, pap, spinach and mixed veggies for lunch yesterday» — "
+      + "two foods INVENTED, the correction framing destroyed, and the chicken lost because a "
+      + "fresh log has nothing to retain. A second journey lost a question and an admission of "
+      + "feeling useless the same way. A rewrite REPLACES the client's words before any handler "
+      + "sees them, so an unfaithful one is not a bad guess, it is the message destroyed in "
+      + "transit, and nothing downstream can recover what it never received. Tried first, and "
+      + "REJECTED: putting it in utils.ts (2 lines of headroom, and utils.ts reaching 1198 lines "
+      + "is itself the result of every pure helper going there) and in gpt.ts (28 lines of "
+      + "headroom, and the gate must be testable without the model it judges). Tried first, and "
+      + "it worked, so it is NOT in the regex number: the emotion test reuses "
+      + "carriesFeelingClause and the question test reuses looksLikeQuestion instead of the two "
+      + "patterns the first draft of the file carried — regexLiterals is unchanged at 316. PAY "
+      + "THIS BACK by moving the SIX inline brakes routes.ts already carries (invented numbers, "
+      + "invented goals, retro dates, repeats, historical weights, reasoning-vocabulary totals) "
+      + "into this file: they answer the same question in the same place, that migration SHRINKS "
+      + "routes.ts and removes patterns from the count, and it was deliberately NOT done in this "
+      + "work order because the directive forbids refactoring working code while fixing a "
+      + "demonstrated failure.",
+  },
   {
     key: "authorshipPoints", from: 419, to: 420, date: "2026-08-10",
     why: "ONE mouth: the confirmation that a meal MOVED to another day. «Actually, that was "

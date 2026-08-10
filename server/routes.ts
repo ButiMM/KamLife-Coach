@@ -49,7 +49,8 @@ import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
 import { mustStayDeterministic } from "./understanding/action-router";
-import { recordMessageSeen, recordReplyPath } from "./self-check";import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
+import { recordMessageSeen, recordReplyPath } from "./self-check";
+import { normalizerFidelity } from "./normalizer-fidelity";import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { mentionsConditionOrMedication, conditionWelcome } from "./condition-welcome";
 
@@ -595,6 +596,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // original message always proceeds untouched on timeout/error. Killswitch: NORMALIZER=off.
   let normalizedQuestion = false;
   const originalMBeforeNorm = m; // save before any normalization rewrite — used for supplementary extraction
+  // The fidelity gate judges the rewrite against what the client actually WROTE, punctuation and
+  // capitalisation intact — `m` is already lower-cased and whitespace-collapsed, which is fine for
+  // matching but is not their message.
+  const originalMessageForFidelity = message;
   if (process.env.NORMALIZER !== "off" && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
       const pre = await Promise.race([
@@ -673,9 +678,18 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
             if (pre.intent === "WORKOUT_LOG") {
               canon = stripInventedRetroDate(canon, originalMBeforeNorm);
             }
-            console.log(`[NORMALIZER] ${pre.intent}(${Math.round(pre.confidence * 100)}%) "${message.slice(0, 80)}" → "${canon.slice(0, 80)}"`);
-            message = canon;
-            m = canon.toLowerCase().replace(/\s+/g, " ").trim();
+            // MAY THIS REWRITE SPEAK FOR THE CLIENT? (Work Order 1.) A rewrite REPLACES their
+            // words before any handler sees them, so an unfaithful one is not a bad guess — it is
+            // the message destroyed in transit. Fails CLOSED: the original proceeds untouched.
+            const fid = normalizerFidelity(originalMessageForFidelity, canon);
+            if (!fid.ok) {
+              console.log(`[NORMALIZER] fidelity gate REJECTED the rewrite — ${fid.reason}. Raw text proceeds: "${originalMessageForFidelity.slice(0, 80)}"`);
+              canon = "";
+            } else {
+              console.log(`[NORMALIZER] ${pre.intent}(${Math.round(pre.confidence * 100)}%) "${message.slice(0, 80)}" → "${canon.slice(0, 80)}"`);
+              message = canon;
+              m = canon.toLowerCase().replace(/\s+/g, " ").trim();
+            }
           }
         }
       }
