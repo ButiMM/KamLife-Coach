@@ -32,7 +32,9 @@
     "check:schema": "tsx script/check-schema-safety.ts",
     "check:sast": "tsx script/check-sast.ts",
     "check:names": "tsx script/check-names.ts",
-    "check:arch": "tsx script/check-architecture.ts"
+    "check:arch": "tsx script/check-architecture.ts",
+    "test:reality": "tsx script/reality-test.ts",
+    "test:acceptance": "tsx script/acceptance-hold.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
