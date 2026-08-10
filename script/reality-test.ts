@@ -162,10 +162,14 @@ const JOURNEYS: Journey[] = [
 // ── Preflight: no model, no verdicts. §16. ──────────────────────────────────────────────────
 async function modelReachable(): Promise<string | null> {
   if (process.env.REALITY_LLM !== "1") return "REALITY_LLM=1 not set — this harness is opt-in because it spends real tokens.";
-  if (!process.env.OPENAI_API_KEY) return "OPENAI_API_KEY is not set.";
+  // The SAME key chain the app uses (server/gpt.ts). Reading only OPENAI_API_KEY would report
+  // NOT TESTED on Railway, where AI_INTEGRATIONS_OPENAI_API_KEY is the one that is set — a
+  // harness that misses the key it was pointed at is worse than no harness.
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  if (!apiKey) return "no OpenAI key — set AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY.";
   try {
     const { default: OpenAI } = await import("openai");
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = new OpenAI({ apiKey });
     await client.chat.completions.create({
       model: "gpt-4o-mini", max_tokens: 4,
       messages: [{ role: "user", content: "reply with: ok" }],
@@ -180,6 +184,23 @@ async function main() {
   if (!process.env.DATABASE_URL) {
     console.error("reality-test: needs a REAL DATABASE_URL. The journeys are about state; a stub has none.");
     process.exit(2);
+  }
+  // THIS HARNESS WRITES. Six fake clients, their meals, their ledger rows. Pointed at
+  // production by accident — which is exactly what happens when someone runs it in the Railway
+  // console because that is where the key works — it would put test users into the real client
+  // table. So it counts the real clients first and refuses unless the risk is accepted out loud.
+  {
+    const { db } = await import("../server/db");
+    const { users } = await import("../shared/schema");
+    const { sql } = await import("drizzle-orm");
+    const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`COUNT(*)::int` }).from(users).catch(() => [{ n: 0 }] as any);
+    const realish = Number(n) - 6;                       // this harness's own six do not count
+    if (realish > 0 && process.env.REALITY_ON_PROD !== "1") {
+      console.error(`reality-test: this database holds ${n} users, so it looks live, and this harness CREATES`);
+      console.error("users and meals. Re-run with REALITY_ON_PROD=1 if you accept that. It cleans up after");
+      console.error("itself (each test client is deleted, cascading its rows), but a failed run may not.");
+      process.exit(2);
+    }
   }
   const blocked = await modelReachable();
 
@@ -239,6 +260,8 @@ async function main() {
         + `mutations=${JSON.stringify(row.mutations || [])} ${row.replyMs}ms`);
     }
     results.push({ j, verdict: fails.length ? "FAIL" : "PASS", fails });
+    // Leave the database as it was found: the transcript above is the record, not the rows.
+    await db.delete(users).where(eq(users.phoneNumber, phone)).catch(() => {});
   }
 
   console.log(`\n${"═".repeat(92)}\nRESULTS\n${"═".repeat(92)}`);
