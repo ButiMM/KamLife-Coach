@@ -36,7 +36,7 @@ const BUDGET = {
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 20,
   /** Named regex literals across the server. The 333 the founder was shown. */
-  regexLiterals: 315,
+  regexLiterals: 316,
   /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
    * something other than the engine can put words in front of a client.
@@ -51,7 +51,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 419,
+  authorshipPoints: 420,
   twilioCallSites: 18,
 };
 
@@ -122,6 +122,38 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "authorshipPoints", from: 419, to: 420, date: "2026-08-10",
+    why: "ONE mouth: the confirmation that a meal MOVED to another day. «Actually, that was "
+      + "yesterday» had no owner anywhere in the product — it fell past every handler to the "
+      + "model, which answered «Sorry Kam, I didn't quite catch that 🙂» and three buttons while "
+      + "the meal stayed on the wrong day. Every total, card and weekly average built on that day "
+      + "was then wrong, silently and permanently, which is the worst class of defect this "
+      + "product has: a number the client cannot tell is lying. A move that does not say what it "
+      + "moved is the same mistake as «Removed your last meal ✅» — the reason the wrong-meal bug "
+      + "hid for a whole conversation. Tried first, and it worked, so it is NOT in this number: "
+      + "the two «I can't trust today's numbers» sentences merged into one owner earlier today "
+      + "(that took 420→419, so this raise is net-neutral on the day), the hold replies REPLACED "
+      + "the delete-and-ask replies rather than adding to them, and holdForReplacement's "
+      + "delimited token was rewritten as a join so it stops reading as a sentence. PAY THIS "
+      + "BACK the same way as the raise below: once the engine owns the resolved target and day, "
+      + "it writes this confirmation itself from facts and the handler goes silent.",
+  },
+  {
+    key: "regexLiterals", from: 315, to: 316, date: "2026-08-10",
+    why: "ONE pattern: MOVE_FRAME, which separates «actually that was yesterday» (move an "
+      + "existing entry) from «I had rice yesterday» (a retroactive LOG, which already worked). "
+      + "The distinction cannot come from the date words — both sentences carry them — so it has "
+      + "to come from the frame. Tried first and rejected: reusing isRetroactiveMeal alone "
+      + "(wrong question — it answers «is another day named», which both sentences answer yes "
+      + "to, and using it alone would have turned every retro log into a move); and reusing "
+      + "parseIdentityCorrection (wrong shape — it requires an «X not Y» pair and this sentence "
+      + "has none). Tried and kept: the predicate takes the date answer as an ARGUMENT rather "
+      + "than asking a second time, so «which day is this about» still has exactly one owner in "
+      + "parseMealDate. PAY THIS BACK by moving the move/log distinction onto the normalizer's "
+      + "intent classification, which already reads every message once and would return the "
+      + "shape of the correction without a pattern here.",
+  },
   {
     key: "regexLiterals", from: 312, to: 315, date: "2026-08-07",
     why: "THREE patterns for the three deterministic defects the live-model gauntlet found at "

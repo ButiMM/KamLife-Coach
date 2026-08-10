@@ -141,7 +141,10 @@ export async function handleEarlyCommands(ctx: {
     const which = whichMacroAsked(m);
     if (which) {
       const { todayRows } = await import("../macro-card-attach");
-      const t = await todayRows(user).catch(() => null);
+      const { getGoalProfile } = await import("../goal-profiles");
+      // A MACRO answer is a numbers answer, so this is where the macro goal-profile gate lives
+      // now — not inside todayRows, which also feeds the card a wellness client is entitled to.
+      const t = getGoalProfile(user?.goalType).usesMacros ? await todayRows(user).catch(() => null) : null;
       if (t) {
         const reply = macroStatusReply(t.rows as any, which, user.name?.split(" ")[0]);
         await logChat(user.id, message, reply, "MACRO_STATUS");
@@ -187,6 +190,12 @@ export async function handleEarlyCommands(ctx: {
     // down and lets the coach answer both.
     const alsoAsksFood = /\b(?:(?:what|which|where)\b[^?]{0,60}\b(?:can|should|do) i (?:eat|have|buy|order|get)|taxi rank|spaza|shisa nyama|kota|takeaway|restaurant|canteen|braai)\b/i.test(m);
     if (alsoAsksFood) return null; // the engine answers both halves — see law 20
+
+    // THE DAY THEY NAMED BEATS THE DAY THE SERVER ASSUMES (2026-08-10 directive, P0.1).
+    // "What did I eat yesterday?" matched here and was answered with TODAY's totals — the same
+    // number, to a different question, about a different day. This branch owns TODAY only; when
+    // the client names another day it stands down and the food-diary path resolves the date.
+    if (isRetroactiveMeal(m)) return null;
 
     // ONE MOUTH FOR "I CAN'T TRUST TODAY'S NUMBERS" — the read threw, or the read disagrees
     // with the rows. Both are the same thing to a client and get the same sentence, below.

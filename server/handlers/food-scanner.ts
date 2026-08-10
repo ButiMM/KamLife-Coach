@@ -668,6 +668,25 @@ export async function recomputeTodayFoodTotals(userId: string): Promise<{ calori
     return result;
   }
 
+  // A LEGITIMATE ZERO IS NOT A MISSING NUMBER (2026-08-10, directive P0.3).
+  //
+  // Below is a text-scrape of the chat log, kept for clients who predate meal_logs. It ran
+  // whenever TODAY read zero — so any day that correctly returned to zero was overwritten by
+  // calories re-parsed out of old chat prose. Moving a meal to yesterday left it counted on
+  // both days; wiping the day put the calories straight back; and every one of those numbers
+  // disagreed with the rows, which is the exact "system tells the user one thing while the
+  // database says another" the directive forbids.
+  //
+  // So the fallback is now scoped to who it was written for: a client with NO meal_logs row,
+  // ever. Anyone who has logged through the ledger is a ledger client, and their zero is real.
+  const [everLogged] = await db.select({ id: mealLogs.id }).from(mealLogs)
+    .where(eq(mealLogs.userId, userId)).limit(1).catch(() => [] as any[]);
+  if (everLogged) {
+    const zero = { calories: 0, protein: 0 };
+    _foodTotalsCache.set(userId, { ...zero, cachedAt: Date.now() });
+    return zero;
+  }
+
   // Legacy fallback (pre-meal_logs users with only chatHistory FOOD_LOG rows).
   const legacyLogs = await db.select({
     messageIn: chatHistory.messageIn,

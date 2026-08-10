@@ -31,7 +31,7 @@ import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSl
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
-import { amendRecentMeal } from "../food-identity-correction";
+import { amendRecentMeal, replaceHeldMeal } from "../food-identity-correction";
 
 // One owner — this literal was declared twice in this file.
 const TREAT_WORDS = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i;
@@ -170,13 +170,13 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
     ))
     .limit(1);
 
-  // AN AMENDMENT IS NOT A SECOND MEAL (2026-08-06 live: adding the avo re-logged the whole
-  // breakfast, ~950 phantom kcal). amendRecentMeal owns the rule and the write.
-  const amendedId = await amendRecentMeal(
-    params.userId,
-    (Array.isArray(params.items) ? params.items : []).map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean),
-    { rawMessage: rawSlice, kcalInt: params.kcalInt, proteinInt: params.proteinInt, carbsInt, fatInt, items: params.items, mealLabel: params.mealLabel },
-  );
+  const patch = { rawMessage: rawSlice, kcalInt: params.kcalInt, proteinInt: params.proteinInt, carbsInt, fatInt, items: params.items, mealLabel: params.mealLabel };
+  const itemNames = (Array.isArray(params.items) ? params.items : []).map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean);
+  // A held row's REPLACEMENT (a correction holds rather than deleting on a promise) and an
+  // AMENDMENT (2026-08-06: adding the avo re-logged the whole breakfast, ~950 phantom kcal) both
+  // rewrite an existing row and suppress the insert below. Neither ever creates a second row.
+  const heldId = await replaceHeldMeal(params.userId, `${rawSlice} ${itemNames.join(" ")}`, patch);
+  const amendedId = heldId || await amendRecentMeal(params.userId, itemNames, patch);
   if (amendedId) { invalidatePatternCache(params.userId); invalidateFoodTotalsCache(params.userId); }
   let insertOk = true;
   const wasDup = recentDup.length > 0 || !!amendedId;

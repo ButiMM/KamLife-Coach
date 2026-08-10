@@ -29,7 +29,7 @@ import { getGroceryPersonalization } from "../grocery-personalize";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
 import { sendCriticalAlert } from "../scheduler/shared";
-import { isAskingNotReporting, sastToday, sastDayStart, proteinOptions , commaName, spaceName, getDisplayName} from "../utils";
+import { isAskingNotReporting, sastToday, sastDayStart, proteinOptions , commaName, spaceName, getDisplayName, parseMealDate, isRetroactiveMeal, mealDateLabel} from "../utils";
 import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
 import { scanForSAFoods, weeklyNetLine } from "./food-scanner";
@@ -963,7 +963,14 @@ export async function handleLifecycle(ctx: {
 
   // ---- FOOD DIARY SUMMARY — "what did I eat today?" / "today's calories?" — no GPT ----
   if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meal log|meal logs|today.?s?\s*meal\s*logs?|meals today|melas today|melas|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
-    const todayStart = sastDayStart();
+    // THE DAY THEY NAMED (2026-08-10 directive, P0.1). "What did I eat yesterday?" read TODAY,
+    // so a client checking yesterday was shown today's plate and told it was theirs. The date
+    // is resolved ONCE, here, by the same parseMealDate that resolves it at write time — one
+    // owner for "which day is this about", read side and write side.
+    const askedDate = isRetroactiveMeal(m) ? parseMealDate(m) : null;
+    const todayStart = askedDate ? sastDayStart(askedDate) : sastDayStart();
+    const dayEnd = new Date(todayStart.getTime() + 86_400_000);
+    const dayWord = askedDate ? mealDateLabel(askedDate) : "today";
 
     // Primary: read from structured mealLogs table — stores SA scanner + GPT fallback + photo logs.
     // This is authoritative: we wrote to it at log time, no re-parsing needed.
@@ -977,6 +984,7 @@ export async function handleLifecycle(ctx: {
     }).from(mealLogs).where(and(
       eq(mealLogs.userId, user.id),
       gte(mealLogs.loggedAt, todayStart),
+      lt(mealLogs.loggedAt, dayEnd),
     )).orderBy(asc(mealLogs.loggedAt));
 
     if (structuredLogs.length === 0) {
@@ -985,7 +993,7 @@ export async function handleLifecycle(ctx: {
         .from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
       if (chatLogs.length === 0) {
-        const diaryReply = `No meals logged yet today. Log your first meal by describing what you ate — for example: "had 2 eggs and pap for breakfast".`;
+        const diaryReply = `No meals logged ${dayWord === "today" ? "yet today" : dayWord}. Log your first meal by describing what you ate — for example: "had 2 eggs and pap for breakfast".`;
         await logChat(user.id, message, diaryReply, "FOOD_DIARY");
         return diaryReply;
       }
@@ -1000,7 +1008,7 @@ export async function handleLifecycle(ctx: {
         if (protMatch) totalProt += parseInt(protMatch[1]);
         if (msgIn && msgIn !== "[Photo]") mealLinesFallback.push(`• ${msgIn.slice(0, 60)}`);
       }
-      const legacyReply = `*Today's meals:*\n${mealLinesFallback.join("\n") || "• Food photo(s) logged"}\n\n*Total: ~${totalCal} kcal | ~${totalProt}g protein*`;
+      const legacyReply = `*${dayWord === "today" ? "Today's" : `Meals ${dayWord}`}:*\n${mealLinesFallback.join("\n") || "• Food photo(s) logged"}\n\n*Total: ~${totalCal} kcal | ~${totalProt}g protein*`;
       await logChat(user.id, message, legacyReply, "FOOD_DIARY");
       return legacyReply;
     }
@@ -1036,7 +1044,7 @@ export async function handleLifecycle(ctx: {
     // ONE SOURCE OF TRUTH: the diary's total comes from the day-ledger — the SAME function the
     // card and the running total read, so "today's meals" can never disagree with them.
     const { getDayLedger } = await import("../day-ledger");
-    const diaryLedger = await getDayLedger(user.id, { user });
+    const diaryLedger = await getDayLedger(user.id, askedDate ? { forDate: askedDate } : { user });
     const totalCal = diaryLedger.kcal;
     const totalProt = diaryLedger.protein;
     const calTarget = user.calorieTarget || 1800;
@@ -1047,9 +1055,9 @@ export async function handleLifecycle(ctx: {
 
     // Coaching note based on intake vs target
     let diaryCoachNote = "";
-    if (totalCal > 0 && totalCal < calTarget * 0.45 && isLateEnough) {
+    if (!askedDate && totalCal > 0 && totalCal < calTarget * 0.45 && isLateEnough) {
       diaryCoachNote = `\n\n⚠️ *Under-eating alert:* ${totalCal} kcal at this time of day is too low. You are ${calRemaining} kcal short. Eat a proper meal tonight — protein and carbs. Starving is not a fat loss strategy, it is a metabolism killer.`;
-    } else if (totalCal > 0 && calRemaining > 500 && !isLateEnough) {
+    } else if (!askedDate && totalCal > 0 && calRemaining > 500 && !isLateEnough) {
       diaryCoachNote = `\n\n${calRemaining} kcal still to go. Spread it across your remaining meals — do not leave it all for dinner.`;
     }
     // Over-target coaching now lives in goalStatusLine (goal-aware, shared with every
@@ -1057,7 +1065,7 @@ export async function handleLifecycle(ctx: {
     // for fat_loss vs muscle_gain vs recomp (2026-07-16 founder review).
 
     const diaryLines = [
-      `*Today's food log (${mealLines.length} ${mealLines.length === 1 ? "meal" : "meals"}):*`,
+      `*${dayWord === "today" ? "Today's" : `Food log ${dayWord}`} (${mealLines.length} ${mealLines.length === 1 ? "meal" : "meals"}):*`,
       ...mealLines,
       ``,
       `*Running total:* ~${totalCal} kcal | ${totalProt}g protein`,
@@ -1069,7 +1077,8 @@ export async function handleLifecycle(ctx: {
     const weekLine = await weeklyNetLine(user);
     const diaryReply = diaryLines.join("\n") + (weekLine ? `\n\n${weekLine}` : "") + diaryCoachNote;
     await logChat(user.id, message, diaryReply, "FOOD_DIARY");
-    const diaryCard = await dailyMacroCardMarker(user); // "today's meals" gets the scorecard too (founder: every view shows the card)
+    // The card is a card about TODAY, so a question about a past day does not get one.
+    const diaryCard = askedDate ? "" : await dailyMacroCardMarker(user);
     return `${diaryReply}${diaryCard}`;
   }
 

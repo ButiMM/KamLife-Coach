@@ -6,11 +6,11 @@
 import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc, asc } from "drizzle-orm";
-import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection } from "../utils";
+import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection, isRetroactiveMeal, parseMealDate, mealDateLabel } from "../utils";
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine, scanForSAFoods, dropMeals } from "./food-scanner";
-import { parseIdentityCorrection, correctionCandidates, type IdentityCorrection } from "../food-identity-correction";
+import { parseIdentityCorrection, correctionCandidates, holdForReplacement, isMealDateMove, type IdentityCorrection } from "../food-identity-correction";
 
 import { UNAVAILABLE_RE } from "../food-swaps";
 
@@ -111,6 +111,25 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     }
   }
 
+  // ---- DATE MOVE — "actually that was yesterday" ----
+  // A correction of the DAY. Must run before the quick-exit (it carries no mgmt keyword) and
+  // before the identity path (which reads "not X" and this sentence has none). The entry MOVES;
+  // it is never re-logged, so the day it left and the day it lands on both recompute from rows.
+  if (isMealDateMove(m, isRetroactiveMeal(m)) && !looksLikeQuestion(m) && scanForSAFoods(m).length === 0) {
+    const target = parseMealDate(m);
+    const [lastAny] = await db.select({ id: mealLogs.id, raw: mealLogs.rawMessage, label: mealLogs.mealLabel, at: mealLogs.loggedAt })
+      .from(mealLogs).where(eq(mealLogs.userId, user.id)).orderBy(desc(mealLogs.loggedAt)).limit(1);
+    if (lastAny) {
+      await db.update(mealLogs).set({ loggedAt: target, corrected: true }).where(eq(mealLogs.id, lastAny.id));
+      invalidateFoodTotalsCache(user.id);
+      const recMove = await recomputeTodayFoodTotals(user.id);
+      await db.update(users).set({ todayCalories: recMove.calories, todayProteinG: recMove.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+      const what = (lastAny.label || lastAny.raw || "that meal").slice(0, 40);
+      console.log(`[MEAL_MOVE] ${String(lastAny.id).slice(0, 8)} ${String(lastAny.at).slice(0, 10)} → ${mealDateLabel(target)} user=...${String(user.id).slice(-6)}`);
+      return `Moved — *${what}* is on ${mealDateLabel(target)} now, not today.\n\nToday: ~${recMove.calories} kcal | ~${recMove.protein}g protein.`;
+    }
+  }
+
   // ---- IDENTITY CORRECTION — "the rice was white not brown", "it was tuna not pilchards" ----
   // Runs before the quantity path (that one owns numeric "not"s) and before the quick-exit,
   // since these carry no mgmt keyword. Without it the message reached the meaning engine,
@@ -178,10 +197,12 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
           const n = Math.abs(deltaN);
           return `${verb} ${n} ${qc.food.replace(/s$/, "")}${n === 1 ? "" : "s"} — now ${qc.count}. ✅\n\nUpdated total today: ~${recQCd.calories} kcal | ~${recQCd.protein}g protein.`;
         }
-        // No per-item numbers and no known portion — honest remove-and-relog beats silent
-        // bad maths or a double-logged "correction".
-        const recQC2 = await dropMeals(user.id, [targetQC.id], "qty-correction-no-portion");
-        return `That entry had the wrong count, so I removed it. ✅ Send the corrected meal — e.g. "${qc.count} ${qc.food}" plus whatever else was in it — and I'll log it right.\n\nToday now: ~${recQC2.calories} kcal | ~${recQC2.protein}g protein.`;
+        // No per-item numbers and no known portion, so the new total cannot be computed here.
+        // HOLD, never delete on a promise (2026-08-07): the entry stays exactly as it is until
+        // the replacement is written, so a client who never re-sends still has their meal.
+        await db.update(users).set({ awaitingInputType: holdForReplacement(targetQC.id, qc.food) }).where(eq(users.id, user.id));
+        const recQC2 = await recomputeTodayFoodTotals(user.id);
+        return `Wrong count noted — I'm holding that entry until you replace it, so nothing is lost. Send it as "${qc.count} ${qc.food}" plus whatever else was on the plate and I'll swap it in.\n\nStill on today: ~${recQC2.calories} kcal | ~${recQC2.protein}g protein.`;
       }
       return `I don't see ${qc.food} in today's log to correct. Send *my meals* to check what's logged.`;
     } catch (err) {
@@ -196,7 +217,9 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   const hasMgmtKeyword = /\b(remove|delete|undo|clear|reset|wipe|scratch|take out|take off|didn.?t (have|eat)|did not (have|eat)|get rid of|cancel.*meal|wrong meal|mistake.*log|log.*mistake|not.*eat|never ate|no\s+just)\b/i.test(m);
   if (!hasMgmtKeyword) return null;
 
-  // ---- CORRECTION: "No just [food]" — remove last meal, prompt to re-log ----
+  // ---- CORRECTION: "No just [food]" — hold the last meal until the replacement lands ----
+  // This branch used to delete first and ask second. Same rule as the quantity path above: the
+  // row is held, not dropped, because a client who never re-sends must not lose the meal.
   const noJustMatch = m.match(/^no[,!]?\s+just\s+(.{2,40})$/i);
   if (noJustMatch) {
     const todayStart = sastDayStart();
@@ -206,9 +229,9 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       .orderBy(desc(mealLogs.loggedAt))
       .limit(1);
     if (lastMealLog.length > 0) {
-      await dropMeals(user.id, [lastMealLog[0].id], "no-just-relog");
       const foodName = noJustMatch[1].trim();
-      return `Got it — removed the last entry. ✅\n\nNow tell me exactly what you had and I'll log it. You can say: "had ${foodName}".`;
+      await db.update(users).set({ awaitingInputType: holdForReplacement(lastMealLog[0].id, foodName) }).where(eq(users.id, user.id));
+      return `Got it — I'm holding that last entry until you replace it, so nothing goes missing. Tell me exactly what it was: "had ${foodName}".`;
     }
   }
 

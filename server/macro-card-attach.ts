@@ -44,8 +44,14 @@ function firstNameOf(user: any): string {
 // includeWater adds today's water as a final row — the DAILY scorecard shows it (founder:
 // "add total water to the daily scorecard"), the per-meal card stays the 4 macros.
 export async function todayRows(user: any, includeWater = false, forDate?: Date): Promise<{ rows: Row[]; isBulk: boolean } | null> {
+  // TWO OWNERS FOR ONE RULE (2026-08-10). This function used to refuse a wellness client
+  // outright — "wellness → no card, ever" — while the line that builds the card below already
+  // says usesNumbers:false for exactly that client, i.e. give them the SAME card with a verdict
+  // where the figure sits. The gate in card-policy.ts was removed days ago and this copy kept
+  // the promise broken: the simplicity camp got no calling card at all. Row-building is not a
+  // policy decision, so the policy moved to the one call site that needs it (the numeric macro
+  // status reply in early-commands) and this function now just computes.
   const profile = getGoalProfile(user?.goalType);
-  if (!profile.usesMacros) return null; // wellness → no card
   const calTarget = Number(user?.calorieTarget) || 0;
   const protTarget = Number(user?.proteinTarget) || 0;
   if (!(calTarget > 0) || !(protTarget > 0)) return null;

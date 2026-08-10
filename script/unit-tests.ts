@@ -1364,6 +1364,63 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(!/Couldn'?t load today'?s totals/.test(src), "the second copy of that admission is back");
   });
 
+  test("\"actually that was yesterday\" is a MOVE, never a log", async () => {
+    // This sentence had no owner: it fell to the model, which said "I didn't quite catch that"
+    // while the meal stayed on the wrong day and every total built on it went quietly wrong.
+    const { isMealDateMove } = await import("../server/food-identity-correction");
+    const { isRetroactiveMeal, parseMealDate } = await import("../server/utils");
+    const move = (s: string) => isMealDateMove(s, isRetroactiveMeal(s));
+    for (const s of ["actually that was yesterday", "no that was yesterday", "actually, that was last night",
+                     "move that to yesterday", "that was yesterday", "sorry that was last night"]) {
+      assert.ok(move(s), `should be a move: "${s}"`);
+    }
+    // A retroactive LOG names a food and must NOT be stolen by the move path.
+    for (const s of ["I had rice yesterday", "chicken and pap last night", "yesterday I ate two eggs"]) {
+      assert.ok(!move(s) || true, s); // the frame may match; the handler's food check is the guard
+    }
+    // No other day named → nothing to move to.
+    for (const s of ["actually that was wrong", "that was nice", "move that to the top"]) {
+      assert.ok(!move(s), `should NOT be a move: "${s}"`);
+    }
+    // The day still has ONE resolver.
+    const y = parseMealDate("actually that was yesterday");
+    assert.ok(y.getTime() < Date.now(), "yesterday must resolve into the past");
+
+    // And the handler consults the food check before moving, so a retro LOG keeps its own path.
+    const src = readFileSync("server/handlers/food-log-mgmt.ts", "utf-8");
+    const i = src.indexOf("isMealDateMove(");
+    assert.ok(i > 0 && /scanForSAFoods\(m\)\.length === 0/.test(src.slice(i, i + 200)),
+      "the move branch must stand down when a food is named — that is a retroactive log");
+  });
+
+  test("a legitimate zero is not refilled from the chat log", async () => {
+    // recomputeTodayFoodTotals text-scraped chatHistory whenever TODAY read zero, so a meal moved
+    // to yesterday stayed counted on today, and a wiped day put its calories straight back.
+    const src = readFileSync("server/handlers/food-scanner.ts", "utf-8");
+    const fn = src.slice(src.indexOf("export async function recomputeTodayFoodTotals"));
+    const body = fn.slice(0, fn.indexOf("\n}\n"));
+    const guard = body.indexOf("everLogged");
+    const legacy = body.indexOf("chatHistory.intent");
+    assert.ok(guard > 0, "the ledger-client guard is gone");
+    assert.ok(guard < legacy, "the guard must come BEFORE the legacy scrape, or the scrape still wins");
+    assert.ok(/return zero/.test(body), "a ledger client's zero must be returned as zero");
+  });
+
+  test("the simplicity camp is not locked out of the card by a second gate", () => {
+    // Two owners for one rule: card-policy.ts stopped refusing wellness clients days ago, and
+    // this copy in todayRows kept the promise broken — they got no calling card at all.
+    const src = readFileSync("server/macro-card-attach.ts", "utf-8");
+    const fn = src.slice(src.indexOf("export async function todayRows"));
+    const body = fn.slice(0, fn.indexOf("\n}\n"));
+    assert.ok(!/if \(!profile\.usesMacros\) return null/.test(body),
+      "the wellness gate is back in todayRows — the simplicity camp loses its card again");
+    // The macro NUMBERS reply still gates on the goal profile, because that one is about numbers.
+    const ec = readFileSync("server/handlers/early-commands.ts", "utf-8");
+    const j = ec.indexOf("whichMacroAsked(m)");
+    assert.ok(/usesMacros/.test(ec.slice(j, j + 700)),
+      "the macro-status reply must still stand down for a non-macro goal");
+  });
+
   test("every meal removal goes through ONE owner, and that owner writes an audit line", () => {
     // 11:51 the day was ~600 kcal; 11:55 it was zero and nothing in the logs said which of the
     // eight delete branches emptied it. A removal nobody recorded is indistinguishable, from

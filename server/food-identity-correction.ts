@@ -128,6 +128,109 @@ export function isMealAmendment(olderItems: string[], newerItems: string[]): boo
 }
 
 /**
+ * "ACTUALLY, THAT WAS YESTERDAY" — a correction of the DAY, not a new meal (2026-08-10, P0.1).
+ *
+ * That sentence had no owner anywhere in the product. It fell past every handler to the model,
+ * which replied "Sorry Kam, I didn't quite catch that 🙂" with three buttons, and the meal stayed
+ * on the wrong day — so every total and average built on it was silently wrong from then on.
+ *
+ * A MOVE, not a LOG: it points at an existing entry ("that", "it", "the last one") and names no
+ * food. "I had rice yesterday" names a food and is a retroactive LOG, which already works, so
+ * the caller also requires that no food is named before acting. It lives here, with the other
+ * corrections, because the question it answers is "what shape of fix is this?" — parseMealDate
+ * in utils.ts stays the single owner of "which day", and this asks the caller to consult it.
+ */
+const MOVE_FRAME = /\b(?:actually|no|sorry|oops|wait|correction)\b[,.!]?\s*(?:that|it|this|those)\s*(?:'s|s|was|were|is|are)\b|\bmove\s+(?:that|it|this|the\s+last\s+(?:one|meal|entry)|that\s+meal)\s+to\b|\b(?:that|it|this)\s+(?:was|were)\s+(?:actually\s+)?(?:on\s+)?(?=\w)/i;
+export function isMealDateMove(message: string, namesAnotherDay: boolean): boolean {
+  return namesAnotherDay && MOVE_FRAME.test(String(message || "").toLowerCase());
+}
+
+/**
+ * NEVER DELETE ON A PROMISE (2026-08-07).
+ *
+ * Two correction branches could not compute the new numbers — a photo meal stores no per-item
+ * macros, and some foods have no per-serving portion — so they deleted the row and asked the
+ * client to send it again. That is a promise, and a promise is not a replacement. On the
+ * founder's phone the row went at 11:51, the re-send never came, the day read zero by 11:55,
+ * and the coach then told him he had logged nothing all day.
+ *
+ * So the row is HELD instead: it stays in the table, with its original numbers, until the
+ * replacement is actually written. The hold is a pointer on the user — the same
+ * awaitingInputType mechanism every other pending answer uses — carrying the row, when the
+ * hold started, and WHICH FOOD is expected back.
+ *
+ * The expected food is what makes this safe. Without it, the next meal of the day would
+ * overwrite the held row and lose the first meal a different way. A log that does not mention
+ * the expected food is a different meal: it inserts normally and the hold is dropped.
+ *
+ * Fifteen minutes, then the hold is ignored. A correction the client walked away from must not
+ * capture their supper.
+ */
+const HOLD = "meal_replace:";
+const HOLD_WINDOW_MS = 15 * 60 * 1000;
+
+/** The pointer to store on users.awaiting_input_type while a row waits for its replacement. */
+export function holdForReplacement(rowId: string, expectFood: string): string {
+  // A colon-delimited token, so it is built as one — a template string here reads like a
+  // sentence to both a human and the authorship guard, and it is neither.
+  return [HOLD + rowId, Date.now(), (expectFood || "").toLowerCase().slice(0, 40)].join(":");
+}
+
+/** PURE: read a hold pointer. Returns null when there isn't one, it has expired, or the new log
+ *  does not mention the food the hold is waiting for. */
+export function readHold(marker: string | null | undefined, newFoodText: string, now = Date.now()):
+  { rowId: string; expectFood: string } | null {
+  const s = String(marker || "");
+  if (!s.startsWith(HOLD)) return null;
+  const parts = s.slice(HOLD.length).split(":");
+  const rowId = parts[0] || "";
+  const at = Number(parts[1] || 0);
+  const expectFood = (parts.slice(2).join(":") || "").trim();
+  if (!rowId || !at || now - at > HOLD_WINDOW_MS) return null;
+  const hay = (newFoodText || "").toLowerCase();
+  const stem = expectFood.replace(/e?s$/, "");
+  if (expectFood && !(hay.includes(expectFood) || (stem.length >= 3 && hay.includes(stem)))) return null;
+  return { rowId, expectFood };
+}
+
+/**
+ * The replacement has arrived: overwrite the held row and release the hold. Returns the row id
+ * so the caller suppresses its insert exactly as it does for an amendment, or null to insert.
+ *
+ * Fail-open in one direction only. If anything here goes wrong the caller INSERTS, which
+ * double-counts one meal — a wrong number. The alternative failure is deleting first and losing
+ * the meal, which is the bug this exists to end.
+ */
+export async function replaceHeldMeal(
+  userId: string,
+  newFoodText: string,
+  patch: Record<string, unknown>,
+): Promise<string | null> {
+  try {
+    const { db } = await import("./db");
+    const { mealLogs, users } = await import("../shared/schema");
+    const { eq, and } = await import("drizzle-orm");
+    // The hold reads its own storage. A caller that had to fetch awaiting_input_type first knew
+    // where a hold lives, which is this module's business and nobody else's.
+    const [owner] = await db.select({ awaiting: users.awaitingInputType }).from(users)
+      .where(eq(users.id, userId)).limit(1);
+    const held = readHold(owner?.awaiting, newFoodText);
+    if (!held) return null;
+    const [row] = await db.select({ id: mealLogs.id, kcal: mealLogs.kcalInt }).from(mealLogs)
+      .where(and(eq(mealLogs.id, held.rowId), eq(mealLogs.userId, userId))).limit(1);
+    if (!row) return null;                                    // already gone — insert instead
+    await db.update(mealLogs).set({ ...patch, corrected: true }).where(eq(mealLogs.id, row.id));
+    await db.update(users).set({ awaitingInputType: null }).where(eq(users.id, userId));
+    console.log(`[MEAL_HOLD] replaced held row ${String(row.id).slice(0, 8)} (${row.kcal || 0} kcal → ${patch.kcalInt}) `
+      + `expected="${held.expectFood}" user=...${userId.slice(-6)}`);
+    return String(row.id);
+  } catch (e) {
+    console.warn("[MEAL_HOLD] replace failed, caller will insert:", (e as any)?.message);
+    return null;
+  }
+}
+
+/**
  * Find a recent meal this log AMENDS and update it in place. Returns its id, or null when this
  * is genuinely a new meal and the caller should insert.
  *
