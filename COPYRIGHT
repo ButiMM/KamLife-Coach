@@ -1,0 +1,58 @@
+COPYRIGHT AND OWNERSHIP
+=======================
+
+© 2026 KamLife. All rights reserved.
+
+Owner:    Koketso Mokgokolo, founder and sole owner of KamLife.
+Product:  KamLife Coach — a WhatsApp-first fitness, nutrition and accountability
+          coaching service.
+Contact:  kmokgokolo@gmail.com
+
+ALL RIGHTS RESERVED
+-------------------
+This repository and everything in it is proprietary and confidential. That
+includes, without limitation: the application source code; the database schema
+and migrations; the coaching prompts, personas and voice; the South African food
+and portion data; the programme, progression and targeting logic; the test and
+verification harnesses; the architectural governors; and all documentation.
+
+No licence is granted. No part of this work may be copied, reproduced,
+distributed, published, sublicensed, reverse-engineered or used to train or
+fine-tune any model, in whole or in part, without the prior written permission of
+the owner.
+
+CONTRIBUTIONS
+-------------
+All work commissioned or accepted into this repository is work-for-hire and vests
+in KamLife. Any person who contributes to, or is granted access to, this
+repository does so on that basis, and assigns to KamLife all right, title and
+interest in their contributions. Contributors hold no ownership stake, no equity,
+and no licence to reuse this work elsewhere.
+
+A signed IP assignment is required from every human contributor. This file
+records the position; it does not replace those signatures.
+
+AI-ASSISTED DEVELOPMENT
+-----------------------
+Portions of this codebase were written with AI assistance (Anthropic's Claude,
+via Claude Code). Git history therefore contains commits authored as
+"Claude <noreply@anthropic.com>" together with AI attribution trailers.
+
+That attribution is tooling metadata and records HOW the work was produced. It is
+not, and must not be read as, a claim of authorship, ownership or any other
+interest by Anthropic, by any AI system, or by any third party. An AI model is
+not a legal person, holds no copyright, and is not a contractor, employee,
+co-founder or equity partner of KamLife. Rights in outputs produced through the
+provider's service are governed by that provider's commercial terms as accepted
+by the owner.
+
+Ownership of this work rests entirely and exclusively with KamLife.
+
+CLIENT DATA
+-----------
+This system processes personal information of South African data subjects and is
+subject to POPIA. Client records, food logs, photographs, measurements and
+message history are not part of the intellectual property described above and
+may not be copied, exported or retained outside the production environment.
+
+First recorded: 10 August 2026.
