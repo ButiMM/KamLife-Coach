@@ -1386,11 +1386,77 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const y = parseMealDate("actually that was yesterday");
     assert.ok(y.getTime() < Date.now(), "yesterday must resolve into the past");
 
-    // And the handler consults the food check before moving, so a retro LOG keeps its own path.
+    // A RETROACTIVE LOG must never be captured by the correction branch. The guard is
+    // planCorrection: "I had rice yesterday" names a day but carries no edit, so it is not a
+    // correction and keeps the ordinary logging path.
+    const { planCorrection } = await import("../server/food-identity-correction");
+    for (const s2 of ["I had rice yesterday", "chicken and pap last night", "yesterday I ate two eggs",
+                      "two eggs and toast on saturday"]) {
+      const p2 = planCorrection(s2, isMealDateMove(s2, isRetroactiveMeal(s2)));
+      assert.ok(!p2.isCorrection, `"${s2}" is a retroactive LOG, not a correction`);
+    }
+    // …while the correction branch itself must gate on plan.isCorrection, not on its own copy.
     const src = readFileSync("server/handlers/food-log-mgmt.ts", "utf-8");
-    const i = src.indexOf("isMealDateMove(");
-    assert.ok(i > 0 && /scanForSAFoods\(m\)\.length === 0/.test(src.slice(i, i + 200)),
-      "the move branch must stand down when a food is named — that is a retroactive log");
+    assert.ok(/plan\?\.isCorrection/.test(src), "the correction branch must gate on the plan");
+  });
+
+  test("a correction is a MUTATION: remove, retain, add, replace, move — composed in one turn", async () => {
+    const { planCorrection, applyCorrection } = await import("../server/food-identity-correction");
+    // The exact failing turn. Result was "Pap, Rice, Spinach" on yesterday: the negated rice
+    // survived and the chicken nobody mentioned was silently dropped.
+    const msg = "actually no, that was yesterday. and it wasn't rice, it was pap. and I had spinach too";
+    const plan = planCorrection(msg, true);
+    assert.ok(plan.isCorrection, "this edits an existing meal — it is not a new lunch");
+    assert.ok(plan.moves, "the day changes");
+    assert.ok(plan.remove.some(r => /rice/.test(r)), `rice must be removed, got ${JSON.stringify(plan.remove)}`);
+    assert.ok(plan.add.some(a => /pap/.test(a)), `pap must be added, got ${JSON.stringify(plan.add)}`);
+    assert.ok(plan.add.some(a => /spinach/.test(a)), `spinach must be added, got ${JSON.stringify(plan.add)}`);
+
+    // RETAIN is the default, and a combo item is split only for the part being corrected.
+    const stored = [{ name: "Chicken and rice", kcal: 580, protein: 56 }];
+    const table: Record<string, any> = {
+      chicken: { name: "Chicken", kcal: 320, protein: 42 },
+      rice: { name: "Rice", kcal: 260, protein: 5 },
+      pap: { name: "Pap", kcal: 290, protein: 6 },
+      spinach: { name: "Spinach", kcal: 25, protein: 3 },
+    };
+    const out = applyCorrection(stored, plan, f => table[f.toLowerCase().split(" ")[0]] || null);
+    const names = out.items.map(i => String(i.name).toLowerCase());
+    assert.ok(names.some(n => n.includes("chicken")), `CHICKEN MUST SURVIVE — got ${JSON.stringify(names)}`);
+    assert.ok(names.some(n => n.includes("pap")), `pap must be there — got ${JSON.stringify(names)}`);
+    assert.ok(names.some(n => n.includes("spinach")), `spinach must be there — got ${JSON.stringify(names)}`);
+    assert.ok(!names.some(n => n === "rice" || n.includes("and rice")), `RICE MUST BE GONE — got ${JSON.stringify(names)}`);
+  });
+
+  test("the correction mechanism is semantic, not a rice→pap hard-code", async () => {
+    const { planCorrection } = await import("../server/food-identity-correction");
+    // Every phrasing the directive lists, none of which shares wording with the failing turn.
+    const removes: Array<[string, string]> = [
+      ["it wasn't rice", "rice"],
+      ["no rice, it was pap", "rice"],
+      ["take the rice out", "rice"],
+      ["I didn't eat the rice", "rice"],
+      ["remove the bread", "bread"],
+      ["it wasn't beef, it was mutton", "beef"],
+    ];
+    for (const [msg, food] of removes) {
+      const p = planCorrection(msg, false);
+      assert.ok(p.remove.some(r => r.includes(food)), `"${msg}" must remove ${food}, got ${JSON.stringify(p.remove)}`);
+      assert.ok(p.isCorrection, `"${msg}" must read as a correction`);
+    }
+    for (const [msg, food] of [["and add spinach", "spinach"], ["I also had eggs", "eggs"], ["and I had morogo too", "morogo"]] as Array<[string, string]>) {
+      const p = planCorrection(msg, false);
+      assert.ok(p.add.some(a => a.includes(food)), `"${msg}" must add ${food}, got ${JSON.stringify(p.add)}`);
+    }
+    // A plain meal report is NOT a correction — it must keep the ordinary logging path.
+    for (const msg of ["chicken and rice", "I had pap and beef for supper", "two eggs and toast"]) {
+      assert.ok(!planCorrection(msg, false).isCorrection, `"${msg}" must NOT be read as a correction`);
+    }
+    // "not sure" / "no problem" must never be read as removing a food.
+    for (const msg of ["I'm not sure", "no problem", "not today"]) {
+      const p = planCorrection(msg, false);
+      assert.ok(p.remove.length === 0, `"${msg}" must remove nothing, got ${JSON.stringify(p.remove)}`);
+    }
   });
 
   test("a legitimate zero is not refilled from the chat log", async () => {

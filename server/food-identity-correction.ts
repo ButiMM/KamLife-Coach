@@ -146,6 +146,145 @@ export function isMealDateMove(message: string, namesAnotherDay: boolean): boole
 }
 
 /**
+ * A CORRECTION IS A MUTATION, NOT A NEW MEAL (2026-08-10 directive, §3).
+ *
+ * The failing turn: «Actually no, that was yesterday. And it wasn't rice, it was pap. And I had
+ * spinach too» against a logged chicken-and-rice lunch. The product produced *Pap, Rice, Spinach*
+ * on yesterday — it moved the day and added the spinach, then kept the rice it had just been told
+ * was wrong and silently dropped the chicken nobody had mentioned. One sentence, two defects:
+ * the negation was never applied, and the item list was REPLACED by what this message happened to
+ * name instead of being edited.
+ *
+ * The cure is to stop treating a correction as another logFood(). One turn can carry five
+ * operations at once, and they compose:
+ *
+ *   REMOVE   "it wasn't rice", "no rice", "take the rice out", "I didn't eat the rice"
+ *   ADD      "and I had spinach too", "add spinach", "I also had spinach"
+ *   REPLACE  "it was pap, not rice"            → REMOVE rice + ADD pap
+ *   MOVE     "that was yesterday"              → the day changes, the meal does not
+ *   RETAIN   everything else                   → the DEFAULT, and the bug that lost the chicken
+ *
+ * RETAIN is the important one. It is not a cue to detect; it is what you get by starting from the
+ * stored items and editing them. Nothing a client did not mention is ever reconsidered.
+ *
+ * Deliberately NOT a taxonomy of phrasings — cue words plus "which food is nearby", so
+ * equivalent language works without a branch each. Pure: no DB, no model, unit-tested.
+ */
+export interface CorrectionPlan {
+  remove: string[];   // food words the client says were wrong
+  add: string[];      // food words the client says to add
+  moves: boolean;     // the day changes (the caller resolves WHICH day via parseMealDate)
+  /** True when this message edits an existing meal rather than reporting a new one. */
+  isCorrection: boolean;
+}
+
+// A removal names a food AFTER a negation. Capturing group 2 is the food.
+const REMOVE_CUES = [
+  /\b(?:it|that|they|those)\s*(?:wasn'?t|were\s?n'?t|is\s?n'?t|ai\s?n'?t)\s+(?:the\s+|any\s+)?([\w][\w\s-]{1,24}?)(?=[,.!?]|\s+(?:it|that|and|but|just)\b|$)/gi,
+  /\b(?:no|not|minus|without|skip)\s+(?:the\s+)?([\w][\w-]{2,20})\b/gi,
+  /\b(?:take|leave|get\s+rid\s+of|cut)\s+(?:out\s+)?(?:the\s+)?([\w][\w-]{2,20})\b(?:\s+out)?/gi,
+  /\b(?:didn'?t|did\s+not|never)\s+(?:eat|have|touch)\s+(?:the\s+|any\s+)?([\w][\w-]{2,20})\b/gi,
+  /\bremove\s+(?:the\s+)?([\w][\w-]{2,20})\b/gi,
+];
+
+// An addition names a food after an "as well" cue, or after "it was …" — the other half of
+// "it wasn't rice, it was pap", which parseIdentityCorrection cannot read because that shape
+// uses "wasn't" where its three frames expect a bare "not".
+const ADD_CUES = [
+  /\b(?:also\s+had|also\s+ate|and\s+i\s+had|and\s+i\s+ate|plus)\s+(?:some\s+|a\s+|the\s+)?([\w][\w\s-]{1,24}?)(?=[,.!?]|\s+(?:too|as\s+well|and)\b|$)/gi,
+  /\b(?:add|include)\s+(?:some\s+|the\s+)?([\w][\w-]{2,20})\b/gi,
+  /\b(?:with|and)\s+(?:some\s+)?([\w][\w-]{2,20})\s+(?:too|as\s+well)\b/gi,
+  /\b(?:it|that|this)\s+(?:was|were|is)\s+(?:actually\s+)?(?:some\s+|a\s+|the\s+)?([\w][\w-]{2,20})\b/gi,
+];
+
+// EVERY match, not the first. One turn can correct two foods ("no rice and no bread"), and the
+// first "it was …" in the failing turn is "that was yesterday" — a stopword. Taking only the
+// first match would have thrown away the "it was pap" that follows it.
+const allGroups = (res: RegExp[], s: string): string[] => {
+  const out: string[] = [];
+  for (const re of res) {
+    for (const m of s.matchAll(re)) {
+      const food = (m[1] || "").trim().toLowerCase().replace(/\s+(?:too|as well)$/, "").trim();
+      if (food && !STOPWORDS.has(food) && !out.includes(food)) out.push(food);
+    }
+  }
+  return out;
+};
+
+// Words that are never a food, so a cue that catches one is discarded rather than acted on.
+const STOPWORDS = new Set(["it", "that", "this", "them", "those", "yesterday", "today", "lunch",
+  "breakfast", "dinner", "supper", "much", "many", "sure", "right", "wrong", "good", "bad", "one",
+  "meal", "food", "anything", "everything", "else", "same", "all", "any", "more", "less", "the",
+  // "no problem", "not sure", "no worries" — a cue word next to a non-food is not a correction.
+  "problem", "worries", "stress", "really", "yet", "idea", "time", "way", "clue", "point", "big",
+  "deal", "bother", "rush", "hurry", "trouble", "drama", "excuse", "sweat"]);
+
+export function planCorrection(message: string, movesDay: boolean): CorrectionPlan {
+  const s = String(message || "").toLowerCase();
+  const remove = allGroups(REMOVE_CUES, s);
+  const add = allGroups(ADD_CUES, s);
+  // "it was pap, not rice" is a REPLACE — parseIdentityCorrection already reads that shape, so
+  // this asks it rather than keeping a second copy of the same three regexes.
+  const ic = parseIdentityCorrection(message);
+  if (ic) {
+    const { rightNames, wrongNames } = correctionCandidates(ic);
+    for (const w of wrongNames) if (!remove.includes(w)) remove.push(w);
+    for (const r of rightNames) if (!add.includes(r)) add.push(r);
+  }
+  // No separate "is this an edit?" pattern: every REMOVE cue is already negation-framed
+  // ("wasn't X", "no X", "take X out", "didn't eat X", "remove X"), so a cue that caught a real
+  // food IS the evidence. A plain meal report trips none of them. One less regex, same answer.
+  const isCorrection = movesDay || remove.length > 0 || !!ic;
+  return { remove, add, moves: movesDay, isCorrection };
+}
+
+/**
+ * Apply a plan to a stored item list. PURE, so the composition rule is testable without a DB.
+ *
+ * `splitCombo` is why the chicken came back. The original lunch was stored as ONE item named
+ * "Chicken and rice" — a combo the food table resolves as a single dish — so "it wasn't rice"
+ * had nothing to remove and "retain the chicken" had nothing to retain. A combo name is split
+ * into its parts only when a removal actually targets one of them; otherwise it is left exactly
+ * as logged, because splitting a dish nobody is correcting would change numbers for no reason.
+ */
+export function applyCorrection<T extends { name?: string }>(
+  items: T[],
+  plan: CorrectionPlan,
+  resolve: (food: string) => T | null,
+): { items: T[]; removed: string[]; added: string[] } {
+  const hits = (name: string, food: string) => {
+    const a = name.toLowerCase(), b = food.toLowerCase();
+    return a === b || a.includes(b) || b.includes(a);
+  };
+  let work: T[] = [...items];
+  const removed: string[] = [];
+
+  for (const food of plan.remove) {
+    // A whole item that IS the food goes.
+    const exact = work.findIndex(i => hits(String(i.name || ""), food));
+    if (exact === -1) continue;
+    const name = String(work[exact].name || "");
+    const parts = name.split(/\s*(?:,|\band\b|\bwith\b|\+)\s*/i).map(p => p.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      // A combo: keep the parts the client did NOT correct, as resolved foods of their own.
+      const keep = parts.filter(p => !hits(p, food)).map(p => resolve(p.toLowerCase().trim())).filter(Boolean) as T[];
+      work.splice(exact, 1, ...keep);
+    } else {
+      work.splice(exact, 1);
+    }
+    removed.push(food);
+  }
+
+  const added: string[] = [];
+  for (const food of plan.add) {
+    if (work.some(i => hits(String(i.name || ""), food))) continue;   // already on the plate
+    const r = resolve(food);
+    if (r) { work.push(r); added.push(food); }
+  }
+  return { items: work, removed, added };
+}
+
+/**
  * NEVER DELETE ON A PROMISE (2026-08-07).
  *
  * Two correction branches could not compute the new numbers — a photo meal stores no per-item

@@ -10,7 +10,7 @@ import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection, is
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine, scanForSAFoods, dropMeals } from "./food-scanner";
-import { parseIdentityCorrection, correctionCandidates, holdForReplacement, isMealDateMove, type IdentityCorrection } from "../food-identity-correction";
+import { parseIdentityCorrection, correctionCandidates, holdForReplacement, isMealDateMove, planCorrection, applyCorrection, type IdentityCorrection } from "../food-identity-correction";
 
 import { UNAVAILABLE_RE } from "../food-swaps";
 
@@ -111,22 +111,50 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     }
   }
 
-  // ---- DATE MOVE — "actually that was yesterday" ----
-  // A correction of the DAY. Must run before the quick-exit (it carries no mgmt keyword) and
-  // before the identity path (which reads "not X" and this sentence has none). The entry MOVES;
-  // it is never re-logged, so the day it left and the day it lands on both recompute from rows.
-  if (isMealDateMove(m, isRetroactiveMeal(m)) && !looksLikeQuestion(m) && scanForSAFoods(m).length === 0) {
-    const target = parseMealDate(m);
-    const [lastAny] = await db.select({ id: mealLogs.id, raw: mealLogs.rawMessage, label: mealLogs.mealLabel, at: mealLogs.loggedAt })
-      .from(mealLogs).where(eq(mealLogs.userId, user.id)).orderBy(desc(mealLogs.loggedAt)).limit(1);
-    if (lastAny) {
-      await db.update(mealLogs).set({ loggedAt: target, corrected: true }).where(eq(mealLogs.id, lastAny.id));
-      invalidateFoodTotalsCache(user.id);
-      const recMove = await recomputeTodayFoodTotals(user.id);
-      await db.update(users).set({ todayCalories: recMove.calories, todayProteinG: recMove.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
-      const what = (lastAny.label || lastAny.raw || "that meal").slice(0, 40);
-      console.log(`[MEAL_MOVE] ${String(lastAny.id).slice(0, 8)} ${String(lastAny.at).slice(0, 10)} → ${mealDateLabel(target)} user=...${String(user.id).slice(-6)}`);
-      return `Moved — *${what}* is on ${mealDateLabel(target)} now, not today.\n\nToday: ~${recMove.calories} kcal | ~${recMove.protein}g protein.`;
+  // ---- CORRECTION AS A MUTATION — move, remove, add, replace, retain, in one turn ----
+  // Must run before the quick-exit (a correction carries no mgmt keyword). It edits the STORED
+  // items, so anything the client did not mention is retained by construction — that is what
+  // used to be lost. A single-operation identity correction ("it was tuna not pilchards") is
+  // left to applyIdentityCorrection below, which already scales servings properly; this owns
+  // compositions and every date move. See food-identity-correction.ts for the semantics.
+  const movesDay = isMealDateMove(m, isRetroactiveMeal(m));
+  const plan = looksLikeQuestion(m) ? null : planCorrection(m, movesDay);
+  if (plan?.isCorrection && (plan.moves || plan.remove.length + plan.add.length >= 2)) {
+    const [row] = await db.select({
+      id: mealLogs.id, raw: mealLogs.rawMessage, label: mealLogs.mealLabel, at: mealLogs.loggedAt,
+      items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
+    }).from(mealLogs).where(eq(mealLogs.userId, user.id)).orderBy(desc(mealLogs.loggedAt)).limit(1);
+    if (row) {
+      const resolveFood = (food: string) => {
+        const hit = scanForSAFoods(food, { exactOnly: true })[0] || scanForSAFoods(food)[0];
+        return hit ? {
+          name: hit.name, grams: hit.typicalPortionGrams || 100, kcal: hit.typicalPortionCalories || 0,
+          protein: hit.typicalPortionProtein || 0, category: hit.category,
+        } : null;
+      };
+      const stored = (Array.isArray(row.items) ? row.items : []) as Array<{ name?: string; kcal?: number; protein?: number }>;
+      const { items: newItems, removed, added } = applyCorrection(stored, plan, resolveFood as any);
+      const target = plan.moves ? parseMealDate(m) : (row.at as Date);
+      // Totals come from the items when every item carries its own numbers; otherwise the row's
+      // stored totals stand, because inventing a total from a partial plate is how a correction
+      // turns into a wrong number the client cannot see.
+      const priced = newItems.length > 0 && newItems.every(i => typeof i.kcal === "number");
+      const newKcal = priced ? newItems.reduce((s, i) => s + (i.kcal || 0), 0) : row.kcalInt;
+      const newProt = priced ? newItems.reduce((s, i) => s + (i.protein || 0), 0) : row.proteinInt;
+      if (removed.length || added.length || plan.moves) {
+        await db.update(mealLogs).set({
+          items: newItems as any, kcalInt: newKcal, proteinInt: newProt,
+          loggedAt: target, corrected: true,
+        }).where(eq(mealLogs.id, row.id));
+        invalidateFoodTotalsCache(user.id);
+        const recC = await recomputeTodayFoodTotals(user.id);
+        await db.update(users).set({ todayCalories: recC.calories, todayProteinG: recC.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+        console.log(`[MEAL_CORRECT] ${String(row.id).slice(0, 8)} removed=[${removed}] added=[${added}] `
+          + `day=${String(row.at).slice(0, 10)}→${mealDateLabel(target)} kcal=${row.kcalInt}→${newKcal} user=...${String(user.id).slice(-6)}`);
+        const plate = newItems.map(i => String(i.name || "")).filter(Boolean).join(", ") || "that meal";
+        const when = plan.moves ? ` on ${mealDateLabel(target)}` : "";
+        return `Fixed — ${plate}${when}.\n\nToday: ~${recC.calories} kcal | ~${recC.protein}g protein.`;
+      }
     }
   }
 

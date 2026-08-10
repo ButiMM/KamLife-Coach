@@ -102,8 +102,11 @@ const sum = (rows: Array<{ kcal: number | null }>) => rows.reduce((s, r) => s + 
   check("1. the row carries calories", sum(day1) > 0, `kcal=${sum(day1)}`);
 
   const r2 = await handleMessage(phone, "actually that was yesterday");
+  // Assert the OUTCOME, not the verb: one owner now writes every correction confirmation, so
+  // the sentence may say "Fixed — … on yesterday" or "Moved — …". What must hold is that the
+  // turn was understood and the confirmation names the day it landed on.
   check("2. the move is understood, not met with \"didn't catch that\"",
-    !/didn'?t (quite )?catch/i.test(r2) && /moved/i.test(r2), r2.slice(0, 140));
+    !/didn'?t (quite )?catch/i.test(r2) && /yesterday/i.test(r2), r2.slice(0, 140));
 
   const all = await db.select({ id: mealLogs.id }).from(mealLogs).where(eq(mealLogs.userId, u.id));
   check("3. it MOVED — one row, not a second copy", all.length === 1, `rows=${all.length}`);
@@ -115,6 +118,42 @@ const sum = (rows: Array<{ kcal: number | null }>) => rows.reduce((s, r) => s + 
   const rT = await handleMessage(phone, "what did I eat today?");
   check("5. today is correctly empty — no phantom calories", /nothing logged|no meals logged/i.test(rT), rT.slice(0, 160));
   check("5. the moved meal is not double-counted on today", !/58\d|59\d/.test(rT.replace(/1800|130/g, "")), rT.slice(0, 160));
+}
+
+// §5 — THE COMPOUND CORRECTION. Five operations in one turn: MOVE the day, REMOVE the rice,
+// REPLACE it with pap, ADD the spinach, and RETAIN the chicken nobody mentioned. Checked at the
+// row level, because the reply is not the record — the database is.
+{
+  console.log("\n── §5 compound correction: remove + retain + add + replace + move, one turn ──");
+  const phone = "whatsapp:+27000000105";
+  const u = await freshUser(phone);
+
+  await handleMessage(phone, "I had rice and chicken for lunch");
+  const t1 = await db.select({ id: mealLogs.id }).from(mealLogs).where(eq(mealLogs.userId, u.id));
+  check("turn 1: one meal, dated today", t1.length === 1 && (await dayRows(u.id)).length === 1);
+  const originalId = String(t1[0]?.id || "");
+
+  const r2 = await handleMessage(phone, "actually no, that was yesterday. and it wasn't rice, it was pap. and I had spinach too");
+  const after = await db.select({ id: mealLogs.id, items: mealLogs.items, at: mealLogs.loggedAt })
+    .from(mealLogs).where(eq(mealLogs.userId, u.id));
+  const names = (after[0]?.items as any[] || []).map(i => String(i?.name || "").toLowerCase()).join(" | ");
+
+  check("turn 2: still ONE meal — a correction is not a second lunch", after.length === 1, `rows=${after.length}`);
+  check("turn 2: the SAME row was mutated, not replaced", String(after[0]?.id) === originalId,
+    `${originalId.slice(0, 8)} → ${String(after[0]?.id).slice(0, 8)}`);
+  check("turn 2: RETAIN — the chicken nobody mentioned survives", /chicken/.test(names), names);
+  check("turn 2: REMOVE — the rice they corrected is gone", !/rice/.test(names), names);
+  check("turn 2: REPLACE — pap is on the plate", /pap/.test(names), names);
+  check("turn 2: ADD — spinach is on the plate", /spinach/.test(names), names);
+  check("turn 2: MOVE — the meal is off today", (await dayRows(u.id)).length === 0);
+  check("turn 2: the confirmation is brief, no lecture", r2.length < 220 && !/great|well done|proud/i.test(r2), r2.slice(0, 160));
+
+  const rY = await handleMessage(phone, "what did I eat yesterday?");
+  check("turn 3: yesterday reads chicken, pap, spinach",
+    /chicken/i.test(rY) && /pap/i.test(rY) && /spinach/i.test(rY) && !/\brice\b/i.test(rY), rY.slice(0, 200));
+
+  const rT = await handleMessage(phone, "what did I eat today?");
+  check("turn 4: today is empty", /nothing logged|no meals logged/i.test(rT), rT.slice(0, 140));
 }
 
 // THE HOLD — a correction never deletes on a promise. Verified at the row level: the entry
