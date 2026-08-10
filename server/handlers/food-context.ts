@@ -172,9 +172,8 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
 
   const patch = { rawMessage: rawSlice, kcalInt: params.kcalInt, proteinInt: params.proteinInt, carbsInt, fatInt, items: params.items, mealLabel: params.mealLabel };
   const itemNames = (Array.isArray(params.items) ? params.items : []).map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean);
-  // A held row's REPLACEMENT (a correction holds rather than deleting on a promise) and an
-  // AMENDMENT (2026-08-06: adding the avo re-logged the whole breakfast, ~950 phantom kcal) both
-  // rewrite an existing row and suppress the insert below. Neither ever creates a second row.
+  // A held row's REPLACEMENT and an AMENDMENT both rewrite an existing row and suppress the
+  // insert below. Neither ever creates a second row.
   const heldId = await replaceHeldMeal(params.userId, `${rawSlice} ${itemNames.join(" ")}`, patch);
   const amendedId = heldId || await amendRecentMeal(params.userId, itemNames, patch);
   if (amendedId) { invalidatePatternCache(params.userId); invalidateFoodTotalsCache(params.userId); }
@@ -751,7 +750,8 @@ export async function handleFoodContext(ctx: {
     // Opinion / advice questions that MENTION food but aren't logging it.
     || /\b(what do you think|what.?s your (take|opinion|view)|thoughts on|your opinion|opinion on|is it (advisable|worth|better|okay|fine)|do you (recommend|think|reckon)|would you (recommend|say)|what about (having|eating|adding)|better to (have|eat)|is it bad to)\b/i.test(m)
     || /^(is |does |do |will |can |should |are |have |has |what |why |which )\b/i.test(m)
-    || isAskingNotReporting(m); // one owner for "is this an ask" — this gate logged a meal nobody ate
+    // WO2 fix 3: an ask stands this path down UNLESS the meal was dated in the PAST (J4 dates it, J3's "KFC tonight?" does not). Both sides asserted in acceptance-hold.ts.
+    || (isAskingNotReporting(m) && !isRetroactiveMeal(m));
   const foodLogOverride = hasLogTrigger && hasActualFood && !hasSubstantiveQuestion && !classifierQuestion;
 
   // Diagnostic: any message containing recognised foods logs its gate state — when a

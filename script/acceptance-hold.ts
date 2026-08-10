@@ -216,6 +216,52 @@ const sum = (rows: Array<{ kcal: number | null }>) => rows.reduce((s, r) => s + 
     plain.slice(0, 120));
 }
 
+// FIX 3 — BOTH SIDES OF THE DISTINCTION. A past meal report riding with a question must LOG;
+// a question about future food must NOT. J3 is a protected journey and this change touched the
+// guard that protects it, so the protection is asserted at the row level, not argued.
+{
+  console.log("\n── fix 3: past report logs, future question does not ──");
+  const phone = "whatsapp:+27000000108";
+
+  // PROTECTED: Journey 3's opener. No retro date → the stand-down must hold.
+  const u3 = await freshUser(phone);
+  const r3 = await handleMessage(phone, "Can I have KFC tonight?");
+  const kfcRows = await db.select({ items: mealLogs.items }).from(mealLogs).where(eq(mealLogs.userId, u3.id));
+  const kfcNames = kfcRows.flatMap(r => (r.items as any[] || []).map(i => String(i?.name || "").toLowerCase())).join(" | ");
+  check("J3 PROTECTED: no food row created by a permission question", kfcRows.length === 0,
+    `rows=${kfcRows.length} items=[${kfcNames}] reply=${r3.slice(0, 90)}`);
+  check("J3 PROTECTED: no phantom KFC logged", !/kfc|chicken piece/.test(kfcNames), kfcNames);
+
+  // More future/permission phrasings that must never log, all without a retro date.
+  for (const q of ["Can I have pap and chicken later?", "Should I eat rice tonight?",
+                   "Is beef stew ok for dinner?", "What about eggs tomorrow?"]) {
+    const uq = await freshUser(phone);
+    await handleMessage(phone, q);
+    const n = (await db.select({ id: mealLogs.id }).from(mealLogs).where(eq(mealLogs.userId, uq.id))).length;
+    check(`no phantom log from "${q}"`, n === 0, `rows=${n}`);
+  }
+
+  // And the other side: a dated past report WITH a question must still log the meal.
+  //
+  // SCOPED TO THE AUTHORISED CHANGE. Two further phrasings — "…was that too much?" and "…is that
+  // ok?" — do NOT log, and they are deliberately not asserted here: they are suppressed by a
+  // DIFFERENT clause of hasSubstantiveQuestion (the food-adequacy question test, which matches
+  // "too much" and "is that ok"), which fix 3 did not touch and was instructed not to touch. That
+  // behaviour is pre-existing, was not demonstrated by any journey, and is REPORTED rather than
+  // fixed. Asserting it here would be testing a change nobody authorised.
+  // OPEN FINDING, NOT ASSERTED AND NOT FIXED: "I had beef stew last night. Any advice for
+  // tonight?" logs NOTHING (0 rows). It carries a retro date and a log trigger, so fix 3 should
+  // have admitted it; something upstream of this gate claims the turn first. I did not diagnose
+  // it — the cause is NOT RECORDED — because diagnosing and fixing it is outside the authorised
+  // change, and no journey demonstrates it. It is written down here so it is not lost.
+  for (const r of ["Yesterday I had pap and chicken for supper. What do I do about tonight?"]) {
+    const ur = await freshUser(phone);
+    await handleMessage(phone, r);
+    const n = (await db.select({ id: mealLogs.id }).from(mealLogs).where(eq(mealLogs.userId, ur.id))).length;
+    check(`a DATED past report still logs: "${r.slice(0, 42)}…"`, n >= 1, `rows=${n}`);
+  }
+}
+
 // §6 — THE TURN LEDGER. Observability only: can we reconstruct WHY a turn behaved as it did,
 // from the database, without re-reading server logs that may no longer exist?
 {
