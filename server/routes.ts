@@ -38,7 +38,7 @@ import { stripSignupSource } from "./signup-source";
 import { captureSignupSource } from "./signup-capture";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
-import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser } from "./handlers/chat-log";
+import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
 import { handleWorkoutCommands } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
@@ -50,7 +50,8 @@ import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
-import { normalizerFidelity } from "./normalizer-fidelity";import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
+import { normalizerFidelity } from "./normalizer-fidelity";
+import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, isMultiPartAsk, getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { mentionsConditionOrMedication, conditionWelcome } from "./condition-welcome";
 
@@ -1033,7 +1034,25 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
   // ---- FOOD CONTEXT (corrections, braai, eating out, relog, scanner, GPT fallback) ----
   const foodCtxResult = await handleFoodContext({ phone, message, m, user, stepReplyPart, handleMessage, classifierQuestion: normalizedQuestion });
-  if (foodCtxResult !== null) return foodCtxResult;
+  if (foodCtxResult !== null) {
+    // ONE TURN CAN CARRY TWO OUTCOMES (2026-08-10, Work Order 2). Journey 4 logged its food and
+    // then THIS LINE ended the turn, so the client got a logging acknowledgement and their actual
+    // question ("tonight there's a family thing… what do I do?") was never answered by anything.
+    //
+    // The food path stays exactly as deterministic as it was — by the time we are here it has
+    // already parsed and COMMITTED the meal, which is why nothing inside it changes. What changes
+    // is only who writes the reply: when the same message also carries a coaching question, the
+    // turn continues to Coach K, who has the raw message AND the committed food in state, and
+    // answers in one voice instead of a confirmation stapled to an answer.
+    //
+    // Narrow on purpose, so an ordinary log keeps its confirmation and its card: a question AND
+    // either several asks or an admission of how they feel. Reuses the existing predicates.
+    const alsoAsksCoach = looksLikeQuestion(message)
+      && (isMultiPartAsk(message) || carriesFeelingClause(message));
+    if (!alsoAsksCoach) return foodCtxResult;
+    turnMutation(`MULTI_INTENT food committed by the deterministic path; the question continues to Coach K`);
+    console.log(`[MULTI_INTENT] food logged, coaching question preserved — "${message.slice(0, 70)}"`);
+  }
 
   // ---- WEIGHT FORECAST / TRAJECTORY ----
   // The anti-"it's a scam" tool: from the client's OWN logged food + steps vs their

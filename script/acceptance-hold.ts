@@ -174,6 +174,48 @@ const sum = (rows: Array<{ kcal: number | null }>) => rows.reduce((s, r) => s + 
   check("no denial on the calorie question", !/nothing logged yet today/i.test(rQ), rQ.slice(0, 140));
 }
 
+// WO2 — ONE TURN, TWO OUTCOMES. The demonstrated Journey 4 failure: food + context + emotion +
+// an explicit coaching question was reduced to a logging acknowledgement. Both outcomes are
+// asserted here — the deterministic food mutation AND that the turn did not end at the food path.
+{
+  console.log("\n── WO2 multi-intent: food logged AND the coaching question survives ──");
+  const phone = "whatsapp:+27000000107";
+  const u = await freshUser(phone);
+
+  const J4 = "Ok so yesterday I had pap and beef stew for supper, and this morning just tea, "
+    + "I think I walked about 6000 steps maybe more I'm not sure, I missed gym on Monday "
+    + "because my back was sore, I'm feeling a bit useless honestly, and tonight there's a "
+    + "family thing with lots of food. What do I do about tonight?";
+
+  const reply = await handleMessage(phone, J4);
+  const rows = await db.select({ id: mealLogs.id, items: mealLogs.items, at: mealLogs.loggedAt, kcal: mealLogs.kcalInt })
+    .from(mealLogs).where(eq(mealLogs.userId, u.id));
+  const names = rows.flatMap(r => (r.items as any[] || []).map(i => String(i?.name || "").toLowerCase())).join(" | ");
+
+  // OUTCOME 1 — the deterministic food mutation still happens, on the day they named.
+  check("WO2 food is committed", rows.length >= 1, `rows=${rows.length}`);
+  check("WO2 pap is logged", /pap/.test(names), names);
+  check("WO2 beef stew is logged", /beef|stew/.test(names), names);
+  check("WO2 dated YESTERDAY, not today", (await dayRows(u.id)).length === 0,
+    `rows on today=${(await dayRows(u.id)).length}`);
+  check("WO2 no duplicate food entries", rows.length <= 2, `rows=${rows.length}`);
+
+  // OUTCOME 2 — the turn did NOT end at the food confirmation. Offline the coaching path cannot
+  // reach the model, so this asserts the ROUTING changed, not the quality of the answer: the
+  // reply is no longer the food-log confirmation. Coaching QUALITY needs the live model and is
+  // measured by the six-journey harness, never here.
+  const looksLikeFoodConfirmation = /^Got it —|logged\b.*👌|Running total/i.test(reply.trim());
+  check("WO2 the turn did NOT end at the food confirmation", !looksLikeFoodConfirmation,
+    `reply: ${reply.slice(0, 120)}`);
+  check("WO2 the coaching path was reached", /Coach K had a moment|tonight/i.test(reply),
+    `offline the brain errors, which still proves the turn continued: ${reply.slice(0, 120)}`);
+
+  // …and an ORDINARY log must keep its confirmation. The narrow predicate is the whole point.
+  const plain = await handleMessage(phone, "chicken and rice for lunch");
+  check("WO2 an ordinary log still gets its confirmation", /got it|logged|kcal/i.test(plain),
+    plain.slice(0, 120));
+}
+
 // §6 — THE TURN LEDGER. Observability only: can we reconstruct WHY a turn behaved as it did,
 // from the database, without re-reading server logs that may no longer exist?
 {

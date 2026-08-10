@@ -22,6 +22,7 @@ import {
 import { withTimeout, logChat } from "./chat-log";
 import { goalStatusLine } from "../education";
 import { dailyMacroCardMarker } from "../macro-card-attach";
+import { carriesFeelingClause } from "../unlogged-notice";
 import { calculateTargets, waterTargetLitres } from "../targets";
 import { getSleepResponse } from "./sleep";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
@@ -29,7 +30,7 @@ import { getGroceryPersonalization } from "../grocery-personalize";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
 import { sendCriticalAlert } from "../scheduler/shared";
-import { isAskingNotReporting, sastToday, sastDayStart, proteinOptions , commaName, spaceName, getDisplayName, parseMealDate, isRetroactiveMeal, mealDateLabel} from "../utils";
+import { isAskingNotReporting, sastToday, sastDayStart, proteinOptions , commaName, spaceName, getDisplayName, parseMealDate, isRetroactiveMeal, mealDateLabel, looksLikeQuestion, isMultiPartAsk} from "../utils";
 import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
 import { scanForSAFoods, weeklyNetLine } from "./food-scanner";
@@ -1359,7 +1360,20 @@ export async function handleLifecycle(ctx: {
   const isMissedWorkout =
     /\b(missed.*(?:workout|session|gym|training)|couldn.?t.*(?:train|gym|workout)|skipped.*(?:gym|session|workout|training)|didn.?t.*(?:train|go to gym|workout)|missed.*gym|didn.?t make it|couldn.?t make it|no gym yesterday|missed yesterday|no training today|didn.?t train)\b/i.test(m);
 
-  if (isMissedWorkout) {
+  // A SINGLE-FACT HANDLER MAY NOT CLAIM A MULTI-PART TURN (2026-08-10, Work Order 2).
+  //
+  // Journey 4 mentions a missed session in passing — "I missed gym on Monday because my back was
+  // sore" — inside a message whose actual question is about a family event tonight. The substring
+  // matched here and this branch answered with a five-paragraph missed-session protocol ending in
+  // "6am? 12pm? After work at 5pm?", which is three clarifying questions to a person who asked
+  // one. The mention was real; the claim on the whole turn was not.
+  //
+  // Same stand-down the calorie branch in early-commands already uses, and the same predicates:
+  // when the message asks several things, or tells us how they feel, this hands the turn on
+  // rather than answering the part it happens to recognise.
+  if (isMissedWorkout && looksLikeQuestion(m) && (isMultiPartAsk(m) || carriesFeelingClause(m))) {
+    console.log(`[MISSED_WORKOUT] standing down — the turn asks more than this branch answers`);
+  } else if (isMissedWorkout) {
     const name = spaceName(user);
     const total = user.totalWorkoutsCompleted || 0;
     const missedReply = `One missed session${name} — that is all it is.\n\n${total > 0 ? `You have ${total} sessions completed. One miss does not erase that.` : "Getting back on track starts now."}\n\n*The rule:* Never miss twice. One miss is life. Two misses in a row is the start of a habit.\n\n*What to do right now:*\nDecide when you train next — not "tomorrow maybe", give me the specific time. 6am? 12pm? After work at 5pm?\n\nThat is your only job. Pick the time.`;
