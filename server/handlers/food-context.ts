@@ -755,7 +755,7 @@ export async function handleFoodContext(ctx: {
   const foodLogOverride = hasLogTrigger && hasActualFood && !hasSubstantiveQuestion && !classifierQuestion;
   // Diagnostic: when a meal silently fails to log in production, this line names the reason instantly.
   if (hasActualFood) {
-    console.log(`[FOOD_GATE] user=...${String(user.id || "").slice(-6)} foods=[${foodsInMsg.map(f => f.name).join("|")}] q=${isQuestion} frus=${isFrustration} emo=${isEmotionalOnly} future=${isFuturePlanning} trig=${hasLogTrigger} direct=${directFoodScan} override=${foodLogOverride} words=${m.split(/\s+/).length} m=${JSON.stringify(String(m).slice(0,90))}`);
+    console.log(`[FOOD_GATE] user=...${String(user.id || "").slice(-6)} foods=[${foodsInMsg.map(f => f.name).join("|")}] q=${isQuestion} frus=${isFrustration} emo=${isEmotionalOnly} future=${isFuturePlanning} trig=${hasLogTrigger} direct=${directFoodScan} override=${foodLogOverride} words=${m.split(/\s+/).length}`);
   }
 
   // ---- RETROSPECTIVE DIET HISTORY — "within the week", "usually eat", "normally I have" ----
