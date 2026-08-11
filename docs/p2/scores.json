@@ -319,5 +319,28 @@
       "reason": "Opens with a raw Twilio error. One valid turn afterwards is not enough to judge the exchange."
     }
   ],
-  "INVALIDATED": "2026-08-11: the corpus parser was wrong when these were scored — media turns were swallowed (U+200E), the voice pipeline was counted as broken output, and 6 of 9 'truncations' were headers followed by their card image. The six turns marked `excluded` and the four conversations marked UNRESOLVED-infrastructure are INVALID and must be re-scored from a regenerated sheet. Dimension scores judged on message text remain indicative; turn indices do not. See MEASUREMENT-GAPS.md §0."
+  "INVALIDATED": "2026-08-11: the corpus parser was wrong when these were scored — media turns were swallowed (U+200E), the voice pipeline was counted as broken output, and 6 of 9 'truncations' were headers followed by their card image. The six turns marked `excluded` and the four conversations marked UNRESOLVED-infrastructure are INVALID and must be re-scored from a regenerated sheet. Dimension scores judged on message text remain indicative; turn indices do not. See MEASUREMENT-GAPS.md §0.",
+  "voiceTurns": {
+    "note": "16 turns recovered by the importer fix. ALL 16 received no coaching reply of their own — transcribed and echoed, never answered before the member spoke again. Understanding/Continuity/Actionability are therefore UNRESOLVED: there is no reply to judge. Scoring them would invent evidence. Actionability as a delivered outcome is 1 — nothing to act on reached the member. Confound checked: typed messages answer in ~6s, and one conversation shows a 290-second window with no coach speech across six voice notes. No new anchors created.",
+    "understanding": "UNRESOLVED",
+    "continuity": "UNRESOLVED",
+    "actionability_as_delivered": 1,
+    "C6_flag": "present and severe — V1 carries a whole day's food and receives no reply",
+    "C4_flag": "candidate at V5 — 'remove that meal' (bread/eggs/avocado/coffee) followed by 'Done — Rice and minced beef logged for dinner', a different meal. NOT scored: the transcript cannot show which row was touched. Requires the ledger evidence that does not exist.",
+    "populationRates": {
+      "replyBeforeMemberSpeaksAgain": "83/408 = 20%",
+      "within5min": "205/408 = 50%",
+      "within15min": "235/408 = 58%",
+      "burstsEventuallyAnswered": "206/209 = 99%",
+      "supersedes": "the 97% in MEASUREMENT-GAPS.md, which counted the transcript echo as a reply"
+    }
+  },
+  "ledger": {
+    "finding": "LEDGER_UNAVAILABLE",
+    "state_read_writers": 1,
+    "state_read_location": "server/handlers/food-log-mgmt.ts:154 (correction branch only)",
+    "mutations_writers": 4,
+    "adapterBuilt": false,
+    "reason": "the evidence required to answer 'what did Coach K have available' is not recorded; no product change was made to create it"
+  }
 }
