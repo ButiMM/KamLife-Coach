@@ -1,0 +1,100 @@
+{
+  "scoredBy": "claude (P2-C), applying the founder's P2-B written standard. NOT founder-scored — overturnable per turn.",
+  "scoredAt": "2026-08-11",
+  "turns": [
+    { "sheetId": 1, "conversationId": "20260805-1237", "excluded": "infrastructure — build artifact", "scores": {} },
+    { "sheetId": 9, "conversationId": "20260806-1847", "excluded": "infrastructure — listening placeholder", "scores": {} },
+    { "sheetId": 10, "conversationId": "20260806-1847", "excluded": "infrastructure — listening placeholder, byte-identical to #9", "scores": {} },
+    { "sheetId": 18, "conversationId": "20260807-1150", "excluded": "infrastructure — listening placeholder", "scores": {} },
+    { "sheetId": 19, "conversationId": "20260807-1627", "excluded": "infrastructure — truncated food-log header, no log", "scores": {} },
+    { "sheetId": 24, "conversationId": "20260811-0821", "excluded": "infrastructure — raw Twilio error, exposes member phone number", "scores": {} },
+
+    { "sheetId": 2, "conversationId": "20260805-1237",
+      "scores": { "understanding": 4, "continuity": 4, "actionability": 3, "humanity": 3, "accountability": "UNRESOLVED" },
+      "notes": "Asked for targets, got his real targets. Actionability 3: a lookup with no 'and here is where you are against them'. Humanity scored on intended text — the trailing 'specific. 👌' is a truncation artifact and principle 18 forbids letting a broken pipe cost the coach humanity. Accountability UNRESOLVED: nothing in the transcript shows whether anything needed correcting." },
+
+    { "sheetId": 3, "conversationId": "20260806-1303",
+      "scores": { "understanding": 4, "continuity": "UNRESOLVED", "actionability": 4, "humanity": 3, "accountability": "UNRESOLVED" },
+      "notes": "Correction understood and acted on without a hand-back — 'I'll take care of that now'. One of the few turns that DOES the thing. Continuity UNRESOLVED: cannot verify from a transcript that the row actually changed. Humanity 3: 'I hear your frustration, and I apologize' is stock, but brief and not damaging." },
+
+    { "sheetId": 4, "conversationId": "20260806-1530",
+      "scores": { "understanding": 2, "continuity": 3, "actionability": 1, "humanity": 2, "accountability": 2 },
+      "notes": "ANCHOR (actionability 1). He removed every ambiguity — 'Be the coach. Coach me.' — and the reply announces an intention to focus on next steps without containing one. Understanding 2 not 1: it did name the muscle-gain goal, so it tracked the topic; it did not grasp the demand." },
+
+    { "sheetId": 5, "conversationId": "20260806-1530",
+      "scores": { "understanding": 4, "continuity": 4, "actionability": 3, "humanity": 4, "accountability": 3 },
+      "notes": "The strongest non-anchored turn in the sample. Answered all three questions AND the fear underneath ('I don't want to be fat') with body composition rather than a number. Tied the target to his actual weight. Actionability 3: informative, nothing to do today." },
+
+    { "sheetId": 6, "conversationId": "20260806-1530",
+      "scores": { "understanding": 1, "continuity": 2, "actionability": 2, "humanity": 1, "accountability": "UNRESOLVED" },
+      "notes": "ANCHOR (understanding 1). INFRA-CAUSED: the preceding reply truncated at '...for these spots:' and answered restaurants when he asked groceries. This turn is the failed recovery. Humanity 1: 'I'm here to support you every step of the way!' is verbatim on principle 3's list of weak statements." },
+
+    { "sheetId": 7, "conversationId": "20260806-1530",
+      "scores": { "understanding": 1, "continuity": 2, "actionability": 2, "humanity": 1, "accountability": "UNRESOLVED" },
+      "notes": "Same complaint repeated, near-identical paragraph returned — the recurrence rule fires. Also carries a duplication artifact ('What do you need right now? right now?')." },
+
+    { "sheetId": 8, "conversationId": "20260806-1530",
+      "scores": { "understanding": 1, "continuity": "UNRESOLVED", "actionability": 1, "humanity": 2, "accountability": "UNRESOLVED" },
+      "notes": "He asked 'do you understand other languages?????' and received identity boilerplate that never answers. Understanding 1 and severe: principle 11 makes South African multilingual comprehension a FIRST-CLASS requirement, and the product could not answer a direct question about it." },
+
+    { "sheetId": 11, "conversationId": "20260806-1847",
+      "scores": { "understanding": 4, "continuity": 3, "actionability": 2, "humanity": 3, "accountability": "UNRESOLVED" },
+      "notes": "Caught its own time-of-day error and owned it cleanly. Then handed the decision back — 'What are you planning to have?' — at exactly the point it had enough context to propose dinner." },
+
+    { "sheetId": 12, "conversationId": "20260807-0600",
+      "scores": { "understanding": 3, "continuity": 1, "actionability": 2, "humanity": 2, "accountability": 2 },
+      "notes": "ANCHOR (continuity 1). Invented a 1.0kg loss and an 83.3kg body weight against no weigh-in. The request was understood; the answer was fabricated." },
+
+    { "sheetId": 13, "conversationId": "20260807-0600",
+      "scores": { "understanding": 3, "continuity": 3, "actionability": 3, "humanity": 3, "accountability": "UNRESOLVED" },
+      "notes": "ANCHOR (continuity 3). Goal used, everything else about him ignored — budget, time, what he actually eats. Contains the honey-with-pilchards suggestion, which is the concrete cost of not using context." },
+
+    { "sheetId": 14, "conversationId": "20260807-0600",
+      "scores": { "understanding": 3, "continuity": 3, "actionability": 3, "humanity": 3, "accountability": "UNRESOLVED" },
+      "notes": "ANCHOR (understanding 3). Acted on the stated objection and owned the error; missed the constraint underneath and closed by handing the choice back." },
+
+    { "sheetId": 15, "conversationId": "20260807-0600",
+      "scores": { "understanding": 3, "continuity": 2, "actionability": 3, "humanity": 2, "accountability": "UNRESOLVED" },
+      "notes": "A usable snack list, so actionability is real. Continuity 2: hummus and whole-grain crackers for a member whose budget has already been raised twice in this conversation. Ends 'What do you think?'." },
+
+    { "sheetId": 16, "conversationId": "20260807-0600",
+      "scores": { "understanding": 3, "continuity": 3, "actionability": 3, "humanity": 2, "accountability": "UNRESOLVED" },
+      "notes": "Did genuinely adjust to budget — pap, peanuts, banana 'if affordable' — which is the correct move. Humanity 2: a formulaic apology followed by the same closing question that caused the frustration." },
+
+    { "sheetId": 17, "conversationId": "20260807-0600",
+      "scores": { "understanding": 2, "continuity": 2, "actionability": 1, "humanity": 1, "accountability": 2 },
+      "notes": "ANCHOR (humanity 1). Third consecutive apology-then-question, to a member reduced to 'Omg❗️❗️❗️'. At the moment one decision needed making for him, he was asked to choose again." },
+
+    { "sheetId": 20, "conversationId": "20260808-0600",
+      "scores": { "understanding": 4, "continuity": "UNRESOLVED", "actionability": 2, "humanity": 3, "accountability": 3 },
+      "notes": "ANCHOR (humanity 3). Logged two burgers and fries without a lecture — the behaviour that keeps a member honest tomorrow. Accountability 3 not 1: he is on muscle gain, so burgers are not an adherence failure. 'Drink enough water' is filler that would fit any message." },
+
+    { "sheetId": 21, "conversationId": "20260808-0600",
+      "scores": { "understanding": 4, "continuity": 5, "actionability": 3, "humanity": 3, "accountability": 3 },
+      "notes": "ANCHOR (continuity 5, accountability 3). The only observed 5 in the corpus. Refuses to invent the number and says what would make the answer available. Then buries it in a wall of text and hands the meal plan back." },
+
+    { "sheetId": 22, "conversationId": "20260808-1415",
+      "scores": { "understanding": 4, "continuity": 3, "actionability": 3, "humanity": 4, "accountability": 1 },
+      "notes": "ANCHOR (actionability 3, accountability 1). The split that defines cluster C5: humanity 4 because it does not moralise about alcohol, accountability 1 because three ciders is a real number and nothing was counted, adjusted or traded off." },
+
+    { "sheetId": 23, "conversationId": "20260808-1415",
+      "scores": { "understanding": 3, "continuity": 2, "actionability": 2, "humanity": 1, "accountability": "UNRESOLVED" },
+      "notes": "Says the same thing twice inside one message: 'No meals logged yet today. I don't have a meal logged for you today.' Self-duplication inside a single reply — a distinct shape from C3's across-turn repetition." },
+
+    { "sheetId": 25, "conversationId": "20260811-0821",
+      "scores": { "understanding": 4, "continuity": "UNRESOLVED", "actionability": 3, "humanity": 3, "accountability": "UNRESOLVED" },
+      "notes": "'What did you have for breakfast?' is a NECESSARY question — it cannot log without the answer, and principle 2 permits questions that materially improve coaching. Recorded deliberately as the contrast case to the C1 hand-backs: the defect is not asking, it is asking instead of deciding." }
+  ],
+  "conversations": [
+    { "conversationId": "20260805-1237", "coaching_value": 2, "reason": "A targets lookup and a build artifact. Correct, thin, nothing moved." },
+    { "conversationId": "20260806-1303", "coaching_value": 3, "reason": "A correction understood and acted on without argument. Real value, small scope." },
+    { "conversationId": "20260806-1530", "coaching_value": 1, "reason": "Asked for grocery help, got restaurants, then a brochure, then the same brochure. Left with nothing and repeating himself." },
+    { "conversationId": "20260806-1847", "coaching_value": "UNRESOLVED", "reason": "Two of three coach turns are listening placeholders. Too little coaching content to judge — an infrastructure failure destroyed the measurement, not just the turn." },
+    { "conversationId": "20260807-0600", "coaching_value": 1, "reason": "ANCHOR. Invented weight, unaffordable food, honey with pilchards, three consecutive hand-backs. Ends on 'Omg❗️❗️❗️'." },
+    { "conversationId": "20260807-1150", "coaching_value": "UNRESOLVED", "reason": "A single member message answered with a listening placeholder. No coaching occurred to score." },
+    { "conversationId": "20260807-1627", "coaching_value": "UNRESOLVED", "reason": "'Show me my meals' answered with a truncated header and no log. Infrastructure, not coaching." },
+    { "conversationId": "20260808-0600", "coaching_value": 3, "reason": "ANCHOR. Burgers logged without judgement; the refusal to invent a weight is the coach being honest at its own expense. Still repeats itself and hands the plan back." },
+    { "conversationId": "20260808-1415", "coaching_value": 2, "reason": "Alcohol handled without shame, which matters — but the trade-off was never coached, and the meals reply duplicates itself." },
+    { "conversationId": "20260811-0821", "coaching_value": "UNRESOLVED", "reason": "Opens with a raw Twilio error. One valid turn afterwards is not enough to judge the exchange." }
+  ]
+}
