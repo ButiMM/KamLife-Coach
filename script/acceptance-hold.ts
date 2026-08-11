@@ -333,6 +333,46 @@ console.log("\n── 7. the coach tells, it does not hand the work back ──"
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. WO6-D — forceLog GOVERNS THE WRITE. The engine's LOG_MEAL hands the handler the model's
+// EXTRACTED foodText, not the client's sentence: "I had rice and chicken for lunch" arrives as
+// "rice and chicken". No logging verb, two words of food — every write gate said no, J5 turn 1
+// wrote nothing, and turn 2's correction had no row to correct. forceLog now stands in for the
+// verb the engine stripped. The three assertions below are the whole contract: it writes when
+// the engine says so, it changes NOTHING for an ordinary turn, and it does not defeat J3.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log("\n── 8. forceLog governs the LOG_MEAL write ──");
+{
+  const { handleFoodContext } = await import("../server/handlers/food-context");
+  const engineTurn = async (u: any, phone: string, text: string, forceLog: boolean) =>
+    handleFoodContext({ phone, message: text, m: text.toLowerCase(), user: u, stepReplyPart: "",
+      handleMessage: async () => "", forceLog } as any);
+
+  // (a) exactly what mealTool passes: extracted food, no verb, forceLog on.
+  const pA = "whatsapp:+27000000108";
+  const uA = await freshUser(pA);
+  await engineTurn(uA, pA, "rice and chicken", true);
+  const rowsA = await dayRows(uA.id);
+  check("8. forceLog WRITES the extracted meal the engine resolved", rowsA.length === 1, `rows=${rowsA.length}`);
+  check("8. the written row carries calories", sum(rowsA) > 0, `kcal=${sum(rowsA)}`);
+
+  // (b) the same words with forceLog off must behave exactly as they did before this change:
+  // two bare foods, no verb, no quantity — not a log. This is the "ordinary turn" guarantee.
+  const pB = "whatsapp:+27000000109";
+  const uB = await freshUser(pB);
+  await engineTurn(uB, pB, "rice and chicken", false);
+  check("8. an ordinary turn (forceLog=false) is UNCHANGED — still no write",
+    (await dayRows(uB.id)).length === 0, `rows=${(await dayRows(uB.id)).length}`);
+
+  // (c) J3's phantom-food protection is downstream of the question guards, which forceLog does
+  // not touch. An engine turn that is still a question must not put food on the day.
+  const pC = "whatsapp:+27000000110";
+  const uC = await freshUser(pC);
+  await engineTurn(uC, pC, "is KFC ok tonight?", true);
+  check("8. J3 protection intact — forceLog does not log a question",
+    (await dayRows(uC.id)).length === 0, `rows=${(await dayRows(uC.id)).length}`);
+}
+
 console.log(`\nacceptance-hold: ${pass}/${pass + fail} passed against a REAL database`);
 if (fail) { console.log(`FAILED:\n${failures.map(f => `  - ${f}`).join("\n")}`); process.exit(1); }
 process.exit(0);

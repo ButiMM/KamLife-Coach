@@ -753,9 +753,7 @@ export async function handleFoodContext(ctx: {
     // WO2 fix 3: an ask stands this path down UNLESS the meal was dated in the PAST (J4 dates it, J3's "KFC tonight?" does not). Both sides asserted in acceptance-hold.ts.
     || (isAskingNotReporting(m) && !isRetroactiveMeal(m));
   const foodLogOverride = hasLogTrigger && hasActualFood && !hasSubstantiveQuestion && !classifierQuestion;
-
-  // Diagnostic: any message containing recognised foods logs its gate state — when a
-  // meal silently fails to log in production, this line names the reason instantly.
+  // Diagnostic: when a meal silently fails to log in production, this line names the reason instantly.
   if (hasActualFood) {
     console.log(`[FOOD_GATE] user=...${String(user.id || "").slice(-6)} foods=[${foodsInMsg.map(f => f.name).join("|")}] q=${isQuestion} frus=${isFrustration} emo=${isEmotionalOnly} future=${isFuturePlanning} trig=${hasLogTrigger} direct=${directFoodScan} override=${foodLogOverride} words=${m.split(/\s+/).length} m=${JSON.stringify(String(m).slice(0,90))}`);
   }
@@ -940,8 +938,10 @@ export async function handleFoodContext(ctx: {
     }
     // Fewer than 2 days had recognised food — fall through to single-day scanner
   }
-
-  if ((!isQuestion || foodLogOverride) && !isFrustration && !isEmotionalOnly && !isFuturePlanning && hasActualFood && (hasLogTrigger || directFoodScan)) {
+  // forceLog is the verb the engine stripped: LOG_MEAL passes the EXTRACTED foodText, so "I had rice and chicken for lunch"
+  // arrives as "rice and chicken" — no trigger, too few foods for directFoodScan, nothing written, and the correction that
+  // followed had no row to correct. It joins the TRIGGER conjunct only, so a question still never logs. acceptance-hold §8.
+  if ((!isQuestion || foodLogOverride) && !isFrustration && !isEmotionalOnly && !isFuturePlanning && hasActualFood && (hasLogTrigger || directFoodScan || forceLog)) {
     console.log(`[FOOD_SCAN] gate fired — user=...${String(user.id || "").slice(-6)} foods=${foodsInMsg.length} trigger=${hasLogTrigger} direct=${directFoodScan}`);
     const MEAL_KEYWORDS = ["breakfast", "lunch", "dinner", "supper", "snack", "brunch", "morning", "afternoon", "evening"];
     const mealSegments: { label: string; text: string }[] = [];
