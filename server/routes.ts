@@ -720,7 +720,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // ---- FOOD LOG MANAGEMENT (reset, remove, show) ----
-  const foodLogMgmtResult = await handleFoodLogMgmt(user, m);
+  const awaitingBefore = user.awaitingInputType; const foodLogMgmtResult = await handleFoodLogMgmt(user, m); if (/\b(actually|wasn'?t|were\s?n'?t|instead)\b/i.test(m)) console.warn(`[WO5-DIAG] PRE_FOODMGMT sha=${process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0,12) || process.env.APP_VERSION || "dev"} awaiting=${JSON.stringify(awaitingBefore)} claimed=${foodLogMgmtResult !== null} m=${JSON.stringify(String(m).slice(0,170))}`); // WO6-A TEMPORARY: awaiting read BEFORE the call — the food_reset_confirm branch clears the flag as a side effect and would erase its own evidence
   if (foodLogMgmtResult !== null) return foodLogMgmtResult;
 
 
