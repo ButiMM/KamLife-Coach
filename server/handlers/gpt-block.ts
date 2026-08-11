@@ -9,6 +9,7 @@ import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { recomputeTodayFoodTotals } from "./food-scanner";
 import { storeMemory, retrieveMemories } from "../memory";
 import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
+import { tellDontAsk } from "../reply-hygiene";
 import { logChat, withTimeout } from "./chat-log";
 import { checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./checks";
 import { detectLanguage } from "../constants";
@@ -651,6 +652,20 @@ SA voice. Direct. Coach forward, not backward.`;
   const rawReply = langPrefix ? `${langPrefix}${gptReply}` : gptReply;
   const gateResult = await safetyGate(rawReply, user, message);
   let finalReply = sanitizeCoachReply(gateResult.response, message, user.weeklyFoodBudget, user.injuries);
+
+  // TELL, DON'T ASK — ON THIS PATH TOO (2026-08-11, P2-E Work Item 1).
+  // The guard has existed since 2026-08-06 and was wired into the ENGINE path only, so every
+  // reply that fell through to this block kept its closing hand-back. That is the coverage hole
+  // behind the measured C1 cluster: "What do you think?" three times in a row to a member who
+  // had just asked to be coached. Same call, same order as the engine (sanitize → tellDontAsk →
+  // number strip), so both paths now close a reply the same way. A hand-back becomes the
+  // instruction computed from THIS member's actual state; when there is genuinely nothing to
+  // instruct, computeNextMove returns "" and the question survives untouched — asking is not
+  // banned, deferring the decision is.
+  try {
+    const { computeNextMove } = await import("../understanding/live");
+    finalReply = tellDontAsk(finalReply, await computeNextMove(user));
+  } catch (e) { console.warn("[TELL_DONT_ASK] non-fatal:", (e as any)?.message); }
 
   // NUMBER-FREE DELIVERY IN CONVERSATION (2026-07-15): the number-free default only
   // reached food/photo replies — a normal conversation still quoted calories to a

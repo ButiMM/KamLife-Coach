@@ -40,7 +40,9 @@ import { localiseSuggestion } from "../food-swaps";
  * Fail-open and silent: any error returns "", the reply ships unchanged, and a client never
  * loses a message because the coach could not think of a task.
  */
-async function computeNextMove(user: any): Promise<string> {
+// Exported (2026-08-11, P2-E WI1) so the GPT fallback path can shape its reply with the SAME
+// computed instruction the engine uses. One owner for "what should this member do next".
+export async function computeNextMove(user: any): Promise<string> {
   try {
     const { theNextMove } = await import("../education");
     const { recomputeTodayFoodTotals } = await import("../handlers/food-scanner");

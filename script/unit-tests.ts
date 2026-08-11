@@ -1787,6 +1787,36 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(tellDontAsk(t, "Get today's session done"), t, "only the CLOSING question is rewritten");
   });
 
+  // P2-E WORK ITEM 1 — THE COVERAGE HOLE, PINNED.
+  // tellDontAsk shipped 2026-08-06 and was wired into the ENGINE path only. Every reply that
+  // fell through to the GPT block kept its hand-back, which is the measured C1 cluster: three
+  // consecutive closing questions to a member who had just asked to be coached. The guard was
+  // never broken — it was never called. A test that only exercises the function would have
+  // stayed green through the entire failure, so this asserts the WIRING.
+  test("tell don't ask: EVERY reply-composition path applies the guard, not just the engine", async () => {
+    const { readFileSync } = await import("node:fs");
+    const paths = ["server/understanding/live.ts", "server/handlers/gpt-block.ts"];
+    for (const p of paths) {
+      assert.match(readFileSync(p, "utf-8"), /tellDontAsk\(/,
+        `${p} composes a client-facing reply but never applies the hand-back guard`);
+    }
+  });
+
+  test("tell don't ask: the founder's own C1 failures are rewritten, not merely detected", () => {
+    // Verbatim from the calibration corpus. Each was validated by the founder at Actionability 1.
+    const move = "Get 30g of protein into your next meal";
+    for (const q of [
+      "I understand this is frustrating. Let's reset and focus on what works for you. I'm here to help, so let's find the right options together. What do you want to tackle first?",
+      "These are quick, easy, and fit your muscle gain goal. What do you think?",
+      "Focus on protein-rich foods and include healthy carbs. What do you have at home?",
+    ]) {
+      const out = tellDontAsk(q, move);
+      assert.notEqual(out, q, `unchanged — the hand-back survived: ${q.slice(-40)}`);
+      assert.ok(!endsWithHandback(out), `still ends in a hand-back: ${out.slice(-60)}`);
+      assert.match(out, /protein/, `the computed instruction was dropped: ${out}`);
+    }
+  });
+
   test("provenance: 'this week' needs a weigh-in THIS WEEK, not a usable 10-day trend", async () => {
     const { applyProvenance } = await import("../server/verifiers/response-gate");
     const stale = { trend: { usable: true } as const, mealsLoggedToday: 2, calorieTarget: 2250, weighedThisWeek: false };
@@ -9125,11 +9155,17 @@ await Promise.all(pending);
     }
   });
 
-  test("P2: coaching_value stays LOCKED — the corpus contains no level-5 conversation", () => {
+  // The cap was lifted deliberately by the founder (P2-D adjudication §5) with a SPECIFIED
+  // exemplar. The old assertion — that coaching_value stays LOCKED — is now wrong on purpose.
+  // What must not be lost is the distinction it protected: the level-5 conversation is the
+  // founder's TARGET STATE, not evidence that production reaches it. If a future run ever
+  // presents a specified anchor as an observation, this fails.
+  test("P2: coaching_value level 5 is SPECIFIED — never presented as an observed conversation", () => {
     const store = JSON.parse(readFileSync("docs/p2/anchors.json", "utf-8"));
-    const cov = anchorCoverage(store).find(c => c.target === "coaching_value")!;
-    assert.deepEqual(cov.missing, [5], "coaching_value coverage changed — if a 5 was found, update this test deliberately");
-    assert.throws(() => assertScoreable("coaching_value", store), /refusing to score/);
+    const five = store.anchors.filter((a: any) => a.target === "coaching_value" && a.level === 5);
+    assert.equal(five.length, 1, "expected exactly one level-5 coaching_value anchor");
+    assert.equal(five[0].provenance, "specified", "a level-5 conversation was never OBSERVED in the corpus");
+    assert.match(five[0].reason, /NOT OBSERVED/, "the anchor must say plainly that it is the target, not evidence");
   });
 }
 
