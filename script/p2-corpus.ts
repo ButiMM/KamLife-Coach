@@ -329,13 +329,22 @@ export function loadConversationFile(path: string, opts: Partial<WhatsAppAdapter
  */
 const VOICE_ACK = /^🎤\s*Coach K is listening/;
 const PHOTO_ACK = /^📸\s*Got your photo/;
-const HEARD = /^🎤\s*I heard:\s*"?([\s\S]*?)"?\s*$/;
+// FIRST LINE ONLY. The reply rides in the SAME message, after a blank line:
+//   🎤 I heard: "…"\n\nNoted — bowl of Cheerios … How's the energy feeling?
+// The first draft used [\s\S]*? to end-of-string, swallowed the reply, and marked the whole
+// message as pipeline — which manufactured a "voice notes get no reply" defect that does not
+// exist (349/350 echoes carry their reply). Anchor the capture to one line.
+const HEARD = /^🎤\s*I heard:\s*"?([^\n]*?)"?\s*$/;
 const MEDIA_PLACEHOLDER = /^[\s\u200e\u200f]*(audio|image|video|sticker|document) omitted\s*$/i;
 
 /** True for a coach message that is transport plumbing rather than something the coach said. */
 export function isPipelineMessage(text: string): boolean {
   const t = text.trim();
-  return VOICE_ACK.test(t) || PHOTO_ACK.test(t) || HEARD.test(t) || MEDIA_PLACEHOLDER.test(t);
+  if (VOICE_ACK.test(t) || PHOTO_ACK.test(t) || MEDIA_PLACEHOLDER.test(t)) return true;
+  // An echo is pipeline ONLY when nothing follows it. When the coaching reply rides in the same
+  // message, that message IS the coach speaking and must stay scoreable.
+  const [first, ...rest] = t.split("\n");
+  return HEARD.test(first.trim()) && rest.join("\n").trim().length <= 15;
 }
 
 /**
@@ -346,8 +355,12 @@ export function resolveVoicePipeline(conv: Conversation): Conversation {
   for (let i = 0; i < conv.turns.length; i++) {
     const t = conv.turns[i];
     if (t.speaker !== "coach") continue;
-    const heard = HEARD.exec(t.message.trim());
+    const lines = t.message.trim().split("\n");
+    const heard = HEARD.exec(lines[0].trim());
     if (!heard) continue;
+    // Strip the echo off the coach's message so the reply is scored on its own words.
+    const spoken = lines.slice(1).join("\n").trim();
+    if (spoken.length > 15) t.message = spoken;
     // Walk back to the member turn this transcript belongs to.
     for (let j = i - 1; j >= 0 && i - j <= 4; j--) {
       const p = conv.turns[j];

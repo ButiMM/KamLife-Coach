@@ -9093,6 +9093,26 @@ await Promise.all(pending);
       assert.equal(coach.length, 1, `expected only the real reply to be scoreable, got ${coach.length}`);
       assert.match(coach[0].message, /Done — removed/);
     });
+
+    // THE FOURTH PARSER BUG, AND THE MOST EXPENSIVE. Coach K returns the echo and the coaching
+    // reply as ONE message separated by a blank line. The HEARD pattern used [\s\S]*? to
+    // end-of-string, so it matched the whole thing and marked the reply as pipeline — which
+    // manufactured a "voice notes never get answered" defect. 349 of 350 echoes in the real
+    // export carry their reply. This nearly caused production code to be changed to fix a bug
+    // that did not exist.
+    test("P2 parser: a reply riding in the echo message is the coach speaking, not pipeline", () => {
+      const one = fromWhatsAppExport([
+        `[2026/08/07, 11:50:03] Kam: hi`,
+        `[2026/08/07, 11:50:25] Coach: 🎤 I heard: "I had Cheerios pre-workout."`,
+        ``,
+        `Noted — bowl of Cheerios for pre-workout 👌. How's the energy feeling for your session?`,
+      ].join("\n"), { coachSender: "Coach" });
+      resolveVoicePipeline(one);
+      const coach = scoreableTurns(one);
+      assert.equal(coach.length, 1, "the coaching reply was swallowed by the transcript echo");
+      assert.match(coach[0].message, /How's the energy feeling/);
+      assert.doesNotMatch(coach[0].message, /I heard:/, "the echo should be stripped off the reply");
+    });
   }
 
   test("P2: no anchor is machine-invented — each has founder provenance and cites a principle", () => {

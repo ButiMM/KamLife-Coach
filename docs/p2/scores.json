@@ -333,7 +333,8 @@
       "within15min": "235/408 = 58%",
       "burstsEventuallyAnswered": "206/209 = 99%",
       "supersedes": "the 97% in MEASUREMENT-GAPS.md, which counted the transcript echo as a reply"
-    }
+    },
+    "VOID": "2026-08-11: this entire block is WITHDRAWN. The echo pattern ran to end-of-string and swallowed the coaching reply, and the corpus files were written without continuation lines. All 16 voice turns DID receive replies; 349/350 echoes carry theirs. See docs/p2/TRACK-A-VOID.md."
   },
   "ledger": {
     "finding": "LEDGER_UNAVAILABLE",
@@ -342,5 +343,47 @@
     "mutations_writers": 4,
     "adapterBuilt": false,
     "reason": "the evidence required to answer 'what did Coach K have available' is not recorded; no product change was made to create it"
+  },
+  "founderValidation": {
+    "validatedAt": "2026-08-11",
+    "result": "all five CONFIRMED at 1",
+    "note": "Founder: 'this doesn't mean Coach K is a 1/5 coach. These are five deliberately selected failure examples establishing the bottom boundary of the rubric.'",
+    "items": [
+      {
+        "n": 1,
+        "dimension": "understanding",
+        "score": 1,
+        "verdict": "CONFIRM",
+        "founderReason": "failed to demonstrate it processed the complaint and changed course; saying 'grocery lists' is not meaningful understanding"
+      },
+      {
+        "n": 2,
+        "dimension": "continuity",
+        "score": 1,
+        "verdict": "CONFIRM",
+        "founderReason": "invented a weigh-in and a weight change; a hard factual failure"
+      },
+      {
+        "n": 3,
+        "dimension": "actionability",
+        "score": 1,
+        "verdict": "CONFIRM",
+        "founderReason": "'Be the coach. Coach me.' required actual coaching; 'let's focus on the next steps' gives no next step"
+      },
+      {
+        "n": 4,
+        "dimension": "humanity",
+        "score": 1,
+        "verdict": "CONFIRM",
+        "founderReason": "repeated apology-then-question is the robotic behaviour we are eliminating; at that emotional moment it should have responded to the person"
+      },
+      {
+        "n": 5,
+        "dimension": "accountability",
+        "score": 1,
+        "verdict": "CONFIRM",
+        "founderReason": "not moralising was correct, but accommodation without coaching is incomplete; three ciders needs the trade-off coached"
+      }
+    ]
   }
 }
