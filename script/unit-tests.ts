@@ -1408,7 +1408,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const src = readFileSync("server/understanding/live.ts", "utf-8");
     const i = src.indexOf("if (destructiveVetoed) {");
     assert.ok(i > 0, "the destructive-action bouncer is gone");
-    const veto = src.slice(i, i + 3000);
+    const veto = src.slice(i, i + 4200);
 
     // The hand-off must come BEFORE the veto writes its own reply, or the turn is already spent.
     const handoff = src.indexOf("handleFoodLogMgmt", i);
@@ -1419,6 +1419,24 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     // It must ASK the existing predicate, not carry a second copy of the rule.
     assert.ok(/planCorrection\(/.test(veto), "the veto must consult planCorrection, not re-derive it");
     assert.ok(/cPlan\.isCorrection/.test(veto), "the hand-off must gate on the correction plan");
+
+    // WO5, PROVEN IN PRODUCTION: HANDOFF_GATE=true and HANDOFF_RESULT=false, every time.
+    // handleFoodLogMgmt is a pure function of (user, m) and routes.ts already called it with the
+    // SAME user and SAME m earlier in this turn — its null is the only reason the engine ran. So
+    // re-asking with `m` could never return anything else, and the plan was derived from
+    // `message` anyway. The handler must be given the SAME text the plan came from.
+    assert.ok(/planCorrection\(message,/.test(veto), "the plan must be derived from the raw message");
+    assert.ok(/handleFoodLogMgmt\(user, rawForHandler\)/.test(veto),
+      "the hand-off must pass the text the plan was derived from — passing `m` re-asks a question already answered null");
+    assert.ok(!/handleFoodLogMgmt\(user, m\)/.test(veto),
+      "passing `m` here is the WO5 defect: identical arguments to the call that already declined this turn");
+    // …and the normalisation must match what handleMessage applies to an inbound message.
+    assert.ok(/rawForHandler = String\(message\)\.toLowerCase\(\)/.test(veto),
+      "rawForHandler must be the raw message normalised the way handleMessage normalises it");
+
+    // The temporary WO4 instrumentation must be gone.
+    assert.ok(!/WO4-DIAG/.test(src), "WO4 diagnostics are still in live.ts");
+    assert.ok(!/WO4-DIAG/.test(readFileSync("server/routes.ts", "utf-8")), "WO4 diagnostics are still in routes.ts");
 
     // And the delete protection itself must be untouched — the veto still vetoes.
     assert.ok(/EXPLICIT_REMOVE_RE/.test(src), "the destructive-action bouncer must remain");
