@@ -720,7 +720,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // ---- FOOD LOG MANAGEMENT (reset, remove, show) ----
-  const foodLogMgmtResult = await handleFoodLogMgmt(user, m);
+  const foodLogMgmtResult = await handleFoodLogMgmt(user, m); if (/\b(actually|wasn'?t|were\s?n'?t|instead)\b/i.test(m)) console.warn(`[WO4-DIAG] TEMPORARY — PRE_FOODMGMT m=${JSON.stringify(String(m).slice(0, 200))} FOODMGMT_CLAIMED=${foodLogMgmtResult !== null}`);
   if (foodLogMgmtResult !== null) return foodLogMgmtResult;
 
 

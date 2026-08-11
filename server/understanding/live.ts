@@ -285,16 +285,44 @@ export async function runMeaningEngineLive(ctx: {
       // it. Existing predicate (planCorrection), existing handler, existing semantics: nothing in
       // planCorrection or applyCorrection changes, no new pattern, no new route. If it does not
       // claim the turn, the veto reply below stands exactly as it did.
-      const cPlan = planCorrection(message, isMealDateMove(message, isRetroactiveMeal(message)));
-      if (cPlan.isCorrection && (cPlan.moves || cPlan.remove.length + cPlan.add.length >= 2)) {
+      // ── WO4 DIAGNOSTIC (2026-08-10). TEMPORARY, instrumentation only: not one line of
+      //    behaviour changes here. It exists to answer the one thing the live log cannot: what
+      //    the hand-off predicate actually RECEIVES, whether the block is reached, whether it
+      //    executes, and whether the veto still owns the reply afterwards. Remove once J5 is
+      //    understood. ──
+      const wo4Sha = process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 12) || process.env.APP_VERSION || "dev";
+      const wo4RawEqM = message.toLowerCase().trim().replace(/\s+/g, " ") === String(m || "").trim();
+      console.warn(`[WO4-DIAG] SHA=${wo4Sha}`);
+      console.warn(`[WO4-DIAG] RAW_MESSAGE=${JSON.stringify(String(message).slice(0, 220))}`);
+      console.warn(`[WO4-DIAG] PREDICATE_INPUT=${JSON.stringify(String(message).slice(0, 220))}`);
+      console.warn(`[WO4-DIAG] M_ARG=${JSON.stringify(String(m || "").slice(0, 220))}`);
+      console.warn(`[WO4-DIAG] RAW_EQUALS_M=${wo4RawEqM}  (false => the message was rewritten upstream)`);
+      console.warn(`[WO4-DIAG] CANONICAL_INTENT=NOT AVAILABLE at this boundary — the classifier verdict is not passed into the engine`);
+      console.warn(`[WO4-DIAG] HANDOFF_REACHED`);
+      const wo4Retro = isRetroactiveMeal(message);
+      const wo4Moves = isMealDateMove(message, wo4Retro);
+      const cPlan = planCorrection(message, wo4Moves);
+      const wo4Gate = cPlan.isCorrection && (cPlan.moves || cPlan.remove.length + cPlan.add.length >= 2);
+      console.warn(`[WO4-DIAG] isRetroactiveMeal=${wo4Retro} isMealDateMove=${wo4Moves}`);
+      console.warn(`[WO4-DIAG] planCorrection=${JSON.stringify(cPlan)}`);
+      console.warn(`[WO4-DIAG] plan.isCorrection=${cPlan.isCorrection} HANDOFF_GATE=${wo4Gate}`);
+      if (wo4Gate) {
         const { handleFoodLogMgmt } = await import("../handlers/food-log-mgmt");
-        const corrected = await handleFoodLogMgmt(user, m).catch(() => null);
+        const corrected = await handleFoodLogMgmt(user, m).catch((e) => {
+          console.warn(`[WO4-DIAG] HANDOFF_THREW=${String((e as any)?.message || e).slice(0, 140)}`);
+          return null;
+        });
+        console.warn(`[WO4-DIAG] HANDOFF_RESULT=${corrected !== null}`);
         if (corrected !== null) {
+          console.warn(`[WO4-DIAG] VETO_RETURNED=false`);
           console.log("[ENGINE_ACTION] not a removal — handed to the correction engine:", message.slice(0, 60));
           await logChat(user.id, message, corrected, "FOOD_CORRECTION").catch(() => {});
           return corrected;
         }
+      } else {
+        console.warn(`[WO4-DIAG] HANDOFF_RESULT=false  (gate false — the hand-off did not execute)`);
       }
+      console.warn(`[WO4-DIAG] VETO_RETURNED=true`);
       // Never relay the model's (likely "Removed…") reply — that would be a lie. "Fix it /
       // recalculate" means: show the honest total from everything logged, delete nothing.
       const { recomputeTodayFoodTotals } = await import("../handlers/food-scanner");
