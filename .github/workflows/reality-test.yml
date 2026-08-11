@@ -1,0 +1,72 @@
+name: Reality Test (six journeys, live model)
+
+# THE FINAL JUDGE IS THE PHONE (2026-08-11, P2-E Work Item 1).
+#
+# Every other suite in this repo grades the deterministic spine: where a message is ROUTED, what
+# is WRITTEN, whether state survives. None of them say whether Coach K can coach. This one drives
+# six real journeys through the real pipeline against the real model and reads the words that come
+# back. It is the only test that can adjudicate a coaching change.
+#
+# MANUAL DISPATCH ONLY — never on push, never on a schedule. It spends real tokens and it writes
+# to the production database. Both are reasons a human decides when it runs.
+#
+# WHAT IT DOES TO THE DATABASE, stated plainly rather than discovered later:
+#   The harness creates six test clients on FIXED synthetic numbers (+2700000901…906), runs the
+#   journeys, and deletes each one immediately after, cascading its rows. Each journey also deletes
+#   its own phone BEFORE creating it, so a run that crashes mid-journey is cleaned up by the next
+#   run rather than accumulating. No real client record is read or modified. REALITY_ON_PROD=1 is
+#   the harness's own required acknowledgement that this is a live database.
+#
+# EXIT CODES — the distinction the founder asked for. An environment failure is NOT a product
+# failure and this job must never let the two look the same:
+#   0  all six journeys passed
+#   1  PRODUCT FAILURE — a journey failed on the words Coach K produced
+#   3  ENVIRONMENT — could not test (no key, no database, model unreachable)
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: reality-test-${{ github.ref }}
+  cancel-in-progress: false        # never kill a run mid-journey; it owns rows in a live database
+
+jobs:
+  reality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
+      DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+      REALITY_LLM: "1"
+      REALITY_ON_PROD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+
+      - name: Run the six journeys against the live model
+        id: reality
+        run: |
+          set +e
+          npx tsx script/reality-test.ts 2>&1 | tee reality.log
+          code=${PIPESTATUS[0]}
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          set -e
+          case "$code" in
+            0) echo "::notice::6/6 journeys PASSED against the live model." ;;
+            1) echo "::error::PRODUCT FAILURE — at least one journey failed on what Coach K said." ;;
+            3) echo "::error::ENVIRONMENT — could not test. This is NOT a product failure." ;;
+            *) echo "::error::Unexpected exit $code — treat as environment until proven otherwise." ;;
+          esac
+          exit $code
+
+      - name: Keep the transcript as evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reality-test-log
+          path: reality.log
+          retention-days: 30
