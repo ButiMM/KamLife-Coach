@@ -60,9 +60,16 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace
  * ("You're doing great on tracking! specific. 👌") is real but not reliably detectable, so it is
  * counted by hand and reported separately rather than folded into this number.
  */
-function looksTruncated(reply: string): boolean {
-  const t = reply.trim().replace(/[*_`]+$/, "").trim();
-  return /[:—-]$/.test(t) && t.length > 12;
+function looksTruncated(conv: Conversation, turn: { index: number; message: string }): boolean {
+  const t = turn.message.trim().replace(/[*_`]+$/, "").trim();
+  if (!/[:—-]$/.test(t) || t.length <= 12) return false;
+  // A dangling colon is NOT a truncation when the thing it introduces is the next message —
+  // "*Today's food log (4 meals):*" followed by the meal-card image is working as designed.
+  // Checking the successor turned 9 apparent truncations into 3 real ones; a detector that
+  // stops at the terminator is measuring punctuation, not delivery.
+  const next = conv.turns[turn.index + 1];
+  if (next && next.speaker === "coach" && /omitted/i.test(next.message)) return false;
+  return true;
 }
 
 /** Placeholders and transport errors that reached the member as if they were a reply. */
@@ -79,7 +86,7 @@ function population(convs: Conversation[]) {
   const coaching = turns.filter(({ t }) => !infraSet.has(t));
 
   const handback = coaching.filter(({ t }) => endsWithHandback(t.message));
-  const truncated = turns.filter(({ t }) => looksTruncated(t.message));
+  const truncated = turns.filter(({ c, t }) => looksTruncated(c, t));
   const repeats = coaching.filter(({ c, t }) =>
     c.turns.some(p => p.speaker === "coach" && p.index < t.index && norm(p.message) === norm(t.message) && norm(t.message).length > 25));
 

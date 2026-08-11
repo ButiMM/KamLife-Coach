@@ -9061,6 +9061,40 @@ await Promise.all(pending);
   // standard. It is no longer empty, so "must be empty" is the wrong guarantee — the guarantee
   // that still matters is that NO anchor was invented here. Every one is either a real corpus
   // turn or an exemplar the founder wrote himself, and every one cites the principle it rests on.
+  // PARSER REGRESSIONS. Each of these bugs produced a wrong headline number before it was found
+  // by tracing a claim to its cause. They are pinned because a measurement instrument that
+  // mis-parses its own corpus reports confident nonsense, which is worse than reporting nothing.
+  {
+    const { fromWhatsAppExport, scoreableTurns } = await import("./p2-corpus");
+    const LTR = "‎";
+    const wa = [
+      `[2026/08/06, 18:47:00] Kam: hello`,
+      `${LTR}[2026/08/06, 18:47:53] Kam: ${LTR}audio omitted`,
+      `[2026/08/06, 18:48:00] Coach: 🎤 Coach K is listening…`,
+      `[2026/08/06, 18:48:13] Coach: 🎤 I heard: "Remove that meal, it is wrong."`,
+      `[2026/08/06, 18:48:30] Coach: Done — removed the bread and eggs.`,
+    ].join("\n");
+    const conv = fromWhatsAppExport(wa, { coachSender: "Coach" });
+    const { resolveVoicePipeline } = await import("./p2-corpus");
+    resolveVoicePipeline(conv);
+
+    test("P2 parser: a media line prefixed with U+200E is its own turn, not swallowed", () => {
+      assert.equal(conv.turns.length, 5, "media line was appended to the previous message");
+    });
+
+    test("P2 parser: the voice transcript is re-attributed to the member who spoke it", () => {
+      const spoken = conv.turns.find(t => t.speaker === "member" && /Remove that meal/.test(t.message));
+      assert.ok(spoken, "voice note never received its transcript");
+      assert.equal((spoken!.metadata as any)?.viaVoiceNote, true);
+    });
+
+    test("P2 parser: the voice ack and the echo are pipeline, not scoreable coach turns", () => {
+      const coach = scoreableTurns(conv);
+      assert.equal(coach.length, 1, `expected only the real reply to be scoreable, got ${coach.length}`);
+      assert.match(coach[0].message, /Done — removed/);
+    });
+  }
+
   test("P2: no anchor is machine-invented — each has founder provenance and cites a principle", () => {
     const store = JSON.parse(readFileSync("docs/p2/anchors.json", "utf-8"));
     for (const a of store.anchors) {

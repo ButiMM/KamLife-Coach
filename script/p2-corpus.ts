@@ -72,8 +72,8 @@ export interface Corpus {
  * that wrong would silently split one member message into several turns and corrupt every
  * sequence-dependent judgement downstream, so it is handled explicitly rather than by luck.
  */
-const WA_BRACKET = /^\[(\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[apAP]\.?[mM]\.?)?)\]\s*([^:]{1,60}):\s?([\s\S]*)$/;
-const WA_DASH = /^(\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[apAP]\.?[mM]\.?)?)\s+-\s+([^:]{1,60}):\s?([\s\S]*)$/;
+const WA_BRACKET = /^[\u200e\u200f]?\[(\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[apAP]\.?[mM]\.?)?)\]\s*([^:]{1,60}):\s?([\s\S]*)$/;
+const WA_DASH = /^[\u200e\u200f]?(\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[apAP]\.?[mM]\.?)?)\s+-\s+([^:]{1,60}):\s?([\s\S]*)$/;
 
 /** WhatsApp's own system lines. Not conversation, and not the member's words. */
 const WA_SYSTEM = /(Messages and calls are end-to-end encrypted|You (?:created|added|joined)|changed the subject|changed this group's icon|security code changed|<Media omitted>|This message was deleted)/i;
@@ -298,12 +298,82 @@ export function loadConversationFile(path: string, opts: Partial<WhatsAppAdapter
     ? fromWhatsAppExport(raw, { coachSender: opts.coachSender || "", ...opts, file: path })
     : fromPastedTranscript(raw, { ...opts, file: path });
   conv.participant = redactPhone(conv.participant);
+  return resolveVoicePipeline(conv);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE VOICE / PHOTO PIPELINE
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * (2026-08-11 — a correction to P2-C, found by checking a claim instead of repeating it.)
+ *
+ * WhatsApp exports strip media, leaving "audio omitted" where the member spoke. Coach K answers a
+ * voice note in three parts: an ack, the transcript echoed back, then the real reply.
+ *
+ *   KAM:          audio omitted
+ *   Kamlife Coach: 🎤 Coach K is listening…
+ *   Kamlife Coach: 🎤 I heard: "The bread, eggs and avocado are inaccurate. Remove that meal."
+ *   Kamlife Coach: <the actual coaching reply>
+ *
+ * P2-C read the first two as coach turns and concluded that 17% of output was non-coaching
+ * artifact — that the pipeline was noise. It is not: 341 of 343 acks are followed by a real reply
+ * and 97% of 408 voice notes got a substantive answer. The ack is a working feature and counting
+ * it as a defect inflated the infrastructure rate AND discarded four voice-rich conversations as
+ * unscoreable. The lesson is the one this whole project runs on: a number that has not been traced
+ * to its cause is not evidence.
+ *
+ * So the pipeline lines are reclassified. The ack is not a scoreable coach turn. The echo is not
+ * one either — but its CONTENT is the member's own words, so it is given back to the member turn
+ * it belongs to. That is what makes voice conversations measurable from a transcript at all.
+ */
+const VOICE_ACK = /^🎤\s*Coach K is listening/;
+const PHOTO_ACK = /^📸\s*Got your photo/;
+const HEARD = /^🎤\s*I heard:\s*"?([\s\S]*?)"?\s*$/;
+const MEDIA_PLACEHOLDER = /^[\s\u200e\u200f]*(audio|image|video|sticker|document) omitted\s*$/i;
+
+/** True for a coach message that is transport plumbing rather than something the coach said. */
+export function isPipelineMessage(text: string): boolean {
+  const t = text.trim();
+  return VOICE_ACK.test(t) || PHOTO_ACK.test(t) || HEARD.test(t) || MEDIA_PLACEHOLDER.test(t);
+}
+
+/**
+ * Fills each "audio omitted" member turn with the transcript Coach K echoed back, and marks the
+ * pipeline lines so they are excluded from scoring. Mutates and returns the conversation.
+ */
+export function resolveVoicePipeline(conv: Conversation): Conversation {
+  for (let i = 0; i < conv.turns.length; i++) {
+    const t = conv.turns[i];
+    if (t.speaker !== "coach") continue;
+    const heard = HEARD.exec(t.message.trim());
+    if (!heard) continue;
+    // Walk back to the member turn this transcript belongs to.
+    for (let j = i - 1; j >= 0 && i - j <= 4; j--) {
+      const p = conv.turns[j];
+      if (p.speaker !== "member") continue;
+      if (MEDIA_PLACEHOLDER.test(p.message)) {
+        p.message = heard[1].trim();
+        p.metadata = { ...(p.metadata || {}), viaVoiceNote: true, transcribedByProduct: true };
+      }
+      break;
+    }
+  }
+  for (const t of conv.turns) {
+    if (t.speaker === "coach" && isPipelineMessage(t.message)) {
+      t.metadata = { ...(t.metadata || {}), pipeline: true };
+    }
+  }
   return conv;
 }
 
 /** Every coach turn that has at least one member turn before it — the scoreable unit. */
 export function scoreableTurns(conv: Conversation): Turn[] {
-  return conv.turns.filter(t => t.speaker === "coach" && conv.turns.slice(0, t.index).some(p => p.speaker === "member"));
+  return conv.turns.filter(t =>
+    t.speaker === "coach"
+    && !t.metadata?.pipeline
+    && !isPipelineMessage(t.message)
+    && conv.turns.slice(0, t.index).some(p => p.speaker === "member" && p.message.trim() !== ""));
 }
 
 /** The member turn a given coach reply is responding to. */
