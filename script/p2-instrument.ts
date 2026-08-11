@@ -35,9 +35,11 @@ import { readdirSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { endsWithHandback } from "../server/reply-hygiene";
 import {
-  loadConversationFile, scoreableTurns, precedingMemberTurn,
-  type Conversation, type Turn,
+  loadConversationFile, scoreableTurns, precedingMemberTurn, loadManifest,
+  CONVERSATION_TYPES, TYPE_NOTES, MANIFEST_PATH,
+  type Conversation, type Turn, type ConversationType,
 } from "./p2-corpus";
+import { selectTurns, STRATA } from "./p2-select";
 import {
   loadAnchors, anchorCoverage, assertScoreable, DIMENSIONS, CONVERSATION_DIMENSION,
   ANCHOR_PATH, type ScoreTarget,
@@ -166,62 +168,143 @@ function calibrate(convs: Conversation[]): void {
   }
   mkdirSync(OUT_DIR, { recursive: true });
   const out = join(OUT_DIR, "calibration-sheet.md");
+  const quota = Number(argValue("--turns") || 25);
+  const manifest = loadManifest();
+  const typeOf = new Map<string, ConversationType>();
+  for (const e of manifest?.conversations || []) {
+    const match = convs.find(c => c.conversationId.endsWith(e.file));
+    if (match) typeOf.set(match.conversationId, e.type);
+  }
+  const sel = selectTurns(convs, quota);
   const rows: string[] = [];
 
   rows.push("# P2 CALIBRATION SHEET");
   rows.push("");
-  rows.push("Score by hand. This sheet is the ground truth; the instrument has scored nothing.");
+  rows.push(`${sel.chosen.length} turns from ${convs.length} conversations. The instrument has scored nothing —`);
+  rows.push("this sheet is the ground truth, not a draft to correct.");
   rows.push("");
-  rows.push("For each turn: 1-5 on the five dimensions, then a reason for anything you score 1 or 5.");
-  rows.push("Those reasons become the anchors, so write them as if explaining the standard to someone new —");
-  rows.push("because that is exactly what they will be used for.");
+  rows.push("## How to score");
   rows.push("");
-  rows.push("Per brief §11: if a turn is genuinely ambiguous, say so in the reason rather than forcing a number.");
-  rows.push("An ambiguity recorded is worth more than a score invented.");
+  rows.push("Looking at a Coach K reply, the question is **not** \"is this a good AI response?\" It is:");
+  rows.push("");
+  rows.push("> If I were the member paying R199/month, did this interaction make me feel understood");
+  rows.push("> and give me something useful to do next?");
+  rows.push("");
+  rows.push("and, separately, at the end of each conversation:");
+  rows.push("");
+  rows.push("> Would I want this coach available to me tomorrow?");
+  rows.push("");
+  rows.push("The member does not care that the classifier was 95%, the mutation was correct, or the");
+  rows.push("reply passed a regex. Those make the product reliable. They are not what is being scored here.");
+  rows.push("");
+  rows.push("**Do not try to make the scores look balanced.** If a reply is a 2, give it a 2. If everything");
+  rows.push("you score lands on 4-5, that is a finding about the standard, not a problem with the sheet.");
+  rows.push("");
+  rows.push("**If you are genuinely torn — 3 or 4 — do not force it.** Put `?` in the score column and say why.");
+  rows.push("A recorded ambiguity is worth more than an invented number, and those cases are exactly what");
+  rows.push("has to be resolved before anything is automated (brief §11).");
+  rows.push("");
+  rows.push("A reason is required for every 1 and every 5. Those become the anchors, so write them as an");
+  rows.push("explanation of the standard to someone who has never seen it — which is precisely their job.");
+  rows.push("");
+  rows.push("## How these turns were chosen");
+  rows.push("");
+  rows.push("Selection spans the axes a machine can actually see — hand-backs, verbatim repeats, long and");
+  rows.push("terse replies, and turns answering a long member message. It does **not** know which replies");
+  rows.push("are good, cold, or context-aware; that is the judgement you are about to make, and if the");
+  rows.push("selector could make it there would be no need for this sheet. Every conversation contributes");
+  rows.push("a turn before any contributes a second, so the longest chat cannot take over.");
+  rows.push("");
+  rows.push("| stratum | in corpus | note |");
+  rows.push("|---|---|---|");
+  for (const s of STRATA) rows.push(`| ${s} | ${sel.strataCounts[s]} | |`);
   rows.push("");
 
+  let n = 0;
   for (const conv of convs) {
-    const turns = scoreableTurns(conv);
+    const mine = sel.chosen.filter(c => c.conversation === conv);
+    if (!mine.length) continue;
+    const t = typeOf.get(conv.conversationId);
     rows.push(`---`);
     rows.push("");
-    rows.push(`## ${conv.conversationId}  —  ${turns.length} scoreable turn(s), participant: ${conv.participant}`);
+    rows.push(`## ${t ? `[${t}] ` : ""}${conv.conversationId}`);
     rows.push("");
-    for (const t of turns) {
-      const o = observe(conv, t);
-      rows.push(`### turn ${t.index}`);
+    rows.push(`_${mine.length} of ${scoreableTurns(conv).length} coach turns selected. Participant: ${conv.participant}._`);
+    if (!t) rows.push(`_No type declared in ${MANIFEST_PATH}._`);
+    rows.push("");
+    for (const c of mine) {
+      const o = observe(conv, c.turn);
+      n++;
+      rows.push(`### ${n}. turn ${c.turn.index}  —  _${c.stratum}_`);
       rows.push("");
       rows.push(`**Member:** ${o.memberMessage.replace(/\n/g, "  \n") || "_(none)_"}`);
       rows.push("");
       rows.push(`**Coach K:** ${o.coachReply.replace(/\n/g, "  \n")}`);
       rows.push("");
-      const facts: string[] = [];
-      if (o.endsWithHandback) facts.push("ends with a hand-back question");
-      if (o.repeatsEarlierReply !== null) facts.push(`repeats the reply at turn ${o.repeatsEarlierReply}`);
-      facts.push("continuity provenance: UNAVAILABLE (transcript corpus, no Turn Ledger)");
-      rows.push(`_Machine observations (facts, not scores): ${facts.join("; ")}._`);
+      rows.push(`_Facts, not scores: ${c.why}; continuity provenance UNAVAILABLE (transcript corpus, no Turn Ledger)._`);
       rows.push("");
-      rows.push("| dimension | score 1-5 | reason (required for 1 and 5) |");
+      rows.push("| dimension | 1-5 or ? | reason (required for 1 and 5) |");
       rows.push("|---|---|---|");
       for (const d of DIMENSIONS) rows.push(`| ${d} | | |`);
       rows.push("");
     }
-    rows.push(`### conversation-level — ${CONVERSATION_DIMENSION}`);
+    rows.push(`#### conversation-level — ${CONVERSATION_DIMENSION}`);
     rows.push("");
-    rows.push("Brief §9: after this conversation, did Coach K create enough value that continued use");
-    rows.push("of KamLife would be rational? This is a coaching-value judgement, not a retention prediction.");
+    rows.push("Would you want this coach available to you tomorrow? Coaching value, not a retention prediction.");
     rows.push("");
-    rows.push("| target | score 1-5 | reason |");
+    rows.push("| target | 1-5 or ? | reason |");
     rows.push("|---|---|---|");
     rows.push(`| ${CONVERSATION_DIMENSION} | | |`);
     rows.push("");
   }
 
   writeFileSync(out, rows.join("\n"));
+
   console.log(`\nP2: calibration sheet written to ${out}`);
-  console.log(`  ${convs.length} conversation(s), ${convs.reduce((n, c) => n + scoreableTurns(c).length, 0)} scoreable turn(s).`);
+  console.log(`  ${sel.chosen.length} turns selected from ${convs.reduce((a, c) => a + scoreableTurns(c).length, 0)} available, across ${convs.length} conversation(s).`);
+  console.log("");
+  console.log("  spread:");
+  for (const s of STRATA) {
+    const got = sel.chosen.filter(c => c.stratum === s).length;
+    if (sel.strataCounts[s]) console.log(`    ${s.padEnd(12)} ${String(got).padStart(3)} chosen of ${sel.strataCounts[s]} in corpus`);
+  }
+  const thin = sel.perConversation.filter(p => p.chosen === 0);
+  if (thin.length) console.log(`\n  NOT REPRESENTED: ${thin.map(p => p.conversationId).join(", ")}`);
+
+  reportTypeCoverage(manifest, convs, typeOf);
+
   console.log(`  Nothing has been scored. ${OUT_DIR}/ is gitignored — it holds real conversations.`);
   console.log("");
   console.log("WAITING FOR FOUNDER CALIBRATION.");
+  console.log("");
+}
+
+/**
+ * The ten types are the point of P2-B — a calibration set that only covers ordinary logs will
+ * produce anchors that only hold for ordinary logs. Missing types are named, loudly, but do not
+ * block: the founder may not have a clean example of every situation to hand, and a sheet for
+ * eight types beats no sheet while the other two are found.
+ */
+function reportTypeCoverage(manifest: ReturnType<typeof loadManifest>, convs: Conversation[], typeOf: Map<string, ConversationType>): void {
+  console.log("");
+  if (!manifest) {
+    console.log(`  NO MANIFEST at ${MANIFEST_PATH} — conversations are unlabelled.`);
+    console.log(`  The ten situation types are declared by you, never guessed: a classifier deciding`);
+    console.log(`  what a conversation is about would be the instrument choosing its own exam.`);
+    console.log("");
+    for (const t of CONVERSATION_TYPES) console.log(`    ${t.padEnd(20)} ${TYPE_NOTES[t]}`);
+    console.log("");
+    return;
+  }
+  const covered = new Set(typeOf.values());
+  const missing = CONVERSATION_TYPES.filter(t => !covered.has(t));
+  console.log(`  type coverage: ${covered.size}/${CONVERSATION_TYPES.length}`);
+  if (missing.length) {
+    console.log(`  MISSING:`);
+    for (const t of missing) console.log(`    ${t.padEnd(20)} ${TYPE_NOTES[t]}`);
+  }
+  const unmatched = (manifest.conversations || []).filter(e => !convs.some(c => c.conversationId.endsWith(e.file)));
+  if (unmatched.length) console.log(`  manifest names files not in the corpus: ${unmatched.map(u => u.file).join(", ")}`);
   console.log("");
 }
 

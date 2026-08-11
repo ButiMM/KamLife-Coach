@@ -14,6 +14,44 @@ npx tsx script/p2-instrument.ts --calibrate   # emit the calibration sheet from 
 npx tsx script/p2-instrument.ts --baseline    # refuses until the anchors exist
 ```
 
+## P2-B: what you need to produce
+
+**Ten conversations, deliberately varied** — not ten random chats. The point is not statistical
+significance; it is exposing the range of situations KamLife actually has to handle, so the
+anchors cover more than the easy middle.
+
+| type | what it is |
+|---|---|
+| `ordinary_food_log` | the everyday turn — most of the product's volume |
+| `correction` | "actually that was yesterday", "it wasn't rice" |
+| `eating_out` | a restaurant or takeaway decision |
+| `budget_constraint` | what to buy on R300, what the shop didn't have |
+| `craving` | wants a specific food and is asking, not reporting |
+| `missed_workout` | a setback — the accountability test |
+| `emotional` | frustrated, flat, or admitting something hard |
+| `messy_voice_note` | run-on transcription, several things at once |
+| `refuses_to_log` | wants advice, not a food diary |
+| `hard_coaching_call` | you knew what the right answer was, whether or not Coach K found it |
+
+That last one matters most. A conversation where you personally know what the right coaching
+response should have been — even if Coach K's answer was poor — is the most valuable anchor in
+the set, because it defines the standard rather than merely rating what happened.
+
+Declare the type of each file in `p2-work/corpus/manifest.json`:
+
+```json
+{ "conversations": [
+  { "file": "01-log.txt",  "type": "ordinary_food_log" },
+  { "file": "02-fix.txt",  "type": "correction" },
+  { "file": "10-hard.txt", "type": "hard_coaching_call",
+    "note": "what I think the right answer was" }
+]}
+```
+
+Types are **declared, never inferred**. A classifier deciding what a conversation is about would
+be the instrument choosing its own exam. Missing types are named loudly but do not block — a
+sheet for eight types beats no sheet while the other two are found.
+
 ## Getting conversations in
 
 Drop files into `p2-work/corpus/`. Two formats, both unedited:
@@ -70,7 +108,26 @@ drifting into whatever is convenient, one reasonable-looking edit at a time.
 ## Sequence
 
 - **P2-A — instrument.** Done.
-- **P2-B — calibration.** Founder hand-scores. Agreed examples become the anchors. ← next
+- **P2-B — calibration.** Selection machinery done; **waiting on the corpus.** Founder hand-scores
+  ~25 selected turns from ten varied conversations; agreed examples become the anchors. ← next
+
+### How the ~25 turns get chosen
+
+`--calibrate` selects for **spread, not volume** (`--turns N` to change the quota). It spans the
+axes a machine can see — verbatim repeats, long replies, hand-backs, terse replies, turns
+answering a long member message, and ordinary turns — and it explicitly cannot see which replies
+are good, cold, or context-aware. That is the judgement being calibrated; if the selector could
+make it, the sheet would be pointless.
+
+Two rules keep the sample honest, both of them regression-tested:
+
+- **No stratum takes more than half the sheet.** The first draft filled 14 of 25 seats with
+  hand-backs, which produces a sheet about one defect rather than about coaching.
+- **Every conversation is represented before any is sampled twice**, so the longest chat cannot
+  crowd out the other nine types.
+
+Selection is reproducible — no randomness. The same corpus yields the same sheet, because an
+instrument whose sample shifts between runs cannot be argued with.
 - **P2-C — baseline.** Distributions and failure clusters. Not built: how to score follows from
   what calibration reveals, not the other way round.
 - **P2-D — adjudication.** Which failures are worth fixing.

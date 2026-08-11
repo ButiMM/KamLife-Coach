@@ -212,6 +212,71 @@ export function fromPastedTranscript(raw: string, opts: { conversationId?: strin
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CONVERSATION TYPES — the ten situations the calibration set must span
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * (2026-08-11, founder, P2-B.) Ten deliberately chosen situation types, not ten random chats.
+ * The point is not statistical significance — it is exposing the RANGE of coaching situations
+ * KamLife actually has to handle, so the anchors cover more than the easy middle.
+ *
+ * These are DECLARED by the founder in a manifest, never inferred. A classifier guessing that a
+ * conversation is "emotional" would be the instrument deciding what it is about to be measured
+ * on, which is the same circularity the anchor lock exists to prevent — just moved upstream.
+ */
+export const CONVERSATION_TYPES = [
+  "ordinary_food_log",
+  "correction",
+  "eating_out",
+  "budget_constraint",
+  "craving",
+  "missed_workout",
+  "emotional",
+  "messy_voice_note",
+  "refuses_to_log",
+  "hard_coaching_call",
+] as const;
+export type ConversationType = typeof CONVERSATION_TYPES[number];
+
+/** What each type is for, printed when the manifest is missing one. */
+export const TYPE_NOTES: Record<ConversationType, string> = {
+  ordinary_food_log: "the everyday turn — most of the product's volume",
+  correction: "\"actually that was yesterday\", \"it wasn't rice\"",
+  eating_out: "a restaurant or takeaway decision",
+  budget_constraint: "what to buy on R300, what the shop didn't have",
+  craving: "wants a specific food and is asking, not reporting",
+  missed_workout: "a setback — the accountability test",
+  emotional: "frustrated, flat, or admitting something hard",
+  messy_voice_note: "run-on transcription, several things at once",
+  refuses_to_log: "wants advice, not a food diary",
+  hard_coaching_call: "you knew what the right answer was, whether or not Coach K found it",
+};
+
+export interface ManifestEntry {
+  file: string;
+  type: ConversationType;
+  /** Optional. For hard_coaching_call especially: what you thought the right response was. */
+  note?: string;
+}
+
+export interface Manifest { conversations: ManifestEntry[] }
+
+export const MANIFEST_PATH = "p2-work/corpus/manifest.json";
+
+export function loadManifest(path = MANIFEST_PATH): Manifest | null {
+  if (!existsSync(path)) return null;
+  const m = JSON.parse(readFileSync(path, "utf-8")) as Manifest;
+  const bad = (m.conversations || []).filter(c => !CONVERSATION_TYPES.includes(c.type));
+  if (bad.length) {
+    throw new Error(
+      `manifest: unknown type(s) ${bad.map(b => JSON.stringify(b.type)).join(", ")}.\n` +
+      `  Valid types: ${CONVERSATION_TYPES.join(", ")}`
+    );
+  }
+  return { conversations: m.conversations || [] };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // LOADING
 // ─────────────────────────────────────────────────────────────────────────────
 

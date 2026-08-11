@@ -9027,6 +9027,36 @@ await Promise.all(pending);
     assert.throws(() => assertScoreable("humanity", partial), /level\(s\) 1, 3/);
   });
 
+  // P2-B SELECTION. Both assertions below are defects the smoke corpus caught before the founder
+  // did: the first draft gave 14 of 25 seats to hand-backs (a sheet about one defect, not about
+  // coaching), and filed verbatim repeats under hand-back so the rarer signal reported zero.
+  const { selectTurns } = await import("./p2-select");
+  const { fromPastedTranscript } = await import("./p2-corpus");
+  const convo = (id: string) => fromPastedTranscript(
+    ["Member: short", "Coach: ok",
+     "Member: what should i do about supper", "Coach: Grill the chicken. What do you think?",
+     "Member: and lunch", "Coach: Grill the chicken. What do you think?",
+     "Member: thanks", "Coach: Pack it tonight so the decision is already made."].join("\n"),
+    { conversationId: id });
+
+  test("P2: no stratum may take more than half the calibration sheet", () => {
+    const sel = selectTurns([1, 2, 3, 4, 5].map(i => convo(`c${i}`)), 15);
+    for (const s of Object.keys(sel.strataCounts)) {
+      const got = sel.chosen.filter(c => c.stratum === s).length;
+      assert.ok(got <= Math.ceil(sel.chosen.length / 2), `stratum ${s} took ${got}/${sel.chosen.length} seats`);
+    }
+  });
+
+  test("P2: a verbatim repeat is filed as a repeat, not swallowed by hand-back", () => {
+    const sel = selectTurns([convo("c1")], 10);
+    assert.ok(sel.strataCounts.repeat > 0, "the repeated reply was not classified as a repeat");
+  });
+
+  test("P2: every conversation is represented before any is sampled twice", () => {
+    const sel = selectTurns([1, 2, 3, 4, 5, 6].map(i => convo(`c${i}`)), 6);
+    assert.equal(new Set(sel.chosen.map(c => c.conversation.conversationId)).size, 6);
+  });
+
   test("P2: the anchor store shipped in the repo is EMPTY — no synthetic calibration", () => {
     const store = JSON.parse(readFileSync("docs/p2/anchors.json", "utf-8"));
     assert.equal(store.anchors.length, 0, "anchors.json is not empty — anchors must come from the founder, not the machine");
