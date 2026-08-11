@@ -5,7 +5,7 @@
 
 import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
-import { eq, and, gte, desc, asc } from "drizzle-orm";
+import { eq, and, gte, desc, asc, sql } from "drizzle-orm";
 import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection, isRetroactiveMeal, parseMealDate, mealDateLabel } from "../utils";
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
@@ -121,6 +121,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   const movesDay = isMealDateMove(m, isRetroactiveMeal(m));
   const plan = looksLikeQuestion(m) ? null : planCorrection(m, movesDay);
   if (plan?.isCorrection && (plan.moves || plan.remove.length + plan.add.length >= 2)) {
+    { const [c] = await db.select({ n: sql<number>`COUNT(*)::int` }).from(mealLogs).where(eq(mealLogs.userId, user.id)).catch(() => [{ n: -1 }] as any); console.warn(`[WO6B-DIAG] TEMPORARY — mealRowCount=${c?.n} (same where-clause as the branch below: userId only, no date filter). 0 => nothing to correct, the branch declines and the null comes from the mgmt-keyword fallback`); }
     const [row] = await db.select({
       id: mealLogs.id, raw: mealLogs.rawMessage, label: mealLogs.mealLabel, at: mealLogs.loggedAt,
       items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
