@@ -39,3 +39,10 @@ marketing/
 
 # Reality Test run artifacts — evidence, not source
 reality-baseline-*.txt
+
+# P2 working directory — REAL CONVERSATIONS. Never commit these.
+# The corpus is the founder's own unedited WhatsApp history: food, weight, setbacks, moods.
+# It is the input to the measurement, not part of the product, and a git history is forever.
+# The anchor store (docs/p2/anchors.json) IS tracked — it is the rubric, and an untracked
+# rubric is folklore. That file holds only the excerpts deliberately chosen as standards.
+p2-work/

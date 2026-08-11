@@ -8996,6 +8996,43 @@ await Promise.all(pending);
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// P2 ANCHOR LOCK — the one property the whole measurement rests on.
+//
+// P2 exists because "an AI reviewer says this feels better" is not evidence. The only thing
+// standing between the instrument and that failure is assertScoreable() refusing to score a
+// dimension no human has anchored. That refusal is load-bearing, and a refusal has a way of
+// becoming a warning, then a flag, then a default. These assertions make removing it a red build.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const { anchorCoverage, assertScoreable, DIMENSIONS, CONVERSATION_DIMENSION } = await import("./p2-anchors");
+  const empty = { version: 1 as const, anchors: [], ambiguities: [] };
+
+  test("P2: every target is locked while the anchor store is empty", () => {
+    for (const c of anchorCoverage(empty)) assert.equal(c.complete, false, `${c.target} claimed complete with no anchors`);
+  });
+
+  test("P2: scoring an unanchored dimension THROWS — it does not warn and return", () => {
+    for (const t of [...DIMENSIONS, CONVERSATION_DIMENSION]) {
+      assert.throws(() => assertScoreable(t, empty), /refusing to score/, `${t} did not refuse`);
+    }
+  });
+
+  test("P2: a partial anchor set does not unlock — 1, 3 and 5 are all required", () => {
+    const partial = {
+      version: 1 as const, ambiguities: [],
+      anchors: [{ target: "humanity" as const, level: 5 as const, conversationId: "c", coachReply: "x",
+                  reason: "r", scoredBy: "founder", scoredAt: "2026-08-11" }],
+    };
+    assert.throws(() => assertScoreable("humanity", partial), /level\(s\) 1, 3/);
+  });
+
+  test("P2: the anchor store shipped in the repo is EMPTY — no synthetic calibration", () => {
+    const store = JSON.parse(readFileSync("docs/p2/anchors.json", "utf-8"));
+    assert.equal(store.anchors.length, 0, "anchors.json is not empty — anchors must come from the founder, not the machine");
+  });
+}
+
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
