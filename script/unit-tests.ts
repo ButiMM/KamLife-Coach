@@ -9057,9 +9057,25 @@ await Promise.all(pending);
     assert.equal(new Set(sel.chosen.map(c => c.conversation.conversationId)).size, 6);
   });
 
-  test("P2: the anchor store shipped in the repo is EMPTY — no synthetic calibration", () => {
+  // The store was empty until the founder's P2-B adjudication (2026-08-11) supplied a written
+  // standard. It is no longer empty, so "must be empty" is the wrong guarantee — the guarantee
+  // that still matters is that NO anchor was invented here. Every one is either a real corpus
+  // turn or an exemplar the founder wrote himself, and every one cites the principle it rests on.
+  test("P2: no anchor is machine-invented — each has founder provenance and cites a principle", () => {
     const store = JSON.parse(readFileSync("docs/p2/anchors.json", "utf-8"));
-    assert.equal(store.anchors.length, 0, "anchors.json is not empty — anchors must come from the founder, not the machine");
+    for (const a of store.anchors) {
+      assert.ok(["observed", "specified"].includes(a.provenance), `${a.target}/${a.level}: bad provenance ${a.provenance}`);
+      assert.ok(String(a.principle || "").length > 5, `${a.target}/${a.level}: no principle cited`);
+      assert.ok(/founder/i.test(String(a.scoredBy)), `${a.target}/${a.level}: not founder-scored`);
+      assert.ok(String(a.reason || "").length > 40, `${a.target}/${a.level}: reason too thin to teach the standard`);
+    }
+  });
+
+  test("P2: coaching_value stays LOCKED — the corpus contains no level-5 conversation", () => {
+    const store = JSON.parse(readFileSync("docs/p2/anchors.json", "utf-8"));
+    const cov = anchorCoverage(store).find(c => c.target === "coaching_value")!;
+    assert.deepEqual(cov.missing, [5], "coaching_value coverage changed — if a 5 was found, update this test deliberately");
+    assert.throws(() => assertScoreable("coaching_value", store), /refusing to score/);
   });
 }
 

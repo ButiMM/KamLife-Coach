@@ -46,9 +46,30 @@ export type ScoreTarget = Dimension | typeof CONVERSATION_DIMENSION;
 export type Level = 1 | 2 | 3 | 4 | 5;
 export const ANCHOR_LEVELS: Level[] = [1, 3, 5];
 
+/**
+ * Where an anchor's authority comes from. There are exactly two legitimate sources and the
+ * machine is neither of them.
+ *
+ * "observed"  — a real turn from the corpus, scored against the founder's written standard.
+ * "specified" — an exemplar the FOUNDER wrote himself in the P2-B adjudication. §11 asks for
+ *               real conversations "wherever possible"; where the corpus contains no example of
+ *               a level (and for level 5 it largely does not — see docs/p2/CALIBRATION.md), the
+ *               founder's own written exemplar stands in. He wrote the words; this file did not.
+ *
+ * There is no third value, and adding one would be the moment P2 stops measuring anything.
+ */
+export type AnchorProvenance = "observed" | "specified";
+
 export interface Anchor {
   target: ScoreTarget;
   level: Level;
+  provenance: AnchorProvenance;
+  /**
+   * Which numbered principle of the founder's P2-B adjudication this anchor rests on. Required:
+   * it is what makes a score auditable rather than a matter of taste, and it means a later
+   * disagreement is settled by re-reading the standard instead of re-arguing the example.
+   */
+  principle: string;
   /** Traceability back to the corpus. A finding nobody can locate is not evidence. */
   conversationId: string;
   /** Absent for conversation-level anchors, which describe the whole exchange. */

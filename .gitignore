@@ -26,7 +26,12 @@ tmp/
 !DEFECTS.md
 # All docs/ markdown is tracked — this folder is project documentation, not scratch.
 # (A blanket *.md ignore was silently dropping new docs from commits.)
+# 2026-08-11: !docs/*.md only matches ONE level deep, so docs/p2/CALIBRATION.md was silently
+# ignored and `git commit` reported "nothing to commit" — the same trap, one directory down.
+# The second line covers every depth. docs/p2/README.md only escaped because !README.md
+# happens to match any basename, which is luck rather than a rule.
 !docs/*.md
+!docs/**/*.md
 
 # Marketing assets (local only — not for repo)
 marketing/
