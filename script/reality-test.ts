@@ -215,15 +215,38 @@ async function main() {
   }
 
   const { db } = await import("../server/db");
-  const { users, turnLedger } = await import("../shared/schema");
+  const { users, turnLedger, chatHistory } = await import("../shared/schema");
   const { eq } = await import("drizzle-orm");
   const { handleMessage } = await import("../server/routes");
+
+  /**
+   * REMOVE A TEST CLIENT — CHILDREN FIRST (2026-08-11).
+   *
+   * Run #1 died here, on the FIRST line of journey 1, before a single model call:
+   *   delete on "users" violates foreign key constraint "chat_history_user_id_fkey"
+   *
+   * The schema declares ON DELETE cascade for chat_history, and the committed migration
+   * creates that constraint as "chat_history_user_id_users_id_fk". Production is enforcing
+   * "chat_history_user_id_fkey" — PostgreSQL's DEFAULT name, with NO cascade. The live
+   * database is carrying an older constraint the Drizzle migration never replaced.
+   *
+   * That drift is a PRODUCTION issue, not a test issue, and it is reported rather than
+   * repaired here: altering a live constraint is a migration, and this file is a harness.
+   * What this function does is make the harness survive it — delete the child rows this
+   * test creates, then the user. Nothing about the journeys or their assertions changes.
+   */
+  async function removeTestClient(phone: string): Promise<void> {
+    const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    if (!existing) return;
+    await db.delete(chatHistory).where(eq(chatHistory.userId, existing.id));
+    await db.delete(users).where(eq(users.phoneNumber, phone));
+  }
 
   const results: Array<{ j: Journey; verdict: Verdict; fails: Array<{ turn: string; what: string; category: Category; reply: string }> }> = [];
 
   for (const j of JOURNEYS) {
     const phone = `whatsapp:+2700000${900 + j.n}`;
-    await db.delete(users).where(eq(users.phoneNumber, phone));
+    await removeTestClient(phone);
     const now = Date.now();
     const [u] = await db.insert(users).values({
       phoneNumber: phone, name: "Kam Test", onboardingState: "COMPLETE", subscriptionStatus: "active",
@@ -261,7 +284,7 @@ async function main() {
     }
     results.push({ j, verdict: fails.length ? "FAIL" : "PASS", fails });
     // Leave the database as it was found: the transcript above is the record, not the rows.
-    await db.delete(users).where(eq(users.phoneNumber, phone)).catch(() => {});
+    await removeTestClient(phone).catch(() => {});
   }
 
   console.log(`\n${"═".repeat(92)}\nRESULTS\n${"═".repeat(92)}`);
@@ -282,4 +305,17 @@ async function main() {
   process.exit(results.some(r => r.verdict === "FAIL") ? 1 : 0);
 }
 
-await main();
+/**
+ * A CRASH IS NOT A VERDICT (2026-08-11).
+ *
+ * Run #1 died on a foreign-key error before a single journey ran, node exited 1, and the
+ * workflow annotated it "PRODUCT FAILURE — at least one journey failed on what Coach K said."
+ * Nothing Coach K said was ever evaluated. Exit 1 must mean "a journey was run and it failed";
+ * anything that stops the harness getting there is the environment, and exits 3.
+ */
+await main().catch((err) => {
+  console.error("\nCOACH K REALITY TEST — ENVIRONMENT FAILURE. No journey was adjudicated.\n");
+  console.error(`  ${err?.cause?.message || err?.message || err}`);
+  console.error("\nThis is NOT a product result. Nothing about Coach K's coaching was measured.");
+  process.exit(3);
+});
