@@ -1400,6 +1400,46 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(/plan\?\.isCorrection/.test(src), "the correction branch must gate on the plan");
   });
 
+  test("WO3: the REMOVE_LAST_MEAL veto hands a correction to the correction engine", async () => {
+    // LIVE Reality Test, Journey 5: the model read "Actually no, that was yesterday. And it wasn't
+    // rice, it was pap." as REMOVE_LAST_MEAL. The bouncer correctly refused the delete — and then
+    // OWNED the turn with "nothing removed, tell me which meal is wrong", to a client who had just
+    // said exactly which meal and what was wrong. planCorrection never saw it.
+    const src = readFileSync("server/understanding/live.ts", "utf-8");
+    const i = src.indexOf("if (destructiveVetoed) {");
+    assert.ok(i > 0, "the destructive-action bouncer is gone");
+    const veto = src.slice(i, i + 3000);
+
+    // The hand-off must come BEFORE the veto writes its own reply, or the turn is already spent.
+    const handoff = src.indexOf("handleFoodLogMgmt", i);
+    const vetoReply = src.indexOf("REMOVE_VETO", i);
+    assert.ok(handoff > 0, "the veto does not hand a correction anywhere");
+    assert.ok(handoff < vetoReply, "the hand-off must precede the veto's own reply");
+
+    // It must ASK the existing predicate, not carry a second copy of the rule.
+    assert.ok(/planCorrection\(/.test(veto), "the veto must consult planCorrection, not re-derive it");
+    assert.ok(/cPlan\.isCorrection/.test(veto), "the hand-off must gate on the correction plan");
+
+    // And the delete protection itself must be untouched — the veto still vetoes.
+    assert.ok(/EXPLICIT_REMOVE_RE/.test(src), "the destructive-action bouncer must remain");
+    assert.ok(/const destructiveVetoed = result\.actions\.some/.test(src),
+      "the veto condition must be unchanged — WO3 changes who answers, never what is allowed to delete");
+
+    // planCorrection agrees this exact turn is a compound correction, which is what makes the
+    // hand-off fire. (The mutation itself is asserted against real rows in acceptance-hold.ts.)
+    const { planCorrection, isMealDateMove } = await import("../server/food-identity-correction");
+    const { isRetroactiveMeal } = await import("../server/utils");
+    const J5 = "Actually no, that was yesterday. And it wasn't rice, it was pap. And I had spinach too.";
+    const p5 = planCorrection(J5, isMealDateMove(J5, isRetroactiveMeal(J5)));
+    assert.ok(p5.isCorrection && p5.moves, `J5 must read as a correction: ${JSON.stringify(p5)}`);
+    assert.ok(p5.remove.includes("rice"), `rice must be removed: ${JSON.stringify(p5.remove)}`);
+
+    // A REAL removal request must still be vetoed and NOT handed off — it is not a correction.
+    const bare = planCorrection("Remove my last meal", isMealDateMove("Remove my last meal", false));
+    assert.ok(!(bare.isCorrection && (bare.moves || bare.remove.length + bare.add.length >= 2)),
+      `a bare removal must not be routed as a compound correction: ${JSON.stringify(bare)}`);
+  });
+
   test("normalizer fidelity: the two rewrites the Reality Test caught are REJECTED", async () => {
     const { normalizerFidelity } = await import("../server/normalizer-fidelity");
     // J5, verbatim from the baseline run. Tin fish and mixed veggies were invented, the correction

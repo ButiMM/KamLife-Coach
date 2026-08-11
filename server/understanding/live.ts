@@ -24,6 +24,8 @@ import { buildClientSnapshot } from "../brain/client-snapshot";
 import { seedUnderstanding } from "./seed";
 import { loadUnderstanding, saveUnderstanding } from "./store";
 import { runMeaningEngine, writeReplyAfterTools } from "./meaning-engine";
+import { planCorrection, isMealDateMove } from "../food-identity-correction";
+import { isRetroactiveMeal } from "../utils";
 import { tellDontAsk } from "../reply-hygiene";
 import { localiseSuggestion } from "../food-swaps";
 
@@ -223,7 +225,7 @@ export async function runMeaningEngineLive(ctx: {
    *  Non-cohort users run dry (until ENGINE_ACTIONS_ALL=on), so `on` is safe to flip today. */
   actionsLive?: boolean;
 }): Promise<string | null> {
-  const { message, user, openai } = ctx;
+  const { message, m, user, openai } = ctx;
   try {
     const snapshot = await buildClientSnapshot(user).catch(() => undefined);
     const prior = user?.id
@@ -272,6 +274,27 @@ export async function runMeaningEngineLive(ctx: {
     const destructiveVetoed = result.actions.some(a => a.type === "REMOVE_LAST_MEAL") && !EXPLICIT_REMOVE_RE.test(message);
     if (destructiveVetoed) {
       console.warn("[ENGINE_ACTION] VETOED REMOVE_LAST_MEAL — no explicit removal words:", message.slice(0, 60));
+      // A CORRECTION IS NOT A REMOVAL REQUEST (2026-08-10, Work Order 3). The live Reality Test
+      // showed Journey 5 dying right here: the model read "Actually no, that was yesterday. And it
+      // wasn't rice, it was pap." as REMOVE_LAST_MEAL, the bouncer correctly refused the delete —
+      // and then OWNED the turn with "nothing removed, tell me which meal is wrong". The client
+      // had already said which meal and what was wrong. The veto was right; keeping the turn was
+      // not, because the deterministic correction engine never got it.
+      //
+      // So the veto now hands the turn to the path that owns corrections instead of answering for
+      // it. Existing predicate (planCorrection), existing handler, existing semantics: nothing in
+      // planCorrection or applyCorrection changes, no new pattern, no new route. If it does not
+      // claim the turn, the veto reply below stands exactly as it did.
+      const cPlan = planCorrection(message, isMealDateMove(message, isRetroactiveMeal(message)));
+      if (cPlan.isCorrection && (cPlan.moves || cPlan.remove.length + cPlan.add.length >= 2)) {
+        const { handleFoodLogMgmt } = await import("../handlers/food-log-mgmt");
+        const corrected = await handleFoodLogMgmt(user, m).catch(() => null);
+        if (corrected !== null) {
+          console.log("[ENGINE_ACTION] not a removal — handed to the correction engine:", message.slice(0, 60));
+          await logChat(user.id, message, corrected, "FOOD_CORRECTION").catch(() => {});
+          return corrected;
+        }
+      }
       // Never relay the model's (likely "Removed…") reply — that would be a lie. "Fix it /
       // recalculate" means: show the honest total from everything logged, delete nothing.
       const { recomputeTodayFoodTotals } = await import("../handlers/food-scanner");
