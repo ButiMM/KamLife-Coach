@@ -2,6 +2,71 @@
 
 **Status: P2-A complete. Waiting for founder calibration.**
 
+---
+
+## AMENDMENT — 2026-08-11: real client data, and the two phases
+
+The original brief §2 said "do not use real client records for this phase." That rule was too
+blunt, and the founder corrected it. Recording the correction here, because a rule that lives
+only in a conversation is folklore.
+
+> **Real client data is the ultimate validation source, but it enters the measurement system
+> deliberately, lawfully, and with privacy controls.**
+
+The reason for the original constraint was privacy and measurement discipline — *don't casually
+dump real client data into an AI evaluation pipeline*. That is not the same as *real client
+conversations are forbidden*, and collapsing the two is counterproductive. An instrument
+calibrated only on synthetic scenarios, constructed test users and the founder's own messages
+measures Coach K against a member who helped design the test. It will certify a product that
+works beautifully in a laboratory and then meets five hundred real South Africans saying things
+no test suite imagined.
+
+### Phase 1 — safe calibration (current)
+
+The founder's own Coach K conversation establishes the initial rubric. No client data.
+
+### Phase 2 — real-world validation (BLOCKED)
+
+Properly handled real member conversations test whether the rubric survives reality. The
+question Phase 2 exists to answer: **where does Coach K fail when confronted with people who
+did not help us design the test?**
+
+**Phase 2 is blocked until the questions below are answered.** Pseudonymisation is explicitly
+NOT sufficient on its own and must not be treated as if it were — see the note under the list.
+
+- [ ] What is the lawful basis for processing member conversations for AI evaluation? Is it
+      covered by the existing KamLife privacy/consent notice, or is additional consent required?
+- [ ] What must be removed, and is removal even achievable for this data?
+- [ ] Who has access to the evaluation corpus?
+- [ ] How long is it retained, and what triggers deletion?
+- [ ] Does it stay local and gitignored? What, if anything, is ever committed?
+- [ ] Is any part of it ever sent to a third-party model?
+
+**Why redaction is not enough here.** Stripping names and phone numbers is trivial and is not
+de-identification for this data. A weight-loss conversation is identifying in its *content* — a
+suburb, a workplace, a medical condition, a named family member, a distinctive phrase. Remove
+the name and the conversation still identifies the person to anyone who knows them. The honest
+posture is therefore pseudonymised, local, access-controlled, retained for a fixed window, and
+never committed — not "redacted, therefore anonymous."
+
+**A load-bearing property to preserve.** The instrument currently makes **no model call and no
+network call at all** — parsing, one shipped regex predicate, string comparison. The corpus
+cannot leave the machine. That is what makes the Phase 2 answer to "is it ever sent to a
+third-party model?" a structural *no* rather than a promise. If P2-C ever adds model-assisted
+scoring, that property dies, and it must die by explicit decision rather than as an
+implementation detail nobody noticed.
+
+### Deferred — the manual-vs-AI comparison
+
+The founder's own hand-coaching conversations with real members are a separate and potentially
+very valuable analysis: what does a human coach do that Coach K does not — the better follow-up
+question, the thing remembered, the challenge instead of agreement, knowing when not to advise.
+
+It is a **different instrument** from P2, and it carries one trap that must be designed out
+first: the samples are not comparable. A human coaches by hand when a member is engaged, paying,
+or in trouble; Coach K handles everything including the dull 6am log. An unmatched comparison
+flatters the human by construction and teaches nothing. **Match on situation or do not run it.**
+
 The instrument is built and scores nothing. That is not an unfinished state — it is the
 designed one. Brief §10 puts human calibration before automated scoring, and §12 forbids the
 system that writes the replies from being the authority on whether they are good.
