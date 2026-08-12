@@ -79,3 +79,21 @@ export function detectEscalation(message: string): EscalationDecision {
     return { should: true, reason: "human_requested", priority: "normal" };
   return { should: false, reason: "", priority: "normal" };
 }
+
+/**
+ * IS THIS A SYNTHETIC TEST CLIENT? (Reality run, 2026-08-12.)
+ *
+ * The Reality harness drives six clients on fixed synthetic numbers (+2700000901…906), and
+ * journey 4 says "I missed gym on Monday because my back was sore" — a real injury phrase, so
+ * detectEscalation correctly fired `injury (urgent)` and a WhatsApp alert was sent to the
+ * founder's actual phone. Correct product behaviour, wrong person: nobody is hurt, and a test
+ * suite that pages a human every run trains them to ignore the page that matters.
+ *
+ * The escalation ROW is still written — the run should be inspectable afterwards. Only the
+ * outbound alert is withheld. Keyed on the number rather than an env var so it holds no matter
+ * how the harness is invoked, and confined to the +27 00000 xxx block, which contains no
+ * dialable SA number (real mobiles carry an operator prefix, never 0, after the 27).
+ */
+export function isSyntheticTestClient(phoneNumber: string | null | undefined): boolean {
+  return (phoneNumber || "").replace(/^whatsapp:/, "").replace(/\D/g, "").startsWith("2700000");
+}

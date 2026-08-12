@@ -4,7 +4,7 @@ import { users, chatHistory, escalations, turnLedger } from "../../shared/schema
 import { eq, and } from "drizzle-orm";
 import twilio from "twilio";
 import { classifyMediaFailure } from "../coach-guardrails";
-import { detectEscalation, escalationSLA } from "../safety-detection";
+import { detectEscalation, escalationSLA, isSyntheticTestClient } from "../safety-detection";
 
 // Standalone escalation check — exported so handleMessage can call it early, before any handler
 // returns. Does NOT create a chatHistory row; only creates the escalations record + coach alert.
@@ -36,6 +36,13 @@ export async function checkEscalation(userId: string, messageIn: string): Promis
         const normPhone = (p: string) => p.replace(/^whatsapp:/, "").replace(/\D/g, "");
         if (normPhone(clientPhone) === normPhone(process.env.COACH_ALERT_PHONE)) {
           console.log("[ESCALATION] Skipping coach alert — alert phone == client phone (recorded in inbox only)");
+          return;
+        }
+        // Nobody is hurt: this is the Reality harness, not a client. Journey 4's "I missed gym
+        // because my back was sore" paged the founder's real phone on every run, and a suite that
+        // cries injury weekly is how a real one gets ignored. Row still written, alert withheld.
+        if (isSyntheticTestClient(clientPhone)) {
+          console.log("[ESCALATION] Skipping coach alert — synthetic test client (recorded in inbox only)");
           return;
         }
         const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);

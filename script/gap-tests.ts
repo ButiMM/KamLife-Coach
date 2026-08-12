@@ -187,6 +187,48 @@ test("explicitMealSlot: the J1 message keeps its breakfast, whatever the clock s
 });
 
 // ============================================================
+// THE REALITY HARNESS MUST NOT PAGE A HUMAN (Reality run, 2026-08-12)
+//
+// Journey 4 says "I missed gym on Monday because my back was sore". detectEscalation read
+// that as `injury (urgent)` — correctly — and a WhatsApp alert went to the founder's real
+// phone. Right behaviour, wrong person. A suite that cries injury on every run is how a real
+// injury alert gets ignored. The escalation ROW must still be written so the run stays
+// inspectable; only the outbound page is withheld.
+// ============================================================
+
+test("isSyntheticTestClient: the six Reality numbers are recognised, in every format", async () => {
+  const { isSyntheticTestClient } = await import("../server/safety-detection");
+  for (let n = 1; n <= 6; n++) {
+    assert.equal(isSyntheticTestClient(`whatsapp:+2700000${900 + n}`), true, `journey ${n} number`);
+    assert.equal(isSyntheticTestClient(`+2700000${900 + n}`), true, "bare + form");
+    assert.equal(isSyntheticTestClient(`2700000${900 + n}`), true, "digits-only form");
+  }
+});
+
+test("isSyntheticTestClient: a REAL client still pages the founder", async () => {
+  const { isSyntheticTestClient } = await import("../server/safety-detection");
+  // The founder's own number and ordinary SA mobiles must never be swallowed by this guard —
+  // suppressing a real injury alert would be far worse than the noise it exists to stop.
+  for (const real of ["whatsapp:+27682002798", "+27821234567", "27735551234", "whatsapp:+27600000000"]) {
+    assert.equal(isSyntheticTestClient(real), false, `${real} is a real client and must alert`);
+  }
+  assert.equal(isSyntheticTestClient(""), false, "empty is not a licence to suppress");
+  assert.equal(isSyntheticTestClient(null), false);
+  assert.equal(isSyntheticTestClient(undefined), false);
+});
+
+test("escalation: the alert is withheld but the row is still written", () => {
+  const src = readFileSync("server/handlers/chat-log.ts", "utf-8");
+  // The guard must sit AFTER the insert, so the escalation is always recorded and only the
+  // outbound page is skipped. If it moved above the insert, test runs would vanish silently.
+  // Match the CALL SITE, not the import at the top of the file.
+  assert.ok(src.indexOf("db.insert(escalations)") < src.indexOf("isSyntheticTestClient(clientPhone)"),
+    "the escalation row must be written before the alert is skipped");
+  assert.ok(/Skipping coach alert — synthetic test client/.test(src),
+    "the skip must say why, in the log, or a missing page looks like a broken alerter");
+});
+
+// ============================================================
 // THE GROCERY GATE MUST READ WHAT THE CLIENT TYPED (Reality J2, 2026-08-12)
 //
 // The first fix for J2 was correct about commas and useless in production, and the offline
