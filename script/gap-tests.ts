@@ -1450,6 +1450,70 @@ test("vague quantity: global 'half the rice' does not double-halve per-food", ()
 // Results
 // ============================================================
 
+// ============================================================
+// SYMPTOM PERSISTENCE (2026-08-12) — step 2 of the hunger doctrine.
+// "I'm hungry" and "I've been hungry every afternoon for six days" are not the same state, and
+// until now the product could not tell them apart. These cover the two ways this could go wrong:
+// capturing the wrong messages, and corrupting the friction system it borrows its pattern from.
+// ============================================================
+
+const { SYMPTOM_SIGNAL_KINDS, NOT_A_BOT_FUMBLE, symptomSignalKind } =
+  await import("../server/quality-signals");
+const { reportsHunger } = await import("../server/unlogged-notice");
+const { FRICTION_SIGNAL_KINDS } = await import("../server/friction");
+
+test("symptom: a present-tense hunger report is captured", () => {
+  for (const m of [
+    "I'm hungry", "im so hungry all the time", "I am always hungry",
+    "still hungry after lunch", "I'm starving", "constantly hungry",
+    "I can't stop eating", "my cravings are out of control",
+  ]) assert.equal(reportsHunger(m), true, `should capture: "${m}"`);
+});
+
+test("symptom: it must NOT capture a past explanation, advice, or an unrelated message", () => {
+  // Over-capturing would manufacture the very persistence the doctrine exists to detect.
+  for (const m of [
+    "I ate the bread because I was hungry",   // past explanation, not a current report
+    "I was so hungry yesterday",              // past
+    "that will keep you full for hours",      // advice about hunger
+    "i had chicken and rice for lunch",       // a food log
+    "how many calories do I have left?",      // a question
+    "how do I stop being hungry",             // asking, not reporting — the coach answers this
+  ]) assert.equal(reportsHunger(m), false, `must NOT capture: "${m}"`);
+});
+
+test("symptom: hunger is NOT a friction kind — the operator queue stays uncorrupted", () => {
+  // Friction means the client is FIGHTING THE BOT; its red flag reads "the bot is failing them".
+  // A hungry client is not a bot failure. If these namespaces ever overlap, reporting a symptom
+  // would rank a client as a churn risk for telling us what we asked them to tell us.
+  assert.equal(symptomSignalKind("hunger"), "symptom_hunger");
+  for (const k of SYMPTOM_SIGNAL_KINDS) {
+    assert.ok(!FRICTION_SIGNAL_KINDS.includes(k), `${k} must never be counted as friction`);
+  }
+  for (const k of FRICTION_SIGNAL_KINDS) {
+    assert.ok(!SYMPTOM_SIGNAL_KINDS.includes(k), `${k} must never be counted as a symptom`);
+  }
+});
+
+test("symptom: a client-state observation is never presented as a bot fumble", () => {
+  // The admin review queue labels every row "a moment the bot fumbled".
+  for (const k of SYMPTOM_SIGNAL_KINDS) {
+    assert.ok(NOT_A_BOT_FUMBLE.includes(k), `${k} must be excluded from the fumble queue`);
+  }
+  const admin = readFileSync("server/routes/admin.ts", "utf-8");
+  assert.ok(/notInArray\(qualitySignals\.kind, NOT_A_BOT_FUMBLE\)/.test(admin),
+    "the exclusion must actually be applied to the query, not merely declared");
+});
+
+test("symptom: persistence records evidence and never diagnoses", () => {
+  // The layer must expose counts and dates only. A cause belongs downstream, with Coach K.
+  const src = readFileSync("server/quality-signals.ts", "utf-8");
+  const fn = src.slice(src.indexOf("export interface SymptomPersistence"));
+  assert.ok(/distinctDays/.test(fn), "distinct DAYS is the load-bearing number, not raw occurrences");
+  assert.ok(!/protein|cause|because|recommend|should eat/i.test(fn.slice(0, 1200)),
+    "the persistence layer must not carry a diagnosis or advice");
+});
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");

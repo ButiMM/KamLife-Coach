@@ -8,7 +8,6 @@ import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
 import OpenAI from "openai";
 import twilio from "twilio";
 import { SA_FOODS_SEED, type SAFood } from "./foods";
-import { COACH_K_SYSTEM } from "./coach-prompt";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide } from "./exercise-media";
 import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, getDayType } from "./programme";
@@ -54,6 +53,8 @@ import { normalizerFidelity } from "./normalizer-fidelity";
 import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, isMultiPartAsk, getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { mentionsConditionOrMedication, conditionWelcome } from "./condition-welcome";
+import { captureSymptom } from "./quality-signals";
+import { reportsHunger } from "./unlogged-notice";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 if (!openaiKey) {
@@ -62,16 +63,8 @@ if (!openaiKey) {
 }
 const openai = new OpenAI({ apiKey: openaiKey });
 
-// COACH_K_SYSTEM imported from ./coach-prompt
-
 // Programme constants, workout builders, and GPT functions moved to dedicated modules (see imports above)
-
-
-
 // detectEscalation + escalationSLA now live in ./safety-detection for unit testing
-
-
-
 
 // ============================================================
 // GET OR CREATE USER
@@ -720,6 +713,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // ---- FOOD LOG MANAGEMENT (reset, remove, show) ----
+  // SYMPTOM PERSISTENCE — record only, never route (2026-08-12). The message still reaches
+  // whatever handler would have answered it; this observes in passing so the hunger doctrine can
+  // ask "how many DAYS?" rather than react to one isolated message. Fire-and-forget.
+  if (reportsHunger(message)) captureSymptom("hunger", { userId: user.id, phone, messageIn: message });
   const foodLogMgmtResult = await handleFoodLogMgmt(user, m);
   if (foodLogMgmtResult !== null) return foodLogMgmtResult;
 

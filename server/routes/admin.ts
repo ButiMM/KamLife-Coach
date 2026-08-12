@@ -2,8 +2,9 @@ import type { Express } from "express";
 import { db } from "../db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs, escalations, clientActions, progressPhotos, weeklyCheckins, clothingCheckins, bodyMeasurements, exerciseLogs, paymentEvents, clientIntelligenceProfiles, gptCosts, qualitySignals } from "../../shared/schema";
 import { evaluateScaling } from "../scaling-milestones";
-import { eq, desc, asc, and, gte, isNull, or, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, gte, isNull, or, inArray, notInArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
+import { NOT_A_BOT_FUMBLE } from "../quality-signals";
 import twilio from "twilio";
 import { requireAdminKey } from "./auth";
 import { computeClientRisk, sortByRisk } from "../client-triage";
@@ -859,13 +860,20 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || "50"), 10) || 50));
       const conds = [] as any[];
       if (kind) conds.push(eq(qualitySignals.kind, kind));
+      // A CLIENT-STATE observation is not a bot fumble (2026-08-12). Every row here is presented
+      // as "a moment the bot fumbled", so symptom rows — a client reporting hunger — must not
+      // appear unless explicitly asked for by kind. Filing a symptom as a defect would put a
+      // client in the review queue for telling us exactly what we asked them to tell us.
+      else conds.push(notInArray(qualitySignals.kind, NOT_A_BOT_FUMBLE));
       if (!includeReviewed) conds.push(eq(qualitySignals.reviewed, false));
       const rows = await db.select().from(qualitySignals)
         .where(conds.length ? and(...conds) : undefined)
         .orderBy(desc(qualitySignals.createdAt)).limit(limit);
       const since = new Date(Date.now() - 7 * 86_400_000);
       const week = await db.select({ kind: qualitySignals.kind, n: sql<number>`count(*)::int` })
-        .from(qualitySignals).where(gte(qualitySignals.createdAt, since)).groupBy(qualitySignals.kind);
+        .from(qualitySignals)
+        .where(and(gte(qualitySignals.createdAt, since), notInArray(qualitySignals.kind, NOT_A_BOT_FUMBLE)))
+        .groupBy(qualitySignals.kind);
       return res.json({
         readIt: "Each row is a moment the bot fumbled. Recurring kinds/messages are your next regression cases — add them to the drill or routing battery.",
         last7dByKind: Object.fromEntries(week.map(w => [w.kind, w.n])),

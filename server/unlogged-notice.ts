@@ -76,6 +76,27 @@ export function carriesFeelingClause(text: string): boolean {
   return /\b(i feel|i'm feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can'?t cope)\b/i.test(text || "");
 }
 
+/**
+ * Does this message REPORT hunger, right now? Sibling of carriesFeelingClause above: both answer
+ * "what state is the client telling us they are in", and both are read by callers that must not
+ * route on it. Added 2026-08-12 for symptom persistence — "I'm hungry" and "I've been hungry
+ * every afternoon for six days" are different states, and the second cannot exist until the
+ * occurrences are recorded.
+ *
+ * Deliberately NARROW. Not a past explanation ("I ate it because I was hungry"), not advice
+ * about hunger, not a question about it. Over-capturing would manufacture the very persistence
+ * the doctrine is meant to detect, which would be worse than not detecting it at all.
+ */
+export function reportsHunger(text: string): boolean {
+  const t = String(text || "").toLowerCase();
+  if (/\b(was|were|had been)\s+(so\s+|really\s+)?hungry\b/.test(t)) return false;
+  if (/\bhow (do|can) i\b/.test(t)) return false; // asking how to stop being hungry — the coach answers
+  return /\b(i(?:'| a)?m|i am|im|feeling|still|always|constantly)\s+(so\s+|really\s+|very\s+|permanently\s+)?(hungry|starving|ravenous)\b/.test(t)
+    || /\b(always|constantly|so)\s+hungry\b/.test(t)
+    || /\bcan'?t\s+(stop\s+eating|control\s+(my\s+)?(cravings|hunger))\b/.test(t)
+    || /\bcravings?\s+(are|is)\s+(bad|out of control|killing me)\b/.test(t);
+}
+
 export function unloggedFoodWords(message: string, loggedNames: string[]): string[] {
   const logged = loggedNames.join(" ").toLowerCase();
   const words = (message || "").toLowerCase()
