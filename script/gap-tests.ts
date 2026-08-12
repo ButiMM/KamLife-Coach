@@ -27,6 +27,7 @@ process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+270
 const { scalePortionDescription, extractMealLabel, adjustFoodsForSegment } = await import("../server/handlers/food-context");
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
+const { explicitMealSlot } = await import("../server/understanding/actions");
 const { scanForSAFoods } = await import("../server/handlers/food-scanner");
 
 let passed = 0;
@@ -148,6 +149,28 @@ test("extractMealLabel: no time signal — returns null (falls back to time-of-d
   const result = extractMealLabel("oats and milk");
   const VALID = new Set(["breakfast", "lunch", "dinner", "snack", null]);
   assert.ok(VALID.has(result), `unexpected label: ${result}`);
+});
+
+// ============================================================
+// explicitMealSlot — the client's own words, isolated from clock/macro inference
+// (Work Order A, 2026-08-12: "lunch" said at 9h SAST was dropped as clock-impossible
+// and relabelled breakfast — the clock must never outrank an explicit claim).
+// ============================================================
+
+test("explicitMealSlot: 'for lunch' → lunch, independent of any clock", () => {
+  assert.equal(explicitMealSlot("I had chicken for lunch"), "lunch");
+});
+
+test("explicitMealSlot: 'for dinner' → dinner", () => {
+  assert.equal(explicitMealSlot("I had pap for dinner yesterday"), "dinner");
+});
+
+test("explicitMealSlot: no meal word at all — 'earlier' is not a slot claim → null", () => {
+  assert.equal(explicitMealSlot("I had chicken earlier"), null);
+});
+
+test("explicitMealSlot: bare keyword anywhere in the message still counts", () => {
+  assert.equal(explicitMealSlot("Rice and beef for my lunch"), "lunch");
 });
 
 // parseLiftLog tests REMOVED 2026-08-06 with the function. Lift logging is gone: training is

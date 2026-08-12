@@ -289,37 +289,44 @@ export function answerSwapAsk(message: string, goalType?: string | null): string
  * ──────────────────────────────────────────────────────────────────────────── */
 export type Substitution = { alt: string; note: string };
 
-const SUBSTITUTES: Array<{ match: RegExp; sub: Substitution }> = [
+// The JOB a food does on the plate. It was already the organising idea of this table — the
+// section comments below have said "protein / starch / veg / fat" since the table was written
+// — but it lived only in the comments, so nothing could READ it. Work Order B needs the
+// reverse lookup ("they proposed eggs — does that work?"), which is the same knowledge asked
+// from the other end, so the grouping becomes a field instead of a second table.
+type FoodJob = "protein" | "starch" | "veg" | "fat";
+
+const SUBSTITUTES: Array<{ match: RegExp; job: FoodJob; sub: Substitution }> = [
   // ── PROTEIN — the job that matters most, and the one clients panic about ──
-  { match: /\b(chicken breast|chicken|braai pack|drumsticks?)\b/i,
+  { match: /\b(chicken breast|chicken|braai pack|drumsticks?)\b/i, job: "protein",
     sub: { alt: "lean mince, tinned pilchards, or eggs", note: "same protein job, and usually cheaper per gram" } },
-  { match: /\b(beef|steak|mince)\b/i,
+  { match: /\b(beef|steak|mince)\b/i, job: "protein",
     sub: { alt: "chicken, soya mince, or tinned fish", note: "same protein, lighter on the pocket" } },
-  { match: /\b(fish|hake|snoek|tinned fish|pilchards?|tuna)\b/i,
+  { match: /\b(fish|hake|snoek|tinned fish|pilchards?|tuna)\b/i, job: "protein",
     sub: { alt: "eggs, chicken, or tinned baked beans", note: "protein is protein — take what the shop has" } },
-  { match: /\b(eggs?)\b/i,
+  { match: /\b(eggs?)\b/i, job: "protein",
     sub: { alt: "tinned pilchards, chicken, or beans", note: "same protein for roughly the same money" } },
-  { match: /\b(biltong|dro[ëe]wors)\b/i,
+  { match: /\b(biltong|dro[ëe]wors)\b/i, job: "protein",
     sub: { alt: "boiled eggs or a tin of pilchards", note: "the protein without the biltong price" } },
   // ── STARCH — filling, cheap, and interchangeable ──
-  { match: /\b(rice)\b/i, sub: { alt: "pap, samp, or potatoes", note: "same job on the plate, same size portion" } },
-  { match: /\b(pap|maize meal|mealie meal)\b/i, sub: { alt: "rice, samp, or potatoes", note: "same job on the plate" } },
-  { match: /\b(bread|brown bread)\b/i, sub: { alt: "provitas, oats, or a potato", note: "same starch, and oats keep you full longer" } },
-  { match: /\b(potatoes?|sweet potatoes?)\b/i, sub: { alt: "rice, pap, or samp", note: "swap freely — they do the same work" } },
-  { match: /\b(oats|porridge)\b/i, sub: { alt: "maltabella, weetbix, or brown bread", note: "same breakfast starch" } },
-  { match: /\b(pasta|macaroni|spaghetti)\b/i, sub: { alt: "rice or samp", note: "same starch, usually cheaper" } },
-  { match: /\b(samp)\b/i, sub: { alt: "rice or pap", note: "same starch, quicker to cook" } },
+  { match: /\b(rice)\b/i, job: "starch", sub: { alt: "pap, samp, or potatoes", note: "same job on the plate, same size portion" } },
+  { match: /\b(pap|maize meal|mealie meal)\b/i, job: "starch", sub: { alt: "rice, samp, or potatoes", note: "same job on the plate" } },
+  { match: /\b(bread|brown bread)\b/i, job: "starch", sub: { alt: "provitas, oats, or a potato", note: "same starch, and oats keep you full longer" } },
+  { match: /\b(potatoes?|sweet potatoes?)\b/i, job: "starch", sub: { alt: "rice, pap, or samp", note: "swap freely — they do the same work" } },
+  { match: /\b(oats|porridge)\b/i, job: "starch", sub: { alt: "maltabella, weetbix, or brown bread", note: "same breakfast starch" } },
+  { match: /\b(pasta|macaroni|spaghetti)\b/i, job: "starch", sub: { alt: "rice or samp", note: "same starch, usually cheaper" } },
+  { match: /\b(samp)\b/i, job: "starch", sub: { alt: "rice or pap", note: "same starch, quicker to cook" } },
   // ── VEG — never skip it because one thing was missing ──
-  { match: /\b(spinach|morogo)\b/i, sub: { alt: "cabbage, or any frozen mixed veg", note: "cabbage is the cheapest green in the shop" } },
-  { match: /\b(broccoli|green beans)\b/i, sub: { alt: "cabbage, carrots, or frozen mixed veg", note: "frozen counts — it is picked riper than fresh" } },
-  { match: /\b(salad|lettuce|tomatoes?)\b/i, sub: { alt: "cucumber, cabbage, or tinned tomatoes", note: "any veg beats no veg" } },
-  { match: /\b(carrots?|butternut|pumpkin)\b/i, sub: { alt: "any frozen mixed veg", note: "same job, keeps for months" } },
+  { match: /\b(spinach|morogo)\b/i, job: "veg", sub: { alt: "cabbage, or any frozen mixed veg", note: "cabbage is the cheapest green in the shop" } },
+  { match: /\b(broccoli|green beans)\b/i, job: "veg", sub: { alt: "cabbage, carrots, or frozen mixed veg", note: "frozen counts — it is picked riper than fresh" } },
+  { match: /\b(salad|lettuce|tomatoes?)\b/i, job: "veg", sub: { alt: "cucumber, cabbage, or tinned tomatoes", note: "any veg beats no veg" } },
+  { match: /\b(carrots?|butternut|pumpkin)\b/i, job: "veg", sub: { alt: "any frozen mixed veg", note: "same job, keeps for months" } },
   // ── FAT + DAIRY ──
-  { match: /\b(olive oil|avocado|avo)\b/i, sub: { alt: "sunflower oil used sparingly, or peanut butter", note: "same fat job at a fraction of the price" } },
-  { match: /\b(milk)\b/i, sub: { alt: "long-life milk or maas", note: "same protein and calcium, keeps longer" } },
-  { match: /\b(yoghurt|greek yoghurt)\b/i, sub: { alt: "maas or plain double-cream yoghurt", note: "maas is the SA original and costs less" } },
-  { match: /\b(cheese)\b/i, sub: { alt: "eggs or a tin of pilchards", note: "cheaper protein, less saturated fat" } },
-  { match: /\b(peanut butter)\b/i, sub: { alt: "any nut butter, or eggs for the protein", note: "same fat and protein job" } },
+  { match: /\b(olive oil|avocado|avo)\b/i, job: "fat", sub: { alt: "sunflower oil used sparingly, or peanut butter", note: "same fat job at a fraction of the price" } },
+  { match: /\b(milk)\b/i, job: "protein", sub: { alt: "long-life milk or maas", note: "same protein and calcium, keeps longer" } },
+  { match: /\b(yoghurt|greek yoghurt)\b/i, job: "protein", sub: { alt: "maas or plain double-cream yoghurt", note: "maas is the SA original and costs less" } },
+  { match: /\b(cheese)\b/i, job: "protein", sub: { alt: "eggs or a tin of pilchards", note: "cheaper protein, less saturated fat" } },
+  { match: /\b(peanut butter)\b/i, job: "fat", sub: { alt: "any nut butter, or eggs for the protein", note: "same fat and protein job" } },
 ];
 
 /**
@@ -333,6 +340,59 @@ export function substituteFor(foodName: string): Substitution | null {
   const f = (foodName || "").toLowerCase().trim();
   if (!f) return null;
   for (const row of SUBSTITUTES) if (row.match.test(f)) return row.sub;
+  return null;
+}
+
+/**
+ * A LOCAL CHANGE TO A LIST ALREADY SENT — answered locally, never by rebuilding the list
+ * (Work Order B, 2026-08-12 live: "Can I use eggs instead?" came back as "Here's your
+ * updated list…" and a full regeneration of every section).
+ *
+ * The scope of the reply is the whole defect. The substitution was understood correctly; the
+ * client asked about ONE item and was handed back twenty, which buries the answer they wanted
+ * and re-prices a list they did not ask to re-price. A local question gets a local answer.
+ *
+ * Two shapes, one owner, because they are the same question asked from two ends:
+ *  • "can I use eggs instead" — they PROPOSE a food. SWAP_ASK_RE cannot see this: it reads
+ *    "instead of X" and here the food comes BEFORE the word, so the message fell past every
+ *    deterministic handler to the model, which had the list in its history and rebuilt it.
+ *  • "I already have rice" — they own an item. Nothing anywhere answered this; the nearest
+ *    thing, UNAVAILABLE_RE, is the opposite polarity (not having something).
+ *
+ * Returns null on any food the table does not know, so Coach K still owns the judgement calls.
+ * Never fires when the client explicitly asks for the full/updated list — see asksForFullList.
+ */
+const JOB_CONFIRMS: Record<FoodJob, string> = {
+  protein: "it does the same protein job",
+  starch: "it does the same job on the plate",
+  veg: "any veg beats no veg",
+  fat: "same fat job",
+};
+
+export function answerLocalListChange(message: string): string | null {
+  const m = (message || "");
+  // An explicit request for the whole list is NOT a local change — let the list handlers run.
+  if (/\b(?:full|whole|updated|new|revised|complete)\s+(?:grocery\s+|shopping\s+)?list\b|\b(?:send|show|give)\s+(?:me\s+)?(?:the\s+|my\s+)?(?:updated|full|new|whole)\b/i.test(m)) return null;
+
+  const row = (food: string) => SUBSTITUTES.find(r => r.match.test(food));
+
+  // THEY PROPOSED A FOOD — "can I use eggs instead", "use eggs instead", "eggs instead?"
+  const proposed = m.match(/\b(?:use|swap in|go with|do|have|take|try|buy|get)\s+(?:some |a |an |the )?([a-z][a-z' \-]{1,30}?)\s+instead\b|^\s*([a-z][a-z' \-]{1,30}?)\s+instead\b/i);
+  if (proposed) {
+    const food = (proposed[1] || proposed[2] || "").trim();
+    const hit = row(food);
+    if (hit) return `Yes — ${food} works 👌 ${JOB_CONFIRMS[hit.job].charAt(0).toUpperCase()}${JOB_CONFIRMS[hit.job].slice(1)}. Everything else on the list stays as it is.`;
+    return null;
+  }
+
+  // THEY ALREADY OWN AN ITEM — "I already have rice", "I've got pap at home".
+  const owned = m.match(/\b(?:i(?:'ve| have)\s+(?:got|already)|already (?:have|got)|i\s+have)\s+(?:some |a |an |the )?([a-z][a-z' \-]{1,30}?)(?:\s+at home)?\s*[.!,?]?\s*$/i);
+  if (owned) {
+    const food = owned[1].trim();
+    const hit = row(food);
+    if (hit) return `Good — cross ${food} off then 👌 That's your ${hit.job === "veg" ? "veg" : hit.job} covered, so put the money on the rest of the list.`;
+    return null;
+  }
   return null;
 }
 

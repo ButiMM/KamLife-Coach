@@ -29,7 +29,7 @@ import { handleMealRepeat } from "./meal-repeat";
 import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
 import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion, handleVoiceReplyPreference } from "./numbers-literacy";
-import { answerSwapAsk, answerUnavailable } from "../food-swaps";
+import { answerSwapAsk, answerUnavailable, answerLocalListChange } from "../food-swaps";
 import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
 import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from "../street-food";
 import { handleAdviceCommands } from "./advice-commands";
@@ -114,6 +114,16 @@ export async function handleEarlyCommands(ctx: {
   // "instead of X" still gets the health answer it always did.
   const subAnswer = answerUnavailable(message);
   if (subAnswer !== null) { await logChat(user.id, message, subAnswer, "SUBSTITUTION"); return subAnswer; }
+
+  // ---- A LOCAL CHANGE TO A LIST WE ALREADY SENT (Work Order B, 2026-08-12) ----
+  // "Can I use eggs instead?" was answered with "Here's your updated list…" and a full
+  // regeneration — the substitution was understood, the SCOPE of the reply was not. The two
+  // handlers above cannot catch it: the goal-swap reads "instead of X" (the food comes first
+  // here) and the availability answer needs a shop/price complaint. So it fell to the model,
+  // which had the list in its history and rebuilt all twenty items to answer a question about
+  // one. Deterministic and local — and it stands down on an explicit "send the full list".
+  const localChange = answerLocalListChange(message);
+  if (localChange !== null) { await logChat(user.id, message, localChange, "LOCAL_LIST_CHANGE"); return localChange; }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
   // ---- WEEKLY / MONTHLY REPORT CARD (2026-07-22) — the shareable scorecard. Matched BEFORE the

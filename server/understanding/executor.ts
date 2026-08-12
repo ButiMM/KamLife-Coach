@@ -22,7 +22,7 @@
  * (handlers are lazy-loaded) so the safety core is unit-testable without the DB chain.
  */
 
-import { type CoachAction, type ToolOutcome, refsAreLabels, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported } from "./actions";
+import { type CoachAction, type ToolOutcome, refsAreLabels, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported, explicitMealSlot } from "./actions";
 import { neverSilentLine } from "../reply-hygiene";
 import { sastHour } from "../sast";
 
@@ -192,12 +192,17 @@ let lastCardMarker = "";
 
 async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx: ExecuteContext): Promise<ToolOutcome> {
   const { handleFoodContext } = await import("../handlers/food-context");
-  // THE CLOCK OVERRULES THE MODEL'S SLOT (2026-08-06, live: an apple at 19:03 was logged "for
-  // breakfast", and the client's next message was "Breakfast? It's 7pm come on"). The model's
-  // slot was trusted blindly. It is a guess about something we can simply look up, so when the
-  // guess is impossible for the current hour we drop it and let extractMealLabel decide from
-  // the clock and the macros — which would have called a lone apple a snack. A slot the CLIENT
-  // said out loud still wins, because it reaches this as part of foodText.
+  // THE CLOCK OVERRULES A GUESSED SLOT, NEVER AN EXPLICIT ONE (2026-08-06, live: an apple at
+  // 19:03 was logged "for breakfast" — the MODEL'S guess, trusted blindly — and the client's
+  // next message was "Breakfast? It's 7pm come on"). That fix dropped any action.meal the clock
+  // called impossible. It over-reached: the comment here used to claim a slot the CLIENT said
+  // out loud "still wins, because it reaches this as part of foodText" — false. The log_meal
+  // tool tells the model food_text is ONLY the foods and amounts ("2 eggs and pap"), never the
+  // meal phrase, so dropping action.meal took the word "lunch" with it and extractMealLabel fell
+  // to the clock on text that no longer carried it (Work Order A, live: "lunch" at 9h SAST →
+  // dropped → label=breakfast). The client's raw message is the one place "did they actually say
+  // it" can be answered from, so check THAT before ever asking the clock.
+  const explicitSlot = explicitMealSlot(ctx.clientMessage || "");
   const hourSAST = sastHour();
   const slotFitsClock = (slot: string): boolean => {
     const s = slot.toLowerCase();
@@ -206,8 +211,9 @@ async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx:
     if (s.includes("dinner") || s.includes("supper")) return hourSAST >= 16 || hourSAST < 3;
     return true; // snack, brunch, night meal — plausible at any hour
   };
-  const slot = action.meal && slotFitsClock(String(action.meal)) ? action.meal : undefined;
-  if (action.meal && !slot) {
+  const clockFits = !!action.meal && slotFitsClock(String(action.meal));
+  const slot = explicitSlot || (clockFits ? action.meal : undefined);
+  if (action.meal && !clockFits && !explicitSlot) {
     console.warn(`[ENGINE_ACTION] dropped impossible slot "${action.meal}" at ${hourSAST}h SAST — letting the clock decide`);
   }
   const text = `${action.foodText}${slot ? ` for ${slot}` : ""}${action.retro ? ` ${action.retro}` : ""}`;

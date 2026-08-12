@@ -27,6 +27,7 @@ import { logChat, withTimeout, turnMutation } from "./chat-log";
 import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
+import { explicitMealSlot } from "../understanding/actions";
 import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, type PortionStat, type SlotContext } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
@@ -38,14 +39,8 @@ const TREAT_WORDS = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|c
 
 export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: number | null; protein?: number | null }, user?: any, slotCtx?: SlotContext): string | null {
   const lo = msg.toLowerCase();
-  if (/\b(for breakfast|breakfast was|had breakfast|breakfast:|ate breakfast|morning meal)\b/i.test(lo)) return "breakfast";
-  if (/\b(for lunch|lunch was|had lunch|lunch:|ate lunch|midday)\b/i.test(lo)) return "lunch";
-  if (/\b(for dinner|for supper|dinner was|supper was|had dinner|had supper|dinner:|supper:|evening meal)\b/i.test(lo)) return "dinner";
-  if (/\bsnack\b/i.test(lo)) return "snack";
-  // A bare keyword anywhere counts — "Lunch rice and beef", "Rice and beef for my lunch".
-  if (/\blunch\b/i.test(lo)) return "lunch";
-  if (/\b(?:dinner|supper)\b/i.test(lo)) return "dinner";
-  if (/\bbreakfast\b/i.test(lo)) return "breakfast";
+  const explicit = explicitMealSlot(msg);
+  if (explicit) return explicit;
   // A light, low-protein log with no keyword is a SNACK — clock-slotting it steals a main slot
   // and lets a later "same breakfast" copy it (bug 2026-07-01).
   if (macros && macros.kcal != null && macros.kcal < 250 && (macros.protein ?? 0) <= 4) return "snack";

@@ -21,6 +21,23 @@
 // The meal slots the logger understands (mirrors utils.slotFromSastHour's output).
 const MEAL_SLOTS = new Set(["breakfast", "lunch", "dinner", "snack", "night meal"]);
 
+// Did the CLIENT'S OWN raw message name a slot, independent of the model and the clock?
+// (Work Order A, 2026-08-12: "lunch" at 9h SAST was dropped as clock-impossible and
+// relabelled breakfast — the executor's slot-vs-clock check only ever saw action.meal,
+// never the client's words, so an explicit claim had no way to survive an odd hour.)
+// Single owner for both the executor's precedence check and food-context's text label.
+export function explicitMealSlot(msg: string): "breakfast" | "lunch" | "dinner" | "snack" | null {
+  const lo = (msg || "").toLowerCase();
+  if (/\b(for breakfast|breakfast was|had breakfast|breakfast:|ate breakfast|morning meal)\b/i.test(lo)) return "breakfast";
+  if (/\b(for lunch|lunch was|had lunch|lunch:|ate lunch|midday)\b/i.test(lo)) return "lunch";
+  if (/\b(for dinner|for supper|dinner was|supper was|had dinner|had supper|dinner:|supper:|evening meal)\b/i.test(lo)) return "dinner";
+  if (/\bsnack\b/i.test(lo)) return "snack";
+  if (/\blunch\b/i.test(lo)) return "lunch";
+  if (/\b(?:dinner|supper)\b/i.test(lo)) return "dinner";
+  if (/\bbreakfast\b/i.test(lo)) return "breakfast";
+  return null;
+}
+
 export type CoachAction =
   // Pure conversation — the default and the safe fallback. Coach K just talks.
   | { type: "JUST_REPLY" }

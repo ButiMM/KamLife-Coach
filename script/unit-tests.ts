@@ -1300,6 +1300,35 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(suggestSwap("avocado", "fat_loss")?.swap || "", /half/i);
     assert.equal(suggestSwap("avocado", "muscle_gain"), null, "builders keep the avo");
   });
+
+  // WORK ORDER B (2026-08-12 live): "Can I use eggs instead?" was answered with "Here's your
+  // updated list…" and a full twenty-item regeneration. The substitution was understood; the
+  // SCOPE of the reply was the defect. A local modification gets a local answer.
+  const { answerLocalListChange } = await import("../server/food-swaps");
+  test("local list change: a proposed substitute is confirmed WITHOUT rebuilding the list", async () => {
+    const r = answerLocalListChange("Can I use eggs instead?") || "";
+    assert.match(r, /eggs/i, "the answer must be about the food they actually named");
+    assert.match(r, /protein/i, "and say what job it does — that is the substitution answer");
+    assert.ok(!/🛒|\*Protein \(|Week total|Carbs|Pantry/i.test(r), `a local question must not return the list: ${r}`);
+    assert.ok(r.length < 200, `a one-item answer must stay short, got ${r.length} chars`);
+  });
+  test("local list change: an item they already own is acknowledged as a delta", async () => {
+    const r = answerLocalListChange("I already have rice") || "";
+    assert.match(r, /rice/i, "name the item they told us about");
+    assert.match(r, /starch/i, "and what it covers, so the rest of the money has a job");
+    assert.ok(!/Week total|🛒/i.test(r), `still not a list rebuild: ${r}`);
+  });
+  test("local list change: an EXPLICIT request for the full list is left alone", async () => {
+    // The whole point of the guard — scoping the answer must never cost the client the list
+    // when the list is what they asked for.
+    assert.equal(answerLocalListChange("send me the updated list"), null);
+    assert.equal(answerLocalListChange("can I get the full grocery list instead?"), null);
+  });
+  test("local list change: unknown foods and ordinary messages fall through to the coach", async () => {
+    assert.equal(answerLocalListChange("can I use quinoa instead?"), null, "a food the table cannot vouch for is Coach K's call");
+    assert.equal(answerLocalListChange("i had eggs and pap"), null, "a food LOG is never a list edit");
+    assert.equal(answerLocalListChange("how am i doing?"), null);
+  });
 }
 
 // "READ THE REST OF MY TRANSCRIPT" (2026-08-06). The condenser summarises long voice notes to
@@ -1899,6 +1928,28 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const src = readFileSync("server/understanding/executor.ts", "utf-8");
     assert.ok(/slotFitsClock/.test(src), "the model's meal slot must be checked against the clock");
     assert.ok(/hourSAST < 11/.test(src), "breakfast must be impossible in the evening");
+  });
+
+  test("Work Order A: an EXPLICIT meal claim beats the clock, the clock only catches a guess", async () => {
+    // "lunch" at 9h SAST was dropped as clock-impossible and relabelled breakfast (live,
+    // 2026-08-12) — the model's food_text never carries the meal word (the log_meal tool
+    // schema says food_text is ONLY the foods and amounts), so once action.meal was dropped
+    // the slot was gone for good. mealTool must re-derive the slot from the client's own raw
+    // message BEFORE ever consulting the clock, and only warn/drop when that check also
+    // comes up empty.
+    const src = readFileSync("server/understanding/executor.ts", "utf-8");
+    const fn = src.slice(src.indexOf("async function mealTool"));
+    const body = fn.slice(0, fn.indexOf("\nasync function", 1) === -1 ? undefined : fn.indexOf("\nasync function", 1));
+    assert.ok(/explicitMealSlot\(ctx\.clientMessage/.test(body),
+      "the raw client message, not action.meal or the clock, is the source of truth for an explicit claim");
+    const explicitIdx = body.indexOf("explicitSlot");
+    const clockIdx = body.indexOf("slotFitsClock(String(action.meal))");
+    assert.ok(explicitIdx > -1 && clockIdx > -1 && explicitIdx < clockIdx,
+      "the explicit check must be computed before the clock gate decides anything");
+    assert.ok(/const slot = explicitSlot \|\|/.test(body),
+      "an explicit slot must win outright — the clock-fit result is only the fallback");
+    assert.ok(/!explicitSlot/.test(body),
+      "the 'dropped impossible slot' warning must not fire when the client said it explicitly");
   });
 
   test("a SHORT number-free food reply is never replaced with a form", async () => {

@@ -457,7 +457,12 @@ export function formatShoppingList(list: ShoppingList, userName?: string, goalTy
     if (!items || items.length === 0) continue;
     body += `\n*${categoryLabels[cat]}:*\n`;
     for (const i of items) {
-      body += `• ${i.item} — ${i.price}\n`;
+      // "~" ON EVERY ITEM PRICE (Work Order D, 2026-08-12). These figures are hand-maintained
+      // shelf estimates, not a live price feed — the type has said "estimated ZAR" since it was
+      // written, but the CLIENT only ever saw "Eggs (1 dozen) — R30", which reads as a quoted
+      // fact. A client who budgets against it and finds R38 at the till has been misled by us.
+      // The week total already carried "est."; the line items now say the same thing.
+      body += `• ${i.item} — ~${i.price}\n`;
     }
   }
 
@@ -488,5 +493,5 @@ export function formatShoppingList(list: ShoppingList, userName?: string, goalTy
     ? `\n\n*🚫 Leave these on the shelf:*\n• Sugary drinks (Coke, Oros, juice, flavoured water) — liquid calories you don't feel\n• Honey, syrup, white sugar — same impact as sweets; fruit handles your sweetness\n• Flavoured yoghurt — most have 15-25g added sugar; plain or Greek only\n• Breakfast cereals and instant oats with flavouring — mostly sugar in a box\n• Polony, Russians, Viennas — high sodium, minimal real protein\n• White bread if you can avoid it — brown bread only`
     : "";
 
-  return `${fn ? fn + ", this" : "This"} is your full week.\n\n${intro}${personalBlock}\n\n${store}\n\n*What to buy (${list.estimatedTotal} est. — ${list.coversDays} days):*${body}\n${dailyStructure}\n\n*Meal ideas to mix it up:*\n${ideas}${avoidSection}\n\n_Screenshot this. Tick off as you shop. Send me what you eat each day — photo or words — and I track the numbers.\n\nTo adjust: tell me what you don't eat, what you want to swap, or what you already have at home._`;
+  return `${fn ? fn + ", this" : "This"} is your full week.\n\n${intro}${personalBlock}\n\n${store}\n\n*What to buy (${list.estimatedTotal} est. — ${list.coversDays} days):*\n_Prices are rough estimates and vary by store._${body}\n${dailyStructure}\n\n*Meal ideas to mix it up:*\n${ideas}${avoidSection}\n\n_Screenshot this. Tick off as you shop. Send me what you eat each day — photo or words — and I track the numbers.\n\nTo adjust: tell me what you don't eat, what you want to swap, or what you already have at home._`;
 }
