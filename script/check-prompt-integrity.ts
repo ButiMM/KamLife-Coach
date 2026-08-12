@@ -184,6 +184,62 @@ console.log(`COACH_K_SYSTEM total: ${COACH_K_SYSTEM.length.toLocaleString()} cha
   `${Math.max(0, COACH_K_SYSTEM.length - SLICE).toLocaleString()} never reach a model\n`);
 console.log(report.join("\n\n"));
 
+// ── THE DELIVERED CONSTITUTION (2026-08-12) ───────────────────────────────────────────────
+// COACH_K_SYSTEM is not the only place doctrine lives, and it is the WORST place to put new
+// doctrine — anything past 20,000 reaches nobody. The engine's CONSTITUTION is sent in FULL on
+// every call, so that is where a reasoning protocol belongs. It has no slice to survive, which
+// means the failure mode here is different: not amputation, but silent DELETION during some
+// future prompt consolidation. These laws are load-bearing enough that losing one should fail
+// the build rather than surface as a behaviour change nobody can trace.
+const CONSTITUTION_LAWS: Array<{ law: string; sentinel: string; why: string }> = [
+  { law: "22", sentinel: "NEVER HAND THE WORK BACK",
+    why: "the hand-back ban tellDontAsk backstops in code — the pair must not drift apart" },
+  { law: "25", sentinel: "ONE NEXT MOVE PER REPLY",
+    why: "the one-instruction rule theNextMove backstops in code" },
+  { law: "26", sentinel: "PERSISTENT HUNGER IS A SIGNAL TO INVESTIGATE",
+    why: "the hunger reasoning protocol — the doctrine the prompt audit found orphaned" },
+];
+const engineSrc = readFileSync("server/understanding/meaning-engine.ts", "utf-8");
+const constitution = (() => {
+  const i = engineSrc.indexOf("const CONSTITUTION = `");
+  const a = engineSrc.indexOf("`", i) + 1;
+  return engineSrc.slice(a, engineSrc.indexOf("`;", a));
+})();
+const lawReport: string[] = [];
+for (const { law, sentinel, why } of CONSTITUTION_LAWS) {
+  const present = constitution.includes(sentinel);
+  if (!present) {
+    problems.push(`  ✗ CONSTITUTION law ${law}: "${sentinel}" is GONE from the delivered prompt.`);
+    problems.push(`      ${why}`);
+    problems.push(`      This law is sent in full on every engine call. Removing it changes coaching silently.`);
+  }
+  lawReport.push(`  law ${law.padStart(2)}  ${present ? "delivered" : "MISSING  "}  ${sentinel}`);
+}
+// Law 26 must teach the SEQUENCE, not the shortcut. A doctrine that collapses to
+// "hungry -> eat more protein" is the brittle rule this whole workstream exists to avoid, and it
+// would pass a naive presence check. So the body is asserted, not just the heading.
+if (constitution.includes("PERSISTENT HUNGER IS A SIGNAL TO INVESTIGATE")) {
+  // Whitespace-normalised — the prompt is hard-wrapped and a phrase may straddle a newline.
+  const law26 = constitution.slice(constitution.indexOf("26. PERSISTENT HUNGER")).replace(/\s+/g, " ");
+  const required: Array<[string, RegExp]> = [
+    ["forbids moralising", /willpower/i],
+    ["gates on evidence first", /enough evidence|enough logged/i],
+    ["names causes beyond protein", /volume|sleep|adherence/i],
+    ["protein is one lever, not the answer", /one lever|already at target|does not mean/i],
+    ["refuses to claim causation", /correlation is not diagnosis/i],
+  ];
+  for (const [what, re] of required) {
+    if (!re.test(law26)) {
+      problems.push(`  ✗ CONSTITUTION law 26 no longer ${what}.`);
+      problems.push(`      It must teach the diagnostic SEQUENCE. Collapsing it to "hungry -> protein"`);
+      problems.push(`      recreates the brittle rule the evidence layer was built to make unnecessary.`);
+    }
+  }
+}
+console.log("\nDELIVERED CONSTITUTION (sent in full, every engine call):");
+console.log(lawReport.join("\n"));
+
+
 if (problems.length) {
   console.error("\nprompt integrity: FAILED — a protected coaching law changed what it delivers:");
   console.error(problems.join("\n"));

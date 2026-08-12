@@ -2,6 +2,8 @@
 
 **Status:** first pass, 2026-08-12. Every row below was verified against the code, not inferred.
 **Frozen while this stands:** `server/coach-prompt.ts` — no restoring, moving, shortening or deleting.
+**Where new doctrine goes:** the engine `CONSTITUTION`, which is delivered in full. Writing a rule
+into the `COACH_K_SYSTEM` tail past character 20,000 is not restoring it — it reaches nobody.
 
 ## Why this exists
 
@@ -70,7 +72,7 @@ pays it **twice**.
 | Banned bot phrases | **split — see gaps** | deterministic invariant | food scanner, coach brain | `unit-tests` | **fragmented** |
 | Prompt doctrine delivery | `check-prompt-integrity.ts` | deterministic invariant | n/a (guard) | wired into `npm test` | healthy |
 | Persistent hunger — evidence | `hunger-evidence.assembleHungerEvidence` | deterministic data | (assembled; not yet consumed) | `gap-tests` state machine | evidence ready |
-| Persistent hunger — doctrine | **none — step 4, BLOCKED** | model doctrine | **none** | **none** | **GAP** |
+| Persistent hunger — doctrine | `CONSTITUTION` Law 26 (`meaning-engine.ts`) | model doctrine | engine, every call, sent in full | `gap-tests` + `check-prompt-integrity` | healthy |
 | Programme ≤ 3 WhatsApp messages | `reply-contract.MESSAGE_BUDGET` | deterministic invariant | `programme.ts` emitters | `unit-tests` (adversarial) | healthy* |
 | Meal plan ≤ 4 WhatsApp messages | `reply-contract.MESSAGE_BUDGET` | deterministic invariant | `meal-plan.ts` | `unit-tests` (adversarial) | healthy |
 | SA retail price estimates | `reply-contract.PRICE_ESTIMATE_NOTE` (framing) + `shopping-lists.ts` (literals) | deterministic data + invariant | shopping list, GPT rebuild | `unit-tests`, `check-pricing` freshness | healthy |

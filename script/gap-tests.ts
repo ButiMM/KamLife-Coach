@@ -1602,6 +1602,77 @@ test("hunger evidence: it carries evidence and NEVER an intervention", () => {
 });
 
 
+// ============================================================
+// LAW 26 — the hunger reasoning protocol (step 4, 2026-08-12).
+// The doctrine lives in the engine's CONSTITUTION, which is delivered IN FULL on every call —
+// not in the COACH_K_SYSTEM tail, where "restoring" it would have meant writing it at character
+// 20,001 and congratulating ourselves. These assert the three cases the founder named, at the
+// level a deterministic test can reach: what the delivered doctrine INSTRUCTS. Whether the model
+// obeys it is a Reality question, and that run comes next.
+// ============================================================
+
+const constitutionText = (() => {
+  const src = readFileSync("server/understanding/meaning-engine.ts", "utf-8");
+  const i = src.indexOf("const CONSTITUTION = `");
+  const a = src.indexOf("`", i) + 1;
+  return src.slice(a, src.indexOf("`;", a));
+})();
+// Whitespace-normalised: the CONSTITUTION is hard-wrapped, so "already at target" is really
+// "already at\ntarget". A phrase assertion that ignores that tests the line breaks, not the rule.
+const law26 = constitutionText.slice(constitutionText.indexOf("26. PERSISTENT HUNGER")).replace(/\s+/g, " ");
+
+test("law 26: it reaches the model — CONSTITUTION is sent in full, unlike the sliced prompt", () => {
+  assert.ok(constitutionText.includes("PERSISTENT HUNGER IS A SIGNAL TO INVESTIGATE"),
+    "the doctrine must live in the DELIVERED layer, not the amputated COACH_K_SYSTEM tail");
+  const engine = readFileSync("server/understanding/meaning-engine.ts", "utf-8");
+  assert.ok(/systemParts\s*=\s*\[\s*\n?\s*CONSTITUTION/.test(engine),
+    "CONSTITUTION must be the first thing in the engine's system message");
+  assert.ok(!/CONSTITUTION\.slice\(/.test(engine), "the CONSTITUTION must never be sliced");
+});
+
+test("law 26 / case 1: adequate protein + persistent hunger must NOT be a protein diagnosis", () => {
+  assert.ok(/already at target/i.test(law26) && /not the answer/i.test(law26),
+    "the doctrine must state plainly that at-target protein is NOT the answer");
+  assert.ok(/lose someone who was doing the work/i.test(law26),
+    "and say why it matters — this is the case that loses a complying client");
+});
+
+test("law 26 / case 2: insufficient evidence must NOT produce a cause", () => {
+  assert.ok(/enough evidence|enough logged/i.test(law26), "evidence sufficiency is checked FIRST");
+  assert.ok(/say so/i.test(law26) && /ask for/i.test(law26),
+    "it must instruct the coach to SAY it does not know and ask for what it needs");
+  assert.ok(/never diagnose from two days/i.test(law26),
+    "the floor must be explicit, not left to judgement");
+});
+
+test("law 26 / case 3: good evidence still is not a verdict", () => {
+  // The subtlest of the three: even with real numbers, naming a cause claims more than we know.
+  assert.ok(/correlation is not diagnosis/i.test(law26), "the doctrine must say this outright");
+  assert.ok(/plausible cause to investigate/i.test(law26),
+    "it must frame the finding as the thing to INVESTIGATE, not the answer");
+  assert.ok(/claims more than you know/i.test(law26),
+    "and must give the counter-example of a sentence that overclaims");
+});
+
+test("law 26: it forbids moralising and does not collapse to a one-line rule", () => {
+  assert.ok(/willpower/i.test(law26) && /forbidden/i.test(law26),
+    "willpower/discipline language must be explicitly banned, not merely discouraged");
+  // The doctrine must name causes BEYOND protein, or it is the brittle rule wearing a longer coat.
+  for (const cause of ["volume", "sleep", "adherence", "calories"]) {
+    assert.ok(new RegExp(cause, "i").test(law26), `law 26 must consider ${cause}, not protein alone`);
+  }
+  assert.ok(/one lever/i.test(law26), "protein must be framed as ONE lever among several");
+});
+
+test("law 26: the integrity guard protects it, in the same change", () => {
+  const guard = readFileSync("script/check-prompt-integrity.ts", "utf-8");
+  assert.ok(/PERSISTENT HUNGER IS A SIGNAL TO INVESTIGATE/.test(guard),
+    "a doctrine with no guard is a doctrine that can vanish silently — the exact failure being fixed");
+  assert.ok(/correlation is not diagnosis/i.test(guard),
+    "the guard must assert the BODY teaches the sequence, not merely that a heading exists");
+});
+
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
