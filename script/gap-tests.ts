@@ -1514,6 +1514,94 @@ test("symptom: persistence records evidence and never diagnoses", () => {
     "the persistence layer must not carry a diagnosis or advice");
 });
 
+// ============================================================
+// HUNGER EVIDENCE (2026-08-12) — step 3. Joins the nutrition picture to the symptom history.
+// The evidenceState machine is where a mistake would be invisible in production, so every
+// transition is covered — including the two that must NOT fire.
+// ============================================================
+
+const { assembleHungerEvidence, PERSISTENT_HUNGER_DAYS, ADEQUATE_PROTEIN_RATIO } =
+  await import("../server/hunger-evidence");
+const { computeProgressScore } = await import("../server/progress-score");
+
+const scoreWith = (over: Partial<any> = {}) => computeProgressScore({
+  completedSessions: 2, plannedSessions: 3,
+  avgDailyProtein: 71, proteinTarget: 120,
+  avgSteps: 6200, stepsTarget: 8500,
+  foodLogDays: 6, weightLogCount: 2, weightChangeKg: -0.4,
+  goalType: "fat_loss", ...over,
+});
+const hungerFor = (distinctDays: number) => ({
+  kind: "hunger" as const, occurrences: distinctDays * 2, distinctDays,
+  firstAt: null, lastAt: null, windowDays: 7,
+});
+const inputsWith = (over: Partial<any> = {}) => ({
+  avgDailyProtein: 71, proteinTarget: 120, avgSteps: 6200, weightChangeKg: -0.4, foodLogDays: 6, ...over,
+});
+
+test("hunger evidence: persistent hunger with short protein puts protein IN SCOPE", () => {
+  const e = assembleHungerEvidence(scoreWith(), hungerFor(6), inputsWith());
+  assert.equal(e.evidenceState, "persistent_hunger");
+  assert.equal(e.hunger.persistent, true);
+  assert.ok(e.progress.proteinRatio! < ADEQUATE_PROTEIN_RATIO);
+  assert.equal(e.confidence, "usable");
+});
+
+test("hunger evidence: ADEQUATE protein with persistent hunger is a distinct state", () => {
+  // The case a one-line rule gets confidently wrong, for exactly the clients who complied.
+  const e = assembleHungerEvidence(
+    scoreWith({ avgDailyProtein: 118 }), hungerFor(5), inputsWith({ avgDailyProtein: 118 }));
+  assert.equal(e.evidenceState, "adequate_protein_persistent_hunger");
+  assert.ok(e.progress.proteinRatio! >= ADEQUATE_PROTEIN_RATIO);
+});
+
+test("hunger evidence: one bad day is NOT persistence", () => {
+  const e = assembleHungerEvidence(scoreWith(), hungerFor(1), inputsWith());
+  assert.equal(e.evidenceState, "single_signal");
+  assert.equal(e.hunger.persistent, false);
+});
+
+test("hunger evidence: six complaints in ONE day is still one day", () => {
+  // occurrences 12, distinctDays 1 — the whole reason distinctDays is the primitive.
+  const e = assembleHungerEvidence(scoreWith(), { ...hungerFor(1), occurrences: 12 }, inputsWith());
+  assert.equal(e.evidenceState, "single_signal", "message volume must never manufacture persistence");
+});
+
+test("hunger evidence: thin logs beat every other signal — no claim about protein at all", () => {
+  // Confidence is checked FIRST. Two logged days cannot support "your protein is low",
+  // however bad the average looks or however many days hunger was reported.
+  const e = assembleHungerEvidence(
+    scoreWith({ foodLogDays: 2, avgDailyProtein: 30 }), hungerFor(6), inputsWith({ foodLogDays: 2, avgDailyProtein: 30 }));
+  assert.equal(e.confidence, "weak");
+  assert.equal(e.evidenceState, "insufficient_data",
+    "persistent hunger must NOT license a protein claim on two logged days");
+});
+
+test("hunger evidence: no symptom reported means nothing is volunteered", () => {
+  const e = assembleHungerEvidence(scoreWith(), hungerFor(0), inputsWith());
+  assert.equal(e.evidenceState, "no_persistent_symptom");
+});
+
+test("hunger evidence: the persistence threshold is days, and it is the stated one", () => {
+  assert.equal(PERSISTENT_HUNGER_DAYS, 3);
+  assert.equal(assembleHungerEvidence(scoreWith(), hungerFor(PERSISTENT_HUNGER_DAYS - 1), inputsWith()).hunger.persistent, false);
+  assert.equal(assembleHungerEvidence(scoreWith(), hungerFor(PERSISTENT_HUNGER_DAYS), inputsWith()).hunger.persistent, true);
+});
+
+test("hunger evidence: it carries evidence and NEVER an intervention", () => {
+  const e = assembleHungerEvidence(scoreWith(), hungerFor(6), inputsWith());
+  const keys = JSON.stringify(e);
+  for (const banned of ["recommend", "intervention", "eatMore", "reduceCalories", "advice", "shouldEat"]) {
+    assert.ok(!keys.includes(banned), `the evidence object must not carry "${banned}"`);
+  }
+  // And no prose anywhere in the module — the coach writes the words, not this file.
+  const src = readFileSync("server/hunger-evidence.ts", "utf-8");
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.ok(!/["'`][A-Z][a-z]+ [a-z]+ [a-z]+/.test(code),
+    "no client-facing sentences may appear in the evidence assembler");
+});
+
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");

@@ -69,7 +69,8 @@ pays it **twice**.
 | SA localisation of suggestions | `food-swaps.localiseSuggestion` + `matchRestaurant` | deterministic, context-aware | engine reply paths | `unit-tests` | healthy |
 | Banned bot phrases | **split — see gaps** | deterministic invariant | food scanner, coach brain | `unit-tests` | **fragmented** |
 | Prompt doctrine delivery | `check-prompt-integrity.ts` | deterministic invariant | n/a (guard) | wired into `npm test` | healthy |
-| Persistent hunger → protein | **none** | — | **none** | **none** | **GAP** |
+| Persistent hunger — evidence | `hunger-evidence.assembleHungerEvidence` | deterministic data | (assembled; not yet consumed) | `gap-tests` state machine | evidence ready |
+| Persistent hunger — doctrine | **none — step 4, BLOCKED** | model doctrine | **none** | **none** | **GAP** |
 | Programme ≤ 3 WhatsApp messages | `reply-contract.MESSAGE_BUDGET` | deterministic invariant | `programme.ts` emitters | `unit-tests` (adversarial) | healthy* |
 | Meal plan ≤ 4 WhatsApp messages | `reply-contract.MESSAGE_BUDGET` | deterministic invariant | `meal-plan.ts` | `unit-tests` (adversarial) | healthy |
 | SA retail price estimates | `reply-contract.PRICE_ESTIMATE_NOTE` (framing) + `shopping-lists.ts` (literals) | deterministic data + invariant | shopping list, GPT rebuild | `unit-tests`, `check-pricing` freshness | healthy |
@@ -121,6 +122,10 @@ Recorded because each is a place where "one question, one owner" is not yet true
   digestive issues in different words, with no imports between them. **This is the one place
   where duplication is genuine** and consolidation would be safe — subject to checking which
   copy each live path actually receives.
+- **The admin review queue labels every signal "a moment the bot fumbled"** — including friction,
+  which `quality-signals.ts` claims is excluded. Symptom kinds are now filtered out via
+  `NOT_A_BOT_FUMBLE`, but the underlying conflation is older and unresolved. **Open architecture
+  debt; an operator/product decision, not a code one.**
 - **`agents.ts` is a fifth prompt layer** carrying programme philosophy the 20k slice drops. It
   was missed in the first audit pass and materially changed the conclusion (13 "orphaned"
   concepts fell to 3 once it was included).

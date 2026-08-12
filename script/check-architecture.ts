@@ -28,7 +28,7 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 235,
+  modules: 236,
   handlerFiles: 29,
   cronRegistrations: 27,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
@@ -122,6 +122,27 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "modules", from: 235, to: 236, date: "2026-08-12",
+    why: "ONE module: server/hunger-evidence.ts, the assembler that joins the nutrition picture "
+      + "to the symptom history. The doctrine it serves is the one the prompt audit found "
+      + "orphaned — persistent hunger is a signal to INVESTIGATE, not proof that protein is the "
+      + "cause — and it cannot be taught to the model before the model can be handed the "
+      + "evidence to investigate with. Its whole job is to make «adequate protein, STILL hungry» "
+      + "impossible to miss, because that is the case a one-line rule gets confidently wrong for "
+      + "exactly the clients who already did what we asked. Tried first, and REJECTED: "
+      + "progress-score.ts (pure and semantically close, but it is the beyond-the-scale COMPOSITE "
+      + "and a hunger object living under that name is a trap for the next reader), and "
+      + "quality-signals.ts (already corrected once this week for exactly this — it stores "
+      + "signals, it must not become a second reasoning brain; the governor caught that and was "
+      + "right). Tried first, and it worked, so it is NOT in the other numbers: zero regexes, "
+      + "zero message deciders, zero client-facing mouths — the file contains no prose at all, "
+      + "by design, and a test fails if it grows any. PAY THIS BACK when the second and third "
+      + "evidence assemblers arrive (plateau, adherence breakdown): they are the same shape — "
+      + "join deterministic evidence, state what it supports, decide nothing — so they belong "
+      + "BESIDE this one rather than as three more modules, and that consolidation takes the "
+      + "count back down rather than up.",
+  },
   {
     key: "modules", from: 234, to: 235, date: "2026-08-10",
     why: "ONE module: server/normalizer-fidelity.ts, the gate that decides whether a normalizer "
