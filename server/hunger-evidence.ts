@@ -134,3 +134,50 @@ export function assembleHungerEvidence(
     evidenceState,
   };
 }
+
+/**
+ * IS THE HUNGER EVIDENCE RELEVANT TO THIS TURN? (2026-08-12 ruling: conditional injection.)
+ *
+ * Deliberately NOT `reportsHunger(message)`. A client who said "I'm hungry every afternoon" for
+ * five days and today says "my weight hasn't moved this week" is still in a hunger state, and the
+ * coach needs the evidence to reason about the connection. Gating on today's literal wording
+ * would hand Coach K the numbers only on the turn it least needs them — the one where the client
+ * already told it what was wrong.
+ *
+ * The other direction matters as much: with no signal at all, nothing is injected. Law 26 only
+ * activates when there is something to activate on, so a permanent hunger subsystem does not ride
+ * along in every prompt — and on a tool turn the engine's system message is sent TWICE, so
+ * "always" would pay that cost on every message to serve a small fraction of them.
+ */
+export function hasRelevantHungerEvidence(
+  hunger: SymptomPersistence,
+  currentMessageReportsHunger: boolean,
+): boolean {
+  return currentMessageReportsHunger || hunger.distinctDays > 0;
+}
+
+/**
+ * Serialise the evidence for the prompt. EVIDENCE ONLY — no cause, no recommendation, no verdict.
+ * The closing line states the boundary rather than a conclusion: it tells the model what this
+ * block IS, never what to conclude from it. `insufficient_data` is included deliberately, because
+ * knowing what it does not know is the difference between "I can't tell you why yet" and a guess.
+ */
+export function renderHungerEvidence(e: HungerEvidence): string {
+  const pct = (r: number | null) => (r === null ? "unknown" : `${Math.round(r * 100)}%`);
+  const lines = [
+    "HUNGER EVIDENCE (deterministic — these numbers are authoritative, never invent them):",
+    `Evidence state: ${e.evidenceState}`,
+    `Food-log days: ${e.dataDays} of ${e.hunger.windowDays}`,
+    `Protein target: ${e.progress.proteinTarget}g/day`,
+    `Average protein: ${e.progress.avgDailyProtein}g/day`,
+    `Protein adequacy: ${pct(e.progress.proteinRatio)}`,
+    `Hunger reported on: ${e.hunger.distinctDays} distinct day(s)${e.hunger.persistent ? " — persistent" : ""}`,
+    e.progress.weeklyKgChange !== null ? `Weight change this week: ${e.progress.weeklyKgChange}kg` : "",
+    `Weakest measured lever: ${e.progress.bottleneck}`,
+    `Confidence: ${e.confidence}`,
+    "",
+    "This block is EVIDENCE, not a diagnosis and not a recommendation. It reports what is measured;",
+    "deciding what it means, and what to do about it, is yours under Law 26.",
+  ];
+  return lines.filter(Boolean).join("\n");
+}

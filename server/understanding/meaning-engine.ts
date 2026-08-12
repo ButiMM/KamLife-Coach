@@ -26,6 +26,7 @@ import { BRAIN_SYSTEM } from "../brain/coach-brain";
 import { type UnderstandingState } from "./state";
 import { compileStateBlurb, compileKeyFacts } from "./compiler";
 import { runPerception } from "./perception";
+import { renderHungerEvidence, type HungerEvidence } from "../hunger-evidence";
 import { COACH_ACTION_TOOLS, ACTION_DIRECTIVE, validateActions, isMemoryGrievance, isSickReaffirmation, type CoachAction } from "./actions";
 import { verifyBrainReply } from "../brain/reply-verifier";
 
@@ -181,6 +182,13 @@ export interface MeaningInput {
   snapshot?: string;
   /** DB-derived stats to fold into understanding */
   stats?: Partial<UnderstandingState["stats"]>;
+  /**
+   * ALREADY-ASSEMBLED hunger evidence, or undefined when this turn has no hunger signal. The
+   * engine SERIALISES it and never computes or reinterprets it — the chain is storage →
+   * deterministic calculation → evidence object → prompt → reasoning, and this file is the
+   * fourth arrow only. Turning it into a second calculator is how the layers blur.
+   */
+  hungerEvidence?: HungerEvidence;
   /** recent turns for continuity: [{role, content}] */
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   /** THE INVERSION (increment 4): when true, Coach K may emit a structured action via
@@ -299,6 +307,10 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
       `WHAT YOU KNOW ABOUT THIS CLIENT RIGHT NOW:\n${blurb}`,
       keyFacts,
       snapshot ? `THEIR REAL NUMBERS (authoritative — quote these, never invent):\n${snapshot}` : "",
+      // Conditional by design: present only when this turn actually has a hunger signal, so a
+      // permanent hunger subsystem does not ride along in every prompt (and on a tool turn this
+      // system message is sent twice). Law 26 reasons over it; this line only delivers it.
+      input.hungerEvidence ? renderHungerEvidence(input.hungerEvidence) : "",
     ].filter(Boolean);
 
     const messages: any[] = [

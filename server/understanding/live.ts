@@ -29,6 +29,11 @@ import { isRetroactiveMeal } from "../utils";
 import { tellDontAsk } from "../reply-hygiene";
 import { localiseSuggestion } from "../food-swaps";
 import { matchRestaurant } from "../restaurants";
+import { symptomPersistence } from "../quality-signals";
+import { reportsHunger } from "../unlogged-notice";
+import { gatherReportData } from "../report-card";
+import { computeProgressScore, progressInputsFrom } from "../progress-score";
+import { assembleHungerEvidence, hasRelevantHungerEvidence, type HungerEvidence } from "../hunger-evidence";
 
 /**
  * THE COACH'S NEXT MOVE, for the conversation (2026-08-06).
@@ -252,9 +257,36 @@ export async function runMeaningEngineLive(ctx: {
     const actionMode = engineActionMode();
     // CODE-LEVEL INTENT BOUNCER (review Q1): a strategy/emotional turn gets NO action tools —
     // the model can only converse, so it can never over-fire a workout dump or a log.
+    // HUNGER EVIDENCE — assembled HERE, where the DB reads already live, and handed to the engine
+    // ready to serialise (2026-08-12). Gated on the hunger STATE, not today's wording: a client who
+    // reported hunger for five days and today asks why the scale has not moved is still in that
+    // state and the coach needs the numbers. With no signal, nothing is assembled and nothing is
+    // injected — the symptom read is one indexed COUNT, and the heavier weekly aggregate is only
+    // paid for when the gate opens. Fail-open throughout: no evidence is an honest prompt, an
+    // exception is not.
+    let hungerEvidence: HungerEvidence | undefined;
+    if (user?.id) {
+      try {
+        const hunger = await symptomPersistence(user.id, "hunger", 7);
+        if (hasRelevantHungerEvidence(hunger, reportsHunger(message))) {
+          const d = await gatherReportData(user, "week");
+          const inputs = progressInputsFrom(d, {
+            proteinTarget: Number(user.proteinTarget) || 0,
+            stepsTarget: Number(user.stepsTarget) || 0,
+            plannedSessions: Number(user.trainingDaysPerWeek) || 0,
+            goalType: String(user.goalType || "fat_loss"),
+          });
+          hungerEvidence = assembleHungerEvidence(computeProgressScore(inputs), hunger, inputs);
+          console.log(`[HUNGER_EVIDENCE] ${hungerEvidence.evidenceState} — ${hunger.distinctDays}d hunger, ${inputs.foodLogDays}d logged, confidence ${hungerEvidence.confidence}`);
+        }
+      } catch (e) {
+        console.warn("[HUNGER_EVIDENCE] assembly failed — prompt proceeds without it:", (e as Error)?.message);
+      }
+    }
+
     const strategyTurn = isStrategyOrEmotional(message);
     if (strategyTurn) console.log(`[ENGINE] strategy/emotional turn — action tools withheld`);
-    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, history: bridgeNote ? [...history, bridgeNote] : history, emitActions: actionMode !== "off" && !strategyTurn });
+    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, hungerEvidence, history: bridgeNote ? [...history, bridgeNote] : history, emitActions: actionMode !== "off" && !strategyTurn });
     if (!result) return null; // fail-open → existing pipeline runs
 
     // Grow the client's durable memory (fail-open — a save miss never blocks the reply).

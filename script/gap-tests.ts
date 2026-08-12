@@ -1594,11 +1594,14 @@ test("hunger evidence: it carries evidence and NEVER an intervention", () => {
   for (const banned of ["recommend", "intervention", "eatMore", "reduceCalories", "advice", "shouldEat"]) {
     assert.ok(!keys.includes(banned), `the evidence object must not carry "${banned}"`);
   }
-  // And no prose anywhere in the module — the coach writes the words, not this file.
+  // No prose in the ASSEMBLER. renderHungerEvidence below it legitimately writes text — but for
+  // the PROMPT, read by the model, never sent to a client. That distinction is the point: the
+  // calculator stays wordless, and the one place with words says only what the evidence IS.
   const src = readFileSync("server/hunger-evidence.ts", "utf-8");
-  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const assembler = src.slice(0, src.indexOf("export function renderHungerEvidence"));
+  const code = assembler.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   assert.ok(!/["'`][A-Z][a-z]+ [a-z]+ [a-z]+/.test(code),
-    "no client-facing sentences may appear in the evidence assembler");
+    "no sentences may appear in the evidence assembler — it returns values, not words");
 });
 
 
@@ -1670,6 +1673,94 @@ test("law 26: the integrity guard protects it, in the same change", () => {
     "a doctrine with no guard is a doctrine that can vanish silently — the exact failure being fixed");
   assert.ok(/correlation is not diagnosis/i.test(guard),
     "the guard must assert the BODY teaches the sequence, not merely that a heading exists");
+});
+
+
+// ============================================================
+// STEP 3.5 — delivering the evidence (2026-08-12). Law 26 tells Coach K to check the evidence;
+// until this wiring the evidence never reached the prompt, so the coach was being asked to
+// reason over numbers it was never given. These cover the gate, the block, and the layer rule.
+// ============================================================
+
+const { hasRelevantHungerEvidence, renderHungerEvidence } = await import("../server/hunger-evidence");
+
+const persistenceOf = (distinctDays: number) => ({
+  kind: "hunger" as const, occurrences: distinctDays, distinctDays,
+  firstAt: null, lastAt: null, windowDays: 7,
+});
+
+test("3.5 gate: a standing hunger state counts even when today's message never says 'hungry'", () => {
+  // Yesterday "I'm hungry every afternoon", today "my weight hasn't moved" — the coach still
+  // needs the numbers. Gating on today's wording would deliver them only when least needed.
+  assert.equal(hasRelevantHungerEvidence(persistenceOf(5), false), true);
+  assert.equal(hasRelevantHungerEvidence(persistenceOf(1), false), true);
+});
+
+test("3.5 gate: today's report counts even with no history", () => {
+  assert.equal(hasRelevantHungerEvidence(persistenceOf(0), true), true);
+});
+
+test("3.5 gate: no signal at all injects NOTHING", () => {
+  // The prompt cost matters: on a tool turn the engine system message is sent twice, so a
+  // permanent hunger subsystem would be paid for on every message to serve a small fraction.
+  assert.equal(hasRelevantHungerEvidence(persistenceOf(0), false), false);
+});
+
+test("3.5 block: it reports evidence and states its own boundary — no diagnosis", () => {
+  const e = assembleHungerEvidence(
+    computeProgressScore({ completedSessions: 2, plannedSessions: 3, avgDailyProtein: 74,
+      proteinTarget: 120, avgSteps: 6000, stepsTarget: 8500, foodLogDays: 2,
+      weightLogCount: 0, weightChangeKg: null, goalType: "fat_loss" }),
+    persistenceOf(1),
+    { avgDailyProtein: 74, proteinTarget: 120, avgSteps: 6000, weightChangeKg: null, foodLogDays: 2 });
+  const block = renderHungerEvidence(e);
+  assert.ok(block.includes("Evidence state: insufficient_data"), "the state must be stated plainly");
+  assert.ok(block.includes("120g/day") && block.includes("74g/day"), "the real numbers must appear");
+  assert.ok(/Protein adequacy: 62%/.test(block), "the ratio must be given, not left to be computed");
+  assert.ok(/EVIDENCE, not a diagnosis and not a recommendation/.test(block),
+    "the block must state what it IS, so the model does not read it as a verdict");
+  // It must never tell the coach what to CONCLUDE or DO. Note the disclaimer legitimately
+  // contains the word "recommendation" — banning that substring would fail the very sentence
+  // that establishes the boundary, so these match advice-shaped statements, not vocabulary.
+  for (const banned of ["you should", "eat more", "increase (your |the )?protein", "try eating",
+                        "the cause is", "because (your|their)"]) {
+    assert.ok(!new RegExp(banned, "i").test(block), `the evidence block must not advise: "${banned}"`);
+  }
+  assert.ok(/not a diagnosis/.test(block), "and it must say outright that it is not one");
+});
+
+test("3.5 block: insufficient_data is DELIVERED, not withheld", () => {
+  // Knowing what it does not know is the difference between "I can't tell you why yet" and a guess.
+  const e = assembleHungerEvidence(
+    computeProgressScore({ completedSessions: 0, plannedSessions: 3, avgDailyProtein: 40,
+      proteinTarget: 120, avgSteps: 0, stepsTarget: 8500, foodLogDays: 1,
+      weightLogCount: 0, weightChangeKg: null, goalType: "fat_loss" }),
+    persistenceOf(2),
+    { avgDailyProtein: 40, proteinTarget: 120, avgSteps: 0, weightChangeKg: null, foodLogDays: 1 });
+  assert.equal(e.evidenceState, "insufficient_data");
+  assert.ok(renderHungerEvidence(e).includes("Confidence: weak"), "the coach must be told how thin it is");
+});
+
+test("3.5 layering: the engine SERIALISES the evidence, it does not compute it", () => {
+  const engine = readFileSync("server/understanding/meaning-engine.ts", "utf-8");
+  assert.ok(/input\.hungerEvidence \? renderHungerEvidence\(input\.hungerEvidence\) : ""/.test(engine),
+    "the engine must pass the assembled object straight to the renderer");
+  // The chain is storage -> calculation -> evidence object -> prompt -> reasoning. If the engine
+  // starts assembling or thresholding, the layers have blurred and the calculator has moved.
+  for (const leak of ["assembleHungerEvidence", "PERSISTENT_HUNGER_DAYS", "ADEQUATE_PROTEIN_RATIO", "symptomPersistence"]) {
+    assert.ok(!engine.includes(leak), `meaning-engine must not reference ${leak} — it serialises only`);
+  }
+});
+
+test("3.5 layering: the composer sits where the DB reads already live", () => {
+  const live = readFileSync("server/understanding/live.ts", "utf-8");
+  assert.ok(/hasRelevantHungerEvidence\(hunger, reportsHunger\(message\)\)/.test(live),
+    "the gate must combine the standing state with today's message");
+  assert.ok(/hungerEvidence,/.test(live), "the assembled object must be handed to the engine");
+  // Fail-open: a telemetry or aggregate miss must never cost the client their reply.
+  const blockSrc = live.slice(live.indexOf("let hungerEvidence"), live.indexOf("const strategyTurn"));
+  assert.ok(/catch/.test(blockSrc) && /prompt proceeds without it/.test(blockSrc),
+    "assembly must fail open — no evidence is an honest prompt, an exception is not");
 });
 
 

@@ -71,7 +71,7 @@ pays it **twice**.
 | SA localisation of suggestions | `food-swaps.localiseSuggestion` + `matchRestaurant` | deterministic, context-aware | engine reply paths | `unit-tests` | healthy |
 | Banned bot phrases | **split — see gaps** | deterministic invariant | food scanner, coach brain | `unit-tests` | **fragmented** |
 | Prompt doctrine delivery | `check-prompt-integrity.ts` | deterministic invariant | n/a (guard) | wired into `npm test` | healthy |
-| Persistent hunger — evidence | `hunger-evidence.assembleHungerEvidence` | deterministic data | (assembled; not yet consumed) | `gap-tests` state machine | evidence ready |
+| Persistent hunger — evidence | `hunger-evidence.assembleHungerEvidence` | deterministic data | engine prompt, **conditionally** (live.ts composes, engine serialises) | `gap-tests` state machine + gate | healthy |
 | Persistent hunger — doctrine | `CONSTITUTION` Law 26 (`meaning-engine.ts`) | model doctrine | engine, every call, sent in full | `gap-tests` + `check-prompt-integrity` | healthy |
 | Programme ≤ 3 WhatsApp messages | `reply-contract.MESSAGE_BUDGET` | deterministic invariant | `programme.ts` emitters | `unit-tests` (adversarial) | healthy* |
 | Meal plan ≤ 4 WhatsApp messages | `reply-contract.MESSAGE_BUDGET` | deterministic invariant | `meal-plan.ts` | `unit-tests` (adversarial) | healthy |
