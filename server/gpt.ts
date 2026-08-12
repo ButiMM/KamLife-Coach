@@ -569,12 +569,11 @@ export function selectModel(instruction: string, userMessage: string): { model: 
     return { model: "gpt-4o", maxTokens: 350, reason: "complex" };
   }
 
-  // LONG-FORM ASKS NEED ROOM TO FINISH (Work Order D, 2026-08-12: "*Week total: ~R199–R*" — a
-  // grocery list cut off mid-price). 160 is right for conversation and stays the default; it was
-  // never right for a caller asking for four sections and twenty priced items. The signal must be
-  // read off the INSTRUCTION too: this function only ever inspected userMessage, and for the
-  // grocery rebuild the message is a raw list of foods while the shape of the wanted output lives
-  // entirely in the instruction. That blind spot IS the truncation. Only the ceiling moves.
+  // LONG-FORM ASKS NEED ROOM TO FINISH (Work Order D, 2026-08-12: "*Week total: ~R199–R*" — a list
+  // cut off mid-price). 160 stays the default for conversation; it was never right for a caller
+  // asking for four sections and twenty priced items. The signal must be read off the INSTRUCTION
+  // too — for the grocery rebuild the message is raw foods and the wanted SHAPE is all in the
+  // instruction, which this function never inspected. That blind spot IS the truncation.
   const LONG_FORM_SIGNALS = ["grocery list", "shopping list", "rebuilt list", "updated list",
     "full list", "meal plan", "detailed plan", "week total", "respond exactly in this format"];
   const bothLower = `${msgLower}\n${(instruction || "").toLowerCase()}`;
@@ -1046,7 +1045,6 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   console.log(`[PATTERN] ${patternSummary}`);
   const saFlags = getSAContextFlags(user);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
-  const hardLimit = "HARD RULE: Max 3 sentences, 60 words total. Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name. End with exactly one specific action.";
   const winMemory = memoryContext ? `\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n${memoryContext}\nUse this to reference specific past wins when relevant. Be specific: if they lost 5kg, say "5kg down". If jeans were tighter at week 2 and loose at week 8, say that. Never fabricate wins not in this list.` : "";
 
   let todayFoodContext = "";
@@ -1090,7 +1088,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
 
   const liftContext = ""; // lift tracking removed 2026-08-06 — kept as "" so the prompt shape is untouched
 
-  const { model, maxTokens } = selectModel(instruction, userMessage);
+  const { model, maxTokens, reason } = selectModel(instruction, userMessage);
 
   const cappedMemory = winMemory.length > 2000 ? winMemory.slice(0, 2000) + "\n[Memory truncated — older entries omitted]" : winMemory;
   // Prompt layout for OpenAI prefix-caching: static brain byte-identical across calls (cached ~50%),
@@ -1099,13 +1097,15 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
     ? `\n\nCLIENT JOURNEY MEMORY (full history — use this to reference specific past achievements, patterns, and progress. Be precise: if they lost 4kg, say 4kg. Never fabricate):\n${cipNarrative.slice(0, 6000)}`
     : "";
   const clientContext = `${getNowContextSA()}\n\n${context}\n\n${patternSummary}${cipBlock}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}`;
+  // The length rule must know what was ASKED (Work Order D follow-up): the raised ceiling stopped
+  // the API cutting a list mid-price, but the prompt still ordered "Max 3 sentences" at a
+  // twenty-item ask. Only the length clause swaps — the voice rules after it never change.
+  const hardLimit = `HARD RULE: ${reason === "long_form" ? "Give the FULL list or plan they asked for — every section, every item, nothing trimmed to save space." : "Max 3 sentences, 60 words total."} Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name. End with exactly one specific action.`;
   const tail = `\n\n${clientContext}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
   const systemContent = `${STATIC_HOT_BRAIN}${staticGuide ? `\n\n${staticGuide}` : ""}${tail}`;
-  // PROMPT BUDGET, BY COMPONENT (Work Order C, 2026-08-12). The warning below has reported one
-  // number since it was written, which says the prompt is big and nothing about WHICH part is
-  // big — so every conversation about it has been arithmetic done by hand against source files.
-  // Same total, itemised. Measurement only: no prompt content changes here, nothing truncates.
-  // `staticBrain` is already a 20k slice of a 67.7k constant; the rest is dropped every call.
+  // PROMPT BUDGET, BY COMPONENT (Work Order C, 2026-08-12). The warning below reports one number:
+  // the prompt is big, nothing about WHICH part. Same total, itemised. Measurement only — nothing
+  // here changes or truncates prompt content. `staticBrain` is already a 20k slice of a 66.6k one.
   console.log("[PROMPT] " + JSON.stringify({
     staticBrain: STATIC_HOT_BRAIN.length, staticGuide: staticGuide?.length || 0,
     context: context.length, patternSummary: patternSummary.length,

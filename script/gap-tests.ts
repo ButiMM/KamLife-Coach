@@ -14,6 +14,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 // Env setup runs AFTER static imports are hoisted in ESM. Server modules use
 // dynamic imports below so db.ts loads only after KAMLIFE_DB_STUB is set.
@@ -209,6 +210,25 @@ test("selectModel: the case that actually broke — the shape lives in the INSTR
     "chicken, eggs, rice, bread, spinach, oats");
   assert.ok(r.maxTokens >= 900, `must fit 20 priced items, got ${r.maxTokens}`);
   assert.equal(r.reason, "long_form");
+});
+
+// The ceiling alone was not enough: askCoachK appended "Max 3 sentences, 60 words total" to
+// EVERY call, so a twenty-item grocery request carried two contradictory format rules and the
+// tighter one could win. The length clause is now keyed off the same long_form reason.
+test("hardLimit: the 3-sentence cap is lifted for long-form, and ONLY for long-form", () => {
+  const src = readFileSync("server/gpt.ts", "utf-8");
+  const line = src.split("\n").find(l => l.includes("const hardLimit"));
+  assert.ok(line, "hardLimit must still exist — the voice rules are not optional");
+  assert.ok(/reason === "long_form"/.test(line!), "the length clause must be keyed off the long_form reason");
+  assert.ok(/Max 3 sentences, 60 words total/.test(line!), "ordinary coaching must keep its cap");
+  assert.ok(/FULL list or plan/.test(line!), "a long-form ask must be told to give the whole thing");
+  // The voice rules must be common to both paths, never traded away for length.
+  for (const rule of ["Coach K here", "Reply MENU", "client's actual name", "one specific action"]) {
+    assert.ok(line!.includes(rule), `voice rule "${rule}" must survive on both paths`);
+  }
+  // And it must be built where `reason` is actually in scope, after selectModel returns.
+  assert.ok(src.indexOf("const { model, maxTokens, reason }") < src.indexOf("const hardLimit"),
+    "hardLimit must be assembled after selectModel, or reason would be undefined");
 });
 
 test("selectModel: safety routing still outranks long-form", () => {
