@@ -68,6 +68,12 @@ export interface HungerEvidence {
     adherence: number | null;
     steps: number | null;
     weeklyKgChange: number | null;
+    /** Average daily intake against target. Protein cannot be judged without this: 70g at
+     *  1,200 kcal and 70g at 3,000 kcal are different situations entirely. */
+    avgDailyKcal: number | null;
+    calorieTarget: number | null;
+    /** intake ÷ target. Well under 1 means the lever is under-eating, not protein. */
+    restrictionRatio: number | null;
     /** The WEAKEST MEASURED lever, never "the intervention". See progress-score.ts. */
     bottleneck: string;
   };
@@ -90,7 +96,8 @@ export interface HungerEvidence {
 export function assembleHungerEvidence(
   score: ProgressScore,
   hunger: SymptomPersistence,
-  inputs: { avgDailyProtein: number; proteinTarget: number; avgSteps: number; weightChangeKg: number | null; foodLogDays: number },
+  inputs: { avgDailyProtein: number; proteinTarget: number; avgSteps: number; weightChangeKg: number | null;
+            foodLogDays: number; avgDailyKcal?: number | null; calorieTarget?: number | null },
 ): HungerEvidence {
   const ratioOf = (label: string): number | null => {
     const c = score.components.find(x => x.label === label);
@@ -122,6 +129,9 @@ export function assembleHungerEvidence(
       adherence: ratioOf("Food logging"),
       steps: inputs.avgSteps || null,
       weeklyKgChange: inputs.weightChangeKg,
+      avgDailyKcal: inputs.avgDailyKcal ?? null,
+      calorieTarget: inputs.calorieTarget ?? null,
+      restrictionRatio: inputs.avgDailyKcal && inputs.calorieTarget ? inputs.avgDailyKcal / inputs.calorieTarget : null,
       bottleneck: score.bottleneck,
     },
     hunger: {
@@ -172,6 +182,8 @@ export function renderHungerEvidence(e: HungerEvidence): string {
     `Average protein: ${e.progress.avgDailyProtein}g/day`,
     `Protein adequacy: ${pct(e.progress.proteinRatio)}`,
     `Hunger reported on: ${e.hunger.distinctDays} distinct day(s)${e.hunger.persistent ? " — persistent" : ""}`,
+    e.progress.calorieTarget !== null ? `Calorie target: ${e.progress.calorieTarget} kcal/day` : "",
+    e.progress.avgDailyKcal !== null ? `Average intake: ${e.progress.avgDailyKcal} kcal/day (${pct(e.progress.restrictionRatio)} of target)` : "",
     e.progress.weeklyKgChange !== null ? `Weight change this week: ${e.progress.weeklyKgChange}kg` : "",
     `Weakest measured lever: ${e.progress.bottleneck}`,
     `Confidence: ${e.confidence}`,

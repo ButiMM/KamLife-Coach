@@ -276,7 +276,9 @@ export async function runMeaningEngineLive(ctx: {
             plannedSessions: Number(user.trainingDaysPerWeek) || 0,
             goalType: String(user.goalType || "fat_loss"),
           });
-          hungerEvidence = assembleHungerEvidence(computeProgressScore(inputs), hunger, inputs);
+          hungerEvidence = assembleHungerEvidence(computeProgressScore(inputs), hunger, {
+            ...inputs, avgDailyKcal: d.avgKcal, calorieTarget: Number(user.calorieTarget) || null,
+          });
           console.log(`[HUNGER_EVIDENCE] ${hungerEvidence.evidenceState} — ${hunger.distinctDays}d hunger, ${inputs.foodLogDays}d logged, confidence ${hungerEvidence.confidence}`);
         }
       } catch (e) {
