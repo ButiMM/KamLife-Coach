@@ -724,17 +724,17 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (foodLogMgmtResult !== null) return foodLogMgmtResult;
 
   // ---- SHOPPING / GROCERY LIST GUARD — must run BEFORE early commands ----
-  // Detect grocery/pantry lists regardless of format: checkboxes [ ]/[x], bullets, dashes,
-  // numbered lines, or plain one-item-per-line. The signal is: many short lines + no
-  // eating verbs. Without this, the alcohol handler misreads "cider" in "apple cider vinegar"
-  // and "drinks" in "soft drinks" as an alcohol log.
-  // A LIST THE CLIENT NAMES AS ONE (Reality J2, 2026-08-12): "Here's my grocery list: chicken,
-  // rice, oil, eggs..." was logged as a 1156 kcal MEAL — this split on NEWLINES only, so a
-  // comma-separated list on one line (how people type on WhatsApp) counted as a single item.
-  const _declaresList = !!message.match(/\b(grocery|shopping)\s*list\b|\bmy groceries\b/i);
-  const _msgLines = (_declaresList ? message.replace(/^[^:\n]*:/, "").split(/[,\n]/) : message.split("\n")).map(l => l.trim()).filter(Boolean);
+  // Detect grocery/pantry lists in any format: checkboxes [ ]/[x], bullets, dashes, numbered or
+  // plain one-per-line. The signal is many short lines + no eating verbs. Without this, the alcohol
+  // handler misreads "cider" in "apple cider vinegar" and "drinks" in "soft drinks" as a log.
+  // JUDGE THIS ON WHAT THE CLIENT TYPED, NEVER THE REWRITE (Reality J2, 2026-08-12). The normalizer
+  // turned "Here's my grocery list: chicken, rice…" into "i had chicken, rice… for breakfast" and
+  // reassigned `message` ABOVE this gate, inventing the verb and the slot: "grocery list" was
+  // destroyed in transit and the invented "i had" then tripped the eating brake below.
+  const _declaresList = !!originalMessageForFidelity.match(/\b(grocery|shopping)\s*list\b|\bmy groceries\b/i);
+  const _msgLines = (_declaresList ? originalMessageForFidelity.replace(/^[^:\n]*:/, "").split(/[,\n]/) : message.split("\n")).map(l => l.trim()).filter(Boolean);
   const _cleanedItems = _msgLines.map(l => l.replace(/^(\[\s*[x✓\s]?\]|[-•*]|\d+[\.\)])\s*/, "").trim()).filter(l => l.length > 1 && l.length < 80);
-  const _hasEatingContext = /\b(i had|i ate|i'm having|just had|just ate|for breakfast|for lunch|for dinner|for supper|this morning|had this)\b/i.test(m);
+  const _hasEatingContext = /\b(i had|i ate|i'm having|just had|just ate|for breakfast|for lunch|for dinner|for supper|this morning|had this)\b/i.test(_declaresList ? originalMBeforeNorm : m);
   const _isListFormat = _msgLines.filter(l => /^(\[\s*[x✓\s]?\]|[-•*]|\d+[\.\)])/.test(l)).length >= 4;
   // 75% threshold instead of `every` — one item with a parenthetical note like
   // "Chicken strips (I use these for wraps)" used to fail the `every(≤6 words)`

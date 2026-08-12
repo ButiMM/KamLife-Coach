@@ -187,6 +187,38 @@ test("explicitMealSlot: the J1 message keeps its breakfast, whatever the clock s
 });
 
 // ============================================================
+// THE GROCERY GATE MUST READ WHAT THE CLIENT TYPED (Reality J2, 2026-08-12)
+//
+// The first fix for J2 was correct about commas and useless in production, and the offline
+// routing test could not tell: routing-audit runs with no model, so the Normalizer never
+// fires there and the gate sees the raw message. Live, the Normalizer rewrote
+// "Here's my grocery list: chicken, rice, oil…" into "i had chicken, rice, oil… for
+// breakfast" and reassigned `message` BEFORE the gate — so the words "grocery list" were
+// gone and the invented "i had" tripped the eating-context brake. A test that passes while
+// production fails is worse than no test, so this asserts the SOURCE reads the pre-rewrite
+// message. It cannot be satisfied by a gate that trusts the Normalizer's output.
+// ============================================================
+
+test("grocery gate: reads the pre-normalizer message, not the rewrite", () => {
+  const src = readFileSync("server/routes.ts", "utf-8");
+  const declares = src.split("\n").find(l => l.includes("const _declaresList"));
+  const lines = src.split("\n").find(l => l.includes("const _msgLines"));
+  const eating = src.split("\n").find(l => l.includes("const _hasEatingContext"));
+  assert.ok(declares && lines && eating, "the grocery gate lines must still exist");
+  // The declaration test and the item split must both come off the client's own words.
+  assert.ok(/originalMessageForFidelity/.test(declares!),
+    "_declaresList must test the pre-normalization message — the rewrite destroys 'grocery list'");
+  assert.ok(/originalMessageForFidelity/.test(lines!),
+    "_msgLines must split the pre-normalization message");
+  // And the eating brake must not be fed an "i had" the Normalizer invented.
+  assert.ok(/_declaresList \? originalMBeforeNorm/.test(eating!),
+    "_hasEatingContext must read the ORIGINAL when the client named a list, or an invented 'i had' blocks it");
+  // The Normalizer reassigns `message`, so the gate must sit after that and cannot rely on it.
+  assert.ok(src.indexOf("message = canon;") < src.indexOf("const _declaresList"),
+    "the gate runs after the rewrite — this is exactly why it must not read `message`");
+});
+
+// ============================================================
 // selectModel — the completion ceiling (Work Order D, 2026-08-12)
 //
 // "*Week total: ~R199–R*" was a grocery list cut off mid-price. selectModel never inspected
