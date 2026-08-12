@@ -2991,6 +2991,68 @@ test("score: a perfect week is 100/100", async () => {
   assert.ok(s.bottleneck.startsWith("None"), "no bottleneck on a perfect week");
 });
 
+// ── EVIDENCE LAYER (2026-08-12) — step 1 of the hunger doctrine. The scorer was written and
+// unit-tested but never CALLED by production. These cover the two things that made it unusable
+// as evidence: it could not say how much it was worth, and nothing mapped real logs onto it.
+test("evidence: confidence gates on logged days, so the layer can say 'I don't know'", async () => {
+  // Four logged days is the floor. Below it an average is a rumour, and a layer that cannot
+  // admit that will tell a client their protein is low on the strength of one Tuesday.
+  assert.equal(computeProgressScore({ ...PERFECT_WEEK, foodLogDays: 0 }).confidence, "none");
+  assert.equal(computeProgressScore({ ...PERFECT_WEEK, foodLogDays: 1 }).confidence, "weak");
+  assert.equal(computeProgressScore({ ...PERFECT_WEEK, foodLogDays: 3 }).confidence, "weak");
+  assert.equal(computeProgressScore({ ...PERFECT_WEEK, foodLogDays: 4 }).confidence, "usable");
+  assert.equal(computeProgressScore(PERFECT_WEEK).confidence, "usable");
+});
+
+test("evidence: every component exposes a comparable ratio", async () => {
+  const s = computeProgressScore({ ...PERFECT_WEEK, avgDailyProtein: 65, proteinTarget: 130 });
+  const protein = s.components.find(c => c.label === "Protein")!;
+  assert.equal(protein.ratio, 0.5, "65g against a 130g target is exactly half the lever");
+  for (const c of s.components) {
+    assert.ok(c.ratio >= 0 && c.ratio <= 1, `${c.label}: ratio must be 0–1, got ${c.ratio}`);
+    assert.equal(c.ratio, c.max > 0 ? c.points / c.max : 0, `${c.label}: ratio must equal points/max`);
+  }
+});
+
+test("evidence: the weekly aggregate maps onto the scorer's declared inputs", async () => {
+  const { progressInputsFrom } = await import("../server/progress-score");
+  // The shape gatherReportData actually returns — one aggregate, no second query.
+  const inputs = progressInputsFrom(
+    { distinctDaysLogged: 6, avgProtein: 71, workouts: 2, avgSteps: 6200, weightChange: -0.4 },
+    { proteinTarget: 120, stepsTarget: 8500, plannedSessions: 3, goalType: "fat_loss" },
+  );
+  assert.equal(inputs.avgDailyProtein, 71);
+  assert.equal(inputs.proteinTarget, 120);
+  assert.equal(inputs.foodLogDays, 6);
+  assert.equal(inputs.weightLogCount, 2, "a non-null change proves at least two weigh-ins");
+  const s = computeProgressScore(inputs);
+  assert.equal(s.confidence, "usable", "six logged days is real evidence");
+  assert.equal(s.bottleneck, "Protein", "71g against 120g is the weakest MEASURED lever here");
+});
+
+test("evidence: a null weight change means no weigh-ins were countable", async () => {
+  const { progressInputsFrom } = await import("../server/progress-score");
+  const inputs = progressInputsFrom(
+    { distinctDaysLogged: 2, avgProtein: 40, workouts: 0, avgSteps: 0, weightChange: null },
+    { proteinTarget: 120, stepsTarget: 8500, plannedSessions: 3, goalType: "fat_loss" },
+  );
+  assert.equal(inputs.weightLogCount, 0);
+  assert.equal(inputs.weightChangeKg, null);
+  // Two logged days must NOT present as usable evidence, however bad the numbers look.
+  assert.equal(computeProgressScore(inputs).confidence, "weak",
+    "a thin week must not license a confident diagnosis");
+});
+
+test("evidence: logged days are clamped to the 7-day window", async () => {
+  const { progressInputsFrom } = await import("../server/progress-score");
+  // gatherReportData can be called for a 30-day period; the scorer is defined out of 7.
+  const inputs = progressInputsFrom(
+    { distinctDaysLogged: 22, avgProtein: 130, workouts: 3, avgSteps: 9000, weightChange: -1 },
+    { proteinTarget: 130, stepsTarget: 8500, plannedSessions: 3, goalType: "fat_loss" },
+  );
+  assert.equal(inputs.foodLogDays, 7, "a 30-day read must not score 22/7 on food logging");
+});
+
 test("score: a totally silent week is 0/100", async () => {
   const s = computeProgressScore({
     completedSessions: 0, plannedSessions: 3,

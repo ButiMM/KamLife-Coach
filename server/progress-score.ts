@@ -37,13 +37,34 @@ export interface ProgressScoreComponent {
   label: string;
   points: number; // awarded
   max: number;    // possible
+  /** points ÷ max, 0–1. The comparable form — this is what "weakest lever" is measured on. */
+  ratio: number;
 }
+
+/**
+ * HOW MUCH THIS ASSESSMENT IS WORTH (2026-08-12). Evidence assembled from two logged days is not
+ * evidence, and a layer that cannot say "I don't know" will invent an answer instead. Consumers
+ * must gate on this: at "none" the honest coaching move is to ask for a log, not to diagnose.
+ */
+export type EvidenceConfidence = "none" | "weak" | "usable";
 
 export interface ProgressScore {
   score: number;                       // 0–100, rounded
   components: ProgressScoreComponent[];
-  bottleneck: string;                  // lowest-ratio component that has room to improve
-  headline: string;                    // one-line, retention-aware summary
+  /**
+   * The WEAKEST MEASURED lever — the lowest-ratio component with room. NOT "the intervention":
+   * see the note at the computation. A consumer that treats this as the next coaching move has
+   * turned the coach into an argmin() over five ratios.
+   */
+  bottleneck: string;
+  /** How far the evidence can be trusted. Gate on this before diagnosing anything. */
+  confidence: EvidenceConfidence;
+  /**
+   * A rendering convenience for the score BLOCK only (renderProgressScore). It is prose from a
+   * calculator, so it must never be fed to Coach K as evidence — the coach writes its own words
+   * from `components`, `bottleneck` and `confidence`.
+   */
+  headline: string;
 }
 
 const clamp01 = (n: number): number => Math.max(0, Math.min(1, n));
@@ -92,12 +113,24 @@ export function computeProgressScore(inp: ProgressScoreInputs): ProgressScore {
     { label: "Training", points: trainingPts, max: 25 },
     { label: "Steps", points: stepsPts, max: 20 },
     { label: "Weight trend", points: weightPts, max: 10 },
-  ];
+  ].map(c => ({ ...c, ratio: c.max > 0 ? c.points / c.max : 0 }));
 
   const score = Math.round(components.reduce((s, c) => s + c.points, 0));
 
-  // Bottleneck = the component with the lowest fill ratio that still has room.
-  // This is the ONE thing to fix — drives the weekly focus message.
+  // Confidence is about the EVIDENCE, not the score. Four logged days is the floor below which an
+  // average is a rumour: 1–3 days is "weak" and 0 is "none". A consumer that ignores this will
+  // confidently tell a client their protein is low on the strength of one Tuesday.
+  const confidence: EvidenceConfidence =
+    inp.foodLogDays >= 4 ? "usable" : inp.foodLogDays >= 1 ? "weak" : "none";
+
+  // THE WEAKEST MEASURED LEVER — not "the intervention" (2026-08-12 ruling). This comment used
+  // to read "This is the ONE thing to fix", which is the argmin fallacy: the lowest ratio is the
+  // weakest thing we MEASURE, and that is not automatically the most useful thing to change. A
+  // client at protein 0.55 / adherence 0.95 / steps 0.60 may still be better served by something
+  // this function cannot see — cost, schedule, food preference, or WHY adherence is breaking.
+  // The deterministic layer says "protein is the weakest measured lever." Coach K decides whether
+  // protein is the right next move. Keeping that boundary is what stops the coach becoming a
+  // glorified argmin() over five ratios.
   const withRoom = components.filter(c => c.points < c.max - 0.01);
   const bottleneckComp = withRoom.length > 0
     ? withRoom.reduce((lo, c) => (c.points / c.max < lo.points / lo.max ? c : lo))
@@ -112,7 +145,7 @@ export function computeProgressScore(inp: ProgressScoreInputs): ProgressScore {
     ? "The habits aren't failing — they're just inconsistent. Fix one thing."
     : "Early days. Pick the one bottleneck and start there.";
 
-  return { score, components, bottleneck, headline };
+  return { score, components, bottleneck, confidence, headline };
 }
 
 /**
@@ -123,4 +156,38 @@ export function renderProgressScore(s: ProgressScore): string {
   return `*KamLife Score: ${s.score}/100*\n${s.headline}${
     s.bottleneck.startsWith("None") ? "" : `\nThis week's bottleneck: *${s.bottleneck}*.`
   }`;
+}
+
+/**
+ * THE WIRING (2026-08-12). This function was written, unit-tested, and never called by anything
+ * in production — the same shape as the sliced prompt: capability the product paid for and never
+ * shipped. `progressInputsFrom` is the missing half: it maps the weekly aggregate that
+ * report-card.ts already computes onto the inputs this scorer has always declared.
+ *
+ * PURE by design. It takes the numbers, it does not read the database — `gatherReportData` owns
+ * that query, so there is exactly one weekly aggregate in the product and a second one cannot
+ * quietly drift from it. And it returns evidence, never words: what Coach K SAYS about a weak
+ * protein ratio is the coach's job, not this file's.
+ *
+ * `weightLogCount` is derived, not measured: gatherReportData exposes the CHANGE (null when it
+ * saw fewer than two weigh-ins) rather than the count. A non-null change proves at least two.
+ * Stated here rather than silently assumed, because a caller reading `weightLogCount` as a real
+ * tally would be wrong — a single weigh-in reads as 0 here.
+ */
+export function progressInputsFrom(
+  d: { distinctDaysLogged: number; avgProtein: number; workouts: number; avgSteps: number; weightChange: number | null },
+  targets: { proteinTarget: number; stepsTarget: number; plannedSessions: number; goalType: string },
+): ProgressScoreInputs {
+  return {
+    completedSessions: d.workouts,
+    plannedSessions: targets.plannedSessions,
+    avgDailyProtein: d.avgProtein,
+    proteinTarget: targets.proteinTarget,
+    avgSteps: d.avgSteps,
+    stepsTarget: targets.stepsTarget,
+    foodLogDays: Math.min(7, d.distinctDaysLogged),
+    weightLogCount: d.weightChange !== null ? 2 : 0,
+    weightChangeKg: d.weightChange,
+    goalType: targets.goalType,
+  };
 }

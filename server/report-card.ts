@@ -25,7 +25,7 @@ function cardBaseUrl(): string {
   return base;
 }
 
-interface ReportData {
+export interface ReportData {
   days: number;
   distinctDaysLogged: number;
   avgKcal: number; avgProtein: number;
@@ -35,7 +35,12 @@ interface ReportData {
   weightChange: number | null;
 }
 
-async function gatherReportData(user: any, period: ReportPeriod): Promise<ReportData> {
+/**
+ * The ONE weekly/monthly aggregate reader. Exported 2026-08-12 so the progress score feeds from
+ * this rather than growing a second aggregator that would drift from it — same SUMs, same window,
+ * same distinct-day divisor. Read-only.
+ */
+export async function gatherReportData(user: any, period: ReportPeriod): Promise<ReportData> {
   const days = period === "week" ? 7 : 30;
   const since = new Date(Date.now() - days * 86400000);
   const [mealAgg, workoutAgg, stepAgg, weights] = await Promise.all([
