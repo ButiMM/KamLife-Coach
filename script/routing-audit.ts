@@ -688,6 +688,19 @@ const CASES: Case[] = [
       // "chicken" in a grocery request — must not log a meal
       x("grocery chicken request", "Can you add more chicken recipes to my grocery list?",
         { reject: [FOOD_LOGGED] }),
+      // REALITY J2 (2026-08-12): "Here's my grocery list: chicken, rice, oil, eggs, milk, bread,
+      // spinach" was logged as a 1156 kcal MEAL. The guard split on NEWLINES only, so a
+      // comma-separated list on ONE line — how people actually type on WhatsApp — counted as a
+      // single item, missed the ≥8 threshold, and fell through to the food scanner. The journey
+      // still "passed" because later turns behaved; the damage was the contaminated day total.
+      x("grocery list on one line is never a meal", "Here's my grocery list: chicken, rice, oil, eggs, milk, bread, spinach.",
+        { reject: [FOOD_LOGGED] }),
+      x("short named shopping list is never a meal", "my shopping list: chicken, rice, spinach",
+        { reject: [FOOD_LOGGED] }),
+      // The other side of that threshold: a real meal that happens to be comma-separated must
+      // STILL log. Widening the grocery net must never swallow a genuine food report.
+      x("comma-separated meal still logs", "i had chicken, rice and spinach for lunch",
+        { reject: [/I didn't catch that|Got your list/i] }),
       // Stated step PREFERENCE persists the target (2026-07-14, the founder's own
       // message went unheard and the morning brief kept nagging the old number)
       x("steps preference persists", "I really only want to be doing 10,000 steps now, nothing more",

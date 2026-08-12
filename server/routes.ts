@@ -723,17 +723,17 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const foodLogMgmtResult = await handleFoodLogMgmt(user, m);
   if (foodLogMgmtResult !== null) return foodLogMgmtResult;
 
-
-
   // ---- SHOPPING / GROCERY LIST GUARD — must run BEFORE early commands ----
   // Detect grocery/pantry lists regardless of format: checkboxes [ ]/[x], bullets, dashes,
   // numbered lines, or plain one-item-per-line. The signal is: many short lines + no
   // eating verbs. Without this, the alcohol handler misreads "cider" in "apple cider vinegar"
   // and "drinks" in "soft drinks" as an alcohol log.
-  const _msgLines = message.split("\n").map(l => l.trim()).filter(Boolean);
-  const _cleanedItems = _msgLines
-    .map(l => l.replace(/^(\[\s*[x✓\s]?\]|[-•*]|\d+[\.\)])\s*/, "").trim())
-    .filter(l => l.length > 1 && l.length < 80);
+  // A LIST THE CLIENT NAMES AS ONE (Reality J2, 2026-08-12): "Here's my grocery list: chicken,
+  // rice, oil, eggs..." was logged as a 1156 kcal MEAL — this split on NEWLINES only, so a
+  // comma-separated list on one line (how people type on WhatsApp) counted as a single item.
+  const _declaresList = !!message.match(/\b(grocery|shopping)\s*list\b|\bmy groceries\b/i);
+  const _msgLines = (_declaresList ? message.replace(/^[^:\n]*:/, "").split(/[,\n]/) : message.split("\n")).map(l => l.trim()).filter(Boolean);
+  const _cleanedItems = _msgLines.map(l => l.replace(/^(\[\s*[x✓\s]?\]|[-•*]|\d+[\.\)])\s*/, "").trim()).filter(l => l.length > 1 && l.length < 80);
   const _hasEatingContext = /\b(i had|i ate|i'm having|just had|just ate|for breakfast|for lunch|for dinner|for supper|this morning|had this)\b/i.test(m);
   const _isListFormat = _msgLines.filter(l => /^(\[\s*[x✓\s]?\]|[-•*]|\d+[\.\)])/.test(l)).length >= 4;
   // 75% threshold instead of `every` — one item with a parenthetical note like
@@ -743,10 +743,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const _shortItemFraction = _cleanedItems.length > 0
     ? _cleanedItems.filter(l => l.split(/\s+/).length <= 7).length / _cleanedItems.length
     : 0;
-  const _isGroceryList = !_hasEatingContext && _cleanedItems.length >= 8 && (
-    _isListFormat ||
-    (_shortItemFraction >= 0.75 && _msgLines.length >= 10)
-  );
+  // A NAMED list needs fewer items than an inferred one — saying "grocery list" outright beats any
+  // shape heuristic. ≥3 keeps "add chicken to my grocery list" (a list EDIT) out of this branch.
+  const _isGroceryList = !_hasEatingContext && ((_declaresList && _cleanedItems.length >= 3)
+    || (_cleanedItems.length >= 8 && (_isListFormat || (_shortItemFraction >= 0.75 && _msgLines.length >= 10))));
   if (_isGroceryList) {
     const clientName = user.name?.split(" ")[0] || "there";
     let listReply: string;

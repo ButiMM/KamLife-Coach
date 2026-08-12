@@ -179,6 +179,13 @@ test("explicitMealSlot: bare keyword anywhere in the message still counts", () =
   assert.equal(explicitMealSlot("Rice and beef for my lunch"), "lunch");
 });
 
+// REALITY J1, verbatim (2026-08-12). Sent at 12h SAST, this was stored as `label=lunch` with
+// the log line `dropped impossible slot "breakfast" at 12h SAST — letting the clock decide`.
+// The client SAID breakfast; the clock overruled them. Locked with the exact live string.
+test("explicitMealSlot: the J1 message keeps its breakfast, whatever the clock says", () => {
+  assert.equal(explicitMealSlot("I had 2 eggs and toast for breakfast"), "breakfast");
+});
+
 // ============================================================
 // selectModel — the completion ceiling (Work Order D, 2026-08-12)
 //
