@@ -564,17 +564,33 @@ const IMPORTS: Array<[RegExp, string]> = [
   [/\b(?:pap|porridge|oats)\s+with\s+(?:a\s+bit\s+of\s+)?(?:sugar|honey|jam)(?:\s+or\s+(?:sugar|honey|jam))*\b/gi, "pap with peanut butter"],
   // Cost caveats — the tell that the coach priced the advice AFTER choosing it. Deleted, not
   // replaced: in this market cost is the frame you start from, never a footnote.
-  [/,?\s*(?:if (?:you can )?afford(?:able)?|if (?:it'?s |they'?re )?(?:in|within) budget|when you can afford (?:it|them))\b/gi, ""],
+  // The trailing object must go WITH the caveat. "…chicken, if you can afford it" left a dangling
+  // "it" behind — "Have the grilled chicken it." — because only the `when you can afford` branch
+  // consumed it. Pre-existing since the table was written; the comment below names that very phrase.
+  [/,?\s*(?:if (?:you can )?afford(?:able)?|if (?:it'?s |they'?re )?(?:in|within) budget|when you can afford)(?:\s+(?:it|them|these|that))?\b/gi, ""],
 ];
 
 /**
  * Rewrite imported foods in a SUGGESTION into the local staple that does the same job.
  * Returns the text unchanged when nothing foreign is named.
+ *
+ * `menu: true` — the client is ordering off a RESTAURANT menu (Reality J1, 2026-08-12). The
+ * original design drew exactly one boundary, and drew it correctly: logging is theirs,
+ * suggesting is ours, and a client who EATS hummus still gets it logged. It never considered a
+ * third case, where the suggestion is ours but the SHELF is not. Swapping salmon for pilchards
+ * is right in a shop and absurd at a Spur — you cannot order a tin of pilchards there — and the
+ * live transcript shows exactly that: "Go for chicken, eggs or pilchards first" against a menu.
+ * A substitution the client cannot act on is worse than the import it replaced.
+ *
+ * Only the FOOD rewrites stand down. The trailing two entries are phrasing, not shelf items —
+ * the sugar-first "snack" and the cost caveat — and those hold everywhere, which is why the
+ * split follows the same slice boundary `namesAnImport` already uses.
  */
-export function localiseSuggestion(text: string): string {
+export function localiseSuggestion(text: string, opts?: { menu?: boolean }): string {
   let out = String(text || "");
   if (!out.trim()) return text;
-  for (const [re, local] of IMPORTS) { re.lastIndex = 0; out = out.replace(re, local); }
+  const table = opts?.menu ? IMPORTS.slice(-2) : IMPORTS;
+  for (const [re, local] of table) { re.lastIndex = 0; out = out.replace(re, local); }
   return out.replace(/\s{2,}/g, " ").replace(/\s+([.,])/g, "$1").trim();
 }
 

@@ -1721,6 +1721,44 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(!/afford/i.test(out), `cost is the frame, never a caveat: ${out}`);
   });
 
+  // REALITY J1 (2026-08-12): "Go for chicken, eggs or pilchards first" — against a Spur MENU.
+  // The localiser's original boundary was right and incomplete: logging is theirs, suggesting is
+  // ours, but it never asked whose SHELF. Swapping salmon for pilchards is correct in a shop and
+  // absurd at a restaurant, because a tin of pilchards is not on the menu. A substitution the
+  // client cannot act on is worse than the import it replaced.
+  test("acceptance: on a restaurant MENU the localiser stands down", async () => {
+    const { matchRestaurant } = await import("../server/restaurants");
+    const reply = "Go for grilled salmon first, or the protein shake, and add veggies. Enjoy Spur!";
+    const menu = !!matchRestaurant("I'm at Spur tonight.") || !!matchRestaurant(reply);
+    assert.equal(menu, true, "Spur must be recognised as a menu context");
+    assert.equal(localiseSuggestion(reply, { menu }), reply, "a menu item must survive untouched");
+    // The follow-up turn drops the place name — the COACH still carries it, so the reply is what
+    // keeps the menu context alive for the rest of the conversation.
+    const cont = "Skip the chips and have the grilled salmon. Enjoy your time at Spur!";
+    const contMenu = !!matchRestaurant("What if I skip the chips?") || !!matchRestaurant(cont);
+    assert.equal(localiseSuggestion(cont, { menu: contMenu }), cont, "continuation must stay menu-aware");
+  });
+
+  test("acceptance: OFF a menu, localisation is unchanged — and the default call is untouched", () => {
+    // The guard must not become an excuse to stop localising where it was always right.
+    assert.equal(localiseSuggestion("Get salmon, greek yoghurt and almonds for protein."),
+      "Get pilchards, maas and peanuts for protein.", "shop advice must still localise");
+    assert.equal(localiseSuggestion("Get salmon and kale."), "Get pilchards and morogo.",
+      "a call with no opts must behave exactly as before");
+  });
+
+  test("acceptance: phrasing rules hold on a menu too — cost caveat and sugar-pap", () => {
+    // These two entries are phrasing, not shelf items, so they are never suspended.
+    // The dangling-object bug was pre-existing: only the `when you can afford` branch consumed
+    // "it", so "…chicken, if you can afford it" became "Have the grilled chicken it."
+    assert.equal(localiseSuggestion("Have the grilled chicken, if you can afford it. Enjoy Spur!", { menu: true }),
+      "Have the grilled chicken. Enjoy Spur!", "the caveat must take its object with it");
+    assert.equal(localiseSuggestion("Get pilchards, if you can afford them."), "Get pilchards.");
+    assert.equal(localiseSuggestion("Try pap with a bit of sugar.", { menu: true }), "Try pap with peanut butter.");
+    // And a real "it" with no caveat around it must never be eaten.
+    assert.equal(localiseSuggestion("Grill it, don't fry it."), "Grill it, don't fry it.");
+  });
+
   test("acceptance: pap with sugar is never offered as a snack", () => {
     const out = localiseSuggestion("For snacks: boiled eggs, a handful of peanuts, pap with a bit of sugar or honey.");
     assert.ok(!/sugar|honey/i.test(out), `a sugar-first snack is not a snack: ${out}`);

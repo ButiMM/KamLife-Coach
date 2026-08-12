@@ -28,6 +28,7 @@ import { planCorrection, isMealDateMove } from "../food-identity-correction";
 import { isRetroactiveMeal } from "../utils";
 import { tellDontAsk } from "../reply-hygiene";
 import { localiseSuggestion } from "../food-swaps";
+import { matchRestaurant } from "../restaurants";
 
 /**
  * THE COACH'S NEXT MOVE, for the conversation (2026-08-06).
@@ -396,7 +397,7 @@ export async function runMeaningEngineLive(ctx: {
           if (afterTools.trim()) {
             const gate2 = await safetyGate(afterTools, user, message);
             let shaped = sanitizeCoachReply(gate2.response, message, user.weeklyFoodBudget, user.injuries);
-            shaped = tellDontAsk(localiseSuggestion(shaped), await computeNextMove(user));
+            shaped = tellDontAsk(localiseSuggestion(shaped, { menu: !!matchRestaurant(message) || !!matchRestaurant(shaped) }), await computeNextMove(user));
             if (shaped.trim()) {
               await logChat(user.id, message, shaped, "ENGINE_AFTER_TOOLS").catch(() => {});
               return shaped;
@@ -415,7 +416,10 @@ export async function runMeaningEngineLive(ctx: {
     const gate = await safetyGate(result.reply, user, message);
     let reply = sanitizeCoachReply(gate.response, message, user.weeklyFoodBudget, user.injuries);
     // TELL, DON'T ASK — a hand-back question becomes the computed instruction (2026-08-06).
-    reply = tellDontAsk(localiseSuggestion(reply), await computeNextMove(user));
+    // The REPLY is checked as well as the message: on a follow-up ("what if I skip the chips?")
+    // the client no longer names the place, but the coach still does ("Enjoy your time at Spur"),
+    // so the reply is what carries the menu context through the rest of the conversation.
+    reply = tellDontAsk(localiseSuggestion(reply, { menu: !!matchRestaurant(message) || !!matchRestaurant(reply) }), await computeNextMove(user));
     if (getNumbersMode(user) === "low") reply = stripNumbersFromProse(reply);
     if (!reply.trim()) return null;
 
