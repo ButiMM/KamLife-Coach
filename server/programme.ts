@@ -6,6 +6,7 @@
 import { resolveExerciseSlug } from "./exercise-media";
 import { validateProgramme } from "./verifiers/programme-validator";
 import { adaptTraining, trainingAdjustHeader, applySetsDelta, trainingStateFromUser, type TrainingInput } from "./adaptive-training";
+import { enforceMessageBudget, MESSAGE_BUDGET } from "./reply-contract";
 
 // Verify pass — appends an injury-safety note when the delivered workout still
 // contains a movement that loads a flagged injury. The programme builder already
@@ -1457,7 +1458,11 @@ function formatGymDay(
 // ============================================================
 
 export function getKamlifeProgramme(user: any, todayOnly = false): string {
-  return withSafetyNote(getKamlifeProgrammeInner(user, todayOnly), user);
+  // MESSAGE BUDGET (2026-08-12). Measured at 15 WhatsApp bubbles against a stated cap of 3.
+  // Nothing is trimmed — sections are re-packed, and an unavoidable overflow is logged.
+  return enforceMessageBudget(
+    withSafetyNote(getKamlifeProgrammeInner(user, todayOnly), user),
+    MESSAGE_BUDGET.programme, todayOnly ? "getKamlifeProgramme(today)" : "getKamlifeProgramme");
 }
 
 function getKamlifeProgrammeInner(user: any, todayOnly = false): string {
@@ -1780,7 +1785,12 @@ export function buildDay1Workout(user: any): string {
 // when the user logs DONE (see handlers/workout.ts).
 // ============================================================
 
+/** Onboarding's full-programme render, held to the same message budget (was 5 bubbles vs cap 3). */
 export function buildFullProgramme(user: any): string {
+  return enforceMessageBudget(buildFullProgrammeInner(user), MESSAGE_BUDGET.programme, "buildFullProgramme");
+}
+
+function buildFullProgrammeInner(user: any): string {
   const mode = user.trainingMode || "home";
   const phase = user.programmePhase || 1;
   const phaseNames = getPhaseNames();

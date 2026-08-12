@@ -13,6 +13,7 @@
 
 import { validateMealPlan, type DayTotals } from "./verifiers/meal-plan-validator";
 import { topUpsForDay, topUpLine } from "./meal-plan-scale";
+import { enforceMessageBudget, MESSAGE_BUDGET } from "./reply-contract";
 
 export type MealPlanOptions = {
   calorieTarget: number;
@@ -419,7 +420,10 @@ export function generateMealPlan(opts: MealPlanOptions): string {
     noPeanuts,
   });
 
-  // Join with ---  so Twilio splits into separate WA messages
+  // Join with ---  so Twilio splits into separate WA messages, then hold it to the stated
+  // 4-message cap (measured at 5 before this). Re-packs sections; never trims a day.
   const parts = [header, ...days.map(formatDay), footer];
-  return parts.join("\n\n---\n\n") + validation.adjustmentNote;
+  return enforceMessageBudget(
+    parts.join("\n\n---\n\n") + validation.adjustmentNote,
+    MESSAGE_BUDGET.mealPlan, "generateMealPlan");
 }

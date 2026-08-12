@@ -101,3 +101,68 @@ export function meetsReplyContract(reply: string, maxLines = 3): boolean {
   if (lines.length > maxLines) return false;
   return !lines.some(l => ITEM_LINE_RE.test(l) || TOTALS_LINE_RE.test(l) || MENU_LINE_RE.test(l));
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * MESSAGE BUDGET — a deterministic product invariant, not a prompt hope.
+ *
+ * COACH_K_SYSTEM has said since it was written: "PROGRAMME DELIVERY: … Maximum 3 messages for
+ * any programme" and "MEAL PLAN DELIVERY: Maximum 4 messages". Two problems with that. It sits
+ * at character 66,782 of a prompt that is sliced at 20,000, so no model has ever read it. And
+ * it was never a model's job anyway — how many WhatsApp bubbles a render becomes is arithmetic
+ * the emitter controls, and a rule the emitter can violate is not a rule.
+ *
+ * Measured before writing this (2026-08-12): buildFullProgramme → 5 messages,
+ * getKamlifeProgramme → 15, generateMealPlan → 5. Every one of them over.
+ *
+ * WHAT THIS GUARANTEES, stated exactly, because a guarantee that overclaims is worse than none:
+ *   1. CONTENT IS NEVER DROPPED. Only separators move. Nothing is truncated, summarised or
+ *      abbreviated — a client who loses half a training day to a formatting rule is worse off
+ *      than one who gets a fourth message.
+ *   2. ORDER IS NEVER CHANGED. Day 2 cannot arrive before Day 1, so packing is first-fit
+ *      forward, never best-fit.
+ *   3. The part count is at or under `cap` WHENEVER THE CONTENT PHYSICALLY FITS — i.e. when
+ *      total length <= cap × maxLen. When it does not fit, the count is the minimum achievable
+ *      and the overflow is logged loudly rather than resolved by deleting coaching.
+ *
+ * That third clause is not a hedge. getKamlifeProgramme is 5,273 characters, and 3 messages at
+ * Twilio's usable 1,500 is 4,500 — so "3 messages" is arithmetically impossible for a full
+ * three-day programme at current content density. The invariant takes it from 15 to the floor
+ * and says so. Closing that last gap is a content decision, not a formatting one.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** The caps the doctrine states. One owner, so the emitters cannot each invent their own. */
+export const MESSAGE_BUDGET = { programme: 3, mealPlan: 4 } as const;
+
+/**
+ * Re-pack `\n\n---\n\n`-separated sections so the send path yields at most `cap` bubbles.
+ * Pure, order-preserving, content-preserving. Returns the text unchanged when already inside
+ * budget, so it is safe to wrap any emitter.
+ */
+export function enforceMessageBudget(text: string, cap: number, label: string, maxLen = 1500): string {
+  const bubbles = String(text || "").split(/\n\n---\n\n/).map(b => b.trim()).filter(Boolean);
+  if (bubbles.length <= cap && bubbles.every(b => b.length <= maxLen)) return text;
+
+  // First-fit forward: fill a bubble until the next section would overflow it, then start a new
+  // one. A section longer than maxLen on its own gets its own bubble and the send path's own
+  // length-splitter handles it — that case is counted honestly below rather than hidden.
+  const packed: string[] = [];
+  let current = "";
+  for (const bubble of bubbles) {
+    const candidate = current ? `${current}\n\n${bubble}` : bubble;
+    if (candidate.length <= maxLen) { current = candidate; continue; }
+    if (current) packed.push(current);
+    current = bubble;
+  }
+  if (current) packed.push(current);
+
+  // What the send path will ACTUALLY produce, counting any over-long section it must re-split.
+  const effective = packed.reduce((n, p) => n + Math.max(1, Math.ceil(p.length / maxLen)), 0);
+  if (effective > cap) {
+    console.warn(
+      `[MESSAGE_BUDGET] ${label}: ${effective} bubbles, cap ${cap} — ` +
+      `${String(text || "").length} chars cannot fit ${cap}×${maxLen}. Packed to the floor; nothing dropped. ` +
+      `Reduce content density to close this.`,
+    );
+  }
+  return packed.join("\n\n---\n\n");
+}

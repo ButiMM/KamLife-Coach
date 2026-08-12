@@ -7078,7 +7078,87 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
 // max 3 lines: acknowledge, the one thing, forward. Detail is REQUESTED, never unsolicited.
 // ============================================================
 {
-  const { enforceReplyContract, meetsReplyContract, clientAskedForDetail } = await import("../server/reply-contract");
+  const { enforceReplyContract, meetsReplyContract, clientAskedForDetail,
+          enforceMessageBudget, MESSAGE_BUDGET } = await import("../server/reply-contract");
+  const { splitWhatsAppBody } = await import("../server/utils");
+
+  // ── MESSAGE BUDGET — a deterministic product invariant (2026-08-12) ──────────────────
+  // The doctrine ("Maximum 3 messages for any programme", "Maximum 4" for a meal plan) sits at
+  // character 66,782 of a prompt sliced at 20,000, so no model has ever read it — and it was
+  // never a model's job. Measured before the fix: programme 5 and 15 bubbles, meal plan 5.
+  // These tests build DELIBERATELY oversized output and prove it cannot escape the cap.
+
+  test("message budget: 20 oversized sections cannot escape the cap", () => {
+    // 20 sections × ~200 chars = ~4,000 chars, which fits 3×1500, so the cap MUST hold.
+    const sections = Array.from({ length: 20 }, (_, i) => `*Section ${i + 1}*\n${"x".repeat(180)}`);
+    const out = enforceMessageBudget(sections.join("\n\n---\n\n"), MESSAGE_BUDGET.programme, "test");
+    const parts = splitWhatsAppBody(out);
+    assert.ok(parts.length <= MESSAGE_BUDGET.programme,
+      `20 sections must pack into ${MESSAGE_BUDGET.programme} bubbles, got ${parts.length}`);
+  });
+
+  test("message budget: NOTHING is dropped — every section survives the re-pack", () => {
+    // The failure worth fearing is a client losing half a training day to a formatting rule.
+    const sections = Array.from({ length: 14 }, (_, i) => `DAY ${i + 1} MARKER_${i} ${"y".repeat(120)}`);
+    const out = enforceMessageBudget(sections.join("\n\n---\n\n"), MESSAGE_BUDGET.programme, "test");
+    for (let i = 0; i < 14; i++) {
+      assert.ok(out.includes(`MARKER_${i}`), `section ${i} was DROPPED — content loss is never acceptable`);
+    }
+    // Order is preserved: Day 2 can never arrive before Day 1.
+    const positions = Array.from({ length: 14 }, (_, i) => out.indexOf(`MARKER_${i}`));
+    for (let i = 1; i < positions.length; i++) {
+      assert.ok(positions[i] > positions[i - 1], `section ${i} moved ahead of ${i - 1}`);
+    }
+  });
+
+  test("message budget: an IMPOSSIBLE case packs to the floor and still drops nothing", () => {
+    // 12,000 chars cannot fit 3×1500 by arithmetic. The honest outcome is the minimum bubble
+    // count, not a truncated programme — deleting coaching to satisfy a formatting rule would
+    // be a worse defect than the extra message.
+    const huge = Array.from({ length: 30 }, (_, i) => `PART_${i} ${"z".repeat(390)}`).join("\n\n---\n\n");
+    const out = enforceMessageBudget(huge, MESSAGE_BUDGET.programme, "impossible-case");
+    for (let i = 0; i < 30; i++) assert.ok(out.includes(`PART_${i}`), `PART_${i} was dropped`);
+    // TIGHTNESS, not a character floor. Sections are INDIVISIBLE — splitting one mid-sentence to
+    // save a bubble would break the content the cap exists to protect. With 397-char sections only
+    // three fit in 1,500 (a fourth reaches 1,594), so the true optimum here is 10 bubbles, not the
+    // 8 a naive total/maxLen sum suggests. The real guarantee is that NO two adjacent bubbles
+    // could be merged — which no amount of sloppy packing can fake.
+    const bubbles = out.split(/\n\n---\n\n/);
+    for (let i = 1; i < bubbles.length; i++) {
+      assert.ok(`${bubbles[i - 1]}\n\n${bubbles[i]}`.length > 1500,
+        `bubbles ${i - 1} and ${i} could still be merged — the packing left room on the table`);
+    }
+  });
+
+  test("message budget: already inside budget is returned byte-identical", () => {
+    const fine = "*Day 1*\nSquats 3x10\n\n---\n\n*Day 2*\nBench 3x10";
+    assert.equal(enforceMessageBudget(fine, MESSAGE_BUDGET.programme, "test"), fine,
+      "a compliant render must not be reshaped at all");
+  });
+
+  test("message budget: the real emitters are held to the cap", async () => {
+    const { buildFullProgramme, getKamlifeProgramme } = await import("../server/programme");
+    const { generateMealPlan } = await import("../server/meal-plan");
+    const u: any = { id: "mb", name: "Kam Test", goalType: "fat_loss", trainingMode: "gym",
+      currentWeight: "85", height: 175, age: 34, gender: "male", sessionsPerWeek: 3,
+      dailyCalories: 1800, dailyProtein: 130, stepsTarget: 8500, programmeWeek: 1,
+      programmePhase: 1, experienceLevel: "beginner", budgetTier: "R200" };
+    for (const [label, text, cap] of [
+      ["buildFullProgramme", buildFullProgramme(u), MESSAGE_BUDGET.programme],
+      ["getKamlifeProgramme", getKamlifeProgramme(u), MESSAGE_BUDGET.programme],
+      ["generateMealPlan", generateMealPlan({ user: u, calories: 1800, protein: 130 } as any), MESSAGE_BUDGET.mealPlan],
+    ] as Array<[string, string, number]>) {
+      const parts = splitWhatsAppBody(text);
+      // Either inside the cap, or at the arithmetic floor for its own length. getKamlifeProgramme
+      // is 5,273 chars — 3×1500 is 4,500 — so "3 messages" is impossible at current content
+      // density and it lands at 4. That is a CONTENT decision, not a formatting one, and this
+      // assertion holds the floor so a regression to 15 bubbles cannot pass.
+      const floor = Math.ceil(text.replace(/\n\n---\n\n/g, "\n\n").length / 1500);
+      assert.ok(parts.length <= Math.max(cap, floor),
+        `${label}: ${parts.length} bubbles — over both cap ${cap} and floor ${floor}`);
+    }
+  });
+
   // The exact live reply the founder photographed.
   const verbose = [
     "🟢 Nicely done — still room for two proper meals today.",
