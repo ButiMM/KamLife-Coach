@@ -28,6 +28,11 @@ const { scalePortionDescription, extractMealLabel, adjustFoodsForSegment } = awa
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
 const { explicitMealSlot } = await import("../server/understanding/actions");
+// NOTE: server/gpt.ts registers a module-scope setInterval (its food-cache sweeper), so a
+// script that imports it only exits because THIS file ends with an explicit process.exit(0).
+// That is why the selectModel coverage lives here and not in unit-tests.ts, which has no
+// such exit and hangs forever once gpt.ts is loaded into it.
+const { selectModel } = await import("../server/gpt");
 const { scanForSAFoods } = await import("../server/handlers/food-scanner");
 
 let passed = 0;
@@ -171,6 +176,46 @@ test("explicitMealSlot: no meal word at all — 'earlier' is not a slot claim �
 
 test("explicitMealSlot: bare keyword anywhere in the message still counts", () => {
   assert.equal(explicitMealSlot("Rice and beef for my lunch"), "lunch");
+});
+
+// ============================================================
+// selectModel — the completion ceiling (Work Order D, 2026-08-12)
+//
+// "*Week total: ~R199–R*" was a grocery list cut off mid-price. selectModel never inspected
+// `instruction`, so a caller asking for four sections and twenty priced items was handed the
+// 160-token conversational default. The ceiling now moves for a list/plan ask and ONLY for a
+// list/plan ask — a raised floor across every coaching reply is what these tests prevent.
+// ============================================================
+
+test("selectModel: ordinary coaching stays capped at the conversational default", () => {
+  for (const msg of ["i had eggs and pap", "how am i doing?", "did 9000 steps"]) {
+    const r = selectModel("Respond as Coach K to this client message.", msg);
+    assert.equal(r.maxTokens, 160, `"${msg}" must not get a long-form budget`);
+    assert.equal(r.reason, "coaching");
+  }
+});
+
+test("selectModel: a list ask named by the CLIENT lifts the ceiling", () => {
+  const r = selectModel("Respond as Coach K to this client message.", "can you send me a grocery list?");
+  assert.ok(r.maxTokens > 160, "a client asking for a list must not be truncated");
+  assert.equal(r.reason, "long_form");
+});
+
+test("selectModel: the case that actually broke — the shape lives in the INSTRUCTION, not the message", () => {
+  // The client's message is a raw list of foods and carries no signal at all; the wanted
+  // output shape is entirely in the caller's instruction, which selectModel used to ignore.
+  const r = selectModel(
+    "REBUILD it completely.\n\n*Week total: ~R[X]–R[Y]*\n\nRESPOND EXACTLY in this format",
+    "chicken, eggs, rice, bread, spinach, oats");
+  assert.ok(r.maxTokens >= 900, `must fit 20 priced items, got ${r.maxTokens}`);
+  assert.equal(r.reason, "long_form");
+});
+
+test("selectModel: safety routing still outranks long-form", () => {
+  // A medical message keeps the safer model even when a list word rides along — the
+  // long-form branch is deliberately checked last.
+  const r = selectModel("Respond as Coach K.", "i have diabetes, can you send me a grocery list?");
+  assert.equal(r.model, "gpt-4o", "a medical message must keep the safer model");
 });
 
 // parseLiftLog tests REMOVED 2026-08-06 with the function. Lift logging is gone: training is

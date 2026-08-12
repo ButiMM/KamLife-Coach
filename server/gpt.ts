@@ -569,6 +569,21 @@ export function selectModel(instruction: string, userMessage: string): { model: 
     return { model: "gpt-4o", maxTokens: 350, reason: "complex" };
   }
 
+  // LONG-FORM ASKS NEED ROOM TO FINISH (Work Order D, 2026-08-12: "*Week total: ~R199–R*" — a
+  // grocery list cut off mid-price). 160 is right for conversation and stays the default; it was
+  // never right for a caller asking for four sections and twenty priced items. The signal must be
+  // read off the INSTRUCTION too: this function only ever inspected userMessage, and for the
+  // grocery rebuild the message is a raw list of foods while the shape of the wanted output lives
+  // entirely in the instruction. That blind spot IS the truncation. Only the ceiling moves.
+  const LONG_FORM_SIGNALS = ["grocery list", "shopping list", "rebuilt list", "updated list",
+    "full list", "meal plan", "detailed plan", "week total", "respond exactly in this format"];
+  const bothLower = `${msgLower}\n${(instruction || "").toLowerCase()}`;
+  const longForm = LONG_FORM_SIGNALS.find(s => bothLower.includes(s));
+  if (longForm) {
+    console.log(`[MODEL] gpt-4o-mini (long-form) — matched: "${longForm}"`);
+    return { model: "gpt-4o-mini", maxTokens: 900, reason: "long_form" };
+  }
+
   console.log(`[MODEL] gpt-4o-mini | msg: "${userMessage.slice(0, 60)}"`);
   // Conversational replies are hard-capped at ~60 words / 3 sentences by the voice
   // rules (~90 tokens) — 160 leaves headroom without paying for runaway outputs.
@@ -1086,6 +1101,18 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   const clientContext = `${getNowContextSA()}\n\n${context}\n\n${patternSummary}${cipBlock}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}`;
   const tail = `\n\n${clientContext}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
   const systemContent = `${STATIC_HOT_BRAIN}${staticGuide ? `\n\n${staticGuide}` : ""}${tail}`;
+  // PROMPT BUDGET, BY COMPONENT (Work Order C, 2026-08-12). The warning below has reported one
+  // number since it was written, which says the prompt is big and nothing about WHICH part is
+  // big — so every conversation about it has been arithmetic done by hand against source files.
+  // Same total, itemised. Measurement only: no prompt content changes here, nothing truncates.
+  // `staticBrain` is already a 20k slice of a 67.7k constant; the rest is dropped every call.
+  console.log("[PROMPT] " + JSON.stringify({
+    staticBrain: STATIC_HOT_BRAIN.length, staticGuide: staticGuide?.length || 0,
+    context: context.length, patternSummary: patternSummary.length,
+    cipNarrative: cipNarrative?.length || 0, cipBlockSent: cipBlock.length,
+    saFlags: saFlags?.length || 0, todayFoodContext: todayFoodContext.length,
+    memory: cappedMemory.length, tail: tail.length, systemContent: systemContent.length,
+  }));
   if (systemContent.length > 48_000) {
     console.warn(`[GPT] System prompt unusually large: ${systemContent.length} chars (tail ${tail.length}) — check for runaway context`);
   }

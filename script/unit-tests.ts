@@ -1331,6 +1331,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+
 // "READ THE REST OF MY TRANSCRIPT" (2026-08-06). The condenser summarises long voice notes to
 // protect the margin, which is right — but it must never answer half of what someone said.
 {
