@@ -70,11 +70,13 @@ pays it **twice**.
 | Banned bot phrases | **split — see gaps** | deterministic invariant | food scanner, coach brain | `unit-tests` | **fragmented** |
 | Prompt doctrine delivery | `check-prompt-integrity.ts` | deterministic invariant | n/a (guard) | wired into `npm test` | healthy |
 | Persistent hunger → protein | **none** | — | **none** | **none** | **GAP** |
-| Programme ≤ 3 WhatsApp messages | **none** | — | **none** | **none** | **GAP** |
-| Meal plan ≤ 4 WhatsApp messages | **none** | — | **none** | **none** | **GAP** |
-| SA grocery item prices | `shopping-lists.ts` (hardcoded) | none — literals | shopping list replies | **none** | **GAP** |
+| Programme ≤ 3 WhatsApp messages | `reply-contract.MESSAGE_BUDGET` | deterministic invariant | `programme.ts` emitters | `unit-tests` (adversarial) | healthy* |
+| Meal plan ≤ 4 WhatsApp messages | `reply-contract.MESSAGE_BUDGET` | deterministic invariant | `meal-plan.ts` | `unit-tests` (adversarial) | healthy |
+| SA retail price estimates | `reply-contract.PRICE_ESTIMATE_NOTE` (framing) + `shopping-lists.ts` (literals) | deterministic data + invariant | shopping list, GPT rebuild | `unit-tests`, `check-pricing` freshness | healthy |
 
 ## The gaps, precisely
+
+_Gap 4 closed 2026-08-12; gaps 2 and 3 closed by the message-budget invariant. Gap 1 remains._
 
 **1. Persistent hunger → protein diagnosis.** The protein-leverage doctrine (*"the most likely
 cause is under-eating protein, not lack of willpower"*, with the mechanism: 1,800 kcal at 50g
@@ -87,17 +89,23 @@ This is the highest-value gap. It converts *"I have no willpower"* from a charac
 a fixable number, which is the reframe the weight-loss promise rests on. **Model doctrine**, not
 deterministic — the reasoning is the product; only the protein numbers are data.
 
-**2 & 3. Message caps.** *"Maximum 3 messages for any programme"* and *"Maximum 4 messages"* for
-meal plans exist nowhere live. `programme.ts` emits **10** `---` separators, so a programme can
-ship as ten WhatsApp messages against a rule of three. These are **deterministic invariants** —
-they belong in code as output constraints, like food values. A rule the emitter can violate is
-not a rule.
+**2 & 3. Message caps — CLOSED 2026-08-12.** `enforceMessageBudget` re-packs sections without
+dropping or reordering content: `buildFullProgramme` 5→2, `generateMealPlan` 5→2.
 
-**4. SA grocery prices.** `shopping-lists.ts` carries hardcoded item prices (`R45` chicken, `R12`
-cabbage) and hardcoded `estimatedTotal` strings. `check-pricing.ts` does **not** cover these — it
-guards the subscription price only. So there is no canonical owner and no staleness guard for the
-numbers the product quotes a client at the till. Either an authoritative source or explicit
-"approximate estimate" framing; today it is neither.
+**\*** `getKamlifeProgramme` went 15→**4** against a cap of 3, and stops there honestly: 5,273
+chars cannot fit 3×1,500 (nor 3×1,600, Twilio's hard cap). The overflow is logged with the numbers
+rather than resolved by deleting coaching. Closing that last message is a CONTENT decision, and it
+raises a doctrine question — the product object looks like *3 training days + a header*, i.e. four
+bubbles, so the written "≤3" may be the incomplete half of the rule.
+
+**4. SA grocery prices — CLOSED 2026-08-12.** Three epistemic classes now, and they are not
+spoken alike: a NUTRITION VALUE is stable reference data (`foods.ts`) and is stated flatly; a
+RETAIL ESTIMATE is a volatile local guess and must carry `PRICE_ESTIMATE_NOTE`; an OBSERVED PRICE
+is what this client actually paid, which we do not collect yet. The asymmetry found was that
+`formatShoppingList` (maintained literals) already hedged, while the GPT rebuild — whose numbers
+the MODEL INVENTS — carried no qualifier at all. Both paths now use one owner for the sentence, and
+`check-pricing.ts` fails when `PRICE_DATA_AS_OF` lapses past `PRICE_REVIEW_MONTHS`. Deliberately
+NOT built: a live SA price feed. An honest estimate beats a fake fact.
 
 ## Fragmentation found while mapping
 

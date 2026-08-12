@@ -166,3 +166,50 @@ export function enforceMessageBudget(text: string, cap: number, label: string, m
   }
   return packed.join("\n\n---\n\n");
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * PRICE CLAIMS — three epistemic classes, and they may not be spoken alike.
+ *
+ * A nutrition value and a shelf price are not the same kind of fact, and the product was
+ * treating them as though they were:
+ *
+ *   NUTRITION VALUE   stable reference data. "Chicken breast 100g = 165 kcal, 31g protein."
+ *                     foods.ts owns it, it barely moves, and stating it flatly is correct.
+ *   RETAIL ESTIMATE   a volatile local guess. "Chicken pieces 1kg — R45." True in one Shoprite
+ *                     in one month. Stating it flatly is a small lie that costs trust at the till.
+ *   OBSERVED PRICE    what THIS client actually paid, where they shop. We do not collect it yet.
+ *
+ * Found 2026-08-12, and the asymmetry ran the wrong way: formatShoppingList — whose numbers are
+ * at least maintained literals — already said "Prices are rough estimates and vary by store",
+ * while the GPT-generated rebuild, whose numbers the MODEL INVENTS, shipped "~R[price]" per item
+ * and a "Week total" with no qualifier at all. The least reliable source carried the least
+ * hedging. This makes one owner for the sentence so both paths say the same thing.
+ *
+ * DELIBERATELY NOT BUILT: a live South African price feed. We are not going to pretend to
+ * national pricing accuracy we do not have. An honest estimate beats a fake fact.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** The one client-facing qualifier for any rand amount that is an ESTIMATE, not a measurement. */
+export const PRICE_ESTIMATE_NOTE = "_Prices are rough estimates and vary by store._";
+
+/**
+ * When the hardcoded retail estimates were last reviewed (YYYY-MM). This is the freshness half
+ * of the policy: an estimate with no age is not an estimate, it is a stale fact waiting to
+ * mislead someone. check-pricing.ts fails once this passes PRICE_REVIEW_MONTHS so the review is
+ * a dated, deliberate event rather than something nobody ever gets round to.
+ */
+export const PRICE_DATA_AS_OF = "2026-08";
+/** How long a retail estimate may stand before it must be re-checked. */
+export const PRICE_REVIEW_MONTHS = 12;
+
+/** True when `text` states a rand amount — i.e. it is making a price claim to a client. */
+export function makesPriceClaim(text: string): boolean {
+  return /R\s?\d|R\[/.test(String(text || ""));
+}
+
+/** True when a price-claiming render carries the estimate qualifier. Used by the tests. */
+export function framesPriceAsEstimate(text: string): boolean {
+  const t = String(text || "");
+  if (!makesPriceClaim(t)) return true; // nothing claimed, nothing to qualify
+  return /rough estimate|vary by store|approximate|estimate only/i.test(t);
+}

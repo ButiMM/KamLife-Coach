@@ -7159,6 +7159,48 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     }
   });
 
+  // ── PRICE CLAIMS — a nutrition value and a shelf price are not the same kind of fact ──────
+  // 2026-08-12: formatShoppingList (maintained literals) already said "rough estimates and vary
+  // by store", while the GPT-generated rebuild — whose numbers the MODEL INVENTS — shipped
+  // "~R[price]" per item and a "Week total" with no qualifier at all. The least reliable source
+  // carried the least hedging. One owner for the sentence, asserted on both paths.
+  test("price claims: the deterministic shopping list frames its prices as estimates", async () => {
+    const { getShoppingList, formatShoppingList } = await import("../server/shopping-lists");
+    const { framesPriceAsEstimate, makesPriceClaim, PRICE_ESTIMATE_NOTE } = await import("../server/reply-contract");
+    const list = getShoppingList("under_100" as any, 1);
+    const out = formatShoppingList(list as any, "Kam");
+    assert.ok(makesPriceClaim(out), "the shopping list does quote rand amounts");
+    assert.ok(out.includes(PRICE_ESTIMATE_NOTE), "it must carry the ONE canonical qualifier, not its own wording");
+    assert.ok(framesPriceAsEstimate(out));
+  });
+
+  test("price claims: the GPT rebuild template carries the qualifier too", () => {
+    // The model invents these numbers, so this is the path that needed it most.
+    for (const f of ["server/handlers/early-commands.ts", "server/handlers/media.ts"]) {
+      const src = readFileSync(f, "utf-8");
+      const i = src.indexOf("*Week total:");
+      assert.ok(i > 0, `${f}: the grocery total template is gone`);
+      assert.ok(src.slice(i, i + 160).includes("PRICE_ESTIMATE_NOTE"),
+        `${f}: a model-invented price total must be qualified as an estimate`);
+    }
+  });
+
+  test("price claims: nutrition values are NOT hedged — they are reference data", async () => {
+    const { framesPriceAsEstimate, makesPriceClaim } = await import("../server/reply-contract");
+    // "165 kcal, 31g protein" is stable reference data from foods.ts and is stated flatly.
+    // The qualifier applies to RAND amounts only; hedging a nutrition fact would be wrong.
+    const nutrition = "Chicken breast 100g — 165 kcal, 31g protein.";
+    assert.equal(makesPriceClaim(nutrition), false, "a kcal/protein claim is not a price claim");
+    assert.equal(framesPriceAsEstimate(nutrition), true, "nothing to qualify, so it passes untouched");
+  });
+
+  test("price claims: an unqualified rand claim is detectable", async () => {
+    const { framesPriceAsEstimate } = await import("../server/reply-contract");
+    assert.equal(framesPriceAsEstimate("Chicken costs R45."), false,
+      "a bare price stated as fact must be catchable — that is the trust problem");
+    assert.equal(framesPriceAsEstimate("Chicken ~R45. _Prices are rough estimates and vary by store._"), true);
+  });
+
   // The exact live reply the founder photographed.
   const verbose = [
     "🟢 Nicely done — still room for two proper meals today.",

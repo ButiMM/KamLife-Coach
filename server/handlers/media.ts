@@ -29,9 +29,8 @@ import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods, fi
 import { buildFoodVisionSystemPrompt, buildFoodVisionUserPrompt, buildMenuPickPrompt } from "./food-vision-prompt";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets, getDailyStepContext, waterTargetLitres } from "../targets";
-import { buildPhysiqueAnalysisPrompt, parsePhysiqueAnalysis, formatPhysiqueFocusLine } from "../physique-analysis";
+import { buildPhysiqueAnalysisPrompt, parsePhysiqueAnalysis, formatPhysiqueFocusLine, buildProgressComparisonPrompt } from "../physique-analysis";
 import { buildFormCheckPrompt, extractFormExercise } from "../form-check-prompt";
-import { buildProgressComparisonPrompt } from "../physique-analysis";
 
 // PROGRESS-SET DEBOUNCE — WhatsApp splits a 3-photo set into separate webhooks; each
 // photo saves immediately, timer resets, one job processes the whole set 15s after the last.
@@ -60,6 +59,7 @@ import { allowExpensiveOp } from "../usage-governor";
 import { scribeTranscribe } from "../elevenlabs";
 import { extractVideoFrames } from "../video-frames";
 import { assertSafeMediaUrl } from "../net-guard";
+import { PRICE_ESTIMATE_NOTE } from "../reply-contract";
 
 // ── SAST today string (YYYY-MM-DD) ──
 function sastToday(): string {
@@ -942,7 +942,7 @@ FORMAT (start immediately, no intro):
 *Pantry & basics:*
 • [item] — [quantity] — ~R[price]
 
-*Week total: ~R[X]–R[Y]*
+*Week total: ~R[X]–R[Y]*\n${PRICE_ESTIMATE_NOTE}
 
 ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, processed snacks, white bread." : "Muscle gain: calorie-dense protein every meal. Extra carb portions."}${medicalNotes !== "none" ? `\nAllergies: ${medicalNotes} — remove ALL.` : ""}`
         )).catch(() => null);

@@ -4,6 +4,10 @@
 // Delivered every Sunday with the weekly summary
 // ============================================================
 
+// PRICE_ESTIMATE_NOTE is the ONE owner of how a rand estimate is qualified to a client — the
+// same sentence the GPT-generated rebuild now carries, so the two paths cannot drift apart.
+import { PRICE_ESTIMATE_NOTE } from "./reply-contract";
+
 export type ShoppingItem = {
   item: string;
   qty: string;
@@ -493,5 +497,5 @@ export function formatShoppingList(list: ShoppingList, userName?: string, goalTy
     ? `\n\n*🚫 Leave these on the shelf:*\n• Sugary drinks (Coke, Oros, juice, flavoured water) — liquid calories you don't feel\n• Honey, syrup, white sugar — same impact as sweets; fruit handles your sweetness\n• Flavoured yoghurt — most have 15-25g added sugar; plain or Greek only\n• Breakfast cereals and instant oats with flavouring — mostly sugar in a box\n• Polony, Russians, Viennas — high sodium, minimal real protein\n• White bread if you can avoid it — brown bread only`
     : "";
 
-  return `${fn ? fn + ", this" : "This"} is your full week.\n\n${intro}${personalBlock}\n\n${store}\n\n*What to buy (${list.estimatedTotal} est. — ${list.coversDays} days):*\n_Prices are rough estimates and vary by store._${body}\n${dailyStructure}\n\n*Meal ideas to mix it up:*\n${ideas}${avoidSection}\n\n_Screenshot this. Tick off as you shop. Send me what you eat each day — photo or words — and I track the numbers.\n\nTo adjust: tell me what you don't eat, what you want to swap, or what you already have at home._`;
+  return `${fn ? fn + ", this" : "This"} is your full week.\n\n${intro}${personalBlock}\n\n${store}\n\n*What to buy (${list.estimatedTotal} est. — ${list.coversDays} days):*\n${PRICE_ESTIMATE_NOTE}${body}\n${dailyStructure}\n\n*Meal ideas to mix it up:*\n${ideas}${avoidSection}\n\n_Screenshot this. Tick off as you shop. Send me what you eat each day — photo or words — and I track the numbers.\n\nTo adjust: tell me what you don't eat, what you want to swap, or what you already have at home._`;
 }

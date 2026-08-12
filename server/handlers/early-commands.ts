@@ -34,6 +34,7 @@ import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../
 import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from "../street-food";
 import { handleAdviceCommands } from "./advice-commands";
 import { handleFoodCommands } from "./food-commands";
+import { PRICE_ESTIMATE_NOTE } from "../reply-contract";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -870,7 +871,7 @@ RESPOND EXACTLY in this format (start immediately with the header, no intro text
 *Pantry & basics:*
 • [item] — [quantity] — ~R[price]
 
-*Week total: ~R[X]–R[Y]*
+*Week total: ~R[X]–R[Y]*\n${PRICE_ESTIMATE_NOTE}
 
 ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut sugary drinks, white bread, processed snacks, anything fried. Replace with eggs, pilchards, chicken, spinach, cabbage." : "Muscle gain focus: calorie-dense protein at every meal. Add extra portions of carbs. Remove nothing — just add. Prioritise chicken, eggs, oats, sweet potato, peanut butter."}${medicalNotes !== "none" ? `\n\nALLERGIES/CONDITIONS: ${medicalNotes} — remove ALL items containing these. No exceptions.` : ""}`
     ));

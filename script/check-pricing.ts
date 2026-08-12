@@ -66,6 +66,32 @@ for (const file of files) {
   });
 }
 
+// ── RETAIL-ESTIMATE FRESHNESS (2026-08-12) ────────────────────────────────────────────────
+// The block above guards the SUBSCRIPTION price — one number, one owner, must never drift. The
+// ~180 hardcoded GROCERY prices in shopping-lists.ts are a different epistemic class entirely: a
+// volatile local estimate, not a measurement, and nothing tracked their age. An estimate with no
+// age is just a stale fact waiting to mislead someone at the till. So the review is dated, and
+// this fails when it lapses — a deliberate, scheduled event rather than something nobody gets
+// round to. Every run prints the months remaining, so it is visible long before it fires.
+const rc = readFileSync("server/reply-contract.ts", "utf-8");
+const asOf = rc.match(/PRICE_DATA_AS_OF\s*=\s*"(\d{4})-(\d{2})"/);
+const window = rc.match(/PRICE_REVIEW_MONTHS\s*=\s*(\d+)/);
+if (!asOf || !window) {
+  console.error("pricing guard: FAILED — PRICE_DATA_AS_OF / PRICE_REVIEW_MONTHS missing from server/reply-contract.ts.");
+  console.error("  Retail estimates must carry a review date. Do not delete the stamp to make this pass.");
+  process.exit(1);
+}
+const stampedAt = new Date(Number(asOf[1]), Number(asOf[2]) - 1, 1);
+const now = new Date();
+const monthsOld = (now.getFullYear() - stampedAt.getFullYear()) * 12 + (now.getMonth() - stampedAt.getMonth());
+const monthsLeft = Number(window[1]) - monthsOld;
+if (monthsLeft <= 0) {
+  violations.push(`  ✗ grocery retail estimates last reviewed ${asOf[1]}-${asOf[2]} — ${monthsOld} months old, ` +
+    `review window is ${window[1]} months.`);
+  violations.push(`      Re-check the shopping-lists.ts prices against real SA shelves, then move PRICE_DATA_AS_OF.`);
+  violations.push(`      Moving the date WITHOUT re-checking the prices is the one thing this guard cannot catch.`);
+}
+
 if (violations.length > 0) {
   console.error("pricing guard: FAILED — stale/hardcoded price found in shipping code:");
   console.error(violations.join("\n"));
@@ -74,4 +100,5 @@ if (violations.length > 0) {
 }
 
 console.log(`pricing guard: ${files.length} files OK (no stale price hardcodes)`);
+console.log(`retail estimates: reviewed ${asOf[1]}-${asOf[2]}, ${monthsLeft} of ${window[1]} months left before re-check.`);
 process.exit(0);
