@@ -28,7 +28,7 @@ import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
 import { explicitMealSlot } from "../understanding/actions";
-import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, type PortionStat, type SlotContext } from "../portion-memory";
+import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, classifyPortionUnit, scalePortionDescription, type PortionStat, type SlotContext } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
@@ -85,26 +85,6 @@ function hasUnmatchedFoodContent(message: string, matchedFoods: Array<{ name: st
 
   const tokens = remaining.split(" ").filter(t => t.length > 2);
   return tokens.length > 0;
-}
-
-// Scale EVERY number in a portion description by the quantity — count AND grams. "2 slices
-// (60g)" ×2 becomes "4 slices (120g)"; grams contradicting the count destroy trust in all of them.
-const SINGULAR_UNITS = new Set([
-  "cup", "bowl", "scoop", "tablespoon", "teaspoon",
-  "serving", "portion", "piece", "packet", "slice", "biscuit", "roti",
-]);
-export function scalePortionDescription(desc: string, quantity: number): string {
-  if (quantity === 1) return desc;
-  const scaled = desc.replace(/\d+(?:\.\d+)?/g, (n) => {
-    const result = parseFloat(n) * quantity;
-    return Number.isInteger(result) ? String(result) : String(Math.round(result * 10) / 10);
-  });
-  return scaled.replace(/(\d+(?:\.\d+)?)\s+([a-zA-Z]+)/g, (match, num, word) => {
-    if (parseFloat(num) > 1 && SINGULAR_UNITS.has(word.toLowerCase())) {
-      return `${num} ${word}s`;
-    }
-    return match;
-  });
 }
 
 // PERSISTED, not in-memory (2026-07-28 live: the 30-day card fired at 13:34 AND 21:25 because a redeploy wiped the Map). Keyed by streak number, so 30 today and 31 tomorrow are different moments.
@@ -250,21 +230,24 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal
     const allAliases = [f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())];
     let quantity = 1;
     let explicitQty = false; // the client SAID an amount — memory never overrides speech
+    let quantityEstimated = false; // WE interpreted the amount — identity can be db, quantity a guess
     for (const alias of allAliases) {
       const qtyDirect = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:${escapeRegex(alias)})`, "i"));
-      const qtyWithFiller = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:slices?|pieces?|cups?|bowls?|plates?|portions?|servings?|tablespoons?|teaspoons?|tbsp|tsp|glasses?)\\s+(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
-      // Fallback: "3 stashes of bread", "2 chunks of pap" — voice mishearings produce non-standard unit
-      // words. "N <word> of <food>" almost always means N portions, so apply the quantity.
-      const qtyWithAnyFiller = !qtyDirect && !qtyWithFiller
-        ? normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+\\w+s?\\s+of\\s+(?:${escapeRegex(alias)})`, "i"))
-        : null;
-      const qtyBefore = qtyDirect || qtyWithFiller || qtyWithAnyFiller;
+      // UNIT-AWARE (2026-08-13): capture the unit WORD and classify it — "2 plates", "2 tablespoons",
+      // "2 pieces" and "2 spoons" are four different claims, and the old catch-all made all four N
+      // whole portions, so "2 spoons of pap" logged 660 kcal. See portion-memory.classifyPortionUnit.
+      const qtyWithUnit = qtyDirect ? null : normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+([a-z]+)\\s+(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
+      const qtyBefore = qtyDirect || qtyWithUnit;
       if (qtyBefore) {
         explicitQty = true;
         const userQty = parseFloat(qtyBefore[1]);
-        const defaultQty = portionDefaultCount(f.typicalPortionDescription);
-        if (userQty > 0 && defaultQty > 0 && userQty !== defaultQty) {
-          quantity = userQty / defaultQty;
+        const unit = qtyWithUnit ? classifyPortionUnit(qtyWithUnit[2], f.typicalPortionDescription, f.typicalPortionGrams) : null;
+        if (unit && unit.fraction !== null) {
+          quantity = unit.cls === "unknown" ? 1 : userQty * unit.fraction;  // never N portions
+          if (unit.estimated) quantityEstimated = true;
+        } else {
+          const defaultQty = portionDefaultCount(f.typicalPortionDescription);
+          if (userQty > 0 && defaultQty > 0 && userQty !== defaultQty) quantity = userQty / defaultQty;
         }
         break;
       }
@@ -320,6 +303,8 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal
       adjustedDescription: scalePortionDescription(f.typicalPortionDescription, quantity),
       quantity,
       portionSource,
+      // Identity verified, quantity estimated — "2 spoons of pap" is db-true about pap, a guess about how much.
+      origin: quantityEstimated ? "ai" as const : undefined,
     };
   });
 }

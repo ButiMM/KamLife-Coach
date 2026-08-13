@@ -27,7 +27,8 @@ process.env.TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "test";
 process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+27000000000";
 
 // Dynamic imports — execute after env vars above, unlike static imports which are hoisted.
-const { scalePortionDescription, extractMealLabel, adjustFoodsForSegment } = await import("../server/handlers/food-context");
+const { extractMealLabel, adjustFoodsForSegment } = await import("../server/handlers/food-context");
+const { scalePortionDescription } = await import("../server/portion-memory");
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
 const { explicitMealSlot } = await import("../server/understanding/actions");
@@ -1874,6 +1875,72 @@ test("A4 gate: the gauntlet uses the shared checker, not a local regex", () => {
   const src = readFileSync("script/hunger-gauntlet.ts", "utf-8");
   assert.ok(/prescribesProtein\(r\)/.test(src), "mustNotBlameProtein must call the tested predicate");
   assert.ok(!/more\|increase\|up your\|raise your/.test(src), "the old inline regex must be gone");
+});
+
+// ── PORTION UNITS: "2 spoons of pap" is not two plates of pap ────────────────────────────────
+// 2026-08-13, measured against the production matcher: "2 spoons of pap" logged 660 kcal — about
+// five times the truth — because the parser read `N <word> of <food>` as N whole portions and
+// stamped the result database-verified.
+
+test("portion units: a fractional unit is a PART of a portion, never a multiple", async () => {
+  const { classifyPortionUnit } = await import("../server/portion-memory");
+  const u = classifyPortionUnit("spoons", "1 cup cooked", 200);
+  assert.equal(u.cls, "fractional");
+  assert.ok(u.fraction !== null && u.fraction < 0.5, "a spoon is a small part of a plate");
+  assert.equal(u.estimated, true, "an ambiguous amount is OUR estimate, not their measurement");
+});
+
+test("portion units: an UNKNOWN unit never multiplies", async () => {
+  const { classifyPortionUnit } = await import("../server/portion-memory");
+  // "3 stashes of bread" — speech-to-text noise. One cautious portion, flagged, not three loaves.
+  const u = classifyPortionUnit("stashes", "2 slices (60g)", 60);
+  assert.equal(u.cls, "unknown");
+  assert.equal(u.fraction, 1);
+  assert.equal(u.estimated, true);
+});
+
+test("portion units: real measurements and full portions are NOT estimates", async () => {
+  const { classifyPortionUnit } = await import("../server/portion-memory");
+  for (const [unit, cls] of [["tablespoons", "measurement"], ["plates", "full"], ["pieces", "count"]] as const) {
+    const u = classifyPortionUnit(unit, "1 cup cooked", 200);
+    assert.equal(u.cls, cls);
+    assert.equal(u.estimated, false, `${unit} is something the client measured`);
+  }
+});
+
+test("portion units: the FOOD decides — a handful of peanuts is one portion of peanuts", async () => {
+  const { classifyPortionUnit } = await import("../server/portion-memory");
+  // The whole reason these fractions are not a universal table. 0.3 of 30g is 9g, not a handful.
+  assert.equal(classifyPortionUnit("handful", "1 handful (30g)", 30).cls, "measurement");
+  assert.equal(classifyPortionUnit("handful", "1 small pack (30g)", 30).cls, "measurement",
+    "a snack-sized canonical portion IS roughly a handful, however it is worded");
+  assert.equal(classifyPortionUnit("handful", "1 cup cooked", 200).cls, "fractional",
+    "but a handful of pap is genuinely a fraction of a plate");
+});
+
+test("portion units: END TO END — the hard South African cases", async () => {
+  const { adjustFoodsForSegment } = await import("../server/handlers/food-context");
+  const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+  const kcal = (msg: string) => {
+    const foods = scanForSAFoods(msg);
+    return adjustFoodsForSegment(foods as any, msg).reduce((s: number, f: any) => s + f.adjustedCalories, 0);
+  };
+  const spoons = kcal("2 spoons of pap");
+  assert.ok(spoons > 0 && spoons < 200, `2 spoons of pap must be a small number, got ${spoons}`);
+  assert.ok(kcal("2 plates of pap") > 500, "but two PLATES is still two plates");
+  assert.ok(kcal("3 stashes of bread") < 250, "an unknown unit must not triple the bread");
+  const handful = kcal("a handful of peanuts");
+  assert.ok(handful > 120 && handful < 250, `a handful of peanuts is ~176 kcal, got ${handful}`);
+  assert.equal(kcal("2 tablespoons peanut butter"), 176, "a real measurement is unchanged");
+});
+
+test("portion units: an estimated quantity is tagged ai even when the FOOD is db", async () => {
+  const { adjustFoodsForSegment } = await import("../server/handlers/food-context");
+  const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+  const of = (msg: string) => adjustFoodsForSegment(scanForSAFoods(msg) as any, msg)[0] as any;
+  assert.equal(of("2 spoons of pap").origin, "ai", "identity verified, quantity guessed");
+  assert.equal(of("3 stashes of bread").origin, "ai", "an unknown unit is an estimate too");
+  assert.equal(of("2 plates of pap").origin, undefined, "a stated full portion is not an estimate");
 });
 
 // ── FOOD PROVENANCE: where a calorie came from ──────────────────────────────────────────────

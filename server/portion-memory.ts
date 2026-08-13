@@ -165,3 +165,106 @@ export async function getSlotContext(userId: string): Promise<SlotContext> {
     return empty; // fail-open: clock fallback, exactly as before
   }
 }
+
+// ── PORTION UNITS: what does "2 spoons of pap" actually mean? ────────────────────────────────
+// (2026-08-13, measured: "2 spoons of pap" logged 660 kcal — roughly five times the truth, and
+// stamped as database-verified.) The parser matched `(\d+)\s+\w+s?\s+of\s+<food>` and treated
+// EVERY unit as a whole portion, on the reasoning that "N <word> of <food> almost always means N
+// portions". True of plates and bowls. Badly false of spoons, handfuls and bites, which are a
+// FRACTION of a portion — so a modest plate of pap became five.
+//
+// Units are not all the same kind of thing, and collapsing them is the bug:
+//   measurement  tablespoon, cup, gram — a real unit; the food's own portion count decides
+//   full         plate, bowl, serving  — one portion each
+//   count        piece, slice, packet  — one item each; the food's portion count decides
+//   fractional   spoon, handful, bite  — a PART of a portion, and the amount is our estimate
+//   unknown      "3 stashes of bread"  — speech-to-text noise. Never multiply on a word we
+//                do not know: one conservative portion, flagged as estimated.
+
+export type UnitClass = "measurement" | "full" | "count" | "fractional" | "unknown";
+
+/**
+ * CONSERVATIVE ENGINEERING PRIORS, NOT PHYSICAL CONSTANTS. A spoon of pap and a spoon of peanut
+ * butter are not the same mass, and nothing here pretends otherwise — these are deliberately
+ * low first guesses for an inherently vague word, chosen so the system under-counts rather than
+ * inflating someone's intake. They are adjustable, and portion-memory above is the path to
+ * replacing them with what a given client's logs actually show.
+ */
+export const UNIT_FRACTIONS: Record<string, number> = {
+  spoon: 0.15, spoons: 0.15, spoonful: 0.15, spoonfuls: 0.15,
+  handful: 0.3, handfuls: 0.3, scoop: 0.5, scoops: 0.5,
+  bite: 0.1, bites: 0.1, mouthful: 0.1, mouthfuls: 0.1,
+  forkful: 0.1, forkfuls: 0.1, sip: 0.05, sips: 0.05,
+  pinch: 0.02, pinches: 0.02, dollop: 0.15, dollops: 0.15,
+};
+
+/** Units roughly the size of a snack portion — see the guard in classifyPortionUnit. */
+const HANDFUL_SIZED = new Set(["handful", "handfuls", "scoop", "scoops", "pack", "packs", "packet", "packets"]);
+
+const MEASUREMENT_UNITS = new Set(["tablespoon", "tablespoons", "tbsp", "teaspoon", "teaspoons", "tsp",
+  "cup", "cups", "gram", "grams", "g", "kg", "ml", "litre", "litres", "liter", "liters", "l", "glass", "glasses"]);
+const FULL_UNITS = new Set(["plate", "plates", "bowl", "bowls", "portion", "portions",
+  "serving", "servings", "helping", "helpings", "dish", "dishes"]);
+const COUNT_UNITS = new Set(["piece", "pieces", "slice", "slices", "packet", "packets", "pack", "packs",
+  "tin", "tins", "can", "cans", "bar", "bars", "biscuit", "biscuits", "roti", "rotis",
+  "egg", "eggs", "wing", "wings", "drumstick", "drumsticks", "ball", "balls"]);
+
+export interface PortionUnit {
+  cls: UnitClass;
+  /** Multiplier on ONE canonical portion. Null when the food's own portion count decides. */
+  fraction: number | null;
+  /** True when WE interpreted the amount rather than the client measuring it. Drives provenance:
+   *  the food's identity can be database-verified while its quantity is a guess. */
+  estimated: boolean;
+}
+
+/**
+ * Classify a unit word against a specific food. THE FOOD MATTERS: peanuts are stored with a
+ * canonical portion of "1 handful (30g)", so a handful of peanuts is one portion, not 0.3 of
+ * one. When the food's own portion description names the unit, that unit IS the portion — which
+ * is the whole reason these fractions are not a universal table.
+ */
+export function classifyPortionUnit(unit: string, portionDescription?: string, portionGrams?: number): PortionUnit {
+  const u = (unit || "").toLowerCase().trim();
+  if (!u) return { cls: "unknown", fraction: null, estimated: true };
+
+  // The food's canonical portion is described in this very unit → recognised measurement.
+  if (portionDescription && new RegExp(`\\b${u.replace(/s$/, "")}s?\\b`, "i").test(portionDescription)) {
+    return { cls: "measurement", fraction: null, estimated: false };
+  }
+  // A HANDFUL OF A SNACK IS THE SNACK. When the canonical portion is already snack-sized, a
+  // handful or a scoop IS roughly that portion — 0.3 of 30g of peanuts is 9g, which is not a
+  // handful of anything. Undercounting is not the safe direction either: it makes a client look
+  // more adherent than they are, and the adaptive engine then trims a target they were missing.
+  // Food-aware, which is the point — the same word means different amounts of different foods.
+  if (HANDFUL_SIZED.has(u) && typeof portionGrams === "number" && portionGrams > 0 && portionGrams <= 60) {
+    return { cls: "measurement", fraction: null, estimated: false };
+  }
+  if (MEASUREMENT_UNITS.has(u)) return { cls: "measurement", fraction: null, estimated: false };
+  if (FULL_UNITS.has(u)) return { cls: "full", fraction: 1, estimated: false };
+  if (COUNT_UNITS.has(u)) return { cls: "count", fraction: null, estimated: false };
+  if (u in UNIT_FRACTIONS) return { cls: "fractional", fraction: UNIT_FRACTIONS[u], estimated: true };
+  // An unrecognised unit must NEVER multiply. "3 stashes of bread" is one portion of bread that
+  // we are unsure about, not three loaves.
+  return { cls: "unknown", fraction: 1, estimated: true };
+}
+
+// Scale EVERY number in a portion description by the quantity — count AND grams. "2 slices
+// (60g)" ×2 becomes "4 slices (120g)"; grams contradicting the count destroy trust in all of them.
+const SINGULAR_UNITS = new Set([
+  "cup", "bowl", "scoop", "tablespoon", "teaspoon",
+  "serving", "portion", "piece", "packet", "slice", "biscuit", "roti",
+]);
+export function scalePortionDescription(desc: string, quantity: number): string {
+  if (quantity === 1) return desc;
+  const scaled = desc.replace(/\d+(?:\.\d+)?/g, (n) => {
+    const result = parseFloat(n) * quantity;
+    return Number.isInteger(result) ? String(result) : String(Math.round(result * 10) / 10);
+  });
+  return scaled.replace(/(\d+(?:\.\d+)?)\s+([a-zA-Z]+)/g, (match, num, word) => {
+    if (parseFloat(num) > 1 && SINGULAR_UNITS.has(word.toLowerCase())) {
+      return `${num} ${word}s`;
+    }
+    return match;
+  });
+}
