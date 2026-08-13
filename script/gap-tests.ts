@@ -1877,6 +1877,31 @@ test("A4 gate: the gauntlet uses the shared checker, not a local regex", () => {
   assert.ok(!/more\|increase\|up your\|raise your/.test(src), "the old inline regex must be gone");
 });
 
+// ── CLIENT TRUTH: "pre-workout" is a TIME, not a supplement ─────────────────────────────────
+// 2026-08-13 founder live test. "I had a pre-workout snack" matched the C4-style powder, logged
+// 15 kcal as the meal, and the client's real food was never captured. The coach — holding a
+// 15-kcal entry — then reached into the 7-day history and told them they had eaten a previous
+// day's breakfast. The invented meal was not invented: it was misattributed from their own past.
+
+test("client truth: a pre-workout SNACK is not the pre-workout supplement", async () => {
+  const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+  const names = (m: string) => scanForSAFoods(m).map(f => f.name);
+  assert.deepEqual(names("I had a pre-workout snack"), [],
+    "a snack before training must not log a scoop of powder");
+  assert.ok(!names("pre-workout snack: banana and peanut butter").some(n => /pre.?workout/i.test(n)),
+    "and the REAL food must be what gets logged");
+  assert.deepEqual(names("pre-workout snack: banana and peanut butter").sort(), ["Banana", "Peanut butter"]);
+  assert.deepEqual(names("I had a snack before the gym"), [], "the same claim, worded the other way round");
+});
+
+test("client truth: a bare pre-workout mention IS still the supplement", async () => {
+  const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+  // The fix must not delete a real capability: someone who actually took C4 still gets it.
+  for (const m of ["I had my pre-workout", "took my pre workout and trained"]) {
+    assert.ok(scanForSAFoods(m).some(f => /pre.?workout/i.test(f.name)), `"${m}" is the powder`);
+  }
+});
+
 // ── PORTION UNITS: "2 spoons of pap" is not two plates of pap ────────────────────────────────
 // 2026-08-13, measured against the production matcher: "2 spoons of pap" logged 660 kcal — about
 // five times the truth — because the parser read `N <word> of <food>` as N whole portions and

@@ -311,6 +311,17 @@ function finalizeMatches(matched: SAFood[], lower: string): SAFood[] {
     if (hasSpecificSandwich) cleaned = cleaned.filter(f => f.name !== "Sandwich");
   }
 
+  // "PRE-WORKOUT" IS USUALLY A TIME, NOT A SUPPLEMENT (2026-08-13, founder's live test).
+  // `pre-workout` is an alias of the C4-style powder, so "I had a pre-workout snack" — a snack
+  // BEFORE training — matched the supplement and logged 15 kcal as the meal. The client's actual
+  // food was never captured, and the coach, holding a 15-kcal entry, reached into the 7-day
+  // history for something substantial and told them they'd eaten a previous day's breakfast.
+  // When the phrase QUALIFIES a meal word it is a time; only a bare mention is the powder.
+  if (/\bpre[\s-]?workout\s+(snack|meal|food|breakfast|lunch|dinner|supper|bite|smoothie|shake)\b/i.test(lower)
+      || /\b(snack|meal|food|bite)\s+(before|pre)[\s-]?(the\s+)?(gym|workout|training|session)\b/i.test(lower)) {
+    cleaned = cleaned.filter(f => !/^pre.?workout/i.test(f.name));
+  }
+
   const names = new Set(cleaned.map(f => f.name));
   if (names.has("Peanut butter") && names.has("Peanut butter (smooth)")) {
     cleaned = cleaned.filter(f => f.name !== "Peanut butter (smooth)");
