@@ -25,6 +25,98 @@ function cardBaseUrl(): string {
   return base;
 }
 
+/**
+ * WHERE A CALORIE CAME FROM (2026-08-13). The adaptive loop turns on `avgKcal7d`, and until now
+ * that number carried no provenance at all: a week from the curated SA database and a week of
+ * model guesses produced byte-identical evidence. Two dimensions were also being conflated —
+ * `mealLogs.source` stored ORIGIN except when a meal was retroactive, where TIMING overwrote it.
+ * They are separate facts: origin lives here, timing lives in loggedAt vs createdAt.
+ *
+ *   db      the curated SA food database — the trustworthy core
+ *   label   a packaging/nutrition label the client gave us
+ *   ai      a model inferred the item and its numbers
+ *   photo   a vision model read it off an image
+ *   unknown logged before provenance existed. NOT backfilled: we genuinely do not know, and
+ *           inventing it would be exactly the false confidence this whole field exists to stop.
+ */
+export type ItemOrigin = "db" | "label" | "ai" | "photo" | "unknown";
+
+/** Model-derived origins. `db` and `label` are grounded in something outside the model. */
+const ESTIMATED_ORIGINS: ItemOrigin[] = ["ai", "photo"];
+
+/**
+ * How much of a window's energy we can actually stand behind. GRADUATED, not binary: 10%
+ * estimated and 80% estimated are different situations and a flag cannot tell them apart.
+ *   verified          essentially all grounded
+ *   mostly_verified   a small estimated share — act on the number normally
+ *   mixed             act, but not on the exact figure
+ *   mostly_estimated  the average is largely inference; conclusions must soften accordingly
+ *   insufficient      too much unknown provenance to characterise it at all
+ */
+export type FoodDataConfidence =
+  | "verified" | "mostly_verified" | "mixed" | "mostly_estimated" | "insufficient";
+
+export interface FoodProvenance {
+  /** Share of window kcal from model-derived items, 0–1. Null when nothing is characterisable. */
+  estimatedShare: number | null;
+  /** Share of window kcal from rows logged before provenance existed, 0–1. */
+  unknownShare: number;
+  confidence: FoodDataConfidence;
+}
+
+/**
+ * PURE. Rows in, provenance out. Unknown is treated as unknown rather than folded into either
+ * side — a meal we cannot characterise must not read as verified OR as estimated.
+ */
+export function summariseProvenance(
+  rows: Array<{ kcal: number; items: unknown; source?: string | null }>,
+): FoodProvenance {
+  let total = 0, estimated = 0, unknown = 0;
+  for (const r of rows) {
+    const kcal = Number(r.kcal) || 0;
+    if (kcal <= 0) continue;
+    total += kcal;
+    const items = Array.isArray(r.items) ? (r.items as any[]) : null;
+    if (!items || items.length === 0) {
+      // No item list. The meal-level `source` is a REAL recorded fact, so use it — but only in
+      // the direction that can lower confidence. `photo` and `gpt_fallback` are unambiguously
+      // model-derived. `sa_scanner` is NOT trusted here: before item tagging existed, that label
+      // was also applied to meals carrying GPT-supplemented items, which is the exact
+      // false-confidence this field exists to remove. Those stay unknown.
+      if (r.source === "photo" || r.source === "gpt_fallback") estimated += kcal;
+      else unknown += kcal;
+      continue;
+    }
+    // Weight each item by its own kcal where it has one; fall back to an even split so a
+    // partially-priced item list still contributes honestly rather than being dropped.
+    const itemKcalTotal = items.reduce((s, it) => s + (Number(it?.kcal) || 0), 0);
+    for (const it of items) {
+      const share = itemKcalTotal > 0 ? (Number(it?.kcal) || 0) / itemKcalTotal : 1 / items.length;
+      const origin = (it?.origin as ItemOrigin) || "unknown";
+      if (origin === "unknown") unknown += kcal * share;
+      else if (ESTIMATED_ORIGINS.includes(origin)) estimated += kcal * share;
+    }
+  }
+  if (total <= 0) return { estimatedShare: null, unknownShare: 0, confidence: "insufficient" };
+
+  const unknownShare = unknown / total;
+  // With half the energy uncharacterisable, any estimated share we compute describes a minority
+  // of the week and would overstate what we know.
+  if (unknownShare >= 0.5) {
+    return { estimatedShare: null, unknownShare: round2(unknownShare), confidence: "insufficient" };
+  }
+  const known = total - unknown;
+  const estimatedShare = known > 0 ? estimated / known : 0;
+  const confidence: FoodDataConfidence =
+    estimatedShare <= 0.05 ? "verified"
+      : estimatedShare <= 0.25 ? "mostly_verified"
+        : estimatedShare <= 0.60 ? "mixed"
+          : "mostly_estimated";
+  return { estimatedShare: round2(estimatedShare), unknownShare: round2(unknownShare), confidence };
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 export interface ReportData {
   days: number;
   distinctDaysLogged: number;
@@ -33,6 +125,8 @@ export interface ReportData {
   avgSteps: number;
   totalMeals: number;
   weightChange: number | null;
+  /** Where the window's calories came from. Null only if the read failed. */
+  provenance: FoodProvenance;
 }
 
 /**
@@ -43,7 +137,7 @@ export interface ReportData {
 export async function gatherReportData(user: any, period: ReportPeriod): Promise<ReportData> {
   const days = period === "week" ? 7 : 30;
   const since = new Date(Date.now() - days * 86400000);
-  const [mealAgg, workoutAgg, stepAgg, weights] = await Promise.all([
+  const [mealAgg, workoutAgg, stepAgg, weights, provRows] = await Promise.all([
     db.select({
       kcal: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}),0)::int`,
       protein: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}),0)::int`,
@@ -53,6 +147,10 @@ export async function gatherReportData(user: any, period: ReportPeriod): Promise
     db.select({ n: sql<number>`COUNT(*)::int` }).from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, since))),
     db.select({ avg: sql<number>`COALESCE(AVG(${stepLogs.steps}),0)::int` }).from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, since))),
     db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, since))).orderBy(weightLogs.loggedAt),
+    // PROVENANCE needs the rows, not a SUM — the origin lives inside each item. A week is a few
+    // dozen rows, and it rides the same Promise.all rather than adding a round trip.
+    db.select({ kcal: mealLogs.kcalInt, items: mealLogs.items, source: mealLogs.source }).from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, since))),
   ]);
   const m = mealAgg[0] as any;
   const distinctDaysLogged = Number(m?.distinctDays || 0);
@@ -69,6 +167,7 @@ export async function gatherReportData(user: any, period: ReportPeriod): Promise
     avgSteps: Number((stepAgg[0] as any)?.avg || 0),
     totalMeals: Number(m?.total || 0),
     weightChange,
+    provenance: summariseProvenance((provRows as any[]) || []),
   };
 }
 

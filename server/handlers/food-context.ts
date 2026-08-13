@@ -989,7 +989,9 @@ export async function handleFoodContext(ctx: {
       mealSegments.push({ label: "", text: m });
     }
 
-    type AdjFood = SAFood & { adjustedCalories: number; adjustedProtein: number; adjustedDescription: string; quantity: number };
+    type AdjFood = SAFood & { adjustedCalories: number; adjustedProtein: number; adjustedDescription: string; quantity: number;
+      /** `db` for scanner matches, `ai` for the GPT supplement — merging loses it otherwise. */
+      origin?: "db" | "ai" };
     const allAdjustedFoods: AdjFood[] = [];
     const isMultiMeal = mealSegments.length >= 2;
     // Per-segment buckets — so a multi-meal log attributes each food (including
@@ -1051,6 +1053,7 @@ export async function handleFoodContext(ctx: {
               adjustedProtein: sf.protein_g,
               adjustedDescription: sf.portion_desc,
               quantity: 1,
+              origin: "ai",  // was merged into an array committed as `sa_scanner` — inference recorded as verified
             };
             allAdjustedFoods.push(adj);
             // Attribute to the segment whose text mentions this item; else the last segment.
@@ -1204,12 +1207,13 @@ export async function handleFoodContext(ctx: {
         kcal: f.adjustedCalories,
         protein: f.adjustedProtein,
         category: f.category,
+        origin: f.origin || "db",
       }));
       const committed = await commitFoodLog({
         userId: user.id,
         phone,
         rawMessage: message.slice(0, 1000),
-        source: scannerIsRetro ? "retro" : "sa_scanner",
+        source: "sa_scanner",  // retro is TIMING (loggedAt), never the origin
         kcalInt: totalCals,
         proteinInt: Math.round(totalProtein),
         carbsInt: totalCarbs,
@@ -1306,13 +1310,14 @@ export async function handleFoodContext(ctx: {
           userId: user.id,
           phone,
           rawMessage: message.slice(0, 1000),
-          source: gptIsRetro ? "retro" : "gpt_fallback",
+          source: "gpt_fallback",  // retro is TIMING (loggedAt), never the origin
           kcalInt: gptFallbackResult.totalKcal,
           proteinInt: gptFallbackResult.totalProtein,
           carbsInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.carbs_g) || 0), 0)),
           fatInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.fat_g) || 0), 0)),
           items: gptFallbackResult.foods.map((f: any) => ({
             name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
+            origin: "ai",
           })),
           mealLabel: extractMealLabel(message, undefined, { kcal: gptFallbackResult.totalKcal, protein: gptFallbackResult.totalProtein }, user, await getSlotContext(user.id)),
           loggedAt: gptLoggedAt,
@@ -1382,7 +1387,7 @@ export async function handleFoodContext(ctx: {
         userId: user.id,
         phone,
         rawMessage: message.slice(0, 1000),
-        source: fb2IsRetro ? "retro" : "gpt_fallback",
+        source: "gpt_fallback",  // retro is TIMING (loggedAt), never the origin
         kcalInt: gptFallbackResult.totalKcal,
         proteinInt: gptFallbackResult.totalProtein,
         carbsInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.carbs_g) || 0), 0)),

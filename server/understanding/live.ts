@@ -326,11 +326,12 @@ export async function runMeaningEngineLive(ctx: {
           avgKcal7d: d.avgKcal || null,
           loggedDays7d: d.distinctDaysLogged,
           goalType: String(user.goalType || "fat_loss"),
+          provenance: d.provenance,
           observedKgPerWeek,
         });
         if (hasRelevantDeficitEvidence(ev)) {
           deficitEvidence = ev;
-          console.log(`[DEFICIT_EVIDENCE] confidence ${ev.confidence} — intake ${ev.avgKcal7d ?? "?"}/${ev.calorieTarget} kcal over ${ev.loggedDays7d}d, expected ${ev.expectedKgPerWeek ?? "?"} vs observed ${ev.observedKgPerWeek ?? "?"} kg/wk`);
+          console.log(`[DEFICIT_EVIDENCE] confidence ${ev.confidence} — intake ${ev.avgKcal7d ?? "?"}/${ev.calorieTarget} kcal over ${ev.loggedDays7d}d, expected ${ev.expectedKgPerWeek ?? "?"} vs observed ${ev.observedKgPerWeek ?? "?"} kg/wk, food-data ${ev.foodDataConfidence}`);
         }
       } catch (e) {
         console.warn("[DEFICIT_EVIDENCE] assembly failed — prompt proceeds without it:", (e as Error)?.message);

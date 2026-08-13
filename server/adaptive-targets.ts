@@ -1,3 +1,4 @@
+import type { FoodDataConfidence, FoodProvenance } from "./report-card";
 /**
  * ADAPTIVE TARGET ENGINE — the brain that was missing.
  *
@@ -355,6 +356,16 @@ export interface DeficitEvidence {
   /** Whether that gap is bigger than day-to-day noise. False when the gap is null. */
   gapIsMaterial: boolean;
   /**
+   * HOW MUCH OF THAT INTAKE WE CAN STAND BEHIND (2026-08-13). The whole loop turns on
+   * `avgKcal7d`, and a week from the curated SA database and a week of model guesses used to
+   * produce identical evidence. Graduated, never binary: 10% estimated and 80% estimated are
+   * different situations. This QUALIFIES the conclusion; it never blocks the adaptation —
+   * deciding is Coach K's, and a deterministic veto here would be the calculator coaching again.
+   */
+  foodDataConfidence: FoodDataConfidence;
+  /** Share of the window's calories that a model inferred, 0–1. Null when uncharacterisable. */
+  estimatedShare: number | null;
+  /**
    * What this evidence can support:
    *   none              nothing usable on either side
    *   intake_only       food is logged well enough, but no trustworthy weight trend
@@ -382,6 +393,8 @@ export function assembleDeficitEvidence(inp: {
   avgKcal7d: number | null;
   loggedDays7d: number;
   goalType: string;
+  /** From `report-card.gatherReportData`. Omit only if the read failed. */
+  provenance?: FoodProvenance;
   /** Only pass this when `weightTrendUsable` returned usable — this file trusts the caller and
    *  will not second-guess a trend it cannot see the weigh-ins for. */
   observedKgPerWeek: number | null;
@@ -417,6 +430,8 @@ export function assembleDeficitEvidence(inp: {
     observedKgPerWeek,
     gapKgPerWeek,
     gapIsMaterial: gapKgPerWeek !== null && Math.abs(gapKgPerWeek) >= MATERIAL_GAP_KG_PER_WEEK,
+    foodDataConfidence: inp.provenance?.confidence ?? "insufficient",
+    estimatedShare: inp.provenance?.estimatedShare ?? null,
     confidence,
   };
 }
@@ -442,11 +457,16 @@ export function renderDeficitEvidence(e: DeficitEvidence): string {
     e.expectedKgPerWeek !== null ? `Expected rate from that intake: ${kg(e.expectedKgPerWeek)} (rough estimate)` : "",
     e.observedKgPerWeek !== null ? `Observed rate on the scale: ${kg(e.observedKgPerWeek)}` : "Observed rate on the scale: no trustworthy trend",
     e.gapKgPerWeek !== null ? `Difference: ${kg(e.gapKgPerWeek)}${e.gapIsMaterial ? "" : " — inside normal week-to-week noise"}` : "",
+    `Food-data confidence: ${e.foodDataConfidence}${e.estimatedShare !== null ? ` (${Math.round(e.estimatedShare * 100)}% of those calories estimated by me, not weighed)` : ""}`,
     `Confidence: ${e.confidence}`,
     "",
     "The expected rate is an ESTIMATE built on an assumed maintenance, and a week of scale readings",
     "moves on water, salt, illness and cycle as well as fat. Treat a difference as something to look",
     "into, never as proof. With confidence below 'usable' you may not say the target is wrong: say",
     "which half you are missing and ask for it. Deciding what this means is yours.",
+    "Use the intake figure IN PROPORTION to its food-data confidence. At 'mostly_estimated' the",
+    "average is largely my own guesswork — say the number is roughly that and soften the",
+    "conclusion; do not tell them they definitely ate it. At 'insufficient' do not build a case on",
+    "the figure at all. At 'verified' or 'mostly_verified' you may use it as it stands.",
   ].filter(Boolean).join("\n");
 }

@@ -1876,6 +1876,108 @@ test("A4 gate: the gauntlet uses the shared checker, not a local regex", () => {
   assert.ok(!/more\|increase\|up your\|raise your/.test(src), "the old inline regex must be gone");
 });
 
+// ── FOOD PROVENANCE: where a calorie came from ──────────────────────────────────────────────
+// The adaptive loop turns on avgKcal7d, and until 2026-08-13 that number carried no provenance:
+// a week from the curated SA database and a week of model guesses produced identical evidence.
+
+test("provenance: an all-database week is verified", async () => {
+  const { summariseProvenance } = await import("../server/report-card");
+  const p = summariseProvenance([
+    { kcal: 600, items: [{ kcal: 600, origin: "db" }], source: "sa_scanner" },
+    { kcal: 900, items: [{ kcal: 900, origin: "db" }], source: "sa_scanner" },
+  ]);
+  assert.equal(p.confidence, "verified");
+  assert.equal(p.estimatedShare, 0);
+});
+
+test("provenance: THE MIXED MEAL — a GPT-supplemented item is no longer hidden", async () => {
+  const { summariseProvenance } = await import("../server/report-card");
+  // chicken + pap from the database, plus a burger the scanner could not match. Before item
+  // tagging this whole row was committed as `sa_scanner` and read as fully verified.
+  const p = summariseProvenance([{
+    kcal: 1000, source: "sa_scanner",
+    items: [{ kcal: 300, origin: "db" }, { kcal: 200, origin: "db" }, { kcal: 500, origin: "ai" }],
+  }]);
+  assert.equal(p.estimatedShare, 0.5, "half those calories are a guess and must say so");
+  assert.equal(p.confidence, "mixed");
+});
+
+test("provenance: untagged sa_scanner rows stay UNKNOWN — never assumed verified", async () => {
+  const { summariseProvenance } = await import("../server/report-card");
+  // These are exactly the historical rows that may contain untagged GPT items. Reading them as
+  // `db` would repeat the false confidence the field exists to remove.
+  const p = summariseProvenance([{ kcal: 1000, items: null, source: "sa_scanner" }]);
+  assert.equal(p.confidence, "insufficient");
+  assert.equal(p.estimatedShare, null, "no share may be claimed from uncharacterisable rows");
+  assert.equal(p.unknownShare, 1);
+});
+
+test("provenance: meal-level source is used only where it LOWERS confidence", async () => {
+  const { summariseProvenance } = await import("../server/report-card");
+  for (const source of ["photo", "gpt_fallback"]) {
+    const p = summariseProvenance([{ kcal: 1000, items: null, source }]);
+    assert.equal(p.confidence, "mostly_estimated", `${source} is model-derived and must count as estimated`);
+    assert.equal(p.unknownShare, 0);
+  }
+});
+
+test("provenance: graduated, not binary — 10% and 80% estimated are different situations", async () => {
+  const { summariseProvenance } = await import("../server/report-card");
+  const at = (aiKcal: number) => summariseProvenance([{
+    kcal: 1000, source: "sa_scanner",
+    items: [{ kcal: 1000 - aiKcal, origin: "db" }, { kcal: aiKcal, origin: "ai" }],
+  }]).confidence;
+  assert.equal(at(20), "verified");
+  assert.equal(at(150), "mostly_verified");
+  assert.equal(at(400), "mixed");
+  assert.equal(at(800), "mostly_estimated");
+});
+
+test("provenance: no backfill — an empty window is insufficient, never verified", async () => {
+  const { summariseProvenance } = await import("../server/report-card");
+  const p = summariseProvenance([]);
+  assert.equal(p.confidence, "insufficient");
+  assert.equal(p.estimatedShare, null);
+});
+
+test("deficit evidence: provenance QUALIFIES the number, it never blocks the adaptation", async () => {
+  const { assembleDeficitEvidence, renderDeficitEvidence } = await import("../server/adaptive-targets");
+  const e = assembleDeficitEvidence({
+    calorieTarget: 1900, avgKcal7d: 2180, loggedDays7d: 7, goalType: "fat_loss",
+    provenance: { estimatedShare: 0.8, unknownShare: 0, confidence: "mostly_estimated" },
+    observedKgPerWeek: 0,
+  });
+  // The intake evidence still stands up — a deterministic veto here would be the calculator
+  // coaching again. What changes is how hard the conclusion may be pushed.
+  assert.equal(e.confidence, "usable", "provenance must not veto the comparison");
+  assert.equal(e.foodDataConfidence, "mostly_estimated");
+  const txt = renderDeficitEvidence(e);
+  assert.match(txt, /80% of those calories estimated by me, not weighed/);
+  assert.match(txt, /IN PROPORTION to its food-data confidence/);
+});
+
+test("deficit evidence: missing provenance reports insufficient, not verified", async () => {
+  const { assembleDeficitEvidence } = await import("../server/adaptive-targets");
+  const e = assembleDeficitEvidence({
+    calorieTarget: 1900, avgKcal7d: 2180, loggedDays7d: 7, goalType: "fat_loss",
+    observedKgPerWeek: -0.1,
+  });
+  assert.equal(e.foodDataConfidence, "insufficient", "absent provenance is never good news");
+});
+
+test("food log: retro is TIMING and may never overwrite the origin", () => {
+  const src = readFileSync("server/handlers/food-context.ts", "utf-8");
+  assert.ok(!/Retro \? "retro" :/.test(src), "a backdated meal must keep where its numbers came from");
+  assert.ok(/source: "sa_scanner"/.test(src) && /source: "gpt_fallback"/.test(src),
+    "both commit paths must state their real origin");
+});
+
+test("food log: the GPT supplement tags its items as inference", () => {
+  const src = readFileSync("server/handlers/food-context.ts", "utf-8");
+  const supp = src.slice(src.indexOf("PARTIAL MATCH SUPPLEMENT"), src.indexOf("Build the multi-meal breakdown"));
+  assert.ok(/origin: "ai"/.test(supp), "items the scanner could not match are NOT database truth");
+});
+
 // ── DEFICIT EVIDENCE: measurements, and what they are worth ─────────────────────────────────
 
 test("deficit evidence: both halves present → usable, and the gap is computed", async () => {
