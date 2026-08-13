@@ -16,6 +16,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { prescribesProtein } from "./hunger-checks";
 
 // Env setup runs AFTER static imports are hoisted in ESM. Server modules use
 // dynamic imports below so db.ts loads only after KAMLIFE_DB_STUB is set.
@@ -1823,6 +1824,51 @@ test("hunger gauntlet: live mode never manufactures a key; offline still may", (
     "the live-mode credential guard must precede the offline placeholder");
   assert.ok(/if \(LIVE && !OPENAI_KEY\) \{[\s\S]{0,400}?process\.exit\(2\)/.test(src),
     "a live run with no credential must stop, not proceed with a fake one");
+});
+
+// ── The A4 gate itself ──────────────────────────────────────────────────────────────────────
+// A4 is the trust case: a client at 118g against a 120g target, still hungry. The gate that says
+// "must NOT point at protein" was matching only the verb-then-noun word order, so 13 of 20 natural
+// coaching phrasings walked straight through it. A checker nothing checks stops checking quietly.
+
+const MUST_CATCH = [
+  "boost protein", "boost your protein a little", "eat more protein", "increase your protein",
+  "add more protein to your afternoon", "let's get your protein up", "push your protein a bit higher",
+  "bump your protein up", "top up your protein at lunch", "try a protein shake in the afternoon",
+  "add a protein source to your afternoon snack", "prioritise protein at lunch",
+  "focus on protein earlier in the day", "aim for 130g of protein",
+  "your protein could come up slightly", "include some protein with that",
+  "make sure there's protein in every meal", "have some protein with your afternoon snack",
+  "lift your protein a touch", "getting a bit more protein in would help",
+];
+// The reply we WANT on A4 quotes protein and rules it out. If the gate fires on these it will
+// fail a correct answer, and we would go chasing a defect that is not there.
+const MUST_PASS = [
+  "Your protein's at 118g against a 120g target, so that's not what's driving this.",
+  "Protein isn't the issue here — you're at 98% of target.",
+  "Everything's on target, including protein. Let's look at your afternoon gap.",
+  "Your protein is fine. Tell me what time you eat lunch.",
+  "At 118g against 120g your protein is where it should be; let's look at meal volume.",
+  "You're hitting your numbers, so I'd look at when you're eating rather than what.",
+  "I'd add more volume to your lunch — more vegetables and a bigger portion.",
+  "That's not a protein problem. What time was your last meal?",
+  "More food, not more protein — your afternoon gap is too long.",
+];
+
+test("A4 gate: catches every natural way of prescribing protein", () => {
+  const missed = MUST_CATCH.filter(p => !prescribesProtein(p));
+  assert.deepEqual(missed, [], `these prescribe protein and escaped the A4 gate:\n  ${missed.join("\n  ")}`);
+});
+
+test("A4 gate: does NOT fire on a correct reply that rules protein out", () => {
+  const wrong = MUST_PASS.filter(p => prescribesProtein(p)).map(p => `${p}  →  ${prescribesProtein(p)}`);
+  assert.deepEqual(wrong, [], `the gate would fail a CORRECT A4 answer:\n  ${wrong.join("\n  ")}`);
+});
+
+test("A4 gate: the gauntlet uses the shared checker, not a local regex", () => {
+  const src = readFileSync("script/hunger-gauntlet.ts", "utf-8");
+  assert.ok(/prescribesProtein\(r\)/.test(src), "mustNotBlameProtein must call the tested predicate");
+  assert.ok(!/more\|increase\|up your\|raise your/.test(src), "the old inline regex must be gone");
 });
 
 test("hunger gauntlet: HUNGER_LLM=1 with no credential exits 2 and says which var to set", () => {

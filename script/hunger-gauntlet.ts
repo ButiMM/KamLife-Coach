@@ -58,6 +58,7 @@ process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+270
 import OpenAI from "openai";
 import { writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { prescribesProtein } from "./hunger-checks";
 const { assembleHungerEvidence } = await import("../server/hunger-evidence");
 const { computeProgressScore } = await import("../server/progress-score");
 const { runMeaningEngine } = await import("../server/understanding/meaning-engine");
@@ -117,8 +118,10 @@ const noCausalClaim: Check = {
 };
 const mustNotBlameProtein: Check = {
   label: "must NOT point at protein — it is already at target",
-  run: (r) => /\b(more|increase|up your|raise your|add more|boost)\b[^.!?]{0,30}\bprotein\b/i.test(r)
-    ? "told a client already at target to eat more protein" : null,
+  run: (r) => {
+    const hit = prescribesProtein(r);
+    return hit ? `told a client already at target to change their protein: "${hit}"` : null;
+  },
 };
 const mustAdmitUncertainty: Check = {
   label: "must say it cannot tell yet, and ask for what it needs",
