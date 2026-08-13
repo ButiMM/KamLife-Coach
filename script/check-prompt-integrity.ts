@@ -227,6 +227,14 @@ if (constitution.includes("PERSISTENT HUNGER IS A SIGNAL TO INVESTIGATE")) {
     ["names causes beyond protein", /volume|sleep|adherence/i],
     ["protein is one lever, not the answer", /one lever|already at target|does not mean/i],
     ["refuses to claim causation", /correlation is not diagnosis/i],
+    // Added 2026-08-13 after the live gauntlet. Each of these three answers a specific observed
+    // failure, so losing the clause silently restores the behaviour it was written to stop.
+    // A3: "How about adding some eggs to your breakfast?" on ONE logged day.
+    ["forbids prescribing on thin evidence", /may not prescribe an intervention/i],
+    // False persistence: single_signal answered with the 7-day protein average.
+    ["forbids longitudinal language on a single day", /symptom TODAY, not a pattern/i],
+    // A1: 900 against 1,800 answered with "try a protein-rich snack".
+    ["puts severe restriction ahead of protein", /RESTRICTION IS THE FINDING/i],
   ];
   for (const [what, re] of required) {
     if (!re.test(law26)) {
