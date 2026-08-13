@@ -18,6 +18,11 @@ import { weeklyTrendSlopeKg } from "../handlers/weight";
 import { getPhaseNames } from "../programme";
 import { energyFrameLine, waterTargetLitres } from "../targets";
 import { sastToday, sastDayStart } from "../utils";
+// ONE day key (2026-08-13). This file grouped the protein average by UTC and the 7-day story by
+// SAST — two day boundaries inside one snapshot, so a meal logged at 00:30 SAST landed on
+// yesterday in the numbers and today in the story. The client is then told they ate something
+// today while the totals disagree. sast.ts already owned this; the local copy was the second owner.
+import { sastDayKey } from "../sast";
 import { liftsForLaggingAreas } from "../physique-analysis";
 import { getGoalProfile } from "../goal-profiles";
 
@@ -187,7 +192,7 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     if (meals.length > 0) {
       const byDay = new Map<string, number>();
       for (const row of meals) {
-        const k = new Date(row.loggedAt || now).toISOString().slice(0, 10);
+        const k = sastDayKey(row.loggedAt || now);
         byDay.set(k, (byDay.get(k) || 0) + (row.proteinInt || 0));
       }
       const days = [...byDay.values()];
@@ -229,31 +234,30 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     const said = await db.select({ messageIn: chatHistory.messageIn, createdAt: chatHistory.createdAt })
       .from(chatHistory).where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, since(7))))
       .orderBy(asc(chatHistory.createdAt)).limit(200).catch(() => [] as any[]);
-    const sastKey = (d: Date | null) => new Date(new Date(d || now).getTime() + 2 * 3_600_000).toISOString().slice(0, 10);
     type Day = { ate: string[]; kcal: number; steps: number; kg: number | null; trained: boolean; said: string[] };
     const story = new Map<string, Day>();
     const slot = (k: string): Day => story.get(k) ?? (story.set(k, { ate: [], kcal: 0, steps: 0, kg: null, trained: false, said: [] }), story.get(k)!);
     for (const r of meals as any[]) {
-      const e = slot(sastKey(r.loggedAt));
+      const e = slot(sastDayKey(r.loggedAt ?? now));
       e.kcal += r.kcalInt || 0;
       const names: string[] = Array.isArray(r.items) ? r.items.map((i: any) => String(i?.name || "").trim()).filter(Boolean)
         : r.rawMessage && r.rawMessage !== "[Photo]" ? [String(r.rawMessage).slice(0, 30)] : [];
       if (names.length) e.ate.push(`${r.mealLabel ? `${r.mealLabel} — ` : ""}${names.slice(0, 3).join(", ")}`);
     }
-    for (const r of stepRows) { const e = slot(sastKey(r.loggedAt)); e.steps = Math.max(e.steps, r.steps || 0); }
-    for (const w of wLogs) if (w.loggedAt && new Date(w.loggedAt).getTime() >= now - 7 * DAY) slot(sastKey(w.loggedAt)).trained = true;
-    for (const r of wl) if (r.loggedAt && new Date(r.loggedAt).getTime() >= now - 7 * DAY) slot(sastKey(r.loggedAt)).kg = parseFloat(String(r.weight));
+    for (const r of stepRows) { const e = slot(sastDayKey(r.loggedAt ?? now)); e.steps = Math.max(e.steps, r.steps || 0); }
+    for (const w of wLogs) if (w.loggedAt && new Date(w.loggedAt).getTime() >= now - 7 * DAY) slot(sastDayKey(w.loggedAt ?? now)).trained = true;
+    for (const r of wl) if (r.loggedAt && new Date(r.loggedAt).getTime() >= now - 7 * DAY) slot(sastDayKey(r.loggedAt ?? now)).kg = parseFloat(String(r.weight));
     // Their own words — the disclosures a coach would remember ("my knee hurt", "work was
     // mad this week"). Skip short/numeric turns: those are logs, already counted above.
     for (const r of said as any[]) {
       const t = String(r.messageIn || "").replace(/\s+/g, " ").trim();
-      const e = slot(sastKey(r.createdAt));
+      const e = slot(sastDayKey(r.createdAt ?? now));
       if (t.length > 28 && e.said.length < 2 && !/^\d/.test(t)) e.said.push(t.slice(0, 90));
     }
     const todayKey = sastToday();
     const sentences: string[] = [];
     for (let i = 6; i >= 0; i--) {
-      const k = sastKey(new Date(now - i * DAY));
+      const k = sastDayKey(new Date(now - i * DAY));
       const e = story.get(k);
       const when = k === todayKey ? "TODAY" : new Date(`${k}T12:00:00Z`).toLocaleDateString("en-ZA", { weekday: "long" });
       if (!e) { sentences.push(`${when}: silent — nothing logged, nothing said.`); continue; }

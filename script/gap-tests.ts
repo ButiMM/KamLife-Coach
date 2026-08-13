@@ -1877,6 +1877,33 @@ test("A4 gate: the gauntlet uses the shared checker, not a local regex", () => {
   assert.ok(!/more\|increase\|up your\|raise your/.test(src), "the old inline regex must be gone");
 });
 
+// ── CLIENT TRUTH: one day boundary, not two ─────────────────────────────────────────────────
+// client-snapshot.ts grouped the protein average by UTC and the 7-day story by SAST — two day
+// boundaries inside ONE snapshot. A meal logged at 00:30 SAST landed on yesterday in the numbers
+// and today in the story, so the coach could say "you ate that today" while the totals disagreed.
+// sast.ts already owned this; the local copy 45 lines below the bug was the second owner.
+
+test("client truth: the snapshot uses the canonical SAST day key, never its own", () => {
+  const src = readFileSync("server/brain/client-snapshot.ts", "utf-8");
+  assert.ok(/import \{ sastDayKey \} from "\.\.\/sast"/.test(src), "it must use the one owner");
+  assert.ok(!/const sastKey =/.test(src), "and must not re-implement it locally");
+  // The raw UTC form is the actual defect — any reappearance is the same bug returning.
+  assert.ok(!/new Date\(row\.loggedAt \|\| now\)\.toISOString\(\)\.slice\(0, 10\)/.test(src),
+    "grouping a logged_at by UTC puts small-hours meals on the wrong day");
+});
+
+test("client truth: the small hours are the case that exposed it", async () => {
+  const { sastDayKey } = await import("../server/sast");
+  // 00:30 SAST on the 14th is 22:30 UTC on the 13th. UTC keying calls that yesterday.
+  const smallHours = new Date("2026-08-13T22:30:00Z");
+  assert.equal(sastDayKey(smallHours), "2026-08-14", "SAST is UTC+2, year-round");
+  assert.notEqual(smallHours.toISOString().slice(0, 10), sastDayKey(smallHours),
+    "the two keys genuinely disagree here — that disagreement WAS the defect");
+  // And the boundary itself holds from both sides.
+  assert.equal(sastDayKey(new Date("2026-08-13T21:59:59Z")), "2026-08-13");
+  assert.equal(sastDayKey(new Date("2026-08-13T22:00:00Z")), "2026-08-14");
+});
+
 // ── CLIENT TRUTH: "pre-workout" is a TIME, not a supplement ─────────────────────────────────
 // 2026-08-13 founder live test. "I had a pre-workout snack" matched the C4-style powder, logged
 // 15 kcal as the meal, and the client's real food was never captured. The coach — holding a
