@@ -1764,6 +1764,40 @@ test("3.5 layering: the composer sits where the DB reads already live", () => {
 });
 
 
+// ============================================================
+// THE FLAG THAT SILENCED THE MODEL (2026-08-12). KAMLIFE_DB_STUB=1 implied AI_OFFLINE, so the
+// hunger gauntlet — which sets the stub because it needs no database — disabled the model on the
+// one script whose whole purpose is calling it. The engine failed open to null, every case scored
+// an empty reply, and 14 prohibition-shaped checks passed because an empty string cannot violate
+// a prohibition. These lock the precedence and the guard that makes it un-repeatable.
+// ============================================================
+
+test("ai-offline: the stub still implies offline — every offline suite depends on it", async () => {
+  // gap-tests itself runs under KAMLIFE_DB_STUB=1, so this is the live value, not a source read.
+  const { AI_OFFLINE } = await import("../server/ai-offline");
+  assert.equal(AI_OFFLINE, true, "the offline suites must never start calling the network");
+});
+
+test("ai-offline: an EXPLICIT OFFLINE_AI=0 beats the stub, and nothing else changes", () => {
+  const src = readFileSync("server/ai-offline.ts", "utf-8");
+  assert.ok(/process\.env\.OFFLINE_AI === "0"\s*\n?\s*\? false/.test(src),
+    "an explicit opt-in must override the stub's implication");
+  assert.ok(/OFFLINE_AI === "1" \|\| process\.env\.KAMLIFE_DB_STUB === "1"/.test(src),
+    "the original rule must survive as the fallback — production sets neither and is unaffected");
+});
+
+test("hunger gauntlet: a live run can never score an EMPTY reply", () => {
+  const src = readFileSync("script/hunger-gauntlet.ts", "utf-8");
+  assert.ok(/if \(!reply\)/.test(src), "an empty reply must be caught before any check runs");
+  assert.ok(/LIVE MODEL REQUIRED/.test(src), "and it must say so unmistakably");
+  // The guard must sit BEFORE the checks, or the vacuous passes happen anyway.
+  assert.ok(src.indexOf("if (!reply)") < src.indexOf("for (const chk of c.checks)"),
+    "the empty-reply guard must precede the mechanical checks");
+  assert.ok(/HUNGER_LLM === "1"\) process\.env\.OFFLINE_AI = "0"/.test(src),
+    "asking for the model must actually enable it");
+});
+
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");

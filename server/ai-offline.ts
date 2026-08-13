@@ -13,8 +13,24 @@
  * seconds of dead time per call and made `npm test` appear to hang. Throwing
  * before the network attempt removes that entirely and keeps tests deterministic.
  */
-export const AI_OFFLINE =
-  process.env.OFFLINE_AI === "1" || process.env.KAMLIFE_DB_STUB === "1";
+/**
+ * PRECEDENCE (2026-08-12). The stub IMPLIES offline, because the offline suites all set it and
+ * none of them want the network. But the two are different concerns — "do not use the real
+ * database" is not "do not call the model" — and the OR made the implication unbreakable.
+ *
+ * That cost a whole run. script/hunger-gauntlet.ts sets KAMLIFE_DB_STUB=1 so it needs no
+ * database (its evidence is constructed in memory), which silently disabled the model on the one
+ * script whose entire purpose is calling it: assertAiOnline threw, the engine caught it and
+ * failed open to null, and every case scored an empty reply against prohibition-shaped checks
+ * that an empty string cannot violate. Fourteen vacuous passes.
+ *
+ * So an EXPLICIT OFFLINE_AI=0 now beats the stub's implication. Production never sets it, so
+ * production semantics are untouched — this only lets a caller that genuinely wants the model,
+ * and genuinely does not want the database, say so.
+ */
+export const AI_OFFLINE = process.env.OFFLINE_AI === "0"
+  ? false
+  : (process.env.OFFLINE_AI === "1" || process.env.KAMLIFE_DB_STUB === "1");
 
 // One clear signal at startup instead of total silence — so a reader of CI output knows
 // WHY there are no GPT responses, without us printing a stack trace per skipped call.

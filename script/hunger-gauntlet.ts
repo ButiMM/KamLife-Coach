@@ -24,7 +24,12 @@
  * Run: HUNGER_LLM=1 OPENAI_API_KEY=... npx tsx script/hunger-gauntlet.ts
  */
 
+// The stub keeps the DATABASE off — this script needs no database, its evidence is built in
+// memory — but the stub also IMPLIES ai-offline, which silently disabled the model on the one
+// script whose whole purpose is calling it. Under HUNGER_LLM=1 we say explicitly that we want
+// the model and still no database. OFFLINE_AI=0 beats the implication; see server/ai-offline.ts.
 process.env.KAMLIFE_DB_STUB = "1";
+if (process.env.HUNGER_LLM === "1") process.env.OFFLINE_AI = "0";
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "sk-test-offline";
 process.env.PROACTIVE_PAUSED = "true";
 process.env.TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "ACtest00000000000000000000000000";
@@ -234,6 +239,17 @@ async function main() {
       red++; failures.push(`✗ ${c.name}: engine threw — ${(e as Error)?.message}`);
       console.log(`  ✗ THREW: ${(e as Error)?.message}`);
       continue;
+    }
+    // NON-NEGOTIABLE. Every mechanical check below is a PROHIBITION, and an empty string
+    // violates none of them — so a silent engine reads as near-perfect compliance. That is
+    // exactly how the first run reported 14 passes while testing nothing. A live run that
+    // produced no words is a broken experiment, not a result, and it stops here.
+    if (!reply) {
+      console.error(`\n  ✗✗ LIVE MODEL REQUIRED — the AI response was empty.`);
+      console.error(`     This run did NOT exercise the model, so no behavioural claim can be made.`);
+      console.error(`     Check: OPENAI_API_KEY is real, OFFLINE_AI is not "1", and AI_OFFLINE is false.`);
+      console.error(`     (server/ai-offline.ts: KAMLIFE_DB_STUB=1 implies offline unless OFFLINE_AI=0.)`);
+      process.exit(2);
     }
     console.log(`\n  >>> ${c.say}\n  <<< ${reply}\n`);
     const mechanicalChecks: Record<string, string | "pass"> = {};
