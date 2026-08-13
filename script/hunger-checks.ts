@@ -29,6 +29,11 @@ const PRESCRIPTION = new RegExp([
   // D. the soft prescription, which reads as advice without a single verb from A
   String.raw`\bsome protein\b`,
   String.raw`\bprotein\b[^.!?;]{0,20}\b(in|with|at) (every|each) meal\b`,
+  // E. protein named, then raised via a PRONOUN. This is the shape the live failure actually
+  // took — "Your protein is almost on target, but let's boost it a bit" — and it escaped both
+  // the original gate and the first fix, because the noun and the verb never touch. Clause
+  // punctuation bounds the window, so the referent cannot be some other sentence's subject.
+  String.raw`\bprotein\b[^.!?;]{0,70}\b(boost|bump|push|raise|increase|lift|nudge|get|bring|take|top)\s+(it|that|this|them)\b`,
 ].join("|"), "i");
 
 /**

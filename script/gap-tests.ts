@@ -1745,8 +1745,19 @@ test("3.5 block: insufficient_data is DELIVERED, not withheld", () => {
 
 test("3.5 layering: the engine SERIALISES the evidence, it does not compute it", () => {
   const engine = readFileSync("server/understanding/meaning-engine.ts", "utf-8");
-  assert.ok(/input\.hungerEvidence \? renderHungerEvidence\(input\.hungerEvidence\) : ""/.test(engine),
+  assert.ok(/input\.hungerEvidence \? renderHungerEvidence\(input\.hungerEvidence(, input\.evidenceRender)?\) : ""/.test(engine),
     "the engine must pass the assembled object straight to the renderer");
+  // The A/B instrumentation may add a RENDER-OPTIONS argument and nothing else. If a second
+  // argument ever carries evidence, a threshold, or a computed value, the calculator has moved
+  // into the engine and this assertion has stopped meaning what it was written to mean.
+  const call = (engine.match(/renderHungerEvidence\([^)]*\)/) || [""])[0];
+  const secondArg = call.split(",")[1]?.trim().replace(/\)$/, "") || "";
+  assert.ok(secondArg === "" || secondArg === "input.evidenceRender",
+    `the only permitted second argument is the inert render-options object, got ${JSON.stringify(secondArg)}`);
+  // ...and it must be inert: production may never set it.
+  const live = readFileSync("server/understanding/live.ts", "utf-8");
+  assert.ok(!live.includes("evidenceRender"),
+    "evidenceRender is A/B instrumentation — the production composer must never pass it");
   // The chain is storage -> calculation -> evidence object -> prompt -> reasoning. If the engine
   // starts assembling or thresholding, the layers have blurred and the calculator has moved.
   for (const leak of ["assembleHungerEvidence", "PERSISTENT_HUNGER_DAYS", "ADEQUATE_PROTEIN_RATIO", "symptomPersistence"]) {
@@ -1840,6 +1851,11 @@ const MUST_CATCH = [
   "your protein could come up slightly", "include some protein with that",
   "make sure there's protein in every meal", "have some protein with your afternoon snack",
   "lift your protein a touch", "getting a bit more protein in would help",
+  // THE OBSERVED LIVE FAILURE, 2026-08-13. It escaped the original gate AND the first fix:
+  // the noun and the verb never touch, the verb acts on a pronoun. This row is the whole
+  // reason the transcript mattered more than the theory.
+  "Your protein is almost on target, but let's boost it a bit\u2026",
+  "Your protein's basically there — let's just nudge it up.",
 ];
 // The reply we WANT on A4 quotes protein and rules it out. If the gate fires on these it will
 // fail a correct answer, and we would go chasing a defect that is not there.
@@ -1869,6 +1885,53 @@ test("A4 gate: the gauntlet uses the shared checker, not a local regex", () => {
   const src = readFileSync("script/hunger-gauntlet.ts", "utf-8");
   assert.ok(/prescribesProtein\(r\)/.test(src), "mustNotBlameProtein must call the tested predicate");
   assert.ok(!/more\|increase\|up your\|raise your/.test(src), "the old inline regex must be gone");
+});
+
+// A4 as both the gauntlet and the A/B construct it: 118g of a 120g target, everything else met.
+function A4_EVIDENCE() {
+  const inputs = {
+    completedSessions: 3, plannedSessions: 3, avgDailyProtein: 118, proteinTarget: 120,
+    avgSteps: 8600, stepsTarget: 8500, foodLogDays: 7, weightLogCount: 2,
+    weightChangeKg: -0.5, goalType: "fat_loss",
+  };
+  return assembleHungerEvidence(
+    computeProgressScore(inputs as any),
+    { kind: "hunger" as const, occurrences: 5, distinctDays: 5, firstAt: null, lastAt: null, windowDays: 7 },
+    { ...inputs, avgDailyKcal: 1780, calorieTarget: 1800 } as any,
+  );
+}
+
+// ── A/B instrumentation: inert by default, one variable when used ───────────────────────────
+
+test("A/B: the default render is unchanged — production sees exactly what it saw before", async () => {
+  const { renderHungerEvidence } = await import("../server/hunger-evidence");
+  const ev = A4_EVIDENCE();
+  assert.ok(renderHungerEvidence(ev).includes("Weakest measured lever: Protein"),
+    "with no options the bottleneck line must still be rendered");
+  assert.equal(renderHungerEvidence(ev), renderHungerEvidence(ev, {}),
+    "an empty options object must be identical to none");
+});
+
+test("A/B: omitBottleneck removes exactly one line and changes nothing else", async () => {
+  const { renderHungerEvidence } = await import("../server/hunger-evidence");
+  const ev = A4_EVIDENCE();
+  const a = renderHungerEvidence(ev).split("\n");
+  const b = renderHungerEvidence(ev, { omitBottleneck: true }).split("\n");
+  assert.deepEqual(a.filter(l => !b.includes(l)), ["Weakest measured lever: Protein"],
+    "only the line under test may disappear");
+  assert.deepEqual(b.filter(l => !a.includes(l)), [], "the B arm must not introduce anything");
+  // Order of the surviving lines must hold too — a reshuffle is a second variable.
+  assert.deepEqual(b, a.filter(l => !l.startsWith("Weakest measured lever")),
+    "the remaining lines must keep their order");
+});
+
+test("A/B: the harness refuses to run if the arms differ by more than that line", () => {
+  const src = readFileSync("script/ab-lever.ts", "utf-8");
+  assert.ok(/removed\.length !== 1 \|\| !removed\[0\]\.startsWith\("Weakest measured lever"\)/.test(src),
+    "the one-variable guard must abort on any other delta");
+  assert.ok(/added\.length !== 0/.test(src), "and on anything the B arm adds");
+  assert.ok(/AB_TRIALS/.test(src) && /interleav/i.test(src),
+    "temperature is 0.5 — one sample per arm cannot separate an effect from a coin flip");
 });
 
 test("hunger gauntlet: HUNGER_LLM=1 with no credential exits 2 and says which var to set", () => {

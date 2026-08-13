@@ -189,6 +189,13 @@ export interface MeaningInput {
    * fourth arrow only. Turning it into a second calculator is how the layers blur.
    */
   hungerEvidence?: HungerEvidence;
+  /**
+   * A/B INSTRUMENTATION ONLY. Suppresses individual evidence FIELDS so one line can be isolated
+   * as a variable while the rest of the prompt stays byte-identical. Nothing in production passes
+   * it; undefined renders exactly as before. Delete it once the question it exists to answer —
+   * does "Weakest measured lever" anchor the model — has an answer.
+   */
+  evidenceRender?: { omitBottleneck?: boolean };
   /** recent turns for continuity: [{role, content}] */
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   /** THE INVERSION (increment 4): when true, Coach K may emit a structured action via
@@ -310,7 +317,7 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
       // Conditional by design: present only when this turn actually has a hunger signal, so a
       // permanent hunger subsystem does not ride along in every prompt (and on a tool turn this
       // system message is sent twice). Law 26 reasons over it; this line only delivers it.
-      input.hungerEvidence ? renderHungerEvidence(input.hungerEvidence) : "",
+      input.hungerEvidence ? renderHungerEvidence(input.hungerEvidence, input.evidenceRender) : "",
     ].filter(Boolean);
 
     const messages: any[] = [
