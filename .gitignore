@@ -45,6 +45,11 @@ marketing/
 # Reality Test run artifacts — evidence, not source
 reality-baseline-*.txt
 
+# Hunger gauntlet run artifacts — the evidence the model saw, its reply, and the checks, tied to
+# a commit SHA. Same rule: evidence, not source. Attach one to the decision it informs; the file
+# exists so "Law 26 worked" can be traced to a revision and an evidence object six weeks later.
+hunger-gauntlet-*.json
+
 # P2 working directory — REAL CONVERSATIONS. Never commit these.
 # The corpus is the founder's own unedited WhatsApp history: food, weight, setbacks, moods.
 # It is the input to the measurement, not part of the product, and a git history is forever.

@@ -1,9 +1,37 @@
 # Canonical Doctrine Map
 
-**Status:** first pass, 2026-08-12. Every row below was verified against the code, not inferred.
+**Status:** 2026-08-12. Hunger doctrine: **implemented, behaviourally unverified** — steps 1–5
+shipped, `script/hunger-gauntlet.ts` construct-validated on every `npm test`, live-model run still
+pending a key. Not "validated", not "production-ready"; the distinction is deliberate.
+First pass, Every row below was verified against the code, not inferred.
 **Frozen while this stands:** `server/coach-prompt.ts` — no restoring, moving, shortening or deleting.
 **Where new doctrine goes:** the engine `CONSTITUTION`, which is delivered in full. Writing a rule
 into the `COACH_K_SYSTEM` tail past character 20,000 is not restoring it — it reaches nobody.
+
+## The law this rebuild produced
+
+> **A doctrine is not implemented because the model was told about it. The evidence required to
+> execute that doctrine must also reach the model.**
+
+Law 26 was delivered, guarded, and tested — and still inert, because `HungerEvidence` had no
+consumer. The coach was instructed to check numbers it was never given. That is the same shape as
+the 47,677 silenced characters of `COACH_K_SYSTEM` and the never-called `computeProgressScore`:
+authored capability, wired to nothing.
+
+**Every future capability answers all eight before it counts as shipped:**
+
+1. What is the doctrine?
+2. What evidence does it require?
+3. Where is that evidence calculated?
+4. Where is it stored?
+5. Where is it injected?
+6. Which live paths receive it?
+7. How do we test that it **arrived**?
+8. How do we test that Coach K actually **used** it?
+
+Questions 1–6 are answerable in this repository. Question 7 is `check-prompt-integrity.ts` and the
+delivery tests. **Question 8 needs a live model and cannot be answered here** — which is why
+"implemented" and "behaviourally verified" are tracked as different states below.
 
 ## Why this exists
 
@@ -72,7 +100,7 @@ pays it **twice**.
 | Banned bot phrases | **split — see gaps** | deterministic invariant | food scanner, coach brain | `unit-tests` | **fragmented** |
 | Prompt doctrine delivery | `check-prompt-integrity.ts` | deterministic invariant | n/a (guard) | wired into `npm test` | healthy |
 | Persistent hunger — evidence | `hunger-evidence.assembleHungerEvidence` | deterministic data | engine prompt, **conditionally** (live.ts composes, engine serialises) | `gap-tests` state machine + gate | healthy |
-| Persistent hunger — doctrine | `CONSTITUTION` Law 26 (`meaning-engine.ts`) | model doctrine | engine, every call, sent in full | `gap-tests` + `check-prompt-integrity` | healthy |
+| Persistent hunger — doctrine | `CONSTITUTION` Law 26 (`meaning-engine.ts`) | model doctrine | engine, every call, sent in full | `gap-tests` + `check-prompt-integrity` | **implemented, behaviourally unverified** |
 | Programme ≤ 3 WhatsApp messages | `reply-contract.MESSAGE_BUDGET` | deterministic invariant | `programme.ts` emitters | `unit-tests` (adversarial) | healthy* |
 | Meal plan ≤ 4 WhatsApp messages | `reply-contract.MESSAGE_BUDGET` | deterministic invariant | `meal-plan.ts` | `unit-tests` (adversarial) | healthy |
 | SA retail price estimates | `reply-contract.PRICE_ESTIMATE_NOTE` (framing) + `shopping-lists.ts` (literals) | deterministic data + invariant | shopping list, GPT rebuild | `unit-tests`, `check-pricing` freshness | healthy |

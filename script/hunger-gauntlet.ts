@@ -32,6 +32,8 @@ process.env.TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "test";
 process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+27000000000";
 
 import OpenAI from "openai";
+import { writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 const { assembleHungerEvidence } = await import("../server/hunger-evidence");
 const { computeProgressScore } = await import("../server/progress-score");
 const { runMeaningEngine } = await import("../server/understanding/meaning-engine");
@@ -66,6 +68,12 @@ function evidenceFrom(f: Facts) {
   };
   return assembleHungerEvidence(computeProgressScore(inputs), hunger,
     { ...inputs, avgDailyKcal: f.avgDailyKcal ?? null, calorieTarget: 1800 });
+}
+
+function revisionUnderTest(): string {
+  if (process.env.RAILWAY_GIT_COMMIT_SHA) return process.env.RAILWAY_GIT_COMMIT_SHA.slice(0, 7);
+  try { return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); }
+  catch { return "unknown"; }
 }
 
 type Check = { label: string; run: (reply: string) => string | null };
@@ -191,6 +199,14 @@ async function main() {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   let red = 0, green = 0;
   const failures: string[] = [];
+  // THE RUN ARTIFACT. Six weeks from now someone will say "Law 26 worked" and nobody will know
+  // which evidence the model saw, which code produced it, or which revision answered. This
+  // records all three per case. Evidence, not source — gitignored like the Reality baselines,
+  // meant to be attached to the decision it informs.
+  const artifact: any = {
+    commit: revisionUnderTest(), ranAt: new Date().toISOString(),
+    doctrine: "CONSTITUTION Law 26", cases: [] as any[],
+  };
 
   for (const c of CASES) {
     const evidence = evidenceFrom(c.facts);
@@ -220,12 +236,26 @@ async function main() {
       continue;
     }
     console.log(`\n  >>> ${c.say}\n  <<< ${reply}\n`);
+    const mechanicalChecks: Record<string, string | "pass"> = {};
     for (const chk of c.checks) {
       const bad = chk.run(reply);
+      mechanicalChecks[chk.label] = bad ?? "pass";
       if (bad) { red++; failures.push(`✗ ${c.name}\n    ${chk.label}: ${bad}\n    reply: ${JSON.stringify(reply.slice(0, 220))}`); console.log(`  ✗ ${chk.label} — ${bad}`); }
       else { green++; console.log(`  ✓ ${chk.label}`); }
     }
+    artifact.cases.push({
+      case: c.name, said: c.say,
+      evidenceState: evidence.evidenceState, confidence: evidence.confidence,
+      evidence, response: reply, mechanicalChecks,
+      // The two questions code cannot answer stay OPEN in the record until a human answers them.
+      // A file that quietly said "passed" would be the same lie as a green suite over a broken path.
+      humanReview: { usedTheEvidence: "pending", reasonedRatherThanRecited: "pending", note: "" },
+    });
   }
+
+  const file = `hunger-gauntlet-${artifact.commit}-${artifact.ranAt.replace(/[:.]/g, "-")}.json`;
+  try { writeFileSync(file, JSON.stringify(artifact, null, 2)); console.log(`\nartifact: ${file}`); }
+  catch (e) { console.warn(`\ncould not write the run artifact: ${(e as Error)?.message}`); }
 
   console.log(`\n${"═".repeat(94)}\nMECHANICAL: ${green} passed, ${red} failed`);
   if (failures.length) console.log("\n" + failures.join("\n"));
