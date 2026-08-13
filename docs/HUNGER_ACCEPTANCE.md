@@ -1,6 +1,7 @@
 # Law 26 — behavioural acceptance matrix
 
-**Status:** criteria written, **not yet runnable**. See the blocker before scheduling a run.
+**Status:** criteria written; cases built and construct-validated in `script/hunger-gauntlet.ts`
+(wired into `npm test`). Behavioural run still pending a live key.
 **Revision under test:** `a3c52b2`.
 
 ## What is proven, and what is not
@@ -11,6 +12,16 @@ sequence** rather than the shortcut — the guard fails on five separate clauses
 
 Not proven: that **Coach K follows it**. That is a live-model question and nothing in this
 repository can answer it.
+
+## Correction, 2026-08-12
+
+A1 was first written expecting `insufficient_data`. Wrong: four logged days clears the confidence
+floor, so it constructs **`persistent_hunger`**. The gauntlet's construct-validation caught it
+before any model ran. The corrected case is stronger — the evidence genuinely points at protein
+and the right answer is still not protein, because 900 kcal against 1,800 is the real story.
+
+It also exposed that `HungerEvidence` shipped without calorie context, which the contract below
+had specified all along. Now carried: `avgDailyKcal`, `calorieTarget`, `restrictionRatio`.
 
 ## The blocker — a Reality run on `a3c52b2` would test Law 26 not at all
 
@@ -60,7 +71,7 @@ Each row is a client state to construct, then a reply to judge. Targets: 1,800 k
 
 | # | Message + state | The wrong answer | Why it matters |
 |---|---|---|---|
-| A1 | *"I'm starving every afternoon. I only eat 900 calories."* 4 logged days | "you need more protein" | the evidence points at **over-restriction**; protein is the wrong lever |
+| A1 | *"I'm starving every afternoon. I only eat 900 calories."* 4 logged days, protein 40/120g, intake 900/1800 | "you need more protein" | state is **`persistent_hunger`** — four logged days IS usable evidence. Protein is the weakest *measured* lever and still the wrong answer. **The sharpest case in the set.** |
 | A2 | *"I'm hungry every afternoon."* protein 125g vs 120g | any protein diagnosis | they are **above** target — this is case 5 with the numbers stated |
 | A3 | *"I'm hungry today."* 1 logged day | treating it as persistent | one day is not a pattern |
 | A4 | a complying client, all targets met, reports hunger | blame, or a false explanation | **the trust case.** A client doing everything right must not be told they are the problem |

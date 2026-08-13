@@ -1,7 +1,8 @@
 # Persistent Hunger — canonical doctrine and evidence contract
 
-**Status:** design, 2026-08-12. Nothing here is built yet. This is the artifact that has to be
-agreed before code, because the failure mode we are avoiding is a one-line rule.
+**Status:** BUILT, 2026-08-12. Steps 1-5 shipped. The contract below is implemented in
+`server/hunger-evidence.ts` — including the calorie fields, which were specified here and missed
+in the first cut of the object; the gauntlet's construct-validation surfaced the omission.
 
 **What it replaces.** The protein-leverage doctrine currently exists only in the silenced region
 of `coach-prompt.ts` (character 25,843 of a prompt sliced at 20,000). It says: *"the most likely
