@@ -21,7 +21,8 @@
  * 26 — are printed for a human. No second LLM judge yet: adding a probabilistic grader before we
  * have read the output ourselves would mean never quite knowing why a case passed.
  *
- * Run: HUNGER_LLM=1 OPENAI_API_KEY=... npx tsx script/hunger-gauntlet.ts
+ * Run: HUNGER_LLM=1 npx tsx script/hunger-gauntlet.ts
+ *      credential comes from AI_INTEGRATIONS_OPENAI_API_KEY || OPENAI_API_KEY — the app's chain.
  */
 
 // The stub keeps the DATABASE off — this script needs no database, its evidence is built in
@@ -29,8 +30,26 @@
 // script whose whole purpose is calling it. Under HUNGER_LLM=1 we say explicitly that we want
 // the model and still no database. OFFLINE_AI=0 beats the implication; see server/ai-offline.ts.
 process.env.KAMLIFE_DB_STUB = "1";
-if (process.env.HUNGER_LLM === "1") process.env.OFFLINE_AI = "0";
-process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "sk-test-offline";
+const LIVE = process.env.HUNGER_LLM === "1";
+if (LIVE) process.env.OFFLINE_AI = "0";
+
+// THE CREDENTIAL. The application reads AI_INTEGRATIONS_OPENAI_API_KEY FIRST — server/gpt.ts:64 and
+// nine other call sites — and reality-test.ts and reality-run.sh already mirror that chain. This
+// script read only OPENAI_API_KEY and then MANUFACTURED "sk-test-offline" when it was absent, so a
+// live run authenticated with a key nobody had set and got a 401 that looked like a Railway problem.
+// Two rules now. Read the chain the app reads. In live mode never invent a key: a missing credential
+// stops the run, it does not fake one.
+const OPENAI_KEY = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "";
+if (LIVE && !OPENAI_KEY) {
+  console.error("hunger-gauntlet: HUNGER_LLM=1 but no OpenAI credential in this environment.");
+  console.error("  export AI_INTEGRATIONS_OPENAI_API_KEY=...   (the variable the app reads)");
+  console.error("  OPENAI_API_KEY is also accepted. This script never prints or logs the value.");
+  process.exit(2);
+}
+// Offline mode still needs a placeholder: imported server modules construct `new OpenAI({...})` at
+// module scope and would throw at import time with nothing set. It authenticates nothing.
+process.env.OPENAI_API_KEY = OPENAI_KEY || "sk-test-offline";
+if (OPENAI_KEY) process.env.AI_INTEGRATIONS_OPENAI_API_KEY = OPENAI_KEY;
 process.env.PROACTIVE_PAUSED = "true";
 process.env.TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "ACtest00000000000000000000000000";
 process.env.TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "test";
@@ -196,12 +215,13 @@ async function main() {
       + `hunger ${e.hunger.distinctDays}d · logged ${e.dataDays}d · ${e.confidence}`);
   }
 
-  if (process.env.HUNGER_LLM !== "1") {
-    console.log("\nhunger-gauntlet: model checks SKIPPED — run with HUNGER_LLM=1 and a real OPENAI_API_KEY.");
+  if (!LIVE) {
+    console.log("\nhunger-gauntlet: model checks SKIPPED — run with HUNGER_LLM=1 and a real credential");
+    console.log("  in AI_INTEGRATIONS_OPENAI_API_KEY (or OPENAI_API_KEY).");
     console.log(`  ${CASES.reduce((n, c) => n + c.checks.length, 0)} behavioural assertions not evaluated.`);
     process.exit(0);
   }
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const openai = new OpenAI({ apiKey: OPENAI_KEY });
   let red = 0, green = 0;
   const failures: string[] = [];
   // THE RUN ARTIFACT. Six weeks from now someone will say "Law 26 worked" and nobody will know

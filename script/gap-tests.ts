@@ -15,6 +15,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 
 // Env setup runs AFTER static imports are hoisted in ESM. Server modules use
 // dynamic imports below so db.ts loads only after KAMLIFE_DB_STUB is set.
@@ -1793,8 +1794,51 @@ test("hunger gauntlet: a live run can never score an EMPTY reply", () => {
   // The guard must sit BEFORE the checks, or the vacuous passes happen anyway.
   assert.ok(src.indexOf("if (!reply)") < src.indexOf("for (const chk of c.checks)"),
     "the empty-reply guard must precede the mechanical checks");
-  assert.ok(/HUNGER_LLM === "1"\) process\.env\.OFFLINE_AI = "0"/.test(src),
+  assert.ok(/HUNGER_LLM === "1";\s*\nif \(LIVE\) process\.env\.OFFLINE_AI = "0"/.test(src),
     "asking for the model must actually enable it");
+});
+
+// ── Credential precedence ───────────────────────────────────────────────────────────────────
+// The gauntlet read only OPENAI_API_KEY and then invented "sk-test-offline" when it was absent,
+// so a live run authenticated with a key nobody set. The app reads AI_INTEGRATIONS_OPENAI_API_KEY
+// first (server/gpt.ts:64 + 9 others) and that is the name Railway carries. These lock the chain
+// and the rule that a live run must never manufacture a credential.
+
+test("hunger gauntlet: reads the app's credential chain, AI_INTEGRATIONS first", () => {
+  const src = readFileSync("script/hunger-gauntlet.ts", "utf-8");
+  assert.ok(/const OPENAI_KEY = process\.env\.AI_INTEGRATIONS_OPENAI_API_KEY \|\| process\.env\.OPENAI_API_KEY \|\| ""/.test(src),
+    "the gauntlet must resolve the key exactly as the application does");
+  // And the resolved key — not the raw env var — must be what the client authenticates with.
+  assert.ok(/new OpenAI\(\{ apiKey: OPENAI_KEY \}\)/.test(src),
+    "the client must use the resolved credential, not process.env.OPENAI_API_KEY");
+});
+
+test("hunger gauntlet: live mode never manufactures a key; offline still may", () => {
+  const src = readFileSync("script/hunger-gauntlet.ts", "utf-8");
+  // The placeholder survives ONLY as the offline branch of the resolved key.
+  assert.ok(/process\.env\.OPENAI_API_KEY = OPENAI_KEY \|\| "sk-test-offline"/.test(src),
+    "offline imports still need a placeholder so module-scope clients construct");
+  // In live mode the placeholder is unreachable: the missing-credential exit precedes it.
+  assert.ok(src.indexOf("if (LIVE && !OPENAI_KEY)") < src.indexOf(`OPENAI_KEY || "sk-test-offline"`),
+    "the live-mode credential guard must precede the offline placeholder");
+  assert.ok(/if \(LIVE && !OPENAI_KEY\) \{[\s\S]{0,400}?process\.exit\(2\)/.test(src),
+    "a live run with no credential must stop, not proceed with a fake one");
+});
+
+test("hunger gauntlet: HUNGER_LLM=1 with no credential exits 2 and says which var to set", () => {
+  // Behavioural, not a source read: actually run it with both names emptied. The guard fires
+  // before the dynamic imports, so this costs no database, no network and no model call.
+  const r = spawnSync("node_modules/.bin/tsx", ["script/hunger-gauntlet.ts"], {
+    env: { ...process.env, HUNGER_LLM: "1", AI_INTEGRATIONS_OPENAI_API_KEY: "", OPENAI_API_KEY: "" },
+    encoding: "utf-8", timeout: 60_000,
+  });
+  assert.equal(r.status, 2, `expected exit 2, got ${r.status}\n${r.stderr || ""}`);
+  assert.ok(/no OpenAI credential/i.test(r.stderr || ""), "it must say the credential is missing");
+  assert.ok(/AI_INTEGRATIONS_OPENAI_API_KEY/.test(r.stderr || ""),
+    "and it must name the variable the app actually reads");
+  // The old failure mode: a fake key reaching the API. Nothing may be manufactured here.
+  assert.ok(!/sk-test-offline/.test((r.stdout || "") + (r.stderr || "")),
+    "a live run must never fall back to the offline placeholder");
 });
 
 
