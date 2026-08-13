@@ -172,11 +172,7 @@ export function hasRelevantHungerEvidence(
  * block IS, never what to conclude from it. `insufficient_data` is included deliberately, because
  * knowing what it does not know is the difference between "I can't tell you why yet" and a guess.
  */
-export function renderHungerEvidence(
-  e: HungerEvidence,
-  /** A/B instrumentation only — see MeaningInput.evidenceRender. Undefined renders as before. */
-  opts?: { omitBottleneck?: boolean },
-): string {
+export function renderHungerEvidence(e: HungerEvidence): string {
   const pct = (r: number | null) => (r === null ? "unknown" : `${Math.round(r * 100)}%`);
   const lines = [
     "HUNGER EVIDENCE (deterministic — these numbers are authoritative, never invent them):",
@@ -189,7 +185,12 @@ export function renderHungerEvidence(
     e.progress.calorieTarget !== null ? `Calorie target: ${e.progress.calorieTarget} kcal/day` : "",
     e.progress.avgDailyKcal !== null ? `Average intake: ${e.progress.avgDailyKcal} kcal/day (${pct(e.progress.restrictionRatio)} of target)` : "",
     e.progress.weeklyKgChange !== null ? `Weight change this week: ${e.progress.weeklyKgChange}kg` : "",
-    opts?.omitBottleneck ? "" : `Weakest measured lever: ${e.progress.bottleneck}`,
+    // `bottleneck` is deliberately NOT rendered. It is argmin over component ratios with no
+    // floor, so for a client at 98% protein and ~100% on everything else it still returns
+    // "Protein" — a superlative that reads as an instruction when there is no materially weak
+    // lever at all. Live A4, 2026-08-13: "Your protein is almost on target, but let's boost it a
+    // bit." The field stays on the object for internal use; the model gets the measurements and
+    // decides for itself whether any of them are actionable, which is Law 26's job.
     `Confidence: ${e.confidence}`,
     "",
     "This block is EVIDENCE, not a diagnosis and not a recommendation. It reports what is measured;",
