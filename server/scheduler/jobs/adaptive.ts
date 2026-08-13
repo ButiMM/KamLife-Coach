@@ -14,6 +14,7 @@
 
 import { db, users, weightLogs, stepLogs, eq, and, gte, desc, sql, getActiveClients, sendWhatsApp, saveState, todaySAST, hasRunToday } from "../shared";
 import { adaptTargets, weightTrendUsable, type AdaptiveInput } from "../../adaptive-targets";
+import { gatherReportData } from "../../report-card";
 
 /** Weeks of no meaningful weight movement (<0.3kg swing) from a series, newest first. */
 function stalledWeeksFrom(weights: number[]): number {
@@ -85,6 +86,12 @@ export async function runAdaptiveTargets(): Promise<void> {
         .where(and(eq(stepLogs.userId, c.id), gte(stepLogs.loggedAt, new Date(Date.now() - 7 * 86_400_000))));
       const avgSteps7d = Number(stepAgg?.avg || 0) || undefined;
 
+      // Fail-open: if the aggregate read fails, the engine sees `undefined` and treats intake as
+      // UNKNOWN, which holds the target rather than adapting on a number we could not read.
+      let intake: { avgKcal: number; distinctDaysLogged: number } | undefined;
+      try { intake = await gatherReportData(c, "week"); }
+      catch (e) { console.warn(`[ADAPTIVE] intake read failed for ${c.id?.slice(-6)}:`, (e as Error)?.message); }
+
       const input: AdaptiveInput = {
         baseCalories: Number(c.calorieTarget) || 0,
         baseProtein: Number(c.proteinTarget) || 0,
@@ -94,11 +101,35 @@ export async function runAdaptiveTargets(): Promise<void> {
         sick, daysSick, recovering, weeklyKgChange,
         stalledWeeks: stalledWeeksFrom(weights),
         avgSteps7d,
+        // WHAT THEY ACTUALLY ATE. Reusing the one weekly aggregate rather than adding a second
+        // SUM over mealLogs — a divergent divisor here would let the engine adapt on a number
+        // that disagrees with the one the report card shows the client.
+        avgKcal7d: intake?.avgKcal,
+        loggedDays7d: intake?.distinctDaysLogged,
       };
       if (!(input.baseCalories > 0 && input.baseProtein > 0)) continue; // no baseline yet
 
       const out = adaptTargets(input);
       if (!out.changed) continue;
+
+      // A STALL THE ENGINE DELIBERATELY DID NOT ACT ON. Both new outcomes leave every target
+      // exactly where it was and say why — so they fall through the "nothing changed → stay
+      // silent" guard below, which is correct for every other reason and wrong for these two.
+      // Rate-limited to once a week: this job runs daily and a stalled, under-logging client
+      // would otherwise be told the same thing every morning for three weeks, which is nagging,
+      // not coaching.
+      if (out.reason === "stalled_unlogged" || out.reason === "stalled_over_target") {
+        const lastNotice = notes.match(/stall_notice:(\d{4}-\d{2}-\d{2})/)?.[1];
+        if (lastNotice && (Date.now() - new Date(lastNotice).getTime()) / 86_400_000 < 7) continue;
+        const kept = notes.replace(/\s*\bstall_notice:\d{4}-\d{2}-\d{2}\b/g, "").trim();
+        await db.update(users)
+          .set({ profileNotes: `${kept} stall_notice:${today}`.trim() })
+          .where(eq(users.id, c.id));
+        await sendWhatsApp(c.phoneNumber, out.note).catch(() => {});
+        console.log(`[ADAPTIVE] ${c.id.slice(-6)} ${out.reason}: targets held at ${input.baseCalories} kcal (logged ${input.loggedDays7d ?? "?"}d, avg ${input.avgKcal7d ?? "?"} kcal)`);
+        continue;
+      }
+
       // Nothing actually different from what they already hold → stay silent.
       if (out.calorieTarget === input.baseCalories && out.proteinTarget === input.baseProtein
           && out.stepsTarget === input.baseSteps) continue;

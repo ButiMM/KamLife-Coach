@@ -23,7 +23,7 @@
 
 export type AdaptReason =
   | "sick" | "recovering" | "losing_too_fast" | "gaining_too_fast"
-  | "stalled" | "inactive" | "none";
+  | "stalled" | "stalled_unlogged" | "stalled_over_target" | "inactive" | "none";
 
 export interface AdaptiveInput {
   /** The client's baseline targets from onboarding/profile (the "set point"). */
@@ -44,7 +44,32 @@ export interface AdaptiveInput {
   stalledWeeks?: number;
   /** Average daily steps over the last 7 days. undefined = unknown. */
   avgSteps7d?: number;
+  /**
+   * WHAT THEY ACTUALLY ATE (2026-08-13). Until now this engine adapted a calorie target without
+   * ever knowing whether the client ate it. A stall was answered with a 7% trim regardless — so a
+   * client averaging 2,400 against an 1,800 target got cut to 1,674, made an unmet target harder,
+   * and was told their food had been adjusted. The target was never the problem.
+   * Both from `report-card.gatherReportData`, the existing 7-day aggregate. undefined = unknown,
+   * which is treated as "cannot tell", never as zero.
+   */
+  avgKcal7d?: number;
+  /** Distinct days with any food logged in the window, 0–7. Below ADEQUATE_LOG_DAYS the average
+   *  is not evidence and the target must not be adapted on it. */
+  loggedDays7d?: number;
 }
+
+/**
+ * Below four logged days in seven, an intake average is not evidence. Same floor the hunger
+ * evidence uses deliberately — one client should not be "well logged" for one subsystem and
+ * "thinly logged" for another on the same day.
+ */
+export const ADEQUATE_LOG_DAYS = 4;
+
+/**
+ * Intake this far above target means the target was not tested. 10% of an 1,800 kcal target is
+ * 180 kcal — inside a day's logging error, so tighter than this would fire on noise.
+ */
+export const INTAKE_OVER_TARGET_RATIO = 1.10;
 
 export interface AdaptiveTargets {
   calorieTarget: number;
@@ -142,7 +167,30 @@ export function adaptTargets(inp: AdaptiveInput): AdaptiveTargets {
   }
 
   // 5. STALLED — 3+ weeks with no movement. SMALL trim OR more steps, never a crash.
+  //
+  // BUT FIRST: WAS THE TARGET EVER ACTUALLY EATEN? (2026-08-13.) A stall only means the target is
+  // wrong if the client was hitting it. Two clients stall identically and need opposite answers —
+  // one is eating 1,780 of 1,800 and needs the target moved, the other is eating 2,400 and needs
+  // the target left exactly where it is. Cutting the second one's food is the same error class as
+  // telling a client at 98% protein to eat more protein: acting on an artifact instead of the
+  // evidence. Neither branch below touches a number; both say what is actually true.
   if ((inp.stalledWeeks ?? 0) >= 3 && inp.goalType === "fat_loss") {
+    const logged = inp.loggedDays7d;
+    if (typeof logged === "number" && logged < ADEQUATE_LOG_DAYS) {
+      return {
+        ...base, reason: "stalled_unlogged",
+        note: `The scale hasn't moved in three weeks, but you've only logged ${logged} day${logged === 1 ? "" : "s"} this week — I can't tell yet whether the target is wrong or it just hasn't been eaten. Log properly for the next few days and I'll have a real answer.`,
+        changed: true,
+      };
+    }
+    if (typeof inp.avgKcal7d === "number" && inp.baseCalories > 0
+        && inp.avgKcal7d > inp.baseCalories * INTAKE_OVER_TARGET_RATIO) {
+      return {
+        ...base, reason: "stalled_over_target",
+        note: `Three weeks flat, and you're averaging ${Math.round(inp.avgKcal7d)} kcal against a ${base.calorieTarget} target — so the target isn't what's stuck, it hasn't been tested yet. I'm leaving your numbers exactly where they are; let's get the food closer to target first.`,
+        changed: true,
+      };
+    }
     const cal = round10(clamp(inp.baseCalories * 0.93, floor, ceiling));
     if (cal >= floor && cal < base.calorieTarget) {
       return {
@@ -262,4 +310,143 @@ export function trendCalorieAdjust(goalType: string, ratePctPerWeek: number): nu
     return 150;                  // losing on a gain programme
   }
   return 0;                      // recomposition coaches with words, never with calories
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// DEFICIT EVIDENCE — what we told them to eat, what they ate, and what the scale did.
+//
+// Lives HERE rather than in its own module, deliberately. It reads the same targets, the same
+// goal types and the same trend rule the engine above adapts on, and a separate file would be a
+// second owner of one question — which is how `weightTrendUsable` came to disagree with a reply
+// in the first place. Same contract as hunger-evidence.ts: the deterministic layer states
+// measurements and how much they are worth, and Coach K decides what they mean. Nothing below
+// returns TARGET_IS_WRONG or ADHERENCE_PROBLEM.
+//
+// THE UNCERTAINTY IS THE POINT. Two approximations sit under this and both are stated rather
+// than hidden: estimated maintenance is not measured expenditure, and a 7-day weight slope is
+// not pure fat — water, sodium, illness, cycle and training inflammation all move the scale
+// faster than fat does. A system reporting "expected -0.4, observed -0.1, therefore your target
+// is wrong" would be confidently wrong for the client who had a salty weekend.
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+/** 7,700 kcal per kg of body fat — the standard approximation, and only ever an approximation. */
+export const KCAL_PER_KG = 7700;
+
+/**
+ * How far the scale may sit from the estimate before it is worth a coach's attention. Anything
+ * inside this is noise: at 0.15 kg/week the difference is a glass of water and a late dinner.
+ */
+export const MATERIAL_GAP_KG_PER_WEEK = 0.15;
+
+export interface DeficitEvidence {
+  calorieTarget: number;
+  avgKcal7d: number | null;
+  loggedDays7d: number;
+  /** avg ÷ target. Above 1 = eating more than the target, below = under it. */
+  intakeRatio: number | null;
+  /** Estimated kg/week implied by (intake − maintenance), where maintenance is inferred from the
+   *  programme's own target. Null when intake is not evidence. Approximate by construction. */
+  expectedKgPerWeek: number | null;
+  /** Measured from weigh-ins, and only when `weightTrendUsable` said so. Null otherwise. */
+  observedKgPerWeek: number | null;
+  /** observed − expected. Positive = losing slower than the estimate. Null if either is null. */
+  gapKgPerWeek: number | null;
+  /** Whether that gap is bigger than day-to-day noise. False when the gap is null. */
+  gapIsMaterial: boolean;
+  /**
+   * What this evidence can support:
+   *   none              nothing usable on either side
+   *   intake_only       food is logged well enough, but no trustworthy weight trend
+   *   trend_only        the trend is trustworthy, but the food is not logged well enough
+   *   usable            both — and only here may the target itself be discussed
+   */
+  confidence: "none" | "intake_only" | "trend_only" | "usable";
+}
+
+/**
+ * Maintenance inferred from the programme's own target. A fat-loss target already contains the
+ * intended deficit, so maintenance is the target plus it. Deliberately NOT a BMR formula: the
+ * programme's number is the one the client was actually coached to, and inventing a second
+ * estimate here would let two parts of the system disagree about the same person.
+ */
+function inferredMaintenance(calorieTarget: number, goalType: string): number {
+  const g = (goalType || "fat_loss").toLowerCase();
+  if (g === "fat_loss") return calorieTarget + 500;
+  if (g === "muscle_gain") return calorieTarget - 300;
+  return calorieTarget;
+}
+
+export function assembleDeficitEvidence(inp: {
+  calorieTarget: number;
+  avgKcal7d: number | null;
+  loggedDays7d: number;
+  goalType: string;
+  /** Only pass this when `weightTrendUsable` returned usable — this file trusts the caller and
+   *  will not second-guess a trend it cannot see the weigh-ins for. */
+  observedKgPerWeek: number | null;
+}): DeficitEvidence {
+  const target = inp.calorieTarget > 0 ? inp.calorieTarget : 0;
+  const intakeIsEvidence = inp.loggedDays7d >= ADEQUATE_LOG_DAYS
+    && typeof inp.avgKcal7d === "number" && inp.avgKcal7d > 0 && target > 0;
+
+  const avgKcal7d = typeof inp.avgKcal7d === "number" ? inp.avgKcal7d : null;
+  const intakeRatio = intakeIsEvidence ? (inp.avgKcal7d as number) / target : null;
+
+  const expectedKgPerWeek = intakeIsEvidence
+    ? Math.round(((((inp.avgKcal7d as number) - inferredMaintenance(target, inp.goalType)) * 7) / KCAL_PER_KG) * 100) / 100
+    : null;
+
+  const observedKgPerWeek = typeof inp.observedKgPerWeek === "number" ? inp.observedKgPerWeek : null;
+  const gapKgPerWeek = expectedKgPerWeek !== null && observedKgPerWeek !== null
+    ? Math.round((observedKgPerWeek - expectedKgPerWeek) * 100) / 100
+    : null;
+
+  const confidence: DeficitEvidence["confidence"] =
+    intakeIsEvidence && observedKgPerWeek !== null ? "usable"
+      : intakeIsEvidence ? "intake_only"
+        : observedKgPerWeek !== null ? "trend_only"
+          : "none";
+
+  return {
+    calorieTarget: target,
+    avgKcal7d,
+    loggedDays7d: inp.loggedDays7d,
+    intakeRatio: intakeRatio === null ? null : Math.round(intakeRatio * 100) / 100,
+    expectedKgPerWeek,
+    observedKgPerWeek,
+    gapKgPerWeek,
+    gapIsMaterial: gapKgPerWeek !== null && Math.abs(gapKgPerWeek) >= MATERIAL_GAP_KG_PER_WEEK,
+    confidence,
+  };
+}
+
+/** Is this worth spending prompt on? Only when at least one side of the comparison is real. */
+export function hasRelevantDeficitEvidence(e: DeficitEvidence): boolean {
+  return e.confidence !== "none";
+}
+
+/**
+ * Serialise for the prompt. MEASUREMENTS ONLY — no cause, no recommendation, no verdict, and
+ * deliberately no "weakest lever" style superlative. The 2026-08-13 lesson: a field that names one
+ * factor reads as an instruction however the surrounding prose is worded.
+ */
+export function renderDeficitEvidence(e: DeficitEvidence): string {
+  const kg = (n: number | null) => (n === null ? "unknown" : `${n > 0 ? "+" : ""}${n.toFixed(2)}kg/week`);
+  return [
+    "WEIGHT-LOSS EVIDENCE (deterministic — these numbers are authoritative, never invent them):",
+    `Calorie target: ${e.calorieTarget} kcal/day`,
+    e.avgKcal7d !== null ? `7-day average intake: ${e.avgKcal7d} kcal/day` : "7-day average intake: not enough logged to say",
+    `Logged days: ${e.loggedDays7d} of 7`,
+    e.intakeRatio !== null ? `Intake against target: ${Math.round(e.intakeRatio * 100)}%` : "",
+    e.expectedKgPerWeek !== null ? `Expected rate from that intake: ${kg(e.expectedKgPerWeek)} (rough estimate)` : "",
+    e.observedKgPerWeek !== null ? `Observed rate on the scale: ${kg(e.observedKgPerWeek)}` : "Observed rate on the scale: no trustworthy trend",
+    e.gapKgPerWeek !== null ? `Difference: ${kg(e.gapKgPerWeek)}${e.gapIsMaterial ? "" : " — inside normal week-to-week noise"}` : "",
+    `Confidence: ${e.confidence}`,
+    "",
+    "The expected rate is an ESTIMATE built on an assumed maintenance, and a week of scale readings",
+    "moves on water, salt, illness and cycle as well as fat. Treat a difference as something to look",
+    "into, never as proof. With confidence below 'usable' you may not say the target is wrong: say",
+    "which half you are missing and ask for it. Deciding what this means is yours.",
+  ].filter(Boolean).join("\n");
 }

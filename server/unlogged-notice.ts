@@ -97,6 +97,23 @@ export function reportsHunger(text: string): boolean {
     || /\bcravings?\s+(are|is)\s+(bad|out of control|killing me)\b/.test(t);
 }
 
+/**
+ * Are they asking why the weight is not moving? The one question the deficit evidence exists to
+ * answer honestly. Deliberately narrow: this gates a weekly aggregate plus a weigh-in read, so it
+ * must not fire on every mention of the word "weight" ("my weight training", "weight of the bar").
+ * It lives here beside `reportsHunger` because that is where the message detectors this system
+ * counts already live — a second home for the same kind of predicate is how they drift.
+ */
+export function asksAboutWeightProgress(text: string): boolean {
+  const t = String(text || "").toLowerCase();
+  if (/\bweight (training|session|room|bar|belt|vest|plates?)\b/.test(t)) return false;
+  return /\b(not|isn'?t|ain'?t|haven'?t|hasn'?t|won'?t|nothing)\b[^.!?]{0,40}\b(losing|lost|moving|moved|dropping|budging|shifting|going down)\b/.test(t)
+    || /\b(why|how come)\b[^.!?]{0,50}\b(no|not|still|stuck|plateau|same weight)\b/.test(t)
+    || /\b(stuck|plateau(ed|ing)?|stalled)\b/.test(t)
+    || /\bscale (hasn'?t|has not|isn'?t|is not|won'?t)\b/.test(t)
+    || /\b(am i|are we) (actually )?(losing|in a deficit)\b/.test(t);
+}
+
 export function unloggedFoodWords(message: string, loggedNames: string[]): string[] {
   const logged = loggedNames.join(" ").toLowerCase();
   const words = (message || "").toLowerCase()

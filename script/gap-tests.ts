@@ -1876,6 +1876,85 @@ test("A4 gate: the gauntlet uses the shared checker, not a local regex", () => {
   assert.ok(!/more\|increase\|up your\|raise your/.test(src), "the old inline regex must be gone");
 });
 
+// ── DEFICIT EVIDENCE: measurements, and what they are worth ─────────────────────────────────
+
+test("deficit evidence: both halves present → usable, and the gap is computed", async () => {
+  const { assembleDeficitEvidence } = await import("../server/adaptive-targets");
+  const e = assembleDeficitEvidence({
+    calorieTarget: 1800, avgKcal7d: 1780, loggedDays7d: 7,
+    goalType: "fat_loss", observedKgPerWeek: -0.1,
+  });
+  assert.equal(e.confidence, "usable");
+  // 1780 against an inferred 2300 maintenance = -520/day = -0.47kg/week.
+  assert.ok(e.expectedKgPerWeek !== null && e.expectedKgPerWeek < -0.4, `got ${e.expectedKgPerWeek}`);
+  assert.ok(e.gapKgPerWeek !== null && e.gapKgPerWeek > 0, "losing slower than the estimate");
+  assert.equal(e.gapIsMaterial, true);
+});
+
+test("deficit evidence: thin logging can never reach 'usable', whatever the scale says", async () => {
+  const { assembleDeficitEvidence } = await import("../server/adaptive-targets");
+  const e = assembleDeficitEvidence({
+    calorieTarget: 1800, avgKcal7d: 1200, loggedDays7d: 2,
+    goalType: "fat_loss", observedKgPerWeek: -0.1,
+  });
+  assert.equal(e.confidence, "trend_only");
+  assert.equal(e.expectedKgPerWeek, null, "an average from 2 days is not evidence");
+  assert.equal(e.gapKgPerWeek, null, "and no gap may be computed from it");
+});
+
+test("deficit evidence: no trustworthy trend → intake_only, no gap invented", async () => {
+  const { assembleDeficitEvidence } = await import("../server/adaptive-targets");
+  const e = assembleDeficitEvidence({
+    calorieTarget: 1800, avgKcal7d: 1780, loggedDays7d: 7,
+    goalType: "fat_loss", observedKgPerWeek: null,
+  });
+  assert.equal(e.confidence, "intake_only");
+  assert.equal(e.gapKgPerWeek, null);
+  assert.equal(e.gapIsMaterial, false);
+});
+
+test("deficit evidence: a small gap is reported as noise, not as a finding", async () => {
+  const { assembleDeficitEvidence, renderDeficitEvidence } = await import("../server/adaptive-targets");
+  const e = assembleDeficitEvidence({
+    calorieTarget: 1800, avgKcal7d: 1780, loggedDays7d: 7,
+    goalType: "fat_loss", observedKgPerWeek: -0.42,
+  });
+  assert.equal(e.gapIsMaterial, false, "0.05kg/week is a glass of water");
+  assert.match(renderDeficitEvidence(e), /normal week-to-week noise/);
+});
+
+test("deficit evidence: the block states measurements and draws NO conclusion", async () => {
+  const { assembleDeficitEvidence, renderDeficitEvidence } = await import("../server/adaptive-targets");
+  const txt = renderDeficitEvidence(assembleDeficitEvidence({
+    calorieTarget: 1800, avgKcal7d: 2400, loggedDays7d: 7,
+    goalType: "fat_loss", observedKgPerWeek: 0,
+  }));
+  // The 2026-08-13 lesson: a field naming one factor reads as an instruction. No verdicts here.
+  for (const banned of ["TARGET_IS_WRONG", "ADHERENCE", "weakest", "cut calories", "eat less"]) {
+    assert.ok(!new RegExp(banned, "i").test(txt), `evidence must not contain a verdict: ${banned}`);
+  }
+  assert.match(txt, /Confidence: usable/);
+  assert.match(txt, /ESTIMATE/, "the uncertainty must be stated, not hidden");
+});
+
+test("deficit evidence: the engine SERIALISES it — no second calculator in the prompt layer", () => {
+  const engine = readFileSync("server/understanding/meaning-engine.ts", "utf-8");
+  assert.ok(/input\.deficitEvidence \? renderDeficitEvidence\(input\.deficitEvidence\) : ""/.test(engine),
+    "the engine must pass the assembled object straight to the renderer");
+  for (const leak of ["assembleDeficitEvidence", "KCAL_PER_KG", "MATERIAL_GAP_KG_PER_WEEK"]) {
+    assert.ok(!engine.includes(leak), `meaning-engine must not reference ${leak} — it serialises only`);
+  }
+});
+
+test("deficit evidence: the live composer reuses weightTrendUsable, never its own trend rule", () => {
+  const live = readFileSync("server/understanding/live.ts", "utf-8");
+  assert.ok(/weightTrendUsable\(\{/.test(live), "the trend gate must be the shared one");
+  assert.ok(/if \(verdict\.usable\)/.test(live), "and a trend it refuses may never be passed on");
+  const block = live.slice(live.indexOf("let deficitEvidence"), live.indexOf("const strategyTurn"));
+  assert.ok(/catch/.test(block) && /prompt proceeds without it/.test(block),
+    "assembly must fail open — no evidence is an honest prompt, an exception is not");
+});
+
 test("hunger gauntlet: HUNGER_LLM=1 with no credential exits 2 and says which var to set", () => {
   // Behavioural, not a source read: actually run it with both names emptied. The guard fires
   // before the dynamic imports, so this costs no database, no network and no model call.

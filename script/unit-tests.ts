@@ -7111,6 +7111,44 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.ok(r.calorieTarget >= 1760 && r.calorieTarget < 2000, `small trim only: ${r.calorieTarget}`);
     assert.ok(r.stepsTarget > 8000, "steps move too");
   });
+  // ── DID THEY ACTUALLY EAT THE TARGET? (2026-08-13) ──────────────────────────────────────
+  // The stall trim above is correct ONLY for a client who was hitting the number. Two clients
+  // stall identically and need opposite answers, and until now both got their food cut.
+
+  test("adaptive: CLIENT A — stalled while eating 2,400 of 2,000 keeps every target", () => {
+    const r = adaptTargets({ ...base, stalledWeeks: 3, loggedDays7d: 7, avgKcal7d: 2400 });
+    assert.equal(r.reason, "stalled_over_target");
+    assert.equal(r.calorieTarget, 2000, "the target was never tested — it must not move");
+    assert.equal(r.stepsTarget, 8000, "and nothing else moves either");
+    assert.ok(/2400/.test(r.note) && /2000/.test(r.note), "the note must show both numbers");
+    assert.ok(r.changed, "silence would leave them thinking the coach did not notice");
+  });
+
+  test("adaptive: CLIENT B — stalled while eating 1,980 of 2,000 still gets the trim", () => {
+    const r = adaptTargets({ ...base, stalledWeeks: 3, loggedDays7d: 7, avgKcal7d: 1980 });
+    assert.equal(r.reason, "stalled", "hitting the target and still stuck IS the adapt case");
+    assert.ok(r.calorieTarget < 2000, `must still come down, got ${r.calorieTarget}`);
+  });
+
+  test("adaptive: a stall on 2 logged days adapts NOTHING and asks for logs", () => {
+    const r = adaptTargets({ ...base, stalledWeeks: 3, loggedDays7d: 2, avgKcal7d: 1500 });
+    assert.equal(r.reason, "stalled_unlogged");
+    assert.equal(r.calorieTarget, 2000, "never adapt a target on evidence too thin to read");
+    assert.ok(/2 days/.test(r.note), "say how thin, plainly");
+  });
+
+  test("adaptive: unknown intake keeps the OLD behaviour — no silent change for existing clients", () => {
+    const r = adaptTargets({ ...base, stalledWeeks: 3 });
+    assert.equal(r.reason, "stalled", "no intake data must behave exactly as it did before");
+    assert.ok(r.calorieTarget < 2000);
+  });
+
+  test("adaptive: intake just over the noise band does NOT block the trim", () => {
+    // 2,180 is 9% over — inside a day's logging error, so it must not read as "never tested".
+    const r = adaptTargets({ ...base, stalledWeeks: 3, loggedDays7d: 6, avgKcal7d: 2180 });
+    assert.equal(r.reason, "stalled");
+  });
+
   test("adaptive: the floor holds — a stall never starves a light client", () => {
     const r = adaptTargets({ ...base, baseCalories: 1400, weightKg: 55, stalledWeeks: 5 });
     assert.ok(r.calorieTarget >= 1400 * 0.93 && r.calorieTarget >= 1210, `never below floor: ${r.calorieTarget}`);

@@ -17,9 +17,9 @@
  * keeps growing.
  */
 
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and, gte } from "drizzle-orm";
 import { db } from "../db";
-import { chatHistory, users } from "../../shared/schema";
+import { chatHistory, users, weightLogs } from "../../shared/schema";
 import { buildClientSnapshot } from "../brain/client-snapshot";
 import { seedUnderstanding } from "./seed";
 import { loadUnderstanding, saveUnderstanding } from "./store";
@@ -30,10 +30,11 @@ import { tellDontAsk } from "../reply-hygiene";
 import { localiseSuggestion } from "../food-swaps";
 import { matchRestaurant } from "../restaurants";
 import { symptomPersistence } from "../quality-signals";
-import { reportsHunger } from "../unlogged-notice";
+import { reportsHunger, asksAboutWeightProgress } from "../unlogged-notice";
 import { gatherReportData } from "../report-card";
 import { computeProgressScore, progressInputsFrom } from "../progress-score";
 import { assembleHungerEvidence, hasRelevantHungerEvidence, type HungerEvidence } from "../hunger-evidence";
+import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable, type DeficitEvidence } from "../adaptive-targets";
 
 /**
  * THE COACH'S NEXT MOVE, for the conversation (2026-08-06).
@@ -286,9 +287,59 @@ export async function runMeaningEngineLive(ctx: {
       }
     }
 
+    // DEFICIT EVIDENCE — "why isn't the scale moving?" answered from what they actually ate, not
+    // from a guess (2026-08-13). Gated on the question being asked, because it costs a weekly
+    // aggregate plus a weigh-in read. The trend goes in ONLY if `weightTrendUsable` says so — the
+    // same gate the nightly job uses — so a reply can never assert a trend the engine refused to
+    // compute. Fail-open: no evidence is an honest prompt, an exception is not.
+    let deficitEvidence: DeficitEvidence | undefined;
+    if (user?.id && asksAboutWeightProgress(message)) {
+      try {
+        const d = await gatherReportData(user, "week");
+        const rows = await db.select({ w: weightLogs.weight, at: weightLogs.loggedAt })
+          .from(weightLogs)
+          .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, new Date(Date.now() - 28 * 86_400_000))))
+          .orderBy(desc(weightLogs.loggedAt)).limit(12);
+        let observedKgPerWeek: number | null = null;
+        if (rows.length >= 2) {
+          const newestAt = new Date(rows[0].at as Date).getTime();
+          const oldestAt = new Date(rows[rows.length - 1].at as Date).getTime();
+          const notes = String(user.profileNotes || "");
+          const sickSince = notes.match(/sick_since:(\d{4}-\d{2}-\d{2})/)?.[1];
+          const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
+          const verdict = weightTrendUsable({
+            count: rows.length, newestAt, oldestAt, now: Date.now(),
+            sickSince: sickSince ? new Date(sickSince).getTime() : undefined,
+            sickUntil: sickUntil ? new Date(sickUntil).getTime() : undefined,
+          });
+          if (verdict.usable) {
+            const span = Math.max(1, (newestAt - oldestAt) / 86_400_000);
+            const newest = parseFloat(String(rows[0].w));
+            const oldest = parseFloat(String(rows[rows.length - 1].w));
+            if (Number.isFinite(newest) && Number.isFinite(oldest)) {
+              observedKgPerWeek = Math.round(((newest - oldest) / span) * 7 * 100) / 100;
+            }
+          }
+        }
+        const ev = assembleDeficitEvidence({
+          calorieTarget: Number(user.calorieTarget) || 0,
+          avgKcal7d: d.avgKcal || null,
+          loggedDays7d: d.distinctDaysLogged,
+          goalType: String(user.goalType || "fat_loss"),
+          observedKgPerWeek,
+        });
+        if (hasRelevantDeficitEvidence(ev)) {
+          deficitEvidence = ev;
+          console.log(`[DEFICIT_EVIDENCE] confidence ${ev.confidence} — intake ${ev.avgKcal7d ?? "?"}/${ev.calorieTarget} kcal over ${ev.loggedDays7d}d, expected ${ev.expectedKgPerWeek ?? "?"} vs observed ${ev.observedKgPerWeek ?? "?"} kg/wk`);
+        }
+      } catch (e) {
+        console.warn("[DEFICIT_EVIDENCE] assembly failed — prompt proceeds without it:", (e as Error)?.message);
+      }
+    }
+
     const strategyTurn = isStrategyOrEmotional(message);
     if (strategyTurn) console.log(`[ENGINE] strategy/emotional turn — action tools withheld`);
-    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, hungerEvidence, history: bridgeNote ? [...history, bridgeNote] : history, emitActions: actionMode !== "off" && !strategyTurn });
+    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, hungerEvidence, deficitEvidence, history: bridgeNote ? [...history, bridgeNote] : history, emitActions: actionMode !== "off" && !strategyTurn });
     if (!result) return null; // fail-open → existing pipeline runs
 
     // Grow the client's durable memory (fail-open — a save miss never blocks the reply).
