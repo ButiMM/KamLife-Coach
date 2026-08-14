@@ -12,10 +12,11 @@
 
 import type { Express } from "express";
 import { db } from "../db";
-import { users, gptCosts } from "../../shared/schema";
+import { users, gptCosts, chatHistory } from "../../shared/schema";
 import { eq, gte, sql, count } from "drizzle-orm";
 import { PRICING, calculateMRR, calculateTrialConversion } from "../../shared/pricing";
 import { requireAdminKey } from "./auth";
+import { WHATSAPP_ZAR_PER_MSG, BILLABLE_MSGS_SQL } from "../cost-tracking";
 
 interface FinanceAlert {
   level: "good" | "warn" | "bad";
@@ -41,7 +42,15 @@ export function registerFinanceRoutes(app: Express): void {
       // ── Tunable cost assumptions (env overrides, sensible SA defaults) ──
       const USD_ZAR = Number(process.env.USD_ZAR_RATE) || 18.5;
       const HOSTING_ZAR = Number(process.env.FINANCE_HOSTING_ZAR_PER_MONTH) || 400;        // Railway + misc fixed
-      const WHATSAPP_ZAR_PER_USER = Number(process.env.FINANCE_WHATSAPP_ZAR_PER_USER) || 8; // Twilio conversations/user/month
+      // WhatsApp cost comes from REAL message volume at the ONE shared rate (cost-tracking.ts).
+      // This used to be a flat R8/user/month modelled on Twilio's per-CONVERSATION bundles, while
+      // cost-tracking.ts already billed per message — two assumptions, two answers, same client.
+      // From 1 Oct 2026 per-message is the real shape, so the per-user figure was not just
+      // imprecise, it was the wrong unit. FINANCE_WHATSAPP_ZAR_PER_USER is retired; tune
+      // WHATSAPP_ZAR_PER_MSG instead when the rate card lands.
+      if (process.env.FINANCE_WHATSAPP_ZAR_PER_USER) {
+        console.warn("[finance] FINANCE_WHATSAPP_ZAR_PER_USER is retired and ignored — set WHATSAPP_ZAR_PER_MSG (per message) instead.");
+      }
       const PAYFAST_PCT = Number(process.env.PAYFAST_FEE_PCT) || 0.03;
       const PAYFAST_FIXED = Number(process.env.PAYFAST_FEE_FIXED_ZAR) || 1.5;
       const price = PRICING.monthlyPriceZAR;
@@ -66,7 +75,11 @@ export function registerFinanceRoutes(app: Express): void {
         .sort((a, b) => b.zar - a.zar);
 
       // ── Money out ──
-      const whatsappZar = activeAll * WHATSAPP_ZAR_PER_USER;
+      // Real billable messages this month — inbound + every outbound bubble, not exchanges.
+      const [msgAgg] = await db.select({ n: BILLABLE_MSGS_SQL })
+        .from(chatHistory).where(gte(chatHistory.createdAt, monthStart));
+      const billableMsgs = Number((msgAgg as any)?.n || 0);
+      const whatsappZar = billableMsgs * WHATSAPP_ZAR_PER_MSG;
       const payfastZar = payingCount * (price * PAYFAST_PCT + PAYFAST_FIXED);
       const totalCost = aiCostZar + whatsappZar + payfastZar + HOSTING_ZAR;
 
@@ -83,7 +96,8 @@ export function registerFinanceRoutes(app: Express): void {
 
       // ── Break-even (the number a non-technical founder most needs) ──
       const aiPerActive = activeAll > 0 ? aiCostZar / activeAll : 0;
-      const variablePerPaying = aiPerActive + WHATSAPP_ZAR_PER_USER + (price * PAYFAST_PCT + PAYFAST_FIXED);
+      const waPerActive = activeAll > 0 ? whatsappZar / activeAll : 0;
+      const variablePerPaying = aiPerActive + waPerActive + (price * PAYFAST_PCT + PAYFAST_FIXED);
       const contributionPerUser = price - variablePerPaying; // profit each paying client adds
       const breakEvenPaying = contributionPerUser > 0 ? Math.ceil(HOSTING_ZAR / contributionPerUser) : null;
       const payingToBreakEven = breakEvenPaying != null ? Math.max(0, breakEvenPaying - payingCount) : null;
@@ -163,7 +177,8 @@ export function registerFinanceRoutes(app: Express): void {
           total: r(totalCost),
           breakdown: [
             { label: "AI (GPT, vision, voice)", amount: r(aiCostZar), measured: true, note: "Actual spend recorded this month" },
-            { label: "WhatsApp (Twilio)", amount: r(whatsappZar), measured: false, note: `${activeAll} active × R${WHATSAPP_ZAR_PER_USER} est.` },
+            // `measured: true` now — the message COUNT is real; only the per-message rate is an estimate.
+            { label: "WhatsApp (Twilio)", amount: r(whatsappZar), measured: true, note: `${billableMsgs} billable messages × R${WHATSAPP_ZAR_PER_MSG} est. rate` },
             { label: "PayFast fees", amount: r(payfastZar), measured: false, note: `${payingCount} × (${Math.round(PAYFAST_PCT * 100)}% + R${PAYFAST_FIXED})` },
             { label: "Hosting (Railway)", amount: r(HOSTING_ZAR), measured: false, note: "Fixed monthly est." },
           ],
@@ -176,7 +191,9 @@ export function registerFinanceRoutes(app: Express): void {
           contributionPerUser: r(contributionPerUser),
         },
         assumptions: {
-          usdZar: USD_ZAR, hostingZar: HOSTING_ZAR, whatsappPerUser: WHATSAPP_ZAR_PER_USER,
+          usdZar: USD_ZAR, hostingZar: HOSTING_ZAR,
+          whatsappPerMsg: WHATSAPP_ZAR_PER_MSG, billableMsgs,
+          whatsappPerActiveUser: r(activeAll > 0 ? whatsappZar / activeAll : 0),
           payfastPct: Math.round(PAYFAST_PCT * 100), payfastFixed: PAYFAST_FIXED, price,
         },
         alerts,

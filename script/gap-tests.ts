@@ -1877,6 +1877,54 @@ test("A4 gate: the gauntlet uses the shared checker, not a local regex", () => {
   assert.ok(!/more\|increase\|up your\|raise your/.test(src), "the old inline regex must be gone");
 });
 
+// ── UNIT ECONOMICS: one WhatsApp cost rule, and it counts MESSAGES ──────────────────────────
+// finance.ts assumed a flat R8/user/month (Twilio's old per-CONVERSATION bundles) while
+// cost-tracking.ts billed per message. Two owners, two answers about the same client — and from
+// 1 Oct 2026 per-message is the real shape, so the per-user figure was the wrong unit, not just
+// imprecise. cost-tracking.ts also counted chat_history ROWS, but a row is an EXCHANGE holding
+// both messageIn and messageOut, so the count was roughly half of what Twilio bills.
+
+test("economics: a chat row is an exchange — both directions are billable", async () => {
+  const { billableMessages } = await import("../server/cost-tracking");
+  assert.equal(billableMessages("did 9000 steps", "Nice, 9,000 logged."), 2,
+    "COUNT(*) on chat_history halved the real message count");
+  assert.equal(billableMessages("hi", null), 1, "an inbound with no reply yet is one message");
+  assert.equal(billableMessages(null, null), 0);
+});
+
+test("economics: a multi-bubble reply is several billed messages", async () => {
+  const { billableMessages } = await import("../server/cost-tracking");
+  // `\n\n---\n\n` is what splits a reply into separate WhatsApp sends — a programme is 3 bubbles,
+  // a meal plan 4, and Twilio bills each one.
+  assert.equal(billableMessages("programme", "Week 1\n\n---\n\nWeek 2\n\n---\n\nWeek 3"), 4,
+    "1 inbound + 3 outbound bubbles");
+  assert.equal(billableMessages(null, "a\n\n---\n\nb"), 2);
+});
+
+test("economics: undercounting is the dangerous direction — it hides whales", async () => {
+  const { memberCostRow, WHALE_THRESHOLD_ZAR, WHATSAPP_ZAR_PER_MSG } = await import("../server/cost-tracking");
+  // 400 exchanges in a month. Counting rows says 400 messages; the truth is at least 800.
+  const undercounted = memberCostRow("u", 0, 400);
+  const real = memberCostRow("u", 0, 800);
+  assert.ok(real.whatsappZar > undercounted.whatsappZar);
+  assert.equal(real.whatsappZar, Math.round(800 * WHATSAPP_ZAR_PER_MSG * 100) / 100);
+  // A member who reads as safe on halved volume must be flagged on true volume.
+  const heavy = memberCostRow("u", 0, Math.ceil((WHALE_THRESHOLD_ZAR / WHATSAPP_ZAR_PER_MSG) + 1));
+  assert.equal(heavy.whale, true, "the flag exists to catch exactly this client");
+});
+
+test("economics: finance and cost-tracking share ONE rate and one counting rule", () => {
+  const fin = readFileSync("server/routes/finance.ts", "utf-8");
+  assert.ok(/WHATSAPP_ZAR_PER_MSG, BILLABLE_MSGS_SQL \} from "\.\.\/cost-tracking"/.test(fin),
+    "finance must import the shared rate and the shared count, not redefine either");
+  assert.ok(!/const WHATSAPP_ZAR_PER_USER/.test(fin), "the per-conversation constant must be gone");
+  assert.ok(/FINANCE_WHATSAPP_ZAR_PER_USER/.test(fin) && /retired and ignored/.test(fin),
+    "a still-set Railway variable must warn, not be silently ignored");
+  // And the break-even must use the same basis as the cost line above it.
+  assert.ok(/waPerActive = activeAll > 0 \? whatsappZar \/ activeAll : 0/.test(fin),
+    "contribution per user must derive from the measured volume");
+});
+
 // ── CLIENT TRUTH: one day boundary, not two ─────────────────────────────────────────────────
 // client-snapshot.ts grouped the protein average by UTC and the 7-day story by SAST — two day
 // boundaries inside ONE snapshot. A meal logged at 00:30 SAST landed on yesterday in the numbers

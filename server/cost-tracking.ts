@@ -22,8 +22,41 @@ export const USD_ZAR = 18.5;                       // same rate the north-star e
 export const PRICE_ZAR = PRICING.monthlyPriceZAR;  // canonical monthly subscription (shared/pricing.ts)
 // ElevenLabs ~US$0.30 per 1,000 characters on the creator tiers (estimate).
 const VOICE_USD_PER_CHAR = 0.30 / 1000;
-// A WhatsApp business message ≈ R0.30 all-in (Meta per-message + Twilio markup, blended estimate).
-const WHATSAPP_ZAR_PER_MSG = 0.30;
+/**
+ * A WhatsApp business message ≈ R0.30 all-in (Meta per-message + Twilio markup, blended estimate).
+ * EXPORTED and env-tunable (2026-08-13) because finance.ts held a SECOND, contradictory assumption
+ * — a flat R8 per user per month, modelled on Twilio's old per-CONVERSATION bundles. From
+ * 1 Oct 2026 service messages bill per message, so the two would have given different answers about
+ * the same client and the per-user one would have been the wrong shape. One owner, one rate, and it
+ * moves with a Railway variable when the real rate card lands.
+ */
+export const WHATSAPP_ZAR_PER_MSG = Number(process.env.WHATSAPP_ZAR_PER_MSG) || 0.30;
+
+/**
+ * BILLABLE MESSAGES IN ONE chat_history ROW. A row is an EXCHANGE, not a message: it holds
+ * `messageIn` AND `messageOut`. So `COUNT(*)` — what this file used to do — undercounted by about
+ * half, because Twilio bills inbound and outbound separately. Worse, `\n\n---\n\n` splits one
+ * `messageOut` into several real WhatsApp sends (a programme is 3, a meal plan 4), each billed.
+ * Undercounting cost is the dangerous direction here: it hides whales, and a founder deciding
+ * whether R199 survives needs the number to be too high rather than too low.
+ */
+export function billableMessages(messageIn: string | null, messageOut: string | null): number {
+  const inbound = messageIn ? 1 : 0;
+  const outbound = messageOut ? messageOut.split("\n\n---\n\n").length : 0;
+  return inbound + outbound;
+}
+
+/**
+ * The SQL that counts the same thing server-side, so a month of rows is not dragged into memory.
+ * Kept beside `billableMessages` deliberately: they are one rule and a drifting pair would put the
+ * dashboard and the tests in disagreement about the same client.
+ */
+export const BILLABLE_MSGS_SQL = sql<number>`COALESCE(SUM(
+  (CASE WHEN ${chatHistory.messageIn} IS NOT NULL THEN 1 ELSE 0 END)
+  + (CASE WHEN ${chatHistory.messageOut} IS NOT NULL
+      THEN 1 + (LENGTH(${chatHistory.messageOut}) - LENGTH(REPLACE(${chatHistory.messageOut}, E'\n\n---\n\n', ''))) / 7
+      ELSE 0 END)
+), 0)::int`
 
 /** USD cost of voicing `charCount` characters through ElevenLabs. */
 export function voiceCostUsd(charCount: number): number {
@@ -79,7 +112,7 @@ export async function costToServeThisMonth(): Promise<Map<string, MemberCost>> {
   const [aiRows, msgRows] = await Promise.all([
     db.select({ userId: gptCosts.userId, usd: sql<string>`COALESCE(SUM(${gptCosts.costUsd}),0)` })
       .from(gptCosts).where(and(isNotNull(gptCosts.userId), gte(gptCosts.createdAt, since))).groupBy(gptCosts.userId),
-    db.select({ userId: chatHistory.userId, n: sql<number>`COUNT(*)::int` })
+    db.select({ userId: chatHistory.userId, n: BILLABLE_MSGS_SQL })
       .from(chatHistory).where(and(isNotNull(chatHistory.userId), gte(chatHistory.createdAt, since))).groupBy(chatHistory.userId),
   ]);
   const msgMap = new Map(msgRows.filter(r => r.userId).map(r => [r.userId as string, Number(r.n)]));
@@ -99,7 +132,7 @@ export async function memberCostThisMonth(userId: string): Promise<MemberCost | 
     const since = monthStart();
     const [ai, msgs] = await Promise.all([
       db.select({ usd: sql<string>`COALESCE(SUM(${gptCosts.costUsd}),0)` }).from(gptCosts).where(and(eq(gptCosts.userId, userId), gte(gptCosts.createdAt, since))),
-      db.select({ n: sql<number>`COUNT(*)::int` }).from(chatHistory).where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, since))),
+      db.select({ n: BILLABLE_MSGS_SQL }).from(chatHistory).where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, since))),
     ]);
     return memberCostRow(userId, parseFloat(ai[0]?.usd || "0"), Number((msgs[0] as any)?.n || 0));
   } catch (e) {
