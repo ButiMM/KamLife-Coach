@@ -18,53 +18,39 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - name: Repair P0 source guards and consolidate policy
+      - name: Repair P0 verifier wiring and source guard
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
 
           meaning = Path('server/understanding/meaning-engine.ts')
           s = meaning.read_text()
-          s = s.replace('import { type UnderstandingState } from "./state";', 'import { type UnderstandingState, deriveRuntimeDecision, type RuntimeDecisionResult } from "./state";')
-          s = s.replace('import { deriveRuntimeDecision, type RuntimeDecisionResult } from "./decision-runtime";\n', '')
           s = s.replace('verifyBrainReply(finalReply, { goalType: user?.goalType })', 'verifyBrainReply(finalReply, { goalType: user?.goalType, clientMessage: message })')
           s = s.replace('verifyBrainReply(rewritten, { goalType: user?.goalType })', 'verifyBrainReply(rewritten, { goalType: user?.goalType, clientMessage: message })')
           meaning.write_text(s)
 
-          for path in ['server/understanding/decision-runtime.ts', 'server/understanding/decision-state.ts']:
-              p = Path(path)
-              if p.exists(): p.unlink()
-          for path in ['script/decision-runtime-tests.ts', 'script/decision-state-tests.ts']:
-              p = Path(path)
-              if p.exists():
-                  p.write_text(p.read_text().replace('from "../server/understanding/decision-runtime"', 'from "../server/understanding/state"').replace('from "../server/understanding/decision-state"', 'from "../server/understanding/state"'))
-
           unit = Path('script/unit-tests.ts')
           lines = unit.read_text().splitlines()
-          kept = [line for line in lines if 'a second violation fails open to the deterministic pipeline' not in line]
-          out = '\n'.join(kept) + '\n'
-          marker = 'assert.match(eng, /verifyBrainReply\\(rewritten'
-          for i, line in enumerate(out.splitlines()):
-              if marker in line:
-                  tail = '\n'.join(out.splitlines()[i+1:i+2])
-                  if 'engine fail-open return' not in tail:
-                      parts = out.splitlines()
-                      parts.insert(i+1, '  assert.match(eng, /return null;/, "engine has a fail-open return when the verifier cannot safely pass a rewrite");')
-                      out = '\n'.join(parts) + '\n'
-                  break
-          unit.write_text(out)
-
-          Path('.github/workflows/repair-p0-ci.yml').unlink()
+          for i, line in enumerate(lines):
+              if 'engine verifies the freeform reply' in line:
+                  lines[i] = '  assert.match(eng, /verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}/, "engine verifies the freeform reply");'
+              elif 'engine verifies the rewritten reply' in line:
+                  lines[i] = '  assert.match(eng, /verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}/, "engine verifies the rewritten reply");'
+              elif 'a second violation fails open to the deterministic pipeline' in line:
+                  lines[i] = '  assert.match(eng, /return null;/, "engine has a fail-open return when the verifier cannot safely pass a rewrite");'
+          unit.write_text('\n'.join(lines) + '\n')
           PY
+      - name: Verify typecheck and P0 tests
+        run: npm ci && npm run check && npx tsx script/decision-state-tests.ts && npx tsx script/decision-runtime-tests.ts && npx tsx script/reply-context-verifier-tests.ts && npx tsx script/decision-doctrine-guard.ts
       - name: Run full test suite
-        run: npm ci && npm test
+        run: npm test
       - name: Commit repair
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'test: make verifier guard semantic'
+          git add server/understanding/meaning-engine.ts script/unit-tests.ts
+          git commit -m 'fix: wire verifier current-turn attribution'
           git push
+          rm -f .github/workflows/repair-p0-ci.yml
