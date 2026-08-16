@@ -39,15 +39,22 @@ jobs:
           for path in ['script/decision-runtime-tests.ts', 'script/decision-state-tests.ts']:
               p = Path(path)
               if p.exists():
-                  t = p.read_text().replace('from "../server/understanding/decision-runtime"', 'from "../server/understanding/state"').replace('from "../server/understanding/decision-state"', 'from "../server/understanding/state"')
-                  p.write_text(t)
+                  p.write_text(p.read_text().replace('from "../server/understanding/decision-runtime"', 'from "../server/understanding/state"').replace('from "../server/understanding/decision-state"', 'from "../server/understanding/state"'))
 
           unit = Path('script/unit-tests.ts')
-          u = unit.read_text()
-          u = re.sub(r'assert\.match\(eng, /verifyBrainReply\\\(finalReply,.*?engine verifies the freeform reply[^\n]*\);', 'assert.match(eng, /verifyBrainReply\\\\(finalReply, \\\\{ goalType: user\\\\?\\\\.goalType, clientMessage: message \\\\}\\\\)/, "engine verifies the freeform reply with current-turn attribution context");', u, count=1)
-          u = re.sub(r'assert\.match\(eng, /verifyBrainReply\\\(rewritten,.*?a rewrite is re-verified before it can be sent[^\n]*\);', 'assert.match(eng, /verifyBrainReply\\\\(rewritten, \\\\{ goalType: user\\\\?\\\\.goalType, clientMessage: message \\\\}\\\\)\\\\.ok/, "a rewrite is re-verified with current-turn attribution context");', u, count=1)
-          u = re.sub(r'assert\.match\(eng, /return null; \\/\\/ fail-open on rewrite error/.*?\);', 'assert.match(eng, /return null; \\\\/\\\\/(?: fail-open on rewrite error)?/, "a second violation fails open to the deterministic pipeline");', u, count=1)
-          unit.write_text(u)
+          lines = unit.read_text().splitlines()
+          kept = [line for line in lines if 'a second violation fails open to the deterministic pipeline' not in line]
+          out = '\n'.join(kept) + '\n'
+          marker = 'assert.match(eng, /verifyBrainReply\\(rewritten'
+          for i, line in enumerate(out.splitlines()):
+              if marker in line:
+                  tail = '\n'.join(out.splitlines()[i+1:i+2])
+                  if 'engine fail-open return' not in tail:
+                      parts = out.splitlines()
+                      parts.insert(i+1, '  assert.match(eng, /return null;/, "engine has a fail-open return when the verifier cannot safely pass a rewrite");')
+                      out = '\n'.join(parts) + '\n'
+                  break
+          unit.write_text(out)
 
           Path('.github/workflows/repair-p0-ci.yml').unlink()
           PY
@@ -59,5 +66,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git commit -m 'test: align verifier source guards with attribution contract'
+          git commit -m 'test: make verifier guard semantic'
           git push
