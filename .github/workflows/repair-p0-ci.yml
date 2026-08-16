@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - name: Repair P0 verifier wiring and source guard
+      - name: Repair P0 verifier and decision ledger wiring
         shell: bash
         run: |
           python - <<'PY'
@@ -40,17 +40,28 @@ jobs:
               elif 'a second violation fails open to the deterministic pipeline' in line:
                   lines[i] = '  assert.match(eng, /return null;/, "engine has a fail-open return when the verifier cannot safely pass a rewrite");'
           unit.write_text('\n'.join(lines) + '\n')
+
+          live = Path('server/understanding/live.ts')
+          s = live.read_text()
+          s = s.replace('import { logChat } from "../handlers/chat-log";', 'import { logChat, turnState } from "../handlers/chat-log";')
+          needle = '    if (!result) return null; // fail-open → existing pipeline runs\n\n'
+          replacement = '''    if (!result) return null; // fail-open → existing pipeline runs\n\n    // Canonical decision observability: every meaningful engine turn records the same\n    // deterministic outcome that constrained the Meaning Engine. This is ledger state,\n    // not chat content, so it cannot contaminate conversational memory.\n    turnState({\n      decisionState: result.decision.state,\n      decisionEvidence: result.decision.evidence,\n      meaningfulProblem: result.decision.meaningfulProblem,\n      hasMinimumUsefulQuestion: result.decision.hasMinimumUsefulQuestion,\n    });\n\n'''
+          if needle not in s:
+              raise SystemExit('live.ts: decision ledger insertion point not found')
+          s = s.replace(needle, replacement, 1)
+          live.write_text(s)
           PY
       - name: Verify typecheck and P0 tests
         run: npm ci && npm run check && npx tsx script/decision-state-tests.ts && npx tsx script/decision-runtime-tests.ts && npx tsx script/reply-context-verifier-tests.ts && npx tsx script/decision-doctrine-guard.ts
       - name: Run full test suite
         run: npm test
-      - name: Commit repair
+      - name: Commit repair and remove one-shot workflow
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add server/understanding/meaning-engine.ts script/unit-tests.ts
-          git commit -m 'fix: wire verifier current-turn attribution'
+          git add server/understanding/meaning-engine.ts server/understanding/live.ts script/unit-tests.ts
+          git commit -m 'fix: record canonical coaching decision in turn ledger'
+          git rm .github/workflows/repair-p0-ci.yml
+          git commit -m 'chore: remove one-shot repair workflow'
           git push
-          rm -f .github/workflows/repair-p0-ci.yml
