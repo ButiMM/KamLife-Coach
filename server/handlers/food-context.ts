@@ -18,13 +18,13 @@ import {
 import { macroCardMarker, cardOrTotals, achievementCardShown, cardBaseUrl } from "../macro-card-attach";
 import { cardWillAttach } from "../card-policy";
 import { claimOncePerDay } from "../once-daily";
-import { estimateCarbsFat } from "../macro-estimate";
+import { estimateCarbsFat, carbsFatFromFoods } from "../macro-estimate";
 import { captureFriction } from "../friction";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout, turnMutation } from "./chat-log";
-import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
+import { unloggedFoodNotice, carriesFeelingClause, plateClausesOnly } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
 import { explicitMealSlot } from "../understanding/actions";
@@ -32,7 +32,7 @@ import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSl
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
-import { amendRecentMeal, replaceHeldMeal } from "../food-identity-correction";
+import { amendRecentMeal, replaceHeldMeal, netMessageFoods, planEventWrites, recordEventGroup } from "../food-identity-correction";
 
 // One owner — this literal was declared twice in this file.
 const TREAT_WORDS = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i;
@@ -106,6 +106,8 @@ interface CommitFoodLogParams {
   items: Array<{ name: string; grams: number; kcal: number; protein: number; category: string }>;
   mealLabel: string | null | undefined;
   loggedAt: Date;
+  /** Later events of ONE message. They are siblings, never amendments of each other. */
+  skipAmend?: boolean;
 }
 
 interface CommitFoodLogResult {
@@ -114,6 +116,8 @@ interface CommitFoodLogResult {
   prevCals: number;
   runningCals: number;
   runningProtein: number;
+  /** The row this write landed on — inserted, amended or held. The event's identity. */
+  id?: string;
 }
 
 // THE single chokepoint for every food-log write (Box 2). GUARANTEE: complete macros — kcal +
@@ -149,14 +153,15 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
   const itemNames = (Array.isArray(params.items) ? params.items : []).map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean);
   // A held row's REPLACEMENT and an AMENDMENT both rewrite an existing row and suppress the
   // insert below. Neither ever creates a second row.
-  const heldId = await replaceHeldMeal(params.userId, `${rawSlice} ${itemNames.join(" ")}`, patch);
-  const amendedId = heldId || await amendRecentMeal(params.userId, itemNames, patch);
+  const heldId = params.skipAmend ? null : await replaceHeldMeal(params.userId, `${rawSlice} ${itemNames.join(" ")}`, patch);
+  const amendedId = heldId || (params.skipAmend ? null : await amendRecentMeal(params.userId, itemNames, patch));
   if (amendedId) { invalidatePatternCache(params.userId); invalidateFoodTotalsCache(params.userId); }
   let insertOk = true;
+  let rowId = amendedId || recentDup[0]?.id || undefined;
   const wasDup = recentDup.length > 0 || !!amendedId;
   if (!wasDup) {
     try {
-      await db.insert(mealLogs).values({
+      const [inserted] = await db.insert(mealLogs).values({
         userId: params.userId,
         rawMessage: rawSlice,
         source: params.source,
@@ -167,7 +172,8 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
         items: params.items,
         mealLabel: params.mealLabel,
         loggedAt: effLoggedAt,
-      });
+      }).returning({ id: mealLogs.id });
+      rowId = inserted?.id || rowId;
       invalidatePatternCache(params.userId);
       invalidateFoodTotalsCache(params.userId);
       turnMutation(`INSERT meal kcal=${params.kcalInt} prot=${params.proteinInt} label=${params.mealLabel || "none"} at=${String(effLoggedAt).slice(0, 10)}`, `[MEAL_LOG] user=...${String(params.userId || "").slice(-6)}`);
@@ -190,7 +196,7 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
     }).where(eq(users.phoneNumber, params.phone));
   } catch (e) { console.error("[MEAL_LOG] calorie update failed — user:", String(params.userId || "").slice(-6), e); }
 
-  return { ok: insertOk, wasDup, prevCals, runningCals, runningProtein };
+  return { ok: insertOk, wasDup, prevCals, runningCals, runningProtein, id: rowId };
 }
 
 type HandleMessageFn = (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
@@ -1007,9 +1013,15 @@ export async function handleFoodContext(ctx: {
 
     // ---- PARTIAL MATCH SUPPLEMENT — catch items the SA scanner missed; attributed back to
     // the segment whose text mentions them.
-    if (allAdjustedFoods.length > 0 && hasUnmatchedFoodContent(m, allAdjustedFoods)) {
+    // NON-FOOD CONTENT INSIDE A FOOD DUMP (2026-08-16): "…and my back is sore and I didn't
+    // sleep" is not an unpriced ingredient. It reached both the supplement model and the
+    // unlogged-food notice as leftover vocabulary — the client was asked whether their back was
+    // fried or grilled. Only the clauses about the plate are priced; the veto keeps any clause
+    // the scanner finds food in ("so tired I ate a whole pizza").
+    const plateText = plateClausesOnly(message, c => scanForSAFoods(c).length > 0);
+    if (allAdjustedFoods.length > 0 && hasUnmatchedFoodContent(plateText, allAdjustedFoods)) {
       try {
-        const suppItems = await gptFoodSupplement(message, user, allAdjustedFoods.map(f => f.name));
+        const suppItems = await gptFoodSupplement(plateText, user, allAdjustedFoods.map(f => f.name));
         if (suppItems && suppItems.length > 0) {
           // Dedup: skip GPT items whose name overlaps with an already-matched SA food
           const filtered = suppItems.filter((si: GptFoodItem) => {
@@ -1051,6 +1063,20 @@ export async function handleFoodContext(ctx: {
       } catch (e) {
         console.warn("[PARTIAL-MATCH SUPP] error:", e);
       }
+    }
+
+    // INTRA-MESSAGE CORRECTION — the client takes a food back in the same breath they logged it
+    // ("rice and chicken for lunch, actually not rice, it was pap"). Netted per event BEFORE the
+    // write, so the record never holds a food they already withdrew. The resolver re-prices the
+    // half of a combo dish they kept — "rice and chicken" is ONE table item, and dropping it
+    // whole is how the chicken went missing the first time this was written.
+    const mem = await getPortionMemory(user.id);
+    const dropped = netMessageFoods(message, segmentBuckets,
+      f => (adjustFoodsForSegment(scanForSAFoods(f, { exactOnly: true }).slice(0, 1), f, mem)[0] as AdjFood) ?? null);
+    if (dropped.length > 0) {
+      allAdjustedFoods.length = 0;
+      allAdjustedFoods.push(...segmentBuckets.flatMap(b => b.foods));
+      console.log(`[FOOD_EVENT] self-correction netted before the write — dropped: ${dropped.join(", ")}`);
     }
 
     // Build the multi-meal breakdown AFTER supplement attribution (so GPT items are included).
@@ -1166,47 +1192,35 @@ export async function handleFoodContext(ctx: {
 
       const scannerLoggedAt = parseMealDate(message);
       const scannerIsRetro = isRetroactiveMeal(message);
-      // Carbs/fat per food: LOWER of the dry estimate (per-100g x grams — overcounts
-      // cooked staples) and the ratio estimate (energy share — overcounts alcohol).
-      // The error modes never hit the same food, so min() is right for both.
-      const macroEnergy = (f: any) => 4 * (f.proteinPer100g || 0) + 4 * (f.carbsPer100g || 0) + 9 * (f.fatPer100g || 0);
-      const totalCarbs = Math.round(allAdjustedFoods.reduce((s, f: any) => {
-        const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
-        const dry = grams * (f.carbsPer100g || 0) / 100;
-        const e = macroEnergy(f);
-        const ratio = e > 0 ? (f.adjustedCalories || 0) * (4 * (f.carbsPer100g || 0) / e) / 4 : dry;
-        return s + Math.min(dry, ratio);
-      }, 0));
-      const totalFat = Math.round(allAdjustedFoods.reduce((s, f: any) => {
-        const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
-        const dry = grams * (f.fatPer100g || 0) / 100;
-        const e = macroEnergy(f);
-        const ratio = e > 0 ? (f.adjustedCalories || 0) * (9 * (f.fatPer100g || 0) / e) / 9 : dry;
-        return s + Math.min(dry, ratio);
-      }, 0));
       const firstSegLabel = mealSegments.find(s => s.label)?.label
         || extractMealLabel(message, undefined, { kcal: totalCals, protein: Math.round(totalProtein) }, user, await getSlotContext(user.id));
-      const scannerItems = allAdjustedFoods.map(f => ({
-        name: f.name,
-        grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
-        kcal: f.adjustedCalories,
-        protein: f.adjustedProtein,
-        category: f.category,
-        origin: f.origin || "db",
+      const itemsOf = (fs: any[]) => fs.map(f => ({
+        name: f.name, grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
+        kcal: f.adjustedCalories, protein: f.adjustedProtein, category: f.category, origin: f.origin || "db",
       }));
-      const committed = await commitFoodLog({
-        userId: user.id,
-        phone,
-        rawMessage: message.slice(0, 1000),
-        source: "sa_scanner",  // retro is TIMING (loggedAt), never the origin
-        kcalInt: totalCals,
-        proteinInt: Math.round(totalProtein),
-        carbsInt: totalCarbs,
-        fatInt: totalFat,
-        items: scannerItems,
-        mealLabel: firstSegLabel,
-        loggedAt: scannerLoggedAt,
-      });
+      // THE EVENT MODEL — one message, N events (planEventWrites, food-identity-correction.ts).
+      // skipAmend: events of ONE message are siblings, never amendments of each other — without
+      // it "eggs for breakfast, eggs and pap for lunch" folds the lunch into the breakfast row
+      // it just wrote, because containment is exactly what an amendment looks like.
+      const events = planEventWrites(segmentBuckets, { label: firstSegLabel || "", message, foods: allAdjustedFoods });
+      let committed = { ok: true, wasDup: false, prevCals: 0, runningCals: 0, runningProtein: 0 } as CommitFoodLogResult;
+      const eventIds: string[] = [];
+      for (const [i, ev] of events.entries()) {
+        const cf = carbsFatFromFoods(ev.foods);
+        const c = await commitFoodLog({
+          userId: user.id, phone, rawMessage: ev.rawMessage.slice(0, 1000),
+          source: "sa_scanner",  // retro is TIMING (loggedAt), never the origin
+          kcalInt: ev.foods.reduce((s, f) => s + (f.adjustedCalories || 0), 0),
+          proteinInt: Math.round(ev.foods.reduce((s, f) => s + (f.adjustedProtein || 0), 0)),
+          carbsInt: cf.carbs, fatInt: cf.fat,
+          items: itemsOf(ev.foods), mealLabel: ev.label || firstSegLabel,
+          loggedAt: scannerLoggedAt, skipAmend: i > 0,
+        });
+        if (c.id) eventIds.push(c.id);
+        committed = i === 0 ? c : { ...c, prevCals: committed.prevCals };
+      }
+      // The rows this turn wrote, so the correction that follows can be about all of them.
+      recordEventGroup(user.id, eventIds);
       if (!committed.ok) {
         const failReply = `Eish — I worked out that meal (~${totalCals} kcal | ${Math.round(totalProtein)}g protein) but couldn't save it just now. Send it again in a moment and I'll log it.`;
         await logChat(user.id, message, failReply, "FOOD_LOG_FAILED");

@@ -1605,6 +1605,198 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     }
   });
 
+  // ============================================================
+  // THE EVENT MODEL — one message, N events (2026-08-16)
+  //
+  // message → N events → grouped corrections → trusted retrieval → correct aggregates →
+  // one final response. Every assertion below is on the DECISION, not on prose: which rows a
+  // message owes, what survives a self-correction, and which row a later correction is about.
+  // ============================================================
+
+  test("event model: two labelled meals in one message owe TWO rows, not one", async () => {
+    const { planEventWrites } = await import("../server/food-identity-correction");
+    const buckets = [
+      { label: "Breakfast", text: "2 eggs and pap", foods: [{ name: "Eggs" }, { name: "Pap" }] },
+      { label: "Lunch", text: "chicken and rice", foods: [{ name: "Chicken" }, { name: "Rice" }] },
+    ];
+    const whole = { label: "breakfast", message: "2 eggs and pap for breakfast, chicken and rice for lunch", foods: buckets.flatMap(b => b.foods) };
+    const events = planEventWrites(buckets, whole);
+    assert.equal(events.length, 2, "one message, two events");
+    assert.deepEqual(events.map(e => e.label), ["breakfast", "lunch"], "each event keeps the slot the CLIENT named");
+    // The stored line is the segment, never the paragraph: the diary must read "chicken and
+    // rice" against lunch, and two rows quoting one sentence would also collide with the
+    // four-minute duplicate guard at the write door.
+    assert.ok(events[1].rawMessage.includes("chicken and rice"), events[1].rawMessage);
+    assert.ok(!events[1].rawMessage.includes("2 eggs"), "an event must not carry another event's food");
+    assert.deepEqual(events[1].foods.map((f: any) => f.name), ["Chicken", "Rice"]);
+  });
+
+  test("event model: an ordinary single meal is byte-identical — one row, the whole message", async () => {
+    const { planEventWrites } = await import("../server/food-identity-correction");
+    const foods = [{ name: "Chicken" }, { name: "Rice" }];
+    // No labelled segments at all (the common case), and one labelled segment (also common).
+    for (const buckets of [[], [{ label: "Lunch", text: "chicken and rice", foods }]]) {
+      const events = planEventWrites(buckets, { label: "lunch", message: "chicken and rice for lunch", foods });
+      assert.equal(events.length, 1, "a single meal is a single event");
+      assert.equal(events[0].rawMessage, "chicken and rice for lunch", "the client's own sentence is what is stored");
+      assert.equal(events[0].foods.length, 2);
+    }
+    // A labelled segment with no food is not an event — "dinner is still coming" owes no row.
+    const empty = planEventWrites(
+      [{ label: "Breakfast", text: "2 eggs", foods: [{ name: "Eggs" }] }, { label: "Dinner", text: "still to come", foods: [] }],
+      { label: "breakfast", message: "2 eggs for breakfast, dinner still to come", foods: [{ name: "Eggs" }] });
+    assert.equal(empty.length, 1, "an empty segment owes no row");
+  });
+
+  test("event model: FOOD_EVENTS=off restores the merged single write", async () => {
+    const { planEventWrites } = await import("../server/food-identity-correction");
+    const buckets = [
+      { label: "Breakfast", text: "eggs", foods: [{ name: "Eggs" }] },
+      { label: "Lunch", text: "chicken", foods: [{ name: "Chicken" }] },
+    ];
+    const whole = { label: "breakfast", message: "eggs for breakfast, chicken for lunch", foods: [{ name: "Eggs" }, { name: "Chicken" }] };
+    const before = process.env.FOOD_EVENTS;
+    try {
+      process.env.FOOD_EVENTS = "off";
+      const off = planEventWrites(buckets, whole);
+      assert.equal(off.length, 1, "the killswitch must collapse the split, not merely warn");
+      assert.equal(off[0].foods.length, 2, "and the merged write still carries every food");
+    } finally {
+      if (before === undefined) delete process.env.FOOD_EVENTS; else process.env.FOOD_EVENTS = before;
+    }
+  });
+
+  test("intra-message correction: a food taken back in the same breath is never written", async () => {
+    const { planCorrection, netEventFoods } = await import("../server/food-identity-correction");
+    // NEWLY DISCOVERED CASE 1. The scanner reads left to right and finds rice, chicken AND pap;
+    // the correction machinery only ever looked at the message AFTER a log, so the rice the
+    // client withdrew mid-sentence was logged anyway — ~260 kcal of silent error.
+    const msg = "I had rice and chicken for lunch, actually not rice, it was pap";
+    const parsed = [{ name: "Rice" }, { name: "Chicken" }, { name: "Pap" }];
+    const net = netEventFoods(parsed, planCorrection(msg, false));
+    const names = net.foods.map(f => f.name.toLowerCase());
+    assert.ok(!names.includes("rice"), `the withdrawn rice must not be written — got ${JSON.stringify(names)}`);
+    assert.ok(names.includes("chicken"), "the food nobody corrected is retained");
+    assert.ok(names.includes("pap"), "the replacement they named is kept");
+    assert.deepEqual(net.removed, ["rice"], "and the drop is reported, never silent");
+
+    // THE COMBO — the way this failed in its first draft, against a real database. The food
+    // table resolves "rice and chicken" to ONE dish, so a name filter removed both foods and
+    // the chicken vanished. Same rule as applyCorrection: split the dish, keep the half they
+    // did not correct, re-priced through the resolver.
+    const combo = netEventFoods(
+      [{ name: "Chicken and rice" }, { name: "Pap" }],
+      planCorrection(msg, false),
+      (f: string) => (/chicken/i.test(f) ? { name: "Chicken" } : /pap/i.test(f) ? { name: "Pap" } : null));
+    const comboNames = combo.foods.map(f => f.name.toLowerCase()).join(" ");
+    assert.ok(/chicken/.test(comboNames), `THE CHICKEN MUST SURVIVE THE COMBO — got ${comboNames}`);
+    assert.ok(!/rice/.test(comboNames), `and the rice must be gone — got ${comboNames}`);
+  });
+
+  test("intra-message correction: it can only drop, never invent, and never empties the plate", async () => {
+    const { planCorrection, netEventFoods } = await import("../server/food-identity-correction");
+    // An ordinary log is untouched — this is the case that must never regress.
+    for (const msg of ["chicken and rice for lunch", "two eggs and toast", "pap and beef stew for supper"]) {
+      const parsed = [{ name: "Chicken" }, { name: "Rice" }];
+      const net = netEventFoods(parsed, planCorrection(msg, false));
+      assert.equal(net.removed.length, 0, `"${msg}" must net nothing`);
+      assert.equal(net.foods.length, 2, `"${msg}" must keep every parsed food`);
+    }
+    // A negation naming a food nobody logged is a no-op, not an error.
+    const noOp = netEventFoods([{ name: "Pap" }, { name: "Chicken" }], planCorrection("pap and chicken, no sugar", false));
+    assert.equal(noOp.foods.length, 2, "a negated food that was never parsed changes nothing");
+    // AND THE ONE-FOOD FLOOR: "no rice" against a single parsed food is a removal request about
+    // an EXISTING entry — food-log-mgmt owns that, and it asks. Netting here would log an empty
+    // meal and swallow the request in the same move.
+    const floor = netEventFoods([{ name: "Rice" }], planCorrection("no rice", false));
+    assert.equal(floor.foods.length, 1, "the plate is never netted to nothing");
+    assert.equal(floor.removed.length, 0, "and nothing is reported as dropped");
+  });
+
+  test("grouped corrections: the fix lands on the event that holds the food, not the newest row", async () => {
+    const { planCorrection, pickCorrectionTargets } = await import("../server/food-identity-correction");
+    // Two events from one message. Rows come back newest-first, so the LUNCH is row 0 — which is
+    // exactly why "it wasn't rice, it was pap" used to edit the wrong meal once a message could
+    // write more than one row.
+    const rows = [
+      { id: "lunch-row", mealLabel: "lunch", rawMessage: "Lunch: chicken and rice", items: [{ name: "Chicken" }, { name: "Rice" }] },
+      { id: "breakfast-row", mealLabel: "breakfast", rawMessage: "Breakfast: 2 eggs and bread", items: [{ name: "Eggs" }, { name: "Bread" }] },
+    ];
+    const bread = pickCorrectionTargets(rows, planCorrection("it wasn't bread, it was pap", false), ["lunch-row", "breakfast-row"]);
+    assert.deepEqual(bread.map(r => r.id), ["breakfast-row"], "the row holding the bread is the target");
+    const rice = pickCorrectionTargets(rows, planCorrection("it wasn't rice, it was pap", false), ["lunch-row", "breakfast-row"]);
+    assert.deepEqual(rice.map(r => r.id), ["lunch-row"], "the row holding the rice is the target");
+  });
+
+  test("grouped corrections: a bare move takes the whole group; nothing else does", async () => {
+    const { planCorrection, pickCorrectionTargets, recordEventGroup, readEventGroup, _resetEventGroups } =
+      await import("../server/food-identity-correction");
+    const rows = [
+      { id: "b", mealLabel: "lunch", rawMessage: "Lunch: chicken", items: [{ name: "Chicken" }] },
+      { id: "a", mealLabel: "breakfast", rawMessage: "Breakfast: eggs", items: [{ name: "Eggs" }] },
+    ];
+    const move = planCorrection("actually that was yesterday", true);
+    // With the group: both rows move, or the totals are wrong on two days at once.
+    assert.deepEqual(pickCorrectionTargets(rows, move, ["a", "b"]).map(r => r.id).sort(), ["a", "b"]);
+    // Without a fresh group (a restart, or an older meal): the most recent row only — exactly
+    // what this code did before the Event Model existed. That is the fail-open direction.
+    assert.deepEqual(pickCorrectionTargets(rows, move, []).map(r => r.id), ["b"]);
+    // A correction that NAMES a food is never a group operation, group or no group.
+    const named = pickCorrectionTargets(rows, planCorrection("it wasn't eggs, it was pap", true), ["a", "b"]);
+    assert.deepEqual(named.map(r => r.id), ["a"], "a named food beats the group");
+
+    // The group memory itself: written, read back, and expired rather than trusted forever.
+    _resetEventGroups();
+    assert.deepEqual(readEventGroup("u1"), [], "no group is the honest default");
+    recordEventGroup("u1", ["a", "b"]);
+    assert.deepEqual(readEventGroup("u1"), ["a", "b"]);
+    assert.deepEqual(readEventGroup("u1", Date.now() + 31 * 60_000), [], "a stale group must not capture a later correction");
+  });
+
+  test("non-food content in a food dump is not priced as food", async () => {
+    const { plateClausesOnly, aboutTheirBodyNotThePlate, unloggedFoodNotice } =
+      await import("../server/unlogged-notice");
+    // NEWLY DISCOVERED CASE 2, verbatim shape. "back" and "sore" are not in NOISE, so the
+    // unpriced-food notice audited them as menu items and asked whether they were fried.
+    const dump = "2 eggs and pap for breakfast, chicken and rice for lunch, my back is sore and I didn't sleep";
+    assert.ok(aboutTheirBodyNotThePlate("my back is sore"), "a sore back is not an ingredient");
+    assert.ok(!aboutTheirBodyNotThePlate("2 eggs and pap for breakfast"), "and a plate is not a symptom");
+    const plate = plateClausesOnly(dump, () => false);
+    assert.ok(!/sore|sleep/.test(plate), `the body clauses must be gone: "${plate}"`);
+    assert.ok(/eggs/.test(plate) && /chicken/.test(plate), `and every food must survive: "${plate}"`);
+    const notice = unloggedFoodNotice(dump, ["Eggs", "Pap", "Chicken", "Rice"]);
+    assert.equal(notice, "", `nothing was dropped, so nothing may be claimed: "${notice}"`);
+    // THE VETO. A clause that really does carry food is kept, however it is framed.
+    const tired = plateClausesOnly("I was so tired I ate a whole pizza", c => /pizza/.test(c));
+    assert.ok(/pizza/.test(tired), `the veto must save a real food: "${tired}"`);
+    // And a genuinely unpriced food still gets said out loud — the notice is not disarmed.
+    const missed = unloggedFoodNotice("I had bunny chow and atchar for lunch", ["Rice"]);
+    assert.ok(/bunny|atchar/i.test(missed), `an unpriced food must still be named: "${missed}"`);
+  });
+
+  test("event model: the write door is wired to all of it", async () => {
+    // Source-level, because the wiring is the part a pure test cannot see: the loop exists, the
+    // group is recorded, later events cannot amend earlier ones, and the reply is still ONE.
+    const src = readFileSync("server/handlers/food-context.ts", "utf-8");
+    assert.ok(/planEventWrites\(segmentBuckets/.test(src), "the split is not wired to the scanner path");
+    assert.ok(/skipAmend: i > 0/.test(src), "sibling events must not amend each other");
+    assert.ok(/recordEventGroup\(user\.id, eventIds\)/.test(src), "the group is not recorded for the correction that follows");
+    assert.ok(/netMessageFoods\(message, segmentBuckets/.test(src),
+      "the self-correction must be netted from the CLIENT's message, before the write");
+    assert.ok(src.indexOf("netMessageFoods(message") < src.indexOf("const events = planEventWrites"),
+      "the netting must happen BEFORE the write is planned, not after");
+    const commit = src.slice(src.indexOf("const events = planEventWrites"), src.indexOf("if (!committed.ok)"));
+    assert.equal((commit.match(/await commitFoodLog\(/g) || []).length, 1,
+      "one write door, called in a loop — never a second copy per shape");
+    assert.ok(!/return `Logged \$\{events/.test(src), "N events must still produce ONE reply");
+    // The correction path reads the ROWS and picks its target from them.
+    const mgmt = readFileSync("server/handlers/food-log-mgmt.ts", "utf-8");
+    assert.ok(/pickCorrectionTargets\(rows, plan, readEventGroup\(user\.id\)\)/.test(mgmt),
+      "the correction target must be chosen from the stored rows plus the turn's group");
+    assert.ok(!/\.orderBy\(desc\(mealLogs\.loggedAt\)\)\.limit\(1\);\s*\n\s*if \(row\)/.test(mgmt),
+      "the blind most-recent-row read is back");
+  });
+
   test("a legitimate zero is not refilled from the chat log", async () => {
     // recomputeTodayFoodTotals text-scraped chatHistory whenever TODAY read zero, so a meal moved
     // to yesterday stayed counted on today, and a wiped day put its calories straight back.

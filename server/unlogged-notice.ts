@@ -114,6 +114,44 @@ export function asksAboutWeightProgress(text: string): boolean {
     || /\b(am i|are we) (actually )?(losing|in a deficit)\b/.test(t);
 }
 
+/**
+ * IS THIS CLAUSE ABOUT THEIR BODY OR THEIR DAY, RATHER THAN THEIR PLATE? (2026-08-16.)
+ *
+ * The sibling carriesFeelingClause could not answer for the sentence that actually shipped:
+ * "2 eggs and pap for breakfast, chicken and rice for lunch, my back is sore and I didn't
+ * sleep." Nothing in that names a feeling in the words the feeling test knows, so the food
+ * dump's leftover vocabulary — back, sore, sleep — was audited as unpriced FOOD and the client
+ * was asked whether it was fried or grilled. It is also, separately, the half of the message
+ * that matters most to them.
+ *
+ * Same doctrine as its sibling, and the same deliberate narrowness: it gates the two places
+ * that would otherwise try to PRICE the client's body, and it decides nothing about routing,
+ * logging, or who answers. A clause is only dropped when it is positively recognised as body
+ * or life talk — everything unrecognised is kept, so the failure direction is today's
+ * behaviour rather than a lost meal.
+ */
+export function aboutTheirBodyNotThePlate(text: string): boolean {
+  const t = (text || "").toLowerCase();
+  if (carriesFeelingClause(t)) return true;
+  return /\b(sore|stiff|aching|aches?|pains?|painful|cramp\w*|headache|nausea|nauseous|dizzy|exhausted|shattered|tired|flu|fever|period|slept|sleeping|insomnia|stressed|anxious|overtime|deadline|shift|missed (?:the )?(?:gym|session|workout|training)|skipped (?:the )?(?:gym|session|workout|training)|didn'?t sleep|couldn'?t sleep|no sleep)\b/.test(t);
+}
+
+/**
+ * THE HALF OF THE MESSAGE THAT IS ABOUT FOOD. One owner, because two callers price text and
+ * both were pricing the client's back.
+ *
+ * `keep` is the caller's veto — it is handed each flagged clause and returns true when the
+ * clause really does carry food ("I was so tired I ate a whole pizza"). Without a veto nothing
+ * that names food can be lost, because the caller who knows how to recognise food is the one
+ * who supplies it: the notice checks what it logged, the scanner path asks the scanner.
+ */
+export function plateClausesOnly(message: string, keep: (clause: string) => boolean = () => false): string {
+  const clauses = String(message || "").split(/(?<=[.!?;\n])|,\s+|\s+\band then\b\s+|\s+\bbut\b\s+/i);
+  const kept = clauses.filter(c => !aboutTheirBodyNotThePlate(c) || keep(c.toLowerCase()));
+  const text = kept.join(" ").replace(/\s+/g, " ").trim();
+  return text || String(message || "");
+}
+
 export function unloggedFoodWords(message: string, loggedNames: string[]): string[] {
   const logged = loggedNames.join(" ").toLowerCase();
   const words = (message || "").toLowerCase()
@@ -168,7 +206,11 @@ export function unloggedFoodNotice(message: string, loggedNames: string[], ask =
   if (place && !loggedJoined.includes(place.stem)) {
     return ask ? clarifyPlaceAsk(place.name) : unloggedPlaceNotice(message, loggedNames);
   }
-  const words = unloggedFoodWords(message, loggedNames);
+  // The same trade as the feeling gate above, applied clause by clause: the body-and-day half
+  // of a food dump is not audited for missing calories. A clause that carries something we DID
+  // log is kept, so "so tired I ate a whole pizza" is still read for its pizza.
+  const plate = plateClausesOnly(lo, c => loggedNames.some(n => n && c.includes(n.toLowerCase())));
+  const words = unloggedFoodWords(plate, loggedNames);
   if (words.length < 2) return "";               // one stray word is usually not a food
   return ask
     ? clarifyFoodAsk(words)

@@ -285,6 +285,203 @@ export function applyCorrection<T extends { name?: string }>(
 }
 
 /**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE EVENT MODEL — one message, N events (2026-08-16).
+ *
+ * The frozen work order:
+ *   message → N events → grouped corrections → trusted retrieval → correct aggregates
+ *   → one final response
+ *
+ * What was wrong: a message was an EVENT. "Two eggs and pap for breakfast, chicken and rice
+ * for lunch" produced ONE meal_logs row — every food merged, labelled with whichever slot was
+ * named first, stamped with one time. The segmentation existed, but only to shape the REPLY;
+ * the database never heard about it. So the client was told breakfast and lunch, and the
+ * record held a single blob called "breakfast". Everything downstream inherits that:
+ * "remove my lunch" cannot find a lunch, a correction lands on whatever was written last, the
+ * diary reads one line for two meals, and per-slot anything is unanswerable.
+ *
+ * NO NEW TABLE, by instruction and by preference: meal_logs IS the event store, and it has
+ * been one row per event since it was written — nothing ever wrote the second row. The three
+ * pieces below are what a message needs before it may become several rows:
+ *
+ *   netEventFoods       a message that corrects ITSELF is netted BEFORE anything is written.
+ *   recordEventGroup    the rows one message wrote, remembered for the correction that follows.
+ *   pickCorrectionTargets   which of those rows a correction is actually about.
+ *
+ * All three are pure or memory-only, so the composition rules are testable without a database
+ * — the same contract planCorrection and applyCorrection above already keep.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * INTRA-MESSAGE CORRECTION — the client corrects themselves inside one message.
+ *
+ * "I had rice and chicken for lunch, actually not rice, it was pap" is ONE turn. The scanner
+ * reads it left to right and finds three foods: rice, chicken, pap. All three were logged,
+ * because a correction was only ever looked for in a message that FOLLOWED a log. The rice the
+ * client took back in the same breath was counted anyway, and the day was ~200 kcal wrong
+ * before it began — the silent kind of wrong, which no one can see to complain about.
+ *
+ * Netting happens before the write, never after: nothing is inserted and then repaired, so
+ * there is no window in which the record says something the client never said.
+ *
+ * DELIBERATELY NARROW. It can only DROP a food this very message parsed — it never reads a
+ * stored row, never adds anything, and a negation that names a food nobody logged is a no-op.
+ * The replacement food needs no special handling: it is in the same sentence, so the scanner
+ * has already found it, which is exactly why the naive read logged all three.
+ *
+ * THE COMBO, AGAIN. The first version filtered by name and it ate the chicken: the table
+ * resolves "rice and chicken" to a single combo dish, so "not rice" matched the whole item and
+ * removed both foods — the identical defect applyCorrection was written to fix one turn later.
+ * So this does not own a second copy of the composition rule; it delegates to applyCorrection
+ * with an empty add list, and the caller supplies the same kind of resolver it does.
+ */
+export function netEventFoods<T extends { name?: string }>(
+  foods: T[],
+  plan: CorrectionPlan,
+  resolve: (food: string) => T | null = () => null,
+): { foods: T[]; removed: string[] } {
+  if (!plan?.remove?.length || foods.length === 0) return { foods, removed: [] };
+  // ADD IS NOT THIS FUNCTION'S BUSINESS: the replacement is in the same sentence and the
+  // scanner already priced it. Adding here would log it twice.
+  const { items, removed } = applyCorrection(foods, { ...plan, add: [] }, resolve);
+  // NEVER NET THE PLATE TO NOTHING. "no rice" against a one-food log is a removal request about
+  // an EXISTING entry, not a self-correction — that belongs to food-log-mgmt, which asks and
+  // holds rather than guessing. Dropping the only food here would log an empty meal AND
+  // swallow the request in the same move.
+  if (items.length === 0) return { foods, removed: [] };
+  return { foods: items, removed };
+}
+
+/**
+ * The same netting across a whole message: every event bucket, one plan, one list of what was
+ * dropped. Returns [] — and touches nothing — when the message carries no negation, or when
+ * there is only one food in the whole message (see the floor in netEventFoods).
+ *
+ * It EDITS the buckets it is given, because they are the caller's working list for this turn
+ * and copying them would leave two answers to "what is on the plate" in one function.
+ */
+export function netMessageFoods<T extends { name?: string }>(
+  message: string,
+  buckets: Array<{ foods: T[] }>,
+  resolve: (food: string) => T | null,
+): string[] {
+  const plan = planCorrection(message, false);
+  const total = buckets.reduce((s, b) => s + b.foods.length, 0);
+  if (plan.remove.length === 0 || total < 2) return [];
+  const dropped: string[] = [];
+  for (const b of buckets) {
+    const net = netEventFoods(b.foods, plan, resolve);
+    b.foods = net.foods;
+    dropped.push(...net.removed);
+  }
+  return dropped;
+}
+
+/**
+ * HOW MANY ROWS DOES THIS MESSAGE OWE? — the split itself.
+ *
+ * A labelled segment carrying food IS an event: "2 eggs and pap for breakfast, chicken and rice
+ * for lunch" owes two rows, not one row called breakfast. Below two labelled segments nothing
+ * changes — a single meal is a single event and its write is byte-identical to what it always
+ * was, which is why an ordinary log cannot be affected by any of this.
+ *
+ * The raw message stored on a split event is the SEGMENT, not the whole sentence: the diary
+ * line for lunch must read "chicken and rice", and two rows quoting the same paragraph would
+ * also collide with the four-minute duplicate guard at the write door.
+ *
+ * NOT a meal-slot taxonomy: the label is whatever word the client used, passed through
+ * unchanged. This function does not know what a "meal" is and must never learn.
+ *
+ * FOOD_EVENTS=off in Railway restores the merged single-row write, instantly and per-deploy.
+ */
+export interface EventWrite<F> { label: string; rawMessage: string; foods: F[] }
+
+export function planEventWrites<F>(
+  buckets: Array<{ label: string; text: string; foods: F[] }>,
+  whole: { label: string; message: string; foods: F[] },
+): Array<EventWrite<F>> {
+  const events = buckets.filter(b => b.label && b.foods.length > 0);
+  if (process.env.FOOD_EVENTS === "off" || events.length < 2) {
+    return [{ label: whole.label, rawMessage: whole.message, foods: whole.foods }];
+  }
+  return events.map(b => ({ label: b.label.toLowerCase(), rawMessage: `${b.label}: ${b.text}`, foods: b.foods }));
+}
+
+/**
+ * THE EVENT GROUP — the rows one message wrote, held long enough to be corrected as a unit.
+ *
+ * Once a message can write three rows, "actually that was yesterday" has three possible
+ * meanings and the old code could only express one of them: move the most recent row. That
+ * leaves two meals on today and one on yesterday, and the day totals on BOTH days are then
+ * wrong — the failure mode this whole work order exists to end.
+ *
+ * Memory, not schema: keyed by client, thirty minutes, dropped on restart. The same shape as
+ * the executor's pending-confirmation park, and for the same reason — a correction is a live
+ * back-and-forth, not durable state. When the memory is empty the correction path behaves
+ * exactly as it did before this existed, which is the fail-open direction.
+ */
+const _eventGroups = new Map<string, { ids: string[]; at: number }>();
+const GROUP_TTL_MS = 30 * 60_000;
+
+export function recordEventGroup(userId: string, ids: string[]): void {
+  const clean = ids.map(String).filter(Boolean);
+  if (!userId || clean.length === 0) return;
+  _eventGroups.set(userId, { ids: clean, at: Date.now() });
+  if (_eventGroups.size > 5000) _eventGroups.clear();
+}
+
+/** The ids this client's last logging turn wrote, or [] when there is no fresh group. */
+export function readEventGroup(userId: string, now = Date.now()): string[] {
+  const g = _eventGroups.get(userId);
+  if (!g) return [];
+  if (now - g.at > GROUP_TTL_MS) { _eventGroups.delete(userId); return []; }
+  return g.ids;
+}
+
+/** Test/ops hook — clear the group memory. */
+export function _resetEventGroups(): void { _eventGroups.clear(); }
+
+/**
+ * WHICH EVENT IS THIS CORRECTION ABOUT? — trusted retrieval, from the rows.
+ *
+ * Answered from what is STORED, never from what the model remembers: the candidate rows come
+ * from the database, and the food the client named is matched against the items those rows
+ * actually hold. Three answers, in order of how much the client told us:
+ *
+ *   1. THEY NAMED A FOOD  → the row that holds it. Scored, so a correction naming two foods
+ *      lands on the entry holding both rather than on whichever was written last. A tie is
+ *      broken by recency, because the newer entry is the one they are still talking about.
+ *   2. A BARE MOVE, WITH A GROUP  → every row that message wrote. "That was yesterday" about a
+ *      three-meal dump moves all three, or the aggregates are wrong on two days at once.
+ *   3. ANYTHING ELSE  → the most recent row. Exactly what this code did before, so a
+ *      single-event day is byte-identical.
+ *
+ * PURE. The caller does the reading and the writing; this only decides the target.
+ */
+export function pickCorrectionTargets<T extends { id: string; items?: unknown; rawMessage?: string | null; mealLabel?: string | null }>(
+  rowsNewestFirst: T[],
+  plan: CorrectionPlan,
+  groupIds: string[] = [],
+): T[] {
+  const rows = rowsNewestFirst.filter(Boolean);
+  if (rows.length === 0) return [];
+  const named = [...(plan?.remove || []), ...(plan?.add || [])].map(s => s.toLowerCase()).filter(Boolean);
+  const haystack = (row: T) => `${row.rawMessage || ""} ${row.mealLabel || ""} ${(Array.isArray(row.items) ? row.items : [])
+    .map((i: any) => String(i?.name || i?.foodName || "")).join(" ")}`.toLowerCase();
+  if (named.length > 0) {
+    const scored = rows.map((r, i) => ({ r, i, n: named.filter(f => haystack(r).includes(f)).length }));
+    const best = scored.reduce((a, b) => (b.n > a.n || (b.n === a.n && b.i < a.i) ? b : a));
+    if (best.n > 0) return [best.r];
+  }
+  if (plan?.moves && groupIds.length > 1) {
+    const group = rows.filter(r => groupIds.includes(String(r.id)));
+    if (group.length > 0) return group;
+  }
+  return [rows[0]];
+}
+
+/**
  * NEVER DELETE ON A PROMISE (2026-08-07).
  *
  * Two correction branches could not compute the new numbers — a photo meal stores no per-item

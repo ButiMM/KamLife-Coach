@@ -17,6 +17,7 @@
 - `MEDIA_BASE_URL` — CDN root for exercise GIFs and portion images
 - `PAYFAST_MERCHANT_ID`, `APP_URL`
 - `PROACTIVE_PAUSED=true` — global killswitch for all proactive messages
+- `FOOD_EVENTS=off` — killswitch for the Event Model (see below); reverts to one row per message
 
 ## GIF setup (pending human task)
 Set `MEDIA_BASE_URL` in Railway, then upload files to `MEDIA_BASE_URL/ex/<slug>.gif`.
@@ -42,6 +43,14 @@ canonical must exist in the original (hallucination brake); on timeout/error the
 original message proceeds unchanged. Killswitch: `NORMALIZER=off` in Railway.
 QUESTION classification also guards the step logger from eating questions.
 Voice transcripts get normalized too — media recursion re-enters handleMessage as text.
+
+### Event Model (one message, N events)
+A food message is not an event — each labelled meal in it is. Two meals in one message are two
+`meal_logs` rows, each with its own label, items and numbers; the day is the sum of its events;
+the turn still gets ONE reply. A correction is netted BEFORE the write when it is in the same
+message, and lands on the event that holds the food when it is in the next one. The rules are
+pure and live in `server/food-identity-correction.ts`; the boundary is `docs/EVENT-MODEL.md`
+and §9 of `script/acceptance-hold.ts` (real DB). Killswitch: `FOOD_EVENTS=off` in Railway.
 
 ## Never touch without full understanding
 - `server/coach-prompt.ts` — any change to food philosophy or coaching voice must preserve goal-aware logic (fat_loss gets portion context, muscle_gain gets encouragement)

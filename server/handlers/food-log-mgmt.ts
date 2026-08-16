@@ -10,7 +10,7 @@ import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection, is
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine, scanForSAFoods, dropMeals } from "./food-scanner";
-import { parseIdentityCorrection, correctionCandidates, holdForReplacement, isMealDateMove, planCorrection, applyCorrection, type IdentityCorrection } from "../food-identity-correction";
+import { parseIdentityCorrection, correctionCandidates, holdForReplacement, isMealDateMove, planCorrection, applyCorrection, pickCorrectionTargets, readEventGroup, type IdentityCorrection } from "../food-identity-correction";
 
 import { UNAVAILABLE_RE } from "../food-swaps";
 import { turnMutation, turnState } from "./chat-log";
@@ -121,11 +121,19 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   const movesDay = isMealDateMove(m, isRetroactiveMeal(m));
   const plan = looksLikeQuestion(m) ? null : planCorrection(m, movesDay);
   if (plan?.isCorrection && (plan.moves || plan.remove.length + plan.add.length >= 2)) {
-    const [row] = await db.select({
+    // GROUPED, AND READ FROM THE ROWS (2026-08-16, the Event Model). This used to take the single
+    // most recent entry, which was the only entry a message could produce. Now that "eggs for
+    // breakfast, chicken for lunch" writes two, the most recent row is a coin toss: "the rice was
+    // wrong" would edit the breakfast because it happened to be written last. pickCorrectionTargets
+    // answers it from what is STORED — the row that actually holds the food they named — and a bare
+    // move ("that was yesterday") takes the whole group, because leaving one of two meals behind
+    // makes the totals wrong on two days at once.
+    const rows = await db.select({
       id: mealLogs.id, raw: mealLogs.rawMessage, label: mealLogs.mealLabel, at: mealLogs.loggedAt,
       items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
-    }).from(mealLogs).where(eq(mealLogs.userId, user.id)).orderBy(desc(mealLogs.loggedAt)).limit(1);
-    if (row) {
+    }).from(mealLogs).where(eq(mealLogs.userId, user.id)).orderBy(desc(mealLogs.loggedAt)).limit(10);
+    const targets = pickCorrectionTargets(rows, plan, readEventGroup(user.id));
+    if (targets.length > 0) {
       const resolveFood = (food: string) => {
         const hit = scanForSAFoods(food, { exactOnly: true })[0] || scanForSAFoods(food)[0];
         return hit ? {
@@ -133,28 +141,37 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
           protein: hit.typicalPortionProtein || 0, category: hit.category,
         } : null;
       };
-      const stored = (Array.isArray(row.items) ? row.items : []) as Array<{ name?: string; kcal?: number; protein?: number }>;
-      const { items: newItems, removed, added } = applyCorrection(stored, plan, resolveFood as any);
-      const target = plan.moves ? parseMealDate(m) : (row.at as Date);
-      // Totals come from the items when every item carries its own numbers; otherwise the row's
-      // stored totals stand, because inventing a total from a partial plate is how a correction
-      // turns into a wrong number the client cannot see.
-      const priced = newItems.length > 0 && newItems.every(i => typeof i.kcal === "number");
-      const newKcal = priced ? newItems.reduce((s, i) => s + (i.kcal || 0), 0) : row.kcalInt;
-      const newProt = priced ? newItems.reduce((s, i) => s + (i.protein || 0), 0) : row.proteinInt;
-      if (removed.length || added.length || plan.moves) {
+      let touched = 0;
+      const plates: string[] = [];
+      let target = new Date();
+      for (const row of targets) {
+        const stored = (Array.isArray(row.items) ? row.items : []) as Array<{ name?: string; kcal?: number; protein?: number }>;
+        const { items: newItems, removed, added } = applyCorrection(stored, plan, resolveFood as any);
+        target = plan.moves ? parseMealDate(m) : (row.at as Date);
+        // Totals come from the items when every item carries its own numbers; otherwise the row's
+        // stored totals stand, because inventing a total from a partial plate is how a correction
+        // turns into a wrong number the client cannot see.
+        const priced = newItems.length > 0 && newItems.every(i => typeof i.kcal === "number");
+        const newKcal = priced ? newItems.reduce((s, i) => s + (i.kcal || 0), 0) : row.kcalInt;
+        const newProt = priced ? newItems.reduce((s, i) => s + (i.protein || 0), 0) : row.proteinInt;
+        if (!(removed.length || added.length || plan.moves)) continue;
         await db.update(mealLogs).set({
           items: newItems as any, kcalInt: newKcal, proteinInt: newProt,
           loggedAt: target, corrected: true,
         }).where(eq(mealLogs.id, row.id));
-        invalidateFoodTotalsCache(user.id);
-        const recC = await recomputeTodayFoodTotals(user.id);
-        await db.update(users).set({ todayCalories: recC.calories, todayProteinG: recC.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+        touched++;
+        plates.push(newItems.map(i => String(i.name || "")).filter(Boolean).join(", "));
         turnMutation(`CORRECT removed=[${removed}] added=[${added}] day=${String(row.at).slice(0, 10)}→${mealDateLabel(target)} kcal=${row.kcalInt}→${newKcal}`);
         turnState({ storedItems: stored.map(i => i.name), newItems: newItems.map(i => i.name) }, mealDateLabel(target));
         console.log(`[MEAL_CORRECT] ${String(row.id).slice(0, 8)} removed=[${removed}] added=[${added}] `
-          + `day=${String(row.at).slice(0, 10)}→${mealDateLabel(target)} kcal=${row.kcalInt}→${newKcal} user=...${String(user.id).slice(-6)}`);
-        const plate = newItems.map(i => String(i.name || "")).filter(Boolean).join(", ") || "that meal";
+          + `day=${String(row.at).slice(0, 10)}→${mealDateLabel(target)} kcal=${row.kcalInt}→${newKcal} `
+          + `of ${targets.length} target(s) user=...${String(user.id).slice(-6)}`);
+      }
+      if (touched > 0) {
+        invalidateFoodTotalsCache(user.id);
+        const recC = await recomputeTodayFoodTotals(user.id);
+        await db.update(users).set({ todayCalories: recC.calories, todayProteinG: recC.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+        const plate = plates.filter(Boolean).join("; ") || "that meal";
         const when = plan.moves ? ` on ${mealDateLabel(target)}` : "";
         return `Fixed — ${plate}${when}.\n\nToday: ~${recC.calories} kcal | ~${recC.protein}g protein.`;
       }

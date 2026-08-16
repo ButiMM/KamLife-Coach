@@ -373,6 +373,125 @@ console.log("\n── 8. forceLog governs the LOG_MEAL write ──");
     (await dayRows(uC.id)).length === 0, `rows=${(await dayRows(uC.id)).length}`);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. THE EVENT MODEL — one message, N events. (2026-08-16.)
+//
+//   message → N events → grouped corrections → trusted retrieval → correct aggregates
+//   → one final response
+//
+// Every assertion here is at the ROW level, because the reply was never the thing that was
+// wrong: the product has been SAYING "breakfast … lunch …" and STORING one blob called
+// breakfast since the segmentation was written. The seven cases above are the acceptance
+// boundary this joins; 9.4 and 9.5 are the two the investigation found last — a correction
+// inside the logging message itself, and non-food content inside a food dump.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log("\n── 9. the event model: one message, N events ──");
+  const phone = "whatsapp:+27000000111";
+  const DUMP = "2 eggs and pap for breakfast, chicken and rice for lunch";
+
+  // 9.1 — N EVENTS. Two meals in one message are two rows, each labelled with the slot the
+  // client named. This is the whole change; everything below depends on it.
+  const u = await freshUser(phone);
+  const reply = await handleMessage(phone, DUMP);
+  const rows = await db.select({ id: mealLogs.id, kcal: mealLogs.kcalInt, prot: mealLogs.proteinInt,
+    label: mealLogs.mealLabel, raw: mealLogs.rawMessage, items: mealLogs.items })
+    .from(mealLogs).where(and(eq(mealLogs.userId, u.id), gte(mealLogs.loggedAt, sastDayStart())));
+  const labels = rows.map(r => String(r.label || "").toLowerCase()).sort();
+  check("9.1 two meals in one message are TWO rows", rows.length === 2, `rows=${rows.length} labels=${labels.join(",")}`);
+  check("9.1 each row carries the slot the CLIENT named", labels.join(",") === "breakfast,lunch", labels.join(","));
+  const named = (label: string) => (rows.find(r => String(r.label || "").toLowerCase() === label)?.items as any[] || [])
+    .map(i => String(i?.name || "").toLowerCase()).join(" ");
+  check("9.1 the breakfast row holds the breakfast food", /egg|pap/.test(named("breakfast")), named("breakfast"));
+  check("9.1 the lunch row holds the lunch food", /chicken|rice/.test(named("lunch")), named("lunch"));
+  check("9.1 no food landed on the wrong plate", !/chicken/.test(named("breakfast")) && !/\begg/.test(named("lunch")),
+    `${named("breakfast")} | ${named("lunch")}`);
+  check("9.1 every row carries its own calories", rows.every(r => (r.kcal || 0) > 0), JSON.stringify(rows.map(r => r.kcal)));
+
+  // 9.2 — CORRECT AGGREGATES. The day is the sum of its events, and the number the client was
+  // told matches the rows. A split that changes the total is a worse bug than the one it fixes.
+  const { recomputeTodayFoodTotals, invalidateFoodTotalsCache } = await import("../server/handlers/food-scanner");
+  invalidateFoodTotalsCache(u.id);   // read the ROWS, never the write-path's cached answer
+  const ledger = await recomputeTodayFoodTotals(u.id);
+  check("9.2 the day total is the sum of the events", ledger.calories === sum(rows as any),
+    `ledger=${ledger.calories} rows=${sum(rows as any)}`);
+  check("9.2 nothing was double-counted", ledger.calories < 2000, `${ledger.calories} kcal for two ordinary meals`);
+
+  // 9.3 — ONE FINAL RESPONSE. Two events, one reply — not two receipts stapled together, and
+  // NOT a per-slot breakdown either: Law 15 forbids a receipt, so what must hold is that one
+  // sentence accounts for food from both events rather than confirming only the first.
+  check("9.3 ONE reply for the turn", (reply.match(/Logged \d+ days/g) || []).length === 0 && reply.length < 900,
+    `${reply.length} chars`);
+  check("9.3 and it accounts for BOTH events", /egg|pap/i.test(reply) && /chicken|rice/i.test(reply), reply.slice(0, 200));
+
+  // 9.4 — INTRA-MESSAGE CORRECTION (newly discovered). The client withdraws a food in the same
+  // breath they logged it. Netted before the write: the rice must never reach a row at all.
+  const p2 = "whatsapp:+27000000112";
+  const u2 = await freshUser(p2);
+  await handleMessage(p2, "I had rice and chicken for lunch, actually not rice, it was pap");
+  const r2 = await db.select({ items: mealLogs.items, kcal: mealLogs.kcalInt }).from(mealLogs)
+    .where(and(eq(mealLogs.userId, u2.id), gte(mealLogs.loggedAt, sastDayStart())));
+  // ITEMS ONLY. The raw message is the client's sentence and still contains the word "rice" —
+  // reading it here would pass this test while the rice sat in the total. What is COUNTED is
+  // the items and the kcal, so that is what is asserted.
+  const plate2 = r2.flatMap(r => (r.items as any[] || []).map(i => String(i?.name || "").toLowerCase())).join(" | ");
+  check("9.4 the withdrawn rice was never written", !/rice/.test(plate2), plate2);
+  check("9.4 the replacement they named IS written", /pap/.test(plate2), plate2);
+  check("9.4 the food they never corrected survives", /chicken/.test(plate2), plate2);
+  check("9.4 the day is priced without the rice", sum(r2 as any) > 0 && sum(r2 as any) < 900, `${sum(r2 as any)} kcal`);
+
+  // 9.5 — NON-FOOD CONTENT INSIDE A FOOD DUMP (newly discovered). A sore back is not an
+  // unpriced ingredient, and must not be logged, priced, or read back as one.
+  const p3 = "whatsapp:+27000000113";
+  const u3 = await freshUser(p3);
+  const r3 = await handleMessage(p3, `${DUMP}, my back is sore and I didn't sleep`);
+  const rows3 = await dayRows(u3.id);
+  const plate3 = rows3.flatMap(r => ((r as any).items as any[] || []).map(i => String(i?.name || "").toLowerCase())).join(" ");
+  check("9.5 the food still logs normally", rows3.length === 2 && sum(rows3 as any) > 0, `rows=${rows3.length}`);
+  check("9.5 no phantom item from the body clause", !/back|sore|sleep/.test(plate3), plate3);
+  check("9.5 the client is not asked to price their back",
+    !/could not price|couldn'?t price/i.test(r3) || !/back|sore|sleep/i.test(r3), r3.slice(-220));
+
+  // 9.6 — GROUPED CORRECTION, TRUSTED RETRIEVAL. The fix lands on the event that HOLDS the
+  // food, read from the rows — not on whichever row happened to be written last.
+  const p4 = "whatsapp:+27000000114";
+  const u4 = await freshUser(p4);
+  await handleMessage(p4, "2 eggs and bread for breakfast, chicken and rice for lunch");
+  const before4 = await dayRows(u4.id);
+  await handleMessage(p4, "it wasn't bread, it was pap");
+  const after4 = await db.select({ label: mealLogs.mealLabel, items: mealLogs.items })
+    .from(mealLogs).where(and(eq(mealLogs.userId, u4.id), gte(mealLogs.loggedAt, sastDayStart())));
+  const plateOf = (label: string) => (after4.find(r => String(r.label || "").toLowerCase() === label)?.items as any[] || [])
+    .map(i => String(i?.name || "").toLowerCase()).join(" ");
+  check("9.6 the breakfast row was corrected", !/bread/.test(plateOf("breakfast")) && /pap/.test(plateOf("breakfast")),
+    plateOf("breakfast"));
+  check("9.6 the lunch row was NOT touched", /chicken/.test(plateOf("lunch")) && /rice/.test(plateOf("lunch")),
+    plateOf("lunch"));
+  check("9.6 no row was created by the correction", after4.length === before4.length, `${before4.length} → ${after4.length}`);
+
+  // 9.7 — A BARE MOVE TAKES THE WHOLE GROUP. "That was yesterday" about a two-meal message must
+  // move both, or the totals are wrong on two days at once — silently, and on both.
+  const p5 = "whatsapp:+27000000115";
+  const u5 = await freshUser(p5);
+  await handleMessage(p5, DUMP);
+  await handleMessage(p5, "actually that was yesterday");
+  const left = await dayRows(u5.id);
+  const all5 = await db.select({ id: mealLogs.id }).from(mealLogs).where(eq(mealLogs.userId, u5.id));
+  check("9.7 both events moved — today is empty", left.length === 0, `still on today: ${left.length}`);
+  check("9.7 and both still exist — a move is not a delete", all5.length === 2, `rows=${all5.length}`);
+
+  // 9.8 — AN ORDINARY LOG IS UNCHANGED. The whole point of the segment gate: one meal, one row,
+  // one confirmation, exactly as before. If this fails, the change is not worth having.
+  const p6 = "whatsapp:+27000000116";
+  const u6 = await freshUser(p6);
+  const r6 = await handleMessage(p6, "chicken and rice for lunch");
+  const rows6 = await dayRows(u6.id);
+  check("9.8 a single meal is still a single row", rows6.length === 1, `rows=${rows6.length}`);
+  check("9.8 it still carries the client's own sentence",
+    /chicken and rice for lunch/i.test(String((rows6[0] as any)?.raw || "")), String((rows6[0] as any)?.raw));
+  check("9.8 and still gets its confirmation", /got it|logged|kcal/i.test(r6), r6.slice(0, 120));
+}
+
 console.log(`\nacceptance-hold: ${pass}/${pass + fail} passed against a REAL database`);
 if (fail) { console.log(`FAILED:\n${failures.map(f => `  - ${f}`).join("\n")}`); process.exit(1); }
 process.exit(0);

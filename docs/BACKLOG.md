@@ -5,6 +5,35 @@ folded into an unrelated work order. Nothing here is authorized for change.
 
 ---
 
+## EVT-1 — Multi-day catch-up rows are events with no items
+
+**Recorded:** 2026-08-16, while building the Event Model (`docs/EVENT-MODEL.md`).
+**Status:** OPEN — recorded, not adjudicated. No fix authorized.
+**Not an Event Model defect.** This path already wrote one row per day and was not
+touched; the gap only became visible once "what is an event" was written down.
+
+`handleFoodContext`'s multi-day branch ("chicken Wednesday, oats Thursday") commits
+each day through `commitFoodLog` with `items: []`, `carbsInt: 0`, `fatInt: 0`. So:
+
+- a correction naming a food (*"the rice on Wednesday was wrong"*) can TARGET the row —
+  `pickCorrectionTargets` matches the raw message — but `applyCorrection` then has an
+  empty item list to edit, so nothing changes and the client is told nothing changed;
+- the carbs and fat on those rows are `estimateCarbsFat`'s ratio guess rather than the
+  table's measured numbers, which the scanner path has for the same foods;
+- the day-ledger falls back to the raw message for the diary line, which reads
+  `"wednesday: chicken and rice"` rather than the foods.
+
+The fix looks like three lines — pass the adjusted foods through the same item shape and
+`carbsFatFromFoods` the scanner path uses. It is NOT done here because it changes stored
+numbers on a path no acceptance case exercises, and this work order was frozen.
+
+**Adjudicate deliberately.** If it is picked up, it wants a row-level case in
+`acceptance-hold.ts` first — a multi-day dump, then a correction naming a food from the
+middle day — because "the correction silently did nothing" is exactly the failure this
+product cannot see from the reply.
+
+---
+
 ## PRIV-1 — Client message content is written to the application log stream
 
 **Recorded:** 2026-08-11, during WO7 acceptance (the privacy grep).
