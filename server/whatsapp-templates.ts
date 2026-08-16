@@ -139,9 +139,12 @@ export function validateTemplate(t: WaTemplate): string[] {
       break;
     }
   }
+  // A body that opens or closes on a placeholder is rejected: Meta cannot tell what the message
+  // says when the variable is empty.
   const trimmed = body.trim();
   if (/^\{\{\d+\}\}/.test(trimmed)) problems.push("body starts with a placeholder — put a real word first");
   if (/\{\{\d+\}\}$/.test(trimmed)) problems.push("body ends with a placeholder — put a real word last");
+  // Two variables with nothing but space between them are also rejected.
   if (/\{\{\d+\}\}\s*\{\{\d+\}\}/.test(body)) problems.push("two placeholders are adjacent — put real text between them");
 
   if (t.vars.length !== unique.length) problems.push(`${unique.length} placeholder(s) in the body but ${t.vars.length} described in vars`);
@@ -151,6 +154,8 @@ export function validateTemplate(t: WaTemplate): string[] {
     if (/[\n\t]/.test(s)) problems.push(`sample for {{${i + 1}}} contains a newline or tab`);
   });
 
+  // Markdown that is not WhatsApp's. WhatsApp uses *bold*, _italic_, ~strike~ — "**bold**"
+  // renders as literal asterisks to the client.
   if (/\*\*[^*]+\*\*/.test(body)) problems.push('"**bold**" is markdown, not WhatsApp — use *bold*');
   if (/ {4,}/.test(body)) problems.push("four or more consecutive spaces — Meta strips or rejects these");
   if (/[ \t]+$/m.test(body)) problems.push("a line ends with trailing whitespace");
@@ -163,6 +168,7 @@ export function validateTemplate(t: WaTemplate): string[] {
   return problems;
 }
 
+/** Every template that fails validation, with its reasons. Empty means the pack is submittable. */
 export function invalidTemplates(list: WaTemplate[] = TEMPLATES): Array<{ name: string; problems: string[] }> {
   return list
     .map(t => ({ name: t.name, problems: validateTemplate(t) }))
@@ -172,17 +178,10 @@ export function invalidTemplates(list: WaTemplate[] = TEMPLATES): Array<{ name: 
 // ── Wiring: from an approved SID to an actual send ───────────────────────────────────────────
 
 /** The approved SID for a template, or "" if it has not been submitted/pasted into Railway yet. */
-const TEMPLATE_ENV_VALUES: Record<string, string | undefined> = {
-  TWILIO_DAILY_TEMPLATE_SID: process.env.TWILIO_DAILY_TEMPLATE_SID,
-  TWILIO_WEEKLY_TEMPLATE_SID: process.env.TWILIO_WEEKLY_TEMPLATE_SID,
-  TWILIO_PAYMENT_TEMPLATE_SID: process.env.TWILIO_PAYMENT_TEMPLATE_SID,
-  TWILIO_REENGAGE_TEMPLATE_SID: process.env.TWILIO_REENGAGE_TEMPLATE_SID,
-};
-
 export function templateSid(name: string): string {
   const t = TEMPLATES.find(x => x.name === name);
   if (!t) return "";
-  return (TEMPLATE_ENV_VALUES[t.env] || "").trim();
+  return (process.env[t.env] || "").trim();
 }
 
 /** Templates with no SID in the environment — i.e. the proactive messages that cannot go out. */
