@@ -5,8 +5,10 @@ on:
     paths:
       - 'server/understanding/decision-state.ts'
       - 'server/understanding/decision-runtime.ts'
+      - 'server/brain/reply-verifier.ts'
       - 'script/decision-state-tests.ts'
       - 'script/decision-runtime-tests.ts'
+      - 'script/reply-context-verifier-tests.ts'
       - 'script/decision-doctrine-guard.ts'
       - 'docs/KAMLIFE_DECISION_ENGINE.md'
   push:
@@ -25,4 +27,5 @@ jobs:
       - run: npm ci
       - run: npx tsx script/decision-state-tests.ts
       - run: npx tsx script/decision-runtime-tests.ts
+      - run: npx tsx script/reply-context-verifier-tests.ts
       - run: npx tsx script/decision-doctrine-guard.ts
