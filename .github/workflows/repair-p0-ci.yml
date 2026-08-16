@@ -18,29 +18,50 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - name: Restore expected fail-open annotation
+      - name: Consolidate P0 decision owner and wire attribution guard
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
           import re
-          p = Path('server/understanding/meaning-engine.ts')
-          s = p.read_text()
-          pattern = r'(verifyBrainReply\(rewritten, \{ goalType: user\?\.goalType \}\)\.ok\) \{.*?\}\s*else \{\s*console\.warn\([^\n]+\);\s*)return null;'
-          new, count = re.subn(pattern, r'\1return null; // fail-open on rewrite error', s, count=1, flags=re.S)
-          if count != 1:
-              raise SystemExit(f'expected verifier return block not found, matches={count}')
-          p.write_text(new)
-          w = Path('.github/workflows/repair-p0-ci.yml')
-          w.unlink()
+
+          meaning = Path('server/understanding/meaning-engine.ts')
+          s = meaning.read_text()
+          s = s.replace('import { type UnderstandingState } from "./state";', 'import { type UnderstandingState, deriveRuntimeDecision, type RuntimeDecisionResult } from "./state";')
+          s = s.replace('import { deriveRuntimeDecision, type RuntimeDecisionResult } from "./decision-runtime";\n', '')
+          s = s.replace('verifyBrainReply(finalReply, { goalType: user?.goalType })', 'verifyBrainReply(finalReply, { goalType: user?.goalType, clientMessage: message })')
+          s = s.replace('verifyBrainReply(rewritten, { goalType: user?.goalType })', 'verifyBrainReply(rewritten, { goalType: user?.goalType, clientMessage: message })')
+          meaning.write_text(s)
+
+          for path in ['server/understanding/decision-runtime.ts', 'server/understanding/decision-state.ts']:
+              Path(path).unlink()
+
+          for path in ['script/decision-runtime-tests.ts', 'script/decision-state-tests.ts']:
+              p = Path(path)
+              t = p.read_text()
+              t = t.replace('from "../server/understanding/decision-runtime"', 'from "../server/understanding/state"')
+              t = t.replace('from "../server/understanding/decision-state"', 'from "../server/understanding/state"')
+              p.write_text(t)
+
+          workflow = Path('.github/workflows/repair-p0-ci.yml')
+          test_workflow = Path('.github/workflows/decision-engine-p0.yml')
+          w = test_workflow.read_text()
+          for needle in [
+              "      - 'server/understanding/state.ts'\n",
+              "      - 'server/understanding/meaning-engine.ts'\n",
+          ]:
+              if needle not in w:
+                  w = w.replace("    paths:\n", "    paths:\n" + needle, 1)
+          test_workflow.write_text(w)
+          workflow.unlink()
           PY
       - name: Run full test suite
         run: npm ci && npm test
-      - name: Commit repair and remove one-shot workflow
+      - name: Commit repair
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add server/understanding/meaning-engine.ts .github/workflows/repair-p0-ci.yml
-          git commit -m 'fix: restore P0 verifier fail-open annotation'
+          git add -A
+          git commit -m 'refactor: consolidate P0 decision policy under state owner'
           git push
