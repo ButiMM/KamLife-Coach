@@ -16,6 +16,8 @@
 
 export interface VerifierFacts {
   goalType?: string | null; // "muscle_gain" | "fat_loss" | "recomposition"
+  /** The raw client message for attribution checks. Optional for legacy callers/tests. */
+  clientMessage?: string | null;
 }
 
 export interface VerifierResult {
@@ -23,123 +25,75 @@ export interface VerifierResult {
   violation?: string; // human-readable, also fed back to the model for the rewrite
 }
 
-// Claims of actions the brain has NO tool to perform. Saying them = lying.
-const FORBIDDEN_ACTION_RE =
-  /\bI(?:'?ll| will| am going to| can)\s+(?:adjust|update|change|increase|decrease|recalculate|reset)\s+(?:your\s+)?(?:targets?|goal|calories?|calorie target|protein target|programme|plan|macros)\b/i
-;
-const CLAIMED_GOAL_CHANGE_RE =
-  /\b(?:we(?:'?ll| will| are going to)?\s+(?:shift|switch|move|change)(?:\s+\w+){0,3}\s+to\s+(?:fat loss|muscle gain|cutting|bulking)|your goal is now|I(?:'?ve| have) (?:changed|updated|switched) your goal)\b/i
-;
+const FORBIDDEN_ACTION_RE = /\bI(?:'?ll| will| am going to| can)\s+(?:adjust|update|change|increase|decrease|recalculate|reset)\s+(?:your\s+)?(?:targets?|goal|calories?|calorie target|protein target|programme|plan|macros)\b/i;
+const CLAIMED_GOAL_CHANGE_RE = /\b(?:we(?:'?ll| will| are going to)?\s+(?:shift|switch|move|change)(?:\s+\w+){0,3}\s+to\s+(?:fat loss|muscle gain|cutting|bulking)|your goal is now|I(?:'?ve| have) (?:changed|updated|switched) your goal)\b/i;
+const FAT_LOSS_PUSH_RE = /\b(?:focus on (?:a )?calorie deficit|let'?s (?:focus on|aim for|target) (?:fat|weight) loss|we(?:'?ll| will)? (?:focus|aim|work) on losing (?:weight|fat)|great (?:progress|work|job)[^.!?]{0,40}\blos(?:ing|t)\b[^.!?]{0,20}\b(?:kg|weight)|keep losing|stay in (?:a|your) deficit)\b/i;
+const SURPLUS_PUSH_RE = /\b(?:let'?s (?:focus on|aim for) (?:a )?(?:calorie )?surplus|eat (?:in a|at a) surplus|focus on bulking|let'?s bulk|aim to gain weight|we(?:'?ll| will)? (?:focus|work) on gaining (?:weight|mass|size))\b/i;
+const FITNESS_MYTH_RE = /\b(muscle confusion|confus\w+ (?:the |your |that )?(?:muscle|muscles|focus|plan)|shock(?:ing)? (?:the |your )?muscles?|spot[- ]?reduc\w+|muscles? turn\w* (?:in)?to fat|fat turn\w* (?:in)?to muscle)\b/i;
+const MYTH_DEBUNK_RE = /\b(myth|no such thing|not (?:a )?real|isn'?t real|not (?:a )?thing|can'?t|cannot|doesn'?t work|false|nonsense|ignore that)\b/i;
+const PROGRAMME_FREELANCE_RE = /\bexercises?\s+(?:like|such as|including)\b|\b(?:incorporate|throw in|mix in|start doing|add in|try (?:doing |adding |some ))\b[^.!?]{0,24}?\b(?:squats?|lunges?|deadlifts?|burpees?|crunches|sit[- ]?ups?|planks?|pull[- ]?ups?|chin[- ]?ups?|dips|mountain climbers?|kettlebell\w*|box jumps?|jumping jacks?|russian twists?|leg raises?|jump squats?|snatch\w*|clean(?:s| and jerks?)?)\b/i;
+const MEDICAL_CURE_RE = /\b(?:cure|reverse|heal|get rid of|eliminate|fix)\s+(?:your\s+|the\s+|his\s+|her\s+)?(?:diabetes|diabetic|hypertension|high blood pressure|blood pressure|cholesterol|pcos|thyroid|arthritis|ibs|cancer|condition|illness|disease|diagnosis)\b/i;
+const MEDICATION_TIMING_RE = /\b(?:take|takes|taking|swallow|have)\s+(?:your |his |her |the |their )?(?:[a-z][\w-]*\s+){0,2}?(?:insulin|medication|meds|medicine|dose|doses|dosage|tablets?|pills?|metformin|statins?|arvs?|antiretrovirals?|treatment|prescription)\b[^.!?]{0,40}\b(?:with food|on an empty stomach|before (?:bed|meals?|eating|breakfast)|after (?:meals?|eating|breakfast|supper)|at night|in the morning|with (?:a )?meal|first thing)\b/i;
+const MEDICATION_CHANGE_RE = /\b(?:stop|start|adjust|change|increase|reduce|lower|skip|come off|go off|wean off|double|halve|cut)\s+(?:your |his |her |the |taking )?(?:[a-z][\w-]*\s+){0,3}?(?:insulin|medication|meds|medicine|dose|dosage|tablets|pills|metformin|statins?|treatment|prescription)\b/i;
 
-// Direction language that contradicts the stored goal. High-precision patterns
-// only — generic words like "loss" alone never match.
-const FAT_LOSS_PUSH_RE =
-  /\b(?:focus on (?:a )?calorie deficit|let'?s (?:focus on|aim for|target) (?:fat|weight) loss|we(?:'?ll| will)? (?:focus|aim|work) on losing (?:weight|fat)|great (?:progress|work|job)[^.!?]{0,40}\blos(?:ing|t)\b[^.!?]{0,20}\b(?:kg|weight)|keep losing|stay in (?:a|your) deficit)\b/i
-;
-const SURPLUS_PUSH_RE =
-  /\b(?:let'?s (?:focus on|aim for) (?:a )?(?:calorie )?surplus|eat (?:in a|at a) surplus|focus on bulking|let'?s bulk|aim to gain weight|we(?:'?ll| will)? (?:focus|work) on gaining (?:weight|mass|size))\b/i
-;
+// This is deliberately about ATTRIBUTION, not whether a stored step count exists.
+// A snapshot can say "Steps TODAY so far: 12,770" and that can be true state. What the
+// coach may not do on a message like "I've had coffee" is turn that state into "you walked
+// 12,770 steps" as though the client just reported it. If the client is explicitly asking
+// about their steps/progress, state may be used to answer; otherwise current-turn attribution
+// must come from the current message.
+const STEP_QUERY_RE = /\b(?:how many|what(?:'s| is| are)|did i|have i|my)\s+(?:total\s+)?steps?\b|\bstep\s+(?:count|total|progress)\b|\bhow (?:am i|many)\s+steps?\b/i;
+const STEP_NUMBER_RE = /\b(?:step(?:s)?|walk(?:ed|ing)?|steps?)\b[^0-9]{0,16}(\d[\d ,]*)\b/i;
+const STEP_NUMBER_REVERSE = /\b(\d[\d ,]*)\b[^a-z0-9]{0,8}(?:step(?:s)?|walk(?:ed|ing)?)\b/i;
 
-// Fitness MYTHS the model absorbed from the broscience-soaked internet and will reach
-// for unprompted (2026-07-09: told a client an 8th chest exercise would "confuse that
-// focus" — echoing muscle-confusion, a myth — instead of the correct answer, targeted
-// volume). Caught in CODE, not left to the prompt, because a prompt line the model can
-// ignore is exactly what let this through. Goal-independent — it's just false.
-const FITNESS_MYTH_RE =
-  /\b(muscle confusion|confus\w+ (?:the |your |that )?(?:muscle|muscles|focus|plan)|shock(?:ing)? (?:the |your )?muscles?|spot[- ]?reduc\w+|muscles? turn\w* (?:in)?to fat|fat turn\w* (?:in)?to muscle)\b/i
-;
-// …but ALLOW the bot to correctly DEBUNK a myth ("muscle confusion is a myth",
-// "you can't spot reduce") — only flag when the myth is being endorsed, not refuted.
-const MYTH_DEBUNK_RE =
-  /\b(myth|no such thing|not (?:a )?real|isn'?t real|not (?:a )?thing|can'?t|cannot|doesn'?t work|false|nonsense|ignore that)\b/i
-;
+function extractStepNumbers(text: string): number[] {
+  const out: number[] = [];
+  for (const re of [STEP_NUMBER_RE, STEP_NUMBER_REVERSE]) {
+    const m = (text || "").match(re);
+    if (m?.[1]) {
+      const n = Number(m[1].replace(/[,\s]/g, ""));
+      if (Number.isFinite(n)) out.push(n);
+    }
+  }
+  return [...new Set(out)];
+}
 
-// PROGRAMME SOVEREIGNTY (2026-07-21 live: asked "where can I improve?", the front-door
-// engine freelanced a workout menu — "incorporate exercises like rows and planks… squats
-// and lunges" — inventing movements that AREN'T in the client's FIXED machine programme.
-// The programme is fixed and delivered deterministically (the *programme* command); a
-// conversational reply must NEVER prescribe a menu of exercises. Improving a body part =
-// targeted volume + progressive overload on the lifts they ALREADY have, plus the lagging
-// muscle from their photo read. The prompt already says this (BRAIN_SYSTEM training
-// philosophy) — but a prompt line the model can ignore is exactly what let this through,
-// so it is enforced HERE in code. High precision: the giveaway is "exercises like/such as"
-// (introducing examples of a category = freelancing) or a prescription verb naming a fresh
-// movement. Progressive-overload phrasing ("add 2.5kg", "add a rep/set to your press")
-// never matches — those are the CORRECT answer, not a violation.
-const PROGRAMME_FREELANCE_RE =
-  /\bexercises?\s+(?:like|such as|including)\b|\b(?:incorporate|throw in|mix in|start doing|add in|try (?:doing |adding |some ))\b[^.!?]{0,24}?\b(?:squats?|lunges?|deadlifts?|burpees?|crunches|sit[- ]?ups?|planks?|pull[- ]?ups?|chin[- ]?ups?|dips|mountain climbers?|kettlebell\w*|box jumps?|jumping jacks?|russian twists?|leg raises?|jump squats?|snatch\w*|clean(?:s| and jerks?)?)\b/i
-;
+function verifyStepAttribution(reply: string, clientMessage: string): VerifierResult {
+  const replySteps = extractStepNumbers(reply);
+  if (replySteps.length === 0) return { ok: true };
+  if (STEP_QUERY_RE.test(clientMessage)) return { ok: true };
 
-// MEDICAL CLAIMS — the Meta / WhatsApp compliance line (2026-07-22, three-reviewer note: a health
-// bot is rejected — or worse, liable — the moment it acts like a doctor). KamLife is a WELLNESS
-// coach: it coaches habits and defers the condition to the client's doctor (the health_condition
-// scope boundary). Two acts must NEVER leave the bot's mouth, and no disclaimer redeems them:
-//   1. Claiming to cure / reverse / heal a named disease.
-//   2. Directing a change to prescribed medication (stop / adjust / skip / come off / double).
-// High precision on purpose: "manage your blood pressure with walking" (manage = the approved
-// word) and "keep taking your meds as your doctor said" never match — only the dangerous acts do.
-const MEDICAL_CURE_RE =
-  /\b(?:cure|reverse|heal|get rid of|eliminate|fix)\s+(?:your\s+|the\s+|his\s+|her\s+)?(?:diabetes|diabetic|hypertension|high blood pressure|blood pressure|cholesterol|pcos|thyroid|arthritis|ibs|cancer|condition|illness|disease|diagnosis)\b/i
-;
-// MEDICATION ADMINISTRATION (2026-07-27 clinical audit): the guard below caught CHANGING a
-// dose but not instructing HOW or WHEN to take one. The coach prompt itself carried "Metformin
-// causes nausea without food — time it correctly" and "Take ARVs with food" — both removed, and
-// both now blocked in code so no prompt edit can reintroduce them. Telling someone when to take
-// medicine is a pharmacist's job; a coach has no business anywhere near it.
-const MEDICATION_TIMING_RE =
-  /\b(?:take|takes|taking|swallow|have)\s+(?:your |his |her |the |their )?(?:[a-z][\w-]*\s+){0,2}?(?:insulin|medication|meds|medicine|dose|doses|dosage|tablets?|pills?|metformin|statins?|arvs?|antiretrovirals?|treatment|prescription)\b[^.!?]{0,40}\b(?:with food|on an empty stomach|before (?:bed|meals?|eating|breakfast)|after (?:meals?|eating|breakfast|supper)|at night|in the morning|with (?:a )?meal|first thing)\b/i
-;
+  const reported = extractStepNumbers(clientMessage);
+  if (reported.length === 0) {
+    return { ok: false, violation: "Your reply attributes a step/walking number to the client, but their current message did not report a step count. Stored snapshot state is not a current-turn client statement. Do not say they walked or did a number of steps unless they reported it in this message; if they asked about progress, that is a different case and you may answer from state." };
+  }
 
-const MEDICATION_CHANGE_RE =
-  /\b(?:stop|start|adjust|change|increase|reduce|lower|skip|come off|go off|wean off|double|halve|cut)\s+(?:your |his |her |the |taking )?(?:[a-z][\w-]*\s+){0,3}?(?:insulin|medication|meds|medicine|dose|dosage|tablets|pills|metformin|statins?|treatment|prescription)\b/i
-;
+  const unsupported = replySteps.some(n => !reported.includes(n));
+  if (unsupported) {
+    return { ok: false, violation: "Your reply attributes a step count that is not one of the numbers the client reported in this message. Do not substitute a stored/context step value for the client's own current-turn number." };
+  }
+  return { ok: true };
+}
 
 export function verifyBrainReply(reply: string, facts: VerifierFacts): VerifierResult {
   const r = reply || "";
 
-  // Compliance first — a medical claim is the highest-stakes thing the bot can say.
-  if (MEDICAL_CURE_RE.test(r)) {
-    return { ok: false, violation: "Your reply claims to cure/reverse/heal a medical CONDITION. KamLife is a wellness coach, NOT a doctor or medical device — this is a compliance and liability breach and must NEVER be said. Rewrite: coach the healthy HABITS (movement, food, sleep, consistency) that support how they feel, and for anything about the condition itself defer to their doctor ('I'm your coach, not your doctor — your doctor guides the condition, I'll help you build the habits around it'). Never promise to cure, reverse or fix a disease." };
-  }
-  if (MEDICATION_TIMING_RE.test(r)) {
-    return { ok: false, violation: "Your reply instructs the client on HOW or WHEN to take medication (with food, on an empty stomach, at night, before bed). That is a pharmacist's or doctor's job and never a coach's — remove it entirely. Say that the timing of their medicine is a question for their doctor or pharmacist, and coach only what you actually coach: the food, the training, the sleep, the consistency." };
-  }
-  if (MEDICATION_CHANGE_RE.test(r)) {
-    return { ok: false, violation: "Your reply directs a change to the client's MEDICATION (stopping / adjusting / skipping a dose). You must NEVER touch medication — it is dangerous and outside a coach's scope. Rewrite: tell them only their doctor decides anything about their medication, and steer back to the habits you DO coach (food, movement, sleep). Remove any instruction about medicine, insulin or dose." };
-  }
+  if (MEDICAL_CURE_RE.test(r)) return { ok: false, violation: "Your reply claims to cure/reverse/heal a medical CONDITION. KamLife is a wellness coach, NOT a doctor or medical device — this is a compliance and liability breach and must NEVER be said. Rewrite: coach the healthy HABITS (movement, food, sleep, consistency) that support how they feel, and for anything about the condition itself defer to their doctor ('I'm your coach, not your doctor — your doctor guides the condition, I'll help you build the habits around it'). Never promise to cure, reverse or fix a disease." };
+  if (MEDICATION_TIMING_RE.test(r)) return { ok: false, violation: "Your reply instructs the client on HOW or WHEN to take medication (with food, on an empty stomach, at night, before bed). That is a pharmacist's or doctor's job and never a coach's — remove it entirely. Say that the timing of their medicine is a question for their doctor or pharmacist, and coach only what you actually coach: the food, the training, the sleep, the consistency." };
+  if (MEDICATION_CHANGE_RE.test(r)) return { ok: false, violation: "Your reply directs a change to the client's MEDICATION (stopping / adjusting / skipping a dose). You must NEVER touch medication — it is dangerous and outside a coach's scope. Rewrite: tell them only their doctor decides anything about their medication, and steer back to the habits you DO coach (food, movement, sleep). Remove any instruction about medicine, insulin or dose." };
+  if (FITNESS_MYTH_RE.test(r) && !MYTH_DEBUNK_RE.test(r)) return { ok: false, violation: "Your reply invokes a fitness MYTH (muscle confusion / shocking the muscle / spot reduction / muscle-turns-to-fat). None of these are real — never tell a client to 'confuse' or 'shock' a muscle. Rewrite with the correct principle: progressive overload on the core lifts, and for a lagging body part, TARGETED VOLUME (a couple more sets, or one focused accessory) on that muscle." };
+  if (PROGRAMME_FREELANCE_RE.test(r)) return { ok: false, violation: "You prescribed exercises as if writing a workout ('exercises like…', 'incorporate squats and lunges'). The client's programme is FIXED and machine-based — you must NEVER invent, list, or suggest movements in a chat reply. To bring up a body part the answer is ALWAYS: targeted volume + progressive overload on the lifts they ALREADY have (add a rep or 2.5kg), plus the lagging muscle from their photo read in the numbers above — name the SPECIFIC weak part and one concrete number. If they want the actual plan, tell them to send *programme*. Rewrite now with no new exercises." };
+  if (FORBIDDEN_ACTION_RE.test(r)) return { ok: false, violation: "You claimed you will adjust targets/goal/programme — you have NO tool for that. Remove the claim; if they want it changed, tell them to say 'change my goal to …' so the system can confirm it properly." };
+  if (CLAIMED_GOAL_CHANGE_RE.test(r)) return { ok: false, violation: "You claimed the client's goal changed or will change. Goals only change through an explicit confirmed request — never from you. Remove the claim." };
 
-  if (FITNESS_MYTH_RE.test(r) && !MYTH_DEBUNK_RE.test(r)) {
-    return { ok: false, violation: "Your reply invokes a fitness MYTH (muscle confusion / shocking the muscle / spot reduction / muscle-turns-to-fat). None of these are real — never tell a client to 'confuse' or 'shock' a muscle. Rewrite with the correct principle: progressive overload on the core lifts, and for a lagging body part, TARGETED VOLUME (a couple more sets, or one focused accessory) on that muscle." };
-  }
-
-  if (PROGRAMME_FREELANCE_RE.test(r)) {
-    return { ok: false, violation: "You prescribed exercises as if writing a workout ('exercises like…', 'incorporate squats and lunges'). The client's programme is FIXED and machine-based — you must NEVER invent, list, or suggest movements in a chat reply. To bring up a body part the answer is ALWAYS: targeted volume + progressive overload on the lifts they ALREADY have (add a rep or 2.5kg), plus the lagging muscle from their photo read in the numbers above — name the SPECIFIC weak part and one concrete number. If they want the actual plan, tell them to send *programme*. Rewrite now with no new exercises." };
-  }
-
-  if (FORBIDDEN_ACTION_RE.test(r)) {
-    return { ok: false, violation: "You claimed you will adjust targets/goal/programme — you have NO tool for that. Remove the claim; if they want it changed, tell them to say 'change my goal to …' so the system can confirm it properly." };
-  }
-  if (CLAIMED_GOAL_CHANGE_RE.test(r)) {
-    return { ok: false, violation: "You claimed the client's goal changed or will change. Goals only change through an explicit confirmed request — never from you. Remove the claim." };
-  }
+  const stepAttribution = verifyStepAttribution(r, facts.clientMessage || "");
+  if (!stepAttribution.ok) return stepAttribution;
 
   const goal = String(facts.goalType || "").toLowerCase();
-  if (goal === "muscle_gain" && FAT_LOSS_PUSH_RE.test(r)) {
-    return { ok: false, violation: "This client's goal is MUSCLE GAIN, but your reply pushes fat loss / a deficit / celebrates losing. Rewrite consistent with muscle gain (falling weight is a problem to fix, not progress)." };
-  }
-  if (goal === "fat_loss" && SURPLUS_PUSH_RE.test(r)) {
-    return { ok: false, violation: "This client's goal is FAT LOSS, but your reply pushes a surplus / bulking / gaining. Rewrite consistent with fat loss." };
-  }
-  // Frame ownership: calling a muscle-gain client's plan "your deficit" (or a
-  // fat-loss client's "your surplus") mirrors the client's confusion back at them
-  // instead of correcting it (2026-07-07 sick-day reply: "your calorie deficit
-  // doesn't matter right now" — to a client on a SURPLUS).
-  if (goal === "muscle_gain" && /\byour\s+(?:calorie\s+)?deficit\b/i.test(r)) {
-    return { ok: false, violation: "You called it 'your deficit' but this client is on a SURPLUS (muscle gain). Correct the frame kindly instead of mirroring their confusion." };
-  }
-  if (goal === "fat_loss" && /\byour\s+(?:calorie\s+)?surplus\b/i.test(r)) {
-    return { ok: false, violation: "You called it 'your surplus' but this client is on a DEFICIT (fat loss). Correct the frame kindly instead of mirroring their confusion." };
-  }
+  if (goal === "muscle_gain" && FAT_LOSS_PUSH_RE.test(r)) return { ok: false, violation: "This client's goal is MUSCLE GAIN, but your reply pushes fat loss / a deficit / celebrates losing. Rewrite consistent with muscle gain (falling weight is a problem to fix, not progress)." };
+  if (goal === "fat_loss" && SURPLUS_PUSH_RE.test(r)) return { ok: false, violation: "This client's goal is FAT LOSS, but your reply pushes a surplus / bulking / gaining. Rewrite consistent with fat loss." };
+  if (goal === "muscle_gain" && /\byour\s+(?:calorie\s+)?deficit\b/i.test(r)) return { ok: false, violation: "You called it 'your deficit' but this client is on a SURPLUS (muscle gain). Correct the frame kindly instead of mirroring their confusion." };
+  if (goal === "fat_loss" && /\byour\s+(?:calorie\s+)?surplus\b/i.test(r)) return { ok: false, violation: "You called it 'your surplus' but this client is on a DEFICIT (fat loss). Correct the frame kindly instead of mirroring their confusion." };
 
   return { ok: true };
 }
