@@ -18,12 +18,11 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - name: Consolidate P0 decision owner and wire attribution guard
+      - name: Consolidate P0 decision owner, wire attribution guard, update source guard
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
 
           meaning = Path('server/understanding/meaning-engine.ts')
           s = meaning.read_text()
@@ -34,16 +33,24 @@ jobs:
           meaning.write_text(s)
 
           for path in ['server/understanding/decision-runtime.ts', 'server/understanding/decision-state.ts']:
-              Path(path).unlink()
+              p = Path(path)
+              if p.exists():
+                  p.unlink()
 
           for path in ['script/decision-runtime-tests.ts', 'script/decision-state-tests.ts']:
               p = Path(path)
-              t = p.read_text()
-              t = t.replace('from "../server/understanding/decision-runtime"', 'from "../server/understanding/state"')
-              t = t.replace('from "../server/understanding/decision-state"', 'from "../server/understanding/state"')
-              p.write_text(t)
+              if p.exists():
+                  t = p.read_text()
+                  t = t.replace('from "../server/understanding/decision-runtime"', 'from "../server/understanding/state"')
+                  t = t.replace('from "../server/understanding/decision-state"', 'from "../server/understanding/state"')
+                  p.write_text(t)
 
-          workflow = Path('.github/workflows/repair-p0-ci.yml')
+          unit = Path('script/unit-tests.ts')
+          u = unit.read_text()
+          u = u.replace('assert.match(eng, /verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType \\}\\)/, "engine verifies the freeform reply");', 'assert.match(eng, /verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)/, "engine verifies the freeform reply with current-turn attribution context");')
+          u = u.replace('assert.match(eng, /verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType \\}\\)\\.ok/, "a rewrite is re-verified before it can be sent");', 'assert.match(eng, /verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)\\.ok/, "a rewrite is re-verified with current-turn attribution context");')
+          unit.write_text(u)
+
           test_workflow = Path('.github/workflows/decision-engine-p0.yml')
           w = test_workflow.read_text()
           for needle in [
@@ -53,7 +60,8 @@ jobs:
               if needle not in w:
                   w = w.replace("    paths:\n", "    paths:\n" + needle, 1)
           test_workflow.write_text(w)
-          workflow.unlink()
+
+          Path('.github/workflows/repair-p0-ci.yml').unlink()
           PY
       - name: Run full test suite
         run: npm ci && npm test
@@ -63,5 +71,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git commit -m 'refactor: consolidate P0 decision policy under state owner'
+          git commit -m 'test: align verifier source guard with attribution contract'
           git push
