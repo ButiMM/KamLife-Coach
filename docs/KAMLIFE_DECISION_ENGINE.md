@@ -65,6 +65,19 @@ Every coaching turn should implicitly answer:
 - If yes, what is the single highest-leverage next action?
 - Is the situation outside KamLife's safe scope?
 
+## Executable decision contract
+
+The four coaching outcomes now have a pure, dependency-free policy in `server/understanding/decision-state.ts`:
+
+```text
+REFER        outside safe scope; highest priority
+INVESTIGATE  material problem + insufficient evidence + useful missing fact
+CHANGE       material problem + sufficient evidence
+CONTINUE     otherwise; including correctly doing nothing
+```
+
+This policy deliberately does not treat uncertainty as permission to intervene. A problem with insufficient evidence becomes `INVESTIGATE` only when there is a minimum useful question that could change the next instruction; otherwise the safest outcome is `CONTINUE`.
+
 ## Core journeys that must be excellent
 
 - Messy multi-meal voice dump.
@@ -95,6 +108,14 @@ For a material coaching doctrine, engineering must be able to identify:
 8. production evidence before calling the behaviour validated.
 
 Keep **implemented**, **deterministically verified**, and **behaviourally verified** as distinct states.
+
+Current P0 status:
+
+- **Implemented:** four-state policy + unit-style regression cases.
+- **Deterministically verified:** test logic exists; local execution still needs to be run by the builder environment.
+- **Behaviourally verified:** not claimed yet; live-model journey evidence is still required.
+- **Runtime wiring:** next bounded step into the live Meaning Engine seam.
+- **Prompt reconciliation:** open; legacy "always intervene" wording is currently guarded by `script/decision-doctrine-guard.ts` and must be removed/replaced before this P0 slice is green.
 
 ## Data minimisation gate
 
