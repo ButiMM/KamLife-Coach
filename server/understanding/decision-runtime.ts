@@ -42,10 +42,16 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInputs): RuntimeDeci
   }
 
   const hunger = input.hungerEvidence;
-  const hungerProblem = hunger?.evidenceState === "persistent_hunger"
+  // The symptom history is meaningful even when the nutrition evidence is thin. Losing the
+  // persistence bit here would turn "hungry for five days, but not enough food logged" into
+  // CONTINUE and silently violate Law 26; the correct state is INVESTIGATE.
+  const persistentHunger = hunger?.hunger.persistent === true;
+  const hungerProblem = persistentHunger
+    || hunger?.evidenceState === "persistent_hunger"
     || hunger?.evidenceState === "adequate_protein_persistent_hunger";
   const hungerNeedsInvestigation = hunger?.evidenceState === "insufficient_data"
-    || hunger?.evidenceState === "adequate_protein_persistent_hunger";
+    || hunger?.evidenceState === "adequate_protein_persistent_hunger"
+    || (persistentHunger && hunger?.confidence !== "usable");
 
   const deficit = input.deficitEvidence;
   const deficitProblem = deficit?.gapIsMaterial === true;
