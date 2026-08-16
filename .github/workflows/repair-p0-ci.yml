@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - name: Repair P0 verifier and decision ledger wiring
+      - name: Repair P0 verifier and decision ledger wiring (one-shot)
         shell: bash
         run: |
           python - <<'PY'
