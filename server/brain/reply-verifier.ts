@@ -6,8 +6,7 @@
  * reply already known to be wrong.
  */
 
-import { currentRuntimeDecision } from "../understanding/state";
-import { decisionBoundaryViolation } from "../understanding/decision-boundary";
+import { currentRuntimeDecision, type RuntimeDecisionResult } from "../understanding/state";
 
 export interface VerifierFacts {
   goalType?: string | null;
@@ -17,6 +16,63 @@ export interface VerifierFacts {
 export interface VerifierResult {
   ok: boolean;
   violation?: string;
+}
+
+const DECISION_VIOLATIONS = {
+  empty: "empty reply",
+  investigateMissing: "INVESTIGATE reply must explicitly acknowledge insufficient evidence and identify the minimum evidence needed",
+  investigateChange: "INVESTIGATE reply must not prescribe a plan-level change before evidence is sufficient",
+  continueChange: "CONTINUE reply must not invent a plan-level change when the deterministic decision is no-change",
+  referMissing: "REFER reply must clearly direct the client to appropriate professional/medical support",
+};
+
+function lowerWords(text: string): string[] {
+  return text.toLowerCase().split(" ").map(word => word
+    .replaceAll(",", "")
+    .replaceAll(".", "")
+    .replaceAll(":", "")
+    .replaceAll(";", "")
+    .replaceAll("!", "")
+    .replaceAll("?", "")
+    .replaceAll("(", "")
+    .replaceAll(")", "")
+    .replaceAll("\"", "")
+    .replaceAll("'", "")
+    .trim()
+  ).filter(Boolean);
+}
+
+function containsAny(text: string, phrases: readonly string[]): boolean {
+  const lower = text.toLowerCase();
+  return phrases.some(phrase => lower.includes(phrase));
+}
+
+function containsPlanChange(text: string): boolean {
+  const words = lowerWords(text);
+  const change = ["lower", "raise", "increase", "decrease", "cut", "add", "remove", "change", "adjust", "drop", "bump"];
+  const plan = ["calorie", "calories", "kcal", "protein", "steps", "step", "target", "intake", "deficit", "plan"];
+  return change.some(word => words.includes(word)) && plan.some(word => words.includes(word));
+}
+
+function decisionBoundaryViolation(reply: string, decision: RuntimeDecisionResult): string | null {
+  const text = (reply || "").trim();
+  if (!text) return DECISION_VIOLATIONS.empty;
+
+  if (decision.state === "INVESTIGATE") {
+    if (!containsAny(text, [
+      "i don't know yet", "i do not know yet", "not enough data", "not enough logged", "not enough evidence",
+      "need another day", "need more days", "need more data", "need more evidence", "log another day", "log a few more", "i need to see more",
+    ])) return DECISION_VIOLATIONS.investigateMissing;
+    if (containsPlanChange(text)) return DECISION_VIOLATIONS.investigateChange;
+  }
+
+  if (decision.state === "CONTINUE" && containsPlanChange(text)) return DECISION_VIOLATIONS.continueChange;
+
+  if (decision.state === "REFER" && !containsAny(text, [
+    "doctor", "dietitian", "clinician", "healthcare professional", "medical help", "seek medical care", "emergency",
+  ])) return DECISION_VIOLATIONS.referMissing;
+
+  return null;
 }
 
 function normaliseStepToken(word: string): string {
@@ -83,16 +139,10 @@ function verifyStepAttribution(reply: string, clientMessage: string): VerifierRe
   return { ok: true };
 }
 
-/**
- * The verifier is the single policy owner. The individual checks stay next to each other so
- * each failure retains its precise rewrite instruction, while no separate pattern list/file
- * can silently become another meaning engine. The inline regexes are intentionally not exported
- * or named: they are implementation details of this owner.
- */
-export function verifyBrainReply(reply: string, facts: VerifierFacts): VerifierResult {
+export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOverride?: RuntimeDecisionResult): VerifierResult {
   const r = reply || "";
 
-  const decision = currentRuntimeDecision();
+  const decision = decisionOverride || currentRuntimeDecision();
   if (decision) {
     const violation = decisionBoundaryViolation(r, decision);
     if (violation) return { ok: false, violation };
