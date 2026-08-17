@@ -1,9 +1,6 @@
 /**
- * Decision boundary — deterministic guard around the conversational reply.
- *
- * The runtime decision is authoritative for PLAN behaviour. The model may still answer the
- * client's immediate question, but it may not silently convert CONTINUE/INVESTIGATE/REFER into
- * an unsupported intervention.
+ * Deterministic guard around the conversational reply.
+ * The runtime decision is authoritative for plan-level behaviour.
  */
 
 import type { RuntimeDecisionResult } from "./state";
@@ -17,8 +14,7 @@ export function decisionBoundaryViolation(reply: string, decision: RuntimeDecisi
   if (!text) return "empty reply";
 
   if (decision.state === "INVESTIGATE") {
-    if (!INVESTIGATE_MARKERS.test(text)) return "INVESTIGATE reply must explicitly acknowledge insufficient evidence and name the minimum evidence needed";
-    if (!text.includes("?")) return "INVESTIGATE reply must ask for the minimum useful fact";
+    if (!INVESTIGATE_MARKERS.test(text)) return "INVESTIGATE reply must explicitly acknowledge insufficient evidence and identify the minimum evidence needed";
     if (CHANGE_LANGUAGE.test(text)) return "INVESTIGATE reply must not prescribe a plan-level change before evidence is sufficient";
   }
 
