@@ -1,0 +1,31 @@
+name: decision-engine-p0
+
+on:
+  pull_request:
+    paths:
+      - 'server/understanding/decision-state.ts'
+      - 'server/understanding/decision-runtime.ts'
+      - 'server/brain/reply-verifier.ts'
+      - 'script/decision-state-tests.ts'
+      - 'script/decision-runtime-tests.ts'
+      - 'script/reply-context-verifier-tests.ts'
+      - 'script/decision-doctrine-guard.ts'
+      - 'docs/KAMLIFE_DECISION_ENGINE.md'
+  push:
+    branches:
+      - codex/p0-decision-engine
+
+jobs:
+  p0-decision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsx script/decision-state-tests.ts
+      - run: npx tsx script/decision-runtime-tests.ts
+      - run: npx tsx script/reply-context-verifier-tests.ts
+      - run: npx tsx script/decision-doctrine-guard.ts

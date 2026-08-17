@@ -155,3 +155,33 @@ export function parseUnderstanding(json: string | null | undefined, fallbackName
   try { return coerceUnderstanding(JSON.parse(json), fallbackName); }
   catch { return defaultUnderstanding(fallbackName); }
 }
+
+// ---- Canonical coaching decision contract (P0) ----
+export type DecisionState = "CONTINUE" | "CHANGE" | "INVESTIGATE" | "REFER";
+export type DecisionEvidence = "sufficient" | "insufficient";
+export interface DecisionInputs { requiresReferral?: boolean; meaningfulProblem: boolean; evidence: DecisionEvidence; hasMinimumUsefulQuestion?: boolean; }
+export function selectDecisionState(input: DecisionInputs): DecisionState {
+  if (input.requiresReferral) return "REFER";
+  if (input.meaningfulProblem && input.evidence === "insufficient") return input.hasMinimumUsefulQuestion ? "INVESTIGATE" : "CONTINUE";
+  if (input.meaningfulProblem && input.evidence === "sufficient") return "CHANGE";
+  return "CONTINUE";
+}
+export function isCoachingDecisionState(value: unknown): value is DecisionState { return value === "CONTINUE" || value === "CHANGE" || value === "INVESTIGATE" || value === "REFER"; }
+
+/** Deterministic adapter from the live evidence objects into the canonical decision contract. */
+export interface RuntimeDecisionInputs { hungerEvidence?: any; deficitEvidence?: any; requiresReferral?: boolean; }
+export interface RuntimeDecisionResult { state: DecisionState; evidence: DecisionEvidence; meaningfulProblem: boolean; hasMinimumUsefulQuestion: boolean; }
+export function deriveRuntimeDecision(input: RuntimeDecisionInputs): RuntimeDecisionResult {
+  if (input.requiresReferral) return { state: "REFER", evidence: "sufficient", meaningfulProblem: true, hasMinimumUsefulQuestion: false };
+  const hunger = input.hungerEvidence;
+  const persistentHunger = hunger?.hunger?.persistent === true;
+  const hungerProblem = persistentHunger || hunger?.evidenceState === "persistent_hunger" || hunger?.evidenceState === "adequate_protein_persistent_hunger";
+  const hungerNeedsInvestigation = hunger?.evidenceState === "insufficient_data" || hunger?.evidenceState === "adequate_protein_persistent_hunger" || (persistentHunger && hunger?.confidence !== "usable");
+  const deficit = input.deficitEvidence;
+  const deficitProblem = deficit?.gapIsMaterial === true;
+  const deficitEvidence: DecisionEvidence = deficit?.confidence === "usable" ? "sufficient" : "insufficient";
+  const meaningfulProblem = hungerProblem || deficitProblem;
+  const evidence: DecisionEvidence = hungerNeedsInvestigation ? "insufficient" : deficitProblem ? deficitEvidence : hungerProblem ? "sufficient" : "insufficient";
+  const hasMinimumUsefulQuestion = hungerNeedsInvestigation || (deficitProblem && deficitEvidence === "insufficient");
+  return { state: selectDecisionState({ meaningfulProblem, evidence, hasMinimumUsefulQuestion }), evidence, meaningfulProblem, hasMinimumUsefulQuestion };
+}

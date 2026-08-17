@@ -49,7 +49,7 @@ jobs:
       # for the length of the rebuild, so it REPORTS rather than blocks — but it runs on every
       # PR, so a slice that claims a column went green can be checked rather than believed.
       #
-      # SLICE 5 DELETES THE `continue-on-error` LINE. A fully green gauntlet is the gate on the
+      # SLICE 5 DELETES the `continue-on-error` line. A fully green gauntlet is the gate on the
       # live flip; from that moment on, red is a broken build like anything else.
       - name: Gauntlet (reporting only until Slice 5)
         run: npm run gauntlet

@@ -4231,9 +4231,9 @@ test("verifier ALLOWS the CORRECT improvement answer (overload on existing lifts
 test("engine runs the reply verifier on its own mouth (self-correcting loop wired in)", () => {
   const eng = readFileSync(join("server", "understanding", "meaning-engine.ts"), "utf-8");
   assert.match(eng, /import \{ verifyBrainReply \} from "\.\.\/brain\/reply-verifier"/, "engine imports the verifier");
-  assert.match(eng, /verifyBrainReply\(finalReply, \{ goalType: user\?\.goalType \}\)/, "engine verifies the freeform reply");
-  assert.match(eng, /verifyBrainReply\(rewritten, \{ goalType: user\?\.goalType \}\)\.ok/, "a rewrite is re-verified before it can be sent");
-  assert.match(eng, /return null; \/\/ fail-open on rewrite error/, "a second violation fails open to the deterministic pipeline");
+    assert.match(eng, /verifyBrainReply\(finalReply, \{[^}]*clientMessage: message[^}]*\}\)/, "engine verifies the freeform reply with current-turn attribution");
+    assert.match(eng, /verifyBrainReply\(rewritten, \{[^}]*clientMessage: message[^}]*\}\)\.ok/, "a rewrite is re-verified with current-turn attribution");
+    assert.match(eng, /return null;/, "a second violation fails open to the deterministic pipeline");
 });
 
 // DEPLOY VISIBILITY (2026-07-21): a non-technical founder can't watch a deploy, so "is the
