@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import twilio from "twilio";
 import { classifyMediaFailure } from "../coach-guardrails";
 import { detectEscalation, escalationSLA, isSyntheticTestClient } from "../safety-detection";
+import { currentRuntimeDecision } from "../understanding/state";
 
 // Standalone escalation check — exported so handleMessage can call it early, before any handler
 // returns. Does NOT create a chatHistory row; only creates the escalations record + coach alert.
@@ -183,12 +184,22 @@ export async function recordTurn(reply: string): Promise<void> {
   const t = turnStore.getStore();
   if (!t?.userId) return;
   try {
+    const decision = currentRuntimeDecision();
+    const stateRead = decision
+      ? {
+          ...t.stateRead,
+          decisionState: decision.state,
+          decisionEvidence: decision.evidence,
+          meaningfulProblem: decision.meaningfulProblem,
+          hasMinimumUsefulQuestion: decision.hasMinimumUsefulQuestion,
+        }
+      : t.stateRead;
     await db.insert(turnLedger).values({
       userId: t.userId,
       inputType: t.inputType,
       inputText: t.inputText,
       resolvedDay: t.resolvedDay,
-      stateRead: Object.keys(t.stateRead).length ? t.stateRead : null,
+      stateRead: Object.keys(stateRead).length ? stateRead : null,
       mutations: t.mutations.length ? t.mutations : null,
       reply: (reply || "").slice(0, 4000),
       replyMs: Date.now() - t.startedAt,
