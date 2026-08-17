@@ -1952,6 +1952,68 @@ test("client truth: the small hours are the case that exposed it", async () => {
   assert.equal(sastDayKey(new Date("2026-08-13T22:00:00Z")), "2026-08-14");
 });
 
+// ── FOOD EVENTS: one message, several rows, one undo ────────────────────────────────────────
+// Migration 0004. Product acceptance cases, not a new harness.
+
+test("food events: the write door carries lineage, and NULL is a group of one", () => {
+  const door = readFileSync("server/day-ledger.ts", "utf-8");
+  assert.ok(/sourceMessageId: params\.sourceMessageId \?\? null/.test(door),
+    "every row records which utterance produced it; absent → NULL");
+  const schema = readFileSync("shared/schema.ts", "utf-8");
+  assert.ok(/sourceMessageId: text\("source_message_id"\)/.test(schema), "column exists");
+  assert.ok(/meal_logs_user_source_msg_idx/.test(schema), "and is indexed per client");
+  // Additive only: nullable, no default, no backfill. A legacy row must stay a group of one.
+  const mig = readFileSync("migrations/0004_meal_event_lineage.sql", "utf-8");
+  assert.ok(/ADD COLUMN IF NOT EXISTS source_message_id text;/.test(mig), "nullable, no default");
+  assert.ok(!/UPDATE public\.meal_logs/.test(mig), "no speculative backfill");
+});
+
+test("food events: several events write several rows, one event writes one", () => {
+  const ctx = readFileSync("server/handlers/food-context.ts", "utf-8");
+  assert.ok(/const splitIntoEvents = eventBuckets\.length >= 2;/.test(ctx),
+    "the split needs TWO events with food — one meal stays one row");
+  assert.ok(/if \(splitIntoEvents\)/.test(ctx) && /\} else \{/.test(ctx),
+    "the single-event branch must still exist untouched");
+  // Each row records the EVENT's words, not the whole message — commitFoodLog dedups on
+  // rawMessage, so four rows sharing the full text would silently drop three.
+  assert.ok(/rawMessage: bucket\.text\.slice\(0, 1000\)/.test(ctx),
+    "an event's row carries that event's words");
+  assert.ok(/sourceMessageId: eventGroupId/.test(ctx), "and links to its siblings");
+});
+
+test("food events: each event gets its OWN date when its words name one", () => {
+  const ctx = readFileSync("server/handlers/food-context.ts", "utf-8");
+  assert.ok(/isRetroactiveMeal\(bucket\.text\) \|\| SAYS_TODAY_RE\.test\(bucket\.text\)/.test(ctx),
+    "an event naming its own day wins over the message-level date");
+  assert.ok(/: scannerLoggedAt;/.test(ctx), "an event naming no day inherits the message's");
+});
+
+test("food events: SAYS_TODAY_RE is what rescues \"this morning\" inside a retro message", async () => {
+  const { SAYS_TODAY_RE } = await import("../server/handlers/food-context");
+  for (const t of ["this morning I had a banana", "just now", "tonight", "today"]) {
+    assert.ok(SAYS_TODAY_RE.test(t), `"${t}" is today, even in a message that opened with yesterday`);
+  }
+  for (const t of ["yesterday", "last night", "on Monday"]) {
+    assert.ok(!SAYS_TODAY_RE.test(t), `"${t}" must not be read as today`);
+  }
+});
+
+test("food events: 'remove last' takes the utterance; 'remove the chicken' does not", () => {
+  const scanner = readFileSync("server/handlers/food-scanner.ts", "utf-8");
+  const mgmt = readFileSync("server/handlers/food-log-mgmt.ts", "utf-8");
+  assert.ok(/opts\?: \{ expandToGroup\?: boolean \}/.test(scanner), "expansion is OPT-IN");
+  // The P0 the split would otherwise introduce: dropping the newest of four rows.
+  assert.ok(/"remove-last", \{ expandToGroup: true \}/.test(mgmt), "remove-last means the utterance");
+  assert.ok(/"remove-last-n", \{ expandToGroup: true \}/.test(mgmt));
+  for (const named of ['`named-foods:${best.n}-matched`', '"remove-specific-food']) {
+    const line = mgmt.split("\n").find(l => l.includes(named)) || "";
+    assert.ok(!/expandToGroup/.test(line), `a named-food removal must NOT expand: ${named}`);
+  }
+  // Legacy safety: NULL lineage must never expand into "every unlineaged row".
+  assert.ok(/isNotNull\(mealLogs\.sourceMessageId\)/.test(scanner),
+    "NULL is unknown lineage, not a group");
+});
+
 // ── EVENT BOUNDARIES: how many meals is this message? ───────────────────────────────────────
 // 2026-08-17, traced from a real founder message. The boundary detector required the literal word
 // "for", so a voice-note-shaped message using "in the morning" and "at lunch" produced ZERO

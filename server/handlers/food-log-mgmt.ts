@@ -299,7 +299,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       .orderBy(desc(mealLogs.loggedAt))
       .limit(n);
     if (rowsMR.length === 0) return `No meals logged today to remove.`;
-    const recMR = await dropMeals(user.id, rowsMR.map(r => r.id), "remove-last-n");
+    const recMR = await dropMeals(user.id, rowsMR.map(r => r.id), "remove-last-n", { expandToGroup: true });
     return `Removed the last ${rowsMR.length} meal${rowsMR.length > 1 ? "s" : ""} ✅\n${rowsMR.map(r => `• ${(r.rawMessage || "meal").slice(0, 45)}`).join("\n")}\n\nToday now: ~${recMR.calories} kcal | ~${recMR.protein}g protein.`;
   }
 
@@ -456,7 +456,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
     }
 
-    const recomputed = await dropMeals(user.id, dropLast, "remove-last");
+    const recomputed = await dropMeals(user.id, dropLast, "remove-last", { expandToGroup: true });
     return `Removed your last meal log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.`;
   }
 

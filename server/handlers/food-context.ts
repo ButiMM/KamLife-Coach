@@ -33,6 +33,9 @@ import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
 import { amendRecentMeal, replaceHeldMeal } from "../food-identity-correction";
+import { randomUUID } from "node:crypto";
+import { commitFoodLog } from "../day-ledger";
+export { commitFoodLog } from "../day-ledger";
 
 // One owner — this literal was declared twice in this file.
 const TREAT_WORDS = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i;
@@ -68,6 +71,9 @@ export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: n
  *
  * Exported so it can be asserted — segmentation had no direct regression coverage at all.
  */
+/** Explicit "this is TODAY" markers — an event saying so overrides a message-level retro date. */
+export const SAYS_TODAY_RE = /\b(today|this morning|this afternoon|this evening|tonight|just now|right now)\b/i;
+
 export const MEAL_BOUNDARY_RE = /\b(?:for|in|at|during|as)\s+(?:a\s+|my\s+|the\s+)?(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b/gi;
 
 /**
@@ -110,104 +116,6 @@ async function getStreakNote(userId: string, streak: number, name: string): Prom
   return (await claimOncePerDay(userId, `streak_${streak}`)) ? note : "";
 }
 
-interface CommitFoodLogParams {
-  userId: string;
-  phone: string;
-  rawMessage: string;
-  source: string;
-  kcalInt: number;
-  proteinInt: number;
-  carbsInt: number;
-  fatInt: number;
-  items: Array<{ name: string; grams: number; kcal: number; protein: number; category: string }>;
-  mealLabel: string | null | undefined;
-  loggedAt: Date;
-}
-
-interface CommitFoodLogResult {
-  ok: boolean;
-  wasDup: boolean;
-  prevCals: number;
-  runningCals: number;
-  runningProtein: number;
-}
-
-// THE single chokepoint for every food-log write (Box 2). GUARANTEE: complete macros — kcal +
-// protein with no carbs/fat get filled from the trusted numbers so the card can't be zero-
-// dragged. Fills only when BOTH are absent (an all-protein meal still lands ~0).
-export async function commitFoodLog(params: CommitFoodLogParams): Promise<CommitFoodLogResult> {
-  let carbsInt = params.carbsInt;
-  let fatInt = params.fatInt;
-  if (params.kcalInt > 0 && carbsInt <= 0 && fatInt <= 0) {
-    const est = estimateCarbsFat(params.kcalInt, params.proteinInt);
-    carbsInt = est.carbs; fatInt = est.fat;
-  }
-  let prevCals = 0;
-  try {
-    const existingTotals = await recomputeTodayFoodTotals(params.userId);
-    prevCals = existingTotals.calories;
-  } catch { /* non-fatal */ }
-
-  const dedupWindow = new Date(Date.now() - 4 * 60 * 1000);
-  const rawSlice = params.rawMessage.slice(0, 1000);
-  const effLoggedAt = effectiveMealLoggedAt(params.loggedAt, params.rawMessage, params.mealLabel);
-  const recentDup = await db.select({ id: mealLogs.id })
-    .from(mealLogs)
-    .where(and(
-      eq(mealLogs.userId, params.userId),
-      gte(mealLogs.loggedAt, dedupWindow),
-      eq(mealLogs.kcalInt, params.kcalInt),
-      eq(mealLogs.rawMessage, rawSlice),
-    ))
-    .limit(1);
-
-  const patch = { rawMessage: rawSlice, kcalInt: params.kcalInt, proteinInt: params.proteinInt, carbsInt, fatInt, items: params.items, mealLabel: params.mealLabel };
-  const itemNames = (Array.isArray(params.items) ? params.items : []).map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean);
-  // A held row's REPLACEMENT and an AMENDMENT both rewrite an existing row and suppress the
-  // insert below. Neither ever creates a second row.
-  const heldId = await replaceHeldMeal(params.userId, `${rawSlice} ${itemNames.join(" ")}`, patch);
-  const amendedId = heldId || await amendRecentMeal(params.userId, itemNames, patch);
-  if (amendedId) { invalidatePatternCache(params.userId); invalidateFoodTotalsCache(params.userId); }
-  let insertOk = true;
-  const wasDup = recentDup.length > 0 || !!amendedId;
-  if (!wasDup) {
-    try {
-      await db.insert(mealLogs).values({
-        userId: params.userId,
-        rawMessage: rawSlice,
-        source: params.source,
-        kcalInt: params.kcalInt,
-        proteinInt: params.proteinInt,
-        carbsInt,
-        fatInt,
-        items: params.items,
-        mealLabel: params.mealLabel,
-        loggedAt: effLoggedAt,
-      });
-      invalidatePatternCache(params.userId);
-      invalidateFoodTotalsCache(params.userId);
-      turnMutation(`INSERT meal kcal=${params.kcalInt} prot=${params.proteinInt} label=${params.mealLabel || "none"} at=${String(effLoggedAt).slice(0, 10)}`, `[MEAL_LOG] user=...${String(params.userId || "").slice(-6)}`);
-    } catch (e) {
-      console.error("[MEAL_LOG] insert failed — user:", String(params.userId || "").slice(-6), e);
-      insertOk = false;
-    }
-  }
-
-  let runningCals = prevCals + params.kcalInt;
-  let runningProtein = params.proteinInt;
-  try {
-    const freshTotals = await recomputeTodayFoodTotals(params.userId);
-    runningCals = freshTotals.calories;
-    runningProtein = freshTotals.protein;
-    await db.update(users).set({
-      todayCalories: runningCals,
-      todayProteinG: runningProtein,
-      todayCaloriesDate: sastToday(),
-    }).where(eq(users.phoneNumber, params.phone));
-  } catch (e) { console.error("[MEAL_LOG] calorie update failed — user:", String(params.userId || "").slice(-6), e); }
-
-  return { ok: insertOk, wasDup, prevCals, runningCals, runningProtein };
-}
 
 type HandleMessageFn = (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
 
@@ -1185,20 +1093,22 @@ export async function handleFoodContext(ctx: {
       // cooked staples) and the ratio estimate (energy share — overcounts alcohol).
       // The error modes never hit the same food, so min() is right for both.
       const macroEnergy = (f: any) => 4 * (f.proteinPer100g || 0) + 4 * (f.carbsPer100g || 0) + 9 * (f.fatPer100g || 0);
-      const totalCarbs = Math.round(allAdjustedFoods.reduce((s, f: any) => {
-        const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
-        const dry = grams * (f.carbsPer100g || 0) / 100;
-        const e = macroEnergy(f);
-        const ratio = e > 0 ? (f.adjustedCalories || 0) * (4 * (f.carbsPer100g || 0) / e) / 4 : dry;
-        return s + Math.min(dry, ratio);
-      }, 0));
-      const totalFat = Math.round(allAdjustedFoods.reduce((s, f: any) => {
-        const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
-        const dry = grams * (f.fatPer100g || 0) / 100;
-        const e = macroEnergy(f);
-        const ratio = e > 0 ? (f.adjustedCalories || 0) * (9 * (f.fatPer100g || 0) / e) / 9 : dry;
-        return s + Math.min(dry, ratio);
-      }, 0));
+      // Per-food carbs/fat, ONE owner: the whole-message total and each event's total must not be
+      // able to disagree about the same food.
+      const carbsFatOf = (foods: any[]) => {
+        const one = (f: any, per100: number, kcalPerG: number) => {
+          const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
+          const dry = grams * (per100 || 0) / 100;
+          const e = macroEnergy(f);
+          const ratio = e > 0 ? (f.adjustedCalories || 0) * (kcalPerG * (per100 || 0) / e) / kcalPerG : dry;
+          return Math.min(dry, ratio);
+        };
+        return {
+          carbs: Math.round(foods.reduce((s, f) => s + one(f, f.carbsPer100g, 4), 0)),
+          fat: Math.round(foods.reduce((s, f) => s + one(f, f.fatPer100g, 9), 0)),
+        };
+      };
+      const { carbs: totalCarbs, fat: totalFat } = carbsFatOf(allAdjustedFoods);
       const firstSegLabel = mealSegments.find(s => s.label)?.label
         || extractMealLabel(message, undefined, { kcal: totalCals, protein: Math.round(totalProtein) }, user, await getSlotContext(user.id));
       const scannerItems = allAdjustedFoods.map(f => ({
@@ -1209,19 +1119,61 @@ export async function handleFoodContext(ctx: {
         category: f.category,
         origin: f.origin || "db",
       }));
-      const committed = await commitFoodLog({
-        userId: user.id,
-        phone,
-        rawMessage: message.slice(0, 1000),
-        source: "sa_scanner",  // retro is TIMING (loggedAt), never the origin
-        kcalInt: totalCals,
-        proteinInt: Math.round(totalProtein),
-        carbsInt: totalCarbs,
-        fatInt: totalFat,
-        items: scannerItems,
-        mealLabel: firstSegLabel,
-        loggedAt: scannerLoggedAt,
-      });
+      // ── ONE ROW PER EATING EVENT (2026-08-17, migration 0004) ───────────────────────────────
+      // "eggs in the morning, pap at lunch" is TWO events, stored as one row with one date and one
+      // label. Each event now gets its own row, date and label, linked by sourceMessageId so the
+      // utterance stays undoable as one thing. Single-event messages are untouched — one row, as
+      // before, and that is the common case. rawMessage carries the EVENT's words: commitFoodLog
+      // dedups on it, so four rows sharing the full text would drop three as duplicates.
+      const eventGroupId = randomUUID();
+      const eventBuckets = segmentBuckets.filter(b => b.foods.length > 0);
+      const splitIntoEvents = eventBuckets.length >= 2;
+      let committed!: Awaited<ReturnType<typeof commitFoodLog>>;
+      if (splitIntoEvents) {
+        const slotCtx = await getSlotContext(user.id);
+        for (const bucket of eventBuckets) {
+          const kcal = bucket.foods.reduce((t, f: any) => t + (f.adjustedCalories || 0), 0);
+          const prot = Math.round(bucket.foods.reduce((t, f: any) => t + (f.adjustedProtein || 0), 0));
+          const { carbs, fat } = carbsFatOf(bucket.foods);
+          // The event's OWN date — its text wins when it names one, else it inherits the message's.
+          const ownDate = isRetroactiveMeal(bucket.text) || SAYS_TODAY_RE.test(bucket.text)
+            ? parseMealDate(bucket.text)
+            : scannerLoggedAt;
+          committed = await commitFoodLog({
+            userId: user.id, phone,
+            rawMessage: bucket.text.slice(0, 1000),
+            source: "sa_scanner",
+            kcalInt: kcal, proteinInt: prot, carbsInt: carbs, fatInt: fat,
+            items: bucket.foods.map((f: any) => ({
+              name: f.name,
+              grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
+              kcal: f.adjustedCalories, protein: f.adjustedProtein,
+              category: f.category, origin: f.origin || "db",
+            })),
+            mealLabel: bucket.label
+              || extractMealLabel(bucket.text, ownDate, { kcal, protein: prot }, user, slotCtx),
+            loggedAt: ownDate,
+            sourceMessageId: eventGroupId,
+          });
+          if (!committed.ok) break;
+        }
+        console.log(`[MEAL_EVENTS] ${eventBuckets.length} events from one message — group ${eventGroupId.slice(0, 8)}`);
+      } else {
+        committed = await commitFoodLog({
+          userId: user.id,
+          phone,
+          rawMessage: message.slice(0, 1000),
+          source: "sa_scanner",  // retro is TIMING (loggedAt), never the origin
+          kcalInt: totalCals,
+          proteinInt: Math.round(totalProtein),
+          carbsInt: totalCarbs,
+          fatInt: totalFat,
+          items: scannerItems,
+          mealLabel: firstSegLabel,
+          loggedAt: scannerLoggedAt,
+          sourceMessageId: eventGroupId,
+        });
+      }
       if (!committed.ok) {
         const failReply = `Eish — I worked out that meal (~${totalCals} kcal | ${Math.round(totalProtein)}g protein) but couldn't save it just now. Send it again in a moment and I'll log it.`;
         await logChat(user.id, message, failReply, "FOOD_LOG_FAILED");

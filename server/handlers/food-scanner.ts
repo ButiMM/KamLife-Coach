@@ -15,7 +15,7 @@ import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../food-fuzzy";
 import { usesMacroTargets } from "../goal-profiles";
 import { db } from "../db";
 import { mealLogs, chatHistory, users } from "../../shared/schema";
-import { eq, and, gte, sql, desc, inArray } from "drizzle-orm";
+import { eq, and, gte, sql, desc, inArray, isNotNull } from "drizzle-orm";
 import { sastDayStart, sastToday } from "../utils";
 import { turnMutation } from "./chat-log";
 
@@ -753,9 +753,38 @@ export async function dropMeals(
   userId: string,
   ids: string[],
   reason: string,
+  /**
+   * GROUPED UNDO (2026-08-17, migration 0004). One message can now write SEVERAL rows — "eggs in
+   * the morning, pap at lunch" is two events. "Remove last meal" means "undo what I just told you",
+   * so it must take the whole utterance; dropping the newest row alone would delete one of two and
+   * leave the client staring at half a meal they asked to remove. That is a P0 the event split
+   * would have introduced on its own, which is why it ships in the same change.
+   *
+   * OPT-IN, because the other intent is real and opposite: "remove the chicken" means ONE event,
+   * not the message. Only the callers that mean the utterance pass this.
+   */
+  opts?: { expandToGroup?: boolean },
 ): Promise<{ calories: number; protein: number }> {
   const before = await recomputeTodayFoodTotals(userId);
-  const keep = ids.filter(Boolean);
+  let keep = ids.filter(Boolean);
+  if (opts?.expandToGroup && keep.length) {
+    // Legacy rows carry sourceMessageId NULL and must NEVER expand — NULL is "unknown lineage",
+    // not "a group of every unlineaged row". isNotNull is what keeps a pre-0004 log safe.
+    const groups = await db.select({ g: mealLogs.sourceMessageId }).from(mealLogs)
+      .where(and(eq(mealLogs.userId, userId), inArray(mealLogs.id, keep), isNotNull(mealLogs.sourceMessageId)))
+      .catch(() => [] as any[]);
+    const ids2 = [...new Set(groups.map((r: any) => r.g).filter(Boolean))];
+    if (ids2.length) {
+      const siblings = await db.select({ id: mealLogs.id }).from(mealLogs)
+        .where(and(eq(mealLogs.userId, userId), inArray(mealLogs.sourceMessageId, ids2)))
+        .catch(() => [] as any[]);
+      const expanded = [...new Set([...keep, ...siblings.map((r: any) => r.id)])];
+      if (expanded.length > keep.length) {
+        console.log(`[MEAL_DROP] group expand ${keep.length} → ${expanded.length} rows (one utterance)`);
+      }
+      keep = expanded;
+    }
+  }
   if (keep.length) {
     // Read what is about to go BEFORE it goes. An audit line written after the delete can only
     // say "something left"; this one can say what, and for how many calories.

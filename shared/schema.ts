@@ -206,10 +206,16 @@ export const mealLogs = pgTable(
     items: jsonb("items"),
     mealLabel: text("meal_label"),              // 'breakfast' | 'lunch' | 'dinner' | 'snack' | null
     corrected: boolean("corrected").notNull().default(false),
+    // EVENT LINEAGE (0004). Rows sharing this are ONE client utterance. A message naming four
+    // meals writes four rows; they stay individually correctable while remaining undoable as the
+    // one thing the client said. NULL = logged before lineage existed, and NOT backfilled —
+    // a legacy row is genuinely a group of one, which is what it always was.
+    sourceMessageId: text("source_message_id"),
   },
   (table) => {
     return {
       userDateIdx: index("meal_logs_user_date_idx").on(table.userId, table.loggedAt),
+      userSourceMsgIdx: index("meal_logs_user_source_msg_idx").on(table.userId, table.sourceMessageId),
     };
   },
 );

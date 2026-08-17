@@ -1915,9 +1915,13 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(!isMealAmendment(["bread", "eggs", "cheese"], ["bread", "eggs", "avocado", "coffee"]),
       "a missing earlier item means these are different meals");
     assert.ok(!isMealAmendment([], ["bread", "eggs"]), "no earlier items means nothing to amend");
-    // And the write door must actually USE it, with an UPDATE.
-    const ctxSrc = readFileSync("server/handlers/food-context.ts", "utf-8");
-    assert.ok(/amendRecentMeal\(/.test(ctxSrc), "commitFoodLog must ask before inserting");
+    // And the write door must actually USE it, with an UPDATE. The door moved from
+    // handlers/food-context.ts to day-ledger.ts on 2026-08-17 (per-event rows pushed food-context
+    // past its line budget); the PROPERTY asserted here is unchanged — whatever file owns
+    // commitFoodLog must ask amendRecentMeal before it inserts.
+    const doorSrc = readFileSync("server/day-ledger.ts", "utf-8");
+    assert.ok(/export async function commitFoodLog/.test(doorSrc), "this file must own the write door");
+    assert.ok(/amendRecentMeal\(/.test(doorSrc), "commitFoodLog must ask before inserting");
     const own = readFileSync("server/food-identity-correction.ts", "utf-8");
     assert.ok(/db\.update\(mealLogs\)/.test(own), "an amendment must UPDATE the row, never insert a second");
   });
