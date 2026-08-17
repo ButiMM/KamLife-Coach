@@ -65,3 +65,5 @@ jobs:
           git rm .github/workflows/repair-p0-ci.yml
           git commit -m 'chore: remove one-shot repair workflow'
           git push
+
+# Triggered explicitly after the first P0 integration run exposed the verifier wiring gap.
