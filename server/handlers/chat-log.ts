@@ -124,7 +124,8 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   const verifier = verifyBrainReply(draft, { clientMessage: scope.inputText });
   const likelyGeneric = (ACK_PREFIX.test(draft) && draft.length <= 180) || GENERIC_COACH_REPLY.test(draft);
   const suspiciousStateLanguage = MISSED_TRAINING_CLAIM.test(draft) || NO_CURRENT_STEPS_CLAIM.test(draft) || CONTRADICTORY_WEIGHT_TREND.test(draft);
-  if (!verifier.ok || (!likelyGeneric && !suspiciousStateLanguage) || !isMeaningfulClientMessage(scope.inputText)) return reply;
+  const meaningful = isMeaningfulClientMessage(scope.inputText);
+  if (!verifier.ok || (!likelyGeneric && !suspiciousStateLanguage) || (!meaningful && !suspiciousStateLanguage)) return reply;
 
   try {
     const [user] = await db.select().from(users).where(eq(users.id, scope.userId)).limit(1);
