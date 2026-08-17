@@ -8,6 +8,20 @@
  *
  * Source of truth for contact age: users.lastActiveAt (the actual client contact clock),
  * not a secondary understanding-store write timestamp.
+ *
+ * DELIBERATELY NOT IN SCOPE, and this is a ruling rather than an oversight (2026-08-17).
+ * scheduler/shared.ts:219 (canSendRoutineNudge) and scheduler/nudge-policy.ts compute their own
+ * `daysSilent` from the same field. Those are NOT duplicates of this module and must not be
+ * consolidated into it:
+ *
+ *   this module        "is this person RETURNING to a conversation?"   → one turn, one reply
+ *   nudge policy       "should KamLife SEND something unprompted?"     → cost, cadence, fatigue
+ *
+ * They read one field to answer two different questions with different thresholds, different
+ * consequences and different owners. Unifying them because both contain the token `daysSilent`
+ * would be exactly the false consolidation this rebuild exists to stop — the nudge tiers exist to
+ * halve message volume for a drifting client, which has nothing to do with what a returning client
+ * should be told. Leave them where they are.
  */
 
 export interface ReentryResolution {
