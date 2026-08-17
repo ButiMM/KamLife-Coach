@@ -31,26 +31,32 @@ jobs:
           if old1 not in s or old2 not in s:
               raise SystemExit('meaning-engine verifier call pattern not found; refusing to mutate')
           s = s.replace(old1, new1, 1).replace(old2, new2, 1)
-          old3 = 'return null; // fail-open → existing pipeline runs'
-          if old3 not in s:
-              raise SystemExit('meaning-engine fail-open marker not found; refusing to mutate')
-          # Keep the source-level failure mode explicit while preserving existing runtime behavior.
-          s = s.replace('console.warn("[MEANING_ENGINE] verifier failed after rewrite — deferring (fail open)");\n            return null;', 'console.warn("[MEANING_ENGINE] verifier failed after rewrite — deferring (fail open)");\n            return null; // fail-open on rewrite error', 1)
+          marker = 'console.warn("[MEANING_ENGINE] verifier failed after rewrite — deferring (fail open)");\n            return null;'
+          if marker not in s:
+              raise SystemExit('meaning-engine fail-open rewrite marker not found; refusing to mutate')
+          s = s.replace(marker, 'console.warn("[MEANING_ENGINE] verifier failed after rewrite — deferring (fail open)");\n            return null; // fail-open on rewrite error', 1)
           meaning.write_text(s)
 
           unit = Path('script/unit-tests.ts')
           s = unit.read_text()
-          s = s.replace('verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType \\}\\)', 'verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)', 1)
-          s = s.replace('verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType \\}\\)\\.ok', 'verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)\\.ok', 1)
+          old_u1 = 'assert.match(eng, /verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType \\}\\)/, "engine verifies the freeform reply");'
+          old_u2 = 'assert.match(eng, /verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType \\}\\)\\.ok/, "a rewrite is re-verified before it can be sent");'
+          if old_u1 not in s or old_u2 not in s:
+              raise SystemExit('P0 unit-test verifier guards not found; refusing to mutate')
+          s = s.replace(old_u1, 'assert.match(eng, /verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)/, "engine verifies the freeform reply");', 1)
+          s = s.replace(old_u2, 'assert.match(eng, /verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)\\.ok/, "a rewrite is re-verified before it can be sent");', 1)
           unit.write_text(s)
           PY
       - name: Verify typecheck and P0/full suite
         run: npm ci && npm run check && npx tsx script/decision-state-tests.ts && npx tsx script/decision-runtime-tests.ts && npx tsx script/reply-context-verifier-tests.ts && npx tsx script/decision-doctrine-guard.ts && npm test
-      - name: Commit verified repair
+      - name: Commit verified repair and remove verification workflow
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add server/understanding/meaning-engine.ts script/unit-tests.ts
+          git checkout origin/main -- .github/workflows/test.yml
+          git rm .github/workflows/p0-repair-verified.yml
+          git add .github/workflows/test.yml
           git commit -m 'fix: wire current-turn context into reply verifier'
           git push
