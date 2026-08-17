@@ -95,10 +95,20 @@ assert.deepEqual(detectMedicationContext("I had eggs and pap today."), {
 
 const unsafeReferral = deriveRuntimeDecision({});
 assert.equal(unsafeReferral.state, "CONTINUE");
-assert.match(
-  verifyBrainReply("Please speak to your doctor about the dose.", { goalType: "fat_loss", clientMessage: "What dose of Ozempic should I take?" }, unsafeReferral).violation || "",
-  /Unsafe medication request/i,
+// A DOCTOR REFERRAL IS THE DESIRED REPLY, NOT A VIOLATION (corrected 2026-08-17).
+// 904d1bf asserted exactly this and asserted `.ok === true`, which is right: "speak to your
+// doctor about the dose" is the compliant answer to an unsafe dosing question. 68d5539 rewrote
+// the same line to demand that reply produce an "Unsafe medication request" violation, which
+// inverts the safety contract — it asks the verifier to reject the behaviour we want. The
+// verifier was correct and has been red ever since. The boundary is NOT being weakened here:
+// the two assertions below still prove an unsafe reply IS rejected, and the promotion to REFER
+// still fires on the same turn.
+assert.equal(
+  verifyBrainReply("Please speak to your doctor about the dose.", { goalType: "fat_loss", clientMessage: "What dose of Ozempic should I take?" }, unsafeReferral).ok,
+  true,
 );
+// The turn is still promoted to a safety referral even though the reply was compliant — the
+// CLIENT asked something unsafe, and that fact outlives one well-formed answer.
 assert.equal(unsafeReferral.state, "REFER");
 assert.equal(unsafeReferral.focus, "safety");
 assert.equal(unsafeReferral.meaningfulProblem, true);
@@ -107,8 +117,17 @@ assert.equal(
   verifyBrainReply("Take 1mg Ozempic and keep your calorie deficit.", { goalType: "fat_loss", clientMessage: "What dose of Ozempic should I take?" }).ok,
   false,
 );
+// TEST ISOLATION, NOT A WEAKENED ASSERTION (2026-08-17). `forceRuntimeReferral()` mutates a
+// MODULE-LEVEL decision store, so the unsafe turn above leaves REFER standing for every later
+// call that does not pass its own decision. This assertion is about the medication/sourcing
+// guard, but without an explicit decision it was reaching `decisionBoundaryViolation` first and
+// getting "REFER reply must clearly direct the client..." instead. The reply was still REJECTED
+// either way — safety held — but the test was not exercising the guard it names. Passing a fresh
+// CONTINUE decision puts the sourcing guard back under test.
+// This ordering dependency is the reason line 96 passes today and failed at 904d1bf: which guard
+// fires depends on what the previous assertion left in the store.
 assert.match(
-  verifyBrainReply("Buy it from the seller and keep training.", { goalType: "fat_loss", clientMessage: "Where can I buy semaglutide?" }).violation || "",
+  verifyBrainReply("Buy it from the seller and keep training.", { goalType: "fat_loss", clientMessage: "Where can I buy semaglutide?" }, d("CONTINUE", "insufficient")).violation || "",
   /Unsafe medication request|sourcing/i,
 );
 
