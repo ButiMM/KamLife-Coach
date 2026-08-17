@@ -39,7 +39,12 @@ assert.match(
   /REFER/,
 );
 
-const liveDecision = deriveRuntimeDecision({ hungerEvidence: { evidenceState: "insufficient_data" } });
+const liveDecision = deriveRuntimeDecision({
+  hungerEvidence: {
+    evidenceState: "insufficient_data",
+    hunger: { distinctDays: 4, windowDays: 7, persistent: true },
+  },
+});
 assert.equal(liveDecision.state, "INVESTIGATE");
 assert.equal(currentRuntimeDecision()?.state, "INVESTIGATE");
 
