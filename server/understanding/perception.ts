@@ -77,20 +77,40 @@ export async function runPerception(openai: OpenAI, input: PerceptionInput): Pro
     const parsed = JSON.parse(content);
     const now = new Date().toISOString();
     const priorPatterns = withStats.observations.learnedPatterns || [];
-    const candidatePatterns = Array.isArray(parsed?.observations?.learnedPatterns)
-      ? parsed.observations.learnedPatterns.map((p: any) => {
-          const text = typeof p?.text === "string" ? p.text.trim() : "";
-          const existing = priorPatterns.find(x => x.text.trim().toLowerCase() === text.toLowerCase());
-          return {
-            ...p,
-            firstObserved: existing?.firstObserved || now,
-            lastObserved: text ? now : existing?.lastObserved || now,
-          };
-        })
-      : priorPatterns;
+    const candidatePatterns = Array.isArray(parsed?.observations?.learnedPatterns) ? parsed.observations.learnedPatterns : [];
+    const byText = new Map<string, any>();
+    for (const p of candidatePatterns) {
+      const text = typeof p?.text === "string" ? p.text.trim() : "";
+      if (text) byText.set(text.toLowerCase(), p);
+    }
+    const mergedPatterns = priorPatterns.map(existing => {
+      const candidate = byText.get(existing.text.trim().toLowerCase());
+      if (!candidate) return existing;
+      return {
+        ...existing,
+        ...candidate,
+        text: existing.text,
+        evidence: typeof candidate.evidence === "string" && candidate.evidence.trim() ? candidate.evidence : existing.evidence,
+        firstObserved: existing.firstObserved,
+        lastObserved: now,
+        confirmed: existing.confirmed || candidate.confirmed === true,
+      };
+    });
+    const existingKeys = new Set(priorPatterns.map(p => p.text.trim().toLowerCase()));
+    for (const candidate of candidatePatterns) {
+      const text = typeof candidate?.text === "string" ? candidate.text.trim() : "";
+      if (!text || existingKeys.has(text.toLowerCase())) continue;
+      mergedPatterns.push({
+        ...candidate,
+        text,
+        firstObserved: now,
+        lastObserved: now,
+        confirmed: candidate.confirmed === true,
+      });
+    }
     const parsedWithPatterns = {
       ...parsed,
-      observations: { ...withStats.observations, ...(parsed?.observations || {}), learnedPatterns: candidatePatterns },
+      observations: { ...withStats.observations, ...(parsed?.observations || {}), learnedPatterns: mergedPatterns },
     };
     const coerced = coerceUnderstanding(parsedWithPatterns, withStats.profile.name, withStats);
     coerced.stats = withStats.stats;
