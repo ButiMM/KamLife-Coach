@@ -2,16 +2,7 @@
  * Prompt Compiler (blueprint safeguard C).
  *
  * Renders UnderstandingState into a short natural-language blurb that gets injected
- * into the coach prompt — NOT the raw JSON. Two reasons:
- *  1. Margin: raw JSON of the full state is ~4-6x the tokens of a 30-word blurb, every
- *     message, forever. At R199 that matters. This step is deliberately DETERMINISTIC
- *     (zero model tokens) — it costs nothing to run.
- *  2. Signal: a model reads "she's frustrated and sick — she needs reassurance, not a
- *     push" far better than nested JSON. Prose in, better coaching out.
- *
- * Example output:
- *   "Bonolo's confidence has dropped lately. She's frustrated and sick right now —
- *    steer toward reassurance, not a push. Protein's been light; she's on a 3-day streak."
+ * into the coach prompt — NOT the raw JSON. Deterministic and zero-cost.
  */
 
 import { currentRuntimeDecision, type UnderstandingState } from "./state";
@@ -36,7 +27,6 @@ function moodClause(s: UnderstandingState): string {
 function steer(s: UnderstandingState): string {
   const { healthStatus } = s.current;
   const { readinessToPush, frustrationLevel } = s.observations;
-  // Health always wins: never push a sick/recovering person.
   if (healthStatus === "sick" || healthStatus === "recovering") return "hold rest, lead with care — do not push training or steps";
   if (frustrationLevel >= 7) return "steer toward reassurance and one small win, not a push";
   if (readinessToPush === "high") return "they can take a real push today";
@@ -58,14 +48,18 @@ function statsClause(s: UnderstandingState): string {
   return bits.join(", ");
 }
 
-/**
- * The compiled blurb — kept tight (~30-45 words). Empty-ish state yields a short line,
- * never noise. Never invents: only speaks to fields that carry real signal.
- */
+function patternsClause(s: UnderstandingState): string {
+  const now = Date.now();
+  const recent = (s.observations.learnedPatterns || [])
+    .filter(p => p.confidence === "high" && (now - new Date(p.lastObserved).getTime()) <= 90 * 86_400_000)
+    .slice(0, 2);
+  if (!recent.length) return "";
+  return `Recent coaching patterns (evidence-backed, not facts): ${recent.map(p => `${p.text} Evidence: ${p.evidence}`).join(" | ")}. Treat them as hypotheses, not guarantees.`;
+}
+
 export function compileStateBlurb(s: UnderstandingState): string {
   const who = firstName(s.profile.name);
   const parts: string[] = [];
-
   const trend = trendClause(s);
   const mood = moodClause(s);
   const openers: string[] = [];
@@ -89,25 +83,18 @@ export function compileStateBlurb(s: UnderstandingState): string {
     else if (decision.state === "CONTINUE") parts.push("Primary coaching focus: no intervention. Protect the current plan unless the client gives new evidence that changes the decision.");
   }
 
+  const patterns = patternsClause(s);
+  if (patterns) parts.push(patterns);
   parts.push(`Right now, ${steer(s)}.`);
 
   const stats = statsClause(s);
   if (stats) parts.push(`They're ${stats}.`);
-
   if (s.profile.lifeStory) parts.push(s.profile.lifeStory.trim());
-
-  const numbers = s.profile.preferences.numberFree
-    ? "Keep it number-free — plain language, no calorie figures."
-    : "";
-  if (numbers) parts.push(numbers);
+  if (s.profile.preferences.numberFree) parts.push("Keep it number-free — plain language, no calorie figures.");
 
   return parts.join(" ").replace(/\s+/g, " ").trim();
 }
 
-/**
- * A compact key-facts line for the durable truths (injuries, job, family, goals) —
- * injected once so the coach never forgets what the client told it weeks ago.
- */
 export function compileKeyFacts(s: UnderstandingState): string {
   const facts = (s.profile.keyFacts || []).filter(Boolean);
   if (facts.length === 0) return "";
