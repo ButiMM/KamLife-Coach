@@ -28,14 +28,36 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 237,
+  modules: 239,
   handlerFiles: 29,
   cronRegistrations: 27,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
   messageDeciders: 31,
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 20,
-  /** Named regex literals across the server. The 333 the founder was shown. */
+  /**
+   * Named regex literals across the server. The 333 the founder was shown.
+   *
+   * DELIBERATELY NOT RAISED, 2026-08-17, and this counter currently reports 320 against 318 — so
+   * this guard is RED ON PURPOSE. Raising it would encode a false positive.
+   *
+   * The re-entry migration moved two patterns out of early-commands.ts and into reentry.ts. Two
+   * definitions became one. The counter reported +2 because the ORIGINALS were written as
+   *     const isProfileUpdateMsg =
+   *       /\b(train(ing)?…)/i.test(m);
+   * and the match below requires `= /` on ONE line (`[^/\n]` cannot cross a newline). The
+   * canonical replacements are single-line, so they are counted and their predecessors never were.
+   *     reported +2   ·   actual -1
+   *
+   * Measured across the merge: 318 -> 320 counted, 63 -> 62 invisible. There are ~381 real
+   * patterns, not 318 — roughly 17% of this metric's own subject is unseen, which is why it cannot
+   * currently support a precise decision about regex growth. That blind spot is also how the
+   * duplicate re-entry regexes sat unnoticed long enough to need a migration.
+   *
+   * FOLLOW-UP, explicit and owned: repair the matcher to see multi-line assignments and re-baseline
+   * to the true figure in one deliberate commit. Until then this red line is the marker, and it is
+   * the ONLY thing in this guard that is red — one red line means something, four never did.
+   */
   regexLiterals: 318,
   /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
@@ -122,6 +144,29 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "modules", from: 237, to: 239, date: "2026-08-17",
+    why: "TWO modules, TWO DISTINCT REASONS — recorded separately because collapsing them into "
+      + "\"PR #46 added two files\" would lose the only thing that makes either defensible. "
+      + "(1) server/understanding/reentry.ts — the canonical owner of what \"returning\" MEANS. "
+      + "Before it, that question was answered in three places from two different clocks, and one "
+      + "of them still reads the wrong one (store.ts:38 uses clientUnderstanding.updatedAt, a "
+      + "PERSISTENCE timestamp, so a client can be greeted as returning because our own storage "
+      + "was last written three days ago). A single owner is the precondition for fixing that. "
+      + "(2) server/understanding/reentry-bridge.ts — a deliberate DATA-SOURCE boundary, not a "
+      + "convenience wrapper. Its only job is that a consumer hands over a `user` and cannot "
+      + "select which timestamp counts as last contact. It has one caller and will still have one "
+      + "after P2, because store.ts fires at understanding-LOAD time where there is no client "
+      + "message and will call the daysSinceContact primitive instead. One caller does not "
+      + "invalidate a boundary whose purpose is to make the wrong field unreachable — architectural "
+      + "value is not measured in lines or callers. "
+      + "TRIED FIRST, and REJECTED: deleting the bridge to reach 238. That is optimising the score, "
+      + "not the architecture, and the caller-count test was actually RUN before the decision "
+      + "rather than assumed. PAY THIS BACK if a future reader can show the boundary is unreachable "
+      + "by mistake without it — i.e. once nothing in the codebase can name a second last-contact "
+      + "field. Evidence: all correctness suites pass on this commit, including 35 resolver and 44 "
+      + "bridge assertions, both now wired into the gate.",
+  },
   {
     key: "modules", from: 236, to: 237, date: "2026-08-17",
     why: "GLP-1 MEDICATION SAFETY — ONE CAPABILITY, THREE COUPLED DIMENSIONS. server/medication-context.ts (21e8c44) is a new deterministic owner of one question: is this message about medication, and is the request unsafe? Nothing answered that question before — there was no existing owner to extend. Because the answer is derived from the client's own words, the module necessarily (a) is a module, (b) runs regexes against the message so it counts as a message-deciding owner, and (c) names those regexes as constants. modules, messageDeciders and regexLiterals therefore moved TOGETHER in a single commit. They are three measurements of one boundary, not three independent architecture decisions, and the diagnosis that established this walked every one of the 95 commits between 77fe0a7 and c52eac7 to attribute each delta. TRIED FIRST, and REJECTED: folding the detection into brain/reply-verifier.ts, which would couple CLASSIFICATION to ENFORCEMENT and leave the safety detector untestable apart from the gate that consumes it; and into handlers/early-commands.ts, which would make a safety boundary a routing concern. Both would have optimised for the counter instead of the architecture. THE GOVERNOR WAS CORRECTED BEFORE IT WAS RAISED: authorshipPoints also read over budget at 423/420, and those three points were the violation strings in medicationBoundaryViolation() — rewrite REASONS sent to the model and the admin queue, never to a client, traced through all six consumers of `.violation`. reply-verifier.ts is now excluded as the gate it is, and that counter returned to 420/420 by losing false positives rather than by moving a ceiling. Only the three deltas that survived an honest measurement are raised here. NOT PAID BACK BY DELETING SOMETHING ELSE. Compressing an unrelated file to reach 236/30/316 would be cargo-cult accounting; the governor exists to force a conscious account of complexity, and this is that account. Pay it back the day medication safety can be expressed by an owner that already exists. Evidence: all correctness suites pass on this commit, the safety boundary is required by CONSTITUTION law 4, and the whole delta traces to 21e8c44.",
