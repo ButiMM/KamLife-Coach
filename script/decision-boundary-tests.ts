@@ -93,13 +93,19 @@ assert.deepEqual(detectMedicationContext("I had eggs and pap today."), {
   present: false, medicationClass: null, unsafeRequest: false, reason: null,
 });
 
+const unsafeReferral = deriveRuntimeDecision({});
+assert.equal(unsafeReferral.state, "CONTINUE");
 assert.match(
-  verifyBrainReply("Take 1mg Ozempic and keep your calorie deficit.", { goalType: "fat_loss", clientMessage: "What dose of Ozempic should I take?" }).violation || "",
+  verifyBrainReply("Please speak to your doctor about the dose.", { goalType: "fat_loss", clientMessage: "What dose of Ozempic should I take?" }, unsafeReferral).violation || "",
   /Unsafe medication request/i,
 );
+assert.equal(unsafeReferral.state, "REFER");
+assert.equal(unsafeReferral.focus, "safety");
+assert.equal(unsafeReferral.meaningfulProblem, true);
+
 assert.equal(
-  verifyBrainReply("Please speak to your doctor about the dose.", { goalType: "fat_loss", clientMessage: "What dose of Ozempic should I take?" }).ok,
-  true,
+  verifyBrainReply("Take 1mg Ozempic and keep your calorie deficit.", { goalType: "fat_loss", clientMessage: "What dose of Ozempic should I take?" }).ok,
+  false,
 );
 assert.match(
   verifyBrainReply("Buy it from the seller and keep training.", { goalType: "fat_loss", clientMessage: "Where can I buy semaglutide?" }).violation || "",
