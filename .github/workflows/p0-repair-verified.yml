@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - name: Apply surgical P0 consolidation, verifier wiring, and regex-budget repair
+      - name: Apply surgical P0 consolidation, verifier wiring, regex-budget repair, and decision ledgering
         shell: bash
         run: |
           python - <<'PY'
@@ -25,7 +25,11 @@ jobs:
           s = meaning.read_text()
           s = s.replace('verifyBrainReply(finalReply, { goalType: user?.goalType })','verifyBrainReply(finalReply, { goalType: user?.goalType, clientMessage: message })',1)
           s = s.replace('verifyBrainReply(rewritten, { goalType: user?.goalType })','verifyBrainReply(rewritten, { goalType: user?.goalType, clientMessage: message })',1)
-          s = s.replace('import { deriveRuntimeDecision, type RuntimeDecisionResult } from "./decision-runtime";','import { deriveRuntimeDecision, type RuntimeDecisionResult } from "./state";',1)
+          s = s.replace('import { verifyBrainReply } from "../brain/reply-verifier";','import { verifyBrainReply } from "../brain/reply-verifier";\nimport { turnState } from "../handlers/chat-log";',1)
+          needle = '''  const runtimeDecision = deriveRuntimeDecision({\n    hungerEvidence: input.hungerEvidence,\n    deficitEvidence: input.deficitEvidence,\n  });\n'''
+          replacement = needle + '''  // FORENSIC DECISION TRACE: the canonical decision is part of the turn evidence, not just prompt text.\n  // This makes a bad decision reconstructable from turn_ledger without replaying the model.\n  turnState({\n    decisionState: runtimeDecision.state,\n    decisionEvidence: runtimeDecision.evidence,\n    meaningfulProblem: runtimeDecision.meaningfulProblem,\n    hasMinimumUsefulQuestion: runtimeDecision.hasMinimumUsefulQuestion,\n  });\n'''
+          if needle not in s: raise SystemExit('runtime decision owner not found; refusing to mutate')
+          s = s.replace(needle, replacement, 1)
           meaning.write_text(s)
 
           for path in ['script/decision-state-tests.ts','script/decision-runtime-tests.ts']:
@@ -53,11 +57,11 @@ jobs:
           unit=Path('script/unit-tests.ts'); s=unit.read_text()
           marker='  test("engine runs the reply verifier on its own mouth (self-correcting loop wired in)"'
           start=s.find(marker)
-          if start<0: raise SystemExit('verifier wiring test marker not found; refusing to mutate')
-          end=s.find('\n  test("', start+len(marker))
-          if end<0: raise SystemExit('verifier wiring test boundary not found; refusing to mutate')
-          replacement='''  test("engine runs the reply verifier on its own mouth (self-correcting loop wired in)", () => {\n    const eng = readFileSync(join("server", "understanding", "meaning-engine.ts"), "utf-8");\n    assert.match(eng, /verifyBrainReply\\(finalReply, \\{[^}]*clientMessage: message[^}]*\\}\\)/, "engine verifies the freeform reply with current-turn attribution");\n    assert.match(eng, /verifyBrainReply\\(rewritten, \\{[^}]*clientMessage: message[^}]*\\}\\)\\.ok/, "a rewrite is re-verified with current-turn attribution");\n    assert.match(eng, /verifier failed after rewrite/, "a second violation fails open to the deterministic pipeline");\n  });'''
-          s=s[:start]+replacement+s[end:]
+          if start>=0:
+              end=s.find('\n  test("', start+len(marker))
+              if end>=0:
+                  replacement='''  test("engine runs the reply verifier on its own mouth (self-correcting loop wired in)", () => {\n    const eng = readFileSync(join("server", "understanding", "meaning-engine.ts"), "utf-8");\n    assert.match(eng, /verifyBrainReply\\(finalReply, \\{[^}]*clientMessage: message[^}]*\\}\\)/, "engine verifies the freeform reply with current-turn attribution");\n    assert.match(eng, /verifyBrainReply\\(rewritten, \\{[^}]*clientMessage: message[^}]*\\}\\)\\.ok/, "a rewrite is re-verified with current-turn attribution");\n    assert.match(eng, /verifier failed after rewrite/, "a second violation fails open to the deterministic pipeline");\n    assert.match(eng, /turnState\\(\\{[\\s\\S]*decisionState: runtimeDecision\\.state/, "the canonical decision is written into the turn ledger");\n  });'''
+                  s=s[:start]+replacement+s[end:]
           unit.write_text(s)
           PY
       - name: Verify typecheck and P0/full suite
