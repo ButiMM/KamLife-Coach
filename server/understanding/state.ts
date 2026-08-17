@@ -26,6 +26,13 @@ export type Trend = "rising" | "stable" | "falling";
 export type Readiness = "low" | "medium" | "high";
 export type WeightDirection = "up" | "down" | "stable";
 
+export interface ReentryState {
+  /** Number of full days since the coach last had a persisted understanding for this client. */
+  daysSinceLastContact: number | null;
+  /** True when the gap is long enough that continuity should be re-established, not assumed. */
+  isReturning: boolean;
+}
+
 export interface UnderstandingState {
   /** persistent, slow-moving — who this person is */
   profile: {
@@ -39,6 +46,7 @@ export interface UnderstandingState {
     mood: Mood;
     healthStatus: HealthStatus;
     topic: Topic;
+    reentry: ReentryState;
   };
   /** the coach's accumulated read on the person — the thing that makes it a coach, not a chatbot */
   observations: {
@@ -61,11 +69,23 @@ export interface UnderstandingState {
 export function defaultUnderstanding(name = "there"): UnderstandingState {
   return {
     profile: { name, lifeStory: "", keyFacts: [], preferences: { numberFree: true } },
-    current: { mood: "neutral", healthStatus: "healthy", topic: "life" },
+    current: { mood: "neutral", healthStatus: "healthy", topic: "life", reentry: { daysSinceLastContact: null, isReturning: false } },
     observations: { confidenceTrend: "stable", frustrationLevel: 3, readinessToPush: "medium", trustLevel: 5 },
     stats: { streak: 0, weightDirection: "stable", recentProteinAvg: 0, recentStepAvg: 0 },
     updatedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Convert elapsed time since a stored understanding into a deterministic re-entry signal.
+ * A missing stored state means there is no reliable prior contact to call a gap.
+ */
+export function reentryFromAgeHours(ageHours: number, hasStoredContact = true): ReentryState {
+  if (!hasStoredContact || !Number.isFinite(ageHours) || ageHours < 0) {
+    return { daysSinceLastContact: null, isReturning: false };
+  }
+  const days = Math.floor(ageHours / 24);
+  return { daysSinceLastContact: days, isReturning: days >= 2 };
 }
 
 /**
@@ -115,6 +135,7 @@ export function coerceUnderstanding(raw: any, fallbackName = "there"): Understan
   const c = raw.current ?? {};
   const o = raw.observations ?? {};
   const s = raw.stats ?? {};
+  const re = c.reentry ?? {};
   return {
     profile: {
       name: typeof p.name === "string" && p.name.trim() ? p.name.trim().slice(0, 60) : d.profile.name,
@@ -126,6 +147,10 @@ export function coerceUnderstanding(raw: any, fallbackName = "there"): Understan
       mood: oneOf(MOODS, c.mood, d.current.mood),
       healthStatus: oneOf(HEALTH, c.healthStatus, d.current.healthStatus),
       topic: oneOf(TOPICS, c.topic, d.current.topic),
+      reentry: {
+        daysSinceLastContact: re.daysSinceLastContact == null ? d.current.reentry.daysSinceLastContact : clampInt(re.daysSinceLastContact, 0, 3650, 0),
+        isReturning: typeof re.isReturning === "boolean" ? re.isReturning : d.current.reentry.isReturning,
+      },
     },
     observations: {
       confidenceTrend: oneOf(TRENDS, o.confidenceTrend, d.observations.confidenceTrend),
