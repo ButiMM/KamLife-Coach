@@ -36,40 +36,68 @@ const MEDICAL_CURE_RE = /\b(?:cure|reverse|heal|get rid of|eliminate|fix)\s+(?:y
 const MEDICATION_TIMING_RE = /\b(?:take|takes|taking|swallow|have)\s+(?:your |his |her |the |their )?(?:[a-z][\w-]*\s+){0,2}?(?:insulin|medication|meds|medicine|dose|doses|dosage|tablets?|pills?|metformin|statins?|arvs?|antiretrovirals?|treatment|prescription)\b[^.!?]{0,40}\b(?:with food|on an empty stomach|before (?:bed|meals?|eating|breakfast)|after (?:meals?|eating|breakfast|supper)|at night|in the morning|with (?:a )?meal|first thing)\b/i;
 const MEDICATION_CHANGE_RE = /\b(?:stop|start|adjust|change|increase|reduce|lower|skip|come off|go off|wean off|double|halve|cut)\s+(?:your |his |her |the |taking )?(?:[a-z][\w-]*\s+){0,3}?(?:insulin|medication|meds|medicine|dose|dosage|tablets|pills|metformin|statins?|treatment|prescription)\b/i;
 
-// This is deliberately about ATTRIBUTION, not whether a stored step count exists.
-// A snapshot can say "Steps TODAY so far: 12,770" and that can be true state. What the
-// coach may not do on a message like "I've had coffee" is turn that state into "you walked
-// 12,770 steps" as though the client just reported it. If the client is explicitly asking
-// about their steps/progress, state may be used to answer; otherwise current-turn attribution
-// must come from the current message.
-const STEP_QUERY_RE = /\b(?:how many|what(?:'s| is| are)|did i|have i|my)\s+(?:total\s+)?steps?\b|\bstep\s+(?:count|total|progress)\b|\bhow (?:am i|many)\s+steps?\b/i;
-const STEP_NUMBER_RE = /\b(?:step(?:s)?|walk(?:ed|ing)?|steps?)\b[^0-9]{0,16}(\d[\d ,]*)\b/i;
-const STEP_NUMBER_REVERSE = /\b(\d[\d ,]*)\b[^a-z0-9]{0,8}(?:step(?:s)?|walk(?:ed|ing)?)\b/i;
+// Step attribution is deliberately about the current turn, not stored state.
+function normaliseStepToken(word: string): string {
+  return word
+    .replaceAll(",", "")
+    .replaceAll(".", "")
+    .replaceAll(":", "")
+    .replaceAll(";", "")
+    .replaceAll("!", "")
+    .replaceAll("?", "")
+    .replaceAll("(", "")
+    .replaceAll(")", "")
+    .replaceAll("\"", "")
+    .replaceAll("'", "")
+    .trim();
+}
+
+function stepWords(text: string): string[] {
+  return (text || "").toLowerCase().split(" ").map(normaliseStepToken).filter(Boolean);
+}
+
+function isStepWord(word: string): boolean {
+  return word === "step" || word === "steps" || word === "walk" || word === "walked" || word === "walking";
+}
 
 function extractStepNumbers(text: string): number[] {
+  const words = stepWords(text);
   const out: number[] = [];
-  for (const re of [STEP_NUMBER_RE, STEP_NUMBER_REVERSE]) {
-    const m = (text || "").match(re);
-    if (m?.[1]) {
-      const n = Number(m[1].replace(/[,\s]/g, ""));
-      if (Number.isFinite(n)) out.push(n);
+  for (let i = 0; i < words.length; i += 1) {
+    const word = words[i];
+    if (isStepWord(word)) {
+      const next = Number(words[i + 1]?.replaceAll(",", ""));
+      if (Number.isFinite(next)) out.push(next);
+      continue;
     }
+    const number = Number(word.replaceAll(",", ""));
+    if (Number.isFinite(number) && isStepWord(words[i + 1] || "")) out.push(number);
   }
   return [...new Set(out)];
+}
+
+function isExplicitStepQuery(text: string): boolean {
+  const q = (text || "").toLowerCase();
+  return q.includes("how many steps")
+    || q.includes("what are my steps")
+    || q.includes("what's my step count")
+    || q.includes("what is my step count")
+    || q.includes("my steps")
+    || q.includes("step progress")
+    || q.includes("step total");
 }
 
 function verifyStepAttribution(reply: string, clientMessage: string): VerifierResult {
   const replySteps = extractStepNumbers(reply);
   if (replySteps.length === 0) return { ok: true };
-  if (STEP_QUERY_RE.test(clientMessage)) return { ok: true };
+  if (isExplicitStepQuery(clientMessage)) return { ok: true };
 
   const reported = extractStepNumbers(clientMessage);
   if (reported.length === 0) {
     return { ok: false, violation: "Your reply attributes a step/walking number to the client, but their current message did not report a step count. Stored snapshot state is not a current-turn client statement. Do not say they walked or did a number of steps unless they reported it in this message; if they asked about progress, that is a different case and you may answer from state." };
   }
 
-  const unsupported = replySteps.some(n => !reported.includes(n));
-  if (unsupported) {
+  if (replySteps.some(n => !reported.includes(n))) {
     return { ok: false, violation: "Your reply attributes a step count that is not one of the numbers the client reported in this message. Do not substitute a stored/context step value for the client's own current-turn number." };
   }
   return { ok: true };
