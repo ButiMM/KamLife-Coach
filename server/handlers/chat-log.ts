@@ -95,6 +95,7 @@ interface TurnScope {
   stateRead: Record<string, unknown>;
   mutations: string[];
   startedAt: number;
+  finalReplyPromise: Promise<string>;
 }
 
 const turnStore = new AsyncLocalStorage<TurnScope>();
@@ -172,10 +173,22 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
 }
 
 export async function inTurn<T>(inputType: string, inputText: string, fn: () => Promise<T>): Promise<T> {
-  return turnStore.run({ userId: null, inputType, inputText: (inputText || "").slice(0, 2000), resolvedDay: null, stateRead: {}, mutations: [], startedAt: Date.now() }, async () => {
-    const result = await fn();
-    if (typeof result !== "string") return result;
-    return await reconcileTurnReply(turnStore.getStore()!, result) as T;
+  let resolveFinalReply!: (reply: string) => void;
+  const finalReplyPromise = new Promise<string>(resolve => { resolveFinalReply = resolve; });
+  return turnStore.run({ userId: null, inputType, inputText: (inputText || "").slice(0, 2000), resolvedDay: null, stateRead: {}, mutations: [], startedAt: Date.now(), finalReplyPromise }, async () => {
+    try {
+      const result = await fn();
+      if (typeof result !== "string") {
+        resolveFinalReply(String(result ?? ""));
+        return result;
+      }
+      const finalReply = await reconcileTurnReply(turnStore.getStore()!, result);
+      resolveFinalReply(finalReply);
+      return finalReply as T;
+    } catch (err) {
+      resolveFinalReply("");
+      throw err;
+    }
   });
 }
 
@@ -187,13 +200,17 @@ export async function recordTurn(reply: string): Promise<void> {
   const t = turnStore.getStore();
   if (!t?.userId) return;
   try {
+    const recordedReply = await Promise.race([
+      t.finalReplyPromise,
+      new Promise<string>(resolve => setTimeout(() => resolve(reply || ""), 20000)),
+    ]);
     const decision = currentRuntimeDecision();
     const evidenceRefs = decision?.focus === "safety" ? ["safety_gate"] : decision?.focus === "hunger" ? ["hunger_evidence"] : decision?.focus === "intake" ? ["deficit_evidence"] : [];
     const stateRead = decision ? { ...t.stateRead, decisionState: decision.state, decisionEvidence: decision.evidence, decisionFocus: decision.focus, decisionEvidenceRefs: evidenceRefs, meaningfulProblem: decision.meaningfulProblem, hasMinimumUsefulQuestion: decision.hasMinimumUsefulQuestion } : t.stateRead;
     await db.insert(turnLedger).values({
       userId: t.userId, inputType: t.inputType, inputText: t.inputText, resolvedDay: t.resolvedDay,
       stateRead: Object.keys(stateRead).length ? stateRead : null, mutations: t.mutations.length ? t.mutations : null,
-      reply: (reply || "").slice(0, 4000), replyMs: Date.now() - t.startedAt,
+      reply: recordedReply.slice(0, 4000), replyMs: Date.now() - t.startedAt,
       version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 12) || process.env.APP_VERSION || "dev",
     });
   } catch (e) { console.warn("[TURN_LEDGER] non-fatal:", (e as any)?.message); }
