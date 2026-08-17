@@ -2,18 +2,12 @@
  * Perception pass (blueprint safeguard A).
  *
  * THE ONE PLACE a raw message becomes updated understanding. It runs a cheap/fast
- * model whose ONLY job is to update UnderstandingState — it never writes the reply.
- * This is the hard split the reviews demanded: if the same model both replied AND
- * wrote the state, it would reverse-engineer the state to justify its own reply
- * (harsh reply → invents "readinessToPush: high" to excuse itself). Fact-finding is
- * kept separate from decision-making.
+ * model whose ONLY job: update UnderstandingState — it never writes the reply.
  *
- * Trust gate: whatever the model returns is passed through coerceUnderstanding(),
- * which clamps ranges and whitelists enums — the model can never poison the state
- * with an out-of-range value or an invented mood.
+ * Trust gate: model output is clamped/whitelisted. Pattern timestamps are server-owned;
+ * the model may describe evidence/confidence/confirmation but cannot forge chronology.
  *
- * Offline/fail-safe: any error returns the prior state unchanged (understanding never
- * regresses on a hiccup, and a reply can still be produced from what we already knew).
+ * Offline/fail-safe: any error returns the prior state unchanged.
  */
 
 import type OpenAI from "openai";
@@ -35,7 +29,9 @@ Rules:
 - topic: what this message is about (recovery/nutrition/workout/life/gratitude/progress).
 - observations.confidenceTrend / frustrationLevel(1-10) / readinessToPush(low/medium/high) / trustLevel(1-10): nudge SLOWLY over time; one message rarely swings these hard. If they're angry at the coach, trust drops and frustration rises.
 - profile.keyFacts: append a durable fact ONLY if they revealed something lasting. Two kinds count: (a) life facts — an injury, their job, family, a firm goal, a food they can't eat; and (b) EVIDENCE of how they respond — observed behaviour that ages well, e.g. "responds well to encouragement", "goes quiet when pushed hard", "mentioned wanting to quit", "logs food daily", "opens up in voice notes". Store the EVIDENCE (what they said or did), never your interpretation ("trustLevel 7", "mood frustrated") — those you infer fresh each message. Never store a passing mood as a fact.
-- profile.lifeStory: a <=50-word narrative in TWO parts. First, WHO THEY ARE (permanent — e.g. "a cleaner, two daughters, wants to be strong for her grandchildren") — keep this stable. Then THEIR CURRENT CHAPTER (what's happening now — e.g. "recovering from flu, confidence dipping, looking forward to next week") — update only this part as things change. Splitting it this way keeps the permanent truth from being overwritten by a passing week.
+- observations.learnedPatterns: use this ONLY for repeated, evidence-backed behavioural patterns that can improve future coaching. A single event is NOT a pattern. Never infer a hidden cause from missing data. Never write "overeats on weekends" because Saturdays are missing; that is uncertainty, not evidence. Pattern `text` must describe what was observed, `evidence` must name the concrete repeated evidence, `confidence` is low/medium/high, and `confirmed` is true only when the client explicitly confirms the pattern or the evidence has repeated independently. Keep at most 8 patterns. When a known pattern is contradicted, update its evidence/confidence instead of silently preserving it.
+- Pattern chronology is NOT model-owned. Do not invent `firstObserved` or `lastObserved` timestamps; the server will retain and update them from persisted state and the current turn.
+- profile.lifeStory: a <=50-word narrative in TWO parts. First, WHO THEY ARE (permanent — e.g. "a cleaner, two daughters, wants to be strong for her grandchildren") — keep this stable. Then THEIR CURRENT CHAPTER (what's happening now — update only this part as things change). Do not turn a single incident into a permanent identity statement.
 - Leave stats untouched (those come from the database, not from you).
 
 Return ONLY valid JSON matching the shape you were given. No prose, no explanation.`;
@@ -43,20 +39,16 @@ Return ONLY valid JSON matching the shape you were given. No prose, no explanati
 export interface PerceptionInput {
   message: string;
   prior: UnderstandingState;
-  /** trustworthy DB-derived stats to fold in (streak, weight direction, averages) */
   stats?: Partial<UnderstandingState["stats"]>;
   userId?: string | null;
 }
 
 export async function runPerception(openai: OpenAI, input: PerceptionInput): Promise<UnderstandingState> {
   const { message, prior, stats, userId } = input;
-  // Stats are DB truth — fold them in regardless of the model, and never let the model touch them.
   const withStats: UnderstandingState = { ...prior, stats: { ...prior.stats, ...(stats || {}) } };
 
   try {
     assertAiOnline("perception");
-    // We send the model the durable subset + current, and ask for an update. Stats are
-    // omitted from what the model sees it can change.
     const seed = {
       profile: withStats.profile,
       current: withStats.current,
@@ -65,7 +57,7 @@ export async function runPerception(openai: OpenAI, input: PerceptionInput): Pro
     const resp = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0,
-      max_tokens: 320,
+      max_tokens: 360,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: PERCEPTION_SYSTEM },
@@ -83,16 +75,51 @@ export async function runPerception(openai: OpenAI, input: PerceptionInput): Pro
     const content = resp.choices[0]?.message?.content;
     if (!content) return withStats;
     const parsed = JSON.parse(content);
-    // Trust gate + re-attach the DB stats (model output for stats is ignored).
-    const coerced = coerceUnderstanding(parsed, withStats.profile.name);
+    const now = new Date().toISOString();
+    const priorPatterns = withStats.observations.learnedPatterns || [];
+    const candidatePatterns = Array.isArray(parsed?.observations?.learnedPatterns) ? parsed.observations.learnedPatterns : [];
+    const byText = new Map<string, any>();
+    for (const p of candidatePatterns) {
+      const text = typeof p?.text === "string" ? p.text.trim() : "";
+      if (text) byText.set(text.toLowerCase(), p);
+    }
+    const mergedPatterns = priorPatterns.map(existing => {
+      const candidate = byText.get(existing.text.trim().toLowerCase());
+      if (!candidate) return existing;
+      return {
+        ...existing,
+        ...candidate,
+        text: existing.text,
+        evidence: typeof candidate.evidence === "string" && candidate.evidence.trim() ? candidate.evidence : existing.evidence,
+        firstObserved: existing.firstObserved,
+        lastObserved: now,
+        confirmed: existing.confirmed || candidate.confirmed === true,
+      };
+    });
+    const existingKeys = new Set(priorPatterns.map(p => p.text.trim().toLowerCase()));
+    for (const candidate of candidatePatterns) {
+      const text = typeof candidate?.text === "string" ? candidate.text.trim() : "";
+      if (!text || existingKeys.has(text.toLowerCase())) continue;
+      mergedPatterns.push({
+        ...candidate,
+        text,
+        firstObserved: now,
+        lastObserved: now,
+        confirmed: candidate.confirmed === true,
+      });
+    }
+    const parsedWithPatterns = {
+      ...parsed,
+      observations: { ...withStats.observations, ...(parsed?.observations || {}), learnedPatterns: mergedPatterns },
+    };
+    const coerced = coerceUnderstanding(parsedWithPatterns, withStats.profile.name, withStats);
     coerced.stats = withStats.stats;
-    coerced.updatedAt = new Date().toISOString();
+    coerced.updatedAt = now;
     return coerced;
   } catch (e) {
     if (!isAiOfflineError(e)) console.warn("[PERCEPTION] update failed (keeping prior state):", (e as any)?.message || e);
-    return withStats; // fail-safe: understanding never regresses
+    return withStats;
   }
 }
 
-// Re-export for the wiring step so callers persist only the durable subset.
 export { persistableUnderstanding };
