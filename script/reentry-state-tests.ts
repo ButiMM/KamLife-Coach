@@ -68,4 +68,4 @@ assert.deepEqual(
   { daysSinceLastContact: 0, isReturning: false, hasExplicitReturnSignal: true, shouldHandleComeback: false },
 );
 
-console.log("reentry-state-tests: 28/28 passed");
+console.log("reentry-state-tests: 31/31 passed");
