@@ -33,6 +33,14 @@ function moodClause(s: UnderstandingState): string {
   return bits.join(" and ");
 }
 
+function reentryClause(s: UnderstandingState): string {
+  if (!s.current.reentry.isReturning) return "";
+  const days = s.current.reentry.daysSinceLastContact;
+  if (days == null || days < 2) return "";
+  const gap = days === 2 ? "a couple of days" : `${days} days`;
+  return `they're returning after ${gap} away — re-establish context from what they say now; do not pretend continuity`;
+}
+
 function steer(s: UnderstandingState): string {
   const { healthStatus } = s.current;
   const { readinessToPush, frustrationLevel } = s.observations;
@@ -68,10 +76,12 @@ export function compileStateBlurb(s: UnderstandingState): string {
 
   const trend = trendClause(s);
   const mood = moodClause(s);
+  const reentry = reentryClause(s);
   const openers: string[] = [];
   if (trend) openers.push(`${who}'s ${trend}`);
   if (mood) openers.push(openers.length ? `they're ${mood}` : `${who}'s ${mood}`);
   if (openers.length) parts.push(openers.join("; ") + ".");
+  if (reentry) parts.push(reentry + ".");
 
   parts.push(`Right now, ${steer(s)}.`);
 
