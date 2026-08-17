@@ -45,12 +45,6 @@ export function defaultUnderstanding(name = "there"): UnderstandingState {
   };
 }
 
-export function reentryFromAgeHours(ageHours: number, hasStoredContact = true): ReentryState {
-  if (!hasStoredContact || !Number.isFinite(ageHours) || ageHours < 0) return { daysSinceLastContact: null, isReturning: false };
-  const days = Math.floor(ageHours / 24);
-  return { daysSinceLastContact: days, isReturning: days >= 2 };
-}
-
 export function decayObservations(o: UnderstandingState["observations"], ageHours: number): UnderstandingState["observations"] {
   if (!(ageHours >= 48)) return o;
   const d = defaultUnderstanding().observations;

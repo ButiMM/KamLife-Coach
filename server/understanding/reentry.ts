@@ -28,6 +28,33 @@ export function daysSinceContact(lastActiveAt: unknown, nowMs = Date.now()): num
   return Math.max(0, Math.floor((nowMs - at) / 86_400_000));
 }
 
+/**
+ * The gap at which a client counts as RETURNING. Lives here and nowhere else — this number was
+ * previously written out in three separate places (early-commands, state.reentryFromAgeHours, and
+ * resolveReentry below), which is how they could drift apart without anything failing.
+ */
+export const RETURNING_DAYS = 2;
+
+/**
+ * CONTACT AGE AS STATE — the message-free half of re-entry.
+ *
+ * Some consumers ask "is this client returning?" at a point where there is no client message to
+ * read: `seedUnderstanding` builds the turn's prior from the user row alone. They still must not
+ * re-derive the threshold, so the canonical owner exposes the answer in the shape they need rather
+ * than handing out a number and trusting each caller to compare it correctly.
+ *
+ * Structurally identical to UnderstandingState's ReentryState, deliberately without importing it:
+ * meaning belongs to this module, and the state container should depend on the meaning, not the
+ * reverse.
+ */
+export function contactState(lastActiveAt: unknown, nowMs = Date.now()): {
+  daysSinceLastContact: number | null;
+  isReturning: boolean;
+} {
+  const days = daysSinceContact(lastActiveAt, nowMs);
+  return { daysSinceLastContact: days, isReturning: days !== null && days >= RETURNING_DAYS };
+}
+
 export function isExplicitReturnSignal(message: string): boolean {
   return RETURN_SIGNAL.test(String(message || ""));
 }
@@ -41,8 +68,7 @@ export function resolveReentry(input: {
   message: string;
   nowMs?: number;
 }): ReentryResolution {
-  const days = daysSinceContact(input.lastActiveAt, input.nowMs);
-  const isReturning = days !== null && days >= 2;
+  const { daysSinceLastContact: days, isReturning } = contactState(input.lastActiveAt, input.nowMs);
   const hasExplicitReturnSignal = isExplicitReturnSignal(input.message);
   const shouldHandleComeback = isReturning && hasExplicitReturnSignal && !isProfileUpdateMessage(input.message);
   return { daysSinceLastContact: days, isReturning, hasExplicitReturnSignal, shouldHandleComeback };

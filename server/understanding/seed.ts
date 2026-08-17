@@ -14,6 +14,7 @@
 import { getDisplayName } from "../utils";
 import { getNumbersMode } from "../numbers-mode";
 import { type UnderstandingState, defaultUnderstanding, type WeightDirection } from "./state";
+import { contactState } from "./reentry";
 
 function isActivelySick(user: any): boolean {
   const notes = user?.profileNotes || "";
@@ -66,6 +67,14 @@ export function seedUnderstanding(user: any, snapshot?: string): UnderstandingSt
   s.profile.preferences.numberFree = getNumbersMode(user) !== "normal"; // low/default → number-free
   s.profile.keyFacts = keyFactsFromUser(user);
   if (isActivelySick(user)) s.current.healthStatus = "sick";
+  // THE CONTACT CLOCK, FROM THE CANONICAL OWNER (2026-08-17). Re-entry used to be manufactured in
+  // store.ts from clientUnderstanding.updatedAt — a PERSISTENCE timestamp. That conflated "how
+  // stale is the understanding I saved?" with "how long since this person spoke to me?", so a
+  // client could be greeted as returning because our own storage was last written three days ago.
+  // Any deploy, backfill, or turn that skipped a save moved it independently of the human.
+  // This is the right owner for it: seedUnderstanding's whole job is building the turn's prior from
+  // durable signals we already hold, and users.lastActiveAt is exactly that.
+  s.current.reentry = contactState(user?.lastActiveAt);
   s.stats = { ...s.stats, ...statsFromSnapshot(snapshot) };
   return s;
 }

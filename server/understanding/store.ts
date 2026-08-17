@@ -21,7 +21,6 @@ import {
   coerceUnderstanding,
   persistableUnderstanding,
   decayObservations,
-  reentryFromAgeHours,
 } from "./state";
 
 export async function loadUnderstanding(userId: string, seed: UnderstandingState): Promise<UnderstandingState> {
@@ -33,9 +32,12 @@ export async function loadUnderstanding(userId: string, seed: UnderstandingState
       { profile: row.profile, observations: row.observations },
       seed.profile.name,
     );
+    // updatedAt answers ONE question and it is the right one for it: how stale is the understanding
+    // we stored? That is a persistence fact and this is the persistence layer. It must NOT also
+    // decide re-entry — the client's contact clock is users.lastActiveAt, and seedUnderstanding
+    // now sources that from the canonical resolver. One variable, two questions, was the defect.
     const ageHours = row.updatedAt ? (Date.now() - new Date(row.updatedAt).getTime()) / 3_600_000 : 0;
     stored.observations = decayObservations(stored.observations, ageHours);
-    const reentry = reentryFromAgeHours(ageHours, !!row.updatedAt);
     return {
       profile: {
         name: seed.profile.name || stored.profile.name,
@@ -44,7 +46,7 @@ export async function loadUnderstanding(userId: string, seed: UnderstandingState
         preferences: seed.profile.preferences,
       },
       observations: stored.observations,
-      current: { ...seed.current, reentry },
+      current: seed.current,
       stats: seed.stats,
       updatedAt: seed.updatedAt,
     };

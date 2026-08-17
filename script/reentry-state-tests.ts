@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { defaultUnderstanding, reentryFromAgeHours } from "../server/understanding/state";
+import { defaultUnderstanding } from "../server/understanding/state";
+import { contactState, RETURNING_DAYS } from "../server/understanding/reentry";
 import { compileStateBlurb } from "../server/understanding/compiler";
 import {
   daysSinceContact,
@@ -10,12 +11,24 @@ import {
 import { resolveReentryForUser, shouldHandleComebackForUser } from "../server/understanding/reentry-bridge";
 
 // Existing UnderstandingState boundary: 48 hours is the returning threshold.
-assert.deepEqual(reentryFromAgeHours(0), { daysSinceLastContact: 0, isReturning: false });
-assert.deepEqual(reentryFromAgeHours(47.99), { daysSinceLastContact: 1, isReturning: false });
-assert.deepEqual(reentryFromAgeHours(48), { daysSinceLastContact: 2, isReturning: true });
-assert.deepEqual(reentryFromAgeHours(240), { daysSinceLastContact: 10, isReturning: true });
-assert.deepEqual(reentryFromAgeHours(240, false), { daysSinceLastContact: null, isReturning: false });
-assert.deepEqual(reentryFromAgeHours(Number.NaN), { daysSinceLastContact: null, isReturning: false });
+// MIGRATED FROM reentryFromAgeHours (2026-08-17). Same six cases, same expectations, now against
+// the canonical owner and driven by a TIMESTAMP rather than a pre-computed age in hours — because
+// the age was the defect: it was derived from clientUnderstanding.updatedAt, a persistence clock.
+// Verified equivalent before the old function was deleted: both agreed on all six, including the
+// future-clock case, which reentryFromAgeHours caught via its `ageHours < 0` guard.
+const NOW = Date.parse("2026-08-17T10:00:00.000Z");
+const hoursAgo = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
+
+assert.equal(RETURNING_DAYS, 2, "the threshold must live in exactly one place");
+assert.deepEqual(contactState(hoursAgo(0), NOW), { daysSinceLastContact: 0, isReturning: false });
+assert.deepEqual(contactState(hoursAgo(47.99), NOW), { daysSinceLastContact: 1, isReturning: false });
+assert.deepEqual(contactState(hoursAgo(48), NOW), { daysSinceLastContact: 2, isReturning: true });
+assert.deepEqual(contactState(hoursAgo(240), NOW), { daysSinceLastContact: 10, isReturning: true });
+assert.deepEqual(contactState(null, NOW), { daysSinceLastContact: null, isReturning: false });
+assert.deepEqual(contactState("not-a-date", NOW), { daysSinceLastContact: null, isReturning: false });
+// A FUTURE contact clock is UNKNOWN, never "here right now". state.ts clamps a stored negative to
+// 0 via clampInt, so without this the wrong answer would read as "0 days since contact".
+assert.deepEqual(contactState(hoursAgo(-24), NOW), { daysSinceLastContact: null, isReturning: false });
 
 const fresh = defaultUnderstanding("Kam");
 assert.doesNotMatch(compileStateBlurb(fresh), /returning after|re-establish context/i);
@@ -87,4 +100,42 @@ assert.deepEqual(
   { daysSinceLastContact: 10, isReturning: true, hasExplicitReturnSignal: true, shouldHandleComeback: true },
 );
 
-console.log("reentry-state-tests: 35/35 passed");
+
+// ── END TO END: contact clock → seed → state → compiled prompt blurb (2026-08-17) ───────────
+// The whole point of P2. compiler.ts:71 turns current.reentry into the sentence the model reads,
+// and that state used to be manufactured from clientUnderstanding.updatedAt. These pin the source
+// all the way to the prose, so a future change of source fails here rather than on a client's phone.
+const { seedUnderstanding } = await import("../server/understanding/seed");
+const { compileStateBlurb: promptBlurb } = await import("../server/understanding/compiler");
+
+const seedFor = (lastActiveAt: unknown) =>
+  seedUnderstanding({ id: "u1", name: "Thandi", lastActiveAt, goalType: "fat_loss" } as any);
+
+// Normal re-entry: 10 days away must reach the prompt as a returning client.
+const away = seedFor(new Date(Date.now() - 10 * 86_400_000).toISOString());
+assert.equal(away.current.reentry.isReturning, true);
+assert.match(promptBlurb(away), /returning after 10 days away/i);
+assert.match(promptBlurb(away), /do not pretend continuity/i);
+
+// Under the threshold: 47 hours is NOT a comeback and must say nothing about returning.
+const recent = seedFor(new Date(Date.now() - 47 * 3_600_000).toISOString());
+assert.equal(recent.current.reentry.isReturning, false);
+assert.doesNotMatch(promptBlurb(recent), /returning after/i);
+
+// Exactly at the threshold, and the phrasing the compiler reserves for it.
+const twoDays = seedFor(new Date(Date.now() - 49 * 3_600_000).toISOString());
+assert.equal(twoDays.current.reentry.daysSinceLastContact, 2);
+assert.match(promptBlurb(twoDays), /returning after a couple of days/i);
+
+// MISSING clock: we do not know, so the prompt must not claim they were away OR that they are here.
+const unknown = seedFor(null);
+assert.equal(unknown.current.reentry.daysSinceLastContact, null);
+assert.equal(unknown.current.reentry.isReturning, false);
+assert.doesNotMatch(promptBlurb(unknown), /returning after/i);
+
+// FUTURE clock: same — unknown, never "0 days since contact".
+const future = seedFor(new Date(Date.now() + 86_400_000).toISOString());
+assert.equal(future.current.reentry.daysSinceLastContact, null);
+assert.doesNotMatch(promptBlurb(future), /returning after/i);
+
+console.log("reentry-state-tests: all assertions passed");
