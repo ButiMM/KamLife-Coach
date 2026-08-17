@@ -1,4 +1,4 @@
-import { deriveRuntimeDecision } from "../server/understanding/decision-runtime";
+import { deriveRuntimeDecision } from "../server/understanding/state";
 
 const baseHunger = {
   progress: {
