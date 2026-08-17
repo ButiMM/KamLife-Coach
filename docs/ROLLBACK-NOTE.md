@@ -1,0 +1,1 @@
+Temporary engineering note: revert the learned-pattern memory slice to restore the last known-green production line. The memory implementation remains preserved on its source branch for re-application as a smaller, independently verified slice after the Railway failure is understood.

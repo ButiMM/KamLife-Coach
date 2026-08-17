@@ -1,8 +1,16 @@
 /**
- * The UnderstandingState store: durable read/write per client.
+ * The UnderstandingState store (blueprint Days 11-20): durable read/write per client.
  *
- * loadUnderstanding merges the PERSISTED durable subset onto a freshly-seeded state.
- * saveUnderstanding writes only the durable subset through the trust gate.
+ * loadUnderstanding merges the PERSISTED durable subset (profile + observations) onto a
+ * freshly-seeded state (which carries this-turn volatile fields + DB-derived stats). So
+ * every turn starts from: what we durably know about the person + where they are right now.
+ *
+ * saveUnderstanding writes back ONLY the durable subset, through the trust gate — the
+ * volatile mood/topic and the DB stats are never persisted (they'd be stale or a model
+ * guess). This is the discipline the reviews demanded: persist only what you can trust.
+ *
+ * Fail-open everywhere: a store miss/error must never break a reply — we fall back to the
+ * seed. The table (client_understanding) is created by `npm run db:push`.
  */
 
 import { eq } from "drizzle-orm";
@@ -13,7 +21,6 @@ import {
   coerceUnderstanding,
   persistableUnderstanding,
   decayObservations,
-  pruneLearnedPatterns,
   reentryFromAgeHours,
 } from "./state";
 
@@ -25,11 +32,9 @@ export async function loadUnderstanding(userId: string, seed: UnderstandingState
     const stored = coerceUnderstanding(
       { profile: row.profile, observations: row.observations },
       seed.profile.name,
-      seed,
     );
     const ageHours = row.updatedAt ? (Date.now() - new Date(row.updatedAt).getTime()) / 3_600_000 : 0;
     stored.observations = decayObservations(stored.observations, ageHours);
-    stored.observations.learnedPatterns = pruneLearnedPatterns(stored.observations.learnedPatterns);
     const reentry = reentryFromAgeHours(ageHours, !!row.updatedAt);
     return {
       profile: {
