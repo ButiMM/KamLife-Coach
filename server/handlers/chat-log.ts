@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { db } from "../db";
 import { users, chatHistory, escalations, turnLedger, workoutLogs, stepLogs } from "../../shared/schema";
-import { eq, and, gte } from "drizzle-orm";
+import { eq, and, gte, desc } from "drizzle-orm";
 import twilio from "twilio";
 import { classifyMediaFailure } from "../coach-guardrails";
 import { detectEscalation, escalationSLA, isSyntheticTestClient } from "../safety-detection";
@@ -11,8 +11,6 @@ import { verifyBrainReply } from "../brain/reply-verifier";
 import { askCoachK } from "../gpt";
 import { sastDayStart } from "../utils";
 
-// Standalone escalation check — exported so handleMessage can call it early, before any handler
-// returns. Does NOT create a chatHistory row; only creates the escalations record + coach alert.
 export async function checkEscalation(userId: string, messageIn: string): Promise<void> {
   if (!messageIn || messageIn.length <= 2) return;
   const esc = detectEscalation(messageIn);
@@ -21,49 +19,50 @@ export async function checkEscalation(userId: string, messageIn: string): Promis
     const recent = await db.select({ id: escalations.id }).from(escalations)
       .where(and(eq(escalations.userId, userId), eq(escalations.status, "open")))
       .limit(1);
-    if (recent.length === 0) {
-      await db.insert(escalations).values({
-        userId,
-        reason: esc.reason,
-        triggerMessage: messageIn.slice(0, 500),
-        priority: esc.priority,
-        slaDeadline: escalationSLA(esc.priority),
-      });
-      console.log(`[ESCALATION] Auto-created: ${esc.reason} (${esc.priority}) for user ${userId}`);
+    if (recent.length !== 0) return;
 
-      if ((esc.priority === "urgent" || esc.priority === "high") && process.env.COACH_ALERT_PHONE && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_NUMBER) {
-        const [client] = await db.select({ name: users.name, phoneNumber: users.phoneNumber }).from(users).where(eq(users.id, userId)).limit(1);
-        const clientName = client?.name || "Client";
-        const clientPhone = client?.phoneNumber || "unknown";
-        const normPhone = (p: string) => p.replace(/^whatsapp:/, "").replace(/\D/g, "");
-        if (normPhone(clientPhone) === normPhone(process.env.COACH_ALERT_PHONE)) {
-          console.log("[ESCALATION] Skipping coach alert — alert phone == client phone (recorded in inbox only)");
-          return;
-        }
-        if (isSyntheticTestClient(clientPhone)) {
-          console.log("[ESCALATION] Skipping coach alert — synthetic test client (recorded in inbox only)");
-          return;
-        }
-        const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-        const fromNum = process.env.TWILIO_WHATSAPP_NUMBER.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
-        const emoji = esc.priority === "urgent" ? "🚨" : "⚠️";
-        const alertBody = `${emoji} ${esc.priority.toUpperCase()} ESCALATION\nReason: ${esc.reason}\nClient: ${clientName} (${clientPhone})\nMessage: "${messageIn.slice(0, 200)}"\n\nOpen the dashboard inbox to claim and respond.`;
-        const delays = [0, 2000, 5000, 10000];
-        let sent = false;
-        for (const delay of delays) {
-          if (delay > 0) await new Promise(r => setTimeout(r, delay));
-          try {
-            await alertClient.messages.create({ from: fromNum, to: `whatsapp:${process.env.COACH_ALERT_PHONE}`, body: alertBody });
-            console.log(`[ESCALATION] Founder alert sent (${esc.priority}/${esc.reason}${delay > 0 ? ` after ${delay}ms retry` : ""})`);
-            sent = true;
-            break;
-          } catch (alertErr) {
-            console.error(`[ESCALATION] Alert attempt failed (delay=${delay}ms):`, (alertErr as Error)?.message);
-          }
-        }
-        if (!sent) console.error(`[ESCALATION] ⚠️ All alert attempts FAILED (${esc.priority}/${esc.reason}) — escalation still recorded in inbox`);
+    await db.insert(escalations).values({
+      userId,
+      reason: esc.reason,
+      triggerMessage: messageIn.slice(0, 500),
+      priority: esc.priority,
+      slaDeadline: escalationSLA(esc.priority),
+    });
+    console.log(`[ESCALATION] Auto-created: ${esc.reason} (${esc.priority}) for user ${userId}`);
+
+    if (!(esc.priority === "urgent" || esc.priority === "high")
+      || !process.env.COACH_ALERT_PHONE
+      || !process.env.TWILIO_ACCOUNT_SID
+      || !process.env.TWILIO_AUTH_TOKEN
+      || !process.env.TWILIO_WHATSAPP_NUMBER) return;
+
+    const [client] = await db.select({ name: users.name, phoneNumber: users.phoneNumber })
+      .from(users).where(eq(users.id, userId)).limit(1);
+    const clientName = client?.name || "Client";
+    const clientPhone = client?.phoneNumber || "unknown";
+    const normPhone = (p: string) => p.replace(/^whatsapp:/, "").replace(/\D/g, "");
+    if (normPhone(clientPhone) === normPhone(process.env.COACH_ALERT_PHONE) || isSyntheticTestClient(clientPhone)) return;
+
+    const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    const fromNum = process.env.TWILIO_WHATSAPP_NUMBER.startsWith("whatsapp:")
+      ? process.env.TWILIO_WHATSAPP_NUMBER
+      : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
+    const emoji = esc.priority === "urgent" ? "🚨" : "⚠️";
+    const alertBody = `${emoji} ${esc.priority.toUpperCase()} ESCALATION\nReason: ${esc.reason}\nClient: ${clientName} (${clientPhone})\nMessage: "${messageIn.slice(0, 200)}"\n\nOpen the dashboard inbox to claim and respond.`;
+    const delays = [0, 2000, 5000, 10000];
+    let sent = false;
+    for (const delay of delays) {
+      if (delay > 0) await new Promise(r => setTimeout(r, delay));
+      try {
+        await alertClient.messages.create({ from: fromNum, to: `whatsapp:${process.env.COACH_ALERT_PHONE}`, body: alertBody });
+        console.log(`[ESCALATION] Founder alert sent (${esc.priority}/${esc.reason}${delay > 0 ? ` after ${delay}ms retry` : ""})`);
+        sent = true;
+        break;
+      } catch (alertErr) {
+        console.error(`[ESCALATION] Alert attempt failed (delay=${delay}ms):`, (alertErr as Error)?.message);
       }
     }
+    if (!sent) console.error(`[ESCALATION] All alert attempts failed (${esc.priority}/${esc.reason}) — escalation remains in inbox`);
   } catch (err) {
     console.error("[checkEscalation] error:", err);
   }
@@ -81,19 +80,13 @@ export async function logChat(userId: string, messageIn: string, messageOut: str
 export async function logMediaFailure(userId: string, stage: string, rawError?: unknown, latencyMs?: number): Promise<void> {
   const code = classifyMediaFailure(stage, rawError);
   const payload = latencyMs !== undefined ? `${code} latency=${latencyMs}ms` : code;
-  try {
-    await logChat(userId, `[MEDIA_FAIL:${stage}]`, payload, "MEDIA_FAILURE");
-  } catch (e) {
-    console.warn("[media-failure-log]", e);
-  }
+  try { await logChat(userId, `[MEDIA_FAIL:${stage}]`, payload, "MEDIA_FAILURE"); }
+  catch (e) { console.warn("[media-failure-log]", e); }
 }
 
 export async function logMediaSuccess(userId: string, flow: string, totalMs: number): Promise<void> {
-  try {
-    await logChat(userId, `[MEDIA_OK:${flow}]`, `total_ms=${totalMs}`, "MEDIA_SUCCESS");
-  } catch (e) {
-    console.warn("[media-success-log]", e);
-  }
+  try { await logChat(userId, `[MEDIA_OK:${flow}]`, `total_ms=${totalMs}`, "MEDIA_SUCCESS"); }
+  catch (e) { console.warn("[media-success-log]", e); }
 }
 
 export function buildMediaTrace(phone: string, mediaType: string): string {
@@ -106,18 +99,12 @@ export async function withTimeout<T>(label: string, ms: number, run: () => Promi
   try {
     return await Promise.race([
       run(),
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label}_timeout_${ms}ms`)), ms);
-      }),
+      new Promise<T>((_, reject) => { timer = setTimeout(() => reject(new Error(`${label}_timeout_${ms}ms`)), ms); }),
     ]);
   } finally {
     if (timer) clearTimeout(timer);
   }
 }
-
-// ════════════════════════════════════════════════════════════════════════════════════════════
-// TURN LEDGER (2026-08-10 directive, §6) — observability, not architecture.
-// ════════════════════════════════════════════════════════════════════════════════════════════
 
 interface TurnScope {
   userId: string | null;
@@ -137,7 +124,6 @@ const PURE_REACTION_INPUTS = new Set([
   "dankie", "baie dankie", "ngiyabonga", "siyabonga", "ngiyabonga coach", "enkosi",
   "ke a leboha", "ke a leboga", "kea leboha", "ndza khensa",
 ]);
-
 const THIN_COACH_REPLY = /^(?:noted|sharp|good|great|perfect|nice|awesome|lekker|got it|understood|well done|keep it up|good choice|great job)[.!👌👊\s]*$/i;
 const GENERIC_COACH_REPLY = /(?:if you need anything else,? just let me know|keep building on those meals|keep that momentum going|focus on your next meal|make that meal count|let'?s keep working|keep fuelling)[.!\s]*$/i;
 const MISSED_TRAINING_CLAIM = /\b(?:missed|didn'?t|did not|haven'?t|have not)\b[^.\n]{0,35}\b(?:train|training|workout|session|gym)\b|\b(?:monday|today)\s+is\s+(?:still\s+)?a\s+training\s+day\b/i;
@@ -173,39 +159,55 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
       db.select({ steps: stepLogs.steps })
         .from(stepLogs)
         .where(and(eq(stepLogs.userId, scope.userId), gte(stepLogs.loggedAt, dayStart)))
-        .orderBy(gte(stepLogs.loggedAt, dayStart) as any)
+        .orderBy(desc(stepLogs.loggedAt))
         .limit(10),
     ]);
     const snapshot = await withTimeout("post_turn_snapshot", 4000, () => buildClientSnapshot(user)).catch(() => "");
     const authoritative = [
-      `POST-ACTION AUTHORITATIVE STATE:`,
+      "POST-ACTION AUTHORITATIVE STATE:",
       `Today's workouts recorded: ${todayWorkouts.length}.`,
       `Today's step rows recorded: ${todaySteps.length}; latest values: ${todaySteps.map(s => Number(s.steps || 0)).join(", ") || "none"}.`,
       scope.mutations.length ? `Mutations recorded this turn: ${scope.mutations.join(" | ")}` : "Mutations recorded this turn: none captured.",
       snapshot ? `\nFULL CLIENT SNAPSHOT:\n${snapshot}` : "",
     ].join("\n");
-
     const repairReason = [
       !verifier.ok ? `VERIFIER REJECTION: ${verifier.violation}` : "",
       likelyGeneric ? "The draft is a receipt/acknowledgement or canned coaching line rather than a useful continuation of the relationship." : "",
       suspiciousStateLanguage ? "The draft makes a current-state claim that must be reconciled against the post-action state before sending." : "",
     ].filter(Boolean).join("\n");
-
     const instruction = `POST-TURN COACH RECONCILIATION — this is the final client-facing response after the deterministic turn has already completed.\n\n${authoritative}\n\nCLIENT'S EXACT MESSAGE:\n${scope.inputText}\n\nDRAFT THAT MUST NOT BE SENT:\n${draft}\n\nWHY IT MUST BE REWRITTEN:\n${repairReason}\n\nWrite the final Coach K reply. Use the AUTHORITATIVE POST-ACTION STATE, not an old cached assumption. Never claim a number or action the state does not support. Never mention handlers, tools, prompts, verification, or this rewrite. Do not merely acknowledge a meaningful update. Show that you heard what happened, connect it to the client's actual situation, and give the one useful next move when there is one. If the client corrected the coach, accept the correction and use the corrected state. Keep it natural, direct, warm, and specific.`;
 
-    const repaired = await withTimeout("post_turn_coach", 20000, () => askCoachK(scope.inputText, user, instruction, ""));
-    return repaired?.trim() || reply;
+    const repaired = (await withTimeout("post_turn_coach", 20000, () => askCoachK(scope.inputText, user, instruction, "")))?.trim();
+    if (!repaired) return reply;
+
+    try {
+      const [lastLog] = await db.select({ id: chatHistory.id })
+        .from(chatHistory)
+        .where(and(eq(chatHistory.userId, scope.userId), eq(chatHistory.messageIn, scope.inputText)))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(1);
+      if (lastLog) {
+        await db.update(chatHistory).set({ messageOut: repaired }).where(eq(chatHistory.id, lastLog.id));
+      }
+    } catch (logErr) {
+      console.warn("[POST_TURN_RECONCILE] chatHistory update non-fatal:", (logErr as any)?.message || logErr);
+    }
+    return repaired;
   } catch (e) {
     console.warn("[POST_TURN_RECONCILE] non-fatal:", (e as any)?.message || e);
     return reply;
   }
 }
 
-/** Run one turn inside its own ledger scope. Returns whatever the turn returns, reconciled against post-action truth when needed. */
 export async function inTurn<T>(inputType: string, inputText: string, fn: () => Promise<T>): Promise<T> {
   return turnStore.run({
-    userId: null, inputType, inputText: (inputText || "").slice(0, 2000),
-    resolvedDay: null, stateRead: {}, mutations: [], startedAt: Date.now(),
+    userId: null,
+    inputType,
+    inputText: (inputText || "").slice(0, 2000),
+    resolvedDay: null,
+    stateRead: {},
+    mutations: [],
+    startedAt: Date.now(),
   }, async () => {
     const result = await fn();
     if (typeof result !== "string") return result;
@@ -213,20 +215,17 @@ export async function inTurn<T>(inputType: string, inputText: string, fn: () => 
   });
 }
 
-/** Attribute the current turn to a client, once it is known. */
 export function turnUser(userId: string): void {
   const t = turnStore.getStore();
   if (t) t.userId = userId;
 }
 
-/** Record a WRITE the turn performed. */
 export function turnMutation(note: string, logPrefix?: string): void {
   const t = turnStore.getStore();
   if (t && t.mutations.length < 40) t.mutations.push(note);
   if (logPrefix) console.log(`${logPrefix} ${note}`);
 }
 
-/** Record facts the turn READ before deciding, and the day it resolved to. */
 export function turnState(facts: Record<string, unknown>, resolvedDay?: string | null): void {
   const t = turnStore.getStore();
   if (!t) return;
@@ -234,7 +233,6 @@ export function turnState(facts: Record<string, unknown>, resolvedDay?: string |
   if (resolvedDay) t.resolvedDay = resolvedDay;
 }
 
-/** Close the turn out. Fail-open and awaited nowhere near the client's reply — a ledger that can delay or break an answer is worse than no ledger. */
 export async function recordTurn(reply: string): Promise<void> {
   const t = turnStore.getStore();
   if (!t?.userId) return;
