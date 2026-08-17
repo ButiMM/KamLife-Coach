@@ -25,44 +25,14 @@ export type Trend = "rising" | "stable" | "falling";
 export type Readiness = "low" | "medium" | "high";
 export type WeightDirection = "up" | "down" | "stable";
 
-export interface ReentryState {
-  /** Number of full days since the coach last had a persisted understanding for this client. */
-  daysSinceLastContact: number | null;
-  /** True when the gap is long enough that continuity should be re-established, not assumed. */
-  isReturning: boolean;
-}
+export interface ReentryState { daysSinceLastContact: number | null; isReturning: boolean; }
 
 export interface UnderstandingState {
-  /** persistent, slow-moving — who this person is */
-  profile: {
-    name: string;
-    lifeStory: string;      // short evolving narrative (~50 words), updated over days
-    keyFacts: string[];     // injuries, job, family, goals — durable truths they told us
-    preferences: { numberFree: boolean };
-  };
-  /** per-message context — what is going on right now (volatile, inferred each turn) */
-  current: {
-    mood: Mood;
-    healthStatus: HealthStatus;
-    topic: Topic;
-    reentry: ReentryState;
-  };
-  /** the coach's accumulated read on the person — the thing that makes it a coach, not a chatbot */
-  observations: {
-    confidenceTrend: Trend;
-    frustrationLevel: number; // 1-10
-    readinessToPush: Readiness;
-    trustLevel: number;       // 1-10
-  };
-  /** objective baseline — DERIVED from the DB snapshot each turn, never persisted here */
-  stats: {
-    streak: number;
-    weightDirection: WeightDirection;
-    recentProteinAvg: number;
-    recentStepAvg: number;
-  };
-  /** bookkeeping */
-  updatedAt: string; // ISO
+  profile: { name: string; lifeStory: string; keyFacts: string[]; preferences: { numberFree: boolean } };
+  current: { mood: Mood; healthStatus: HealthStatus; topic: Topic; reentry: ReentryState };
+  observations: { confidenceTrend: Trend; frustrationLevel: number; readinessToPush: Readiness; trustLevel: number };
+  stats: { streak: number; weightDirection: WeightDirection; recentProteinAvg: number; recentStepAvg: number };
+  updatedAt: string;
 }
 
 export function defaultUnderstanding(name = "there"): UnderstandingState {
@@ -76,17 +46,12 @@ export function defaultUnderstanding(name = "there"): UnderstandingState {
 }
 
 export function reentryFromAgeHours(ageHours: number, hasStoredContact = true): ReentryState {
-  if (!hasStoredContact || !Number.isFinite(ageHours) || ageHours < 0) {
-    return { daysSinceLastContact: null, isReturning: false };
-  }
+  if (!hasStoredContact || !Number.isFinite(ageHours) || ageHours < 0) return { daysSinceLastContact: null, isReturning: false };
   const days = Math.floor(ageHours / 24);
   return { daysSinceLastContact: days, isReturning: days >= 2 };
 }
 
-export function decayObservations(
-  o: UnderstandingState["observations"],
-  ageHours: number,
-): UnderstandingState["observations"] {
+export function decayObservations(o: UnderstandingState["observations"], ageHours: number): UnderstandingState["observations"] {
   if (!(ageHours >= 48)) return o;
   const d = defaultUnderstanding().observations;
   return {
@@ -114,11 +79,7 @@ const oneOf = <T,>(set: Set<T>, v: unknown, dflt: T): T => (set.has(v as T) ? (v
 export function coerceUnderstanding(raw: any, fallbackName = "there"): UnderstandingState {
   const d = defaultUnderstanding(fallbackName);
   if (!raw || typeof raw !== "object") return d;
-  const p = raw.profile ?? {};
-  const c = raw.current ?? {};
-  const o = raw.observations ?? {};
-  const s = raw.stats ?? {};
-  const re = c.reentry ?? {};
+  const p = raw.profile ?? {}, c = raw.current ?? {}, o = raw.observations ?? {}, s = raw.stats ?? {}, re = c.reentry ?? {};
   return {
     profile: {
       name: typeof p.name === "string" && p.name.trim() ? p.name.trim().slice(0, 60) : d.profile.name,
@@ -151,16 +112,11 @@ export function coerceUnderstanding(raw: any, fallbackName = "there"): Understan
   };
 }
 
-export function persistableUnderstanding(s: UnderstandingState): Pick<UnderstandingState, "profile" | "observations"> {
-  return { profile: s.profile, observations: s.observations };
-}
-
+export function persistableUnderstanding(s: UnderstandingState): Pick<UnderstandingState, "profile" | "observations"> { return { profile: s.profile, observations: s.observations }; }
 export function serializeUnderstanding(s: UnderstandingState): string { return JSON.stringify(s); }
-
 export function parseUnderstanding(json: string | null | undefined, fallbackName = "there"): UnderstandingState {
   if (!json) return defaultUnderstanding(fallbackName);
-  try { return coerceUnderstanding(JSON.parse(json), fallbackName); }
-  catch { return defaultUnderstanding(fallbackName); }
+  try { return coerceUnderstanding(JSON.parse(json), fallbackName); } catch { return defaultUnderstanding(fallbackName); }
 }
 
 export type DecisionState = "CONTINUE" | "CHANGE" | "INVESTIGATE" | "REFER";
@@ -180,6 +136,20 @@ export interface RuntimeDecisionResult { state: DecisionState; evidence: Decisio
 const decisionStorage = new AsyncLocalStorage<RuntimeDecisionResult>();
 export function currentRuntimeDecision(): RuntimeDecisionResult | undefined { return decisionStorage.getStore(); }
 const rememberRuntimeDecision = (decision: RuntimeDecisionResult): RuntimeDecisionResult => { decisionStorage.enterWith(decision); return decision; };
+
+export function forceRuntimeReferral(): RuntimeDecisionResult {
+  const current = decisionStorage.getStore();
+  if (current) {
+    current.state = "REFER";
+    current.evidence = "sufficient";
+    current.meaningfulProblem = true;
+    current.hasMinimumUsefulQuestion = false;
+    current.focus = "safety";
+    return current;
+  }
+  return rememberRuntimeDecision({ state: "REFER", evidence: "sufficient", meaningfulProblem: true, hasMinimumUsefulQuestion: false, focus: "safety" });
+}
+
 export function deriveRuntimeDecision(input: RuntimeDecisionInputs): RuntimeDecisionResult {
   if (input.requiresReferral) return rememberRuntimeDecision({ state: "REFER", evidence: "sufficient", meaningfulProblem: true, hasMinimumUsefulQuestion: false, focus: "safety" });
   const hunger = input.hungerEvidence;
