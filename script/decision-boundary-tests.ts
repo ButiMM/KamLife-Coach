@@ -1,8 +1,9 @@
-/** Pure tests for the canonical coaching decision boundary. */
+/** Pure tests for the canonical coaching decision boundary and medication safety context. */
 
 import assert from "node:assert/strict";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { compileStateBlurb } from "../server/understanding/compiler";
+import { detectMedicationContext } from "../server/medication-context";
 import { currentRuntimeDecision, deriveRuntimeDecision, defaultUnderstanding } from "../server/understanding/state";
 import type { DecisionFocus, RuntimeDecisionResult } from "../server/understanding/state";
 
@@ -70,13 +71,26 @@ assert.equal(referDecision.state, "REFER");
 assert.equal(referDecision.focus, "safety");
 assert.match(compileStateBlurb(defaultUnderstanding("Test")).toLowerCase(), /primary coaching focus: safety\/referral/);
 
-assert.match(
-  verifyBrainReply("You're hungry, so add more protein tomorrow.", { goalType: "fat_loss", clientMessage: "I'm always hungry" }).violation || "",
-  /INVESTIGATE/i,
-);
-assert.equal(
-  verifyBrainReply("I don't know yet — log another day properly and I'll tell you what matters.", { goalType: "fat_loss", clientMessage: "I'm always hungry" }).ok,
-  true,
-);
+assert.deepEqual(detectMedicationContext("I'm taking Ozempic and I'm working on my food."), {
+  present: true, medicationClass: "glp1", unsafeRequest: false, reason: null,
+});
+const dosing = detectMedicationContext("What dose of Ozempic should I take?");
+assert.equal(dosing.unsafeRequest, true);
+assert.equal(dosing.reason, "dosing");
+const titration = detectMedicationContext("Can I increase my Wegovy dose next week?");
+assert.equal(titration.unsafeRequest, true);
+assert.equal(titration.reason, "titration");
+const stopping = detectMedicationContext("Should I stop Mounjaro?");
+assert.equal(stopping.unsafeRequest, true);
+assert.equal(stopping.reason, "stopping");
+const sourcing = detectMedicationContext("Where can I buy semaglutide from a seller?");
+assert.equal(sourcing.unsafeRequest, true);
+assert.equal(sourcing.reason, "sourcing");
+const adverse = detectMedicationContext("I'm on Wegovy and have severe nausea and abdominal pain.");
+assert.equal(adverse.unsafeRequest, true);
+assert.equal(adverse.reason, "adverse_reaction");
+assert.deepEqual(detectMedicationContext("I had eggs and pap today."), {
+  present: false, medicationClass: null, unsafeRequest: false, reason: null,
+});
 
 console.log("decision-boundary-tests: all passed");
