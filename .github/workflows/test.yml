@@ -36,39 +36,6 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
-
-      - name: Surgical P0 repair verification (temporary)
-        if: ${{ github.head_ref == 'codex/p0-repair-verified' }}
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          meaning = Path('server/understanding/meaning-engine.ts')
-          s = meaning.read_text()
-          old1 = 'verifyBrainReply(finalReply, { goalType: user?.goalType })'
-          old2 = 'verifyBrainReply(rewritten, { goalType: user?.goalType })'
-          if old1 not in s or old2 not in s:
-              raise SystemExit('P0 verifier call pattern not found; refusing mutation')
-          s = s.replace(old1, 'verifyBrainReply(finalReply, { goalType: user?.goalType, clientMessage: message })', 1)
-          s = s.replace(old2, 'verifyBrainReply(rewritten, { goalType: user?.goalType, clientMessage: message })', 1)
-          marker = 'console.warn("[MEANING_ENGINE] verifier failed after rewrite — deferring (fail open)");\n            return null;'
-          if marker not in s:
-              raise SystemExit('P0 fail-open rewrite marker not found; refusing mutation')
-          s = s.replace(marker, 'console.warn("[MEANING_ENGINE] verifier failed after rewrite — deferring (fail open)");\n            return null; // fail-open on rewrite error', 1)
-          meaning.write_text(s)
-
-          unit = Path('script/unit-tests.ts')
-          s = unit.read_text()
-          old_u1 = 'assert.match(eng, /verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType \\}\\)/, "engine verifies the freeform reply");'
-          old_u2 = 'assert.match(eng, /verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType \\}\\)\\.ok/, "a rewrite is re-verified before it can be sent");'
-          if old_u1 not in s or old_u2 not in s:
-              raise SystemExit('P0 unit-test verifier guards not found; refusing mutation')
-          s = s.replace(old_u1, 'assert.match(eng, /verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)/, "engine verifies the freeform reply");', 1)
-          s = s.replace(old_u2, 'assert.match(eng, /verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)\\.ok/, "a rewrite is re-verified before it can be sent");', 1)
-          unit.write_text(s)
-          PY
-
       - name: Type check
         run: npm run check
       - name: Test suite
@@ -82,21 +49,8 @@ jobs:
       # for the length of the rebuild, so it REPORTS rather than blocks — but it runs on every
       # PR, so a slice that claims a column went green can be checked rather than believed.
       #
-      # SLICE 5 DELETES THE `continue-on-error` line. A fully green gauntlet is the gate on the
+      # SLICE 5 DELETES the `continue-on-error` line. A fully green gauntlet is the gate on the
       # live flip; from that moment on, red is a broken build like anything else.
       - name: Gauntlet (reporting only until Slice 5)
         run: npm run gauntlet
         continue-on-error: true
-
-      - name: Commit verified surgical repair and remove temporary workflow
-        if: ${{ github.head_ref == 'codex/p0-repair-verified' && success() }}
-        shell: bash
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add server/understanding/meaning-engine.ts script/unit-tests.ts
-          git checkout origin/main -- .github/workflows/test.yml
-          git rm .github/workflows/p0-repair-verified.yml
-          git add .github/workflows/test.yml
-          git commit -m 'fix: wire current-turn context into reply verifier'
-          git push
