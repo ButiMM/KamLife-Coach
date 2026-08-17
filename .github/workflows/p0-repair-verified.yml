@@ -51,8 +51,13 @@ jobs:
           rv.write_text(s)
 
           unit=Path('script/unit-tests.ts'); s=unit.read_text()
-          s=s.replace('assert.match(eng, /verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType \\}\\)/, "engine verifies the freeform reply");','assert.match(eng, /verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)/, "engine verifies the freeform reply");',1)
-          s=s.replace('assert.match(eng, /verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType \\}\\)\\.ok/, "a rewrite is re-verified before it can be sent");','assert.match(eng, /verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)\\.ok/, "a rewrite is re-verified before it can be sent");',1)
+          marker='  test("engine runs the reply verifier on its own mouth (self-correcting loop wired in)"'
+          start=s.find(marker)
+          if start<0: raise SystemExit('verifier wiring test marker not found; refusing to mutate')
+          end=s.find('\n  test("', start+len(marker))
+          if end<0: raise SystemExit('verifier wiring test boundary not found; refusing to mutate')
+          replacement='''  test("engine runs the reply verifier on its own mouth (self-correcting loop wired in)", () => {\n    const eng = readFileSync(join("server", "understanding", "meaning-engine.ts"), "utf-8");\n    assert.match(eng, /verifyBrainReply\\(finalReply, \\{[^}]*clientMessage: message[^}]*\\}\\)/, "engine verifies the freeform reply with current-turn attribution");\n    assert.match(eng, /verifyBrainReply\\(rewritten, \\{[^}]*clientMessage: message[^}]*\\}\\)\\.ok/, "a rewrite is re-verified with current-turn attribution");\n    assert.match(eng, /verifier failed after rewrite/, "a second violation fails open to the deterministic pipeline");\n  });'''
+          s=s[:start]+replacement+s[end:]
           unit.write_text(s)
           PY
       - name: Verify typecheck and P0/full suite
