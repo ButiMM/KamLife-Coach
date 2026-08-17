@@ -14,7 +14,7 @@
  *    steer toward reassurance, not a push. Protein's been light; she's on a 3-day streak."
  */
 
-import type { UnderstandingState } from "./state";
+import { currentRuntimeDecision, type UnderstandingState } from "./state";
 
 function firstName(name: string): string {
   const n = (name || "").trim().split(/\s+/)[0];
@@ -79,6 +79,14 @@ export function compileStateBlurb(s: UnderstandingState): string {
       const gap = days === 2 ? "a couple of days" : `${days} days`;
       parts.push(`they're returning after ${gap} away — re-establish context from what they say now; do not pretend continuity.`);
     }
+  }
+
+  const decision = currentRuntimeDecision();
+  if (decision) {
+    if (decision.focus === "safety") parts.push("Primary coaching focus: safety/referral. Do not turn this into normal coaching.");
+    else if (decision.focus === "hunger") parts.push("Primary coaching focus: hunger. Treat this as the one thing to investigate or act on; do not invent a second problem.");
+    else if (decision.focus === "intake") parts.push("Primary coaching focus: intake/energy balance. Keep other observations in the background unless they change the next instruction.");
+    else if (decision.state === "CONTINUE") parts.push("Primary coaching focus: no intervention. Protect the current plan unless the client gives new evidence that changes the decision.");
   }
 
   parts.push(`Right now, ${steer(s)}.`);

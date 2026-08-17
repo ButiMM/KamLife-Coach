@@ -12,9 +12,8 @@
  *  - stats                   → DERIVED from the real DB snapshot each turn; NEVER persisted here
  *                              (persisting a stale streak/weight would lie).
  *
- * Storage is deliberately abstract: this module only defines the shape, safe defaults,
- * and (de)serialization. Where it lives (a table, a jsonb column, a cache) is the wiring
- * step's decision, not the schema's.
+ * Storage is deliberately abstract: this module only defines the shape, safe defaults, and (de)serialization.
+ * Where it lives (a table, a jsonb column, a cache) is the wiring step's decision, not the schema's.
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -186,7 +185,8 @@ export function parseUnderstanding(json: string | null | undefined, fallbackName
 // ---- Canonical coaching decision contract (P0) ----
 export type DecisionState = "CONTINUE" | "CHANGE" | "INVESTIGATE" | "REFER";
 export type DecisionEvidence = "sufficient" | "insufficient";
-export interface DecisionInputs { requiresReferral?: boolean; meaningfulProblem: boolean; evidence: DecisionEvidence; hasMinimumUsefulQuestion?: boolean; }
+export type DecisionFocus = "safety" | "hunger" | "intake" | "none";
+export interface DecisionInputs { requiresReferral?: boolean; meaningfulProblem: boolean; evidence: DecisionEvidence; hasMinimumUsefulQuestion?: boolean; focus?: DecisionFocus; }
 export function selectDecisionState(input: DecisionInputs): DecisionState {
   if (input.requiresReferral) return "REFER";
   if (input.meaningfulProblem && input.evidence === "insufficient") return input.hasMinimumUsefulQuestion ? "INVESTIGATE" : "CONTINUE";
@@ -197,7 +197,7 @@ export function isCoachingDecisionState(value: unknown): value is DecisionState 
 
 /** Deterministic adapter from the live evidence objects into the canonical decision contract. */
 export interface RuntimeDecisionInputs { hungerEvidence?: any; deficitEvidence?: any; requiresReferral?: boolean; }
-export interface RuntimeDecisionResult { state: DecisionState; evidence: DecisionEvidence; meaningfulProblem: boolean; hasMinimumUsefulQuestion: boolean; }
+export interface RuntimeDecisionResult { state: DecisionState; evidence: DecisionEvidence; meaningfulProblem: boolean; hasMinimumUsefulQuestion: boolean; focus: DecisionFocus; }
 const decisionStorage = new AsyncLocalStorage<RuntimeDecisionResult>();
 export function currentRuntimeDecision(): RuntimeDecisionResult | undefined { return decisionStorage.getStore(); }
 const rememberRuntimeDecision = (decision: RuntimeDecisionResult): RuntimeDecisionResult => {
@@ -205,7 +205,7 @@ const rememberRuntimeDecision = (decision: RuntimeDecisionResult): RuntimeDecisi
   return decision;
 };
 export function deriveRuntimeDecision(input: RuntimeDecisionInputs): RuntimeDecisionResult {
-  if (input.requiresReferral) return rememberRuntimeDecision({ state: "REFER", evidence: "sufficient", meaningfulProblem: true, hasMinimumUsefulQuestion: false });
+  if (input.requiresReferral) return rememberRuntimeDecision({ state: "REFER", evidence: "sufficient", meaningfulProblem: true, hasMinimumUsefulQuestion: false, focus: "safety" });
   const hunger = input.hungerEvidence;
   const persistentHunger = hunger?.hunger?.persistent === true;
   const hungerProblem = persistentHunger || hunger?.evidenceState === "persistent_hunger" || hunger?.evidenceState === "adequate_protein_persistent_hunger";
@@ -216,5 +216,6 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInputs): RuntimeDeci
   const meaningfulProblem = hungerProblem || deficitProblem;
   const evidence: DecisionEvidence = hungerNeedsInvestigation ? "insufficient" : deficitProblem ? deficitEvidence : hungerProblem ? "sufficient" : "insufficient";
   const hasMinimumUsefulQuestion = hungerNeedsInvestigation || (deficitProblem && deficitEvidence === "insufficient");
-  return rememberRuntimeDecision({ state: selectDecisionState({ meaningfulProblem, evidence, hasMinimumUsefulQuestion }), evidence, meaningfulProblem, hasMinimumUsefulQuestion });
+  const focus: DecisionFocus = hungerProblem ? "hunger" : deficitProblem ? "intake" : "none";
+  return rememberRuntimeDecision({ state: selectDecisionState({ meaningfulProblem, evidence, hasMinimumUsefulQuestion, focus }), evidence, meaningfulProblem, hasMinimumUsefulQuestion, focus });
 }
