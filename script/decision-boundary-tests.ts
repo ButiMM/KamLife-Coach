@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { decisionBoundaryViolation } from "../server/understanding/decision-boundary";
+import { currentRuntimeDecision, deriveRuntimeDecision } from "../server/understanding/state";
 import type { RuntimeDecisionResult } from "../server/understanding/state";
 
 const d = (state: RuntimeDecisionResult["state"], evidence: RuntimeDecisionResult["evidence"]): RuntimeDecisionResult => ({
@@ -34,5 +35,9 @@ assert.match(
   decisionBoundaryViolation("Just cut your calories and see how you feel.", d("REFER", "sufficient")) || "",
   /REFER/,
 );
+
+const liveDecision = deriveRuntimeDecision({ hungerEvidence: { evidenceState: "insufficient_data" } });
+assert.equal(liveDecision.state, "INVESTIGATE");
+assert.equal(currentRuntimeDecision()?.state, "INVESTIGATE");
 
 console.log("decision-boundary-tests: all passed");
