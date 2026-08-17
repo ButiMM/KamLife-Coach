@@ -93,4 +93,17 @@ assert.deepEqual(detectMedicationContext("I had eggs and pap today."), {
   present: false, medicationClass: null, unsafeRequest: false, reason: null,
 });
 
+assert.match(
+  verifyBrainReply("Take 1mg Ozempic and keep your calorie deficit.", { goalType: "fat_loss", clientMessage: "What dose of Ozempic should I take?" }).violation || "",
+  /Unsafe medication request/i,
+);
+assert.equal(
+  verifyBrainReply("Please speak to your doctor about the dose.", { goalType: "fat_loss", clientMessage: "What dose of Ozempic should I take?" }).ok,
+  true,
+);
+assert.match(
+  verifyBrainReply("Buy it from the seller and keep training.", { goalType: "fat_loss", clientMessage: "Where can I buy semaglutide?" }).violation || "",
+  /Unsafe medication request|sourcing/i,
+);
+
 console.log("decision-boundary-tests: all passed");
