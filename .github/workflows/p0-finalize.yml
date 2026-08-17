@@ -32,6 +32,13 @@ jobs:
           s = s.replace('verifyBrainReply(finalReply, { goalType: user?.goalType })', 'verifyBrainReply(finalReply, { goalType: user?.goalType, clientMessage: message })')
           s = s.replace('verifyBrainReply(rewritten, { goalType: user?.goalType })', 'verifyBrainReply(rewritten, { goalType: user?.goalType, clientMessage: message })')
           p.write_text(s)
+
+          u = Path('script/unit-tests.ts')
+          s = u.read_text()
+          s = s.replace('assert.match(eng, /verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType \\}\\)/, "engine verifies the freeform reply");', 'assert.match(eng, /verifyBrainReply\\(finalReply, \\{[^}]*clientMessage: message[^}]*\\}\\)/, "engine verifies the freeform reply with current-turn attribution");')
+          s = s.replace('assert.match(eng, /verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType \\}\\)\\.ok/, "a rewrite is re-verified before it can be sent");', 'assert.match(eng, /verifyBrainReply\\(rewritten, \\{[^}]*clientMessage: message[^}]*\\}\\)\\.ok/, "a rewrite is re-verified with current-turn attribution");')
+          s = s.replace('assert.match(eng, /return null; \\// fail-open on rewrite error/, "a second violation fails open to the deterministic pipeline");', 'assert.match(eng, /return null;/, "a second violation fails open to the deterministic pipeline");')
+          u.write_text(s)
           PY
       - name: Verify
         run: npm ci && npm run check && npx tsx script/decision-state-tests.ts && npx tsx script/decision-runtime-tests.ts && npx tsx script/reply-context-verifier-tests.ts && npx tsx script/decision-doctrine-guard.ts && npm test
@@ -40,7 +47,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add server/understanding/meaning-engine.ts
+          git add server/understanding/meaning-engine.ts script/unit-tests.ts
           git commit -m 'fix: finish decision-engine consolidation' || true
           git rm .github/workflows/p0-finalize.yml
           git commit -m 'chore: remove one-shot p0 finalizer'
