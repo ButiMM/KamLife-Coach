@@ -2,7 +2,8 @@
 
 import assert from "node:assert/strict";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
-import { currentRuntimeDecision, deriveRuntimeDecision } from "../server/understanding/state";
+import { compileStateBlurb } from "../server/understanding/compiler";
+import { currentRuntimeDecision, deriveRuntimeDecision, defaultUnderstanding } from "../server/understanding/state";
 import type { DecisionFocus, RuntimeDecisionResult } from "../server/understanding/state";
 
 const d = (state: RuntimeDecisionResult["state"], evidence: RuntimeDecisionResult["evidence"], focus: DecisionFocus = "none"): RuntimeDecisionResult => ({
@@ -50,20 +51,24 @@ assert.equal(liveDecision.state, "INVESTIGATE");
 assert.equal(liveDecision.focus, "hunger");
 assert.equal(currentRuntimeDecision()?.state, "INVESTIGATE");
 assert.equal(currentRuntimeDecision()?.focus, "hunger");
+assert.match(compileStateBlurb(defaultUnderstanding("Test")).toLowerCase(), /primary coaching focus: hunger/);
 
 const intakeDecision = deriveRuntimeDecision({
   deficitEvidence: { gapIsMaterial: true, confidence: "usable" },
 });
 assert.equal(intakeDecision.state, "CHANGE");
 assert.equal(intakeDecision.focus, "intake");
+assert.match(compileStateBlurb(defaultUnderstanding("Test")).toLowerCase(), /primary coaching focus: intake\/energy balance/);
 
 const continueDecision = deriveRuntimeDecision({});
 assert.equal(continueDecision.state, "CONTINUE");
 assert.equal(continueDecision.focus, "none");
+assert.match(compileStateBlurb(defaultUnderstanding("Test")).toLowerCase(), /primary coaching focus: no intervention/);
 
 const referDecision = deriveRuntimeDecision({ requiresReferral: true });
 assert.equal(referDecision.state, "REFER");
 assert.equal(referDecision.focus, "safety");
+assert.match(compileStateBlurb(defaultUnderstanding("Test")).toLowerCase(), /primary coaching focus: safety\/referral/);
 
 assert.match(
   verifyBrainReply("You're hungry, so add more protein tomorrow.", { goalType: "fat_loss", clientMessage: "I'm always hungry" }).violation || "",
