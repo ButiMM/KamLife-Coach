@@ -27,30 +27,35 @@ export type Readiness = "low" | "medium" | "high";
 export type WeightDirection = "up" | "down" | "stable";
 
 export interface UnderstandingState {
+  /** persistent, slow-moving — who this person is */
   profile: {
     name: string;
-    lifeStory: string;
-    keyFacts: string[];
+    lifeStory: string;      // short evolving narrative (~50 words), updated over days
+    keyFacts: string[];     // injuries, job, family, goals — durable truths they told us
     preferences: { numberFree: boolean };
   };
+  /** per-message context — what is going on right now (volatile, inferred each turn) */
   current: {
     mood: Mood;
     healthStatus: HealthStatus;
     topic: Topic;
   };
+  /** the coach's accumulated read on the person — the thing that makes it a coach, not a chatbot */
   observations: {
     confidenceTrend: Trend;
-    frustrationLevel: number;
+    frustrationLevel: number; // 1-10
     readinessToPush: Readiness;
-    trustLevel: number;
+    trustLevel: number;       // 1-10
   };
+  /** objective baseline — DERIVED from the DB snapshot each turn, never persisted here */
   stats: {
     streak: number;
     weightDirection: WeightDirection;
     recentProteinAvg: number;
     recentStepAvg: number;
   };
-  updatedAt: string;
+  /** bookkeeping */
+  updatedAt: string; // ISO
 }
 
 export function defaultUnderstanding(name = "there"): UnderstandingState {
@@ -63,17 +68,24 @@ export function defaultUnderstanding(name = "there"): UnderstandingState {
   };
 }
 
+/**
+ * INFERENCE DECAY (Law 5 — facts are sacred, inferences expire). `observations` are the
+ * coach's READ on the person (frustration, confidence trend, readiness) — educated guesses,
+ * not facts. After a gap they go stale: nothing worse than a coach still treating someone as
+ * "anxious" or "frustrated" weeks later. So on reload we pull the volatile reads back toward
+ * neutral. TRUST is different — it's EARNED, durable, and only fades after a long absence.
+ */
 export function decayObservations(
   o: UnderstandingState["observations"],
   ageHours: number,
 ): UnderstandingState["observations"] {
-  if (!(ageHours >= 48)) return o;
+  if (!(ageHours >= 48)) return o; // fresh (<2 days) — the read still holds
   const d = defaultUnderstanding().observations;
   return {
-    confidenceTrend: "stable",
-    readinessToPush: "medium",
-    frustrationLevel: Math.round(o.frustrationLevel * 0.5 + d.frustrationLevel * 0.5),
-    trustLevel: ageHours >= 24 * 30 ? Math.round(o.trustLevel * 0.7 + d.trustLevel * 0.3) : o.trustLevel,
+    confidenceTrend: "stable",   // no trend assumption survives a gap
+    readinessToPush: "medium",   // re-earn the read on how hard to push
+    frustrationLevel: Math.round(o.frustrationLevel * 0.5 + d.frustrationLevel * 0.5), // halfway back to baseline
+    trustLevel: ageHours >= 24 * 30 ? Math.round(o.trustLevel * 0.7 + d.trustLevel * 0.3) : o.trustLevel, // trust only fades after ~a month away
   };
 }
 
@@ -91,6 +103,11 @@ const clampInt = (n: unknown, lo: number, hi: number, dflt: number): number => {
 };
 const oneOf = <T,>(set: Set<T>, v: unknown, dflt: T): T => (set.has(v as T) ? (v as T) : dflt);
 
+/**
+ * Coerce arbitrary parsed JSON (from storage OR from a model) into a valid, safe
+ * UnderstandingState. This is the trust gate: a model can never write an out-of-range
+ * frustration level or an invented mood into the system — it is clamped/whitelisted here.
+ */
 export function coerceUnderstanding(raw: any, fallbackName = "there"): UnderstandingState {
   const d = defaultUnderstanding(fallbackName);
   if (!raw || typeof raw !== "object") return d;
@@ -126,6 +143,7 @@ export function coerceUnderstanding(raw: any, fallbackName = "there"): Understan
   };
 }
 
+/** The durable subset — what is safe to PERSIST (profile + observations only). */
 export function persistableUnderstanding(s: UnderstandingState): Pick<UnderstandingState, "profile" | "observations"> {
   return { profile: s.profile, observations: s.observations };
 }
@@ -152,17 +170,15 @@ export function selectDecisionState(input: DecisionInputs): DecisionState {
 }
 export function isCoachingDecisionState(value: unknown): value is DecisionState { return value === "CONTINUE" || value === "CHANGE" || value === "INVESTIGATE" || value === "REFER"; }
 
+/** Deterministic adapter from the live evidence objects into the canonical decision contract. */
 export interface RuntimeDecisionInputs { hungerEvidence?: any; deficitEvidence?: any; requiresReferral?: boolean; }
 export interface RuntimeDecisionResult { state: DecisionState; evidence: DecisionEvidence; meaningfulProblem: boolean; hasMinimumUsefulQuestion: boolean; }
-
 const decisionStorage = new AsyncLocalStorage<RuntimeDecisionResult>();
 export function currentRuntimeDecision(): RuntimeDecisionResult | undefined { return decisionStorage.getStore(); }
 const rememberRuntimeDecision = (decision: RuntimeDecisionResult): RuntimeDecisionResult => {
   decisionStorage.enterWith(decision);
   return decision;
 };
-
-/** Deterministic adapter from the live evidence objects into the canonical decision contract. */
 export function deriveRuntimeDecision(input: RuntimeDecisionInputs): RuntimeDecisionResult {
   if (input.requiresReferral) return rememberRuntimeDecision({ state: "REFER", evidence: "sufficient", meaningfulProblem: true, hasMinimumUsefulQuestion: false });
   const hunger = input.hungerEvidence;
