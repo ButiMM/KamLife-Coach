@@ -6,6 +6,9 @@
  * reply already known to be wrong.
  */
 
+import { currentRuntimeDecision } from "../understanding/state";
+import { decisionBoundaryViolation } from "../understanding/decision-boundary";
+
 export interface VerifierFacts {
   goalType?: string | null;
   clientMessage?: string | null;
@@ -88,6 +91,12 @@ function verifyStepAttribution(reply: string, clientMessage: string): VerifierRe
  */
 export function verifyBrainReply(reply: string, facts: VerifierFacts): VerifierResult {
   const r = reply || "";
+
+  const decision = currentRuntimeDecision();
+  if (decision) {
+    const violation = decisionBoundaryViolation(r, decision);
+    if (violation) return { ok: false, violation };
+  }
 
   if (/\b(?:cure|reverse|heal|get rid of|eliminate|fix)\s+(?:your\s+|the\s+|his\s+|her\s+)?(?:diabetes|diabetic|hypertension|high blood pressure|blood pressure|cholesterol|pcos|thyroid|arthritis|ibs|cancer|condition|illness|disease|diagnosis)\b/i.test(r)) {
     return { ok: false, violation: "Your reply claims to cure/reverse/heal a medical CONDITION. KamLife is a wellness coach, NOT a doctor or medical device — this is a compliance and liability breach and must NEVER be said. Rewrite: coach the healthy HABITS (movement, food, sleep, consistency) that support how they feel, and for anything about the condition itself defer to their doctor ('I'm your coach, not your doctor — your doctor guides the condition, I'll help you build the habits around it'). Never promise to cure, reverse or fix a disease." };
