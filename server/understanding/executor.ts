@@ -25,6 +25,7 @@
 import { type CoachAction, type ToolOutcome, refsAreLabels, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported, explicitMealSlot } from "./actions";
 import { neverSilentLine } from "../reply-hygiene";
 import { sastHour } from "../sast";
+import { turnMutation } from "../handlers/chat-log";
 
 export interface ExecuteContext {
   user: any;
@@ -42,7 +43,7 @@ export interface ExecuteContext {
    *  fallback, logged when it fires, not the normal path. */
   engineReply?: string;
   /** Resuming a parked action after an explicit "yes". The number was already checked
-   *  against the message that proposed it, and "yes" carries no digits of its own. */
+   * against the message that proposed it, and "yes" carries no digits of its own. */
   preConfirmed?: boolean;
 }
 
@@ -140,7 +141,10 @@ export async function executeAction(action: CoachAction, ctx: ExecuteContext): P
   // 4. PERFORM — delegate to the proven handler. Fingerprint on SUCCESS only.
   try {
     const reply = await perform(action, ctx);
-    if (writesState(action.type)) markDone(fingerprint);
+    if (writesState(action.type)) {
+      markDone(fingerprint);
+      turnMutation(`${describeAction(action)} → performed`);
+    }
     return { ...base, performed: writesState(action.type), reply: reply || "" };
   } catch (e) {
     console.error(`[EXECUTOR] ${action.type} failed:`, (e as Error)?.message || e);
