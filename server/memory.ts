@@ -146,36 +146,52 @@ export async function retrieveMemories(phone: string, query: string): Promise<st
 // ============================================================
 // SHARED FACT SCANNER — one memory writer for EVERY reply path.
 // The store triggers lived inline in gpt-block only, so anything a client told
-// the BRAIN was never remembered: "What supplements am I on?" → "none" →
-// "You're lying, I'm on creatine. Can you not see it in your memory?"
-// (production, 2026-07-07). Fire-and-forget; never blocks or fails a reply.
+// the BRAIN was never remembered. Fire-and-forget; never blocks or fails a reply.
 // ============================================================
 export async function scanAndStoreClientFacts(phone: string, message: string): Promise<void> {
   const m = (message || "").toLowerCase();
+  const raw = (message || "").trim();
+  if (!raw) return;
+
   try {
+    const writes: Array<[string, string]> = [];
+
     if (/\b(injury|injured|hurt|pain|bad knee|bad back|bad shoulder|bad hip)\b/.test(m)) {
-      await storeMemory(phone, `Client reported injury: "${message}"`, "medical");
-    } else if (/\b(allergic|allergy|intolerant|can't eat|cannot eat|dairy free|gluten free|peanut allergy)\b/.test(m)) {
-      await storeMemory(phone, `Client dietary restriction: "${message}"`, "medical");
-    } else if (/\b(diabetes|diabetic|hypertension|pcos|hiv|tb |tuberculosis|pregnant|epilepsy)\b/.test(m)) {
-      await storeMemory(phone, `Client medical condition: "${message}"`, "medical");
-    } else if (/\bi(?:'m| am)?\s+(?:on|taking|using|take)\b[^.!?]{0,30}\b(creatine|whey|protein\s+(?:powder|shake)|pre.?workout|multivitamin|omega|bcaa|supplement)/i.test(message)
-        || /\b(creatine|whey|pre.?workout)\b[^.!?]{0,20}\b(daily|every\s+(?:day|morning)|before\s+(?:gym|training))\b/i.test(message)) {
-      await storeMemory(phone, `Client supplement info: "${message}"`, "supplement");
-    } else if (/\bonly\s+want\s+(?:to\s+(?:do|walk|hit)\s+)?[\d,]+\s*steps\b|\b[\d,]+\s*steps\s+(?:is|are)\s+(?:enough|my\s+(?:limit|max))\b/.test(m)) {
-      await storeMemory(phone, `Client steps preference: "${message}"`, "preference");
-    } else if (/\b(i prefer|i hate|i love|don't like|can't stand|favourite food|i always eat|i never eat|my go.?to)\b/.test(m)) {
-      await storeMemory(phone, `Client food or training preference: "${message}"`, "preference");
-    } else if (/\b(night shift|work from home|just had a baby|new job|retrenched|moved|single mom|single dad|divorce|breakup)\b/.test(m)) {
-      await storeMemory(phone, `Life situation update: "${message}"`, "preference");
-    } else if (/\b(i'?ll|i will|i'm going to|i am going to|i plan to|i promise|i'll make sure|starting tomorrow)\b.{0,100}\b(?:train|workout|walk|hit|reach|log|eat|cook|pack|weigh|check in|sleep|drink)\b/i.test(message)
-      || /\b(?:tomorrow|tonight|this week)\b.{0,80}\b(?:i'?ll|i will|going to|plan to|promise to)\b/i.test(message)) {
-      await storeMemory(phone, `Client commitment: "${message.slice(0, 220)}"`, "commitment");
-    } else if (/\b(stressed|anxious|depressed|overwhelmed|struggling|bad week|hard week|tough week|not okay|burnout|quit|give up|want to stop|not working|no results|nothing is changing)\b/.test(m)) {
-      await storeMemory(phone, `Client mindset/motivation signal: "${message.slice(0, 120)}"`, "mindset");
-    } else if (/\b(hit my goal|reached my goal|lost.*kg|gained.*kg|pb|personal best|new record)\b/.test(m)) {
-      await storeMemory(phone, `Client milestone: "${message}"`, "milestone");
+      writes.push([`Client reported injury: "${raw}"`, "medical"]);
     }
+    if (/\b(allergic|allergy|intolerant|can't eat|cannot eat|dairy free|gluten free|peanut allergy)\b/.test(m)) {
+      writes.push([`Client dietary restriction: "${raw}"`, "medical"]);
+    }
+    if (/\b(diabetes|diabetic|hypertension|pcos|hiv|tb |tuberculosis|pregnant|epilepsy)\b/.test(m)) {
+      writes.push([`Client medical condition: "${raw}"`, "medical"]);
+    }
+    if (/\bi(?:'m| am)?\s+(?:on|taking|using|take)\b[^.!?]{0,30}\b(creatine|whey|protein\s+(?:powder|shake)|pre.?workout|multivitamin|omega|bcaa|supplement)/i.test(raw)
+        || /\b(creatine|whey|pre.?workout)\b[^.!?]{0,20}\b(daily|every\s+(?:day|morning)|before\s+(?:gym|training))\b/i.test(raw)) {
+      writes.push([`Client supplement info: "${raw}"`, "supplement"]);
+    }
+    if (/\bonly\s+want\s+(?:to\s+(?:do|walk|hit)\s+)?[\d,]+\s*steps\b|\b[\d,]+\s*steps\s+(?:is|are)\s+(?:enough|my\s+(?:limit|max))\b/.test(m)) {
+      writes.push([`Client steps preference: "${raw}"`, "preference"]);
+    }
+    if (/\b(i prefer|i hate|i love|don't like|can't stand|favourite food|i always eat|i never eat|my go.?to)\b/.test(m)) {
+      writes.push([`Client food or training preference: "${raw}"`, "preference"]);
+    }
+    if (/\b(night shift|work from home|just had a baby|new job|retrenched|moved|single mom|single dad|divorce|breakup)\b/.test(m)) {
+      writes.push([`Life situation update: "${raw}"`, "preference"]);
+    }
+    if (/\b(i'?ll|i will|i'm going to|i am going to|i plan to|i promise|i'll make sure|starting tomorrow)\b.{0,100}\b(?:train|workout|walk|hit|reach|log|eat|cook|pack|weigh|check in|sleep|drink)\b/i.test(raw)
+      || /\b(?:tomorrow|tonight|this week)\b.{0,80}\b(?:i'?ll|i will|going to|plan to|promise to)\b/i.test(raw)) {
+      writes.push([`Client commitment: "${raw.slice(0, 220)}"`, "commitment"]);
+    }
+    if (/\b(stressed|anxious|depressed|overwhelmed|struggling|bad week|hard week|tough week|not okay|burnout|quit|give up|want to stop|not working|no results|nothing is changing)\b/.test(m)) {
+      writes.push([`Client mindset/motivation signal: "${raw.slice(0, 160)}"`, "mindset"]);
+    }
+    if (/\b(hit my goal|reached my goal|lost.*kg|gained.*kg|pb|personal best|new record)\b/.test(m)) {
+      writes.push([`Client milestone: "${raw}"`, "milestone"]);
+    }
+
+    // Keep this fire-and-forget relative to the reply path, but don't let one malformed
+    // category prevent the other facts in the same turn from being retained.
+    await Promise.all(writes.map(([content, category]) => storeMemory(phone, content, category)));
   } catch (e: any) {
     console.warn("[MEMORY] fact scan non-fatal:", e?.message || e);
   }
