@@ -82,9 +82,28 @@ export async function retrieveMemories(phone: string, query: string): Promise<st
       console.warn(`[MEMORY] Unexpected query embedding size: ${vec?.length} — returning empty`);
       return [];
     }
+    const vector = `[${vec.join(",")}]`;
+
+    // Memory should feel like a continuing relationship, not a static FAQ index.
+    // Pure semantic ranking can surface an old, beautifully matching fact while burying
+    // something the client just told us or a recent commitment. Keep semantic relevance as
+    // the dominant signal, but blend in recency and importance so recent/high-stakes context
+    // can survive retrieval when the wording is different.
     const result = await pool.query(
-      `SELECT content FROM memories WHERE phone = $1 ORDER BY embedding <=> $2::vector LIMIT 8`,
-      [phone, `[${vec.join(",")}]`]
+      `SELECT content,
+              embedding <=> $2::vector AS distance,
+              created_at,
+              importance,
+              (
+                0.72 * (embedding <=> $2::vector)
+                + 0.20 * LEAST(EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400.0 / 30.0, 1.0)
+                - 0.08 * (GREATEST(COALESCE(importance, 3), 1) / 5.0)
+              ) AS retrieval_score
+       FROM memories
+       WHERE phone = $1
+       ORDER BY retrieval_score ASC
+       LIMIT 8`,
+      [phone, vector]
     );
     return result.rows.map((r: any) => r.content as string);
   } catch (err) {
