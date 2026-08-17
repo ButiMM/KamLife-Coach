@@ -3,13 +3,14 @@
 import assert from "node:assert/strict";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { currentRuntimeDecision, deriveRuntimeDecision } from "../server/understanding/state";
-import type { RuntimeDecisionResult } from "../server/understanding/state";
+import type { DecisionFocus, RuntimeDecisionResult } from "../server/understanding/state";
 
-const d = (state: RuntimeDecisionResult["state"], evidence: RuntimeDecisionResult["evidence"]): RuntimeDecisionResult => ({
+const d = (state: RuntimeDecisionResult["state"], evidence: RuntimeDecisionResult["evidence"], focus: DecisionFocus = "none"): RuntimeDecisionResult => ({
   state,
   evidence,
   meaningfulProblem: state !== "CONTINUE",
   hasMinimumUsefulQuestion: state === "INVESTIGATE",
+  focus,
 });
 
 assert.equal(
@@ -22,20 +23,20 @@ assert.match(
 );
 
 assert.equal(
-  verifyBrainReply("I don't know yet — log another day properly and I'll tell you what matters.", { goalType: "fat_loss", clientMessage: "I'm always hungry" }, d("INVESTIGATE", "insufficient")).ok,
+  verifyBrainReply("I don't know yet — log another day properly and I'll tell you what matters.", { goalType: "fat_loss", clientMessage: "I'm always hungry" }, d("INVESTIGATE", "insufficient", "hunger")).ok,
   true,
 );
 assert.match(
-  verifyBrainReply("You're hungry, so add more protein tomorrow.", { goalType: "fat_loss", clientMessage: "I'm always hungry" }, d("INVESTIGATE", "insufficient")).violation || "",
+  verifyBrainReply("You're hungry, so add more protein tomorrow.", { goalType: "fat_loss", clientMessage: "I'm always hungry" }, d("INVESTIGATE", "insufficient", "hunger")).violation || "",
   /INVESTIGATE/i,
 );
 
 assert.equal(
-  verifyBrainReply("This needs a doctor to assess properly.", { goalType: "fat_loss", clientMessage: "I have severe pain" }, d("REFER", "sufficient")).ok,
+  verifyBrainReply("This needs a doctor to assess properly.", { goalType: "fat_loss", clientMessage: "I have severe pain" }, d("REFER", "sufficient", "safety")).ok,
   true,
 );
 assert.match(
-  verifyBrainReply("Just cut your calories and see how you feel.", { goalType: "fat_loss", clientMessage: "I have severe pain" }, d("REFER", "sufficient")).violation || "",
+  verifyBrainReply("Just cut your calories and see how you feel.", { goalType: "fat_loss", clientMessage: "I have severe pain" }, d("REFER", "sufficient", "safety")).violation || "",
   /REFER/,
 );
 
@@ -46,7 +47,23 @@ const liveDecision = deriveRuntimeDecision({
   },
 });
 assert.equal(liveDecision.state, "INVESTIGATE");
+assert.equal(liveDecision.focus, "hunger");
 assert.equal(currentRuntimeDecision()?.state, "INVESTIGATE");
+assert.equal(currentRuntimeDecision()?.focus, "hunger");
+
+const intakeDecision = deriveRuntimeDecision({
+  deficitEvidence: { gapIsMaterial: true, confidence: "usable" },
+});
+assert.equal(intakeDecision.state, "CHANGE");
+assert.equal(intakeDecision.focus, "intake");
+
+const continueDecision = deriveRuntimeDecision({});
+assert.equal(continueDecision.state, "CONTINUE");
+assert.equal(continueDecision.focus, "none");
+
+const referDecision = deriveRuntimeDecision({ requiresReferral: true });
+assert.equal(referDecision.state, "REFER");
+assert.equal(referDecision.focus, "safety");
 
 assert.match(
   verifyBrainReply("You're hungry, so add more protein tomorrow.", { goalType: "fat_loss", clientMessage: "I'm always hungry" }).violation || "",
