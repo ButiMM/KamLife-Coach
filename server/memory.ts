@@ -55,6 +55,22 @@ async function pruneOldMemories(phone: string): Promise<void> {
 export async function storeMemory(phone: string, content: string, category: string): Promise<void> {
   try {
     assertAiOnline("storeMemory");
+
+    // Identical facts should not be embedded and inserted again on every turn.
+    // Keep this scoped to recent history so a genuinely repeated fact can become a
+    // fresh memory later without letting the table fill with same-turn duplicates.
+    const duplicate = await pool.query(
+      `SELECT 1
+       FROM memories
+       WHERE phone = $1
+         AND content = $2
+         AND category = $3
+         AND created_at >= NOW() - INTERVAL '30 days'
+       LIMIT 1`,
+      [phone, content, category]
+    );
+    if (duplicate.rows.length > 0) return;
+
     const resp = await openai.embeddings.create({ model: "text-embedding-3-small", input: content });
     const vec = resp.data[0].embedding;
     if (!Array.isArray(vec) || vec.length !== 1536) {
