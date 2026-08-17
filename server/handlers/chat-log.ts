@@ -124,10 +124,11 @@ const PURE_REACTION_INPUTS = new Set([
   "dankie", "baie dankie", "ngiyabonga", "siyabonga", "ngiyabonga coach", "enkosi",
   "ke a leboha", "ke a leboga", "kea leboha", "ndza khensa",
 ]);
-const THIN_COACH_REPLY = /^(?:noted|sharp|good|great|perfect|nice|awesome|lekker|got it|understood|well done|keep it up|good choice|great job)[.!👌👊\s]*$/i;
-const GENERIC_COACH_REPLY = /(?:if you need anything else,? just let me know|keep building on those meals|keep that momentum going|focus on your next meal|make that meal count|let'?s keep working|keep fuelling)[.!\s]*$/i;
+const ACK_PREFIX = /^(?:noted|sharp|good|great|perfect|nice|awesome|lekker|got it|understood|well done|keep it up|good choice|great job)\b/i;
+const GENERIC_COACH_REPLY = /(?:if you need anything else,? just let me know|keep building on those meals|keep that momentum going|focus on your next meal|make that meal count|let'?s keep working|keep fuelling|keep it balanced)[.!\s]*$/i;
 const MISSED_TRAINING_CLAIM = /\b(?:missed|didn'?t|did not|haven'?t|have not)\b[^.\n]{0,35}\b(?:train|training|workout|session|gym)\b|\b(?:monday|today)\s+is\s+(?:still\s+)?a\s+training\s+day\b/i;
 const NO_CURRENT_STEPS_CLAIM = /\b(?:haven'?t|have not|no|zero)\b[^.\n]{0,30}\b(?:steps|walk(?:ed|ing)?)\b/i;
+const CONTRADICTORY_WEIGHT_TREND = /\b(?:not|won'?t|will not|can'?t|cannot)\b[^.\n]{0,50}\btrend\b[^.\n]{0,80}\b(?:scale|weight)\s+(?:is\s+)?going\s+up\b/i;
 
 function isMeaningfulClientMessage(message: string): boolean {
   const m = message.trim().toLowerCase();
@@ -142,8 +143,10 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
 
   const draft = String(reply).trim();
   const verifier = verifyBrainReply(draft, { clientMessage: scope.inputText });
-  const likelyGeneric = THIN_COACH_REPLY.test(draft) || GENERIC_COACH_REPLY.test(draft);
-  const suspiciousStateLanguage = MISSED_TRAINING_CLAIM.test(draft) || NO_CURRENT_STEPS_CLAIM.test(draft);
+  const likelyGeneric = (ACK_PREFIX.test(draft) && draft.length <= 180) || GENERIC_COACH_REPLY.test(draft);
+  const suspiciousStateLanguage = MISSED_TRAINING_CLAIM.test(draft)
+    || NO_CURRENT_STEPS_CLAIM.test(draft)
+    || CONTRADICTORY_WEIGHT_TREND.test(draft);
   if (!verifier.ok || (!likelyGeneric && !suspiciousStateLanguage) || !isMeaningfulClientMessage(scope.inputText)) return reply;
 
   try {
