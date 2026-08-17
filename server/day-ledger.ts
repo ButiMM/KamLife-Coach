@@ -19,7 +19,7 @@ import { foldLedgerRows, freshTodayWater, type DayLedger, type LedgerRow } from 
 import { estimateCarbsFat } from "./macro-estimate";
 import { effectiveMealLoggedAt } from "./utils";
 import { invalidatePatternCache } from "./cache";
-import { replaceHeldMeal, amendRecentMeal } from "./food-identity-correction";
+import { replaceHeldMeal, amendRecentMeal, planCorrection, applyCorrection } from "./food-identity-correction";
 import { turnMutation } from "./handlers/chat-log";
 
 export { foldLedgerRows } from "./day-ledger-core";
@@ -92,6 +92,40 @@ interface CommitFoodLogResult {
   runningProtein: number;
 }
 
+/**
+ * A client can correct a food inside the same message that logs it. The scanner has already
+ * parsed both sides by the time this write door sees the turn. Net the removal here, before the
+ * row is written, and let the replacement survive because it is already present in `items`.
+ *
+ * This reuses the existing correction grammar and composition rule; it does not create a second
+ * correction engine. When a composite DB food (e.g. "Chicken and rice") needs to be split, use
+ * the scanner's own resolver so the retained half gets real food numbers rather than a guess.
+ */
+async function netSameMessageCorrection(
+  rawMessage: string,
+  items: CommitFoodLogParams["items"],
+): Promise<CommitFoodLogParams["items"]> {
+  if (!rawMessage || !Array.isArray(items) || items.length < 2 || !/\b(?:not|no|wasn'?t|didn'?t)\b/i.test(rawMessage)) return items;
+  const plan = planCorrection(rawMessage, false);
+  if (!plan.remove.length) return items;
+
+  const { scanForSAFoods } = await import("./handlers/food-scanner");
+  const resolveFood = (food: string) => {
+    const hit = scanForSAFoods(food, { exactOnly: true })[0] || scanForSAFoods(food)[0];
+    return hit ? {
+      name: hit.name,
+      grams: hit.typicalPortionGrams || 100,
+      kcal: hit.typicalPortionCalories || 0,
+      protein: hit.typicalPortionProtein || 0,
+      category: hit.category,
+    } : null;
+  };
+
+  const net = applyCorrection(items, { ...plan, add: [] }, resolveFood as any);
+  if (!net.removed.length || net.items.length === 0) return items;
+  return net.items as CommitFoodLogParams["items"];
+}
+
 // THE single chokepoint for every food-log write (Box 2). GUARANTEE: complete macros — kcal +
 // protein with no carbs/fat get filled from the trusted numbers so the card can't be zero-
 // dragged. Fills only when BOTH are absent (an all-protein meal still lands ~0).
@@ -99,12 +133,23 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
   // Dynamic on purpose: food-scanner imports THIS module dynamically, so a static edge back would
   // cycle at module init. Same pattern, same reason, opposite direction.
   const { recomputeTodayFoodTotals, invalidateFoodTotalsCache } = await import("./handlers/food-scanner");
+
+  const correctedItems = await netSameMessageCorrection(params.rawMessage, params.items);
+  const itemsChanged = correctedItems !== params.items;
+  const effectiveKcal = itemsChanged ? correctedItems.reduce((s, i) => s + (i.kcal || 0), 0) : params.kcalInt;
+  const effectiveProtein = itemsChanged ? Math.round(correctedItems.reduce((s, i) => s + (i.protein || 0), 0)) : params.proteinInt;
+
   let carbsInt = params.carbsInt;
   let fatInt = params.fatInt;
-  if (params.kcalInt > 0 && carbsInt <= 0 && fatInt <= 0) {
+  if (itemsChanged) {
+    const est = estimateCarbsFat(effectiveKcal, effectiveProtein);
+    carbsInt = est.carbs;
+    fatInt = est.fat;
+  } else if (params.kcalInt > 0 && carbsInt <= 0 && fatInt <= 0) {
     const est = estimateCarbsFat(params.kcalInt, params.proteinInt);
     carbsInt = est.carbs; fatInt = est.fat;
   }
+
   let prevCals = 0;
   try {
     const existingTotals = await recomputeTodayFoodTotals(params.userId);
@@ -119,13 +164,16 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
     .where(and(
       eq(mealLogs.userId, params.userId),
       gte(mealLogs.loggedAt, dedupWindow),
-      eq(mealLogs.kcalInt, params.kcalInt),
+      eq(mealLogs.kcalInt, effectiveKcal),
       eq(mealLogs.rawMessage, rawSlice),
     ))
     .limit(1);
 
-  const patch = { rawMessage: rawSlice, kcalInt: params.kcalInt, proteinInt: params.proteinInt, carbsInt, fatInt, items: params.items, mealLabel: params.mealLabel };
-  const itemNames = (Array.isArray(params.items) ? params.items : []).map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean);
+  const patch = { rawMessage: rawSlice, kcalInt: effectiveKcal, proteinInt: effectiveProtein, carbsInt, fatInt, items: correctedItems, mealLabel: params.mealLabel };
+  const itemNames = correctedItems.map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean);
+  if (itemsChanged) {
+    turnMutation(`SELF_CORRECTION removed-from-write-door raw=${rawSlice.slice(0, 160)}`, `[MEAL_CORRECTION] user=...${String(params.userId || "").slice(-6)}`);
+  }
   // A held row's REPLACEMENT and an AMENDMENT both rewrite an existing row and suppress the
   // insert below. Neither ever creates a second row.
   const heldId = await replaceHeldMeal(params.userId, `${rawSlice} ${itemNames.join(" ")}`, patch);
@@ -140,25 +188,25 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
         rawMessage: rawSlice,
         source: params.source,
         sourceMessageId: params.sourceMessageId ?? null,
-        kcalInt: params.kcalInt,
-        proteinInt: params.proteinInt,
+        kcalInt: effectiveKcal,
+        proteinInt: effectiveProtein,
         carbsInt,
         fatInt,
-        items: params.items,
+        items: correctedItems,
         mealLabel: params.mealLabel,
         loggedAt: effLoggedAt,
       });
       invalidatePatternCache(params.userId);
       invalidateFoodTotalsCache(params.userId);
-      turnMutation(`INSERT meal kcal=${params.kcalInt} prot=${params.proteinInt} label=${params.mealLabel || "none"} at=${String(effLoggedAt).slice(0, 10)}`, `[MEAL_LOG] user=...${String(params.userId || "").slice(-6)}`);
+      turnMutation(`INSERT meal kcal=${effectiveKcal} prot=${effectiveProtein} label=${params.mealLabel || "none"} at=${String(effLoggedAt).slice(0, 10)}`, `[MEAL_LOG] user=...${String(params.userId || "").slice(-6)}`);
     } catch (e) {
       console.error("[MEAL_LOG] insert failed — user:", String(params.userId || "").slice(-6), e);
       insertOk = false;
     }
   }
 
-  let runningCals = prevCals + params.kcalInt;
-  let runningProtein = params.proteinInt;
+  let runningCals = prevCals + effectiveKcal;
+  let runningProtein = effectiveProtein;
   try {
     const freshTotals = await recomputeTodayFoodTotals(params.userId);
     runningCals = freshTotals.calories;
