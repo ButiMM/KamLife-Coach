@@ -30,7 +30,7 @@ import { renderHungerEvidence, type HungerEvidence } from "../hunger-evidence";
 import { renderDeficitEvidence, type DeficitEvidence } from "../adaptive-targets";
 import { COACH_ACTION_TOOLS, ACTION_DIRECTIVE, validateActions, isMemoryGrievance, isSickReaffirmation, type CoachAction } from "./actions";
 import { verifyBrainReply } from "../brain/reply-verifier";
-import { deriveRuntimeDecision, type RuntimeDecisionResult } from "./decision-runtime";
+import { deriveRuntimeDecision, type RuntimeDecisionResult } from "./state";
 
 // COACH K'S CONSTITUTION (final review): the immutable laws every reply obeys. These sit
 // ABOVE everything — the one identity, expressed as principles, so the engine behaves the
@@ -301,7 +301,7 @@ Rules: CONTINUE means do not invent a change merely to create novelty. INVESTIGA
 
     let finalReply = reply;
     if (finalReply && action.type === "JUST_REPLY") {
-      const verdict = verifyBrainReply(finalReply, { goalType: user?.goalType });
+      const verdict = verifyBrainReply(finalReply, { goalType: user?.goalType, clientMessage: message });
       if (!verdict.ok) {
         console.log(`[MEANING_ENGINE] verifier violation — self-correcting: ${(verdict.violation || "").slice(0, 90)}`);
         try {
@@ -318,7 +318,7 @@ Rules: CONTINUE means do not invent a change merely to create novelty. INVESTIGA
             promptTokens: fix.usage?.prompt_tokens ?? 0, completionTokens: fix.usage?.completion_tokens ?? 0,
           });
           const rewritten = (fix.choices[0]?.message?.content || "").trim();
-          if (rewritten && verifyBrainReply(rewritten, { goalType: user?.goalType }).ok) {
+          if (rewritten && verifyBrainReply(rewritten, { goalType: user?.goalType, clientMessage: message }).ok) {
             finalReply = rewritten;
           } else {
             console.warn("[MEANING_ENGINE] verifier failed after rewrite — deferring (fail open)");
