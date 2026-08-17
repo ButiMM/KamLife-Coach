@@ -73,6 +73,32 @@ export async function storeMemory(phone: string, content: string, category: stri
   }
 }
 
+async function recentConversation(phone: string): Promise<string> {
+  try {
+    const result = await pool.query(
+      `SELECT message_in, message_out, created_at
+       FROM chat_history
+       WHERE user_id = (SELECT id FROM users WHERE phone_number = $1 LIMIT 1)
+       ORDER BY created_at DESC, id DESC
+       LIMIT 4`,
+      [phone]
+    );
+    if (result.rows.length === 0) return "";
+    const turns = result.rows.reverse().map((r: any) => {
+      const when = r.created_at instanceof Date
+        ? r.created_at.toISOString().slice(0, 16).replace("T", " ")
+        : String(r.created_at || "").slice(0, 16).replace("T", " ");
+      const incoming = String(r.message_in || "").trim().slice(0, 600);
+      const outgoing = String(r.message_out || "").trim().slice(0, 700);
+      return `[${when}] CLIENT: ${incoming}\n[${when}] COACH: ${outgoing}`;
+    });
+    return turns.join("\n");
+  } catch (err) {
+    console.warn("[MEMORY] Recent conversation unavailable:", (err as any)?.message || err);
+    return "";
+  }
+}
+
 export async function retrieveMemories(phone: string, query: string): Promise<string[]> {
   try {
     assertAiOnline("retrieveMemories");
@@ -105,7 +131,12 @@ export async function retrieveMemories(phone: string, query: string): Promise<st
        LIMIT 8`,
       [phone, vector]
     );
-    return result.rows.map((r: any) => r.content as string);
+    const recalled = result.rows.map((r: any) => r.content as string);
+    const thread = await recentConversation(phone);
+    if (thread) {
+      recalled.push(`RECENT CONVERSATION — use this to stay in the thread, not to recite it:\n${thread}`);
+    }
+    return recalled;
   } catch (err) {
     if (!isAiOfflineError(err)) console.error("[MEMORY] Retrieve error:", err);
     return [];
