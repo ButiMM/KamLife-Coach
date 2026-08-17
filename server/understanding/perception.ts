@@ -4,8 +4,8 @@
  * THE ONE PLACE a raw message becomes updated understanding. It runs a cheap/fast
  * model whose ONLY job: update UnderstandingState — it never writes the reply.
  *
- * Trust gate: whatever the model returns is passed through coerceUnderstanding(),
- * which clamps ranges and whitelists enums.
+ * Trust gate: model output is clamped/whitelisted. Pattern timestamps are server-owned;
+ * the model may describe evidence/confidence/confirmation but cannot forge chronology.
  *
  * Offline/fail-safe: any error returns the prior state unchanged.
  */
@@ -30,6 +30,7 @@ Rules:
 - observations.confidenceTrend / frustrationLevel(1-10) / readinessToPush(low/medium/high) / trustLevel(1-10): nudge SLOWLY over time; one message rarely swings these hard. If they're angry at the coach, trust drops and frustration rises.
 - profile.keyFacts: append a durable fact ONLY if they revealed something lasting. Two kinds count: (a) life facts — an injury, their job, family, a firm goal, a food they can't eat; and (b) EVIDENCE of how they respond — observed behaviour that ages well, e.g. "responds well to encouragement", "goes quiet when pushed hard", "mentioned wanting to quit", "logs food daily", "opens up in voice notes". Store the EVIDENCE (what they said or did), never your interpretation ("trustLevel 7", "mood frustrated") — those you infer fresh each message. Never store a passing mood as a fact.
 - observations.learnedPatterns: use this ONLY for repeated, evidence-backed behavioural patterns that can improve future coaching. A single event is NOT a pattern. Never infer a hidden cause from missing data. Never write "overeats on weekends" because Saturdays are missing; that is uncertainty, not evidence. Pattern `text` must describe what was observed, `evidence` must name the concrete repeated evidence, `confidence` is low/medium/high, and `confirmed` is true only when the client explicitly confirms the pattern or the evidence has repeated independently. Keep at most 8 patterns. When a known pattern is contradicted, update its evidence/confidence instead of silently preserving it.
+- Pattern chronology is NOT model-owned. Do not invent `firstObserved` or `lastObserved` timestamps; the server will retain and update them from persisted state and the current turn.
 - profile.lifeStory: a <=50-word narrative in TWO parts. First, WHO THEY ARE (permanent — e.g. "a cleaner, two daughters, wants to be strong for her grandchildren") — keep this stable. Then THEIR CURRENT CHAPTER (what's happening now — update only this part as things change). Do not turn a single incident into a permanent identity statement.
 - Leave stats untouched (those come from the database, not from you).
 
@@ -38,7 +39,6 @@ Return ONLY valid JSON matching the shape you were given. No prose, no explanati
 export interface PerceptionInput {
   message: string;
   prior: UnderstandingState;
-  /** trustworthy DB-derived stats to fold in (streak, weight direction, averages) */
   stats?: Partial<UnderstandingState["stats"]>;
   userId?: string | null;
 }
@@ -75,9 +75,26 @@ export async function runPerception(openai: OpenAI, input: PerceptionInput): Pro
     const content = resp.choices[0]?.message?.content;
     if (!content) return withStats;
     const parsed = JSON.parse(content);
-    const coerced = coerceUnderstanding(parsed, withStats.profile.name, withStats);
+    const now = new Date().toISOString();
+    const priorPatterns = withStats.observations.learnedPatterns || [];
+    const candidatePatterns = Array.isArray(parsed?.observations?.learnedPatterns)
+      ? parsed.observations.learnedPatterns.map((p: any) => {
+          const text = typeof p?.text === "string" ? p.text.trim() : "";
+          const existing = priorPatterns.find(x => x.text.trim().toLowerCase() === text.toLowerCase());
+          return {
+            ...p,
+            firstObserved: existing?.firstObserved || now,
+            lastObserved: text ? now : existing?.lastObserved || now,
+          };
+        })
+      : priorPatterns;
+    const parsedWithPatterns = {
+      ...parsed,
+      observations: { ...withStats.observations, ...(parsed?.observations || {}), learnedPatterns: candidatePatterns },
+    };
+    const coerced = coerceUnderstanding(parsedWithPatterns, withStats.profile.name, withStats);
     coerced.stats = withStats.stats;
-    coerced.updatedAt = new Date().toISOString();
+    coerced.updatedAt = now;
     return coerced;
   } catch (e) {
     if (!isAiOfflineError(e)) console.warn("[PERCEPTION] update failed (keeping prior state):", (e as any)?.message || e);
