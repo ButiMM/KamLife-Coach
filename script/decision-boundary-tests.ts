@@ -1,7 +1,4 @@
-/**
- * Pure tests for the canonical coaching decision boundary.
- * Run: npx tsx script/decision-boundary-tests.ts
- */
+/** Pure tests for the canonical coaching decision boundary. */
 
 import assert from "node:assert/strict";
 import { decisionBoundaryViolation } from "../server/understanding/decision-boundary";
@@ -21,12 +18,12 @@ assert.match(
 );
 
 assert.equal(
-  decisionBoundaryViolation("I don't have enough logged to tell you why yet — can you log another day properly?", d("INVESTIGATE", "insufficient")),
+  decisionBoundaryViolation("I don't know yet — log another day properly and I'll tell you what matters.", d("INVESTIGATE", "insufficient")),
   null,
 );
 assert.match(
   decisionBoundaryViolation("You're hungry, so add more protein tomorrow.", d("INVESTIGATE", "insufficient")) || "",
-  /INSUFFICIENT|INVESTIGATE/i,
+  /INVESTIGATE/i,
 );
 
 assert.equal(
