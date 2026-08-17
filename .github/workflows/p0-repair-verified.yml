@@ -1,0 +1,56 @@
+name: p0-repair-verified
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Apply surgical P0 verifier wiring
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          meaning = Path('server/understanding/meaning-engine.ts')
+          s = meaning.read_text()
+          old1 = 'verifyBrainReply(finalReply, { goalType: user?.goalType })'
+          new1 = 'verifyBrainReply(finalReply, { goalType: user?.goalType, clientMessage: message })'
+          old2 = 'verifyBrainReply(rewritten, { goalType: user?.goalType })'
+          new2 = 'verifyBrainReply(rewritten, { goalType: user?.goalType, clientMessage: message })'
+          if old1 not in s or old2 not in s:
+              raise SystemExit('meaning-engine verifier call pattern not found; refusing to mutate')
+          s = s.replace(old1, new1, 1).replace(old2, new2, 1)
+          old3 = 'return null; // fail-open → existing pipeline runs'
+          if old3 not in s:
+              raise SystemExit('meaning-engine fail-open marker not found; refusing to mutate')
+          # Keep the source-level failure mode explicit while preserving existing runtime behavior.
+          s = s.replace('console.warn("[MEANING_ENGINE] verifier failed after rewrite — deferring (fail open)");\n            return null;', 'console.warn("[MEANING_ENGINE] verifier failed after rewrite — deferring (fail open)");\n            return null; // fail-open on rewrite error', 1)
+          meaning.write_text(s)
+
+          unit = Path('script/unit-tests.ts')
+          s = unit.read_text()
+          s = s.replace('verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType \\}\\)', 'verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)', 1)
+          s = s.replace('verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType \\}\\)\\.ok', 'verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)\\.ok', 1)
+          unit.write_text(s)
+          PY
+      - name: Verify typecheck and P0/full suite
+        run: npm ci && npm run check && npx tsx script/decision-state-tests.ts && npx tsx script/decision-runtime-tests.ts && npx tsx script/reply-context-verifier-tests.ts && npx tsx script/decision-doctrine-guard.ts && npm test
+      - name: Commit verified repair
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server/understanding/meaning-engine.ts script/unit-tests.ts
+          git commit -m 'fix: wire current-turn context into reply verifier'
+          git push
