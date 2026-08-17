@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - name: Apply surgical P0 verifier wiring
+      - name: Apply surgical P0 consolidation and verifier wiring
         shell: bash
         run: |
           python - <<'PY'
@@ -35,7 +35,20 @@ jobs:
           if marker not in s:
               raise SystemExit('meaning-engine fail-open rewrite marker not found; refusing to mutate')
           s = s.replace(marker, 'console.warn("[MEANING_ENGINE] verifier failed after rewrite — deferring (fail open)");\n            return null; // fail-open on rewrite error', 1)
+          old_import = 'import { deriveRuntimeDecision, type RuntimeDecisionResult } from "./decision-runtime";'
+          new_import = 'import { deriveRuntimeDecision, type RuntimeDecisionResult } from "./state";'
+          if old_import not in s:
+              raise SystemExit('meaning-engine decision import pattern not found; refusing to mutate')
+          s = s.replace(old_import, new_import, 1)
           meaning.write_text(s)
+
+          state_test = Path('script/decision-state-tests.ts')
+          s = state_test.read_text().replace('from "../server/understanding/decision-state"', 'from "../server/understanding/state"', 1)
+          state_test.write_text(s)
+
+          runtime_test = Path('script/decision-runtime-tests.ts')
+          s = runtime_test.read_text().replace('from "../server/understanding/decision-runtime"', 'from "../server/understanding/state"', 1)
+          runtime_test.write_text(s)
 
           unit = Path('script/unit-tests.ts')
           s = unit.read_text()
@@ -46,6 +59,9 @@ jobs:
           s = s.replace(old_u1, 'assert.match(eng, /verifyBrainReply\\(finalReply, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)/, "engine verifies the freeform reply");', 1)
           s = s.replace(old_u2, 'assert.match(eng, /verifyBrainReply\\(rewritten, \\{ goalType: user\\?\\.goalType, clientMessage: message \\}\\)\\.ok/, "a rewrite is re-verified before it can be sent");', 1)
           unit.write_text(s)
+
+          for p in [Path('server/understanding/decision-state.ts'), Path('server/understanding/decision-runtime.ts')]:
+              if p.exists(): p.unlink()
           PY
       - name: Verify typecheck and P0/full suite
         run: npm ci && npm run check && npx tsx script/decision-state-tests.ts && npx tsx script/decision-runtime-tests.ts && npx tsx script/reply-context-verifier-tests.ts && npx tsx script/decision-doctrine-guard.ts && npm test
@@ -54,9 +70,9 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add server/understanding/meaning-engine.ts script/unit-tests.ts
+          git add server/understanding/meaning-engine.ts script/decision-state-tests.ts script/decision-runtime-tests.ts script/unit-tests.ts server/understanding/state.ts
+          git rm server/understanding/decision-state.ts server/understanding/decision-runtime.ts .github/workflows/p0-repair-verified.yml
           git checkout origin/main -- .github/workflows/test.yml
-          git rm .github/workflows/p0-repair-verified.yml
           git add .github/workflows/test.yml
-          git commit -m 'fix: wire current-turn context into reply verifier'
+          git commit -m 'refactor: consolidate coaching decision policy into understanding state'
           git push
