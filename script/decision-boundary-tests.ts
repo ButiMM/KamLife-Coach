@@ -71,23 +71,28 @@ assert.equal(referDecision.focus, "safety");
 assert.match(compileStateBlurb(defaultUnderstanding("Test")).toLowerCase(), /primary coaching focus: safety\/referral/);
 
 const now = Date.parse("2026-08-17T10:00:00.000Z");
+const existingPattern = {
+  text: "Weekends are often harder after Friday social events.",
+  evidence: "Repeated Friday/Saturday reports over several weeks.",
+  confidence: "high" as const,
+  firstObserved: "2026-08-01T10:00:00.000Z",
+  lastObserved: "2026-08-16T10:00:00.000Z",
+  confirmed: true,
+};
 const bounded = coerceUnderstanding({
-  observations: {
-    learnedPatterns: [{
-      text: "Weekends are often harder after Friday social events.",
-      evidence: "Repeated Friday/Saturday reports over several weeks.",
-      confidence: "high",
-      firstObserved: "2026-08-01T10:00:00.000Z",
-      lastObserved: "2026-08-16T10:00:00.000Z",
-      confirmed: true,
-    }],
-  },
+  observations: { learnedPatterns: [existingPattern] },
 }, "Test");
 assert.equal(bounded.observations.learnedPatterns.length, 1);
 assert.equal(bounded.observations.learnedPatterns[0]?.confirmed, true);
 const boundedBlurb = compileStateBlurb(bounded).toLowerCase();
 assert.match(boundedBlurb, /recent coaching patterns/);
 assert.match(boundedBlurb, /weekends are often harder/);
+
+const prior = defaultUnderstanding("Test");
+prior.observations.learnedPatterns = [existingPattern];
+const preserved = coerceUnderstanding({ observations: {} }, "Test", prior);
+assert.equal(preserved.observations.learnedPatterns.length, 1);
+assert.equal(preserved.observations.learnedPatterns[0]?.text, existingPattern.text);
 
 const stale = [{
   text: "They tend to skip logging when busy.",
@@ -98,6 +103,12 @@ const stale = [{
   confirmed: false,
 }];
 assert.equal(pruneLearnedPatterns(stale, now).length, 0);
+
+const confirmedOlder = [{
+  ...existingPattern,
+  lastObserved: "2026-03-01T10:00:00.000Z",
+}];
+assert.equal(pruneLearnedPatterns(confirmedOlder, now).length, 1);
 
 const safeWithoutEvidence = coerceUnderstanding({ observations: { learnedPatterns: [{
   text: "They overeat on Saturdays.",
