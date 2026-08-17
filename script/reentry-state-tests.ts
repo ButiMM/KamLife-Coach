@@ -7,6 +7,7 @@ import {
   isProfileUpdateMessage,
   resolveReentry,
 } from "../server/understanding/reentry";
+import { resolveReentryForUser, shouldHandleComebackForUser } from "../server/understanding/reentry-bridge";
 
 // Existing UnderstandingState boundary: 48 hours is the returning threshold.
 assert.deepEqual(reentryFromAgeHours(0), { daysSinceLastContact: 0, isReturning: false });
@@ -68,4 +69,22 @@ assert.deepEqual(
   { daysSinceLastContact: 0, isReturning: false, hasExplicitReturnSignal: true, shouldHandleComeback: false },
 );
 
-console.log("reentry-state-tests: 31/31 passed");
+// Consumer boundary: callers receive the canonical result rather than duplicating the rules.
+assert.equal(
+  shouldHandleComebackForUser({ user: { lastActiveAt: "2026-08-15T10:00:00.000Z" }, message: "I'm back", nowMs: now }),
+  true,
+);
+assert.equal(
+  shouldHandleComebackForUser({ user: { lastActiveAt: "2026-08-15T10:00:00.000Z" }, message: "workout", nowMs: now }),
+  false,
+);
+assert.equal(
+  shouldHandleComebackForUser({ user: { lastActiveAt: "2026-08-15T10:00:00.000Z" }, message: "I train at home now", nowMs: now }),
+  false,
+);
+assert.deepEqual(
+  resolveReentryForUser({ user: { lastActiveAt: "2026-08-07T10:00:00.000Z" }, message: "sorry I've been busy", nowMs: now }),
+  { daysSinceLastContact: 10, isReturning: true, hasExplicitReturnSignal: true, shouldHandleComeback: true },
+);
+
+console.log("reentry-state-tests: 35/35 passed");
