@@ -35,6 +35,7 @@ import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from 
 import { handleAdviceCommands } from "./advice-commands";
 import { handleFoodCommands } from "./food-commands";
 import { PRICE_ESTIMATE_NOTE } from "../reply-contract";
+import { resolveReentryForUser } from "../understanding/reentry-bridge";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -1056,10 +1057,6 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // not handed a workout programme when they've just had a hard day.
   // ============================================================
   const capName = user.name?.split(" ")[0] || "there";
-  const daysSilent = user.lastActiveAt
-    ? Math.floor((Date.now() - new Date(user.lastActiveAt).getTime()) / 86_400_000)
-    : 0;
-  const isReturning = daysSilent >= 2;
 
   // ---- TARGET WEIGHT DETECTION — "I want to get to 70kg", "my goal is 75kg" ----
   const targetWeightMatch = m.match(/\b(?:get(?:\s+down)?|lose\s+(?:weight\s+)?(?:to|down\s+to)|reach|hit|weigh|target(?:\s+is|\s+weight)?|goal(?:\s+is|\s+weight)?|aim(?:ing)?\s+(?:for|to\s+(?:get\s+)?to)|slim\s+down\s+to)\s+(?:to\s+)?(\d{2,3}(?:\.\d)?)\s*kg\b/i);
@@ -1196,14 +1193,21 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // Respond with empathy and a clean restart plan — not a workout delivered cold.
   // Guard: do NOT intercept profile-update messages (training mode, goals, days) —
   // those MUST fall through to lifecycle.ts isProfileUpdate handler.
-  const isProfileUpdateMsg =
-    /\b(train(ing)?\s+(at|from|to)?\s*(home|gym)|home\s+workout|i\s+train|working\s+out\s+(at\s+)?home|joined.*gym|going.*gym|quit.*gym|no.*gym|left.*gym|change.*goal|my\s+goal\s+is|switch\s+to|new\s+goal|update.*goal|change.*training|training\s+days?)\b/i.test(m);
-  // Must have an explicit return/excuse phrase — short messages like "done", "today",
-  // "menu", "1" are action intent, not comebacks, and must fall through to their handlers.
-  const isComeback = isReturning && !isProfileUpdateMsg &&
-    /\b(i.?m back|i am back|back now|returning|i.?ve been|been (busy|away|sick|off|struggling|stressed)|sorry (i|for|about)|haven.?t been|couldn.?t|wasn.?t able|let me start|can we start|starting again|picking up|back on track|back to it|resuming|fresh start|starting fresh|been (a|so) (long|while)|miss(ed)? (a|this|it)|been MIA|went quiet|disappeared|fell off|going through (a lot|it|stuff|things)|things (have been|been) (crazy|hectic|tough|hard|rough|mad)|life (got|gets?) (in the way|busy)|had a (rough|tough|hard) (week|month|time|period)|what did i miss|catch me up|where (was|did) i (leave off|stop)|been meaning to (come back|check in))\b/i.test(m);
+  //
+  // ONE OWNER (2026-08-17). This block used to compute its own `daysSilent`, `isReturning`,
+  // `isProfileUpdateMsg` and the return-signal regex. The same question — "is this client coming
+  // back after a real gap?" — was therefore answered here and, once the canonical resolver landed,
+  // in two places at once. The regexes were byte-identical, so this swap is behaviour-preserving
+  // by construction; what it removes is the second definition, not the behaviour.
+  const reentry = resolveReentryForUser({ user, message: m });
+  const isComeback = reentry.shouldHandleComeback;
 
   if (isComeback) {
+    // `daysSinceLastContact` is null when the contact clock is missing or in the future — a real
+    // "we do not know". The DECISION above already treats that as not-returning; this is the
+    // DISPLAY path, which needs a number, and the legacy code read 0 there. Keeping that default
+    // is deliberate: null would render as "null days" to a client.
+    const daysSilent = reentry.daysSinceLastContact ?? 0;
     const daysText = daysSilent <= 7 ? `${daysSilent} day${daysSilent === 1 ? "" : "s"}` : daysSilent <= 14 ? "about a week" : "a while";
 
     // Pull their last-logged stats so the comeback feels informed, not generic.
