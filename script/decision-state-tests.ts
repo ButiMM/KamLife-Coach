@@ -1,4 +1,4 @@
-import { isCoachingDecisionState, selectDecisionState } from "../server/understanding/decision-state";
+import { isCoachingDecisionState, selectDecisionState } from "../server/understanding/state";
 
 type Case = {
   name: string;
