@@ -185,11 +185,20 @@ export async function recordTurn(reply: string): Promise<void> {
   if (!t?.userId) return;
   try {
     const decision = currentRuntimeDecision();
+    const evidenceRefs = decision?.focus === "safety"
+      ? ["safety_gate"]
+      : decision?.focus === "hunger"
+        ? ["hunger_evidence"]
+        : decision?.focus === "intake"
+          ? ["deficit_evidence"]
+          : [];
     const stateRead = decision
       ? {
           ...t.stateRead,
           decisionState: decision.state,
           decisionEvidence: decision.evidence,
+          decisionFocus: decision.focus,
+          decisionEvidenceRefs: evidenceRefs,
           meaningfulProblem: decision.meaningfulProblem,
           hasMinimumUsefulQuestion: decision.hasMinimumUsefulQuestion,
         }
