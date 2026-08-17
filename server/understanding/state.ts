@@ -17,8 +17,6 @@
  * step's decision, not the schema's.
  */
 
-import { AsyncLocalStorage } from "node:async_hooks";
-
 export type Mood = "frustrated" | "anxious" | "motivated" | "neutral" | "hopeful";
 export type HealthStatus = "sick" | "recovering" | "healthy";
 export type Topic = "recovery" | "nutrition" | "workout" | "life" | "gratitude" | "progress";
@@ -173,14 +171,8 @@ export function isCoachingDecisionState(value: unknown): value is DecisionState 
 /** Deterministic adapter from the live evidence objects into the canonical decision contract. */
 export interface RuntimeDecisionInputs { hungerEvidence?: any; deficitEvidence?: any; requiresReferral?: boolean; }
 export interface RuntimeDecisionResult { state: DecisionState; evidence: DecisionEvidence; meaningfulProblem: boolean; hasMinimumUsefulQuestion: boolean; }
-const decisionStorage = new AsyncLocalStorage<RuntimeDecisionResult>();
-export function currentRuntimeDecision(): RuntimeDecisionResult | undefined { return decisionStorage.getStore(); }
-const rememberRuntimeDecision = (decision: RuntimeDecisionResult): RuntimeDecisionResult => {
-  decisionStorage.enterWith(decision);
-  return decision;
-};
 export function deriveRuntimeDecision(input: RuntimeDecisionInputs): RuntimeDecisionResult {
-  if (input.requiresReferral) return rememberRuntimeDecision({ state: "REFER", evidence: "sufficient", meaningfulProblem: true, hasMinimumUsefulQuestion: false });
+  if (input.requiresReferral) return { state: "REFER", evidence: "sufficient", meaningfulProblem: true, hasMinimumUsefulQuestion: false };
   const hunger = input.hungerEvidence;
   const persistentHunger = hunger?.hunger?.persistent === true;
   const hungerProblem = persistentHunger || hunger?.evidenceState === "persistent_hunger" || hunger?.evidenceState === "adequate_protein_persistent_hunger";
@@ -191,5 +183,5 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInputs): RuntimeDeci
   const meaningfulProblem = hungerProblem || deficitProblem;
   const evidence: DecisionEvidence = hungerNeedsInvestigation ? "insufficient" : deficitProblem ? deficitEvidence : hungerProblem ? "sufficient" : "insufficient";
   const hasMinimumUsefulQuestion = hungerNeedsInvestigation || (deficitProblem && deficitEvidence === "insufficient");
-  return rememberRuntimeDecision({ state: selectDecisionState({ meaningfulProblem, evidence, hasMinimumUsefulQuestion }), evidence, meaningfulProblem, hasMinimumUsefulQuestion });
+  return { state: selectDecisionState({ meaningfulProblem, evidence, hasMinimumUsefulQuestion }), evidence, meaningfulProblem, hasMinimumUsefulQuestion };
 }
