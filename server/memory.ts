@@ -35,7 +35,7 @@ export async function initMemoryTable(): Promise<void> {
 // `memories` (pgvector) stays raw above because Drizzle lacks stable pgvector support.
 
 const IMPORTANCE: Record<string, number> = {
-  medical: 5, milestone: 5, preference: 4,
+  medical: 5, milestone: 5, preference: 4, commitment: 4,
   training: 3, nutrition: 3, mindset: 2,
 };
 
@@ -137,6 +137,9 @@ export async function scanAndStoreClientFacts(phone: string, message: string): P
       await storeMemory(phone, `Client food or training preference: "${message}"`, "preference");
     } else if (/\b(night shift|work from home|just had a baby|new job|retrenched|moved|single mom|single dad|divorce|breakup)\b/.test(m)) {
       await storeMemory(phone, `Life situation update: "${message}"`, "preference");
+    } else if (/\b(i'?ll|i will|i'm going to|i am going to|i plan to|i promise|i'll make sure|starting tomorrow)\b.{0,100}\b(?:train|workout|walk|hit|reach|log|eat|cook|pack|weigh|check in|sleep|drink)\b/i.test(message)
+      || /\b(?:tomorrow|tonight|this week)\b.{0,80}\b(?:i'?ll|i will|going to|plan to|promise to)\b/i.test(message)) {
+      await storeMemory(phone, `Client commitment: "${message.slice(0, 220)}"`, "commitment");
     } else if (/\b(stressed|anxious|depressed|overwhelmed|struggling|bad week|hard week|tough week|not okay|burnout|quit|give up|want to stop|not working|no results|nothing is changing)\b/.test(m)) {
       await storeMemory(phone, `Client mindset/motivation signal: "${message.slice(0, 120)}"`, "mindset");
     } else if (/\b(hit my goal|reached my goal|lost.*kg|gained.*kg|pb|personal best|new record)\b/.test(m)) {
