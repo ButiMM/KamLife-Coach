@@ -29,6 +29,13 @@
       "when": 1786949613000,
       "tag": "0003_step_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786955000000,
+      "tag": "0004_step_health_sync_provenance",
+      "breakpoints": true
     }
   ]
 }
