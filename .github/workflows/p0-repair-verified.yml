@@ -56,12 +56,13 @@ jobs:
           rv.write_text(s)
 
           unit=Path('script/unit-tests.ts'); s=unit.read_text()
-          marker='  test("engine runs the reply verifier on its own mouth (self-correcting loop wired in)"'
+          marker='test("engine runs the reply verifier on its own mouth (self-correcting loop wired in)"'
           start=s.find(marker)
           if start>=0:
               end=s.find('\n  test("', start+len(marker))
+              if end<0: end=s.find('\ntest("', start+len(marker))
               if end>=0:
-                  replacement='''  test("engine runs the reply verifier on its own mouth (self-correcting loop wired in)", () => {\n    const eng = readFileSync(join("server", "understanding", "meaning-engine.ts"), "utf-8");\n    assert.match(eng, /verifyBrainReply\\(finalReply, \\{[^}]*clientMessage: message[^}]*\\}\\)/, "engine verifies the freeform reply with current-turn attribution");\n    assert.match(eng, /verifyBrainReply\\(rewritten, \\{[^}]*clientMessage: message[^}]*\\}\\)\\.ok/, "a rewrite is re-verified with current-turn attribution");\n    assert.match(eng, /verifier failed after rewrite/, "a second violation fails open to the deterministic pipeline");\n    assert.match(eng, /turnState\\(\\{[\\s\\S]*decisionState: runtimeDecision\\.state/, "the canonical decision is written into the turn ledger");\n  });'''
+                  replacement='''test("engine runs the reply verifier on its own mouth (self-correcting loop wired in)", () => {\n  const eng = readFileSync(join("server", "understanding", "meaning-engine.ts"), "utf-8");\n  assert.match(eng, /verifyBrainReply\\(finalReply, \\{[^}]*clientMessage: message[^}]*\\}\\)/, "engine verifies the freeform reply with current-turn attribution");\n  assert.match(eng, /verifyBrainReply\\(rewritten, \\{[^}]*clientMessage: message[^}]*\\}\\)\\.ok/, "a rewrite is re-verified with current-turn attribution");\n  assert.match(eng, /verifier failed after rewrite/, "a second violation fails open to the deterministic pipeline");\n  assert.match(eng, /turnState\\(\\{[\\s\\S]*decisionState: runtimeDecision\\.state/, "the canonical decision is written into the turn ledger");\n});'''
                   s=s[:start]+replacement+s[end:]
           unit.write_text(s)
           PY
