@@ -36,7 +36,7 @@ export async function initMemoryTable(): Promise<void> {
 
 const IMPORTANCE: Record<string, number> = {
   medical: 5, milestone: 5, preference: 4, commitment: 4,
-  training: 3, nutrition: 3, mindset: 2,
+  training: 3, nutrition: 3, mindset: 2, correction: 5,
 };
 
 async function pruneOldMemories(phone: string): Promise<void> {
@@ -219,6 +219,9 @@ export async function scanAndStoreClientFacts(phone: string, message: string): P
     }
     if (/\b(hit my goal|reached my goal|lost.*kg|gained.*kg|pb|personal best|new record)\b/.test(m)) {
       writes.push([`Client milestone: "${raw}"`, "milestone"]);
+    }
+    if (/\b(no\s*,?\s*(?:i did|i didn't|i have|i haven't)|you(?:'| a)?re (?:confused|wrong|mistaken)|actually\b.{0,80}\b(?:it was|i did|i didn't|not|instead)\b|that(?:'s| is) (?:wrong|not right))\b/i.test(raw)) {
+      writes.push([`Client correction / truth override: "${raw.slice(0, 220)}"`, "correction"]);
     }
 
     // Keep this fire-and-forget relative to the reply path, but don't let one malformed
