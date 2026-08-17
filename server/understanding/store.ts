@@ -21,6 +21,7 @@ import {
   coerceUnderstanding,
   persistableUnderstanding,
   decayObservations,
+  reentryFromAgeHours,
 } from "./state";
 
 /**
@@ -45,6 +46,7 @@ export async function loadUnderstanding(userId: string, seed: UnderstandingState
     // so the coach never greets a returning client stuck on a weeks-old mood.
     const ageHours = row.updatedAt ? (Date.now() - new Date(row.updatedAt).getTime()) / 3_600_000 : 0;
     stored.observations = decayObservations(stored.observations, ageHours);
+    const reentry = reentryFromAgeHours(ageHours, !!row.updatedAt);
     return {
       profile: {
         // name/prefs from the seed (live source of truth); narrative/facts from storage.
@@ -54,7 +56,7 @@ export async function loadUnderstanding(userId: string, seed: UnderstandingState
         preferences: seed.profile.preferences,
       },
       observations: stored.observations,
-      current: seed.current,
+      current: { ...seed.current, reentry },
       stats: seed.stats,
       updatedAt: seed.updatedAt,
     };

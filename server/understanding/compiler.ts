@@ -73,6 +73,14 @@ export function compileStateBlurb(s: UnderstandingState): string {
   if (mood) openers.push(openers.length ? `they're ${mood}` : `${who}'s ${mood}`);
   if (openers.length) parts.push(openers.join("; ") + ".");
 
+  if (s.current.reentry.isReturning) {
+    const days = s.current.reentry.daysSinceLastContact;
+    if (days != null && days >= 2) {
+      const gap = days === 2 ? "a couple of days" : `${days} days`;
+      parts.push(`they're returning after ${gap} away — re-establish context from what they say now; do not pretend continuity.`);
+    }
+  }
+
   parts.push(`Right now, ${steer(s)}.`);
 
   const stats = statsClause(s);
