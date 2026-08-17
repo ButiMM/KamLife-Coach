@@ -1,6 +1,7 @@
 /** Pure tests for the canonical coaching decision boundary. */
 
 import assert from "node:assert/strict";
+import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { decisionBoundaryViolation } from "../server/understanding/decision-boundary";
 import { currentRuntimeDecision, deriveRuntimeDecision } from "../server/understanding/state";
 import type { RuntimeDecisionResult } from "../server/understanding/state";
@@ -39,5 +40,31 @@ assert.match(
 const liveDecision = deriveRuntimeDecision({ hungerEvidence: { evidenceState: "insufficient_data" } });
 assert.equal(liveDecision.state, "INVESTIGATE");
 assert.equal(currentRuntimeDecision()?.state, "INVESTIGATE");
+assert.match(
+  verifyBrainReply("You're hungry, so add more protein tomorrow.", { goalType: "fat_loss", clientMessage: "I'm always hungry" }).violation || "",
+  /INSUFFICIENT|INVESTIGATE/i,
+);
+assert.equal(
+  verifyBrainReply("I don't know yet — log another day properly and I'll tell you what matters.", { goalType: "fat_loss", clientMessage: "I'm always hungry" }).ok,
+  true,
+);
+
+const continueDecision = deriveRuntimeDecision({});
+assert.equal(continueDecision.state, "CONTINUE");
+assert.match(
+  verifyBrainReply("You're on track, so increase your calories and change your plan.", { goalType: "fat_loss", clientMessage: "How am I doing?" }).violation || "",
+  /CONTINUE/,
+);
+assert.equal(
+  verifyBrainReply("You're on track. Keep going exactly as you are.", { goalType: "fat_loss", clientMessage: "How am I doing?" }).ok,
+  true,
+);
+
+const referDecision = deriveRuntimeDecision({ requiresReferral: true });
+assert.equal(referDecision.state, "REFER");
+assert.equal(
+  verifyBrainReply("This needs a doctor to assess properly.", { goalType: "fat_loss", clientMessage: "I have severe pain" }).ok,
+  true,
+);
 
 console.log("decision-boundary-tests: all passed");
