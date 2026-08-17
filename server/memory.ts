@@ -91,16 +91,32 @@ export async function storeMemory(phone: string, content: string, category: stri
 
 async function recentConversation(phone: string): Promise<string> {
   try {
-    const result = await pool.query(
-      `SELECT message_in, message_out, created_at
-       FROM chat_history
+    // The turn ledger records the reply that actually reached the client after deterministic
+    // handlers and post-turn reconciliation. Prefer it over chat_history, which some older
+    // handler paths populated with a receipt/draft before the final reply was settled.
+    const turnResult = await pool.query(
+      `SELECT input_text AS message_in, reply AS message_out, created_at
+       FROM turn_ledger
        WHERE user_id = (SELECT id FROM users WHERE phone_number = $1 LIMIT 1)
+         AND reply IS NOT NULL
        ORDER BY created_at DESC, id DESC
        LIMIT 4`,
       [phone]
     );
-    if (result.rows.length === 0) return "";
-    const turns = result.rows.reverse().map((r: any) => {
+
+    const sourceRows = turnResult.rows.length > 0
+      ? turnResult.rows
+      : (await pool.query(
+        `SELECT message_in, message_out, created_at
+         FROM chat_history
+         WHERE user_id = (SELECT id FROM users WHERE phone_number = $1 LIMIT 1)
+         ORDER BY created_at DESC, id DESC
+         LIMIT 4`,
+        [phone]
+      )).rows;
+
+    if (sourceRows.length === 0) return "";
+    const turns = sourceRows.reverse().map((r: any) => {
       const when = r.created_at instanceof Date
         ? r.created_at.toISOString().slice(0, 16).replace("T", " ")
         : String(r.created_at || "").slice(0, 16).replace("T", " ");
