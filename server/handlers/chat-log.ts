@@ -8,7 +8,7 @@ import { detectEscalation, escalationSLA, isSyntheticTestClient } from "../safet
 import { currentRuntimeDecision } from "../understanding/state";
 import { buildClientSnapshot } from "../brain/client-snapshot";
 import { verifyBrainReply } from "../brain/reply-verifier";
-import { askCoachK } from "../gpt";
+import { askCoachK, isUnderGPTCallLimit } from "../gpt";
 import { sastDayStart } from "../utils";
 
 export async function checkEscalation(userId: string, messageIn: string): Promise<void> {
@@ -128,6 +128,10 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   if (!verifier.ok || (!likelyGeneric && !suspiciousStateLanguage) || (!meaningful && !suspiciousStateLanguage)) return reply;
 
   try {
+    if (!(await isUnderGPTCallLimit(scope.userId))) {
+      console.warn(`[POST_TURN_RECONCILE] skipped for user ...${scope.userId.slice(-6)} — existing AI cap reached`);
+      return reply;
+    }
     const [user] = await db.select().from(users).where(eq(users.id, scope.userId)).limit(1);
     if (!user) return reply;
     const dayStart = sastDayStart(new Date());
