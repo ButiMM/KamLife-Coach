@@ -376,6 +376,16 @@ const NOT_CLIENT_FACING: Array<[string, string]> = [
   ["server/handlers/food-vision-prompt.ts", "ditto"],
   ["server/form-check-prompt.ts", "ditto"],
   ["server/verifiers/", "gates that inspect a draft; their strings are reasons, not replies"],
+  // SAME PRINCIPLE, DIFFERENT DIRECTORY (2026-08-17). reply-verifier.ts is a gate — it inspects a
+  // draft and returns the REASON the draft is wrong — but it lives in server/brain/, so the
+  // "server/verifiers/" prefix above never reached it. Its three prose returns are the medication
+  // violation reasons added in 904d1bf, and every consumer of `.violation` was traced before this
+  // entry was written: console.log (meaning-engine:306), a system message to the MODEL asking for a
+  // rewrite (meaning-engine:313, gpt:1182), console.warn (gpt:1175), and captureQualitySignal into
+  // the founder's admin queue (gpt:1176). routes.ts reads only `.ok`. NO path sends one to a client.
+  // Excluded by FILE, not by "server/brain/" — coach-brain.ts is already listed separately and other
+  // files in that directory may hold real mouths.
+  ["server/brain/reply-verifier.ts", "a gate, not a mouth — its strings are rewrite reasons sent to the model and the admin queue"],
   ["server/drill-cases.ts", "test fixtures"],
   ["server/self-check.ts", "boot diagnostics for the founder"],
   ["server/whatsapp-templates.ts", "Meta-approved template bodies — Meta owns this copy, not us"],
