@@ -2,7 +2,16 @@
  * Prompt Compiler (blueprint safeguard C).
  *
  * Renders UnderstandingState into a short natural-language blurb that gets injected
- * into the coach prompt — NOT the raw JSON. Deterministic and zero-cost.
+ * into the coach prompt — NOT the raw JSON. Two reasons:
+ *  1. Margin: raw JSON of the full state is ~4-6x the tokens of a 30-word blurb, every
+ *     message, forever. At R199 that matters. This step is deliberately DETERMINISTIC
+ *     (zero model tokens) — it costs nothing to run.
+ *  2. Signal: a model reads "she's frustrated and sick — she needs reassurance, not a
+ *     push" far better than nested JSON. Prose in, better coaching out.
+ *
+ * Example output:
+ *   "Bonolo's confidence has dropped lately. She's frustrated and sick right now —
+ *    steer toward reassurance, not a push. Protein's been light; she's on a 3-day streak."
  */
 
 import { currentRuntimeDecision, type UnderstandingState } from "./state";
@@ -48,18 +57,10 @@ function statsClause(s: UnderstandingState): string {
   return bits.join(", ");
 }
 
-function patternsClause(s: UnderstandingState): string {
-  const now = Date.now();
-  const recent = (s.observations.learnedPatterns || [])
-    .filter(p => p.confidence === "high" && (now - new Date(p.lastObserved).getTime()) <= 90 * 86_400_000)
-    .slice(0, 2);
-  if (!recent.length) return "";
-  return `Recent coaching patterns (evidence-backed, not facts): ${recent.map(p => `${p.text} Evidence: ${p.evidence}`).join(" | ")}. Treat them as hypotheses, not guarantees.`;
-}
-
 export function compileStateBlurb(s: UnderstandingState): string {
   const who = firstName(s.profile.name);
   const parts: string[] = [];
+
   const trend = trendClause(s);
   const mood = moodClause(s);
   const openers: string[] = [];
@@ -83,14 +84,17 @@ export function compileStateBlurb(s: UnderstandingState): string {
     else if (decision.state === "CONTINUE") parts.push("Primary coaching focus: no intervention. Protect the current plan unless the client gives new evidence that changes the decision.");
   }
 
-  const patterns = patternsClause(s);
-  if (patterns) parts.push(patterns);
   parts.push(`Right now, ${steer(s)}.`);
 
   const stats = statsClause(s);
   if (stats) parts.push(`They're ${stats}.`);
+
   if (s.profile.lifeStory) parts.push(s.profile.lifeStory.trim());
-  if (s.profile.preferences.numberFree) parts.push("Keep it number-free — plain language, no calorie figures.");
+
+  const numbers = s.profile.preferences.numberFree
+    ? "Keep it number-free — plain language, no calorie figures."
+    : "";
+  if (numbers) parts.push(numbers);
 
   return parts.join(" ").replace(/\s+/g, " ").trim();
 }
