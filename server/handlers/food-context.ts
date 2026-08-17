@@ -55,6 +55,22 @@ export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: n
 }
 
 /**
+ * WHERE ONE EATING EVENT ENDS AND THE NEXT BEGINS.
+ *
+ * (2026-08-17, traced from a real message.) This required the literal word "for", so "had eggs and
+ * toast IN THE MORNING, pap and chicken AT LUNCH" produced ZERO boundaries and collapsed into one
+ * segment. People do not say "for lunch" in a voice note; they say in, at, then, this morning.
+ *
+ * Widened to POST-POSITIONED prepositions only — "<food> in/at/during/as <meal>" — because the
+ * algorithm below assigns the text BEFORE a boundary to that boundary's label. Pre-positioned
+ * phrasing ("this morning I had a banana") puts the food AFTER the label and needs the opposite
+ * assignment; mixing both in one message is a separate open defect.
+ *
+ * Exported so it can be asserted — segmentation had no direct regression coverage at all.
+ */
+export const MEAL_BOUNDARY_RE = /\b(?:for|in|at|during|as)\s+(?:a\s+|my\s+|the\s+)?(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b/gi;
+
+/**
  * Check if the message likely has food items beyond what the SA scanner matched.
  * Returns true if there are substantive unmatched tokens that could be food.
  */
@@ -927,8 +943,7 @@ export async function handleFoodContext(ctx: {
     const mealSegments: { label: string; text: string }[] = [];
 
     // Allow "for a snack", "for my dinner", "for the lunch" etc. — articles are non-capturing.
-    const FOR_MEAL_RE = /\bfor\s+(?:a\s+|my\s+|the\s+)?(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b/gi;
-    const forMealMatches = [...m.matchAll(FOR_MEAL_RE)];
+    const forMealMatches = [...m.matchAll(new RegExp(MEAL_BOUNDARY_RE.source, "gi"))];
 
     if (forMealMatches.length >= 2) {
       for (let i = 0; i < forMealMatches.length; i++) {

@@ -1952,6 +1952,48 @@ test("client truth: the small hours are the case that exposed it", async () => {
   assert.equal(sastDayKey(new Date("2026-08-13T22:00:00Z")), "2026-08-14");
 });
 
+// ── EVENT BOUNDARIES: how many meals is this message? ───────────────────────────────────────
+// 2026-08-17, traced from a real founder message. The boundary detector required the literal word
+// "for", so a voice-note-shaped message using "in the morning" and "at lunch" produced ZERO
+// boundaries and four eating events collapsed into one segment. Segmentation had no direct test
+// coverage before this — it was inline and unexported, which is why the narrowness survived.
+
+test("event boundaries: real prepositions, not just \"for\"", async () => {
+  const { MEAL_BOUNDARY_RE } = await import("../server/handlers/food-context");
+  const boundaries = (msg: string) =>
+    [...msg.matchAll(new RegExp(MEAL_BOUNDARY_RE.source, "gi"))].map(m => m[1].toLowerCase());
+  // The message that exposed it. Two post-positioned boundaries where there used to be none.
+  assert.deepEqual(
+    boundaries("had eggs and toast in the morning, pap and chicken at lunch"),
+    ["morning", "lunch"],
+    "a voice note says in/at, not for");
+  // The original phrasing must still work — this widens, it does not replace.
+  assert.deepEqual(boundaries("eggs for breakfast and pap for lunch"), ["breakfast", "lunch"]);
+  assert.deepEqual(boundaries("chicken during dinner"), ["dinner"]);
+  // Articles stay non-capturing.
+  assert.deepEqual(boundaries("a wrap for my lunch and biltong for a snack"), ["lunch", "snack"]);
+});
+
+test("event boundaries: segmentation needs TWO, so one mention is not a split", async () => {
+  const { MEAL_BOUNDARY_RE } = await import("../server/handlers/food-context");
+  const n = (msg: string) => [...msg.matchAll(new RegExp(MEAL_BOUNDARY_RE.source, "gi"))].length;
+  assert.equal(n("I had chicken and pap at lunch"), 1, "one meal is one meal");
+  assert.equal(n("2 spoons of pap"), 0, "no meal word, no boundary");
+  assert.equal(n("I had a pre-workout snack"), 1, "snack counts, and one is not a split");
+});
+
+test("event boundaries: PRE-positioned phrasing is still unhandled — documented, not hidden", async () => {
+  const { MEAL_BOUNDARY_RE } = await import("../server/handlers/food-context");
+  const n = (msg: string) => [...msg.matchAll(new RegExp(MEAL_BOUNDARY_RE.source, "gi"))].length;
+  // "this morning I had a banana" puts the food AFTER the label. The algorithm assigns text BEFORE
+  // a boundary to that boundary, so matching here would attribute the PREVIOUS meal's food to it.
+  // Deliberately not matched. This assertion exists so the gap is a recorded decision rather than
+  // something a future reader assumes was handled.
+  assert.equal(n("this morning I just had a banana"), 0,
+    "pre-positioned events need the opposite assignment — separate slice");
+  assert.equal(n("then two amagwinya around four"), 0, "no meal keyword at all — also unhandled");
+});
+
 // ── CLIENT TRUTH: "pre-workout" is a TIME, not a supplement ─────────────────────────────────
 // 2026-08-13 founder live test. "I had a pre-workout snack" matched the C4-style powder, logged
 // 15 kcal as the meal, and the client's real food was never captured. The coach — holding a
