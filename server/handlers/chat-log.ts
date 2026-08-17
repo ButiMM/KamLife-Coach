@@ -110,6 +110,7 @@ const GENERIC_COACH_REPLY = /(?:if you need anything else|keep building on those
 const MISSED_TRAINING_CLAIM = /\b(?:missed|didn'?t|did not|haven'?t|have not)\b[^.\n]{0,35}\b(?:train|training|workout|session|gym)\b|\b(?:monday|today)\s+is\s+(?:still\s+)?a\s+training\s+day\b/i;
 const NO_CURRENT_STEPS_CLAIM = /\b(?:haven'?t|have not|no|zero)\b[^.\n]{0,30}\b(?:steps|walk(?:ed|ing)?)\b/i;
 const CONTRADICTORY_WEIGHT_TREND = /\b(?:not|won'?t|will not|can'?t|cannot)\b[^.\n]{0,50}\btrend\b[^.\n]{0,80}\b(?:scale|weight)\s+(?:is\s+)?going\s+up\b/i;
+const EXPLICIT_STEP_QUERY = /\b(?:how many steps|what (?:are|is) my steps?|what'?s my step count|what is my step count|my steps|step progress|step total)\b/i;
 
 function isMeaningfulClientMessage(message: string): boolean {
   const m = message.trim().toLowerCase();
@@ -117,6 +118,11 @@ function isMeaningfulClientMessage(message: string): boolean {
   return /[?]/.test(m)
     || /\b(?:i did|i had|i ate|i trained|i worked out|workout|training|steps?|walked|weighed|weight|scale|calories?|protein|meal|dinner|lunch|breakfast|today|trend|goal|target|kota|done|finished|completed)\b/i.test(m)
     || m.length > 18;
+}
+
+function extractStepNumbers(text: string): number[] {
+  const matches = text.match(/\b\d{1,3}(?:,\d{3})*\s*steps?\b/gi) || [];
+  return [...new Set(matches.map(v => Number(v.replace(/\D/g, ""))).filter(n => Number.isFinite(n)))];
 }
 
 async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<string> {
@@ -143,11 +149,23 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
         .where(and(eq(stepLogs.userId, scope.userId), gte(stepLogs.loggedAt, dayStart)))
         .orderBy(desc(stepLogs.loggedAt)).limit(10),
     ]);
+    const latestLoggedSteps = Number(todaySteps[0]?.steps || 0);
+    const replyStepNumbers = extractStepNumbers(draft);
+    const staleStepQuery = EXPLICIT_STEP_QUERY.test(scope.inputText)
+      && replyStepNumbers.length > 0
+      && latestLoggedSteps > 0
+      && replyStepNumbers.some(n => n !== latestLoggedSteps);
+    const stepDriftReason = staleStepQuery
+      ? `The client asked for current step progress, but the draft used ${replyStepNumbers.join(", ")} while the latest authoritative step row is ${latestLoggedSteps}. Rewrite using the latest row only.`
+      : "";
+    const shouldRepair = likelyGeneric || suspiciousStateLanguage || staleStepQuery;
+    if (!shouldRepair) return reply;
+
     const snapshot = await withTimeout("post_turn_snapshot", 4000, () => buildClientSnapshot(user)).catch(() => "");
     const authoritative = [
       "POST-ACTION AUTHORITATIVE STATE:",
       `Today's workouts recorded: ${todayWorkouts.length}.`,
-      `Today's step rows recorded: ${todaySteps.length}; latest values: ${todaySteps.map(s => Number(s.steps || 0)).join(", ") || "none"}.`,
+      `Today's step rows recorded: ${todaySteps.length}; latest authoritative steps: ${latestLoggedSteps || "none"}.`,
       scope.mutations.length ? `Mutations recorded this turn: ${scope.mutations.join(" | ")}` : "Mutations recorded this turn: none captured.",
       snapshot ? `\nFULL CLIENT SNAPSHOT:\n${snapshot}` : "",
     ].join("\n");
@@ -155,6 +173,7 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
       !verifier.ok ? `VERIFIER REJECTION: ${verifier.violation}` : "",
       likelyGeneric ? "The draft is a receipt, acknowledgement, or canned coaching line rather than a useful continuation of the relationship." : "",
       suspiciousStateLanguage ? "The draft makes a current-state claim that must be reconciled against the post-action state before sending." : "",
+      stepDriftReason,
     ].filter(Boolean).join("\n");
     const instruction = `POST-TURN COACH RECONCILIATION — this is the final client-facing response after the deterministic turn has already completed.\n\n${authoritative}\n\nCLIENT'S EXACT MESSAGE:\n${scope.inputText}\n\nDRAFT THAT MUST NOT BE SENT:\n${draft}\n\nWHY IT MUST BE REWRITTEN:\n${repairReason}\n\nWrite the final Coach K reply. Use the AUTHORITATIVE POST-ACTION STATE, not an old cached assumption. Never claim a number or action the state does not support. Never mention handlers, tools, prompts, verification, or this rewrite. Do not merely acknowledge a meaningful update. Show that you heard what happened, connect it to the client's actual situation, and give the one useful next move when there is one. If the client corrected the coach, accept the correction and use the corrected state. Keep it natural, direct, warm, and specific.`;
     const repaired = (await withTimeout("post_turn_coach", 20000, () => askCoachK(scope.inputText, user, instruction, "")))?.trim();
