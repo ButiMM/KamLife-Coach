@@ -6,7 +6,7 @@
  * reply already known to be wrong.
  */
 
-import { currentRuntimeDecision, type RuntimeDecisionResult } from "../understanding/state";
+import { currentRuntimeDecision, forceRuntimeReferral, type RuntimeDecisionResult } from "../understanding/state";
 import { detectMedicationContext } from "../medication-context";
 
 export interface VerifierFacts {
@@ -158,14 +158,17 @@ function verifyStepAttribution(reply: string, clientMessage: string): VerifierRe
 
 export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOverride?: RuntimeDecisionResult): VerifierResult {
   const r = reply || "";
-
   const decision = decisionOverride || currentRuntimeDecision();
   if (decision) {
     const violation = decisionBoundaryViolation(r, decision);
     if (violation) return { ok: false, violation };
   }
 
+  const medication = detectMedicationContext(facts.clientMessage || "");
   const medicationViolation = medicationBoundaryViolation(r, facts.clientMessage || "");
+  if (medication.unsafeRequest) {
+    forceRuntimeReferral();
+  }
   if (medicationViolation) return { ok: false, violation: medicationViolation };
 
   if (/\b(?:cure|reverse|heal|get rid of|eliminate|fix)\s+(?:your\s+|the\s+|his\s+|her\s+)?(?:diabetes|diabetic|hypertension|high blood pressure|blood pressure|cholesterol|pcos|thyroid|arthritis|ibs|cancer|condition|illness|disease|diagnosis)\b/i.test(r)) {
