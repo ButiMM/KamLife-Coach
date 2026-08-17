@@ -7,6 +7,7 @@
  */
 
 import { currentRuntimeDecision, type RuntimeDecisionResult } from "../understanding/state";
+import { detectMedicationContext } from "../medication-context";
 
 export interface VerifierFacts {
   goalType?: string | null;
@@ -72,6 +73,22 @@ function decisionBoundaryViolation(reply: string, decision: RuntimeDecisionResul
     "doctor", "dietitian", "clinician", "healthcare professional", "medical help", "seek medical care", "emergency",
   ])) return DECISION_VIOLATIONS.referMissing;
 
+  return null;
+}
+
+function medicationBoundaryViolation(reply: string, clientMessage: string): string | null {
+  const medication = detectMedicationContext(clientMessage);
+  if (!medication.unsafeRequest) return null;
+  const text = (reply || "").toLowerCase();
+  if (!containsAny(text, ["doctor", "pharmacist", "clinician", "healthcare professional", "medical care", "seek medical help", "emergency"])) {
+    return `Unsafe medication request (${medication.reason}) must be redirected to a doctor, pharmacist, or other appropriate medical professional; do not answer it as ordinary coaching.`;
+  }
+  if (/\b(calorie|calories|kcal|protein|steps|step|workout|training|session|deficit|meal plan|diet)\b/i.test(text)) {
+    return `Unsafe medication request (${medication.reason}) must remain a referral/safety response. Do not continue ordinary diet, training, or weight-loss coaching in the same reply.`;
+  }
+  if (medication.reason === "sourcing" && /\b(buy|seller|supplier|source|sourcing|black market|hairdresser)\b/i.test(text)) {
+    return "The reply must not facilitate medication sourcing or black-market access.";
+  }
   return null;
 }
 
@@ -147,6 +164,9 @@ export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOv
     const violation = decisionBoundaryViolation(r, decision);
     if (violation) return { ok: false, violation };
   }
+
+  const medicationViolation = medicationBoundaryViolation(r, facts.clientMessage || "");
+  if (medicationViolation) return { ok: false, violation: medicationViolation };
 
   if (/\b(?:cure|reverse|heal|get rid of|eliminate|fix)\s+(?:your\s+|the\s+|his\s+|her\s+)?(?:diabetes|diabetic|hypertension|high blood pressure|blood pressure|cholesterol|pcos|thyroid|arthritis|ibs|cancer|condition|illness|disease|diagnosis)\b/i.test(r)) {
     return { ok: false, violation: "Your reply claims to cure/reverse/heal a medical CONDITION. KamLife is a wellness coach, NOT a doctor or medical device — this is a compliance and liability breach and must NEVER be said. Rewrite: coach the healthy HABITS (movement, food, sleep, consistency) that support how they feel, and for anything about the condition itself defer to their doctor ('I'm your coach, not your doctor — your doctor guides the condition, I'll help you build the habits around it'). Never promise to cure, reverse or fix a disease." };
