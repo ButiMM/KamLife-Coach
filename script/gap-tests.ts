@@ -2109,6 +2109,116 @@ test("proactive budget: adaptive does not speak, and its line is not lost", () =
     "the line joins the existing message; it does not start a new bubble");
 });
 
+// ── ONE PROACTIVE DECISION OWNER ────────────────────────────────────────────────────────────
+// Issue #49 step 4. chooseAction was already the ordered decision, reached from a command almost
+// nobody types and from one line inside a 474-line morning job that made every other decision
+// itself. decideProactive makes it reachable from the canonical snapshot and pairs it with the
+// SAME verdict vocabulary the reactive path uses — not a second set of verdicts.
+
+const decisionState = (over: any = {}) => ({
+  name: "Thabo", goalType: "fat_loss",
+  health: { sick: false },
+  food: { loggedDays7d: 6, daysSinceAnyLog: 0 },
+  workout: { sessionsLast7d: 3 },
+  steps: { avg7d: 8200 },
+  weight: { daysSinceWeighIn: 1, trendUsable: true },
+  today: { kcal: 1900, protein: 150, steps: 9000, logged: true, hour: 7 },
+  evidence: { foodSufficient: true, weightSufficient: true },
+  ...over,
+});
+const decisionProfile = {
+  weeksOnProgramme: 6, sessionsTarget: 3,
+  calorieTarget: 2000, proteinTarget: 150, stepsTarget: 8000,
+};
+
+test("proactive decision: on track is CONTINUE and says nothing", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  const d = decideProactive(decisionState(), decisionProfile);
+  assert.equal(d.action.kind, "hold");
+  assert.equal(d.state, "CONTINUE");
+  assert.equal(d.line, "", "a coach who always has a note teaches you that you can never be doing well");
+});
+
+test("proactive decision: asking for a measurement is INVESTIGATE, never CHANGE", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  // Gone four days. The action is "come back" — that does not change the plan, it asks for the
+  // contact that would let us decide. Claiming CHANGE here would be acting on nothing.
+  const gone = decideProactive(decisionState({ food: { loggedDays7d: 0, daysSinceAnyLog: 4 } }), decisionProfile);
+  assert.equal(gone.action.kind, "come_back");
+  assert.equal(gone.state, "INVESTIGATE");
+  assert.equal(gone.evidence, "insufficient", "we are asking BECAUSE we cannot tell");
+
+  // Never weighed: same shape. A measurement request, not a plan change.
+  const unweighed = decideProactive(
+    decisionState({ weight: { daysSinceWeighIn: null, trendUsable: false } }), decisionProfile);
+  assert.equal(unweighed.action.kind, "weigh");
+  assert.equal(unweighed.state, "INVESTIGATE");
+});
+
+test("proactive decision: changing the plan requires evidence", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  const short = { today: { kcal: 1900, protein: 40, steps: 9000, logged: true, hour: 7 } };
+  const evidenced = decideProactive(decisionState(short), decisionProfile);
+  assert.equal(evidenced.action.kind, "protein");
+  assert.equal(evidenced.state, "CHANGE", "a real problem with evidence behind it");
+
+  // Same client, nothing measured well enough. The action still stands, but it must not be
+  // dressed up as a decision we had grounds for.
+  const thin = decideProactive(
+    decisionState({ ...short, evidence: { foodSufficient: false, weightSufficient: false } }),
+    decisionProfile);
+  assert.equal(thin.evidence, "insufficient");
+  assert.notEqual(thin.state, "CHANGE", "insufficient evidence may never read as CHANGE");
+});
+
+test("proactive decision: sick outranks everything, and rest is a real action", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  const d = decideProactive(decisionState({
+    health: { sick: true },
+    today: { kcal: 0, protein: 0, steps: 0, logged: false, hour: 7 },
+  }), decisionProfile);
+  assert.equal(d.action.kind, "rest");
+  assert.ok(/rest/i.test(d.line), "a coach who cannot say rest is a nagging app");
+});
+
+test("proactive decision: an unset target is not a starving client", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  // Dividing today's protein by a target of 0 would make every unconfigured client look
+  // catastrophically short and trigger a protein instruction on no information at all.
+  const d = decideProactive(decisionState(), { ...decisionProfile, proteinTarget: 0, calorieTarget: 0 });
+  assert.notEqual(d.action.kind, "protein");
+});
+
+test("proactive decision: morning has one state assembly, not two", () => {
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  const code = morning.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // It called buildDayState(client) — five more queries over ledgers loadProactiveState had just
+  // read — moments after loading the snapshot. Two assemblies inside the job that WAS the second
+  // coach.
+  assert.ok(!/buildDayState/.test(code), "morning decides from the snapshot, not a second assembly");
+  assert.ok(/decideProactive\(state,/.test(code), "…and through the one decision owner");
+  const cmd = readFileSync("server/handlers/one-action-command.ts", "utf-8");
+  assert.ok(/dayStateFrom\(/.test(cmd),
+    "the reactive command shares the projection, so the two cannot disagree about a field");
+});
+
+test("proactive decision: re-entry is not met with a calorie adjustment", () => {
+  // Deliberately excluded branches. A paused, long-absent, or just-returning client should not
+  // have their first contact back be an explanation of a target change — re-engagement comes
+  // first, and the reason reaches them on the next ordinary morning.
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  const lines = morning.split("\n");
+  const carriesAdapt = (needle: string) => {
+    const l = lines.find(x => x.includes(needle));
+    assert.ok(l, `expected a send containing ${needle}`);
+    return /withAdapt\(/.test(l!);
+  };
+  assert.equal(carriesAdapt("your coaching pause ends tomorrow"), false, "paused client");
+  assert.equal(carriesAdapt("days. Life happens"), false, "3-day re-engagement prompt");
+  // And the >7-day skip returns before any of this is computed.
+  assert.ok(/daysSilent > 7\) continue;/.test(morning), "the long-silence skip still returns early");
+});
+
 // ── FOOD EVENTS: one message, several rows, one undo ────────────────────────────────────────
 // Migration 0004. Product acceptance cases, not a new harness.
 

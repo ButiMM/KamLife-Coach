@@ -13,6 +13,7 @@ import { selectVariantMessage, recordDelivery } from "../../ab";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
 import { morningClosingLine } from "../../morning-closing";
 import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
+import { decideProactive } from "../../one-action";
 
 export async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
@@ -492,13 +493,29 @@ export async function runMorningCheckin(): Promise<void> {
         // It REPLACES the breakfast question rather than joining it. Two asks in one message is
         // two decisions for someone who hasn't had coffee, and the whole point is one.
         // Fail-open: any error and the old ask goes out unchanged.
+        // ONE DECISION OWNER, ONE STATE (2026-08-18, Issue #49 step 4). This called
+        // buildDayState(client) — a SECOND state assembly, five more queries, run moments after
+        // loadProactiveState had already read the same ledgers. Two assemblies inside the one job
+        // that was itself the second coach. It now decides from the snapshot above, through
+        // decideProactive, which pairs the action with the SAME verdict vocabulary the reactive
+        // path uses (CONTINUE / CHANGE / INVESTIGATE / REFER).
+        //
+        // "hold" still means the breakfast question is the right ask — least intervention. The
+        // decision says so explicitly now (empty line, verdict CONTINUE) instead of the caller
+        // inferring it from a kind string.
         let breakfastAsk = `🍳 What's for breakfast?${repeatSuggestion || ""}`;
         try {
-          const { buildDayState } = await import("../../handlers/one-action-command");
-          const { chooseAction } = await import("../../one-action");
-          const act = chooseAction({ ...(await buildDayState(client)), hour: 7 });
-          // "hold" means nothing needs changing — then the breakfast question IS the right ask.
-          if (act.kind !== "hold") breakfastAsk = `*${act.todo}*\n\n_${act.why}_`;
+          const decision = decideProactive(state, {
+            dreamGoal: client.dreamGoal,
+            biggestStruggle: client.biggestStruggle,
+            weeksOnProgramme: Math.floor(progDays / 7),
+            sessionsTarget: Number(client.trainingDaysPerWeek) || 3,
+            calorieTarget: Number(client.calorieTarget) || 0,
+            proteinTarget: Number(client.proteinTarget) || 0,
+            stepsTarget: Number(client.stepsTarget) || 0,
+          }, { hour: 7 });
+          if (decision.line) breakfastAsk = decision.line;
+          console.log(`[MORNING] ${client.id.slice(-6)} decision=${decision.state} evidence=${decision.evidence} action=${decision.action.kind}`);
         } catch (e) {
           console.warn("[MORNING] one-action skipped:", (e as any)?.message || e);
         }

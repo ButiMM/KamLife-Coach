@@ -13,7 +13,7 @@
 import { and, desc, eq, gte } from "drizzle-orm";
 import { db } from "../db";
 import { mealLogs, weightLogs, workoutLogs, stepLogs } from "../../shared/schema";
-import { chooseAction, formatOneAction, type DayState } from "../one-action";
+import { chooseAction, formatOneAction, dayStateFrom, type DayState } from "../one-action";
 import { getDayLedger } from "../day-ledger";
 import { sastDayStart, sastDaysBetween, sastHour } from "../sast";
 
@@ -41,30 +41,48 @@ export async function buildDayState(user: any): Promise<DayState> {
       .orderBy(desc(stepLogs.loggedAt)).limit(1),
   ]);
 
-  const calTarget = Number(user?.calorieTarget) || 0;
-  const protTarget = Number(user?.proteinTarget) || 0;
   const lastMealAt = lastMeal[0]?.at ? new Date(lastMeal[0].at) : null;
 
-  return {
-    firstName: String(user?.name || "").trim().split(/\s+/)[0] || undefined,
-    goal: (user?.goalType as any) || "general",
-    dreamGoal: user?.dreamGoal,
-    biggestStruggle: user?.biggestStruggle,
-    weeksOnProgramme: user?.createdAt ? Math.floor(sastDaysBetween(new Date(user.createdAt)) / 7) : 0,
-    // No log ever = treat as a long silence, which routes them to "come back" rather than to a
-    // protein tip about a day that does not exist.
-    daysSinceAnyLog: lastMealAt ? sastDaysBetween(lastMealAt) : 99,
-    daysSinceWeighIn: lastWeigh[0]?.at ? sastDaysBetween(new Date(lastWeigh[0].at)) : null,
-    loggedToday: !!lastMealAt && sastDaysBetween(lastMealAt) === 0,
-    proteinPct: protTarget > 0 ? ledger.protein / protTarget : 1,
-    caloriePct: calTarget > 0 ? ledger.kcal / calTarget : 1,
-    sessionsThisWeek: weekSessions.length,
-    sessionsTarget: Number(user?.trainingDaysPerWeek) || 3,
-    stepsToday: todaySteps[0]?.steps || 0,
-    stepsTarget: Number(user?.stepsTarget) || 0,
-    sick: isSick(user),
-    hour: sastHour(),
-  };
+  // ONE PROJECTION (2026-08-18, Issue #49 step 4). This file used to map every field into DayState
+  // itself, and the morning job reached DayState by a different route — so the two could disagree
+  // about what "never logged" or an unset target meant, and nothing would have caught it. The
+  // mapping now lives in one-action.ts beside the decision that consumes it; this file only
+  // FETCHES, which is what its own header always claimed it did.
+  return dayStateFrom(
+    {
+      name: String(user?.name || "").trim().split(/\s+/)[0] || "there",
+      goalType: user?.goalType || "general",
+      health: { sick: isSick(user) },
+      food: {
+        loggedDays7d: null,
+        daysSinceAnyLog: lastMealAt ? sastDaysBetween(lastMealAt) : null,
+      },
+      workout: { sessionsLast7d: weekSessions.length },
+      steps: { avg7d: null },
+      weight: {
+        daysSinceWeighIn: lastWeigh[0]?.at ? sastDaysBetween(new Date(lastWeigh[0].at)) : null,
+        trendUsable: false,
+      },
+      today: {
+        kcal: ledger.kcal, protein: ledger.protein,
+        steps: todaySteps[0]?.steps || 0,
+        logged: !!lastMealAt && sastDaysBetween(lastMealAt) === 0,
+        hour: sastHour(),
+      },
+      // Only decideProactive reads these, and this path calls chooseAction directly. Stated false
+      // rather than guessed: this assembly does not compute evidence sufficiency.
+      evidence: { foodSufficient: false, weightSufficient: false },
+    },
+    {
+      dreamGoal: user?.dreamGoal,
+      biggestStruggle: user?.biggestStruggle,
+      weeksOnProgramme: user?.createdAt ? Math.floor(sastDaysBetween(new Date(user.createdAt)) / 7) : 0,
+      sessionsTarget: Number(user?.trainingDaysPerWeek) || 3,
+      calorieTarget: Number(user?.calorieTarget) || 0,
+      proteinTarget: Number(user?.proteinTarget) || 0,
+      stepsTarget: Number(user?.stepsTarget) || 0,
+    },
+  );
 }
 
 /**

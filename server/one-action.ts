@@ -28,6 +28,7 @@
  */
 
 import type { GoalKey } from "./goal-profiles";
+import { selectDecisionState } from "./understanding/state";
 
 export interface DayState {
   firstName?: string;
@@ -250,6 +251,130 @@ export function chooseAction(s: DayState): OneAction {
     kind: "hold",
     todo: "Nothing new today. Do exactly what you did yesterday.",
     why: why("This is the part that works. Boring and repeated beats clever and occasional.", s.dreamGoal),
+  };
+}
+
+// ── THE PROACTIVE DECISION OWNER ─────────────────────────────────────────────────────────────
+//
+// (2026-08-18, Issue #49 step 4.) chooseAction was already the ordered decision — silence first,
+// rest is a real action, hold when nothing needs changing. It was reached from a command almost
+// nobody types, and from ONE line inside a 474-line morning job that made all its other decisions
+// itself. That job was the second coach.
+//
+// This makes the decision reachable from the canonical proactive snapshot, and pairs it with the
+// verdict vocabulary the REACTIVE path already uses — selectDecisionState in
+// understanding/state.ts, CONTINUE / CHANGE / INVESTIGATE / REFER against evidence sufficiency.
+// One vocabulary for both paths, so "the coach decided to investigate" means the same thing
+// whether the client spoke first or we did. Deliberately NOT a second set of verdicts.
+//
+// Pure: the projection and the decision. Nothing here reads a database or calls a model.
+
+/** The fields of the canonical ProactiveState this decision needs. Named structurally rather than
+ *  imported, for the same reason adaptiveInputFrom is: scheduler/shared.ts pulls in the database
+ *  and Twilio, and this module must stay callable from a test with neither. */
+export interface ProactiveStateForDecision {
+  name: string;
+  goalType: string;
+  health: { sick: boolean };
+  food: { loggedDays7d: number | null; daysSinceAnyLog: number | null };
+  workout: { sessionsLast7d: number };
+  steps: { avg7d: number | null };
+  weight: { daysSinceWeighIn: number | null; trendUsable: boolean };
+  today: { kcal: number; protein: number; steps: number; logged: boolean; hour: number };
+  evidence: { foodSufficient: boolean; weightSufficient: boolean };
+}
+
+export interface ProactiveProfile {
+  dreamGoal?: string | null;
+  biggestStruggle?: string | null;
+  weeksOnProgramme: number;
+  sessionsTarget: number;
+  calorieTarget: number;
+  proteinTarget: number;
+  stepsTarget: number;
+}
+
+/**
+ * ProactiveState → DayState. The one projection.
+ *
+ * `daysSinceAnyLog: null` means NEVER LOGGED, and it becomes 99 — a long silence, which routes to
+ * "come back" rather than to a protein tip about a day that does not exist. That mapping was
+ * already in buildDayState; it is stated here so both callers cannot disagree about it.
+ */
+export function dayStateFrom(
+  s: ProactiveStateForDecision, p: ProactiveProfile, opts?: { atKeyboard?: boolean; hour?: number },
+): DayState {
+  return {
+    firstName: s.name,
+    goal: (s.goalType as GoalKey) || ("general" as GoalKey),
+    dreamGoal: p.dreamGoal,
+    biggestStruggle: p.biggestStruggle,
+    weeksOnProgramme: p.weeksOnProgramme,
+    daysSinceAnyLog: s.food.daysSinceAnyLog ?? 99,
+    daysSinceWeighIn: s.weight.daysSinceWeighIn,
+    loggedToday: s.today.logged,
+    // A target of zero means "not set", and dividing by it would make every client look starved.
+    // 1 = "at target", i.e. nothing to say — the same fail-safe buildDayState used.
+    proteinPct: p.proteinTarget > 0 ? s.today.protein / p.proteinTarget : 1,
+    caloriePct: p.calorieTarget > 0 ? s.today.kcal / p.calorieTarget : 1,
+    sessionsThisWeek: s.workout.sessionsLast7d,
+    sessionsTarget: p.sessionsTarget,
+    stepsToday: s.today.steps,
+    stepsTarget: p.stepsTarget,
+    sick: s.health.sick,
+    hour: opts?.hour ?? s.today.hour,
+    atKeyboard: opts?.atKeyboard,
+  };
+}
+
+export interface ProactiveDecision {
+  /**
+   * Same vocabulary as the reactive path.
+   *
+   * NOT YET ENFORCED, and saying so here rather than letting it be discovered: `state` and
+   * `action` can currently disagree. A real problem with insufficient evidence and no useful
+   * question to ask returns CONTINUE while `line` still carries an instruction — so the coach
+   * says "carry on" internally and tells the client to change something. Today the verdict is
+   * recorded and logged; it does not yet gate what goes out. Making CONTINUE and INVESTIGATE
+   * binding on the outbound message is the next step, and it is a behaviour change that needs
+   * its own measurement — not something to slip in under a refactor.
+   */
+  state: "CONTINUE" | "CHANGE" | "INVESTIGATE" | "REFER";
+  evidence: "sufficient" | "insufficient";
+  action: OneAction;
+  /** Rendered instruction + reason, ready to place in a message. "" when the verdict is CONTINUE
+   *  and the action is `hold` — nothing to add is a legitimate outcome, not a gap to fill. */
+  line: string;
+}
+
+/**
+ * WHICH ACTIONS ARE A CHANGE, and which are only a question.
+ *
+ * `hold` is CONTINUE by definition. `come_back`, `log` and `weigh` do not change the plan — they
+ * ask for the measurement that would let us decide, which is precisely INVESTIGATE. Everything
+ * else alters what the client does today, and may only be said on sufficient evidence.
+ */
+const INVESTIGATIVE: ReadonlySet<ActionKind> = new Set<ActionKind>(["come_back", "log", "weigh"]);
+
+export function decideProactive(
+  s: ProactiveStateForDecision, p: ProactiveProfile, opts?: { atKeyboard?: boolean; hour?: number },
+): ProactiveDecision {
+  const action = chooseAction(dayStateFrom(s, p, opts));
+  const investigating = INVESTIGATIVE.has(action.kind);
+  const state = selectDecisionState({
+    meaningfulProblem: action.kind !== "hold",
+    // Asking for a measurement is what you do BECAUSE evidence is insufficient. Claiming
+    // sufficiency there would turn every "please weigh yourself" into a CHANGE.
+    evidence: investigating ? "insufficient"
+      : (s.evidence.foodSufficient || s.evidence.weightSufficient) ? "sufficient" : "insufficient",
+    hasMinimumUsefulQuestion: investigating,
+  });
+  return {
+    state,
+    evidence: investigating ? "insufficient"
+      : (s.evidence.foodSufficient || s.evidence.weightSufficient) ? "sufficient" : "insufficient",
+    action,
+    line: action.kind === "hold" ? "" : `*${action.todo}*\n\n_${action.why}_`,
   };
 }
 

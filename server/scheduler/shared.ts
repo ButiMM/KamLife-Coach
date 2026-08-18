@@ -811,10 +811,17 @@ export interface ProactiveState {
   health: { sick: boolean; sickYesterday: boolean; recovering: boolean; daysSick: number; sickUntil?: string; sickSince?: string };
   /** null everywhere means COULD NOT READ, never zero. A client who logged nothing and a ledger
    *  that failed to answer are different facts and the engine acts differently on each. */
-  food: { avgKcal7d: number | null; avgProtein7d: number | null; loggedDays7d: number | null };
+  food: { avgKcal7d: number | null; avgProtein7d: number | null; loggedDays7d: number | null;
+    /** Days since ANY food log. null = never logged, which is not the same as "logged long ago". */
+    daysSinceAnyLog: number | null };
   workout: { sessionsLast7d: number; daysSinceLastSession: number | null };
   steps: { avg7d: number | null };
-  weight: { weeklyKgChange: number | null; trendUsable: boolean; stalledWeeks: number };
+  weight: { weeklyKgChange: number | null; trendUsable: boolean; stalledWeeks: number;
+    /** Unbounded, unlike weeklyKgChange's 28-day window — "never weighed" and "weighed in March"
+     *  are different clients and the decision owner treats them differently. */
+    daysSinceWeighIn: number | null };
+  /** TODAY, not the 7-day picture. The one-action decision turns on these. */
+  today: { kcal: number; protein: number; steps: number; logged: boolean; hour: number };
   reentry: { daysSinceLastContact: number | null; isReturning: boolean };
   /** Can a decision be made, or only a question asked? Missing ≠ negative. */
   evidence: { foodSufficient: boolean; weightSufficient: boolean };
@@ -861,7 +868,11 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
   // that just ended. The rule itself lives in adaptive-targets.ts so it has one owner.
   const sickYesterday = sickCoveredYesterday(sickSince, sickUntil, today);
 
-  const [intake, wRows, stepAgg, workoutRows] = await Promise.all([
+  const { getDayLedger } = await import("../day-ledger");
+  const { sastDayStart, sastDaysBetween, sastHour } = await import("../sast");
+  const dayStart0 = sastDayStart();
+
+  const [intake, wRows, stepAgg, workoutRows, lastMeal, lastWeigh, todaySteps, ledger] = await Promise.all([
     gatherReportData(client, "week").catch(() => null),
     db.select({ w: weightLogs.weight, at: weightLogs.loggedAt }).from(weightLogs)
       .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, since(28))))
@@ -873,6 +884,19 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
     db.select({ at: workoutLogs.loggedAt }).from(workoutLogs)
       .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, since(7))))
       .orderBy(desc(workoutLogs.loggedAt)).catch(() => [] as any[]),
+    // UNBOUNDED, deliberately. The 28-day windows above answer "what is happening now"; these two
+    // answer "has this ever happened", and a client who last weighed in March is a different
+    // person from one who never has. Bounding them would collapse both into null.
+    db.select({ at: mealLogs.loggedAt }).from(mealLogs)
+      .where(eq(mealLogs.userId, client.id)).orderBy(desc(mealLogs.loggedAt)).limit(1)
+      .catch(() => [] as any[]),
+    db.select({ at: weightLogs.loggedAt }).from(weightLogs)
+      .where(eq(weightLogs.userId, client.id)).orderBy(desc(weightLogs.loggedAt)).limit(1)
+      .catch(() => [] as any[]),
+    db.select({ steps: stepLogs.steps }).from(stepLogs)
+      .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, dayStart0)))
+      .orderBy(desc(stepLogs.loggedAt)).limit(1).catch(() => [] as any[]),
+    getDayLedger(client.id, { user: client }).catch(() => null),
   ]);
 
   const weights = (wRows as any[]).map(r => parseFloat(String(r.w))).filter(n => Number.isFinite(n));
@@ -895,6 +919,8 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
 
   const lastSession = (workoutRows as any[])[0]?.at;
   const loggedDays7d = intake ? intake.distinctDaysLogged : null;
+  const lastMealAt = (lastMeal as any[])[0]?.at ? new Date((lastMeal as any[])[0].at) : null;
+  const lastWeighAt = (lastWeigh as any[])[0]?.at ? new Date((lastWeigh as any[])[0].at) : null;
 
   return {
     userId: client.id,
@@ -921,6 +947,7 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
       avgKcal7d: intake ? intake.avgKcal : null,
       avgProtein7d: intake ? intake.avgProtein : null,
       loggedDays7d,
+      daysSinceAnyLog: lastMealAt ? sastDaysBetween(lastMealAt) : null,
     },
     workout: {
       sessionsLast7d: (workoutRows as any[]).length,
@@ -928,7 +955,17 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
         ? Math.floor((Date.now() - new Date(lastSession).getTime()) / 86_400_000) : null,
     },
     steps: { avg7d: Number((stepAgg as any[])[0]?.avg || 0) || null },
-    weight: { weeklyKgChange, trendUsable, stalledWeeks: stalledWeeksFrom(weights) },
+    weight: {
+      weeklyKgChange, trendUsable, stalledWeeks: stalledWeeksFrom(weights),
+      daysSinceWeighIn: lastWeighAt ? sastDaysBetween(lastWeighAt) : null,
+    },
+    today: {
+      kcal: ledger?.kcal ?? 0,
+      protein: ledger?.protein ?? 0,
+      steps: Number((todaySteps as any[])[0]?.steps || 0),
+      logged: !!lastMealAt && sastDaysBetween(lastMealAt) === 0,
+      hour: sastHour(),
+    },
     reentry: contactState(client.lastActiveAt),
     evidence: {
       foodSufficient: loggedDays7d !== null && loggedDays7d >= PROACTIVE_LOG_FLOOR,

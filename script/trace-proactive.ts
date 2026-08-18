@@ -34,6 +34,7 @@ import { readFileSync } from "node:fs";
 // is pure, so this trace exercises the real path instead of a mirror that can drift.
 const { adaptTargets, adaptiveInputFrom } = await import("../server/adaptive-targets");
 const { contactState } = await import("../server/understanding/reentry");
+const { decideProactive } = await import("../server/one-action");
 
 const argv = process.argv.slice(2);
 const DAYS = Number((argv.find(a => a.startsWith("--days=")) || "--days=1").split("=")[1]) || 1;
@@ -42,8 +43,17 @@ const W = 98;
 const rule = (t = "") => console.log(t ? `\n${"═".repeat(2)} ${t} ${"═".repeat(Math.max(0, W - t.length - 4))}` : "─".repeat(W));
 
 // A fixture is now a ProactiveState — the SAME structure both scheduled jobs read at runtime,
-// shaped here by hand instead of by loadProactiveState (which needs a database). The fields are
-// the contract, so a field either job stops honouring shows up here as a compile error.
+// shaped here by hand instead of by loadProactiveState (which needs a database).
+//
+// I claimed in an earlier commit that this makes a missing field a compile error. IT DOES NOT, and
+// the correction matters more than the claim: tsconfig.json's `include` is client/ shared/ server/
+// only, so `npm run check` never typechecks script/ — this file or any gate suite in it. When
+// ProactiveState gained today/daysSinceAnyLog/daysSinceWeighIn these fixtures went stale and tsx
+// ran them anyway, printing a picture of a client that no longer matched the interface. Found by
+// running tsc against this file directly.
+//
+// So the protection here is runtime assertions in script/gap-tests.ts, not the type system. Do not
+// rely on the annotations below to catch a drifted fixture.
 type State = import("../server/scheduler/shared").ProactiveState;
 interface Client { name: string; why: string; state: State; recentMessages: string[] }
 
@@ -56,10 +66,11 @@ const base = (over: Partial<State> = {}): State => ({
   baseline: { calories: 2000, protein: 150, steps: 8000 },
   current: { calories: 2000, protein: 150, steps: 8000 },
   health: { sick: false, sickYesterday: false, recovering: false, daysSick: 0 },
-  food: { avgKcal7d: null, avgProtein7d: null, loggedDays7d: null },
+  food: { avgKcal7d: null, avgProtein7d: null, loggedDays7d: null, daysSinceAnyLog: null },
   workout: { sessionsLast7d: 0, daysSinceLastSession: null },
   steps: { avg7d: null },
-  weight: { weeklyKgChange: null, trendUsable: false, stalledWeeks: 0 },
+  weight: { weeklyKgChange: null, trendUsable: false, stalledWeeks: 0, daysSinceWeighIn: null },
+  today: { kcal: 0, protein: 0, steps: 0, logged: false, hour: 7 },
   reentry: contactState(ago(0)),
   evidence: { foodSufficient: false, weightSufficient: false },
   ...over,
@@ -70,28 +81,40 @@ const CLIENTS: Client[] = [
     name: "STALLED — the ratchet", why: "3 weeks flat, logging well, eating close to target",
     recentMessages: ["did 8000 steps", "chicken and pap for lunch"],
     state: base({
-      food: { avgKcal7d: 1980, avgProtein7d: 145, loggedDays7d: 7 },
-      weight: { weeklyKgChange: 0, trendUsable: true, stalledWeeks: 3 },
+      food: { avgKcal7d: 1980, avgProtein7d: 145, loggedDays7d: 7, daysSinceAnyLog: 0 },
+      weight: { weeklyKgChange: 0, trendUsable: true, stalledWeeks: 3, daysSinceWeighIn: 1 },
+      workout: { sessionsLast7d: 3, daysSinceLastSession: 1 },
+      today: { kcal: 1900, protein: 148, steps: 8100, logged: true, hour: 7 },
       evidence: { foodSufficient: true, weightSufficient: true },
     }),
   },
   {
     name: "SICK — durable vs keyword", why: "not sick; mentioned someone else being sick",
     recentMessages: ["my mom is sick so I skipped gym", "had eggs"],
-    state: base(),
+    // They logged — "had eggs". A fixture with no logs would route to come_back and this case
+    // would silently stop testing the thing it is named for, which is whose illness counts.
+    state: base({
+      food: { avgKcal7d: 1900, avgProtein7d: 140, loggedDays7d: 5, daysSinceAnyLog: 0 },
+      weight: { weeklyKgChange: null, trendUsable: false, stalledWeeks: 0, daysSinceWeighIn: 2 },
+      workout: { sessionsLast7d: 2, daysSinceLastSession: 2 },
+      today: { kcal: 1850, protein: 145, steps: 8100, logged: true, hour: 7 },
+      evidence: { foodSufficient: true, weightSufficient: false },
+    }),
   },
   {
     name: "RE-ENTRY — 10 days quiet", why: "returning client; must not be punished",
     recentMessages: ["I'm back, sorry I've been busy"],
-    state: base({ reentry: contactState(ago(10)) }),
+    state: base({ reentry: contactState(ago(10)), food: { avgKcal7d: null, avgProtein7d: null, loggedDays7d: 0, daysSinceAnyLog: 10 } }),
   },
   {
     name: "ON TRACK — nothing to say", why: "hitting targets; least intervention applies",
     recentMessages: ["morning", "logged breakfast"],
     state: base({
-      food: { avgKcal7d: 1960, avgProtein7d: 148, loggedDays7d: 6 },
+      food: { avgKcal7d: 1960, avgProtein7d: 148, loggedDays7d: 6, daysSinceAnyLog: 0 },
       steps: { avg7d: 8200 },
-      weight: { weeklyKgChange: -0.4, trendUsable: true, stalledWeeks: 0 },
+      weight: { weeklyKgChange: -0.4, trendUsable: true, stalledWeeks: 0, daysSinceWeighIn: 1 },
+      workout: { sessionsLast7d: 3, daysSinceLastSession: 1 },
+      today: { kcal: 1950, protein: 150, steps: 8600, logged: true, hour: 7 },
       evidence: { foodSufficient: true, weightSufficient: true },
     }),
   },
@@ -195,6 +218,13 @@ for (const c of CLIENTS) {
     console.log(`     ✓ SPLIT TRUTH CLOSED: the scan matched "${c.recentMessages.find(t => SICK_RE.test(t))}"`);
     console.log(`       and morning now ignores it — health comes from the durable token both jobs read.`);
   }
+  // THE DECISION — really computed, through the owner morning now calls.
+  const decision = decideProactive(s, {
+    weeksOnProgramme: 6, sessionsTarget: 3,
+    calorieTarget: s.current.calories, proteinTarget: s.current.protein, stepsTarget: s.current.steps,
+  }, { hour: 7 });
+  console.log(`  decision: ${decision.state} · evidence ${decision.evidence} · action ${decision.action.kind}`);
+  console.log(`     ${decision.line ? `"${decision.action.todo}"` : "nothing to add — the breakfast question stands"}`);
   console.log(`  morning would claim the daily slot and send: yes (every one of its sends is gated)`);
 
   // WHAT THE CLIENT ACTUALLY RECEIVES. `adaptiveWouldSend` now means "adaptive produced a line",
