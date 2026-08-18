@@ -1164,7 +1164,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 // streak got "Good to have you back" — trajectory is workout-only, so a daily logger who
 // trains moderately read as lapsed-and-returned). Absence framing must never hit the engaged.
 {
-  const { morningClosingLine } = await import("../server/morning-closing");
+  const { morningClosingLine } = await import("../server/morning-message");
   const eng = { activelyEngaged: true, completedSessions28: 4 };
   const lapsed = { activelyEngaged: false, completedSessions28: 4 };
   test("morning close: an actively-engaged client is NEVER told 'welcome back' or 'reply Hi'", () => {

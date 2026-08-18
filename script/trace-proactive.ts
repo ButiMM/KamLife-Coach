@@ -35,6 +35,7 @@ import { readFileSync } from "node:fs";
 const { adaptTargets, adaptiveInputFrom } = await import("../server/adaptive-targets");
 const { contactState } = await import("../server/understanding/reentry");
 const { decideProactive } = await import("../server/one-action");
+const { composeMorning, yesterdayObservation, morningClosingLine } = await import("../server/morning-message");
 
 const argv = process.argv.slice(2);
 const DAYS = Number((argv.find(a => a.startsWith("--days=")) || "--days=1").split("=")[1]) || 1;
@@ -209,8 +210,7 @@ for (const c of CLIENTS) {
     console.log(`    the job fed its own STORED target back in as baseCalories. No baseline column existed.`);
   }
 
-  // MORNING — reads the SAME structure now for the two facts that decide whether it speaks.
-  // Everything else it composes is still its own; that is the next step, not this one.
+  // MORNING — one snapshot, one decision owner, one composer as of step 5.
   const keywordSaysSick = c.recentMessages.some(t => SICK_RE.test(t));
   console.log(`  morning: re-entry ${s.reentry.isReturning ? `RETURNING (${s.reentry.daysSinceLastContact}d)` : "current"}`
     + `  ·  durable sick yesterday=${s.health.sickYesterday}  ·  old keyword scan said sick=${keywordSaysSick}`);
@@ -225,10 +225,54 @@ for (const c of CLIENTS) {
   }, { hour: 7 });
   console.log(`  decision: ${decision.state} · evidence ${decision.evidence} · action ${decision.action.kind}`);
   console.log(`     ${decision.line ? `"${decision.action.todo}"` : "nothing to add — the breakfast question stands"}`);
+  // MORNING'S THREE EARLY EXITS, mirrored from the job. Modelling these matters: without them
+  // this trace claimed the 10-day client receives a full brief, when the job returns on
+  // `daysSilent > 7` and sends them nothing at all.
+  const silent = s.reentry.daysSinceLastContact ?? 0;
+  const exit = silent > 7 ? "NOTHING — daysSilent > 7, the job returns"
+    : silent >= 3 ? "the 3-day re-engagement buttons, not a brief"
+    : "";
+  if (exit) {
+    console.log(`  morning: ${exit}`);
+    console.log(`  → the adaptive reason is deliberately NOT carried here; re-entry comes first.`);
+    if (decision.line && silent > 7) {
+      console.log(`  ⚠ OPEN: the decision owner has something to say — ${decision.state}, "${decision.action.todo}" —`);
+      console.log(`    and this job drops it. >7 days silent is retention.ts's client, not morning's, so the`);
+      console.log(`    decision is computed and discarded. Pre-existing; the proactive-job sweep owns it.`);
+    }
+    rulePerClientEnd(adaptiveWouldSend);
+    continue;
+  }
   console.log(`  morning would claim the daily slot and send: yes (every one of its sends is gated)`);
 
-  // WHAT THE CLIENT ACTUALLY RECEIVES. `adaptiveWouldSend` now means "adaptive produced a line",
-  // not "adaptive sent a message" — the line rides the morning message instead.
+  // THE ACTUAL MESSAGE, through the real composer. Only the DB-derived recognition lines are
+  // supplied by hand; everything structural is the code that runs in production.
+  const msg = composeMorning({
+    firstName: s.name, targetFixLine: "", identityLine: "",
+    streakLine: s.workout.sessionsLast7d >= 2 ? `🔥 *${s.workout.sessionsLast7d}-session streak*.` : "",
+    workoutLine: "",
+    yesterdayLine: yesterdayObservation({
+      foodLogged: (s.food.loggedDays7d ?? 0) > 0,
+      proteinLogged: s.food.avgProtein7d ?? 0,
+      proteinTarget: s.current.protein, numbersLow: false,
+    }),
+    todayLines: ["*Today:*", `👟 ${s.current.steps.toLocaleString()} steps`, `💪 Training day. Reply *1* for your workout.`],
+    closingLine: morningClosingLine("ON_TRACK", { activelyEngaged: true, completedSessions28: 10 }),
+    decisionLine: decision.line, breakfastAsk: "🍳 What's for breakfast?",
+    adaptLine: adaptiveWouldSend ? "Three weeks flat, so I've adjusted your food a little." : "",
+    sickYesterday: s.health.sickYesterday,
+  });
+  const sentences = (msg.match(/[.!?](\s|$)/g) || []).length;
+  const asks = (msg.match(/\*[^*\n]+\*\n\n_/g) || []).length + (msg.includes("What's for breakfast") ? 1 : 0);
+  console.log(`  message: ${msg.split("\n\n").length} block(s), ${sentences} sentences, ${asks} instruction(s), `
+    + `${msg.includes("---") ? "SPLIT INTO 2 BILLED MESSAGES" : "one bubble"}`);
+
+  rulePerClientEnd(adaptiveWouldSend);
+}
+
+// WHAT THE CLIENT ACTUALLY RECEIVES. `adaptiveWouldSend` now means "adaptive produced a line",
+// not "adaptive sent a message" — the line rides the morning message instead.
+function rulePerClientEnd(adaptiveWouldSend: boolean) {
   if (adaptiveWouldSend && adaptiveSends.length === 0) {
     console.log(`  ✓ ONE proactive message today. Targets moved silently at 05:45; the reason is`);
     console.log(`    folded into the 06:00 brief, which claims the slot. Was two messages.`);
