@@ -107,7 +107,12 @@ for (const c of CLIENTS) {
 
   // ADAPTIVE — really computed. Compounds across N mornings exactly as the job does.
   let base = c.baseCalories;
+  // What the client currently HOLDS. The job's guard compares its output against this, not against
+  // the baseline it reasoned from — post-0005 those are different things, and modelling only the
+  // base would report a send every morning when the real job goes quiet after the first.
+  let storedOverlay = c.baseCalories, storedProtein = c.baseProtein, storedSteps = c.baseSteps;
   let adaptiveWouldSend = false;
+  let sendCount = 0;
   for (let day = 1; day <= DAYS; day++) {
     const out = adaptTargets({
       baseCalories: base, baseProtein: c.baseProtein, baseSteps: c.baseSteps,
@@ -118,15 +123,18 @@ for (const c of CLIENTS) {
     });
     // The job's own send gates, mirrored from adaptive.ts.
     const noteOnly = out.reason === "stalled_unlogged" || out.reason === "stalled_over_target";
-    const targetsMoved = out.calorieTarget !== base || out.proteinTarget !== c.baseProtein || out.stepsTarget !== c.baseSteps;
+    const targetsMoved = out.calorieTarget !== storedOverlay || out.proteinTarget !== storedProtein || out.stepsTarget !== storedSteps;
     const sends = out.changed && (noteOnly || targetsMoved) && !!out.note;
-    if (sends) adaptiveWouldSend = true;
+    if (sends) { adaptiveWouldSend = true; sendCount++; }
     console.log(`  adaptive day ${day}: base ${base} → ${out.calorieTarget}  reason=${out.reason}  `
       + `sends=${sends ? "YES (unbudgeted)" : "no"}`);
     if (sends && day === 1) console.log(`     "${out.note.slice(0, 88)}…"`);
-    // THE COMPOUNDING: the job writes calorieTarget back, so tomorrow's base is today's output.
-    base = out.calorieTarget;
+    // After 0005 the job reads users.baselineCalorieTarget — which it never writes — so the base
+    // does NOT become tomorrow's input. Set TRACE_RECURSIVE=1 to reproduce the pre-0005 ratchet.
+    if (process.env.TRACE_RECURSIVE === "1") base = out.calorieTarget;
+    storedOverlay = out.calorieTarget; storedProtein = out.proteinTarget; storedSteps = out.stepsTarget;
   }
+  if (DAYS > 1) console.log(`  → ${sendCount} proactive send(s) from adaptive across ${DAYS} mornings`);
   if (DAYS > 1 && base !== c.baseCalories) {
     const pct = Math.round(((c.baseCalories - base) / c.baseCalories) * 1000) / 10;
     console.log(`  → ${DAYS} mornings from one baseline: ${c.baseCalories} → ${base} (${pct}% down), because`);

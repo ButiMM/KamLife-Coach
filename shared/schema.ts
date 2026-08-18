@@ -35,6 +35,15 @@ export const users = pgTable(
     trainingDaysPerWeek: integer("training_days_per_week"),
     budgetLevel: text("budget_level"), // low | medium | high
     calorieTarget: integer("calorie_target"),
+    // THE CURRENT number the client sees is calorie/protein/steps Target above — an OVERLAY,
+    // recomputed each morning from the baseline below plus today's evidence. The baseline is the
+    // client's PROFILE number: written by onboarding and programme rebuilds, never by the daily
+    // adaptive job. Before 0005 the job read the stored target and wrote its own output back to
+    // the same column, so adaptation compounded on itself — a compliant client was walked 12%
+    // down in three days and then told their target "hasn't been tested yet".
+    baselineCalorieTarget: integer("baseline_calorie_target"),
+    baselineProteinTarget: integer("baseline_protein_target"),
+    baselineStepsTarget: integer("baseline_steps_target"),
     proteinTarget: integer("protein_target"),
     stepsTarget: integer("steps_target"),
     subscriptionStatus: text("subscription_status")

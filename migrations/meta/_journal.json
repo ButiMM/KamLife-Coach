@@ -36,6 +36,13 @@
       "when": 1787000000000,
       "tag": "0004_meal_event_lineage",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787100000000,
+      "tag": "0005_adaptive_baseline",
+      "breakpoints": true
     }
   ]
 }

@@ -92,10 +92,19 @@ export async function runAdaptiveTargets(): Promise<void> {
       try { intake = await gatherReportData(c, "week"); }
       catch (e) { console.warn(`[ADAPTIVE] intake read failed for ${c.id?.slice(-6)}:`, (e as Error)?.message); }
 
+      // THE BASELINE, NOT YESTERDAY'S OUTPUT (2026-08-18, migration 0005). This read
+      // users.calorieTarget — the column this job then WROTE — so each morning adapted the
+      // previous morning's adaptation. Measured on an 80kg stalled client: 2000 → 1860 → 1760 in
+      // three days, 12% down, while the client ate 1,980 every single day and changed nothing.
+      // Then, because the target had passed under their unchanged intake, the job began telling
+      // them the target "hasn't been tested yet". The system moved the goalposts and blamed them.
+      //
+      // Baseline is the profile number; onboarding and programme rebuilds own it. This job reads
+      // it and never writes it. The COALESCE is for the window before 0005 has run on a database.
       const input: AdaptiveInput = {
-        baseCalories: Number(c.calorieTarget) || 0,
-        baseProtein: Number(c.proteinTarget) || 0,
-        baseSteps: Number(c.stepsTarget) || 0,
+        baseCalories: Number(c.baselineCalorieTarget ?? c.calorieTarget) || 0,
+        baseProtein: Number(c.baselineProteinTarget ?? c.proteinTarget) || 0,
+        baseSteps: Number(c.baselineStepsTarget ?? c.stepsTarget) || 0,
         goalType: c.goalType || "fat_loss",
         weightKg: parseFloat(String(c.currentWeight || "")) || 75,
         sick, daysSick, recovering, weeklyKgChange,
@@ -130,9 +139,11 @@ export async function runAdaptiveTargets(): Promise<void> {
         continue;
       }
 
-      // Nothing actually different from what they already hold → stay silent.
-      if (out.calorieTarget === input.baseCalories && out.proteinTarget === input.baseProtein
-          && out.stepsTarget === input.baseSteps) continue;
+      // Nothing actually different from what they already HOLD — compared against the stored
+      // overlay, not the baseline the engine reasoned from. Those diverge now: an unchanged
+      // decision recomputed from baseline can still equal what the client already has.
+      if (out.calorieTarget === Number(c.calorieTarget) && out.proteinTarget === Number(c.proteinTarget)
+          && out.stepsTarget === Number(c.stepsTarget)) continue;
 
       // MARK IT DELIBERATE, or the morning sanity audit reverts it before lunch (2026-07-30
       // live: this job wrote 2530, morning.ts saw 332 kcal off the profile figure, called it

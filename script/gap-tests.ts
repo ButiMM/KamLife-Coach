@@ -1952,6 +1952,51 @@ test("client truth: the small hours are the case that exposed it", async () => {
   assert.equal(sastDayKey(new Date("2026-08-13T22:00:00Z")), "2026-08-14");
 });
 
+// ── ADAPTIVE BASELINE: adaptation must not compound on itself ───────────────────────────────
+// Measured 2026-08-18 (script/trace-proactive.ts): an 80kg stalled client eating 1,980 against a
+// 2,000 target — compliant, unchanged — was walked 2000 → 1860 → 1760 in three mornings because
+// the job fed users.calorie_target back in as baseCalories. Then, the target having passed under
+// their unchanged intake, it began telling them the target "hasn't been tested yet". The system
+// moved the goalposts and blamed the client. Migration 0005.
+
+test("adaptive baseline: four mornings from one baseline do not walk the target down", async () => {
+  const { adaptTargets } = await import("../server/adaptive-targets");
+  const BASE = 2000;
+  const run = (base: number) => adaptTargets({
+    baseCalories: base, baseProtein: 150, baseSteps: 8000, goalType: "fat_loss",
+    weightKg: 80, sick: false, stalledWeeks: 3, loggedDays7d: 7, avgKcal7d: 1980,
+  });
+  // From a STABLE baseline, every morning reaches the same answer.
+  const days = [1, 2, 3, 4].map(() => run(BASE).calorieTarget);
+  assert.deepEqual(days, [1860, 1860, 1860, 1860], "a stable baseline gives a stable decision");
+  // And the reason must stay `stalled` — never the manufactured over-target accusation.
+  assert.deepEqual([...new Set([1, 2, 3, 4].map(() => run(BASE).reason))], ["stalled"]);
+
+  // THE OLD RECURSION, pinned so it cannot come back: feeding the output in as tomorrow's base.
+  let recursive = BASE; const walk: number[] = [];
+  for (let d = 0; d < 3; d++) { recursive = run(recursive).calorieTarget; walk.push(recursive); }
+  assert.deepEqual(walk, [1860, 1760, 1760], "this is what the job used to do");
+  assert.ok(walk[2] < BASE * 0.9, "12% down in three days, on a client who changed nothing");
+  // And it invents the accusation, which is the part that reaches the client.
+  assert.equal(run(1760).reason, "stalled_over_target",
+    "once the target passes under their unchanged intake, they are told they never tested it");
+});
+
+test("adaptive baseline: the job reads baseline and never writes it", () => {
+  const job = readFileSync("server/scheduler/jobs/adaptive.ts", "utf-8");
+  assert.ok(/baseCalories: Number\(c\.baselineCalorieTarget \?\? c\.calorieTarget\)/.test(job),
+    "the engine must reason from the profile baseline, not the column this job writes");
+  assert.ok(!/baselineCalorieTarget:/.test(job), "this job must never WRITE a baseline");
+  // The unchanged-guard compares against what the client HOLDS, not the baseline reasoned from —
+  // those diverge now, and comparing the wrong one sends the same message every morning.
+  assert.ok(/out\.calorieTarget === Number\(c\.calorieTarget\)/.test(job),
+    "silence is decided against the stored overlay");
+  const schema = readFileSync("shared/schema.ts", "utf-8");
+  for (const col of ["baseline_calorie_target", "baseline_protein_target", "baseline_steps_target"]) {
+    assert.ok(schema.includes(col), `${col} must exist`);
+  }
+});
+
 // ── FOOD EVENTS: one message, several rows, one undo ────────────────────────────────────────
 // Migration 0004. Product acceptance cases, not a new harness.
 
