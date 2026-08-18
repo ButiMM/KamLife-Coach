@@ -2312,6 +2312,66 @@ test("morning: the empty-yesterday client goes down the same path as everyone el
   assert.ok(/shieldLine \|\| workoutLine/.test(code), "…and still speaks, as an input");
 });
 
+// ── PROACTIVE SWEEP: one target owner, durable health everywhere, no orphan decisions ───────
+// Issue #49 sweep. Migration 0005 ended the ratchet in scheduler/jobs/adaptive.ts. It did not end
+// it in business.ts, which had TWO more target writers nobody had pointed at.
+
+test("sweep: no proactive job reads the target column it writes", () => {
+  // The defect, in both jobs: `const currentCal = client.calorieTarget` then
+  // `newCal = currentCal - 100` then `set({ calorieTarget: newCal })`. Every three weeks measured
+  // from the last cut instead of from the client's profile.
+  const business = readFileSync("server/scheduler/jobs/business.ts", "utf-8");
+  const code = business.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  assert.ok(/const currentCal\s+= client\.baselineCalorieTarget/.test(code),
+    "the calorie adjuster reasons from the baseline, not from the column it writes");
+  assert.ok(/const stepsTarget\s+= client\.baselineStepsTarget/.test(code),
+    "the step adjuster reasons from the baseline too");
+  // And a three-week structural change must reach the baseline, or the DAILY adaptive job
+  // recomputes the visible target from an unchanged baseline the next morning and erases it —
+  // twenty hours after the client was told "Calories: 2000 → 1900".
+  assert.ok(/baselineCalorieTarget: newCal, calorieTarget: newCal/.test(code),
+    "a structural adjustment writes the baseline AND the visible target");
+  assert.ok(/baselineStepsTarget: newTarget, stepsTarget: newTarget/.test(code));
+});
+
+test("sweep: the keyword sickness scan drives no decision anywhere", () => {
+  const strip = (s: string) => s.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  for (const job of ["morning", "evening", "retention"]) {
+    const src = strip(readFileSync(`server/scheduler/jobs/${job}.ts`, "utf-8"));
+    assert.ok(!/wasSickOrInjured\(|isSickOrInjuredToday\(/.test(src),
+      `${job}.ts still decides health from a regex over chat history`);
+  }
+  // Every one of those jobs returns on isPaused() before its sick branch, and sick-flow writes
+  // paused_until beside sick_until — so the scan could only ever fire on its FALSE positives:
+  // "rest day", "skip gym", "miss workout", someone else being ill.
+  const sick = readFileSync("server/handlers/sick-flow.ts", "utf-8");
+  assert.ok(/paused_until:\$\{sickUntil\}/.test(sick));
+});
+
+test("sweep: sickToday and sickCoveredYesterday have one owner", async () => {
+  const { sickToday, sickCoveredYesterday } = await import("../server/adaptive-targets");
+  const day = (o: number) => new Date(Date.now() + o * 86_400_000).toISOString().slice(0, 10);
+  assert.equal(sickToday(day(1), day(0)), true, "window still open");
+  assert.equal(sickToday(day(0), day(0)), true, "last day of the window counts");
+  assert.equal(sickToday(day(-1), day(0)), false, "window closed yesterday");
+  assert.equal(sickToday(undefined, day(0)), false, "no illness on record");
+  // The two rules are different questions and must not collapse into each other: an illness that
+  // ended yesterday is not sick today, but it DID cover yesterday.
+  assert.equal(sickCoveredYesterday(day(-3), day(-1), day(0)), true);
+  assert.equal(sickToday(day(-1), day(0)), false);
+});
+
+test("sweep: the >7-day client's decision is used, not computed and discarded", () => {
+  const retention = readFileSync("server/scheduler/jobs/retention.ts", "utf-8");
+  // morning.ts returns on daysSilent > 7 AFTER running decideProactive, so the coach worked out
+  // what to ask for and threw it away — and retention sent "Reply *1* for today's workout": a
+  // training ask, to someone who has not logged a meal in a week, chosen without reading state.
+  assert.ok(/decideProactive\(state,/.test(retention), "retention asks the decision owner");
+  assert.ok(/reentryAsk\(client\)/.test(retention), "…and the 7-day message uses its answer");
+  assert.ok(/return decision\.line \|\| FALLBACK/.test(retention),
+    "a drifting client must not get silence because a ledger read timed out");
+});
+
 // ── FOOD EVENTS: one message, several rows, one undo ────────────────────────────────────────
 // Migration 0004. Product acceptance cases, not a new harness.
 

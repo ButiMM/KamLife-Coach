@@ -3,13 +3,49 @@ import {
   eq, gte, and, lt, desc, sql,
   sendWhatsApp, canSendProactive, recordProactiveSend,
   getActiveClients, isPaused, dayStart, loadState, saveState,
-  TRAINING_SCHEDULES, wasSickOrInjured, isSickOrInjuredToday,
+  TRAINING_SCHEDULES, loadProactiveState,
   todaySAST, thisWeekUTC, claimProactive, claimDailySlot, isProactivePaused,
   escalations,
 } from "../shared";
+import { decideProactive } from "../../one-action";
 import { selectVariantMessage, recordDelivery } from "../../ab";
 import { detectWeightStall } from "../../trajectory";
 import { getTrajectoryForUser } from "../../trajectory-report";
+
+/**
+ * THE DECISION OWNER'S ASK, FOR THE CLIENT MORNING CANNOT REACH.
+ *
+ * (2026-08-18, Issue #49 sweep — the gap the proactive trace surfaced and named.) morning.ts
+ * returns on `daysSilent > 7`, but it returns AFTER loading the snapshot and running
+ * decideProactive. So for exactly the clients who have drifted furthest, the coach worked out
+ * what to ask for — INVESTIGATE, "log one meal today" — and threw it away, and retention sent a
+ * generic "Reply *1* to see today's workout" instead: a training ask, to someone who has not
+ * logged a meal in a week, chosen without reading their state at all.
+ *
+ * Retention owns the >7-day client, so retention asks the decision owner. Falls back to the
+ * original line on any failure — a client who is already drifting must not get silence because a
+ * ledger read timed out.
+ */
+async function reentryAsk(client: any): Promise<string> {
+  const FALLBACK = `Reply *1* to see today's workout. That is all — one session.`;
+  try {
+    const state = await loadProactiveState(client);
+    const decision = decideProactive(state, {
+      dreamGoal: client.dreamGoal,
+      biggestStruggle: client.biggestStruggle,
+      weeksOnProgramme: Math.max(0, (client.programmeWeek || 1) - 1),
+      sessionsTarget: Number(client.trainingDaysPerWeek) || 3,
+      calorieTarget: Number(client.calorieTarget) || 0,
+      proteinTarget: Number(client.proteinTarget) || 0,
+      stepsTarget: Number(client.stepsTarget) || 0,
+    });
+    console.log(`[RETENTION] ${client.id.slice(-6)} 7d decision=${decision.state} action=${decision.action.kind}`);
+    return decision.line || FALLBACK;
+  } catch (e) {
+    console.warn(`[RETENTION] decision unavailable for ${client.id?.slice(-6)}:`, (e as Error)?.message);
+    return FALLBACK;
+  }
+}
 
 export async function runSilenceDetection(): Promise<void> {
   console.log("[SCHEDULER] JOB: Silence detection");
@@ -49,7 +85,7 @@ export async function runSilenceDetection(): Promise<void> {
       } else if (silenceMs >= 7 * 24 * HOUR && silenceMs < 8 * 24 * HOUR) {
         const ok = await claimProactive(client.id, "silence_7d", today);
         if (ok) await sendWhatsApp(client.phoneNumber,
-          `${name}, a week since we spoke. ${workouts > 0 ? `You have ${workouts} sessions in the bank — that does not disappear.` : "Your programme is ready and waiting."} Life gets busy — I get it.\n\nReply *1* to see today's workout. That is all — one session.`
+          `${name}, a week since we spoke. ${workouts > 0 ? `You have ${workouts} sessions in the bank — that does not disappear.` : "Your programme is ready and waiting."} Life gets busy — I get it.\n\n${await reentryAsk(client)}`
         );
       } else if (silenceMs >= 48 * HOUR && silenceMs < 72 * HOUR) {
         const ok = await claimProactive(client.id, "silence_2d", today);

@@ -760,21 +760,23 @@ export function programmeDaysSince(startDate: Date | null | undefined): number {
   return Math.floor((Date.now() - new Date(startDate).getTime()) / 86_400_000);
 }
 
-export const SICK_PATTERNS = /\b(sick|flu|fever|ill|cold|vomit|nausea|nauseous|diarrhea|diarrhoea|hospital|doctor|clinic|injured|injury|hurt|sprain|strain|pulled|torn|not feeling|feeling sick|feel sick|feeling bad|unwell|too sick|got sick|i am sick|i'm sick|im sick|still sick|rest day|can't train|cant train|cannot train|no training|skip.*gym|skip.*workout|miss.*gym|miss.*workout)\b/i;
-
-export async function wasSickOrInjured(userId: string, since: Date): Promise<boolean> {
-  const recentMessages = await db
-    .select({ messageIn: chatHistory.messageIn })
-    .from(chatHistory)
-    .where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, since)))
-    .orderBy(desc(chatHistory.createdAt))
-    .limit(20);
-  return recentMessages.some(row => row.messageIn && SICK_PATTERNS.test(row.messageIn));
-}
-
-export async function isSickOrInjuredToday(userId: string): Promise<boolean> {
-  return wasSickOrInjured(userId, dayStart(0));
-}
+// DELETED 2026-08-18 (Issue #49 sweep): SICK_PATTERNS, wasSickOrInjured, isSickOrInjuredToday.
+//
+// A regex over the client's last 20 inbound messages, asked by morning, evening and retention to
+// decide whether someone was ill. It had no callers left after those three moved to the durable
+// sick_since / sick_until tokens, and a dead health-scan is worth deleting rather than leaving
+// available: the next job that wants to know "are they sick" must now ask the state, which is the
+// whole point.
+//
+// It could not do its job even when it was wired. sick-flow.ts writes paused_until beside
+// sick_until, and every one of those jobs returns on isPaused() before its sick branch — so a
+// genuinely ill client never reached the scan. What did reach it were the patterns that are not
+// illness at all: "rest day", "skip gym", "miss workout", and someone ELSE being ill ("my mom is
+// sick so I skipped gym"). The durable path already scrubs all three, via
+// sick-flow.looksSickMention → aboutSomeoneElse, past-tense and regret-context handling.
+//
+// The durable questions now have one owner each, in adaptive-targets.ts: sickToday() and
+// sickCoveredYesterday().
 
 // ════════════════════════════════════════════════════════════════════════════════════════════
 // CANONICAL PROACTIVE STATE — the one structure every scheduled job reads.
@@ -852,7 +854,7 @@ function stalledWeeksFrom(weights: number[]): number {
  * than throwing — a scheduled job must not die for one client's missing row.
  */
 export async function loadProactiveState(client: any): Promise<ProactiveState> {
-  const { weightTrendUsable, sickCoveredYesterday } = await import("../adaptive-targets");
+  const { weightTrendUsable, sickCoveredYesterday, sickToday } = await import("../adaptive-targets");
   const { contactState } = await import("../understanding/reentry");
   const { gatherReportData } = await import("../report-card");
   const since = (d: number) => new Date(Date.now() - d * 86_400_000);
@@ -861,7 +863,7 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
   const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
   const sickSince = notes.match(/sick_since:(\d{4}-\d{2}-\d{2})/)?.[1];
   const today = todaySAST();
-  const sick = !!sickUntil && new Date(sickUntil) >= new Date(today);
+  const sick = sickToday(sickUntil, today);
   const recovering = !sick && !!sickUntil
     && (Date.now() - new Date(sickUntil).getTime()) / 86_400_000 <= 3;
   // "Were they ill YESTERDAY" — what the morning brief actually asks, since it reports on the day

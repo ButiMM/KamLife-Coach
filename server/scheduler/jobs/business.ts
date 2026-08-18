@@ -418,8 +418,21 @@ export async function runAutoCalAdjust(): Promise<void> {
         if (isNaN(first) || isNaN(last)) continue;
 
         const change     = last - first;
-        const currentCal  = client.calorieTarget  || 1800;
-        const currentProt = client.proteinTarget   || 120;
+        // THE BASELINE, NOT THE OVERLAY (2026-08-18, Issue #49 sweep). This read
+        // client.calorieTarget — the column it writes forty lines below — exactly the recursion
+        // migration 0005 removed from scheduler/jobs/adaptive.ts. 0005 fixed one job; this is the
+        // second, and nothing pointed at it.
+        //
+        // Two defects, not one. The slow ratchet is the obvious half: 2000 → 1900 → 1800 every
+        // three weeks, each cut measured from the last cut rather than from the client's profile.
+        // The worse half is that since 0005 the daily adaptive job recomputes the visible target
+        // from `baseline` every morning at 05:45 — so this job's Sunday-morning write was ERASED
+        // by Monday, twenty hours after the client had been told "Calories: 2000 → 1900".
+        // A three-week structural re-evaluation is a change to the profile, which is what a
+        // baseline IS. It writes both now: the baseline so tomorrow's adaptation starts from it,
+        // and the visible target so the number in this message is true when they read it.
+        const currentCal  = client.baselineCalorieTarget ?? client.calorieTarget  ?? 1800;
+        const currentProt = client.baselineProteinTarget ?? client.proteinTarget  ?? 120;
         const name        = (client.name || "").split(" ")[0] || "there";
         const goal        = client.goalType || "fat_loss";
         const isFemale    = client.gender === "female";
@@ -489,9 +502,11 @@ export async function runAutoCalAdjust(): Promise<void> {
         if (newCal !== null) {
           // Claim before mutating targets + sending — DB-backed per 3-week window, restart-safe.
           if (!(await claimProactive(client.id, "cal_adjust", `w${windowKey}`))) continue;
-          const patch: Partial<typeof client> = { calorieTarget: newCal };
-          if (newProt !== null) (patch as any).proteinTarget = newProt;
-          await db.update(users).set(patch as any).where(eq(users.id, client.id));
+          // Baseline AND overlay. The baseline is what tomorrow's adaptation reasons from; the
+          // overlay is the number this message quotes, so it must be true today too.
+          const patch: any = { baselineCalorieTarget: newCal, calorieTarget: newCal };
+          if (newProt !== null) { patch.baselineProteinTarget = newProt; patch.proteinTarget = newProt; }
+          await db.update(users).set(patch).where(eq(users.id, client.id));
           if (msg) await sendWhatsApp(client.phoneNumber, msg);
           adjusted++;
         }
@@ -515,7 +530,10 @@ export async function runStepTargetAdaptation(): Promise<void> {
     for (const client of clients) {
       if (isPaused(client)) continue;
       try {
-        const stepsTarget    = client.stepsTarget || 8500;
+        // BASELINE, for the same reason as the calorie job above: this read the column it writes,
+        // so every fortnight's ±1000 was measured from the previous fortnight's ±1000, and the
+        // daily adaptive job then recomputed the visible target from `baseline` and undid it.
+        const stepsTarget    = client.baselineStepsTarget ?? client.stepsTarget ?? 8500;
         const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
         const sevenDaysAgo    = new Date(Date.now() - 7  * 86_400_000);
 
@@ -539,13 +557,13 @@ export async function runStepTargetAdaptation(): Promise<void> {
         if (hitRate >= 0.8 && stepsTarget < 12000) {
           if (!(await claimProactive(client.id, "step_target_adapt", `w${windowKey}`))) continue;
           const newTarget = Math.min(12000, stepsTarget + 1000);
-          await db.update(users).set({ stepsTarget: newTarget }).where(eq(users.id, client.id));
+          await db.update(users).set({ baselineStepsTarget: newTarget, stepsTarget: newTarget }).where(eq(users.id, client.id));
           await sendWhatsApp(client.phoneNumber, `${name}, you have been nailing your step target 🔥 Time to raise the bar.\n\nNew target: *${newTarget.toLocaleString()} steps/day*\n\nSame routine — just aim a little further. Your body is ready for it.`);
           bumped++;
         } else if (hitRate <= 0.3 && stepsTarget > 5000) {
           if (!(await claimProactive(client.id, "step_target_adapt", `w${windowKey}`))) continue;
           const newTarget = Math.max(5000, stepsTarget - 1000);
-          await db.update(users).set({ stepsTarget: newTarget }).where(eq(users.id, client.id));
+          await db.update(users).set({ baselineStepsTarget: newTarget, stepsTarget: newTarget }).where(eq(users.id, client.id));
           await sendWhatsApp(client.phoneNumber, `${name}, I have adjusted your step target to *${newTarget.toLocaleString()} steps/day*.\n\nThis is not lowering standards — it is setting a target you can actually hit consistently. Hitting ${newTarget.toLocaleString()} every day beats struggling at ${stepsTarget.toLocaleString()} and stopping.\n\nWe raise it again when this feels easy.`);
           reduced++;
         }

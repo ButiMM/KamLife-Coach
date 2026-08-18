@@ -153,20 +153,35 @@ console.log(adaptiveSends.length === 0
 const handoff = /adapt_note:\$\{today\}/.test(adaptiveSrc) && /adapt_note:\(/.test(morningSrc);
 console.log(`  hand-off wired end to end (adaptive writes the marker, morning reads it): ${handoff}`);
 
+rule("WHO MAY WRITE A TARGET");
+const businessSrc = readFileSync("server/scheduler/jobs/business.ts", "utf-8");
+const writers = ["adaptive.ts", "business.ts (cal_adjust)", "business.ts (step_target_adapt)"];
+const recursive = /const currentCal\s+= client\.calorieTarget/.test(strip(businessSrc))
+  || /const stepsTarget\s+= client\.stepsTarget \|\|/.test(strip(businessSrc));
+console.log(`  three jobs write calorie/protein/steps targets: ${writers.join(", ")}`);
+console.log(`  any of them still reading the column it writes: ${recursive}`);
+console.log(recursive
+  ? `  ✗ the 0005 ratchet is alive in business.ts — it was only ever fixed in adaptive.ts`
+  : `  ✓ all three reason from baseline. adaptive owns the daily overlay; business.ts makes the`);
+if (!recursive) console.log(`    three-week structural change to the BASELINE, so the next morning does not erase it.`);
+
+rule("KEYWORD SICKNESS — does it decide anything?");
+for (const j of ["morning", "evening", "retention"]) {
+  const src = strip(readFileSync(`server/scheduler/jobs/${j}.ts`, "utf-8"));
+  const uses = /wasSickOrInjured\(|isSickOrInjuredToday\(/.test(src);
+  console.log(`  ${j.padEnd(10)} decides health from a regex: ${uses ? "YES" : "no — durable token"}`);
+}
+
 rule("SHARED STATE — do both jobs read one structure?");
 console.log(`  loadProactiveState defined in scheduler/shared.ts: ${/export async function loadProactiveState/.test(sharedSrc)}`);
 console.log(`  adaptive.ts loads it: ${countOf(adaptiveSrc, /loadProactiveState\(/g)} site(s)`
   + `   morning.ts loads it: ${countOf(morningSrc, /loadProactiveState\(/g)} site(s)`);
 
-rule("HEALTH TRUTH — which source decides TODAY");
+// The scan the three jobs above used to ask. Kept here only to show, per client, what it WOULD
+// have said — the function itself is deleted from scheduler/shared.ts.
 const SICK_RE = /\b(sick|ill|flu|injur|hurt|pain|rest day|skip)\b/i;
-console.log(`  wasSickOrInjured() (chat_history, last 20 inbound, regex) still exists: `
-  + `${/export async function wasSickOrInjured/.test(sharedSrc)}`);
-console.log(`  but morning.ts calls it at: ${countOf(morningSrc, /wasSickOrInjured\(/g)} site(s) — health is durable now`);
-console.log(`  still keyword-driven elsewhere: evening.ts, retention.ts (audit/analytics, next sweep)`);
-console.log(`  NOTE the scan could only ever be wrong in morning: sick-flow writes paused_until`);
-console.log(`  beside sick_until, and morning returns on isPaused() long before the sick branch —`);
-console.log(`  so a genuinely ill client never reached it. Only false positives did.`);
+console.log(`  wasSickOrInjured() still exists in shared.ts: `
+  + `${/export async function wasSickOrInjured/.test(sharedSrc)} (deleted — no callers left)`);
 
 // ── Per-client ────────────────────────────────────────────────────────────────────────────────
 for (const c of CLIENTS) {
@@ -236,9 +251,13 @@ for (const c of CLIENTS) {
     console.log(`  morning: ${exit}`);
     console.log(`  → the adaptive reason is deliberately NOT carried here; re-entry comes first.`);
     if (decision.line && silent > 7) {
-      console.log(`  ⚠ OPEN: the decision owner has something to say — ${decision.state}, "${decision.action.todo}" —`);
-      console.log(`    and this job drops it. >7 days silent is retention.ts's client, not morning's, so the`);
-      console.log(`    decision is computed and discarded. Pre-existing; the proactive-job sweep owns it.`);
+      const owned = /reentryAsk\(client\)/.test(readFileSync("server/scheduler/jobs/retention.ts", "utf-8"));
+      console.log(`  ${owned ? "✓ OWNED" : "⚠ OPEN"}: the decision owner has something to say — ${decision.state},`);
+      console.log(`    "${decision.action.todo}"`);
+      console.log(owned
+        ? `    retention.ts's 7-day message now asks decideProactive for it instead of sending a`
+        : `    and morning drops it. >7 days silent belongs to retention.ts, so it is discarded.`);
+      if (owned) console.log(`    generic "Reply *1* for today's workout" to someone who has not logged a meal in a week.`);
     }
     rulePerClientEnd(adaptiveWouldSend);
     continue;

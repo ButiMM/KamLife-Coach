@@ -315,6 +315,18 @@ export const MAX_TREND_AGE_DAYS = 10;
  * Lives here, beside weightTrendUsable, because both answer "what does this illness window let us
  * say" and the scheduler module that reads the tokens cannot be imported without a database.
  */
+/**
+ * Is the client inside a recorded illness window TODAY? ISO dates, compared as strings.
+ *
+ * The durable answer to the question `wasSickOrInjured()` was guessing at from the last 20 chat
+ * messages. That scan matched "rest day", "skip gym", "miss workout" and someone ELSE being ill,
+ * and — in every job that checks isPaused() first, which is all of them — it could not reach a
+ * genuinely ill client at all, because sick-flow writes paused_until beside sick_until.
+ */
+export function sickToday(sickUntil: string | undefined, today: string): boolean {
+  return !!sickUntil && sickUntil >= today;
+}
+
 export function sickCoveredYesterday(
   sickSince: string | undefined, sickUntil: string | undefined, today: string,
 ): boolean {
