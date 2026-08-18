@@ -1,19 +1,33 @@
 /**
- * ADAPTIVE TARGETS — the daily job that actually MOVES a client's numbers.
+ * ADAPTIVE TARGETS — the daily job that MOVES a client's numbers. IT NO LONGER SPEAKS.
+ *
+ * (2026-08-18, Issue #49 step 3.) This job ran at 05:45 and sent up to two WhatsApp messages,
+ * neither of which passed claimDailySlot — the shared one-proactive-message-a-day budget. Morning
+ * ran fifteen minutes later and sent another, budgeted. So a client whose targets moved heard from
+ * "their coach" twice before six, and the daily cap that was supposed to prevent exactly that
+ * counted one of the two. One coach, one message.
+ *
+ * The words were not deleted, they were HANDED OVER. This job writes `adapt_note:<date>` and the
+ * morning brief — which claims the slot — asks the same pure engine for the same line and folds it
+ * into the message it was already sending. The client still learns their targets moved and why;
+ * they learn it once, inside the morning message, instead of as a second notification.
  *
  * (2026-07-27) The adaptive engine was written and tested but not wired, which is the exact
  * failure the founder called out: built, not integrated. This is the wiring. It runs each
  * morning BEFORE the morning check-in so the day's message already reflects today's real
  * targets.
  *
- * It reads the client's actual state (sick marker, 14-day weight trend, 7-day step average,
- * weeks stalled), asks the pure engine what today's targets should be, PERSISTS them, and
- * sends ONE plain line only when something changed. Silence is the default — a target that
- * moves every day is noise.
+ * It reads the client's state from the shared proactive snapshot, asks the pure engine what
+ * today's targets should be, and PERSISTS them. Silence is the default — a target that moves
+ * every day is noise — and silence is now the only thing this job does directly.
  */
 
-import { db, users, eq, getActiveClients, sendWhatsApp, saveState, todaySAST, hasRunToday, loadProactiveState } from "../shared";
+import { db, users, eq, getActiveClients, saveState, todaySAST, hasRunToday, loadProactiveState } from "../shared";
 import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
+
+/** Strip a stale hand-off marker before writing a fresh one, so yesterday's note can never be
+ *  read as today's. Every write path clears it, including the ones that then don't set it. */
+const clearTokens = (n: string) => n.replace(/\s*\badapt_note:\d{4}-\d{2}-\d{2}\b/g, "");
 
 export async function runAdaptiveTargets(): Promise<void> {
   const today = todaySAST();
@@ -53,12 +67,11 @@ export async function runAdaptiveTargets(): Promise<void> {
       if (out.reason === "stalled_unlogged" || out.reason === "stalled_over_target") {
         const lastNotice = notes.match(/stall_notice:(\d{4}-\d{2}-\d{2})/)?.[1];
         if (lastNotice && (Date.now() - new Date(lastNotice).getTime()) / 86_400_000 < 7) continue;
-        const kept = notes.replace(/\s*\bstall_notice:\d{4}-\d{2}-\d{2}\b/g, "").trim();
+        const kept = clearTokens(notes).replace(/\s*\bstall_notice:\d{4}-\d{2}-\d{2}\b/g, "").trim();
         await db.update(users)
-          .set({ profileNotes: `${kept} stall_notice:${today}`.trim() })
+          .set({ profileNotes: `${kept} stall_notice:${today} adapt_note:${today}`.trim() })
           .where(eq(users.id, c.id));
-        await sendWhatsApp(c.phoneNumber, out.note).catch(() => {});
-        console.log(`[ADAPTIVE] ${c.id.slice(-6)} ${out.reason}: targets held at ${input.baseCalories} kcal (logged ${input.loggedDays7d ?? "?"}d, avg ${input.avgKcal7d ?? "?"} kcal)`);
+        console.log(`[ADAPTIVE] ${c.id.slice(-6)} ${out.reason}: targets held at ${input.baseCalories} kcal (logged ${input.loggedDays7d ?? "?"}d, avg ${input.avgKcal7d ?? "?"} kcal) — note handed to morning`);
         continue;
       }
 
@@ -72,20 +85,17 @@ export async function runAdaptiveTargets(): Promise<void> {
       // live: this job wrote 2530, morning.ts saw 332 kcal off the profile figure, called it
       // corruption and wrote 2862 back with an announcement). Same durable profileNotes token
       // pattern as sick_until, and the same exemption a diet break already gets.
-      const keptNotes = (notes || "").replace(/\s*\badapted_until:\d{4}-\d{2}-\d{2}\b/g, "").trim();
+      const keptNotes = clearTokens(notes).replace(/\s*\badapted_until:\d{4}-\d{2}-\d{2}\b/g, "").trim();
       const adaptedUntil = new Date(Date.now() + 13 * 86_400_000).toISOString().slice(0, 10);
       await db.update(users).set({
         calorieTarget: out.calorieTarget,
         proteinTarget: out.proteinTarget,
         stepsTarget: out.stepsTarget,
-        profileNotes: `${keptNotes} adapted_until:${adaptedUntil}`.trim(),
+        profileNotes: `${keptNotes} adapted_until:${adaptedUntil}${out.note ? ` adapt_note:${today}` : ""}`.trim(),
       }).where(eq(users.id, c.id));
 
-      if (out.note) {
-        await sendWhatsApp(c.phoneNumber, `🎯 *Targets adjusted for today.*\n\n${out.note}`).catch(() => {});
-      }
       moved++;
-      console.log(`[ADAPTIVE] ${c.id.slice(-6)} ${out.reason}: ${input.baseCalories}→${out.calorieTarget} kcal, steps ${input.baseSteps}→${out.stepsTarget}`);
+      console.log(`[ADAPTIVE] ${c.id.slice(-6)} ${out.reason}: ${input.baseCalories}→${out.calorieTarget} kcal, steps ${input.baseSteps}→${out.stepsTarget} — note handed to morning`);
     } catch (e) {
       console.warn(`[ADAPTIVE] failed for ${c.id?.slice(-6)}:`, (e as Error)?.message || e);
     }

@@ -12,6 +12,7 @@ import { getNumbersMode } from "../../numbers-mode";
 import { selectVariantMessage, recordDelivery } from "../../ab";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
 import { morningClosingLine } from "../../morning-closing";
+import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
 
 export async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
@@ -117,6 +118,27 @@ export async function runMorningCheckin(): Promise<void> {
       // own detail below — collapsing that is a later step — but health and re-entry, the two
       // facts that decide whether it speaks at all, now come from here.
       const state = await loadProactiveState(client);
+
+      // THE ADAPTIVE JOB'S VOICE, SPOKEN HERE (2026-08-18, Issue #49 step 3). runAdaptiveTargets
+      // ran at 05:45 and sent its own WhatsApp message outside the daily budget; this job sent
+      // another at 06:00 inside it. Two messages, one coach, one of them uncounted. Adaptive now
+      // moves the numbers silently and leaves an adapt_note:<date> marker, and its line is folded
+      // into the message below — the one that claims the slot.
+      //
+      // The WORDS come from the same pure engine adaptive asked, against the same snapshot, so
+      // there is no second copy of them to drift. Baseline is what the engine reasons from and
+      // adaptive never writes it, so this re-derivation is deterministic: identical input,
+      // identical line. A marker dated anything but today is stale and ignored.
+      let adaptLine = "";
+      try {
+        const marked = String(client.profileNotes || "").match(/adapt_note:(\d{4}-\d{2}-\d{2})/)?.[1];
+        if (marked === todaySAST()) adaptLine = adaptTargets(adaptiveInputFrom(state)).note || "";
+      } catch (e) { console.warn("[MORNING] adapt line unavailable:", (e as Error)?.message); }
+      // One bubble, deliberately. `\n\n---\n\n` would split this into a second WhatsApp message,
+      // separately billed — which is the two-messages-before-six problem again, wearing the
+      // morning job's name instead of the adaptive job's.
+      const withAdapt = (m: string) => (adaptLine ? `${m}\n\n${adaptLine}` : m);
+
       const name = client.name || "there";
       const phone = client.phoneNumber;
       const proteinTarget = client.proteinTarget || 120;
@@ -133,7 +155,7 @@ export async function runMorningCheckin(): Promise<void> {
           // scrubs all three (looksSickMention → aboutSomeoneElse, past tense, regret context).
           const sickYesterday = state.health.sickYesterday;
           if (sickYesterday) {
-            await sendWhatsApp(phone, `Morning ${name}. Hope you're feeling better. When you're ready to get back on it, just say Hi.`);
+            await sendWhatsApp(phone, withAdapt(`Morning ${name}. Hope you're feeling better. When you're ready to get back on it, just say Hi.`));
             continue;
           }
           const wStreak = client.workoutStreak || 0;
@@ -145,9 +167,12 @@ export async function runMorningCheckin(): Promise<void> {
           if (shieldAvailable) {
             const updatedNotes = (client.profileNotes || "").replace(/streak_shield:\d{4}-\d{2}/, "").trim() + ` streak_shield:${currentMonth}`;
             await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.id, client.id));
-            await sendWhatsApp(phone, `Morning ${name}. Good news — your *${wStreak}-session streak is safe*, your monthly shield's got yesterday covered.\n\nLog today's session and keep the momentum going. 💪`);
+            await sendWhatsApp(phone, withAdapt(`Morning ${name}. Good news — your *${wStreak}-session streak is safe*, your monthly shield's got yesterday covered.\n\nLog today's session and keep the momentum going. 💪`));
           } else {
-            await sendWhatsApp(phone, `Morning ${name}. Send me your breakfast right now — one line is all I need. We start from here.`);
+            // The stalled_unlogged client lands HERE, not in the full brief — they are stalled
+            // BECAUSE they are barely logging, so yesterday is usually empty. Dropping the line on
+            // this branch would silently lose the one case adaptive's stall notice existed for.
+            await sendWhatsApp(phone, withAdapt(`Morning ${name}. Send me your breakfast right now — one line is all I need. We start from here.`));
           }
         }
         continue;
@@ -312,7 +337,7 @@ export async function runMorningCheckin(): Promise<void> {
 
       if (sickYesterday) {
         parts.push(`Hope you're feeling better. When you're ready, just say Hi and we pick up from where you left off.`);
-        if (await claimDailySlot(client.id, "morning")) { await sendWhatsApp(phone, parts.join(" ")); }
+        if (await claimDailySlot(client.id, "morning")) { await sendWhatsApp(phone, withAdapt(parts.join(" "))); }
         continue;
       }
 
@@ -477,7 +502,10 @@ export async function runMorningCheckin(): Promise<void> {
         } catch (e) {
           console.warn("[MORNING] one-action skipped:", (e as any)?.message || e);
         }
-        const fullMessage = targetFixLine + parts.join(" ") + "\n\n" + todaySection.join("\n") + "\n\n" + breakfastAsk;
+        // The adapt line sits with the day's numbers, before the ask — it EXPLAINS the figures in
+        // todaySection, which are the ones adaptive just moved. Putting it after the ask would
+        // leave the client reading a changed target with the reason further down.
+        const fullMessage = targetFixLine + parts.join(" ") + "\n\n" + withAdapt(todaySection.join("\n")) + "\n\n" + breakfastAsk;
         await sendWhatsApp(phone, fullMessage);
       }
     } catch (err) {

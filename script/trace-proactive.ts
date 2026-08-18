@@ -111,12 +111,23 @@ console.log("PROACTIVE MORNING TRACE — Issue #49 step 1");
 console.log("═".repeat(W));
 
 rule("THE TWO JOBS, AS WIRED");
-const adaptiveSends = countOf(adaptiveSrc, /sendWhatsApp\(/g);
-console.log(`  05:45 SAST  runAdaptiveTargets   sends: ${adaptiveSends}   claim sites: ${countOf(adaptiveSrc, /claimDailySlot\(/g)}`);
-console.log(`  06:00 SAST  runMorningCheckin    sends: ${countOf(morningSrc, /sendWhatsApp(Buttons)?\(/g)}   claim sites: ${countOf(morningSrc, /claimDailySlot\(/g)}`);
-console.log(`  Counts do NOT map 1:1 and are not the claim: morning's sends at :136 :148 :150 share`);
-console.log(`  the one claim at :126, and :106 sits under :96. Read them — every morning send is`);
-console.log(`  inside a claimed block. Adaptive's ${adaptiveSends} are inside none.`);
+/** Line numbers of a pattern in real code, so this never cites a line that has since moved. */
+const linesOf = (s: string, re: RegExp) => s.split("\n")
+  .map((l, i) => (!/^\s*(\/\/|\*|\/\*)/.test(l) && re.test(l) ? i + 1 : 0)).filter(Boolean);
+
+const adaptiveSends = linesOf(adaptiveSrc, /sendWhatsApp\(/);
+const morningSends = linesOf(morningSrc, /sendWhatsApp(Buttons)?\(/);
+const morningClaims = linesOf(morningSrc, /claimDailySlot\(/);
+console.log(`  05:45 SAST  runAdaptiveTargets   sends: ${adaptiveSends.length}   claim sites: ${countOf(adaptiveSrc, /claimDailySlot\(/g)}`);
+console.log(`  06:00 SAST  runMorningCheckin    sends: ${morningSends.length} (lines ${morningSends.join(" ")})`);
+console.log(`                                   claim sites: ${morningClaims.length} (lines ${morningClaims.join(" ")})`);
+console.log(`  Counts do NOT map 1:1 and are not the claim — several sends share one claim. Read`);
+console.log(`  them: every morning send sits inside a claimed block.`);
+console.log(adaptiveSends.length === 0
+  ? `  ✓ ADAPTIVE NO LONGER SPEAKS. It moves the numbers and leaves adapt_note:<date>; morning\n    folds the engine's own line into the message that claims the slot. One coach, one message.`
+  : `  ✗ adaptive still has ${adaptiveSends.length} send(s) at line(s) ${adaptiveSends.join(" ")}, inside no claim.`);
+const handoff = /adapt_note:\$\{today\}/.test(adaptiveSrc) && /adapt_note:\(/.test(morningSrc);
+console.log(`  hand-off wired end to end (adaptive writes the marker, morning reads it): ${handoff}`);
 
 rule("SHARED STATE — do both jobs read one structure?");
 console.log(`  loadProactiveState defined in scheduler/shared.ts: ${/export async function loadProactiveState/.test(sharedSrc)}`);
@@ -161,7 +172,7 @@ for (const c of CLIENTS) {
     const sends = out.changed && (noteOnly || targetsMoved) && !!out.note;
     if (sends) { adaptiveWouldSend = true; sendCount++; }
     console.log(`  adaptive day ${day}: baseline ${baseline} → ${out.calorieTarget}  reason=${out.reason}  `
-      + `sends=${sends ? "YES (unbudgeted)" : "no"}`);
+      + `line=${sends ? (adaptiveSends.length === 0 ? "yes → rides the morning message" : "YES (unbudgeted send)") : "none"}`);
     if (sends && day === 1) console.log(`     "${out.note.slice(0, 88)}…"`);
     // After 0005 the job reads users.baselineCalorieTarget — which it never writes — so the base
     // does NOT become tomorrow's input. Set TRACE_RECURSIVE=1 to reproduce the pre-0005 ratchet.
@@ -186,12 +197,16 @@ for (const c of CLIENTS) {
   }
   console.log(`  morning would claim the daily slot and send: yes (every one of its sends is gated)`);
 
-  // THE COLLISION.
-  if (adaptiveWouldSend) {
+  // WHAT THE CLIENT ACTUALLY RECEIVES. `adaptiveWouldSend` now means "adaptive produced a line",
+  // not "adaptive sent a message" — the line rides the morning message instead.
+  if (adaptiveWouldSend && adaptiveSends.length === 0) {
+    console.log(`  ✓ ONE proactive message today. Targets moved silently at 05:45; the reason is`);
+    console.log(`    folded into the 06:00 brief, which claims the slot. Was two messages.`);
+  } else if (adaptiveWouldSend) {
     console.log(`  ✗ COLLISION: this client receives TWO proactive messages 15 minutes apart —`);
     console.log(`    adaptive at 05:45 (unbudgeted) and morning at 06:00 (budgeted). Two coaches.`);
   } else {
-    console.log(`  ✓ one proactive message today (adaptive stayed silent)`);
+    console.log(`  ✓ one proactive message today (nothing for adaptive to say)`);
   }
 }
 

@@ -2079,6 +2079,36 @@ test("proactive state: sickYesterday needs the illness to have covered yesterday
   assert.equal(covered(undefined, undefined), false, "no illness on record is not illness");
 });
 
+test("proactive budget: adaptive does not speak, and its line is not lost", () => {
+  const adaptive = readFileSync("server/scheduler/jobs/adaptive.ts", "utf-8");
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  const code = (s: string) => s.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+
+  // 05:45 sent up to two messages, neither through claimDailySlot; 06:00 sent another, through it.
+  // The daily cap counted one of the two, so "one proactive message a day" was never true for a
+  // client whose targets moved.
+  assert.ok(!/sendWhatsApp/.test(code(adaptive)), "the adaptive job must not send");
+
+  // But the words are HANDED OVER, not deleted — the standing rule is that no send is removed
+  // until its behaviour is accounted for by the new owner.
+  assert.ok(/adapt_note:\$\{today\}/.test(adaptive), "adaptive marks the day it produced a line");
+  assert.ok(/adapt_note:\(/.test(morning), "morning looks for that marker");
+  assert.ok(/adaptTargets\(adaptiveInputFrom\(state\)\)\.note/.test(morning),
+    "morning asks the SAME pure engine for the line — no second copy of the words to drift");
+  assert.ok(/marked === todaySAST\(\)/.test(morning), "a marker from another day is stale");
+
+  // And it must reach the branch the stalled_unlogged client actually lands in: they are stalled
+  // because they barely log, so yesterday is usually empty and they never see the full brief.
+  const breakfastAsk = morning.split("\n").find(l => l.includes("Send me your breakfast right now"));
+  assert.ok(breakfastAsk && /withAdapt\(/.test(breakfastAsk),
+    "the empty-yesterday branch carries the line, or the stall notice is silently lost");
+
+  // One bubble. `\n\n---\n\n` splits into a second WhatsApp message, separately billed — that is
+  // the two-messages-before-six problem again under a different job's name.
+  assert.ok(/adaptLine \? `\$\{m\}\\n\\n\$\{adaptLine\}`/.test(morning),
+    "the line joins the existing message; it does not start a new bubble");
+});
+
 // ── FOOD EVENTS: one message, several rows, one undo ────────────────────────────────────────
 // Migration 0004. Product acceptance cases, not a new harness.
 
