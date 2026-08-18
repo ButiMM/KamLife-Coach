@@ -3,7 +3,7 @@ import {
   eq, gte, and, lt, desc, sql, asc,
   sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot,
   getActiveClients, isPaused, dayStart, getYesterdayLogs,
-  TRAINING_SCHEDULES, programmeDaysSince, wasSickOrInjured,
+  TRAINING_SCHEDULES, programmeDaysSince, loadProactiveState,
   todaySAST,
 } from "../shared";
 import { auditStoredTargets, auditStepsTarget } from "../../targets";
@@ -111,6 +111,12 @@ export async function runMorningCheckin(): Promise<void> {
     }
 
     try {
+      // THE SAME SNAPSHOT THE ADAPTIVE JOB READ FIFTEEN MINUTES AGO (2026-08-18, Issue #49
+      // step 2). Two jobs speak to one client each morning and until now they assembled two
+      // different pictures of them. This is the shared one. Morning still computes plenty of its
+      // own detail below — collapsing that is a later step — but health and re-entry, the two
+      // facts that decide whether it speaks at all, now come from here.
+      const state = await loadProactiveState(client);
       const name = client.name || "there";
       const phone = client.phoneNumber;
       const proteinTarget = client.proteinTarget || 120;
@@ -118,7 +124,14 @@ export async function runMorningCheckin(): Promise<void> {
 
       if (yesterdayLogs.length === 0) {
         if (await claimDailySlot(client.id, "morning")) {
-          const sickYesterday = await wasSickOrInjured(client.id, dayStart(-1));
+          // DURABLE, NOT A KEYWORD SCAN. This asked wasSickOrInjured(), a regex over the client's
+          // last 20 inbound messages — and that scan could only ever be WRONG here. sick-flow.ts
+          // writes paused_until alongside sick_until, and this job returns on isPaused() two
+          // hundred lines above, so a genuinely ill client never reaches this line. What did reach
+          // it were the scan's non-illness matches: SICK_PATTERNS also fires on "rest day",
+          // "skip gym", "miss workout", and on someone else being ill. The durable path already
+          // scrubs all three (looksSickMention → aboutSomeoneElse, past tense, regret context).
+          const sickYesterday = state.health.sickYesterday;
           if (sickYesterday) {
             await sendWhatsApp(phone, `Morning ${name}. Hope you're feeling better. When you're ready to get back on it, just say Hi.`);
             continue;
@@ -294,7 +307,7 @@ export async function runMorningCheckin(): Promise<void> {
       };
       const trajPrefix = trajectoryPrefix[trajectory] ? ` ${trajectoryPrefix[trajectory]}` : "";
 
-      const sickYesterday = await wasSickOrInjured(client.id, dayStart(-1));
+      const sickYesterday = state.health.sickYesterday;
       const parts: string[] = [`Morning ${name}.${dowOpener}${trajPrefix}${identityLine}${streakLine}`];
 
       if (sickYesterday) {

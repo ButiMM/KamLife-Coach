@@ -101,7 +101,8 @@ const BUDGET = {
 const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT RISK"> = {
   "server/handlers/meal-repeat.ts": "guarded",
   "server/handlers/food-commands.ts": "guarded",
-  "server/handlers/food-context.ts": "guarded",
+  // food-context.ts was here until commitFoodLog — the write door — moved to server/day-ledger.ts.
+  // It now parses and decides and hands rows to that one owner; it writes nothing itself.
   "server/handlers/food-log-mgmt.ts": "guarded",
   "server/handlers/media.ts": "guarded",
   "server/handlers/workout.ts": "guarded",
@@ -122,6 +123,11 @@ const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT 
   // day's accounting columns, and records what left in [MEAL_DROP]. The message-matching half
   // of this file (scanForSAFoods) still only reads. Re-classify the day it decides anything.
   "server/handlers/food-scanner.ts": "bookkeeping",
+  // It records the turn — chat_history, the turn ledger, and a safety escalation row when
+  // detectEscalation fires. Every write is a record of what happened; none of them changes a
+  // target, a programme, or anything else the client's plan is made of. Re-classify the day one
+  // of them does.
+  "server/handlers/chat-log.ts": "bookkeeping",
   // Named backlog. Each mutates something the client feels, from a message match, with no guard:
   "server/handlers/early-commands.ts": "AT RISK",   // trainingMode, trainingDaysPerWeek, targetWeightKg
   "server/handlers/advice-commands.ts": "AT RISK",  // stepsTarget

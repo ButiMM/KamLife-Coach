@@ -30,7 +30,9 @@ process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+270
 process.env.PROACTIVE_PAUSED = "true";
 
 import { readFileSync } from "node:fs";
-const { adaptTargets } = await import("../server/adaptive-targets");
+// adaptiveInputFrom is the projection the SCHEDULED JOB uses — not a copy of it. adaptive-targets
+// is pure, so this trace exercises the real path instead of a mirror that can drift.
+const { adaptTargets, adaptiveInputFrom } = await import("../server/adaptive-targets");
 const { contactState } = await import("../server/understanding/reentry");
 
 const argv = process.argv.slice(2);
@@ -39,43 +41,59 @@ const DAYS = Number((argv.find(a => a.startsWith("--days=")) || "--days=1").spli
 const W = 98;
 const rule = (t = "") => console.log(t ? `\n${"═".repeat(2)} ${t} ${"═".repeat(Math.max(0, W - t.length - 4))}` : "─".repeat(W));
 
-interface Client {
-  name: string; why: string;
-  baseCalories: number; baseProtein: number; baseSteps: number; weightKg: number;
-  sick?: boolean; daysSick?: number; recovering?: boolean;
-  weeklyKgChange?: number; stalledWeeks?: number; avgSteps7d?: number;
-  avgKcal7d?: number; loggedDays7d?: number;
-  lastActiveAt: string | null;
-  /** What a durable sick_until token would say vs what the last 20 messages contain. */
-  durableSickUntil?: string | null; recentMessages: string[];
-}
+// A fixture is now a ProactiveState — the SAME structure both scheduled jobs read at runtime,
+// shaped here by hand instead of by loadProactiveState (which needs a database). The fields are
+// the contract, so a field either job stops honouring shows up here as a compile error.
+type State = import("../server/scheduler/shared").ProactiveState;
+interface Client { name: string; why: string; state: State; recentMessages: string[] }
 
 const now = Date.now();
 const ago = (d: number) => new Date(now - d * 86_400_000).toISOString();
 
+/** Everything a healthy, well-logged 80kg client looks like. Each case overrides what it is about. */
+const base = (over: Partial<State> = {}): State => ({
+  userId: "trace", phone: "+27000000000", name: "Trace", goalType: "fat_loss", weightKg: 80,
+  baseline: { calories: 2000, protein: 150, steps: 8000 },
+  current: { calories: 2000, protein: 150, steps: 8000 },
+  health: { sick: false, sickYesterday: false, recovering: false, daysSick: 0 },
+  food: { avgKcal7d: null, avgProtein7d: null, loggedDays7d: null },
+  workout: { sessionsLast7d: 0, daysSinceLastSession: null },
+  steps: { avg7d: null },
+  weight: { weeklyKgChange: null, trendUsable: false, stalledWeeks: 0 },
+  reentry: contactState(ago(0)),
+  evidence: { foodSufficient: false, weightSufficient: false },
+  ...over,
+});
+
 const CLIENTS: Client[] = [
   {
     name: "STALLED — the ratchet", why: "3 weeks flat, logging well, eating close to target",
-    baseCalories: 2000, baseProtein: 150, baseSteps: 8000, weightKg: 80,
-    stalledWeeks: 3, loggedDays7d: 7, avgKcal7d: 1980, weeklyKgChange: 0,
-    lastActiveAt: ago(0), recentMessages: ["did 8000 steps", "chicken and pap for lunch"],
+    recentMessages: ["did 8000 steps", "chicken and pap for lunch"],
+    state: base({
+      food: { avgKcal7d: 1980, avgProtein7d: 145, loggedDays7d: 7 },
+      weight: { weeklyKgChange: 0, trendUsable: true, stalledWeeks: 3 },
+      evidence: { foodSufficient: true, weightSufficient: true },
+    }),
   },
   {
     name: "SICK — durable vs keyword", why: "not sick; mentioned someone else being sick",
-    baseCalories: 2000, baseProtein: 150, baseSteps: 8000, weightKg: 80,
-    sick: false, lastActiveAt: ago(0), durableSickUntil: null,
     recentMessages: ["my mom is sick so I skipped gym", "had eggs"],
+    state: base(),
   },
   {
     name: "RE-ENTRY — 10 days quiet", why: "returning client; must not be punished",
-    baseCalories: 2000, baseProtein: 150, baseSteps: 8000, weightKg: 80,
-    lastActiveAt: ago(10), recentMessages: ["I'm back, sorry I've been busy"],
+    recentMessages: ["I'm back, sorry I've been busy"],
+    state: base({ reentry: contactState(ago(10)) }),
   },
   {
     name: "ON TRACK — nothing to say", why: "hitting targets; least intervention applies",
-    baseCalories: 2000, baseProtein: 150, baseSteps: 8000, weightKg: 80,
-    weeklyKgChange: -0.4, avgSteps7d: 8200, loggedDays7d: 6, avgKcal7d: 1960,
-    lastActiveAt: ago(0), recentMessages: ["morning", "logged breakfast"],
+    recentMessages: ["morning", "logged breakfast"],
+    state: base({
+      food: { avgKcal7d: 1960, avgProtein7d: 148, loggedDays7d: 6 },
+      steps: { avg7d: 8200 },
+      weight: { weeklyKgChange: -0.4, trendUsable: true, stalledWeeks: 0 },
+      evidence: { foodSufficient: true, weightSufficient: true },
+    }),
   },
 ];
 
@@ -83,74 +101,90 @@ const CLIENTS: Client[] = [
 const adaptiveSrc = readFileSync("server/scheduler/jobs/adaptive.ts", "utf-8");
 const morningSrc = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
 const sharedSrc = readFileSync("server/scheduler/shared.ts", "utf-8");
-const countOf = (s: string, re: RegExp) => (s.match(re) || []).length;
+/** Count CODE only. Counting raw source made this instrument report a call site that was a
+ *  sentence in a comment about having removed that call — the trace lying about the fix. */
+const strip = (s: string) => s.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+const countOf = (s: string, re: RegExp) => (strip(s).match(re) || []).length;
 
 console.log("═".repeat(W));
 console.log("PROACTIVE MORNING TRACE — Issue #49 step 1");
 console.log("═".repeat(W));
 
 rule("THE TWO JOBS, AS WIRED");
-console.log(`  05:45 SAST  runAdaptiveTargets   sends: ${countOf(adaptiveSrc, /sendWhatsApp\(/g)}   slot-claimed: ${countOf(adaptiveSrc, /claimDailySlot\(/g)}`);
-console.log(`  06:00 SAST  runMorningCheckin    sends: ${countOf(morningSrc, /sendWhatsApp(Buttons)?\(/g)}   slot-claimed: ${countOf(morningSrc, /claimDailySlot\(/g)}`);
-console.log(`  → every adaptive send bypasses the shared daily budget; every morning send claims it.`);
+const adaptiveSends = countOf(adaptiveSrc, /sendWhatsApp\(/g);
+console.log(`  05:45 SAST  runAdaptiveTargets   sends: ${adaptiveSends}   claim sites: ${countOf(adaptiveSrc, /claimDailySlot\(/g)}`);
+console.log(`  06:00 SAST  runMorningCheckin    sends: ${countOf(morningSrc, /sendWhatsApp(Buttons)?\(/g)}   claim sites: ${countOf(morningSrc, /claimDailySlot\(/g)}`);
+console.log(`  Counts do NOT map 1:1 and are not the claim: morning's sends at :136 :148 :150 share`);
+console.log(`  the one claim at :126, and :106 sits under :96. Read them — every morning send is`);
+console.log(`  inside a claimed block. Adaptive's ${adaptiveSends} are inside none.`);
+
+rule("SHARED STATE — do both jobs read one structure?");
+console.log(`  loadProactiveState defined in scheduler/shared.ts: ${/export async function loadProactiveState/.test(sharedSrc)}`);
+console.log(`  adaptive.ts loads it: ${countOf(adaptiveSrc, /loadProactiveState\(/g)} site(s)`
+  + `   morning.ts loads it: ${countOf(morningSrc, /loadProactiveState\(/g)} site(s)`);
 
 rule("HEALTH TRUTH — which source decides TODAY");
-const keywordScan = /recentMessages\.some\(row => row\.messageIn && SICK_PATTERNS\.test/.test(sharedSrc);
-console.log(`  wasSickOrInjured() reads chat_history, last 20 inbound, regex: ${keywordScan}`);
-console.log(`  morning.ts calls it at: ${[...morningSrc.matchAll(/wasSickOrInjured\(/g)].length} site(s)`);
-console.log(`  durable sick_until / sick_since exist in profileNotes and are NOT what morning asks.`);
+const SICK_RE = /\b(sick|ill|flu|injur|hurt|pain|rest day|skip)\b/i;
+console.log(`  wasSickOrInjured() (chat_history, last 20 inbound, regex) still exists: `
+  + `${/export async function wasSickOrInjured/.test(sharedSrc)}`);
+console.log(`  but morning.ts calls it at: ${countOf(morningSrc, /wasSickOrInjured\(/g)} site(s) — health is durable now`);
+console.log(`  still keyword-driven elsewhere: evening.ts, retention.ts (audit/analytics, next sweep)`);
+console.log(`  NOTE the scan could only ever be wrong in morning: sick-flow writes paused_until`);
+console.log(`  beside sick_until, and morning returns on isPaused() long before the sick branch —`);
+console.log(`  so a genuinely ill client never reached it. Only false positives did.`);
 
 // ── Per-client ────────────────────────────────────────────────────────────────────────────────
 for (const c of CLIENTS) {
   rule(c.name);
   console.log(`  ${c.why}`);
 
-  // ADAPTIVE — really computed. Compounds across N mornings exactly as the job does.
-  let base = c.baseCalories;
+  const s = c.state;
+  console.log(`  state: baseline ${s.baseline.calories} · current ${s.current.calories}`
+    + ` · logged ${s.food.loggedDays7d === null ? "unread" : `${s.food.loggedDays7d}d`} · avg ${s.food.avgKcal7d ?? "unread"} kcal`
+    + ` · stalled ${s.weight.stalledWeeks}w · trend ${s.weight.trendUsable ? `${s.weight.weeklyKgChange}kg/wk` : "unusable"}`
+    + ` · sick ${s.health.sick}`);
+
+  // ADAPTIVE — really computed, through the job's own projection. Compounds across N mornings.
+  let baseline = s.baseline.calories;
   // What the client currently HOLDS. The job's guard compares its output against this, not against
   // the baseline it reasoned from — post-0005 those are different things, and modelling only the
   // base would report a send every morning when the real job goes quiet after the first.
-  let storedOverlay = c.baseCalories, storedProtein = c.baseProtein, storedSteps = c.baseSteps;
+  let overlay = { ...s.current };
   let adaptiveWouldSend = false;
   let sendCount = 0;
   for (let day = 1; day <= DAYS; day++) {
-    const out = adaptTargets({
-      baseCalories: base, baseProtein: c.baseProtein, baseSteps: c.baseSteps,
-      goalType: "fat_loss", weightKg: c.weightKg,
-      sick: !!c.sick, daysSick: c.daysSick, recovering: c.recovering,
-      weeklyKgChange: c.weeklyKgChange, stalledWeeks: c.stalledWeeks, avgSteps7d: c.avgSteps7d,
-      avgKcal7d: c.avgKcal7d, loggedDays7d: c.loggedDays7d,
-    });
+    const today: State = { ...s, baseline: { ...s.baseline, calories: baseline }, current: { ...overlay } };
+    const out = adaptTargets(adaptiveInputFrom(today));
     // The job's own send gates, mirrored from adaptive.ts.
     const noteOnly = out.reason === "stalled_unlogged" || out.reason === "stalled_over_target";
-    const targetsMoved = out.calorieTarget !== storedOverlay || out.proteinTarget !== storedProtein || out.stepsTarget !== storedSteps;
+    const targetsMoved = out.calorieTarget !== overlay.calories || out.proteinTarget !== overlay.protein || out.stepsTarget !== overlay.steps;
     const sends = out.changed && (noteOnly || targetsMoved) && !!out.note;
     if (sends) { adaptiveWouldSend = true; sendCount++; }
-    console.log(`  adaptive day ${day}: base ${base} → ${out.calorieTarget}  reason=${out.reason}  `
+    console.log(`  adaptive day ${day}: baseline ${baseline} → ${out.calorieTarget}  reason=${out.reason}  `
       + `sends=${sends ? "YES (unbudgeted)" : "no"}`);
     if (sends && day === 1) console.log(`     "${out.note.slice(0, 88)}…"`);
     // After 0005 the job reads users.baselineCalorieTarget — which it never writes — so the base
     // does NOT become tomorrow's input. Set TRACE_RECURSIVE=1 to reproduce the pre-0005 ratchet.
-    if (process.env.TRACE_RECURSIVE === "1") base = out.calorieTarget;
-    storedOverlay = out.calorieTarget; storedProtein = out.proteinTarget; storedSteps = out.stepsTarget;
+    if (process.env.TRACE_RECURSIVE === "1") baseline = out.calorieTarget;
+    overlay = { calories: out.calorieTarget, protein: out.proteinTarget, steps: out.stepsTarget };
   }
   if (DAYS > 1) console.log(`  → ${sendCount} proactive send(s) from adaptive across ${DAYS} mornings`);
-  if (DAYS > 1 && base !== c.baseCalories) {
-    const pct = Math.round(((c.baseCalories - base) / c.baseCalories) * 1000) / 10;
-    console.log(`  → ${DAYS} mornings from one baseline: ${c.baseCalories} → ${base} (${pct}% down), because`);
-    console.log(`    adaptive.ts:96 feeds the STORED target back in as baseCalories. No baseline column exists.`);
+  if (DAYS > 1 && baseline !== s.baseline.calories) {
+    const pct = Math.round(((s.baseline.calories - baseline) / s.baseline.calories) * 1000) / 10;
+    console.log(`  → ${DAYS} mornings from one baseline: ${s.baseline.calories} → ${baseline} (${pct}% down), because`);
+    console.log(`    the job fed its own STORED target back in as baseCalories. No baseline column existed.`);
   }
 
-  // MORNING — structural, not simulated. Stated as such.
-  const re = contactState(c.lastActiveAt);
-  const keywordSaysSick = c.recentMessages.some(t => /\b(sick|ill|flu|injur|hurt|pain)\b/i.test(t));
-  console.log(`  morning: re-entry ${re.isReturning ? `RETURNING (${re.daysSinceLastContact}d)` : "current"}`
-    + `  ·  durable sick=${c.durableSickUntil ? "yes" : "no"}  ·  keyword scan says sick=${keywordSaysSick}`);
-  if (keywordSaysSick && !c.durableSickUntil) {
-    console.log(`     ⚠ SPLIT TRUTH: morning would read SICK from "${c.recentMessages.find(t => /sick/i.test(t))}"`);
-    console.log(`       while the durable state says otherwise. Today's health decided by a regex.`);
+  // MORNING — reads the SAME structure now for the two facts that decide whether it speaks.
+  // Everything else it composes is still its own; that is the next step, not this one.
+  const keywordSaysSick = c.recentMessages.some(t => SICK_RE.test(t));
+  console.log(`  morning: re-entry ${s.reentry.isReturning ? `RETURNING (${s.reentry.daysSinceLastContact}d)` : "current"}`
+    + `  ·  durable sick yesterday=${s.health.sickYesterday}  ·  old keyword scan said sick=${keywordSaysSick}`);
+  if (keywordSaysSick && !s.health.sickYesterday) {
+    console.log(`     ✓ SPLIT TRUTH CLOSED: the scan matched "${c.recentMessages.find(t => SICK_RE.test(t))}"`);
+    console.log(`       and morning now ignores it — health comes from the durable token both jobs read.`);
   }
-  console.log(`  morning would claim the daily slot and send: yes (all 6 of its sends are gated)`);
+  console.log(`  morning would claim the daily slot and send: yes (every one of its sends is gated)`);
 
   // THE COLLISION.
   if (adaptiveWouldSend) {

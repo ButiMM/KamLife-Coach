@@ -1982,19 +1982,101 @@ test("adaptive baseline: four mornings from one baseline do not walk the target 
     "once the target passes under their unchanged intake, they are told they never tested it");
 });
 
-test("adaptive baseline: the job reads baseline and never writes it", () => {
+test("adaptive baseline: the job reads baseline and never writes it", async () => {
+  // The subject MOVED (2026-08-18, Issue #49 step 2): the job no longer assembles the engine's
+  // input, loadProactiveState + adaptiveInputFrom do. Repointed at the new owners and made
+  // behavioural where it used to be a grep — the check below now fails if the projection prefers
+  // the wrong number, not merely if a line was reworded.
+  const { adaptiveInputFrom } = await import("../server/adaptive-targets");
+
+  // A client mid-adaptation: baseline 2000 (profile), current 1860 (what the job wrote yesterday).
+  // The engine must reason from 2000. Reasoning from 1860 IS the ratchet.
+  const projected = adaptiveInputFrom({
+    goalType: "fat_loss", weightKg: 80,
+    baseline: { calories: 2000, protein: 150, steps: 8000 },
+    health: { sick: false, recovering: false, daysSick: 0 },
+    food: { avgKcal7d: 1980, loggedDays7d: 7 },
+    steps: { avg7d: 8200 },
+    weight: { weeklyKgChange: 0, stalledWeeks: 3 },
+  });
+  assert.equal(projected.baseCalories, 2000, "the engine reasons from the PROFILE baseline");
+  assert.equal(projected.baseProtein, 150);
+  assert.equal(projected.baseSteps, 8000);
+
+  // COULD NOT READ must arrive as undefined ("cannot tell", holds the target) and never as 0,
+  // which the engine would act on as "logged nothing".
+  const unread = adaptiveInputFrom({
+    goalType: "fat_loss", weightKg: 80,
+    baseline: { calories: 2000, protein: 150, steps: 8000 },
+    health: { sick: false, recovering: false, daysSick: 0 },
+    food: { avgKcal7d: null, loggedDays7d: null },
+    steps: { avg7d: null },
+    weight: { weeklyKgChange: null, stalledWeeks: 0 },
+  });
+  assert.equal(unread.loggedDays7d, undefined, "an unread ledger is unknown, never zero");
+  assert.equal(unread.avgKcal7d, undefined);
+  assert.equal(unread.weeklyKgChange, undefined);
+
   const job = readFileSync("server/scheduler/jobs/adaptive.ts", "utf-8");
-  assert.ok(/baseCalories: Number\(c\.baselineCalorieTarget \?\? c\.calorieTarget\)/.test(job),
-    "the engine must reason from the profile baseline, not the column this job writes");
+  assert.ok(/adaptiveInputFrom\(/.test(job), "the job uses the one projection, it does not rebuild it");
   assert.ok(!/baselineCalorieTarget:/.test(job), "this job must never WRITE a baseline");
   // The unchanged-guard compares against what the client HOLDS, not the baseline reasoned from —
   // those diverge now, and comparing the wrong one sends the same message every morning.
-  assert.ok(/out\.calorieTarget === Number\(c\.calorieTarget\)/.test(job),
+  assert.ok(/out\.calorieTarget === s\.current\.calories/.test(job),
     "silence is decided against the stored overlay");
+  const shared = readFileSync("server/scheduler/shared.ts", "utf-8");
+  assert.ok(/calories: Number\(client\.baselineCalorieTarget \?\? client\.calorieTarget\)/.test(shared),
+    "the snapshot reads the baseline column, falling back only for the window before 0005 runs");
   const schema = readFileSync("shared/schema.ts", "utf-8");
   for (const col of ["baseline_calorie_target", "baseline_protein_target", "baseline_steps_target"]) {
     assert.ok(schema.includes(col), `${col} must exist`);
   }
+});
+
+// ── CANONICAL PROACTIVE STATE: two jobs, one picture of the client ──────────────────────────
+// Issue #49 step 2. Reactive turns got authoritative state, a decision owner and outbound gates.
+// Proactive got none of it: adaptive assembled its own view at 05:45 and morning assembled a
+// different one at 06:00, so the same client could be sick for one job and well for the other in
+// the same quarter hour. Both now read loadProactiveState.
+
+test("proactive state: both scheduled jobs read the one snapshot", () => {
+  const adaptive = readFileSync("server/scheduler/jobs/adaptive.ts", "utf-8");
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  assert.ok(/loadProactiveState\(/.test(adaptive), "adaptive reads the shared snapshot");
+  assert.ok(/loadProactiveState\(/.test(morning), "morning reads the shared snapshot");
+  // Neither may go back to reading the weight/step/intake ledgers for itself — that divergence
+  // is the whole defect. adaptive.ts used to run its own weightLogs and stepLogs queries.
+  assert.ok(!/from\(weightLogs\)/.test(adaptive), "adaptive must not re-read the weight ledger");
+  assert.ok(!/from\(stepLogs\)/.test(adaptive), "adaptive must not re-read the step ledger");
+});
+
+test("proactive state: morning's health is durable, never a keyword scan", () => {
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  const code = morning.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // The scan could only ever be WRONG here: sick-flow writes paused_until beside sick_until, and
+  // morning returns on isPaused() long before the sick branch — so a genuinely ill client never
+  // reached it. Only SICK_PATTERNS' non-illness matches did: "rest day", "skip gym", someone
+  // else being ill.
+  assert.ok(!/wasSickOrInjured\(/.test(code), "morning decides health from durable state only");
+  assert.ok(/state\.health\.sickYesterday/.test(code), "…and asks the snapshot for it");
+  const sick = readFileSync("server/handlers/sick-flow.ts", "utf-8");
+  assert.ok(/sick_until:\$\{sickUntil\}/.test(sick) && /paused_until:\$\{sickUntil\}/.test(sick),
+    "the durable token and the pause are written together — that is why the scan was unreachable");
+});
+
+test("proactive state: sickYesterday needs the illness to have covered yesterday", async () => {
+  // An illness that started THIS MORNING did not cause yesterday's missing logs, and a window
+  // that closed before yesterday did not either. Both would send "hope you're feeling better" to
+  // someone who simply did not log.
+  const { sickCoveredYesterday } = await import("../server/adaptive-targets");
+  const day = (o: number) => new Date(Date.now() + o * 86_400_000).toISOString().slice(0, 10);
+  const covered = (since: string | undefined, until: string | undefined) =>
+    sickCoveredYesterday(since, until, day(0));
+  assert.equal(covered(day(-3), day(1)), true, "ill across yesterday");
+  assert.equal(covered(day(0), day(2)), false, "started today — yesterday was not illness");
+  assert.equal(covered(day(-9), day(-4)), false, "window closed before yesterday");
+  assert.equal(covered(undefined, day(-1)), true, "no start recorded, window reaches yesterday");
+  assert.equal(covered(undefined, undefined), false, "no illness on record is not illness");
 });
 
 // ── FOOD EVENTS: one message, several rows, one undo ────────────────────────────────────────

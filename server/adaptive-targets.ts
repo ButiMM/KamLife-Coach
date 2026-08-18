@@ -60,6 +60,48 @@ export interface AdaptiveInput {
 }
 
 /**
+ * THE ONE PROJECTION from canonical proactive state into this engine's input (2026-08-18,
+ * Issue #49 step 2). The scheduled job used to assemble these fields itself, which is how it came
+ * to read `users.calorie_target` — the column it writes — as the baseline and ratchet a client
+ * down 12% in three days.
+ *
+ * Structurally typed on purpose: `ProactiveState` lives in scheduler/shared.ts, which pulls in the
+ * database and Twilio. Naming the shape instead of importing it keeps this module pure, so the
+ * offline instrument can call the exact function the job calls rather than a copy of it that can
+ * silently drift.
+ *
+ * null means COULD NOT READ and becomes `undefined` — the engine's "cannot tell", which holds the
+ * target. It must never arrive as 0, which the engine would read as "logged nothing" and act on.
+ */
+export interface ProactiveStateForAdapt {
+  goalType: string;
+  weightKg: number;
+  baseline: { calories: number; protein: number; steps: number };
+  health: { sick: boolean; recovering: boolean; daysSick: number };
+  food: { avgKcal7d: number | null; loggedDays7d: number | null };
+  steps: { avg7d: number | null };
+  weight: { weeklyKgChange: number | null; stalledWeeks: number };
+}
+
+export function adaptiveInputFrom(s: ProactiveStateForAdapt): AdaptiveInput {
+  return {
+    baseCalories: s.baseline.calories,
+    baseProtein: s.baseline.protein,
+    baseSteps: s.baseline.steps,
+    goalType: s.goalType,
+    weightKg: s.weightKg,
+    sick: s.health.sick,
+    daysSick: s.health.daysSick,
+    recovering: s.health.recovering,
+    weeklyKgChange: s.weight.weeklyKgChange ?? undefined,
+    stalledWeeks: s.weight.stalledWeeks,
+    avgSteps7d: s.steps.avg7d ?? undefined,
+    avgKcal7d: s.food.avgKcal7d ?? undefined,
+    loggedDays7d: s.food.loggedDays7d ?? undefined,
+  };
+}
+
+/**
  * Below four logged days in seven, an intake average is not evidence. Same floor the hunger
  * evidence uses deliberately — one client should not be "well logged" for one subsystem and
  * "thinly logged" for another on the same day.
@@ -260,6 +302,26 @@ export const ILLNESS_TAIL_MS = 7 * 86_400_000;
 export const MIN_TREND_SPAN_DAYS = 5;
 /** Older than this and it describes a body that has moved on. */
 export const MAX_TREND_AGE_DAYS = 10;
+
+/**
+ * Did the recorded illness cover YESTERDAY — the day a morning brief reports on?
+ *
+ * Both edges matter and each one is a message that would otherwise reach the wrong client. An
+ * illness that started this morning did not cause yesterday's missing logs, and a window that
+ * closed before yesterday did not either; in both cases "hope you're feeling better" goes to
+ * someone who simply did not log. ISO date strings, compared as strings — same shape as the
+ * sick_since / sick_until tokens in profileNotes.
+ *
+ * Lives here, beside weightTrendUsable, because both answer "what does this illness window let us
+ * say" and the scheduler module that reads the tokens cannot be imported without a database.
+ */
+export function sickCoveredYesterday(
+  sickSince: string | undefined, sickUntil: string | undefined, today: string,
+): boolean {
+  if (!sickUntil) return false;
+  const yesterday = new Date(Date.parse(today) - 86_400_000).toISOString().slice(0, 10);
+  return sickUntil >= yesterday && (!sickSince || sickSince <= yesterday);
+}
 
 export function weightTrendUsable(w: TrendWindow): TrendVerdict {
   if (w.count < 2) return { usable: false, why: "too_few" };

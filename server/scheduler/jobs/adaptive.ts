@@ -12,21 +12,8 @@
  * moves every day is noise.
  */
 
-import { db, users, weightLogs, stepLogs, eq, and, gte, desc, sql, getActiveClients, sendWhatsApp, saveState, todaySAST, hasRunToday } from "../shared";
-import { adaptTargets, weightTrendUsable, type AdaptiveInput } from "../../adaptive-targets";
-import { gatherReportData } from "../../report-card";
-
-/** Weeks of no meaningful weight movement (<0.3kg swing) from a series, newest first. */
-function stalledWeeksFrom(weights: number[]): number {
-  if (weights.length < 3) return 0;
-  const newest = weights[0];
-  let weeks = 0;
-  for (const w of weights.slice(1)) {
-    if (Math.abs(newest - w) < 0.3) weeks++;
-    else break;
-  }
-  return weeks;
-}
+import { db, users, eq, getActiveClients, sendWhatsApp, saveState, todaySAST, hasRunToday, loadProactiveState } from "../shared";
+import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
 
 export async function runAdaptiveTargets(): Promise<void> {
   const today = todaySAST();
@@ -36,87 +23,23 @@ export async function runAdaptiveTargets(): Promise<void> {
   let moved = 0;
   for (const c of clients) {
     try {
-      const notes = String(c.profileNotes || "");
-      const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
-      const sickSince = notes.match(/sick_since:(\d{4}-\d{2}-\d{2})/)?.[1];
-      const sick = !!sickUntil && new Date(sickUntil) >= new Date(today);
-      const daysSick = sickSince ? Math.floor((Date.now() - new Date(sickSince).getTime()) / 86_400_000) : 0;
-      // Recovering = the sick window closed within the last 3 days.
-      const recovering = !sick && !!sickUntil
-        && (Date.now() - new Date(sickUntil).getTime()) / 86_400_000 <= 3;
-
-      // 28 days of weigh-ins, newest first — enough for a trend and a stall read.
-      const wRows = await db.select({ w: weightLogs.weight, at: weightLogs.loggedAt })
-        .from(weightLogs)
-        .where(and(eq(weightLogs.userId, c.id), gte(weightLogs.loggedAt, new Date(Date.now() - 28 * 86_400_000))))
-        .orderBy(desc(weightLogs.loggedAt)).limit(12);
-      const weights = wRows.map(r => parseFloat(String(r.w))).filter(n => Number.isFinite(n));
-      let weeklyKgChange: number | undefined;
-      if (weights.length >= 2) {
-        // A TREND NEEDS A RECENT NUMBER (2026-07-30 live). Two weigh-ins anywhere inside 28 days
-        // used to be enough, so a client who last stood on a scale three weeks ago — before and
-        // during an illness — was told "you're gaining quicker than muscle can build" and had his
-        // food cut 6%. The same morning message asked him to weigh himself because "it's been a
-        // while": it knew the data was stale and used it anyway. Illness moves weight through
-        // fluid and inactivity, which is exactly the reading this then acts on.
-        // AND THE ILLNESS MUST NOT BE INSIDE IT (2026-07-30, founder: "I've been sick for three
-        // weeks. It didn't even take that into consideration"). Illness EXPIRES from the state
-        // (sick_until, plus 3 days of "recovering") while the weight it produced keeps driving
-        // decisions for 28 — so the job read sick-weight as diet-weight and cut a recovering
-        // man's calories.
-        //
-        // The rule now lives in adaptive-targets.ts and is shared with the provenance gate, so a
-        // reply can never assert a trend this job has refused to compute. It used to be inline
-        // here, reachable by nobody else, which is exactly how the two disagreed.
-        const newestAt = new Date(wRows[0].at as Date).getTime();
-        const oldestAt = new Date(wRows[wRows.length - 1].at as Date).getTime();
-        const spanDays = Math.max(1, (newestAt - oldestAt) / 86_400_000);
-        const verdict = weightTrendUsable({
-          count: weights.length, newestAt, oldestAt, now: Date.now(),
-          sickSince: sickSince ? new Date(sickSince).getTime() : undefined,
-          sickUntil: sickUntil ? new Date(sickUntil).getTime() : undefined,
-        });
-        if (verdict.usable) {
-          weeklyKgChange = ((weights[0] - weights[weights.length - 1]) / spanDays) * 7;
-        }
-      }
-
-      const [stepAgg] = await db.select({ avg: sql<number>`COALESCE(AVG(${stepLogs.steps}),0)::int` })
-        .from(stepLogs)
-        .where(and(eq(stepLogs.userId, c.id), gte(stepLogs.loggedAt, new Date(Date.now() - 7 * 86_400_000))));
-      const avgSteps7d = Number(stepAgg?.avg || 0) || undefined;
-
-      // Fail-open: if the aggregate read fails, the engine sees `undefined` and treats intake as
-      // UNKNOWN, which holds the target rather than adapting on a number we could not read.
-      let intake: { avgKcal: number; distinctDaysLogged: number } | undefined;
-      try { intake = await gatherReportData(c, "week"); }
-      catch (e) { console.warn(`[ADAPTIVE] intake read failed for ${c.id?.slice(-6)}:`, (e as Error)?.message); }
-
-      // THE BASELINE, NOT YESTERDAY'S OUTPUT (2026-08-18, migration 0005). This read
-      // users.calorieTarget — the column this job then WROTE — so each morning adapted the
-      // previous morning's adaptation. Measured on an 80kg stalled client: 2000 → 1860 → 1760 in
-      // three days, 12% down, while the client ate 1,980 every single day and changed nothing.
-      // Then, because the target had passed under their unchanged intake, the job began telling
-      // them the target "hasn't been tested yet". The system moved the goalposts and blamed them.
+      // ONE SNAPSHOT, SHARED (2026-08-18, Issue #49 step 2). Everything this job used to read for
+      // itself — durable sickness, the 28-day weigh-in series and its usability verdict, 7-day
+      // steps, the weekly intake aggregate, the stall count — now comes from loadProactiveState,
+      // which the morning job reads too. It assembled its own before, and morning assembled a
+      // different one, which is how the same client could be sick for one job and well for the
+      // other in the same quarter hour.
       //
-      // Baseline is the profile number; onboarding and programme rebuilds own it. This job reads
-      // it and never writes it. The COALESCE is for the window before 0005 has run on a database.
-      const input: AdaptiveInput = {
-        baseCalories: Number(c.baselineCalorieTarget ?? c.calorieTarget) || 0,
-        baseProtein: Number(c.baselineProteinTarget ?? c.proteinTarget) || 0,
-        baseSteps: Number(c.baselineStepsTarget ?? c.stepsTarget) || 0,
-        goalType: c.goalType || "fat_loss",
-        weightKg: parseFloat(String(c.currentWeight || "")) || 75,
-        sick, daysSick, recovering, weeklyKgChange,
-        stalledWeeks: stalledWeeksFrom(weights),
-        avgSteps7d,
-        // WHAT THEY ACTUALLY ATE. Reusing the one weekly aggregate rather than adding a second
-        // SUM over mealLogs — a divergent divisor here would let the engine adapt on a number
-        // that disagrees with the one the report card shows the client.
-        avgKcal7d: intake?.avgKcal,
-        loggedDays7d: intake?.distinctDaysLogged,
-      };
+      // The baseline rule that migration 0005 established lives inside that snapshot now: the
+      // engine reasons from `baseline` (the profile number, which nothing here writes) and the
+      // client's visible target is the `current` overlay this job persists.
+      const s = await loadProactiveState(c);
+      const input = adaptiveInputFrom(s);
       if (!(input.baseCalories > 0 && input.baseProtein > 0)) continue; // no baseline yet
+
+      // Still read directly: the two profileNotes tokens this job WRITES and owns — its own
+      // once-a-week stall notice and the adapted_until marker. Bookkeeping, not client state.
+      const notes = String(c.profileNotes || "");
 
       const out = adaptTargets(input);
       if (!out.changed) continue;
@@ -142,8 +65,8 @@ export async function runAdaptiveTargets(): Promise<void> {
       // Nothing actually different from what they already HOLD — compared against the stored
       // overlay, not the baseline the engine reasoned from. Those diverge now: an unchanged
       // decision recomputed from baseline can still equal what the client already has.
-      if (out.calorieTarget === Number(c.calorieTarget) && out.proteinTarget === Number(c.proteinTarget)
-          && out.stepsTarget === Number(c.stepsTarget)) continue;
+      if (out.calorieTarget === s.current.calories && out.proteinTarget === s.current.protein
+          && out.stepsTarget === s.current.steps) continue;
 
       // MARK IT DELIBERATE, or the morning sanity audit reverts it before lunch (2026-07-30
       // live: this job wrote 2530, morning.ts saw 332 kcal off the profile figure, called it

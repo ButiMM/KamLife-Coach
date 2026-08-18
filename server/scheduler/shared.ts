@@ -775,3 +775,164 @@ export async function wasSickOrInjured(userId: string, since: Date): Promise<boo
 export async function isSickOrInjuredToday(userId: string): Promise<boolean> {
   return wasSickOrInjured(userId, dayStart(0));
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// CANONICAL PROACTIVE STATE — the one structure every scheduled job reads.
+//
+// (2026-08-18, Issue #49 step 2.) The proactive path had no shared state. adaptive.ts assembled
+// its own; morning.ts assembled its own, 474 lines of it, and asked a REGEX over the client's last
+// 20 messages whether they were sick today — so "my mom is sick so I skipped gym" flipped the
+// client's own health state while durable sick_until said otherwise.
+//
+// Reactive turns got authoritative state, a decision owner, evidence contracts and outbound gates
+// this month. Proactive got none of it, and no suite noticed because none of them run a scheduled
+// job. This is the first half of fixing that: one snapshot, authoritative ledgers only.
+//
+// RULES THIS ENCODES, each one a defect that reached a client:
+//   · health is DURABLE state, never a keyword scan — that scan is audit/analytics from here
+//   · workouts come from workoutLogs, never chat_history saying "done"
+//   · baseline targets are read-only; the overlay is what the client currently sees (0005)
+//   · a weight trend is only present when weightTrendUsable says so — the same gate the reply
+//     path uses, so a proactive message can never assert a trend a reply would refuse
+//   · evidence sufficiency is stated, so a job can tell "no" from "I don't know"
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+export interface ProactiveState {
+  userId: string;
+  phone: string;
+  name: string;
+  goalType: string;
+  weightKg: number;
+  /** Profile numbers. The adaptive engine reasons FROM these and never writes them (0005). */
+  baseline: { calories: number; protein: number; steps: number };
+  /** What the client currently sees — the overlay the adaptive job persists. */
+  current: { calories: number; protein: number; steps: number };
+  /** DURABLE health only. No regex over recent messages ever reaches a proactive decision. */
+  health: { sick: boolean; sickYesterday: boolean; recovering: boolean; daysSick: number; sickUntil?: string; sickSince?: string };
+  /** null everywhere means COULD NOT READ, never zero. A client who logged nothing and a ledger
+   *  that failed to answer are different facts and the engine acts differently on each. */
+  food: { avgKcal7d: number | null; avgProtein7d: number | null; loggedDays7d: number | null };
+  workout: { sessionsLast7d: number; daysSinceLastSession: number | null };
+  steps: { avg7d: number | null };
+  weight: { weeklyKgChange: number | null; trendUsable: boolean; stalledWeeks: number };
+  reentry: { daysSinceLastContact: number | null; isReturning: boolean };
+  /** Can a decision be made, or only a question asked? Missing ≠ negative. */
+  evidence: { foodSufficient: boolean; weightSufficient: boolean };
+}
+
+/** Below this many logged days in seven, intake averages are not evidence. Same floor as the
+ *  hunger and deficit contracts — one client must not be "well logged" for one subsystem and
+ *  "thinly logged" for another on the same morning. */
+export const PROACTIVE_LOG_FLOOR = 4;
+
+/** Weeks of no meaningful weight movement (<0.3kg swing) from a series, newest first.
+ *  Moved here from adaptive.ts so the stall a message TALKS about and the stall the engine ACTS
+ *  on are one number. */
+function stalledWeeksFrom(weights: number[]): number {
+  if (weights.length < 3) return 0;
+  const newest = weights[0];
+  let weeks = 0;
+  for (const w of weights.slice(1)) {
+    if (Math.abs(newest - w) < 0.3) weeks++;
+    else break;
+  }
+  return weeks;
+}
+
+/**
+ * Assemble one client's proactive state from authoritative ledgers. Read-only, and fail-soft per
+ * field: a ledger that cannot be read yields null and lowers the matching evidence flag rather
+ * than throwing — a scheduled job must not die for one client's missing row.
+ */
+export async function loadProactiveState(client: any): Promise<ProactiveState> {
+  const { weightTrendUsable, sickCoveredYesterday } = await import("../adaptive-targets");
+  const { contactState } = await import("../understanding/reentry");
+  const { gatherReportData } = await import("../report-card");
+  const since = (d: number) => new Date(Date.now() - d * 86_400_000);
+
+  const notes = String(client.profileNotes || "");
+  const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
+  const sickSince = notes.match(/sick_since:(\d{4}-\d{2}-\d{2})/)?.[1];
+  const today = todaySAST();
+  const sick = !!sickUntil && new Date(sickUntil) >= new Date(today);
+  const recovering = !sick && !!sickUntil
+    && (Date.now() - new Date(sickUntil).getTime()) / 86_400_000 <= 3;
+  // "Were they ill YESTERDAY" — what the morning brief actually asks, since it reports on the day
+  // that just ended. The rule itself lives in adaptive-targets.ts so it has one owner.
+  const sickYesterday = sickCoveredYesterday(sickSince, sickUntil, today);
+
+  const [intake, wRows, stepAgg, workoutRows] = await Promise.all([
+    gatherReportData(client, "week").catch(() => null),
+    db.select({ w: weightLogs.weight, at: weightLogs.loggedAt }).from(weightLogs)
+      .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, since(28))))
+      .orderBy(desc(weightLogs.loggedAt)).limit(12).catch(() => [] as any[]),
+    db.select({ avg: sql<number>`COALESCE(AVG(${stepLogs.steps}),0)::int` }).from(stepLogs)
+      .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, since(7)))).catch(() => [] as any[]),
+    // THE WORKOUT LEDGER, not chat_history saying "done". A client typing the word is not a
+    // completed session, and a session logged by any other path still counts.
+    db.select({ at: workoutLogs.loggedAt }).from(workoutLogs)
+      .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, since(7))))
+      .orderBy(desc(workoutLogs.loggedAt)).catch(() => [] as any[]),
+  ]);
+
+  const weights = (wRows as any[]).map(r => parseFloat(String(r.w))).filter(n => Number.isFinite(n));
+  let weeklyKgChange: number | null = null;
+  let trendUsable = false;
+  if (weights.length >= 2) {
+    const newestAt = new Date((wRows as any[])[0].at as Date).getTime();
+    const oldestAt = new Date((wRows as any[])[wRows.length - 1].at as Date).getTime();
+    const verdict = weightTrendUsable({
+      count: weights.length, newestAt, oldestAt, now: Date.now(),
+      sickSince: sickSince ? new Date(sickSince).getTime() : undefined,
+      sickUntil: sickUntil ? new Date(sickUntil).getTime() : undefined,
+    });
+    trendUsable = verdict.usable;
+    if (verdict.usable) {
+      const spanDays = Math.max(1, (newestAt - oldestAt) / 86_400_000);
+      weeklyKgChange = ((weights[0] - weights[weights.length - 1]) / spanDays) * 7;
+    }
+  }
+
+  const lastSession = (workoutRows as any[])[0]?.at;
+  const loggedDays7d = intake ? intake.distinctDaysLogged : null;
+
+  return {
+    userId: client.id,
+    phone: client.phoneNumber,
+    name: String(client.name || "").split(" ")[0] || "there",
+    goalType: client.goalType || "fat_loss",
+    weightKg: parseFloat(String(client.currentWeight || "")) || 75,
+    baseline: {
+      calories: Number(client.baselineCalorieTarget ?? client.calorieTarget) || 0,
+      protein: Number(client.baselineProteinTarget ?? client.proteinTarget) || 0,
+      steps: Number(client.baselineStepsTarget ?? client.stepsTarget) || 0,
+    },
+    current: {
+      calories: Number(client.calorieTarget) || 0,
+      protein: Number(client.proteinTarget) || 0,
+      steps: Number(client.stepsTarget) || 0,
+    },
+    health: {
+      sick, sickYesterday, recovering,
+      daysSick: sickSince ? Math.floor((Date.now() - new Date(sickSince).getTime()) / 86_400_000) : 0,
+      sickUntil, sickSince,
+    },
+    food: {
+      avgKcal7d: intake ? intake.avgKcal : null,
+      avgProtein7d: intake ? intake.avgProtein : null,
+      loggedDays7d,
+    },
+    workout: {
+      sessionsLast7d: (workoutRows as any[]).length,
+      daysSinceLastSession: lastSession
+        ? Math.floor((Date.now() - new Date(lastSession).getTime()) / 86_400_000) : null,
+    },
+    steps: { avg7d: Number((stepAgg as any[])[0]?.avg || 0) || null },
+    weight: { weeklyKgChange, trendUsable, stalledWeeks: stalledWeeksFrom(weights) },
+    reentry: contactState(client.lastActiveAt),
+    evidence: {
+      foodSufficient: loggedDays7d !== null && loggedDays7d >= PROACTIVE_LOG_FLOOR,
+      weightSufficient: trendUsable,
+    },
+  };
+}
