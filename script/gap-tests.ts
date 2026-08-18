@@ -2372,6 +2372,106 @@ test("sweep: the >7-day client's decision is used, not computed and discarded", 
     "a drifting client must not get silence because a ledger read timed out");
 });
 
+// ── VERDICT ENFORCEMENT: the decision stops being advisory ──────────────────────────────────
+// Issue #49, last item. The verdict was recorded and logged and then ignored by the message.
+// Measured on the traced client set before this pass: 2 clients in 6 received a plan change under
+// a verdict that did not support one.
+
+const PRESCRIPTIVE_KINDS = ["protein", "walk", "train", "eat_more", "rest"];
+
+test("verdict: a prescription may only ride CHANGE or REFER", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  // Every shape from the traced set, plus the two the measurement added.
+  const shapes = [
+    ["on track", decisionState()],
+    ["stalled, well logged", decisionState({ food: { loggedDays7d: 7, daysSinceAnyLog: 0 } })],
+    ["gone 4 days", decisionState({ food: { loggedDays7d: 0, daysSinceAnyLog: 4 } })],
+    ["sparse log, protein looks low", decisionState({
+      food: { loggedDays7d: 2, daysSinceAnyLog: 0 },
+      today: { kcal: 900, protein: 35, steps: 8200, logged: true, hour: 7 },
+      weight: { daysSinceWeighIn: 3, trendUsable: false },
+      evidence: { foodSufficient: false, weightSufficient: false },
+    })],
+    ["never weighed", decisionState({ weight: { daysSinceWeighIn: null, trendUsable: false } })],
+    ["durably sick", decisionState({
+      health: { sick: true },
+      today: { kcal: 400, protein: 20, steps: 300, logged: true, hour: 7 },
+      evidence: { foodSufficient: false, weightSufficient: false },
+    })],
+  ] as const;
+  for (const [label, st] of shapes) {
+    const d = decideProactive(st as any, decisionProfile);
+    if (PRESCRIPTIVE_KINDS.includes(d.action.kind)) {
+      assert.ok(d.state === "CHANGE" || d.state === "REFER",
+        `${label}: ${d.state} carries the plan change "${d.action.todo}"`);
+    }
+    if (d.state === "CONTINUE") assert.equal(d.line, "", `${label}: CONTINUE must add nothing`);
+  }
+});
+
+test("verdict: illness is its own evidence", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  // A sick client has no food or weight evidence by definition, and used to come back
+  // CONTINUE / insufficient / "Rest today" — a prescription under a verdict saying carry on. The
+  // message was right; the evidence model was wrong. Illness is observed durable state.
+  const d = decideProactive(decisionState({
+    health: { sick: true },
+    today: { kcal: 400, protein: 20, steps: 300, logged: true, hour: 7 },
+    evidence: { foodSufficient: false, weightSufficient: false },
+  }), decisionProfile);
+  assert.equal(d.action.kind, "rest");
+  assert.equal(d.evidence, "sufficient", "rest is the best-founded instruction the coach gives");
+  assert.equal(d.state, "CHANGE");
+});
+
+test("verdict: the downgrade asks for what is missing, never for what they just did", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  // The first version of the downgrade sent "Tell me what you ate today" to a client who HAD
+  // logged today — their seven-day record was thin, not their morning. That is handing the work
+  // back for something they just did. Caught by re-running the trace, not by review.
+  const loggedToday = decideProactive(decisionState({
+    food: { loggedDays7d: 2, daysSinceAnyLog: 0 },
+    today: { kcal: 900, protein: 35, steps: 8200, logged: true, hour: 7 },
+    weight: { daysSinceWeighIn: 3, trendUsable: false },
+    evidence: { foodSufficient: false, weightSufficient: false },
+  }), decisionProfile);
+  assert.notEqual(loggedToday.action.kind, "log", "they already logged today");
+
+  // Not logged today and thin: asking for the log is exactly right.
+  const notLogged = decideProactive(decisionState({
+    food: { loggedDays7d: 2, daysSinceAnyLog: 1 },
+    today: { kcal: 0, protein: 0, steps: 8200, logged: false, hour: 12 },
+    weight: { daysSinceWeighIn: 1, trendUsable: false },
+    evidence: { foodSufficient: false, weightSufficient: false },
+  }), decisionProfile);
+  assert.equal(notLogged.action.kind, "log");
+
+  // Logged today, weighed yesterday, still thin history: nothing honest left to ask. Silence is a
+  // legitimate outcome — least intervention, not a gap to fill.
+  const nothingToAsk = decideProactive(decisionState({
+    food: { loggedDays7d: 3, daysSinceAnyLog: 0 },
+    today: { kcal: 900, protein: 35, steps: 8200, logged: true, hour: 7 },
+    weight: { daysSinceWeighIn: 1, trendUsable: false },
+    evidence: { foodSufficient: false, weightSufficient: false },
+  }), decisionProfile);
+  assert.equal(nothingToAsk.action.kind, "hold");
+  assert.equal(nothingToAsk.line, "");
+});
+
+test("verdict: the reactive path is held to the same standard", () => {
+  const cmd = readFileSync("server/handlers/one-action-command.ts", "utf-8");
+  const code = cmd.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // It called chooseAction directly, so the same client with the same ledgers got a prescription
+  // reactively that the proactive path would have refused — two standards depending on who spoke
+  // first.
+  assert.ok(/decideProactive\(state, profile/.test(code), "the reply goes through the verdict");
+  assert.ok(!/chooseAction\(/.test(code), "…and not around it");
+  // And it must compute evidence rather than hardcoding it false, or every reactive prescription
+  // downgrades to a measurement request.
+  assert.ok(/foodSufficient: distinctLoggedDays >= 4/.test(code),
+    "the reactive path computes evidence sufficiency, same floor as the proactive one");
+});
+
 // ── FOOD EVENTS: one message, several rows, one undo ────────────────────────────────────────
 // Migration 0004. Product acceptance cases, not a new harness.
 

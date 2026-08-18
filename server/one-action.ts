@@ -28,7 +28,7 @@
  */
 
 import type { GoalKey } from "./goal-profiles";
-import { selectDecisionState } from "./understanding/state";
+import { selectDecisionState, type DecisionEvidence } from "./understanding/state";
 
 export interface DayState {
   firstName?: string;
@@ -122,6 +122,40 @@ function why(base: string, dream?: string | null): string {
   return d ? `${base} That's what gets you to *${d}*.` : base;
 }
 
+// ── THE TWO MEASUREMENT ASKS ─────────────────────────────────────────────────────────────────
+// Named because they are reached from two places now: the ordered decision below, and the verdict
+// enforcement further down, which downgrades a prescription it cannot justify into the measurement
+// that WOULD justify it. One copy of the wording, so the two can never drift.
+
+function askToLog(dream?: string | null): OneAction {
+  return {
+    kind: "log",
+    todo: "Tell me what you ate today — one line is enough.",
+    why: why("I can't coach a day I can't see.", dream),
+  };
+}
+
+function holdAction(dream?: string | null): OneAction {
+  return {
+    kind: "hold",
+    todo: "Nothing new today. Do exactly what you did yesterday.",
+    why: why("This is the part that works. Boring and repeated beats clever and occasional.", dream),
+  };
+}
+
+function askToWeigh(dream?: string | null, neverWeighed = false): OneAction {
+  return {
+    kind: "weigh",
+    todo: "Stand on a scale this morning, before you eat.",
+    why: why(
+      neverWeighed
+        ? "It's one number and it's the only way either of us sees this working."
+        : "It's been a while — one number today and I can show you what's actually happening.",
+      dream,
+    ),
+  };
+}
+
 // ── THE DECISION ─────────────────────────────────────────────────────────────────────────────
 
 const LATE = 17; // from 5pm, "log today" and "get a walk in" start to make sense
@@ -175,16 +209,7 @@ export function chooseAction(s: DayState): OneAction {
   //    outcomes data — a client with no weigh-in is one we can never prove we helped.
   const neverWeighed = s.daysSinceWeighIn === null;
   if ((neverWeighed && s.weeksOnProgramme >= 1) || (s.daysSinceWeighIn !== null && s.daysSinceWeighIn >= 10)) {
-    return {
-      kind: "weigh",
-      todo: "Stand on a scale this morning, before you eat.",
-      why: why(
-        neverWeighed
-          ? "It's one number and it's the only way either of us sees this working."
-          : "It's been a while — one number today and I can show you what's actually happening.",
-        s.dreamGoal,
-      ),
-    };
+    return askToWeigh(s.dreamGoal, neverWeighed);
   }
 
   // 4. UNDER-FUELLED ON A BULK. Nothing else works if they aren't eating.
@@ -216,13 +241,7 @@ export function chooseAction(s: DayState): OneAction {
   }
 
   // 6. NOTHING LOGGED AND THE DAY IS NEARLY OVER.
-  if (!s.loggedToday && s.hour >= LATE) {
-    return {
-      kind: "log",
-      todo: "Tell me what you ate today — one line is enough.",
-      why: why("I can't coach a day I can't see.", s.dreamGoal),
-    };
-  }
+  if (!s.loggedToday && s.hour >= LATE) return askToLog(s.dreamGoal);
 
   // 7. STEPS. The easiest win there is, and the one most people can actually do on a bad day.
   if (s.stepsTarget > 0 && s.stepsToday < s.stepsTarget * 0.5 && s.hour >= 12) {
@@ -247,11 +266,7 @@ export function chooseAction(s: DayState): OneAction {
 
   // 9. EVERYTHING IS ON TRACK. Say so and ask for nothing — a coach who always has a note to add
   //    teaches you that you can never actually be doing well.
-  return {
-    kind: "hold",
-    todo: "Nothing new today. Do exactly what you did yesterday.",
-    why: why("This is the part that works. Boring and repeated beats clever and occasional.", s.dreamGoal),
-  };
+  return holdAction(s.dreamGoal);
 }
 
 // ── THE PROACTIVE DECISION OWNER ─────────────────────────────────────────────────────────────
@@ -355,25 +370,78 @@ export interface ProactiveDecision {
  * else alters what the client does today, and may only be said on sufficient evidence.
  */
 const INVESTIGATIVE: ReadonlySet<ActionKind> = new Set<ActionKind>(["come_back", "log", "weigh"]);
+const PRESCRIPTIVE: ReadonlySet<ActionKind> = new Set<ActionKind>(["protein", "walk", "train", "eat_more", "rest"]);
+
+/**
+ * ILLNESS IS ITS OWN EVIDENCE (2026-08-18, verdict enforcement pass).
+ *
+ * Measured on the traced client set: a durably sick client came back CONTINUE / insufficient /
+ * "Rest today" — a prescription under a verdict that says carry on. The message was RIGHT; the
+ * evidence model was wrong. Sufficiency was computed only from the food and weight ledgers, and a
+ * sick client has neither, so illness — which is directly observed durable state, not an inference
+ * from thin data — read as "we cannot tell". Rest is the best-founded instruction the coach ever
+ * gives. It is sufficient by construction.
+ *
+ * Silence is the same kind of fact: `come_back` follows from an observed absence, not a guess.
+ */
+function evidenceFor(s: ProactiveStateForDecision, kind: ActionKind): DecisionEvidence {
+  if (kind === "rest") return "sufficient";
+  if (INVESTIGATIVE.has(kind)) return "insufficient";
+  return s.evidence.foodSufficient || s.evidence.weightSufficient ? "sufficient" : "insufficient";
+}
 
 export function decideProactive(
   s: ProactiveStateForDecision, p: ProactiveProfile, opts?: { atKeyboard?: boolean; hour?: number },
 ): ProactiveDecision {
-  const action = chooseAction(dayStateFrom(s, p, opts));
+  let action = chooseAction(dayStateFrom(s, p, opts));
+  let evidence = evidenceFor(s, action.kind);
+
+  // ── THE VERDICT IS BINDING ─────────────────────────────────────────────────────────────────
+  // Until now it was advisory: recorded, logged, and ignored by the message. Measured on the
+  // traced client set, one client in six got a plan change under a verdict that did not support
+  // one — the sparse-log client, whose protein "looks" low across two logged days in seven. Two
+  // days is not evidence; acting on it is how the product invented the over-target accusation in
+  // the first place, one layer up.
+  //
+  // A prescription under insufficient evidence is DOWNGRADED to the measurement that would make
+  // the evidence sufficient — which is exactly what INVESTIGATE means: the minimum useful
+  // question, and no intervention dressed up as settled. The client still hears something useful,
+  // and it is something we can stand behind.
+  //
+  // ASK FOR WHAT IS ACTUALLY MISSING. The first version of this downgrade sent "Tell me what you
+  // ate today" to a client who HAD logged today — their seven-day record was thin, not their
+  // morning — which is handing the work back for something they had just done, the exact failure
+  // Law 22 exists to prevent. Caught by re-running the trace on the sparse-log client, whose
+  // fixture logs today.
+  if (PRESCRIPTIVE.has(action.kind) && evidence === "insufficient") {
+    const canAskForFood = !s.evidence.foodSufficient && !s.today.logged;
+    // Weighing again the day after they weighed tells us nothing a trend needs. Never weighed, or
+    // three days stale, is a real gap worth one ask.
+    const staleWeight = s.weight.daysSinceWeighIn === null || s.weight.daysSinceWeighIn >= 3;
+    const canAskForWeight = !s.evidence.weightSufficient && staleWeight;
+    action = canAskForFood ? askToLog(p.dreamGoal)
+      : canAskForWeight ? askToWeigh(p.dreamGoal, s.weight.daysSinceWeighIn === null)
+      // Nothing useful to ask and nothing we can justify prescribing. Silence is the honest
+      // outcome, and it is a legitimate one — least intervention, not a gap to fill.
+      : holdAction(p.dreamGoal);
+    evidence = evidenceFor(s, action.kind);
+  }
+
   const investigating = INVESTIGATIVE.has(action.kind);
   const state = selectDecisionState({
     meaningfulProblem: action.kind !== "hold",
-    // Asking for a measurement is what you do BECAUSE evidence is insufficient. Claiming
-    // sufficiency there would turn every "please weigh yourself" into a CHANGE.
-    evidence: investigating ? "insufficient"
-      : (s.evidence.foodSufficient || s.evidence.weightSufficient) ? "sufficient" : "insufficient",
+    evidence,
     hasMinimumUsefulQuestion: investigating,
   });
+
+  // The invariant this pass exists to establish. Cheap, and it fails loudly in a scheduled job's
+  // log rather than quietly in a client's WhatsApp.
+  if (PRESCRIPTIVE.has(action.kind) && state !== "CHANGE" && state !== "REFER") {
+    console.error(`[DECISION] INVARIANT BROKEN: ${state} carrying prescription "${action.kind}"`);
+  }
+
   return {
-    state,
-    evidence: investigating ? "insufficient"
-      : (s.evidence.foodSufficient || s.evidence.weightSufficient) ? "sufficient" : "insufficient",
-    action,
+    state, evidence, action,
     line: action.kind === "hold" ? "" : `*${action.todo}*\n\n_${action.why}_`,
   };
 }

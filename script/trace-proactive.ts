@@ -108,6 +108,27 @@ const CLIENTS: Client[] = [
     state: base({ reentry: contactState(ago(10)), food: { avgKcal7d: null, avgProtein7d: null, loggedDays7d: 0, daysSinceAnyLog: 10 } }),
   },
   {
+    name: "SPARSE STALL — a real problem, no evidence", why: "protein looks low, but only 2 logged days in 7",
+    recentMessages: ["had some pap"],
+    state: base({
+      food: { avgKcal7d: 1200, avgProtein7d: 40, loggedDays7d: 2, daysSinceAnyLog: 0 },
+      weight: { weeklyKgChange: null, trendUsable: false, stalledWeeks: 0, daysSinceWeighIn: 3 },
+      workout: { sessionsLast7d: 3, daysSinceLastSession: 1 },
+      today: { kcal: 900, protein: 35, steps: 8200, logged: true, hour: 7 },
+      evidence: { foodSufficient: false, weightSufficient: false },
+    }),
+  },
+  {
+    name: "SICK — durable illness", why: "sick_until is live; rest is the right action",
+    recentMessages: ["I have flu"],
+    state: base({
+      health: { sick: true, sickYesterday: true, recovering: false, daysSick: 2 },
+      food: { avgKcal7d: null, avgProtein7d: null, loggedDays7d: 1, daysSinceAnyLog: 1 },
+      today: { kcal: 400, protein: 20, steps: 300, logged: true, hour: 7 },
+      evidence: { foodSufficient: false, weightSufficient: false },
+    }),
+  },
+  {
     name: "ON TRACK — nothing to say", why: "hitting targets; least intervention applies",
     recentMessages: ["morning", "logged breakfast"],
     state: base({
@@ -183,6 +204,8 @@ const SICK_RE = /\b(sick|ill|flu|injur|hurt|pain|rest day|skip)\b/i;
 console.log(`  wasSickOrInjured() still exists in shared.ts: `
   + `${/export async function wasSickOrInjured/.test(sharedSrc)} (deleted — no callers left)`);
 
+let leakCount = 0;
+
 // ── Per-client ────────────────────────────────────────────────────────────────────────────────
 for (const c of CLIENTS) {
   rule(c.name);
@@ -240,6 +263,12 @@ for (const c of CLIENTS) {
   }, { hour: 7 });
   console.log(`  decision: ${decision.state} · evidence ${decision.evidence} · action ${decision.action.kind}`);
   console.log(`     ${decision.line ? `"${decision.action.todo}"` : "nothing to add — the breakfast question stands"}`);
+  // VERDICT ENFORCEMENT MEASUREMENT. Keyed on action.kind, which is exact — no prose parsing.
+  // A prescription changes what the client does today; only CHANGE (or REFER) may carry one.
+  const PRESCRIPTIVE = new Set(["protein", "walk", "train", "eat_more", "rest"]);
+  const leaks = PRESCRIPTIVE.has(decision.action.kind) && decision.state !== "CHANGE" && decision.state !== "REFER";
+  if (leaks) { leakCount++; console.log(`  ✗ LEAK: ${decision.state} carries a plan change — "${decision.action.todo}"`); }
+  else console.log(`  ✓ verdict and instruction agree`);
   // MORNING'S THREE EARLY EXITS, mirrored from the job. Modelling these matters: without them
   // this trace claimed the 10-day client receives a full brief, when the job returns on
   // `daysSilent > 7` and sends them nothing at all.
@@ -304,6 +333,7 @@ function rulePerClientEnd(adaptiveWouldSend: boolean) {
 }
 
 rule();
+console.log(`VERDICT ENFORCEMENT: ${leakCount} client(s) where the verdict and the instruction disagree.`);
 console.log("Instrument only — nothing written, nothing sent, no model called.");
 console.log("Adaptive figures are really computed. Morning is structural, read from source: it");
 console.log("cannot be executed without a database and it sends.");
