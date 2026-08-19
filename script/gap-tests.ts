@@ -79,6 +79,19 @@ test("isMessyLifeTranscript: food + feeling is messy life", () => {
   );
 });
 
+
+test("ungrounded food: Big Mac dropped when client said SA breakfast + mocha", () => {
+  const { findUngroundedFoodItems } = require("../server/utils");
+  const msg = "Today for breakfast I had a South African breakfast from McDonald's and a large mocha";
+  const dropped = findUngroundedFoodItems(msg, [
+    { name: "McDonald's Big Mac" },
+    { name: "McDonald's Big Breakfast (SA)" },
+    { name: "Mocha" },
+  ]);
+  assert.ok(dropped.some((n: string) => /big mac/i.test(n)), "Big Mac must be ungrounded");
+  assert.ok(!dropped.some((n: string) => /^mocha$/i.test(n)), "Mocha must stay grounded");
+});
+
 process.exit(0).
 // That is why the selectModel coverage lives here and not in unit-tests.ts, which has no
 // such exit and hangs forever once gpt.ts is loaded into it.
