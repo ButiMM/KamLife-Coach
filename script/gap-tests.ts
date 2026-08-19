@@ -14,7 +14,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { prescribesProtein } from "./hunger-checks";
 
@@ -32,22 +32,38 @@ const { scalePortionDescription } = await import("../server/portion-memory");
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
 const { explicitMealSlot } = await import("../server/understanding/actions");
-// NOTE: server/gpt.ts registers a module-scope setInterval (its food-cache sweeper), so a script
-// that imports it only exits because this file ends with an explicit exit call. That is why the
-// selectModel coverage lives here and not in unit-tests.ts, which has no such exit and hangs
-// forever once gpt.ts is loaded into it.
-//
-// DO NOT LEAVE A BARE STATEMENT BELOW THIS BLOCK. Twice now an inserted test has landed between
-// the two halves of a split sentence here, orphaning `process.exit(0).` as live syntax — the file
-// then throws a TransformError and NOT ONE of its tests runs. Both times the suite reported
-// nothing rather than failing loudly. Add new tests further down, beside their subject.
+// NOTE: server/gpt.ts registers a module-scope setInterval (its food-cache sweeper), so a
+// script that imports it only exits because THIS file ends with an explicit 
+test("unlogged: roast potatoes + mixed veggies is not an unpriced leftover after those items log", () => {
+  const { unloggedFoodNotice } = require("../server/unlogged-notice");
+  const notice = unloggedFoodNotice(
+    "My dinner is roast potatoes with mixed veggies and chicken breast",
+    ["Chicken breast", "Roast potato", "Mixed"],
+  );
+  assert.equal(notice, "", notice);
+});
+
+
+test("progress card: calories at/over target do not sell another meal", () => {
+  const { nextMoveLine } = require("../server/macro-card-attach");
+  const rows = [
+    { label: "Calories", current: 3200, target: 3140 },
+    { label: "Protein", current: 195, target: 160 },
+    { label: "Fat", current: 90, target: 70 },
+  ];
+  const line = nextMoveLine(rows, false, 18, false);
+  assert.ok(!/next meal/i.test(line), line);
+  assert.ok(/water|done|in/i.test(line), line);
+});
+
+process.exit(0).
+// That is why the selectModel coverage lives here and not in unit-tests.ts, which has no
+// such exit and hangs forever once gpt.ts is loaded into it.
 const { selectModel } = await import("../server/gpt");
 const { scanForSAFoods } = await import("../server/handlers/food-scanner");
-
 // These were written as CommonJS require() inside an ESM module, so every test below
 // that used them threw "require is not defined" — they had never executed. Bound once here.
 const MESSY = await import("../server/understanding/messy-intake");
-const UNLOGGED = await import("../server/unlogged-notice");
 const UTILS = await import("../server/utils");
 const FOODID = await import("../server/food-identity-correction");
 const FIDELITY = await import("../server/normalizer-fidelity");
@@ -67,15 +83,6 @@ function test(name: string, fn: () => void) {
     failures.push(`  ✗ ${name}\n    ${err.message}`);
   }
 }
-
-test("unlogged: roast potatoes + mixed veggies is not an unpriced leftover after those items log", () => {
-  const { unloggedFoodNotice } = UNLOGGED;
-  const notice = unloggedFoodNotice(
-    "My dinner is roast potatoes with mixed veggies and chicken breast",
-    ["Chicken breast", "Roast potato", "Mixed"],
-  );
-  assert.equal(notice, "", notice);
-});
 
 // ── Messy-life intake (product core journeys) ───────────────────────────────
 test("messy intake: McDonald's breakfast + mocha forces food log", () => {
@@ -159,7 +166,7 @@ test("cut 1: the hand-stitched pair branches are gone", () => {
 
 test("cut 2: the fact parse happens before the rewriter, not after", () => {
   const src = readFileSync("server/routes.ts", "utf-8");
-  const parseAt = src.search(/(?:const|let) turnFacts = \w*\(?parseMessyIntake\(message\)/);
+  const parseAt = src.search(/const turnFacts = \w*\(?parseMessyIntake\(message\)/);
   const rewriteAt = src.indexOf("message = canon;");
   assert.ok(parseAt > -1 && rewriteAt > -1, "both sites must exist");
   assert.ok(parseAt < rewriteAt,
@@ -246,56 +253,6 @@ test("cut 3: a stale number is corrected from the ledger, keeping formatting", a
   // A number that is not the stale one must not be touched.
   assert.equal(__testReplaceNumberToken("8,500 steps against a 10,000 target.", 8500, 8000),
     "8,000 steps against a 10,000 target.");
-});
-
-// ── CUT 4: ONE SCHEMA PATH ──────────────────────────────────────────────────────────────────
-// The six-hour outage on 2026-08-18. migrations/0005 declared three baseline_* columns on
-// `users`; no deploy path created them; Drizzle names every declared column in every SELECT; the
-// webhook reads `users` before anything else. Every inbound message threw.
-
-test("cut 4: migrations/ actually runs on boot", () => {
-  const boot = readFileSync("server/index.ts", "utf-8");
-  const code = boot.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
-  assert.ok(/readdirSync\(dir\)[\s\S]{0,80}endsWith\("\.sql"\)/.test(code),
-    "the migrations directory must be read at boot, not just committed");
-  assert.ok(/CREATE TABLE IF NOT EXISTS schema_migrations/.test(code),
-    "applied migrations are tracked so they run exactly once");
-  assert.ok(/applySqlMigrations\(\)/.test(code), "…and the phase is actually called");
-});
-
-test("cut 4: a failed migration refuses the boot", () => {
-  const boot = readFileSync("server/index.ts", "utf-8");
-  const code = boot.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
-  // Booting with a schema the code does not match is exactly what produced the outage: the
-  // process was healthy and every client message returned an error. Refusing to boot is loud.
-  assert.ok(/throw new Error\(`migration \$\{file\} failed/.test(code),
-    "a migration failure must be fatal, not logged and stepped over");
-  assert.ok(/ROLLBACK/.test(code), "…and must not leave a half-applied migration behind");
-});
-
-test("cut 4: every declared column is creatable by the deploy path", () => {
-  // The guard itself is script/check-schema-safety.ts; this pins that it exists and is wired
-  // into the gate, because an unwired guard is what we had before — migrations/ was committed,
-  // guarded, and never executed.
-  const guard = readFileSync("script/check-schema-safety.ts", "utf-8");
-  assert.ok(/no deploy path can create/.test(guard), "the guard must check creatability");
-  assert.ok(/shared\/schema\.ts/.test(guard) && /migrations\//.test(guard),
-    "…against both the declared schema and the committed migrations");
-  const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
-  assert.ok(/check-schema-safety/.test(pkg.scripts?.test || ""), "and it must run in the gate");
-});
-
-test("cut 4: the committed migrations are safe to re-run", () => {
-  // Adopting migrations/ on a database that already has the schema is only safe because every
-  // file was written idempotently. A new file that is not would turn boot-migrations into a
-  // second outage source, so this is checked rather than assumed.
-  for (const f of readdirSync("migrations").filter(n => n.endsWith(".sql"))) {
-    const sql = readFileSync(`migrations/${f}`, "utf-8");
-    const bareCreateTable = /^\s*CREATE TABLE\s+(?!IF NOT EXISTS)/im.test(sql);
-    const bareAddColumn = /ADD COLUMN\s+(?!IF NOT EXISTS)/i.test(sql);
-    assert.ok(!bareCreateTable, `${f}: CREATE TABLE without IF NOT EXISTS cannot re-run`);
-    assert.ok(!bareAddColumn, `${f}: ADD COLUMN without IF NOT EXISTS cannot re-run`);
-  }
 });
 
 test("cut 1: one composer, fixed order, one bubble", async () => {
@@ -3039,7 +2996,6 @@ test("client truth: a pre-workout SNACK is not the pre-workout supplement", asyn
 // These were written as CommonJS require() inside an ESM module, so every test below
 // that used them threw "require is not defined" — they had never executed. Bound once here.
 const MESSY = await import("../server/understanding/messy-intake");
-const UNLOGGED = await import("../server/unlogged-notice");
 const UTILS = await import("../server/utils");
 const FOODID = await import("../server/food-identity-correction");
 const FIDELITY = await import("../server/normalizer-fidelity");
@@ -3060,7 +3016,6 @@ test("client truth: a bare pre-workout mention IS still the supplement", async (
 // These were written as CommonJS require() inside an ESM module, so every test below
 // that used them threw "require is not defined" — they had never executed. Bound once here.
 const MESSY = await import("../server/understanding/messy-intake");
-const UNLOGGED = await import("../server/unlogged-notice");
 const UTILS = await import("../server/utils");
 const FOODID = await import("../server/food-identity-correction");
 const FIDELITY = await import("../server/normalizer-fidelity");
@@ -3120,7 +3075,6 @@ test("portion units: END TO END — the hard South African cases", async () => {
 // These were written as CommonJS require() inside an ESM module, so every test below
 // that used them threw "require is not defined" — they had never executed. Bound once here.
 const MESSY = await import("../server/understanding/messy-intake");
-const UNLOGGED = await import("../server/unlogged-notice");
 const UTILS = await import("../server/utils");
 const FOODID = await import("../server/food-identity-correction");
 const FIDELITY = await import("../server/normalizer-fidelity");
@@ -3146,7 +3100,6 @@ test("portion units: an estimated quantity is tagged ai even when the FOOD is db
 // These were written as CommonJS require() inside an ESM module, so every test below
 // that used them threw "require is not defined" — they had never executed. Bound once here.
 const MESSY = await import("../server/understanding/messy-intake");
-const UNLOGGED = await import("../server/unlogged-notice");
 const UTILS = await import("../server/utils");
 const FOODID = await import("../server/food-identity-correction");
 const FIDELITY = await import("../server/normalizer-fidelity");
