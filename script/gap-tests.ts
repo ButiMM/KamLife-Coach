@@ -219,6 +219,25 @@ test("REBUILD GATE journey 3: that wasn't a big mac is a drop, not a new meal", 
   assert.equal(parseDropLoggedItem("that wasn't a big mac"), "big mac");
 });
 
+
+test("fidelity: STEPS canonical cannot drop pap and chicken", () => {
+  const { normalizerFidelity } = require("../server/normalizer-fidelity");
+  const r = normalizerFidelity(
+    "Yesterday I walked eight thousand steps and I had chicken and pap.",
+    "i walked 8000 steps yesterday",
+  );
+  assert.equal(r.ok, false, r.reason);
+});
+
+test("fidelity: FOOD_LOG canonical cannot drop 8000 steps", () => {
+  const { normalizerFidelity } = require("../server/normalizer-fidelity");
+  const r = normalizerFidelity(
+    "Yesterday I had pap and chicken, and I walked 8,000 steps. I'm so exhausted.",
+    "i had pap and chicken yesterday",
+  );
+  assert.equal(r.ok, false, r.reason);
+});
+
 process.exit(0).
 // That is why the selectModel coverage lives here and not in unit-tests.ts, which has no
 // such exit and hangs forever once gpt.ts is loaded into it.
