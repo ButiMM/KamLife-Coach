@@ -1304,13 +1304,16 @@ export async function handleFoodContext(ctx: {
   }
 
   // ---- GPT FOOD FALLBACK (no SA foods detected but clear food intent) ----
-  const voiceFallbackTooLong = m.split(/\s+/).filter(Boolean).length > 50;
+  // Live 2026-08-19: "I had a McDonald's South African breakfast with a mocha" fell through
+  // to freeform coach → "I don't have a meal logged / what did you eat?" + invented macros.
+  // Cause: SA scanner missed branded meal; path must still attempt GPT log (or one clarify),
+  // never hand a clear "I had … breakfast" turn to the chat coach.
   const hasStrongFoodTrigger = /\b(i ate|i had|i've had|ive had|just had|just ate|just finished eating|for breakfast|for lunch|for dinner|for supper|for brunch|for snack|breakfast was|lunch was|dinner was|supper was|brunch was|meal was|meal is|food was|i'm eating|im eating|i am eating|i'll have|gonna have|going to have|pre.?workout meal|post.?workout meal|had a\b|had some\b|had the\b|had my\b|ate a\b|ate some\b|ate the\b|ate my\b|having a\b|having some\b|having my\b)\b/i.test(m);
-  // FAIL OPEN: the SA database will never be comprehensive. A bare food statement with no
-  // trigger phrase and no DB match ("two boerewors rolls and a Coke", "kota and chips") used
-  // to slip past BOTH the database and GPT and get logged as nothing. Now any short,
-  // declarative, non-question/non-emotional message also gets one shot at the GPT food
-  // extractor — which self-filters non-food via is_food, so we only LOG when GPT confirms food.
+  // Branded / takeaway meal with an eating verb — treat as log intent even when DB has no row.
+  const hasNamedMealIntent = hasLogTrigger && /\b(mcdonald'?s?|kfc|spur|nando'?s?|steers|wimpy|burger\s*king|pizza\s*hut|domino'?s?|takeaways?|takeaway|take\s*away|drive\s*thru|mocha|cappuccino|latte|flat white|breakfast|lunch|dinner|supper|brunch)\b/i.test(m);
+  // Word-count ceiling only applies to bare statements without a strong eating trigger.
+  // Voice notes that clearly say "I had X" must always get a log attempt.
+  const voiceFallbackTooLong = m.split(/\s+/).filter(Boolean).length > 50 && !hasStrongFoodTrigger && !hasNamedMealIntent;
   const looksLikeBareFoodStatement = !isFuturePlanning && !isFrustration && !hasSubstantiveQuestion
     // Up to 22 words is safe here: the GPT extractor self-filters non-food (only logs when it
     // confirms is_food), so longer run-on voice-note meals get a shot without false logs.
@@ -1321,9 +1324,14 @@ export async function handleFoodContext(ctx: {
   // with no actual food. The GPT extractor would FABRICATE a specific meal (e.g. "McDonald's Big
   // Breakfast") from it. Don't call it — let the coach ask what they actually ate.
   const bareMealTimeReference = /^(?:i\s+)?(?:just\s+)?(?:had|have|having|ate|eating|did|done|for|my)?\s*(?:my\s+|some\s+|a\s+|the\s+)?(?:big\s+|small\s+|nice\s+|quick\s+|light\s+|heavy\s+|huge\s+|large\s+|good\s+|proper\s+|full\s+|lekker\s+)?(?:breakfast|lunch|dinner|supper|brunch|meal|food|brekkie|brekkies)\b[.!?]*$/i.test(m.trim());
-  const tryGptFood = !isQuestion && !isEmotionalOnly && !hasActualFood && !voiceFallbackTooLong
+  // Eating-verb + meal/brand words: never require SA-DB hit. isQuestion alone must not
+  // block a declarative "I had breakfast at McDonald's" voice note.
+  const mealReportNotQuestion = hasStrongFoodTrigger || hasNamedMealIntent
+    ? !(classifierQuestion || /\?\s*$/.test(m.trim()))
+    : !isQuestion;
+  const tryGptFood = mealReportNotQuestion && !isEmotionalOnly && !hasActualFood && !voiceFallbackTooLong
     && !isFuturePlanning && !bareMealTimeReference && !isMealSuggestionRequest
-    && (hasStrongFoodTrigger || looksLikeBareFoodStatement);
+    && (hasStrongFoodTrigger || hasNamedMealIntent || looksLikeBareFoodStatement);
   if (tryGptFood) {
     const gptFallbackResult = await gptFoodFallback(message, user);
     if (gptFallbackResult) {
@@ -1387,14 +1395,23 @@ export async function handleFoodContext(ctx: {
     // was handed a data-entry format. Same failure as the unpriced-food notice, same owner:
     // when the model cannot read the food AND the person is struggling, the reply belongs to
     // the coach, not to the logger. Falls through to normal chat rather than demanding a format.
-    if (hasStrongFoodTrigger && carriesFeelingClause(message)) {
+    if ((hasStrongFoodTrigger || hasNamedMealIntent) && carriesFeelingClause(message)) {
       console.log(`[GPT-FOOD-FALLBACK] unreadable food inside a feeling clause — leaving the reply to the coach: "${message.slice(0, 60)}"`);
-    } else if (hasStrongFoodTrigger) {
+    } else if (hasStrongFoodTrigger || hasNamedMealIntent) {
       console.warn(`[GPT-FOOD-FALLBACK] null result for: "${message.slice(0, 80)}" — asking for clarification`);
-      const clarifyReply = `I didn't catch what food that was — can you describe it as something like "chicken breast and rice" or "2 slices of bread with peanut butter"? The more specific, the more accurate your log.`;
+      const clarifyReply = `I heard you — I just need the items a bit clearer to log it accurately. E.g. "McDonald's deluxe breakfast and a mocha" or "2 eggs, toast, coffee". One line is enough.`;
       await logChat(user.id, message, clarifyReply, "FOOD_CLARIFY");
       return clarifyReply;
     }
+  }
+
+  // Last resort: clear "I had … meal" must never reach freeform coach (invents macros /
+  // "what did you eat?"). One clarify, no numbers, no steps.
+  if ((hasStrongFoodTrigger || hasNamedMealIntent) && !isFuturePlanning && !isEmotionalOnly) {
+    console.warn(`[FOOD_GATE] strong meal signal fell through — forcing clarify: "${message.slice(0, 80)}"`);
+    const clarifyReply = `Got it — you ate something. Tell me the items in one line (e.g. "McDonald's breakfast and a mocha") and I'll log it.`;
+    await logChat(user.id, message, clarifyReply, "FOOD_CLARIFY");
+    return clarifyReply;
   }
 
   return null;
