@@ -35,9 +35,19 @@ import { firstActionCelebration } from "../activation";
 import { amendRecentMeal, replaceHeldMeal } from "../food-identity-correction";
 import { randomUUID } from "node:crypto";
 import { commitFoodLog } from "../day-ledger";
+import { verifyBrainReply } from "../brain/reply-verifier";
 export { commitFoodLog } from "../day-ledger";
 
 // One owner — this literal was declared twice in this file.
+
+function gateFoodReply(reply: string, message: string, user: any): string {
+  const v = verifyBrainReply(reply, { goalType: user?.goalType, clientMessage: message });
+  if (v.ok) return reply;
+  console.warn("[REPLY_VERIFIER] food path blocked:", v.violation);
+  return reply.replace(/that'?s a lot of fried\/?takeaway[^.]*\./i, "").replace(/Grill it,? don'?t fry it[^.]*\./i, "").trim()
+    || "Got it — logged.";
+}
+
 const TREAT_WORDS = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i;
 
 export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: number | null; protein?: number | null }, user?: any, slotCtx?: SlotContext): string | null {
@@ -1234,7 +1244,7 @@ export async function handleFoodContext(ctx: {
       const assembled = `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakLine}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}`;
       const contractOn = process.env.REPLY_CONTRACT === "on" && !clientAskedForDetail(message);
       const finalBody = contractOn ? enforceReplyContract(assembled) : assembled;
-      return `${finalBody}${droppedNote}${cardOrTotals(macroCard, totalCals, totalProtein, user)}`;
+      return gateFoodReply(`${finalBody}${droppedNote}${cardOrTotals(macroCard, totalCals, totalProtein, user)}`, message, user);
     }
 
     // All segments were planned/future (e.g. a lone "dinner is going to be stir fry fish")
