@@ -194,8 +194,48 @@ function isExplicitStepQuery(text: string): boolean {
     || q.includes("step total");
 }
 
+/**
+ * A TARGET IS NOT AN ATTRIBUTION (2026-08-19).
+ *
+ * This rule exists to stop the coach telling a client they walked a number they never reported.
+ * It read every step figure in a reply as such a claim — including "8,000 steps/day", which is a
+ * PRESCRIPTION about tomorrow, not a statement about yesterday.
+ *
+ * Cost of the confusion, once Cut 3 made the verdict binding: completeOnboarding() prints the
+ * client's targets, so the FIRST MESSAGE A NEW CLIENT EVER RECEIVES — their programme, their
+ * numbers, how the coach works — was replaced with "Let me not guess on that one." Every new
+ * signup. Found by onboarding-e2e, which had been red on main and was sitting fourteenth in an
+ * `&&` chain, so the eight guards behind it stopped running too.
+ *
+ * Deliberately narrow. Only the unambiguous per-day and named-target forms are redacted before
+ * the attribution check; "you did 8,000 steps" and "you hit 8,000 steps today" are untouched and
+ * must still fail. Redaction, not an exemption — a reply that ALSO makes a real attribution still
+ * gets caught on that clause.
+ */
+/** A segment is prescriptive when it frames the number as something to reach. */
+const TARGET_MARKER = /\btargets?\b|\bgoals?\b|\baim\s+for\b|\/\s*day\b|\bper\s+day\b|\ba\s+day\b|\bnon-negotiable\b/i;
+
+/**
+ * …and it stops being prescriptive the moment it also says the CLIENT DID IT. "You did 6,000
+ * steps against a target of 8,000" names a target and is still an attribution, so it stays
+ * subject to the rule. Deliberately generous: a false hit here only restores the strict old
+ * behaviour, which is the safe direction to fail in.
+ */
+const CLIENT_DID_IT = /\b(?:you(?:'ve| have| are|'re)?\s+(?:already\s+)?(?:walked|did|done|hit|got|clocked|logged|managed|racked|at)|walked|clocked|racked\s+up)\b/i;
+
+/**
+ * Blank out prescriptive segments before the attribution check. Split per line AND per sentence,
+ * so one bullet in a target list cannot borrow an attribution verb from another line.
+ */
+function withoutStepTargets(reply: string): string {
+  return (reply || "")
+    .split(/(\n+|(?<=[.!?])\s+)/)
+    .map(seg => (TARGET_MARKER.test(seg) && !CLIENT_DID_IT.test(seg) ? " " : seg))
+    .join("");
+}
+
 function verifyStepAttribution(reply: string, clientMessage: string): VerifierResult {
-  const replySteps = extractStepNumbers(reply);
+  const replySteps = extractStepNumbers(withoutStepTargets(reply));
   if (replySteps.length === 0) return { ok: true };
   if (isExplicitStepQuery(clientMessage)) return { ok: true };
   const reported = extractStepNumbers(clientMessage);

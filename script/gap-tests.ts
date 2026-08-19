@@ -3321,6 +3321,34 @@ test("hunger gauntlet: HUNGER_LLM=1 with no credential exits 2 and says which va
 });
 
 
+// ── A TARGET IS NOT AN ATTRIBUTION ──────────────────────────────────────────────────────────
+// Cut 3 made the verifier binding. This rule then read every step figure in a reply as a claim
+// that the client had walked it — including the targets in completeOnboarding(), so the FIRST
+// MESSAGE A NEW CLIENT EVER RECEIVED was replaced with "Let me not guess on that one."
+// onboarding-e2e caught it and had been red on main, eighth in an && chain, hiding the fourteen suites behind it.
+
+test("verifier: a step TARGET is not a claim that they walked it", () => {
+  const ok = (reply: string, msg = "Full gym (machines)") => VERIF.verifyBrainReply(reply, { clientMessage: msg }).ok;
+  // The two shapes the welcome actually prints. Both were blocking it.
+  assert.ok(ok("• 7,500 steps/day — non-negotiable"), "the targets bullet must reach the client");
+  assert.ok(ok("*Walking today:* 5,250 steps (building up — full target is 7,500). Send a screenshot."),
+    "a ramped target names two numbers and claims neither");
+  assert.ok(ok("Aim for 10,000 steps per day."), "a prescription is not an attribution");
+  assert.ok(ok("Today's goal: 6,000 steps."), "nor is a goal");
+});
+
+test("verifier: it still catches the thing it was built to catch", () => {
+  const blocked = (reply: string) => !VERIF.verifyBrainReply(reply, { clientMessage: "hi" }).ok;
+  assert.ok(blocked("You walked 8,000 steps today — nice."), "a bare attribution still fails");
+  assert.ok(blocked("Nice, 12,000 steps today!"), "…including one with no verb at all");
+  // REDACTION, NOT EXEMPTION. A reply that names a target AND claims a number is still a claim,
+  // and a target sentence elsewhere in the message must not launder it.
+  assert.ok(blocked("You did 6,000 steps against a target of 8,000 steps."),
+    "one segment mentioning a target does not excuse the attribution inside it");
+  assert.ok(blocked("Your target is 8,000 steps/day.\nYou already hit 12,000 steps today."),
+    "and a target line must not launder an attribution on the next line");
+});
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
