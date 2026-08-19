@@ -153,7 +153,7 @@ test("cut 1: the hand-stitched pair branches are gone", () => {
 
 test("cut 2: the fact parse happens before the rewriter, not after", () => {
   const src = readFileSync("server/routes.ts", "utf-8");
-  const parseAt = src.search(/const turnFacts = \w*\(?parseMessyIntake\(message\)/);
+  const parseAt = src.search(/(?:const|let) turnFacts = \w*\(?parseMessyIntake\(message\)/);
   const rewriteAt = src.indexOf("message = canon;");
   assert.ok(parseAt > -1 && rewriteAt > -1, "both sites must exist");
   assert.ok(parseAt < rewriteAt,

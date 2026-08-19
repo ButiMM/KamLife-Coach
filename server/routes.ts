@@ -881,12 +881,14 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     if (engineFront !== null) return tag(engineFront, "🧠 new engine");
   }
 
-  // Stands down on a multi-fact note (Cut 2): a command matcher firing on a log is a false
-  // positive that used to end the turn and delete the rest of the sentence.
-  const earlyResult = multiFact
-    ? null
-    : await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
-  if (earlyResult !== null) return earlyResult;
+  // COMMITS, DOES NOT CLAIM THE TURN (Cut 2/3). On "2 litres of water and took my creatine" the
+  // supplement handler inside it used to end the turn and the water was never logged. Standing
+  // down loses the supplement instead — it must run, and commit.
+  const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
+  if (earlyResult !== null) {
+    if (!multiFact) return earlyResult;
+    commitFact(turn, "other", earlyResult);
+  }
 
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
   if (mediaUrl) {
