@@ -193,6 +193,32 @@ test("mealCard yesterday unit is not protein today", () => {
   assert.ok(!/today/i.test(card.sub || ""), card.sub);
 });
 
+
+test("REBUILD GATE journey 2: yesterday pap + 8000 steps + exhausted — all three, steps survive QUESTION", () => {
+  const { journeyMustKeepFacts, parseMessyIntake } = require("../server/understanding/messy-intake");
+  const msg = "Yesterday, I had pap and chicken, and I walked 8,000 steps. I'm so exhausted.";
+  const g = journeyMustKeepFacts(msg);
+  assert.equal(g.food, true);
+  assert.equal(g.feeling, true);
+  assert.equal(g.isRetro, true);
+  assert.equal(g.stepCount, 8000);
+  assert.equal(g.logStepsEvenIfClassifiedQuestion, true);
+  const r = parseMessyIntake(msg);
+  assert.equal(r.hasFoodReport, true);
+  assert.equal(r.hasStepsReport, true);
+});
+
+test("REBUILD GATE journey 1: McDonald's + mocha is a food log, not a chat", () => {
+  const { journeyMustKeepFacts } = require("../server/understanding/messy-intake");
+  const g = journeyMustKeepFacts("I had a South African breakfast from McDonald's and a large mocha");
+  assert.equal(g.food, true);
+});
+
+test("REBUILD GATE journey 3: that wasn't a big mac is a drop, not a new meal", () => {
+  const { parseDropLoggedItem } = require("../server/food-identity-correction");
+  assert.equal(parseDropLoggedItem("that wasn't a big mac"), "big mac");
+});
+
 process.exit(0).
 // That is why the selectModel coverage lives here and not in unit-tests.ts, which has no
 // such exit and hangs forever once gpt.ts is loaded into it.
