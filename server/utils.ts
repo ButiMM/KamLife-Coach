@@ -1241,6 +1241,18 @@ export function transcriptMustPassWhole(text: string): boolean {
   // meals, multi-beat day stories. Condensing these destroys the facts the log path needs
   // and is how "I had McDonald's breakfast and a mocha" never reached food-context whole.
   if (isMessyLifeTranscript(t)) return true;
+  // A PERSON TELLING YOU HOW THEY ARE IS NEVER SQUEEZED (CTO ruling, 2026-08-19).
+  //
+  // Making `temporal` a qualifier rather than a signal was right for what it fixed, and it had a
+  // consequence I did not weigh: a long come-back ramble with no food and no steps — someone
+  // returning after days away, which is exactly the Pulse client — became condensable. Shortening
+  // that to save tokens is tracker behaviour, not coaching, and the money saved is not worth the
+  // one note where they finally said what was going on.
+  //
+  // So a feeling carries the whole transcript on its own. The margin guard now only reaches a
+  // long note with no food, no steps, no feeling and no stacked question — which is a narrower
+  // path than before, deliberately.
+  if (/\b(tired|exhausted|stressed|stress|feel(?:ing)?|felt|anxious|motivat|struggling|overwhelmed|depressed|hard day|rough day|not coping|drained|down|low|lost|give up|giving up)\b/.test(t)) return true;
   return false;
 }
 

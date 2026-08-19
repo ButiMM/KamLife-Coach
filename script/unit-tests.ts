@@ -1351,9 +1351,17 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   test("a day's food list is never condensed (the July regression)", async () => {
     assert.ok(transcriptMustPassWhole("I had two eggs and pap for breakfast, chicken and rice for lunch, and a banana"));
   });
-  test("a genuine one-topic ramble IS still condensable — the margin guard survives", async () => {
-    assert.ok(!transcriptMustPassWhole(
+  test("a feeling note is never squeezed; a feeling-free ramble still can be", async () => {
+    // CTO ruling, 2026-08-19. This test used to assert the opposite — that a tired/traffic/sleep
+    // note was condensable, because the margin guard came first. It does not any more: a long
+    // come-back ramble with no food and no steps is the Pulse client saying what is actually
+    // going on, and summarising it to save tokens is tracker behaviour. The money is not worth
+    // the one note where they finally told you.
+    assert.ok(transcriptMustPassWhole(
       "Eish coach I am so tired today the traffic was terrible and I did not sleep well at all last night"));
+    // The guard survives, narrowed: no food, no steps, no feeling, no stacked question.
+    assert.ok(!transcriptMustPassWhole(
+      "the taxi was late again and then the queue at the shop went around the corner and my phone died on the way home"));
   });
 }
 
