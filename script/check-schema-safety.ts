@@ -58,10 +58,41 @@ for (const key of ["start", "build", "postinstall", "deploy", "release"]) {
   }
 }
 
+// 4. EVERY DECLARED COLUMN MUST BE CREATABLE BY THE DEPLOY PATH (Cut 4, 2026-08-19).
+//
+// This is the guard that would have prevented the six-hour outage on 2026-08-18. Migration 0005
+// declared baseline_calorie_target on `users`; nothing in the deploy created it; Drizzle names
+// every declared column in every SELECT; the webhook reads `users` before anything else. Every
+// inbound message threw for six hours.
+//
+// The repo had a migrations/ directory that no deploy path executed and a hand-maintained ALTER
+// array inside server/index.ts that nobody thought of as a migration. Two systems, neither
+// authoritative, and the difference between a safe change and an outage was whether the author
+// remembered an undocumented second step.
+//
+// PHASE 3 in server/index.ts now runs migrations/ on boot, so a column is creatable if it appears
+// in the boot SQL or in any committed migration. Anything declared and creatable by neither is a
+// column production will be asked for and will not have.
+const schemaSrc = readFileSync("shared/schema.ts", "utf-8");
+const bootSrc = readFileSync("server/index.ts", "utf-8");
+const migrationSql = migrations.map(f => readFileSync(`migrations/${f}`, "utf-8")).join("\n");
+const creatable = `${bootSrc}\n${migrationSql}`;
+const declared = [...schemaSrc.matchAll(/\b(?:text|integer|boolean|timestamp|numeric|jsonb|serial|uuid|real|date|varchar)\s*\(\s*"([a-z0-9_]+)"/g)]
+  .map(m => m[1]);
+const uncreatable = [...new Set(declared)].filter(col => !creatable.includes(col));
+if (uncreatable.length > 0) {
+  problems.push(
+    `shared/schema.ts declares ${uncreatable.length} column(s) no deploy path can create: ${uncreatable.slice(0, 8).join(", ")}`
+    + `\n     Drizzle names every declared column in every SELECT, so production will be asked for a`
+    + `\n     column it does not have and every read of that table will throw. Add a migrations/*.sql`
+    + `\n     file (it runs on boot) — do NOT hand-copy into the ALTER array in server/index.ts.`,
+  );
+}
+
 if (problems.length > 0) {
   console.error("schema safety: FAILED\n" + problems.map(p => `  ✗ ${p}`).join("\n"));
   console.error("\nWhy this guard exists: a bad `push` corrupts the day-ledger and the only way back\nis the 6-hourly backup — up to half a day of client food logs lost.\n");
   process.exit(1);
 }
 
-console.log(`schema safety: OK (${migrations.length} committed migrations, no push in any deploy path)`);
+console.log(`schema safety: OK (${migrations.length} committed migrations run on boot, ${new Set(declared).size} declared columns all creatable, no push in any deploy path)`);

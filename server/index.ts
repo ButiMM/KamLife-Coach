@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { readdirSync, readFileSync, existsSync } from "fs";
+import { join } from "path";
 import helmet from "helmet";
 import * as Sentry from "@sentry/node";
 import express, { type Request, Response, NextFunction } from "express";
@@ -598,6 +600,66 @@ async function runMigrations(): Promise<void> {
     }
   }
   console.log(`[MIGRATION] Done — ${applied}/${migrations.length} columns ensured`);
+
+  await applySqlMigrations();
+}
+
+/**
+ * ── PHASE 3: the migrations/ directory actually runs (Cut 4) ──────────────────────────────────
+ *
+ * Until now this repo had TWO schema systems and neither was authoritative. `migrations/*.sql`
+ * was version-controlled, had a guard enforcing db:migrate over db:push, and was **never executed
+ * by any deploy path** — railway.json and the Dockerfile both just run `node dist/index.cjs`. The
+ * real schema was the hand-maintained ALTER array above.
+ *
+ * That cost six hours of total outage on 2026-08-18. Migration 0005 declared three baseline_*
+ * columns on `users`; nothing created them; Drizzle names every declared column in every SELECT;
+ * the webhook reads `users` before anything else. Every inbound message threw. The difference
+ * between a safe migration and an outage was whether the author happened to remember an
+ * undocumented second step — hand-copying their columns into the array above.
+ *
+ * Now: every file in migrations/ runs once, in filename order, tracked in schema_migrations.
+ * A FAILURE IS FATAL. Booting with a schema the code does not match is what produced the outage;
+ * refusing to boot is loud, and Railway's restart policy makes it visible immediately.
+ *
+ * Every file in migrations/ is already written to be safe against a database that already has the
+ * schema — 0000 carries an explicit idempotency patch saying so — which is what makes adopting
+ * them on an existing production database safe rather than a second outage.
+ */
+async function applySqlMigrations(): Promise<void> {
+  const dir = join(process.cwd(), "migrations");
+  if (!existsSync(dir)) {
+    console.warn(`[MIGRATION] no migrations/ directory at ${dir} — skipping SQL phase`);
+    return;
+  }
+  await pool.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
+    filename TEXT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
+  const done = new Set(
+    (await pool.query(`SELECT filename FROM schema_migrations`)).rows.map((r: any) => r.filename),
+  );
+  const files = readdirSync(dir).filter(f => f.endsWith(".sql")).sort();
+  let ran = 0;
+  for (const file of files) {
+    if (done.has(file)) continue;
+    const sql = readFileSync(join(dir, file), "utf-8");
+    try {
+      await pool.query("BEGIN");
+      await pool.query(sql);
+      await pool.query(`INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING`, [file]);
+      await pool.query("COMMIT");
+      ran++;
+      console.log(`[MIGRATION] applied ${file}`);
+    } catch (e: any) {
+      await pool.query("ROLLBACK").catch(() => {});
+      // FATAL ON PURPOSE. The alternative is what happened on 2026-08-18: the process boots, the
+      // schema does not match the code, and every client message returns an error instead.
+      console.error(`[MIGRATION] FATAL — ${file} failed: ${e?.message}`);
+      throw new Error(`migration ${file} failed: ${e?.message}`);
+    }
+  }
+  console.log(`[MIGRATION] SQL phase — ${ran} applied, ${files.length - ran} already recorded`);
 }
 
 const app = express();
