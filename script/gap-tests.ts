@@ -138,6 +138,32 @@ test("verifier blocks fried lecture on a meal they just stated", () => {
   assert.equal(r.ok, false);
 });
 
+
+test("same-meal retry: two McDonald breakfast item lists are one meal", () => {
+  const { isSameMealRetry } = require("../server/food-identity-correction");
+  assert.equal(isSameMealRetry(
+    ["McDonald's Big Breakfast (SA)", "Mocha"],
+    ["McDonald's Breakfast", "Mocha (coffee shop)"],
+  ), true);
+  assert.equal(isSameMealRetry(["pap", "chicken"], ["eggs", "toast"]), false);
+});
+
+test("parseDropLoggedItem: that wasn't a big mac", () => {
+  const { parseDropLoggedItem } = require("../server/food-identity-correction");
+  assert.equal(parseDropLoggedItem("that wasn't a big mac"), "big mac");
+  assert.equal(parseDropLoggedItem("I am not hungry"), null);
+});
+
+test("messy intake: yesterday pap and chicken is retro", () => {
+  const { parseMessyIntake } = require("../server/understanding/messy-intake");
+  const r = parseMessyIntake("Yesterday I ate pap and chicken, walked about 8000 steps, I'm exhausted");
+  assert.equal(r.hasFoodReport, true);
+  assert.equal(r.hasStepsReport, true);
+  assert.equal(r.hasFeeling, true);
+  assert.equal(r.stepCount, 8000);
+  assert.equal(r.isRetro, true);
+});
+
 process.exit(0).
 // That is why the selectModel coverage lives here and not in unit-tests.ts, which has no
 // such exit and hangs forever once gpt.ts is loaded into it.
