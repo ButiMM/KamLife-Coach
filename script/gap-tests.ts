@@ -33,7 +33,17 @@ const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handler
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
 const { explicitMealSlot } = await import("../server/understanding/actions");
 // NOTE: server/gpt.ts registers a module-scope setInterval (its food-cache sweeper), so a
-// script that imports it only exits because THIS file ends with an explicit process.exit(0).
+// script that imports it only exits because THIS file ends with an explicit 
+test("unlogged: roast potatoes + mixed veggies is not an unpriced leftover after those items log", () => {
+  const { unloggedFoodNotice } = require("../server/unlogged-notice");
+  const notice = unloggedFoodNotice(
+    "My dinner is roast potatoes with mixed veggies and chicken breast",
+    ["Chicken breast", "Roast potato", "Mixed"],
+  );
+  assert.equal(notice, "", notice);
+});
+
+process.exit(0).
 // That is why the selectModel coverage lives here and not in unit-tests.ts, which has no
 // such exit and hangs forever once gpt.ts is loaded into it.
 const { selectModel } = await import("../server/gpt");
