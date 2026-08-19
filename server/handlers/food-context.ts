@@ -1326,9 +1326,13 @@ export async function handleFoodContext(ctx: {
   const bareMealTimeReference = /^(?:i\s+)?(?:just\s+)?(?:had|have|having|ate|eating|did|done|for|my)?\s*(?:my\s+|some\s+|a\s+|the\s+)?(?:big\s+|small\s+|nice\s+|quick\s+|light\s+|heavy\s+|huge\s+|large\s+|good\s+|proper\s+|full\s+|lekker\s+)?(?:breakfast|lunch|dinner|supper|brunch|meal|food|brekkie|brekkies)\b[.!?]*$/i.test(m.trim());
   // Eating-verb + meal/brand words: never require SA-DB hit. isQuestion alone must not
   // block a declarative "I had breakfast at McDonald's" voice note.
-  const mealReportNotQuestion = hasStrongFoodTrigger || hasNamedMealIntent
-    ? !(classifierQuestion || /\?\s*$/.test(m.trim()))
-    : !isQuestion;
+  // forceLog (messy intake / executor) is a WRITE order — never blocked by the classifier
+  // calling a declarative "I had McDonald's breakfast" a QUESTION (live 2026-08-19 ×4).
+  const mealReportNotQuestion = forceLog
+    ? true
+    : (hasStrongFoodTrigger || hasNamedMealIntent
+      ? !(classifierQuestion || /\?\s*$/.test(m.trim()))
+      : !isQuestion);
   const tryGptFood = mealReportNotQuestion && !isEmotionalOnly && !hasActualFood && !voiceFallbackTooLong
     && !isFuturePlanning && !bareMealTimeReference && !isMealSuggestionRequest
     && (hasStrongFoodTrigger || hasNamedMealIntent || looksLikeBareFoodStatement || forceLog);
