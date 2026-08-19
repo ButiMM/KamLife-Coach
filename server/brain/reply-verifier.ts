@@ -6,6 +6,7 @@
  * reply already known to be wrong.
  */
 
+import { parseMessyIntake } from "../understanding/messy-intake";
 import { currentRuntimeDecision, forceRuntimeReferral, type RuntimeDecisionResult } from "../understanding/state";
 import { detectMedicationContext } from "../medication-context";
 
@@ -248,8 +249,16 @@ export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOv
   // invented precise kcal/protein. Reality before reasoning: never re-ask for a meal
   // already in the client message; never pair "nothing logged" with macro precision.
   const clientMsg = String(facts.clientMessage || "");
-  const clientHasFood = /\b(ate|eaten|had|having|breakfast|lunch|dinner|supper|meal|mcdonald|mcdonalds|mocha|burger|pizza|pap|chicken|eggs?|toast|sandwich|coffee|protein shake|whey)\b/i.test(clientMsg)
-    || /\b(i(?:'| a)?m eating|i(?:'| a)?ve (?:just )?eaten|for breakfast|for lunch|for dinner)\b/i.test(clientMsg);
+  // ONE OWNER FOR "DID THEY REPORT FOOD" (Cut 3). This was its own noun regex, and it matched
+  // the word "meal" in "remove last meal" — so a management command counted as a food report.
+  // Harmless while a rejected reply was sent anyway; the moment the verdict BINDS, it blocked a
+  // legitimate reply and the client got "let me not guess on that one". A planning question
+  // ("what should I order at KFC") misfired the same way.
+  //
+  // parseMessyIntake owns the report-vs-command distinction and answers no to both. Narrower
+  // than the old regex on foods it does not know by name, and stated rather than hidden: this is
+  // a grounding rule, not a safety one, and a false block is worse than a missed nudge.
+  const clientHasFood = parseMessyIntake(clientMsg).hasFoodReport;
   const asksWhatAte = /\b(what did you eat|what have you eaten|i don'?t have a meal logged|no meal logged|nothing logged for you today|i have no meal logged)\b/i.test(r);
   const claimsMealMacros = /\b\d{2,5}\s*kcal\b/i.test(r) && /\b\d{1,3}\s*g(?:rams?)?\s*protein\b/i.test(r);
   if (clientHasFood && asksWhatAte) {

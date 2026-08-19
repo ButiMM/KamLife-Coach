@@ -65,6 +65,14 @@ const FEELING =
 // the workout handler alone; "I trained chest" is a fact that has to coexist with the meal.
 const WORKOUT =
   /\b(trained|training\s+done|worked\s+out|workout\s+done|did\s+(?:my|the)\s+(?:workout|session|gym)|session\s+done|hit\s+(?:the\s+)?gym|went\s+to\s+(?:the\s+)?gym|benched|squatted|deadlifted|leg\s+day|chest\s+day|back\s+day|arm\s+day|push\s+day|pull\s+day)\b/i;
+// PLANNING IS NOT A REPORT. "Going to KFC for lunch, what should I order?" matched FOOD_VERB on
+// "for lunch" and FOOD_NOUN on "kfc", so the parser called an unmade decision a logged meal. That
+// is wrong on its own terms — the ledger must never commit food the client has not eaten — and it
+// also misfired the reply verifier, which blocked the ordering guide for quoting menu macros.
+const PLANNING =
+  /\b(going to|about to|thinking of|planning to|what should i|should i (?:get|order|have|eat)|gonna|i'?ll (?:have|get|order)|later|tonight i'?ll)\b/i;
+const EATEN =
+  /\b(ate|eaten|had|having|just had|just ate|finished)\b/i;
 const WATER =
   /\b(\d+\s*(?:l|litres?|liters?)\b|litres?\s+of\s+water|liters?\s+of\s+water|glasses?\s+of\s+water|drank\s+water|drinking\s+water)\b/i;
 
@@ -200,10 +208,16 @@ export function parseMessyIntake(message: string): MessyIntakeResult {
   }
 
   // McDonald's / breakfast + eating verb = force food path even if scanner DB is empty
+  // A planning message with no past-tense eating verb reports nothing yet.
+  if (PLANNING.test(text) && !EATEN.test(text)) {
+    hasFood = false;
+    foodText = null;
+  }
+
   const branded =
     /\b(mcdonald'?s?|kfc|nando'?s?|spur|steers|wimpy|takeaways?|mocha)\b/i.test(text) ||
     (/\b(breakfast|lunch|dinner|supper)\b/i.test(text) && FOOD_VERB.test(text));
-  const mustForceFoodLog = hasFood || (FOOD_VERB.test(text) && branded);
+  const mustForceFoodLog = hasFood && (branded || FOOD_VERB.test(text));
 
   const hasWorkout = WORKOUT.test(text);
   const hasWater = WATER.test(text);
@@ -229,6 +243,30 @@ export function parseMessyIntake(message: string): MessyIntakeResult {
   };
 }
 
+/**
+ * THE FOOD TABLE KNOWS MORE FOODS THAN FOOD_NOUN DOES.
+ *
+ * FOOD_NOUN above is a short hand-written list — pap, chicken, eggs, the branded takeaways. It
+ * does not know "apple" or "pear", and the moment the ledger started deciding the turn on
+ * `factTypes`, that gap became a dropped meal: "I had an apple and a pear and one litre of water"
+ * parsed as water ONLY, so water was a single-fact note, it ended the turn, and the fruit was
+ * gone. Adding apple and pear to the list would only move the edge.
+ *
+ * This module stays pure — it cannot import the scanner without a cycle (food-scanner →
+ * unlogged-notice → here). So the caller, which already holds the authoritative scanner result,
+ * merges it in. Rebuilt in canonical TURN_FACTS order so composition never depends on the order
+ * a fact was discovered.
+ */
+export function withKnownFood(result: MessyIntakeResult, scannerSawFood: boolean): MessyIntakeResult {
+  if (!scannerSawFood || result.hasFoodReport) return result;
+  const present = new Set<TurnFact>([...result.factTypes, "food"]);
+  return {
+    ...result,
+    hasFoodReport: true,
+    factTypes: TURN_FACTS.filter(f => present.has(f)),
+  };
+}
+
 /** Walk mentioned with no parseable count — do not drop the movement. */
 export function mentionedWalkWithoutCount(message: string): boolean {
   const r = parseMessyIntake(message);
@@ -251,7 +289,11 @@ export function mentionedWalkWithoutCount(message: string): boolean {
 // fact type — which is the property the pair-stitching never had.
 // ════════════════════════════════════════════════════════════════════════════════════════════
 
-export const TURN_FACTS = ["workout", "steps", "water", "food", "feeling"] as const;
+// `other` is what a handler ABOVE the five fact types committed — a supplement taken, a training
+// mode switched. It exists so early-commands can COMMIT instead of standing down: on
+// "had 2 litres of water and took my creatine" the supplement confirmation is a fact the client
+// told us, and a handler that recognised it must not end the turn to say so.
+export const TURN_FACTS = ["workout", "other", "steps", "water", "food", "feeling"] as const;
 export type TurnFact = (typeof TURN_FACTS)[number];
 
 export interface TurnLedger {

@@ -143,7 +143,7 @@ test("cut 1: the hand-stitched pair branches are gone", () => {
 
 test("cut 2: the fact parse happens before the rewriter, not after", () => {
   const src = readFileSync("server/routes.ts", "utf-8");
-  const parseAt = src.indexOf("const turnFacts = parseMessyIntake(message)");
+  const parseAt = src.search(/const turnFacts = \w*\(?parseMessyIntake\(message\)/);
   const rewriteAt = src.indexOf("message = canon;");
   assert.ok(parseAt > -1 && rewriteAt > -1, "both sites must exist");
   assert.ok(parseAt < rewriteAt,
@@ -174,8 +174,62 @@ test("cut 2: nothing above the ledger may answer a multi-fact note", () => {
   // freeform reply answers instead of the facts being committed.
   assert.equal((code.match(/engineLive\(\) && !multiFact/g) || []).length, 2,
     "both engine passes must stand down on a multi-fact note");
-  assert.ok(/const earlyResult = multiFact\s*\n?\s*\? null/.test(code),
-    "a command matcher firing on a log is a false positive that used to end the turn");
+  // early-commands now RUNS and COMMITS rather than standing down: on "had 2 litres of water and
+  // took my creatine" the supplement handler inside it is the only thing that knows what a
+  // supplement is, and standing down lost the confirmation entirely.
+  assert.ok(/if \(!multiFact\) return earlyResult;\s*\n\s*commitFact\(turn, "other", earlyResult\);/.test(code),
+    "early-commands must commit its confirmation, not end the turn and not vanish");
+});
+
+// ── CUT 3: THE VERDICT BINDS THE MOUTH, AND THE MOUTH IS DETERMINISTIC ──────────────────────
+// reconcileTurnReply was backwards in the one direction that matters: `if (!verifier.ok) return
+// reply` sent a REJECTED reply — including a medication-safety violation — to the client
+// unchanged, and the VERIFIER REJECTION repair reason further down was unreachable dead code.
+// Meanwhile a reply the verifier PASSED could be handed to a second askCoachK call whose output
+// went out unverified and overwrote chatHistory.messageOut.
+
+test("cut 3: a rejected reply is blocked, not forwarded", () => {
+  const src = readFileSync("server/handlers/chat-log.ts", "utf-8");
+  const code = src.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  assert.ok(!/if \(!verifier\.ok \|\|/.test(code),
+    "the old guard returned the rejected draft — a violation must never be the reply");
+  assert.ok(/if \(!verifier\.ok\) \{[\s\S]{0,400}?safeReplacementFor/.test(code),
+    "a rejected reply is replaced by a deterministic safe line");
+  assert.ok(/reply_blocked_by_verifier/.test(code), "…and raises an escalation, not just a log line");
+});
+
+test("cut 3: the repair layer has no second mouth", () => {
+  const src = readFileSync("server/handlers/chat-log.ts", "utf-8");
+  const code = src.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // Doctrine: deterministic commit + compose wins. Repair does not get a model call.
+  assert.ok(!/askCoachK/.test(code), "no second model call after the deterministic turn");
+  assert.ok(!/buildClientSnapshot/.test(code), "…and no snapshot built to feed one");
+  assert.ok(!/DRAFT THAT MUST NOT BE SENT/.test(src), "the rewrite instruction is gone");
+});
+
+test("cut 3: messageOut is only ever overwritten with re-verified text", () => {
+  const src = readFileSync("server/handlers/chat-log.ts", "utf-8");
+  const code = src.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  const write = code.indexOf("messageOut: corrected");
+  const recheck = code.indexOf("const recheck = verifyBrainReply");
+  assert.ok(write > -1 && recheck > -1, "both sites must exist");
+  assert.ok(recheck < write, "a correction is re-verified BEFORE it replaces the record");
+  assert.ok(!/messageOut: repaired/.test(code), "unverified model output never touches the record");
+});
+
+test("cut 3: a stale number is corrected from the ledger, keeping formatting", async () => {
+  // Deterministic substitution replaces the second model call. We already hold the authoritative
+  // row — asking a model to "rewrite using the latest step count" was slower, billed, and its
+  // output went out ungated.
+  const { __testReplaceNumberToken } = await import("../server/handlers/chat-log");
+  assert.equal(__testReplaceNumberToken("You're on 8,500 steps today.", 8500, 8000),
+    "You're on 8,000 steps today.");
+  assert.equal(__testReplaceNumberToken("You're on 8500 steps today.", 8500, 8000),
+    "You're on 8,000 steps today.");
+  assert.equal(__testReplaceNumberToken("You weighed 83.4kg.", 83.4, 82.1), "You weighed 82.1kg.");
+  // A number that is not the stale one must not be touched.
+  assert.equal(__testReplaceNumberToken("8,500 steps against a 10,000 target.", 8500, 8000),
+    "8,000 steps against a 10,000 target.");
 });
 
 test("cut 1: one composer, fixed order, one bubble", async () => {

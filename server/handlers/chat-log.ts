@@ -6,9 +6,7 @@ import twilio from "twilio";
 import { classifyMediaFailure } from "../coach-guardrails";
 import { detectEscalation, escalationSLA, isSyntheticTestClient } from "../safety-detection";
 import { currentRuntimeDecision } from "../understanding/state";
-import { buildClientSnapshot } from "../brain/client-snapshot";
 import { verifyBrainReply } from "../brain/reply-verifier";
-import { askCoachK, isUnderGPTCallLimit } from "../gpt";
 import { sastDayStart } from "../utils";
 
 export async function checkEscalation(userId: string, messageIn: string): Promise<void> {
@@ -126,25 +124,92 @@ function extractStepNumbers(text: string): number[] {
   return [...new Set(matches.map(v => Number(v.replace(/\D/g, ""))).filter(n => Number.isFinite(n)))];
 }
 
+/**
+ * Swap one wrong figure for the authoritative one, keeping the client's own formatting.
+ *
+ * Deliberately narrow: it only touches a number the extractors already located, and only where
+ * that number is written as a standalone figure (with or without thousands separators). Prose is
+ * never re-worded here — a correction that rewrites a sentence is the second mouth again.
+ */
+function replaceNumberToken(text: string, wrong: number, right: number): string {
+  const grouped = wrong.toLocaleString("en-US");
+  const decimals = String(right).includes(".") || String(wrong).includes(".");
+  const out = decimals ? String(right) : right.toLocaleString("en-US");
+  const escape = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const alternatives = [...new Set([grouped, String(wrong)])].map(escape).join("|");
+  // NOT \b on either side. "83.4kg" has no word boundary between the 4 and the k, so \b would
+  // silently fail to correct exactly the weight case this exists for. Guard on digits instead:
+  // do not start mid-number, do not stop mid-number.
+  return text.replace(new RegExp(`(?<![\\d.])(?:${alternatives})(?![\\d.])`, "g"), out);
+}
+
+/** Test seam for the deterministic correction — the function itself stays private. */
+export const __testReplaceNumberToken = replaceNumberToken;
+
 function extractWeightNumbers(text: string): number[] {
   const matches = text.match(/\b(?:\d{2,3}(?:\.\d+)?)\s*kg\b/gi) || [];
   return [...new Set(matches.map(v => Number(v.replace(/[^0-9.]/g, ""))).filter(n => Number.isFinite(n)))];
+}
+
+/**
+ * A REPLY THE VERIFIER REJECTED MUST NOT REACH A CLIENT.
+ *
+ * Deterministic, because the reason this function exists is that the model already produced
+ * something we refused to send — asking it again is not a safety control. Medication and medical
+ * claims get the scope boundary the doctrine already owns; everything else falls back to the
+ * smallest honest thing a coach can say.
+ */
+const CLINICAL_REFERRAL = "That one's for a doctor or pharmacist, not me — I'm your coach, not your clinician. "
+  + "Speak to them about it, and I'll keep helping you with the food, training and habits around it.";
+const WITHHOLD = "Let me not guess on that one. Tell me what happened in your own words and I'll pick it up from there.";
+
+function safeReplacementFor(violation: string): string {
+  return /medication|medical|cure|reverse|heal|diagnos/i.test(violation) ? CLINICAL_REFERRAL : WITHHOLD;
 }
 
 async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<string> {
   if (process.env.NODE_ENV === "test" || !scope.userId || !reply) return reply;
   const draft = String(reply).trim();
   const verifier = verifyBrainReply(draft, { clientMessage: scope.inputText });
+
+  // ════════════════════════════════════════════════════════════════════════════════════════
+  // CUT 3 — THE VERDICT BINDS THE MOUTH, AND THE MOUTH IS DETERMINISTIC.
+  //
+  // This guard used to read `if (!verifier.ok || …) return reply;` — so a reply the verifier
+  // REJECTED was returned to the client untouched, including a medication-safety violation, and
+  // the `VERIFIER REJECTION` repair reason further down was unreachable dead code. Backwards in
+  // the one direction that matters.
+  //
+  // And a reply the verifier PASSED could be handed to a second askCoachK call whose output went
+  // out unverified — after every gate had run — and overwrote chatHistory.messageOut, destroying
+  // the record of what the deterministic pipeline actually said.
+  //
+  // Doctrine: deterministic commit + compose wins. Repair does not get a second mouth.
+  // ════════════════════════════════════════════════════════════════════════════════════════
+  if (!verifier.ok) {
+    console.error(`[REPLY_BLOCKED] ...${scope.userId.slice(-6)} — ${verifier.violation}`);
+    const safe = safeReplacementFor(verifier.violation || "");
+    // The row keeps what actually went out. A blocked reply is an escalation, not a log line.
+    await db.insert(escalations).values({
+      userId: scope.userId, reason: "reply_blocked_by_verifier", status: "open",
+      triggerMessage: `${(verifier.violation || "").slice(0, 300)} || draft: ${draft.slice(0, 200)}`,
+      priority: "high", slaDeadline: new Date(Date.now() + 24 * 3_600_000),
+    }).catch(() => {});
+    return safe;
+  }
+
   const likelyGeneric = (ACK_PREFIX.test(draft) && draft.length <= 180) || GENERIC_COACH_REPLY.test(draft);
   const suspiciousStateLanguage = MISSED_TRAINING_CLAIM.test(draft) || NO_CURRENT_STEPS_CLAIM.test(draft) || CONTRADICTORY_WEIGHT_TREND.test(draft);
   const meaningful = isMeaningfulClientMessage(scope.inputText);
-  if (!verifier.ok || (!likelyGeneric && !suspiciousStateLanguage) || (!meaningful && !suspiciousStateLanguage)) return reply;
+  // A GENERIC REPLY IS A QUALITY GAP, NOT A SAFETY ONE. It used to trigger the second model call.
+  // It no longer does anything here: making a thin reply better is the deterministic composer's
+  // job, and Cut 1 moved that work to where the facts are. Counted, not rewritten.
+  if (likelyGeneric && meaningful && !suspiciousStateLanguage) {
+    console.log(`[REPLY_THIN] ...${scope.userId.slice(-6)} — generic reply to a meaningful message`);
+  }
+  if (!suspiciousStateLanguage && !meaningful) return reply;
 
   try {
-    if (!(await isUnderGPTCallLimit(scope.userId))) {
-      console.warn(`[POST_TURN_RECONCILE] skipped for user ...${scope.userId.slice(-6)} — existing AI cap reached`);
-      return reply;
-    }
     const [user] = await db.select().from(users).where(eq(users.id, scope.userId)).limit(1);
     if (!user) return reply;
     const dayStart = sastDayStart(new Date());
@@ -170,41 +235,41 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
       && latestWeight != null
       && Number.isFinite(latestWeight)
       && replyWeightNumbers.some(n => Math.abs(n - latestWeight) > 0.1);
-    const stepDriftReason = staleStepQuery
-      ? `The client asked for current step progress, but the draft used ${replyStepNumbers.join(", ")} while the latest authoritative step row is ${latestLoggedSteps}. Rewrite using the latest row only.`
-      : "";
-    const weightDriftReason = staleWeightQuery
-      ? `The client asked about current weight/trend, but the draft used ${replyWeightNumbers.join(", ")}kg while the latest authoritative weight log is ${latestWeight}kg. Rewrite using the latest weight only, and do not claim a trend unless the evidence supports one.`
-      : "";
-    const shouldRepair = likelyGeneric || suspiciousStateLanguage || staleStepQuery || staleWeightQuery;
-    if (!shouldRepair) return reply;
+    // ── STALE NUMBERS ARE CORRECTED FROM THE LEDGER, NOT BY A SECOND MODEL CALL ──────────────
+    // We already hold the authoritative row. Asking a model to "rewrite using the latest step
+    // count" was strictly worse than substituting it: slower, billed, and its output went out
+    // unverified. A number we can read is a number we can fix.
+    let corrected = draft;
+    if (staleStepQuery) {
+      for (const wrong of replyStepNumbers) {
+        if (wrong === latestLoggedSteps) continue;
+        corrected = replaceNumberToken(corrected, wrong, latestLoggedSteps);
+      }
+      console.warn(`[POST_TURN_FIX] ...${scope.userId.slice(-6)} steps ${replyStepNumbers.join(",")} → ${latestLoggedSteps}`);
+    }
+    if (staleWeightQuery && latestWeight != null) {
+      for (const wrong of replyWeightNumbers) {
+        if (Math.abs(wrong - latestWeight) <= 0.1) continue;
+        corrected = replaceNumberToken(corrected, wrong, latestWeight);
+      }
+      console.warn(`[POST_TURN_FIX] ...${scope.userId.slice(-6)} weight ${replyWeightNumbers.join(",")} → ${latestWeight}`);
+    }
+    if (corrected === draft) return reply;
 
-    const snapshot = await withTimeout("post_turn_snapshot", 4000, () => buildClientSnapshot(user)).catch(() => "");
-    const authoritative = [
-      "POST-ACTION AUTHORITATIVE STATE:",
-      `Today's workouts recorded: ${todayWorkouts.length}.`,
-      `Today's step rows recorded: ${todaySteps.length}; latest authoritative steps: ${latestLoggedSteps || "none"}.`,
-      `Latest authoritative weight: ${latestWeight == null ? "none" : `${latestWeight}kg`}.`,
-      scope.mutations.length ? `Mutations recorded this turn: ${scope.mutations.join(" | ")}` : "Mutations recorded this turn: none captured.",
-      snapshot ? `\nFULL CLIENT SNAPSHOT:\n${snapshot}` : "",
-    ].join("\n");
-    const repairReason = [
-      !verifier.ok ? `VERIFIER REJECTION: ${verifier.violation}` : "",
-      likelyGeneric ? "The draft is a receipt, acknowledgement, or canned coaching line rather than a useful continuation of the relationship." : "",
-      suspiciousStateLanguage ? "The draft makes a current-state claim that must be reconciled against the post-action state before sending." : "",
-      stepDriftReason,
-      weightDriftReason,
-    ].filter(Boolean).join("\n");
-    const instruction = `POST-TURN COACH RECONCILIATION — this is the final client-facing response after the deterministic turn has already completed.\n\n${authoritative}\n\nCLIENT'S EXACT MESSAGE:\n${scope.inputText}\n\nDRAFT THAT MUST NOT BE SENT:\n${draft}\n\nWHY IT MUST BE REWRITTEN:\n${repairReason}\n\nWrite the final Coach K reply. Use the AUTHORITATIVE POST-ACTION STATE, not an old cached assumption. Never claim a number or action the state does not support. Never mention handlers, tools, prompts, verification, or this rewrite. Do not merely acknowledge a meaningful update. Show that you heard what happened, connect it to the client's actual situation, and give the one useful next move when there is one. If the client corrected the coach, accept the correction and use the corrected state. Keep it natural, direct, warm, and specific.`;
-    const repaired = (await withTimeout("post_turn_coach", 20000, () => askCoachK(scope.inputText, user, instruction, "")))?.trim();
-    if (!repaired) return reply;
+    // A CORRECTION IS RE-VERIFIED BEFORE IT CAN BE SENT. The old path had no such discipline —
+    // whatever the second model returned went straight out.
+    const recheck = verifyBrainReply(corrected, { clientMessage: scope.inputText });
+    if (!recheck.ok) {
+      console.error(`[REPLY_BLOCKED] ...${scope.userId.slice(-6)} — correction failed re-verification: ${recheck.violation}`);
+      return safeReplacementFor(recheck.violation || "");
+    }
     try {
       const [lastLog] = await db.select({ id: chatHistory.id }).from(chatHistory)
         .where(and(eq(chatHistory.userId, scope.userId), eq(chatHistory.messageIn, scope.inputText)))
         .orderBy(desc(chatHistory.createdAt)).limit(1);
-      if (lastLog) await db.update(chatHistory).set({ messageOut: repaired }).where(eq(chatHistory.id, lastLog.id));
-    } catch (logErr) { console.warn("[POST_TURN_RECONCILE] chatHistory update non-fatal:", (logErr as any)?.message || logErr); }
-    return repaired;
+      if (lastLog) await db.update(chatHistory).set({ messageOut: corrected }).where(eq(chatHistory.id, lastLog.id));
+    } catch (logErr) { console.warn("[POST_TURN_FIX] chatHistory update non-fatal:", (logErr as any)?.message || logErr); }
+    return corrected;
   } catch (e) {
     console.warn("[POST_TURN_RECONCILE] non-fatal:", (e as any)?.message || e);
     return reply;

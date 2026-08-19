@@ -47,7 +47,7 @@ import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
-import { parseMessyIntake, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, WORD_NUM } from "./understanding/messy-intake";
+import { parseMessyIntake, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, withKnownFood, WORD_NUM } from "./understanding/messy-intake";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
@@ -599,7 +599,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // CUT 2 — the facts are counted on the client's RAW text, here, before the rewriter below can
   // replace it. Cut 1 counted them after, so a two-fact note rewritten down to one fact reached
   // the ledger as a one-fact note. See understanding/messy-intake.ts.
-  const turnFacts = parseMessyIntake(message);
+  // The scanner is the authoritative food owner; the parser's noun list is short. Merged here.
+  const turnFacts = withKnownFood(parseMessyIntake(message), scanForSAFoods(m).some(f => !/^water$/i.test(f.name)));
   const multiFact = turnFacts.factTypes.length >= 2;
   const turn = newTurnLedger(turnFacts.factTypes);
   if (multiFact) console.log(`[TURN] ${turnFacts.factTypes.join("+")} in the client's own words — no handler may end this turn`);
@@ -878,12 +879,13 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     if (engineFront !== null) return tag(engineFront, "🧠 new engine");
   }
 
-  // Stands down on a multi-fact note (Cut 2): a command matcher firing on a log is a false
-  // positive that used to end the turn and delete the rest of the sentence.
-  const earlyResult = multiFact
-    ? null
-    : await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
-  if (earlyResult !== null) return earlyResult;
+  // COMMITS, DOES NOT CLAIM THE TURN (Cut 2/3). On "2 litres of water and took my creatine" the
+  // supplement handler inside it used to end the turn and the water was never logged.
+  const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
+  if (earlyResult !== null) {
+    if (!multiFact) return earlyResult;
+    commitFact(turn, "other", earlyResult);
+  }
 
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
   if (mediaUrl) {
