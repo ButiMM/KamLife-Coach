@@ -92,6 +92,52 @@ test("ungrounded food: Big Mac dropped when client said SA breakfast + mocha", (
   assert.ok(!dropped.some((n: string) => /^mocha$/i.test(n)), "Mocha must stay grounded");
 });
 
+
+test("messy: walk without a number is a steps report with null count", () => {
+  const { parseMessyIntake, mentionedWalkWithoutCount } = require("../server/understanding/messy-intake");
+  const r = parseMessyIntake("This morning I had a mocha and I've just walked");
+  assert.equal(r.hasFoodReport, true);
+  assert.equal(mentionedWalkWithoutCount("This morning I had a mocha and I've just walked"), true);
+  assert.equal(mentionedWalkWithoutCount("I walked 8000 steps"), false);
+});
+
+test("composeMessyAck joins food, steps, feeling without dropping a part", () => {
+  const { composeMessyAck } = require("../server/understanding/messy-intake");
+  const out = composeMessyAck({
+    food: "Got it — pap and chicken.",
+    steps: "Heard you walked — send the step count.",
+    feeling: true,
+  });
+  assert.ok(/pap and chicken/.test(out));
+  assert.ok(/walked/.test(out));
+  assert.ok(/feeling/.test(out));
+});
+
+test("nutrition: three McDonald's retries are one takeaway, not a fried-day lecture", () => {
+  const { assessNutritionStandards } = require("../server/nutrition-guardrails");
+  const foods = [
+    "McDonald's Big Breakfast mocha",
+    "McDonald's Big Breakfast mocha",
+    "McDonald's Big Breakfast mocha",
+  ];
+  const n = assessNutritionStandards({ todayFoods: foods, goalType: "muscle_gain" });
+  assert.equal(n, null);
+});
+
+test("card nextMoveLine does not say grill it don't fry it", () => {
+  const src = require("fs").readFileSync(require("path").join(__dirname, "../server/macro-card-attach.ts"), "utf8");
+  assert.ok(!/Grill it, don't fry it/.test(src), "confirmation card must not scold frying");
+});
+
+test("verifier blocks fried lecture on a meal they just stated", () => {
+  const { verifyBrainReply } = require("../server/brain/reply-verifier");
+  const r = verifyBrainReply(
+    "That's a lot of fried/takeaway today — tasty, but heavy on the hidden fat and salt.",
+    { clientMessage: "I had a McDonald's South African breakfast with a mocha" },
+  );
+  assert.equal(r.ok, false);
+});
+
 process.exit(0).
 // That is why the selectModel coverage lives here and not in unit-tests.ts, which has no
 // such exit and hangs forever once gpt.ts is loaded into it.
