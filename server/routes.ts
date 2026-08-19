@@ -47,7 +47,7 @@ import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
-import { parseMessyIntake } from "./understanding/messy-intake";
+import { parseMessyIntake, mentionedWalkWithoutCount, composeMessyAck } from "./understanding/messy-intake";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
@@ -1017,8 +1017,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // Voice cut off: "I've walked..." with no number. Do not drop the walk.
-  const mentionedWalk = /\b(walked|walking|i'?ve\s+walked|just\s+walked|went\s+for\s+a\s+walk)\b/i.test(m);
-  if (!stepReplyPart && mentionedWalk && !stepIsQuestion && !normalizedQuestion && !isFutureIntent(m)) {
+  if (!stepReplyPart && mentionedWalkWithoutCount(message) && !stepIsQuestion && !normalizedQuestion && !isFutureIntent(m)) {
     stepReplyPart = `Heard you walked — send the step count (e.g. "3000 steps") and I'll log it.`;
   }
 
@@ -1057,12 +1056,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     const alsoAsksCoach = looksLikeQuestion(message)
       && (isMultiPartAsk(message) || hasFeeling);
     if (hasFeeling && !alsoAsksCoach) {
-      const feelLine =
-        "Heard you on how you're feeling — tired is allowed. You still logged; that counts. " +
-        "Next move stays small: one solid meal or a short walk when you can. No catch-up punishment.";
       turnMutation(`MULTI_INTENT food+feeling deterministic`);
       console.log(`[MULTI_INTENT] food logged + feeling acknowledged — "${message.slice(0, 70)}"`);
-      return `${foodCtxResult}\n\n${feelLine}`;
+      return composeMessyAck({ food: foodCtxResult, feeling: true });
     }
     if (!alsoAsksCoach) return foodCtxResult;
     turnMutation(`MULTI_INTENT food committed by the deterministic path; the question continues to Coach K`);
