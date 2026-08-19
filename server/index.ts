@@ -566,9 +566,14 @@ async function runMigrations(): Promise<void> {
       fat_int INTEGER NOT NULL DEFAULT 0,
       items JSONB,
       meal_label TEXT,
-      corrected BOOLEAN NOT NULL DEFAULT false
+      corrected BOOLEAN NOT NULL DEFAULT false,
+      source_message_id TEXT
     )`,
     `CREATE INDEX IF NOT EXISTS meal_logs_user_date_idx ON meal_logs(user_id, logged_at)`,
+    // Migration 0004 event lineage — column must self-heal on boot. Without it, commitFoodLog
+    // INSERT fails and clients see "worked out that meal but couldn't save it" (live 2026-08-19).
+    `ALTER TABLE meal_logs ADD COLUMN IF NOT EXISTS source_message_id TEXT`,
+    `CREATE INDEX IF NOT EXISTS meal_logs_user_source_msg_idx ON meal_logs(user_id, source_message_id)`,
     `CREATE TABLE IF NOT EXISTS gpt_costs (
       id SERIAL PRIMARY KEY,
       user_id UUID REFERENCES users(id) ON DELETE CASCADE,
