@@ -182,9 +182,9 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour()): s
 
   // Over the day's food — the move is about the NEXT meal, never guilt about the last one.
   if (!isBulk && ratio(cal) > 1.05) {
-    return calLeft < -400 ? "Keep tonight light — protein and veg only" : "Go lean next meal — grilled, no starch";
+    return calLeft < -400 ? "Keep tonight light — protein and veg only" : "Keep the next meal simple — protein and veg";
   }
-  if (ratio(fat) > 1.25) return "Grill it, don't fry it — that's the whole fix today";
+  if (ratio(fat) > 1.25) return hour < 11 ? "Keep lunch simple — protein and veg" : "Next meal: protein and veg, keep it simple";
 
   // Building and under-fuelled — but NEVER a bare "eat more" when a limiting macro is already
   // blown (2026-07-28 live: the pill read "Fat over" directly above "Eat more today — add a
