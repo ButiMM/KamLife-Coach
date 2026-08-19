@@ -184,3 +184,20 @@ export function parseMessyIntake(message: string): MessyIntakeResult {
     foodText: foodText || (mustForceFoodLog ? text : null),
   };
 }
+
+/** Walk mentioned with no parseable count — do not drop the movement. */
+export function mentionedWalkWithoutCount(message: string): boolean {
+  const r = parseMessyIntake(message);
+  return r.hasStepsReport && r.stepCount == null && /\b(walked|walking|walk)\b/i.test(message || "");
+}
+
+/** One reply from the parts we actually handled. Empty parts omitted. */
+export function composeMessyAck(parts: { food?: string | null; steps?: string | null; feeling?: boolean }): string {
+  const out: string[] = [];
+  if (parts.food && parts.food.trim()) out.push(parts.food.trim());
+  if (parts.steps && parts.steps.trim()) out.push(parts.steps.trim());
+  if (parts.feeling) {
+    out.push("Heard you on how you're feeling. Showing up still counts. Next move stays small.");
+  }
+  return out.join("\n\n");
+}
