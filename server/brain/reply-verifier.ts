@@ -115,18 +115,69 @@ function isStepWord(word: string): boolean {
   return word === "step" || word === "steps" || word === "walk" || word === "walked" || word === "walking";
 }
 
+const WORD_NUMBERS: Record<string, number> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+  ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+  seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50,
+  sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100, thousand: 1000,
+};
+
+/** "three thousand" / "fifteen hundred" → number. Fail-open on unknown phrasing. */
+function parseWordNumberPhrase(words: string[], start: number): { value: number; consumed: number } | null {
+  let i = start;
+  let total = 0;
+  let current = 0;
+  let consumed = 0;
+  while (i < words.length) {
+    const w = words[i];
+    const n = WORD_NUMBERS[w];
+    if (n === undefined) break;
+    if (n === 1000) {
+      current = (current || 1) * 1000;
+      total += current;
+      current = 0;
+    } else if (n === 100) {
+      current = (current || 1) * 100;
+    } else {
+      current += n;
+    }
+    consumed += 1;
+    i += 1;
+  }
+  const value = total + current;
+  if (consumed === 0 || !Number.isFinite(value) || value <= 0) return null;
+  return { value, consumed };
+}
+
 function extractStepNumbers(text: string): number[] {
   const words = stepWords(text);
   const out: number[] = [];
   for (let i = 0; i < words.length; i += 1) {
     const word = words[i];
     if (isStepWord(word)) {
-      const next = Number(words[i + 1]?.replaceAll(",", ""));
-      if (Number.isFinite(next)) out.push(next);
+      const nextNum = Number(words[i + 1]?.replaceAll(",", ""));
+      if (Number.isFinite(nextNum)) out.push(nextNum);
+      const phraseBefore = parseWordNumberPhrase(words, Math.max(0, i - 4));
+      // Prefer phrase immediately preceding the step word
+      for (let back = 1; back <= 4 && i - back >= 0; back += 1) {
+        const p = parseWordNumberPhrase(words, i - back);
+        if (p && p.consumed === back) {
+          out.push(p.value);
+          break;
+        }
+      }
       continue;
     }
     const number = Number(word.replaceAll(",", ""));
     if (Number.isFinite(number) && isStepWord(words[i + 1] || "")) out.push(number);
+    // "three thousand steps"
+    if (WORD_NUMBERS[word] !== undefined && isStepWord(words[i + 1] || "") === false) {
+      const p = parseWordNumberPhrase(words, i);
+      if (p) {
+        const after = words[i + p.consumed];
+        if (isStepWord(after || "")) out.push(p.value);
+      }
+    }
   }
   return [...new Set(out)];
 }
@@ -190,6 +241,29 @@ export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOv
   if (/\bI(?:'?ll| will| am going to| can)\s+(?:adjust|update|change|increase|decrease|recalculate|reset)\s+(?:your\s+)?(?:targets?|goal|calories?|calorie target|protein target|programme|plan|macros)\b/i.test(r)
       || /\b(?:we(?:'?ll| will| are going to)?\s+(?:shift|switch|move|change)(?:\s+\w+){0,3}\s+to\s+(?:fat loss|muscle gain|cutting|bulking)|your goal is now|I(?:'?ve| have) (?:changed|updated|switched) your goal)\b/i.test(r)) {
     return { ok: false, violation: "You claimed the client's targets/goal/programme will change, but you have NO tool for that. Remove the claim; if they want it changed, tell them to say 'change my goal to …' so the system can confirm it properly." };
+  }
+
+  // ── Food-turn grounding (live 2026-08-19 McDonald's voice failure) ─────────
+  // Client described a meal; coach said "no meal logged / what did you eat?" AND
+  // invented precise kcal/protein. Reality before reasoning: never re-ask for a meal
+  // already in the client message; never pair "nothing logged" with macro precision.
+  const clientMsg = String(facts.clientMessage || "");
+  const clientHasFood = /\b(ate|eaten|had|having|breakfast|lunch|dinner|supper|meal|mcdonald|mcdonalds|mocha|burger|pizza|pap|chicken|eggs?|toast|sandwich|coffee|protein shake|whey)\b/i.test(clientMsg)
+    || /\b(i(?:'| a)?m eating|i(?:'| a)?ve (?:just )?eaten|for breakfast|for lunch|for dinner)\b/i.test(clientMsg);
+  const asksWhatAte = /\b(what did you eat|what have you eaten|i don'?t have a meal logged|no meal logged|nothing logged for you today|i have no meal logged)\b/i.test(r);
+  const claimsMealMacros = /\b\d{2,5}\s*kcal\b/i.test(r) && /\b\d{1,3}\s*g(?:rams?)?\s*protein\b/i.test(r);
+  if (clientHasFood && asksWhatAte) {
+    return { ok: false, violation: "The client already described food in this message. Do NOT ask what they ate or claim no meal is logged. Log or confirm that food in their words; if amounts are unclear ask ONLY for the missing amount — never pretend the meal was not stated." };
+  }
+  if (asksWhatAte && claimsMealMacros) {
+    return { ok: false, violation: "Contradiction: you said no meal is logged (or asked what they ate) and also stated precise kcal/protein. You cannot invent macros for a meal you claim is missing. Either log the stated food without fake precision, or ask one clarifying question with no numbers." };
+  }
+  if (clientHasFood && claimsMealMacros && asksWhatAte === false && /\bi don'?t have a meal logged\b/i.test(r) === false) {
+    // Still block precise macros when we have no proof a log write happened this turn.
+    // VerifierFacts does not yet carry mealLoggedThisTurn — treat unanchored precision as unsafe.
+    if (!/\b(logged|on the log|in the books|saved)\b/i.test(r)) {
+      return { ok: false, violation: "Client described food but your reply states precise kcal/protein without confirming a log write. Log first (or confirm amounts), then reply in their words. If estimating, say it is an estimate and do not treat it as logged truth." };
+    }
   }
 
   const stepAttribution = verifyStepAttribution(r, facts.clientMessage || "");
