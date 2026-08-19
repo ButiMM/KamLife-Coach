@@ -72,8 +72,13 @@ export function assessNutritionStandards(input: NutritionDayInput): string | nul
     foods.push(f);
   }
   const count = (re: RegExp) => foods.filter(f => has(f, re)).length;
-  const energy = count(ENERGY_DRINK_RE);
-  const coffee = count(COFFEE_RE);
+  // CAFFEINE IS COUNTED RAW, NOT DEDUPED. The dedup above exists so a re-logged takeaway does not
+  // stack macros twice, and it is right for that. But it collapses two Monster Zeros into one, so
+  // the "two energy drinks and no food" rule — the founder's exact case, the reason this file
+  // exists — could never fire for two of the SAME drink. How many you had is the whole question.
+  const countRaw = (re: RegExp) => raw.filter(f => has(f, re)).length;
+  const energy = countRaw(ENERGY_DRINK_RE);
+  const coffee = countRaw(COFFEE_RE);
   const caffeine = energy + coffee;
   const sugary = foods.filter(f => has(f, SUGARY_FULL_RE) && !has(f, NO_SUGAR_RE)).length;
   const fried = count(FRIED_TAKEAWAY_RE);

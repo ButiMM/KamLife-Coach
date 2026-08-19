@@ -31,7 +31,17 @@ export async function checkEscalation(userId: string, messageIn: string): Promis
     const clientName = client?.name || "Client";
     const clientPhone = client?.phoneNumber || "unknown";
     const normPhone = (p: string) => p.replace(/^whatsapp:/, "").replace(/\D/g, "");
-    if (normPhone(clientPhone) === normPhone(process.env.COACH_ALERT_PHONE) || isSyntheticTestClient(clientPhone)) return;
+    // THE ROW IS WRITTEN, THE PAGE IS WITHHELD — AND IT SAYS WHY. Two reasons were collapsed
+    // into one silent return, so an escalation that never paged looked identical to a broken
+    // alerter. The row above is already committed; only the outbound page is skipped here.
+    if (normPhone(clientPhone) === normPhone(process.env.COACH_ALERT_PHONE)) {
+      console.log(`[ESCALATION] Skipping coach alert — the client IS the coach alert number (${esc.reason})`);
+      return;
+    }
+    if (isSyntheticTestClient(clientPhone)) {
+      console.log(`[ESCALATION] Skipping coach alert — synthetic test client ${clientPhone} (${esc.reason})`);
+      return;
+    }
     const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     const fromNum = process.env.TWILIO_WHATSAPP_NUMBER.startsWith("whatsapp:")
       ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;

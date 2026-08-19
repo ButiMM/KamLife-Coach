@@ -1256,7 +1256,13 @@ export function isMessyLifeTranscript(text: string): boolean {
   const steps = /\b(steps?|walked|walking|\d+\s*km|kilometers?|ran|run)\b/.test(t);
   const feeling = /\b(tired|stressed|stress|feel(?:ing)?|felt|anxious|motivat|struggling|overwhelmed|depressed|hard day|rough day|not coping|drained)\b/.test(t);
   const temporal = /\b(yesterday|last night|this morning|earlier today|then i|after that|before (?:that|gym|work))\b/.test(t);
-  const signals = [food, steps, feeling, temporal].filter(Boolean).length;
+  // TEMPORAL IS A QUALIFIER, NOT A FACT. Counting "last night" as a signal meant any emotional
+  // note that mentioned a time was treated as a messy-life multi-fact note and protected from
+  // condensing — "Eish coach I am so tired today… I did not sleep well last night" scored
+  // feeling + temporal = 2. That is one topic, and condensing it is exactly what protects the
+  // R199 margin on a long voice note. It still counts where it belongs: `food && temporal`
+  // below, which is what makes "yesterday I had pap" a retro meal report.
+  const signals = [food, steps, feeling].filter(Boolean).length;
   // Short branded meal reports still need the full string (scanner + GPT fallback).
   if (food && /\b(mcdonald|kfc|nando|spur|steers|wimpy|mocha|breakfast|lunch|dinner)\b/.test(t) && words <= 40) return true;
   if (signals >= 2) return true;

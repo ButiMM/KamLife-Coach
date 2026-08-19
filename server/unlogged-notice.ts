@@ -193,11 +193,20 @@ export function clarifyPlaceAsk(placeName: string): string {
   return `⚠️ I could not price the *${placeName}* item, so it's not in the total yet.\n\nWhat was it — the breakfast, a burger, chicken and chips? One or two words and I'll add it.`;
 }
 
-export function clarifyFoodAsk(words: string[]): string {
+export function clarifyFoodAsk(words: string[], opts?: { branded?: boolean }): string {
   const list = words.join(", ");
-  // Branded / takeaway residue must not get a kitchen question (live 2026-08-19: McDonald's
-  // breakfast already logged, still asked "fried or grilled?").
-  return `⚠️ I could not price *${list}* — not in the total yet.\n\nWhat was that item, in a few words (e.g. "big breakfast" or "2 eggs and toast")? I'll add it.`;
+  // TWO DIFFERENT LEFTOVERS, TWO DIFFERENT QUESTIONS.
+  //
+  // Branded/takeaway residue must not get a kitchen question — live 2026-08-19, a McDonald's
+  // breakfast was already logged and the coach still asked "fried or grilled?". The fix removed
+  // the kitchen question for EVERY leftover, which broke the case it exists for: "bunny chow and
+  // skopo" are real foods the table cannot price, and the only two things that change their
+  // number are how much and how it was cooked. One live screenshot, applied globally, silently
+  // took the useful question away from every genuine unknown.
+  const ask = opts?.branded
+    ? `What was that item, in a few words (e.g. "big breakfast" or "2 eggs and toast")? I'll add it.`
+    : `Two things and I'll add it: how much, and was it fried or grilled?`;
+  return `⚠️ I could not price *${list}* — not in the total yet.\n\n${ask}`;
 }
 
 /**
@@ -233,6 +242,6 @@ export function unloggedFoodNotice(message: string, loggedNames: string[], ask =
   const words = unloggedFoodWords(message, loggedNames);
   if (words.length < 2) return "";               // one stray word is usually not a food
   return ask
-    ? clarifyFoodAsk(words)
+    ? clarifyFoodAsk(words, { branded: !!place })
     : `⚠️ I could not price *${words.join(", ")}* — that part is NOT in the total. Tell me roughly what it was and I'll add it.`;
 }

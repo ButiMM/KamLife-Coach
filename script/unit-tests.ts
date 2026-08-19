@@ -943,7 +943,11 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     // summarised before the coach saw it — which is how a client ends up sending a voice note
     // that says "read the rest of my transcript". The margin guard survives, the half-answer
     // does not; transcriptMustPassWhole is the second half of that fix.
-    assert.match(media, /wordCount > 150 \? await condenseVoiceRamble/, "only a genuine ramble (>150 words) is condensed");
+    // The condition gained the whole-transcript guard (a real improvement); this pinned the old
+    // spelling. Assert the two conditions that matter, not the punctuation between them.
+    assert.match(media, /wordCount > 150/, "only a genuine ramble (>150 words) is condensed");
+    assert.match(media, /!transcriptMustPassWhole\(transcribedText\)[\s\S]{0,40}condenseVoiceRamble/,
+      "…and never a note whose facts must reach the log path whole");
     assert.match(media, /transcriptMustPassWhole/, "the whole-transcript guard is referenced in the comment trail");
     assert.match(media, /const forBrain =/, "the condensed text feeds the brain");
     assert.match(media, /echoTrimmed/, "the echo still shows what they actually said, not the condensed version");
@@ -5009,9 +5013,21 @@ test("sick flow: 'until <day>' parses to the real weekday, not the ~3-day defaul
     for (const msg of ["I had chicken and rice", "what's my workout", "I'm struggling to find time", "push day tomorrow?"])
       assert.equal(detectToneSignal(msg), null, `must not trip: ${msg}`);
   });
-  test("tone-mode: warm steer is empty (default voice byte-unchanged); others non-empty", () => {
-    assert.equal(toneSteer("warm"), "");
-    for (const t of ["gentle", "direct", "hype"] as const) assert.ok(toneSteer(t).length > 0);
+  test("tone-mode: warm is the neutral baseline, and every mode shares one core", () => {
+    // WAS: assert.equal(toneSteer("warm"), "") — "default voice byte-unchanged". That invariant
+    // was deliberately retired when RELATIONSHIP_CORE became shared by all four modes (the
+    // relationship-contract work, 2026-08-17). Retired, not broken: the point of the original
+    // was that choosing a tone must not smuggle a different coach into the default. That still
+    // holds, so it is asserted directly instead of via an empty string.
+    const warm = toneSteer("warm");
+    const others = (["gentle", "direct", "hype"] as const).map(toneSteer);
+    for (const o of others) assert.ok(o.length > 0);
+    // One shared core, no mode special-cased away from it.
+    const core = warm.slice(0, warm.indexOf("TONE FOR THIS CLIENT"));
+    assert.ok(core.length > 0, "warm carries the shared relationship core");
+    for (const o of others) assert.ok(o.startsWith(core), "every mode starts from the same core");
+    // Warm adds no tone-specific pressure — that is what makes it the baseline.
+    assert.doesNotMatch(warm, /extra gentle|no softening|bring intensity|challenge them/i);
   });
 }
 
