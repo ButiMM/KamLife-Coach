@@ -343,6 +343,63 @@ export function findFabricatedComposites(
 }
 
 // Returns a human-readable label for the date, e.g. "Saturday" or "yesterday".
+
+/**
+ * Drop extracted foods whose names are not grounded in the client's words.
+ * Live 2026-08-19: "South African breakfast + mocha" became Big Mac + Big Breakfast.
+ * A logged item is a fact — only keep names the message actually supports.
+ */
+export function findUngroundedFoodItems(
+  userMessage: string,
+  foods: Array<{ name: string }>,
+): string[] {
+  if (!userMessage || !foods?.length) return [];
+  const hay = userMessage
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const hayWords = new Set(hay.split(" ").filter((w) => w.length >= 2));
+
+  // Brand / meal tokens that count as grounding when present in the message
+  const STOP = new Set([
+    "and", "with", "the", "for", "a", "an", "of", "in", "on", "from", "to",
+    "i", "had", "have", "ate", "eaten", "just", "some", "my", "was", "were",
+    "large", "small", "cup", "plate", "bowl", "piece", "pieces", "slice", "slices",
+  ]);
+
+  const ungrounded: string[] = [];
+  for (const f of foods) {
+    const raw = (f.name || "").replace(/\([^)]*\)/g, " ").toLowerCase();
+    const nameWords = raw
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(" ")
+      .filter((w) => w.length >= 2 && !STOP.has(w));
+    if (nameWords.length === 0) continue;
+
+    // Full phrase in message (e.g. "big breakfast") — grounded
+    const phrase = nameWords.join(" ");
+    if (hay.includes(phrase)) continue;
+
+    // Distinctive words (skip ultra-generic menu words that appear in many DB names)
+    const GENERIC = new Set(["meal", "food", "combo", "special", "item", "order", "menu"]);
+    const distinctive = nameWords.filter((w) => !GENERIC.has(w));
+    const need = distinctive.length > 0 ? distinctive : nameWords;
+    const hits = need.filter(
+      (w) => hayWords.has(w) || [...hayWords].some((h) => h.startsWith(w) || w.startsWith(h)),
+    ).length;
+    // Require a majority of distinctive tokens to appear in the client message
+    const minHits = need.length <= 1 ? 1 : Math.ceil(need.length * 0.5);
+    if (hits < minHits) {
+      ungrounded.push(f.name);
+    }
+  }
+  return ungrounded;
+}
+
+
 export function mealDateLabel(date: Date): string {
   const nowSAST = new Date(Date.now() + 2 * 3_600_000);
   const mealSAST = new Date(date.getTime() + 2 * 3_600_000);
