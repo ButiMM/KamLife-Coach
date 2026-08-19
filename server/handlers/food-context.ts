@@ -845,7 +845,7 @@ export async function handleFoodContext(ctx: {
   // forceLog is the verb the engine stripped: LOG_MEAL passes the EXTRACTED foodText, so "I had rice and chicken for lunch"
   // arrives as "rice and chicken" — no trigger, too few foods for directFoodScan, nothing written, and the correction that
   // followed had no row to correct. It joins the TRIGGER conjunct only, so a question still never logs. acceptance-hold §8.
-  if ((!isQuestion || foodLogOverride) && !isFrustration && !isEmotionalOnly && !isFuturePlanning && hasActualFood && (hasLogTrigger || directFoodScan || forceLog)) {
+  if ((!isQuestion || foodLogOverride || forceLog) && !isFrustration && !isEmotionalOnly && !isFuturePlanning && (hasActualFood || forceLog) && (hasLogTrigger || directFoodScan || forceLog)) {
     console.log(`[FOOD_SCAN] gate fired — user=...${String(user.id || "").slice(-6)} foods=${foodsInMsg.length} trigger=${hasLogTrigger} direct=${directFoodScan}`);
     const MEAL_KEYWORDS = ["breakfast", "lunch", "dinner", "supper", "snack", "brunch", "morning", "afternoon", "evening"];
     const mealSegments: { label: string; text: string }[] = [];
@@ -1331,7 +1331,7 @@ export async function handleFoodContext(ctx: {
     : !isQuestion;
   const tryGptFood = mealReportNotQuestion && !isEmotionalOnly && !hasActualFood && !voiceFallbackTooLong
     && !isFuturePlanning && !bareMealTimeReference && !isMealSuggestionRequest
-    && (hasStrongFoodTrigger || hasNamedMealIntent || looksLikeBareFoodStatement);
+    && (hasStrongFoodTrigger || hasNamedMealIntent || looksLikeBareFoodStatement || forceLog);
   if (tryGptFood) {
     const gptFallbackResult = await gptFoodFallback(message, user);
     if (gptFallbackResult) {
@@ -1407,7 +1407,7 @@ export async function handleFoodContext(ctx: {
 
   // Last resort: clear "I had … meal" must never reach freeform coach (invents macros /
   // "what did you eat?"). One clarify, no numbers, no steps.
-  if ((hasStrongFoodTrigger || hasNamedMealIntent) && !isFuturePlanning && !isEmotionalOnly) {
+  if ((hasStrongFoodTrigger || hasNamedMealIntent || forceLog) && !isFuturePlanning && !isEmotionalOnly) {
     console.warn(`[FOOD_GATE] strong meal signal fell through — forcing clarify: "${message.slice(0, 80)}"`);
     const clarifyReply = `Got it — you ate something. Tell me the items in one line (e.g. "McDonald's breakfast and a mocha") and I'll log it.`;
     await logChat(user.id, message, clarifyReply, "FOOD_CLARIFY");
