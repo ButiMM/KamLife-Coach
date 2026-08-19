@@ -408,3 +408,37 @@ export async function amendRecentMeal(
     return null;
   }
 }
+
+
+/** "that wasn't a big mac" / "wasn't a Big Mac" — drop the invented item, no replacement named. */
+export function parseDropLoggedItem(message: string): string | null {
+  const s = (message || "").trim();
+  if (!s || s.length > 80) return null;
+  const m = /^(?:(?:no|wait|nah)[,.]?\s+)?(?:that\s+)?(?:wasn'?t|was not|it wasn'?t|it was not|it'?s not|its not|not)\s+(?:a\s+|the\s+)?([a-z][\w' .-]{1,40})$/i.exec(s);
+  if (!m) return null;
+  const name = (m[1] || "").replace(/[.!?]+$/g, "").trim().toLowerCase();
+  if (!name || /^(sure|really|today|hungry|feeling|logged|counted|eating|that|it)$/.test(name)) return null;
+  return name;
+}
+
+/** Repeat of the same takeaway within a short window (voice retries) — not a second meal. */
+export function isSameMealRetry(olderItems: string[], newerItems: string[]): boolean {
+  const norm = (s: string) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const older = olderItems.map(norm).filter(Boolean);
+  const newer = newerItems.map(norm).filter(Boolean);
+  if (!older.length || !newer.length) return false;
+  const o = older.join(" ");
+  const n = newer.join(" ");
+  const brand = (t: string) =>
+    /\b(mcdonald|macdonald|maccas)\b/.test(t) ? "mcdonald"
+    : /\bkfc\b/.test(t) ? "kfc"
+    : /\bnando/.test(t) ? "nando"
+    : "";
+  if (brand(o) && brand(o) === brand(n)) return true;
+  const ot = new Set(o.split(" ").filter(w => w.length > 2));
+  const nt = new Set(n.split(" ").filter(w => w.length > 2));
+  if (!ot.size || !nt.size) return false;
+  let hit = 0;
+  for (const t of nt) if (ot.has(t)) hit++;
+  return hit / Math.max(ot.size, nt.size) >= 0.7;
+}
