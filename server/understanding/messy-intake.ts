@@ -205,3 +205,29 @@ export function composeMessyAck(parts: { food?: string | null; steps?: string | 
   }
   return out.join("\n\n");
 }
+
+
+/**
+ * REBUILD GATE — the three facts in a messy note cannot be dropped because a classifier
+ * called the whole turn a question. This is the product, not a helper.
+ */
+export function journeyMustKeepFacts(message: string): {
+  food: boolean;
+  steps: boolean;
+  stepCount: number | null;
+  feeling: boolean;
+  isRetro: boolean;
+  /** Explicit step count still logs even if the note was classified as QUESTION. */
+  logStepsEvenIfClassifiedQuestion: boolean;
+} {
+  const r = parseMessyIntake(message);
+  const explicitSteps = r.stepCount != null && r.stepCount > 100;
+  return {
+    food: r.hasFoodReport,
+    steps: r.hasStepsReport || explicitSteps,
+    stepCount: r.stepCount,
+    feeling: r.hasFeeling,
+    isRetro: r.isRetro,
+    logStepsEvenIfClassifiedQuestion: explicitSteps,
+  };
+}
