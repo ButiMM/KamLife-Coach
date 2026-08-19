@@ -164,6 +164,35 @@ test("messy intake: yesterday pap and chicken is retro", () => {
   assert.equal(r.isRetro, true);
 });
 
+
+test("nextMoveLine on a past day does not say eat more today", () => {
+  const { nextMoveLine } = require("../server/macro-card-attach");
+  const rows = [
+    { label: "Calories", current: 600, target: 2500 },
+    { label: "Protein", current: 56, target: 180 },
+  ];
+  const line = nextMoveLine(rows, false, 16, true);
+  assert.ok(!/today/i.test(line), line);
+  assert.ok(/yesterday/i.test(line), line);
+});
+
+test("mealCard yesterday unit is not protein today", () => {
+  const { mealCard } = require("../server/macro-card-attach");
+  const card = mealCard({
+    firstName: "Kam",
+    mealName: "Chicken and pap",
+    rows: [
+      { label: "Calories", current: 600, target: 2500 },
+      { label: "Protein", current: 56, target: 180 },
+    ],
+    isBulk: false,
+    usesNumbers: true,
+    isPastDay: true,
+  });
+  assert.ok(!/today/i.test(card.unit), card.unit);
+  assert.ok(!/today/i.test(card.sub || ""), card.sub);
+});
+
 process.exit(0).
 // That is why the selectModel coverage lives here and not in unit-tests.ts, which has no
 // such exit and hangs forever once gpt.ts is loaded into it.
