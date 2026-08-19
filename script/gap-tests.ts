@@ -135,6 +135,49 @@ test("cut 1: the hand-stitched pair branches are gone", () => {
   assert.ok(!/alsoHasFood|alsoHasWater/.test(routes), "the steps↔food pair branch is gone");
 });
 
+// ── CUT 2: THE FACTS ARE COUNTED ON WHAT THE CLIENT WROTE ───────────────────────────────────
+// Cut 1 parsed the facts off `message` AFTER the normalizer had replaced it. A two-fact note
+// rewritten down to "i walked 8000 steps" reached the ledger as ONE fact, so multiFact was false
+// and the first handler ended the turn. Cut 1's own gate could not see this: routing-audit runs
+// with NORMALIZER=off, so the rewriter never executed in any test that proved Cut 1 worked.
+
+test("cut 2: the fact parse happens before the rewriter, not after", () => {
+  const src = readFileSync("server/routes.ts", "utf-8");
+  const parseAt = src.indexOf("const turnFacts = parseMessyIntake(message)");
+  const rewriteAt = src.indexOf("message = canon;");
+  assert.ok(parseAt > -1 && rewriteAt > -1, "both sites must exist");
+  assert.ok(parseAt < rewriteAt,
+    "facts must be counted on the client's raw text — after `message = canon` they are counted on a rewrite");
+});
+
+test("cut 2: a multi-fact note is never rewritten at all", () => {
+  const src = readFileSync("server/routes.ts", "utf-8");
+  assert.ok(/if \(multiFact && canon\)/.test(src),
+    "a canonical is one command; a note of several facts cannot be spoken for by one");
+});
+
+test("cut 2: rewriting a mixed note down to one fact is what breaks the ledger", async () => {
+  const { parseMessyIntake } = await import("../server/understanding/messy-intake");
+  const raw = parseMessyIntake("Yesterday I walked eight thousand steps and I had chicken and pap. I'm exhausted.");
+  assert.ok(raw.factTypes.length >= 2, "the client's own words carry three facts");
+  // This is the exact string the classifier produced live at 16:21. If the ledger is fed THIS,
+  // multiFact is false and every downstream guard is bypassed — which is why the parse moved.
+  const rewritten = parseMessyIntake("i walked 8000 steps");
+  assert.equal(rewritten.factTypes.length, 1, "the rewrite is a one-fact note by construction");
+  assert.ok(!rewritten.factTypes.includes("food"), "…and the meal is simply gone from it");
+});
+
+test("cut 2: nothing above the ledger may answer a multi-fact note", () => {
+  const src = readFileSync("server/routes.ts", "utf-8");
+  const code = src.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // The engine sits above the ledger and returns the turn. On a log it must stand down, or a
+  // freeform reply answers instead of the facts being committed.
+  assert.equal((code.match(/engineLive\(\) && !multiFact/g) || []).length, 2,
+    "both engine passes must stand down on a multi-fact note");
+  assert.ok(/const earlyResult = multiFact\s*\n?\s*\? null/.test(code),
+    "a command matcher firing on a log is a false positive that used to end the turn");
+});
+
 test("cut 1: one composer, fixed order, one bubble", async () => {
   const { newTurnLedger, commitFact, composeMessyAck, committedCount, FEELING_ACK } =
     await import("../server/understanding/messy-intake");

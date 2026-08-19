@@ -47,7 +47,7 @@ import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
-import { parseMessyIntake, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn } from "./understanding/messy-intake";
+import { parseMessyIntake, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, WORD_NUM } from "./understanding/messy-intake";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
@@ -595,6 +595,15 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // capitalisation intact — `m` is already lower-cased and whitespace-collapsed, which is fine for
   // matching but is not their message.
   const originalMessageForFidelity = message;
+
+  // CUT 2 — the facts are counted on the client's RAW text, here, before the rewriter below can
+  // replace it. Cut 1 counted them after, so a two-fact note rewritten down to one fact reached
+  // the ledger as a one-fact note. See understanding/messy-intake.ts.
+  const turnFacts = parseMessyIntake(message);
+  const multiFact = turnFacts.factTypes.length >= 2;
+  const turn = newTurnLedger(turnFacts.factTypes);
+  if (multiFact) console.log(`[TURN] ${turnFacts.factTypes.join("+")} in the client's own words — no handler may end this turn`);
+
   if (process.env.NORMALIZER !== "off" && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
       const pre = await Promise.race([
@@ -635,6 +644,12 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       // coaching QUESTION, not a totals lookup — reasoning vocabulary keeps the original message.
       if (pre.intent === "TOTALS_QUERY" && /\b(adjust|change|why|what happens|should|if i|when i.?m|sick|ill|holiday|rest|not (walking|training)|stay the same|missing the point)\b/i.test(originalMBeforeNorm)) {
         console.log(`[NORMALIZER] TOTALS brake — reasoning vocabulary in "${originalMBeforeNorm.slice(0, 60)}" — dropping canonical`);
+        canon = "";
+      }
+      // A canonical is ONE command; this note is several facts, so any rewrite is a deletion
+      // however faithful it looks. Fidelity below stays a tripwire for single-fact notes.
+      if (multiFact && canon) {
+        console.log(`[NORMALIZER] ${turnFacts.factTypes.join("+")} — multi-fact note is never rewritten; raw text proceeds`);
         canon = "";
       }
       if (ACTION_INTENTS.has(pre.intent) && pre.confidence >= 0.75 && canon.length >= 3 && canon.length <= message.length * 2.5 + 20) {
@@ -713,15 +728,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     } catch (normErr) { console.warn("[NORMALIZER] exception — original message proceeds:", normErr instanceof Error ? normErr.message : normErr); }
   }
 
-  // CUT 1 — ONE TURN COMMITS EVERY EVENT. Parse the facts ONCE, here. If the note carries two
-  // or more, no handler below may end the turn: each COMMITS what it did and control continues,
-  // and one composer builds one reply. A single-fact note keeps its old fast path exactly.
+  // CUT 1 — ONE TURN COMMITS EVERY EVENT. The facts were parsed from the client's raw text
+  // above, before the rewriter. If the note carries two or more, no handler below may end the
+  // turn: each COMMITS what it did and control continues, and one composer builds one reply.
   // See server/understanding/messy-intake.ts for what this replaced and why.
-  const turnFacts = parseMessyIntake(message);
-  const multiFact = turnFacts.factTypes.length >= 2;
-  const turn = newTurnLedger(turnFacts.factTypes);
-  if (multiFact) console.log(`[TURN] ${turnFacts.factTypes.join("+")} — no handler may end this turn`);
-
   // ---- FOOD LOG MANAGEMENT (reset, remove, show) ----
   // SYMPTOM PERSISTENCE — record only, never route (2026-08-12). The message still reaches
   // whatever handler would have answered it; this observes in passing so the hunger doctrine can
@@ -860,12 +870,19 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // A FOOD LOG IS A COACHING MOMENT, NOT A RAIL (2026-08-04). The two conditions removed here
   // — isTransactionReport and "the message names a food" — were the other half of the lockout.
   // Between them and REPORTED_NUMBER, every single log a client sends bypassed the coach.
-  if (engineLive() && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isBareGreeting(m)) {
+  // STANDS DOWN ON A MULTI-FACT NOTE (Cut 2). This sits above the ledger and returns the turn,
+  // so a freeform reply could answer instead of the facts being committed. Two or more facts is
+  // a LOG; the deterministic rails own it. mustStayDeterministic was reaching for this.
+  if (engineLive() && !multiFact && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isBareGreeting(m)) {
     const engineFront = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
     if (engineFront !== null) return tag(engineFront, "🧠 new engine");
   }
 
-  const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
+  // Stands down on a multi-fact note (Cut 2): a command matcher firing on a log is a false
+  // positive that used to end the turn and delete the rest of the sentence.
+  const earlyResult = multiFact
+    ? null
+    : await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
   if (earlyResult !== null) return earlyResult;
 
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
@@ -901,12 +918,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const hasKmWalk = m.match(/(?:walked|loop|walk)\s+([\d.]+)\s*km/i);
   const hasDurationWalk = !stepNumMatch && !deviceStepMatch && !hasKmWalk && m.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*((min(?:ute)?s?|hrs?|hours?))/i);
   const stepIsKShorthand = !!m.match(/\b[\d,]+(?:\.\d+)?\s*k\s*(?:steps?|staps?)\b/i);
-  // Spoken numbers — voice notes produce "ten thousand steps", "did twelve thousand steps"
-  const WORD_THOUSANDS: Record<string, number> = {
-    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
-    seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
-  };
+  // Spoken numbers ("ten thousand steps") — WORD_NUM is the one table, shared with the fact parser.
   // "walked about eight thousand" / "eight thousand steps" — voice notes often omit "steps"
   const wordThousandMatch = !stepNumMatch && !deviceStepMatch
     ? m.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\s*(?:steps?|staps?)?\b/i)
@@ -929,7 +941,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (stepIsLoggable && !isFutureIntent(m) && !mentionsNotDone(m) && (stepIsExplicitLog || !normalizedQuestion) && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
     let steps = 0;
     if (wordThousandMatch) {
-      const base = WORD_THOUSANDS[wordThousandMatch[1].toLowerCase()] ?? parseInt(wordThousandMatch[1]);
+      const base = WORD_NUM[wordThousandMatch[1].toLowerCase()] ?? parseInt(wordThousandMatch[1]);
       steps = base * 1000 + (wordThousandMatch[2] ? 500 : 0);
     } else if (deviceStepMatch) {
       const num = parseFloat(deviceStepMatch[1].replace(/,/g, ""));
@@ -1096,7 +1108,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // MUST also respect mustStayDeterministic (2026-08-19 live ×4): first pass skipped meal
   // reports correctly, then this second pass handed them to freeform Coach K → "I don't have
   // a meal logged / what did you eat". Stated meal reports stay off the engine entirely.
-  if (engineLive() && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+  if (engineLive() && !multiFact && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
     if (engineReply !== null) return tag(engineReply, "🧠 new engine");
   }
