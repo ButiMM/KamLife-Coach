@@ -47,6 +47,7 @@ import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
+import { parseMessyIntake } from "./understanding/messy-intake";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
@@ -1030,7 +1031,13 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // ---- FOOD CONTEXT (corrections, braai, eating out, relog, scanner, GPT fallback) ----
-  const foodCtxResult = await handleFoodContext({ phone, message, m, user, stepReplyPart, handleMessage, classifierQuestion: normalizedQuestion });
+  // Messy-life intake: stated meal (incl. branded takeaway voice notes) forces food path.
+  const messyIntake = parseMessyIntake(message);
+  const foodCtxResult = await handleFoodContext({
+    phone, message, m, user, stepReplyPart, handleMessage,
+    classifierQuestion: normalizedQuestion,
+    forceLog: messyIntake.mustForceFoodLog,
+  });
   if (foodCtxResult !== null) {
     // ONE TURN CAN CARRY TWO OUTCOMES (2026-08-10, Work Order 2). Journey 4 logged its food and
     // then THIS LINE ended the turn, so the client got a logging acknowledgement and their actual
