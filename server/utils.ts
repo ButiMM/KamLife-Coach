@@ -1241,17 +1241,10 @@ export function transcriptMustPassWhole(text: string): boolean {
   // meals, multi-beat day stories. Condensing these destroys the facts the log path needs
   // and is how "I had McDonald's breakfast and a mocha" never reached food-context whole.
   if (isMessyLifeTranscript(t)) return true;
-  // A PERSON TELLING YOU HOW THEY ARE IS NEVER SQUEEZED (CTO ruling, 2026-08-19).
-  //
-  // Making `temporal` a qualifier rather than a signal was right for what it fixed, and it had a
-  // consequence I did not weigh: a long come-back ramble with no food and no steps — someone
-  // returning after days away, which is exactly the Pulse client — became condensable. Shortening
-  // that to save tokens is tracker behaviour, not coaching, and the money saved is not worth the
-  // one note where they finally said what was going on.
-  //
-  // So a feeling carries the whole transcript on its own. The margin guard now only reaches a
-  // long note with no food, no steps, no feeling and no stacked question — which is a narrower
-  // path than before, deliberately.
+  // A PERSON TELLING YOU HOW THEY ARE IS NEVER SQUEEZED (CTO ruling, 2026-08-19). A long
+  // come-back ramble with no food and no steps is the Pulse client finally saying what is going
+  // on; shortening it to save tokens is tracker behaviour. The margin guard now reaches only a
+  // long note with no food, no steps, no feeling and no stacked question — narrower on purpose.
   if (/\b(tired|exhausted|stressed|stress|feel(?:ing)?|felt|anxious|motivat|struggling|overwhelmed|depressed|hard day|rough day|not coping|drained|down|low|lost|give up|giving up)\b/.test(t)) return true;
   return false;
 }
@@ -1268,12 +1261,8 @@ export function isMessyLifeTranscript(text: string): boolean {
   const steps = /\b(steps?|walked|walking|\d+\s*km|kilometers?|ran|run)\b/.test(t);
   const feeling = /\b(tired|stressed|stress|feel(?:ing)?|felt|anxious|motivat|struggling|overwhelmed|depressed|hard day|rough day|not coping|drained)\b/.test(t);
   const temporal = /\b(yesterday|last night|this morning|earlier today|then i|after that|before (?:that|gym|work))\b/.test(t);
-  // TEMPORAL IS A QUALIFIER, NOT A FACT. Counting "last night" as a signal meant any emotional
-  // note that mentioned a time was treated as a messy-life multi-fact note and protected from
-  // condensing — "Eish coach I am so tired today… I did not sleep well last night" scored
-  // feeling + temporal = 2. That is one topic, and condensing it is exactly what protects the
-  // R199 margin on a long voice note. It still counts where it belongs: `food && temporal`
-  // below, which is what makes "yesterday I had pap" a retro meal report.
+  // TEMPORAL IS A QUALIFIER, NOT A FACT — it still counts in `food && temporal` below, which is
+  // what makes "yesterday I had pap" a retro meal report.
   const signals = [food, steps, feeling].filter(Boolean).length;
   // Short branded meal reports still need the full string (scanner + GPT fallback).
   if (food && /\b(mcdonald|kfc|nando|spur|steers|wimpy|mocha|breakfast|lunch|dinner)\b/.test(t) && words <= 40) return true;

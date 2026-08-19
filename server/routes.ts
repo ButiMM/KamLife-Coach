@@ -47,7 +47,7 @@ import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
-import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, WORD_NUM } from "./understanding/messy-intake";
+import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog } from "./understanding/messy-intake";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
@@ -910,63 +910,16 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // we log steps but do NOT return early — let it fall through to food scanning
   // "12k steps", "8.5k steps", "12,000 steps", "12000 steps" — all valid
   // Also: "Fitbit says 8500", "health app: 9000", "steps today: 7500"
-  const stepNumMatch = m.match(/\b([\d,]+(?:\.\d+)?)\s*k\s*(?:steps?|staps?)\b/i)
-    || m.match(/\b([\d,]+)\s*(?:steps?|staps?)\b/i)
-    || m.match(/(?:walked|done|did|logged)\s+([\d,]+(?:\.\d+)?k?)\s*(?:steps?|staps?)/i);
-  // Device/app references without explicit "steps" keyword after the number
-  // e.g. "Fitbit says 8500", "Health app: 9000", "steps today: 7500", "step count: 12k"
-  const _devMatch = !stepNumMatch ? (
-    m.match(/\b(?:fitbit|garmin|apple\s*health|health\s*app|samsung\s*health|google\s*fit|my\s*(?:watch|tracker|band|phone)|strava|polar|whoop|oura|mi\s*band|galaxy\s*watch)\b[^.!?]*?([\d,]+(?:\.\d+)?)\s*(k)?\s*(?:steps?|staps?)?/i)
-    || m.match(/\bsteps?\s*(?:today|count|total|for\s*today)?\s*[:=]\s*([\d,]+(?:\.\d+)?)\s*(k)?\b/i)
-  ) : null;
-  const deviceStepMatch = (_devMatch && !/\b(?:heart\s*rate|bpm|pulse|calories?\s*burned|sleep\s*score|blood|oxygen)\b/i.test(m)) ? _devMatch : null;
-  const hasKmWalk = m.match(/(?:walked|loop|walk)\s+([\d.]+)\s*km/i);
-  const hasDurationWalk = !stepNumMatch && !deviceStepMatch && !hasKmWalk && m.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*((min(?:ute)?s?|hrs?|hours?))/i);
-  const stepIsKShorthand = !!m.match(/\b[\d,]+(?:\.\d+)?\s*k\s*(?:steps?|staps?)\b/i);
-  // Spoken numbers ("ten thousand steps") — WORD_NUM is the one table, shared with the fact parser.
-  // "walked about eight thousand" / "eight thousand steps" — voice notes often omit "steps"
-  const wordThousandMatch = !stepNumMatch && !deviceStepMatch
-    ? m.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\s*(?:steps?|staps?)?\b/i)
-      && /\b(steps?|staps?|walked|walking|walk)\b/i.test(m)
-      ? m.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\b/i)
-      : null
-    : null;
-  // A step QUESTION ("is 8000 enough?") must reach GPT; an explicit step LOG ("walked 8000
-  // steps", "12k steps") is unambiguous even with a trailing SEPARATE question. Split the two
-  // so explicit logs survive a trailing "?" while genuine step-questions still route to GPT.
-  const stepQuestionForm = /^(does|doesn.?t|do|don.?t|will|would|should|shouldn.?t|can|could|is|isn.?t|are|aren.?t|what|why|how|when|which)\b/i.test(m.trim())
-    || /\b(affect|matter|enough|too\s+(?:much|many|few|little)|should\s+i|do\s+i\s+need|is\s+it\s+(?:ok|okay|bad|good|fine))\b/i.test(m);
-  const stepIsQuestion = m.includes("?") || stepQuestionForm;
-  const stepIsExplicitLog = !!(stepNumMatch || deviceStepMatch || hasKmWalk || wordThousandMatch);
-  // Explicit logs ignore a trailing "?"; duration-only walks keep the strict guard.
-  const stepIsLoggable = stepIsExplicitLog ? !stepQuestionForm : !stepIsQuestion;
-  // Future-intent guard: "I'll walk 10k tomorrow" slips past the question check — must not log today.
-  // Explicit "walked 8,000 steps" is a log even if the classifier tagged the note as QUESTION
-  // because they also said "I'm exhausted" (live 2026-08-19 mixed note — steps dropped).
-  if (stepIsLoggable && !isFutureIntent(m) && !mentionsNotDone(m) && (stepIsExplicitLog || !normalizedQuestion) && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
-    let steps = 0;
-    if (wordThousandMatch) {
-      const base = WORD_NUM[wordThousandMatch[1].toLowerCase()] ?? parseInt(wordThousandMatch[1]);
-      steps = base * 1000 + (wordThousandMatch[2] ? 500 : 0);
-    } else if (deviceStepMatch) {
-      const num = parseFloat(deviceStepMatch[1].replace(/,/g, ""));
-      steps = deviceStepMatch[2] ? Math.round(num * 1000) : Math.round(num);
-    } else if (stepNumMatch) {
-      const raw = stepNumMatch[1].replace(/,/g, "");
-      steps = stepIsKShorthand ? Math.round(parseFloat(raw) * 1000) : Math.round(parseFloat(raw));
-    } else if (hasKmWalk) {
-      const km = Math.min(parseFloat(hasKmWalk[1]), 50); // cap at 50km (marathon+)
-      steps = Math.round(km * 1300);
-    } else if (hasDurationWalk) {
-      let minutes = parseInt(hasDurationWalk[1]);
-      const unit = hasDurationWalk[2]?.toLowerCase() || "";
-      if (unit.startsWith("h")) minutes *= 60;
-      steps = Math.round(minutes * 100);
-    }
-    // "Give me 5 steps to lose belly fat" — a bare "N steps" with no movement signal is the
-    // NOUN steps, not a pedometer count. Only nag about a low count when they actually moved.
-    const stepHasMovementSignal = !!(deviceStepMatch || wordThousandMatch || hasKmWalk || hasDurationWalk || stepIsKShorthand
-      || /\b(walk(?:ed|ing)?|did|done|logged|hit|managed|got|reached|clocked)\b/i.test(m));
+  // ALL STEP PARSING HAS ONE OWNER (Cut 5b). ~50 lines of regexes and the number arithmetic
+  // lived here, beside messy-intake's own extractStepCount — two step parsers for one fact, in
+  // two files. Moved whole; the guards that need this function's context stay here.
+  const sd = detectStepLog(m);
+  // Future-intent guard: "I'll walk 10k tomorrow" slips past the question check — must not log
+  // today. Explicit "walked 8,000 steps" is a log even if the classifier tagged the note a
+  // QUESTION because they also said "I'm exhausted" (live 2026-08-19 mixed note — steps dropped).
+  if (sd.loggableByForm && !isFutureIntent(m) && !mentionsNotDone(m) && (sd.isExplicitLog || !normalizedQuestion) && sd.matched) {
+    let steps = sd.steps;                       // a "8000 not 5000" correction rewrites it below
+    const stepHasMovementSignal = sd.hasMovementSignal;
     if (!isNaN(steps) && steps > 0 && steps <= 100 && stepHasMovementSignal) {
       return `That step count looks low — did the message cut off? Send your actual count, e.g. "8500 steps" or "walked 5km".`;
     }
@@ -1044,7 +997,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // Voice cut off: "I've walked..." with no number. Do not drop the walk.
-  if (!turn.parts.steps && mentionedWalkWithoutCount(message) && !stepIsQuestion && !isFutureIntent(m)) {
+  if (!turn.parts.steps && mentionedWalkWithoutCount(message) && !(m.includes("?") || sd.isQuestionForm) && !isFutureIntent(m)) {
     commitFact(turn, "steps", `Heard you walked — send the step count (e.g. "3000 steps") and I'll log it.`);
   }
 

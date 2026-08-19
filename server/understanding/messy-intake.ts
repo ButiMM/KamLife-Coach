@@ -267,6 +267,85 @@ export function withKnownFood(result: MessyIntakeResult, scannerSawFood: boolean
   };
 }
 
+/**
+ * THE STEP LOG PARSE — all of it, in one place (Cut 5b).
+ *
+ * routes.ts carried ~50 lines of step regexes and the number arithmetic, next to this module's
+ * own extractStepCount. Two step parsers for one fact, in two files, is how they drift — and it
+ * is the same duplication the WORD_NUM table had. Pure and behaviour-identical to what routes.ts
+ * did; the caller keeps the guards that need its own context (future intent, "didn't manage it",
+ * the classifier's question verdict).
+ */
+export interface StepLogDetection {
+  /** Parsed count, 0 when nothing parsed. */
+  steps: number;
+  /** A number the client clearly stated, as opposed to a duration-only walk. */
+  isExplicitLog: boolean;
+  /** Question SHAPE — "is 8000 enough?" reaches the coach, "walked 8000 steps" does not. */
+  isQuestionForm: boolean;
+  /** Loggable on form alone. Explicit logs survive a trailing "?"; duration walks do not. */
+  loggableByForm: boolean;
+  /** Any recognised step/walk form matched at all. */
+  matched: boolean;
+  /** "Give me 5 steps to lose belly fat" is the NOUN steps — no pedometer signal. */
+  hasMovementSignal: boolean;
+}
+
+export function detectStepLog(text: string): StepLogDetection {
+  const numMatch = text.match(/\b([\d,]+(?:\.\d+)?)\s*k\s*(?:steps?|staps?)\b/i)
+    || text.match(/\b([\d,]+)\s*(?:steps?|staps?)\b/i)
+    || text.match(/(?:walked|done|did|logged)\s+([\d,]+(?:\.\d+)?k?)\s*(?:steps?|staps?)/i);
+  // Device/app references without an explicit "steps" keyword after the number.
+  const devRaw = !numMatch ? (
+    text.match(/\b(?:fitbit|garmin|apple\s*health|health\s*app|samsung\s*health|google\s*fit|my\s*(?:watch|tracker|band|phone)|strava|polar|whoop|oura|mi\s*band|galaxy\s*watch)\b[^.!?]*?([\d,]+(?:\.\d+)?)\s*(k)?\s*(?:steps?|staps?)?/i)
+    || text.match(/\bsteps?\s*(?:today|count|total|for\s*today)?\s*[:=]\s*([\d,]+(?:\.\d+)?)\s*(k)?\b/i)
+  ) : null;
+  const dev = (devRaw && !/\b(?:heart\s*rate|bpm|pulse|calories?\s*burned|sleep\s*score|blood|oxygen)\b/i.test(text)) ? devRaw : null;
+  const km = text.match(/(?:walked|loop|walk)\s+([\d.]+)\s*km/i);
+  const duration = !numMatch && !dev && !km
+    ? text.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*((min(?:ute)?s?|hrs?|hours?))/i) : null;
+  const kShorthand = !!text.match(/\b[\d,]+(?:\.\d+)?\s*k\s*(?:steps?|staps?)\b/i);
+  const wordThousand = !numMatch && !dev
+    ? (text.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\s*(?:steps?|staps?)?\b/i)
+        && /\b(steps?|staps?|walked|walking|walk)\b/i.test(text)
+        ? text.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\b/i)
+        : null)
+    : null;
+
+  const isQuestionForm = /^(does|doesn.?t|do|don.?t|will|would|should|shouldn.?t|can|could|is|isn.?t|are|aren.?t|what|why|how|when|which)\b/i.test(text.trim())
+    || /\b(affect|matter|enough|too\s+(?:much|many|few|little)|should\s+i|do\s+i\s+need|is\s+it\s+(?:ok|okay|bad|good|fine))\b/i.test(text);
+  const isExplicitLog = !!(numMatch || dev || km || wordThousand);
+  const loggableByForm = isExplicitLog ? !isQuestionForm : !(text.includes("?") || isQuestionForm);
+
+  let steps = 0;
+  if (wordThousand) {
+    const base = WORD_NUM[wordThousand[1].toLowerCase()] ?? parseInt(wordThousand[1]);
+    steps = base * 1000 + (wordThousand[2] ? 500 : 0);
+  } else if (dev) {
+    const num = parseFloat(dev[1].replace(/,/g, ""));
+    steps = dev[2] ? Math.round(num * 1000) : Math.round(num);
+  } else if (numMatch) {
+    const raw = numMatch[1].replace(/,/g, "");
+    steps = kShorthand ? Math.round(parseFloat(raw) * 1000) : Math.round(parseFloat(raw));
+  } else if (km) {
+    steps = Math.round(Math.min(parseFloat(km[1]), 50) * 1300);   // cap at 50km (marathon+)
+  } else if (duration) {
+    let minutes = parseInt(duration[1]);
+    if ((duration[2] || "").toLowerCase().startsWith("h")) minutes *= 60;
+    steps = Math.round(minutes * 100);
+  }
+
+  return {
+    steps,
+    isExplicitLog,
+    isQuestionForm,
+    loggableByForm,
+    matched: !!(numMatch || km || duration || dev || wordThousand),
+    hasMovementSignal: !!(dev || wordThousand || km || duration || kShorthand
+      || /\b(walk(?:ed|ing)?|did|done|logged|hit|managed|got|reached|clocked)\b/i.test(text)),
+  };
+}
+
 /** Walk mentioned with no parseable count — do not drop the movement. */
 export function mentionedWalkWithoutCount(message: string): boolean {
   const r = parseMessyIntake(message);
