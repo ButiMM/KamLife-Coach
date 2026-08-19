@@ -93,6 +93,7 @@ import { safetyGate } from "../verifiers/response-gate";
 import { logChat } from "../handlers/chat-log";
 import { executeAction, setPendingConfirm, takePendingConfirm, takeLastToolFacts } from "./executor";
 import { describeAction, isStrategyOrEmotional, type CoachAction } from "./actions";
+import { verifyBrainReply } from "../brain/reply-verifier";
 import { classifyConfirmReply } from "./confirm-reply";
 export { classifyConfirmReply } from "./confirm-reply";
 
@@ -509,6 +510,11 @@ export async function runMeaningEngineLive(ctx: {
     if (getNumbersMode(user) === "low") reply = stripNumbersFromProse(reply);
     if (!reply.trim()) return null;
 
+    const gated = verifyBrainReply(reply, { goalType: user?.goalType, clientMessage: message });
+    if (!gated.ok) {
+      console.warn("[REPLY_VERIFIER] engine blocked:", gated.violation);
+      reply = "I heard you. I will not guess or lecture — send the next line if I missed something.";
+    }
     await logChat(user.id, message, reply, "ENGINE_LIVE").catch(() => {});
     return reply;
   } catch (e) {
