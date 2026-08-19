@@ -266,6 +266,12 @@ export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOv
     }
   }
 
+  // Live 14:22: meal just logged, then "a lot of fried/takeaway" + "grill it don't fry it".
+  // Least intervention: confirm the log. Do not shame the plate they already ate.
+  if (clientHasFood && /\b(that'?s a lot of fried\/?takeaway|grill it,? don'?t fry it|heavy on the hidden fat)\b/i.test(r)) {
+    return { ok: false, violation: "Do not lecture a client about fried/takeaway on the turn they just described a meal. Confirm the log. Next-meal direction only — no shame about the plate already eaten." };
+  }
+
   const stepAttribution = verifyStepAttribution(r, facts.clientMessage || "");
   if (!stepAttribution.ok) return stepAttribution;
 
