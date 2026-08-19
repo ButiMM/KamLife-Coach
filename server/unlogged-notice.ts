@@ -59,6 +59,13 @@ const NOISE = new Set([
   "evening","afternoon","night","brunch","big","large","small","little","extra","full","half",
   "whole","double","piece","pieces","slice","slices","cup","cups","bowl","plate","portion","serving",
   "gram","grams","from","but","then","more","made","make","got","get","went","there","here","been",
+  // Geography / brand residue — "South African breakfast from McDonald's" is NOT four unpriced foods
+  // (live 2026-08-19: "could not price south, african"). Movement words are steps, not meals.
+  "south","southern","african","africa","american","style",
+  "mcdonald","mcdonalds","macdonald","macdonalds","maccas",
+  "mocha","coffee","shop","latte","cappuccino",
+  "walked","walking","steps","step","thousand","hundred","three","four","five",
+  "so","this","morning","afternoon",
 ]);
 /**
  * Is the client telling us how they FEEL, not just what they ate? (2026-08-04, Slice 2.)
@@ -139,7 +146,9 @@ export function clarifyPlaceAsk(placeName: string): string {
 
 export function clarifyFoodAsk(words: string[]): string {
   const list = words.join(", ");
-  return `⚠️ I could not price *${list}* — not in the total yet.\n\nRoughly how much was it, and was it fried or grilled? Tell me and I'll add it properly.`;
+  // Branded / takeaway residue must not get a kitchen question (live 2026-08-19: McDonald's
+  // breakfast already logged, still asked "fried or grilled?").
+  return `⚠️ I could not price *${list}* — not in the total yet.\n\nWhat was that item, in a few words (e.g. "big breakfast" or "2 eggs and toast")? I'll add it.`;
 }
 
 /**
@@ -167,6 +176,10 @@ export function unloggedFoodNotice(message: string, loggedNames: string[], ask =
   const loggedJoined = loggedNames.join(" ").toLowerCase();
   if (place && !loggedJoined.includes(place.stem)) {
     return ask ? clarifyPlaceAsk(place.name) : unloggedPlaceNotice(message, loggedNames);
+  }
+  // Place meal already on the log — do not audit leftover geography words as missing food.
+  if (place && loggedJoined.includes(place.stem)) {
+    return "";
   }
   const words = unloggedFoodWords(message, loggedNames);
   if (words.length < 2) return "";               // one stray word is usually not a food
