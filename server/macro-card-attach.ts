@@ -157,8 +157,9 @@ function stripWrapQuotes(s: string): string {
 // so "Good start 👌" reached the founder as "Good start ☐" (2026-08-04 live, one hour after I
 // put them in). Emoji belong in the CHAT text, where WhatsApp renders them; on the card they
 // are a tofu box. His register survives without them — the words were always the voice.
-export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour()): string {
+export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), isPastDay = false): string {
   const r = (label: string) => rows.find(x => x.label === label);
+  if (isPastDay) return "Yesterday's log — today's plate is a separate day";
   const ratio = (x?: Row) => (x && x.target > 0 ? x.current / x.target : 0);
   const cal = r("Calories"), prot = r("Protein"), fat = r("Fat");
   const protLeft = prot ? Math.round(prot.target - prot.current) : 0;
@@ -430,6 +431,7 @@ function cardMarker(base: string, png: Buffer | Uint8Array): string {
 export function mealCard(opts: {
   firstName: string; mealName: string; rows: Row[]; isBulk: boolean; usesNumbers: boolean;
   hour?: number;
+  isPastDay?: boolean;
 }): AchievementCardData {
   const r = (label: string) => opts.rows.find(x => x.label === label);
   const prot = r("Protein");
@@ -447,9 +449,9 @@ export function mealCard(opts: {
 
   return {
     figure: opts.usesNumbers ? `${protSoFar}g` : verdict,
-    unit: opts.usesNumbers ? "protein today" : "so far today",
+    unit: opts.usesNumbers ? (opts.isPastDay ? "protein yesterday" : "protein today") : (opts.isPastDay ? "yesterday" : "so far today"),
     line: `${opts.firstName ? opts.firstName + ": " : ""}${opts.mealName} logged.`,
-    sub: nextMoveLine(opts.rows, opts.isBulk, opts.hour),
+    sub: nextMoveLine(opts.rows, opts.isBulk, opts.hour, !!opts.isPastDay),
   };
 }
 
@@ -475,12 +477,14 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
 
     const today = await todayRows(opts.user, false, opts.forDate);
     if (!today) return "";
+    const isPastDay = !!opts.forDate && isPastSastDay(opts.forDate);
     const card = mealCard({
       firstName: firstNameOf(opts.user),
       mealName: opts.mealName || "Meal",
       rows: today.rows,
       isBulk: today.isBulk,
       usesNumbers: getNumbersMode(opts.user) !== "low" && getGoalProfile(opts.user?.goalType).usesMacros,
+      isPastDay,
     });
     noteCardSent(opts.user?.id);
     return cardMarker(base, renderAchievementCard(card));
