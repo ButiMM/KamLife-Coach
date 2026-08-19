@@ -136,5 +136,19 @@ export function mustStayDeterministic(message: string, isQuestion?: boolean): bo
   // whose understand-first Constitution won that exact moment 2.3→9.0 in scoring. Those rewrites
   // are the ENGINE_LIVE=off fallback, which is the revert path, not the live one — and quietly
   // reversing a measured decision to make my own change visible would have been the wrong trade.
+  //
+  // STATED MEAL REPORT → deterministic food path (2026-08-19 live failure, 3×):
+  // ENGINE_LIVE sent "I had a McDonald's South African breakfast with a mocha" to freeform
+  // Coach K because "coach is in the room for logs" removed the old log→deterministic rule.
+  // The engine did not call LOG_MEAL; it invented "I don't have a meal logged / what did you
+  // eat / 1525 kcal". A meal REPORT is a write. Until branded/voice LOG_MEAL is proven under
+  // the engine, food-context owns these turns. Questions (? or classifier) still stay with
+  // the engine. Retro "yesterday's meals" above already returns false so the engine keeps them.
+  if (!/\?/.test(s)
+      && /\b(?:i\s+)?(?:ate|eaten|had|having|just\s+had|just\s+ate)\b/i.test(s)
+      && /\b(?:breakfast|lunch|dinner|supper|brunch|snack|meal|mcdonald|kfc|nando|spur|steers|wimpy|takeaways?|take\s*away|mocha|pap|chicken|eggs?|food|burger|pizza)\b/i.test(s)
+      && !/\b(?:what\s+(?:should|can|do)\s+i\s+eat|ideas?\s+for\s+(?:dinner|lunch)|meal\s+plan)\b/i.test(s)) {
+    return true;
+  }
   return DETERMINISTIC_ACTION.test(s);
 }
