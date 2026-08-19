@@ -181,9 +181,10 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), is
       : "That's the day wrapped — same again tomorrow";
   }
 
-  // Over the day's food — the move is about the NEXT meal, never guilt about the last one.
-  if (!isBulk && ratio(cal) > 1.05) {
-    return calLeft < -400 ? "Keep tonight light — protein and veg only" : "Keep the next meal simple — protein and veg";
+  // Calories already in — the card must not argue with "target reached" by selling another meal
+  // (live 18:08: Calorie target reached + "Next meal: protein and veg").
+  if (ratio(cal) >= 1) {
+    return "Calories are in — water from here, not another plate";
   }
   if (ratio(fat) > 1.25) return hour < 11 ? "Keep lunch simple — protein and veg" : "Next meal: protein and veg, keep it simple";
 
