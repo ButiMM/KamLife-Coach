@@ -22,7 +22,8 @@
  * Run: npx tsx script/check-architecture.ts   (wired into `npm test`)
  */
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
@@ -559,6 +560,30 @@ for (const rule of ONE_OWNER) {
     problems.push(`  ✗ nobody owns "${rule.question}" — expected ${rule.owner}`);
   } else if (owners.length > 1 || owners[0] !== rule.owner) {
     problems.push(`  ✗ "${rule.question}" is answered in ${owners.join(", ")} — only ${rule.owner} may.`);
+  }
+}
+
+// ── GUARD #10: A SUITE THAT STOPS RUNNING MUST FAIL FROM OUTSIDE ITSELF (2026-08-19) ─────────
+//
+// script/gap-tests.ts has been broken three times in two days by the same mechanism: an inserted
+// test lands above the harness or between the halves of a split comment, esbuild throws a
+// TransformError, and NOT ONE of its ~300 tests runs. Each time it reported nothing rather than
+// failing, and each time the repair was itself reverted in a merge.
+//
+// A suite cannot police its own liveness — if it will not parse, nothing inside it executes. So
+// the check lives here, in the guard that runs last: every suite in the npm test chain must at
+// least parse. Cheap (syntax only, no execution) and it survives a revert of the suite itself.
+{
+  const chain: string[] = (JSON.parse(readFileSync("package.json", "utf-8")).scripts?.test || "")
+    .split("&&").map((c: string) => (c.match(/script\/([\w-]+\.ts)/) || [])[1]).filter(Boolean);
+  for (const file of [...new Set(chain)]) {
+    const path = `script/${file}`;
+    if (!existsSync(path)) { problems.push(`  ✗ npm test runs ${path}, which does not exist.`); continue; }
+    const r = spawnSync("npx", ["esbuild", path, "--log-level=error", "--outfile=/dev/null"], { encoding: "utf-8" });
+    if (r.status !== 0) {
+      problems.push(`  ✗ ${path} DOES NOT PARSE — every test in it silently stops running.`);
+      problems.push(`    ${String(r.stderr || "").split("\n").filter(Boolean)[0] || "syntax error"}`);
+    }
   }
 }
 

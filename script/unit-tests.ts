@@ -7774,7 +7774,12 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.doesNotMatch(big, /\d/, "the layman's line must carry no numbers");
     // Pinned for the same reason as the line above — these two read the wall clock and went
     // red every evening. 19:00 is the "over on calories, still in the day" case they assert.
-    assert.match(nextMoveLine(rows(185, 185, 3400, 2862), false, 19), /lean|light/i);
+    // WAS /lean|light/ — "Keep tonight light, protein and veg only". That still sold a plate to
+    // someone already 538 kcal over, which is the 18:08 defect. The line must not offer food, and
+    // must not claim they are on target when they are past it.
+    const over = nextMoveLine(rows(185, 185, 3400, 2862), false, 19);
+    assert.doesNotMatch(over, /next meal|another plate|protein and veg|eat/i, over);
+    assert.match(over, /past the line/i, over);
     assert.match(nextMoveLine(rows(185, 185, 2800, 2862), false, 19), /done/i);
   });
 

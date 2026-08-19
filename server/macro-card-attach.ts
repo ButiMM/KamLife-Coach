@@ -182,9 +182,14 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), is
   }
 
   // Calories already in — the card must not argue with "target reached" by selling another meal
-  // (live 18:08: Calorie target reached + "Next meal: protein and veg").
+  // (live 18:08: Calorie target reached + "Next meal: protein and veg"). That fix was right and
+  // it blurred two different truths into one sentence: AT the line and 500 past it both read
+  // "Calories are in", which is the same self-contradiction one step along. Neither sells a
+  // plate; only one of them claims they are on target.
   if (ratio(cal) >= 1) {
-    return "Calories are in — water from here, not another plate";
+    return ratio(cal) > 1.05
+      ? "Past the line today — water from here, and we go again tomorrow"
+      : "Calories are in — water from here, not another plate";
   }
   if (ratio(fat) > 1.25) return hour < 11 ? "Keep lunch simple — protein and veg" : "Next meal: protein and veg, keep it simple";
 
