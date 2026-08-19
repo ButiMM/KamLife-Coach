@@ -37,6 +37,7 @@
 import { planCorrection, isMealDateMove } from "./food-identity-correction";
 import { isRetroactiveMeal, looksLikeQuestion } from "./utils";
 import { carriesFeelingClause } from "./unlogged-notice";
+import { parseMessyIntake } from "./understanding/messy-intake";
 
 export interface Fidelity {
   /** May the canonical replace the client's message? */
@@ -121,7 +122,21 @@ export function normalizerFidelity(original: string, canonical: string): Fidelit
     return { ok: false, reason: "original carries emotion; canonical drops it" };
   }
 
-  // 4. NOTHING INVENTED. Every claim in the canonical must trace to the client's own words.
+  // 4. NOTHING DROPPED FROM A MIXED NOTE (live 16:02 / 16:21). Classifier picks STEPS or
+  //    FOOD_LOG, rewrites to that one fact, and the other half never reaches a handler.
+  //    "walked 8000 and had pap" becoming "i walked 8000 steps" is a faithful-looking rewrite
+  //    that still destroys the meal. Invention check below cannot see a deletion.
+  const origIntents = parseMessyIntake(orig);
+  const canonIntents = parseMessyIntake(canon);
+  if (origIntents.hasFoodReport && !canonIntents.hasFoodReport) {
+    return { ok: false, reason: "original reports food; canonical drops the meal" };
+  }
+  if ((origIntents.hasStepsReport || origIntents.stepCount != null)
+      && !(canonIntents.hasStepsReport || canonIntents.stepCount != null)) {
+    return { ok: false, reason: "original reports steps; canonical drops the walk" };
+  }
+
+  // 5. NOTHING INVENTED. Every claim in the canonical must trace to the client's own words.
   for (const w of words(canonLower)) {
     if (STRUCTURE.has(w) || /^\d+$/.test(w)) continue;        // numbers have their own brake
     if (!traces(w, origLower)) return { ok: false, reason: `canonical invents "${w}"` };
