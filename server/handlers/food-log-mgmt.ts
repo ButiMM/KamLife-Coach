@@ -10,7 +10,7 @@ import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection, is
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine, scanForSAFoods, dropMeals } from "./food-scanner";
-import { parseIdentityCorrection, correctionCandidates, holdForReplacement, isMealDateMove, planCorrection, applyCorrection, type IdentityCorrection } from "../food-identity-correction";
+import { parseIdentityCorrection, correctionCandidates, holdForReplacement, isMealDateMove, planCorrection, applyCorrection, parseDropLoggedItem, type IdentityCorrection } from "../food-identity-correction";
 
 import { UNAVAILABLE_RE } from "../food-swaps";
 import { turnMutation, turnState } from "./chat-log";
@@ -245,6 +245,39 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   // Set by the referent branch below when two entries match a named-food removal equally
   // well; read by the numbered-list branch, which owns the "tell me which one" answer.
   let ambiguousRemoval = false;
+  // "that wasn't a big mac" — drop the invented item from the last meal, no "remove" keyword.
+  const dropName = parseDropLoggedItem(m);
+  if (dropName) {
+    const todayStart = sastDayStart();
+    const last = await db.select({
+      id: mealLogs.id, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt, rawMessage: mealLogs.rawMessage,
+    }).from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
+      .orderBy(desc(mealLogs.loggedAt))
+      .limit(1);
+    if (last.length === 0) return `Nothing logged today to correct.`;
+    const items = Array.isArray(last[0].items) ? [...(last[0].items as any[])] : [];
+    const before = items.length;
+    const kept = items.filter((i: any) => {
+      const n = String(i?.name || i?.foodName || "").toLowerCase();
+      return !n.includes(dropName) && !dropName.split(/\s+/).every(w => w.length > 2 && n.includes(w));
+    });
+    if (kept.length === before) {
+      return `I don't see "${dropName}" on the last meal, so I haven't changed the log. Reply "remove last" if the whole entry is wrong.`;
+    }
+    if (kept.length === 0) {
+      const rec = await dropMeals(user.id, [last[0].id], `drop-item:${dropName}`);
+      return `Removed ${dropName} — that was the whole last entry. Today now: ~${rec.calories} kcal | ~${rec.protein}g protein.`;
+    }
+    const kcal = kept.reduce((s: number, i: any) => s + (i.kcal || 0), 0);
+    const prot = Math.round(kept.reduce((s: number, i: any) => s + (i.protein || 0), 0));
+    await db.update(mealLogs).set({ items: kept, kcalInt: kcal, proteinInt: prot }).where(eq(mealLogs.id, last[0].id));
+    invalidateFoodTotalsCache(user.id);
+    const rec = await recomputeTodayFoodTotals(user.id);
+    turnMutation(`DROP_ITEM ${dropName} from last meal`, `[MEAL_CORRECTION] drop=${dropName}`);
+    return `Removed ${dropName} from the last meal. Today now: ~${rec.calories} kcal | ~${rec.protein}g protein.`;
+  }
+
   const hasMgmtKeyword = /\b(remove|delete|undo|clear|reset|wipe|scratch|take out|take off|didn.?t (have|eat)|did not (have|eat)|get rid of|cancel.*meal|wrong meal|mistake.*log|log.*mistake|not.*eat|never ate|no\s+just)\b/i.test(m);
   if (!hasMgmtKeyword) return null;
 
