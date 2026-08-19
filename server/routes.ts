@@ -1084,12 +1084,22 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
 
   // ---- ENGINE, second pass: the backstop for what the handlers above declined. Fail-open.
-  if (engineLive() && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+  // MUST also respect mustStayDeterministic (2026-08-19 live ×4): first pass skipped meal
+  // reports correctly, then this second pass handed them to freeform Coach K → "I don't have
+  // a meal logged / what did you eat". Stated meal reports stay off the engine entirely.
+  if (engineLive() && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
     if (engineReply !== null) return tag(engineReply, "🧠 new engine");
   }
 
   // MODEL_BRAIN path deleted 2026-07-30. Two paths answer a client: the engine, then gpt-block.
+  // Stated meal report that food-context could not finish: NEVER freeform invent macros.
+  if (messyIntake.mustForceFoodLog) {
+    const clarify = `Got it — you ate something. Send the items in one line (e.g. "McDonald's breakfast and a mocha") and I'll log it.`;
+    const { logChat: lc } = await import("./handlers/chat-log");
+    await lc(user.id, message, clarify, "FOOD_CLARIFY").catch(() => {});
+    return tag(clarify, "food force-clarify");
+  }
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
   const gptReply = await handleGptBlock({ phone, message, m, user, intentPromise });
   return tag(gptReply, "gpt fallback");
