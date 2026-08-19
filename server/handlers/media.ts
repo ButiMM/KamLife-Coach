@@ -36,7 +36,7 @@ import { buildFormCheckPrompt, extractFormExercise } from "../form-check-prompt"
 // photo saves immediately, timer resets, one job processes the whole set 15s after the last.
 const _progressBurst = new Map<string, ReturnType<typeof setTimeout>>();
 import { getTodayWorkoutState } from "../workout-state";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim, isAskingNotReporting , getDisplayName} from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim, isAskingNotReporting , getDisplayName, transcriptMustPassWhole } from "../utils";
 import { stripVoiceDenial } from "../reply-hygiene";
 import { detectVoiceLanguageNote } from "../voice-language";
 import { extractMealLabel } from "./food-context";
@@ -1415,7 +1415,11 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // 150, not 90 (2026-08-06): at 90 an ordinary "here is my day" note was summarised
       // before the coach saw it — hence "read the rest of my transcript". See
       // transcriptMustPassWhole, which refuses to condense anything asking more than one thing.
-      const forBrain = wordCount > 150 ? await condenseVoiceRamble(openai, transcribedText, user.id) : transcribedText;
+      // Messy-life notes (food+steps+feeling, yesterday meals, branded short meals) must
+      // reach food-context / compound handlers WHOLE. Condensing first was deleting the meal.
+      const forBrain = (wordCount > 150 && !transcriptMustPassWhole(transcribedText))
+        ? await condenseVoiceRamble(openai, transcribedText, user.id)
+        : transcribedText;
 
       voiceStage = "coach_reply";
       voiceStageStart = Date.now();
