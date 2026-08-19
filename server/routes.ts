@@ -893,8 +893,12 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
     seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
   };
+  // "walked about eight thousand" / "eight thousand steps" — voice notes often omit "steps"
   const wordThousandMatch = !stepNumMatch && !deviceStepMatch
-    ? m.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\s*(?:steps?|staps?)\b/i)
+    ? m.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\s*(?:steps?|staps?)?\b/i)
+      && /\b(steps?|staps?|walked|walking|walk)\b/i.test(m)
+      ? m.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\b/i)
+      : null
     : null;
   let stepReplyPart = ""; // stored so we can combine with food reply if needed
   // A step QUESTION ("is 8000 enough?") must reach GPT; an explicit step LOG ("walked 8000
@@ -1039,20 +1043,21 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     forceLog: messyIntake.mustForceFoodLog,
   });
   if (foodCtxResult !== null) {
-    // ONE TURN CAN CARRY TWO OUTCOMES (2026-08-10, Work Order 2). Journey 4 logged its food and
-    // then THIS LINE ended the turn, so the client got a logging acknowledgement and their actual
-    // question ("tonight there's a family thing… what do I do?") was never answered by anything.
-    //
-    // The food path stays exactly as deterministic as it was — by the time we are here it has
-    // already parsed and COMMITTED the meal, which is why nothing inside it changes. What changes
-    // is only who writes the reply: when the same message also carries a coaching question, the
-    // turn continues to Coach K, who has the raw message AND the committed food in state, and
-    // answers in one voice instead of a confirmation stapled to an answer.
-    //
-    // Narrow on purpose, so an ordinary log keeps its confirmation and its card: a question AND
-    // either several asks or an admission of how they feel. Reuses the existing predicates.
+    // PHASE 1.1 — messy-life multi-intent (2026-08-19): one note can carry food + steps + feeling.
+    // Food is already committed. Steps (if any) are in stepReplyPart inside foodCtxResult.
+    // Feeling must not be dropped, and must not hand the whole turn to freeform (invents state).
+    // Deterministic feel line keeps truth + humanity in one reply.
+    const hasFeeling = messyIntake.hasFeeling || carriesFeelingClause(message);
     const alsoAsksCoach = looksLikeQuestion(message)
-      && (isMultiPartAsk(message) || carriesFeelingClause(message));
+      && (isMultiPartAsk(message) || hasFeeling);
+    if (hasFeeling && !alsoAsksCoach) {
+      const feelLine =
+        "Heard you on how you're feeling — tired is allowed. You still logged; that counts. " +
+        "Next move stays small: one solid meal or a short walk when you can. No catch-up punishment.";
+      turnMutation(`MULTI_INTENT food+feeling deterministic`);
+      console.log(`[MULTI_INTENT] food logged + feeling acknowledged — "${message.slice(0, 70)}"`);
+      return `${foodCtxResult}\n\n${feelLine}`;
+    }
     if (!alsoAsksCoach) return foodCtxResult;
     turnMutation(`MULTI_INTENT food committed by the deterministic path; the question continues to Coach K`);
     console.log(`[MULTI_INTENT] food logged, coaching question preserved — "${message.slice(0, 70)}"`);
