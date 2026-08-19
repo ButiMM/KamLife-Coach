@@ -151,13 +151,31 @@ function spansClaimedByOtherFacts(message: string): string {
   return claimed.join(" ").toLowerCase();
 }
 
+/** Is this leftover word already on the log under another form (potatoes/potato, veggies/veg)? */
+function coveredByLogged(word: string, logged: string): boolean {
+  const w = (word || "").toLowerCase();
+  if (!w) return true;
+  if (logged.includes(w)) return true;
+  const stem = w.endsWith("oes") && w.length > 5 ? w.slice(0, -2)           // potatoes → potato
+    : w.endsWith("ies") && w.length > 5 ? w.slice(0, -3)                    // veggies → vegg
+    : w.endsWith("es") && w.length > 4 ? w.slice(0, -2)
+    : w.endsWith("s") && w.length > 4 ? w.slice(0, -1)
+    : w;
+  if (stem.length >= 4 && logged.includes(stem)) return true;
+  if (stem.length >= 3 && logged.includes(stem)) return true;
+  // Mixed veggies logged as "Mixed" / "Roast potato" — the leftover is the same plate.
+  if (/^vegg/.test(w) && /\b(veg|mixed)\b/.test(logged)) return true;
+  if (w === "roast" && /roast/.test(logged)) return true;
+  return false;
+}
+
 export function unloggedFoodWords(message: string, loggedNames: string[]): string[] {
   const logged = loggedNames.join(" ").toLowerCase();
   const otherFacts = spansClaimedByOtherFacts(message);
   const words = (message || "").toLowerCase()
     .replace(/[^a-z\s]/g, " ").split(/\s+/)
     .filter(w => w.length > 3 && !NOISE.has(w) && !otherFacts.includes(w));
-  const dropped = words.filter(w => !logged.includes(w.slice(0, Math.max(4, w.length - 1))));
+  const dropped = words.filter(w => !coveredByLogged(w, logged));
   return [...new Set(dropped)].slice(0, 4);
 }
 
