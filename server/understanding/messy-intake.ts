@@ -42,6 +42,8 @@ export interface MessyIntakeResult {
   /** Extracted step count when present (digit or word number). */
   stepCount: number | null;
   foodText: string | null;
+  /** Named yesterday / last night — log to that day, not today. */
+  isRetro: boolean;
 }
 
 const FOOD_VERB =
@@ -124,6 +126,7 @@ export function parseMessyIntake(message: string): MessyIntakeResult {
       mustForceFoodLog: false,
       stepCount: null,
       foodText: null,
+      isRetro: false,
     };
   }
 
@@ -182,6 +185,7 @@ export function parseMessyIntake(message: string): MessyIntakeResult {
     mustForceFoodLog,
     stepCount,
     foodText: foodText || (mustForceFoodLog ? text : null),
+    isRetro: /\b(yesterday|last night|last evening)\b/i.test(text),
   };
 }
 
