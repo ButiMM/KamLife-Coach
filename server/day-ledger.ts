@@ -19,7 +19,7 @@ import { foldLedgerRows, freshTodayWater, type DayLedger, type LedgerRow } from 
 import { estimateCarbsFat } from "./macro-estimate";
 import { effectiveMealLoggedAt } from "./utils";
 import { invalidatePatternCache } from "./cache";
-import { replaceHeldMeal, amendRecentMeal, planCorrection, applyCorrection } from "./food-identity-correction";
+import { replaceHeldMeal, amendRecentMeal, planCorrection, applyCorrection, isSameMealRetry } from "./food-identity-correction";
 import { turnMutation } from "./handlers/chat-log";
 
 export { foldLedgerRows } from "./day-ledger-core";
@@ -159,7 +159,7 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
   const dedupWindow = new Date(Date.now() - 4 * 60 * 1000);
   const rawSlice = params.rawMessage.slice(0, 1000);
   const effLoggedAt = effectiveMealLoggedAt(params.loggedAt, params.rawMessage, params.mealLabel);
-  const recentDup = await db.select({ id: mealLogs.id })
+  let recentDup = await db.select({ id: mealLogs.id })
     .from(mealLogs)
     .where(and(
       eq(mealLogs.userId, params.userId),
@@ -168,6 +168,22 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
       eq(mealLogs.rawMessage, rawSlice),
     ))
     .limit(1);
+  // Voice retries of the same takeaway (McDonald's breakfast x3) have different raw text
+  // so exact-match never fires — 127g protein from one breakfast. Treat same-chain items
+  // in the last 2 hours as one meal.
+  if (recentDup.length === 0) {
+    const retryWindow = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const recentRows = await db.select({ id: mealLogs.id, items: mealLogs.items })
+      .from(mealLogs)
+      .where(and(eq(mealLogs.userId, params.userId), gte(mealLogs.loggedAt, retryWindow)))
+      .limit(8);
+    const newerNames = correctedItems.map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean);
+    const hit = recentRows.find(r => {
+      const older = Array.isArray(r.items) ? (r.items as any[]).map(i => String(i?.name || i?.foodName || "")).filter(Boolean) : [];
+      return isSameMealRetry(older, newerNames);
+    });
+    if (hit) recentDup = [{ id: hit.id }];
+  }
 
   const patch = { rawMessage: rawSlice, kcalInt: effectiveKcal, proteinInt: effectiveProtein, carbsInt, fatInt, items: correctedItems, mealLabel: params.mealLabel };
   const itemNames = correctedItems.map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean);
