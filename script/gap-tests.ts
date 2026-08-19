@@ -33,7 +33,53 @@ const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handler
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
 const { explicitMealSlot } = await import("../server/understanding/actions");
 // NOTE: server/gpt.ts registers a module-scope setInterval (its food-cache sweeper), so a
-// script that imports it only exits because THIS file ends with an explicit process.exit(0).
+// script that imports it only exits because THIS file ends with an explicit 
+// ── Messy-life intake (product core journeys) ───────────────────────────────
+test("messy intake: McDonald's breakfast + mocha forces food log", () => {
+  const { parseMessyIntake } = require("../server/understanding/messy-intake");
+  const r = parseMessyIntake("So today I had a McDonald's South African breakfast with a mocha.");
+  assert.equal(r.mustForceFoodLog, true);
+  assert.equal(r.hasFoodReport, true);
+  assert.ok(r.foodText && /mcdonald|breakfast|mocha/i.test(r.foodText));
+});
+
+test("messy intake: mixed yesterday food + steps + feeling", () => {
+  const { parseMessyIntake } = require("../server/understanding/messy-intake");
+  const r = parseMessyIntake(
+    "Yesterday I ate pap and chicken for dinner, walked about eight thousand steps, I'm exhausted.",
+  );
+  assert.equal(r.hasFoodReport, true);
+  assert.equal(r.hasStepsReport, true);
+  assert.equal(r.hasFeeling, true);
+  assert.equal(r.stepCount, 8000);
+  assert.equal(r.mustForceFoodLog, true);
+});
+
+test("messy intake: pure feeling does not force food log", () => {
+  const { parseMessyIntake } = require("../server/understanding/messy-intake");
+  const r = parseMessyIntake("I'm just tired and stressed, work was a lot.");
+  assert.equal(r.hasFeeling, true);
+  assert.equal(r.mustForceFoodLog, false);
+  assert.equal(r.hasFoodReport, false);
+});
+
+test("isMessyLifeTranscript: short branded meal preserved whole", () => {
+  const { isMessyLifeTranscript } = require("../server/utils");
+  assert.equal(
+    isMessyLifeTranscript("I had a McDonald's breakfast with a mocha"),
+    true,
+  );
+});
+
+test("isMessyLifeTranscript: food + feeling is messy life", () => {
+  const { isMessyLifeTranscript } = require("../server/utils");
+  assert.equal(
+    isMessyLifeTranscript("I ate takeaways again and I feel like giving up"),
+    true,
+  );
+});
+
+process.exit(0).
 // That is why the selectModel coverage lives here and not in unit-tests.ts, which has no
 // such exit and hangs forever once gpt.ts is loaded into it.
 const { selectModel } = await import("../server/gpt");
