@@ -1179,7 +1179,32 @@ export function transcriptMustPassWhole(text: string): boolean {
   const openers = (t.toLowerCase().match(/\b(what|why|how|when|where|which|can i|should i|do i|is it|are they)\b/g) || []).length;
   if (openers >= 2) return true;
   const stackers = (t.toLowerCase().match(/\b(also|another thing|one more|and then|secondly|lastly|by the way|plus)\b/g) || []).length;
-  return stackers >= 1 && (questions + openers) >= 1;
+  if (stackers >= 1 && (questions + openers) >= 1) return true;
+  // Messy-life voice notes (product core): food + movement, food + feeling, yesterday's
+  // meals, multi-beat day stories. Condensing these destroys the facts the log path needs
+  // and is how "I had McDonald's breakfast and a mocha" never reached food-context whole.
+  if (isMessyLifeTranscript(t)) return true;
+  return false;
+}
+
+/**
+ * Two or more life signals in one note = the demographic we built for.
+ * Keep the full transcript; do not summarise away the meal, the steps, or the feeling.
+ */
+export function isMessyLifeTranscript(text: string): boolean {
+  const t = (text || "").toLowerCase();
+  if (!t) return false;
+  const words = t.split(/\s+/).filter(Boolean).length;
+  const food = /\b(ate|eaten|had|having|breakfast|lunch|dinner|supper|brunch|snack|meal|mcdonald|kfc|takeaway|pap|chicken|eggs?|mocha|coffee|food)\b/.test(t);
+  const steps = /\b(steps?|walked|walking|\d+\s*km|kilometers?|ran|run)\b/.test(t);
+  const feeling = /\b(tired|stressed|stress|feel(?:ing)?|felt|anxious|motivat|struggling|overwhelmed|depressed|hard day|rough day|not coping|drained)\b/.test(t);
+  const temporal = /\b(yesterday|last night|this morning|earlier today|then i|after that|before (?:that|gym|work))\b/.test(t);
+  const signals = [food, steps, feeling, temporal].filter(Boolean).length;
+  // Short branded meal reports still need the full string (scanner + GPT fallback).
+  if (food && /\b(mcdonald|kfc|nando|spur|steers|wimpy|mocha|breakfast|lunch|dinner)\b/.test(t) && words <= 40) return true;
+  if (signals >= 2) return true;
+  if (food && temporal) return true;
+  return false;
 }
 
 export function transcriptIsLogList(text: string): boolean {
