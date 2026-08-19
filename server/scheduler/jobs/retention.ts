@@ -1,175 +1,87 @@
 import {
-  db, users, chatHistory, stepLogs, workoutLogs, mealLogs, weightLogs,
-  eq, gte, and, lt, desc, sql,
-  sendWhatsApp, canSendProactive, recordProactiveSend,
-  getActiveClients, isPaused, dayStart, loadState, saveState,
-  TRAINING_SCHEDULES, loadProactiveState,
-  todaySAST, thisWeekUTC, claimProactive, claimDailySlot, isProactivePaused,
-  escalations,
+  db, eq, and, getActiveClients, isPaused, escalations,
 } from "../shared";
-import { decideProactive } from "../../one-action";
-import { selectVariantMessage, recordDelivery } from "../../ab";
-import { detectWeightStall } from "../../trajectory";
-import { getTrajectoryForUser } from "../../trajectory-report";
 
 /**
- * THE DECISION OWNER'S ASK, FOR THE CLIENT MORNING CANNOT REACH.
+ * RETENTION RECORDS. IT DOES NOT SPEAK.
  *
- * (2026-08-18, Issue #49 sweep — the gap the proactive trace surfaced and named.) morning.ts
- * returns on `daysSilent > 7`, but it returns AFTER loading the snapshot and running
- * decideProactive. So for exactly the clients who have drifted furthest, the coach worked out
- * what to ask for — INVESTIGATE, "log one meal today" — and threw it away, and retention sent a
- * generic "Reply *1* to see today's workout" instead: a training ask, to someone who has not
- * logged a meal in a week, chosen without reading their state at all.
+ * (2026-08-19, Cut 6.) This file used to hold three of the five voices that could talk to a
+ * client who had gone quiet: a 2-day note, a 7-day note, a 14-day note, plus a 30-day sign-off
+ * next door and a Tue/Thu fan-out below. Silence now has one owner — the ladder in one-action.ts,
+ * reached from runMorningCheckin, one rung per absence.
  *
- * Retention owns the >7-day client, so retention asks the decision owner. Falls back to the
- * original line on any failure — a client who is already drifting must not get silence because a
- * ledger read timed out.
+ * A second job that still SENT would not be a smaller raffle, it would be the same clock bug:
+ * DAILY_PROACTIVE_CAP is 1, morning runs at 04:00 UTC and this ran at 04:04, so which of them
+ * reached the client was decided by four minutes. Worse in the gaps — the ladder claims a rung
+ * once per absence, so on the days between rungs the budget was free and these notes went out
+ * *instead of nothing*, undoing the cadence that makes the ladder humane.
+ *
+ * What remains is the one thing the ladder cannot do: TELL A HUMAN. Two weeks of silence is a
+ * business event, not a coaching one, and the founder needs it in the escalation queue whether
+ * or not a message went out that morning.
+ *
+ * ACCOUNTING FOR WHAT WAS REMOVED, as required before any send is deleted:
+ *
+ *   2-day note     → the client is not gone at two days; they get the ordinary morning brief,
+ *                    which is what the daily budget was already giving them. Measured: morning
+ *                    claimed the slot at 04:00 and this was suppressed at 04:04 every time.
+ *   7-day note     → the ladder's week-1 rung, which asks for one meal instead of a workout.
+ *   14-day note    → the ladder's week-2 rung. The ESCALATION it carried is kept below, and is
+ *                    no longer gated behind a send budget — the old code created it inside
+ *                    `if (ok)`, so once the ladder consumed the day's slot the founder would
+ *                    have stopped being told. That is the defect this rewrite exists to prevent.
+ *   30-day sign-off→ the ladder's month-plus rung says the same thing ("just say hi", nothing is
+ *                    lost) and then goes quiet by construction, because every rung is claimed
+ *                    once per absence. The behaviour the sign-off announced is preserved; the
+ *                    announcement is not. Flagged explicitly rather than dropped silently.
  */
-async function reentryAsk(client: any): Promise<string> {
-  const FALLBACK = `Reply *1* to see today's workout. That is all — one session.`;
-  try {
-    const state = await loadProactiveState(client);
-    const decision = decideProactive(state, {
-      dreamGoal: client.dreamGoal,
-      biggestStruggle: client.biggestStruggle,
-      weeksOnProgramme: Math.max(0, (client.programmeWeek || 1) - 1),
-      sessionsTarget: Number(client.trainingDaysPerWeek) || 3,
-      calorieTarget: Number(client.calorieTarget) || 0,
-      proteinTarget: Number(client.proteinTarget) || 0,
-      stepsTarget: Number(client.stepsTarget) || 0,
-    });
-    console.log(`[RETENTION] ${client.id.slice(-6)} 7d decision=${decision.state} action=${decision.action.kind}`);
-    return decision.line || FALLBACK;
-  } catch (e) {
-    console.warn(`[RETENTION] decision unavailable for ${client.id?.slice(-6)}:`, (e as Error)?.message);
-    return FALLBACK;
-  }
-}
-
 export async function runSilenceDetection(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Silence detection");
+  console.log("[SCHEDULER] JOB: Silence detection (record only)");
   const clients = await getActiveClients();
   const now = Date.now();
-  const HOUR = 3_600_000;
+  const DAY = 86_400_000;
 
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
       if (!client.lastActiveAt) continue;
-      const name = client.name || "there";
-      const silenceMs = now - new Date(client.lastActiveAt).getTime();
-      const workouts = client.totalWorkoutsCompleted || 0;
-      const week = client.programmeWeek || 1;
+      const silentDays = (now - new Date(client.lastActiveAt).getTime()) / DAY;
+      if (silentDays < 14) continue;
 
-      const today = todaySAST();
-      if (silenceMs >= 14 * 24 * HOUR && silenceMs < 15 * 24 * HOUR) {
-        const ok = await claimProactive(client.id, "silence_14d", today);
-        if (ok) {
-          await sendWhatsApp(client.phoneNumber,
-            `${name}, two weeks. ${workouts} sessions logged. Week ${week} of your programme. All saved.\n\nI am not going anywhere. When you are ready, just say Hi — I will tell you exactly where you left off and what to do next. No judgement. No starting over.`
-          );
-          try {
-            const existingEsc = await db.select({ id: escalations.id })
-              .from(escalations).where(and(eq(escalations.userId, client.id), eq(escalations.status, "open"))).limit(1);
-            if (existingEsc.length === 0) {
-              await db.insert(escalations).values({
-                userId: client.id, reason: "14_day_silence", status: "open",
-                priority: "urgent", slaDeadline: new Date(Date.now() + 48 * HOUR),
-              });
-            }
-          } catch (flagErr) {
-            console.error(`[SCHEDULER] Failed to create escalation for ${client.phoneNumber}:`, flagErr);
-          }
-        }
-      } else if (silenceMs >= 7 * 24 * HOUR && silenceMs < 8 * 24 * HOUR) {
-        const ok = await claimProactive(client.id, "silence_7d", today);
-        if (ok) await sendWhatsApp(client.phoneNumber,
-          `${name}, a week since we spoke. ${workouts > 0 ? `You have ${workouts} sessions in the bank — that does not disappear.` : "Your programme is ready and waiting."} Life gets busy — I get it.\n\n${await reentryAsk(client)}`
-        );
-      } else if (silenceMs >= 48 * HOUR && silenceMs < 72 * HOUR) {
-        const ok = await claimProactive(client.id, "silence_2d", today);
-        // Silence is usually eating-shame, not busyness (2026-07-13 retention reports).
-        // Make the hard days SAFE to admit — that breaks the hide→avoid→quit spiral.
-        if (ok) await sendWhatsApp(client.phoneNumber, `${name}, two days quiet — and that's completely okay. Life happens. No judgement, ever. 💛\n\nNothing reset and nothing's lost — we just pick up exactly where you left off. And if you ate something off-plan, tell me anyway: I count everything, *especially* the hard days. That's the whole point of me.\n\nWhat did you eat today? One line is all I need.`);
-      }
+      // Idempotent on its own terms, deliberately: one OPEN escalation per client is the
+      // question a human actually answers, and it survives a redeploy without a claim row.
+      const open = await db.select({ id: escalations.id }).from(escalations)
+        .where(and(eq(escalations.userId, client.id), eq(escalations.status, "open"))).limit(1);
+      if (open.length > 0) continue;
+
+      await db.insert(escalations).values({
+        userId: client.id, reason: "14_day_silence", status: "open",
+        priority: "urgent", slaDeadline: new Date(now + 2 * DAY),
+      });
+      console.log(`[RETENTION] flagged ...${client.id.slice(-6)} — ${Math.floor(silentDays)}d silent, no message sent`);
     } catch (err) {
       console.error(`[SCHEDULER] Silence detection error — ${client.phoneNumber}:`, err);
     }
   }
 }
 
-/**
- * FADE DETECTION — still replying, stopped logging.
- *
- * (2026-07-28.) runSilenceDetection above keys on `lastActiveAt`, which EVERY inbound message
- * bumps. So a client who still answers "ok" twice a week while logging nothing for a fortnight
- * never trips it — and that is precisely the founder's churn pattern: "people come in excited,
- * then after a month or two they drop it off." They go passive long before they go quiet, and
- * the passive phase is the only window where a nudge still lands.
- *
- * Fires once per client per fortnight, respects every existing gate (pause, friction/life quiet
- * window, the shared daily budget). Silent clients are deliberately left to the silence job so
- * nobody gets both.
+/*
+ * runDeepSilenceEscalation — REMOVED (2026-08-19, Cut 6). Its entire body was one send at 30
+ * days: "I am not going to keep messaging you after this." It ran at 05:00 UTC, and by day 30
+ * the ladder's month rung had been claimed two days earlier, so the daily budget was free and
+ * this DID reach the client — the one place in the sweep where a second mouth genuinely won.
+ * See the accounting in the comment above: the ladder makes the promise true instead of saying it.
  */
-export async function runDeepSilenceEscalation(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Deep silence escalation");
-  const clients = await getActiveClients();
-  const now = Date.now();
-  const HOUR = 3_600_000;
 
-  for (const client of clients) {
-    if (isPaused(client)) continue;
-    try {
-      if (!client.lastActiveAt) continue;
-      const name = client.name || "there";
-      const silenceMs = now - new Date(client.lastActiveAt).getTime();
-      const workouts = client.totalWorkoutsCompleted || 0;
-      const week = client.programmeWeek || 1;
-
-      // 30-day final message — one send only, then Coach K stops proactively reaching out
-      if (silenceMs >= 30 * 24 * HOUR && silenceMs < 31 * 24 * HOUR) {
-        const ok = await claimProactive(client.id, "deep_silence_30d", todaySAST());
-        if (ok) await sendWhatsApp(client.phoneNumber,
-          `${name}, a month of silence. I am not going to keep messaging you after this. Your profile is saved, your programme is saved, everything is exactly as you left it. When life settles and you are ready — just say "back" and we go again. No judgment.`
-        );
-      }
-    } catch (err) {
-      console.error(`[SCHEDULER] Deep silence error — ${client.phoneNumber}:`, err);
-    }
-  }
-}
-
-export async function runComebackMessages(): Promise<void> {
-  console.log("[SCHEDULER] Running comeback messages...");
-  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runComebackMessages blocked"); return; }
-  const threeDaysAgo = new Date(Date.now() - 3 * 86400_000);
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
-
-  const silentClients = await db.select().from(users)
-    .where(and(
-      eq(users.onboardingState, "COMPLETE"),
-      eq(users.subscriptionStatus, "active"),
-      lt(users.lastActiveAt, threeDaysAgo),
-      gte(users.lastActiveAt, sevenDaysAgo)
-    ));
-
-  const comebacks = [
-    (name: string, wk: number) => `${name}, it has been a few days. Your programme is still here waiting. ${wk > 0 ? `You were on ${wk} workouts — do not let that go.` : ""} One session today changes the trajectory. What time are you training?`,
-    (name: string, wk: number) => `${name}. No judgment. Life happens. But your goals have not changed.\n\n${wk >= 3 ? `${wk} sessions completed — that work is still yours.` : "One workout today puts you back on track."}\n\nReply "menu" to see today's workout. That is all I am asking.`,
-    (name: string, wk: number) => `${name}, quick check — you good? Have not heard from you in a few days.\n\nYour programme is ready whenever you are. Just reply "menu" and we pick up exactly where you left off.\n\nNo reset. No guilt. Just forward.`,
-    (name: string, wk: number) => `${name}, noticed you've been quiet — no judgment, life gets busy.\n\n${wk >= 5 ? `${wk} sessions already done — that's real progress, worth picking back up.` : "One session today gets you moving again."}\n\nReply *done* after your next workout. I'll be here.`,
-  ];
-
-  let sent = 0;
-  for (const client of silentClients) {
-    const name = client.name?.split(" ")[0] || "there";
-    const wk = client.totalWorkoutsCompleted || 0;
-    const msg = comebacks[sent % comebacks.length](name, wk);
-    // Once per day per client — DB-backed so a recycle on a comeback day can't re-send.
-    if (!(await claimProactive(client.id, "comeback", todaySAST()))) continue;
-    await sendWhatsApp(client.phoneNumber, msg);
-    sent++;
-  }
-  console.log(`[SCHEDULER] Comeback messages sent: ${sent}`);
-}
+/*
+ * runComebackMessages — REMOVED (2026-08-19, Cut 6).
+ *
+ * Four rotating templates for a client silent 3–7 days, on Tuesdays and Thursdays, picked by
+ * `sent % 4` — that is, by this client's POSITION IN THE LOOP. Two clients in identical states
+ * got different messages because of the order the database returned them.
+ *
+ * Every one of the four asked for TRAINING ("What time are you training?", "Reply *menu* to see
+ * today's workout", "Reply *done* after your next workout") from someone who has not opened the
+ * app in most of a week. The ladder asks such a client for ONE MEAL, and asks for less the longer
+ * they have been gone.
+ */

@@ -1,18 +1,65 @@
 import {
   db, users, chatHistory, stepLogs, workoutLogs, mealLogs, escalations,
   eq, gte, and, lt, desc, sql, asc,
-  sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot,
+  sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot, claimProactive,
   getActiveClients, isPaused, dayStart, getYesterdayLogs,
   TRAINING_SCHEDULES, programmeDaysSince, loadProactiveState,
   todaySAST,
 } from "../shared";
 import { auditStoredTargets, auditStepsTarget } from "../../targets";
 import { getNumbersMode } from "../../numbers-mode";
-import { selectVariantMessage, recordDelivery } from "../../ab";
-import { sendWhatsAppButtons } from "../../twilio-interactive";
+// The `re_engagement` A/B went out with the button menu (2026-08-19, Cut 6). Worth recording why
+// nothing is lost: it called selectVariantMessage and then DISCARDED the text it chose
+// (`const { text: _variantMsg }`) before sending the buttons unchanged. Every arm sent the same
+// message, so the experiment measured nothing. Deleting the send deletes an empty measurement.
 import { morningClosingLine, composeMorning, yesterdayObservation } from "../../morning-message";
 import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
-import { decideProactive } from "../../one-action";
+import { chooseAction, decideProactive, formatOneAction } from "../../one-action";
+
+/**
+ * WHAT WE SAY TO SOMEONE WHO HAS GONE — decided by the ladder, not written here.
+ *
+ * (2026-08-19, Cut 6.) There were five wordings for this in the codebase and the one that
+ * actually ran was chosen by which cron minute reached the client first, under a daily cap of
+ * one. That is a raffle, not a coach. `chooseAction` already holds the real ladder — days, then
+ * weeks, then a month, with the ask getting SMALLER and the absolution more explicit the longer
+ * they have been gone — and it was unreachable from this job. This is the call it never had.
+ *
+ * Fails soft, and the fallback is still the ladder: if the ledger cannot be read we ask the same
+ * function from the one fact we already hold. A client who is drifting must not get silence
+ * because a query timed out, and they must not get a sixth hand-written string either.
+ */
+async function silenceAsk(client: any, daysSilent: number): Promise<string> {
+  const firstName = client.name?.split(" ")[0] || undefined;
+  const profile = {
+    dreamGoal: client.dreamGoal,
+    biggestStruggle: client.biggestStruggle,
+    weeksOnProgramme: Math.max(0, (client.programmeWeek || 1) - 1),
+    sessionsTarget: Number(client.trainingDaysPerWeek) || 3,
+    calorieTarget: Number(client.calorieTarget) || 0,
+    proteinTarget: Number(client.proteinTarget) || 0,
+    stepsTarget: Number(client.stepsTarget) || 0,
+  };
+  try {
+    const state = await loadProactiveState(client);
+    const decision = decideProactive(state, profile, { hour: 7 });
+    console.log(`[MORNING] ${client.id.slice(-6)} silent=${daysSilent}d decision=${decision.state} action=${decision.action.kind}`);
+    return formatOneAction(decision.action, firstName);
+  } catch (e) {
+    console.warn(`[MORNING] silence decision unavailable for ${client.id?.slice(-6)}:`, (e as Error)?.message);
+    // Only the silence rung is reachable from here — `daysSinceAnyLog >= 3` is the first branch
+    // chooseAction tests, and a client silent three days cannot have logged inside them. The
+    // remaining fields are neutral inputs it will never read, not a second opinion about the day.
+    return formatOneAction(chooseAction({
+      firstName, goal: (client.goalType as any) || "general",
+      dreamGoal: client.dreamGoal, biggestStruggle: client.biggestStruggle,
+      weeksOnProgramme: profile.weeksOnProgramme,
+      daysSinceAnyLog: daysSilent, daysSinceWeighIn: 0, loggedToday: false,
+      proteinPct: 1, caloriePct: 1, sessionsThisWeek: 0, sessionsTarget: 0,
+      stepsToday: 0, stepsTarget: 0, hour: 7,
+    }), firstName);
+  }
+}
 
 export async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
@@ -41,7 +88,10 @@ export async function runMorningCheckin(): Promise<void> {
     const daysSilent = client.lastActiveAt
       ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
       : 0;
-    if (daysSilent > 7) continue;
+    // NO `daysSilent > 7` SKIP (2026-08-19, Cut 6). It used to `continue` here, which is why the
+    // ladder's own month-plus rung — "Just say hi. That's the whole ask today." — could never run
+    // from this job: the client it was written for was dropped four hundred lines above the call.
+    // The silence branch below now owns every absence, so nothing falls through to the brief.
 
     // ---- TARGET SANITY AUDIT (2026-07-13) — a wrong calorie/protein target must not
     // survive 24h. A tester carried 2,346 kcal that matched NO input combination of our
@@ -91,25 +141,31 @@ export async function runMorningCheckin(): Promise<void> {
         console.error(`[TARGET_SANITY] bounds fix ${client.phoneNumber.slice(-4)}:`, JSON.stringify(fixes));
       }
     } catch (boundsErr) { console.error("[TARGET_SANITY] bounds check failed:", boundsErr); }
-    if (client.workSchedule === "night_shift") continue;
-
+    // ── SILENCE HAS ONE OWNER ────────────────────────────────────────────────────────────────
+    //
+    // (2026-08-19, Cut 6.) Deliberately ABOVE the night-shift skip below. That skip exists
+    // because a 6am brief is the wrong message for someone who got home at 5am — it is a
+    // statement about the BRIEF, not about whether a client who has vanished ever hears from us.
+    // Under the old order a night-shift client could go quiet forever in total silence.
     if (daysSilent >= 3) {
-      if (client.awaitingInputType !== "comeback" && await claimDailySlot(client.id, "morning")) {
-        const name = client.name || "there";
-        const reEngageBody = `${name}, ${daysSilent} days. Life happens — no lecture from me.\n\nTell me which one fits right now:`;
-        const reEngageButtons = [
-          "I'm back, let's go",
-          "I need a simpler plan",
-          "Busy — check in next week",
-        ];
-        const comebBackMsg = `${reEngageBody}\n\n*1* — ${reEngageButtons[0]}\n*2* — ${reEngageButtons[1]}\n*3* — ${reEngageButtons[2]}\n\nOne reply is all I need.`;
-        const { text: _variantMsg, assignmentId } = await selectVariantMessage(client.id, "re_engagement", comebBackMsg);
-        await sendWhatsAppButtons(client.phoneNumber, reEngageBody, reEngageButtons);
-        if (assignmentId !== null) await recordDelivery(assignmentId);
-        await db.update(users).set({ awaitingInputType: "comeback" }).where(eq(users.id, client.id));
+      // ONE ASK PER RUNG PER ABSENCE. The old branch sent a three-button menu — three decisions
+      // for someone whose problem is that deciding got too expensive — and it was capped at one
+      // send ever, by `awaitingInputType`. Sending the ladder daily instead would be worse: a
+      // client gone a month would get twenty-eight messages into an empty room.
+      //
+      // So the rung is the dedupe key and the absence is the window: the date they last spoke.
+      // That yields at most five sends across a month — 3–6 days, week 1, week 2, week 3,
+      // month-plus — each one smaller than the last, and then quiet. It resets by construction
+      // when they come back and lapse again, because the window is a new date.
+      const rung = Math.min(4, Math.floor(daysSilent / 7));
+      const absence = new Date(client.lastActiveAt as any).toISOString().slice(0, 10);
+      if (await claimProactive(client.id, `silence_w${rung}`, absence)) {
+        await sendWhatsApp(client.phoneNumber, await silenceAsk(client, daysSilent));
       }
       continue;
     }
+
+    if (client.workSchedule === "night_shift") continue;
 
     try {
       // THE SAME SNAPSHOT THE ADAPTIVE JOB READ FIFTEEN MINUTES AGO (2026-08-18, Issue #49

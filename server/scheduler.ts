@@ -12,7 +12,7 @@ import { deliveryStats, sendWhatsApp, sendWhatsAppTemplate, loadState, saveState
 import { runMorningCheckin } from "./scheduler/jobs/morning";
 import { runAdaptiveTargets } from "./scheduler/jobs/adaptive";
 import { runEveningAccountability } from "./scheduler/jobs/evening";
-import { runSilenceDetection, runDeepSilenceEscalation, runComebackMessages } from "./scheduler/jobs/retention";
+import { runSilenceDetection } from "./scheduler/jobs/retention";
 import { runSundayWeeklyReport } from "./scheduler/jobs/weekly";
 import { runPhaseAdvancement } from "./scheduler/jobs/programme";
 import { runEarlyOnboarding, runStepSyncCatchup } from "./scheduler/jobs/onboarding";
@@ -208,9 +208,13 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("30 7 * * *",   () => safe("runTrialCountdown",          runTrialCountdown, { cron: "30 7 * * *" }),           { timezone: "UTC" }); // 9:30am SAST — trial Day 2/5/7 conversion
 
   // ── Every 12 hours ────────────────────────────────────────────────────────
-  cron.schedule("4 4,16 * * *",  () => safe("runSilenceDetection",    runSilenceDetection, { cron: "4 4,16 * * *" }),    { timezone: "UTC" });
-  // Fade: still replying, stopped logging — the churn the silence job structurally cannot see.
-  cron.schedule("0 5,18 * * *",  () => safe("runDeepSilenceEscalation", runDeepSilenceEscalation, { cron: "0 5,18 * * *" }), { timezone: "UTC" });
+  // RECORD ONLY (2026-08-19, Cut 6) — this job no longer messages anyone. It flags a two-week
+  // absence into the escalation queue for a human. Once a day is plenty for a queue entry, and
+  // moving it off the 04:04 slot removes the last job that could race morning for the client's
+  // phone by four minutes.
+  cron.schedule("30 9 * * *",    () => safe("runSilenceDetection",    runSilenceDetection, { cron: "30 9 * * *" }),    { timezone: "UTC" }); // 11:30am SAST
+  // runDeepSilenceEscalation is gone with its 30-day send — the ladder's month rung says it and
+  // then goes quiet, which makes the promise true rather than announced.
 
   // ── Every minute — fire user-set reminders whose time has come ─────────────
   cron.schedule("* * * * *",     () => safe("runDueReminders",       runDueReminders, { cron: "* * * * *" }),             { timezone: "UTC" });
@@ -241,14 +245,11 @@ export async function initScheduler(): Promise<void> {
   }, { timezone: "UTC" });
 
   // ── Weekly — Tuesday & Thursday ───────────────────────────────────────────
-  cron.schedule("0 8 * * 2,4",   async () => {                        // 10am SAST comeback
-    try {
-      const today = todaySAST();
-      if (hasRunToday("comeback_msg", today)) return;
-      saveState("comeback_msg", today);
-      await runComebackMessages();
-    } catch (e) { console.error("[SCHEDULER] runComebackMessages failed:", e); }
-  }, { timezone: "UTC" });
+  // The Tue/Thu comeback fan-out is GONE (2026-08-19, Cut 6). Silence has one owner now — the
+  // ladder in one-action.ts, reached from runMorningCheckin, every day rather than twice a week.
+  // A second job for the same absence could only ever compete for the same one daily slot, and
+  // which of them won was decided by the clock: 04:00 UTC beats 08:00 UTC, so this one's four
+  // templates mostly never sent at all.
 
   // ── Weekly — Wednesday ────────────────────────────────────────────────────
 

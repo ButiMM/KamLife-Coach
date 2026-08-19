@@ -2633,9 +2633,12 @@ test("proactive decision: re-entry is not met with a calorie adjustment", () => 
     return /withAdapt\(/.test(l!);
   };
   assert.equal(carriesAdapt("your coaching pause ends tomorrow"), false, "paused client");
-  assert.equal(carriesAdapt("days. Life happens"), false, "3-day re-engagement prompt");
-  // And the >7-day skip returns before any of this is computed.
-  assert.ok(/daysSilent > 7\) continue;/.test(morning), "the long-silence skip still returns early");
+  // The re-engagement send is now the ladder's one ask (Cut 6) rather than a button menu written
+  // here. The exclusion is unchanged and matters more, not less: someone coming back after weeks
+  // away must not have their first contact be an explanation of a calorie change.
+  assert.equal(carriesAdapt("await silenceAsk(client, daysSilent)"), false, "the silent client");
+  // The >7-day skip that used to sit above all of this is gone — see the cut6 gates below. It was
+  // the reason the ladder's month rung could never run. Absence is now handled, not skipped.
 });
 
 // ── ONE COMPOSER FOR THE MORNING MESSAGE ────────────────────────────────────────────────────
@@ -2721,8 +2724,12 @@ test("morning: the empty-yesterday client goes down the same path as everyone el
   // needed the most coaching got the least.
   assert.ok(!/Send me your breakfast right now/.test(code), "the parallel empty-yesterday brief is gone");
   assert.ok(/composeMorning\(\{/.test(code), "one composer");
-  assert.equal((code.match(/sendWhatsApp\(/g) || []).length, 2,
-    "two sends left: the pause notice and the composed brief");
+  // A count, on purpose: this is how many mouths this job has. It went 2 → 3 in Cut 6 and the
+  // third is a REPLACEMENT, not an addition — the button menu it supersedes went out through
+  // sendWhatsAppButtons, which this counter never saw. Net across the repo the cut removes sends.
+  assert.equal((code.match(/sendWhatsApp\(/g) || []).length, 3,
+    "three sends: the pause notice, the ladder's one ask, and the composed brief");
+  assert.ok(!/sendWhatsAppButtons\(/.test(code), "and none of them is a menu");
   // The one thing that branch really owned — the streak shield, which WRITES — must survive.
   assert.ok(/streak_shield:\$\{currentMonth\}/.test(code), "the monthly streak shield still writes");
   assert.ok(/shieldLine \|\| workoutLine/.test(code), "…and still speaks, as an input");
@@ -2778,13 +2785,22 @@ test("sweep: sickToday and sickCoveredYesterday have one owner", async () => {
 });
 
 test("sweep: the >7-day client's decision is used, not computed and discarded", () => {
-  const retention = readFileSync("server/scheduler/jobs/retention.ts", "utf-8");
-  // morning.ts returns on daysSilent > 7 AFTER running decideProactive, so the coach worked out
-  // what to ask for and threw it away — and retention sent "Reply *1* for today's workout": a
-  // training ask, to someone who has not logged a meal in a week, chosen without reading state.
-  assert.ok(/decideProactive\(state,/.test(retention), "retention asks the decision owner");
-  assert.ok(/reentryAsk\(client\)/.test(retention), "…and the 7-day message uses its answer");
-  assert.ok(/return decision\.line \|\| FALLBACK/.test(retention),
+  // ORIGINAL DEFECT (Issue #49 sweep): morning.ts returned on `daysSilent > 7` AFTER running
+  // decideProactive, so the coach worked out what to ask for and threw it away — and retention
+  // sent "Reply *1* for today's workout": a training ask, to someone who had not logged a meal in
+  // a week, chosen without reading their state at all.
+  //
+  // The sweep fixed the WORDING by having retention ask the decision owner too. Cut 6 fixed the
+  // CAUSE: the skip is gone, so morning itself reaches the >7-day client and retention has no
+  // message to word. Same invariant, moved to the owner — asserted here against morning, which is
+  // where the decision now happens, and reinforced by the cut6 gates below.
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  assert.ok(!/if \(daysSilent > 7\) continue;/.test(morning), "the client is no longer discarded");
+  assert.ok(/const decision = decideProactive\(state, profile/.test(morning),
+    "morning asks the decision owner for the client it used to drop");
+  assert.ok(/return formatOneAction\(decision\.action, firstName\)/.test(morning),
+    "…and the message IS its answer, not a second wording of it");
+  assert.ok(/return formatOneAction\(chooseAction\(\{/.test(morning),
     "a drifting client must not get silence because a ledger read timed out");
 });
 
@@ -3320,6 +3336,112 @@ test("hunger gauntlet: HUNGER_LLM=1 with no credential exits 2 and says which va
     "a live run must never fall back to the offline placeholder");
 });
 
+
+// ── CUT 6: SILENCE HAS ONE OWNER ────────────────────────────────────────────────────────────
+// Before this, five places decided what to say to a client who had gone quiet, and which one
+// spoke was settled by cron minute under DAILY_PROACTIVE_CAP = 1 — 04:00 beat 04:04 beat 08:00.
+// Two clients in the same state got different messages depending on the clock and on their
+// position in a database result set. These gates exist so that cannot come back.
+
+test("cut6: the ladder is reachable for a client who has actually vanished", async () => {
+  const { chooseAction } = await import("../server/one-action");
+  const gone = (days: number) => chooseAction({
+    goal: "fat_loss" as any, weeksOnProgramme: 4, daysSinceAnyLog: days,
+    daysSinceWeighIn: 2, loggedToday: false, proteinPct: 1, caloriePct: 1,
+    sessionsThisWeek: 3, sessionsTarget: 3, stepsToday: 9000, stepsTarget: 8000, hour: 7,
+  });
+  // The rungs the morning job now dedupes against. Each must be come_back — if any of these
+  // fell through to "train"/"protein" the job would be coaching an empty room.
+  for (const d of [3, 6, 7, 13, 14, 21, 30, 90]) {
+    assert.equal(gone(d).kind, "come_back", `${d} days silent must still be come_back`);
+  }
+  // AND THE ASK MUST SHRINK. A month gone is not a bigger version of three days gone — it is
+  // someone who has decided they failed, and the only ask small enough is to say hi.
+  assert.match(gone(30).todo, /say hi/i, "month-plus is the smallest ask on the ladder");
+  assert.ok(gone(30).todo.length < gone(3).todo.length, "the ask gets smaller, not louder");
+  assert.match(gone(30).why + gone(3).why, /haven't blown anything|nothing is lost/i,
+    "absolution is explicit — silence is usually shame, not busyness");
+});
+
+test("cut6: morning runs the ladder for every absence — no skip, no menu", () => {
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  // The bug this cut existed to kill: the >7-day client was dropped ~370 lines ABOVE the
+  // decideProactive call, so the ladder's month rung could never run from this job.
+  assert.ok(!/if \(daysSilent > 7\) continue;/.test(morning),
+    "a client gone more than a week must not be skipped before the decision is made");
+  assert.ok(/if \(daysSilent >= 3\) \{/.test(morning), "silence is still handled here");
+  assert.ok(/await silenceAsk\(client, daysSilent\)/.test(morning),
+    "…and the wording comes from the ladder, not from this job");
+  // Three buttons is three decisions, for someone whose problem is that deciding got expensive.
+  assert.ok(!/sendWhatsAppButtons/.test(morning), "the re-engagement button menu is gone");
+  assert.ok(!/I'm back, let's go|need a simpler plan/i.test(morning),
+    "no hand-written re-engagement wording may live in a job again");
+});
+
+test("cut6: one ask per rung per absence — never a daily drip", () => {
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  // The rung must be derived the SAME WAY the ladder derives its wording, or the dedupe key and
+  // the message drift apart and a client hears week 2's line twice.
+  assert.ok(/Math\.min\(4, Math\.floor\(daysSilent \/ 7\)\)/.test(morning),
+    "the rung is floor(days/7) capped at the ladder's own month-plus band");
+  assert.ok(/claimProactive\(client\.id, `silence_w\$\{rung\}`/.test(morning),
+    "the rung is the dedupe key, so each rung speaks once");
+  // THE WINDOW IS THE ABSENCE, NOT THE DAY. todaySAST() here would send every morning — 28
+  // messages to someone who has been gone a month.
+  assert.ok(/const absence = new Date\(client\.lastActiveAt as any\)\.toISOString\(\)\.slice\(0, 10\)/.test(morning),
+    "the window is the date they last spoke, so it resets when they return and lapse again");
+  assert.ok(!/claimProactive\(client\.id, `silence_w\$\{rung\}`, todaySAST\(\)\)/.test(morning),
+    "a per-day window would turn the ladder into a daily drip");
+});
+
+test("cut6: a night-shift client who vanishes still hears from us", () => {
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  const silence = morning.indexOf("if (daysSilent >= 3) {");
+  const nightShift = morning.indexOf('if (client.workSchedule === "night_shift") continue;');
+  assert.ok(silence > 0 && nightShift > 0, "both branches must exist");
+  // The night-shift skip is a statement about the 6am BRIEF being wrong for them, not about
+  // whether someone who has disappeared is ever contacted. Under the old order they could go
+  // quiet forever in total silence.
+  assert.ok(silence < nightShift, "silence is decided before the brief's night-shift skip");
+});
+
+test("cut6: the Tuesday/Thursday comeback fan-out is gone", () => {
+  // Comments are stripped: the removal note in retention.ts quotes the wording it deleted, and a
+  // gate that cannot tell a tombstone from live code is a gate that blocks its own explanation.
+  const strip = (s: string) => s.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  const retention = strip(readFileSync("server/scheduler/jobs/retention.ts", "utf-8"));
+  const scheduler = strip(readFileSync("server/scheduler.ts", "utf-8"));
+  assert.ok(!/export async function runComebackMessages/.test(retention),
+    "a second job for the same absence is a second mouth");
+  assert.ok(!/runComebackMessages\(\)/.test(scheduler), "and it is unscheduled, not just unexported");
+  // It picked its wording with `sent % comebacks.length` — the client's position in the result
+  // set decided what the coach said to them.
+  assert.ok(!/comebacks\[sent % comebacks\.length\]/.test(retention),
+    "no message may be chosen by a loop counter");
+  // Every one of its four templates asked a week-absent client for a TRAINING session.
+  assert.ok(!/What time are you training\?/.test(retention),
+    "we do not ask someone who has been gone a week what time they are training");
+});
+
+test("cut6: retention records, it does not speak", () => {
+  const strip = (s: string) => s.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  const retention = strip(readFileSync("server/scheduler/jobs/retention.ts", "utf-8"));
+  const scheduler = strip(readFileSync("server/scheduler.ts", "utf-8"));
+  // THE POINT OF THE CUT. A second job that still sends is not a smaller raffle — it is the same
+  // clock bug, and it is worst in the gaps BETWEEN rungs, where the ladder is deliberately quiet
+  // and the daily budget is therefore free.
+  assert.ok(!/sendWhatsApp/.test(retention), "no send may live in retention");
+  assert.ok(!/claimProactive/.test(retention), "and nothing here may consume the client's daily slot");
+  assert.ok(!/runDeepSilenceEscalation/.test(scheduler), "the 30-day sign-off went with it");
+  // What it must still do: tell a human. Two weeks of silence is a business event, not a
+  // coaching one, and it must reach the founder whether or not a message went out that morning.
+  assert.ok(/reason: "14_day_silence"/.test(retention), "a fortnight of silence still reaches the founder");
+  // AND THE RECORD MUST NOT BE GATED ON A SEND. The old code created the escalation inside
+  // `if (ok)`, so once the ladder consumed the day's slot the founder would have stopped being
+  // told. That defect is why this job was rewritten rather than merely muted.
+  const flagIdx = retention.indexOf('reason: "14_day_silence"');
+  assert.ok(!/if \(ok\)/.test(retention.slice(0, flagIdx)), "the escalation is not behind a send budget");
+});
 
 // ── A TARGET IS NOT AN ATTRIBUTION ──────────────────────────────────────────────────────────
 // Cut 3 made the verifier binding. This rule then read every step figure in a reply as a claim
