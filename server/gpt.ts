@@ -5,7 +5,7 @@ import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { getPhaseNames } from "./programme";
 import { calculateTargets } from "./targets";
-import { getDisplayName, sastDayStart, findFabricatedComposites } from "./utils";
+import { getDisplayName, sastDayStart, findFabricatedComposites, findUngroundedFoodItems } from "./utils";
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
 import { verifyBrainReply } from "./brain/reply-verifier";
@@ -697,7 +697,7 @@ export async function gptFoodFallback(
           type: "function",
           function: {
             name: "log_food",
-            description: "Extract nutritional data from a user's food description. Use South African food names where applicable. If the message is NOT about food at all, set is_food to false and leave foods empty.",
+            description: "Extract nutritional data ONLY for foods the user explicitly named or clearly described. Never add a different menu item (e.g. do not add Big Mac when they said South African breakfast). Use South African food names where applicable. If the message is NOT about food at all, set is_food to false and leave foods empty.",
             parameters: {
               type: "object",
               properties: {
@@ -812,9 +812,15 @@ Be precise — never round to nearest 100. Always use SA food names (pap not pol
     // ANTI-FABRICATION GUARD — the model sometimes merges a listed carb with an UNLISTED protein
     // ("rice" → "rice and chicken"), inventing protein. Drop phantom composites before totalling so
     // an inflated number is never logged; the caller surfaces `dropped` to re-send what was left out.
-    const dropped = findFabricatedComposites(message, allFoods);
-    const foods = dropped.length > 0 ? allFoods.filter(f => !dropped.includes(f.name)) : allFoods;
-    if (foods.length === 0) return null; // whole "meal" was a single fabricated composite
+    const droppedComposites = findFabricatedComposites(message, allFoods);
+    let foods = droppedComposites.length > 0 ? allFoods.filter(f => !droppedComposites.includes(f.name)) : allFoods;
+    const droppedUngrounded = findUngroundedFoodItems(message, foods);
+    if (droppedUngrounded.length > 0) {
+      console.warn(`[gptFoodFallback] dropped ungrounded item(s): ${droppedUngrounded.join(", ")} — message: "${message.slice(0, 80)}"`);
+      foods = foods.filter(f => !droppedUngrounded.includes(f.name));
+    }
+    const dropped = [...droppedComposites, ...droppedUngrounded];
+    if (foods.length === 0) return null; // whole "meal" was fabricated / ungrounded
 
     const totalKcal = foods.reduce((s, f) => s + f.kcal, 0);
     const totalProtein = foods.reduce((s, f) => s + f.protein_g, 0);
