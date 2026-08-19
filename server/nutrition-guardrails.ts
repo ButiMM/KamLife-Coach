@@ -49,8 +49,28 @@ export interface NutritionDayInput {
  * crossed — or null. "Crossing" semantics (count === threshold) so it fires ONCE, on the log that
  * tips it, never nagging every subsequent log. Priority runs most-health-critical first.
  */
+function collapseFoodKey(s: string): string {
+  const t = (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!t) return "";
+  // Repeat logs of the same chain (retries / re-sends) are ONE meal, not a pattern.
+  if (/\b(mcdonald|macdonald|maccas)\b/.test(t)) return "place:mcdonald";
+  if (/\bkfc\b/.test(t)) return "place:kfc";
+  if (/\bnando/.test(t)) return "place:nando";
+  if (/\bsteers\b/.test(t)) return "place:steers";
+  if (/\bwimpy\b/.test(t)) return "place:wimpy";
+  return t.slice(0, 96);
+}
+
 export function assessNutritionStandards(input: NutritionDayInput): string | null {
-  const foods = (input.todayFoods || []).map(f => f || "");
+  const raw = (input.todayFoods || []).map(f => f || "");
+  const seen = new Set<string>();
+  const foods: string[] = [];
+  for (const f of raw) {
+    const k = collapseFoodKey(f);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    foods.push(f);
+  }
   const count = (re: RegExp) => foods.filter(f => has(f, re)).length;
   const energy = count(ENERGY_DRINK_RE);
   const coffee = count(COFFEE_RE);
@@ -86,7 +106,7 @@ export function assessNutritionStandards(input: NutritionDayInput): string | nul
   }
   // 5. Fried / takeaway repeating. No shame — but three in a day isn't a plate, it's a pattern.
   if (fried === 3) {
-    return "_That's a lot of fried/takeaway today — tasty, but heavy on the hidden fat and salt. No guilt, it's logged. Just aim for one real home plate next: protein, veg, and a carb. You've got this._";
+    return "_A few takeaways in the log today — it's counted, no drama. Next plate: protein, veg, a carb. That's enough._";
   }
   if (fried === 2 && isCut) {
     return "_Second takeaway today — easily done, no drama. For your goal, make the next meal a simple home plate (grilled protein + veg) and the day balances out nicely._";
