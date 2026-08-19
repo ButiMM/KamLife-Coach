@@ -911,7 +911,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // Explicit logs ignore a trailing "?"; duration-only walks keep the strict guard.
   const stepIsLoggable = stepIsExplicitLog ? !stepQuestionForm : !stepIsQuestion;
   // Future-intent guard: "I'll walk 10k tomorrow" slips past the question check — must not log today.
-  if (stepIsLoggable && !isFutureIntent(m) && !normalizedQuestion && !mentionsNotDone(m) && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
+  // Explicit "walked 8,000 steps" is a log even if the classifier tagged the note as QUESTION
+  // because they also said "I'm exhausted" (live 2026-08-19 mixed note — steps dropped).
+  if (stepIsLoggable && !isFutureIntent(m) && !mentionsNotDone(m) && (stepIsExplicitLog || !normalizedQuestion) && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
     let steps = 0;
     if (wordThousandMatch) {
       const base = WORD_THOUSANDS[wordThousandMatch[1].toLowerCase()] ?? parseInt(wordThousandMatch[1]);
@@ -1017,7 +1019,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // Voice cut off: "I've walked..." with no number. Do not drop the walk.
-  if (!stepReplyPart && mentionedWalkWithoutCount(message) && !stepIsQuestion && !normalizedQuestion && !isFutureIntent(m)) {
+  if (!stepReplyPart && mentionedWalkWithoutCount(message) && !stepIsQuestion && !isFutureIntent(m)) {
     stepReplyPart = `Heard you walked — send the step count (e.g. "3000 steps") and I'll log it.`;
   }
 
