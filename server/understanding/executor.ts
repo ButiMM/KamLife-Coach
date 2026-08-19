@@ -229,7 +229,7 @@ async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx:
   // a [MEDIA:…] marker, so the gate flip silently took the card with it. A client logging a meal
   // got no card at all, which is a regression, not a simplification. The PROSE is still binned;
   // only the picture is kept.
-  const discarded = await handleFoodContext({ phone: ctx.phone, message: text, m: text.toLowerCase(), user: ctx.user, stepReplyPart: "", handleMessage: async () => "", forceLog: true });
+  const discarded = await handleFoodContext({ phone: ctx.phone, message: text, m: text.toLowerCase(), user: ctx.user, handleMessage: async () => "", forceLog: true });
   lastCardMarker = (String(discarded || "").match(/\[MEDIA:[^\]]+\]/) || [""])[0];
   const refs: Record<string, string> = { mealName: String(action.foodText || "").slice(0, 60) };
   if (slot) refs.slot = String(slot).slice(0, 20);

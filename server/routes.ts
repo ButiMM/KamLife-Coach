@@ -47,7 +47,7 @@ import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
-import { parseMessyIntake, mentionedWalkWithoutCount, composeMessyAck } from "./understanding/messy-intake";
+import { parseMessyIntake, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn } from "./understanding/messy-intake";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
@@ -713,6 +713,15 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     } catch (normErr) { console.warn("[NORMALIZER] exception — original message proceeds:", normErr instanceof Error ? normErr.message : normErr); }
   }
 
+  // CUT 1 — ONE TURN COMMITS EVERY EVENT. Parse the facts ONCE, here. If the note carries two
+  // or more, no handler below may end the turn: each COMMITS what it did and control continues,
+  // and one composer builds one reply. A single-fact note keeps its old fast path exactly.
+  // See server/understanding/messy-intake.ts for what this replaced and why.
+  const turnFacts = parseMessyIntake(message);
+  const multiFact = turnFacts.factTypes.length >= 2;
+  const turn = newTurnLedger(turnFacts.factTypes);
+  if (multiFact) console.log(`[TURN] ${turnFacts.factTypes.join("+")} — no handler may end this turn`);
+
   // ---- FOOD LOG MANAGEMENT (reset, remove, show) ----
   // SYMPTOM PERSISTENCE — record only, never route (2026-08-12). The message still reaches
   // whatever handler would have answered it; this observes in passing so the hunger doctrine can
@@ -866,8 +875,13 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
 
   // ---- WORKOUT COMMANDS (gym log, done, lifts, exercises, weight, programme) ----
+  // COMMITS, DOES NOT CLAIM THE TURN. Returned unconditionally, so "I trained chest today and
+  // had chicken and pap" logged the session and deleted the meal.
   const workoutResult = await handleWorkoutCommands({ phone, message, m, user });
-  if (workoutResult !== null) return workoutResult;
+  if (workoutResult !== null) {
+    if (!multiFact) return workoutResult;
+    commitFact(turn, "workout", workoutResult);
+  }
 
   // ---- STEP LOG DETECTION (direct — no GPT cost) ----
   // NOTE: If message also contains food (e.g. voice note: "I had eggs for breakfast and walked 3000 steps"),
@@ -900,7 +914,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       ? m.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\b/i)
       : null
     : null;
-  let stepReplyPart = ""; // stored so we can combine with food reply if needed
   // A step QUESTION ("is 8000 enough?") must reach GPT; an explicit step LOG ("walked 8000
   // steps", "12k steps") is unambiguous even with a trailing SEPARATE question. Split the two
   // so explicit logs survive a trailing "?" while genuine step-questions still route to GPT.
@@ -1003,69 +1016,56 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       void stepGoalCtx; // used by getStepResponse via user.goalType
       const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg, user, workedOutToday);
       const stepRetroNote = stepIsRetro ? `\n_Logged to ${mealDateLabel(stepLoggedAt)}._` : "";
-      stepReplyPart = (isStepCorrection ? `Fixed ✅ — step count updated to *${steps.toLocaleString()}*.\n\n` : "") + stepReply + stepRetroNote + (perfectDay || "");
+      const stepPart = (isStepCorrection ? `Fixed ✅ — step count updated to *${steps.toLocaleString()}*.\n\n` : "") + stepReply + stepRetroNote + (perfectDay || "");
+      commitFact(turn, "steps", stepPart);
+      await logChat(user.id, message, stepPart, "STEP_LOG");
 
-      // COMPOUND: if the message ALSO carries food or water, don't return — every thing the
-      // client told us in one breath must log. Steps ride along; water/food handlers append.
-      const alsoHasFood = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|eggs?|bread|toast|rice|chicken|pap|porridge|oats|milk|fish|pilchard|vienna|polony|cheese|yoghurt|banana|apple|mango|potato|beans|lentil|coffee|tea|juice|cereal|muesli|sandwich)\b/i.test(m);
-      const alsoHasWater = looksLikeWaterReport(m);
-      if (!alsoHasFood && !alsoHasWater) {
-        await logChat(user.id, message, stepReplyPart, "STEP_LOG");
-        return stepReplyPart;
-      }
-      // Food and/or water also present — log steps but continue down the pipeline
-      await logChat(user.id, message, stepReplyPart, "STEP_LOG");
+      // ONE RULE, NOT A PAIR BRANCH: this asked `alsoHasFood` with its own 30-word food regex,
+      // a second list of which facts were allowed to coexist with steps. The ledger knows.
+      if (!multiFact) return stepPart;
     }
   }
 
   // Voice cut off: "I've walked..." with no number. Do not drop the walk.
-  if (!stepReplyPart && mentionedWalkWithoutCount(message) && !stepIsQuestion && !isFutureIntent(m)) {
-    stepReplyPart = `Heard you walked — send the step count (e.g. "3000 steps") and I'll log it.`;
+  if (!turn.parts.steps && mentionedWalkWithoutCount(message) && !stepIsQuestion && !isFutureIntent(m)) {
+    commitFact(turn, "steps", `Heard you walked — send the step count (e.g. "3000 steps") and I'll log it.`);
   }
 
   // ---- WATER LOGGING HANDLER (compound-aware) ----
   // "an apple and a pear, and one litre of water" must log BOTH: water logs here, but if the
   // message also carries food, carry the water confirmation and let the food pipeline log the
   // meal — never return early and drop half of what the client told us.
+  // COMMITS LIKE EVERY OTHER FACT. Was two branches, each re-deciding what else the note held.
   const waterHasFoodToo = scanForSAFoods(m).some(f => !/^water$/i.test(f.name));
-  if (waterHasFoodToo) {
-    const waterPart = await tryLogWater({ phone, message, m, user });
-    if (waterPart !== null) {
-      stepReplyPart += waterPart.replace(/\[BUTTONS:[^\]]*\]\s*$/, "").trim() + "\n\n";
-    }
-    // fall through — food-context logs the meal and prepends stepReplyPart
-  } else {
-    const waterResult = await handleWater({ phone, message, m, user });
-    // Steps may have logged above and passed through ("8000 steps and 2L of water") —
-    // carry that confirmation so the client sees BOTH logs, never just the second one.
-    if (waterResult !== null) return stepReplyPart ? `${stepReplyPart.trim()}\n\n${waterResult}` : waterResult;
+  const waterPart = waterHasFoodToo
+    ? await tryLogWater({ phone, message, m, user })
+    : await handleWater({ phone, message, m, user });
+  if (waterPart !== null) {
+    commitFact(turn, "water", waterPart);
+    if (!multiFact) return waterPart;
   }
 
   // ---- FOOD CONTEXT (corrections, braai, eating out, relog, scanner, GPT fallback) ----
   // Messy-life intake: stated meal (incl. branded takeaway voice notes) forces food path.
-  const messyIntake = parseMessyIntake(message);
   const foodCtxResult = await handleFoodContext({
-    phone, message, m, user, stepReplyPart, handleMessage,
+    phone, message, m, user, handleMessage,
     classifierQuestion: normalizedQuestion,
-    forceLog: messyIntake.mustForceFoodLog,
+    forceLog: turnFacts.mustForceFoodLog,
   });
-  if (foodCtxResult !== null) {
-    // PHASE 1.1 — messy-life multi-intent (2026-08-19): one note can carry food + steps + feeling.
-    // Food is already committed. Steps (if any) are in stepReplyPart inside foodCtxResult.
-    // Feeling must not be dropped, and must not hand the whole turn to freeform (invents state).
-    // Deterministic feel line keeps truth + humanity in one reply.
-    const hasFeeling = messyIntake.hasFeeling || carriesFeelingClause(message);
-    const alsoAsksCoach = looksLikeQuestion(message)
-      && (isMultiPartAsk(message) || hasFeeling);
-    if (hasFeeling && !alsoAsksCoach) {
-      turnMutation(`MULTI_INTENT food+feeling deterministic`);
-      console.log(`[MULTI_INTENT] food logged + feeling acknowledged — "${message.slice(0, 70)}"`);
-      return composeMessyAck({ food: foodCtxResult, feeling: true });
-    }
-    if (!alsoAsksCoach) return foodCtxResult;
-    turnMutation(`MULTI_INTENT food committed by the deterministic path; the question continues to Coach K`);
-    console.log(`[MULTI_INTENT] food logged, coaching question preserved — "${message.slice(0, 70)}"`);
+  if (foodCtxResult !== null) commitFact(turn, "food", foodCtxResult);
+
+  // ── THE ONE COMPOSE ── replaces the food+feeling special case that used to live here, and
+  // the food+steps string concatenation that lived inside food-context before that.
+  const hasFeeling = turnFacts.hasFeeling || carriesFeelingClause(message);
+  const resolved = resolveTurn(turn, {
+    hasFeeling,
+    alsoAsksCoach: looksLikeQuestion(message) && (isMultiPartAsk(message) || hasFeeling),
+  });
+  if (resolved.committed) {
+    turnMutation(`TURN committed ${resolved.committed}${resolved.reply ? "" : "; question continues to Coach K"}`);
+    console.log(`[TURN] committed ${resolved.committed} — "${message.slice(0, 70)}"`);
   }
+  if (resolved.reply) return resolved.reply;
 
   // ---- WEIGHT FORECAST / TRAJECTORY ----
   // The anti-"it's a scam" tool: from the client's OWN logged food + steps vs their
@@ -1103,7 +1103,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
   // MODEL_BRAIN path deleted 2026-07-30. Two paths answer a client: the engine, then gpt-block.
   // Stated meal report that food-context could not finish: NEVER freeform invent macros.
-  if (messyIntake.mustForceFoodLog) {
+  if (turnFacts.mustForceFoodLog) {
     const clarify = `Got it — you ate something. Send the items in one line (e.g. "McDonald's breakfast and a mocha") and I'll log it.`;
     const { logChat: lc } = await import("./handlers/chat-log");
     await lc(user.id, message, clarify, "FOOD_CLARIFY").catch(() => {});

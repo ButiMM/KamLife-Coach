@@ -37,6 +37,13 @@ export interface MessyIntakeResult {
   hasFoodReport: boolean;
   hasStepsReport: boolean;
   hasFeeling: boolean;
+  /** A completed session. First-class because "I trained and had chicken" dropped the meal:
+   *  handleWorkoutCommands returned the turn at routes.ts:872 and food never ran. */
+  hasWorkoutReport: boolean;
+  /** Water is a fact, not a special case bolted onto the food branch. */
+  hasWaterReport: boolean;
+  /** Which fact types this one note carries. Two or more means no single handler owns the turn. */
+  factTypes: TurnFact[];
   /** Stated meal / branded takeaway — food path must own the turn (log or one clarify). */
   mustForceFoodLog: boolean;
   /** Extracted step count when present (digit or word number). */
@@ -54,6 +61,12 @@ const STEPS =
   /\b(steps?|walked|walking|ran\s+\d|\d+\s*km)\b/i;
 const FEELING =
   /\b(tired|exhausted|stressed|stress|feel(?:ing)?|felt|anxious|motivat|struggling|overwhelmed|drained|hard\s+day|rough\s+day|not\s+coping)\b/i;
+// A REPORTED SESSION, not a request for one. "send me my workout" is a command and stays with
+// the workout handler alone; "I trained chest" is a fact that has to coexist with the meal.
+const WORKOUT =
+  /\b(trained|training\s+done|worked\s+out|workout\s+done|did\s+(?:my|the)\s+(?:workout|session|gym)|session\s+done|hit\s+(?:the\s+)?gym|went\s+to\s+(?:the\s+)?gym|benched|squatted|deadlifted|leg\s+day|chest\s+day|back\s+day|arm\s+day|push\s+day|pull\s+day)\b/i;
+const WATER =
+  /\b(\d+\s*(?:l|litres?|liters?)\b|litres?\s+of\s+water|liters?\s+of\s+water|glasses?\s+of\s+water|drank\s+water|drinking\s+water)\b/i;
 
 const WORD_NUM: Record<string, number> = {
   zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
@@ -123,6 +136,9 @@ export function parseMessyIntake(message: string): MessyIntakeResult {
       hasFoodReport: false,
       hasStepsReport: false,
       hasFeeling: false,
+      hasWorkoutReport: false,
+      hasWaterReport: false,
+      factTypes: [],
       mustForceFoodLog: false,
       stepCount: null,
       foodText: null,
@@ -142,20 +158,30 @@ export function parseMessyIntake(message: string): MessyIntakeResult {
     const stepsHit = STEPS.test(beat) || extractStepCount(beat) != null;
     const feelHit = FEELING.test(beat);
 
+    // ONE BEAT CAN CARRY SEVERAL FACTS. This was an `else if` chain, so the first thing a beat
+    // matched was the only thing recorded — the same first-match-wins disease as the router, one
+    // level down. "I had a mocha and I've just walked" matched food, and the walk was never a
+    // steps report at all, so mentionedWalkWithoutCount could not see it and the movement was
+    // silently dropped before any handler ran.
+    let matched = false;
     if (foodHit && FOOD_NOUN.test(beat + " " + text)) {
       hasFood = true;
       if (!foodText) foodText = beat;
       intents.push({ kind: "food_report", text: beat });
-    } else if (stepsHit) {
+      matched = true;
+    }
+    if (stepsHit) {
       hasSteps = true;
       const c = extractStepCount(beat) ?? stepCount;
       intents.push({ kind: "steps_report", count: c, text: beat });
-    } else if (feelHit) {
+      matched = true;
+    }
+    if (feelHit) {
       hasFeeling = true;
       intents.push({ kind: "feeling", text: beat });
-    } else {
-      intents.push({ kind: "other", text: beat });
+      matched = true;
     }
+    if (!matched) intents.push({ kind: "other", text: beat });
   }
 
   // Whole-message fallback: short branded meal with no beat split
@@ -177,11 +203,23 @@ export function parseMessyIntake(message: string): MessyIntakeResult {
     (/\b(breakfast|lunch|dinner|supper)\b/i.test(text) && FOOD_VERB.test(text));
   const mustForceFoodLog = hasFood || (FOOD_VERB.test(text) && branded);
 
+  const hasWorkout = WORKOUT.test(text);
+  const hasWater = WATER.test(text);
+  const factTypes: TurnFact[] = [];
+  if (hasWorkout) factTypes.push("workout");
+  if (hasSteps || stepCount != null) factTypes.push("steps");
+  if (hasWater) factTypes.push("water");
+  if (hasFood || mustForceFoodLog) factTypes.push("food");
+  if (hasFeeling) factTypes.push("feeling");
+
   return {
     intents,
     hasFoodReport: hasFood || mustForceFoodLog,
     hasStepsReport: hasSteps,
     hasFeeling,
+    hasWorkoutReport: hasWorkout,
+    hasWaterReport: hasWater,
+    factTypes,
     mustForceFoodLog,
     stepCount,
     foodText: foodText || (mustForceFoodLog ? text : null),
@@ -195,15 +233,87 @@ export function mentionedWalkWithoutCount(message: string): boolean {
   return r.hasStepsReport && r.stepCount == null && /\b(walked|walking|walk)\b/i.test(message || "");
 }
 
-/** One reply from the parts we actually handled. Empty parts omitted. */
-export function composeMessyAck(parts: { food?: string | null; steps?: string | null; feeling?: boolean }): string {
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// THE TURN LEDGER — every fact a note carries gets committed; nothing ends the turn early.
+//
+// (Cut 1.) What this replaces: routes.ts was a chain of ~13 `return` statements. The first
+// handler that recognised anything answered the client and ended the turn, and the rest of the
+// sentence stopped existing. Multi-intent was faked by threading a string called `stepReplyPart`
+// through the chain and hand-stitching specific PAIRS — food+steps, food+water, food+feeling.
+// Seven fact types is twenty-one pairs, so the founder found the missing ones one voice note at a
+// time. "I trained chest and had chicken and pap" dropped the meal, because workout+food was
+// never written as a pair.
+//
+// A handler now COMMITS what it did and returns control. This ledger holds the commits and one
+// composer turns them into one reply. Adding a fact type does not require touching any other
+// fact type — which is the property the pair-stitching never had.
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+export const TURN_FACTS = ["workout", "steps", "water", "food", "feeling"] as const;
+export type TurnFact = (typeof TURN_FACTS)[number];
+
+export interface TurnLedger {
+  /** Confirmation text per fact, in the order the handlers ran. */
+  parts: Partial<Record<TurnFact, string>>;
+  /** Facts the parser saw in the note, whether or not a handler managed to commit them. */
+  expected: TurnFact[];
+}
+
+export function newTurnLedger(expected: TurnFact[] = []): TurnLedger {
+  return { parts: {}, expected };
+}
+
+/** Record what a handler actually did. Empty or duplicate commits are ignored. */
+export function commitFact(ledger: TurnLedger, fact: TurnFact, text: string | null | undefined): void {
+  const t = String(text ?? "").trim();
+  if (!t || ledger.parts[fact]) return;
+  ledger.parts[fact] = t;
+}
+
+export function committedCount(ledger: TurnLedger): number {
+  return Object.keys(ledger.parts).length;
+}
+
+/**
+ * THE ONLY OUTBOUND ASSEMBLER for a multi-fact note.
+ *
+ * Order is fixed and deliberate — what they DID, then what they drank/ate, then how they feel —
+ * so two clients with the same facts get the same shape, and the reply does not reorder itself
+ * depending on which handler happened to run first.
+ *
+ * `\n\n` and never `\n\n---\n\n`: the latter splits into separate WhatsApp messages, separately
+ * billed, which is the multi-message problem this cut exists to end.
+ */
+export function composeMessyAck(ledger: TurnLedger): string {
   const out: string[] = [];
-  if (parts.food && parts.food.trim()) out.push(parts.food.trim());
-  if (parts.steps && parts.steps.trim()) out.push(parts.steps.trim());
-  if (parts.feeling) {
-    out.push("Heard you on how you're feeling. Showing up still counts. Next move stays small.");
+  for (const fact of TURN_FACTS) {
+    const part = ledger.parts[fact];
+    if (part) out.push(part.replace(/\[BUTTONS:[^\]]*\]\s*$/, "").trim());
   }
-  return out.join("\n\n");
+  return out.filter(Boolean).join("\n\n");
+}
+
+/** The deterministic feeling line. Acknowledges without inventing state or handing the turn to
+ *  freeform, which is how a "how are you feeling" reply used to start asserting macros. */
+export const FEELING_ACK = "Heard you on how you're feeling. Showing up still counts. Next move stays small.";
+
+/**
+ * Every fact has had its chance to commit — what goes out?
+ *
+ * `reply` is the one composed message, or null when the turn should continue to Coach K. A
+ * genuine coaching QUESTION riding with the facts continues: the logs are already written and
+ * their confirmations are in the ledger, so the question is answered by someone who knows what
+ * just happened rather than instead of it.
+ */
+export function resolveTurn(
+  ledger: TurnLedger,
+  opts: { hasFeeling: boolean; alsoAsksCoach: boolean },
+): { reply: string | null; committed: string } {
+  if (opts.hasFeeling && !opts.alsoAsksCoach) commitFact(ledger, "feeling", FEELING_ACK);
+  const committed = Object.keys(ledger.parts).join("+");
+  if (committedCount(ledger) === 0) return { reply: null, committed };
+  if (opts.alsoAsksCoach) return { reply: null, committed };
+  return { reply: composeMessyAck(ledger) || null, committed };
 }
 
 

@@ -1003,6 +1003,22 @@ const CASES: Case[] = [
     expect: [/pap|samp|potato/i] },
   { name: "substitute: a plain health swap still gets the HEALTH answer, not the shop one", msg: "What can I eat instead of mayonnaise?",
     expect: [/light mayo/i], reject: [/No stress/i] },
+
+  // ── CUT 1 — THE TWO NOTES THAT DEFINE DONE ───────────────────────────────────────────────
+  // The founder sends these on the phone; these are the same notes through the real router, so
+  // a regression is caught here rather than by him. Both used to lose half the sentence: the
+  // first handler that recognised anything ended the turn.
+  { name: "CUT1: yesterday steps + yesterday meal + feeling all survive one note",
+    msg: "Yesterday I walked eight thousand steps and I had chicken and pap. I'm exhausted.",
+    expect: [/8\s?000 steps/i, /yesterday/i, /chicken and pap/i, /how you're feeling/i],
+    // The card must not coach TODAY off a yesterday log, and nothing may be offered as unpriced
+    // food that another fact already claimed ("eight", "exhausted").
+    reject: [/eat more today/i, /could not price \*[^*]*(eight|exhausted)/i] },
+
+  { name: "CUT1: workout + meal commit in the same turn",
+    msg: "I trained chest today and had chicken and pap",
+    expect: [/session/i, /chicken and pap/i],
+    reject: [/could not price \*[^*]*(trained|chest)/i] },
 ];
 
 async function main() {

@@ -1,3 +1,4 @@
+import { parseMessyIntake } from "./understanding/messy-intake";
 /**
  * UNLOGGED NOTICE — never silently drop food the client named. Pure, unit-tested.
  *
@@ -121,11 +122,41 @@ export function asksAboutWeightProgress(text: string): boolean {
     || /\b(am i|are we) (actually )?(losing|in a deficit)\b/.test(t);
 }
 
+/**
+ * WORDS THAT BELONG TO ANOTHER FACT ARE NOT UNPRICED FOOD (Cut 1).
+ *
+ * The NOISE list above has been growing one screenshot at a time — "south", "african", "walked",
+ * "thousand", "three", "four", "five" were each added after a client was asked to price them.
+ * That list can never finish, because the real question is not "is this word food-ish" but "did
+ * something else in this note already claim it".
+ *
+ * Now that one turn commits every event, the note reaching the scanner is the WHOLE note, so
+ * "eight thousand steps" and "I'm exhausted" and "I trained chest" arrive intact. The parser
+ * already attributed those spans to steps, feeling and workout. Anything it claimed is removed
+ * here rather than appended to a stopword list that grows forever.
+ */
+function spansClaimedByOtherFacts(message: string): string {
+  const r = parseMessyIntake(message);
+  const claimed = r.intents
+    .filter(i => i.kind === "steps_report" || i.kind === "feeling")
+    .map(i => i.text);
+  // A reported session is a fact too, but it has no intent span — take the clause it sits in.
+  if (r.hasWorkoutReport) {
+    for (const clause of String(message).split(/[.!?,]|\band\b/i)) {
+      if (/\b(trained|training|worked\s+out|workout|session|gym|benched|squatted|deadlifted|chest|back|legs?|arms?|push|pull)\b/i.test(clause)) {
+        claimed.push(clause);
+      }
+    }
+  }
+  return claimed.join(" ").toLowerCase();
+}
+
 export function unloggedFoodWords(message: string, loggedNames: string[]): string[] {
   const logged = loggedNames.join(" ").toLowerCase();
+  const otherFacts = spansClaimedByOtherFacts(message);
   const words = (message || "").toLowerCase()
     .replace(/[^a-z\s]/g, " ").split(/\s+/)
-    .filter(w => w.length > 3 && !NOISE.has(w));
+    .filter(w => w.length > 3 && !NOISE.has(w) && !otherFacts.includes(w));
   const dropped = words.filter(w => !logged.includes(w.slice(0, Math.max(4, w.length - 1))));
   return [...new Set(dropped)].slice(0, 4);
 }

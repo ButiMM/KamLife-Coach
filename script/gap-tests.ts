@@ -33,217 +33,20 @@ const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handler
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
 const { explicitMealSlot } = await import("../server/understanding/actions");
 // NOTE: server/gpt.ts registers a module-scope setInterval (its food-cache sweeper), so a
-// script that imports it only exits because THIS file ends with an explicit 
-// ── Messy-life intake (product core journeys) ───────────────────────────────
-test("messy intake: McDonald's breakfast + mocha forces food log", () => {
-  const { parseMessyIntake } = require("../server/understanding/messy-intake");
-  const r = parseMessyIntake("So today I had a McDonald's South African breakfast with a mocha.");
-  assert.equal(r.mustForceFoodLog, true);
-  assert.equal(r.hasFoodReport, true);
-  assert.ok(r.foodText && /mcdonald|breakfast|mocha/i.test(r.foodText));
-});
-
-test("messy intake: mixed yesterday food + steps + feeling", () => {
-  const { parseMessyIntake } = require("../server/understanding/messy-intake");
-  const r = parseMessyIntake(
-    "Yesterday I ate pap and chicken for dinner, walked about eight thousand steps, I'm exhausted.",
-  );
-  assert.equal(r.hasFoodReport, true);
-  assert.equal(r.hasStepsReport, true);
-  assert.equal(r.hasFeeling, true);
-  assert.equal(r.stepCount, 8000);
-  assert.equal(r.mustForceFoodLog, true);
-});
-
-test("messy intake: pure feeling does not force food log", () => {
-  const { parseMessyIntake } = require("../server/understanding/messy-intake");
-  const r = parseMessyIntake("I'm just tired and stressed, work was a lot.");
-  assert.equal(r.hasFeeling, true);
-  assert.equal(r.mustForceFoodLog, false);
-  assert.equal(r.hasFoodReport, false);
-});
-
-test("isMessyLifeTranscript: short branded meal preserved whole", () => {
-  const { isMessyLifeTranscript } = require("../server/utils");
-  assert.equal(
-    isMessyLifeTranscript("I had a McDonald's breakfast with a mocha"),
-    true,
-  );
-});
-
-test("isMessyLifeTranscript: food + feeling is messy life", () => {
-  const { isMessyLifeTranscript } = require("../server/utils");
-  assert.equal(
-    isMessyLifeTranscript("I ate takeaways again and I feel like giving up"),
-    true,
-  );
-});
-
-
-test("ungrounded food: Big Mac dropped when client said SA breakfast + mocha", () => {
-  const { findUngroundedFoodItems } = require("../server/utils");
-  const msg = "Today for breakfast I had a South African breakfast from McDonald's and a large mocha";
-  const dropped = findUngroundedFoodItems(msg, [
-    { name: "McDonald's Big Mac" },
-    { name: "McDonald's Big Breakfast (SA)" },
-    { name: "Mocha" },
-  ]);
-  assert.ok(dropped.some((n: string) => /big mac/i.test(n)), "Big Mac must be ungrounded");
-  assert.ok(!dropped.some((n: string) => /^mocha$/i.test(n)), "Mocha must stay grounded");
-});
-
-
-test("messy: walk without a number is a steps report with null count", () => {
-  const { parseMessyIntake, mentionedWalkWithoutCount } = require("../server/understanding/messy-intake");
-  const r = parseMessyIntake("This morning I had a mocha and I've just walked");
-  assert.equal(r.hasFoodReport, true);
-  assert.equal(mentionedWalkWithoutCount("This morning I had a mocha and I've just walked"), true);
-  assert.equal(mentionedWalkWithoutCount("I walked 8000 steps"), false);
-});
-
-test("composeMessyAck joins food, steps, feeling without dropping a part", () => {
-  const { composeMessyAck } = require("../server/understanding/messy-intake");
-  const out = composeMessyAck({
-    food: "Got it — pap and chicken.",
-    steps: "Heard you walked — send the step count.",
-    feeling: true,
-  });
-  assert.ok(/pap and chicken/.test(out));
-  assert.ok(/walked/.test(out));
-  assert.ok(/feeling/.test(out));
-});
-
-test("nutrition: three McDonald's retries are one takeaway, not a fried-day lecture", () => {
-  const { assessNutritionStandards } = require("../server/nutrition-guardrails");
-  const foods = [
-    "McDonald's Big Breakfast mocha",
-    "McDonald's Big Breakfast mocha",
-    "McDonald's Big Breakfast mocha",
-  ];
-  const n = assessNutritionStandards({ todayFoods: foods, goalType: "muscle_gain" });
-  assert.equal(n, null);
-});
-
-test("card nextMoveLine does not say grill it don't fry it", () => {
-  const src = require("fs").readFileSync(require("path").join(__dirname, "../server/macro-card-attach.ts"), "utf8");
-  assert.ok(!/Grill it, don't fry it/.test(src), "confirmation card must not scold frying");
-});
-
-test("verifier blocks fried lecture on a meal they just stated", () => {
-  const { verifyBrainReply } = require("../server/brain/reply-verifier");
-  const r = verifyBrainReply(
-    "That's a lot of fried/takeaway today — tasty, but heavy on the hidden fat and salt.",
-    { clientMessage: "I had a McDonald's South African breakfast with a mocha" },
-  );
-  assert.equal(r.ok, false);
-});
-
-
-test("same-meal retry: two McDonald breakfast item lists are one meal", () => {
-  const { isSameMealRetry } = require("../server/food-identity-correction");
-  assert.equal(isSameMealRetry(
-    ["McDonald's Big Breakfast (SA)", "Mocha"],
-    ["McDonald's Breakfast", "Mocha (coffee shop)"],
-  ), true);
-  assert.equal(isSameMealRetry(["pap", "chicken"], ["eggs", "toast"]), false);
-});
-
-test("parseDropLoggedItem: that wasn't a big mac", () => {
-  const { parseDropLoggedItem } = require("../server/food-identity-correction");
-  assert.equal(parseDropLoggedItem("that wasn't a big mac"), "big mac");
-  assert.equal(parseDropLoggedItem("I am not hungry"), null);
-});
-
-test("messy intake: yesterday pap and chicken is retro", () => {
-  const { parseMessyIntake } = require("../server/understanding/messy-intake");
-  const r = parseMessyIntake("Yesterday I ate pap and chicken, walked about 8000 steps, I'm exhausted");
-  assert.equal(r.hasFoodReport, true);
-  assert.equal(r.hasStepsReport, true);
-  assert.equal(r.hasFeeling, true);
-  assert.equal(r.stepCount, 8000);
-  assert.equal(r.isRetro, true);
-});
-
-
-test("nextMoveLine on a past day does not say eat more today", () => {
-  const { nextMoveLine } = require("../server/macro-card-attach");
-  const rows = [
-    { label: "Calories", current: 600, target: 2500 },
-    { label: "Protein", current: 56, target: 180 },
-  ];
-  const line = nextMoveLine(rows, false, 16, true);
-  assert.ok(!/today/i.test(line), line);
-  assert.ok(/yesterday/i.test(line), line);
-});
-
-test("mealCard yesterday unit is not protein today", () => {
-  const { mealCard } = require("../server/macro-card-attach");
-  const card = mealCard({
-    firstName: "Kam",
-    mealName: "Chicken and pap",
-    rows: [
-      { label: "Calories", current: 600, target: 2500 },
-      { label: "Protein", current: 56, target: 180 },
-    ],
-    isBulk: false,
-    usesNumbers: true,
-    isPastDay: true,
-  });
-  assert.ok(!/today/i.test(card.unit), card.unit);
-  assert.ok(!/today/i.test(card.sub || ""), card.sub);
-});
-
-
-test("REBUILD GATE journey 2: yesterday pap + 8000 steps + exhausted — all three, steps survive QUESTION", () => {
-  const { journeyMustKeepFacts, parseMessyIntake } = require("../server/understanding/messy-intake");
-  const msg = "Yesterday, I had pap and chicken, and I walked 8,000 steps. I'm so exhausted.";
-  const g = journeyMustKeepFacts(msg);
-  assert.equal(g.food, true);
-  assert.equal(g.feeling, true);
-  assert.equal(g.isRetro, true);
-  assert.equal(g.stepCount, 8000);
-  assert.equal(g.logStepsEvenIfClassifiedQuestion, true);
-  const r = parseMessyIntake(msg);
-  assert.equal(r.hasFoodReport, true);
-  assert.equal(r.hasStepsReport, true);
-});
-
-test("REBUILD GATE journey 1: McDonald's + mocha is a food log, not a chat", () => {
-  const { journeyMustKeepFacts } = require("../server/understanding/messy-intake");
-  const g = journeyMustKeepFacts("I had a South African breakfast from McDonald's and a large mocha");
-  assert.equal(g.food, true);
-});
-
-test("REBUILD GATE journey 3: that wasn't a big mac is a drop, not a new meal", () => {
-  const { parseDropLoggedItem } = require("../server/food-identity-correction");
-  assert.equal(parseDropLoggedItem("that wasn't a big mac"), "big mac");
-});
-
-
-test("fidelity: STEPS canonical cannot drop pap and chicken", () => {
-  const { normalizerFidelity } = require("../server/normalizer-fidelity");
-  const r = normalizerFidelity(
-    "Yesterday I walked eight thousand steps and I had chicken and pap.",
-    "i walked 8000 steps yesterday",
-  );
-  assert.equal(r.ok, false, r.reason);
-});
-
-test("fidelity: FOOD_LOG canonical cannot drop 8000 steps", () => {
-  const { normalizerFidelity } = require("../server/normalizer-fidelity");
-  const r = normalizerFidelity(
-    "Yesterday I had pap and chicken, and I walked 8,000 steps. I'm so exhausted.",
-    "i had pap and chicken yesterday",
-  );
-  assert.equal(r.ok, false, r.reason);
-});
-
-process.exit(0).
+// script that imports it only exits because THIS file ends with an explicit process.exit(0).
 // That is why the selectModel coverage lives here and not in unit-tests.ts, which has no
 // such exit and hangs forever once gpt.ts is loaded into it.
 const { selectModel } = await import("../server/gpt");
 const { scanForSAFoods } = await import("../server/handlers/food-scanner");
-
+// These were written as CommonJS require() inside an ESM module, so every test below
+// that used them threw "require is not defined" — they had never executed. Bound once here.
+const MESSY = await import("../server/understanding/messy-intake");
+const UTILS = await import("../server/utils");
+const FOODID = await import("../server/food-identity-correction");
+const FIDELITY = await import("../server/normalizer-fidelity");
+const CARD = await import("../server/macro-card-attach");
+const NUTRI = await import("../server/nutrition-guardrails");
+const VERIF = await import("../server/brain/reply-verifier");
 let passed = 0;
 let failed = 0;
 const failures: string[] = [];
@@ -257,6 +60,287 @@ function test(name: string, fn: () => void) {
     failures.push(`  ✗ ${name}\n    ${err.message}`);
   }
 }
+
+// ── Messy-life intake (product core journeys) ───────────────────────────────
+test("messy intake: McDonald's breakfast + mocha forces food log", () => {
+  const { parseMessyIntake } = MESSY;
+  const r = parseMessyIntake("So today I had a McDonald's South African breakfast with a mocha.");
+  assert.equal(r.mustForceFoodLog, true);
+  assert.equal(r.hasFoodReport, true);
+  assert.ok(r.foodText && /mcdonald|breakfast|mocha/i.test(r.foodText));
+});
+
+test("messy intake: mixed yesterday food + steps + feeling", () => {
+  const { parseMessyIntake } = MESSY;
+  const r = parseMessyIntake(
+    "Yesterday I ate pap and chicken for dinner, walked about eight thousand steps, I'm exhausted.",
+  );
+  assert.equal(r.hasFoodReport, true);
+  assert.equal(r.hasStepsReport, true);
+  assert.equal(r.hasFeeling, true);
+  assert.equal(r.stepCount, 8000);
+  assert.equal(r.mustForceFoodLog, true);
+});
+
+// ── CUT 1: ONE TURN COMMITS EVERY EVENT ─────────────────────────────────────────────────────
+// The gate is the commit path, not the parser. routes.ts was a chain of ~13 `return` statements:
+// the first handler that recognised anything ended the turn. Pairs were stitched by hand, so
+// combinations nobody had screenshotted still dropped half the note.
+
+test("cut 1: workout + food is a two-fact note, not a workout note", () => {
+  const { parseMessyIntake } = MESSY;
+  // The live defect: handleWorkoutCommands returned unconditionally at routes.ts:872, so this
+  // logged the session and deleted the meal. Same failure as the 16:02 note, a pair nobody
+  // had written.
+  const r = parseMessyIntake("I trained chest today and had chicken and pap");
+  assert.equal(r.hasWorkoutReport, true, "a reported session is a fact");
+  assert.equal(r.hasFoodReport, true, "…and so is the meal beside it");
+  assert.ok(r.factTypes.includes("workout") && r.factTypes.includes("food"));
+  assert.ok(r.factTypes.length >= 2, "two facts means no single handler may end the turn");
+});
+
+test("cut 1: a request for a workout is not a reported session", () => {
+  const { parseMessyIntake } = MESSY;
+  // Detection must not be so loose that every workout command becomes a multi-fact note.
+  for (const ask of ["send me my workout", "workout", "what's today's session", "1"]) {
+    assert.equal(parseMessyIntake(ask).hasWorkoutReport, false, `"${ask}" is a command, not a fact`);
+  }
+});
+
+test("cut 1: no handler may end a multi-fact turn", () => {
+  const routes = readFileSync("server/routes.ts", "utf-8");
+  const code = routes.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // Every co-occurring handler commits and continues; only a single-fact note keeps a fast path.
+  for (const guard of [
+    /if \(!multiFact\) return workoutResult;/,
+    /if \(!multiFact\) return stepPart;/,
+    /if \(!multiFact\) return waterPart;/,
+  ]) assert.ok(guard.test(code), `a co-occurring handler still claims the turn: ${guard}`);
+  assert.ok(/commitFact\(turn, "food", foodCtxResult\)/.test(code), "food commits like the rest");
+});
+
+test("cut 1: the hand-stitched pair branches are gone", () => {
+  // Comments naming the retired hacks are how we remember why they went — strip them, or this
+  // test fails on its own explanation.
+  const strip = (f: string) => readFileSync(f, "utf-8").split("\n")
+    .filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  const routes = strip("server/routes.ts");
+  const food = strip("server/handlers/food-context.ts");
+  // `stepReplyPart` was a string threaded through the chain so food could prepend the steps
+  // line — multi-intent faked one pair at a time. It is the disease in a variable name.
+  assert.ok(!/stepReplyPart/.test(routes), "stepReplyPart is gone from the router");
+  assert.ok(!/stepReplyPart/.test(food), "…and from the food handler it was threaded into");
+  // `alsoHasFood` was a 30-word food regex inside the STEP handler, deciding which other facts
+  // were allowed to coexist with steps — maintained separately from the real food scanner.
+  assert.ok(!/alsoHasFood|alsoHasWater/.test(routes), "the steps↔food pair branch is gone");
+});
+
+test("cut 1: one composer, fixed order, one bubble", async () => {
+  const { newTurnLedger, commitFact, composeMessyAck, committedCount, FEELING_ACK } =
+    await import("../server/understanding/messy-intake");
+  const t = newTurnLedger(["workout", "food", "feeling"]);
+  // Commit out of order on purpose — the reply must not reorder itself by handler timing.
+  commitFact(t, "food", "Logged: chicken and pap 🍽️");
+  commitFact(t, "feeling", FEELING_ACK);
+  commitFact(t, "workout", "Session logged 💪");
+  const out = composeMessyAck(t);
+  assert.equal(committedCount(t), 3);
+  assert.ok(out.indexOf("Session logged") < out.indexOf("Logged: chicken"), "what they did comes first");
+  assert.ok(out.indexOf("Logged: chicken") < out.indexOf("Showing up"), "feeling closes the reply");
+  assert.ok(!out.includes("---"), "`\\n\\n---\\n\\n` would bill this as two WhatsApp messages");
+  // A duplicate or empty commit must not double the reply.
+  commitFact(t, "food", "Logged: chicken and pap 🍽️");
+  commitFact(t, "steps", "   ");
+  assert.equal(committedCount(t), 3);
+});
+
+test("messy intake: pure feeling does not force food log", () => {
+  const { parseMessyIntake } = MESSY;
+  const r = parseMessyIntake("I'm just tired and stressed, work was a lot.");
+  assert.equal(r.hasFeeling, true);
+  assert.equal(r.mustForceFoodLog, false);
+  assert.equal(r.hasFoodReport, false);
+});
+
+test("isMessyLifeTranscript: short branded meal preserved whole", () => {
+  const { isMessyLifeTranscript } = UTILS;
+  assert.equal(
+    isMessyLifeTranscript("I had a McDonald's breakfast with a mocha"),
+    true,
+  );
+});
+
+test("isMessyLifeTranscript: food + feeling is messy life", () => {
+  const { isMessyLifeTranscript } = UTILS;
+  assert.equal(
+    isMessyLifeTranscript("I ate takeaways again and I feel like giving up"),
+    true,
+  );
+});
+
+
+test("ungrounded food: Big Mac dropped when client said SA breakfast + mocha", () => {
+  const { findUngroundedFoodItems } = UTILS;
+  const msg = "Today for breakfast I had a South African breakfast from McDonald's and a large mocha";
+  const dropped = findUngroundedFoodItems(msg, [
+    { name: "McDonald's Big Mac" },
+    { name: "McDonald's Big Breakfast (SA)" },
+    { name: "Mocha" },
+  ]);
+  assert.ok(dropped.some((n: string) => /big mac/i.test(n)), "Big Mac must be ungrounded");
+  assert.ok(!dropped.some((n: string) => /^mocha$/i.test(n)), "Mocha must stay grounded");
+});
+
+
+test("messy: walk without a number is a steps report with null count", () => {
+  const { parseMessyIntake, mentionedWalkWithoutCount } = MESSY;
+  const r = parseMessyIntake("This morning I had a mocha and I've just walked");
+  assert.equal(r.hasFoodReport, true);
+  assert.equal(mentionedWalkWithoutCount("This morning I had a mocha and I've just walked"), true);
+  assert.equal(mentionedWalkWithoutCount("I walked 8000 steps"), false);
+});
+
+test("composeMessyAck joins food, steps, feeling without dropping a part", () => {
+  const { composeMessyAck, newTurnLedger, commitFact, FEELING_ACK } = MESSY;
+  const t = newTurnLedger(["food", "steps", "feeling"]);
+  commitFact(t, "food", "Got it — pap and chicken.");
+  commitFact(t, "steps", "Heard you walked — send the step count.");
+  commitFact(t, "feeling", FEELING_ACK);
+  const out = composeMessyAck(t);
+  assert.ok(/pap and chicken/.test(out));
+  assert.ok(/walked/.test(out));
+  assert.ok(/feeling/.test(out));
+});
+
+test("nutrition: three McDonald's retries are one takeaway, not a fried-day lecture", () => {
+  const { assessNutritionStandards } = NUTRI;
+  const foods = [
+    "McDonald's Big Breakfast mocha",
+    "McDonald's Big Breakfast mocha",
+    "McDonald's Big Breakfast mocha",
+  ];
+  const n = assessNutritionStandards({ todayFoods: foods, goalType: "muscle_gain" });
+  assert.equal(n, null);
+});
+
+test("card nextMoveLine does not say grill it don't fry it", () => {
+  const src = readFileSync("server/macro-card-attach.ts", "utf8");
+  assert.ok(!/Grill it, don't fry it/.test(src), "confirmation card must not scold frying");
+});
+
+test("verifier blocks fried lecture on a meal they just stated", () => {
+  const { verifyBrainReply } = VERIF;
+  const r = verifyBrainReply(
+    "That's a lot of fried/takeaway today — tasty, but heavy on the hidden fat and salt.",
+    { clientMessage: "I had a McDonald's South African breakfast with a mocha" },
+  );
+  assert.equal(r.ok, false);
+});
+
+
+test("same-meal retry: two McDonald breakfast item lists are one meal", () => {
+  const { isSameMealRetry } = FOODID;
+  assert.equal(isSameMealRetry(
+    ["McDonald's Big Breakfast (SA)", "Mocha"],
+    ["McDonald's Breakfast", "Mocha (coffee shop)"],
+  ), true);
+  assert.equal(isSameMealRetry(["pap", "chicken"], ["eggs", "toast"]), false);
+});
+
+test("parseDropLoggedItem: that wasn't a big mac", () => {
+  const { parseDropLoggedItem } = FOODID;
+  assert.equal(parseDropLoggedItem("that wasn't a big mac"), "big mac");
+  assert.equal(parseDropLoggedItem("I am not hungry"), null);
+});
+
+test("messy intake: yesterday pap and chicken is retro", () => {
+  const { parseMessyIntake } = MESSY;
+  const r = parseMessyIntake("Yesterday I ate pap and chicken, walked about 8000 steps, I'm exhausted");
+  assert.equal(r.hasFoodReport, true);
+  assert.equal(r.hasStepsReport, true);
+  assert.equal(r.hasFeeling, true);
+  assert.equal(r.stepCount, 8000);
+  assert.equal(r.isRetro, true);
+});
+
+
+test("nextMoveLine on a past day does not say eat more today", () => {
+  const { nextMoveLine } = CARD;
+  const rows = [
+    { label: "Calories", current: 600, target: 2500 },
+    { label: "Protein", current: 56, target: 180 },
+  ];
+  const line = nextMoveLine(rows, false, 16, true);
+  // "today's plate is a separate day" is the CORRECT line and contains "today", so banning the
+  // word is the wrong test. What must never happen is a TODAY instruction off a yesterday log.
+  assert.ok(!/(eat|add|get|have|hit)[^.]{0,30}\btoday\b/i.test(line), line);
+  assert.ok(!/\btoday'?s? (target|goal|card)\b/i.test(line), line);
+  assert.ok(/yesterday/i.test(line), line);
+});
+
+test("mealCard yesterday unit is not protein today", () => {
+  const { mealCard } = CARD;
+  const card = mealCard({
+    firstName: "Kam",
+    mealName: "Chicken and pap",
+    rows: [
+      { label: "Calories", current: 600, target: 2500 },
+      { label: "Protein", current: 56, target: 180 },
+    ],
+    isBulk: false,
+    usesNumbers: true,
+    isPastDay: true,
+  });
+  // The unit is the client-facing number label — on a past day it must read "yesterday".
+  assert.equal(card.unit, "protein yesterday", card.unit);
+  // The sub-line may SAY today ("today's plate is a separate day") but must not INSTRUCT today.
+  assert.ok(!/(eat|add|get|have|hit)[^.]{0,30}\btoday\b/i.test(card.sub || ""), card.sub);
+});
+
+
+test("REBUILD GATE journey 2: yesterday pap + 8000 steps + exhausted — all three, steps survive QUESTION", () => {
+  const { journeyMustKeepFacts, parseMessyIntake } = MESSY;
+  const msg = "Yesterday, I had pap and chicken, and I walked 8,000 steps. I'm so exhausted.";
+  const g = journeyMustKeepFacts(msg);
+  assert.equal(g.food, true);
+  assert.equal(g.feeling, true);
+  assert.equal(g.isRetro, true);
+  assert.equal(g.stepCount, 8000);
+  assert.equal(g.logStepsEvenIfClassifiedQuestion, true);
+  const r = parseMessyIntake(msg);
+  assert.equal(r.hasFoodReport, true);
+  assert.equal(r.hasStepsReport, true);
+});
+
+test("REBUILD GATE journey 1: McDonald's + mocha is a food log, not a chat", () => {
+  const { journeyMustKeepFacts } = MESSY;
+  const g = journeyMustKeepFacts("I had a South African breakfast from McDonald's and a large mocha");
+  assert.equal(g.food, true);
+});
+
+test("REBUILD GATE journey 3: that wasn't a big mac is a drop, not a new meal", () => {
+  const { parseDropLoggedItem } = FOODID;
+  assert.equal(parseDropLoggedItem("that wasn't a big mac"), "big mac");
+});
+
+
+test("fidelity: STEPS canonical cannot drop pap and chicken", () => {
+  const { normalizerFidelity } = FIDELITY;
+  const r = normalizerFidelity(
+    "Yesterday I walked eight thousand steps and I had chicken and pap.",
+    "i walked 8000 steps yesterday",
+  );
+  assert.equal(r.ok, false, r.reason);
+});
+
+test("fidelity: FOOD_LOG canonical cannot drop 8000 steps", () => {
+  const { normalizerFidelity } = FIDELITY;
+  const r = normalizerFidelity(
+    "Yesterday I had pap and chicken, and I walked 8,000 steps. I'm so exhausted.",
+    "i had pap and chicken yesterday",
+  );
+  assert.equal(r.ok, false, r.reason);
+});
 
 // ============================================================
 // scalePortionDescription — portion label scaling
@@ -2789,6 +2873,15 @@ test("event boundaries: PRE-positioned phrasing is still unhandled — documente
 
 test("client truth: a pre-workout SNACK is not the pre-workout supplement", async () => {
   const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+// These were written as CommonJS require() inside an ESM module, so every test below
+// that used them threw "require is not defined" — they had never executed. Bound once here.
+const MESSY = await import("../server/understanding/messy-intake");
+const UTILS = await import("../server/utils");
+const FOODID = await import("../server/food-identity-correction");
+const FIDELITY = await import("../server/normalizer-fidelity");
+const CARD = await import("../server/macro-card-attach");
+const NUTRI = await import("../server/nutrition-guardrails");
+const VERIF = await import("../server/brain/reply-verifier");
   const names = (m: string) => scanForSAFoods(m).map(f => f.name);
   assert.deepEqual(names("I had a pre-workout snack"), [],
     "a snack before training must not log a scoop of powder");
@@ -2800,6 +2893,15 @@ test("client truth: a pre-workout SNACK is not the pre-workout supplement", asyn
 
 test("client truth: a bare pre-workout mention IS still the supplement", async () => {
   const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+// These were written as CommonJS require() inside an ESM module, so every test below
+// that used them threw "require is not defined" — they had never executed. Bound once here.
+const MESSY = await import("../server/understanding/messy-intake");
+const UTILS = await import("../server/utils");
+const FOODID = await import("../server/food-identity-correction");
+const FIDELITY = await import("../server/normalizer-fidelity");
+const CARD = await import("../server/macro-card-attach");
+const NUTRI = await import("../server/nutrition-guardrails");
+const VERIF = await import("../server/brain/reply-verifier");
   // The fix must not delete a real capability: someone who actually took C4 still gets it.
   for (const m of ["I had my pre-workout", "took my pre workout and trained"]) {
     assert.ok(scanForSAFoods(m).some(f => /pre.?workout/i.test(f.name)), `"${m}" is the powder`);
@@ -2850,6 +2952,15 @@ test("portion units: the FOOD decides — a handful of peanuts is one portion of
 test("portion units: END TO END — the hard South African cases", async () => {
   const { adjustFoodsForSegment } = await import("../server/handlers/food-context");
   const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+// These were written as CommonJS require() inside an ESM module, so every test below
+// that used them threw "require is not defined" — they had never executed. Bound once here.
+const MESSY = await import("../server/understanding/messy-intake");
+const UTILS = await import("../server/utils");
+const FOODID = await import("../server/food-identity-correction");
+const FIDELITY = await import("../server/normalizer-fidelity");
+const CARD = await import("../server/macro-card-attach");
+const NUTRI = await import("../server/nutrition-guardrails");
+const VERIF = await import("../server/brain/reply-verifier");
   const kcal = (msg: string) => {
     const foods = scanForSAFoods(msg);
     return adjustFoodsForSegment(foods as any, msg).reduce((s: number, f: any) => s + f.adjustedCalories, 0);
@@ -2866,6 +2977,15 @@ test("portion units: END TO END — the hard South African cases", async () => {
 test("portion units: an estimated quantity is tagged ai even when the FOOD is db", async () => {
   const { adjustFoodsForSegment } = await import("../server/handlers/food-context");
   const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+// These were written as CommonJS require() inside an ESM module, so every test below
+// that used them threw "require is not defined" — they had never executed. Bound once here.
+const MESSY = await import("../server/understanding/messy-intake");
+const UTILS = await import("../server/utils");
+const FOODID = await import("../server/food-identity-correction");
+const FIDELITY = await import("../server/normalizer-fidelity");
+const CARD = await import("../server/macro-card-attach");
+const NUTRI = await import("../server/nutrition-guardrails");
+const VERIF = await import("../server/brain/reply-verifier");
   const of = (msg: string) => adjustFoodsForSegment(scanForSAFoods(msg) as any, msg)[0] as any;
   assert.equal(of("2 spoons of pap").origin, "ai", "identity verified, quantity guessed");
   assert.equal(of("3 stashes of bread").origin, "ai", "an unknown unit is an estimate too");
