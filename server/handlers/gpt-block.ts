@@ -18,6 +18,7 @@ import { getKamlifeProgramme } from "../programme";
 import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
 import { safetyGate } from "../verifiers/response-gate";
+import { verifyBrainReply } from "../brain/reply-verifier";
 import { isBareReaction, readsAsTherapySpeak, bareReactionFallback } from "../reaction-guard";
 
 // ── SCENARIO GUIDE — the coach's situation playbook ────────────────────────────
@@ -29,6 +30,14 @@ import { isBareReaction, readsAsTherapySpeak, bareReactionFallback } from "../re
 // STATUS blocks the model already receives.
 // Exported: the brain injects this conditionally on hard-case topics (sick/broke/
 // travel/GLP-1/period/plateau…) so both mouths coach the scenarios identically.
+
+function applyReplyVerifier(reply: string, user: any, message: string): string {
+  const v = verifyBrainReply(reply, { goalType: user?.goalType, clientMessage: message });
+  if (v.ok) return reply;
+  console.warn("[REPLY_VERIFIER] blocked:", v.violation);
+  return "I heard you. I will not guess or lecture — send the next line if I missed something.";
+}
+
 export const SCENARIO_GUIDE = `SCENARIO GUIDE — read the message and decide which applies:
 
 HOLIDAY / VACATION / WEEKEND AWAY: never cancel or guilt the trip — "enjoy it" first. If they name foods they're taking, build the away-plan FROM THEIR OWN LIST: keep everything they named, suggest adding cheap veg (lettuce, tomatoes, cucumber — makes meals bigger without trying), one-line portion caution per risky item (biltong salty — small handful; peanuts calorie-dense — not the whole bag; muesli — a cup, not free-pour; braai meat — enjoy, not only fatty cuts). Close with the only rules, goal-aware: protein first, veg next, drink water. Steps still count; log what you can. A client who slipped for weeks but is still reporting is a WIN — warmth, never the missed weeks.
@@ -746,7 +755,7 @@ SA voice. Direct. Coach forward, not backward.`;
     const damageControl = await getDamageControlNote(user.id, message);
     const fullReply = finalReply + (pattern ? "\n\n" + pattern : "") + (perfectDay || "") + dailyTotal + damageControl;
     await logChat(user.id, message, fullReply, "FOOD_LOG");
-    return fullReply;
+    return applyReplyVerifier(fullReply, user, message);
   }
 
   // Log the GPT catchall with the classifier's intent label so the observability
@@ -756,5 +765,5 @@ SA voice. Direct. Coach forward, not backward.`;
     : (agentType === "mindset" ? "MINDSET" : agentType === "nutrition" ? "NUTRITION" : agentType === "programming" ? "PROGRAMME" : "GENERAL");
   await logChat(user.id, message, finalReply, gptIntentLabel).catch(e => console.warn("[non-fatal logChat]", e));
 
-  return finalReply;
+  return applyReplyVerifier(finalReply, user, message);
 }
