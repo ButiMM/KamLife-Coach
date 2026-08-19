@@ -12,6 +12,7 @@ import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { getGroceryPersonalization } from "../grocery-personalize";
 import { sendWhatsApp } from "../scheduler";
 import { scanForSAFoods, recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
+import { getDayLedger } from "../day-ledger";
 import { logChat, withTimeout } from "./chat-log";
 import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
@@ -213,11 +214,13 @@ export async function handleEarlyCommands(ctx: {
     // with the rows. Both are the same thing to a client and get the same sentence, below.
     try {
       // Always recompute from mealLogs (primary) — covers quick_relog, GPT logs, scanner logs
-      const totals = await recomputeTodayFoodTotals(user.id);
-      const todayCals = totals.calories;
-      const todayProt = totals.protein;
+      const ledger = await getDayLedger(user.id, { user });
+      const todayCals = ledger.kcal;
+      const todayProt = ledger.protein;
+      const todaySteps = ledger.steps;
       const remaining = cal - todayCals;
       const protRemaining = prot - todayProt;
+      const stepBit = todaySteps > 0 ? ` · ${todaySteps.toLocaleString()} steps` : "";
       if (todayCals > 0) {
         const calDone = remaining <= 0;
         const protShortNote = calDone && protRemaining > 0 ? ` ${protRemaining}g protein short — carry to tomorrow.` : "";
@@ -233,9 +236,11 @@ export async function handleEarlyCommands(ctx: {
         // sentence so a person knows what they're looking at. Same rule as the food log path,
         // which was fixed two commits before this one and left this call site untouched.
         if (dailyCard) {
+          // THE NUMBERS ARE THE ANSWER (live 18:08). "Calorie target reached" hid the day and
+          // the card then sold another meal. Progress is the ledger, in one sentence.
           const lead = remaining > 0
-            ? `${name}here's your day so far. *${remaining} kcal and ${protRemaining > 0 ? `${protRemaining}g protein` : "protein done"}* left.`
-            : `${name}here's your day. *Calorie target reached.*${protShortNote}`;
+            ? `${name}today: *${todayCals}/${cal} kcal* · *${todayProt}g/${prot}g* protein${stepBit}. *${remaining} kcal* left.`
+            : `${name}today: *${todayCals}/${cal} kcal* · *${todayProt}g* protein${stepBit}. Calories are done — water from here, not another plate.`;
           return `${lead}${dailyCard}`;
         }
         return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go${inMeals ? ` — ${inMeals}` : ""}.` : `\nCalorie target reached. ✅${protShortNote}`}${actionLine}${eduNote}`;
