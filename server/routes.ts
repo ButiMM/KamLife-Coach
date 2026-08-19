@@ -1016,6 +1016,12 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     }
   }
 
+  // Voice cut off: "I've walked..." with no number. Do not drop the walk.
+  const mentionedWalk = /\b(walked|walking|i'?ve\s+walked|just\s+walked|went\s+for\s+a\s+walk)\b/i.test(m);
+  if (!stepReplyPart && mentionedWalk && !stepIsQuestion && !normalizedQuestion && !isFutureIntent(m)) {
+    stepReplyPart = `Heard you walked — send the step count (e.g. "3000 steps") and I'll log it.`;
+  }
+
   // ---- WATER LOGGING HANDLER (compound-aware) ----
   // "an apple and a pear, and one litre of water" must log BOTH: water logs here, but if the
   // message also carries food, carry the water confirmation and let the food pipeline log the
