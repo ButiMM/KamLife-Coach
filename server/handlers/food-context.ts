@@ -1202,7 +1202,7 @@ export async function handleFoodContext(ctx: {
         isRetro: scannerIsRetro,
       });
 
-      const scannerRetroNote = scannerIsRetro ? `\n_Logged to ${mealDateLabel(scannerLoggedAt)}._` : "";
+      const scannerRetroNote = (scannerIsRetro && !/logged for yesterday/i.test(reply)) ? `\n_Logged to ${mealDateLabel(scannerLoggedAt)}._` : "";
       await logChat(user.id, message, reply, "FOOD_LOG");
       const [saPattern, saDay, foodStreak] = await Promise.all([
         checkFoodPatterns(user.id),
@@ -1225,7 +1225,7 @@ export async function handleFoodContext(ctx: {
       const comboUpsell = allAdjustedFoods
         .map(f => COMBO_UPSELL[f.name])
         .find(note => note);
-      const upsellNote = comboUpsell ? `\n\n${comboUpsell}` : "";
+      const upsellNote = (comboUpsell && !scannerIsRetro && !carriesFeelingClause(message)) ? `\n\n${comboUpsell}` : "";
       const guiltNote = hasGuiltSignal ? `\n\n_No judgment — it's logged and counted. One off-plan meal doesn't undo weeks of work. Your next meal is the reset._` : "";
       const activationNote = await firstActionCelebration(user, phone, "meal");
 
