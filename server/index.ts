@@ -482,6 +482,19 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS primary_focus_area TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS baseline_week_active BOOLEAN DEFAULT false`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS baseline_week_complete BOOLEAN DEFAULT false`,
+    // Adaptive baseline (migration 0005) — must self-heal on boot. Railway starts
+    // `node dist/index.cjs` and never runs migrations/*.sql. Without these columns,
+    // any Drizzle select on users throws and clients see "Eish, something went wrong."
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS baseline_calorie_target INTEGER`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS baseline_protein_target INTEGER`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS baseline_steps_target INTEGER`,
+    // One-time backfill: baseline = current overlay where still null (stops recursion;
+    // cannot recover pre-ratchet values).
+    `UPDATE users SET baseline_calorie_target = COALESCE(baseline_calorie_target, calorie_target),
+                            baseline_protein_target = COALESCE(baseline_protein_target, protein_target),
+                            baseline_steps_target   = COALESCE(baseline_steps_target, steps_target)
+                     WHERE (calorie_target IS NOT NULL OR protein_target IS NOT NULL OR steps_target IS NOT NULL)
+                       AND (baseline_calorie_target IS NULL OR baseline_protein_target IS NULL OR baseline_steps_target IS NULL)`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_notes TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS workout_streak INTEGER DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_renews_at TIMESTAMP`,
