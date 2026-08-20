@@ -9532,6 +9532,15 @@ test("facts: an injury is a body part plus a reason to believe it", async () => 
   assert.equal(detectFacts("that workout hurt so good").injuries, undefined, "no body part named");
   assert.equal(detectFacts("my legs are sore after leg day").injuries, undefined, "DOMS is not an injury");
   assert.equal(detectFacts("chicken and pap for lunch").injuries, undefined);
+  // GUARDED (Cut 8b, found by the architecture governor). A false positive rewrites the
+  // programme silently and forever; a false negative just means we learn it next time.
+  assert.equal(detectFacts("my knee doesn't hurt anymore").injuries, undefined,
+    "an injury the client says is OVER must never be recorded");
+  assert.equal(detectFacts("my back is all better now").injuries, undefined);
+  assert.equal(detectFacts("what happens if I hurt my knee?").injuries, undefined, "a question is not a report");
+  assert.equal(detectFacts("I'm going to hurt my shoulder doing that").injuries, undefined, "nor is a plan");
+  // …and the guards must not eat the real thing.
+  assert.equal(detectFacts("I hurt my lower back at work").injuries, "back", "still recorded");
 });
 
 test("facts: a medical condition is first-person or it is not ours to record", async () => {
@@ -9540,6 +9549,7 @@ test("facts: a medical condition is first-person or it is not ours to record", a
   assert.equal(detectFacts("I'm diabetic").medicalConditions, "diabetes", "normalised to one token");
   assert.equal(detectFacts("my sister has diabetes").medicalConditions, undefined,
     "someone else's chart must never land on this client");
+  assert.equal(detectFacts("do I have diabetes?").medicalConditions, undefined, "asking is not having");
 });
 
 test("facts: life context, and the one fact whose value is constraining us", async () => {
@@ -9550,6 +9560,9 @@ test("facts: life context, and the one fact whose value is constraining us", asy
   assert.equal(nights.lifeContext, "night shift");
   assert.equal(nights.workSchedule, "night_shift", "…and it sets the work pattern the brief reads");
   // Nothing detected this before Cut 7 — it was the clearest hole in "memory that is a person".
+  // NOT GUARDED BY looksLikeQuestion, on purpose: "don't mention my weight" is a negative
+  // imperative and that guard matches a leading "don't". Guarding it would silently discard the
+  // one fact whose entire value is being honoured.
   assert.equal(detectFacts("please don't mention my weight again").doNotMention, "weight");
   assert.equal(detectFacts("stop bringing up the scale").doNotMention, "scale");
 });

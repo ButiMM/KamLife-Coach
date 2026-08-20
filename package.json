@@ -16,7 +16,7 @@
     "test:scanner": "tsx script/food-scanner-tests.ts",
     "test:decision-boundary": "tsx script/decision-boundary-tests.ts",
     "test:reentry": "tsx script/reentry-state-tests.ts && tsx script/reentry-bridge-tests.ts",
-    "test": "tsx script/unit-tests.ts && tsx script/integration-tests.ts && tsx script/food-scanner-tests.ts && tsx script/safety-audit.ts && tsx script/golden-regression.ts && tsx script/routing-audit.ts && tsx script/gap-tests.ts && tsx script/onboarding-e2e.ts && tsx script/video-path-verify.ts && tsx script/phrasing-battery.ts && tsx script/check-file-sizes.ts && tsx script/check-pricing.ts && tsx script/check-schema-safety.ts && tsx script/check-sast.ts && tsx script/check-names.ts && tsx script/check-reach.ts && tsx script/check-prompt-integrity.ts && tsx script/hunger-gauntlet.ts && tsx script/decision-boundary-tests.ts && tsx script/reentry-state-tests.ts && tsx script/reentry-bridge-tests.ts && tsx script/check-architecture.ts",
+    "test": "tsx script/run-suites.ts",
     "check:filesize": "tsx script/check-file-sizes.ts",
     "check:pricing": "tsx script/check-pricing.ts",
     "db:push": "drizzle-kit push",

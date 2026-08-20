@@ -230,6 +230,7 @@ export async function retrieveMemories(phone: string, query: string): Promise<st
 import { db } from "./db";
 import { users } from "../shared/schema";
 import { eq } from "drizzle-orm";
+import { looksLikeQuestion, isFutureIntent } from "./utils";
 
 export interface DurableFacts {
   injuries?: string;
@@ -256,10 +257,32 @@ export function detectFacts(message: string): DurableFacts {
   const facts: DurableFacts = {};
   if (!raw) return facts;
 
+  // ── THE GUARDS, APPLIED PER FACT AND NOT IN A BLOCK ──────────────────────────────────────
+  //
+  // (2026-08-19, Cut 8b — the architecture governor caught this file writing to the database off
+  // the client's message with nothing in front of it.) The asymmetry decides the design: a false
+  // positive here rewrites the client's programme silently and forever, while a false negative
+  // just means we learn the fact next time, or through pain triage, which still works. So when
+  // the phrasing is a question or a plan, we do not record.
+  //
+  // Applied where they are RIGHT, and excluded where they would be wrong — a blanket guard would
+  // be worse than none:
+  //   • the question and future guards do NOT apply to don't-mention, because "don't mention my
+  //     weight" is itself a negative imperative and looksLikeQuestion matches a leading "don't".
+  //     Guarding it would silently discard the only fact whose value is being honoured.
+  //   • mentionsNotDone is used NOWHERE here. It matches "can't", and "can't eat dairy" is the
+  //     dietary fact, not its negation. Injury resolution is detected explicitly below instead.
+  const asking = looksLikeQuestion(raw);
+  const planning = isFutureIntent(raw);
+  const reporting = !asking && !planning;
+
   // INJURY — needs both a pain word and a body part. "my back is killing me" qualifies;
   // "that workout hurt" does not, and must not amputate their leg day.
+  // "my knee doesn't hurt anymore", "the back is healed" — the client is telling us the injury is
+  // OVER. Recording it here would train around a knee that is fine, permanently.
+  const resolved = /\b(?:no longer|not\s+(?:really\s+)?(?:sore|hurting|painful)|doesn'?t\s+hurt|don'?t\s+hurt|healed|all\s+better|fine\s+now|better\s+now|sorted\s+now)\b|\banymore\b/i.test(m);
   const part = m.match(BODY_PART)?.[0]?.toLowerCase();
-  if (part) {
+  if (part && reporting && !resolved) {
     // An INJURY VERB naming a body part is enough on its own — "I hurt my lower back at work" is
     // a report, not a complaint about a hard session.
     const injuryVerb = /\b(injur\w*|hurt|strain\w*|sprain\w*|pulled|tweaked|twisted)\b/i.test(m);
@@ -272,23 +295,24 @@ export function detectFacts(message: string): DurableFacts {
 
   // MEDICAL CONDITION — first person only. "my sister has diabetes" is not this client's chart.
   const condition = m.match(/\b(diabetes|diabetic|hypertension|high blood pressure|pcos|hiv|tuberculosis|epilepsy|pregnant|asthma|thyroid)\b/)?.[0];
-  if (condition && /\b(i|i'?m|i am|i have|i'?ve|my)\b/i.test(m) && !/\b(my (?:sister|brother|mother|father|mom|dad|wife|husband|friend|aunt|uncle|gran))\b/i.test(m)) {
+  if (condition && reporting && /\b(i|i'?m|i am|i have|i'?ve|my)\b/i.test(m) && !/\b(my (?:sister|brother|mother|father|mom|dad|wife|husband|friend|aunt|uncle|gran))\b/i.test(m)) {
     facts.medicalConditions = condition === "diabetic" ? "diabetes" : condition;
   }
 
   // DIETARY RESTRICTION — what they cannot or will not eat. Separate from a preference: this one
   // constrains every meal suggestion we make from now on.
-  const allergy = m.match(/\b(?:allergic to|intolerant to|can'?t eat|cannot eat|don'?t eat|i'?m|i am)\s+([a-z ]{3,20}?)\b(?:\.|,|$| and | but )/)?.[1]?.trim();
+  // Question and future only — see the note above on why mentionsNotDone must not run here.
+  const allergy = !reporting ? undefined : m.match(/\b(?:allergic to|intolerant to|can'?t eat|cannot eat|don'?t eat|i'?m|i am)\s+([a-z ]{3,20}?)\b(?:\.|,|$| and | but )/)?.[1]?.trim();
   if (allergy && /\b(lactose|gluten|dairy|nuts?|peanuts?|shellfish|eggs?|pork|beef|halaal|halal|vegan|vegetarian|seafood|fish)\b/i.test(allergy)) {
     facts.dietaryRestrictions = allergy;
-  } else if (/\b(lactose intolerant|gluten free|dairy free|vegan|vegetarian|halaal|halal|kosher)\b/i.test(m) && /\bi'?m|i am\b/i.test(m)) {
+  } else if (reporting && /\b(lactose intolerant|gluten free|dairy free|vegan|vegetarian|halaal|halal|kosher)\b/i.test(m) && /\bi'?m|i am\b/i.test(m)) {
     facts.dietaryRestrictions = m.match(/\b(lactose intolerant|gluten free|dairy free|vegan|vegetarian|halaal|halal|kosher)\b/i)![0];
   }
 
   // LIFE CONTEXT — the thing that makes a month-gone "just say hi" land as a coach. This is the
   // fact the old store was worst at: it embedded "just had a baby" and then recalled it only if
   // the client later said something semantically similar to a baby.
-  const life = m.match(/\b(night shift|night shifts|just had a baby|new baby|newborn|new job|retrenched|laid off|lost my job|got married|divorce|breakup|moved house|moved to|studying|exams)\b/)?.[0];
+  const life = !reporting ? undefined : m.match(/\b(night shift|night shifts|just had a baby|new baby|newborn|new job|retrenched|laid off|lost my job|got married|divorce|breakup|moved house|moved to|studying|exams)\b/)?.[0];
   if (life) {
     facts.lifeContext = life;
     if (/night shift/.test(life)) facts.workSchedule = "night_shift";

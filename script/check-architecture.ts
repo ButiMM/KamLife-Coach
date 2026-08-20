@@ -111,6 +111,15 @@ const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT 
   "server/handlers/sick-flow.ts": "guarded",
   "server/handlers/lifecycle.ts": "guarded",
   "server/routes.ts": "guarded",
+  // 2026-08-19, Cut 7/8b. recordClientFacts writes six durable columns off the client's own
+  // words, and one of them — injuries — is read by programme.ts to remove exercises from a plan.
+  // That is a mutation of the client's plan, so bookkeeping would be a lie. It is "guarded"
+  // because detectFacts consults looksLikeQuestion and isFutureIntent before recording, plus an
+  // explicit resolution check so "my knee doesn't hurt anymore" cannot train around a healthy
+  // knee. mentionsNotDone is deliberately NOT used — it matches "can't", and "can't eat dairy" is
+  // the dietary fact rather than its negation; the guards are applied per fact, with reasons, in
+  // detectFacts itself. The governor caught this file undeclared and the gap was real.
+  "server/memory.ts": "guarded",
   "server/handlers/safety.ts": "must-act",
   "server/handlers/pain-triage.ts": "must-act",
   "server/onboarding.ts": "must-act",
@@ -573,12 +582,21 @@ for (const rule of ONE_OWNER) {
 // A suite cannot police its own liveness — if it will not parse, nothing inside it executes. So
 // the check lives here, in the guard that runs last: every suite in the npm test chain must at
 // least parse. Cheap (syntax only, no execution) and it survives a revert of the suite itself.
+// THE LIST MOVED, AND SO DID THIS (2026-08-19). `npm test` is no longer an `&&` chain — it is
+// script/run-suites.ts, which runs every suite and reports the failures together, because the
+// chain stopped at the first red and left fourteen suites, this guard among them, unexecuted.
+// The suite list now lives in that file's SUITES array and is read from it here. A guard that
+// kept parsing package.json would have quietly checked an empty chain and passed.
 {
-  const chain: string[] = (JSON.parse(readFileSync("package.json", "utf-8")).scripts?.test || "")
-    .split("&&").map((c: string) => (c.match(/script\/([\w-]+\.ts)/) || [])[1]).filter(Boolean);
+  const runner = "script/run-suites.ts";
+  const chain: string[] = existsSync(runner)
+    ? (readFileSync(runner, "utf-8").match(/export const SUITES = \[([\s\S]*?)\]/)?.[1] || "")
+        .match(/"([\w-]+)"/g)?.map(q => `${q.replace(/"/g, "")}.ts`) || []
+    : [];
+  if (chain.length < 20) problems.push(`  ✗ the suite list in ${runner} reads as ${chain.length} suites — the liveness guard is checking almost nothing.`);
   for (const file of [...new Set(chain)]) {
     const path = `script/${file}`;
-    if (!existsSync(path)) { problems.push(`  ✗ npm test runs ${path}, which does not exist.`); continue; }
+    if (!existsSync(path)) { problems.push(`  ✗ the suite list names ${path}, which does not exist.`); continue; }
     const r = spawnSync("npx", ["esbuild", path, "--log-level=error", "--outfile=/dev/null"], { encoding: "utf-8" });
     if (r.status !== 0) {
       problems.push(`  ✗ ${path} DOES NOT PARSE — every test in it silently stops running.`);
