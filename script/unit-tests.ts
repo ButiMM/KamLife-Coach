@@ -9920,6 +9920,16 @@ test("step questions are a shape, not a list of phrasings", async () => {
   assert.ok(blocked("Nice, 12,000 steps today!", "I had eggs"), "…including alongside an unrelated report");
 });
 
+test("coach identity: one normalisation, or the founder is a stranger to his own bot", async () => {
+  const { normaliseMsisdn } = await import("../server/utils");
+  // The two forms of the SAME phone. The env var holds one, Twilio delivers the other.
+  assert.equal(normaliseMsisdn("0821234567"), "27821234567");
+  assert.equal(normaliseMsisdn("+27821234567"), "27821234567");
+  assert.equal(normaliseMsisdn("whatsapp:+27 82 123 4567".replace(/^whatsapp:/, "")), "27821234567");
+  // Raw-digit compare — what routes.ts did until 2026-08-20 — says these are different people.
+  assert.notEqual("0821234567".replace(/\D/g, ""), "+27821234567".replace(/\D/g, ""));
+});
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

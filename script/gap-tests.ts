@@ -3756,6 +3756,23 @@ test("p0: a fallback may lose specificity, never the relationship", () => {
   assert.equal((live.match(/I'm Coach K/g) || []).length, 0, "no redirect copy leaks into the caller");
 });
 
+test("p0: the coach is recognised by the same rule as everyone else", () => {
+  const routes = readFileSync("server/routes.ts", "utf-8");
+  const code = routes.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // isCoach compared RAW digits; isBetaTester, seventy lines below, normalised both sides. Two
+  // answers to "is this the same person" in one function — so `0821234567` in the env never
+  // equalled `whatsapp:+27821234567` from Twilio and the founder failed EVERY coach gate.
+  //
+  // The visible cost was the deploy check itself: texting `version` — the command that exists so
+  // a non-technical founder can prove what is live — fell through to the model and came back
+  // "Let me not guess on that one." We could not confirm a deploy, which is the gate the entire
+  // phone test hangs on.
+  assert.ok(/const coachPhone = normaliseMsisdn\(/.test(code), "the env side is normalised");
+  assert.ok(/normaliseMsisdn\(userPhone\) === coachPhone/.test(code), "…and so is the client side");
+  assert.ok(!/userPhone === coachPhone\b/.test(code.replace(/normaliseMsisdn\(userPhone\)/g, "")),
+    "no raw-digit comparison survives");
+});
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");

@@ -242,11 +242,10 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
     }
   }
 
-  // ---- COACH / OWNER BYPASS — never paywall the coach's own number ----
-  // Checks COACH_ALERT_PHONE and ADMIN_PHONE_OVERRIDE (either env var works)
-  const coachPhone = (process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE || "").replace(/\D/g, "");
+  // COACH BYPASS — ONE NORMALISATION (phone P0 2026-08-20). See the gap-test for what broke.
+  const coachPhone = normaliseMsisdn(process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE || "");
   const userPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
-  const isCoach = !!(coachPhone && userPhone === coachPhone);
+  const isCoach = !!(coachPhone && normaliseMsisdn(userPhone) === coachPhone);
   if (isCoach && (user.subscriptionStatus === "inactive" || user.subscriptionStatus === "trial")) {
     await db.update(users).set({ subscriptionStatus: "active" }).where(eq(users.phoneNumber, phone));
     user.subscriptionStatus = "active";
