@@ -255,8 +255,8 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // No shell for a non-technical founder: text "replay" (optionally "replay 50") and the
   // Meaning Engine is dry-run over real history, scored vs production, results sent here.
   if (isCoach) {
-    // COACH COMMAND "version" → PROVE what's LIVE (a founder can't watch a deploy). Text the
-    // live bot → running commit + a self-test the running code runs on itself.
+    // COACH COMMAND "version" → PROVE what's LIVE (a founder can't watch a deploy): running
+    // commit + a self-test. Probes are NAMED, never quoted — see the gap-test for why.
     if (/^(version|deploy(?:ed)?|what.?version|whatami|running|self.?test|is it live)$/i.test(m.trim())) {
       const sha = (process.env.RAILWAY_GIT_COMMIT_SHA || "").slice(0, 7) || "unknown";
       const bootAt = new Date(Date.now() - process.uptime() * 1000).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
@@ -269,7 +269,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
       // reported a scary "card leaks as a link" while cards rendered fine (2026-07-27).
       const appUrlOk = /^https?:\/\/.+/i.test((await import("./macro-card-attach")).cardBaseUrl());
       const cardOk = cardFontLoaded && appUrlOk;
-      return `🚀 *Running build*\nCommit: *${sha}* (${process.env.RAILWAY_GIT_BRANCH || "main"})\nBooted: ${bootAt} SAST · up ${Math.max(1, Math.round(process.uptime() / 60))} min\nEngine: ENGINE_LIVE=*${engine}*\n\n*Live self-test* (the running code checking itself now):\n• "incorporate exercises like rows and planks" → ${mark(freelance)}\n• "shock the muscle to confuse it" → ${mark(myth)}\n• Meal card → ${cardOk ? "✅ font loaded, image URL valid" : `⚠️ ${!cardFontLoaded ? "font NOT loaded (card text blank)" : "APP_URL missing https:// (card leaks as a link)"}`}\n\n${freelance && myth ? "The engine fix is LIVE." : "⚠️ Engine fix NOT live yet — give Railway a minute and send *version* again."}`;
+      return `🚀 *Running build*\nCommit: *${sha}* (${process.env.RAILWAY_GIT_BRANCH || "main"})\nBooted: ${bootAt} SAST · up ${Math.max(1, Math.round(process.uptime() / 60))} min\nEngine: ENGINE_LIVE=*${engine}*\n\n*Live self-test* (the running code checking itself now):\n• freelance-advice probe → ${mark(freelance)}\n• muscle-confusion myth probe → ${mark(myth)}\n• Meal card → ${cardOk ? "✅ font loaded, image URL valid" : `⚠️ ${!cardFontLoaded ? "font NOT loaded (card text blank)" : "APP_URL missing https:// (card leaks as a link)"}`}\n\n${freelance && myth ? "The engine fix is LIVE." : "⚠️ Engine fix NOT live yet — give Railway a minute and send *version* again."}`;
     }
 
     // Founder reports: engagement, surface, audit (defects), outcomes (results), selfcheck (what's off).

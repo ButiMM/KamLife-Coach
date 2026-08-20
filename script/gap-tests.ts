@@ -3787,6 +3787,27 @@ test("deploy identity does not depend on the app's own routing", () => {
     "the 200 and the 503 both name the build");
 });
 
+test("the self-test does not trip its own gate", async () => {
+  const V = await import("../server/brain/reply-verifier");
+  const routes = readFileSync("server/routes.ts", "utf-8");
+  // routeMessage runs inside inTurn, so EVERY reply — including a deterministic coach command —
+  // passes verifyBrainReply on the way out. The `version` reply used to print its probe sentences
+  // verbatim, so it reproduced a violation, its own gate blocked it, and the founder got
+  // "Let me not guess on that one" instead of the running commit. Twice, on two separate days.
+  // The one command that exists to prove what is deployed was the one that could not answer.
+  assert.ok(!/• "incorporate exercises like rows and planks"/.test(routes),
+    "the probe is named, not quoted");
+  assert.ok(!/• "shock the muscle to confuse it"/.test(routes), "…both of them");
+  assert.ok(/freelance-advice probe|muscle-confusion myth probe/.test(routes), "named instead");
+  // The probes must still genuinely be violations — naming them must not weaken the test.
+  assert.ok(!V.verifyBrainReply("To improve, incorporate exercises like rows and planks.", {}).ok);
+  assert.ok(!V.verifyBrainReply("We'll shock the muscle with new movements to confuse it.", {}).ok);
+  // And the reply the founder actually receives must survive the gate it just ran.
+  const shipped = `🚀 *Running build*\nCommit: *abc1234* (main)\n\n*Live self-test* (the running code checking itself now):\n• freelance-advice probe → ✅ BLOCKED\n• muscle-confusion myth probe → ✅ BLOCKED\n• Meal card → ✅ font loaded, image URL valid\n\nThe engine fix is LIVE.`;
+  assert.ok(V.verifyBrainReply(shipped, { clientMessage: "version" }).ok,
+    "the deploy check must be able to reach the person asking for it");
+});
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
