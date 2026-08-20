@@ -3783,8 +3783,14 @@ test("deploy identity does not depend on the app's own routing", () => {
   assert.ok(/\.\.\.runningBuild\(\)/.test(code), "on /health");
   // AND ON THE FAILURE PATH. "Which code is failing" is the first question when an instance is
   // unhealthy, and the moment the WhatsApp command is least likely to answer.
-  assert.equal((code.match(/\.\.\.runningBuild\(\)/g) || []).length, 2,
-    "the 200 and the 503 both name the build");
+  // Every path out of /health names the build — the healthy one, the database-down one, and the
+  // still-starting one. Asserted as a property rather than a count: the count grew when startup
+  // state was added, and a count that has to be edited to stay green teaches you to edit it.
+  const healthBody = code.slice(code.indexOf('app.get("/health"'), code.indexOf('app.get("/health/ready"'));
+  const responses = healthBody.match(/res\.(?:status\(\d+\)\.)?json\(/g) || [];
+  const named = healthBody.match(/\.\.\.runningBuild\(\)/g) || [];
+  assert.ok(responses.length >= 2, "there is more than one way out of /health");
+  assert.equal(named.length, responses.length, "every one of them names the build");
 });
 
 test("the self-test does not trip its own gate", async () => {
@@ -3806,6 +3812,77 @@ test("the self-test does not trip its own gate", async () => {
   const shipped = `🚀 *Running build*\nCommit: *abc1234* (main)\n\n*Live self-test* (the running code checking itself now):\n• freelance-advice probe → ✅ BLOCKED\n• muscle-confusion myth probe → ✅ BLOCKED\n• Meal card → ✅ font loaded, image URL valid\n\nThe engine fix is LIVE.`;
   assert.ok(V.verifyBrainReply(shipped, { clientMessage: "version" }).ok,
     "the deploy check must be able to reach the person asking for it");
+});
+
+// ── STARTUP OBSERVABILITY: a failed boot must be able to say what it is ─────────────────────
+// The order was migrations → routes → listen, so any failure before listen produced a bare 502 —
+// indistinguishable from a dead container, a wrong domain or a crash-loop. /health, whose whole
+// job is to answer "which build, what state", was registered two steps after the thing that
+// failed. Reproduced against an unreachable database, then fixed and re-verified.
+
+test("startup: the process binds before it proves the schema", () => {
+  const index = readFileSync("server/index.ts", "utf-8");
+  const code = index.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  const gate = code.indexOf("registerStartupGate(app)");
+  const verify = code.indexOf("void verifySchemaThenServe()");
+  const listen = code.indexOf("httpServer.listen(");
+  assert.ok(gate > 0 && verify > 0 && listen > 0, "all three steps exist");
+  assert.ok(gate < verify, "the gate is registered before anything can be served");
+  assert.ok(verify < listen, "the schema check is kicked off, not awaited, ahead of listen");
+  // NOT awaited — awaiting it would restore the old behaviour exactly.
+  assert.ok(!/await verifySchemaThenServe\(\)/.test(code), "listen must not wait on migrations");
+});
+
+test("startup: the gate is registered before every other route", () => {
+  const index = readFileSync("server/index.ts", "utf-8");
+  const code = index.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // Express matches in registration order. Auth and audio routes are registered before
+  // registerRoutes() runs, so a gate living inside it would have let them through against an
+  // unverified schema.
+  const gate = code.indexOf("registerStartupGate(app)");
+  const audio = code.indexOf("registerAudioRoutes(app)");
+  const routes = code.indexOf("await registerRoutes(httpServer, app)");
+  assert.ok(gate < audio && gate < routes, "nothing is registered ahead of the gate");
+});
+
+test("startup: the schema guarantee survives binding early", () => {
+  const health = readFileSync("server/routes/health.ts", "utf-8");
+  // Binding before migrations must not mean SERVING before migrations — that is the guarantee
+  // Cut 4's fatal runner exists to provide, and it is unchanged.
+  assert.ok(/if \(isReady\(\) \|\| req\.path\.startsWith\("\/health"\)\) return next\(\);/.test(health),
+    "everything but a health probe is refused until ready");
+  assert.ok(/schema not verified yet — not serving traffic/.test(health), "and the refusal says why");
+  // The scheduler must not fire proactive messages against an unverified schema either.
+  const index = readFileSync("server/index.ts", "utf-8");
+  const readyBranch = index.slice(index.indexOf('setStartupPhase("ready"'), index.indexOf("} catch (e: any) {", index.indexOf('setStartupPhase("ready"')));
+  assert.ok(/initScheduler\(\)/.test(readyBranch), "the scheduler starts from the ready branch");
+  assert.ok(/initFoodsTable\(\)/.test(readyBranch) && /initMemoryTable\(\)/.test(readyBranch),
+    "…and so does everything else that touches the schema");
+});
+
+test("startup: cannot-connect and migration-failed are different facts", () => {
+  const index = readFileSync("server/index.ts", "utf-8");
+  assert.ok(/function isConnectionError/.test(index), "the two are classified apart");
+  assert.ok(/ECONNREFUSED/.test(index) && /ENOTFOUND/.test(index), "infrastructure codes are named");
+  // One is infrastructure and one is our SQL. Treating them identically is how an opaque 502 came
+  // to stand for both.
+  assert.ok(/database: connection \? "unreachable" : "reachable"/.test(index));
+  assert.ok(/migration: connection \? "pending" : "failed"/.test(index));
+  // A missing env var used to throw before listen — same opacity, different cause.
+  assert.ok(!/throw new Error\(`Missing critical env vars in production/.test(index),
+    "a missing env var is reported, not thrown into a 502");
+  assert.ok(/missing critical env vars: \$\{missingCritical\.join\(", "\)\}/.test(index),
+    "…and the variable is named, which is the one thing the person fixing it needs");
+});
+
+test("startup: /health answers without a database", () => {
+  const health = readFileSync("server/routes/health.ts", "utf-8");
+  const idx = health.indexOf('app.get("/health"');
+  const body = health.slice(idx, health.indexOf('app.get("/health/ready"'));
+  const earlyReturn = body.indexOf('if (startupState.phase !== "ready")');
+  const dbCall = body.indexOf("await db.execute");
+  assert.ok(earlyReturn > 0 && dbCall > 0 && earlyReturn < dbCall,
+    "it reports startup state BEFORE requiring a live query — the two states we most need to tell apart both used to come back as one opaque error");
 });
 
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);

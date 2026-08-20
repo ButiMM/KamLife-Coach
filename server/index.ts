@@ -5,6 +5,7 @@ import helmet from "helmet";
 import * as Sentry from "@sentry/node";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { setStartupPhase, registerStartupGate } from "./routes/health";
 import { registerAudioRoutes } from "./replit_integrations/audio/routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -626,6 +627,13 @@ async function runMigrations(): Promise<void> {
  * schema — 0000 carries an explicit idempotency patch saying so — which is what makes adopting
  * them on an existing production database safe rather than a second outage.
  */
+/** Infrastructure, not our SQL. These must be reported — and retried — differently. */
+function isConnectionError(e: any): boolean {
+  const code = String(e?.code || e?.cause?.code || "");
+  return ["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "ECONNRESET", "EHOSTUNREACH", "EAI_AGAIN"].includes(code)
+    || /connect|terminat|timeout|getaddrinfo/i.test(String(e?.message || ""));
+}
+
 async function applySqlMigrations(): Promise<void> {
   const dir = join(process.cwd(), "migrations");
   if (!existsSync(dir)) {
@@ -765,10 +773,53 @@ async function activateCoachAccount(): Promise<void> {
   }
 }
 
+/**
+ * BIND FIRST, THEN PROVE THE SCHEMA (2026-08-20).
+ *
+ * The order was migrations → routes → listen, so any migration failure meant the port was never
+ * bound and the edge returned a bare 502 — indistinguishable from a dead container, a bad domain,
+ * or a crash-loop. /health could not answer, because it is registered after the step that failed.
+ *
+ * The safety guarantee is unchanged: a schema that failed to migrate still may not serve Coach
+ * traffic. The gate in routes/health.ts refuses everything but a health probe until the phase is
+ * `ready`. What changes is that the process is REACHABLE while it decides, and says which of
+ * "cannot connect" and "migration failed" happened — two different facts that a 502 conflated.
+ */
+async function verifySchemaThenServe(): Promise<void> {
+  setStartupPhase("migrating");
+  try {
+    await runMigrations();
+    setStartupPhase("ready", { database: "reachable", migration: "applied", detail: null });
+    // Everything that touches the schema starts HERE, after it is proven — never from the listen
+    // callback, which fires whether or not the migration succeeded.
+    // SHOUT ABOUT ANYTHING SILENTLY OFF (2026-07-28). A crisis alert that cannot reach the
+    // founder must not wait for someone to think of asking.
+    import("./self-check").then(sc => sc.logSelfCheckAtBoot()).catch(() => {});
+    initScheduler().catch(e => console.error("[STARTUP] Scheduler init failed:", e));
+    initFoodsTable().catch(e => console.error("[STARTUP] Foods init failed:", e));
+    initMemoryTable().catch(e => console.error("[STARTUP] Memory init failed:", e));
+    activateCoachAccount().catch(e => console.error("[STARTUP] Coach activation failed:", e));
+  } catch (e: any) {
+    const connection = isConnectionError(e);
+    setStartupPhase("failed", {
+      database: connection ? "unreachable" : "reachable",
+      migration: connection ? "pending" : "failed",
+      detail: e?.message || String(e),
+    });
+    // NOT process.exit(). A dead process cannot tell anyone what went wrong, and that is exactly
+    // the hole this fixes. It stays up, serves /health, and refuses everything else.
+    console.error(`[STARTUP] schema not verified — serving /health only. ${connection ? "database unreachable" : "MIGRATION FAILED"}: ${e?.message}`);
+  }
+}
+
 (async () => {
-  await runMigrations();
+  // FIRST. Express matches in registration order, so this must precede every other route or it
+  // only guards what comes after it.
+  registerStartupGate(app);
   registerAudioRoutes(app);
   await registerRoutes(httpServer, app);
+  // Kicked off, not awaited: the listen() below must happen regardless of how this goes.
+  void verifySchemaThenServe();
 
   if (process.env.SENTRY_DSN) {
     app.use(Sentry.expressErrorHandler() as any);
@@ -829,12 +880,18 @@ async function activateCoachAccount(): Promise<void> {
     }
   }
 
-  // Hard-fail in production if any critical var is missing — refuse to boot broken.
+  // REFUSE TO SERVE, BUT SAY SO (2026-08-20). This threw before listen(), so a missing env var
+  // was indistinguishable from a crash-loop, a bad domain or a dead database — all of them a bare
+  // 502. The refusal is unchanged in substance: the startup gate keeps every non-health route
+  // closed. What changes is that the process stays reachable long enough to NAME the variable,
+  // which is the one thing the person fixing it needs.
   if (process.env.NODE_ENV === "production") {
     const missingCritical = missing.filter(e => e.critical).map(e => e.key);
     if (missingCritical.length > 0) {
-      console.error(`[STARTUP] ❌  Refusing to start in production — missing critical env vars: ${missingCritical.join(", ")}`);
-      throw new Error(`Missing critical env vars in production: ${missingCritical.join(", ")}`);
+      console.error(`[STARTUP] ❌  Refusing to serve in production — missing critical env vars: ${missingCritical.join(", ")}`);
+      // NOT a return: listen() is below, and skipping it would reproduce the exact opacity this
+      // change exists to remove. Bind, refuse traffic at the gate, and name the variable.
+      setStartupPhase("failed", { detail: `missing critical env vars: ${missingCritical.join(", ")}` });
     }
   }
 
@@ -854,15 +911,11 @@ async function activateCoachAccount(): Promise<void> {
     listenOptions,
     () => {
       log(`serving on port ${port}`);
-      // SHOUT ABOUT ANYTHING SILENTLY OFF (2026-07-28). A crisis alert that cannot reach the
-      // founder must not wait for someone to think of asking — the first time you learn about it
-      // should not be the moment a real client needs it. Text *selfcheck* for the full list.
-      import("./self-check").then(sc => sc.logSelfCheckAtBoot()).catch(() => {});
-      initScheduler().catch(e => console.error("[STARTUP] Scheduler init failed:", e));
-      initFoodsTable().catch(e => console.error("[STARTUP] Foods init failed:", e));
-      initMemoryTable().catch(e => console.error("[STARTUP] Memory init failed:", e));
-      // meal_logs is created by the canonical migration block above (was a duplicate here).
-      activateCoachAccount().catch(e => console.error("[STARTUP] Coach activation failed:", e));
+      // THE PORT IS BOUND; NOTHING ELSE STARTS YET. Binding early is what lets /health explain a
+      // failed startup, but the scheduler must not fire proactive messages — or the foods and
+      // memory tables initialise — against a schema we have not verified. Those now run from the
+      // `ready` branch of verifySchemaThenServe, which is the one place that knows the schema is
+      // good. A boot that never reaches `ready` serves /health and nothing else, on purpose.
     },
   );
 

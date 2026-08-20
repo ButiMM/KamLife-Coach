@@ -26,18 +26,105 @@ function runningBuild() {
   };
 }
 
+/**
+ * STARTUP STATE — so a failed boot can still say what it is (2026-08-20).
+ *
+ * The startup sequence was migrations → routes → listen. Any migration failure therefore meant
+ * the port was never bound, the edge returned a bare 502, and /health — the endpoint whose whole
+ * job is to answer "which build, what state" — could not answer, because it is registered two
+ * steps after the thing that failed. Reproduced locally against an unreachable database: the
+ * process ran migrations, threw, and never listened.
+ *
+ * The fix is NOT to make migrations non-fatal. A schema that failed to migrate must never serve
+ * Coach traffic — that is the guarantee Cut 4 exists to provide, and it stands. What changes is
+ * that the process BINDS FIRST and says so:
+ *
+ *     listening → migrating → ready          (normal)
+ *     listening → migrating → failed         (says which, and why, and stays up to say it)
+ *
+ * and everything that is not a health probe is refused with 503 until the phase is `ready`.
+ *
+ * "Cannot connect" and "migration failed after connecting" are DIFFERENT FACTS and are reported
+ * separately — one is infrastructure, the other is our SQL, and treating them identically is how
+ * an opaque 502 came to stand for both.
+ */
+export type StartupPhase = "starting" | "migrating" | "ready" | "failed";
+
+const startup: {
+  phase: StartupPhase;
+  database: "unknown" | "reachable" | "unreachable";
+  migration: "pending" | "applied" | "failed";
+  detail: string | null;
+} = { phase: "starting", database: "unknown", migration: "pending", detail: null };
+
+export function setStartupPhase(
+  phase: StartupPhase,
+  patch?: { database?: typeof startup.database; migration?: typeof startup.migration; detail?: string | null },
+): void {
+  startup.phase = phase;
+  if (patch?.database) startup.database = patch.database;
+  if (patch?.migration) startup.migration = patch.migration;
+  if (patch?.detail !== undefined) startup.detail = patch.detail ? String(patch.detail).slice(0, 300) : null;
+  console.log(`[STARTUP] phase=${startup.phase} db=${startup.database} migration=${startup.migration}${startup.detail ? ` — ${startup.detail}` : ""}`);
+}
+
+export function isReady(): boolean {
+  return startup.phase === "ready";
+}
+
+export function startupSnapshot() {
+  return { ...startup };
+}
+
+/**
+ * THE SCHEMA GUARANTEE, KEPT (2026-08-20). Binding before migrations must not mean SERVING before
+ * migrations — a schema that failed to migrate may never take Coach traffic, which is the whole
+ * point of Cut 4's fatal runner. Everything that is not a health probe is refused until the phase
+ * is `ready`, and the refusal SAYS WHY instead of timing out.
+ *
+ * Registered FIRST, before any other route, because Express matches in registration order — a
+ * gate placed halfway down the list only guards the half below it. Auth and audio routes are
+ * registered before registerRoutes() runs, so a gate living inside it would have let them through
+ * against an unverified schema.
+ *
+ * It lives in this module because this is where the phase is owned: one place decides what
+ * "ready" means.
+ */
+export function registerStartupGate(app: Express) {
+  app.use((req, res, next) => {
+    if (isReady() || req.path.startsWith("/health")) return next();
+    const startupState = startupSnapshot();
+    console.warn(`[STARTUP] refused ${req.method} ${req.path} — phase=${startupState.phase}`);
+    res.status(503).json({
+      error: "starting", detail: "schema not verified yet — not serving traffic",
+      ...runningBuild(), startup: startupState,
+    });
+  });
+}
+
 export function registerHealthRoutes(app: Express) {
   // ── Simple health check — includes DB ping so Railway stops routing to dead instances ──
   app.get("/health", async (_req, res) => {
+    const startupState = startupSnapshot();
+    // ANSWERS DURING STARTUP AND AFTER A FAILED ONE. This used to require a live database read
+    // before it would say anything at all, so the two states we most need to tell apart —
+    // "still migrating" and "migration failed" — both came back as one opaque error.
+    if (startupState.phase !== "ready") {
+      return res.status(503).json({
+        status: startupState.phase === "failed" ? "error" : "starting",
+        service: "KamLife Coach", ...runningBuild(), startup: startupState,
+        timestamp: new Date().toISOString(),
+      });
+    }
     try {
       await db.execute(sql`SELECT 1`);
-      res.json({ status: "ok", service: "KamLife Coach", ...runningBuild(), timestamp: new Date().toISOString() });
+      res.json({ status: "ok", service: "KamLife Coach", ...runningBuild(), startup: startupState, timestamp: new Date().toISOString() });
     } catch (e: any) {
       console.error("[HEALTH] DB check failed:", e.message);
       // The build still answers on a 503 — "which code is failing" is the question you ask FIRST
       // when an instance is unhealthy, and it is the moment the WhatsApp command is least likely
       // to work.
-      res.status(503).json({ status: "error", detail: "database unavailable", ...runningBuild(), timestamp: new Date().toISOString() });
+      res.status(503).json({ status: "error", detail: "database unavailable", ...runningBuild(), startup: startupState, timestamp: new Date().toISOString() });
     }
   });
 
