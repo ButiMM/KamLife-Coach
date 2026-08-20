@@ -9,6 +9,9 @@
 import { parseMessyIntake } from "../understanding/messy-intake";
 import { currentRuntimeDecision, forceRuntimeReferral, type RuntimeDecisionResult } from "../understanding/state";
 import { detectMedicationContext } from "../medication-context";
+// The canonical "is this a question" owner. utils.ts imports only ./sast, so this module stays
+// free of the database and the model.
+import { looksLikeQuestion } from "../utils";
 
 export interface VerifierFacts {
   goalType?: string | null;
@@ -183,15 +186,23 @@ function extractStepNumbers(text: string): number[] {
   return [...new Set(out)];
 }
 
+/**
+ * NOT A PHRASE LIST ANY MORE (2026-08-20, phone P0).
+ *
+ * This was seven literal strings. The founder asked "How does my daily step count affect my
+ * progress and calorie burn and energy levels" — a question this rule's own violation text says
+ * we MAY answer from state — and "my daily step count" was in none of them. The reply was
+ * blocked, and the client got "Let me not guess on that one. Tell me what happened in your own
+ * words", which asks somebody to narrate an event when they asked a question.
+ *
+ * A list of phrasings can only ever be as good as the phrasings somebody thought of. This is the
+ * shape instead, and the "is this a question" half is looksLikeQuestion — the canonical owner,
+ * which already knows that "did 9000 steps" is a REPORT and not an interrogative.
+ */
 function isExplicitStepQuery(text: string): boolean {
   const q = (text || "").toLowerCase();
-  return q.includes("how many steps")
-    || q.includes("what are my steps")
-    || q.includes("what's my step count")
-    || q.includes("what is my step count")
-    || q.includes("my steps")
-    || q.includes("step progress")
-    || q.includes("step total");
+  if (!/\b(steps?|step count|walking|walked)\b/.test(q)) return false;
+  return looksLikeQuestion(text) || /\bmy\b[^.?!]{0,24}\b(steps?|step count)\b/.test(q);
 }
 
 /**

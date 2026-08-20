@@ -3704,6 +3704,58 @@ test("cut11: provenance has one home and the object carries it", () => {
   assert.ok(/provenance: FoodProvenance;/.test(dl), "known / likely / unknown rides on the object");
 });
 
+// ── PHONE P0 WIRING: one owner per question ─────────────────────────────────────────────────
+
+test("p0: one recovery vocabulary, not two", () => {
+  const sick = readFileSync("server/handlers/sick-flow.ts", "utf-8");
+  const code = sick.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // The detector accepted a bare "not sick"; the branch that CLEARED the hold demanded the
+  // contraction. Two vocabularies for one question, and the state-changing one was the narrow one.
+  assert.ok(/export function saysRecovered/.test(code), "one predicate");
+  assert.ok(/const declaresReturn = saysRecovered\(m\)/.test(code), "…and the clear branch uses it");
+  assert.ok(!/i'\?m not sick\|not sick any/.test(code), "the second hand-written list is gone");
+});
+
+test("p0: a stale health flag cannot silence the morning", () => {
+  const shared = readFileSync("server/scheduler/shared.ts", "utf-8");
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  // recordSickState writes paused_until beside sick_until, so isPaused() turned an un-cleared
+  // illness into an invisible killswitch on the 06:00 coach.
+  assert.ok(/export function pauseReason/.test(shared), "the scheduler can see WHY");
+  assert.ok(/pauseReason\(client\) === "explicit"/.test(morning),
+    "only a pause the client asked for suppresses the morning");
+  assert.ok(!/if \(isPaused\(client\)\) \{/.test(morning), "the blanket gate is gone");
+});
+
+test("p0: the repair path answers a question instead of asking them to narrate", () => {
+  const chat = readFileSync("server/handlers/chat-log.ts", "utf-8");
+  assert.ok(/if \(!looksLikeQuestion\(scope\.inputText \|\| ""\)\) return WITHHOLD;/.test(chat),
+    "WITHHOLD is for a report we could not trust, not for a question");
+  assert.ok(/getDayLedger\(scope\.userId!, \{\}\)/.test(chat), "the known part comes from the ledger");
+});
+
+test("p0: the step exemption is a shape, and the fallback is not a list", () => {
+  const v = readFileSync("server/brain/reply-verifier.ts", "utf-8");
+  const code = v.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  assert.ok(!/q\.includes\("how many steps"\)/.test(code), "the seven literal phrasings are gone");
+  assert.ok(/looksLikeQuestion\(text\)/.test(code), "it asks the canonical question owner");
+});
+
+test("p0: a fallback may lose specificity, never the relationship", () => {
+  const guard = readFileSync("server/understanding/domain-guard.ts", "utf-8");
+  const live = readFileSync("server/understanding/live.ts", "utf-8");
+  assert.ok(/REDIRECT_IN_CONVERSATION/.test(guard), "there is an in-conversation form");
+  // Assert the CONSTANT, not a substring of the file — the doc comment above it legitimately
+  // names Coach K while explaining why the line must not.
+  const inConv = guard.match(/const REDIRECT_IN_CONVERSATION\s*=\s*\n?\s*"([^"]+)"/)?.[1] || "";
+  assert.ok(inConv.length > 20, "the in-conversation redirect has a body");
+  assert.ok(!/Coach K/.test(inConv), "…and it does not introduce us to somebody already talking to us");
+  assert.ok(/still here|What did you need/i.test(inConv), "it stays in the conversation and hands the turn back");
+  assert.ok(/classifyDomain\(openai, message, \{ ongoing \}\)/.test(live), "the caller says which it is");
+  // Both wordings live in ONE module — the fix must not become a second fallback tree.
+  assert.equal((live.match(/I'm Coach K/g) || []).length, 0, "no redirect copy leaks into the caller");
+});
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");

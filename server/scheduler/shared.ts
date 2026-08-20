@@ -721,6 +721,29 @@ export async function getActiveClients(opts?: { ignorePause?: boolean }) {
   );
 }
 
+/**
+ * WHY is this client paused? (2026-08-20, phone P0.)
+ *
+ * recordSickState writes `sick_until` and `paused_until` in the same string, and every proactive
+ * job gates on isPaused(). So an illness flag that failed to clear did not merely mis-coach — it
+ * SILENCED the coach. The founder was logging 10k steps and arguing with us at 22:47 and got no
+ * 06:00 morning, because a stale health flag was acting as a killswitch nobody could see.
+ *
+ * That is two policies for one question. chooseAction already ranks `rest` SECOND — right after
+ * silence — precisely so that "do nothing today" is a coaching answer rather than an absence. A
+ * sick client should hear "rest today", not hear nothing; hearing nothing is how they find out we
+ * stopped noticing them.
+ *
+ * So sickness now INFORMS the decision and no longer gates the job. An explicit pause — the
+ * client asked us to stop for a fortnight — still suppresses, because that one is a request.
+ */
+export function pauseReason(client: { profileNotes?: string | null }): "explicit" | "health" | null {
+  const notes = client.profileNotes || "";
+  const match = notes.match(/paused_until:(\d{4}-\d{2}-\d{2})/);
+  if (!match || new Date(match[1]) < new Date(todayUTC())) return null;
+  return /sick_until:\d{4}-\d{2}-\d{2}/.test(notes) ? "health" : "explicit";
+}
+
 export function isPaused(client: { profileNotes?: string | null }): boolean {
   const notes = client.profileNotes || "";
   const match = notes.match(/paused_until:(\d{4}-\d{2}-\d{2})/);

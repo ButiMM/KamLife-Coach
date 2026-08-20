@@ -1,7 +1,7 @@
 import {
   db, users, chatHistory, stepLogs, workoutLogs, mealLogs, escalations,
   eq, gte, and, lt, desc, sql, asc,
-  sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot, claimProactive,
+  sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot, claimProactive, pauseReason,
   getActiveClients, isPaused, dayStart, getYesterdayLogs,
   TRAINING_SCHEDULES, programmeDaysSince, loadProactiveState,
   todaySAST,
@@ -73,7 +73,15 @@ export async function runMorningCheckin(): Promise<void> {
   const clients = await getActiveClients();
 
   for (const client of clients) {
-    if (isPaused(client)) {
+    // A HEALTH PAUSE NO LONGER SILENCES THE COACH (2026-08-20, phone P0). isPaused() was true for
+    // anyone carrying a `sick_until`, because recordSickState writes `paused_until` beside it — so
+    // a stale illness flag suppressed the morning entirely, and the client had no way to tell the
+    // difference between "the coach thinks I'm resting" and "the coach is broken". The founder
+    // spent an evening logging steps and correcting us and got nothing at 06:00.
+    //
+    // Sickness is an INPUT to the decision below, which ranks `rest` second on purpose. An
+    // explicit pause — they asked us to stop — still suppresses, because that one is a request.
+    if (pauseReason(client) === "explicit") {
       const notes = client.profileNotes || "";
       const pauseMatch = notes.match(/paused_until:(\d{4}-\d{2}-\d{2})/);
       if (pauseMatch) {

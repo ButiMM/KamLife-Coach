@@ -7,6 +7,7 @@ import { classifyMediaFailure } from "../coach-guardrails";
 import { detectEscalation, escalationSLA, isSyntheticTestClient } from "../safety-detection";
 import { currentRuntimeDecision } from "../understanding/state";
 import { verifyBrainReply, mentionsForbidden, stripForbidden, HONOURED_SILENCE } from "../brain/reply-verifier";
+import { looksLikeQuestion } from "../utils";
 import { sastDayStart } from "../utils";
 
 export async function checkEscalation(userId: string, messageIn: string): Promise<void> {
@@ -173,8 +174,37 @@ const CLINICAL_REFERRAL = "That one's for a doctor or pharmacist, not me — I'm
   + "Speak to them about it, and I'll keep helping you with the food, training and habits around it.";
 const WITHHOLD = "Let me not guess on that one. Tell me what happened in your own words and I'll pick it up from there.";
 
-function safeReplacementFor(violation: string): string {
-  return /medication|medical|cure|reverse|heal|diagnos/i.test(violation) ? CLINICAL_REFERRAL : WITHHOLD;
+/**
+ * HUMILITY IS NOT STARVATION (2026-08-20, phone P0).
+ *
+ * WITHHOLD asks the client to "tell me what happened in your own words". That is the right thing
+ * to say when a REPORT could not be trusted. It is the wrong thing to say to somebody who asked a
+ * question: the founder asked how his daily step count affects his progress, the verifier blocked
+ * the answer, and he was told to describe the event — an event that never happened, because he
+ * was asking, not reporting.
+ *
+ * So a blocked reply to a question answers the part we KNOW and declines only the inference. That
+ * is the evidence doctrine applied to our own repair path: known → say it, unknown → don't invent
+ * it, and never hand the work back for something they did not do.
+ */
+/** Test seam — the repair path is where a blocked reply becomes what the client actually reads. */
+export const __testSafeReplacementFor = (v: string, scope: any) => safeReplacementFor(v, scope);
+
+async function safeReplacementFor(violation: string, scope: TurnScope): Promise<string> {
+  if (/medication|medical|cure|reverse|heal|diagnos/i.test(violation)) return CLINICAL_REFERRAL;
+  if (!looksLikeQuestion(scope.inputText || "")) return WITHHOLD;
+  try {
+    const { getDayLedger } = await import("../day-ledger");
+    const ledger = await getDayLedger(scope.userId!, {});
+    const known: string[] = [];
+    if (ledger.steps > 0) known.push(`${ledger.steps.toLocaleString()} steps`);
+    if (ledger.kcal > 0) known.push(`${ledger.kcal} kcal`);
+    if (ledger.protein > 0) known.push(`${ledger.protein}g protein`);
+    if (known.length > 0) {
+      return `Today I've got ${known.join(", ")} on your ledger — that part I'm sure of. The rest of what you asked I'd be guessing at, and I won't do that. Ask me the piece you want and I'll answer it straight.`;
+    }
+  } catch (e) { console.warn("[REPLY_BLOCKED] ledger unavailable for the honest answer:", (e as any)?.message || e); }
+  return `I don't have enough on today to answer that properly yet — log a meal or your steps and ask me again, and you'll get a real number instead of a guess.`;
 }
 
 async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<string> {
@@ -198,7 +228,7 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   // ════════════════════════════════════════════════════════════════════════════════════════
   if (!verifier.ok) {
     console.error(`[REPLY_BLOCKED] ...${scope.userId.slice(-6)} — ${verifier.violation}`);
-    const safe = safeReplacementFor(verifier.violation || "");
+    const safe = await safeReplacementFor(verifier.violation || "", scope);
     // The row keeps what actually went out. A blocked reply is an escalation, not a log line.
     await db.insert(escalations).values({
       userId: scope.userId, reason: "reply_blocked_by_verifier", status: "open",
@@ -298,7 +328,7 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
     const recheck = verifyBrainReply(corrected, { clientMessage: scope.inputText });
     if (!recheck.ok) {
       console.error(`[REPLY_BLOCKED] ...${scope.userId.slice(-6)} — correction failed re-verification: ${recheck.violation}`);
-      return safeReplacementFor(recheck.violation || "");
+      return await safeReplacementFor(recheck.violation || "", scope);
     }
     try {
       const [lastLog] = await db.select({ id: chatHistory.id }).from(chatHistory)

@@ -9843,6 +9843,83 @@ test("progress: provenance stays honest about what we cannot characterise", asyn
   assert.equal(solid.confidence, "verified");
 });
 
+// ── PHONE P0 (19–20 Aug screenshots): a correction must change STATE, not just language ─────
+// The founder said "I am not sick. I've never been sick." The coach replied "I appreciate your
+// clarity" and changed nothing — kept telling him to rest, sent a night-before return nudge, and
+// because the sick flag also writes paused_until, his 06:00 morning was suppressed for as long as
+// the flag stood. One sentence, three symptoms.
+
+test("recovery: the words a person actually says", async () => {
+  const { saysRecovered } = await import("../server/handlers/sick-flow");
+  // THE EXACT TRANSCRIPT that changed nothing on 19 August.
+  assert.ok(saysRecovered("I am not sick. I've never been sick."), "the un-contracted form");
+  assert.ok(saysRecovered("I'm not sick"), "and the contracted one it used to accept");
+  for (const said of [
+    "im not sick", "I have never been sick", "I am no longer sick", "not sick anymore",
+    "feeling better", "I am better", "I'm fine", "recovered", "back to normal", "over the flu",
+  ]) assert.ok(saysRecovered(said), `must clear on: ${said}`);
+  // AND MUST NOT FIRE ON A REPORT OF BEING SICK, or the hold clears the moment it is set.
+  for (const said of ["I'm sick", "I have the flu", "still sick", "I feel terrible", "I am ill"]) {
+    assert.ok(!saysRecovered(said), `must NOT clear on: ${said}`);
+  }
+  // "over the" used to be in this vocabulary bare — "I went over the calorie target" would have
+  // read as a recovery declaration once this predicate started clearing state.
+  assert.ok(!saysRecovered("I went over the calorie target today"), "over-target is not over-the-flu");
+});
+
+test("pause: a health flag informs the decision, an explicit pause silences the job", async () => {
+  const { pauseReason } = await import("../server/scheduler/shared");
+  const future = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+  const past = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10);
+  // The founder's row: sickness wrote both tokens, so isPaused() was true and morning returned.
+  assert.equal(pauseReason({ profileNotes: `sick_since:${past} | sick_until:${future} | paused_until:${future}` }), "health");
+  // A client who ASKED us to stop is a request, and still suppresses.
+  assert.equal(pauseReason({ profileNotes: `paused_until:${future}` }), "explicit");
+  assert.equal(pauseReason({ profileNotes: `paused_until:${past}` }), null, "an expired pause is not a pause");
+  assert.equal(pauseReason({ profileNotes: "" }), null);
+  assert.equal(pauseReason({ profileNotes: null }), null);
+});
+
+test("sick client still gets coached — rest is an answer, silence is not", async () => {
+  const { chooseAction } = await import("../server/one-action");
+  const a = chooseAction({
+    goal: "fat_loss" as any, weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 2,
+    loggedToday: true, proteinPct: 1, caloriePct: 1, sessionsThisWeek: 0, sessionsTarget: 3,
+    stepsToday: 0, stepsTarget: 8000, hour: 7, sick: true,
+  });
+  // This is why the health pause is the wrong tool: the decision ALREADY ranks rest second.
+  assert.equal(a.kind, "rest");
+  assert.match(a.todo, /rest/i);
+});
+
+test("blocked question: answer the known part, never ask them to narrate", async () => {
+  const { __testSafeReplacementFor } = await import("../server/handlers/chat-log");
+  // A blocked REPORT still hands back — that is what WITHHOLD is for.
+  const report = await __testSafeReplacementFor("step attribution", { userId: null, inputText: "did 9000 steps" } as any);
+  assert.match(report, /in your own words/i);
+  // A blocked QUESTION must not. The founder asked how his step count affects his progress and
+  // was told to describe an event that never happened, because he was asking, not reporting.
+  const question = await __testSafeReplacementFor("step attribution", { userId: null, inputText: "How does my daily step count affect my progress?" } as any);
+  assert.ok(!/in your own words/i.test(question), "humility is not starvation");
+  assert.match(question, /log a meal or your steps|that part I'm sure of/i);
+  // Medication still outranks both.
+  const med = await __testSafeReplacementFor("unsafe medication request", { userId: null, inputText: "can I take ozempic?" } as any);
+  assert.match(med, /doctor or pharmacist/i);
+});
+
+test("step questions are a shape, not a list of phrasings", async () => {
+  const V = await import("../server/brain/reply-verifier");
+  const blocked = (reply: string, msg: string) => !V.verifyBrainReply(reply, { clientMessage: msg }).ok;
+  // THE EXACT QUESTION from 19 August, which the seven-phrase allow-list did not contain.
+  assert.ok(!blocked("You walked 10,000 steps today, which burns roughly 400 kcal.",
+    "How does my daily step count affect my progress and calorie burn and energy levels?"),
+    "asking about your own steps may be answered from state");
+  assert.ok(!blocked("You did 8,000 steps today.", "what's my step count looking like?"));
+  // The rule still catches what it was built for: a number attributed to someone who reported none.
+  assert.ok(blocked("You walked 8,000 steps today — nice.", "hi"), "a bare attribution still fails");
+  assert.ok(blocked("Nice, 12,000 steps today!", "I had eggs"), "…including alongside an unrelated report");
+});
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

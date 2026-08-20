@@ -245,7 +245,11 @@ export async function runMeaningEngineLive(ctx: {
     // DOMAIN BOUNDARY GATE (Law 11) — keep Coach K a coaching platform, not a general
     // assistant. Out-of-domain gets a warm redirect (never runs the engine); a partial
     // (life stuff a coach can bridge) passes a note so the engine steers back to the journey.
-    const domain = await classifyDomain(openai, message);
+    // ONGOING = they have spoken to us recently, so the fallback must not introduce itself. The
+    // reentry state is already loaded above and already answers "are we mid-conversation" — no
+    // second notion of it is needed here.
+    const ongoing = (prior?.current?.reentry?.daysSinceLastContact ?? 99) <= 1;
+    const domain = await classifyDomain(openai, message, { ongoing });
     if (domain.classification === "out-of-domain" && domain.redirectMessage) {
       await logChat(user.id, message, domain.redirectMessage, "DOMAIN_REDIRECT").catch(() => {});
       captureFriction("redirect", { userId: user.id, messageIn: message, detail: "cold domain redirect" });

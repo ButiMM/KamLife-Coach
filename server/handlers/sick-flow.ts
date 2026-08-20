@@ -18,7 +18,36 @@ import { scheduleReturnNudge, cancelReturnNudges } from "../reminders";
 // around at work") is context — unless the message ALSO asserts first-person
 // sickness. Idioms are scrubbed FIRST because they contain the trigger words.
 const SICK_WORDS = /\b(sick|ill|flu|flue|flu.?like|fever|vomit|nausea|nauseous|throwing up|stomach bug|food poison|covid|covid.?19|not well|not feeling well|feeling sick|feeling ill|feel sick|feel ill|i.?m sick|i.?m ill|under the weather|hospital|doctor.?s|clinic|bed rest|body aches|headache.*bad|migraine|tonsil|sore throat|chest.*tight|can.?t breathe|difficulty breathing)\b/i;
-const RECOVERED = /\b(used to be sick|was sick last week|recovered|feeling better now|back to normal|got better|all better|not sick|not ill|not unwell|i.?m not sick|no longer sick|not sick anymore|i.?m better|i.?m fine now|i.?m okay now|i.?m ok now|feel better|feeling better|better now|i.?m well|i.?m healthy|recovered from|over the|over it now)\b/i;
+/**
+ * ONE RECOVERY MATCHER — the client said they are not sick (2026-08-20, phone P0).
+ *
+ * THERE WERE TWO. This constant accepted a bare "not sick"; the branch that actually CLEARS the
+ * hold required the contraction `i'?m not sick`. A client whose voice note transcribed as
+ * "I am not sick. I've never been sick." matched the wide one and failed the narrow one — so the
+ * coach agreed with him and changed nothing, kept telling him to rest, sent a night-before
+ * "you're cleared to get back to it" nudge, and because recordSickState writes `paused_until`
+ * alongside `sick_until`, isPaused() suppressed his 06:00 morning for as long as the flag stood.
+ *
+ * The file's own comment records this being half-fixed once already: "'I'm not sick' … were in
+ * the RECOVERED vocabulary at the top of this file but NOT in the clear-list below." The
+ * contraction was added. The words a person actually says were not.
+ *
+ * So: one predicate, used by both readers. It is expressed as SHAPES — a first-person negation of
+ * illness, or a statement of being better — rather than a list of literal phrasings, because the
+ * list is what failed. Same class of defect as `\bliver\b` against "chicken livers" and `\b`
+ * against "2kg": a matcher closed at the wrong end.
+ */
+const NOT_SICK = /\b(?:i(?:'|’)?m|i\s+am|im|i(?:'|’)?ve|i\s+have)?\s*(?:not|never(?:\s+been)?|no longer)\s+(?:been\s+)?(?:sick|ill|unwell)\b|\bnot\s+sick\s+any\s?more\b/i;
+const IS_BETTER = /\b(?:feeling|feel|i(?:'|’)?m|i\s+am|all|much|getting)\s*better\b|\bbetter\s+now\b|\brecovered\b|\bback to normal\b|\bgot better\b|\bover (?:the (?:flu|cold|bug|virus)|it now)\b|\bi(?:'|’)?m\s+(?:fine|ok(?:ay)?|well|healthy)\b/i;
+/** Past-tense only — "I was sick last week" is not a claim to be sick now. */
+const WAS_SICK = /\b(?:used to be sick|was sick last week)\b/i;
+
+/** The one question: is this person telling me they are NOT sick? */
+export function saysRecovered(text: string): boolean {
+  const t = String(text || "");
+  return NOT_SICK.test(t) || IS_BETTER.test(t) || WAS_SICK.test(t);
+}
+const RECOVERED = { test: (s: string) => saysRecovered(s) };
 // PAST-TENSE REFERENCE (2026-07-27 live disaster): a client said "Now that I'm not sick
 // anymore how do we go about my plan?" — got the right plan — then added "But I was sick",
 // and the bare word "sick" threw them BACK into the sick flow: training cancelled, check-ins
@@ -263,9 +292,13 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
   // "I'm not sick" / "I'm fine now" were in the RECOVERED vocabulary at the top of this file but
   // NOT in the clear-list below, so a client correcting the coach ("I'm not sick") could not clear
   // the hold and kept getting sick-adjusted targets every morning (2026-07-28 live).
-  if (!isDeferredReturn
-      && /\b(i'?m back|feeling better|i'?m better|recovered|all better|ready to train|back to training|flu'?s? gone|over the flu|i'?m not sick|not sick any\s?more|no longer sick|i'?m fine now|i'?m ok(?:ay)? now|i'?m well now|i'?m healthy)\b/i.test(m)
-      && /sick_until:\d{4}-\d{2}-\d{2}/.test(user.profileNotes || "")) {
+  // THE SAME PREDICATE THE DETECTOR USES. Two vocabularies for one question is what produced the
+  // 19-20 August screenshots; there is now one, and "I'm back" / "ready to train" join it here
+  // because those are declarations of return rather than of health.
+  const declaresReturn = saysRecovered(m)
+    || /\b(i'?m back|i\s+am\s+back|ready to train|back to training|flu'?s? gone|i'?m training (?:today|tomorrow)|i\s+am\s+training (?:today|tomorrow)|never left|haven'?t been (?:gone|away)|never been (?:gone|away))\b/i.test(m);
+  if (!isDeferredReturn && declaresReturn
+      && /(?:sick_until|paused_until):\d{4}-\d{2}-\d{2}/.test(user.profileNotes || "")) {
     try {
       const cleaned = (user.profileNotes || "").replace(/\s*\|?\s*(?:paused_until|sick_until|sick_since):\d{4}-\d{2}-\d{2}/g, "").trim();
       await db.update(users).set({ profileNotes: cleaned || null }).where(eq(users.id, user.id));

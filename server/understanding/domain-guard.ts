@@ -31,6 +31,22 @@ export interface DomainVerdict {
 const REDIRECT =
   "I'm Coach K — I'm here for your health and fitness journey. If it's about your training, food, sleep, stress, habits or progress, I'm all in. What's going on with you today?";
 
+/**
+ * THE SAME REDIRECT, TO SOMEBODY ALREADY TALKING TO US (2026-08-20, phone P0).
+ *
+ * The line above introduces Coach K. That is right for a cold first contact and wrong for anyone
+ * mid-conversation — the founder, six messages into correcting us about his own state, asked
+ * "What's the day today??" and got the brochure. Introducing yourself to someone who is arguing
+ * with you reads as the coach forgetting who they are talking to, which is worse than any wrong
+ * answer, because it says the relationship was never there.
+ *
+ * A fallback may lose SPECIFICITY. It may not reset identity, relationship or context. So this
+ * one stays in the conversation and hands the turn back, and it lives here beside the other so
+ * there is one owner of what we say when we cannot answer — not a second tree somewhere else.
+ */
+const REDIRECT_IN_CONVERSATION =
+  "That one's outside what I can help with — but I'm still here on the training, food and how you're going. What did you need?";
+
 // Broad IN-DOMAIN vocabulary. Generous on purpose: a false "out-of-domain" refuses a paying
 // client, which is the worst outcome. Anything health/body/food/feeling/life/logging/social
 // pleasantry stays in-domain with NO model call.
@@ -107,7 +123,9 @@ Reply with ONE word only:
 A complaint, correction, or reference to Coach K's OWN previous reply ("no, reverse that", "that's wrong", "you misunderstood", "look at the picture again") is ALWAYS part of the coaching conversation → YES.
 Lean YES/PARTIALLY when unsure — this is a coaching client, not a search engine.`;
 
-export async function classifyDomain(openai: OpenAI, message: string): Promise<DomainVerdict> {
+export async function classifyDomain(
+  openai: OpenAI, message: string, opts?: { ongoing?: boolean },
+): Promise<DomainVerdict> {
   if (killswitchOff() || isObviouslyInDomain(message)) {
     return { classification: "in-domain", reasoning: "fast-path / killswitch" };
   }
@@ -125,7 +143,7 @@ export async function classifyDomain(openai: OpenAI, message: string): Promise<D
     const { recordGptCost } = await import("../gpt"); // lazy — keeps the pure fast-path db-free
     recordGptCost({ userId: null, model: "gpt-4o-mini", feature: "domain_guard", promptTokens: resp.usage?.prompt_tokens ?? 0, completionTokens: resp.usage?.completion_tokens ?? 0 });
     const word = (resp.choices[0]?.message?.content || "").trim().toUpperCase();
-    if (word.startsWith("NO")) return { classification: "out-of-domain", reasoning: "classifier: NO", redirectMessage: REDIRECT };
+    if (word.startsWith("NO")) return { classification: "out-of-domain", reasoning: "classifier: NO", redirectMessage: opts?.ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT };
     if (word.startsWith("SAFETY")) return { classification: "safety", reasoning: "classifier: SAFETY" };
     if (word.startsWith("PART")) return { classification: "partially-related", reasoning: "classifier: PARTIALLY" };
     return { classification: "in-domain", reasoning: "classifier: YES" };
