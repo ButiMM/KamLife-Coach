@@ -552,13 +552,59 @@ export async function handleMiscCommands(ctx: {
   // client's body: the one thing the 2026-07-28 note two hundred lines up says must never
   // happen. Ungated now. Anything carrying "today" still means today and gets the card
   // (early-commands owns that); bare "progress" means the journey so far.
-  if (["progress", "my progress", "how am i doing"].includes(m)) {
-    const daysOn = user.programmeStartDate
-      ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86400000)
-      : 0;
-    const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged";
+  // ── PROGRESS HAS ONE OWNER (2026-08-20, response-graph audit) ────────────────────────────
+  //
+  // This branch built its own scoreboard from four `users` columns — totalWorkoutsCompleted,
+  // programmeStartDate, programmeWeek, currentWeight — and never touched the ledger. So the
+  // client had THREE progress authorities: this one, the day ledger behind "today's progress",
+  // and getProgressTruth behind the cards. Cut 11 consolidated the cards and left the two doors
+  // a person actually types.
+  //
+  // It also printed "Day 35, week 1" — daysOn derived from programmeStartDate against a stored
+  // programmeWeek column, two parallel scoreboards contradicting each other inside one sentence.
+  // Reading one source removes the contradiction rather than patching the arithmetic.
+  //
+  // And it advertised "Send *this week*" — a command NO handler owned, so it fell to the model,
+  // which improvised averages and handed the next move back to the client. Both doors are owned
+  // here now, from the same truth.
+  const wantsToday = ["progress", "my progress", "how am i doing"].includes(m);
+  const wantsWeek = ["this week", "week", "my week", "weekly", "this weeks progress", "this week's progress"].includes(m);
+  if (wantsToday || wantsWeek) {
     const name = getDisplayName(user) || "there";
-    return `*${name}'s Progress*\n\n✅ Workouts: *${user.totalWorkoutsCompleted || 0}*\n📅 Day *${daysOn}*, week *${user.programmeWeek || 1}*\n⚖️ Weight: *${w}*\n\nSend *this week* for the 7-day breakdown.`;
+    try {
+      const { getProgressTruth } = await import("../day-ledger");
+      const truth = await getProgressTruth(user, { days: 7, clientMessage: message });
+      const calTarget = Number(user.calorieTarget) || 0;
+      const protTarget = Number(user.proteinTarget) || 0;
+      const weightLine = truth.weight.known && truth.weight.currentKg
+        ? `\n⚖️ Weight: *${truth.weight.currentKg}kg*${truth.weight.changeKg !== null ? ` (${truth.weight.changeKg <= 0 ? "down" : "up"} ${Math.abs(truth.weight.changeKg)}kg)` : ""}`
+        : "";
+      if (wantsWeek) {
+        // ONE NEXT MOVE, NEVER A QUESTION BACK. The model's version ended "What's one action you
+        // can take this week?" — the coach asking the client to coach himself, which is the exact
+        // inverse of the product contract.
+        const { chooseAction } = await import("../one-action");
+        const act = chooseAction({
+          goal: (user.goalType as any) || "general", weeksOnProgramme: Math.max(0, (user.programmeWeek || 1) - 1),
+          dreamGoal: user.dreamGoal, biggestStruggle: user.biggestStruggle, lifeContext: user.lifeContext,
+          doNotMention: user.doNotMention, daysSinceAnyLog: truth.window.daysLogged > 0 ? 0 : 7,
+          daysSinceWeighIn: truth.weight.known ? 0 : null, loggedToday: truth.today.kcal > 0,
+          proteinPct: protTarget > 0 ? truth.window.avgProtein / protTarget : 1,
+          caloriePct: calTarget > 0 ? truth.window.avgKcal / calTarget : 1,
+          sessionsThisWeek: truth.sessions, sessionsTarget: Number(user.trainingDaysPerWeek) || 3,
+          stepsToday: truth.avgSteps, stepsTarget: Number(user.stepsTarget) || 0, hour: 12,
+        });
+        return `*${name} — last 7 days*\n\n💪 Sessions: *${truth.sessions}*\n📋 Days logged: *${truth.window.daysLogged}/7*\n🔥 Avg: *${truth.window.avgKcal} kcal* · *${truth.window.avgProtein}g* protein\n👟 Avg steps: *${truth.avgSteps.toLocaleString()}*${weightLine}\n\n*${act.todo}*`;
+      }
+      const todayLine = truth.today.kcal > 0
+        ? `🔥 Today: *${truth.today.kcal}${calTarget ? `/${calTarget}` : ""} kcal* · *${truth.today.protein}${protTarget ? `/${protTarget}` : ""}g* protein`
+        : `🔥 Today: *nothing logged yet*`;
+      const stepsLine = truth.today.steps > 0 ? `\n👟 Steps today: *${truth.today.steps.toLocaleString()}*` : "";
+      return `*${name}'s Progress*\n\n${todayLine}${stepsLine}\n💪 Sessions this week: *${truth.sessions}*\n📋 Days logged (7d): *${truth.window.daysLogged}/7*${weightLine}\n\nSend *this week* for the 7-day breakdown.`;
+    } catch (e) {
+      console.warn("[PROGRESS] truth unavailable:", (e as any)?.message || e);
+      return `${name}, I can't read your numbers this second — give me a moment and ask again. I'd rather say that than guess.`;
+    }
   }
   if (["targets", "my targets", "goals"].includes(m)) {
     const goalLabel: Record<string, string> = {

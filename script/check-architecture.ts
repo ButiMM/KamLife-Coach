@@ -24,6 +24,9 @@
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+// ESM: a static import, not require(). This repo has already lost 23 tests to require() inside an
+// ES module — they threw at load and reported nothing.
+import { DOMAIN_OWNERS, NON_CLAIMANTS } from "./domain-owners";
 import { join } from "node:path";
 
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
@@ -601,6 +604,67 @@ for (const rule of ONE_OWNER) {
     if (r.status !== 0) {
       problems.push(`  ✗ ${path} DOES NOT PARSE — every test in it silently stops running.`);
       problems.push(`    ${String(r.stderr || "").split("\n").filter(Boolean)[0] || "syntax error"}`);
+    }
+  }
+}
+
+// ── GUARD #11: ONE OWNER PER CUSTOMER QUESTION (2026-08-20) ──────────────────────────────────
+//
+// Every other guard in this file counts FILES. This one counts DOORS, because the failure that
+// earned it was invisible to file counting: `report-card` consolidated perfectly onto
+// getProgressTruth while `misc-commands` kept answering "my progress" from four `users` columns,
+// and "this week" — a command the product tells clients to type — had no owner at all and fell
+// through to the model.
+//
+// A green module test proved nothing, because the client never types at a module. So: given the
+// words a person actually sends, exactly one file may be able to answer, and its numbers must come
+// from the declared source.
+{
+  for (const d of DOMAIN_OWNERS) {
+    // COMMENTS ARE NOT CLAIMS. A tombstone recording a handler we DELETED ("this is the SECOND
+    // 'how am I doing' handler") named the vocabulary and read as a live second owner. A guard
+    // that cries wolf is worse than no guard, because it gets switched off.
+    const liveCode = (src: string) => src
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const claimants = files.filter((f, i) => {
+      if (NON_CLAIMANTS.some(prefix => f.startsWith(prefix))) return false;
+      return d.vocabulary.test(liveCode(all[i]));
+    });
+    for (const c of claimants) {
+      if (d.engineSurface.includes(c)) continue; // proven safe by chain order below
+      if (!d.owners.includes(c)) {
+        problems.push(`  ✗ ${c} can answer the "${d.domain}" question, and is not a declared owner.`);
+        problems.push(`    Declared: ${d.owners.join(", ")}. Either route through one of those, or`);
+        problems.push(`    declare it in script/domain-owners.ts and say why a second owner is correct.`);
+      }
+    }
+    for (const owner of d.owners) {
+      if (!existsSync(owner)) { problems.push(`  ✗ "${d.domain}" declares owner ${owner}, which does not exist.`); continue; }
+      const src = readFileSync(owner, "utf-8");
+      const source = d.truthSource.replace(/^server\//, "").replace(/\.ts$/, "");
+      if (!new RegExp(`from "\\.{1,2}(?:/\\.\\.)*/?${source}"|import\\("\\.{1,2}(?:/\\.\\.)*/?${source}"\\)`).test(src)) {
+        problems.push(`  ✗ ${owner} owns "${d.domain}" but does not read ${d.truthSource}.`);
+        problems.push(`    An owner that builds its own numbers is the second authority this guard exists to stop.`);
+      }
+    }
+    // THE MODEL MUST NOT BE ABLE TO GET THERE FIRST. "this week" had no owner, so it fell to the
+    // engine, which improvised averages and asked the client what they should do next. Ordering is
+    // what makes a declared owner an owner rather than a preference.
+    if (d.engineSurface.length > 0) {
+      const chain = readFileSync("server/routes.ts", "utf-8");
+      const engineAt = chain.indexOf("handleGptBlock(");
+      for (const owner of d.owners) {
+        const handler = `handle${owner.replace(/.*\//, "").replace(/-([a-z])/g, (_, c) => c.toUpperCase()).replace(/\.ts$/, "").replace(/^./, ch => ch.toUpperCase())}(`;
+        const at = chain.indexOf(handler);
+        if (at < 0) { problems.push(`  ✗ "${d.domain}" owner ${owner} is not called from the handler chain in routes.ts.`); continue; }
+        if (engineAt > 0 && at > engineAt) {
+          problems.push(`  ✗ "${d.domain}" owner ${owner} runs AFTER the model in routes.ts — the engine would claim it first.`);
+        }
+      }
+    }
+    if (claimants.length === 0) {
+      problems.push(`  ✗ "${d.domain}" has NO claimant. A question the product invites and nobody owns falls to the model.`);
     }
   }
 }

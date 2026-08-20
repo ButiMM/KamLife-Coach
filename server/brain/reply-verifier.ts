@@ -16,6 +16,31 @@ import { looksLikeQuestion } from "../utils";
 export interface VerifierFacts {
   goalType?: string | null;
   clientMessage?: string | null;
+  /**
+   * WHAT WE ACTUALLY HOLD FOR THIS CLIENT, RIGHT NOW (2026-08-20, response-graph audit).
+   *
+   * The step-attribution rule inferred provenance from LANGUAGE: it asked whether the client's
+   * wording contained a steps term, and rejected the number if not. So "today's progress" —
+   * answered correctly from the day ledger, including the 3,000 steps the client had logged four
+   * hours earlier — was destroyed, and the client was told to describe what happened in his own
+   * words. The most basic question in the product, answered by asking the customer.
+   *
+   * A claim is legitimate when it maps to a value we hold for this client and context:
+   *
+   *     claim → source → value → context
+   *
+   * This carries the value and the context. It is DELIBERATELY NOT "the handler touched the
+   * ledger, trust everything" — that is the same shortcut with a new name. "3,000 steps today"
+   * validates against `stepsToday`; "3,000 steps before lunch" does not, because we hold a daily
+   * total and no intraday breakdown, and the context does not match.
+   *
+   * Absent, every existing rule behaves exactly as before — the model path passes nothing, so
+   * nothing is loosened for freeform replies.
+   */
+  evidence?: {
+    /** Today's step total from the day ledger, when the caller read it this turn. */
+    stepsToday?: number | null;
+  };
 }
 
 export interface VerifierResult {
@@ -245,9 +270,21 @@ function withoutStepTargets(reply: string): string {
     .join("");
 }
 
-function verifyStepAttribution(reply: string, clientMessage: string): VerifierResult {
+/** Does this reply attribute the number to a window we actually hold — today — or to a narrower
+ *  one we do not? "3,000 steps today" is evidenced; "3,000 steps before lunch" is not. */
+const NARROWER_THAN_A_DAY = /\b(?:before|after|by)\s+(?:lunch|breakfast|dinner|noon|midday|\d{1,2}\s?(?:am|pm))\b|\bthis (?:morning|afternoon|evening)\b|\bin the (?:morning|afternoon|evening)\b|\bper hour\b|\bsince (?:lunch|breakfast|this morning)\b/i;
+
+function verifyStepAttribution(reply: string, clientMessage: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
   const replySteps = extractStepNumbers(withoutStepTargets(reply));
   if (replySteps.length === 0) return { ok: true };
+  // PROVENANCE BEFORE PHRASING. A number we hold for this client today is a recital, not an
+  // attribution — regardless of how they happened to word the question. The context guard is the
+  // half that keeps this honest: we hold a DAILY total, so a claim about part of a day is still
+  // unevidenced even though the digits match.
+  const held = evidence?.stepsToday;
+  if (typeof held === "number" && held > 0 && replySteps.every(n => n === held) && !NARROWER_THAN_A_DAY.test(reply)) {
+    return { ok: true };
+  }
   if (isExplicitStepQuery(clientMessage)) return { ok: true };
   const reported = extractStepNumbers(clientMessage);
   if (reported.length === 0) {
@@ -332,7 +369,7 @@ export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOv
     return { ok: false, violation: "Do not lecture a client about fried/takeaway on the turn they just described a meal. Confirm the log. Next-meal direction only — no shame about the plate already eaten." };
   }
 
-  const stepAttribution = verifyStepAttribution(r, facts.clientMessage || "");
+  const stepAttribution = verifyStepAttribution(r, facts.clientMessage || "", facts.evidence);
   if (!stepAttribution.ok) return stepAttribution;
 
   const goal = String(facts.goalType || "").toLowerCase();

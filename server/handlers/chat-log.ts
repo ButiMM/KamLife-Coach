@@ -105,6 +105,8 @@ interface TurnScope {
   mutations: string[];
   startedAt: number;
   finalReplyPromise: Promise<string>;
+  /** Values an authoritative source produced this turn — see turnEvidence. */
+  evidence?: { stepsToday?: number | null };
 }
 
 const turnStore = new AsyncLocalStorage<TurnScope>();
@@ -210,7 +212,7 @@ async function safeReplacementFor(violation: string, scope: TurnScope): Promise<
 async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<string> {
   if (process.env.NODE_ENV === "test" || !scope.userId || !reply) return reply;
   const draft = String(reply).trim();
-  const verifier = verifyBrainReply(draft, { clientMessage: scope.inputText });
+  const verifier = verifyBrainReply(draft, { clientMessage: scope.inputText, evidence: scope.evidence });
 
   // ════════════════════════════════════════════════════════════════════════════════════════
   // CUT 3 — THE VERDICT BINDS THE MOUTH, AND THE MOUTH IS DETERMINISTIC.
@@ -325,7 +327,7 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
 
     // A CORRECTION IS RE-VERIFIED BEFORE IT CAN BE SENT. The old path had no such discipline —
     // whatever the second model returned went straight out.
-    const recheck = verifyBrainReply(corrected, { clientMessage: scope.inputText });
+    const recheck = verifyBrainReply(corrected, { clientMessage: scope.inputText, evidence: scope.evidence });
     if (!recheck.ok) {
       console.error(`[REPLY_BLOCKED] ...${scope.userId.slice(-6)} — correction failed re-verification: ${recheck.violation}`);
       return await safeReplacementFor(recheck.violation || "", scope);
@@ -366,6 +368,23 @@ export async function inTurn<T>(inputType: string, inputText: string, fn: () => 
 export function turnUser(userId: string): void { const t = turnStore.getStore(); if (t) t.userId = userId; }
 export function turnMutation(note: string, logPrefix?: string): void { const t = turnStore.getStore(); if (t && t.mutations.length < 40) t.mutations.push(note); if (logPrefix) console.log(`${logPrefix} ${note}`); }
 export function turnState(facts: Record<string, unknown>, resolvedDay?: string | null): void { const t = turnStore.getStore(); if (!t) return; Object.assign(t.stateRead, facts); if (resolvedDay) t.resolvedDay = resolvedDay; }
+
+/**
+ * THE TRUTH SOURCE RECORDS WHAT IT HANDED OUT (2026-08-20, response-graph audit).
+ *
+ * The verifier used to infer a number's provenance from the client's WORDING, so a step count
+ * read straight from the day ledger was rejected as an invention. The fix is not a wider phrase
+ * list — it is for the mouth to check the claim against the value we actually hold.
+ *
+ * getDayLedger calls this when it computes a day. No extra query: the one read that already
+ * happened leaves its value on the turn, and reconcileTurnReply validates against it. A turn where
+ * nothing read the ledger records nothing, and every rule behaves exactly as it did before.
+ */
+export function turnEvidence(facts: { stepsToday?: number | null }): void {
+  const t = turnStore.getStore();
+  if (!t) return;
+  t.evidence = { ...(t.evidence || {}), ...facts };
+}
 
 export async function recordTurn(reply: string): Promise<void> {
   const t = turnStore.getStore();

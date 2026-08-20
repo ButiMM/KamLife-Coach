@@ -22,7 +22,7 @@ import { estimateCarbsFat } from "./macro-estimate";
 import { effectiveMealLoggedAt } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { replaceHeldMeal, amendRecentMeal, planCorrection, applyCorrection, isSameMealRetry } from "./food-identity-correction";
-import { turnMutation } from "./handlers/chat-log";
+import { turnMutation, turnEvidence } from "./handlers/chat-log";
 import { answerPlateAsk, foodConstraints, swapNudge } from "./food-swaps";
 import { matchStreetDish } from "./street-food";
 import { mentionsForbidden } from "./brain/reply-verifier";
@@ -55,6 +55,9 @@ export async function getDayLedger(userId: string, opts?: { forDate?: Date; user
   // pure + unit-tested; the guard matches every other surface (client-snapshot, misc-commands).
   const water = opts?.forDate ? 0 : freshTodayWater(opts?.user?.waterLastResetDate, sastToday(), opts?.user?.todayWater);
   const steps = Number(stepRow?.steps || 0);
+  // Leave the value on the turn so the mouth can tell a recital from an invention (2026-08-20).
+  // This read already happened; nothing extra is queried.
+  turnEvidence({ stepsToday: steps });
   return { ...folded, water, steps };
 }
 
