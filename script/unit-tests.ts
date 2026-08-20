@@ -9728,6 +9728,73 @@ test("constraints: the street guide stops handing a vegetarian four meat lines",
   assert.match(formatStreetDish(kota, "fat_loss"), /chips/i, "unconstrained it still coaches the order");
 });
 
+// ── CUT 10: THE ASK GETS AN ANSWER ──────────────────────────────────────────────────────────
+// A client standing at a counter typing "can I eat this kota?" is four seconds of their life.
+// Until now every deterministic handler declined — correctly, it is a question — and the model
+// answered without the day's ledger in front of it.
+
+test("plate ask: the permission shape is not every food question", async () => {
+  const { PERMISSION_ASK } = await import("../server/food-swaps");
+  for (const yes of ["can i eat this kota?", "may i have a gatsby", "is that okay?",
+                     "am i allowed a vetkoek", "does it fit my calories?", "do i have room for chips"]) {
+    assert.ok(PERMISSION_ASK.test(yes), `should be a permission ask: ${yes}`);
+  }
+  // A fact ask and a recommendation ask are OTHER jobs, already owned. Stealing them here would
+  // be the pair-branch disease with a friendlier name.
+  for (const no of ["how much protein is in a kota?", "what should i eat tonight",
+                    "i ate a kota", "give me a meal plan"]) {
+    assert.ok(!PERMISSION_ASK.test(no), `should NOT be a permission ask: ${no}`);
+  }
+});
+
+test("plate ask: the verdict comes from the ledger, and never forbids a legal food", async () => {
+  const { answerPlateAsk, foodConstraints } = await import("../server/food-swaps");
+  const base = {
+    foodName: "Kota", portionKcal: 1100, portionProtein: 25,
+    eatenProtein: 100, proteinTarget: 150, constraints: foodConstraints({}),
+  };
+  // Room to spare.
+  const room = answerPlateAsk({ ...base, eatenKcal: 400, calorieTarget: 2200 });
+  assert.equal(room.kind, "room");
+  assert.match(room.reply, /you've got the room/i);
+  assert.match(room.reply, /1100 kcal/, "it says what the plate actually costs");
+  // Right at the line — still yes, and it says it is the last one.
+  const tight = answerPlateAsk({ ...base, eatenKcal: 1200, calorieTarget: 2200 });
+  assert.equal(tight.kind, "tight");
+  assert.match(tight.reply, /last plate today/i);
+  // Over. NEVER a refusal — a kota is not a moral failure, and a coach that forbids it gets lied
+  // to for the rest of the month. A move they can make while standing there.
+  const over = answerPlateAsk({ ...base, eatenKcal: 2000, calorieTarget: 2200 });
+  assert.equal(over.kind, "half");
+  assert.match(over.reply, /half/i);
+  assert.ok(!/\b(no|don'?t|avoid|shouldn'?t)\b/i.test(over.reply.split("\n")[0]),
+    "the verdict line must not read as a refusal");
+});
+
+test("plate ask: unknown stays unknown", async () => {
+  const { answerPlateAsk, foodConstraints } = await import("../server/food-swaps");
+  // No calorie target set — we do not invent a verdict. Known / likely / unknown, on a plate.
+  const out = answerPlateAsk({
+    foodName: "Kota", portionKcal: 1100, portionProtein: 25, eatenKcal: 0, calorieTarget: 0,
+    eatenProtein: 0, proteinTarget: 0, constraints: foodConstraints({}), smartMove: "Less chips, add an egg.",
+  });
+  assert.equal(out.kind, "unpriced");
+  assert.ok(!/kcal|\d{3}/.test(out.reply), "no numbers may be quoted against a target we do not have");
+  assert.match(out.reply, /less chips/i, "the smart move still lands");
+});
+
+test("plate ask: the constraint wins before the arithmetic", async () => {
+  const { answerPlateAsk, foodConstraints } = await import("../server/food-swaps");
+  const out = answerPlateAsk({
+    foodName: "bacon roll", portionKcal: 300, portionProtein: 15, eatenKcal: 0, calorieTarget: 2200,
+    eatenProtein: 0, proteinTarget: 150, constraints: foodConstraints({ dietaryRestrictions: "halaal" }),
+  });
+  assert.equal(out.kind, "off_limits");
+  assert.match(out.reply, /not that one/i);
+  assert.match(out.reply, /halaal/i, "said back in their own words");
+  assert.match(out.reply, /what else is there/i, "never a dead end — we still pick the plate");
+});
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

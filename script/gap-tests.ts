@@ -3611,6 +3611,45 @@ test("cut9: the weight reports honour do_not_mention, each in the right way", ()
     "and nobody who asked us to drop the scale gets told off for not standing on one");
 });
 
+// ── CUT 10: ONE FOOD PIPE FOR THE ASK ───────────────────────────────────────────────────────
+
+test("cut10: the permission ask is answered where the question is already known", () => {
+  const fc = readFileSync("server/handlers/food-context.ts", "utf-8");
+  const code = fc.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // It hooks at the point that has ALREADY decided this is a question about a priced food —
+  // no second detector, no new handler stage, no route added to the pipeline.
+  assert.ok(/hasActualFood && hasSubstantiveQuestion && !isFuturePlanning && PERMISSION_ASK\.test\(m\)/.test(code),
+    "the hook reuses the gate that already ran");
+  assert.ok(/answerFoodPermissionAsk\(user, message, foodsInMsg\)/.test(code));
+  // And it must sit ABOVE the retro/scanner paths, or the question falls through to the model
+  // exactly as it did before.
+  const hook = code.indexOf("answerFoodPermissionAsk(user, message, foodsInMsg)");
+  const retro = code.indexOf("const isRetroDietAudit");
+  assert.ok(hook > 0 && retro > 0 && hook < retro, "answered before the logging paths, not after");
+});
+
+test("cut10: the answer reads the ledger, and the verdict stays pure", () => {
+  const ledger = readFileSync("server/day-ledger.ts", "utf-8");
+  const swaps = readFileSync("server/food-swaps.ts", "utf-8");
+  assert.ok(/getDayLedger\(user\.id, \{ user \}\)/.test(ledger), "the day's truth, not a guess");
+  assert.ok(/foodConstraints\(\{/.test(ledger), "…and the same constraints every plate path uses");
+  // PURITY IS LOad-BEARING: the unit gates import food-swaps with no database, and answerPlateAsk
+  // is where the judgement lives. The db-touching half deliberately sits in day-ledger.ts.
+  assert.ok(!/from "\.\/db"|drizzle-orm/.test(swaps), "food-swaps must stay database-free");
+  assert.ok(/export function answerPlateAsk/.test(swaps));
+});
+
+test("cut10: it declines rather than inventing, and never becomes a second logger", () => {
+  const ledger = readFileSync("server/day-ledger.ts", "utf-8");
+  assert.ok(/return null;\s*\n\s*\}\s*catch/.test(ledger) || /leaving it to the coach/.test(ledger),
+    "any failure hands back to the coach instead of guessing");
+  // A permission ask must never write a meal. The whole defect class this pipeline exists to
+  // prevent is a QUESTION being logged as a plate the client never ate.
+  const fc = readFileSync("server/handlers/food-context.ts", "utf-8");
+  const hookBlock = fc.slice(fc.indexOf("CUT 10"), fc.indexOf("RETROSPECTIVE DIET HISTORY"));
+  assert.ok(!/commitFoodLog/.test(hookBlock), "the ask is answered, never logged");
+});
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");

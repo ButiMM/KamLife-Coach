@@ -34,7 +34,8 @@ import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
 import { amendRecentMeal, replaceHeldMeal } from "../food-identity-correction";
 import { randomUUID } from "node:crypto";
-import { commitFoodLog } from "../day-ledger";
+import { commitFoodLog, answerFoodPermissionAsk } from "../day-ledger";
+import { PERMISSION_ASK } from "../food-swaps";
 import { verifyBrainReply } from "../brain/reply-verifier";
 export { commitFoodLog } from "../day-ledger";
 
@@ -669,6 +670,15 @@ export async function handleFoodContext(ctx: {
   // Diagnostic: when a meal silently fails to log in production, this line names the reason instantly.
   if (hasActualFood) {
     console.log(`[FOOD_GATE] user=...${String(user.id || "").slice(-6)} foods=[${foodsInMsg.map(f => f.name).join("|")}] q=${isQuestion} frus=${isFrustration} emo=${isEmotionalOnly} future=${isFuturePlanning} trig=${hasLogTrigger} direct=${directFoodScan} override=${foodLogOverride} words=${m.split(/\s+/).length}`);
+  }
+
+  // ---- CUT 10: THE ASK GETS AN ANSWER, NOT A HANDOFF ----------------------------------------
+  // Everything above has just worked out that this is a QUESTION about a food we can price. Until
+  // now that was the end of the deterministic road: every handler declined and the model answered
+  // without the day's ledger in front of it. This is the one place that already knows both.
+  if (hasActualFood && hasSubstantiveQuestion && !isFuturePlanning && PERMISSION_ASK.test(m)) {
+    const answered = await answerFoodPermissionAsk(user, message, foodsInMsg);
+    if (answered) { await logChat(user.id, message, answered, "FOOD_PERMISSION"); return answered; }
   }
 
   // ---- RETROSPECTIVE DIET HISTORY — "within the week", "usually eat", "normally I have" ----

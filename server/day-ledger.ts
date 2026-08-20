@@ -21,6 +21,8 @@ import { effectiveMealLoggedAt } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { replaceHeldMeal, amendRecentMeal, planCorrection, applyCorrection, isSameMealRetry } from "./food-identity-correction";
 import { turnMutation } from "./handlers/chat-log";
+import { answerPlateAsk, foodConstraints, swapNudge } from "./food-swaps";
+import { matchStreetDish } from "./street-food";
 
 export { foldLedgerRows } from "./day-ledger-core";
 export type { DayLedger, LedgerMeal, LedgerRow } from "./day-ledger-core";
@@ -235,4 +237,51 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
   } catch (e) { console.error("[MEAL_LOG] calorie update failed — user:", String(params.userId || "").slice(-6), e); }
 
   return { ok: insertOk, wasDup, prevCals, runningCals, runningProtein };
+}
+
+/**
+ * THE ANSWER TO "CAN I EAT THIS?" — the ledger's own reply (2026-08-19, Cut 10).
+ *
+ * Lives here, not in the handler and not beside the pure verdict, because it is the one function
+ * that needs BOTH sides: this module already owns the day's truth, and answerPlateAsk in
+ * food-swaps.ts stays database-free so it can be unit-tested without one.
+ *
+ * Returns null whenever we cannot do better than the coach would — an unpriced food and no smart
+ * move is a case for judgement, not for a deterministic sentence with nothing behind it.
+ */
+export async function answerFoodPermissionAsk(
+  user: any, message: string, foods: Array<{ name: string; typicalPortionCalories?: number; typicalPortionProtein?: number }>,
+): Promise<string | null> {
+  try {
+    const food = foods.find(f => (f.typicalPortionCalories || 0) > 0) || foods[0];
+    if (!food) return null;
+
+    const [ledger, dish] = await Promise.all([
+      getDayLedger(user.id, { user }),
+      Promise.resolve(matchStreetDish(String(message || "").toLowerCase())),
+    ]);
+    const constraints = foodConstraints({
+      dietaryRestrictions: user.dietaryRestrictions, foodDislikes: user.foodDislikes,
+      otherMedicalNotes: user.otherMedicalNotes, medicalConditions: user.medicalConditions,
+    });
+    // A street dish carries the move we already coach for it — "less chips, add an egg". Using it
+    // here keeps ONE wording for that plate whether they asked permission or asked for the guide.
+    const smartMove = dish
+      ? (user.goalType === "muscle_gain" ? dish.smartBulk : dish.smartCut)
+      : swapNudge(food.name, user.goalType, constraints);
+
+    const verdict = answerPlateAsk({
+      foodName: dish?.name || food.name,
+      portionKcal: dish?.kcal || Number(food.typicalPortionCalories || 0),
+      portionProtein: dish?.protein || Number(food.typicalPortionProtein || 0),
+      eatenKcal: ledger.kcal, calorieTarget: Number(user.calorieTarget || 0),
+      eatenProtein: ledger.protein, proteinTarget: Number(user.proteinTarget || 0),
+      constraints, smartMove,
+    });
+    console.log(`[PLATE_ASK] ...${String(user.id).slice(-6)} ${verdict.kind} — ${dish?.name || food.name}`);
+    return verdict.reply;
+  } catch (e) {
+    console.warn("[PLATE_ASK] non-fatal, leaving it to the coach:", (e as any)?.message || e);
+    return null;
+  }
 }

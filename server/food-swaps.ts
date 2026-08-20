@@ -704,9 +704,13 @@ export function foodConstraints(u: {
     ? new RegExp(`\\b(?:${literalForms.sort((a, b) => b.length - a.length).join("|")})\\b`, "i")
     : null;
 
+  // THEIR WORD, NOT OUR DERIVATION. A client who told us "halaal" should hear "halaal" back, not
+  // "no pork" — saying it in their own language is most of what makes being remembered land.
+  const declaredLabel = declared.match(/\b(halaal|halal|kosher)\b/)?.[0];
   const terms = [
     ...(vegan ? ["vegan"] : vegetarian ? ["vegetarian"] : []),
-    ...(noPork && !vegetarian ? ["no pork"] : []),
+    ...(declaredLabel ? [declaredLabel] : []),
+    ...(noPork && !vegetarian && !declaredLabel ? ["no pork"] : []),
     ...(noDairy && !vegan ? ["no dairy"] : []),
     ...(noGluten ? ["no gluten"] : []),
     ...(noPeanuts ? ["no peanuts"] : []),
@@ -739,3 +743,103 @@ export function foodConstraints(u: {
 
 /** Constraints for a client with nothing declared — the shared "everything is allowed" case. */
 export const NO_CONSTRAINTS: FoodConstraints = foodConstraints({});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// "CAN I EAT THIS?" — the question, answered from the ledger (2026-08-19, Cut 10)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+//
+// Cut 9 made the constraint true in every RECOMMENDER. It did not answer the ask. A client
+// standing at a counter typing "can I eat this kota?" got the same treatment they always did:
+// every deterministic handler declined — correctly, it is a question, not a log — and the model
+// answered from a prompt, without the day's ledger in front of it.
+//
+// That is the job the manual clients pay for, and it is four seconds of their life. It needs one
+// move, now, from what we already know: what they have eaten today, what they told us they do
+// not eat, and what this plate actually costs.
+//
+// HONEST ABOUT WHAT WE DO NOT KNOW. With no calorie target set we do not invent a verdict — the
+// answer is the smart order and nothing about numbers. Known / likely / unknown, on a plate.
+//
+// NEVER "NO" FOR A FOOD THEY CAN EAT. A kota is not a moral failure, and a coach that forbids it
+// gets lied to for the rest of the month. Over budget becomes "half it", which is a move they can
+// actually make while standing there.
+
+/**
+ * "May I have this?" — the permission shape, distinct from every other food question.
+ *
+ * NOT "how much protein is in a kota" (a fact ask) and NOT "what should I have" (a
+ * recommendation, which the guides already own). This is a client standing in front of a
+ * specific plate deciding whether to buy it, and the only useful answer is one move now.
+ */
+// A leading wh-word turns it into a RECOMMENDATION ask — "what should I eat tonight" is the
+// guides' job, not this one. Stealing it here would be the pair-branch disease with a
+// friendlier name: two owners for one question, differing only in how the client phrased it.
+export const PERMISSION_ASK = /(?<!\b(?:what|which|where|when|how)\s)\b(?:can|may|should|could)\s+i\s+(?:still\s+)?(?:eat|have|get|buy|order|grab|take)\b|\b(?:is|are)\s+(?:it|this|that|these|those)\s+(?:ok(?:ay)?|fine|alright|allowed|safe)\b|\b(?:am\s+i\s+allowed|allowed\s+to\s+have|can\s+i\s+afford)\b|\bfits?\s+(?:in(?:to)?|within)?\s*(?:my|the)\s+(?:calories|macros|kcal|budget|numbers|targets?|deficit)\b|\bdo\s+i\s+have\s+(?:room|space)\s+for\b/i;
+
+export interface PlateAskInput {
+  foodName: string;
+  /** What this portion actually costs. 0 when we could not price it. */
+  portionKcal: number;
+  portionProtein: number;
+  eatenKcal: number;
+  calorieTarget: number;
+  eatenProtein: number;
+  proteinTarget: number;
+  constraints: FoodConstraints;
+  /** The dish's own smart-order line, when it is a street food we coach. */
+  smartMove?: string;
+}
+
+export interface PlateVerdict {
+  kind: "off_limits" | "unpriced" | "room" | "tight" | "half";
+  reply: string;
+}
+
+export function answerPlateAsk(i: PlateAskInput): PlateVerdict {
+  const name = (i.foodName || "that one").trim();
+  const move = (i.smartMove || "").trim();
+
+  if (!i.constraints.allows(name)) {
+    return {
+      kind: "off_limits",
+      reply: `*Not that one.* You told me: ${i.constraints.terms.join(", ")} — I'm not going to forget that at the counter.\n\nTell me what else is there and I'll pick the plate.`,
+    };
+  }
+
+  // No target, or no price for this food: say the true thing rather than a confident guess.
+  if (i.calorieTarget <= 0 || i.portionKcal <= 0) {
+    return {
+      kind: "unpriced",
+      reply: move
+        ? `*Have it — order it smart.*\n\n${move}`
+        : `*Have it.* Get some protein on that plate with it and you're fine.\n\nSnap a photo when it lands and I'll log it properly.`,
+    };
+  }
+
+  const remaining = i.calorieTarget - i.eatenKcal;
+  const proteinShort = i.proteinTarget > 0 && i.eatenProtein < i.proteinTarget * 0.6;
+  const tail = move ? `\n\n${move}` : "";
+
+  if (i.portionKcal <= remaining) {
+    const protLine = proteinShort && i.portionProtein >= 20
+      ? ` And it puts ~${i.portionProtein}g of protein in, which is where you're short.`
+      : "";
+    return {
+      kind: "room",
+      reply: `*Yes — you've got the room.* That's about ${i.portionKcal} kcal and you've got ~${Math.round(remaining)} left today.${protLine}${tail}`,
+    };
+  }
+
+  // Within a plate's margin of the line: still yes, but it is the last one.
+  if (i.portionKcal <= remaining + i.calorieTarget * 0.12) {
+    return {
+      kind: "tight",
+      reply: `*Yes — but that's the last plate today.* It's about ${i.portionKcal} kcal against ~${Math.round(remaining)} left, so it takes you to the line, not past it.${tail || "\n\nWater from here, and we go again tomorrow."}`,
+    };
+  }
+
+  return {
+    kind: "half",
+    reply: `*Have half of it now, the rest tomorrow.* Whole thing is about ${i.portionKcal} kcal and you've got ~${Math.round(Math.max(0, remaining))} left — half lands you right.${tail}`,
+  };
+}
