@@ -29,6 +29,9 @@
 
 import type { GoalKey } from "./goal-profiles";
 import { selectDecisionState, type DecisionEvidence } from "./understanding/state";
+// Pure, and it has to be: the verifier owns "may this reach a client" and carries no database or
+// model, so the decision can ask it what the client asked us not to say (Cut 8).
+import { mentionsForbidden } from "./brain/reply-verifier";
 
 export interface DayState {
   firstName?: string;
@@ -74,6 +77,15 @@ export interface DayState {
    * beginning of a coach who stops asking for anything.
    */
   lifeContext?: string | null;
+  /**
+   * What they asked us to stop bringing up — users.do_not_mention (Cut 7).
+   *
+   * THE DECISION STANDS DOWN, IT DOES NOT GET FILTERED. A client who said "don't talk about the
+   * scale" and is then told to stand on one has been ignored, and stripping that sentence at the
+   * mouth afterwards leaves the coach with nothing to say instead of the next real action. The
+   * honest fix is to never choose the ask: the ordering below simply continues past it.
+   */
+  doNotMention?: string | null;
 }
 
 export type ActionKind =
@@ -245,7 +257,8 @@ export function chooseAction(s: DayState): OneAction {
   // 3. THEY CANNOT SEE PROGRESS THEY NEVER MEASURED. This also fixes the blind spot in our own
   //    outcomes data — a client with no weigh-in is one we can never prove we helped.
   const neverWeighed = s.daysSinceWeighIn === null;
-  if ((neverWeighed && s.weeksOnProgramme >= 1) || (s.daysSinceWeighIn !== null && s.daysSinceWeighIn >= 10)) {
+  const scaleIsOffLimits = mentionsForbidden("weight scale weigh", s.doNotMention);
+  if (!scaleIsOffLimits && ((neverWeighed && s.weeksOnProgramme >= 1) || (s.daysSinceWeighIn !== null && s.daysSinceWeighIn >= 10))) {
     return askToWeigh(s.dreamGoal, neverWeighed);
   }
 
@@ -271,7 +284,12 @@ export function chooseAction(s: DayState): OneAction {
         ? "Get protein into your next meal — eggs, pilchards or sugar beans."
         : "Make your next meal a proper protein meal.",
       why: why(
-        isBulk ? "Protein is the part your body actually builds with." : "Protein is what keeps the weight you lose off your muscle instead of your strength.",
+        isBulk ? "Protein is the part your body actually builds with."
+          // The cut reason names the scale, which is the one thing this client asked us to drop.
+          // A different true sentence, not a filtered one — the mouth gate only guards the
+          // reactive path, and this line goes out in a proactive brief that never passes it.
+          : scaleIsOffLimits ? "Protein is what protects your muscle while everything else changes."
+          : "Protein is what keeps the weight you lose off your muscle instead of your strength.",
         s.dreamGoal,
       ),
     };
@@ -339,6 +357,8 @@ export interface ProactiveStateForDecision {
 export interface ProactiveProfile {
   dreamGoal?: string | null;
   biggestStruggle?: string | null;
+  /** users.do_not_mention — carried so the decision never chooses an ask they asked us to drop. */
+  doNotMention?: string | null;
   /** users.life_context — a durable fact (Cut 7), carried so the come_back rungs can name it. */
   lifeContext?: string | null;
   weeksOnProgramme: number;
@@ -377,6 +397,7 @@ export function dayStateFrom(
     stepsTarget: p.stepsTarget,
     sick: s.health.sick,
     lifeContext: p.lifeContext,
+    doNotMention: p.doNotMention,
     hour: opts?.hour ?? s.today.hour,
     atKeyboard: opts?.atKeyboard,
   };
@@ -458,7 +479,11 @@ export function decideProactive(
     // Weighing again the day after they weighed tells us nothing a trend needs. Never weighed, or
     // three days stale, is a real gap worth one ask.
     const staleWeight = s.weight.daysSinceWeighIn === null || s.weight.daysSinceWeighIn >= 3;
-    const canAskForWeight = !s.evidence.weightSufficient && staleWeight;
+    // …and not if they asked us to leave the scale alone. The downgrade exists to ask for the
+    // measurement that would justify a prescription; when that measurement is off limits, the
+    // honest outcome is the same one it already reaches when there is nothing useful to ask.
+    const canAskForWeight = !s.evidence.weightSufficient && staleWeight
+      && !mentionsForbidden("weight scale weigh", p.doNotMention);
     action = canAskForFood ? askToLog(p.dreamGoal)
       : canAskForWeight ? askToWeigh(p.dreamGoal, s.weight.daysSinceWeighIn === null)
       // Nothing useful to ask and nothing we can justify prescribing. Silence is the honest

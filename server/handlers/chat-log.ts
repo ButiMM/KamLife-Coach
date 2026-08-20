@@ -6,7 +6,7 @@ import twilio from "twilio";
 import { classifyMediaFailure } from "../coach-guardrails";
 import { detectEscalation, escalationSLA, isSyntheticTestClient } from "../safety-detection";
 import { currentRuntimeDecision } from "../understanding/state";
-import { verifyBrainReply } from "../brain/reply-verifier";
+import { verifyBrainReply, mentionsForbidden, stripForbidden, HONOURED_SILENCE } from "../brain/reply-verifier";
 import { sastDayStart } from "../utils";
 
 export async function checkEscalation(userId: string, messageIn: string): Promise<void> {
@@ -207,6 +207,33 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
     }).catch(() => {});
     return safe;
   }
+
+  // ── CUT 8 — WHAT THEY ASKED US NOT TO SAY ────────────────────────────────────────────────
+  //
+  // Placed HERE, above the `!meaningful` early return below, because a client who asked us to
+  // drop the scale is owed that whether or not this particular turn was "meaningful". The check
+  // that follows only runs for messages worth reconciling; this one runs for every reply.
+  //
+  // COSTS ONE COLUMN. A primary-key lookup returning users.do_not_mention on every reply — stated
+  // rather than buried, because the alternative was moving the full row read above the early
+  // return and paying for every column instead of one.
+  try {
+    const [banned] = await db.select({ doNotMention: users.doNotMention })
+      .from(users).where(eq(users.id, scope.userId)).limit(1);
+    if (banned?.doNotMention) {
+      // THEY MAY RAISE IT THEMSELVES. "Don't mention my weight" is not "refuse to tell me my
+      // weight when I ask" — the request is about us bringing it up, and a coach who won't answer
+      // a direct question is not honouring anything, it is sulking. Same trap as the step TARGET
+      // that read as an attribution in the P0: the rule has to know who started it.
+      if (!mentionsForbidden(scope.inputText, banned.doNotMention)) {
+        const held = stripForbidden(draft, banned.doNotMention);
+        if (held.stripped) {
+          console.warn(`[DO_NOT_MENTION] ...${scope.userId.slice(-6)} — held "${banned.doNotMention}"${held.text ? "" : " (whole reply)"}`);
+          return held.text || HONOURED_SILENCE;
+        }
+      }
+    }
+  } catch (e) { console.warn("[DO_NOT_MENTION] non-fatal:", (e as any)?.message || e); }
 
   const likelyGeneric = (ACK_PREFIX.test(draft) && draft.length <= 180) || GENERIC_COACH_REPLY.test(draft);
   const suspiciousStateLanguage = MISSED_TRAINING_CLAIM.test(draft) || NO_CURRENT_STEPS_CLAIM.test(draft) || CONTRADICTORY_WEIGHT_TREND.test(draft);

@@ -336,3 +336,98 @@ export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOv
 
   return { ok: true };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// "DON'T TALK ABOUT THE SCALE" — THE ONE FACT WHOSE WHOLE VALUE IS BEING HONOURED
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+//
+// (2026-08-19, Cut 8.) Cut 7 started detecting this request and storing it in users.do_not_mention,
+// and then told only the GPT context about it. Every deterministic path — the weigh-in ask, the
+// progress reply, the morning decision — carried on saying the word.
+//
+// That is worse than the gap it replaced. Before Cut 7 we never heard the request; after it we
+// hear it, record it, and visibly ignore it. Noticing what someone asked for and then doing it
+// anyway is a broken promise, and this cut exists to close what Cut 7 opened.
+//
+// Pure, and deliberately in the verifier: this module already owns the question "may this reach a
+// client", and it has no database or model, so the DECISION can import it without either.
+
+/** Topics that are one topic. Asked not to mention "the scale", we must not say "weigh" either. */
+const TOPIC_CLUSTERS: string[][] = [
+  ["weight", "weigh", "weighed", "weighing", "weigh-in", "weighin", "scale", "scales", "kg", "kilos", "kilograms"],
+  ["calories", "calorie", "kcal", "cals"],
+];
+
+/**
+ * The pattern that means "this text names the thing they asked me to drop", or null when there is
+ * nothing to honour. Word-bounded — "scale" must not fire on "escalate".
+ */
+export function forbiddenTopicPattern(doNotMention?: string | null): RegExp | null {
+  const raw = (doNotMention || "").trim().toLowerCase();
+  if (raw.length < 2 || raw.length > 60) return null;
+  const asked = raw.split(/[,;]+| and /).map(s => s.trim()).filter(w => w.length >= 2);
+  if (asked.length === 0) return null;
+
+  const words = new Set<string>();
+  for (const term of asked) {
+    words.add(term);
+    // One member of a cluster pulls in the rest — otherwise "don't mention the scale" is honoured
+    // by a reply that says "let's get you weighed", which is the same sentence to the person who
+    // asked. Terms outside every cluster are taken literally and nothing is inferred.
+    for (const cluster of TOPIC_CLUSTERS) {
+      if (cluster.some(c => c === term || term.includes(c))) cluster.forEach(c => words.add(c));
+    }
+  }
+  const escaped = [...words].map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).sort((a, b) => b.length - a.length);
+  // LETTER LOOKAROUNDS, NOT \b. "2kg" has no word boundary between the digit and the k, so \b
+  // would silently fail on exactly the sentence this exists to catch — the identical mistake
+  // replaceNumberToken in chat-log.ts carries a comment about, and the one the step-target P0
+  // turned on. Guarding on letters still blocks a substring hit: "escalate" cannot match "scale"
+  // because the preceding character is a letter.
+  try { return new RegExp(`(?<![a-z])(?:${escaped.join("|")})(?![a-z])`, "i"); } catch { return null; }
+}
+
+export function mentionsForbidden(text: string, doNotMention?: string | null): boolean {
+  const re = forbiddenTopicPattern(doNotMention);
+  return !!re && re.test(String(text || ""));
+}
+
+export interface ForbiddenStripResult {
+  /** What may be sent. "" when nothing substantive survived. */
+  text: string;
+  /** True when something was actually removed — the caller logs and escalates on this. */
+  stripped: boolean;
+}
+
+/**
+ * Remove the sentences that name the topic, and keep the rest of the reply.
+ *
+ * SENTENCE LEVEL ON PURPOSE. Blocking the whole reply — the Cut 3 treatment — would throw away a
+ * correctly logged meal because the message happened to end with "weigh in tomorrow". Honouring
+ * the request should cost the client the sentence, not the answer.
+ *
+ * A reply that is ENTIRELY about the topic strips to "", and the caller says so honestly instead
+ * of sending an empty message.
+ */
+export function stripForbidden(reply: string, doNotMention?: string | null): ForbiddenStripResult {
+  const re = forbiddenTopicPattern(doNotMention);
+  const draft = String(reply || "");
+  if (!re || !re.test(draft)) return { text: draft, stripped: false };
+
+  // Split on bubble breaks first — `\n\n---\n\n` is a separate WhatsApp message, so a bubble that
+  // is entirely about the topic must go whole rather than leave a stub behind.
+  const bubbles = draft.split("\n\n---\n\n").map(bubble =>
+    bubble.split("\n").map(line => {
+      if (!re.test(line)) return line;
+      const kept = line.split(/(?<=[.!?])\s+/).filter(s => !re.test(s));
+      return kept.join(" ").trim();
+    }).filter(l => l !== "" || false).join("\n").trim()
+  ).filter(b => b.length > 0);
+
+  const text = bubbles.join("\n\n---\n\n").replace(/\n{3,}/g, "\n\n").trim();
+  // A leftover that is only punctuation, an emoji or a bare "*" is not an answer.
+  return { text: /[a-z0-9]{3}/i.test(text) ? text : "", stripped: true };
+}
+
+/** What we say when the entire reply was about the thing they asked us to drop. */
+export const HONOURED_SILENCE = "You asked me to leave that one alone, so I will. Tell me what you ate and we work from there.";

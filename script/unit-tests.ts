@@ -9583,6 +9583,75 @@ test("facts: the ladder names what it knows, and only on the come_back rungs", a
   assert.ok(!/newborn/i.test(here.why + here.todo), "the ask is unchanged when they are here");
 });
 
+// ── CUT 8: WHAT THEY ASKED US NOT TO SAY ────────────────────────────────────────────────────
+// Cut 7 detected and stored the request and honoured it only in the GPT context. Hearing a
+// request and then visibly ignoring it is worse than never hearing it — these gates are the
+// close on that.
+
+test("dont-mention: one topic, not one word", async () => {
+  const { mentionsForbidden } = await import("../server/brain/reply-verifier");
+  // Asked to drop "the scale", a reply that says "let's get you weighed" is the same sentence to
+  // the person who asked. The cluster is the point.
+  assert.ok(mentionsForbidden("Stand on a scale this morning.", "the scale"));
+  assert.ok(mentionsForbidden("Time to weigh in.", "the scale"));
+  assert.ok(mentionsForbidden("You're down 2kg.", "weight"));
+  // …but nothing is inferred outside a cluster, and no substring may fire.
+  assert.ok(!mentionsForbidden("We need to escalate that.", "the scale"), "escalate is not scale");
+  assert.ok(!mentionsForbidden("Chicken and pap logged.", "the scale"));
+  assert.equal(mentionsForbidden("anything at all", null), false, "nothing asked, nothing honoured");
+});
+
+test("dont-mention: the sentence goes, the answer stays", async () => {
+  const { stripForbidden, HONOURED_SILENCE } = await import("../server/brain/reply-verifier");
+  const kept = stripForbidden("Chicken and pap logged, 620 kcal. Weigh yourself tomorrow morning.", "the scale");
+  assert.ok(kept.stripped);
+  assert.match(kept.text, /Chicken and pap logged/, "a correct food log must not be thrown away");
+  assert.ok(!/weigh/i.test(kept.text), "…and the sentence they banned is gone");
+  // A reply that is ENTIRELY about the topic strips to nothing, and we say so rather than sending
+  // an empty message or a stub of punctuation.
+  const all = stripForbidden("You're up 1.2kg this week. The scale moves around, don't panic.", "weight");
+  assert.equal(all.text, "");
+  assert.ok(HONOURED_SILENCE.length > 20, "there is an honest line to send instead");
+  // Untouched when there is nothing to honour — no cost to every other client.
+  assert.deepEqual(stripForbidden("Nice one, that's your third session.", null), 
+    { text: "Nice one, that's your third session.", stripped: false });
+});
+
+test("dont-mention: a whole bubble that is only the topic goes, not a stub", async () => {
+  const { stripForbidden } = await import("../server/brain/reply-verifier");
+  const out = stripForbidden("620 kcal logged.\n\n---\n\nWeigh in tomorrow.", "the scale");
+  assert.equal(out.text, "620 kcal logged.", "the second WhatsApp bubble is removed whole");
+});
+
+test("dont-mention: the decision stands down rather than being filtered", async () => {
+  const { chooseAction } = await import("../server/one-action");
+  const day = (over: any) => ({
+    goal: "fat_loss" as any, weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: null,
+    loggedToday: true, proteinPct: 0.3, caloriePct: 0.9, sessionsThisWeek: 3, sessionsTarget: 3,
+    stepsToday: 9000, stepsTarget: 8000, hour: 7, ...over,
+  });
+  // Never weighed, four weeks in — normally the weigh ask outranks everything about food.
+  assert.equal(chooseAction(day({})).kind, "weigh");
+  // Asked to drop it, the ordering CONTINUES to the next real action. Filtering at the mouth
+  // instead would have left the coach with nothing to say.
+  const quiet = chooseAction(day({ doNotMention: "the scale" }));
+  assert.equal(quiet.kind, "protein", "they still get coached, just not about the scale");
+  assert.ok(!/weigh|scale|weight/i.test(quiet.todo + quiet.why));
+  // THE DURABLE GUARD. Standing down from the weigh ASK is not enough if the action we choose
+  // instead names the topic in its reason — and the proactive brief never passes the mouth gate,
+  // so nothing downstream would catch it. Sweep every action the ordering can reach.
+  const shapes = [
+    {}, { sick: true }, { daysSinceAnyLog: 5 }, { loggedToday: false, hour: 20 },
+    { proteinPct: 1, stepsToday: 500, hour: 14 }, { proteinPct: 1, sessionsThisWeek: 0 },
+    { proteinPct: 1, daysSinceWeighIn: 1 }, { goal: "muscle_gain" as any, caloriePct: 0.3, hour: 19 },
+  ];
+  for (const over of shapes) {
+    const a = chooseAction(day({ ...over, doNotMention: "the scale" }));
+    assert.ok(!/\bweigh|\bscale|\bweight/i.test(a.todo + " " + a.why),
+      `action "${a.kind}" names the topic they asked us to drop: ${a.todo} / ${a.why}`);
+  }
+});
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

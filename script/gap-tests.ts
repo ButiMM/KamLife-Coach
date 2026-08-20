@@ -3522,6 +3522,47 @@ test("cut7: one owner for the injury append", () => {
   }
 });
 
+// ── CUT 8: DON'T-MENTION IS BOUND TO THE MOUTH ──────────────────────────────────────────────
+
+test("cut8: the reply path honours do_not_mention, above the meaningful-message gate", () => {
+  const chatLog = readFileSync("server/handlers/chat-log.ts", "utf-8");
+  const code = chatLog.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  assert.ok(/stripForbidden\(draft, banned\.doNotMention\)/.test(code), "the mouth is bound");
+  // ORDER MATTERS. `if (!suspiciousStateLanguage && !meaningful) return reply;` returns early for
+  // ordinary turns — a promise honoured only on "meaningful" messages is not honoured.
+  const bind = code.indexOf("stripForbidden(draft");
+  const earlyReturn = code.indexOf("if (!suspiciousStateLanguage && !meaningful) return reply;");
+  assert.ok(bind > 0 && earlyReturn > 0 && bind < earlyReturn,
+    "the check must run before the early return, or it only fires on some turns");
+});
+
+test("cut8: they may raise it themselves", async () => {
+  const { mentionsForbidden } = await import("../server/brain/reply-verifier");
+  const chatLog = readFileSync("server/handlers/chat-log.ts", "utf-8");
+  // "Don't mention my weight" is not "refuse to tell me my weight when I ask". A coach that won't
+  // answer a direct question is not honouring a request, it is sulking — and it is the same trap
+  // as the step TARGET that read as an attribution in the P0.
+  assert.ok(/if \(!mentionsForbidden\(scope\.inputText, banned\.doNotMention\)\)/.test(chatLog),
+    "the client opening the topic re-opens it");
+  assert.ok(mentionsForbidden("what's my weight?", "the scale"), "…and that check can see it");
+});
+
+test("cut8: the decision stands down before the mouth ever has to", () => {
+  const oneAction = readFileSync("server/one-action.ts", "utf-8");
+  const code = oneAction.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // The proactive brief does not pass through reconcileTurnReply, so filtering alone would leave
+  // morning free to tell a client to stand on a scale they asked us never to raise.
+  assert.ok(/const scaleIsOffLimits = mentionsForbidden\("weight scale weigh", s\.doNotMention\)/.test(code),
+    "the weigh ask is never chosen");
+  assert.ok(/!scaleIsOffLimits && \(\(neverWeighed/.test(code), "…in the ordering itself");
+  assert.ok(/&& !mentionsForbidden\("weight scale weigh", p\.doNotMention\)/.test(code),
+    "…and in the verdict downgrade, which reaches askToWeigh by a second route");
+  // And the fact has to actually arrive: morning carries it into the profile it decides from.
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  assert.equal((morning.match(/doNotMention: client\.doNotMention/g) || []).length, 3,
+    "all three decision call sites in morning carry it");
+});
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
