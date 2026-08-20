@@ -12,6 +12,8 @@
  * kota still goes to the SA food database (842 foods); THIS is the "what should I get" guide.
  */
 
+import type { FoodConstraints } from "./food-swaps";
+
 export interface StreetDish {
   name: string;
   aliases: string[];
@@ -82,7 +84,12 @@ export function isStreetContext(m: string): boolean {
 }
 
 /** Goal-aware smart-order coaching for one street dish — short and human, no data dump. */
-export function formatStreetDish(d: StreetDish, goal: string): string {
+export function formatStreetDish(d: StreetDish, goal: string, c?: FoodConstraints): string {
+  // A dish they cannot eat is not "order it smart" — it is the wrong dish (Cut 9). Said plainly
+  // and once, then we point at what they CAN have rather than leaving them with nothing.
+  if (c && !c.allows(`${d.name} ${d.aliases.join(" ")} ${d.smartCut}`)) {
+    return `*${d.name}* — not one for you.\n\nThat one runs into ${c.terms.join(" / ")}, and you told me that. Tell me what else is on the counter and I'll pick the plate.`;
+  }
   const bulking = goal === "muscle_gain";
   const move = bulking ? d.smartBulk : d.smartCut;
   const tag = d.verdict === "win" ? "💪 Good choice" : d.verdict === "ok" ? "👍 Workable" : "⚠️ Doable — order it smart";
@@ -90,17 +97,30 @@ export function formatStreetDish(d: StreetDish, goal: string): string {
 }
 
 /** "What should I get at the taxi rank / on the street" — recommend the wins, flag the bombs. */
-export function streetGuide(goal: string): string {
+export function streetGuide(goal: string, c?: FoodConstraints): string {
   const bulking = goal === "muscle_gain";
+  // THE BEST-BUYS LIST IS A RECOMMENDATION, so it is filtered rather than printed whole. Four
+  // meat lines to a vegetarian is the pamphlet problem: correct in general, useless to them.
+  const bestBuys = [
+    "• Chicken livers — top pick, huge protein",
+    "• Shisa nyama plate — grilled meat + pap + chakalaka",
+    "• Grilled chicken and pap (pull the skin for fat loss)",
+    "• Walkie / offal — traditional, cheap, high protein",
+    "• Beans, chakalaka and pap — cheap, filling, real protein",
+    "• Roasted mielies — the honest street carb",
+  ].filter(l => !c || c.allows(l));
   return `Eating on the street — no problem, let's do it smart. 💪\n\n`
     + `*Best buys* (cheap, high protein):\n`
-    + `• Chicken livers — top pick, huge protein\n`
-    + `• Shisa nyama plate — grilled meat + pap + chakalaka\n`
-    + `• Grilled chicken and pap (pull the skin for fat loss)\n`
-    + `• Walkie / offal — traditional, cheap, high protein\n\n`
+    + `${bestBuys.slice(0, 4).join("\n")}\n\n`
     + `*Order these smart:*\n`
-    + `• Kota — ${bulking ? "get the egg + russian in it, great cheap fuel" : "less chips, add an egg, eat half now half later"}\n`
-    + `• Vetkoek & mince — ${bulking ? "fine around training, mince is the protein" : "one not two, load the mince not the bread"}\n`
-    + `• Gatsby — share it, pick steak/chicken over polony\n\n`
+    // FILTERED TOO (Cut 9). Leaving this block whole would have handed a vegetarian "vetkoek &
+    // mince" two lines under a best-buys list we had just carefully cleaned for them — the
+    // constraint has to hold across the WHOLE message or it reads as the coach forgetting
+    // mid-sentence, which is worse than never knowing.
+    + `${[
+      `• Kota — ${bulking ? "get the egg + russian in it, great cheap fuel" : "less chips, add an egg, eat half now half later"}`,
+      `• Vetkoek & mince — ${bulking ? "fine around training, mince is the protein" : "one not two, load the mince not the bread"}`,
+      `• Gatsby — share it, pick steak/chicken over polony`,
+    ].filter(l => !c || c.allows(l)).join("\n") || "• Tell me what's on the counter and I'll call it"}\n\n`
     + `The only real rule: *get some protein in every plate*, and don't let chips be the whole meal. Tell me what you're getting and I'll coach the exact order.`;
 }

@@ -225,13 +225,18 @@ const ALREADY_GOOD_RE = /\b(zero|sugar.?free|sugarfree|diet|light|lite|low.?fat|
  * Given a food name (as logged) and the client's goal, return the correct SA shelf
  * swap, or null if the food is already a good choice or has no better shelf option.
  */
-export function suggestSwap(foodName: string, goalType?: string | null): FoodSwap | null {
+export function suggestSwap(foodName: string, goalType?: string | null, c?: FoodConstraints): FoodSwap | null {
   const name = (foodName || "").toLowerCase();
   if (!name.trim() || ALREADY_GOOD_RE.test(name)) return null;
   const goal = (goalType || "").toLowerCase();
   for (const rule of SWAP_RULES) {
     if (!rule.match.test(name)) continue;
     if (rule.goals && !rule.goals.includes(goal as GoalType)) continue;
+    // THE REPLACEMENT IS A RECOMMENDATION (Cut 9). Telling a vegan to swap their mayo for eggs
+    // is worse than saying nothing: it is the coach proving it does not know them, at the exact
+    // moment it claims to be helping. No usable swap for this client → fall through to null,
+    // which every caller already treats as "Coach K's judgement".
+    if (c && !c.allows(rule.swap)) continue;
     return { swap: rule.swap, reason: rule.reason };
   }
   return null;
@@ -241,8 +246,8 @@ export function suggestSwap(foodName: string, goalType?: string | null): FoodSwa
  * A plain, kind, one-line "for next time" nudge built from a swap — never shaming,
  * always framed forward. Returns "" if there's no useful swap.
  */
-export function swapNudge(foodName: string, goalType?: string | null): string {
-  const s = suggestSwap(foodName, goalType);
+export function swapNudge(foodName: string, goalType?: string | null, c?: FoodConstraints): string {
+  const s = suggestSwap(foodName, goalType, c);
   if (!s) return "";
   return `_Next time: swap it for ${s.swap} — ${s.reason}._`;
 }
@@ -264,10 +269,10 @@ export function parseSwapAsk(message: string): string | null {
 }
 
 /** Full deterministic answer to a swap ask, or null to let Coach K handle it. */
-export function answerSwapAsk(message: string, goalType?: string | null): string | null {
+export function answerSwapAsk(message: string, goalType?: string | null, c?: FoodConstraints): string | null {
   const food = parseSwapAsk(message);
   if (!food) return null;
-  const s = suggestSwap(food, goalType);
+  const s = suggestSwap(food, goalType, c);
   if (!s) return null;
   return `Instead of ${food}: *${s.swap}* — ${s.reason}. 👌`;
 }
@@ -600,3 +605,137 @@ export function namesAnImport(text: string): boolean {
   // merely said "if you can afford it" is not naming an import.
   return IMPORTS.slice(0, -2).some(([re]) => { re.lastIndex = 0; return re.test(String(text || "")); });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// WHAT THIS CLIENT MAY EAT — one owner, because there were three (2026-08-19, Cut 9)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+//
+// The same question was being answered in three places, from three different sources, with no
+// agreement between them:
+//
+//   meal-plan.ts        derived isVegan / isVegetarian / noDairy / noFish / noPeanuts by
+//                       substring-matching `otherMedicalNotes`.
+//   grocery-personalize derived a "never suggest these" list from users.food_dislikes.
+//   memory.ts factsLine put users.dietary_restrictions into the GPT context and nowhere else.
+//
+// So a client who told us in conversation that they are lactose intolerant (Cut 7 records that
+// in dietary_restrictions) still got a meal plan built on amasi, because meal-plan reads a
+// different column. A constraint that holds on one path and not another is not a constraint —
+// it is a coincidence, and the client finds the hole before we do.
+//
+// This is that question's one owner. It lives here rather than in a new module because the
+// architecture governor is already over on `modules`, and this file is the nearest existing
+// owner of food suitability — it is what already answers "should this person eat that". foods.ts
+// would be the better name and it has one line of budget headroom.
+//
+// DELIBERATELY NOT CLINICAL. A diagnosis does not become a food ban here: diabetes sets low-GI
+// emphasis, which meal-plan already had, and nothing else. Deciding that a condition forbids a
+// food is clinical advice, and the doctrine is that we hand that to a doctor.
+
+export interface FoodConstraints {
+  /** What they actually told us, for saying back to them. Never invented. */
+  terms: string[];
+  /** One line for a coaching context or prompt. "" when there is nothing to say. */
+  line: string;
+  /** False when this food is off the table for this client. */
+  allows(foodName: string): boolean;
+  vegan: boolean;
+  vegetarian: boolean;
+  noDairy: boolean;
+  noPork: boolean;
+  noGluten: boolean;
+  noFish: boolean;
+  noPeanuts: boolean;
+  /** Diabetes / PCOS — an EMPHASIS, not a ban. Preserved from meal-plan's own derivation. */
+  lowGI: boolean;
+}
+
+/** What a declared diet actually rules out on a South African plate. */
+// PLURALS ARE THE WHOLE GAME HERE. "Chicken livers" is what a street vendor writes on the board,
+// and `\bliver\b` cannot see it. This codebase already carries the lesson in readStruggle — a
+// stem must not be closed at both ends — and it cost three failing gates before this comment
+// existed. `s?` rather than an open stem, deliberately: an open `\bham` would ban a beef
+// hamburger for a halaal client, which is the same class of bug pointing the other way.
+const DAIRY = /\b(milk|amasi|maas|cheese|yoghurts?|yogurts?|cream|butter|custard|ice ?cream|condensed milk)\b/i;
+const MEAT = /\b(chicken|beef|steaks?|mince|lamb|mutton|pork|bacon|ham|polony|russians?|vienna|wors|boerewors|biltong|livers?|tripe|offal|walkie|gammon|sausages?|meat|nyama|shisa ?nyama)\b/i;
+const FISH = /\b(fish|pilchards?|tuna|hake|snoek|sardines?|anchov(?:y|ies)|prawns?|shrimps?|calamari|mussels?|seafood)\b/i;
+const EGG = /\b(eggs?|omelettes?)\b/i;
+const PORK = /\b(pork|bacon|ham|gammon|pig)\b/i;
+const GLUTEN = /\b(bread|rolls?|buns?|kota|vetkoek|pasta|macaroni|spaghetti|noodles?|wheat|flour|cereal|weetbix|rusks?)\b/i;
+const PEANUT = /\b(peanuts?|peanut ?butter|groundnuts?)\b/i;
+
+export function foodConstraints(u: {
+  dietaryRestrictions?: string | null;
+  foodDislikes?: string | null;
+  otherMedicalNotes?: string | null;
+  medicalConditions?: string | null;
+}): FoodConstraints {
+  // BOTH COLUMNS, MERGED. dietary_restrictions is what they said in conversation (Cut 7);
+  // food_dislikes is what they said at signup. Reading one and not the other is how the hole
+  // above happened, and which column a fact landed in was decided by when they mentioned it.
+  const declared = `${u.dietaryRestrictions || ""} ${u.foodDislikes || ""} ${u.otherMedicalNotes || ""}`.toLowerCase();
+  const conditions = (u.medicalConditions || "").toLowerCase();
+
+  const has = (re: RegExp) => re.test(declared);
+  const vegan = has(/\bvegan\b/) || /\bvegan\b/.test(conditions);
+  const vegetarian = vegan || has(/\bvegetarian\b|\bno meat\b|\bplant.?based\b/) || /\bvegetarian\b/.test(conditions);
+  const noDairy = vegan || has(/\bdairy\b|\blactose\b|\bmilk\b/);
+  const noPork = has(/\bpork\b|\bhalaal\b|\bhalal\b|\bkosher\b|\bbacon\b/);
+  const noGluten = has(/\bgluten\b|\bceliac\b|\bcoeliac\b|\bwheat\b/);
+  const noFish = vegetarian || has(/\bfish\b|\bpilchard\b|\btuna\b|\bseafood\b|\bshellfish\b/);
+  const noPeanuts = has(/\bpeanut\b|\bgroundnut\b/);
+
+  // The literal foods they named, beyond the diet labels — "I don't eat liver" is a constraint
+  // even though no cluster covers it.
+  const literal = `${u.dietaryRestrictions || ""} ${u.foodDislikes || ""}`
+    .toLowerCase()
+    .split(/[,;]+|\band\b/)
+    .map(s => s.trim().replace(/^(no|not|never|hate|dislike|avoid|i don'?t eat|can'?t eat)\s+/, "").trim())
+    .filter(s => s.length >= 3 && s.length <= 24 && /^[a-z' -]+$/.test(s)
+      && !/^(vegan|vegetarian|halaal|halal|kosher|gluten free|dairy free|lactose intolerant)$/.test(s));
+
+  // Both forms of every literal term, for the same reason — a client who typed "liver" means
+  // "chicken livers" on a menu, and one who typed "eggs" means an egg.
+  const literalForms = literal.flatMap(w => {
+    const e = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return e.endsWith("s") ? [e, e.slice(0, -1)] : [e, `${e}s`];
+  }).filter(Boolean);
+  const literalRe = literalForms.length
+    ? new RegExp(`\\b(?:${literalForms.sort((a, b) => b.length - a.length).join("|")})\\b`, "i")
+    : null;
+
+  const terms = [
+    ...(vegan ? ["vegan"] : vegetarian ? ["vegetarian"] : []),
+    ...(noPork && !vegetarian ? ["no pork"] : []),
+    ...(noDairy && !vegan ? ["no dairy"] : []),
+    ...(noGluten ? ["no gluten"] : []),
+    ...(noPeanuts ? ["no peanuts"] : []),
+    ...(noFish && !vegetarian ? ["no fish"] : []),
+    ...literal,
+  ];
+
+  const allows = (foodName: string): boolean => {
+    const f = String(foodName || "");
+    if (!f.trim()) return true;
+    if (literalRe && literalRe.test(f)) return false;
+    if (vegan && (MEAT.test(f) || FISH.test(f) || EGG.test(f) || DAIRY.test(f))) return false;
+    if (vegetarian && (MEAT.test(f) || FISH.test(f))) return false;
+    if (noDairy && DAIRY.test(f)) return false;
+    if (noPork && PORK.test(f)) return false;
+    if (noGluten && GLUTEN.test(f)) return false;
+    if (noFish && FISH.test(f)) return false;
+    if (noPeanuts && PEANUT.test(f)) return false;
+    return true;
+  };
+
+  return {
+    terms,
+    line: terms.length ? `Does not eat: ${terms.join(", ")} — never suggest these, and never ask them to.` : "",
+    allows,
+    vegan, vegetarian, noDairy, noPork, noGluten, noFish, noPeanuts,
+    lowGI: /\bdiabet|pcos\b/.test(conditions) || /\bdiabet|pcos\b/.test(declared),
+  };
+}
+
+/** Constraints for a client with nothing declared — the shared "everything is allowed" case. */
+export const NO_CONSTRAINTS: FoodConstraints = foodConstraints({});

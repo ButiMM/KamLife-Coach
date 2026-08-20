@@ -374,6 +374,8 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
           weeklyFoodBudget: user.weeklyFoodBudget || "100_300",
           goalType: user.goalType || "fat_loss",
           medicalConditions: user.medicalConditions || "",
+          dietaryRestrictions: user.dietaryRestrictions,
+          foodDislikes: user.foodDislikes,
           otherMedicalNotes: user.otherMedicalNotes || "",
           recentFoods: [],
           firstName: user.name?.split(" ")[0] || "",

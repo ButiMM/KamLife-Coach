@@ -14,6 +14,7 @@
 import { validateMealPlan, type DayTotals } from "./verifiers/meal-plan-validator";
 import { topUpsForDay, topUpLine } from "./meal-plan-scale";
 import { enforceMessageBudget, MESSAGE_BUDGET } from "./reply-contract";
+import { foodConstraints } from "./food-swaps";
 
 export type MealPlanOptions = {
   calorieTarget: number;
@@ -22,6 +23,11 @@ export type MealPlanOptions = {
   goalType: string;         // "fat_loss" | "muscle_gain" | "recomposition"
   medicalConditions: string; // comma-separated, e.g. "diabetes,hypertension"
   otherMedicalNotes: string;
+  /** users.dietary_restrictions — what they told us in conversation (Cut 7). Optional so every
+   *  existing caller keeps compiling; a caller that omits it simply declares fewer constraints. */
+  dietaryRestrictions?: string | null;
+  /** users.food_dislikes — what they told us at signup. Read here for the first time in Cut 9. */
+  foodDislikes?: string | null;
   recentFoods: string[];    // names of foods logged in last 7 days (lowercase)
   firstName: string;
 };
@@ -259,36 +265,25 @@ export function generateMealPlan(opts: MealPlanOptions): string {
     goalType,
     medicalConditions,
     otherMedicalNotes,
+    dietaryRestrictions,
+    foodDislikes,
     firstName,
   } = opts;
 
-  const medicals = medicalConditions
-    ? medicalConditions.split(",").map((s) => s.trim().toLowerCase())
-    : [];
-  const isLowGI =
-    medicals.includes("diabetes") ||
-    medicals.includes("diabetic") ||
-    medicals.includes("pcos");
-  const notes = (otherMedicalNotes || "").toLowerCase();
-  const noFish =
-    notes.includes("fish") ||
-    notes.includes("pilchard") ||
-    notes.includes("tuna");
-  const noDairy =
-    notes.includes("dairy") ||
-    notes.includes("lactose") ||
-    notes.includes("milk");
-  const noPeanuts = notes.includes("peanut");
-  const isVegetarian =
-    notes.includes("vegetarian") ||
-    notes.includes("no meat") ||
-    notes.includes("no chicken") ||
-    notes.includes("no beef") ||
-    notes.includes("plant-based") ||
-    medicals.includes("vegetarian");
-  const isVegan =
-    notes.includes("vegan") ||
-    medicals.includes("vegan");
+  // ONE OWNER (2026-08-19, Cut 9). This block used to derive vegan / vegetarian / noDairy /
+  // noFish / noPeanuts by substring-matching `otherMedicalNotes` — a third private answer to
+  // "what may this client eat", which never saw users.dietary_restrictions or food_dislikes. A
+  // client who told us in conversation that they are lactose intolerant still got a plan built
+  // on amasi, because this function read a different column from the one that recorded it.
+  const constraints = foodConstraints({
+    dietaryRestrictions, foodDislikes, otherMedicalNotes, medicalConditions,
+  });
+  const isLowGI = constraints.lowGI;
+  const noFish = constraints.noFish;
+  const noDairy = constraints.noDairy;
+  const noPeanuts = constraints.noPeanuts;
+  const isVegetarian = constraints.vegetarian;
+  const isVegan = constraints.vegan;
 
   // Pick pools based on budget
   const budget = weeklyFoodBudget || "100_300";

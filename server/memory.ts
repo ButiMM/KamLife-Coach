@@ -231,6 +231,7 @@ import { db } from "./db";
 import { users } from "../shared/schema";
 import { eq } from "drizzle-orm";
 import { looksLikeQuestion, isFutureIntent } from "./utils";
+import { foodConstraints } from "./food-swaps";
 
 export interface DurableFacts {
   injuries?: string;
@@ -383,6 +384,7 @@ export async function factsLine(phone: string): Promise<string> {
       injuries: users.injuries, medicalConditions: users.medicalConditions,
       dietaryRestrictions: users.dietaryRestrictions, lifeContext: users.lifeContext,
       doNotMention: users.doNotMention, workSchedule: users.workSchedule,
+      foodDislikes: users.foodDislikes,
     }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
     const u = rows[0];
     if (!u) return "";
@@ -390,7 +392,14 @@ export async function factsLine(phone: string): Promise<string> {
     const usable = (v: any) => v && String(v).trim() && String(v).trim().toLowerCase() !== "none";
     if (usable(u.injuries)) parts.push(`Injury: ${u.injuries} — train around it, never through it.`);
     if (usable(u.medicalConditions)) parts.push(`Medical: ${u.medicalConditions}.`);
-    if (usable(u.dietaryRestrictions)) parts.push(`Does not eat: ${u.dietaryRestrictions}.`);
+    // ONE CONSTRAINT LINE (Cut 9), through the same owner every deterministic food path uses —
+    // otherwise the model and the meal plan disagree about what this person eats, and the client
+    // hears both. dietary_restrictions and food_dislikes are merged and expanded here exactly as
+    // they are for the plan, the swaps and the shopping list.
+    const foodLine = foodConstraints({
+      dietaryRestrictions: u.dietaryRestrictions, foodDislikes: u.foodDislikes,
+    }).line;
+    if (foodLine) parts.push(foodLine);
     if (usable(u.workSchedule) && u.workSchedule !== "standard") parts.push(`Work pattern: ${u.workSchedule}.`);
     if (usable(u.lifeContext)) parts.push(`Life right now: ${u.lifeContext}.`);
     if (usable(u.doNotMention)) parts.push(`DO NOT MENTION: ${u.doNotMention}. They asked.`);

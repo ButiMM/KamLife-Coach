@@ -12,6 +12,7 @@ import { suggestStepTargetAdjustment } from "../../targets";
 import { getTrajectoryForUser } from "../../trajectory-report";
 import { runWeeklyRecaps } from "../../weekly-recap";
 import { generateMealPlan } from "../../meal-plan";
+import { mentionsForbidden } from "../../brain/reply-verifier";
 
 export async function runFridayWeekendStrategy(): Promise<void> {
   console.log("[SCHEDULER] JOB: Friday weekend strategy");
@@ -48,7 +49,13 @@ export async function runFridayWeekendStrategy(): Promise<void> {
         ? parseFloat(String(weekWeights[weekWeights.length - 1].weight)) - parseFloat(String(weekWeights[0].weight))
         : null;
 
-      const weightLine = weightChange === null ? ""
+      // THE LINE STANDS DOWN, NOT THE REPORT (2026-08-19, Cut 9). Unlike the Monday weigh-in
+      // reminder — which IS the scale and is withheld whole — this wrap-up is mostly sessions,
+      // food days and steps: real progress that must still reach them. Cut 8 bound
+      // do_not_mention to the reactive mouth and the decision; a proactive report reaches
+      // neither, which is the hole this closes.
+      const scaleOffLimits = mentionsForbidden("weight scale weigh", (client as any).doNotMention);
+      const weightLine = scaleOffLimits || weightChange === null ? ""
         : weightChange < -0.2 ? `⬇️ Down ${Math.abs(weightChange).toFixed(1)}kg`
         : weightChange > 0.2 ? `⬆️ Up ${weightChange.toFixed(1)}kg`
         : `➡️ Weight holding`;
@@ -117,8 +124,14 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const proteinTarget = client.proteinTarget || 120;
       const stepsTarget = client.stepsTarget || 8500;
 
+      // Same rule, the other weekly report (Cut 9). "not logged — weigh in Monday morning" was
+      // the worst of the four outcomes: a client who asked us to drop the scale got told off
+      // for not standing on one.
+      const scaleOff = mentionsForbidden("weight scale weigh", (client as any).doNotMention);
       let weightLine = "", weightEmoji = "⚖️";
-      if (weightEntries.length >= 2) {
+      if (scaleOff) {
+        weightLine = "";
+      } else if (weightEntries.length >= 2) {
         const diff = parseFloat(String(weightEntries[weightEntries.length - 1].weight)) - parseFloat(String(weightEntries[0].weight));
         if (diff < -0.1) { weightLine = `${Math.abs(diff).toFixed(1)}kg down`; weightEmoji = "📉"; }
         else if (diff > 0.1) { weightLine = `${diff.toFixed(1)}kg up`; weightEmoji = "📈"; }
@@ -227,7 +240,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
         `${trainEmoji} Training: ${completedSessions}/${plannedSessions} sessions`,
         `${stepsEmoji} Steps: ${stepsLine}`,
         `${proteinEmoji} Protein days: ${proteinDays}/${foodDays} meals tracked`,
-        `${weightEmoji} Weight: ${weightLine}`,
+        weightLine ? `${weightEmoji} Weight: ${weightLine}` : "",
         ...(forecastLine ? [forecastLine] : []),
         streakLine || "", ``,
         `*Weekly Score: ${totalScore}/100 — ${scoreLabel}*`, ``,
@@ -249,7 +262,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
 
       try {
         const list = getShoppingList(budgetTierWeekly, weekNum + 1, clientGoalWeekly);
-        const personalization = await getGroceryPersonalization(client.id, clientGoalWeekly, (client as any).foodDislikes);
+        const personalization = await getGroceryPersonalization(client.id, clientGoalWeekly, (client as any).foodDislikes, (client as any).dietaryRestrictions);
         const shoppingMsg = formatShoppingList(list, name, clientGoalWeekly, {
           calorieTarget: client.calorieTarget || undefined,
           proteinTarget: client.proteinTarget || undefined,
@@ -412,6 +425,8 @@ export async function runSundayMealPlan(): Promise<void> {
         weeklyFoodBudget: client.weeklyFoodBudget || "100_300",
         goalType: client.goalType || "fat_loss",
         medicalConditions: client.medicalConditions || "",
+        dietaryRestrictions: client.dietaryRestrictions,
+        foodDislikes: client.foodDislikes,
         otherMedicalNotes: client.otherMedicalNotes || "",
         recentFoods,
         firstName: name,

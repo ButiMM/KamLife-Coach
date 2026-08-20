@@ -3563,6 +3563,54 @@ test("cut8: the decision stands down before the mouth ever has to", () => {
     "all three decision call sites in morning carry it");
 });
 
+// ── CUT 9: ONE FOOD-CONSTRAINT OWNER, AND THE WEIGHT REPORTS HONOUR THE COLUMN ──────────────
+
+test("cut9: no food path keeps its own answer to what this client may eat", () => {
+  const strip = (x: string) => x.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  const mealPlan = strip(readFileSync("server/meal-plan.ts", "utf-8"));
+  const grocery = strip(readFileSync("server/grocery-personalize.ts", "utf-8"));
+  const memory = strip(readFileSync("server/memory.ts", "utf-8"));
+  // meal-plan derived vegan/vegetarian/noDairy by substring-matching otherMedicalNotes — a
+  // third private answer that never saw dietary_restrictions, so a client who told us in
+  // conversation they were lactose intolerant still got a plan built on amasi.
+  assert.ok(!/notes\.includes\("lactose"\)/.test(mealPlan), "meal-plan no longer derives its own");
+  assert.ok(!/notes\.includes\("vegan"\)/.test(mealPlan), "…including the diet labels");
+  assert.ok(/foodConstraints\(\{/.test(mealPlan), "it asks the owner");
+  assert.ok(/foodConstraints\(\{ foodDislikes, dietaryRestrictions \}\)/.test(grocery),
+    "the shopping list reads BOTH columns, not just the signup one");
+  assert.ok(/foodConstraints\(\{/.test(memory), "and the coach context is built from the same owner");
+});
+
+test("cut9: every plate recommender can be constrained", () => {
+  const swaps = readFileSync("server/food-swaps.ts", "utf-8");
+  const street = readFileSync("server/street-food.ts", "utf-8");
+  // A swap and a street guide are RECOMMENDATIONS — the one place a constraint failure is not
+  // just unhelpful but actively proves we do not know them.
+  assert.ok(/export function suggestSwap\(foodName: string, goalType\?: string \| null, c\?: FoodConstraints\)/.test(swaps));
+  assert.ok(/if \(c && !c\.allows\(rule\.swap\)\) continue;/.test(swaps), "never suggest a banned food");
+  assert.ok(/export function streetGuide\(goal: string, c\?: FoodConstraints\)/.test(street));
+  assert.ok((street.match(/\.filter\(l => !c \|\| c\.allows\(l\)\)/g) || []).length >= 2,
+    "both lists in the guide are filtered — a constraint that lapses mid-message reads as forgetting");
+});
+
+test("cut9: the weight reports honour do_not_mention, each in the right way", () => {
+  const monday = readFileSync("server/scheduler/jobs/monday.ts", "utf-8");
+  const weekly = readFileSync("server/scheduler/jobs/weekly.ts", "utf-8");
+  // These are PROACTIVE sends. They pass through neither Cut 8 binding — not the reactive mouth,
+  // not the decision — which is exactly why they were still saying it.
+  assert.ok(/mentionsForbidden\("weight scale weigh", \(client as any\)\.doNotMention\)/.test(monday),
+    "the Monday weigh-in reminder is bound");
+  assert.ok(/weigh-in reminder withheld, they asked/.test(monday),
+    "…and withheld WHOLE — a weigh-in reminder is the scale, there is no paragraph to strip");
+  assert.equal((weekly.match(/mentionsForbidden\("weight scale weigh"/g) || []).length, 2,
+    "both weekly reports are bound");
+  // The wrap-up is mostly sessions, food days and steps — real progress that must still arrive.
+  assert.ok(/weightLine \? `\$\{weightEmoji\} Weight: \$\{weightLine\}` : ""/.test(weekly),
+    "the weight LINE stands down, not the report");
+  assert.ok(!/weightLine = "not logged — weigh in Monday morning";[\s\S]{0,80}\}\s*$/.test(weekly),
+    "and nobody who asked us to drop the scale gets told off for not standing on one");
+});
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");

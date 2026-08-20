@@ -20,6 +20,7 @@
  */
 
 import { suggestSwap } from "./food-swaps";
+import { foodConstraints } from "./food-swaps";
 
 export type FoodProfileItem = { name: string; count: number };
 export type FoodProfile = { topFoods: FoodProfileItem[]; distinctCount: number };
@@ -165,14 +166,22 @@ export async function getRecentFoodProfile(userId: string, days = 14): Promise<F
  * Convenience for the four shopping-list callers: fetch the profile and build the block
  * in one call. Returns null on cold start or any error (list still sends, just generic).
  */
-export async function getGroceryPersonalization(userId: string, goalType?: string | null, foodDislikes?: string | null): Promise<string | null> {
+export async function getGroceryPersonalization(
+  userId: string,
+  goalType?: string | null,
+  foodDislikes?: string | null,
+  dietaryRestrictions?: string | null,
+): Promise<string | null> {
   try {
     const profile = await getRecentFoodProfile(userId);
     const block = buildGroceryPersonalization(profile, goalType);
-    // Honour the foods they told us at onboarding they can't stand — never on the list.
-    const disliked = (foodDislikes || "").trim();
-    if (disliked) {
-      return `${block}\n🚫 *Left off* — you told me you're not a fan of ${disliked.replace(/[.]+$/, "")}. Say the word if you want a swap for anything else.`;
+    // ONE OWNER (Cut 9). This read food_dislikes alone, so a client who told us in conversation
+    // that they are lactose intolerant — recorded in dietary_restrictions — still got amasi on
+    // their shopping list. Which column their constraint landed in depended only on WHEN they
+    // said it, and the list honoured one of the two.
+    const c = foodConstraints({ foodDislikes, dietaryRestrictions });
+    if (c.terms.length > 0) {
+      return `${block}\n🚫 *Left off* — you told me: ${c.terms.join(", ")}. Say the word if you want a swap for anything else.`;
     }
     return block;
   } catch (e: any) {

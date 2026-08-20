@@ -9665,6 +9665,69 @@ test("dont-mention: the decision stands down rather than being filtered", async 
   }
 });
 
+// ── CUT 9: DIET IS FOOD-STATE, NOT GPT MEMORY ───────────────────────────────────────────────
+// The same question — "what may this client eat" — was answered in three places from three
+// different columns. A constraint that holds on one path and not another is a coincidence.
+
+test("constraints: both columns, because which one it landed in was an accident of timing", async () => {
+  const { foodConstraints } = await import("../server/food-swaps");
+  // Said at signup.
+  assert.ok(!foodConstraints({ foodDislikes: "liver" }).allows("chicken livers"));
+  // Said in conversation months later — Cut 7 records this one, and until Cut 9 only the GPT
+  // context ever saw it while the meal plan built breakfasts on amasi.
+  assert.ok(!foodConstraints({ dietaryRestrictions: "lactose intolerant" }).allows("amasi and oats"));
+  assert.ok(!foodConstraints({ dietaryRestrictions: "lactose intolerant" }).allows("full cream milk"));
+  // And nothing declared allows everything — no client pays for a constraint they never set.
+  const open = foodConstraints({});
+  assert.ok(open.allows("kota") && open.allows("amasi") && open.allows("chicken livers"));
+  assert.equal(open.line, "", "silence when there is nothing to honour");
+});
+
+test("constraints: a declared diet rules out what it actually rules out", async () => {
+  const { foodConstraints } = await import("../server/food-swaps");
+  const vegan = foodConstraints({ dietaryRestrictions: "vegan" });
+  for (const f of ["chicken and pap", "boerewors", "pilchards on toast", "scrambled eggs", "amasi"]) {
+    assert.ok(!vegan.allows(f), `vegan must not be offered ${f}`);
+  }
+  assert.ok(vegan.allows("beans and chakalaka"), "…and there is still food they can eat");
+  const halaal = foodConstraints({ dietaryRestrictions: "halaal" });
+  assert.ok(!halaal.allows("bacon and eggs"));
+  assert.ok(halaal.allows("grilled chicken"), "halaal is not vegetarian");
+  const veg = foodConstraints({ dietaryRestrictions: "vegetarian" });
+  assert.ok(!veg.allows("hake") && veg.allows("eggs on toast"), "vegetarian keeps eggs, drops fish");
+});
+
+test("constraints: the swap is a recommendation, so it is constrained too", async () => {
+  const { suggestSwap, foodConstraints } = await import("../server/food-swaps");
+  // Unconstrained, the table answers as it always did.
+  const plain = suggestSwap("full cream milk", "fat_loss");
+  assert.ok(plain, "the swap table still works");
+  // Telling someone their swap is a food they told us they cannot eat is the coach proving it
+  // does not know them, at the exact moment it claims to be helping. Null → Coach K's judgement,
+  // which every caller already handles.
+  const vegan = foodConstraints({ dietaryRestrictions: "vegan" });
+  const rules = ["chicken", "eggs", "milk", "cheese", "yoghurt", "biltong", "tuna"];
+  for (const r of rules) {
+    const out = suggestSwap(r, "fat_loss", vegan);
+    if (out) assert.ok(vegan.allows(out.swap), `suggested "${out.swap}" to a vegan`);
+  }
+});
+
+test("constraints: the street guide stops handing a vegetarian four meat lines", async () => {
+  const { streetGuide, formatStreetDish, STREET_FOODS } = await import("../server/street-food");
+  const { foodConstraints } = await import("../server/food-swaps");
+  const veg = foodConstraints({ dietaryRestrictions: "vegetarian" });
+  const guide = streetGuide("fat_loss", veg);
+  assert.ok(!/chicken livers|shisa nyama|walkie/i.test(guide), "the meat best-buys are gone");
+  assert.ok(/beans|mielies/i.test(guide), "…and replaced with something they can actually buy");
+  assert.ok(streetGuide("fat_loss").includes("Chicken livers"), "unconstrained, the guide is unchanged");
+  // A dish they cannot eat is the wrong dish, said once, then we point at what they can have.
+  const kota = STREET_FOODS.find(d => /kota/i.test(d.name))!;
+  const glutenFree = foodConstraints({ dietaryRestrictions: "gluten free" });
+  assert.match(formatStreetDish(kota, "fat_loss", glutenFree), /not one for you/i);
+  assert.match(formatStreetDish(kota, "fat_loss"), /chips/i, "unconstrained it still coaches the order");
+});
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

@@ -6,6 +6,7 @@ import {
   todaySAST, thisWeekUTC, isProactivePaused,
 } from "../shared";
 import { getGoalProfile } from "../../goal-profiles";
+import { mentionsForbidden } from "../../brain/reply-verifier";
 
 export async function runWeightReminder(): Promise<void> {
   console.log("[SCHEDULER] Running weight check-in reminder...");
@@ -20,6 +21,14 @@ export async function runWeightReminder(): Promise<void> {
     .where(and(eq(users.onboardingState, "COMPLETE"), gte(users.lastActiveAt, threeDaysAgo)));
   let sent = 0;
   for (const client of activeClients) {
+    // THE WHOLE JOB IS THE THING THEY ASKED US TO DROP (2026-08-19, Cut 9). Cut 8 bound
+    // do_not_mention to the reactive mouth and to the decision; this send passes through
+    // neither. There is no paragraph to strip here — a weigh-in reminder IS the scale — so the
+    // honest binding is to stand down for this client, exactly as chooseAction does.
+    if (mentionsForbidden("weight scale weigh", (client as any).doNotMention)) {
+      console.log(`[MONDAY] ...${client.id.slice(-6)} — weigh-in reminder withheld, they asked`);
+      continue;
+    }
     const [recent] = await db.select({ c: count() }).from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, thirtySixHoursAgo)));
     if ((recent.c || 0) > 0) continue;
     const name = client.name?.split(" ")[0] || "there";
