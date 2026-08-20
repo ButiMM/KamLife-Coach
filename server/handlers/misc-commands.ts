@@ -31,7 +31,7 @@ import { calculateTargets, waterTargetLitres } from "../targets";
 import { JUNK_WORDS } from "./checks";
 import { getStepStreak } from "./steps";
 import { scanForSAFoods } from "./food-scanner";
-import { storeMemory } from "../memory";
+import { storeMemory, addFact } from "../memory";
 import { sendWhatsApp } from "../scheduler";
 import { sastToday, sastDayStart, looksLikeDirectionRequest, classifyPainReport , getDisplayName} from "../utils";
 import { isDespairNotAQuestion } from "../despair";
@@ -201,9 +201,10 @@ export async function handleMiscCommands(ctx: {
     // REMEMBER the injury — the programme and swap logic read user.injuries, so from
     // now every workout trains around it instead of re-prescribing the painful move.
     if (injuredArea !== "the affected area") {
-      const existingInj = (user.injuries || "").toLowerCase();
-      if (!existingInj.includes(injuredArea)) {
-        const updatedInj = user.injuries && user.injuries !== "none" ? `${user.injuries}, ${injuredArea}` : injuredArea;
+      // ONE OWNER for the append (Cut 7) — this block was duplicated verbatim in
+      // pain-triage.ts and misc-commands.ts, and recordClientFacts needed a third copy.
+      const updatedInj = addFact(user.injuries, injuredArea);
+      if (updatedInj !== user.injuries) {
         await db.update(users).set({ injuries: updatedInj }).where(eq(users.id, user.id)).catch(() => {});
       }
     }

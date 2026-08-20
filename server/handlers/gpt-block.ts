@@ -683,36 +683,16 @@ SA voice. Direct. Coach forward, not backward.`;
   // (only calorie/protein tokens; leaves sets/reps/steps), and numbers:full opts out.
   if (getNumbersMode(user) === "low") finalReply = stripNumbersFromProse(finalReply);
 
-  // ---- MEMORY: store important facts for future sessions ----
-  try {
-    if (/\b(injury|injured|hurt|pain|bad knee|bad back|bad shoulder|bad hip)\b/i.test(m)) {
-      await storeMemory(phone, `Client reported injury: "${message}"`, "medical");
-    } else if (/\b(allergic|allergy|intolerant|can't eat|cannot eat|dairy free|gluten free|peanut allergy)\b/i.test(m)) {
-      await storeMemory(phone, `Client dietary restriction: "${message}"`, "medical");
-    } else if (/\b(diabetes|diabetic|hypertension|pcos|hiv|tb |tuberculosis|pregnant|epilepsy)\b/i.test(m)) {
-      await storeMemory(phone, `Client medical condition: "${message}"`, "medical");
-    } else if (/\b(i prefer|i hate|i love|don't like|can't stand|favourite food|i always eat|i never eat)\b/i.test(m)) {
-      await storeMemory(phone, `Client food or training preference: "${message}"`, "preference");
-    } else if (/\b(quit|give up|want to stop|not working|no results|nothing is changing)\b/i.test(m)) {
-      await storeMemory(phone, `Client struggled with motivation: "${message}"`, "mindset");
-    } else if (/\b(hit my goal|reached my goal|lost.*kg|gained.*kg|pb|personal best|new record)\b/i.test(m)) {
-      await storeMemory(phone, `Client milestone: "${message}"`, "milestone");
-    }
-  } catch (e) { console.warn("[non-fatal]", e); }
-
-  // Auto-store significant coaching notes for future memory
-  try {
-    const mLower = message.toLowerCase();
-    if (/\b(stressed|anxious|depressed|overwhelmed|struggling|bad week|hard week|tough week|not okay|burnout)\b/.test(mLower)) {
-      await storeMemory(phone, `Client mentioned stress or emotional difficulty: "${message.slice(0, 100)}"`, "mindset");
-    } else if (/\b(hate|don.?t like|can.?t stand|avoid|never eat|allergic to|dislike)\b/.test(mLower)) {
-      await storeMemory(phone, `Food/exercise preference noted: "${message.slice(0, 100)}"`, "preference");
-    } else if (/\b(love|favourite|always eat|prefer|enjoy|my go.?to)\b/.test(mLower)) {
-      await storeMemory(phone, `Positive preference noted: "${message.slice(0, 100)}"`, "preference");
-    } else if (/\b(night shift|work from home|just had a baby|new job|retrenched|moved|single mom|single dad|divorce|breakup)\b/.test(mLower)) {
-      await storeMemory(phone, `Life situation update: "${message.slice(0, 120)}"`, "preference");
-    }
-  } catch (e) { console.warn("[non-fatal]", e); }
+  // ---- MEMORY ----
+  // The two detector blocks that stood here are GONE (2026-08-19, Cut 7). Between them they
+  // matched injury, allergy, condition, preference, mindset, milestone and life-situation, and
+  // wrote each one as a sentence of prose into the pgvector store — from INSIDE the GPT handler,
+  // last in the pipeline. So a fact mentioned alongside a meal routed to the food handler and was
+  // never learned at all, and a fact that WAS caught went somewhere no coaching decision could
+  // read. `users.injuries` sat NULL while programme.ts kept prescribing squats on a bad knee.
+  //
+  // recordClientFacts in memory.ts now runs at the front door in routes.ts, on every message, and
+  // writes typed columns the programme and the decision already know how to read.
 
   // ---- FOOD CONTEXT CHECK — only if GPT response is about food the user actually ate ----
   // STRICT: must have BOTH a log trigger AND actual SA food detected by scanner

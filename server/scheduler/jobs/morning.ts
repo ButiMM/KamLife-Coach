@@ -34,6 +34,7 @@ async function silenceAsk(client: any, daysSilent: number): Promise<string> {
   const profile = {
     dreamGoal: client.dreamGoal,
     biggestStruggle: client.biggestStruggle,
+    lifeContext: client.lifeContext,
     weeksOnProgramme: Math.max(0, (client.programmeWeek || 1) - 1),
     sessionsTarget: Number(client.trainingDaysPerWeek) || 3,
     calorieTarget: Number(client.calorieTarget) || 0,
@@ -53,7 +54,7 @@ async function silenceAsk(client: any, daysSilent: number): Promise<string> {
     return formatOneAction(chooseAction({
       firstName, goal: (client.goalType as any) || "general",
       dreamGoal: client.dreamGoal, biggestStruggle: client.biggestStruggle,
-      weeksOnProgramme: profile.weeksOnProgramme,
+      lifeContext: client.lifeContext, weeksOnProgramme: profile.weeksOnProgramme,
       daysSinceAnyLog: daysSilent, daysSinceWeighIn: 0, loggedToday: false,
       proteinPct: 1, caloriePct: 1, sessionsThisWeek: 0, sessionsTarget: 0,
       stepsToday: 0, stepsTarget: 0, hour: 7,
@@ -475,6 +476,7 @@ export async function runMorningCheckin(): Promise<void> {
           const decision = decideProactive(state, {
             dreamGoal: client.dreamGoal,
             biggestStruggle: client.biggestStruggle,
+            lifeContext: client.lifeContext,
             weeksOnProgramme: Math.floor(progDays / 7),
             sessionsTarget: Number(client.trainingDaysPerWeek) || 3,
             calorieTarget: Number(client.calorieTarget) || 0,

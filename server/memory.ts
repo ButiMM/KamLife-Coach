@@ -52,7 +52,25 @@ async function pruneOldMemories(phone: string): Promise<void> {
   }
 }
 
+/**
+ * EMBEDDINGS ARE OFF (2026-08-19, Cut 7). Set MEMORY_EMBEDDINGS=on in Railway to restore them.
+ *
+ * What this table was sold to us as: relationship. What it is: cosine similarity over chat. It
+ * cost an OpenAI embedding call on every stored fact AND on every retrieval — two per coached
+ * message on the GPT path — to recall a paragraph that no part of the coaching decision could act
+ * on, because acting requires a field.
+ *
+ * The six things a coach actually has to remember — injury, condition, dietary restriction, work
+ * pattern, life context, don't-mention — are now typed columns on the client, written by
+ * recordClientFacts below and read by the decision. That is memory. This was search.
+ *
+ * Nothing is deleted: the table, the writer and the reader all still work, and one env var turns
+ * them back on. What is switched off is paying per message for fog.
+ */
+const EMBEDDINGS_ON = String(process.env.MEMORY_EMBEDDINGS || "").toLowerCase() === "on";
+
 export async function storeMemory(phone: string, content: string, category: string): Promise<void> {
+  if (!EMBEDDINGS_ON) return;
   try {
     assertAiOnline("storeMemory");
 
@@ -132,6 +150,16 @@ async function recentConversation(phone: string): Promise<string> {
 }
 
 export async function retrieveMemories(phone: string, query: string): Promise<string[]> {
+  // THE THREAD IS NOT AN EMBEDDING. recentConversation below is a plain read of the last four
+  // turns, and it is the part of this function that was always doing honest work — staying in
+  // the conversation rather than recalling a similar-sounding one. It survives the mute.
+  if (!EMBEDDINGS_ON) {
+    const [facts, thread] = await Promise.all([factsLine(phone), recentConversation(phone)]);
+    const out: string[] = [];
+    if (facts) out.push(facts);
+    if (thread) out.push(`RECENT CONVERSATION — use this to stay in the thread, not to recite it:\n${thread}`);
+    return out;
+  }
   try {
     assertAiOnline("retrieveMemories");
     const resp = await openai.embeddings.create({ model: "text-embedding-3-small", input: query });
@@ -175,59 +203,175 @@ export async function retrieveMemories(phone: string, query: string): Promise<st
   }
 }
 
-// ============================================================
-// SHARED FACT SCANNER — one memory writer for EVERY reply path.
-// The store triggers lived inline in gpt-block only, so anything a client told
-// the BRAIN was never remembered. Fire-and-forget; never blocks or fails a reply.
-// ============================================================
-export async function scanAndStoreClientFacts(phone: string, message: string): Promise<void> {
-  const m = (message || "").toLowerCase();
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// THE SIX DURABLE FACTS — memory as a person, not a search index (2026-08-19, Cut 7)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+//
+// What was here before: scanAndStoreClientFacts, a detector set that turned everything a client
+// told us into prose and embedded it. It had ZERO callers — imported by brain/coach-brain.ts and
+// never invoked — and an almost identical, LIVE copy of the same detectors sat inline in
+// handlers/gpt-block.ts. So the facts were being caught twice and stored somewhere nothing could
+// read, or not caught at all, depending on which handler the sentence routed to.
+//
+// The defect that makes this a safety fix and not a memory nicety:
+//
+//   `users.injuries` is typed and it already WORKS. programme.ts filters exercises against it,
+//   verifiers/injury-rules.ts parses body parts out of it, response-gate.ts and
+//   programme-validator.ts both read it. A client who goes through pain triage gets every future
+//   session built around their knee.
+//
+//   A client who just SAYS "my knee has been killing me since Saturday" hit the gpt-block
+//   detector, which embedded the sentence into pgvector and left the column NULL — and the
+//   programme carried on prescribing squats. Same client, same fact, two outcomes, decided by
+//   routing.
+//
+// So: one detector set, one writer, typed columns, read by the decision and by the programme.
+
+import { db } from "./db";
+import { users } from "../shared/schema";
+import { eq } from "drizzle-orm";
+
+export interface DurableFacts {
+  injuries?: string;
+  medicalConditions?: string;
+  dietaryRestrictions?: string;
+  lifeContext?: string;
+  doNotMention?: string;
+  workSchedule?: string;
+}
+
+/** Body parts we can actually train around — the vocabulary programme.ts already filters on. */
+const BODY_PART = /\b(knee|back|shoulder|hip|ankle|wrist|elbow|neck|groin|hamstring|calf|foot|heel)\b/i;
+
+/**
+ * WHAT THE CLIENT JUST TOLD US ABOUT THEMSELVES, AS FIELDS. Pure — no database, no model.
+ *
+ * Deliberately narrow. Every one of these is written into a column the coach ACTS on, so a false
+ * positive is not noise, it is a programme built around an injury the client does not have. The
+ * old prose detectors could afford to be loose because nothing read them.
+ */
+export function detectFacts(message: string): DurableFacts {
   const raw = (message || "").trim();
-  if (!raw) return;
+  const m = raw.toLowerCase();
+  const facts: DurableFacts = {};
+  if (!raw) return facts;
 
+  // INJURY — needs both a pain word and a body part. "my back is killing me" qualifies;
+  // "that workout hurt" does not, and must not amputate their leg day.
+  const part = m.match(BODY_PART)?.[0]?.toLowerCase();
+  if (part) {
+    // An INJURY VERB naming a body part is enough on its own — "I hurt my lower back at work" is
+    // a report, not a complaint about a hard session.
+    const injuryVerb = /\b(injur\w*|hurt|strain\w*|sprain\w*|pulled|tweaked|twisted)\b/i.test(m);
+    // "sore" and "pain" are vaguer and overlap with DOMS, which pain-triage owns — those need a
+    // second signal before we let them rewrite a programme.
+    const vagueWithSignal = /\b(sore|pain\w*|killing me)\b/i.test(m)
+      && /\b(sharp|stab\w*|shooting|can'?t|cannot|weeks?|days?|since|still|again|killing)\b/i.test(m);
+    if (injuryVerb || vagueWithSignal) facts.injuries = part;
+  }
+
+  // MEDICAL CONDITION — first person only. "my sister has diabetes" is not this client's chart.
+  const condition = m.match(/\b(diabetes|diabetic|hypertension|high blood pressure|pcos|hiv|tuberculosis|epilepsy|pregnant|asthma|thyroid)\b/)?.[0];
+  if (condition && /\b(i|i'?m|i am|i have|i'?ve|my)\b/i.test(m) && !/\b(my (?:sister|brother|mother|father|mom|dad|wife|husband|friend|aunt|uncle|gran))\b/i.test(m)) {
+    facts.medicalConditions = condition === "diabetic" ? "diabetes" : condition;
+  }
+
+  // DIETARY RESTRICTION — what they cannot or will not eat. Separate from a preference: this one
+  // constrains every meal suggestion we make from now on.
+  const allergy = m.match(/\b(?:allergic to|intolerant to|can'?t eat|cannot eat|don'?t eat|i'?m|i am)\s+([a-z ]{3,20}?)\b(?:\.|,|$| and | but )/)?.[1]?.trim();
+  if (allergy && /\b(lactose|gluten|dairy|nuts?|peanuts?|shellfish|eggs?|pork|beef|halaal|halal|vegan|vegetarian|seafood|fish)\b/i.test(allergy)) {
+    facts.dietaryRestrictions = allergy;
+  } else if (/\b(lactose intolerant|gluten free|dairy free|vegan|vegetarian|halaal|halal|kosher)\b/i.test(m) && /\bi'?m|i am\b/i.test(m)) {
+    facts.dietaryRestrictions = m.match(/\b(lactose intolerant|gluten free|dairy free|vegan|vegetarian|halaal|halal|kosher)\b/i)![0];
+  }
+
+  // LIFE CONTEXT — the thing that makes a month-gone "just say hi" land as a coach. This is the
+  // fact the old store was worst at: it embedded "just had a baby" and then recalled it only if
+  // the client later said something semantically similar to a baby.
+  const life = m.match(/\b(night shift|night shifts|just had a baby|new baby|newborn|new job|retrenched|laid off|lost my job|got married|divorce|breakup|moved house|moved to|studying|exams)\b/)?.[0];
+  if (life) {
+    facts.lifeContext = life;
+    if (/night shift/.test(life)) facts.workSchedule = "night_shift";
+  }
+
+  // DON'T MENTION — the one fact whose entire value is that it constrains what we say. Nothing
+  // detected this before; it was the clearest hole in "memory that is a person".
+  const drop = raw.match(/\b(?:do ?n'?t|please don'?t|stop|never)\s+(?:talk(?:ing)? about|mention(?:ing)?|bring(?:ing)? up|ask(?:ing)? about|remind(?:ing)? me about)\s+(?:my |the )?([a-zA-Z ]{2,28})/i)?.[1]?.trim();
+  if (drop) facts.doNotMention = drop.replace(/\s+(again|anymore|any more|please)$/i, "").trim();
+
+  return facts;
+}
+
+/**
+ * Append one item to a comma-separated column without duplicating it.
+ *
+ * THE THIRD COPY, AVOIDED. handlers/pain-triage.ts and handlers/misc-commands.ts each carry their
+ * own inline version of exactly this — read `user.injuries`, lowercase it, `includes()`, join with
+ * ", ", treat the string "none" as empty. Both now call this instead.
+ */
+export function addFact(existing: string | null | undefined, item: string): string | null {
+  const clean = (item || "").trim();
+  if (!clean) return existing ?? null;
+  const cur = (existing || "").trim();
+  if (!cur || cur.toLowerCase() === "none") return clean;
+  if (cur.toLowerCase().includes(clean.toLowerCase())) return cur; // already known
+  return `${cur}, ${clean}`;
+}
+
+/**
+ * Write what this message told us, if anything. Fire-and-forget: never blocks or fails a reply.
+ *
+ * Called from the FRONT DOOR, not from the GPT handler, which is the whole point — the old
+ * detectors sat last in the pipeline, so an injury mentioned alongside a meal was routed to the
+ * food handler and never recorded at all.
+ */
+export async function recordClientFacts(user: any, message: string): Promise<void> {
   try {
-    const writes: Array<[string, string]> = [];
+    const f = detectFacts(message);
+    if (Object.keys(f).length === 0) return;
 
-    if (/\b(injury|injured|hurt|pain|bad knee|bad back|bad shoulder|bad hip)\b/.test(m)) {
-      writes.push([`Client reported injury: "${raw}"`, "medical"]);
-    }
-    if (/\b(allergic|allergy|intolerant|can't eat|cannot eat|dairy free|gluten free|peanut allergy)\b/.test(m)) {
-      writes.push([`Client dietary restriction: "${raw}"`, "medical"]);
-    }
-    if (/\b(diabetes|diabetic|hypertension|pcos|hiv|tb |tuberculosis|pregnant|epilepsy)\b/.test(m)) {
-      writes.push([`Client medical condition: "${raw}"`, "medical"]);
-    }
-    if (/\bi(?:'m| am)?\s+(?:on|taking|using|take)\b[^.!?]{0,30}\b(creatine|whey|protein\s+(?:powder|shake)|pre.?workout|multivitamin|omega|bcaa|supplement)/i.test(raw)
-        || /\b(creatine|whey|pre.?workout)\b[^.!?]{0,20}\b(daily|every\s+(?:day|morning)|before\s+(?:gym|training))\b/i.test(raw)) {
-      writes.push([`Client supplement info: "${raw}"`, "supplement"]);
-    }
-    if (/\bonly\s+want\s+(?:to\s+(?:do|walk|hit)\s+)?[\d,]+\s*steps\b|\b[\d,]+\s*steps\s+(?:is|are)\s+(?:enough|my\s+(?:limit|max))\b/.test(m)) {
-      writes.push([`Client steps preference: "${raw}"`, "preference"]);
-    }
-    if (/\b(i prefer|i hate|i love|don't like|can't stand|favourite food|i always eat|i never eat|my go.?to)\b/.test(m)) {
-      writes.push([`Client food or training preference: "${raw}"`, "preference"]);
-    }
-    if (/\b(night shift|work from home|just had a baby|new job|retrenched|moved|single mom|single dad|divorce|breakup)\b/.test(m)) {
-      writes.push([`Life situation update: "${raw}"`, "preference"]);
-    }
-    if (/\b(i'?ll|i will|i'm going to|i am going to|i plan to|i promise|i'll make sure|starting tomorrow)\b.{0,100}\b(?:train|workout|walk|hit|reach|log|eat|cook|pack|weigh|check in|sleep|drink)\b/i.test(raw)
-      || /\b(?:tomorrow|tonight|this week)\b.{0,80}\b(?:i'?ll|i will|going to|plan to|promise to)\b/i.test(raw)) {
-      writes.push([`Client commitment: "${raw.slice(0, 220)}"`, "commitment"]);
-    }
-    if (/\b(stressed|anxious|depressed|overwhelmed|struggling|bad week|hard week|tough week|not okay|burnout|quit|give up|want to stop|not working|no results|nothing is changing)\b/.test(m)) {
-      writes.push([`Client mindset/motivation signal: "${raw.slice(0, 160)}"`, "mindset"]);
-    }
-    if (/\b(hit my goal|reached my goal|lost.*kg|gained.*kg|pb|personal best|new record)\b/.test(m)) {
-      writes.push([`Client milestone: "${raw}"`, "milestone"]);
-    }
-    if (/\b(no\s*,?\s*(?:i did|i didn't|i have|i haven't)|you(?:'| a)?re (?:confused|wrong|mistaken)|actually\b.{0,80}\b(?:it was|i did|i didn't|not|instead)\b|that(?:'s| is) (?:wrong|not right))\b/i.test(raw)) {
-      writes.push([`Client correction / truth override: "${raw.slice(0, 220)}"`, "correction"]);
-    }
+    const patch: Record<string, string> = {};
+    const inj = f.injuries ? addFact(user.injuries, f.injuries) : null;
+    if (inj && inj !== user.injuries) patch.injuries = inj;
+    const cond = f.medicalConditions ? addFact(user.medicalConditions, f.medicalConditions) : null;
+    if (cond && cond !== user.medicalConditions) patch.medicalConditions = cond;
+    const diet = f.dietaryRestrictions ? addFact(user.dietaryRestrictions, f.dietaryRestrictions) : null;
+    if (diet && diet !== user.dietaryRestrictions) patch.dietaryRestrictions = diet;
+    const life = f.lifeContext ? addFact(user.lifeContext, f.lifeContext) : null;
+    if (life && life !== user.lifeContext) patch.lifeContext = life;
+    // NOT appended — a new request replaces the old one. "Don't mention my weight" then later
+    // "don't mention my ex" should not leave us avoiding a growing list forever.
+    if (f.doNotMention && f.doNotMention !== user.doNotMention) patch.doNotMention = f.doNotMention;
+    if (f.workSchedule && f.workSchedule !== user.workSchedule) patch.workSchedule = f.workSchedule;
 
-    // Keep this fire-and-forget relative to the reply path, but don't let one malformed
-    // category prevent the other facts in the same turn from being retained.
-    await Promise.all(writes.map(([content, category]) => storeMemory(phone, content, category)));
-  } catch (e: any) {
-    console.warn("[MEMORY] fact scan non-fatal:", e?.message || e);
+    if (Object.keys(patch).length === 0) return;
+    await db.update(users).set(patch).where(eq(users.id, user.id));
+    console.log(`[FACTS] ...${String(user.id).slice(-6)} learned ${Object.keys(patch).join(", ")}`);
+  } catch (e) {
+    console.warn("[FACTS] non-fatal:", (e as any)?.message || e);
+  }
+}
+
+/** The six facts as one context line for the coach. Replaces the embedded prose. */
+export async function factsLine(phone: string): Promise<string> {
+  try {
+    const rows = await db.select({
+      injuries: users.injuries, medicalConditions: users.medicalConditions,
+      dietaryRestrictions: users.dietaryRestrictions, lifeContext: users.lifeContext,
+      doNotMention: users.doNotMention, workSchedule: users.workSchedule,
+    }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    const u = rows[0];
+    if (!u) return "";
+    const parts: string[] = [];
+    const usable = (v: any) => v && String(v).trim() && String(v).trim().toLowerCase() !== "none";
+    if (usable(u.injuries)) parts.push(`Injury: ${u.injuries} — train around it, never through it.`);
+    if (usable(u.medicalConditions)) parts.push(`Medical: ${u.medicalConditions}.`);
+    if (usable(u.dietaryRestrictions)) parts.push(`Does not eat: ${u.dietaryRestrictions}.`);
+    if (usable(u.workSchedule) && u.workSchedule !== "standard") parts.push(`Work pattern: ${u.workSchedule}.`);
+    if (usable(u.lifeContext)) parts.push(`Life right now: ${u.lifeContext}.`);
+    if (usable(u.doNotMention)) parts.push(`DO NOT MENTION: ${u.doNotMention}. They asked.`);
+    return parts.length ? `WHAT YOU KNOW ABOUT THIS PERSON:\n${parts.join("\n")}` : "";
+  } catch {
+    return "";
   }
 }

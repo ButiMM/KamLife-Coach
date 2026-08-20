@@ -9,6 +9,7 @@ import { db } from "../db";
 import { users } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { logChat } from "./chat-log";
+import { addFact } from "../memory";
 
 export async function resolvePainTriage(ctx: { message: string; m: string; user: any }): Promise<string | null> {
   const { message, m, user } = ctx;
@@ -21,9 +22,10 @@ export async function resolvePainTriage(ctx: { message: string; m: string; user:
 
   if (saidSharp && !saidSore) {
     if (triageArea !== "the affected area") {
-      const existingInj = (user.injuries || "").toLowerCase();
-      if (!existingInj.includes(triageArea)) {
-        const updatedInj = user.injuries && user.injuries !== "none" ? `${user.injuries}, ${triageArea}` : triageArea;
+      // ONE OWNER for the append (Cut 7) — this block was duplicated verbatim here and in
+      // misc-commands.ts, and recordClientFacts would have needed a third copy.
+      const updatedInj = addFact(user.injuries, triageArea);
+      if (updatedInj !== user.injuries) {
         await db.update(users).set({ injuries: updatedInj }).where(eq(users.id, user.id)).catch(() => {});
       }
     }

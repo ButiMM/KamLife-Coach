@@ -62,6 +62,14 @@ export const users = pgTable(
     referredBy: text("referred_by"),
     signupSource: text("signup_source"), // QR/marketing acquisition tag (gym, flyer, ig) — captured from the prefilled join message
     injuries: text("injuries"),
+    // ── THE SIX DURABLE FACTS (2026-08-19, Cut 6→7) ──────────────────────────────────────
+    // Beside injuries, medical_conditions, work_schedule, dream_goal and biggest_struggle,
+    // which already existed. These are what the coach REMEMBERS about a person, as fields the
+    // decision can read — not prose embedded into a vector store and recalled by similarity.
+    // See migrations/0006_durable_client_facts.sql.
+    dietaryRestrictions: text("dietary_restrictions"), // comma-separated, like medical_conditions
+    lifeContext: text("life_context"),                 // night shifts, new baby, retrenched, moved
+    doNotMention: text("do_not_mention"),              // topics the client asked us to drop
     programmePhase: integer("programme_phase").default(1),
     programmeWeek: integer("programme_week").default(1),
     programmeDayInWeek: integer("programme_day_in_week").default(1),

@@ -3471,6 +3471,57 @@ test("verifier: it still catches the thing it was built to catch", () => {
     "and a target line must not launder an attribution on the next line");
 });
 
+// ── CUT 7: MEMORY IS FIELDS, NOT SEARCH ─────────────────────────────────────────────────────
+
+test("cut7: durable facts are learned at the front door, not inside the GPT handler", () => {
+  const strip = (x: string) => x.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  const routes = strip(readFileSync("server/routes.ts", "utf-8"));
+  const gptBlock = strip(readFileSync("server/handlers/gpt-block.ts", "utf-8"));
+  // THE DEFECT: the detectors sat last in the pipeline, so "my knee is killing me, had chicken
+  // and pap" routed to the food handler and the injury was never recorded — while programme.ts
+  // kept building sessions from users.injuries, which stayed NULL.
+  assert.ok(/recordClientFacts\(user, message\)/.test(routes), "every message is heard, not just GPT ones");
+  assert.ok(!/storeMemory\(phone, `Client reported injury/.test(gptBlock),
+    "the prose detectors in the GPT handler are gone");
+  assert.ok(!/storeMemory\(phone, `Life situation update/.test(gptBlock), "…both blocks of them");
+});
+
+test("cut7: an injury reaches the column the programme actually reads", async () => {
+  const { detectFacts } = await import("../server/memory");
+  const programme = readFileSync("server/programme.ts", "utf-8");
+  // This is why Cut 7 is a safety fix and not a memory nicety: users.injuries is ALREADY wired to
+  // exercise selection. The fact just never arrived unless the client used the injury command.
+  assert.ok(/filterInjuredExercises|filterInjuredGymExercises/.test(programme),
+    "the programme trains around users.injuries");
+  assert.equal(detectFacts("my knee has been killing me since Saturday").injuries, "knee",
+    "…and an ordinary sentence now fills it");
+});
+
+test("cut7: embeddings are off, and the conversation thread survives the mute", () => {
+  const memory = readFileSync("server/memory.ts", "utf-8");
+  assert.ok(/const EMBEDDINGS_ON = String\(process\.env\.MEMORY_EMBEDDINGS/.test(memory),
+    "one env var turns the vector store back on — muted, not deleted");
+  assert.ok(/^export async function storeMemory[\s\S]{0,120}if \(!EMBEDDINGS_ON\) return;/m.test(memory),
+    "no embedding call per stored fact");
+  // recentConversation is a plain SQL read of the last four turns and was always the honest half
+  // of retrieval. Muting the vector search must not take it out.
+  assert.ok(/if \(!EMBEDDINGS_ON\) \{[\s\S]{0,400}recentConversation\(phone\)/.test(memory),
+    "the thread still reaches the coach");
+  assert.ok(/factsLine\(phone\)/.test(memory), "…alongside the six facts, which replace the prose");
+});
+
+test("cut7: one owner for the injury append", () => {
+  const strip = (x: string) => x.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // The same six lines lived in pain-triage.ts and misc-commands.ts, and recordClientFacts would
+  // have made three copies of "lowercase it, includes(), join with a comma, treat 'none' as empty".
+  for (const f of ["server/handlers/pain-triage.ts", "server/handlers/misc-commands.ts"]) {
+    const src = strip(readFileSync(f, "utf-8"));
+    assert.ok(/addFact\(user\.injuries,/.test(src), `${f} uses the one owner`);
+    assert.ok(!/const existingInj = \(user\.injuries \|\| ""\)\.toLowerCase\(\)/.test(src),
+      `${f} no longer carries its own copy`);
+  }
+});
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");

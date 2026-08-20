@@ -9204,8 +9204,10 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
-// Every async test must finish before a single number is printed — see the note on test().
-await Promise.all(pending);
+// (The settle used to be HERE, ~350 lines and forty-odd tests before the end of the file, so
+// every async test declared below it resolved AFTER the summary had already printed its total.
+// They ran, they could fail, and nothing counted them or reported them. Moved to the bottom,
+// where "every async test" is actually every async test. 2026-08-19, Cut 7.)
 
 
   test("retro steps: 'yesterday' survives validation onto the action", async () => {
@@ -9513,6 +9515,76 @@ await Promise.all(pending);
     assert.match(five[0].reason, /NOT OBSERVED/, "the anchor must say plainly that it is the target, not evidence");
   });
 }
+
+// ── CUT 7: DURABLE FACTS ────────────────────────────────────────────────────────────────────
+// Memory as a person, not a search index. These are the detectors that write TYPED columns the
+// programme and the decision already read — so a false positive here is not noise, it is a
+// programme rebuilt around an injury the client never had. Tested for what they must NOT catch
+// at least as hard as for what they must.
+
+test("facts: an injury is a body part plus a reason to believe it", async () => {
+  const { detectFacts } = await import("../server/memory");
+  assert.equal(detectFacts("my knee has been killing me since Saturday").injuries, "knee");
+  assert.equal(detectFacts("I hurt my lower back at work").injuries, "back");
+  assert.equal(detectFacts("sharp pain in my shoulder").injuries, "shoulder");
+  // MUST NOT FIRE. programme.ts trains around whatever lands in users.injuries, so each of these
+  // would quietly delete exercises from a healthy client's plan, permanently.
+  assert.equal(detectFacts("that workout hurt so good").injuries, undefined, "no body part named");
+  assert.equal(detectFacts("my legs are sore after leg day").injuries, undefined, "DOMS is not an injury");
+  assert.equal(detectFacts("chicken and pap for lunch").injuries, undefined);
+});
+
+test("facts: a medical condition is first-person or it is not ours to record", async () => {
+  const { detectFacts } = await import("../server/memory");
+  assert.equal(detectFacts("I have diabetes").medicalConditions, "diabetes");
+  assert.equal(detectFacts("I'm diabetic").medicalConditions, "diabetes", "normalised to one token");
+  assert.equal(detectFacts("my sister has diabetes").medicalConditions, undefined,
+    "someone else's chart must never land on this client");
+});
+
+test("facts: life context, and the one fact whose value is constraining us", async () => {
+  const { detectFacts } = await import("../server/memory");
+  const baby = detectFacts("sorry, just had a baby, everything is chaos");
+  assert.equal(baby.lifeContext, "just had a baby");
+  const nights = detectFacts("I'm on night shift this month");
+  assert.equal(nights.lifeContext, "night shift");
+  assert.equal(nights.workSchedule, "night_shift", "…and it sets the work pattern the brief reads");
+  // Nothing detected this before Cut 7 — it was the clearest hole in "memory that is a person".
+  assert.equal(detectFacts("please don't mention my weight again").doNotMention, "weight");
+  assert.equal(detectFacts("stop bringing up the scale").doNotMention, "scale");
+});
+
+test("facts: appending never duplicates, and never grows on a repeat", async () => {
+  const { addFact } = await import("../server/memory");
+  assert.equal(addFact(null, "knee"), "knee");
+  assert.equal(addFact("none", "knee"), "knee", '"none" is empty, not a known injury');
+  assert.equal(addFact("knee", "back"), "knee, back");
+  assert.equal(addFact("knee, back", "knee"), "knee, back", "already known");
+  assert.equal(addFact("knee", ""), "knee", "nothing to add changes nothing");
+});
+
+test("facts: the ladder names what it knows, and only on the come_back rungs", async () => {
+  const { chooseAction, lifeClause } = await import("../server/one-action");
+  assert.equal(lifeClause("just had a baby"), "with a newborn in the house");
+  assert.equal(lifeClause(""), "", "we say nothing when we know nothing");
+  assert.equal(lifeClause("a".repeat(60)), "", "free text that long is not a clause");
+  const day = (over: any) => ({
+    goal: "fat_loss" as any, weeksOnProgramme: 4, daysSinceWeighIn: 2, loggedToday: false,
+    proteinPct: 1, caloriePct: 1, sessionsThisWeek: 3, sessionsTarget: 3,
+    stepsToday: 9000, stepsTarget: 8000, hour: 7, daysSinceAnyLog: 0, ...over,
+  });
+  const gone = chooseAction(day({ daysSinceAnyLog: 21, lifeContext: "just had a baby" }));
+  assert.equal(gone.kind, "come_back");
+  assert.match(gone.why, /newborn/i, "three weeks gone with a newborn is not lost interest");
+  // IT MUST NOT SOFTEN A PRESCRIPTION. A coach who lowers the bar because life is hard stops
+  // being a coach; the fact explains an absence, it does not excuse a protein target.
+  const here = chooseAction(day({ loggedToday: true, proteinPct: 0.3, lifeContext: "just had a baby" }));
+  assert.equal(here.kind, "protein");
+  assert.ok(!/newborn/i.test(here.why + here.todo), "the ask is unchanged when they are here");
+});
+
+// Every async test must finish before a single number is printed — see the note on test().
+await Promise.all(pending);
 
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {

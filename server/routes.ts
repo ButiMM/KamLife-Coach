@@ -17,7 +17,7 @@ import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboardi
 import { saysNotWorking } from "./despair";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
-import { storeMemory, retrieveMemories } from "./memory";
+import { recordClientFacts } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { sendWhatsApp } from "./scheduler";
 import { recordConversion } from "./ab";
@@ -595,6 +595,12 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // capitalisation intact — `m` is already lower-cased and whitespace-collapsed, which is fine for
   // matching but is not their message.
   const originalMessageForFidelity = message;
+
+  // CUT 7 — durable facts are learned at the FRONT DOOR, on the raw text, for the same reason the
+  // turn facts are. The old detectors sat inside the GPT handler, last in the pipeline, so "my
+  // knee is killing me, had chicken and pap" routed to food and the injury was never recorded —
+  // and programme.ts, which trains around users.injuries, never heard about the knee.
+  void recordClientFacts(user, message);
 
   // CUT 2 — the facts are counted on the client's RAW text, here, before the rewriter below can
   // replace it. Cut 1 counted them after, so a two-fact note rewritten down to one fact reached

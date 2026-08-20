@@ -63,6 +63,17 @@ export interface DayState {
    * message IS — and they get the next real action instead.
    */
   atKeyboard?: boolean;
+  /**
+   * What is going on in their life, in their own words — "night shift", "just had a baby",
+   * "retrenched". A durable fact from users.life_context (Cut 7), not an inference.
+   *
+   * This is the difference between a coach and a reminder. Someone three weeks gone with a
+   * newborn is not someone who lost interest, and the ask has to say so or the absolution rings
+   * hollow. Used ONLY on the come_back rungs — it explains an absence; it does not excuse a
+   * protein target, and a prescription that quietly softens because of a life event is the
+   * beginning of a coach who stops asking for anything.
+   */
+  lifeContext?: string | null;
 }
 
 export type ActionKind =
@@ -114,6 +125,27 @@ export function dreamClause(dream?: string | null): string {
   if (!/[a-z]{3}/i.test(raw)) return "";                 // not actual words
   const cleaned = raw.replace(/[.!?]+$/, "");
   return cleaned.toLowerCase();
+}
+
+/**
+ * A short clause naming what we know is going on in their life, or "" when we know nothing.
+ *
+ * Same conservatism as dreamClause: this is free text a client typed, spliced into a sentence at
+ * a moment when they already feel bad about being away. Short and clean, or omitted entirely.
+ */
+export function lifeClause(life?: string | null): string {
+  const raw = (life || "").replace(/[*_`~\n\r]+/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+  if (raw.length < 3 || raw.length > 40) return "";
+  if (!/^[a-z0-9 ,'-]+$/.test(raw)) return "";
+  // The few we can phrase naturally. Anything else is stated flatly rather than guessed at.
+  if (/newborn|new baby|just had a baby/.test(raw)) return "with a newborn in the house";
+  if (/night shift/.test(raw)) return "on night shifts";
+  if (/retrenched|laid off|lost my job/.test(raw)) return "with work the way it is";
+  if (/new job/.test(raw)) return "with the new job";
+  if (/divorce|breakup/.test(raw)) return "with everything going on at home";
+  if (/exams|studying/.test(raw)) return "with exams on";
+  if (/moved/.test(raw)) return "in the middle of a move";
+  return "";
 }
 
 /** The "why" line — their dream when we have it, an honest general reason when we don't. */
@@ -173,18 +205,23 @@ export function chooseAction(s: DayState): OneAction {
     // gone six weeks has usually decided they failed and is embarrassed to come back. The longer
     // they have been gone, the smaller the ask and the more explicit the absolution.
     const weeks = Math.floor(s.daysSinceAnyLog / 7);
+    // WE KNOW WHY THEY'RE GONE (2026-08-19, Cut 7). A durable fact, stated back plainly and once.
+    // "No judgement" from a coach who does not know about the newborn is a form letter; naming it
+    // is the whole difference. Kept to a clause — this is acknowledgement, not a conversation
+    // about their life, and it never changes what we ask for.
+    const because = lifeClause(s.lifeContext);
     if (weeks >= 4) {
       return {
         kind: "come_back",
         todo: "Just say hi. That's the whole ask today.",
-        why: why(`It's been about ${weeks === 4 ? "a month" : `${weeks} weeks`}, and you haven't blown anything — that's the story people tell themselves and it stops them coming back. Your numbers are exactly where you left them.`, s.dreamGoal),
+        why: why(`It's been about ${weeks === 4 ? "a month" : `${weeks} weeks`}${because ? `, and ${because} that makes complete sense` : ""} — you haven't blown anything — that's the story people tell themselves and it stops them coming back. Your numbers are exactly where you left them.`, s.dreamGoal),
       };
     }
     if (weeks >= 1) {
       return {
         kind: "come_back",
         todo: struggle === "time" ? "Tell me one thing you ate this week." : "Log one meal today. Any meal.",
-        why: why("No catching up, no starting over. One meal puts you straight back in.", s.dreamGoal),
+        why: why(`No catching up, no starting over${because ? `, especially ${because}` : ""}. One meal puts you straight back in.`, s.dreamGoal),
       };
     }
     return {
@@ -192,7 +229,7 @@ export function chooseAction(s: DayState): OneAction {
       todo: struggle === "time"
         ? "Log one thing today — even just what you had for lunch"
         : "Log one meal today. Any meal.",
-      why: why("Nothing resets and nothing is lost — you pick up exactly where you left off.", s.dreamGoal),
+      why: why(`Nothing resets and nothing is lost${because ? ` — ${because}, a few quiet days is nothing` : " — you pick up exactly where you left off"}.`, s.dreamGoal),
     };
   }
 
@@ -302,6 +339,8 @@ export interface ProactiveStateForDecision {
 export interface ProactiveProfile {
   dreamGoal?: string | null;
   biggestStruggle?: string | null;
+  /** users.life_context — a durable fact (Cut 7), carried so the come_back rungs can name it. */
+  lifeContext?: string | null;
   weeksOnProgramme: number;
   sessionsTarget: number;
   calorieTarget: number;
@@ -337,6 +376,7 @@ export function dayStateFrom(
     stepsToday: s.today.steps,
     stepsTarget: p.stepsTarget,
     sick: s.health.sick,
+    lifeContext: p.lifeContext,
     hour: opts?.hour ?? s.today.hour,
     atKeyboard: opts?.atKeyboard,
   };

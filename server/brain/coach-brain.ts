@@ -28,7 +28,10 @@ import { invalidatePatternCache } from "../cache";
 import { selectMealToCopy, type CopyableMeal } from "../meal-select";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "../handlers/food-scanner";
 import { enforceCoachGuardrails } from "../coach-guardrails";
-import { retrieveMemories, scanAndStoreClientFacts } from "../memory";
+// scanAndStoreClientFacts was imported here and never called (Cut 7). Its replacement,
+// recordClientFacts, runs at the front door in routes.ts so it catches a fact whichever
+// handler the sentence routes to — including the ones that never reach this brain.
+import { retrieveMemories } from "../memory";
 import { verifyBrainReply } from "./reply-verifier";
 import { SCENARIO_GUIDE } from "../handlers/gpt-block";
 import { buildClientSnapshot } from "./client-snapshot";
