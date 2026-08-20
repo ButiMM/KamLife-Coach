@@ -12,10 +12,12 @@
  */
 
 import { db } from "./db";
-import { mealLogs, stepLogs, users } from "../shared/schema";
+import { mealLogs, stepLogs, users, workoutLogs, weightLogs } from "../shared/schema";
 import { and, eq, gte, lt, desc, sql } from "drizzle-orm";
 import { sastDayStart, sastToday } from "./utils";
-import { foldLedgerRows, freshTodayWater, type DayLedger, type LedgerRow } from "./day-ledger-core";
+import { sastDayKey } from "./sast";
+import { foldLedgerRows, freshTodayWater, foldWindowRows, weightChangeKg, summariseProvenance,
+  type DayLedger, type LedgerRow, type WindowTotals, type FoodProvenance } from "./day-ledger-core";
 import { estimateCarbsFat } from "./macro-estimate";
 import { effectiveMealLoggedAt } from "./utils";
 import { invalidatePatternCache } from "./cache";
@@ -23,6 +25,7 @@ import { replaceHeldMeal, amendRecentMeal, planCorrection, applyCorrection, isSa
 import { turnMutation } from "./handlers/chat-log";
 import { answerPlateAsk, foodConstraints, swapNudge } from "./food-swaps";
 import { matchStreetDish } from "./street-food";
+import { mentionsForbidden } from "./brain/reply-verifier";
 
 export { foldLedgerRows } from "./day-ledger-core";
 export type { DayLedger, LedgerMeal, LedgerRow } from "./day-ledger-core";
@@ -284,4 +287,93 @@ export async function answerFoodPermissionAsk(
     console.warn("[PLATE_ASK] non-fatal, leaving it to the coach:", (e as any)?.message || e);
     return null;
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// THE CANONICAL PROGRESS OBJECT (2026-08-19, Cut 11)
+// ════════════════════════════════════════════════════════════════════════════════════════════
+//
+// One object. Two windows. One source. Chat, the card and the share are PRESENTATIONS of this —
+// never separate calculators. Before it, report-card ran its own five queries, the share path ran
+// its own weight query with the opposite sign convention, and four card modules never read the
+// ledger at all.
+//
+// THE WEIGHT IS WITHHELD BY THE OBJECT, NOT BY EACH PRESENTATION. A client who asked us to stop
+// mentioning the scale should not depend on three renderers each remembering to strip it — one of
+// them will forget, and the one that gets forwarded to their friends is the worst place to find
+// out. So the truth object refuses to carry the number, and every presentation is safe because it
+// has nothing to print. That is what makes the share card safe to hand somebody.
+//
+// They can still ASK. Cut 8's rule holds: a prohibition is about us raising it, not about refusing
+// to answer. Pass the client's own message and a direct question re-opens it.
+
+export interface ProgressWeight {
+  /** False when we have fewer than two weigh-ins, or when they asked us not to raise it. */
+  known: boolean;
+  currentKg: number | null;
+  /** NEGATIVE MEANS LOST. One convention, from day-ledger-core. */
+  changeKg: number | null;
+  /** True only in the don't-mention case, so a caller can tell "we don't know" from "not ours to say". */
+  withheld: boolean;
+}
+
+export interface ProgressTruth {
+  today: DayLedger;
+  window: WindowTotals;
+  sessions: number;
+  avgSteps: number;
+  weight: ProgressWeight;
+  /** How much of this window we actually KNOW — db / label / ai / photo / unknown, and the
+   *  confidence that falls out of it. Known / likely / unknown, measured rather than asserted. */
+  provenance: FoodProvenance;
+}
+
+export async function getProgressTruth(
+  user: any,
+  opts?: { days?: number; clientMessage?: string | null },
+): Promise<ProgressTruth> {
+  const days = opts?.days && opts.days > 0 ? opts.days : 7;
+  const since = new Date(Date.now() - days * 86_400_000);
+
+  const [today, windowRows, sessionRows, stepRows, weighIns] = await Promise.all([
+    getDayLedger(user.id, { user }),
+    db.select({
+      label: mealLogs.mealLabel, kcal: mealLogs.kcalInt, protein: mealLogs.proteinInt,
+      carbs: mealLogs.carbsInt, fat: mealLogs.fatInt, loggedAt: mealLogs.loggedAt,
+      source: mealLogs.source, items: mealLogs.items, rawMessage: mealLogs.rawMessage,
+    }).from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, since))),
+    db.select({ n: sql<number>`COUNT(*)::int` }).from(workoutLogs)
+      .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, since))),
+    db.select({ avg: sql<number>`COALESCE(AVG(${stepLogs.steps}),0)::int` }).from(stepLogs)
+      .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, since))),
+    db.select({ weight: weightLogs.weight }).from(weightLogs)
+      .where(eq(weightLogs.userId, user.id)).orderBy(weightLogs.loggedAt),
+  ]);
+
+  const window = foldWindowRows(windowRows as LedgerRow[], days, d => sastDayKey(d));
+  // The SAME rows, characterised. report-card ran a second query for exactly this.
+  const provenance = summariseProvenance(
+    (windowRows as any[]).map(r => ({ kcal: Number(r.kcal) || 0, items: r.items, source: r.source })),
+  );
+
+  const askedThemselves = mentionsForbidden(String(opts?.clientMessage || ""), user?.doNotMention);
+  const withheld = !askedThemselves && mentionsForbidden("weight scale weigh", user?.doNotMention);
+  const change = weightChangeKg(weighIns as Array<{ weight: unknown }>);
+  const latest = weighIns.length ? Number((weighIns[weighIns.length - 1] as any).weight) : NaN;
+
+  return {
+    today,
+    window,
+    sessions: Number((sessionRows[0] as any)?.n || 0),
+    avgSteps: Number((stepRows[0] as any)?.avg || 0),
+    provenance,
+    weight: withheld
+      ? { known: false, currentKg: null, changeKg: null, withheld: true }
+      : {
+        known: change !== null,
+        currentKg: Number.isFinite(latest) ? latest : null,
+        changeKg: change,
+        withheld: false,
+      },
+  };
 }

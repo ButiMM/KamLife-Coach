@@ -9795,6 +9795,54 @@ test("plate ask: the constraint wins before the arithmetic", async () => {
   assert.match(out.reply, /what else is there/i, "never a dead end — we still pick the plate");
 });
 
+// ── CUT 11: ONE CANONICAL PROGRESS TRUTH ────────────────────────────────────────────────────
+// Twenty modules computed a progress figure and four cards never read the ledger. The two that
+// both reported a weight change disagreed about its SIGN — and the one with the wrong sign was
+// the card people forward to their friends.
+
+test("progress: one sign convention, and a single reading is not a change", async () => {
+  const { weightChangeKg } = await import("../server/day-ledger-core");
+  assert.equal(weightChangeKg([{ weight: 92 }, { weight: 87 }]), -5, "NEGATIVE means lost");
+  assert.equal(weightChangeKg([{ weight: 87 }, { weight: 92 }]), 5);
+  // The crime this object exists to stop: inventing a trend from one number.
+  assert.equal(weightChangeKg([{ weight: 92 }]), null);
+  assert.equal(weightChangeKg([]), null);
+  assert.equal(weightChangeKg([{ weight: "bad" }, { weight: 87 }]), null, "one usable reading is not two");
+});
+
+test("progress: the week is the day reducer over more days, not a second sum", async () => {
+  const { foldWindowRows } = await import("../server/day-ledger-core");
+  const row = (day: string, kcal: number, protein: number) => ({
+    label: "meal", kcal, protein, carbs: 0, fat: 0,
+    loggedAt: new Date(`${day}T10:00:00Z`), source: "text", items: null, rawMessage: "x",
+  });
+  const w = foldWindowRows(
+    [row("2026-08-17", 600, 40), row("2026-08-17", 400, 20), row("2026-08-19", 900, 60)],
+    7, d => d.toISOString().slice(0, 10),
+  );
+  assert.equal(w.kcal, 1900);
+  assert.equal(w.meals, 3);
+  assert.equal(w.daysLogged, 2, "two days carried food, not seven");
+  // THE DIVISOR IS LOGGED DAYS. Three logged days out of seven is not a 43% eater, and dividing
+  // by seven would have made every honest client look starved.
+  assert.equal(w.avgKcal, 950);
+  assert.equal(w.perDay.length, 2);
+  assert.equal(w.perDay[0].day, "2026-08-17");
+});
+
+test("progress: provenance stays honest about what we cannot characterise", async () => {
+  const { summariseProvenance } = await import("../server/day-ledger-core");
+  // Half the energy uncharacterisable → we do not report an estimated share at all.
+  const thin = summariseProvenance([
+    { kcal: 500, items: null, source: "text" },
+    { kcal: 500, items: [{ kcal: 500, origin: "db" }], source: "sa_scanner" },
+  ]);
+  assert.equal(thin.confidence, "insufficient");
+  assert.equal(thin.estimatedShare, null, "unknown must not read as verified OR estimated");
+  const solid = summariseProvenance([{ kcal: 800, items: [{ kcal: 800, origin: "db" }], source: "sa_scanner" }]);
+  assert.equal(solid.confidence, "verified");
+});
+
 // Every async test must finish before a single number is printed — see the note on test().
 await Promise.all(pending);
 

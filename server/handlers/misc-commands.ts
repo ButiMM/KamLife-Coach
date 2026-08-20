@@ -36,6 +36,7 @@ import { sendWhatsApp } from "../scheduler";
 import { sastToday, sastDayStart, looksLikeDirectionRequest, classifyPainReport , getDisplayName} from "../utils";
 import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
+import { getProgressTruth } from "../day-ledger";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
 const PROTEIN_WORDS: string[] = Array.from(new Set([
@@ -1053,16 +1054,25 @@ export async function handleMiscCommands(ctx: {
     const streak = user.workoutStreak || 0;
     const foodStreakForShare = await computeFoodLogStreak(user.id).catch(() => 0);
 
+    // ONE TRUTH FOR THE THING THEY FORWARD (2026-08-19, Cut 11). This ran its own weight query
+    // with the OPPOSITE sign convention to report-card — first minus last here, last minus first
+    // there — so the same client's week could read "down 2kg" on a shared card and "up 2kg" in a
+    // report. The card is the one that goes to their friends, which makes it the worst place for
+    // the divergence to live.
+    //
+    // The object also refuses to carry the number at all when they asked us to drop the scale, so
+    // a public card cannot leak what a private chat is honouring.
     let weightLine = "";
+    let kgDown = 0;
     try {
-      const weights2 = await db.select({ weight: weightLogs.weight }).from(weightLogs)
-        .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt));
-      const diff = weights2.length >= 2 ? parseFloat(String(weights2[0].weight)) - parseFloat(String(weights2[weights2.length - 1].weight)) : 0;
-      if (diff > 1) weightLine = `\n⚖️ Down ${diff.toFixed(1)}kg`;
-    } catch { /* non-fatal */ }
+      const truth = await getProgressTruth(user, { days: 3650 });
+      if (truth.weight.known && truth.weight.changeKg !== null && truth.weight.changeKg < -1) {
+        kgDown = Math.abs(truth.weight.changeKg);
+        weightLine = `\n⚖️ Down ${kgDown.toFixed(1)}kg`;
+      }
+    } catch { /* non-fatal — the card falls back to streak and sessions */ }
 
     // A PICTURE, NOT HOMEWORK (2026-07-28, founder: "if a person wants to share it with their friends, THAT is what it brings up"). This used to hand back text ending in "copy this and share it" — asking the client to do the work, in a format nobody forwards. Now it is the achievement card, built from their strongest REAL number; fail-open to the old text.
-    const kgDown = weightLine ? parseFloat(weightLine.replace(/[^\d.]/g, "")) : 0;
     const ach = shareAchievement({ firstName: name, weightChangeKg: kgDown > 0 ? -kgDown : undefined, streak: foodStreakForShare, sessions: totalWorkouts });
     const marker = ach ? achievementCardMarker(ach) : "";
     const shareCard = marker

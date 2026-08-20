@@ -3650,6 +3650,60 @@ test("cut10: it declines rather than inventing, and never becomes a second logge
   assert.ok(!/commitFoodLog/.test(hookBlock), "the ask is answered, never logged");
 });
 
+// ── CUT 11: THE DELETION TEST ───────────────────────────────────────────────────────────────
+// The inspector's rule: a canonical object that merely WRAPS the old calculators is fake
+// consolidation. The test is whether the duplicated arithmetic can be deleted from the
+// presentation modules afterwards. These gates assert that it was.
+
+test("cut11: report-card derives nothing — it projects", () => {
+  const rc = readFileSync("server/report-card.ts", "utf-8");
+  const code = rc.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // Five queries of its own: meal sums, workouts, steps, weigh-ins, provenance rows. All gone.
+  assert.ok(!/COALESCE\(SUM\(/.test(code), "the meal aggregate is deleted, not wrapped");
+  assert.ok(!/COUNT\(DISTINCT DATE\(/.test(code), "…and the distinct-day divisor with it");
+  assert.ok(!/from\(workoutLogs\)|from\(stepLogs\)|from\(weightLogs\)/.test(code),
+    "it no longer reads workouts, steps or weigh-ins itself");
+  assert.ok(/const truth = await getProgressTruth\(user, \{ days \}\)/.test(code), "it asks the object");
+  assert.ok(/weightChange: truth\.weight\.changeKg/.test(code), "including the sign convention");
+});
+
+test("cut11: the share card cannot invent a kilogram", () => {
+  const misc = readFileSync("server/handlers/misc-commands.ts", "utf-8");
+  const code = misc.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // It ran its own weigh-in query with the OPPOSITE sign to report-card. Same client, same week,
+  // two numbers with opposite meaning — on the artefact that leaves the conversation.
+  assert.ok(!/const weights2 = await db\.select/.test(code), "the share path's own weight query is gone");
+  assert.ok(/await getProgressTruth\(user/.test(code), "it reads the canonical object");
+  assert.ok(/truth\.weight\.known && truth\.weight\.changeKg !== null/.test(code),
+    "and only speaks when the object says the number is known");
+});
+
+test("cut11: don't-mention is enforced by the object, not by each renderer", () => {
+  const dl = readFileSync("server/day-ledger.ts", "utf-8");
+  // THE DESIGN POINT. Three presentations each remembering to strip the weight is three chances
+  // to forget, and the one that gets forwarded to their friends is the worst place to find out.
+  // The object refuses to carry the number, so every presentation is safe with nothing to print.
+  assert.ok(/const withheld = !askedThemselves && mentionsForbidden\("weight scale weigh", user\?\.doNotMention\)/.test(dl),
+    "the truth object applies the prohibition");
+  assert.ok(/withheld\s*\?\s*\{ known: false, currentKg: null, changeKg: null, withheld: true \}/.test(dl),
+    "a withheld weight is absent, not merely unrendered");
+  // Cut 8's rule still holds: a prohibition is about US raising it, never about refusing to answer.
+  assert.ok(/const askedThemselves = mentionsForbidden\(String\(opts\?\.clientMessage \|\| ""\), user\?\.doNotMention\)/.test(dl),
+    "a direct question re-opens it");
+});
+
+test("cut11: provenance has one home and the object carries it", () => {
+  const core = readFileSync("server/day-ledger-core.ts", "utf-8");
+  const rc = readFileSync("server/report-card.ts", "utf-8");
+  const dl = readFileSync("server/day-ledger.ts", "utf-8");
+  assert.ok(/export function summariseProvenance/.test(core), "pure derivation lives with the reducer");
+  assert.ok(!/export function summariseProvenance/.test(rc), "…and not in the card as well");
+  assert.ok(/summariseProvenance,/.test(rc), "report-card re-exports it so existing consumers keep working");
+  // Same rows, characterised once — report-card ran a second query for exactly this.
+  assert.ok(/const provenance = summariseProvenance\(/.test(dl));
+  assert.ok(/provenance: FoodProvenance;/.test(dl), "known / likely / unknown rides on the object");
+});
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
