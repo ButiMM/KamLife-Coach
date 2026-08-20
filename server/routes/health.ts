@@ -7,15 +7,37 @@ import { requireAdminKey } from "./auth";
 import { deliveryStats, jobRegistry, dailyProactiveCount, DAILY_PROACTIVE_CAP } from "../scheduler/shared";
 import { isTwilioCircuitOpen } from "../utils";
 
+/**
+ * WHICH BUILD IS ANSWERING (2026-08-20).
+ *
+ * The running commit was readable in exactly three places, and all three sat behind something
+ * that could break: the WhatsApp `version` command (which depends on a phone-number comparison —
+ * and that comparison was wrong, so the command never fired), a column in turn_ledger that no
+ * route reads, and an internal audit payload.
+ *
+ * The cost was two rounds of screenshots diagnosed against code that may not have been live. A
+ * deploy check must not depend on the application's own routing being correct; that is the one
+ * thing it exists to test.
+ */
+function runningBuild() {
+  return {
+    version: (process.env.RAILWAY_GIT_COMMIT_SHA || "").slice(0, 7) || process.env.APP_VERSION || "dev",
+    bootedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+  };
+}
+
 export function registerHealthRoutes(app: Express) {
   // ── Simple health check — includes DB ping so Railway stops routing to dead instances ──
   app.get("/health", async (_req, res) => {
     try {
       await db.execute(sql`SELECT 1`);
-      res.json({ status: "ok", service: "KamLife Coach", timestamp: new Date().toISOString() });
+      res.json({ status: "ok", service: "KamLife Coach", ...runningBuild(), timestamp: new Date().toISOString() });
     } catch (e: any) {
       console.error("[HEALTH] DB check failed:", e.message);
-      res.status(503).json({ status: "error", detail: "database unavailable", timestamp: new Date().toISOString() });
+      // The build still answers on a 503 — "which code is failing" is the question you ask FIRST
+      // when an instance is unhealthy, and it is the moment the WhatsApp command is least likely
+      // to work.
+      res.status(503).json({ status: "error", detail: "database unavailable", ...runningBuild(), timestamp: new Date().toISOString() });
     }
   });
 

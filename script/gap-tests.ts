@@ -3773,6 +3773,20 @@ test("p0: the coach is recognised by the same rule as everyone else", () => {
     "no raw-digit comparison survives");
 });
 
+test("deploy identity does not depend on the app's own routing", () => {
+  const health = readFileSync("server/routes/health.ts", "utf-8");
+  const code = health.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // The running commit used to be readable only through the WhatsApp `version` command — which
+  // depends on a phone-number comparison, and that comparison was wrong, so it never fired. Two
+  // rounds of screenshots were diagnosed against code that may not have been live.
+  assert.ok(/RAILWAY_GIT_COMMIT_SHA/.test(code), "the build reports itself over HTTP");
+  assert.ok(/\.\.\.runningBuild\(\)/.test(code), "on /health");
+  // AND ON THE FAILURE PATH. "Which code is failing" is the first question when an instance is
+  // unhealthy, and the moment the WhatsApp command is least likely to answer.
+  assert.equal((code.match(/\.\.\.runningBuild\(\)/g) || []).length, 2,
+    "the 200 and the 503 both name the build");
+});
+
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
