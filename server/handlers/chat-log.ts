@@ -225,7 +225,44 @@ async function safeReplacementFor(violation: string, scope: TurnScope): Promise<
 
 async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<string> {
   if (process.env.NODE_ENV === "test" || !scope.userId || !reply) return reply;
-  const draft = String(reply).trim();
+  let draft = String(reply).trim();
+
+  // ════════════════════════════════════════════════════════════════════════════════════════
+  // THE BEHAVIOURAL INSTRUCTION COMES FROM THE CANONICAL RENDERER, NOT FROM THE MODEL.
+  // (2026-08-21, final authority boundary.)
+  //
+  // Stating the decision in the prompt is guidance, and guidance is not enforcement. Worse, only
+  // three of the TEN model exits ever saw that guidance: the four specialist agents and the
+  // punct / short / frustration replies all return early, so they carried no canonical
+  // instruction at all and nothing removed a directive of their own.
+  //
+  // This is the one place every reply crosses, so it is where the boundary belongs:
+  //
+  //     GPT prose  →  strip any instruction it issued  →  append the canonical instruction
+  //
+  // The model still supplies empathy, context and explanation — that is what it is for, and it
+  // survives untouched. What it no longer supplies is the thing the client is told to DO.
+  //
+  // HONEST BOUND, stated here rather than in a report: the STRIP depends on recognising a
+  // directive in prose, which is ~89% of plausible phrasings. What that buys is that the
+  // canonical instruction is ALWAYS the one appended; what it does not buy is structural
+  // impossibility of a stray model directive surviving. That would require the model to emit
+  // structured fields instead of prose across all ten exits — a larger change than this one.
+  if (scope.evidence?.modelAuthored) {
+    const { stripUnlicensedDirectives } = await import("../brain/reply-verifier");
+    const { kept, removed } = stripUnlicensedDirectives(draft, scope.evidence);
+    if (removed.length > 0) {
+      console.log(`[CANONICAL_RENDER] removed ${removed.length} model-authored instruction(s): ${removed[0].slice(0, 70)}`);
+      draft = kept;
+    }
+    const todo = String(scope.evidence.canonicalTodo || "").trim();
+    // Appended only when the reply does not already carry it — the paths that reach tellDontAsk
+    // have put it there already, and saying it twice is worse than not saying it.
+    if (todo && !draft.toLowerCase().includes(todo.toLowerCase().replace(/[.!]$/, ""))) {
+      draft = draft ? `${draft}\n\n${todo}` : todo;
+    }
+    if (!draft) draft = todo || "I'm here — tell me what's going on and we'll take it from there.";
+  }
   const verifier = verifyBrainReply(draft, { clientMessage: scope.inputText, evidence: scope.evidence });
 
   // ════════════════════════════════════════════════════════════════════════════════════════

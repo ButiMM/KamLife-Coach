@@ -404,6 +404,43 @@ function directiveDomains(sentence: string): Set<string> {
  */
 const PROSE_TARGET_WRITE = /\b(?:drop|lower|reduce|cut|raise|increase|bump|set|change|move|push)\s+(?:your\s+)?(?:calories|kcal|intake|protein|steps?|target|goal)\b[^.!?]{0,40}?(?:\bto\b|\bdown\b|\bup\b|\bhigher\b|\blower\b)/i;
 
+/**
+ * REMOVE THE MODEL'S INSTRUCTION SO THE CANONICAL ONE CAN BE RENDERED IN ITS PLACE (2026-08-21).
+ *
+ * Blocking a whole reply because one sentence over-stepped throws away the empathy and the
+ * explanation with it. What the architecture actually wants is narrower: the model supplies
+ * context, and the BEHAVIOURAL INSTRUCTION is rendered deterministically from the canonical
+ * decision. So the offending sentences come out and the canonical instruction goes on.
+ *
+ * Returns the surviving prose and what was removed. Used at the single outbound chokepoint, which
+ * is the only place that sees every model exit — the four specialist agents and the punct/short/
+ * frustration replies all return early and never reach the append at the end of gpt-block.
+ */
+export function stripUnlicensedDirectives(
+  reply: string, evidence?: VerifierFacts["evidence"],
+): { kept: string; removed: string[] } {
+  if (!evidence?.modelAuthored) return { kept: reply, removed: [] };
+  const licensed = domainsIn(String(evidence.canonicalTodo || ""));
+  const structured = String(evidence.structuredAction || "");
+  if (structured === "SET_SICK") licensed.add("training");
+  if (structured === "END_SICK") licensed.add("training");
+
+  const removed: string[] = [];
+  const kept = String(reply || "")
+    .split(/(?<=[.!?])\s+/)
+    .filter(sentence => {
+      const domains = directiveDomains(sentence);
+      if (domains.size === 0) return true;
+      const unlicensed = [...domains].some(d => !licensed.has(d));
+      if (unlicensed) { removed.push(sentence.trim()); return false; }
+      return true;
+    })
+    .join(" ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return { kept, removed };
+}
+
 function verifyPrescriptionProvenance(reply: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
   // Deterministic replies recite state they own. Only model prose is held to this.
   if (!evidence?.modelAuthored) return { ok: true };

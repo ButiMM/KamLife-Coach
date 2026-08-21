@@ -581,6 +581,76 @@ async function main() {
   // decision on afterwards, and a verifier tried to work out from English what the model had
   // decided. canonicalDecision reads state and never the reply, so nothing ever forced it to run
   // late — it just always had.
+  // ── THE BEHAVIOURAL INSTRUCTION COMES FROM THE CANONICAL RENDERER ─────────────────────────
+  check("every model exit is covered, not only the ones that see the brief", () => {
+    // TEN exits reach WhatsApp: the main Coach-K call and its two fallbacks, four specialist
+    // agents, and the punct / short / frustration replies. Only three ever saw decisionBrief —
+    // the other seven return early. Enforcement therefore belongs at the ONE place every reply
+    // crosses, not in the prompt of the paths that happen to read it.
+    const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    // Asserted as WIRING, not as a word appearing somewhere: the real function must be imported
+    // from the verifier, its result must be used, and the canonical instruction must be appended.
+    // A first draft checked only that the name appeared, and a control that stubbed the import
+    // left it green — a guard that cannot fail is not a guard.
+    assert.ok(/stripUnlicensedDirectives\s*\}\s*=\s*await import\("\.\.\/brain\/reply-verifier"\)/.test(log),
+      "the chokepoint must import the real strip from the verifier, not a local stand-in");
+    assert.ok(/const \{ kept, removed \} = stripUnlicensedDirectives\(draft, scope\.evidence\)/.test(log),
+      "…and run it on the draft with this turn's evidence");
+    assert.ok(/draft = kept;/.test(log), "…and actually use what survived");
+    assert.ok(/scope\.evidence\.canonicalTodo/.test(log) && /draft = draft \? `\$\{draft\}/.test(log),
+      "…and render the canonical instruction in place of what it removed");
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
+    const code = gpt.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    // The decision must be computed before the FIRST exit, not before the last one.
+    const decidedAt = code.indexOf("await canonicalDecision(");
+    for (const exit of ["gpt_punct", "gpt_short", "gpt_frust", "nutritionAgent(",
+                        "programmingAgent(", "mindsetAgent(", "adminAgent("]) {
+      const at = code.indexOf(exit);
+      assert.ok(at > 0, `${exit} is not in gpt-block`);
+      assert.ok(decidedAt > 0 && decidedAt < at,
+        `${exit} can return before the canonical decision is computed, so its reply would carry none`);
+    }
+  });
+
+  check("strip-then-render behaves at the boundary", async () => {
+    const { stripUnlicensedDirectives } = await import("../server/brain/reply-verifier");
+    const ev = (canonicalTodo: string) => ({ modelAuthored: true, canonicalTodo }) as any;
+    const render = (reply: string, todo: string) => {
+      const { kept } = stripUnlicensedDirectives(reply, ev(todo));
+      return todo && !kept.toLowerCase().includes(todo.toLowerCase().replace(/[.!]$/, ""))
+        ? (kept ? `${kept}\n\n${todo}` : todo) : kept;
+    };
+    const PROTEIN = "Make your next meal a proper protein meal.";
+
+    // 3. the directive in the final reply comes from the canonical renderer, not the model
+    const a = render("That's a tough week. Train chest today.", PROTEIN);
+    assert.ok(!/train chest/i.test(a), "the model's instruction must not reach the client");
+    assert.ok(a.includes(PROTEIN), "the canonical instruction must");
+    assert.ok(/tough week/i.test(a), "…and the model's empathy must survive");
+
+    // 4. canonicalTodo = null produces no behavioural directive
+    const b = render("I hear you — that sounds heavy. Go for a 20-minute walk.", "");
+    assert.ok(!/20-minute walk/i.test(b), "no decision means no instruction reaches the client");
+    assert.ok(/hear you/i.test(b), "…and the conversation survives");
+
+    // 5. rewording cannot create a different directive
+    for (const r of ["You should hit legs today.", "I'd get a push session in this afternoon.",
+                     "Today is a good day for an upper body workout."]) {
+      assert.ok(!/legs|push session|upper body/i.test(render(r, PROTEIN)),
+        `a reworded directive still reached the client: ${r}`);
+    }
+
+    // 6. deterministic responses are untouched
+    const det = stripUnlicensedDirectives("Drop your calories to 1,800.", { modelAuthored: false } as any);
+    assert.equal(det.kept, "Drop your calories to 1,800.");
+    assert.equal(det.removed.length, 0);
+
+    // 1+2. an exit that never saw the brief still carries the canonical instruction
+    const e = render("Ja, that's normal when you're coming back from being ill.", "Log one meal today. Any meal.");
+    assert.ok(e.includes("Log one meal today"), "a short exit must still carry the canonical instruction");
+  });
+
   check("both model paths are told the decision BEFORE they generate", () => {
     const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
     const code = gpt.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
