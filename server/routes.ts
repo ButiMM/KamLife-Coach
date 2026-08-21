@@ -1069,14 +1069,33 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (lifecycleResult !== null) return lifecycleResult;
 
 
-  // ---- ENGINE, second pass: the backstop for what the handlers above declined. Fail-open.
-  // MUST also respect mustStayDeterministic (2026-08-19 live ×4): first pass skipped meal
-  // reports correctly, then this second pass handed them to freeform Coach K → "I don't have
-  // a meal logged / what did you eat". Stated meal reports stay off the engine entirely.
-  if (engineLive() && !multiFact && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
-    if (engineReply !== null) return tag(engineReply, "🧠 new engine");
-  }
+  /*
+   * ENGINE SECOND PASS — REMOVED (2026-08-21, turn authority).
+   *
+   * The engine was invoked TWICE in one turn, from the same function, and either call could end
+   * the turn. That is two independent final-answer opportunities for one owner, separated only by
+   * chain position — and the two sites applied OPPOSITE policy about the same message: the front
+   * pass may claim a stated food log ("a food log is a coaching moment, not a rail", 2026-08-04),
+   * this one may not (2026-08-19, four live failures where it answered a logged meal with "I don't
+   * have a meal logged / what did you eat"). Which policy the engine held depended on when you
+   * asked it.
+   *
+   * WHY DELETING THIS ONE IS SAFE, and not a judgement call:
+   *
+   *   this guard  = front guard && !isTransactionReport
+   *
+   * — a strict subset. Every guard variable (multiFact, m, normalizedQuestion, mediaUrl,
+   * isTransactionReport) is computed above the FRONT call and is never reassigned between the two
+   * sites. So any message able to satisfy this guard had already satisfied the front guard, had
+   * already been offered to runMeaningEngineLive on this turn, and had already been declined.
+   * This call could only ever re-roll the same model on the same preconditions. Nor is there
+   * pending state to change the answer: !multiFact and !isTransactionReport together mean the
+   * intervening handlers have essentially nothing to commit.
+   *
+   * The engine keeps its one shot, at the front, where the product reason for it lives. What it
+   * declines falls to the deterministic owners and then to gpt-block — one path authoritative per
+   * turn, which is the invariant this removal exists to establish.
+   */
 
   // MODEL_BRAIN path deleted 2026-07-30. Two paths answer a client: the engine, then gpt-block.
   // Stated meal report that food-context could not finish: NEVER freeform invent macros.

@@ -207,8 +207,22 @@ test("cut 2: nothing above the ledger may answer a multi-fact note", () => {
   const code = src.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
   // The engine sits above the ledger and returns the turn. On a log it must stand down, or a
   // freeform reply answers instead of the facts being committed.
-  assert.equal((code.match(/engineLive\(\) && !multiFact/g) || []).length, 2,
-    "both engine passes must stand down on a multi-fact note");
+  // Asserted as an INVARIANT rather than a count (2026-08-21). This required exactly 2, which
+  // encoded the defect it was written beside: the engine was invoked twice per turn. The turn
+  // now has one engine pass, and the rule that matters is unchanged — EVERY pass stands down on
+  // a log, however many there are.
+  // Anchored to the INVOCATION, not to every mention of engineLive() — there is an unrelated
+  // frustration gate that also names it, and a guard that flags the wrong line gets switched off.
+  const lines = code.split("\n");
+  const invocations = lines
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => /runMeaningEngineLive\(/.test(l));
+  assert.ok(invocations.length >= 1, "the engine is invoked somewhere");
+  for (const { i } of invocations) {
+    const guard = lines.slice(Math.max(0, i - 3), i + 1).join(" ");
+    assert.ok(/!multiFact/.test(guard),
+      `an engine pass does not stand down on a multi-fact note: ${lines[i].trim().slice(0, 90)}`);
+  }
   // early-commands now RUNS and COMMITS rather than standing down: on "had 2 litres of water and
   // took my creatine" the supplement handler inside it is the only thing that knows what a
   // supplement is, and standing down lost the confirmation entirely.

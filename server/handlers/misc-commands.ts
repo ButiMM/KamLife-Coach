@@ -36,6 +36,7 @@ import { sendWhatsApp } from "../scheduler";
 import { sastToday, sastDayStart, looksLikeDirectionRequest, classifyPainReport , getDisplayName} from "../utils";
 import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
+import { turnEvidence } from "./chat-log";
 import { getProgressTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 
@@ -491,6 +492,11 @@ export async function handleMiscCommands(ctx: {
         .orderBy(desc(stepLogs.loggedAt))
         .limit(1);
       const logged = todayStep?.steps || 0;
+      // RECORD WHAT WE HOLD (2026-08-21). The verifier judges a step number in the reply against
+      // the turn's evidence; without this line the deterministic answer had no provenance and was
+      // allowed through only because the client's wording looked like a step question. Provenance
+      // is the thing that should decide, so the door states it.
+      turnEvidence({ stepsToday: logged });
       const remaining = Math.max(0, target - logged);
       if (!logged) return `${name2 ? name2 + " — " : ""}${target.toLocaleString()} steps is your target. No steps logged yet today — send your count: "8,500 steps" or "walked 5km".`;
       if (remaining === 0) return `${name2 ? name2 + " — " : ""}${logged.toLocaleString()} steps today. Target hit ✅`;

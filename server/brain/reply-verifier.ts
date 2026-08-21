@@ -285,7 +285,16 @@ function verifyStepAttribution(reply: string, clientMessage: string, evidence?: 
   if (typeof held === "number" && held > 0 && replySteps.every(n => n === held) && !NARROWER_THAN_A_DAY.test(reply)) {
     return { ok: true };
   }
-  if (isExplicitStepQuery(clientMessage)) return { ok: true };
+  // REMOVED 2026-08-21: `if (isExplicitStepQuery(clientMessage)) return { ok: true }`.
+  //
+  // That was the last rule in this file where a claim's VALIDITY depended on how the client
+  // happened to phrase the question. Ask "how many steps did I do?" and any number in the reply
+  // passed — including one nobody held. Phrasing is not provenance.
+  //
+  // The evidence branch above is the legitimate version of what it was reaching for: a number we
+  // hold for this client today is a recital and passes on its own, whatever words the question
+  // used. The deterministic steps door now records that evidence, so the honest path is open and
+  // the wording bypass is not.
   const reported = extractStepNumbers(clientMessage);
   if (reported.length === 0) {
     return { ok: false, violation: "Your reply attributes a step/walking number to the client, but their current message did not report a step count. Stored snapshot state is not a current-turn client statement. Do not say they walked or did a number of steps unless they reported it in this message; if they asked about progress, that is a different case and you may answer from state." };

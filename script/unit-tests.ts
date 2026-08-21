@@ -9907,14 +9907,29 @@ test("blocked question: answer the known part, never ask them to narrate", async
   assert.match(med, /doctor or pharmacist/i);
 });
 
-test("step questions are a shape, not a list of phrasings", async () => {
+test("a step claim is validated by provenance, never by the client's phrasing", async () => {
   const V = await import("../server/brain/reply-verifier");
-  const blocked = (reply: string, msg: string) => !V.verifyBrainReply(reply, { clientMessage: msg }).ok;
-  // THE EXACT QUESTION from 19 August, which the seven-phrase allow-list did not contain.
+  const check = (reply: string, msg: string, stepsToday?: number) =>
+    V.verifyBrainReply(reply, { clientMessage: msg, ...(stepsToday === undefined ? {} : { evidence: { stepsToday } }) });
+  const blocked = (reply: string, msg: string, stepsToday?: number) => !check(reply, msg, stepsToday).ok;
+
+  // THE EXACT QUESTION from 19 August, which a seven-phrase allow-list did not contain. It must
+  // still be answerable — and it is, because the path that answers it reads the day ledger, which
+  // records what we hold. gpt.ts:1062 -> getDayLedger -> turnEvidence({ stepsToday }).
   assert.ok(!blocked("You walked 10,000 steps today, which burns roughly 400 kcal.",
+    "How does my daily step count affect my progress and calorie burn and energy levels?", 10_000),
+    "a held number may be recited, whatever words the question used");
+  assert.ok(!blocked("You did 8,000 steps today.", "what's my step count looking like?", 8_000));
+
+  // WHAT CHANGED, 2026-08-21. Phrasing used to be enough on its own: isExplicitStepQuery() let ANY
+  // number through as long as the question mentioned steps. It is gone. The question below is
+  // worded identically to the one above; the only difference is that nothing backs the number.
+  assert.ok(blocked("You walked 10,000 steps today, which burns roughly 400 kcal.",
     "How does my daily step count affect my progress and calorie burn and energy levels?"),
-    "asking about your own steps may be answered from state");
-  assert.ok(!blocked("You did 8,000 steps today.", "what's my step count looking like?"));
+    "the same question, with nothing held, must not license the same number");
+  assert.ok(blocked("You did 9,000 steps today.", "what's my step count looking like?", 3_000),
+    "held 3,000 does not license a claim of 9,000 — the failure the evidence rule exists for");
+
   // The rule still catches what it was built for: a number attributed to someone who reported none.
   assert.ok(blocked("You walked 8,000 steps today — nice.", "hi"), "a bare attribution still fails");
   assert.ok(blocked("Nice, 12,000 steps today!", "I had eggs"), "…including alongside an unrelated report");

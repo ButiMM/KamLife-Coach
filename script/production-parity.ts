@@ -424,6 +424,58 @@ async function main() {
     assert.ok(/state\.health\.sickYesterday/.test(morning), "…it asks the snapshot");
   });
 
+  // ── TURN AUTHORITY: ONE FINAL-ANSWER OWNER PER INBOUND MESSAGE ────────────────────────────
+  // Domain ownership can be correct while TURN ownership is still ambiguous. The engine used to
+  // be invoked twice in one turn, from the same function, either call able to end it — two
+  // independent final-answer opportunities separated only by chain position, and applying
+  // opposite policy about the same message.
+  check("the meaning engine gets one shot per turn, not two", () => {
+    const chain = readFileSync("server/routes.ts", "utf-8");
+    const code = chain.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const calls = (code.match(/runMeaningEngineLive\(/g) || []).length;
+    assert.equal(calls, 1,
+      `runMeaningEngineLive is invoked ${calls} times in one turn. More than one is more than one `
+      + `chance to produce the final answer, and the second can win a turn the first declined.`);
+  });
+
+  check("the engine gate is evaluated once, and cannot disagree with itself", () => {
+    const chain = readFileSync("server/routes.ts", "utf-8");
+    const code = chain.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const gates = (code.match(/mustStayDeterministic\(/g) || []).length;
+    assert.equal(gates, 1,
+      `mustStayDeterministic is evaluated ${gates} times in the chain. It is a routing seam, not an `
+      + `authority — evaluated once it cannot admit a message at one point and exclude it at another.`);
+  });
+
+  check("the verifier is downstream of the answer, and decides nothing", () => {
+    // STRUCTURE, not position in a file. handleMessage wraps routeMessage in inTurn, and inTurn
+    // applies reconcileTurnReply to whatever routeMessage RETURNED. So the verifier can only ever
+    // see a reply some path already chose: it is incapable of pre-empting an owner, whatever it
+    // decides to do with the text.
+    const chain = readFileSync("server/routes.ts", "utf-8");
+    assert.ok(/return inTurn\([\s\S]{0,200}?routeMessage\(/.test(chain),
+      "the whole chain runs inside one turn wrapper");
+    const log = readFileSync("server/handlers/chat-log.ts", "utf-8");
+    assert.ok(/const result = await fn\(\);[\s\S]{0,400}?reconcileTurnReply\(turnStore\.getStore\(\)!, result\)/.test(log),
+      "reconciliation runs on the chain's own return value, downstream of every owner");
+    // It may block and it may explain. It may not pick the coaching action.
+    const verifier = readFileSync("server/brain/reply-verifier.ts", "utf-8");
+    assert.ok(!/chooseAction\(|decideProactive\(/.test(verifier),
+      "the verifier calls the decision owner — that would make it a second decision point");
+  });
+
+  check("chooseAction is the only coaching decision owner", () => {
+    const owner = readFileSync("server/one-action.ts", "utf-8");
+    assert.ok(/export function chooseAction/.test(owner));
+    // Nothing outside the owner module may define a competing verdict producer.
+    for (const f of ["server/handlers/misc-commands.ts", "server/scheduler/jobs/morning.ts",
+                     "server/handlers/gpt-block.ts", "server/health-state.ts"]) {
+      const src = readFileSync(f, "utf-8");
+      assert.ok(!/function\s+(choose|decide)[A-Z]\w*\s*\(/.test(src),
+        `${f} defines its own decision function — chooseAction is the only one`);
+    }
+  });
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");
