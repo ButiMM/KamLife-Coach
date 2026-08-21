@@ -45,7 +45,17 @@ export const DOMAIN_OWNERS: DomainOwnership[] = [
     // The literal command forms only. Prose ABOUT progress is not a claim on the intent — the
     // vocabulary has to be narrow enough that a comment or a coaching sentence does not read as
     // a second owner, or the guard cries wolf and gets switched off.
-    vocabulary: /["'`\[]\s*(?:my progress|this week|how am i doing|today'?s progress|progress today|daily progress)\s*["'`,\]]/i,
+    // Extended 2026-08-20 with the weekly cousins. A fourth calculator owned them — "weekly
+    // stats", "progress card", "weekly progress", "progress this week" — and disagreed with
+    // "this week" on the same seven days. The guard covers them so a second owner cannot come
+    // back under a synonym.
+    //
+    // NOT in this vocabulary, deliberately: "my week", "week report", "week card", "weekly card".
+    // Those reach the shareable REPORT CARD in early-commands.ts:135, which answers with an image
+    // rather than the text breakdown. That is a second answer to the same customer question and
+    // it is recorded in `earnedBy` below — but it is a product decision, not a refactor, so the
+    // vocabulary describes what is true today instead of asserting a convergence nobody made.
+    vocabulary: /["'`\[]\s*(?:my progress|this week|how am i doing|today'?s progress|progress today|daily progress)\s*["'`,\]]|\b(?:weekly stats|progress card|weekly progress|my stats this week|progress this week)\b/i,
     owners: [
       "server/handlers/misc-commands.ts",   // "my progress", "this week" — reads getProgressTruth
       "server/handlers/early-commands.ts",  // "today's progress" — reads getDayLedger
@@ -57,7 +67,10 @@ export const DOMAIN_OWNERS: DomainOwnership[] = [
     ],
     truthSource: "server/day-ledger.ts",
     earnedBy: "2026-08-20: three authorities at once; 'this week' had none and fell to the model, "
-      + "which invented averages and asked the client to choose the next action.",
+      + "which invented averages and asked the client to choose the next action. A fourth (the "
+      + "WEEKLY PROGRESS CARD) was deleted in the follow-up. STILL OPEN, reported not fixed: the "
+      + "shareable report card answers 'my week' with an image while 'this week' answers with "
+      + "text, and the all-time block at misc-commands.ts:622 computes its own journey totals.",
   },
 ];
 

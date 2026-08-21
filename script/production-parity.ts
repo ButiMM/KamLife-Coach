@@ -109,11 +109,87 @@ async function main() {
     });
   }
 
+  // ── THE WEEKLY SYNONYMS, WHICH USED TO REACH A SECOND CALCULATOR ───────────────────────────
+  // A fourth progress calculator (the WEEKLY PROGRESS CARD) owned these until 2026-08-20. It ran
+  // its own four queries, bucketed days with a hand-rolled +2h offset instead of sastDayKey, and
+  // measured weight over a 14-day window — so "my week" and "this week" described the same seven
+  // days with different numbers, and which one a client got depended on the synonym they typed.
+  //
+  // The assertion is IDENTITY, not phrasing: one owner means one answer. A future second claimant
+  // cannot satisfy this by coincidence — it would have to reproduce the owner's text exactly, at
+  // which point it is not a second authority.
+  const WEEKLY_DOORS = [
+    "weekly stats", "progress card", "progress this week",
+    "weekly progress", "my weekly", "my stats this week",
+  ];
+  const weeklyReplies: Array<readonly [string, string]> = [];
+  for (const door of WEEKLY_DOORS) weeklyReplies.push([door, await say(door)] as const);
+
+  for (const [door, reply] of weeklyReplies) {
+    check(`"${door}" reaches the one weekly owner`, () => {
+      assert.ok(!reply.startsWith("__THREW__"), `handler threw: ${reply}`);
+      assert.ok(!/something went wrong on my side|give me a second and try again/i.test(reply),
+        `the pipeline crashed and returned its fallback:\n      ${reply.slice(0, 120)}`);
+      assert.ok(!WITHHELD.test(reply), `the verifier destroyed a progress answer:\n      ${reply.slice(0, 160)}`);
+      assert.equal(reply, week,
+        `"${door}" and "this week" describe the same seven days with different text — that is a\n`
+        + `      second weekly authority, which is the defect this domain was converged to remove.\n`
+        + `      "${door}": ${reply.slice(0, 160)}\n      "this week": ${week.slice(0, 160)}`);
+    });
+  }
+
+  // ── THE DOORS THE REPORT CARD OWNS MUST NOT BE CLAIMED TWICE ───────────────────────────────
+  // This assertion is the one that earned its place. The first draft of the convergence folded
+  // "my week", "week report", "week card" and "weekly card" into the weekly owner — and the
+  // identity check above went red, because the shareable report card in early-commands.ts matches
+  // them and runs earlier in the chain. Both blocks looked like owners; only chain order decided.
+  //
+  // So this asserts the negative: those words reach the report card, and the weekly owner does not
+  // also list them. A claimant that can never fire is not harmless — it is the next engineer's
+  // evidence that the question is owned here, and it is how the fourth calculator survived.
+  const REPORT_CARD_DOORS = ["my week", "week report", "week card", "weekly card"];
+  for (const door of REPORT_CARD_DOORS) {
+    const reply = await say(door);
+    check(`"${door}" still reaches the report card, and only it`, () => {
+      assert.ok(!reply.startsWith("__THREW__"), `handler threw: ${reply}`);
+      assert.ok(/scorecard|save it, share it/i.test(reply),
+        `the report card no longer answers "${door}":\n      ${reply.slice(0, 160)}`);
+      assert.notEqual(reply, week, `"${door}" is being answered by the weekly text owner instead`);
+    });
+  }
+
+  check("the weekly owner does not list a door the report card wins", () => {
+    const misc = readFileSync("server/handlers/misc-commands.ts", "utf-8");
+    const code = misc.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    const claim = /const wantsWeek = ([\s\S]*?);\n/.exec(code);
+    assert.ok(claim, "wantsWeek not found — this check is asserting nothing");
+    for (const door of REPORT_CARD_DOORS) {
+      // Delimited, not substring: "my weekly" legitimately belongs to the weekly owner and
+      // contains "my week". A guard that fails on that gets switched off within a week.
+      const listed = new RegExp(`["'\`|(]${door}["'\`|)]`, "i");
+      assert.ok(!listed.test(claim[1]),
+        `wantsWeek claims "${door}", which early-commands answers first — a claimant that can `
+        + `never fire, which is exactly how the deleted weekly calculator survived four cuts`);
+    }
+  });
+
+  check("the deleted weekly calculator has not grown back", () => {
+    const misc = readFileSync("server/handlers/misc-commands.ts", "utf-8");
+    const code = misc.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    // Its fingerprints: the card heading, the screenshot close, and its own chat label. Any of
+    // them reappearing means a weekly scoreboard is being built outside getProgressTruth again.
+    assert.ok(!/Week \$\{weekNum\}|Week Summary/.test(code), "the Week N Summary card is gone");
+    assert.ok(!/Screenshot this and send it/.test(code), "…and its closing line with it");
+    assert.ok(!/PROGRESS_CARD/.test(code), "…and no handler still logs under PROGRESS_CARD");
+  });
+
   // SHOW THE WORK. This harness once reported 8/8 while every message was crashing, so it prints
   // what it graded. A green you cannot read is the thing we are trying to stop trusting.
   for (const [n, r] of [["today's progress", todays], ["my progress", mine], ["this week", week]] as const) {
     console.log(`\n── ${n} ──\n${r.replace(/\[CARD:[^\]]*\]/g, "[card]").slice(0, 420)}`);
   }
+  console.log(`\n── weekly synonyms ──\n${WEEKLY_DOORS.length} doors, all identical to "this week": `
+    + `${weeklyReplies.every(([, r]) => r === week) ? "yes" : "NO"}`);
 
   // ── OWNERSHIP, NOT PHRASING ───────────────────────────────────────────────────────────────
   // Asserting three expected strings would go green and prove nothing — a fourth synonym would

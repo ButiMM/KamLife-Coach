@@ -7,7 +7,7 @@ import { db } from "../db";
 import { assessWeightRate } from "./weight";
 import {
   users, weightLogs, workoutLogs, stepLogs, chatHistory,
-  mealLogs, bodyMeasurements, clothingCheckins,
+  bodyMeasurements, clothingCheckins,
 } from "../../shared/schema";
 import { eq, desc, asc, and, gte, sql } from "drizzle-orm";
 import { SUPPLEMENT_GUIDE } from "../constants";
@@ -568,7 +568,14 @@ export async function handleMiscCommands(ctx: {
   // which improvised averages and handed the next move back to the client. Both doors are owned
   // here now, from the same truth.
   const wantsToday = ["progress", "my progress", "how am i doing"].includes(m);
-  const wantsWeek = ["this week", "week", "my week", "weekly", "this weeks progress", "this week's progress"].includes(m);
+  // The weekly doors this handler can actually WIN, and no others. The deleted WEEKLY PROGRESS
+  // CARD block also listed "my week", "week report", "week card" and "weekly card" — but the
+  // shareable report card in early-commands.ts:135 matches those and runs earlier, so that block
+  // could never answer them. Folding them in here would have rebuilt the same dead claimant one
+  // file to the left: code that looks like it owns a question and only loses on chain order.
+  // Those four belong to the report card; production-parity asserts they still reach it.
+  const wantsWeek = ["this week", "week", "weekly", "this weeks progress", "this week's progress"].includes(m)
+    || /\b(?:weekly stats|progress card|how.*i doing this week|weekly progress|my weekly|my stats this week|progress this week)\b/i.test(m);
   if (wantsToday || wantsWeek) {
     const name = getDisplayName(user) || "there";
     try {
@@ -655,109 +662,21 @@ export async function handleMiscCommands(ctx: {
   // ---- TRAJECTORY: "on track?", "where am I going", "is this working" ----
   // A directional assessment, not a wall of numbers. Gated to the engine when live.
 
-  // ---- WEEKLY PROGRESS CARD ----
-  if (/\b(my week|weekly stats|progress card|week report|how.*i doing this week|weekly progress|my weekly|weekly card|week card|my stats this week|progress this week)\b/i.test(m)) {
-    try {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-      const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
-      const name = user.name?.split(" ")[0] || "there";
-      const wStreak = user.workoutStreak || 0;
-      const programmeDays = user.programmeStartDate
-        ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
-        : 0;
-      const weekNum = programmeDays > 0 ? Math.ceil(programmeDays / 7) : 1;
+  /*
+   * WEEKLY PROGRESS CARD — REMOVED (2026-08-20, progress convergence follow-up).
+   *
+   * A FOURTH progress calculator, and the last competing weekly authority. It ran its own four
+   * queries (workouts, meals, steps, weights), bucketed days with a hand-rolled `+2h` SAST offset
+   * rather than sastDayKey, measured weight over its own 14-day window, and derived `weekNum` from
+   * programmeStartDate — so it disagreed with "this week" on the same seven days, and the answer a
+   * client got depended only on which synonym they happened to type.
+   *
+   * `my week` was matched by BOTH this block and the owner above; the owner won on chain order,
+   * which is a coincidence, not ownership. Its phrases now belong to that one owner, which reads
+   * getProgressTruth. Nothing is lost: the same seven days, from the source every other progress
+   * surface uses, ending in one instruction instead of "screenshot this".
+   */
 
-      const [weekWorkouts, weekMeals, weekSteps, recentWeights] = await Promise.all([
-        db.select({ id: workoutLogs.id, loggedAt: workoutLogs.loggedAt })
-          .from(workoutLogs)
-          .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
-        db.select({ loggedAt: mealLogs.loggedAt, proteinInt: mealLogs.proteinInt })
-          .from(mealLogs)
-          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sevenDaysAgo))),
-        db.select({ steps: stepLogs.steps, loggedAt: stepLogs.loggedAt })
-          .from(stepLogs)
-          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
-        db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
-          .from(weightLogs)
-          .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, fourteenDaysAgo)))
-          .orderBy(asc(weightLogs.loggedAt)),
-      ]);
-
-      // Food: days with at least one logged meal
-      const foodDays = new Set(weekMeals.map(ml => {
-        const d = new Date((ml.loggedAt?.getTime() || 0) + 2 * 3_600_000);
-        return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
-      })).size;
-
-      // Best protein day this week
-      const protByDay: Record<string, number> = {};
-      for (const meal of weekMeals) {
-        const d = new Date((meal.loggedAt?.getTime() || 0) + 2 * 3_600_000);
-        const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
-        protByDay[key] = (protByDay[key] || 0) + (meal.proteinInt || 0);
-      }
-      const bestProt = Object.values(protByDay).length > 0 ? Math.max(...Object.values(protByDay)) : 0;
-      const protTarget = user.proteinTarget || 120;
-
-      // Steps: average this week
-      const stepsTarget = user.stepsTarget || 8500;
-      const avgSteps = weekSteps.length > 0
-        ? Math.round(weekSteps.reduce((s, r) => s + (r.steps || 0), 0) / weekSteps.length)
-        : 0;
-      const daysHitSteps = weekSteps.filter(r => (r.steps || 0) >= stepsTarget).length;
-
-      // Weight: change over the period
-      const oldestWeight = recentWeights.length >= 2 ? parseFloat(recentWeights[0].weight || "0") : 0;
-      const newestWeight = recentWeights.length >= 1 ? parseFloat(recentWeights[recentWeights.length - 1].weight || "0") : 0;
-      const weightDelta = (oldestWeight > 0 && newestWeight > 0) ? (newestWeight - oldestWeight) : null;
-
-      const workoutCount = weekWorkouts.length;
-      const trainingDays = user.trainingDaysPerWeek || 3;
-
-      // Score: how many of the 3 pillars did they hit?
-      const pillars = [workoutCount >= trainingDays, foodDays >= 5, avgSteps >= stepsTarget].filter(Boolean).length;
-      const scoreEmoji = pillars === 3 ? "🔥" : pillars >= 2 ? "✅" : "📈";
-
-      // Build card lines
-      const lines: string[] = [];
-      lines.push(`${scoreEmoji} *${name} — Week ${weekNum} Summary*`);
-      lines.push(``);
-      lines.push(`🏋️ *Workouts:* ${workoutCount}/${trainingDays}${workoutCount >= trainingDays ? " ✅" : ""}`);
-      if (avgSteps > 0) {
-        lines.push(`👟 *Steps avg:* ${avgSteps.toLocaleString()}/day${daysHitSteps > 0 ? ` (${daysHitSteps} days hit target)` : ""}`);
-      }
-      lines.push(`🥗 *Food logged:* ${foodDays}/7 days${foodDays >= 5 ? " ✅" : ""}`);
-      if (bestProt > 0) {
-        lines.push(`💪 *Best protein day:* ${bestProt}g${bestProt >= protTarget ? " — target hit ✅" : ` (target: ${protTarget}g)`}`);
-      }
-      if (wStreak > 0) lines.push(`🔥 *Streak:* ${wStreak} sessions`);
-      if (weightDelta !== null) {
-        const arrow = weightDelta < -0.1 ? "⬇️" : weightDelta > 0.3 ? "⬆️" : "➡️";
-        lines.push(`⚖️ *Weight:* ${newestWeight}kg ${arrow} (${weightDelta > 0 ? "+" : ""}${weightDelta.toFixed(1)}kg this period)`);
-      }
-      lines.push(``);
-
-      // Closing line based on performance
-      if (pillars === 3) {
-        lines.push(`Locked in. Three pillars hit — workouts, steps, food. This is the week that moves the needle.`);
-      } else if (workoutCount >= trainingDays) {
-        lines.push(`Workouts done — that's the hardest one. Close the food or steps gap next week and the results compound.`);
-      } else if (foodDays >= 5) {
-        lines.push(`Solid food discipline. Now pair that with the sessions — ${trainingDays - workoutCount} workout${trainingDays - workoutCount > 1 ? "s" : ""} left this week.`);
-      } else {
-        lines.push(`Next week: workouts first, food second. One consistent week is all it takes to build momentum.`);
-      }
-
-      lines.push(``);
-      lines.push(`_Screenshot this and send it to whoever keeps you accountable._`);
-
-      const cardReply = lines.join("\n");
-      await logChat(user.id, message, cardReply, "PROGRESS_CARD");
-      return cardReply;
-    } catch (e) {
-      console.error("[PROGRESS_CARD]", e);
-    }
-  }
 
 
   // ---- JOIN CHALLENGE (friend accepting an invite) ----
