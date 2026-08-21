@@ -42,8 +42,23 @@ import { DOMAIN_OWNERS } from "./domain-owners";
 let passed = 0;
 const failures: string[] = [];
 
-function check(name: string, fn: () => void) {
-  try { fn(); passed++; } catch (e: any) { failures.push(`  ✗ ${name}\n    ${e?.message || e}`); }
+/**
+ * AWAITED, DELIBERATELY (2026-08-21). This took `() => void` and did `try { fn(); passed++ }`.
+ * An async check therefore incremented `passed` the instant its promise was created — the
+ * assertions inside ran later, and a rejection surfaced as an unhandled promise, not a failure.
+ * Two checks in this file were already written async, so two of its greens meant nothing.
+ *
+ * That is the same defect this harness exists to catch, for the third time: a suite that can
+ * report success without exercising what it claims to grade.
+ */
+const pending: Array<Promise<void>> = [];
+function check(name: string, fn: () => void | Promise<void>) {
+  const record = (e: any) => failures.push(`  ✗ ${name}\n    ${e?.message || e}`);
+  try {
+    const r = fn();
+    if (r instanceof Promise) pending.push(r.then(() => { passed++; }, record));
+    else passed++;
+  } catch (e: any) { record(e); }
 }
 
 const NOW = Date.now();
@@ -337,6 +352,78 @@ async function main() {
     }
   });
 
+  // ── TARGETS: ONE CALCULATION, MANY WRITERS ────────────────────────────────────────────────
+  // Nine files write calorie/protein/step targets. That is fine — they are writers. What would
+  // not be fine is a second CALCULATION, so that two of them could hand the same client different
+  // numbers. Asserted structurally: every writer routes through targets.ts.
+  check("targets have one calculation, and every writer uses it", () => {
+    const targetWriters = [
+      "server/onboarding.ts", "server/handlers/lifecycle.ts", "server/handlers/weight.ts",
+      "server/handlers/workout.ts", "server/handlers/media.ts", "server/handlers/early-commands.ts",
+    ];
+    for (const f of targetWriters) {
+      const src = readFileSync(f, "utf-8");
+      if (!/calorieTarget:\s*(?!user|Number|null)/.test(src)) continue;
+      assert.ok(/calculateTargets|recalcTargetsForProfile/.test(src),
+        `${f} sets a target without calling the one calculation in server/targets.ts`);
+    }
+  });
+
+  check("the client-facing target answer reads stored state, not a recomputation", async () => {
+    const targets = await say("my targets");
+    assert.ok(!targets.startsWith("__THREW__"), `handler threw: ${targets}`);
+    assert.ok(new RegExp(String(USER.calorieTarget)).test(targets),
+      `"my targets" does not report the stored calorie target:\n      ${targets.slice(0, 160)}`);
+    assert.ok(new RegExp(String(USER.proteinTarget)).test(targets),
+      `"my targets" does not report the stored protein target:\n      ${targets.slice(0, 160)}`);
+  });
+
+  // ── QUESTIONS: FACTUAL FIRST, JUDGMENT TO THE MODEL ───────────────────────────────────────
+  // A factual question whose answer is already in authoritative state must never be sent to the
+  // model to reconstruct — that is how "this week" got invented averages. The test is that the
+  // reply carries the HELD NUMBER, which a model answering from prose could only match by luck.
+  check("factual questions are answered from state", async () => {
+    const steps = await say("what are my steps");
+    const target = await say("my targets");
+    for (const [q, r] of [["what are my steps", steps], ["my targets", target]] as const) {
+      assert.ok(!r.startsWith("__THREW__"), `"${q}" threw: ${r}`);
+      assert.ok(!/something went wrong on my side/i.test(r), `"${q}" crashed the pipeline`);
+      assert.ok(r.trim().length > 0, `"${q}" returned nothing`);
+    }
+    assert.ok(/8[,.]?500|steps/i.test(steps), `"what are my steps" did not answer from state:\n      ${steps.slice(0, 160)}`);
+  });
+
+  check("judgment questions are not hijacked by a deterministic scoreboard", async () => {
+    // "I'm struggling" is a life question. The failure this guards is a scorecard being fired at
+    // it — the exact defect despair.ts was written for. It must not come back as a numbers dump.
+    const struggle = await say("I'm struggling with all of this");
+    assert.ok(!struggle.startsWith("__THREW__"), `handler threw: ${struggle}`);
+    assert.ok(!/Days logged|Avg: \*|last 7 days|Sessions:/i.test(struggle),
+      `a life question was answered with a progress scoreboard:\n      ${struggle.slice(0, 200)}`);
+  });
+
+  // ── PROACTIVE: ONE DECISION OWNER, NO SECOND POLICY ───────────────────────────────────────
+  check("morning and the one-action command share the decision owner", () => {
+    const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+    const cmd = readFileSync("server/handlers/one-action-command.ts", "utf-8");
+    for (const [name, src] of [["morning", morning], ["one-action command", cmd]] as const) {
+      assert.ok(/decideProactive\(/.test(src), `${name} does not run the decision owner`);
+    }
+    // decideProactive wraps chooseAction with the evidence gate; both live in one-action.ts, so
+    // there is one decision module, not two policies.
+    const owner = readFileSync("server/one-action.ts", "utf-8");
+    assert.ok(/export function decideProactive/.test(owner) && /export function chooseAction/.test(owner),
+      "the evidence gate and the decision live in the same owner");
+    assert.ok(/chooseAction\(dayStateFrom/.test(owner),
+      "decideProactive must DELEGATE to chooseAction, not decide for itself");
+  });
+
+  check("the morning brief reads health state, never a keyword scan", () => {
+    const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+    assert.ok(!/wasSickOrInjured|SICK_PATTERNS/.test(morning), "no keyword sickness scan");
+    assert.ok(/state\.health\.sickYesterday/.test(morning), "…it asks the snapshot");
+  });
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");
@@ -346,6 +433,7 @@ async function main() {
     assert.notEqual(process.env.NODE_ENV, "test", "…and this harness must not take it");
   });
 
+  await Promise.all(pending); // every async check must land before the tally is printed
   console.log(`\nproduction-parity: ${passed}/${passed + failures.length} passed`);
   if (failures.length > 0) {
     console.log("\nFailures:");

@@ -442,8 +442,14 @@ export async function handleMiscCommands(ctx: {
 
   // ---- STEPS QUERY (bare "steps", "my steps", or explicit today query) ----
   const isStepWeekQuery = /\b(steps?\s*(?:this\s+)?week|my\s+step\s*(?:history|stats?|average|trend)|step\s*(?:history|stats?|average|trend|report)|weekly\s*steps?|7[\s-]day\s*steps?)\b/i.test(m);
+  // "what are my steps" reached NONE of these and fell through to the model, which has no step
+  // ledger and answered with the offline-agent apology (2026-08-21, found by the factual-question
+  // check once production-parity started awaiting its async cases). A held number must never be
+  // reconstructed by the model. This last alternative is a SHAPE — an interrogative in front of
+  // "my steps" — rather than another phrasing added to the list, because the list is what missed.
   if (["steps", "my steps", "step target", "steps target", "daily steps"].includes(m) ||
       /\b(steps?\s*today|how many steps|steps?\s*logged|did i hit my steps?|steps?\s*(count|so far|this morning|tonight)|today.?s steps?)\b/i.test(m) ||
+      /\b(?:what(?:'|’)?s|what is|what are|show me|tell me)\b[^?]{0,24}\bmy\s+steps?\b/i.test(m) ||
       isStepWeekQuery) {
     try {
       const target = user.stepsTarget || 8500;
