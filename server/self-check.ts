@@ -83,6 +83,25 @@ export function recordReplyPath(source: string): void {
 export function _resetReplyPaths(): void { replyPaths.clear(); messagesSeen = 0; }
 
 /**
+ * THE RESIDUE, COUNTED RATHER THAN ARGUED (2026-08-21).
+ *
+ * On a turn where chooseAction decided to change nothing, the model may still write something
+ * suggestion-shaped. We remove the ones we recognise; we cannot recognise all of them, and
+ * closing that gap by pattern is the museum this project keeps refusing to build.
+ *
+ * So it is measured instead. Beta answers the question that argument could not: does a real
+ * client ever receive a suggestion the coach did not decide on, and does it ever contradict?
+ *
+ *   coachdirective:stripped_on_hold    the model tried to instruct on a no-decision turn
+ *   coachdirective:stripped_on_action  …and on a turn that already had an instruction
+ *
+ * A rising first number is the honest read on whether the residual matters.
+ */
+export function recordDirectiveStripped(onDecisionTurn: boolean): void {
+  bump(`coachdirective:${onDecisionTurn ? "stripped_on_action" : "stripped_on_hold"}`);
+}
+
+/**
  * The founder-facing breakdown, over ALL traffic rather than since the last boot.
  * Deterministic = everything no model path claimed.
  */

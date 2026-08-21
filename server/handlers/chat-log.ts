@@ -257,19 +257,55 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   // structured fields instead of prose across all ten exits — a larger change than this one.
   if (scope.evidence?.modelAuthored) {
     const { stripModelDirectives } = await import("../brain/reply-verifier");
+    const { renderActionLine } = await import("../one-action");
+    const { recordDirectiveStripped } = await import("../self-check");
+
+    // CLARIFICATION IS NOT A COACHING TURN. It gets its directives stripped like every model
+    // path — no path may instruct — but it never receives an action line. "Did you mean 500g?"
+    // followed by "Log one meal today" is the coach talking over its own question.
+    const clarifying = !!scope.evidence.conversationalOnly;
+    const todo = clarifying ? "" : String(scope.evidence.canonicalTodo || "").trim();
+    const decisionTurn = todo.length > 0;
+
     const { kept, removed } = stripModelDirectives(draft, scope.evidence);
     if (removed.length > 0) {
-      console.log(`[CANONICAL_RENDER] removed ${removed.length} model-authored instruction(s): ${removed[0].slice(0, 70)}`);
+      // COUNTED, NOT ARGUED. On a no-decision turn this is the model trying to instruct where the
+      // coach decided to change nothing — the residual the beta is meant to measure.
+      recordDirectiveStripped(decisionTurn);
+      console.log(`[ACTION_LINE] removed ${removed.length} model instruction(s) on a ${decisionTurn ? "decision" : "hold"} turn: ${removed[0].slice(0, 70)}`);
       draft = kept;
     }
-    const todo = scope.evidence.conversationalOnly ? "" : String(scope.evidence.canonicalTodo || "").trim();
-    // Appended only when the reply does not already carry it — the paths that reach tellDontAsk
-    // have put it there already, and saying it twice is worse than not saying it.
-    if (todo && !draft.toLowerCase().includes(todo.toLowerCase().replace(/[.!]$/, ""))) {
-      draft = draft ? `${draft}\n\n${todo}` : todo;
+
+    if (decisionTurn) {
+      // EXACTLY ONE INSTRUCTION, AND CODE OWNS IT. The prose keeps empathy, context and
+      // explanation — that is what the model is for. The action line is rendered from
+      // canonicalTodo and stands alone, so "how many instructions did this turn send" has a
+      // countable answer instead of a prose-shaped one.
+      //
+      // Paths that reach tellDontAsk have already appended the todo INTO the prose; that copy is
+      // taken out here so the rendered line is not the second one.
+      // DE-DUPLICATED AT SENTENCE LEVEL, not block level. A first version split on blank lines
+      // only — but stripModelDirectives rejoins sentences with a space, so the paragraph break
+      // tellDontAsk inserted is already gone by the time this runs, and the todo survived inline
+      // AND as the rendered line. The client would have been told the same thing twice in one
+      // message. The check counted action lines, saw one, and went green over it.
+      const bare = todo.toLowerCase().replace(/\s*[.!]\s*$/, "");
+      const prose = draft
+        .split(/\n{2,}|(?<=[.!?])\s+/)
+        .filter(part => {
+          const b = part.trim().toLowerCase().replace(/^\*+|\*+$/g, "").replace(/\s*[.!]\s*$/, "");
+          return b !== bare && !(bare.length > 12 && b.startsWith(bare));
+        })
+        .join(" ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+      const line = renderActionLine(todo);
+      draft = prose ? `${prose}\n\n${line}` : line;
+    } else if (!draft) {
+      draft = "I'm here — tell me what's going on and we'll take it from there.";
     }
-    if (!draft) draft = todo || "I'm here — tell me what's going on and we'll take it from there.";
   }
+
   const verifier = verifyBrainReply(draft, { clientMessage: scope.inputText, evidence: scope.evidence });
 
   // ════════════════════════════════════════════════════════════════════════════════════════

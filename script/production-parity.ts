@@ -598,8 +598,11 @@ async function main() {
     assert.ok(/const \{ kept, removed \} = stripModelDirectives\(draft, scope\.evidence\)/.test(log),
       "…and run it on the draft with this turn's evidence");
     assert.ok(/draft = kept;/.test(log), "…and actually use what survived");
-    assert.ok(/scope\.evidence\.canonicalTodo/.test(log) && /draft = draft \? `\$\{draft\}/.test(log),
-      "…and render the canonical instruction in place of what it removed");
+    assert.ok(/scope\.evidence\.canonicalTodo/.test(log), "…reads the canonical decision");
+    assert.ok(/renderActionLine\s*\}\s*=\s*await import\("\.\.\/one-action"\)/.test(log),
+      "…and renders the instruction with the canonical renderer, not by hand");
+    assert.ok(/draft = prose \? `\$\{prose\}\\n\\n\$\{line\}` : line;/.test(log),
+      "…composing prose + exactly one action line");
     const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
     const code = gpt.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
     // The decision must be computed before the FIRST exit, not before the last one.
@@ -653,6 +656,71 @@ async function main() {
     const gcode = gpt.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
     assert.equal((gcode.match(/conversationalOnly: true/g) || []).length, 3,
       "the punct, short and frustration exits must each declare themselves clarification");
+  });
+
+  // ── ONE ACTION LINE, RENDERED BY CODE ─────────────────────────────────────────────────────
+  // A decision turn carries EXACTLY ONE behavioural instruction and code owns it. The model keeps
+  // empathy, context and explanation; the action line is rendered from canonicalTodo and stands
+  // alone, so "how many instructions did this turn send" has a countable answer.
+  check("a decision turn sends exactly one instruction, and code wrote it", async () => {
+    const { stripModelDirectives } = await import("../server/brain/reply-verifier");
+    const { renderActionLine } = await import("../server/one-action");
+    // Mirrors reconcileTurnReply's composition.
+    const compose = (reply: string, todo: string, clarifying = false) => {
+      const ev = { modelAuthored: true, canonicalTodo: todo, conversationalOnly: clarifying } as any;
+      const t = clarifying ? "" : todo.trim();
+      let draft = stripModelDirectives(reply, ev).kept;
+      if (!t) return draft;
+      const bare = t.toLowerCase().replace(/\s*[.!]\s*$/, "");
+      const prose = draft.split(/\n{2,}|(?<=[.!?])\s+/).filter(part => {
+        const b = part.trim().toLowerCase().replace(/^\*+|\*+$/g, "").replace(/\s*[.!]\s*$/, "");
+        return b !== bare && !(bare.length > 12 && b.startsWith(bare));
+      }).join(" ").replace(/\s{2,}/g, " ").trim();
+      return prose ? `${prose}\n\n${renderActionLine(t)}` : renderActionLine(t);
+    };
+    const lines = (x: string) => (x.match(/^\*[^*]+\*$/gm) || []).length;
+    const times = (hay: string, needle: string) =>
+      hay.toLowerCase().split(needle.toLowerCase().replace(/\s*[.!]\s*$/, "")).length - 1;
+
+    const PROTEIN = "Make your next meal a proper protein meal.";
+    const REST = "Rest today — your body is doing the work.";
+    const LOG = "Log one meal today. Any meal.";
+
+    const a = compose("That's a tough week and it makes sense you're flat. Train chest today.", PROTEIN);
+    assert.ok(!/train chest/i.test(a), "the model's instruction reached the client");
+    assert.equal(lines(a), 1, "a decision turn must carry exactly one action line");
+    assert.ok(/tough week/i.test(a), "empathy must survive — that is what the model is for");
+
+    // The paths that reach tellDontAsk already put the todo in the prose. A first version
+    // de-duplicated on blank lines only, but the strip rejoins sentences with a space, so the
+    // client was told the same thing twice and the action-line count still read 1.
+    const b = compose(`You're wiped. Go train today.\n\n${REST}`, REST);
+    assert.ok(!/go train/i.test(b), "the contradiction must not ship");
+    assert.equal(lines(b), 1);
+    assert.equal(times(b, REST), 1, "the instruction must appear exactly once in the whole reply");
+
+    // NONE turn: no action line at all, conversation retained.
+    const c = compose("I hear you — that sounds heavy. Go for a 20-minute walk.", "");
+    assert.equal(lines(c), 0, "no decision means no action line");
+    assert.ok(/hear you/i.test(c), "…and the conversation is kept, not replaced");
+
+    // Clarification never receives one.
+    const d = compose("Did you mean 500g or 50g?", LOG, true);
+    assert.equal(lines(d), 0);
+    assert.ok(/500g or 50g/.test(d));
+
+    // Deterministic replies are a different authority.
+    const det = stripModelDirectives("Drop your calories to 1,800.", { modelAuthored: false } as any);
+    assert.equal(det.kept, "Drop your calories to 1,800.");
+  });
+
+  check("the residue is instrumented for beta, not argued about", () => {
+    const sc = readFileSync("server/self-check.ts", "utf-8");
+    assert.ok(/coachdirective:\$\{onDecisionTurn \? "stripped_on_action" : "stripped_on_hold"\}/.test(sc),
+      "a stripped model instruction must be counted, separately for hold and decision turns");
+    const log = readFileSync("server/handlers/chat-log.ts", "utf-8");
+    assert.ok(/recordDirectiveStripped\(decisionTurn\)/.test(log),
+      "…and the boundary must actually record it");
   });
 
   check("the model's own instruction never survives, licensed or not", async () => {

@@ -454,6 +454,22 @@ const PRESCRIPTIVE: ReadonlySet<ActionKind> = new Set<ActionKind>(["protein", "w
  * would have given: an unevidenced prescription is downgraded to the measurement that would
  * justify one, or held.
  */
+/**
+ * THE ONE ACTION LINE (2026-08-21). The behavioural instruction, rendered from the canonical
+ * decision, in the coach's voice — and the ONLY place a decision turn's instruction is composed.
+ *
+ * It is a separate line, not a sentence folded into prose, for a reason that is architectural
+ * rather than cosmetic: a decision turn must carry EXACTLY ONE instruction, and one line that
+ * code owns is countable. Prose the model wrote is not.
+ *
+ * No new vocabulary — `todo` is what chooseAction already produces, in the voice it already has.
+ * This only decides that it stands alone.
+ */
+export function renderActionLine(todo: string): string {
+  const t = String(todo || "").trim();
+  return t ? `*${t.replace(/\s*[.!]\s*$/, "")}*` : "";
+}
+
 export function underPolicy(action: OneAction, opts: { evidenced: boolean; dreamGoal?: string | null }): OneAction {
   if (!PRESCRIPTIVE.has(action.kind) || opts.evidenced) return action;
   return holdAction(opts.dreamGoal);
