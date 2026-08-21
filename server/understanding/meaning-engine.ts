@@ -163,6 +163,8 @@ export interface MeaningInput {
   deficitEvidence?: DeficitEvidence;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   emitActions?: boolean;
+  /** The already-made coaching decision, stated to the model before it writes. */
+  decisionBrief?: string;
 }
 
 export interface MeaningResult {
@@ -251,6 +253,10 @@ Rules: CONTINUE means do not invent a change merely to create novelty. INVESTIGA
       snapshot ? `THEIR REAL NUMBERS (authoritative — quote these, never invent):\n${snapshot}` : "",
       input.hungerEvidence ? renderHungerEvidence(input.hungerEvidence) : "",
       input.deficitEvidence ? renderDeficitEvidence(input.deficitEvidence) : "",
+      // THE DECISION, DECLARED BEFORE THE PROSE (2026-08-21). Same order as the gpt path: the
+      // coach's decision engine has already chosen, and the model's job is to say it in its own
+      // words — not to decide and be second-guessed afterwards.
+      input.decisionBrief || "",
     ].filter(Boolean);
 
     const messages: any[] = [

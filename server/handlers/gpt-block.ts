@@ -4,6 +4,7 @@ import { eq, desc, and, gte } from "drizzle-orm";
 import { askCoachK, getSAContextFlags, getNowContextSA, isUnderGPTCallLimit, selectModel, classifyIntent, type ClassifiedIntent } from "../gpt";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "../agents";
 import { buildClientSnapshot } from "../brain/client-snapshot";
+import { canonicalDecision, decisionBrief } from "../understanding/live";
 import { getToneMode, toneSteer } from "../tone-mode";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { recomputeTodayFoodTotals } from "./food-scanner";
@@ -367,6 +368,9 @@ RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K — apply the SCENARIO GUIDE f
   const isDiabetic = (user.medicalConditions || "").includes("diabetes");
   const isNutritionOrExerciseQ = /\b(eat|food|meal|carb|sugar|glucose|blood sugar|exercise|train|workout|walk|steps|insulin|medication|metformin)\b/i.test(m);
   let finalInstruction = instruction;
+  // Computed here rather than after generation: canonicalDecision reads state, never the reply,
+  // so nothing forces it to run late. Reused by tellDontAsk below, so it is asked once per turn.
+  const decision = await canonicalDecision(user).catch(() => ({ todo: "", kind: "hold" }));
   if (isDiabetic && isNutritionOrExerciseQ) {
     finalInstruction = `DIABETES COACHING ACTIVE: This client has diabetes. Apply ALL of the following:\n- Low GI carbs only: samp and beans, oats, sweet potato, brown rice. Never white pap alone.\n- Never recommend skipping meals — blood sugar stability is critical.\n- Train 1-2 hours after eating, never fasted.\n- Consistent meal timing is non-negotiable — same times every day.\n- Metformin causes nausea if taken without food — always advise with a meal.\n- Weight loss of even 5% significantly improves insulin sensitivity — celebrate every kg lost.\n\n` + instruction;
   }
@@ -644,6 +648,13 @@ SA voice. Direct. Coach forward, not backward.`;
       const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 120}g | Steps target: ${user.stepsTarget || 8500}`;
       gptReply = await adminAgent(user, message, "log", message, targetValue);
     } else {
+      // THE DECISION IS DECLARED BEFORE THE PROSE (2026-08-21). It used to be computed AFTER
+      // generation and stapled on by tellDontAsk, which meant the model wrote whatever it liked
+      // and a verifier tried to work out afterwards what it had decided. Now the already-made
+      // decision goes into the prompt, the model RENDERS it, and the validator checks a declared
+      // fact. chooseAction is still the only thing that decides; this only tells the model what
+      // it decided.
+      finalInstruction = `${decisionBrief(decision)}\n\n${finalInstruction}`;
       gptReply = await withTimeout("gpt_coach", 30000, () => askCoachK(message, user, finalInstruction, memoryContext, SCENARIO_GUIDE));
     }
     // If specialist agent returned its own error string, fall back to full Coach K
@@ -671,10 +682,10 @@ SA voice. Direct. Coach forward, not backward.`;
   // instruction computed from THIS member's actual state; when there is genuinely nothing to
   // instruct, computeNextMove returns "" and the question survives untouched — asking is not
   // banned, deferring the decision is.
-  try {
-    const { computeNextMove } = await import("../understanding/live");
-    finalReply = tellDontAsk(finalReply, await computeNextMove(user));
-  } catch (e) { console.warn("[TELL_DONT_ASK] non-fatal:", (e as any)?.message); }
+  // The SAME decision the model was handed above — asked once, used twice. A hand-back still
+  // gets replaced by the instruction; the difference is that the model already knew what it was.
+  try { finalReply = tellDontAsk(finalReply, decision.todo); }
+  catch (e) { console.warn("[TELL_DONT_ASK] non-fatal:", (e as any)?.message); }
 
   // NUMBER-FREE DELIVERY IN CONVERSATION (2026-07-15): the number-free default only
   // reached food/photo replies — a normal conversation still quoted calories to a

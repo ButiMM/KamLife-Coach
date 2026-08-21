@@ -573,6 +573,52 @@ async function main() {
     }
   });
 
+  // ── THE DECISION IS DECLARED BEFORE THE PROSE, NOT INFERRED AFTER IT ──────────────────────
+  //
+  //     authoritative state → chooseAction → canonicalTodo → GPT renders → validated against it
+  //
+  // The old order was the reverse: the model wrote whatever it liked, tellDontAsk stapled the
+  // decision on afterwards, and a verifier tried to work out from English what the model had
+  // decided. canonicalDecision reads state and never the reply, so nothing ever forced it to run
+  // late — it just always had.
+  check("both model paths are told the decision BEFORE they generate", () => {
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
+    const code = gpt.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const decidedAt = code.indexOf("canonicalDecision(");
+    const injectedAt = code.indexOf("decisionBrief(decision)");
+    const generatedAt = code.indexOf("askCoachK(message, user, finalInstruction");
+    assert.ok(decidedAt > 0 && injectedAt > 0 && generatedAt > 0, "all three points exist on the gpt path");
+    assert.ok(decidedAt < injectedAt && injectedAt < generatedAt,
+      "the decision must be made, then stated to the model, then rendered — in that order");
+
+    const live = readFileSync("server/understanding/live.ts", "utf-8");
+    const liveCode = live.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const eDecided = liveCode.indexOf("const engineDecision = await canonicalDecision(");
+    const eRan = liveCode.indexOf("runMeaningEngine({");
+    assert.ok(eDecided > 0 && eRan > eDecided,
+      "the engine must be handed the decision before it is invoked");
+    assert.ok(/decisionBrief: decisionBrief\(engineDecision\)/.test(liveCode),
+      "…and the brief must actually be passed into the engine input");
+  });
+
+  check("the decision the model was told is the decision the reply closes with", () => {
+    // The property is not "compute it once" — it is that the append at the END reuses the value
+    // DECLARED at the start. Recomputing at append time lets the two disagree: the model told one
+    // thing, the reply closing with another.
+    for (const f of ["server/handlers/gpt-block.ts", "server/understanding/live.ts"]) {
+      const code = readFileSync(f, "utf-8")
+        .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+      for (const line of code.split("\n")) {
+        if (!/tellDontAsk\(/.test(line)) continue;
+        assert.ok(!/await\s+(?:computeNextMove|canonicalDecision)\(/.test(line),
+          `${f} recomputes the decision when appending it, instead of reusing the one the model `
+          + `was given: ${line.trim().slice(0, 100)}`);
+        assert.ok(/decision\.todo|engineDecision\.todo/.test(line),
+          `${f} appends something other than the declared decision: ${line.trim().slice(0, 100)}`);
+      }
+    }
+  });
+
   check("the model paths prescribe THROUGH the decision owner, never beside it", () => {
     // Every place that appends an instruction to a model reply must take it from computeNextMove,
     // and computeNextMove must ask chooseAction under the policy contract. Otherwise GPT or the
@@ -582,7 +628,10 @@ async function main() {
         .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
       for (const line of code.split("\n")) {
         if (!/tellDontAsk\(/.test(line)) continue;
-        assert.ok(/computeNextMove\(/.test(line),
+        // Updated 2026-08-21: the decision is now DECLARED before generation and the same value
+        // is reused here, so the thing to assert is that it came from the canonical decision —
+        // by either name — not that it was recomputed by computeNextMove at this point.
+        assert.ok(/computeNextMove\(|decision\.todo|engineDecision\.todo/.test(line),
           `${f} appends an instruction that did not come from the decision owner: ${line.trim().slice(0, 90)}`);
       }
     }

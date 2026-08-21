@@ -50,7 +50,20 @@ import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable,
  */
 // Exported (2026-08-11, P2-E WI1) so the GPT fallback path can shape its reply with the SAME
 // computed instruction the engine uses. One owner for "what should this member do next".
-export async function computeNextMove(user: any): Promise<string> {
+/**
+ * THE DECISION, AS A DECLARABLE FACT (2026-08-21).
+ *
+ * Returns the canonical decision so it can be handed to the model BEFORE the prose is written,
+ * and validated against afterwards. `computeNextMove` below keeps the string-only shape its
+ * existing callers use.
+ *
+ * The order this establishes is the whole point:
+ *
+ *     authoritative state → chooseAction → canonicalTodo → GPT renders → validated against it
+ *
+ * rather than the model deciding in prose and a verifier trying to work out what it decided.
+ */
+export async function canonicalDecision(user: any): Promise<{ todo: string; kind: string }> {
   try {
     // ONE CONSTITUTION (2026-08-21). This called theNextMove(), a SECOND ranked ladder —
     // training → protein → calories → steps → scale — that produced "the one thing to do" from
@@ -98,10 +111,31 @@ export async function computeNextMove(user: any): Promise<string> {
     const { turnEvidence } = await import("../handlers/chat-log");
     turnEvidence({ canonicalKind: act.kind, canonicalTodo: act.kind === "hold" ? null : act.todo });
 
-    // "hold" means the honest answer is that nothing needs changing. An empty string is what
+    // "hold" means the honest answer is that nothing needs changing. An empty todo is what
     // tellDontAsk expects in that case, and it is what the old ladder returned too.
-    return act.kind === "hold" ? "" : act.todo;
-  } catch { return ""; }
+    return { todo: act.kind === "hold" ? "" : act.todo, kind: act.kind };
+  } catch { return { todo: "", kind: "hold" }; }
+}
+
+/** The string form, for the callers that only append it. */
+export async function computeNextMove(user: any): Promise<string> {
+  return (await canonicalDecision(user)).todo;
+}
+
+/**
+ * THE DECISION, STATED TO THE MODEL. Injected into the prompt before generation, so the model is
+ * RENDERING a decision rather than making one — and the validator downstream is checking a
+ * declared fact rather than inferring intent from English.
+ */
+export function decisionBrief(d: { todo: string; kind: string }): string {
+  return d.todo
+    ? `COACHING DECISION FOR THIS TURN (already made, by the coach's own decision engine): "${d.todo}"\n`
+      + `Say this in your own words, naturally, as part of your reply. You may phrase it however `
+      + `fits the conversation. Do NOT add any other instruction, and do NOT attach a number to it `
+      + `that is not already in the sentence above.`
+    : `COACHING DECISION FOR THIS TURN: none. The verdict is to change nothing today.\n`
+      + `Answer them, explain, encourage — but do NOT tell them to train, rest, walk, weigh, eat `
+      + `differently, or change any target. There is no instruction to give this turn.`;
 }
 import { classifyDomain } from "./domain-guard";
 import { captureFriction } from "../friction";
@@ -362,7 +396,12 @@ export async function runMeaningEngineLive(ctx: {
 
     const strategyTurn = isStrategyOrEmotional(message);
     if (strategyTurn) console.log(`[ENGINE] strategy/emotional turn — action tools withheld`);
-    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, hungerEvidence, deficitEvidence, history: bridgeNote ? [...history, bridgeNote] : history, emitActions: actionMode !== "off" && !strategyTurn });
+    // THE DECISION FIRST, THEN THE PROSE. canonicalDecision reads state and never the reply, so
+    // nothing forced it to run after generation — it just always had. Declaring it here makes the
+    // model a renderer of a decision chooseAction already made, and makes the downstream check a
+    // validation of a stated fact rather than an inference from English.
+    const engineDecision = await canonicalDecision(user).catch(() => ({ todo: "", kind: "hold" }));
+    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, hungerEvidence, deficitEvidence, history: bridgeNote ? [...history, bridgeNote] : history, emitActions: actionMode !== "off" && !strategyTurn, decisionBrief: decisionBrief(engineDecision) });
     if (!result) return null; // fail-open → existing pipeline runs
 
     // Grow the client's durable memory (fail-open — a save miss never blocks the reply).
@@ -505,7 +544,7 @@ export async function runMeaningEngineLive(ctx: {
           if (afterTools.trim()) {
             const gate2 = await safetyGate(afterTools, user, message);
             let shaped = sanitizeCoachReply(gate2.response, message, user.weeklyFoodBudget, user.injuries);
-            shaped = tellDontAsk(localiseSuggestion(shaped, { menu: !!matchRestaurant(message) || !!matchRestaurant(shaped) }), await computeNextMove(user));
+            shaped = tellDontAsk(localiseSuggestion(shaped, { menu: !!matchRestaurant(message) || !!matchRestaurant(shaped) }), engineDecision.todo);
             if (shaped.trim()) {
               await logChat(user.id, message, shaped, "ENGINE_AFTER_TOOLS").catch(() => {});
               return shaped;
@@ -527,7 +566,7 @@ export async function runMeaningEngineLive(ctx: {
     // The REPLY is checked as well as the message: on a follow-up ("what if I skip the chips?")
     // the client no longer names the place, but the coach still does ("Enjoy your time at Spur"),
     // so the reply is what carries the menu context through the rest of the conversation.
-    reply = tellDontAsk(localiseSuggestion(reply, { menu: !!matchRestaurant(message) || !!matchRestaurant(reply) }), await computeNextMove(user));
+    reply = tellDontAsk(localiseSuggestion(reply, { menu: !!matchRestaurant(message) || !!matchRestaurant(reply) }), engineDecision.todo);
     if (getNumbersMode(user) === "low") reply = stripNumbersFromProse(reply);
     if (!reply.trim()) return null;
 
