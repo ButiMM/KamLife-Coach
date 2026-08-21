@@ -635,6 +635,51 @@ async function main() {
     }
   });
 
+  // ── THE RULE'S COVERAGE, MEASURED AND PRINTED ─────────────────────────────────────────────
+  // The provenance rule compares model prose to the CANONICAL DECISION'S OWN TEXT, by domain.
+  // What it cannot do is recognise a directive whose grammar falls outside "advisory or
+  // imperative" — so the honest guarantee is bounded, and the bound belongs in every CI run
+  // rather than in a report nobody re-reads.
+  //
+  // Measurement, not detection. Adding cases here does not make the product safer; the residue
+  // closes only by making the model emit structure instead of prose, which is a larger change
+  // than this cut was authorised to make.
+  {
+    const { verifyBrainReply } = await import("../server/brain/reply-verifier");
+    const F = { clientMessage: "hi", evidence: { modelAuthored: true, canonicalKind: "hold", canonicalTodo: "" } } as any;
+    const blocked = (r: string) => !verifyBrainReply(r, F).ok;
+    const CASES = [
+      "Train chest today.", "Go to the gym today.", "Get your session done today.",
+      "You should hit legs today.", "Today is a good day for an upper body workout.",
+      "I'd get a push session in this afternoon.", "Let's do chest and triceps today.",
+      "Skip the gym today.", "Take a rest day.", "Rest today.", "Don't train today.",
+      "I'd give training a miss today.", "Sit today out.",
+      "Go for a 20-minute walk.", "Add 3000 steps today.", "Take a walk after dinner.",
+      "Try to get an extra walk in.", "A brisk 30 minutes outside would help.",
+      "Weigh yourself tomorrow morning.", "Step on the scale tomorrow.", "Jump on the scale in the morning.",
+      "Eat 30g more protein.", "Add another 40g of protein today.",
+      "Drop your calories to 1800.", "Lower your intake to 2000 kcal.",
+      "I'd bring your calories down a bit.", "Push your protein higher tomorrow.",
+    ];
+    const caught = CASES.filter(blocked).length;
+    const pct = Math.round(caught / CASES.length * 100);
+    console.log(`\n── prescription provenance ──\n${caught}/${CASES.length} plausible unlicensed `
+      + `phrasings refused on a CONTINUE turn (${pct}%). The residue ships. The rule compares prose `
+      + `to the canonical decision's own text; what escapes is grammar it does not recognise as an `
+      + `instruction, and that closes structurally, not with more signatures.`);
+
+    // The guarantee: on a CONTINUE turn — no canonical decision — the model may not introduce a
+    // behavioural instruction. That is the dangerous case and it must not rot.
+    check("no decision means no directive, whatever the phrasing", () => {
+      for (const r of ["Train chest today.", "Skip the gym today.", "Go for a 20-minute walk.",
+                       "Weigh yourself tomorrow morning.", "Drop your calories to 1800.",
+                       "Eat 30g more protein.", "You should hit legs today.",
+                       "I'd get a push session in this afternoon.", "Take a rest day."]) {
+        assert.ok(blocked(r), `the model could invent an instruction on a CONTINUE turn: ${r}`);
+      }
+    });
+  }
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");

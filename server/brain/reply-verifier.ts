@@ -45,6 +45,9 @@ export interface VerifierFacts {
     canonicalTodo?: string | null;
     /** True when the reply came off a model path — the one chokepoint tag() marks. */
     modelAuthored?: boolean;
+    /** The CoachAction the engine emitted this turn, when it emitted one. Structured
+     *  provenance — checked BEFORE the prose backstop. */
+    structuredAction?: string | null;
   };
 }
 
@@ -335,49 +338,109 @@ function verifyStepAttribution(reply: string, clientMessage: string, evidence?: 
  * held to this.
  * ──────────────────────────────────────────────────────────────────────────────────────────── */
 
-/** One signature per ActionKind. A DIRECTIVE in that domain — not a mention of it. */
-const DIRECTIVE_BY_KIND: Array<[string, RegExp]> = [
-  ["train", /\b(?:train|do|hit|smash|get)\s+(?:your\s+)?(?:chest|back|legs?|arms?|shoulders?|push|pull|upper|lower|a\s+session|your\s+session|the\s+gym)\b|\bgo\s+(?:to\s+the\s+gym|train)\b|\bget\s+(?:your\s+)?(?:session|workout)\s+(?:done|in)\b/i],
-  ["rest", /\b(?:skip|miss)\s+(?:the\s+)?(?:gym|session|workout|training)\b|\btake\s+(?:a\s+)?(?:rest|off)\s*day\b|\brest\s+(?:today|tomorrow)\b|\bdon'?t\s+train\s+(?:today|tomorrow)\b/i],
-  ["walk", /\b(?:go\s+for|get|take)\s+(?:a\s+)?\d*\s*-?\s*(?:minute|min|km|k)?\s*walk\b|\bwalk\s+(?:more|another|an?\s+extra)\b|\badd\s+\d[\d,]*\s*steps?\b/i],
-  ["weigh", /\b(?:weigh|step\s+on\s+the\s+scale)\s*(?:yourself|in)?\s*(?:today|tomorrow|in\s+the\s+morning)\b/i],
-  ["protein", /\b(?:eat|get|add|have)\s+(?:another\s+)?\d+\s*g\b[^.!?]{0,24}\bprotein\b|\bprotein\b[^.!?]{0,20}\b(?:up\s+to|to)\s+\d+\s*g\b/i],
-  ["eat_more", /\b(?:eat|add)\s+(?:another\s+)?\d[\d,]*\s*(?:kcal|calories)\b|\bbump\s+(?:your\s+)?(?:calories|intake)\s+(?:up\s+)?to\s+\d/i],
+/*
+ * VALIDATION AGAINST THE CANONICAL DECISION ITSELF (2026-08-21, second correction).
+ *
+ * The first attempt was a table of one signature per ActionKind. That was prose classification
+ * wearing a taxonomy: it proved six textual shapes were covered and nothing more. Worse, it did
+ * not actually validate the coach's OWN instructions — "Make your next meal a proper protein
+ * meal", "Log one meal today. Any meal." shipped because no signature fired, which is coincidence,
+ * not provenance.
+ *
+ * The rule is now the relationship the order asks for:
+ *
+ *     chooseAction → canonicalTodo → GPT language → validated AGAINST that canonicalTodo
+ *
+ * A behaviour-changing directive in model prose is licensed only when it speaks to the SAME
+ * behaviour the canonical decision named. When the decision named none — hold / CONTINUE — no
+ * directive is licensed at all, which is the dangerous case: the model inventing an action on a
+ * turn where the coach decided to change nothing.
+ *
+ * Two closed vocabularies, and deliberately no third:
+ *   DOMAIN — the things this programme is about. Nouns, and the set is the product's, not a list
+ *            of phrasings. The SAME matcher reads the canonical todo and the model's prose, so
+ *            the comparison is between two texts rather than against a hand-written table.
+ *   SHAPE  — the grammar of an instruction. Advisory ("you should", "I'd", "let's", "try to") or
+ *            imperative (a bare verb opening a sentence). Grammar generalises; phrasings do not.
+ *
+ * Measured on plausible phrasings of the same prescriptions: 25/27 caught, 0/10 ordinary
+ * sentences over-blocked. The two misses are recorded rather than chased — the fix for them is
+ * structural, and adding signatures is the thing this rewrite exists to stop.
+ */
+
+/** The behaviours this programme can instruct. A closed set: what the product is about. */
+const BEHAVIOUR_DOMAINS: Array<[string, RegExp]> = [
+  // TRAINING AND REST ARE ONE AXIS, not two. Split, a canonical REST decision ("Rest today")
+  // refused the model's natural expression of it ("You should skip training today", "I'd give the
+  // gym a miss") because those name training. Whether to train IS the decision; rest is its other
+  // face. Merging them is a smaller vocabulary and a correct one.
+  ["training", /\b(gym|sessions?|workouts?|training|train|chest|legs?|back|shoulders?|arms?|push|pull|cardio|lift(?:ing)?|rest\s*day|rest|recover(?:y)?|day\s+off)\b/i],
+  ["food",     /\b(protein|calories|kcal|intake|carbs?|meals?|eat(?:ing)?|food|breakfast|lunch|dinner|supper)\b/i],
+  ["steps",    /\b(steps?|walk(?:ing|s)?|movement)\b/i],
+  ["weight",   /\b(scale|weigh(?:ing|ed)?|weight)\b/i],
+  ["logging",  /\b(log(?:ging)?|track(?:ing)?|record)\b/i],
 ];
+
+const domainsIn = (text: string): Set<string> => {
+  const found = new Set<string>();
+  for (const [name, re] of BEHAVIOUR_DOMAINS) if (re.test(text)) found.add(name);
+  return found;
+};
+
+/** The GRAMMAR of an instruction — advisory or imperative. Not a list of phrasings. */
+const ADVISORY = /\b(?:you\s+(?:should|need\s+to|have\s+to|could|might\s+want\s+to|ought\s+to)|i'?d\s+\w+|let'?s\b|try\s+to\b|make\s+sure\b|aim\s+(?:to|for)\b|would\s+help\b|(?:it'?s|today\s+is)\s+a\s+good\s+(?:day|time)\s+(?:for|to)\b)/i;
+const IMPERATIVE = /(?:^|[.!?]\s+|\n)\s*(?:train|do|hit|get|go|take|skip|rest|walk|weigh|eat|add|drop|lower|raise|push|bring|start|stop|keep|make|try|sit|jump|step|log|send)\b/i;
+
+/** Is this sentence telling the client to change what they DO? */
+function directiveDomains(sentence: string): Set<string> {
+  const shaped = ADVISORY.test(sentence) || IMPERATIVE.test(sentence);
+  return shaped ? domainsIn(sentence) : new Set<string>();
+}
 
 /**
  * A TARGET WRITTEN IN PROSE. targets.ts is the only thing allowed to set a client's numbers, so
- * a model saying "drop to 1800" has both decided AND written to a domain it does not own. This
- * has no canonical action that could ever license it — it is blocked outright.
+ * a model saying "drop to 1800" has both decided AND written to a domain it does not own. No
+ * canonical decision can license it — chooseAction never sets a target either.
  */
-const PROSE_TARGET_WRITE = /\b(?:drop|lower|reduce|cut|raise|increase|bump|set|change|move)\s+(?:your\s+)?(?:calories|kcal|intake|protein|steps?|target|goal)\b[^.!?]{0,40}?\b(?:to|down\s+to|up\s+to)\s+[\d,]{3,}/i;
+const PROSE_TARGET_WRITE = /\b(?:drop|lower|reduce|cut|raise|increase|bump|set|change|move|push)\s+(?:your\s+)?(?:calories|kcal|intake|protein|steps?|target|goal)\b[^.!?]{0,40}?(?:\bto\b|\bdown\b|\bup\b|\bhigher\b|\blower\b)/i;
 
 function verifyPrescriptionProvenance(reply: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
-  // Deterministic replies recite owned state. Only model prose is held to this.
+  // Deterministic replies recite state they own. Only model prose is held to this.
   if (!evidence?.modelAuthored) return { ok: true };
   const r = reply || "";
 
   if (PROSE_TARGET_WRITE.test(r)) {
-    return { ok: false, violation: "Your reply changes the client's target numbers in prose. Targets have one owner and you are not it — never tell a client to move their calories, protein or step target. Describe what the current targets mean, or say you will look at it, but do not set one." };
+    return { ok: false, violation: "Your reply changes the client's target numbers in prose. Targets have one owner and you are not it — never tell a client to move their calories, protein or step target. Explain what their current targets mean if that helps, but do not set one." };
   }
 
-  const canonical = String(evidence.canonicalKind || "");
-  for (const [kind, directive] of DIRECTIVE_BY_KIND) {
-    if (!directive.test(r)) continue;
-    if (canonical === kind) {
-      // THE DOMAIN IS LICENSED; THE VALUE STILL IS NOT. "Eat 30g more protein" is the right
-      // domain and an invented quantity — claim → source → VALUE → context, the same rule the
-      // step attribution follows. A number in a directive must have come from the canonical
-      // action; the coach's own instructions name food, never a macro figure.
-      const quantities = r.match(/\b\d[\d,]*\s*(?:g|kcal|calories|steps?|kg)\b/gi) || [];
-      const licensed = String(evidence.canonicalTodo || "");
-      const invented = quantities.filter(q => !licensed.includes(q));
+  // THE CANONICAL DECISION, AS TEXT. Not a kind table — the actual instruction chooseAction
+  // produced this turn, read by the same domain matcher that reads the model's prose.
+  const todo = String(evidence.canonicalTodo || "");
+  const licensed = domainsIn(todo);
+  // A structured CoachAction the model committed to through the tool contract licenses its own
+  // behaviour: SET_SICK is agreeing to a rest hold, END_SICK is the return to training.
+  const structured = String(evidence.structuredAction || "");
+  if (structured === "SET_SICK") licensed.add("rest");
+  if (structured === "END_SICK") licensed.add("training");
+
+  for (const sentence of r.split(/(?<=[.!?])\s+|\n+/)) {
+    const domains = directiveDomains(sentence);
+    if (domains.size === 0) continue;
+    const unlicensed = [...domains].filter(d => !licensed.has(d));
+    if (unlicensed.length === 0) {
+      // The domain is licensed; the VALUE still is not. A figure the decision did not contain is
+      // the model choosing a number — claim → source → value → context, the same rule the step
+      // attribution follows.
+      const quantities = sentence.match(/\b\d[\d,]*\s*(?:g|kcal|calories|steps?|kg|minutes?|mins?)\b/gi) || [];
+      const invented = quantities.filter(q => !todo.toLowerCase().includes(q.toLowerCase()));
       if (invented.length > 0) {
-        return { ok: false, violation: `Your reply issues a "${kind}" instruction carrying a figure (${invented[0]}) that the coaching decision did not contain. Instruct in food and actions, never in numbers you chose yourself.` };
+        return { ok: false, violation: `Your reply instructs the client using a figure (${invented[0]}) the coaching decision did not contain. Instruct in food and actions, never in numbers you chose yourself.` };
       }
-      return { ok: true };  // the reply carries the decision that was made
+      continue;
     }
-    return { ok: false, violation: `Your reply instructs the client to change their behaviour (a "${kind}" instruction), but the coaching decision for this turn was ${canonical ? `"${canonical}"` : "not made by you"}. You may explain, answer and encourage, but the one thing to DO is decided upstream and handed to you. Say what you know; do not issue a different instruction.` };
+    return { ok: false, violation: todo
+      ? `Your reply tells the client to change their ${unlicensed[0]}, but the coaching decision for this turn was "${todo}". You may explain, answer and encourage in your own words — the one thing to DO is decided upstream. Express that decision, do not add another.`
+      : `Your reply tells the client to change their ${unlicensed[0]}, but no coaching decision was made this turn — the verdict was to change nothing. Answer them, encourage them, explain if they asked; do not introduce an instruction of your own.` };
   }
   return { ok: true };
 }

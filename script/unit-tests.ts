@@ -1861,56 +1861,99 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
       "the surviving constitution ranks protein above an unused training day");
   });
 
-  // ── PRESCRIPTION PROVENANCE (2026-08-21) ────────────────────────────────────────────────
-  // tellDontAsk catches ONE shape: a question handed back. "Train chest today." has no question
-  // mark and is already a decision, so the claim "GPT prescribes through chooseAction" was false
-  // for arbitrary model output. A behaviour-changing directive in model prose must correspond to
-  // the turn's canonical action, or it does not ship.
+  // ── PRESCRIPTION PROVENANCE, VALIDATED AGAINST THE CANONICAL DECISION ────────────────────
+  //
+  //     chooseAction → canonicalTodo → GPT language → validated AGAINST that canonicalTodo
+  //
+  // The first attempt was a table of one signature per ActionKind: prose classification wearing a
+  // taxonomy. It proved six textual shapes were covered, and it did not even validate the coach's
+  // OWN instructions — "Make your next meal a proper protein meal" shipped because no signature
+  // fired, which is coincidence, not provenance.
+  //
+  // Now the model's prose is compared to the DECISION'S OWN TEXT by the same domain matcher. A
+  // behaviour-changing sentence is licensed only when it speaks to the behaviour the decision
+  // named; when the decision named none, none is licensed.
   {
     const V = await import("../server/brain/reply-verifier");
-    const model = (canonicalKind: string | null, canonicalTodo?: string) =>
-      ({ clientMessage: "how's it going", evidence: { modelAuthored: true, canonicalKind, canonicalTodo } }) as any;
-    const blocked = (reply: string, facts: any) => !V.verifyBrainReply(reply, facts).ok;
+    const under = (canonicalTodo: string, extra: Record<string, unknown> = {}) =>
+      ({ clientMessage: "hi", evidence: { modelAuthored: true, canonicalTodo,
+         canonicalKind: canonicalTodo ? "x" : "hold", ...extra } }) as any;
+    const ships = (r: string, todo: string, extra?: Record<string, unknown>) =>
+      V.verifyBrainReply(r, under(todo, extra)).ok;
 
-    test("provenance: a model cannot issue a behaviour-changing instruction of its own", () => {
-      for (const r of ["Train chest today.", "Skip the gym today.", "Go for a 20-minute walk.",
-                       "Weigh yourself tomorrow morning."]) {
-        assert.ok(blocked(r, model("protein")), `model prescribed without provenance: ${r}`);
+    const TRAIN = "Get today's session done.";
+    const REST = "Rest today — your body is doing the work.";
+    const PROTEIN = "Make your next meal a proper protein meal.";
+    const LOG = "Log one meal today. Any meal.";
+
+    test("provenance 1: canonical TRAIN can be phrased however the coach likes", () => {
+      for (const r of ["Get today's session done.", "Today's the day for your session — go and do it.",
+                       "You should get your workout in today.", "I'd hit the gym today if you can.",
+                       "Let's get that session done."]) {
+        assert.ok(ships(r, TRAIN), `a natural phrasing of the canonical decision was refused: ${r}`);
       }
     });
 
-    test("provenance: a model may never write a target in prose", () => {
-      // targets.ts is the only owner. No canonical action can ever license this.
-      assert.ok(blocked("Drop your calories to 1,800.", model("eat_more")));
-      assert.ok(blocked("Let's raise your protein target to 200.", model("protein")));
+    test("provenance 2: canonical REST can be phrased however the coach likes", () => {
+      // Training and rest are ONE axis. Split into two domains, "you should skip training today"
+      // read as a training directive under a REST decision and was wrongly refused.
+      for (const r of ["Rest today.", "Take a proper rest day.", "You should skip training today.",
+                       "I'd give the gym a miss today."]) {
+        assert.ok(ships(r, REST), `a natural phrasing of REST was refused: ${r}`);
+      }
     });
 
-    test("provenance: the right domain does not license an invented figure", () => {
-      // claim → source → VALUE → context. "Eat 30g more protein" is the right domain and a number
-      // the decision never contained.
-      assert.ok(blocked("Eat 30g more protein.", model("protein", "Make your next meal a proper protein meal.")),
-        "a gram figure the canonical action did not carry");
+    test("provenance 3: canonical PROTEIN expresses freely but may not invent a figure", () => {
+      for (const r of ["Make your next meal a proper protein meal.", "Get some protein into your next meal.",
+                       "You should make the next one a protein meal.",
+                       "I'd put eggs or tin fish on the next plate."]) {
+        assert.ok(ships(r, PROTEIN), `a natural phrasing of PROTEIN was refused: ${r}`);
+      }
+      assert.ok(!ships("Eat 30g more protein.", PROTEIN),
+        "the right behaviour does not license a number the decision never contained");
     });
 
-    test("provenance: a reply that CARRIES the decision passes", () => {
-      const todo = "Make your next meal a proper protein meal.";
-      assert.ok(!blocked(`Solid week. ${todo}`, model("protein", todo)));
+    test("provenance 4: canonical LOG can be phrased however the coach likes", () => {
+      for (const r of ["Log one meal today. Any meal.", "Send me one meal today.",
+                       "Just track one thing you eat today."]) {
+        assert.ok(ships(r, LOG), `a natural phrasing of LOG was refused: ${r}`);
+      }
     });
 
-    test("provenance: ordinary coaching language is untouched", () => {
+    test("provenance 5: a target can never be set in prose", () => {
+      // targets.ts is the only owner, and chooseAction never sets one either — so no canonical
+      // decision exists that could license this.
+      assert.ok(!ships("Drop your calories to 1800.", PROTEIN));
+      assert.ok(!ships("Let's raise your protein target higher.", PROTEIN));
+      assert.ok(!ships("I'd lower your intake to 2000 kcal.", ""));
+    });
+
+    test("provenance 6: no decision means no directive may appear", () => {
+      // THE DANGEROUS CASE. The coach decided to change nothing; the model must not fill silence
+      // with an instruction of its own.
+      for (const r of ["Train chest today.", "Take a rest day.", "Go for a 20-minute walk.",
+                       "You should weigh yourself tomorrow.", "I'd get a session in this afternoon."]) {
+        assert.ok(!ships(r, ""), `the model invented an instruction on a CONTINUE turn: ${r}`);
+      }
+    });
+
+    test("provenance 7: ordinary coaching language is untouched", () => {
       for (const r of ["Take care of yourself this week.",
                        "Yes, you can have the chicken — it fits your day.",
                        "That's a solid week. Protein is what protects muscle while you lean out.",
-                       "I hear you. That sounds like a hard few days."]) {
-        assert.ok(!blocked(r, model("hold")), `over-blocked ordinary language: ${r}`);
+                       "I hear you. That sounds like a hard few days.",
+                       "Well done. Genuinely.", "How did the session feel?",
+                       "That's completely normal when you're coming back from being ill.",
+                       "Your calorie target is 2,800 kcal and your protein target is 195g."]) {
+        assert.ok(ships(r, ""), `over-blocked ordinary language: ${r}`);
       }
+      // A factual step statement is governed by the step-attribution rule, which needs evidence.
+      assert.ok(ships("You logged 8,500 steps today.", "", { stepsToday: 8500 }));
     });
 
     test("provenance: a DETERMINISTIC reply reciting owned state is not held to this", () => {
-      // A handler stating a target is reading state it owns; a model doing it is deciding.
       const det = { clientMessage: "my targets", evidence: { modelAuthored: false } } as any;
-      assert.ok(!blocked("Your calorie target is 2,800 kcal and your protein target is 195g.", det));
-      assert.ok(!blocked("Drop your calories to 1,800.", det),
+      assert.ok(V.verifyBrainReply("Drop your calories to 1,800.", det).ok,
         "the rule applies to model prose only — a deterministic path is a different authority");
     });
   }

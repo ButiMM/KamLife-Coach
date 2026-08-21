@@ -296,6 +296,15 @@ Rules: CONTINUE means do not invent a change merely to create novelty. INVESTIGA
       }
     }
     const action: CoachAction = actions[0] ?? { type: "JUST_REPLY" };
+    // STRUCTURED PROVENANCE, WHERE IT EXISTS (2026-08-21). The action the model actually emitted
+    // is a fact about this turn; the prose beside it is not. Recording it lets the verifier judge
+    // a behaviour-changing sentence against something structural instead of against its wording.
+    // Note what this does NOT establish: `reply` below is msg.content — a SIBLING of the action,
+    // not a rendering of it. The model can emit JUST_REPLY and prescribe in prose regardless.
+    try {
+      const { turnEvidence } = await import("../handlers/chat-log");
+      turnEvidence({ structuredAction: action.type });
+    } catch { /* provenance is a bonus; never break the turn for it */ }
     const reply = (msg?.content || "").trim();
     if (!reply && action.type === "JUST_REPLY") return null;
 

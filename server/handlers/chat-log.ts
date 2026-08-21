@@ -117,6 +117,9 @@ interface TurnScope {
     canonicalKind?: string | null;
     canonicalTodo?: string | null;
     modelAuthored?: boolean;
+    /** The CoachAction the meaning engine emitted this turn, when it emitted one. Structured
+     *  provenance — checked BEFORE the prose backstop. */
+    structuredAction?: string | null;
   };
 }
 
