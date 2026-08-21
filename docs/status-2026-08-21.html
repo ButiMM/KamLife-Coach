@@ -1,0 +1,525 @@
+<title>The Hi That Didn't Work</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Public+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap">
+
+<style>
+  :root {
+    --ground:      #F5F7F3;
+    --surface:     #FFFFFF;
+    --surface-2:   #ECF0EA;
+    --ink:         #16211C;
+    --ink-soft:    #47554E;
+    --ink-faint:   #6E7D75;
+    --rule:        #D7DED6;
+    --rule-soft:   #E6EBE4;
+    --accent:      #1F5E43;
+    --accent-soft: #DCEBE2;
+    --bad:         #A6321F;
+    --bad-soft:    #F6E2DD;
+    --warn:        #8A6410;
+    --warn-soft:   #F5EBD4;
+    --good:        #1F5E43;
+    --good-soft:   #DCEBE2;
+    --bubble-in:   #FFFFFF;
+    --bubble-out:  #DDF3D8;
+    --term-bg:     #16211C;
+    --term-ink:    #CFDAD3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0E1411;
+      --surface:     #151D19;
+      --surface-2:   #1D2722;
+      --ink:         #E4EBE6;
+      --ink-soft:    #A9B7AF;
+      --ink-faint:   #7E8D85;
+      --rule:        #2A3630;
+      --rule-soft:   #212B26;
+      --accent:      #6BC79C;
+      --accent-soft: #1B3128;
+      --bad:         #E8917C;
+      --bad-soft:    #341A14;
+      --warn:        #D9AC55;
+      --warn-soft:   #33270F;
+      --good:        #6BC79C;
+      --good-soft:   #1B3128;
+      --bubble-in:   #1D2722;
+      --bubble-out:  #1F3A2B;
+      --term-bg:     #0A100D;
+      --term-ink:    #BCCAC2;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #0E1411;
+    --surface:     #151D19;
+    --surface-2:   #1D2722;
+    --ink:         #E4EBE6;
+    --ink-soft:    #A9B7AF;
+    --ink-faint:   #7E8D85;
+    --rule:        #2A3630;
+    --rule-soft:   #212B26;
+    --accent:      #6BC79C;
+    --accent-soft: #1B3128;
+    --bad:         #E8917C;
+    --bad-soft:    #341A14;
+    --warn:        #D9AC55;
+    --warn-soft:   #33270F;
+    --good:        #6BC79C;
+    --good-soft:   #1B3128;
+    --bubble-in:   #1D2722;
+    --bubble-out:  #1F3A2B;
+    --term-bg:     #0A100D;
+    --term-ink:    #BCCAC2;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16.5px;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 20px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 760px; margin: 0 auto; }
+
+  /* ── masthead ─────────────────────────────────────── */
+  .mast {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 56px 0 28px;
+    border-bottom: 2px solid var(--ink);
+  }
+  .kicker {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+  }
+  h1 {
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(2.1rem, 6vw, 3.05rem);
+    line-height: 1.06;
+    letter-spacing: -0.018em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-family: "Newsreader", Georgia, serif;
+    font-size: clamp(1.06rem, 2.4vw, 1.24rem);
+    line-height: 1.5;
+    color: var(--ink-soft);
+    margin: 0;
+    max-width: 60ch;
+  }
+
+  /* ── section scaffolding ──────────────────────────── */
+  section { padding: 44px 0 0; }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 6px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .sec-head .tag {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    padding-top: 4px;
+  }
+  h2 {
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(1.42rem, 3.6vw, 1.78rem);
+    line-height: 1.18;
+    letter-spacing: -0.012em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: "Public Sans", sans-serif;
+    font-weight: 700;
+    font-size: 0.99rem;
+    letter-spacing: 0.005em;
+    margin: 26px 0 6px;
+  }
+  p { margin: 0 0 14px; max-width: 66ch; }
+  p:last-child { margin-bottom: 0; }
+  a { color: var(--accent); }
+
+  strong { font-weight: 700; }
+  em.q { font-style: normal; font-family: "Newsreader", Georgia, serif; }
+
+  code, .mono {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.855em;
+  }
+  p code, li code, td code {
+    background: var(--surface-2);
+    border-radius: 3px;
+    padding: 0.1em 0.36em;
+  }
+
+  /* ── whatsapp reproduction ────────────────────────── */
+  .thread {
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 18px 16px;
+    margin: 20px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .bub {
+    max-width: 84%;
+    padding: 11px 14px;
+    border-radius: 12px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.07);
+  }
+  .bub .t {
+    display: block;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-top: 6px;
+    letter-spacing: 0.04em;
+  }
+  .bub.in  { background: var(--bubble-in);  align-self: flex-start; border-top-left-radius: 3px; }
+  .bub.out { background: var(--bubble-out); align-self: flex-end;   border-top-right-radius: 3px; }
+  .verdict {
+    align-self: center;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--bad);
+    background: var(--bad-soft);
+    border-radius: 999px;
+    padding: 4px 12px;
+  }
+
+  /* ── terminal ─────────────────────────────────────── */
+  pre.term {
+    background: var(--term-bg);
+    color: var(--term-ink);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin: 18px 0;
+    overflow-x: auto;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12.5px;
+    line-height: 1.72;
+  }
+  pre.term b { color: #F0A28F; font-weight: 400; }
+  pre.term i { color: #7FD4A8; font-style: normal; }
+  pre.term u { color: #7E8D85; text-decoration: none; }
+
+  /* ── tables ───────────────────────────────────────── */
+  .scroll { overflow-x: auto; margin: 20px 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+  }
+  th {
+    text-align: left;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 400;
+    padding: 0 14px 8px 0;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 14px 10px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+  }
+  td:last-child, th:last-child { padding-right: 0; }
+
+  .pill {
+    display: inline-block;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .pill.ok   { background: var(--good-soft); color: var(--good); }
+  .pill.bad  { background: var(--bad-soft);  color: var(--bad); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+
+  /* ── callouts ─────────────────────────────────────── */
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 16px 18px;
+    margin: 20px 0;
+  }
+  .note.stop { border-left-color: var(--bad); }
+  .note.hold { border-left-color: var(--warn); }
+  .note .lbl {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    display: block;
+    margin-bottom: 7px;
+  }
+  .note p { margin-bottom: 10px; }
+
+  ul, ol { margin: 0 0 14px; padding-left: 1.15em; max-width: 66ch; }
+  li { margin-bottom: 7px; padding-left: 0.15em; }
+
+  .open-item { padding: 18px 0; border-bottom: 1px solid var(--rule-soft); }
+  .open-item:last-child { border-bottom: 0; }
+  .open-item h3 { margin-top: 0; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .open-item p { font-size: 0.94rem; color: var(--ink-soft); margin-bottom: 0; }
+
+  footer {
+    margin-top: 52px;
+    padding-top: 20px;
+    border-top: 1px solid var(--rule);
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    color: var(--ink-faint);
+    line-height: 1.9;
+  }
+
+  @media (max-width: 560px) {
+    .sec-head { flex-direction: column; gap: 4px; }
+    .sec-head .tag { padding-top: 0; }
+    .bub { max-width: 94%; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="mast">
+    <div class="kicker">
+      <span>KamLife Coach</span>
+      <span>Engineering status</span>
+      <span>21 August 2026</span>
+    </div>
+    <h1>The Hi that didn't work</h1>
+    <p class="standfirst">A client on a health hold was told every morning to say Hi. The coach did not accept Hi. Two commits shipped; three things remain open, and one of them needs a decision that isn't mine.</p>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <span class="tag">What happened</span>
+      <h2>The founder's handset, 06:00</h2>
+    </div>
+
+    <p>Kam had been marked sick. Every morning the brief opened the same way, and the exit it offered did not exist.</p>
+
+    <div class="thread">
+      <div class="bub in">Morning Kam. Hope you're feeling better. When you're ready, just say Hi and we pick up from where you left off.<span class="t">06:00</span></div>
+      <div class="bub out">Hi<span class="t">✓✓</span></div>
+      <div class="bub in">Good morning Kam 👋 Training day — your session's ready.<span class="t">the menu — hold untouched</span></div>
+      <div class="verdict">next morning, the same message</div>
+    </div>
+
+    <p>The coach was asking for a password it would not accept. The hold could only end by expiry, or by the client guessing a phrase the coach had never mentioned.</p>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="tag">Cause</span>
+      <h2>Two files disagreeing about one contract</h2>
+    </div>
+
+    <p>The promise and the door were written in different vocabularies, in different files, and nothing compared them.</p>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Role</th><th>Location</th><th>Accepted</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>The mouth</td>
+            <td><code>morning-message.ts:113</code></td>
+            <td><em class="q">"just say Hi"</em></td>
+          </tr>
+          <tr>
+            <td>The door</td>
+            <td><code>sick-flow.ts:298</code></td>
+            <td><code>I'm back</code> · <code>feeling better</code> · <code>ready to train</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Measured directly against the recovery predicate:</p>
+
+<pre class="term"><b>STUCK  </b> "Hi"          <b>STUCK  </b> "Hey"      <b>STUCK  </b> "Morning"
+<b>STUCK  </b> "Hello"       <b>STUCK  </b> "yo"       <b>STUCK  </b> "Hi coach"
+<i>CLEARS </i> "I'm back"    <i>CLEARS </i> "feeling better"    <i>CLEARS </i> "I'm fine"</pre>
+
+    <p>A bare greeting fell through to the menu branch in <code>early-commands.ts</code>, which answered with the command list and left <code>sick_until</code> exactly where it was.</p>
+
+    <div class="note stop">
+      <span class="lbl">The part worth reporting</span>
+      <p>This is the same defect as the coach telling clients to <em class="q">Send <strong>this week</strong></em> when no handler owned the phrase — the mouth advertising a command the doors do not honour. A CI check for that exact disease was written four days ago, for the progress domain, and nobody asked whether the sick path had the same hole.</p>
+      <p>It did. The class of bug was known and the sweep was never done.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="tag">Shipped</span>
+      <h2>Two commits on main</h2>
+    </div>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Commit</th><th>Change</th><th>Files</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>832dbd0</code></td>
+            <td>The sick hold accepts the exit the brief advertises</td>
+            <td class="mono">4 · +94 −20</td>
+          </tr>
+          <tr>
+            <td><code>e4b7141</code></td>
+            <td>Weekly progress has one owner; the doors it cannot win, it no longer claims</td>
+            <td class="mono">5 · +117 −108</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>832dbd0 — the greeting fix</h3>
+    <ul>
+      <li>The greeting vocabulary moves to <code>constants.ts</code>. The menu branch and the sick handler now read the same list. Two readers, one list — <code>sick-flow</code> cannot import from <code>early-commands</code>, because <code>early-commands</code> imports <code>sick-flow</code>.</li>
+      <li>A bare greeting ends a <strong>health</strong> hold only. A holiday pause never says <em class="q">say Hi</em>, so a greeting must not end one.</li>
+      <li>Greeting while still ill stays safe: the sickness detector runs earlier in the same handler, so <em class="q">hi, still sick</em> re-arms the hold rather than reaching the clear branch.</li>
+    </ul>
+
+    <h3>e4b7141 — the weekly progress convergence</h3>
+    <p>A fourth progress calculator, 103 lines, was deleted. It ran four of its own queries, bucketed days with a hand-rolled offset instead of the shared one, and measured weight over its own 14-day window — so it described the same seven days as <em class="q">this week</em> with different numbers. Which answer a client got depended only on which synonym they typed.</p>
+    <p>Its live phrases now belong to the single owner that reads the canonical truth object.</p>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="tag">Proof</span>
+      <h2>The check fails when the fix is removed</h2>
+    </div>
+
+    <p>The regression is graded as <strong>final client text</strong> — after the outbound verifier, with production branches enabled — because the failure was a disagreement between two files, and only the reply that arrives shows whether they agree.</p>
+
+    <p>Negative control, with the fix reverted:</p>
+
+<pre class="term"><b>  ✗ a client on a health hold can leave it the way the brief told them to</b>
+    "Hi" from a client on a sick hold did not end it — the 06:00 brief
+    promises exactly this and this is the reply that arrives instead:
+    <u>Good morning Kam 👋 Training day — your session's ready.</u></pre>
+
+    <p>That red output is the reply the handset produces today. With the fix in place, the same check passes and the client gets <em class="q">Welcome back</em>.</p>
+
+    <p>A second assertion ties the two files together permanently: if the brief tells a sick client to greet, the sick handler must read greetings. Rewording the brief cannot quietly break the contract again.</p>
+
+    <h3>Suite status</h3>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Suite</th><th>State</th><th>Note</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>production-parity</td><td><span class="pill ok">22 / 22</span></td><td>Was 8 before this week's work</td></tr>
+          <tr><td>Full chain</td><td><span class="pill warn">21 / 23</span></td><td>Up from 19 / 23</td></tr>
+          <tr><td>check-architecture</td><td><span class="pill bad">red</span></td><td>Pre-existing — see below</td></tr>
+          <tr><td>check-file-sizes</td><td><span class="pill bad">red</span></td><td>Three files over budget, untouched by this work</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Two ratchets were lowered, not raised — <code>check-sast</code> 67 → 65 and <code>check-names</code> 102 → 101 — both driven down by the deletion.</p>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="tag">Blocked</span>
+      <h2>What I could not verify</h2>
+    </div>
+
+    <div class="note hold">
+      <span class="lbl">Needs a human</span>
+      <p><strong>Which build Railway is actually running.</strong> The health endpoint is unreachable from the build container — the outbound proxy returns 403 on the tunnel. The code is fixed and pushed; I cannot confirm it is live.</p>
+      <p>Open <code>/health</code> and check the SHA. If it is not <code>832dbd0</code>, the fixes exist and have not shipped — which would also explain the older bubbles in the screenshot, both of which match the pre-<code>736a08c</code> code exactly.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="tag">Open</span>
+      <h2>Reported, not fixed</h2>
+    </div>
+
+    <p>None of these were in the authorised scope. They are listed because leaving them unsaid is how the last four survived.</p>
+
+    <div class="open-item">
+      <h3>No floor under a health hold <span class="pill warn">decision needed</span></h3>
+      <p><code>sick_until</code> clears when a message clears it, or one day after its date passes. Nothing sweeps stale health flags. A client who never types the right words and carries a distant date sits in the hold. The exit is now fixed; the absence of a floor is not, and that is a product call rather than a refactor.</p>
+    </div>
+
+    <div class="open-item">
+      <h3>The all-time block still computes its own totals <span class="pill bad">claimant</span></h3>
+      <p><code>misc-commands.ts:622</code> — <em class="q">all time</em>, <em class="q">my journey</em>, <em class="q">my results</em>. Its own step sum, its own first and last weight queries, its own day count off the programme start date. A genuine remaining progress authority.</p>
+    </div>
+
+    <div class="open-item">
+      <h3>The Sunday recap counts the week separately <span class="pill bad">claimant</span></h3>
+      <p><code>weekly-recap.ts</code> runs six of its own queries for the voice note, including its own weight window. It never answers an inbound message, so it is not a routing conflict — but it can narrate a different week than <em class="q">this week</em> returns on the same day.</p>
+    </div>
+
+    <div class="open-item">
+      <h3>One question, two answers <span class="pill warn">decision needed</span></h3>
+      <p><em class="q">my week</em> returns a shareable image; <em class="q">this week</em> returns text. Same seven days, same source, different reply depending on the word typed. Not a numbers conflict — a product decision.</p>
+    </div>
+
+    <div class="open-item">
+      <h3>The governor has been red since before this series <span class="pill bad">pre-existing</span></h3>
+      <p>At the commit preceding the first cut it already failed on all four counters. It still does: modules 240/239, deciders 32/31, regexes 350/318, authorship 426/420. Caps were never raised — but two counters drifted upward across the cuts while the guard was already failing, so nothing said no. That is the governor's own failure mode, and it went unflagged at the time.</p>
+    </div>
+  </section>
+
+  <footer>
+    main @ 832dbd0 · pushed 21 Aug 2026 05:24 UTC<br>
+    Preceding: e4b7141 · 736a08c<br>
+    Deploy state unverified — check /health before treating the fix as live.
+  </footer>
+
+</div>
