@@ -464,6 +464,37 @@ async function main() {
     assert.ok(engineAt < gptAt, "the engine must precede the gpt fallback");
   });
 
+  // SOURCE ORDER IS NOT ENOUGH. `indexOf(misc) < indexOf(engine)` proves only that misc is
+  // earlier — not that a rail-owned phrase ever REACHES misc. A phrase the rails fail to
+  // recognise still falls through to the engine and gets a model answer. So this drives the real
+  // production path and asserts the final text, for the phrases that leaked when measured.
+  const RAIL_OWNED: Array<[string, RegExp]> = [
+    ["this week",         /last 7 days/i],
+    ["my targets",        /Your Targets|Daily Targets/i],  // early-commands claims it, not misc
+    ["all time",          /Journey with Coach K/i],
+    ["transformation",    /Monthly Transformation Report/i],
+    ["what are my steps", /steps/i],
+    ["my week",           /scorecard|save it, share it/i],
+    ["my progress",       /Progress/i],
+    ["today's progress",  /kcal|logged|progress/i],
+  ];
+  const railReplies: Array<readonly [string, string]> = [];
+  for (const [door] of RAIL_OWNED) railReplies.push([door, await say(door)] as const);
+
+  for (const [door, expected] of RAIL_OWNED) {
+    const reply = railReplies.find(([d]) => d === door)![1];
+    check(`"${door}" is answered by its rail, not by the model`, () => {
+      assert.ok(!reply.startsWith("__THREW__"), `handler threw: ${reply}`);
+      // The engine and gpt fallback both tag themselves on the coach path; on a client path they
+      // announce themselves differently — the reliable signal is that the RAIL's own shape came
+      // back. A model answering this phrase cannot reproduce the rail's card.
+      assert.match(reply, expected,
+        `"${door}" did not get its rail's answer. It fell through to a model path, which is the `
+        + `fallback-claimant hole: ordering is green while the phrase never reaches its owner.\n`
+        + `      got: ${reply.slice(0, 180)}`);
+    });
+  }
+
   check("the meaning engine gets one shot per turn, not two", () => {
     const chain = readFileSync("server/routes.ts", "utf-8");
     const code = chain.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
@@ -560,6 +591,36 @@ async function main() {
       "computeNextMove must reach chooseAction through the policy contract");
     assert.ok(/getProgressTruth\(/.test(live),
       "…and decide on canonical state, not on numbers it gathered itself");
+  });
+
+  check("every caller hands the decision owner the same world", () => {
+    // ONE CONSTITUTION IS NOT ONE DECISION if two callers feed it materially different inputs.
+    // The weekly answer passed WEEKLY AVERAGES into fields that mean today — window.avgProtein
+    // into `proteinPct`, avgSteps into `stepsToday` (the name says it) — and froze the clock at
+    // `hour: 12`, so the evening rule could never fire there and the same client could get a
+    // different "one thing" from the weekly card than from the coach five minutes earlier.
+    //
+    // The card's NUMBERS are weekly; the ACTION is what to do next, which is a daily question and
+    // the only one chooseAction was built to answer. Asserted at the call site, because this is a
+    // semantics bug that produces no crash and no visible difference in a green suite.
+    for (const f of ["server/handlers/misc-commands.ts", "server/understanding/live.ts"]) {
+      const code = readFileSync(f, "utf-8")
+        .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+      const call = /chooseAction\(\{([\s\S]*?)\}\s*(?:as any)?\)/.exec(code);
+      if (!call) continue;
+      const args = call[1];
+      for (const [field, wrong] of [["proteinPct", /window\.avg/], ["caloriePct", /window\.avg/],
+                                    ["stepsToday", /avgSteps/]] as const) {
+        const line = args.split("\n").find(l => l.includes(field + ":")) || "";
+        assert.ok(!wrong.test(line),
+          `${f} feeds a WEEKLY AVERAGE into ${field}, which means today. Two callers, two worlds, `
+          + `one decision function: ${line.trim().slice(0, 90)}`);
+      }
+      const hourLine = args.split("\n").find(l => /\bhour:/.test(l)) || "";
+      assert.ok(!/hour:\s*\d+/.test(hourLine),
+        `${f} freezes the clock (${hourLine.trim().slice(0, 40)}). The decision reads the hour to `
+        + `know whether an instruction can still be acted on today; a literal makes that a lie.`);
+    }
   });
 
   check("chooseAction is the only coaching decision owner", () => {

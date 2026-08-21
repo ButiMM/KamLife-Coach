@@ -37,7 +37,7 @@ import { stripSignupSource } from "./signup-source";
 import { captureSignupSource } from "./signup-capture";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
-import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation } from "./handlers/chat-log";
+import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnEvidence } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
 import { handleWorkoutCommands } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
@@ -876,7 +876,14 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // THE HOIST (2026-07-30): Coach K runs BEFORE early-commands, media, workout and water. They
   // had first refusal; the coach was eighth — which is why ENGINE_ACTIONS has been `on` for weeks
   // with an EMPTY action log. Food logs still fall through to food-context below.
-  const tag = (reply: string, src: string) => { recordReplyPath(src); return isCoach ? `${reply}\n\n_· ${src} ·_` : reply; }; // tag() is the one chokepoint all model paths cross
+  // tag() is the one chokepoint all model paths cross — so it is also where the turn learns the
+  // reply was MODEL-AUTHORED. The prescription-provenance rule applies to model prose only:
+  // a deterministic handler stating a target is reciting owned state, a model doing it is deciding.
+  const tag = (reply: string, src: string) => {
+    recordReplyPath(src);
+    turnEvidence({ modelAuthored: true });
+    return isCoach ? `${reply}\n\n_· ${src} ·_` : reply;
+  };
   /*
    * ENGINE FRONT PASS — REMOVED (2026-08-21, turn boundary).
    *

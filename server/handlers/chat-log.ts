@@ -106,7 +106,18 @@ interface TurnScope {
   startedAt: number;
   finalReplyPromise: Promise<string>;
   /** Values an authoritative source produced this turn — see turnEvidence. */
-  evidence?: { stepsToday?: number | null };
+  evidence?: {
+    stepsToday?: number | null;
+    /**
+     * PRESCRIPTION PROVENANCE (2026-08-21). The canonical action this turn decided, if any, and
+     * whether the reply was authored by a model path. A behaviour-changing directive in
+     * model prose must correspond to `canonicalKind`; without one it has no provenance and
+     * must not ship. See verifyPrescriptionProvenance.
+     */
+    canonicalKind?: string | null;
+    canonicalTodo?: string | null;
+    modelAuthored?: boolean;
+  };
 }
 
 const turnStore = new AsyncLocalStorage<TurnScope>();
@@ -380,7 +391,7 @@ export function turnState(facts: Record<string, unknown>, resolvedDay?: string |
  * happened leaves its value on the turn, and reconcileTurnReply validates against it. A turn where
  * nothing read the ledger records nothing, and every rule behaves exactly as it did before.
  */
-export function turnEvidence(facts: { stepsToday?: number | null }): void {
+export function turnEvidence(facts: NonNullable<TurnScope["evidence"]>): void {
   const t = turnStore.getStore();
   if (!t) return;
   t.evidence = { ...(t.evidence || {}), ...facts };

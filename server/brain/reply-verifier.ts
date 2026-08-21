@@ -40,6 +40,11 @@ export interface VerifierFacts {
   evidence?: {
     /** Today's step total from the day ledger, when the caller read it this turn. */
     stepsToday?: number | null;
+    /** The coaching decision this turn actually made, from chooseAction. */
+    canonicalKind?: string | null;
+    canonicalTodo?: string | null;
+    /** True when the reply came off a model path — the one chokepoint tag() marks. */
+    modelAuthored?: boolean;
   };
 }
 
@@ -305,6 +310,78 @@ function verifyStepAttribution(reply: string, clientMessage: string, evidence?: 
   return { ok: true };
 }
 
+/* ────────────────────────────────────────────────────────────────────────────────────────────
+ * PRESCRIPTION PROVENANCE — a model may write the language, not invent the decision (2026-08-21)
+ *
+ * tellDontAsk was the only thing standing between the model and a decision, and it catches
+ * exactly one shape: a question handed back to the client. So this was blocked —
+ *
+ *     "What do you think you should do?"          ← caught, replaced with the canonical move
+ *
+ * and this was not —
+ *
+ *     "Train chest today."                        ← no question mark. Already a decision.
+ *     "Drop your calories to 1800."               ← a TARGET write, in prose
+ *
+ * The claim "GPT now prescribes through chooseAction" was therefore false for arbitrary model
+ * output. This closes that, and it is deliberately NOT a phrase museum: the domains below are
+ * the ActionKind taxonomy that already exists — come_back · rest · weigh · protein · eat_more ·
+ * log · walk · train · hold — one signature per kind, a closed set defined by the decision owner
+ * rather than by phrases invented here. When the taxonomy changes, this changes with it.
+ *
+ * WHAT IT DOES NOT TOUCH. Ordinary coaching language, answers to "can I eat this?", explanation,
+ * encouragement, and anything a DETERMINISTIC handler wrote. A deterministic reply stating a
+ * target is reciting state it owns; a model doing it is deciding. Only model-authored prose is
+ * held to this.
+ * ──────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** One signature per ActionKind. A DIRECTIVE in that domain — not a mention of it. */
+const DIRECTIVE_BY_KIND: Array<[string, RegExp]> = [
+  ["train", /\b(?:train|do|hit|smash|get)\s+(?:your\s+)?(?:chest|back|legs?|arms?|shoulders?|push|pull|upper|lower|a\s+session|your\s+session|the\s+gym)\b|\bgo\s+(?:to\s+the\s+gym|train)\b|\bget\s+(?:your\s+)?(?:session|workout)\s+(?:done|in)\b/i],
+  ["rest", /\b(?:skip|miss)\s+(?:the\s+)?(?:gym|session|workout|training)\b|\btake\s+(?:a\s+)?(?:rest|off)\s*day\b|\brest\s+(?:today|tomorrow)\b|\bdon'?t\s+train\s+(?:today|tomorrow)\b/i],
+  ["walk", /\b(?:go\s+for|get|take)\s+(?:a\s+)?\d*\s*-?\s*(?:minute|min|km|k)?\s*walk\b|\bwalk\s+(?:more|another|an?\s+extra)\b|\badd\s+\d[\d,]*\s*steps?\b/i],
+  ["weigh", /\b(?:weigh|step\s+on\s+the\s+scale)\s*(?:yourself|in)?\s*(?:today|tomorrow|in\s+the\s+morning)\b/i],
+  ["protein", /\b(?:eat|get|add|have)\s+(?:another\s+)?\d+\s*g\b[^.!?]{0,24}\bprotein\b|\bprotein\b[^.!?]{0,20}\b(?:up\s+to|to)\s+\d+\s*g\b/i],
+  ["eat_more", /\b(?:eat|add)\s+(?:another\s+)?\d[\d,]*\s*(?:kcal|calories)\b|\bbump\s+(?:your\s+)?(?:calories|intake)\s+(?:up\s+)?to\s+\d/i],
+];
+
+/**
+ * A TARGET WRITTEN IN PROSE. targets.ts is the only thing allowed to set a client's numbers, so
+ * a model saying "drop to 1800" has both decided AND written to a domain it does not own. This
+ * has no canonical action that could ever license it — it is blocked outright.
+ */
+const PROSE_TARGET_WRITE = /\b(?:drop|lower|reduce|cut|raise|increase|bump|set|change|move)\s+(?:your\s+)?(?:calories|kcal|intake|protein|steps?|target|goal)\b[^.!?]{0,40}?\b(?:to|down\s+to|up\s+to)\s+[\d,]{3,}/i;
+
+function verifyPrescriptionProvenance(reply: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
+  // Deterministic replies recite owned state. Only model prose is held to this.
+  if (!evidence?.modelAuthored) return { ok: true };
+  const r = reply || "";
+
+  if (PROSE_TARGET_WRITE.test(r)) {
+    return { ok: false, violation: "Your reply changes the client's target numbers in prose. Targets have one owner and you are not it — never tell a client to move their calories, protein or step target. Describe what the current targets mean, or say you will look at it, but do not set one." };
+  }
+
+  const canonical = String(evidence.canonicalKind || "");
+  for (const [kind, directive] of DIRECTIVE_BY_KIND) {
+    if (!directive.test(r)) continue;
+    if (canonical === kind) {
+      // THE DOMAIN IS LICENSED; THE VALUE STILL IS NOT. "Eat 30g more protein" is the right
+      // domain and an invented quantity — claim → source → VALUE → context, the same rule the
+      // step attribution follows. A number in a directive must have come from the canonical
+      // action; the coach's own instructions name food, never a macro figure.
+      const quantities = r.match(/\b\d[\d,]*\s*(?:g|kcal|calories|steps?|kg)\b/gi) || [];
+      const licensed = String(evidence.canonicalTodo || "");
+      const invented = quantities.filter(q => !licensed.includes(q));
+      if (invented.length > 0) {
+        return { ok: false, violation: `Your reply issues a "${kind}" instruction carrying a figure (${invented[0]}) that the coaching decision did not contain. Instruct in food and actions, never in numbers you chose yourself.` };
+      }
+      return { ok: true };  // the reply carries the decision that was made
+    }
+    return { ok: false, violation: `Your reply instructs the client to change their behaviour (a "${kind}" instruction), but the coaching decision for this turn was ${canonical ? `"${canonical}"` : "not made by you"}. You may explain, answer and encourage, but the one thing to DO is decided upstream and handed to you. Say what you know; do not issue a different instruction.` };
+  }
+  return { ok: true };
+}
+
 export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOverride?: RuntimeDecisionResult): VerifierResult {
   const r = reply || "";
   const decision = decisionOverride || currentRuntimeDecision();
@@ -377,6 +454,9 @@ export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOv
   if (clientHasFood && /\b(that'?s a lot of fried\/?takeaway|grill it,? don'?t fry it|heavy on the hidden fat)\b/i.test(r)) {
     return { ok: false, violation: "Do not lecture a client about fried/takeaway on the turn they just described a meal. Confirm the log. Next-meal direction only — no shame about the plate already eaten." };
   }
+
+  const prescription = verifyPrescriptionProvenance(r, facts.evidence);
+  if (!prescription.ok) return prescription;
 
   const stepAttribution = verifyStepAttribution(r, facts.clientMessage || "", facts.evidence);
   if (!stepAttribution.ok) return stepAttribution;

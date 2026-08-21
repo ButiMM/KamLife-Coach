@@ -93,6 +93,11 @@ export async function computeNextMove(user: any): Promise<string> {
       atKeyboard: true,
     } as any), { evidenced: truth.window.daysLogged >= 3, dreamGoal: user.dreamGoal });
 
+    // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,
+    // so it can tell a model reply that CARRIES the decision from one that invented its own.
+    const { turnEvidence } = await import("../handlers/chat-log");
+    turnEvidence({ canonicalKind: act.kind, canonicalTodo: act.kind === "hold" ? null : act.todo });
+
     // "hold" means the honest answer is that nothing needs changing. An empty string is what
     // tellDontAsk expects in that case, and it is what the old ladder returned too.
     return act.kind === "hold" ? "" : act.todo;

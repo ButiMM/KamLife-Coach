@@ -599,17 +599,31 @@ export async function handleMiscCommands(ctx: {
         // EVIDENCE, from the same truth object the card is built from: a week with fewer than
         // three logged days is the sparse-log case the gate exists for. Two days is not evidence,
         // and acting on it is how the product invented the over-target accusation.
+        // ONE DECISION CONTEXT, NOT JUST ONE DECISION FUNCTION (2026-08-21).
+        //
+        // This fed WEEKLY AVERAGES into fields that mean TODAY — `proteinPct` from
+        // window.avgProtein, `stepsToday` (the name says it) from avgSteps — and froze the clock
+        // at `hour: 12`, so the evening rule could never fire here and the same client could get a
+        // different "one thing" from the weekly card than from the coach five minutes earlier.
+        // One constitution does not mean one decision if two callers hand it different worlds.
+        //
+        // The CARD is a weekly recap; the ACTION is what to do next, which is a daily question and
+        // the only one chooseAction was built to answer. So the numbers stay weekly and the
+        // decision context becomes today's — identical semantics to computeNextMove and morning.
         const { chooseAction, underPolicy } = await import("../one-action");
+        const { sastHour } = await import("../sast");
         const act = underPolicy(chooseAction({
           goal: (user.goalType as any) || "general", weeksOnProgramme: Math.max(0, (user.programmeWeek || 1) - 1),
           dreamGoal: user.dreamGoal, biggestStruggle: user.biggestStruggle, lifeContext: user.lifeContext,
-          doNotMention: user.doNotMention, daysSinceAnyLog: truth.window.daysLogged > 0 ? 0 : 7,
+          doNotMention: user.doNotMention,
+          daysSinceAnyLog: truth.today.kcal > 0 ? 0 : (truth.window.daysLogged > 0 ? 1 : 7),
           daysSinceWeighIn: truth.weight.known ? 0 : null, loggedToday: truth.today.kcal > 0,
-          proteinPct: protTarget > 0 ? truth.window.avgProtein / protTarget : 1,
-          caloriePct: calTarget > 0 ? truth.window.avgKcal / calTarget : 1,
+          proteinPct: protTarget > 0 ? truth.today.protein / protTarget : 1,
+          caloriePct: calTarget > 0 ? truth.today.kcal / calTarget : 1,
           sessionsThisWeek: truth.sessions, sessionsTarget: Number(user.trainingDaysPerWeek) || 3,
-          stepsToday: truth.avgSteps, stepsTarget: Number(user.stepsTarget) || 0, hour: 12,
-        }), { evidenced: truth.window.daysLogged >= 3, dreamGoal: user.dreamGoal });
+          stepsToday: truth.today.steps, stepsTarget: Number(user.stepsTarget) || 0,
+          hour: sastHour(), atKeyboard: true,
+        } as any), { evidenced: truth.window.daysLogged >= 3, dreamGoal: user.dreamGoal });
         return `*${name} — last 7 days*\n\n💪 Sessions: *${truth.sessions}*\n📋 Days logged: *${truth.window.daysLogged}/7*\n🔥 Avg: *${truth.window.avgKcal} kcal* · *${truth.window.avgProtein}g* protein\n👟 Avg steps: *${truth.avgSteps.toLocaleString()}*${weightLine}\n\n*${act.todo}*`;
       }
       const todayLine = truth.today.kcal > 0

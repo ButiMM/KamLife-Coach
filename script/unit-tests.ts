@@ -1861,6 +1861,60 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
       "the surviving constitution ranks protein above an unused training day");
   });
 
+  // ── PRESCRIPTION PROVENANCE (2026-08-21) ────────────────────────────────────────────────
+  // tellDontAsk catches ONE shape: a question handed back. "Train chest today." has no question
+  // mark and is already a decision, so the claim "GPT prescribes through chooseAction" was false
+  // for arbitrary model output. A behaviour-changing directive in model prose must correspond to
+  // the turn's canonical action, or it does not ship.
+  {
+    const V = await import("../server/brain/reply-verifier");
+    const model = (canonicalKind: string | null, canonicalTodo?: string) =>
+      ({ clientMessage: "how's it going", evidence: { modelAuthored: true, canonicalKind, canonicalTodo } }) as any;
+    const blocked = (reply: string, facts: any) => !V.verifyBrainReply(reply, facts).ok;
+
+    test("provenance: a model cannot issue a behaviour-changing instruction of its own", () => {
+      for (const r of ["Train chest today.", "Skip the gym today.", "Go for a 20-minute walk.",
+                       "Weigh yourself tomorrow morning."]) {
+        assert.ok(blocked(r, model("protein")), `model prescribed without provenance: ${r}`);
+      }
+    });
+
+    test("provenance: a model may never write a target in prose", () => {
+      // targets.ts is the only owner. No canonical action can ever license this.
+      assert.ok(blocked("Drop your calories to 1,800.", model("eat_more")));
+      assert.ok(blocked("Let's raise your protein target to 200.", model("protein")));
+    });
+
+    test("provenance: the right domain does not license an invented figure", () => {
+      // claim → source → VALUE → context. "Eat 30g more protein" is the right domain and a number
+      // the decision never contained.
+      assert.ok(blocked("Eat 30g more protein.", model("protein", "Make your next meal a proper protein meal.")),
+        "a gram figure the canonical action did not carry");
+    });
+
+    test("provenance: a reply that CARRIES the decision passes", () => {
+      const todo = "Make your next meal a proper protein meal.";
+      assert.ok(!blocked(`Solid week. ${todo}`, model("protein", todo)));
+    });
+
+    test("provenance: ordinary coaching language is untouched", () => {
+      for (const r of ["Take care of yourself this week.",
+                       "Yes, you can have the chicken — it fits your day.",
+                       "That's a solid week. Protein is what protects muscle while you lean out.",
+                       "I hear you. That sounds like a hard few days."]) {
+        assert.ok(!blocked(r, model("hold")), `over-blocked ordinary language: ${r}`);
+      }
+    });
+
+    test("provenance: a DETERMINISTIC reply reciting owned state is not held to this", () => {
+      // A handler stating a target is reading state it owns; a model doing it is deciding.
+      const det = { clientMessage: "my targets", evidence: { modelAuthored: false } } as any;
+      assert.ok(!blocked("Your calorie target is 2,800 kcal and your protein target is 195g.", det));
+      assert.ok(!blocked("Drop your calories to 1,800.", det),
+        "the rule applies to model prose only — a deterministic path is a different authority");
+    });
+  }
+
   test("tell don't ask: every hand-back from that morning is replaced by the instruction", () => {
     const move = "Get today's session done";
     for (const q of [
