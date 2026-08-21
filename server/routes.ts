@@ -246,6 +246,16 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   const coachPhone = normaliseMsisdn(process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE || "");
   const userPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
   const isCoach = !!(coachPhone && normaliseMsisdn(userPhone) === coachPhone);
+
+  // THE ONE CHOKEPOINT EVERY MODEL PATH CROSSES — hoisted here 2026-08-21 so it is in scope for
+  // the FIRST model exit in the function, not just the last three. It marks the turn
+  // model-authored, which is what makes reconcileTurnReply apply the directive boundary; a model
+  // reply that never calls this is a reply the boundary never sees.
+  const tag = (reply: string, src: string) => {
+    recordReplyPath(src);
+    turnEvidence({ modelAuthored: true });
+    return isCoach ? `${reply}\n\n_· ${src} ·_` : reply;
+  };
   if (isCoach && (user.subscriptionStatus === "inactive" || user.subscriptionStatus === "trial")) {
     await db.update(users).set({ subscriptionStatus: "active" }).where(eq(users.phoneNumber, phone));
     user.subscriptionStatus = "active";
@@ -334,7 +344,18 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // non-yes/no reply returns null and flows on to normal understanding.
   if (user.awaitingInputType === "engine_confirm") {
     const confirmReply = await resumeEngineConfirm({ phone, message, m, user, sourceMessageId, actionsLive: isCoach || isBetaTester });
-    if (confirmReply !== null) return isCoach ? `${confirmReply}\n\n_· 🧠 new engine ·_` : confirmReply;
+    // THIS BYPASSED THE RESPONSE BOUNDARY (found 2026-08-21). It hand-rolled the coach suffix
+    // instead of calling tag(), so `modelAuthored` was never set on the turn — and
+    // reconcileTurnReply skips the whole directive boundary when that flag is absent. An engine
+    // confirm reply could therefore carry any instruction and ship untouched. It is the eleventh
+    // model exit, and the only one that reached WhatsApp without crossing the boundary.
+    //
+    // A confirmation is a CLARIFICATION, not a coaching turn: it answers "did you mean 500g?".
+    // It gets its directives stripped like every model path, and no coaching todo appended.
+    if (confirmReply !== null) {
+      turnEvidence({ conversationalOnly: true });
+      return tag(confirmReply, "🧠 new engine");
+    }
   }
   // ---- SUBSCRIPTION GATE — full product requires active subscription, no free tier ----
   // Safety messages (chest pain, crisis, emergency) always bypass.
@@ -879,11 +900,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // tag() is the one chokepoint all model paths cross — so it is also where the turn learns the
   // reply was MODEL-AUTHORED. The prescription-provenance rule applies to model prose only:
   // a deterministic handler stating a target is reciting owned state, a model doing it is deciding.
-  const tag = (reply: string, src: string) => {
-    recordReplyPath(src);
-    turnEvidence({ modelAuthored: true });
-    return isCoach ? `${reply}\n\n_· ${src} ·_` : reply;
-  };
   /*
    * ENGINE FRONT PASS — REMOVED (2026-08-21, turn boundary).
    *
@@ -1115,6 +1131,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     const clarify = `Got it — you ate something. Send the items in one line (e.g. "McDonald's breakfast and a mocha") and I'll log it.`;
     const { logChat: lc } = await import("./handlers/chat-log");
     await lc(user.id, message, clarify, "FOOD_CLARIFY").catch(() => {});
+    // CLARIFICATION IS NOT COACHING (2026-08-21). This asks the client to restate what they ate.
+    // It is model-tagged, so without this it would have a coaching instruction appended to it —
+    // "Send the items in one line" followed by "Log one meal today" is the coach answering a
+    // question it just asked. Directives are still stripped; no todo is added.
+    turnEvidence({ conversationalOnly: true });
     return tag(clarify, "food force-clarify");
   }
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----

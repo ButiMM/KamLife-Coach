@@ -614,6 +614,47 @@ async function main() {
   });
 
   // ── THE DIRECTIVE SLOT IS DETERMINISTIC; THE PROSE SLOT CARRIES NO INSTRUCTION ────────────
+  check("no model exit bypasses the response boundary", () => {
+    // Found 2026-08-21: resumeEngineConfirm returned model text and hand-rolled the coach suffix
+    // instead of calling tag(), so `modelAuthored` was never set and reconcileTurnReply skipped
+    // the whole boundary. An ELEVENTH exit, and the only one that reached WhatsApp without
+    // crossing it. Asserted structurally: every model reply leaves through tag().
+    const chain = readFileSync("server/routes.ts", "utf-8");
+    const code = chain.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    for (const [line, i] of code.split("\n").map((l, i) => [l, i] as const)) {
+      if (!/_· \$\{?src|🧠 new engine ·_|gpt fallback ·_/.test(line)) continue;
+      // The only place that may compose the coach suffix is tag() itself.
+      assert.ok(/const tag = /.test(code.split("\n")[i - 1] || "") || /recordReplyPath/.test(code.split("\n").slice(Math.max(0, i - 3), i + 1).join(" ")),
+        `a model reply composes the coach suffix outside tag(), so it never marks the turn `
+        + `model-authored and the boundary never sees it: ${line.trim().slice(0, 90)}`);
+    }
+    assert.ok(/turnEvidence\(\{ modelAuthored: true \}\)/.test(code), "tag() marks the turn");
+    // tag() must be in scope for the FIRST model exit, not only the last ones.
+    const tagAt = code.indexOf("const tag = ");
+    const firstExit = code.indexOf("resumeEngineConfirm(");
+    assert.ok(tagAt > 0 && firstExit > 0 && tagAt < firstExit,
+      "the chokepoint must be in scope before the first model exit in the function");
+  });
+
+  check("clarification is a different response mode from coaching", () => {
+    const chain = readFileSync("server/routes.ts", "utf-8");
+    const code = chain.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const lines = code.split("\n");
+    // Both clarification exits must declare themselves — otherwise a question the coach asked
+    // gets a coaching instruction stapled underneath it.
+    for (const marker of ["food force-clarify", "return tag(confirmReply"]) {
+      const at = lines.findIndex(l => l.includes(marker));
+      assert.ok(at > 0, `${marker} not found`);
+      const window = lines.slice(Math.max(0, at - 3), at + 1).join(" ");
+      assert.ok(/conversationalOnly: true/.test(window),
+        `${marker} is model-tagged but not marked a clarification, so it would gain a coaching todo`);
+    }
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
+    const gcode = gpt.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.equal((gcode.match(/conversationalOnly: true/g) || []).length, 3,
+      "the punct, short and frustration exits must each declare themselves clarification");
+  });
+
   check("the model's own instruction never survives, licensed or not", async () => {
     const { stripModelDirectives } = await import("../server/brain/reply-verifier");
     const render = (reply: string, todo: string, opts: Record<string, unknown> = {}) => {
