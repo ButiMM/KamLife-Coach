@@ -1,0 +1,325 @@
+<title>One Authority Per Question</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Public+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap">
+
+<style>
+  :root {
+    --ground:#F5F7F3; --surface:#FFFFFF; --surface-2:#ECF0EA;
+    --ink:#16211C; --ink-soft:#47554E; --ink-faint:#6E7D75;
+    --rule:#D7DED6; --rule-soft:#E6EBE4;
+    --accent:#1F5E43; --accent-soft:#DCEBE2;
+    --bad:#A6321F; --bad-soft:#F6E2DD;
+    --warn:#8A6410; --warn-soft:#F5EBD4;
+    --good:#1F5E43; --good-soft:#DCEBE2;
+    --term-bg:#16211C; --term-ink:#CFDAD3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#0E1411; --surface:#151D19; --surface-2:#1D2722;
+      --ink:#E4EBE6; --ink-soft:#A9B7AF; --ink-faint:#7E8D85;
+      --rule:#2A3630; --rule-soft:#212B26;
+      --accent:#6BC79C; --accent-soft:#1B3128;
+      --bad:#E8917C; --bad-soft:#341A14;
+      --warn:#D9AC55; --warn-soft:#33270F;
+      --good:#6BC79C; --good-soft:#1B3128;
+      --term-bg:#0A100D; --term-ink:#BCCAC2;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0E1411; --surface:#151D19; --surface-2:#1D2722;
+    --ink:#E4EBE6; --ink-soft:#A9B7AF; --ink-faint:#7E8D85;
+    --rule:#2A3630; --rule-soft:#212B26;
+    --accent:#6BC79C; --accent-soft:#1B3128;
+    --bad:#E8917C; --bad-soft:#341A14;
+    --warn:#D9AC55; --warn-soft:#33270F;
+    --good:#6BC79C; --good-soft:#1B3128;
+    --term-bg:#0A100D; --term-ink:#BCCAC2;
+  }
+
+  * { box-sizing:border-box; }
+  body {
+    background:var(--ground); color:var(--ink);
+    font-family:"Public Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size:16.5px; line-height:1.62; margin:0; padding:0 20px 96px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:800px; margin:0 auto; }
+
+  .mast { display:flex; flex-direction:column; gap:18px; padding:56px 0 28px; border-bottom:2px solid var(--ink); }
+  .kicker {
+    font-family:"JetBrains Mono", ui-monospace, monospace; font-size:11.5px;
+    letter-spacing:.14em; text-transform:uppercase; color:var(--accent);
+    display:flex; flex-wrap:wrap; gap:10px 16px;
+  }
+  h1 {
+    font-family:"Newsreader", Georgia, serif; font-weight:600;
+    font-size:clamp(2.1rem,6vw,3.05rem); line-height:1.06; letter-spacing:-.018em;
+    margin:0; text-wrap:balance;
+  }
+  .standfirst {
+    font-family:"Newsreader", Georgia, serif; font-size:clamp(1.06rem,2.4vw,1.24rem);
+    line-height:1.5; color:var(--ink-soft); margin:0; max-width:62ch;
+  }
+
+  section { padding:44px 0 0; }
+  .sec-head { display:flex; align-items:baseline; gap:14px; margin-bottom:6px; padding-bottom:10px; border-bottom:1px solid var(--rule); }
+  .sec-head .tag {
+    font-family:"JetBrains Mono", ui-monospace, monospace; font-size:10.5px;
+    letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint);
+    white-space:nowrap; padding-top:4px;
+  }
+  h2 {
+    font-family:"Newsreader", Georgia, serif; font-weight:600;
+    font-size:clamp(1.42rem,3.6vw,1.78rem); line-height:1.18; letter-spacing:-.012em;
+    margin:0; text-wrap:balance;
+  }
+  h3 { font-weight:700; font-size:.99rem; margin:26px 0 6px; }
+  p { margin:0 0 14px; max-width:68ch; }
+  p:last-child { margin-bottom:0; }
+  a { color:var(--accent); }
+  em.q { font-style:normal; font-family:"Newsreader", Georgia, serif; }
+
+  code, .mono { font-family:"JetBrains Mono", ui-monospace, monospace; font-size:.855em; }
+  p code, li code, td code { background:var(--surface-2); border-radius:3px; padding:.1em .36em; }
+
+  pre.term {
+    background:var(--term-bg); color:var(--term-ink); border-radius:8px;
+    padding:16px 18px; margin:18px 0; overflow-x:auto;
+    font-family:"JetBrains Mono", ui-monospace, monospace; font-size:12.5px; line-height:1.72;
+  }
+  pre.term b { color:#F0A28F; font-weight:400; }
+  pre.term i { color:#7FD4A8; font-style:normal; }
+  pre.term u { color:#7E8D85; text-decoration:none; }
+
+  .scroll { overflow-x:auto; margin:20px 0; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; font-variant-numeric:tabular-nums; }
+  th {
+    text-align:left; font-family:"JetBrains Mono", ui-monospace, monospace; font-size:10px;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); font-weight:400;
+    padding:0 14px 8px 0; border-bottom:1px solid var(--rule); white-space:nowrap;
+  }
+  td { padding:10px 14px 10px 0; border-bottom:1px solid var(--rule-soft); vertical-align:top; }
+  td:last-child, th:last-child { padding-right:0; }
+
+  .pill {
+    display:inline-block; font-family:"JetBrains Mono", ui-monospace, monospace; font-size:10px;
+    letter-spacing:.09em; text-transform:uppercase; padding:3px 9px; border-radius:999px; white-space:nowrap;
+  }
+  .pill.ok{background:var(--good-soft);color:var(--good);}
+  .pill.bad{background:var(--bad-soft);color:var(--bad);}
+  .pill.warn{background:var(--warn-soft);color:var(--warn);}
+  .pill.neutral{background:var(--surface-2);color:var(--ink-faint);}
+
+  .note {
+    background:var(--surface); border:1px solid var(--rule); border-left:3px solid var(--accent);
+    border-radius:0 8px 8px 0; padding:16px 18px; margin:20px 0;
+  }
+  .note.stop{border-left-color:var(--bad);}
+  .note.hold{border-left-color:var(--warn);}
+  .note .lbl {
+    font-family:"JetBrains Mono", ui-monospace, monospace; font-size:10px; letter-spacing:.13em;
+    text-transform:uppercase; color:var(--ink-faint); display:block; margin-bottom:7px;
+  }
+  .note p { margin-bottom:10px; }
+
+  ul, ol { margin:0 0 14px; padding-left:1.15em; max-width:68ch; }
+  li { margin-bottom:7px; }
+
+  .open-item { padding:18px 0; border-bottom:1px solid var(--rule-soft); }
+  .open-item:last-child { border-bottom:0; }
+  .open-item h3 { margin-top:0; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  .open-item p { font-size:.94rem; color:var(--ink-soft); margin-bottom:0; }
+
+  footer {
+    margin-top:52px; padding-top:20px; border-top:1px solid var(--rule);
+    font-family:"JetBrains Mono", ui-monospace, monospace; font-size:11px;
+    letter-spacing:.05em; color:var(--ink-faint); line-height:1.9;
+  }
+
+  @media (max-width:560px) {
+    .sec-head { flex-direction:column; gap:4px; }
+    .sec-head .tag { padding-top:0; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="mast">
+    <div class="kicker"><span>KamLife Coach</span><span>Authority reduction</span><span>21 August 2026</span></div>
+    <h1>One authority per question</h1>
+    <p class="standfirst">Five progress calculators, thirteen readings of one health fact, and two chances per turn for the same engine to answer. The audit found more than the directive assumed. This is what was removed, what remains, and what CI now refuses to let back in.</p>
+  </header>
+
+  <section>
+    <div class="sec-head"><span class="tag">Before</span><h2>The authority graph as found</h2></div>
+
+<pre class="term"><u>PROGRESS — one question, five calculators</u>
+  "today's progress"   → early-commands   → getDayLedger        <i>canonical</i>
+  "this week"          → misc-commands    → getProgressTruth    <i>canonical</i>
+  "all time"           → misc-commands    → <b>own SQL</b>  own daysOn  own weight queries
+  "transformation"     → misc-commands    → <b>own SQL ×5</b>  own 30-day window
+  Sunday voice note    → weekly-recap     → <b>own SQL ×6</b>  own 14-day window
+  "my week"            → early-commands   → report-card → getProgressTruth   <i>adapter</i>
+
+<u>HEALTH — one stored fact, thirteen readers, five interpretations</u>
+  sickUntil &gt;= today                        string compare, SAST
+  new Date(sickUntil) &gt;= new Date(today)    UTC midnight — last day ended 02:00 SAST
+  sickUntil+"T23:59:59+02:00" &gt;= now        end of the final SAST day
+  <b>if (sickUntil)                            NO DATE CHECK AT ALL</b>
+  + paused_until written and cleared by hand in four places
+
+<u>TURN — the engine answers twice</u>
+  INBOUND → <b>engine pass 1</b> → handlers → <b>engine pass 2</b> → gpt-block → verifier
+            (may claim a food log)          (may not)</pre>
+
+    <p>The health column is the one that reached a customer. <code>client-snapshot</code> told the model <em class="q">"Client is SICK/resting until &lt;date&gt;"</em> on every turn for as long as the token existed, with no reference to whether the date had passed — and nothing in the product ever removed the token.</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="tag">After</span><h2>The authority graph now</h2></div>
+
+<pre class="term"><u>TURN — one final-answer owner</u>
+  INBOUND
+    ↓ one dispatch decision  (mustStayDeterministic, evaluated <i>once</i>)
+    ↓ <i>one</i> engine pass  — or the deterministic owners — or gpt-block
+    ↓ state        health-state.ts · day-ledger.ts · targets.ts
+    ↓ decision     chooseAction  (decideProactive delegates to it)
+    ↓ verifier     claim → source → value → context, on the chain's return value
+  OUTBOUND
+
+<u>PROGRESS — one owner, four windows</u>
+  today · 7d · 30d · all-time   → getProgressTruth(user, { days, weightWindowDays })
+  every door, reactive and proactive, reads it
+
+<u>HEALTH — one owner, one lifecycle</u>
+  readHealthState(user) → { phase, isSick, isRecovering, wasSickYesterday, pause }
+  none → sick → recovering → <i>ended</i>          expiry DERIVED ON READ
+  openHold · clearHold · setExplicitPause · clearPause   — the only writers</pre>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="tag">Deleted / converged</span><h2>Which authorities were removed</h2></div>
+
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Authority</th><th>Was</th><th>Now</th></tr></thead>
+        <tbody>
+          <tr><td>All-time journey<br><span class="mono">misc-commands</span></td><td>Own <code>SUM(steps)</code>, own first/last weight, own <code>daysOn</code>, users-row workout counter</td><td>Converged → <code>getProgressTruth</code></td></tr>
+          <tr><td>Monthly transformation<br><span class="mono">misc-commands</span></td><td>Five queries, own 30-day weight window, step average per <em>log row</em> not per day</td><td>Converged → <code>getProgressTruth</code></td></tr>
+          <tr><td>Sunday voice note<br><span class="mono">weekly-recap</span></td><td>Six <code>pool.query</code> statements over the same week</td><td>Converged → <code>getProgressTruth</code></td></tr>
+          <tr><td>Weekly progress card<br><span class="mono">misc-commands</span></td><td>103 lines, hand-rolled SAST bucketing</td><td>Deleted</td></tr>
+          <tr><td>13 health readers</td><td>Each parsed <code>sick_until</code> and decided what it meant</td><td>Converged → <code>readHealthState</code></td></tr>
+          <tr><td><code>sickToday</code> / <code>sickCoveredYesterday</code></td><td>Second entry point to the same answer</td><td>Deleted; tests re-pointed at the owner</td></tr>
+          <tr><td>4 hand-rolled pause writes<br><span class="mono">lifecycle</span></td><td>Replace-or-append dances; one could append a second token</td><td>Converged → one writer</td></tr>
+          <tr><td>Engine pass 2<br><span class="mono">routes</span></td><td>Second final-answer opportunity, opposite food-log policy</td><td>Deleted — provably redundant</td></tr>
+          <tr><td><code>isExplicitStepQuery</code> bypass<br><span class="mono">reply-verifier</span></td><td>Claim validity depended on the client's wording</td><td>Deleted — provenance only</td></tr>
+          <tr><td>6× inline <code>daysOnProgramme</code></td><td>Derived separately, printed <em class="q">"Day 35, week 1"</em></td><td>One pure function</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note stop">
+      <span class="lbl">Why deleting engine pass 2 is provable, not a judgement call</span>
+      <p><code>second guard = front guard &amp;&amp; !isTransactionReport</code> — a strict subset. Every guard variable is computed above the front call and never reassigned between the two sites (verified). So any message able to satisfy the second guard <strong>had already been offered to the engine on that turn and declined</strong>. It could only re-roll the same model on the same preconditions.</p>
+      <p>And there was no pending state to change the answer: <code>!multiFact</code> and <code>!isTransactionReport</code> together mean the intervening handlers have essentially nothing to commit.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="tag">Remaining</span><h2>What still exists, and why it is not an owner</h2></div>
+
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Module</th><th>Role</th><th>Why not a decision owner</th></tr></thead>
+        <tbody>
+          <tr><td><code>report-card.ts</code></td><td><span class="pill neutral">Adapter</span></td><td>Renders <code>getProgressTruth</code> as a shareable image. No numbers of its own.</td></tr>
+          <tr><td><code>decideProactive</code></td><td><span class="pill neutral">Same owner</span></td><td>Calls <code>chooseAction</code> and gates it on evidence. Same module, not a second policy.</td></tr>
+          <tr><td><code>health-state.ts</code></td><td><span class="pill neutral">State</span></td><td>Returns facts, no verdict, no message. Read is pure — DB imported lazily in the writers only.</td></tr>
+          <tr><td><code>mustStayDeterministic</code></td><td><span class="pill neutral">Routing seam</span></td><td>Runs before any decision, produces no response, mutates no state. Chooses which path gets first refusal. One call site.</td></tr>
+          <tr><td>Verifier</td><td><span class="pill neutral">Downstream</span></td><td>Runs on the chain's own return value inside the turn wrapper — structurally cannot pre-empt an owner. Never calls the decision owner.</td></tr>
+          <tr><td>Habit calendar, step chart,<br>workout diary, weight graph</td><td><span class="pill neutral">Readers</span></td><td>Render per-row history the truth object does not carry. They answer <em class="q">show me my last N days</em>, not <em class="q">how am I doing</em>.</td></tr>
+          <tr><td><code>trajectory-report.ts</code></td><td><span class="pill warn">Reader + model</span></td><td>A forecast, not a progress report. Derives per-day energy rows itself because the truth object exposes aggregates. Flagged below.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="tag">Proof</span><h2>What CI now refuses</h2></div>
+
+    <p>All of it graded on the <strong>final outbound text</strong>, with production branches enabled and the verifier running — not on a handler's draft.</p>
+
+    <div class="note stop">
+      <span class="lbl">The harness was lying, and that comes first</span>
+      <p><code>check()</code> took <code>() =&gt; void</code> and did <code>try { fn(); passed++ }</code>. An async check incremented <code>passed</code> the instant its promise was created; assertions ran afterwards and rejections surfaced as unhandled promises, not failures. Two checks were already async, so two of its greens meant nothing.</p>
+      <p>Third time this harness could report success without exercising what it graded. It awaits every check now — and awaiting immediately exposed that <em class="q">"what are my steps"</em> reached no deterministic door and fell through to the model, which has no step ledger.</p>
+    </div>
+
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Invariant</th><th>Enforced by</th></tr></thead>
+        <tbody>
+          <tr><td>One final-answer owner per turn — the engine gets one shot, not two</td><td>production-parity</td></tr>
+          <tr><td>The dispatch gate is evaluated once and cannot disagree with itself</td><td>production-parity</td></tr>
+          <tr><td>The verifier runs on the chain's return value and never calls the decision owner</td><td>production-parity</td></tr>
+          <tr><td><code>chooseAction</code> is the only decision function anywhere</td><td>production-parity</td></tr>
+          <tr><td>No file outside the owner parses a declared fact's stored form</td><td>GUARD #12 <span class="pill ok">new</span></td></tr>
+          <tr><td>No progress door computes its own totals; the two non-progress uses of the users-row counter are named so a third cannot appear quietly</td><td>production-parity</td></tr>
+          <tr><td>A hold that aged out no longer speaks</td><td>production-parity</td></tr>
+          <tr><td>Every weekly synonym returns text identical to <em class="q">this week</em></td><td>production-parity</td></tr>
+          <tr><td>Factual questions answer from state; a judgment question is not answered with a scoreboard</td><td>production-parity</td></tr>
+          <tr><td>One target calculation; every writer routes through it</td><td>production-parity</td></tr>
+          <tr><td>Health lifecycle phase transitions, including expiry</td><td>gap-tests</td></tr>
+          <tr><td>A step claim is validated by provenance, never by phrasing</td><td>unit-tests</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Verified by negative control</h3>
+    <p>Guards were reverted one at a time to confirm they fail. GUARD #12, with one old reader restored:</p>
+<pre class="term"><b>  ✗ [OWNERSHIP] server/gpt.ts parses the stored form of "sick / recovery hold" directly.</b>
+    Call readHealthState() from server/health-state.ts instead.</pre>
+
+    <p>The ownership verdict also prints separately from the budget counters now. Those counters have been over since before this series began, so the suite is permanently red — and a gate that is always red signals nothing. No budget was raised; the counters still fail the build.</p>
+<pre class="term"><i>ownership: OK — one owner per declared question, one reader per declared fact</i>
+architecture guard: FAILED
+  <b>✗ modules: 241 — budget 239</b>       <u>(over since before this series)</u></pre>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="tag">Unresolved</span><h2>Outside this cut</h2></div>
+
+    <div class="open-item">
+      <h3>Two answers to one question <span class="pill warn">product decision</span></h3>
+      <p><em class="q">my week</em> returns a shareable image; <em class="q">this week</em> returns text. Same seven days, same source — the report card is an adapter, so the numbers agree — but which one a client gets depends on the word they type. That is a product call, not a refactor.</p>
+    </div>
+
+    <div class="open-item">
+      <h3>The forecast derives its own per-day rows <span class="pill warn">flagged</span></h3>
+      <p><code>trajectory-report.ts</code> answers <em class="q">will I lose weight</em> from per-day intake and step pairs. The truth object exposes aggregates, not rows, so it queries the tables itself. It is a different question with its own model, not a second progress authority — but it is the one place two paths compute from the same tables.</p>
+    </div>
+
+    <div class="open-item">
+      <h3>The users-row workout counter still drifts <span class="pill warn">flagged</span></h3>
+      <p>Every progress <em>claim</em> now reads <code>workoutLogs</code>. Two non-progress uses remain and are asserted by name: a veteran gate (≥12 sessions unlocks supplements) and the session label on a workout card. Both read a column that drifts from the log table the moment one write fails.</p>
+    </div>
+
+    <div class="open-item">
+      <h3>The governor's counters <span class="pill bad">pre-existing</span></h3>
+      <p>Red since before the first cut. Modules rose by one this cut — <code>health-state.ts</code>, which the directive explicitly permits as a legitimate non-authoritative module. Architecture judged by ownership, not by counters, as instructed.</p>
+    </div>
+
+    <div class="open-item">
+      <h3>Deploy state <span class="pill bad">unverified</span></h3>
+      <p>The health endpoint is unreachable from the build container — the outbound proxy returns 403. Everything here is pushed to <code>main</code>. Whether Railway is running it has to be checked from outside.</p>
+    </div>
+  </section>
+
+  <footer>
+    main @ 270c7e7 · suites 21/23 · production-parity 36/36<br>
+    5e50a77 health lifecycle · 2e62129 progress convergence · c9754d3 targets/questions/proactive · 270c7e7 turn authority<br>
+    Two red suites are pre-existing: file sizes, governor budget counters.
+  </footer>
+
+</div>
