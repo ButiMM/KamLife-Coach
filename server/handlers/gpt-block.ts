@@ -11,7 +11,7 @@ import { recomputeTodayFoodTotals } from "./food-scanner";
 import { storeMemory, retrieveMemories } from "../memory";
 import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
 import { tellDontAsk } from "../reply-hygiene";
-import { logChat, withTimeout } from "./chat-log";
+import { logChat, withTimeout, turnEvidence } from "./chat-log";
 import { checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./checks";
 import { detectLanguage } from "../constants";
 import { checkGptRateLimit, sastDayStart, sastToday, looksLikeDeepEmotionalShare , getDisplayName} from "../utils";
@@ -437,6 +437,10 @@ RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K — apply the SCENARIO GUIDE f
       let punctReply = sanitizeCoachReply(await withTimeout("gpt_punct", 15000, () => askCoachK(message, user, punctCtx, memoryContext)), message, user.weeklyFoodBudget, user.injuries);
       if (readsAsTherapySpeak(punctReply)) punctReply = bareReactionFallback(user.name?.split(" ")[0] || "");
       await logChat(user.id, message, punctReply, "SHORT_REPLY");
+      // CLARIFICATION, NOT COACHING (2026-08-21). This exit answers a question or de-escalates;
+      // appending "Log one meal today" to it would be the coach talking over the question it just
+      // asked. Directives are still stripped — no path may instruct — but no instruction is added.
+      turnEvidence({ conversationalOnly: true });
       return punctReply;
     } catch (e) { console.warn("[punct-reply]", e); }
   }
@@ -495,6 +499,10 @@ Do not ask "what do you mean" — interpret from context. Max 2 sentences.`;
         shortReply = bareReactionFallback(user.name?.split(" ")[0] || "");
       }
       await logChat(user.id, message, shortReply, "SHORT_REPLY");
+      // CLARIFICATION, NOT COACHING (2026-08-21). This exit answers a question or de-escalates;
+      // appending "Log one meal today" to it would be the coach talking over the question it just
+      // asked. Directives are still stripped — no path may instruct — but no instruction is added.
+      turnEvidence({ conversationalOnly: true });
       return shortReply;
     } catch (e) { console.warn("[short-reply]", e); }
   }
@@ -561,6 +569,10 @@ NEVER SAY: "I apologise", "I'm sorry", "I understand", "It sounds like", "You ne
 SA voice. Direct. Coach forward, not backward.`;
       const frustReply = sanitizeCoachReply(await withTimeout("gpt_frust", 20000, () => askCoachK(message, user, frustContext)), message, user.weeklyFoodBudget, user.injuries);
       await logChat(user.id, message, frustReply, "FRUSTRATION");
+      // CLARIFICATION, NOT COACHING (2026-08-21). This exit answers a question or de-escalates;
+      // appending "Log one meal today" to it would be the coach talking over the question it just
+      // asked. Directives are still stripped — no path may instruct — but no instruction is added.
+      turnEvidence({ conversationalOnly: true });
       return frustReply;
     } catch (e) { console.warn("[fall-through-gpt]", e); }
   }

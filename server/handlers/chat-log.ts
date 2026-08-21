@@ -117,6 +117,13 @@ interface TurnScope {
     canonicalKind?: string | null;
     canonicalTodo?: string | null;
     modelAuthored?: boolean;
+    /**
+     * This turn is a CLARIFICATION or a de-escalation, not a coaching turn. It still gets its
+     * directives stripped — the model may not instruct from any path — but it must not have a
+     * coaching instruction appended to it. "Did you mean 500g or 50g?" followed by "Log one meal
+     * today" is the coach talking over the question it just asked.
+     */
+    conversationalOnly?: boolean;
     /** The CoachAction the meaning engine emitted this turn, when it emitted one. Structured
      *  provenance — checked BEFORE the prose backstop. */
     structuredAction?: string | null;
@@ -249,13 +256,13 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   // impossibility of a stray model directive surviving. That would require the model to emit
   // structured fields instead of prose across all ten exits — a larger change than this one.
   if (scope.evidence?.modelAuthored) {
-    const { stripUnlicensedDirectives } = await import("../brain/reply-verifier");
-    const { kept, removed } = stripUnlicensedDirectives(draft, scope.evidence);
+    const { stripModelDirectives } = await import("../brain/reply-verifier");
+    const { kept, removed } = stripModelDirectives(draft, scope.evidence);
     if (removed.length > 0) {
       console.log(`[CANONICAL_RENDER] removed ${removed.length} model-authored instruction(s): ${removed[0].slice(0, 70)}`);
       draft = kept;
     }
-    const todo = String(scope.evidence.canonicalTodo || "").trim();
+    const todo = scope.evidence.conversationalOnly ? "" : String(scope.evidence.canonicalTodo || "").trim();
     // Appended only when the reply does not already carry it — the paths that reach tellDontAsk
     // have put it there already, and saying it twice is worse than not saying it.
     if (todo && !draft.toLowerCase().includes(todo.toLowerCase().replace(/[.!]$/, ""))) {

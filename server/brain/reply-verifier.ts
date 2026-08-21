@@ -48,6 +48,8 @@ export interface VerifierFacts {
     /** The CoachAction the engine emitted this turn, when it emitted one. Structured
      *  provenance — checked BEFORE the prose backstop. */
     structuredAction?: string | null;
+    /** A clarification or de-escalation turn: strip directives, append no coaching instruction. */
+    conversationalOnly?: boolean;
   };
 }
 
@@ -416,24 +418,50 @@ const PROSE_TARGET_WRITE = /\b(?:drop|lower|reduce|cut|raise|increase|bump|set|c
  * is the only place that sees every model exit — the four specialist agents and the punct/short/
  * frustration replies all return early and never reach the append at the end of gpt-block.
  */
-export function stripUnlicensedDirectives(
+/**
+ * THE MODEL'S PROSE CARRIES NO INSTRUCTION AT ALL (2026-08-21, final boundary).
+ *
+ * WHAT WAS WRONG WITH THE PREVIOUS VERSION, and it was my own doing. It stripped only
+ * *unlicensed* directives — a model sentence in the same behaviour DOMAIN as the canonical
+ * decision was allowed through as "the model expressing the decision naturally". Two commits
+ * earlier I had merged training and rest into one domain to stop a canonical REST decision
+ * refusing "you should skip training today". Together those produced this, sent as one message:
+ *
+ *     "Go train today.
+ *
+ *      Rest today — your body is doing the work."
+ *
+ * Two contradictory instructions, licensed because they were the same domain. Same shape for
+ * food: "You should skip dinner" survived beside "Make your next meal a proper protein meal".
+ *
+ * THE LICENSING CONCEPT WAS THE BUG. It existed so the model could express the decision in its
+ * own words — but the decision is now RENDERED deterministically, so the model never needs to
+ * express it, and letting it try is what created the contradiction. So: every directive sentence
+ * the model writes comes out, and the canonical instruction goes on afterwards. The model keeps
+ * what it is actually for — empathy, context, explanation, judgment — and the thing the client
+ * is told to DO comes from one place.
+ *
+ * The residual bound is now a SINGLE question — did we recognise this sentence as an instruction
+ * — rather than a semantic judgement about whether the model's instruction agreed with ours.
+ */
+export function stripModelDirectives(
   reply: string, evidence?: VerifierFacts["evidence"],
 ): { kept: string; removed: string[] } {
   if (!evidence?.modelAuthored) return { kept: reply, removed: [] };
-  const licensed = domainsIn(String(evidence.canonicalTodo || ""));
-  const structured = String(evidence.structuredAction || "");
-  if (structured === "SET_SICK") licensed.add("training");
-  if (structured === "END_SICK") licensed.add("training");
+
+  // THE CANONICAL SENTENCE ITSELF SURVIVES. On the paths that reach tellDontAsk it has already
+  // been appended into the draft, and stripping the coach's own instruction would be absurd.
+  const todo = String(evidence.canonicalTodo || "").trim().toLowerCase().replace(/[.!]$/, "");
 
   const removed: string[] = [];
   const kept = String(reply || "")
-    .split(/(?<=[.!?])\s+/)
+    .split(/(?<=[.!?])\s+|\n{2,}/)
     .filter(sentence => {
-      const domains = directiveDomains(sentence);
-      if (domains.size === 0) return true;
-      const unlicensed = [...domains].some(d => !licensed.has(d));
-      if (unlicensed) { removed.push(sentence.trim()); return false; }
-      return true;
+      const t = sentence.trim().toLowerCase().replace(/[.!]$/, "");
+      if (todo && (t === todo || t.includes(todo))) return true;
+      if (directiveDomains(sentence).size === 0) return true;
+      removed.push(sentence.trim());
+      return false;
     })
     .join(" ")
     .replace(/\s{2,}/g, " ")

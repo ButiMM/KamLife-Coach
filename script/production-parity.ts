@@ -593,9 +593,9 @@ async function main() {
     // from the verifier, its result must be used, and the canonical instruction must be appended.
     // A first draft checked only that the name appeared, and a control that stubbed the import
     // left it green — a guard that cannot fail is not a guard.
-    assert.ok(/stripUnlicensedDirectives\s*\}\s*=\s*await import\("\.\.\/brain\/reply-verifier"\)/.test(log),
+    assert.ok(/stripModelDirectives\s*\}\s*=\s*await import\("\.\.\/brain\/reply-verifier"\)/.test(log),
       "the chokepoint must import the real strip from the verifier, not a local stand-in");
-    assert.ok(/const \{ kept, removed \} = stripUnlicensedDirectives\(draft, scope\.evidence\)/.test(log),
+    assert.ok(/const \{ kept, removed \} = stripModelDirectives\(draft, scope\.evidence\)/.test(log),
       "…and run it on the draft with this turn's evidence");
     assert.ok(/draft = kept;/.test(log), "…and actually use what survived");
     assert.ok(/scope\.evidence\.canonicalTodo/.test(log) && /draft = draft \? `\$\{draft\}/.test(log),
@@ -613,11 +613,68 @@ async function main() {
     }
   });
 
+  // ── THE DIRECTIVE SLOT IS DETERMINISTIC; THE PROSE SLOT CARRIES NO INSTRUCTION ────────────
+  check("the model's own instruction never survives, licensed or not", async () => {
+    const { stripModelDirectives } = await import("../server/brain/reply-verifier");
+    const render = (reply: string, todo: string, opts: Record<string, unknown> = {}) => {
+      const ev = { modelAuthored: true, canonicalTodo: todo, ...opts } as any;
+      const { kept } = stripModelDirectives(reply, ev);
+      const t = ev.conversationalOnly ? "" : todo;
+      return t && !kept.toLowerCase().includes(t.toLowerCase().replace(/[.!]$/, ""))
+        ? (kept ? `${kept}\n\n${t}` : t) : kept;
+    };
+    const PROTEIN = "Make your next meal a proper protein meal.";
+    const REST = "Rest today — your body is doing the work.";
+    const TRAIN = "Get today's session done.";
+    const LOG = "Log one meal today. Any meal.";
+
+    // THE CONTRADICTION CLASS, closed by construction rather than by better patterns. Licensing a
+    // same-DOMAIN model directive sent "Go train today." and "Rest today." in one message.
+    const rest = render("You're wiped. Go train today.", REST);
+    assert.ok(!/go train/i.test(rest), "a contradictory instruction reached the client");
+    assert.ok(rest.includes("Rest today"), "…and the canonical one did not");
+    const prot = render("Long day. You should skip dinner.", PROTEIN);
+    assert.ok(!/skip dinner/i.test(prot) && prot.includes(PROTEIN));
+
+    // The canonical instruction is rendered on every kind of turn.
+    assert.ok(render("You're in a good rhythm.", TRAIN).includes(TRAIN));
+    assert.ok(render("No stress about yesterday.", LOG).includes("Log one meal today"));
+
+    // An invented number cannot ride in on a directive.
+    assert.ok(!/1800/.test(render("Drop your calories to 1800.", PROTEIN)));
+
+    // Empathy and context survive — that is what the model is for.
+    assert.ok(/hard few days/.test(render("I hear you. That sounds like a hard few days.", "")));
+
+    // A clarification does not acquire a coaching instruction just for crossing a model path.
+    const clar = render("Did you mean 500g or 50g?", LOG, { conversationalOnly: true });
+    assert.ok(!/Log one meal/i.test(clar) && /500g or 50g/.test(clar));
+
+    // Deterministic replies are a different authority and are untouched.
+    const det = stripModelDirectives("Drop your calories to 1,800.", { modelAuthored: false } as any);
+    assert.equal(det.kept, "Drop your calories to 1,800.");
+  });
+
+  // THE LIMIT, PRINTED RATHER THAN FILED. Two phrasings the boundary does not close, and the
+  // reason closing them by pattern is not a fix: both require open-ended vocabularies — every
+  // hedge ("maybe", "perhaps", "no harm in"), and every food noun in South Africa. The residue
+  // closes when the model stops emitting free prose, not when this list grows.
+  {
+    const { stripModelDirectives } = await import("../server/brain/reply-verifier");
+    const OPEN = ["Maybe take it easy today.", "Eggs tonight."];
+    const surviving = OPEN.filter(r =>
+      stripModelDirectives(r, { modelAuthored: true, canonicalTodo: "" } as any).removed.length === 0);
+    console.log(`\n── directive boundary: known-open ──\n${surviving.length} of ${OPEN.length} `
+      + `soft phrasings still reach the client on a CONTINUE turn: ${surviving.map(x => JSON.stringify(x)).join(", ")}`
+      + `\nNeither has a verb or a domain noun. Catching them needs open-ended vocabularies `
+      + `(every hedge; every food word), which is why this is reported and not patched.`);
+  }
+
   check("strip-then-render behaves at the boundary", async () => {
-    const { stripUnlicensedDirectives } = await import("../server/brain/reply-verifier");
+    const { stripModelDirectives } = await import("../server/brain/reply-verifier");
     const ev = (canonicalTodo: string) => ({ modelAuthored: true, canonicalTodo }) as any;
     const render = (reply: string, todo: string) => {
-      const { kept } = stripUnlicensedDirectives(reply, ev(todo));
+      const { kept } = stripModelDirectives(reply, ev(todo));
       return todo && !kept.toLowerCase().includes(todo.toLowerCase().replace(/[.!]$/, ""))
         ? (kept ? `${kept}\n\n${todo}` : todo) : kept;
     };
@@ -642,7 +699,7 @@ async function main() {
     }
 
     // 6. deterministic responses are untouched
-    const det = stripUnlicensedDirectives("Drop your calories to 1,800.", { modelAuthored: false } as any);
+    const det = stripModelDirectives("Drop your calories to 1,800.", { modelAuthored: false } as any);
     assert.equal(det.kept, "Drop your calories to 1,800.");
     assert.equal(det.removed.length, 0);
 
