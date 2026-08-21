@@ -63,7 +63,7 @@ import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable,
  *
  * rather than the model deciding in prose and a verifier trying to work out what it decided.
  */
-export async function canonicalDecision(user: any): Promise<{ todo: string; kind: string }> {
+export async function canonicalDecision(user: any): Promise<{ todo: string; kind: string; reply: string }> {
   try {
     // ONE CONSTITUTION (2026-08-21). This called theNextMove(), a SECOND ranked ladder —
     // training → protein → calories → steps → scale — that produced "the one thing to do" from
@@ -108,13 +108,24 @@ export async function canonicalDecision(user: any): Promise<{ todo: string; kind
 
     // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,
     // so it can tell a model reply that CARRIES the decision from one that invented its own.
+    // THE WHOLE DETERMINISTIC REPLY, RENDERED HERE (2026-08-21). On a decision turn the customer
+    // sees this and nothing the model wrote — so it is built once, with the user in hand, by the
+    // renderer that already speaks in the coach's voice. No new vocabulary: formatOneAction is
+    // what the morning brief has always used.
+    const { formatOneAction } = await import("../one-action");
+    const rendered = act.kind === "hold" ? "" : formatOneAction(act, getDisplayName(user) || undefined);
+
     const { turnEvidence } = await import("../handlers/chat-log");
-    turnEvidence({ canonicalKind: act.kind, canonicalTodo: act.kind === "hold" ? null : act.todo });
+    turnEvidence({
+      canonicalKind: act.kind,
+      canonicalTodo: act.kind === "hold" ? null : act.todo,
+      canonicalReply: rendered || null,
+    });
 
     // "hold" means the honest answer is that nothing needs changing. An empty todo is what
     // tellDontAsk expects in that case, and it is what the old ladder returned too.
-    return { todo: act.kind === "hold" ? "" : act.todo, kind: act.kind };
-  } catch { return { todo: "", kind: "hold" }; }
+    return { todo: act.kind === "hold" ? "" : act.todo, kind: act.kind, reply: rendered };
+  } catch { return { todo: "", kind: "hold", reply: "" }; }
 }
 
 /** The string form, for the callers that only append it. */

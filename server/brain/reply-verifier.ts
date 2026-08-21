@@ -43,6 +43,12 @@ export interface VerifierFacts {
     /** The coaching decision this turn actually made, from chooseAction. */
     canonicalKind?: string | null;
     canonicalTodo?: string | null;
+    /**
+     * THE WHOLE REPLY for a decision turn, rendered deterministically from chooseAction. On a
+     * decision turn this REPLACES the model's prose — the model is not the author of a turn that
+     * carries an instruction.
+     */
+    canonicalReply?: string | null;
     /** True when the reply came off a model path — the one chokepoint tag() marks. */
     modelAuthored?: boolean;
     /** The CoachAction the engine emitted this turn, when it emitted one. Structured

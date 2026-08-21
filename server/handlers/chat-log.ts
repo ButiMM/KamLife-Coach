@@ -116,6 +116,12 @@ interface TurnScope {
      */
     canonicalKind?: string | null;
     canonicalTodo?: string | null;
+    /**
+     * THE WHOLE REPLY for a decision turn, rendered deterministically from chooseAction. On a
+     * decision turn this REPLACES the model's prose — the model is not the author of a turn that
+     * carries an instruction.
+     */
+    canonicalReply?: string | null;
     modelAuthored?: boolean;
     /**
      * This turn is a CLARIFICATION or a de-escalation, not a coaching turn. It still gets its
@@ -277,30 +283,33 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
     }
 
     if (decisionTurn) {
-      // EXACTLY ONE INSTRUCTION, AND CODE OWNS IT. The prose keeps empathy, context and
-      // explanation — that is what the model is for. The action line is rendered from
-      // canonicalTodo and stands alone, so "how many instructions did this turn send" has a
-      // countable answer instead of a prose-shaped one.
+      // STRICT BOUNDARY (2026-08-21, live acceptance failure). Stripping recognised directives was
+      // not enough, and the handset proved it:
       //
-      // Paths that reach tellDontAsk have already appended the todo INTO the prose; that copy is
-      // taken out here so the rendered line is not the second one.
-      // DE-DUPLICATED AT SENTENCE LEVEL, not block level. A first version split on blank lines
-      // only — but stripModelDirectives rejoins sentences with a space, so the paragraph break
-      // tellDontAsk inserted is already gone by the time this runs, and the todo survived inline
-      // AND as the rendered line. The client would have been told the same thing twice in one
-      // message. The check counted action lines, saw one, and went green over it.
-      const bare = todo.toLowerCase().replace(/\s*[.!]\s*$/, "");
-      const prose = draft
-        .split(/\n{2,}|(?<=[.!?])\s+/)
-        .filter(part => {
-          const b = part.trim().toLowerCase().replace(/^\*+|\*+$/g, "").replace(/\s*[.!]\s*$/, "");
-          return b !== bare && !(bare.length > 12 && b.startsWith(bare));
-        })
-        .join(" ")
-        .replace(/\s{2,}/g, " ")
-        .trim();
-      const line = renderActionLine(todo);
-      draft = prose ? `${prose}\n\n${line}` : line;
+      //     canonical REST → "Today's a chest day."  →  "Rest today…"
+      //
+      // "Today's a chest day" has no imperative verb and no advisory shape, so nothing matched it
+      // and it shipped directly above the opposite instruction. Every version of this that keeps
+      // free model prose on a decision turn has the same hole, because recognising an instruction
+      // in arbitrary English is the thing that cannot be done.
+      //
+      // So on a turn that carries a decision, the customer sees the DETERMINISTIC reply and
+      // nothing the model wrote. Not stripped — not authored. There is exactly one behavioural
+      // instruction because there is exactly one sentence that could be one, and code wrote it.
+      //
+      // The model still runs, still reads state, still shapes the NONE turns, and every scanner,
+      // writer and safety rail is untouched. What it no longer does is talk over a decision.
+      const rendered = String(scope.evidence.canonicalReply || "").trim();
+      if (rendered) {
+        if (draft && draft !== rendered) {
+          console.log(`[DECISION_TURN] model prose withheld (${draft.length} chars) — the turn carries a decision`);
+        }
+        draft = rendered;
+      } else {
+        // No rendered reply (the decision was read but formatting failed): fall back to the one
+        // line rather than shipping prose that could contradict it.
+        draft = renderActionLine(todo);
+      }
     } else if (!draft) {
       draft = "I'm here — tell me what's going on and we'll take it from there.";
     }

@@ -601,8 +601,10 @@ async function main() {
     assert.ok(/scope\.evidence\.canonicalTodo/.test(log), "…reads the canonical decision");
     assert.ok(/renderActionLine\s*\}\s*=\s*await import\("\.\.\/one-action"\)/.test(log),
       "…and renders the instruction with the canonical renderer, not by hand");
-    assert.ok(/draft = prose \? `\$\{prose\}\\n\\n\$\{line\}` : line;/.test(log),
-      "…composing prose + exactly one action line");
+    // Updated 2026-08-21: a decision turn no longer composes prose + line. The deterministic
+    // reply REPLACES the model's prose entirely — asserted in its own check above.
+    assert.ok(/draft = rendered;/.test(log),
+      "…and on a decision turn the rendered reply is what the client receives");
     const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
     const code = gpt.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
     // The decision must be computed before the FIRST exit, not before the last one.
@@ -662,6 +664,52 @@ async function main() {
   // A decision turn carries EXACTLY ONE behavioural instruction and code owns it. The model keeps
   // empathy, context and explanation; the action line is rendered from canonicalTodo and stands
   // alone, so "how many instructions did this turn send" has a countable answer.
+  // ── STRICT BOUNDARY: A DECISION TURN CARRIES NO MODEL PROSE ───────────────────────────────
+  // 2026-08-21 live acceptance failure. Stripping recognised directives was not enough:
+  //
+  //     canonical REST → "Today's a chest day."  →  "Rest today…"
+  //
+  // "Today's a chest day" has no imperative verb and no advisory shape, so nothing matched it and
+  // it shipped directly above the opposite instruction. Every design that keeps free model prose
+  // on a decision turn has this hole, because recognising an instruction in arbitrary English is
+  // the thing that cannot be done. So the customer sees the deterministic reply and nothing the
+  // model wrote — one behavioural instruction, because there is exactly one sentence that could
+  // be one and code wrote it.
+  check("a decision turn cannot carry a contradictory instruction, in any phrasing", async () => {
+    const { formatOneAction } = await import("../server/one-action");
+    // Mirrors reconcileTurnReply on a decision turn.
+    const decisionReply = (act: any) => formatOneAction(act, "Kam");
+    const A = (kind: string, todo: string, why: string) => ({ kind, todo, why }) as any;
+    const CASES: Array<[string, any, RegExp]> = [
+      ["REST vs train language",   A("rest", "Rest today — your body is doing the work.", "Recovery is where the adaptation happens."), /chest|train|gym/i],
+      ["TRAIN vs rest language",   A("train", "Get today's session done.", "The hardest one to start is the one that counts."), /take it easy|no need to push/i],
+      ["PROTEIN vs food denial",   A("protein", "Make your next meal a proper protein meal.", "Protein is what protects your muscle."), /skip dinner/i],
+      ["LOG vs don't-log",         A("log", "Log one meal today. Any meal.", "One meal puts you straight back in it."), /no need to log/i],
+      ["WALK vs don't-walk",       A("walk", "Get a 20-minute walk in today.", "Easiest win there is on a bad day."), /don.t bother/i],
+      ["WEIGH vs don't-weigh",     A("weigh", "Weigh in tomorrow morning.", "One number, same conditions, no drama."), /stay off the scale/i],
+    ];
+    for (const [label, act, contradiction] of CASES) {
+      const out = decisionReply(act);
+      assert.ok(!contradiction.test(out), `${label}: the model's contradiction reached the client`);
+      assert.ok(out.includes(act.todo), `${label}: the canonical instruction is missing`);
+      assert.equal((out.match(/^\*[^*]+\*$/gm) || []).length, 1,
+        `${label}: a decision turn must carry exactly one behavioural instruction`);
+    }
+  });
+
+  check("the boundary withholds model prose on a decision turn", () => {
+    const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    // Asserted as wiring: the rendered reply REPLACES the draft, it is not appended to it. An
+    // append would leave the model's sentence above the instruction — the live failure.
+    assert.ok(/const rendered = String\(scope\.evidence\.canonicalReply \|\| ""\)\.trim\(\);/.test(log),
+      "the boundary must read the deterministically rendered reply");
+    assert.ok(/draft = rendered;/.test(log),
+      "…and REPLACE the draft with it, not append to it");
+    assert.ok(!/draft = `\$\{draft\}[\s\S]{0,40}\$\{rendered\}`/.test(log),
+      "the model's prose must not survive above the instruction");
+  });
+
   check("a decision turn sends exactly one instruction, and code wrote it", async () => {
     const { stripModelDirectives } = await import("../server/brain/reply-verifier");
     const { renderActionLine } = await import("../server/one-action");
