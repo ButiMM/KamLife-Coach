@@ -323,17 +323,10 @@ export const MAX_TREND_AGE_DAYS = 10;
  * and — in every job that checks isPaused() first, which is all of them — it could not reach a
  * genuinely ill client at all, because sick-flow writes paused_until beside sick_until.
  */
-export function sickToday(sickUntil: string | undefined, today: string): boolean {
-  return !!sickUntil && sickUntil >= today;
-}
-
-export function sickCoveredYesterday(
-  sickSince: string | undefined, sickUntil: string | undefined, today: string,
-): boolean {
-  if (!sickUntil) return false;
-  const yesterday = new Date(Date.parse(today) - 86_400_000).toISOString().slice(0, 10);
-  return sickUntil >= yesterday && (!sickSince || sickSince <= yesterday);
-}
+// DELETED 2026-08-21: sickToday() and sickCoveredYesterday(). Both moved to health-state.ts as
+// readHealthState().isSick and .wasSickYesterday, with the same rules. They were two of the five
+// disagreeing interpretations of one stored fact; leaving them here as a second entry point to
+// the same answer is how the next caller ends up asking the wrong one.
 
 export function weightTrendUsable(w: TrendWindow): TrendVerdict {
   if (w.count < 2) return { usable: false, why: "too_few" };

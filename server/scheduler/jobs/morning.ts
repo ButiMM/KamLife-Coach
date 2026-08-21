@@ -8,6 +8,7 @@ import {
 } from "../shared";
 import { auditStoredTargets, auditStepsTarget } from "../../targets";
 import { getNumbersMode } from "../../numbers-mode";
+import { readHealthState } from "../../health-state";
 // The `re_engagement` A/B went out with the button menu (2026-08-19, Cut 6). Worth recording why
 // nothing is lost: it called selectVariantMessage and then DISCARDED the text it chose
 // (`const { text: _variantMsg }`) before sending the buttons unchanged. Every arm sent the same
@@ -82,10 +83,9 @@ export async function runMorningCheckin(): Promise<void> {
     // Sickness is an INPUT to the decision below, which ranks `rest` second on purpose. An
     // explicit pause — they asked us to stop — still suppresses, because that one is a request.
     if (pauseReason(client) === "explicit") {
-      const notes = client.profileNotes || "";
-      const pauseMatch = notes.match(/paused_until:(\d{4}-\d{2}-\d{2})/);
-      if (pauseMatch) {
-        const pauseEnd = new Date(pauseMatch[1]);
+      const pausedUntil = readHealthState(client).pausedUntil;
+      if (pausedUntil) {
+        const pauseEnd = new Date(pausedUntil);
         const tomorrow = new Date(Date.now() + 86_400_000);
         const isTomorrowEnd = pauseEnd.toISOString().slice(0, 10) === tomorrow.toISOString().slice(0, 10);
         if (isTomorrowEnd && await claimDailySlot(client.id, "morning")) {

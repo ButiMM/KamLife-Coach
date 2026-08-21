@@ -13,6 +13,7 @@ import { join } from "path";
 import { schedulerState } from "../../shared/schema";
 import { routineNudgeAllowed, dayOfYearSAST } from "./nudge-policy";
 import { checkOutboundMessage } from "../verifiers/proactive-gate";
+import { readHealthState } from "../health-state";
 import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply } from "../reply-hygiene";
 import { templateSid, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
@@ -737,18 +738,14 @@ export async function getActiveClients(opts?: { ignorePause?: boolean }) {
  * So sickness now INFORMS the decision and no longer gates the job. An explicit pause — the
  * client asked us to stop for a fortnight — still suppresses, because that one is a request.
  */
+// Both delegate to the health-state owner (2026-08-21). They were two more independent readings
+// of the same tokens — and isPaused compared UTC midnights, so a pause expired at 02:00 SAST.
 export function pauseReason(client: { profileNotes?: string | null }): "explicit" | "health" | null {
-  const notes = client.profileNotes || "";
-  const match = notes.match(/paused_until:(\d{4}-\d{2}-\d{2})/);
-  if (!match || new Date(match[1]) < new Date(todayUTC())) return null;
-  return /sick_until:\d{4}-\d{2}-\d{2}/.test(notes) ? "health" : "explicit";
+  return readHealthState(client).pause;
 }
 
 export function isPaused(client: { profileNotes?: string | null }): boolean {
-  const notes = client.profileNotes || "";
-  const match = notes.match(/paused_until:(\d{4}-\d{2}-\d{2})/);
-  if (!match) return false;
-  return new Date(match[1]) >= new Date(todayUTC());
+  return readHealthState(client).pause !== null;
 }
 
 export function dayStart(offsetDays = 0): Date {
@@ -798,8 +795,7 @@ export function programmeDaysSince(startDate: Date | null | undefined): number {
 // sick so I skipped gym"). The durable path already scrubs all three, via
 // sick-flow.looksSickMention → aboutSomeoneElse, past-tense and regret-context handling.
 //
-// The durable questions now have one owner each, in adaptive-targets.ts: sickToday() and
-// sickCoveredYesterday().
+// The durable questions have one owner: health-state.ts readHealthState().
 
 // ════════════════════════════════════════════════════════════════════════════════════════════
 // CANONICAL PROACTIVE STATE — the one structure every scheduled job reads.
@@ -877,21 +873,19 @@ function stalledWeeksFrom(weights: number[]): number {
  * than throwing — a scheduled job must not die for one client's missing row.
  */
 export async function loadProactiveState(client: any): Promise<ProactiveState> {
-  const { weightTrendUsable, sickCoveredYesterday, sickToday } = await import("../adaptive-targets");
+  const { weightTrendUsable } = await import("../adaptive-targets");
   const { contactState } = await import("../understanding/reentry");
   const { gatherReportData } = await import("../report-card");
   const since = (d: number) => new Date(Date.now() - d * 86_400_000);
 
-  const notes = String(client.profileNotes || "");
-  const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
-  const sickSince = notes.match(/sick_since:(\d{4}-\d{2}-\d{2})/)?.[1];
+  // ONE READ. This block used to derive sick / recovering / sickYesterday three different ways
+  // from three separate parses of the same string.
+  const health = readHealthState(client);
+  const { sickUntil, sickSince } = health;
   const today = todaySAST();
-  const sick = sickToday(sickUntil, today);
-  const recovering = !sick && !!sickUntil
-    && (Date.now() - new Date(sickUntil).getTime()) / 86_400_000 <= 3;
-  // "Were they ill YESTERDAY" — what the morning brief actually asks, since it reports on the day
-  // that just ended. The rule itself lives in adaptive-targets.ts so it has one owner.
-  const sickYesterday = sickCoveredYesterday(sickSince, sickUntil, today);
+  const sick = health.isSick;
+  const recovering = health.isRecovering;
+  const sickYesterday = health.wasSickYesterday;
 
   const { getDayLedger } = await import("../day-ledger");
   const { sastDayStart, sastDaysBetween, sastHour } = await import("../sast");

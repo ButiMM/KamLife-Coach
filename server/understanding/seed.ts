@@ -15,13 +15,9 @@ import { getDisplayName } from "../utils";
 import { getNumbersMode } from "../numbers-mode";
 import { type UnderstandingState, defaultUnderstanding, type WeightDirection } from "./state";
 import { contactState } from "./reentry";
+import { readHealthState } from "../health-state";
 
-function isActivelySick(user: any): boolean {
-  const notes = user?.profileNotes || "";
-  const m = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/);
-  if (!m) return false;
-  return new Date(m[1]) >= new Date(new Date().toISOString().slice(0, 10));
-}
+const isActivelySick = (user: any): boolean => readHealthState(user).isSick;
 
 // Pull the few trustworthy stats out of the snapshot text (it's the DB's own numbers).
 function statsFromSnapshot(snapshot?: string): Partial<UnderstandingState["stats"]> {

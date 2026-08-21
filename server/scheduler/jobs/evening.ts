@@ -5,7 +5,7 @@ import {
   getActiveClients, isPaused, dayStart, getTodayLogs,
   TRAINING_SCHEDULES, todaySAST,
 } from "../shared";
-import { sickToday } from "../../adaptive-targets";
+import { readHealthState } from "../../health-state";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
 import { usesMacroTargets } from "../../goal-profiles";
 import { proteinOptions } from "../../utils";
@@ -48,10 +48,7 @@ export async function runEveningAccountability(): Promise<void> {
       // morning's copy it could only ever be wrong here: sick-flow.ts writes paused_until beside
       // sick_until and this job returns on isPaused() at line 18, so a genuinely ill client never
       // reaches it. SICK_PATTERNS also fires on "rest day", "skip gym" and someone else being ill.
-      const sick = sickToday(
-        String(client.profileNotes || "").match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1],
-        todaySAST(),
-      );
+      const sick = readHealthState(client).isSick;
       const protTarget = client.proteinTarget || 120;
       const stepsTarget = client.stepsTarget || 8500;
       const trainingDays = client.trainingDaysPerWeek || 3;

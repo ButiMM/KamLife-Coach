@@ -12,6 +12,7 @@ import { logChat } from "./chat-log";
 import { parseSickDays, isReturnFromSicknessQuestion, looksLikeComebackQuestion } from "../utils";
 import { scheduleReturnNudge, cancelReturnNudges } from "../reminders";
 import { isBareGreeting } from "../constants";
+import { readHealthState, openHold, clearHold } from "../health-state";
 
 // ── Precision guards (2026-07-13, cross-intent sweep) ─────────────────────────
 // Word PRESENCE is not a sickness report. "Sick of pap" is frustration. "Flu shot"
@@ -112,17 +113,11 @@ async function recordSickState(user: any, notes: string, m: string, minDays = 0)
   // machine resumes nagging someone who's still in bed (2026-07-22, Kam: "for two weeks
   // I've been telling it I'm sick" and it kept pinging).
   const sickDays = Math.max(parseSickDays(m), minDays);
-  const sickUntil = new Date(Date.now() + sickDays * 86_400_000).toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
-  // sick_since = the FIRST day they reported this illness. Set once, preserved across every
-  // repeat mention, so we can see how long it's dragged on (prolonged-illness care).
-  const sinceMatch = notes.match(/sick_since:(\d{4}-\d{2}-\d{2})/);
-  const sickSince = sinceMatch ? sinceMatch[1] : today;
-  const daysSick = Math.max(0, Math.round((Date.parse(today) - Date.parse(sickSince)) / 86_400_000));
+  void notes; // the state owner reads the row's notes itself
   try {
-    const cleaned = notes.replace(/\s*\|?\s*(?:paused_until|sick_until|sick_since):\d{4}-\d{2}-\d{2}/g, "").trim();
-    const updatedNotes = `${cleaned ? cleaned + " | " : ""}sick_since:${sickSince} | sick_until:${sickUntil} | paused_until:${sickUntil}`;
-    await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.id, user.id));
+    // ENTRY, through the one writer. sick_since is set once and preserved across repeat mentions;
+    // the storage format lives in health-state.ts and nowhere else.
+    const { sickUntil, daysSick } = await openHold(user, sickDays);
     // TEMPORAL LOOP: don't go silent on a sick client — nudge them the evening before they're due back.
     if (user.phoneNumber) scheduleReturnNudge(user.id, user.phoneNumber, sickUntil, "sick").catch((e) => console.error("[SICK] return nudge failed:", e));
     return { sickDays, sickUntil, daysSick };
@@ -154,16 +149,16 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
   //
   // It is hoisted, not duplicated. Still gated on illness vocabulary by the detectors themselves,
   // and it still records a first-person report before answering, so nothing is lost either way.
+  const healthEarly = readHealthState(user);
+  const alreadySickEarly = healthEarly.isSick;
   const notesEarly = user.profileNotes || "";
-  const sickMatchEarly = notesEarly.match(/sick_until:(\d{4}-\d{2}-\d{2})/);
-  const alreadySickEarly = !!sickMatchEarly && new Date(sickMatchEarly[1]) >= new Date(new Date().toISOString().slice(0, 10));
   // Hoisting cost us one guard that `looksSickMention` used to apply on this path: it rejects
   // an illness that belongs to somebody else. "My wife, after the flu — how do I help?" must
   // never come back with YOUR comeback plan. Re-applied explicitly rather than assumed.
   if (!aboutSomeoneElse(m) && (isReturnFromSicknessQuestion(m) || looksLikeComebackQuestion(m))) {
     // Answering the question must not LOSE the report — "I can't walk today, I'm sick... how
     // does that affect my progress?" both declares and asks. Record first, then answer.
-    let backDate = sickMatchEarly ? sickMatchEarly[1] : null;
+    let backDate = healthEarly.isSick ? healthEarly.sickUntil ?? null : null;
     let heldLine = "";
     if (!alreadySickEarly && FIRST_PERSON_SICK.test(m)) {
       const rec = await recordSickState(user, notesEarly, m);
@@ -197,8 +192,8 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
     // the template again; (4) the FIRST report parses the duration, remembers it, and
     // puts the entire proactive machine on hold via the existing paused_until plumbing.
     const notes = user.profileNotes || "";
-    const sickMatch = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/);
-    const alreadySick = !!sickMatch && new Date(sickMatch[1]) >= new Date(new Date().toISOString().slice(0, 10));
+    const health = readHealthState(user);
+    const alreadySick = health.isSick;
 
     // MEMORY COMPLAINT (2026-07-19 live: "I said I'm still sick until Monday why did you
     // forget that??" got the full first-report template — re-committing the exact
@@ -207,7 +202,7 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
     const memoryComplaint = /\b(you forgot|forgot that|forgot i|did you forget|why (did|would|do|are) you|already (told|said)|i (told|said) you|i keep (telling|saying)|keep telling you|i already|you (should )?(know|remember)|not listening|weren'?t listening|pay attention|do you (even )?remember)\b/i.test(m);
     if (memoryComplaint) {
       const hasDatePhrase = /\b(until|till|til|through|thru|by|for|next|about|\d+\s*days?|week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(m);
-      let until = alreadySick ? sickMatch![1] : null;
+      let until = alreadySick ? health.sickUntil ?? null : null;
       if (!alreadySick || hasDatePhrase) {
         const rec2 = await recordSickState(user, notes, m);
         if (rec2) until = rec2.sickUntil;
@@ -307,13 +302,11 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
   // holiday pause never says "say Hi", so a greeting must not end one. And it cannot fire on a
   // client who greets while still ill: looksSickMention runs earlier in this same handler, so
   // "hi, still sick" re-arms the hold instead of reaching here.
-  const greetsBackFromSick = isBareGreeting(m)
-    && /sick_until:\d{4}-\d{2}-\d{2}/.test(user.profileNotes || "");
-  if (!isDeferredReturn && (declaresReturn || greetsBackFromSick)
-      && /(?:sick_until|paused_until):\d{4}-\d{2}-\d{2}/.test(user.profileNotes || "")) {
+  const holdOnRecord = readHealthState(user);
+  const greetsBackFromSick = isBareGreeting(m) && holdOnRecord.isSick;
+  if (!isDeferredReturn && (declaresReturn || greetsBackFromSick) && holdOnRecord.phase !== "none") {
     try {
-      const cleaned = (user.profileNotes || "").replace(/\s*\|?\s*(?:paused_until|sick_until|sick_since):\d{4}-\d{2}-\d{2}/g, "").trim();
-      await db.update(users).set({ profileNotes: cleaned || null }).where(eq(users.id, user.id));
+      await clearHold(user);
       // Already back — cancel the pending night-before nudge so we don't ping someone who returned early.
       await cancelReturnNudges(user.id).catch((e) => console.error("[SICK] cancel return nudge failed:", e));
     } catch (e) { console.error("[SICK] failed to clear sick state:", e); }

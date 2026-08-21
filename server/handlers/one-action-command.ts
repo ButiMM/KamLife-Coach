@@ -18,13 +18,10 @@ import { formatOneAction, dayStateFrom, decideProactive,
 import { sql } from "drizzle-orm";
 import { getDayLedger } from "../day-ledger";
 import { sastDayStart, sastDaysBetween, sastHour } from "../sast";
+import { readHealthState } from "../health-state";
 
-/** Is this client inside a declared sick window? Stored as a profileNotes token. */
-function isSick(user: any): boolean {
-  const m = (user?.profileNotes || "").match(/sick_until:(\d{4}-\d{2}-\d{2})/);
-  if (!m) return false;
-  return new Date(`${m[1]}T23:59:59+02:00`).getTime() >= Date.now();
-}
+/** Is this client inside a declared sick window? Asked of the state owner, not of the text. */
+const isSick = (user: any): boolean => readHealthState(user).isSick;
 
 async function buildDecisionInputs(user: any): Promise<{ state: ProactiveStateForDecision; profile: ProactiveProfile }> {
   const dayStart = sastDayStart();

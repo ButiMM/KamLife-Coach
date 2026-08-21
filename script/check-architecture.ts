@@ -26,7 +26,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 // ESM: a static import, not require(). This repo has already lost 23 tests to require() inside an
 // ES module — they threw at load and reported nothing.
-import { DOMAIN_OWNERS, NON_CLAIMANTS } from "./domain-owners";
+import { DOMAIN_OWNERS, NON_CLAIMANTS, STATE_OWNERS } from "./domain-owners";
 import { join } from "node:path";
 
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
@@ -634,7 +634,7 @@ for (const rule of ONE_OWNER) {
     for (const c of claimants) {
       if (d.engineSurface.includes(c)) continue; // proven safe by chain order below
       if (!d.owners.includes(c)) {
-        problems.push(`  ✗ ${c} can answer the "${d.domain}" question, and is not a declared owner.`);
+        problems.push(`  ✗ [OWNERSHIP] ${c} can answer the "${d.domain}" question, and is not a declared owner.`);
         problems.push(`    Declared: ${d.owners.join(", ")}. Either route through one of those, or`);
         problems.push(`    declare it in script/domain-owners.ts and say why a second owner is correct.`);
       }
@@ -644,7 +644,7 @@ for (const rule of ONE_OWNER) {
       const src = readFileSync(owner, "utf-8");
       const source = d.truthSource.replace(/^server\//, "").replace(/\.ts$/, "");
       if (!new RegExp(`from "\\.{1,2}(?:/\\.\\.)*/?${source}"|import\\("\\.{1,2}(?:/\\.\\.)*/?${source}"\\)`).test(src)) {
-        problems.push(`  ✗ ${owner} owns "${d.domain}" but does not read ${d.truthSource}.`);
+        problems.push(`  ✗ [OWNERSHIP] ${owner} owns "${d.domain}" but does not read ${d.truthSource}.`);
         problems.push(`    An owner that builds its own numbers is the second authority this guard exists to stop.`);
       }
     }
@@ -659,15 +659,57 @@ for (const rule of ONE_OWNER) {
         const at = chain.indexOf(handler);
         if (at < 0) { problems.push(`  ✗ "${d.domain}" owner ${owner} is not called from the handler chain in routes.ts.`); continue; }
         if (engineAt > 0 && at > engineAt) {
-          problems.push(`  ✗ "${d.domain}" owner ${owner} runs AFTER the model in routes.ts — the engine would claim it first.`);
+          problems.push(`  ✗ [OWNERSHIP] "${d.domain}" owner ${owner} runs AFTER the model in routes.ts — the engine would claim it first.`);
         }
       }
     }
     if (claimants.length === 0) {
-      problems.push(`  ✗ "${d.domain}" has NO claimant. A question the product invites and nobody owns falls to the model.`);
+      problems.push(`  ✗ [OWNERSHIP] "${d.domain}" has NO claimant. A question the product invites and nobody owns falls to the model.`);
     }
   }
 }
+
+// ── GUARD #12: ONE READER PER DURABLE FACT (2026-08-21) ─────────────────────────────────────
+//
+// GUARD #11 asks who may ANSWER a question. This asks who may READ THE STORED FORM of a fact —
+// a different failure, and one #11 cannot see, because every site that parsed sick_until was a
+// legitimate reader doing legitimate work. What was illegitimate is that each decided for itself
+// what the bytes meant, and five of them decided differently.
+//
+// Matching the STORAGE SIGNATURE rather than a vocabulary is the whole point: a second reader
+// cannot hide behind a synonym, because it still has to parse the same characters.
+{
+  for (const st of STATE_OWNERS) {
+    if (!existsSync(st.owner)) {
+      problems.push(`  ✗ "${st.fact}" declares owner ${st.owner}, which does not exist.`);
+      continue;
+    }
+    const trespassers = files.filter((f, i) => {
+      if (f === st.owner) return false;
+      // Comments may name the storage format — that is documentation, not a second reading.
+      const live = all[i].replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+      return st.storageSignature.test(live);
+    });
+    for (const t of trespassers) {
+      problems.push(`  ✗ [OWNERSHIP] ${t} parses the stored form of "${st.fact}" directly.`);
+      problems.push(`    Call ${st.accessor} from ${st.owner} instead. ${st.earnedBy}`);
+    }
+  }
+}
+
+// THE OWNERSHIP VERDICT, STATED SEPARATELY (2026-08-21).
+//
+// The budget counters have been over since before the convergence series began, so this suite is
+// permanently red — and a gate that is always red signals nothing, which is the same suite-liveness
+// disease documented in script/run-suites.ts. Ownership is the assertion that must stay readable:
+// a second claimant introduced tomorrow has to be visible without anyone diffing counter numbers.
+//
+// This is NOT a budget being raised. The counters still fail the build. They are just no longer
+// the only thing printed.
+const ownership = problems.filter(p => p.includes("[OWNERSHIP]"));
+console.log(ownership.length === 0
+  ? "ownership: OK — one owner per declared question, one reader per declared fact"
+  : `ownership: ${ownership.length} VIOLATION(S) — a second authority exists`);
 
 if (problems.length > 0) {
   console.error("architecture guard: FAILED\n");

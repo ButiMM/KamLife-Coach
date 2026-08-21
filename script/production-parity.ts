@@ -216,6 +216,35 @@ async function main() {
         + `      and this is the reply that arrives instead:\n      ${greetingReply.slice(0, 200)}`);
     });
 
+    // ── THE LIFECYCLE HAS A TERMINAL STATE ──────────────────────────────────────────────────
+    // The hold used to end only when a message ended it. Nothing swept the tokens, and one reader
+    // never checked the date at all — so a client could be described as ill indefinitely. Expiry
+    // is derived on read now; this proves it at the final outbound text, not in a unit test.
+    const EXPIRED_SINCE = new Date(NOW - 40 * 86_400_000).toISOString().slice(0, 10);
+    const EXPIRED_UNTIL = new Date(NOW - 30 * 86_400_000).toISOString().slice(0, 10);
+    (globalThis as any).__KAMLIFE_STUB_USER = {
+      ...USER,
+      profileNotes: `sick_since:${EXPIRED_SINCE} | sick_until:${EXPIRED_UNTIL} | paused_until:${EXPIRED_UNTIL}`,
+    };
+    const staleAsk = await say("what workout do I have today");
+    (globalThis as any).__KAMLIFE_STUB_USER = { ...USER };
+
+    check("a hold that aged out no longer speaks", () => {
+      assert.ok(!staleAsk.startsWith("__THREW__"), `handler threw: ${staleAsk}`);
+      assert.ok(!/you'?re resting until|hope you'?re feeling better|no training pushes/i.test(staleAsk),
+        `a hold that ended 30 days ago is still treating the client as ill:\n      ${staleAsk.slice(0, 200)}`);
+    });
+
+    check("the state owner agrees with itself across the lifecycle", async () => {
+      const { readHealthState } = await import("../server/health-state");
+      const day = (o: number) => new Date(NOW + o * 86_400_000).toISOString().slice(0, 10);
+      const notes = `sick_since:${day(-9)} | sick_until:${day(-30)} | paused_until:${day(-30)}`;
+      const st = readHealthState({ profileNotes: notes }, day(0));
+      assert.equal(st.phase, "ended");
+      assert.equal(st.isSick, false, "an aged-out hold is not illness");
+      assert.equal(st.pause, null, "…and it holds nothing");
+    });
+
     check("the brief and the door use the same words", () => {
       const brief = readFileSync("server/morning-message.ts", "utf-8");
       const sick = readFileSync("server/handlers/sick-flow.ts", "utf-8");

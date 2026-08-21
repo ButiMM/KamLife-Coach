@@ -19,6 +19,7 @@
 
 import { eq, desc, inArray, and, gte } from "drizzle-orm";
 import { db } from "../db";
+import { readHealthState } from "../health-state";
 import { chatHistory, users, weightLogs } from "../../shared/schema";
 import { buildClientSnapshot } from "../brain/client-snapshot";
 import { seedUnderstanding } from "./seed";
@@ -310,8 +311,7 @@ export async function runMeaningEngineLive(ctx: {
           const newestAt = new Date(rows[0].at as Date).getTime();
           const oldestAt = new Date(rows[rows.length - 1].at as Date).getTime();
           const notes = String(user.profileNotes || "");
-          const sickSince = notes.match(/sick_since:(\d{4}-\d{2}-\d{2})/)?.[1];
-          const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
+          const { sickSince, sickUntil } = readHealthState({ profileNotes: notes });
           const verdict = weightTrendUsable({
             count: rows.length, newestAt, oldestAt, now: Date.now(),
             sickSince: sickSince ? new Date(sickSince).getTime() : undefined,

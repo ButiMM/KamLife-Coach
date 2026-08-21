@@ -23,6 +23,7 @@ import { sastToday, sastDayStart } from "../utils";
 // yesterday in the numbers and today in the story. The client is then told they ate something
 // today while the totals disagree. sast.ts already owned this; the local copy was the second owner.
 import { sastDayKey } from "../sast";
+import { readHealthState } from "../health-state";
 import { liftsForLaggingAreas } from "../physique-analysis";
 import { getGoalProfile } from "../goal-profiles";
 
@@ -64,9 +65,12 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     const frame = energyFrameLine(user.goalType, user.calorieTarget);
     if (frame) lines.push(frame);
 
-    const sickMatch = String(user.profileNotes || "").match(/sick_until:(\d{4}-\d{2}-\d{2})/);
-    if (sickMatch && new Date(sickMatch[1]) >= new Date(sastToday())) {
-      lines.push(`⚠️ CLIENT IS SICK (resting until ~${sickMatch[1]}). No training pushes, no calorie pressure — care first. If they ask about coming back: nothing resets. Session 1 at 60% with one less set, sessions 2-3 at 70-80%, full weight only by week 2-3. NEVER say they go back to full speed on session two.`);
+    // ONE READ of the health hold (2026-08-21). This block and the memory block below used to
+    // parse sick_until separately and disagree — this one compared UTC midnights, the other did
+    // not check the date at all.
+    const health = readHealthState(user);
+    if (health.isSick) {
+      lines.push(`⚠️ CLIENT IS SICK (resting until ~${health.sickUntil}). No training pushes, no calorie pressure — care first. If they ask about coming back: nothing resets. Session 1 at 60% with one less set, sessions 2-3 at 70-80%, full weight only by week 2-3. NEVER say they go back to full speed on session two.`);
     }
 
     if (user.dreamGoal) lines.push(`Their 3-month dream, in their words: "${String(user.dreamGoal).slice(0, 160)}". Reference this to motivate — it's their why.`);
@@ -244,11 +248,16 @@ export async function buildClientSnapshot(user: any): Promise<string> {
   try {
     const notes = user.profileNotes || "";
     const backOn = notes.match(/back_on:(\d{4}-\d{2}-\d{2})/)?.[1];
-    const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
-    const pausedUntil = notes.match(/paused_until:(\d{4}-\d{2}-\d{2})/)?.[1];
     if (backOn) lines.push(`The client TOLD you they plan to be back on ${backOn}. Remember it — reference it naturally, don't re-ask, and don't push training before then.`);
-    if (sickUntil) lines.push(`Client is SICK/resting until ${sickUntil} (they told you). Care first; no training pushes before that date.`);
-    if (pausedUntil) lines.push(`Client is on a PAUSE/break until ${pausedUntil}. Respect it — no programme pressure until then.`);
+    // THE 21 AUGUST BUG. These two lines were `if (sickUntil)` and `if (pausedUntil)` — no date
+    // check whatsoever — so an illness from March still told the model "Client is SICK/resting
+    // until 2026-03-04" on every single turn, for as long as the token sat on the row. Nothing in
+    // the product removed the token, so "as long as" meant forever. The state owner derives expiry
+    // on read, which is why a stale hold can no longer speak.
+    const mem = readHealthState(user);
+    if (mem.isSick) lines.push(`Client is SICK/resting until ${mem.sickUntil} (they told you). Care first; no training pushes before that date.`);
+    else if (mem.isRecovering) lines.push(`Client is JUST BACK from being ill (hold ended ${mem.sickUntil}). Ease them in — do not treat this as a normal training week, and do not describe them as still sick.`);
+    if (mem.pause === "explicit") lines.push(`Client is on a PAUSE/break until ${mem.pausedUntil}. Respect it — no programme pressure until then.`);
   } catch { /* memory lines are bonus */ }
 
   try {

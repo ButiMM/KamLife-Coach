@@ -30,6 +30,7 @@ import { handleMealRepeat } from "./meal-repeat";
 import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
 import { isBareGreeting } from "../constants";
+import { readHealthState } from "../health-state";
 import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion, handleVoiceReplyPreference } from "./numbers-literacy";
 import { answerSwapAsk, answerUnavailable, answerLocalListChange } from "../food-swaps";
 import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
@@ -510,11 +511,10 @@ export async function handleEarlyCommands(ctx: {
     // SICK-AWARE SERVING (2026-07-16: a client resting until tomorrow was told "today is
     // the reset — one session and you're back in it"). While sick_until is active the
     // programme is served TO LOOK AT — never as a push, never counting missed days.
-    const sickUntilMatch = String(user.profileNotes || "").match(/sick_until:(\d{4}-\d{2}-\d{2})/);
-    const sastTodayStr = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
-    const sickActive = !!(sickUntilMatch && sickUntilMatch[1] >= sastTodayStr);
+    const sickHold = readHealthState(user);
+    const sickActive = sickHold.isSick;
     const sickViewHeader = sickActive
-      ? `You're resting until ${sickUntilMatch![1]} — no pressure to do this today, it's just here to look at. Say *I'm back* when you're ready.\n\n`
+      ? `You're resting until ${sickHold.sickUntil} — no pressure to do this today, it's just here to look at. Say *I'm back* when you're ready.\n\n`
       : "";
 
     // FULL PLAN vs TODAY (2026-07-16 live: "show me my programme" answered with ONE

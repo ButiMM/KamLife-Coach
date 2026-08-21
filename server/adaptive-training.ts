@@ -138,13 +138,17 @@ export function comebackPlan(firstName = ""): string {
  * "healthy" for everyone.
  */
 export interface TrainingState { sick: boolean; recovering: boolean; daysSinceLastWorkout: number }
+import { readHealthState } from "./health-state";
 
 export function trainingStateFromUser(user: any, now: number = Date.now()): TrainingState {
-  const notes = String(user?.profileNotes ?? user?.notes ?? "");
-  const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
-  const today = new Date(now).toISOString().slice(0, 10);
-  const sick = !!sickUntil && new Date(sickUntil) >= new Date(today);
-  const recovering = !sick && !!sickUntil && (now - new Date(sickUntil).getTime()) / 86_400_000 <= 3;
+  // ONE READ (2026-08-21). This computed `sick` from UTC-midnight Date objects and `recovering`
+  // from a 3-day tail — the same two facts the state owner now derives once, from the same rules.
+  const health = readHealthState(
+    { profileNotes: String(user?.profileNotes ?? user?.notes ?? "") },
+    new Date(now + 2 * 3_600_000).toISOString().slice(0, 10),
+  );
+  const sick = health.isSick;
+  const recovering = health.isRecovering;
   const daysSinceLastWorkout = user?.lastWorkoutDate
     ? Math.floor((now - new Date(user.lastWorkoutDate).getTime()) / 86_400_000)
     : 0;

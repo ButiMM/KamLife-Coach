@@ -85,3 +85,48 @@ export const NON_CLAIMANTS = [
   "server/weekly-recap.ts",
   "server/agents.ts",          // admin keyword list, never a client reply path
 ];
+
+/**
+ * WHO OWNS A DURABLE FACT — the state half of the map (2026-08-21).
+ *
+ * DOMAIN_OWNERS above answers "who may reply to this question". This answers the prior one: who
+ * may READ THE STORED FORM of a fact. They are different failures. Progress had one stored truth
+ * and several replies; sick/recovery had one stored fact and THIRTEEN files parsing it out of
+ * free text, each applying its own interpretation:
+ *
+ *   sickUntil >= today                          string compare, SAST
+ *   new Date(sickUntil) >= new Date(today)      UTC midnight — the last day ended at 02:00 SAST
+ *   sickUntil + "T23:59:59+02:00" >= now        end of the final SAST day
+ *   if (sickUntil)                              no date check at all — told the model the client
+ *                                               was ill for as long as the token existed, and
+ *                                               nothing ever removed the token
+ *
+ * A domain guard cannot see that: every one of those sites is a legitimate reader doing a
+ * legitimate job. What is illegitimate is each of them deciding what the bytes MEAN. So the rule
+ * is about the STORAGE SIGNATURE — match the way the fact is written down, and only its owner may
+ * do so.
+ */
+export interface StateOwnership {
+  /** The fact, in one phrase. */
+  fact: string;
+  /** How the fact is written down. Any file matching this is reading storage directly. */
+  storageSignature: RegExp;
+  /** The single file permitted to parse and interpret it. */
+  owner: string;
+  /** The read every other file must use instead. */
+  accessor: string;
+  /** Why this fact is here — the failure that earned it a place. */
+  earnedBy: string;
+}
+
+export const STATE_OWNERS: StateOwnership[] = [
+  {
+    fact: "sick / recovery hold",
+    storageSignature: /(?:sick_until|sick_since|paused_until)\s*:\s*\\?\(?\\d\{4\}/,
+    owner: "server/health-state.ts",
+    accessor: "readHealthState()",
+    earnedBy: "2026-08-21: thirteen files parsed the tokens out of profileNotes and five of them "
+      + "disagreed about what 'sick now' means. One had no date check at all, so a hold nothing "
+      + "ever cleared described the client to the model as ill indefinitely.",
+  },
+];

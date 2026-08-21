@@ -14,6 +14,11 @@
  */
 
 import assert from "node:assert/strict";
+
+/** The stored form of a health hold, so the tests drive the owner through its real input. */
+const notes = (since?: string, until?: string) =>
+  [since ? `sick_since:${since}` : "", until ? `sick_until:${until}` : "", until ? `paused_until:${until}` : ""]
+    .filter(Boolean).join(" | ");
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { prescribesProtein } from "./hunger-checks";
@@ -2475,8 +2480,10 @@ test("proactive state: morning's health is durable, never a keyword scan", () =>
   // else being ill.
   assert.ok(!/wasSickOrInjured\(/.test(code), "morning decides health from durable state only");
   assert.ok(/state\.health\.sickYesterday/.test(code), "…and asks the snapshot for it");
-  const sick = readFileSync("server/handlers/sick-flow.ts", "utf-8");
-  assert.ok(/sick_until:\$\{sickUntil\}/.test(sick) && /paused_until:\$\{sickUntil\}/.test(sick),
+  // The tokens are written by health-state.holdTokens now (2026-08-21) — one writer, one format.
+  // The assertion is unchanged in substance: the pause is still written beside the illness.
+  const owner = readFileSync("server/health-state.ts", "utf-8");
+  assert.ok(/sick_until:\$\{sickUntil\}/.test(owner) && /paused_until:\$\{sickUntil\}/.test(owner),
     "the durable token and the pause are written together — that is why the scan was unreachable");
 });
 
@@ -2484,10 +2491,13 @@ test("proactive state: sickYesterday needs the illness to have covered yesterday
   // An illness that started THIS MORNING did not cause yesterday's missing logs, and a window
   // that closed before yesterday did not either. Both would send "hope you're feeling better" to
   // someone who simply did not log.
-  const { sickCoveredYesterday } = await import("../server/adaptive-targets");
+  // Re-pointed at the health-state owner (2026-08-21). The rule is unchanged; the file that
+  // owns it is. Deleting these assertions along with the old function would have dropped the
+  // coverage that keeps the rule honest.
+  const { readHealthState } = await import("../server/health-state");
   const day = (o: number) => new Date(Date.now() + o * 86_400_000).toISOString().slice(0, 10);
   const covered = (since: string | undefined, until: string | undefined) =>
-    sickCoveredYesterday(since, until, day(0));
+    readHealthState({ profileNotes: notes(since, until) }, day(0)).wasSickYesterday;
   assert.equal(covered(day(-3), day(1)), true, "ill across yesterday");
   assert.equal(covered(day(0), day(2)), false, "started today — yesterday was not illness");
   assert.equal(covered(day(-9), day(-4)), false, "window closed before yesterday");
@@ -2767,21 +2777,41 @@ test("sweep: the keyword sickness scan drives no decision anywhere", () => {
   // Every one of those jobs returns on isPaused() before its sick branch, and sick-flow writes
   // paused_until beside sick_until — so the scan could only ever fire on its FALSE positives:
   // "rest day", "skip gym", "miss workout", someone else being ill.
-  const sick = readFileSync("server/handlers/sick-flow.ts", "utf-8");
-  assert.ok(/paused_until:\$\{sickUntil\}/.test(sick));
+  const holdWriter = readFileSync("server/health-state.ts", "utf-8");
+  assert.ok(/paused_until:\$\{sickUntil\}/.test(holdWriter));
 });
 
-test("sweep: sickToday and sickCoveredYesterday have one owner", async () => {
-  const { sickToday, sickCoveredYesterday } = await import("../server/adaptive-targets");
+test("sweep: sick-now and sick-yesterday have one owner", async () => {
+  const { readHealthState } = await import("../server/health-state");
   const day = (o: number) => new Date(Date.now() + o * 86_400_000).toISOString().slice(0, 10);
-  assert.equal(sickToday(day(1), day(0)), true, "window still open");
-  assert.equal(sickToday(day(0), day(0)), true, "last day of the window counts");
-  assert.equal(sickToday(day(-1), day(0)), false, "window closed yesterday");
-  assert.equal(sickToday(undefined, day(0)), false, "no illness on record");
+  const sickNow = (until: string | undefined) =>
+    readHealthState({ profileNotes: notes(undefined, until) }, day(0)).isSick;
+  assert.equal(sickNow(day(1)), true, "window still open");
+  assert.equal(sickNow(day(0)), true, "last day of the window counts");
+  assert.equal(sickNow(day(-1)), false, "window closed yesterday");
+  assert.equal(sickNow(undefined), false, "no illness on record");
   // The two rules are different questions and must not collapse into each other: an illness that
   // ended yesterday is not sick today, but it DID cover yesterday.
-  assert.equal(sickCoveredYesterday(day(-3), day(-1), day(0)), true);
-  assert.equal(sickToday(day(-1), day(0)), false);
+  const h = readHealthState({ profileNotes: notes(day(-3), day(-1)) }, day(0));
+  assert.equal(h.wasSickYesterday, true);
+  assert.equal(h.isSick, false);
+});
+
+test("health lifecycle: a hold that ages out stops describing the client as ill", async () => {
+  // THE 21 AUGUST DEFECT. client-snapshot told GPT "Client is SICK/resting until X" with no date
+  // check at all, and nothing in the product ever removed the token — so a client could be
+  // described to the model as ill indefinitely. Expiry is derived on read now, so the phase
+  // advances on its own even when the tokens linger.
+  const { readHealthState, RECOVERY_TAIL_DAYS } = await import("../server/health-state");
+  const day = (o: number) => new Date(Date.now() + o * 86_400_000).toISOString().slice(0, 10);
+  const at = (until: string, today: string) => readHealthState({ profileNotes: notes(day(-9), until) }, today);
+  assert.equal(at(day(2), day(0)).phase, "sick", "inside the window");
+  assert.equal(at(day(-1), day(0)).phase, "recovering", "the tail after the window");
+  assert.equal(at(day(-RECOVERY_TAIL_DAYS), day(0)).phase, "recovering", "last day of the tail");
+  const ended = at(day(-RECOVERY_TAIL_DAYS - 1), day(0));
+  assert.equal(ended.phase, "ended", "past the tail — the hold is over");
+  assert.equal(ended.isSick, false, "…and nothing may call this client sick");
+  assert.equal(ended.pause, null, "…and an aged-out paused_until holds nothing");
 });
 
 test("sweep: the >7-day client's decision is used, not computed and discarded", () => {

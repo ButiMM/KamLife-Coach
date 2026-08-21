@@ -20,6 +20,7 @@ import {
   buildDayWorkout, buildFullProgramme, getKamlifeProgramme,
 } from "../programme";
 import { withTimeout, logChat } from "./chat-log";
+import { setExplicitPause, clearPause } from "../health-state";
 import { goalStatusLine } from "../education";
 import { dailyMacroCardMarker } from "../macro-card-attach";
 import { carriesFeelingClause } from "../unlogged-notice";
@@ -454,11 +455,7 @@ export async function handleLifecycle(ctx: {
   // even when the user hasn't cancelled — sets a 1-year messaging pause.
   if (m === "stop" || m === "stop all" || m === "opt out" || m === "opt-out") {
     const name = getDisplayName(user) || "there";
-    const pauseUntil = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
-    const existingNotes = user.profileNotes || "";
-    const cleanedNotes = existingNotes.replace(/\s*\|?\s*paused_until:\d{4}-\d{2}-\d{2}/, "").trim();
-    const updatedNotes = `${cleanedNotes ? cleanedNotes + " | " : ""}paused_until:${pauseUntil}`;
-    await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.phoneNumber, phone));
+    await setExplicitPause(user, 365);
     const stopReply = `Done${name !== "there" ? `, ${name}` : ""}. No more messages from me. Your data is saved.\n\nReply *START* anytime to resume coaching.`;
     await logChat(user.id, message, stopReply, "OPT_OUT");
     return stopReply;
@@ -466,11 +463,7 @@ export async function handleLifecycle(ctx: {
 
   // ---- START (WhatsApp Business / POPIA opt-in / resume) ----
   if (m === "start" || m === "unstop" || m === "opt in" || m === "opt-in") {
-    const existingNotes = user.profileNotes || "";
-    const wasPaused = /paused_until:\d{4}-\d{2}-\d{2}/.test(existingNotes);
-    if (wasPaused) {
-      const cleanedNotes = existingNotes.replace(/\s*\|?\s*paused_until:\d{4}-\d{2}-\d{2}/, "").trim();
-      await db.update(users).set({ profileNotes: cleanedNotes || null }).where(eq(users.phoneNumber, phone));
+    if (await clearPause(user)) {
       const resumeReply = `Welcome back. Coaching is resumed. Tell me what you ate today and we pick up from there.`;
       await logChat(user.id, message, resumeReply, "OPT_IN");
       return resumeReply;
@@ -487,12 +480,8 @@ export async function handleLifecycle(ctx: {
     const protein = user.proteinTarget || 140;
 
     if (choice === "1" || /\b(too expensive|expensive|can.?t afford|afford|price|cost|money)\b/i.test(m)) {
-      const pauseUntil = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
-      const existingNotes = user.profileNotes || "";
-      const pausedNotes = existingNotes.includes("paused_until:")
-        ? existingNotes.replace(/paused_until:\d{4}-\d{2}-\d{2}/, `paused_until:${pauseUntil}`)
-        : `${existingNotes ? existingNotes + " | " : ""}paused_until:${pauseUntil}`;
-      await db.update(users).set({ awaitingInputType: null, profileNotes: pausedNotes }).where(eq(users.phoneNumber, phone));
+      await setExplicitPause(user, 30);
+      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
       const priceReply = `Understood, ${name}. Paused for 30 days — no check-ins, your programme and progress are saved.\n\nWhen you're ready, reply *back* and we pick up exactly where you left off.\n\n_To cancel completely, reply *cancel* again._`;
       await logChat(user.id, message, priceReply, "CANCEL_SAVE_PAUSE_PRICE");
       return priceReply;
@@ -529,12 +518,8 @@ export async function handleLifecycle(ctx: {
     }
 
     if (choice === "3" || /\b(break|need a break|taking a break|rest|holiday|vacation|pause|step away)\b/i.test(m)) {
-      const pauseUntil = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
-      const existingNotes = user.profileNotes || "";
-      const pausedNotes = existingNotes.includes("paused_until:")
-        ? existingNotes.replace(/paused_until:\d{4}-\d{2}-\d{2}/, `paused_until:${pauseUntil}`)
-        : `${existingNotes ? existingNotes + " | " : ""}paused_until:${pauseUntil}`;
-      await db.update(users).set({ awaitingInputType: null, profileNotes: pausedNotes }).where(eq(users.phoneNumber, phone));
+      await setExplicitPause(user, 30);
+      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
       const breakReply = `Done, ${name}. Paused for 30 days — no check-ins. Programme saved.\n\nWhen you're ready, reply *back* and we go again. No restart needed.`;
       await logChat(user.id, message, breakReply, "CANCEL_SAVE_PAUSE_BREAK");
       return breakReply;
@@ -647,12 +632,7 @@ export async function handleLifecycle(ctx: {
       pauseDays = unit.startsWith("week") ? num * 7 : num;
     }
     pauseDays = Math.min(pauseDays, 30); // max 30 days
-    const pauseUntil = new Date(Date.now() + pauseDays * 86_400_000).toISOString().slice(0, 10);
-    const existingNotes = user.profileNotes || "";
-    const updatedNotes = existingNotes.replace(/paused_until:\d{4}-\d{2}-\d{2}/, `paused_until:${pauseUntil}`)
-      || `${existingNotes ? existingNotes + " | " : ""}paused_until:${pauseUntil}`;
-    const finalNotes = updatedNotes.includes("paused_until:") ? updatedNotes : `${existingNotes ? existingNotes + " | " : ""}paused_until:${pauseUntil}`;
-    await db.update(users).set({ profileNotes: finalNotes }).where(eq(users.phoneNumber, phone));
+    const pauseUntil = await setExplicitPause(user, pauseDays);
     const pauseReply = `Got it. No check-in messages for ${pauseDays} day${pauseDays > 1 ? "s" : ""} — until ${pauseUntil}. Your programme is saved. When you are back, just message me and we pick up where we left off.`;
     await logChat(user.id, message, pauseReply, "PAUSE_MODE");
     return pauseReply;
@@ -660,10 +640,7 @@ export async function handleLifecycle(ctx: {
 
   // ---- UNPAUSE ----
   if (/\b(i.?m back|i am back|back now|unpause|resume|i.?m here|returned|back from holiday|feeling better|i.?m better)\b/i.test(m)) {
-    const existingNotes = user.profileNotes || "";
-    if (existingNotes.includes("paused_until:")) {
-      const updatedNotes = existingNotes.replace(/\s*\|?\s*paused_until:\d{4}-\d{2}-\d{2}/, "").trim();
-      await db.update(users).set({ profileNotes: updatedNotes || null }).where(eq(users.phoneNumber, phone));
+    if (await clearPause(user)) {
       const backReply = `Welcome back. Programme resumes now. What did you eat for your last meal and have you trained yet today?`;
       await logChat(user.id, message, backReply, "UNPAUSED");
       return backReply;

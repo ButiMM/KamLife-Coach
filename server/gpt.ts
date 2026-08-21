@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { readHealthState } from "./health-state";
 import { db } from "./db";
 import { users, chatHistory, weightLogs, stepLogs, workoutLogs, mealLogs, gptCosts } from "../shared/schema";
 import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
@@ -392,8 +393,7 @@ export async function buildPatternSummary(user: any): Promise<string> {
 
     // WEIGHT IN CONTEXT (2026-07-22): bare "up 1.3kg this week" was the intelligence gap —
     // no attribution to WHEN the weight moved or the client's STATE. Engine in weight-context.ts.
-    const suMatch = (user.profileNotes || "").match(/sick_until:(\d{4}-\d{2}-\d{2})/);
-    const restingNow = !!suMatch && suMatch[1] >= new Date().toISOString().slice(0, 10);
+    const restingNow = readHealthState(user).isSick;
     let weightTrend = weightInContextLine({
       goalType: user.goalType,
       weighIns: (monthWeights as any[]).map((w) => ({ weight: parseFloat(String(w.weight)), at: w.loggedAt })),

@@ -24,6 +24,7 @@
 import OpenAI from "openai";
 import { extractBodyParts, checkExercisesAgainstInjuries } from "./injury-rules";
 import { splitSentences } from "../reply-hygiene";
+import { readHealthState } from "../health-state";
 import { weightTrendUsable, type TrendVerdict } from "../adaptive-targets";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { db } from "../db";
@@ -437,8 +438,7 @@ export async function provenanceGate(phone: string, body: string): Promise<strin
     if (!u) return body; // not a client we know — nothing to verify against
 
     const notes = String(u.profileNotes || "");
-    const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
-    const sickSince = notes.match(/sick_since:(\d{4}-\d{2}-\d{2})/)?.[1];
+    const { sickUntil, sickSince } = readHealthState({ profileNotes: notes });
 
     let trend: TrendVerdict = { usable: false, why: "too_few" };
     let weighedThisWeek = false;
