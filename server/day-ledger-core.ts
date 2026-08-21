@@ -219,3 +219,17 @@ export function summariseProvenance(
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * DAYS ON PROGRAMME — one derivation (2026-08-21).
+ *
+ * Six places computed this inline from programmeStartDate, and the weekly card printed the
+ * result beside a stored `programmeWeek` column that disagreed with it: "Day 35, week 1". Pure,
+ * so a caller that only needs the number does not have to run a progress query for it;
+ * getProgressTruth exposes the same function's answer as `daysOnProgramme`.
+ */
+export function daysOnProgramme(user: { programmeStartDate?: Date | string | null }): number {
+  const start = user?.programmeStartDate;
+  if (!start) return 0;
+  return Math.max(0, Math.floor((Date.now() - new Date(start).getTime()) / 86_400_000));
+}

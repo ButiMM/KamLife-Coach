@@ -173,6 +173,41 @@ async function main() {
     }
   });
 
+  // ── EVERY PROGRESS WINDOW READS THE ONE SOURCE ────────────────────────────────────────────
+  // Five calculators answered progress questions across four windows — today, seven days, thirty
+  // days and all-time — each with its own SQL. They are one owner now, called with a different
+  // window. This asserts the property structurally: no progress door builds its own totals.
+  check("no progress door computes its own totals", () => {
+    const misc = readFileSync("server/handlers/misc-commands.ts", "utf-8");
+    const code = misc.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    // The fingerprints of a SCOREBOARD, not of a history view. misc-commands still reads the log
+    // tables directly for per-row renderings — the habit calendar, the step chart, the workout
+    // diary, the weight graph — and that is legitimate: they show rows the truth object does not
+    // carry, and they answer "show me my last N days", not "how am I doing". What must not come
+    // back is a second set of TOTALS.
+    assert.ok(!/SUM\(steps\)|COALESCE\(SUM/.test(code), "no hand-rolled step totals");
+    assert.ok(!/programmeStartDate\)\.getTime\(\)/.test(code),
+      "days-on-programme is derived once, in the truth object — not per progress door");
+    // The users-row counter survives in exactly two non-progress roles, and they are named so a
+    // third cannot appear quietly: a VETERAN GATE (>= 12 sessions unlocks supplements) and the
+    // SESSION LABEL on a workout card ("Session 19"), which is a position in the programme rather
+    // than a claim about progress. Neither is a reply to "how am I doing".
+    const counterUses = code.split("\n").filter(l => /totalWorkoutsCompleted/.test(l));
+    assert.equal(counterUses.length, 2,
+      `the users-row workout counter is used ${counterUses.length} times; only the veteran gate and `
+      + `the session label may use it. Progress totals come from workoutLogs via the truth object, `
+      + `which the counter drifts from the moment one write fails:\n      `
+      + counterUses.map(l => l.trim()).join("\n      "));
+  });
+
+  check("the weekly recap narrates the same week the client can ask for", () => {
+    const recap = readFileSync("server/weekly-recap.ts", "utf-8");
+    const code = recap.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    assert.ok(/getProgressTruth/.test(code), "the Sunday voice note reads canonical truth");
+    assert.ok(!/COUNT\(\*\) FROM workout_logs|AVG\(steps\)|COUNT\(DISTINCT DATE\(logged_at\)\) AS days/.test(code),
+      "…and no longer counts the same week a second time");
+  });
+
   check("the deleted weekly calculator has not grown back", () => {
     const misc = readFileSync("server/handlers/misc-commands.ts", "utf-8");
     const code = misc.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");

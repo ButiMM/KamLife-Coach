@@ -17,7 +17,7 @@ import { and, eq, gte, lt, desc, sql } from "drizzle-orm";
 import { sastDayStart, sastToday } from "./utils";
 import { sastDayKey } from "./sast";
 import { foldLedgerRows, freshTodayWater, foldWindowRows, weightChangeKg, summariseProvenance,
-  type DayLedger, type LedgerRow, type WindowTotals, type FoodProvenance } from "./day-ledger-core";
+  type DayLedger, type LedgerRow, type WindowTotals, type FoodProvenance, daysOnProgramme } from "./day-ledger-core";
 import { estimateCarbsFat } from "./macro-estimate";
 import { effectiveMealLoggedAt } from "./utils";
 import { invalidatePatternCache } from "./cache";
@@ -325,6 +325,12 @@ export interface ProgressTruth {
   window: WindowTotals;
   sessions: number;
   avgSteps: number;
+  /** Steps SUMMED over the window, not averaged. The all-time card reported a journey total from
+   *  its own SUM(steps); this is the same number from the same source as everything else. */
+  totalSteps: number;
+  /** Whole days since programmeStartDate. Derived here so nothing derives it twice — the old
+   *  all-time and weekly blocks each computed their own and printed "Day 35, week 1". */
+  daysOnProgramme: number;
   weight: ProgressWeight;
   /** How much of this window we actually KNOW — db / label / ai / photo / unknown, and the
    *  confidence that falls out of it. Known / likely / unknown, measured rather than asserted. */
@@ -333,10 +339,17 @@ export interface ProgressTruth {
 
 export async function getProgressTruth(
   user: any,
-  opts?: { days?: number; clientMessage?: string | null },
+  opts?: { days?: number; clientMessage?: string | null; weightWindowDays?: number },
 ): Promise<ProgressTruth> {
   const days = opts?.days && opts.days > 0 ? opts.days : 7;
   const since = new Date(Date.now() - days * 86_400_000);
+  // The weight window is SEPARATE from the activity window, and defaults to the whole journey.
+  // A seven-day card wants "since you started"; the Sunday recap measured its change over
+  // fourteen days with its own query. Making it a parameter of the one owner is what let that
+  // query go, without changing what either surface says (2026-08-21).
+  const weightSince = opts?.weightWindowDays && opts.weightWindowDays > 0
+    ? new Date(Date.now() - opts.weightWindowDays * 86_400_000)
+    : null;
 
   const [today, windowRows, sessionRows, stepRows, weighIns] = await Promise.all([
     getDayLedger(user.id, { user }),
@@ -347,10 +360,16 @@ export async function getProgressTruth(
     }).from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, since))),
     db.select({ n: sql<number>`COUNT(*)::int` }).from(workoutLogs)
       .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, since))),
-    db.select({ avg: sql<number>`COALESCE(AVG(${stepLogs.steps}),0)::int` }).from(stepLogs)
+    db.select({
+      avg: sql<number>`COALESCE(AVG(${stepLogs.steps}),0)::int`,
+      total: sql<number>`COALESCE(SUM(${stepLogs.steps}),0)::int`,
+    }).from(stepLogs)
       .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, since))),
     db.select({ weight: weightLogs.weight }).from(weightLogs)
-      .where(eq(weightLogs.userId, user.id)).orderBy(weightLogs.loggedAt),
+      .where(weightSince
+        ? and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, weightSince))
+        : eq(weightLogs.userId, user.id))
+      .orderBy(weightLogs.loggedAt),
   ]);
 
   const window = foldWindowRows(windowRows as LedgerRow[], days, d => sastDayKey(d));
@@ -369,6 +388,8 @@ export async function getProgressTruth(
     window,
     sessions: Number((sessionRows[0] as any)?.n || 0),
     avgSteps: Number((stepRows[0] as any)?.avg || 0),
+    totalSteps: Number((stepRows[0] as any)?.total || 0),
+    daysOnProgramme: daysOnProgramme(user),
     provenance,
     weight: withheld
       ? { known: false, currentKg: null, changeKg: null, withheld: true }

@@ -37,6 +37,7 @@ import { sastToday, sastDayStart, looksLikeDirectionRequest, classifyPainReport 
 import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
 import { getProgressTruth } from "../day-ledger";
+import { daysOnProgramme } from "../day-ledger-core";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
 const PROTEIN_WORDS: string[] = Array.from(new Set([
@@ -369,73 +370,61 @@ export async function handleMiscCommands(ctx: {
     }
   }
 
-  // ---- MONTHLY TRANSFORMATION REPORT ----
-  if (m === "monthly report" || m === "my month" || m === "transformation" || m === "month report" || m === "monthly" || /\b(month.?s?\s*report|month.?s?\s*summary|this month|my transformation|30.?day\s*report)\b/i.test(m)) {
+  // ---- MONTHLY TRANSFORMATION REPORT — converged 2026-08-21 ----
+  //
+  // A FIFTH progress calculator: five of its own queries, its own 30-day weight window, its own
+  // `daysOn` off programmeStartDate, and a step average computed per LOG ROW rather than per day
+  // — so two step logs on one day halved it against every other surface.
+  //
+  // It also claimed "monthly report", "my month", "month report" and "month's summary", all of
+  // which the shareable report card in early-commands.ts:135 matches and answers first. Four dead
+  // phrases in a block that looked like an owner. The words it can actually win are left here;
+  // the numbers now come from the one source.
+  if (m === "transformation" || m === "monthly" || /\b(this month|my transformation|30.?day\s*report)\b/i.test(m)) {
     try {
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
-      const [weights, steps, workouts, foodLogs, sleepLogs] = await Promise.all([
-        db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt }).from(weightLogs)
-          .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, thirtyDaysAgo))).orderBy(asc(weightLogs.loggedAt)),
-        db.select({ steps: stepLogs.steps }).from(stepLogs)
-          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, thirtyDaysAgo))),
-        db.select({ id: workoutLogs.id }).from(workoutLogs)
-          .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, thirtyDaysAgo))),
-        db.select({ id: chatHistory.id }).from(chatHistory)
-          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, thirtyDaysAgo))),
-        db.select({ intent: chatHistory.intent, messageIn: chatHistory.messageIn }).from(chatHistory)
-          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SLEEP_LOG"), gte(chatHistory.createdAt, thirtyDaysAgo))),
-      ]);
+      const { getProgressTruth } = await import("../day-ledger");
+      const truth = await getProgressTruth(user, { days: 30, weightWindowDays: 30, clientMessage: message });
+      const sleepLogs = await db.select({ id: chatHistory.id }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SLEEP_LOG"),
+          gte(chatHistory.createdAt, new Date(Date.now() - 30 * 86_400_000))));
 
-      const name = user.name?.split(" ")[0] || "you";
-      const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
+      const name = getDisplayName(user) || "you";
+      const stepsTarget = user.stepsTarget || 8500;
 
-      // Weight change
       let weightLine = "No weight logs this month — step on the scale.";
-      if (weights.length >= 2) {
-        const first = parseFloat(String(weights[0].weight));
-        const last = parseFloat(String(weights[weights.length - 1].weight));
-        const diff = last - first;
-        if (diff < -0.5) weightLine = `⚖️ Weight: *${Math.abs(diff).toFixed(1)}kg DOWN* (${first.toFixed(1)} → ${last.toFixed(1)}kg)`;
-        else if (diff > 0.5) weightLine = `⚖️ Weight: ${diff.toFixed(1)}kg up (${first.toFixed(1)} → ${last.toFixed(1)}kg)`;
-        else weightLine = `⚖️ Weight: Holding steady at ${last.toFixed(1)}kg`;
-      } else if (weights.length === 1) {
-        weightLine = `⚖️ Weight: ${parseFloat(String(weights[0].weight)).toFixed(1)}kg — log more to track trend`;
+      if (truth.weight.known && truth.weight.changeKg !== null) {
+        const diff = truth.weight.changeKg;
+        weightLine = diff < -0.5 ? `⚖️ Weight: *${Math.abs(diff).toFixed(1)}kg DOWN* this month (now ${truth.weight.currentKg}kg)`
+          : diff > 0.5 ? `⚖️ Weight: ${diff.toFixed(1)}kg up this month (now ${truth.weight.currentKg}kg)`
+          : `⚖️ Weight: Holding steady at ${truth.weight.currentKg}kg`;
+      } else if (truth.weight.currentKg) {
+        weightLine = `⚖️ Weight: ${truth.weight.currentKg}kg — log more to track trend`;
       }
 
-      // Steps
-      const totalStepsMonth = steps.reduce((s, l) => s + l.steps, 0);
-      const avgSteps = steps.length > 0 ? Math.round(totalStepsMonth / steps.length) : 0;
-      const stepsTarget = user.stepsTarget || 8500;
-      const stepsHitDays = steps.filter(l => l.steps >= stepsTarget).length;
-
-      // Workouts
-      const workoutCount = workouts.length;
+      const workoutCount = truth.sessions;
       const planned = (user.trainingDaysPerWeek || 3) * 4; // 4 weeks
       const workoutRate = planned > 0 ? Math.round(workoutCount / planned * 100) : 0;
+      const avgSteps = truth.avgSteps;
+      const foodDays = truth.window.daysLogged;
 
-      // Food logging
-      const foodDays = foodLogs.length;
-
-      // Sleep
-      const sleepCount = sleepLogs.length;
-
-      // Grade
+      // Grade — unchanged thresholds, canonical inputs. "weights.length >= 3" became
+      // "the weight is known", which is the same evidence question the truth object already answers.
       let grade = "D";
       const score = (workoutRate >= 75 ? 2 : workoutRate >= 50 ? 1 : 0) +
         (avgSteps >= stepsTarget ? 2 : avgSteps >= stepsTarget * 0.7 ? 1 : 0) +
         (foodDays >= 20 ? 1 : 0) +
-        (weights.length >= 3 ? 1 : 0);
+        (truth.weight.known ? 1 : 0);
       if (score >= 5) grade = "A";
       else if (score >= 4) grade = "B";
       else if (score >= 3) grade = "C";
 
       const report = `*📊 Monthly Transformation Report — ${name}*\n` +
-        `_${daysOn} days on programme_\n\n` +
+        `_${truth.daysOnProgramme} days on programme_\n\n` +
         `${weightLine}\n` +
         `💪 Workouts: *${workoutCount}/${planned}* planned (${workoutRate}%)\n` +
-        `👟 Steps: ${avgSteps.toLocaleString()} avg/day | ${stepsHitDays} days hit target\n` +
-        `🍽️ Food logged: ${foodDays} meals this month\n` +
-        `😴 Sleep logged: ${sleepCount} times\n` +
+        `👟 Steps: ${avgSteps.toLocaleString()} avg/day\n` +
+        `🍽️ Days food logged: ${foodDays}/30\n` +
+        `😴 Sleep logged: ${sleepLogs.length} times\n` +
         `🔥 Current streak: ${user.workoutStreak || 0} sessions\n\n` +
         `*Month Grade: ${grade}*\n\n` +
         (grade === "A" ? `Elite consistency${name ? `, ${name}` : ""}. This is how bodies change. Keep it going.` :
@@ -621,39 +610,40 @@ export async function handleMiscCommands(ctx: {
     return `*Your Daily Targets*\n\n🔥 Calories: *${user.calorieTarget || "not set"} kcal*\n💪 Protein: *${user.proteinTarget || "not set"}g*\n👟 Steps: *${(user.stepsTarget || 0).toLocaleString()}*\n🎯 Goal: *${goalLabel[user.goalType || ""] || user.goalType || "not set"}*\n\nHit all three every day. That is the whole programme.`;
   }
 
-  // ---- NEW: CUMULATIVE STATS ----
+  // ---- ALL-TIME / JOURNEY — the LAST independent progress calculation, converged 2026-08-21 ----
+  //
+  // It ran its own SUM(steps), its own first/last weight queries and its own daysOn off
+  // programmeStartDate, and read totalWorkoutsCompleted straight off the users row — a scoreboard
+  // column that drifts from workoutLogs the moment one write fails. Four private facts, none of
+  // them from the source every other progress surface uses.
+  //
+  // Same window, same numbers, one owner: getProgressTruth over the whole journey. The suspicious-
+  // data warning survives because it is PRESENTATION over the canonical change, not a second
+  // reading of the weight history.
   if (["all time", "my journey", "total", "overall", "my results", "how far"].includes(m)) { // "stats"/"my stats" owned by early-commands (Targets card)
     try {
-      const [stepsTotal, firstWeight, lastWeight] = await Promise.all([
-        db.select({ total: sql<string>`COALESCE(SUM(steps), 0)` }).from(stepLogs).where(eq(stepLogs.userId, user.id)),
-        db.select().from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt)).limit(1),
-        db.select().from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(1),
-      ]);
-      const totalSteps = Number(stepsTotal[0]?.total || 0);
-      const totalWorkouts = user.totalWorkoutsCompleted || 0;
-      const daysOn = user.programmeStartDate
-        ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86400000) : 0;
+      const { getProgressTruth } = await import("../day-ledger");
+      const seed = user.programmeStartDate || user.createdAt;
+      const daysOn = seed
+        ? Math.max(1, Math.floor((Date.now() - new Date(seed).getTime()) / 86_400_000))
+        : 1;
+      const truth = await getProgressTruth(user, { days: daysOn + 1, clientMessage: message });
       const streak = await getStepStreak(user.id);
       let weightLine = "";
-      if (firstWeight.length > 0 && lastWeight.length > 0 && firstWeight[0].id !== lastWeight[0].id) {
-        const diff = parseFloat(String(lastWeight[0].weight)) - parseFloat(String(firstWeight[0].weight));
-        const journeyDays = firstWeight[0].loggedAt && lastWeight[0].loggedAt
-          ? (new Date(lastWeight[0].loggedAt).getTime() - new Date(firstWeight[0].loggedAt).getTime()) / 86_400_000
-          : daysOn || 999;
-        const isSuspicious = Math.abs(diff) > 10 || (Math.abs(diff) > 5 && journeyDays < 14);
-        if (isSuspicious) {
-          weightLine = `\n⚠️ Weight data: ${parseFloat(String(firstWeight[0].weight)).toFixed(1)}kg → ${parseFloat(String(lastWeight[0].weight)).toFixed(1)}kg — looks like a data issue. Send "weight Xkg" with your real current weight to fix it.`;
-        } else {
-          weightLine = diff < 0
-            ? `\n⬇️ Weight: down ${Math.abs(diff).toFixed(1)}kg since you started`
-            : diff > 0 ? `\n⬆️ Weight: up ${diff.toFixed(1)}kg since you started`
-            : `\n⚖️ Weight: unchanged since you started`;
-        }
-      } else if (user.currentWeight) {
-        weightLine = `\n⚖️ Current weight: ${user.currentWeight}kg`;
+      const change = truth.weight.changeKg;
+      if (truth.weight.known && change !== null) {
+        // A 10kg swing, or 5kg inside a fortnight, is a data-entry problem rather than a result.
+        const isSuspicious = Math.abs(change) > 10 || (Math.abs(change) > 5 && daysOn < 14);
+        weightLine = isSuspicious
+          ? `\n⚠️ Weight data: a ${Math.abs(change).toFixed(1)}kg swing since you started — looks like a data issue. Send "weight Xkg" with your real current weight to fix it.`
+          : change < 0 ? `\n⬇️ Weight: down ${Math.abs(change).toFixed(1)}kg since you started`
+          : change > 0 ? `\n⬆️ Weight: up ${change.toFixed(1)}kg since you started`
+          : `\n⚖️ Weight: unchanged since you started`;
+      } else if (truth.weight.currentKg) {
+        weightLine = `\n⚖️ Current weight: ${truth.weight.currentKg}kg`;
       }
       const name = getDisplayName(user) || "there";
-      const statsReply = `*${name}'s Journey with Coach K* 💪\n\n✅ Workouts completed: ${totalWorkouts}\n👟 Total steps logged: ${totalSteps.toLocaleString()}\n📅 Days on programme: ${daysOn}\n🔥 Current streak: ${streak} day${streak !== 1 ? "s" : ""}${weightLine}\n\nThis is what you have built. Keep going.`;
+      const statsReply = `*${name}'s Journey with Coach K* 💪\n\n✅ Workouts completed: ${truth.sessions}\n👟 Total steps logged: ${truth.totalSteps.toLocaleString()}\n📅 Days on programme: ${truth.daysOnProgramme}\n🔥 Current streak: ${streak} day${streak !== 1 ? "s" : ""}${weightLine}\n\nThis is what you have built. Keep going.`;
       await logChat(user.id, message, statsReply, "STATS_LOOKUP");
       return statsReply;
     } catch (e) { console.error("[STATS]", e); }
@@ -801,7 +791,8 @@ export async function handleMiscCommands(ctx: {
   // ---- NEW: STREAK ----
   if (["streak", "my streak", "step streak", "current streak"].includes(m)) {
     const streak = await getStepStreak(user.id);
-    const workoutCount = user.totalWorkoutsCompleted || 0;
+    // "Total workouts completed: N" is a progress claim, so it comes from workoutLogs.
+    const workoutCount = (await getProgressTruth(user, { days: 3650 }).catch(() => null))?.sessions ?? 0;
     if (streak === 0) {
       return `No step streak yet — log today's steps and it starts at 1. 👟`;
     }
@@ -854,7 +845,7 @@ export async function handleMiscCommands(ctx: {
 
     // Prompt for rating — no emojis, Coach K voice
     const name = user.name?.split(" ")[0] || "there";
-    const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
+    const daysOn = daysOnProgramme(user);
     await logChat(user.id, message, `NPS survey prompted (${daysOn} days on programme)`, "NPS_SURVEY");
     return `${name}, one question:\n\nHow likely are you to recommend Coach K to a friend? Reply with a number from 1 to 10.\n\n1 = Not at all. 10 = Definitely.\n\nHonest answer only — I read every one.`;
   }
@@ -941,7 +932,7 @@ export async function handleMiscCommands(ctx: {
       ]);
 
       const name = user.name?.split(" ")[0] || "there";
-      const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
+      const daysOn = daysOnProgramme(user);
       let report = `*🏋️ Body Composition Check — ${name}*\n_${daysOn} days on programme_\n\n`;
 
       // Weight trend
@@ -1014,8 +1005,7 @@ export async function handleMiscCommands(ctx: {
   // ---- SHARE CARD — "share my progress", "share" ----
   if (m === "share" || m === "share my progress" || m === "share progress" || m === "brag" || /\b(share\s*my|share\s*progress|tell\s*everyone|brag)\b/i.test(m)) {
     const name = user.name?.split(" ")[0] || "there";
-    const totalWorkouts = user.totalWorkoutsCompleted || 0;
-    const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
+    const daysOn = daysOnProgramme(user);
     const streak = user.workoutStreak || 0;
     const foodStreakForShare = await computeFoodLogStreak(user.id).catch(() => 0);
 
@@ -1029,8 +1019,10 @@ export async function handleMiscCommands(ctx: {
     // a public card cannot leak what a private chat is honouring.
     let weightLine = "";
     let kgDown = 0;
+    let totalWorkouts = 0;
     try {
       const truth = await getProgressTruth(user, { days: 3650 });
+      totalWorkouts = truth.sessions; // workoutLogs, not the users-row counter that drifts from it
       if (truth.weight.known && truth.weight.changeKg !== null && truth.weight.changeKg < -1) {
         kgDown = Math.abs(truth.weight.changeKg);
         weightLine = `\n⚖️ Down ${kgDown.toFixed(1)}kg`;
@@ -1140,8 +1132,10 @@ export async function handleMiscCommands(ctx: {
         return `No workouts logged in the last 30 days. Say *workout* to see today's session and get started.`;
       }
 
-      const name = user.name?.split(" ")[0] || "there";
-      const totalWorkouts = user.totalWorkoutsCompleted || 0;
+      const name = getDisplayName(user) || "there";
+      // A PROGRESS CLAIM, so it comes from workoutLogs — not the users-row counter, which is a
+      // separate scoreboard that drifts from the log table the moment one write fails.
+      const totalWorkouts = (await getProgressTruth(user, { days: 3650 }).catch(() => null))?.sessions ?? 0;
       const streak = user.workoutStreak || 0;
 
       // Group workouts by week

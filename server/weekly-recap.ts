@@ -47,8 +47,8 @@ interface ClientWeekData {
 const LIFE_EVENT_PATTERNS = /\b(sick|ill|flu|fever|vomit|nausea|hospital|clinic|doctor|emergency|funeral|died|death|passed away|passed on|lost my|losing my|granny|grandma|grandfather|gran|bereave|mourning|grieving|surgery|operation|injury|injured|hurt|broken|fracture|sprain|overwhelm|breakdown|depressed|depression|anxiety|mental health|can't cope|cant cope|crisis|accident|icu|intensive care|covid|quarantine|isolat)\b/i;
 
 async function getClientWeekData(userId: string): Promise<ClientWeekData | null> {
-  const weekAgo = new Date(Date.now() - 7 * 86_400_000);
-  const twoWeeksAgo = new Date(Date.now() - 14 * 86_400_000);
+  const weekAgo = new Date(Date.now() - 7 * 86_400_000); // top-foods only; the progress facts
+                                                         // come from getProgressTruth below
 
   try {
     const { rows: userRows } = await pool.query<{
@@ -66,33 +66,22 @@ async function getClientWeekData(userId: string): Promise<ClientWeekData | null>
     if (!userRows.length) return null;
     const u = userRows[0];
 
-    const [workoutRes, stepsRes, weightRes, mealsRes] = await Promise.all([
-      pool.query<{ count: string }>(
-        `SELECT COUNT(*) FROM workout_logs WHERE user_id=$1 AND logged_at > $2 AND workout_completed=true`,
-        [userId, weekAgo]
-      ),
-      pool.query<{ avg: string }>(
-        `SELECT COALESCE(AVG(steps), 0) AS avg FROM step_logs WHERE user_id=$1 AND logged_at > $2`,
-        [userId, weekAgo]
-      ),
-      pool.query<{ weight: string; logged_at: string }>(
-        `SELECT weight, logged_at FROM weight_logs WHERE user_id=$1 ORDER BY logged_at DESC LIMIT 1`,
-        [userId]
-      ),
-      pool.query<{ days: string }>(
-        `SELECT COUNT(DISTINCT DATE(logged_at)) AS days FROM meal_logs WHERE user_id=$1 AND logged_at > $2`,
-        [userId, weekAgo]
-      ),
-    ]);
-
-    // Weight change vs oldest weight in last 2 weeks
-    const { rows: oldWeightRows } = await pool.query<{ weight: string }>(
-      `SELECT weight FROM weight_logs WHERE user_id=$1 AND logged_at > $2 ORDER BY logged_at ASC LIMIT 1`,
-      [userId, twoWeeksAgo]
+    // THE FOUR PROGRESS FACTS COME FROM THE ONE OWNER (2026-08-21).
+    //
+    // This block ran its own COUNT of completed workouts, its own AVG(steps), its own
+    // COUNT(DISTINCT DATE) of meal days and its own two weight queries over a 14-day window —
+    // six statements describing the same week the reactive "this week" answer describes, from
+    // the same tables, with no guarantee of agreeing with it. The recap is a delivery surface;
+    // it reads state, it does not compute it.
+    //
+    // weightWindowDays: 14 preserves exactly the window this file already used.
+    const { getProgressTruth } = await import("./day-ledger");
+    const truth = await getProgressTruth(
+      { id: userId, doNotMention: null, calorieTarget: u.calorie_target, proteinTarget: u.protein_target },
+      { days: 7, weightWindowDays: 14 },
     );
-    const latestWeight = weightRes.rows[0]?.weight ? parseFloat(weightRes.rows[0].weight) : null;
-    const oldWeight = oldWeightRows[0]?.weight ? parseFloat(oldWeightRows[0].weight) : null;
-    const weightChange = latestWeight !== null && oldWeight !== null ? latestWeight - oldWeight : null;
+    const latestWeight = u.current_weight ? parseFloat(u.current_weight) : null;
+    const weightChange = truth.weight.changeKg;
 
     // The client's ACTUAL most-logged foods this week — this is what stops the voice
     // note sounding like a generic report card read aloud (2026-07-12, Kam: "it sounds
@@ -158,16 +147,16 @@ async function getClientWeekData(userId: string): Promise<ClientWeekData | null>
       id: u.id,
       name: u.name,
       phoneNumber: u.phone_number,
-      currentWeight: u.current_weight ? parseFloat(u.current_weight) : null,
+      currentWeight: latestWeight,
       calorieTarget: u.calorie_target,
       proteinTarget: u.protein_target,
       stepsTarget: u.steps_target,
       goalType: u.goal_type,
-      workoutsThisWeek: parseInt(workoutRes.rows[0].count, 10),
+      workoutsThisWeek: truth.sessions,
       trainingDaysPerWeek: u.training_days_per_week ?? 3,
-      avgStepsThisWeek: Math.round(parseFloat(stepsRes.rows[0].avg)),
+      avgStepsThisWeek: truth.avgSteps,
       weightChange: weightChange !== null ? Math.round(weightChange * 10) / 10 : null,
-      mealsLoggedDays: parseInt(mealsRes.rows[0].days, 10),
+      mealsLoggedDays: truth.window.daysLogged,
       workoutStreak: u.workout_streak ?? 0,
       lifeContext,
       topFoods,
