@@ -199,6 +199,54 @@
   </section>
 
   <section>
+    <div class="sec-head"><span class="tag">Turn audit</span><h2>Every point that can answer a client</h2></div>
+
+    <p>Classified by tracing the actual return path, not the file name. <code>handleMessage</code> wraps <code>routeMessage</code>, which is a first-non-null-return chain — so exactly one of these ends any given turn.</p>
+
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Point</th><th>Class</th><th>Traced</th></tr></thead>
+        <tbody>
+          <tr><td>Safety</td><td><span class="pill ok">Final owner</span></td><td>Outranks everything by design; returns before the chain proper.</td></tr>
+          <tr><td>Onboarding · POPIA consent · subscription gate</td><td><span class="pill ok">Final owner</span></td><td>Account preconditions. Mutually exclusive with coaching — a client in any of these states never reaches the chain.</td></tr>
+          <tr><td>Coach admin commands</td><td><span class="pill neutral">Final owner</span></td><td>Gated on <code>isCoach</code>. Not a client surface.</td></tr>
+          <tr><td>Media acknowledgement</td><td><span class="pill ok">Final owner</span></td><td>Answers "did you get my photo", nothing else.</td></tr>
+          <tr><td>Food-log management</td><td><span class="pill ok">Final owner</span></td><td>Owns edits and deletions to the ledger.</td></tr>
+          <tr><td>Reminder command</td><td><span class="pill ok">Final owner</span></td><td>Own domain, no overlap.</td></tr>
+          <tr><td><strong>Meaning engine</strong></td><td><span class="pill ok">Final owner</span></td><td><strong>One shot.</strong> Behind the single dispatch gate. Was two.</td></tr>
+          <tr><td>Early commands</td><td><span class="pill ok">Final owner</span> <span class="pill neutral">or state mutation</span></td><td>Ends the turn when the note carries one fact; <em>commits and continues</em> when it carries several, so nothing is dropped.</td></tr>
+          <tr><td><code>handleMediaMessage</code></td><td><span class="pill ok">Final owner</span></td><td>Exclusive branch — always returns. Voice re-enters as text.</td></tr>
+          <tr><td>Workout · steps · water</td><td><span class="pill ok">Final owner</span> <span class="pill neutral">or state mutation</span></td><td>Same rule as early commands.</td></tr>
+          <tr><td><code>resolveTurn</code> (multi-fact)</td><td><span class="pill neutral">Adapter</span></td><td>Composes the committed acknowledgements. Makes no coaching decision, calls no decision owner, returns null when a real question rides along so the coach still answers it.</td></tr>
+          <tr><td>Trajectory forecast</td><td><span class="pill ok">Final owner</span></td><td>Separate domain — <em class="q">will I lose weight</em>, not <em class="q">how am I doing</em>.</td></tr>
+          <tr><td>Misc commands</td><td><span class="pill ok">Final owner</span></td><td>Progress, targets, streak, history views.</td></tr>
+          <tr><td>Lifecycle</td><td><span class="pill ok">Final owner</span></td><td>Pause, resume, cancel, opt-out.</td></tr>
+          <tr><td>Food force-clarify</td><td><span class="pill warn">Fallback</span></td><td>Only when a stated meal could not be finished — never invents macros.</td></tr>
+          <tr><td>GPT block</td><td><span class="pill warn">Fallback</span></td><td>Last. Judgment, on authoritative state it was handed.</td></tr>
+          <tr><td>Verifier</td><td><span class="pill neutral">Downstream</span></td><td>Runs on whatever the chain returned, inside the turn wrapper. Cannot pre-empt an owner.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>The two engine invocations — which were they?</h3>
+    <p><strong>Two genuinely separate final-answer opportunities.</strong> Not analysis plus renderer: the same function, called twice, either call able to end the turn — and applying opposite policy about a stated food log. The second is gone.</p>
+
+    <h3><code>mustStayDeterministic</code> — routing seam, kept</h3>
+    <ul>
+      <li><strong>Protects:</strong> the deterministic pipeline's ownership of actions, commands, data writes, safety and billing — biased toward "keep deterministic" so a log is never lost to the model.</li>
+      <li><strong>Excludes:</strong> questions, and retro food requests, which belong to the engine.</li>
+      <li><strong>Can it create competing owners?</strong> No — one call site now, so it cannot admit a message at one point and exclude it at another.</li>
+      <li><strong>Can it override an established decision?</strong> No. Nothing calls <code>chooseAction</code>, <code>decideProactive</code> or <code>selectDecisionState</code> before the gate — verified — so there is no decision in existence for it to override. It produces no response and mutates no state.</li>
+    </ul>
+
+    <div class="note">
+      <span class="lbl">One bounded exception, named rather than hidden</span>
+      <p><code>chooseAction</code> is reachable two ways: through <code>decideProactive</code>, which downgrades a prescription under insufficient evidence, and directly. That is deliberate, not drift — an <em>unsolicited</em> message must clear the evidence bar before it prescribes, because the proactive path once invented a plan change from two logged days. A client who typed <em class="q">this week</em> has asked, and answering a direct question is not the same act as pushing advice at someone who did not.</p>
+      <p>All three call sites are pinned by name in CI, so a fourth cannot appear quietly.</p>
+    </div>
+  </section>
+
+  <section>
     <div class="sec-head"><span class="tag">Deleted / converged</span><h2>Which authorities were removed</h2></div>
 
     <div class="scroll">
@@ -261,6 +309,7 @@
         <thead><tr><th>Invariant</th><th>Enforced by</th></tr></thead>
         <tbody>
           <tr><td>One final-answer owner per turn — the engine gets one shot, not two</td><td>production-parity</td></tr>
+          <tr><td>The decision owner has exactly three known entry points, pinned by name</td><td>production-parity</td></tr>
           <tr><td>The dispatch gate is evaluated once and cannot disagree with itself</td><td>production-parity</td></tr>
           <tr><td>The verifier runs on the chain's return value and never calls the decision owner</td><td>production-parity</td></tr>
           <tr><td><code>chooseAction</code> is the only decision function anywhere</td><td>production-parity</td></tr>

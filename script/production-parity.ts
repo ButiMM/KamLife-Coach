@@ -464,6 +464,36 @@ async function main() {
       "the verifier calls the decision owner — that would make it a second decision point");
   });
 
+  // ── THE DECISION OWNER HAS A KNOWN SET OF ENTRY POINTS ────────────────────────────────────
+  // chooseAction is the only decision, but it is reachable two ways: through decideProactive,
+  // which downgrades a prescription under insufficient evidence, and directly. Those are not the
+  // same policy, so the call sites are pinned by name and a third cannot appear quietly.
+  //
+  // The distinction is deliberate, not an oversight. An UNSOLICITED message must clear the
+  // evidence bar before it prescribes — that gate exists because the proactive path invented a
+  // plan change from two logged days. A client who typed "this week" has asked, and answering a
+  // direct question is not the same act as pushing advice at someone who did not.
+  check("the decision owner has exactly the entry points we know about", () => {
+    const sites: Array<[string, string]> = [
+      ["server/one-action.ts", "decideProactive delegates to it — the evidence-gated entry"],
+      ["server/scheduler/jobs/morning.ts", "documented degraded fallback when the ledger read fails"],
+      ["server/handlers/misc-commands.ts", "the weekly answer to a question the client asked"],
+    ];
+    const found: string[] = [];
+    for (const f of ["server/one-action.ts", "server/scheduler/jobs/morning.ts",
+                     "server/handlers/misc-commands.ts", "server/handlers/gpt-block.ts",
+                     "server/handlers/early-commands.ts", "server/handlers/lifecycle.ts",
+                     "server/routes.ts", "server/weekly-recap.ts", "server/report-card.ts"]) {
+      const code = readFileSync(f, "utf-8")
+        .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+      if (/(?<!function )\bchooseAction\(/.test(code)) found.push(f);
+    }
+    assert.deepEqual(found.sort(), sites.map(([f]) => f).sort(),
+      `the decision owner is entered from an unexpected place. Known entries:\n      `
+      + sites.map(([f, why]) => `${f} — ${why}`).join("\n      ")
+      + `\n      Found: ${found.join(", ")}`);
+  });
+
   check("chooseAction is the only coaching decision owner", () => {
     const owner = readFileSync("server/one-action.ts", "utf-8");
     assert.ok(/export function chooseAction/.test(owner));
