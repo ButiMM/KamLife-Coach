@@ -168,3 +168,43 @@ export function detectLanguage(text: string): SALanguage {
   if (AFRIKAANS.some(w => lower.includes(w))) return "af";
   return "en";
 }
+
+/**
+ * A BARE GREETING — one vocabulary, two readers (2026-08-21).
+ *
+ * This list lived inside early-commands' menu branch. It is here because the SICK path needs the
+ * same words and cannot import from early-commands (early-commands imports sick-flow), and because
+ * a greeting recognised in one place and not the other is how the 21 August failure happened:
+ *
+ *   06:00 → "Hope you're feeling better. When you're ready, just say Hi and we pick up from
+ *            where you left off."
+ *   client → "Hi"
+ *   sick-flow → not a recovery declaration. Hold stands. Next morning, the same message.
+ *
+ * The coach advertised an exit and then did not accept it. That is the same defect as telling
+ * clients to "Send *this week*" when no handler owned the phrase — the mouth promising something
+ * the doors do not honour — so it gets the same remedy: one vocabulary both sides read.
+ */
+export const BARE_GREETINGS = [
+  "hello", "hi", "hey", "howzit", "hola", "yo", "sup", "hello there", "hi there",
+  "sawubona", "sanibonani", "unjani", "kunjani",          // isiZulu
+  "molo", "molweni",                                       // isiXhosa
+  "dumela", "dumelang", "lumela", "thobela",               // Sotho/Tswana/Pedi
+  "avuxeni",                                               // Xitsonga
+  "hallo", "goeie more", "goeie môre", "hoe gaan dit",     // Afrikaans
+  "heita", "eita", "aweh", "awe",                          // street
+  "morning", "good morning", "good afternoon", "good evening", "good day", "gm",
+];
+
+/** Strip emoji, trailing punctuation and an optional "coach (k)" suffix — "hi coach k 👋" is "hi". */
+export function greetingCore(m: string): string {
+  return (m || "")
+    .replace(/[👋🙏🙌💪🔥❤️😊🤝]/gu, "")
+    .trim()
+    .replace(/[!.,?]+$/g, "")
+    .trim()
+    .replace(/\s+(coach k|coach|there|guys|team)$/i, "")
+    .trim();
+}
+
+export const isBareGreeting = (m: string): boolean => BARE_GREETINGS.includes(greetingCore(m));

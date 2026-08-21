@@ -29,6 +29,7 @@ import { generateMealPlan } from "../meal-plan";
 import { handleMealRepeat } from "./meal-repeat";
 import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
+import { isBareGreeting } from "../constants";
 import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion, handleVoiceReplyPreference } from "./numbers-literacy";
 import { answerSwapAsk, answerUnavailable, answerLocalListChange } from "../food-swaps";
 import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
@@ -766,28 +767,12 @@ export async function handleEarlyCommands(ctx: {
   // ---- GREETINGS / MENU (direct — no GPT) ----
   // A greeting gets a warm coach check-in; menu/help gets the full command list.
   // Covers SA languages: isiZulu, isiXhosa, Sesotho/Setswana/Sepedi, Afrikaans, Xitsonga.
-  const greetings = [
-    "hello", "hi", "hey", "howzit", "hola", "yo", "sup", "hello there", "hi there",
-    "sawubona", "sanibonani", "unjani", "kunjani",          // isiZulu
-    "molo", "molweni",                                       // isiXhosa
-    "dumela", "dumelang", "lumela", "thobela",               // Sotho/Tswana/Pedi
-    "avuxeni",                                               // Xitsonga
-    "hallo", "goeie more", "goeie môre", "hoe gaan dit",     // Afrikaans
-    "heita", "eita", "aweh", "awe",                          // street
-    "morning", "good morning", "good afternoon", "good evening", "good day", "gm",
-  ];
-  // Strip emojis/punctuation and an optional "coach (k)" suffix so "hi coach k 👋" still matches.
-  const mGreet = m
-    .replace(/[👋🙏🙌💪🔥❤️😊🤝]/gu, "")
-    .trim()
-    .replace(/[!.,?]+$/g, "")
-    .trim()
-    .replace(/\s+(coach k|coach|there|guys|team)$/i, "")
-    .trim();
+  // The list moved to constants.ts as BARE_GREETINGS. The sick path needs the same words — the
+  // morning brief tells an ill client "just say Hi" — and it cannot import from this file.
   // MENU — always reachable: "menu", "help", or "#" (Self-Cav pattern), plus a greeting. Returns
   // tappable quick-action buttons. NO avatar image here (2026-07-22: firing the welcome card on
   // every "hello" was spammy) — the branded card belongs on the FIRST welcome only (onboarding).
-  if (greetings.includes(mGreet)) {
+  if (isBareGreeting(m)) {
     return replyWithButtons(await getMenuText(user), MENU_BUTTONS);
   }
   if (m === "menu" || m === "help" || m.trim() === "#") {

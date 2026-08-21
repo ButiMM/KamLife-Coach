@@ -191,6 +191,43 @@ async function main() {
   console.log(`\n── weekly synonyms ──\n${WEEKLY_DOORS.length} doors, all identical to "this week": `
     + `${weeklyReplies.every(([, r]) => r === week) ? "yes" : "NO"}`);
 
+  // ── THE SICK HOLD MUST ACCEPT THE EXIT IT ADVERTISES ──────────────────────────────────────
+  // 2026-08-21, Kam's handset: at 06:00 the brief said "Hope you're feeling better. When you're
+  // ready, just say Hi and we pick up from where you left off." He said Hi. Nothing cleared, so
+  // the same message arrived the next morning. The coach asked for a password it would not accept.
+  //
+  // Graded here rather than in a unit test because the failure was a DISAGREEMENT between two
+  // files — the mouth in morning-message.ts and the door in sick-flow.ts — and only the final
+  // client reply shows whether they agree.
+  {
+    const SICK_UNTIL = new Date(NOW + 2 * 86_400_000).toISOString().slice(0, 10);
+    const SICK_SINCE = new Date(NOW - 2 * 86_400_000).toISOString().slice(0, 10);
+    (globalThis as any).__KAMLIFE_STUB_USER = {
+      ...USER,
+      profileNotes: `sick_since:${SICK_SINCE} | sick_until:${SICK_UNTIL} | paused_until:${SICK_UNTIL}`,
+    };
+    const greetingReply = await say("Hi");
+    (globalThis as any).__KAMLIFE_STUB_USER = { ...USER };
+
+    check("a client on a health hold can leave it the way the brief told them to", () => {
+      assert.ok(!greetingReply.startsWith("__THREW__"), `handler threw: ${greetingReply}`);
+      assert.ok(/welcome back/i.test(greetingReply),
+        `"Hi" from a client on a sick hold did not end it — the 06:00 brief promises exactly this\n`
+        + `      and this is the reply that arrives instead:\n      ${greetingReply.slice(0, 200)}`);
+    });
+
+    check("the brief and the door use the same words", () => {
+      const brief = readFileSync("server/morning-message.ts", "utf-8");
+      const sick = readFileSync("server/handlers/sick-flow.ts", "utf-8");
+      // If the sick brief tells the client to greet, the sick handler must read greetings. Tying
+      // the assertion to the advertised text means rewording the brief cannot quietly break it.
+      if (/just say Hi/i.test(brief)) {
+        assert.ok(/isBareGreeting/.test(sick),
+          "the morning brief tells a sick client to say Hi, and sick-flow does not accept a greeting");
+      }
+    });
+  }
+
   // ── OWNERSHIP, NOT PHRASING ───────────────────────────────────────────────────────────────
   // Asserting three expected strings would go green and prove nothing — a fourth synonym would
   // open the next hole. These assert the property: one owner, one truth, one next move.

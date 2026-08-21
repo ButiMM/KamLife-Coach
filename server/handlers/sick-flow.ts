@@ -11,6 +11,7 @@ import { comebackPlan, trainingStateFromUser } from "../adaptive-training";
 import { logChat } from "./chat-log";
 import { parseSickDays, isReturnFromSicknessQuestion, looksLikeComebackQuestion } from "../utils";
 import { scheduleReturnNudge, cancelReturnNudges } from "../reminders";
+import { isBareGreeting } from "../constants";
 
 // ── Precision guards (2026-07-13, cross-intent sweep) ─────────────────────────
 // Word PRESENCE is not a sickness report. "Sick of pap" is frustration. "Flu shot"
@@ -297,7 +298,18 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
   // because those are declarations of return rather than of health.
   const declaresReturn = saysRecovered(m)
     || /\b(i'?m back|i\s+am\s+back|ready to train|back to training|flu'?s? gone|i'?m training (?:today|tomorrow)|i\s+am\s+training (?:today|tomorrow)|never left|haven'?t been (?:gone|away)|never been (?:gone|away))\b/i.test(m);
-  if (!isDeferredReturn && declaresReturn
+  // THE EXIT THE MORNING BRIEF ADVERTISES (2026-08-21 live, Kam's handset). A client on a health
+  // hold is told at 06:00: "When you're ready, just say Hi and we pick up from where you left
+  // off." "Hi" was not a return declaration, so the hold stood and the same message arrived the
+  // next morning, and the next. The coach was asking for a password it would not accept.
+  //
+  // Scoped deliberately to a HEALTH hold, which is the only place that promise is made — a
+  // holiday pause never says "say Hi", so a greeting must not end one. And it cannot fire on a
+  // client who greets while still ill: looksSickMention runs earlier in this same handler, so
+  // "hi, still sick" re-arms the hold instead of reaching here.
+  const greetsBackFromSick = isBareGreeting(m)
+    && /sick_until:\d{4}-\d{2}-\d{2}/.test(user.profileNotes || "");
+  if (!isDeferredReturn && (declaresReturn || greetsBackFromSick)
       && /(?:sick_until|paused_until):\d{4}-\d{2}-\d{2}/.test(user.profileNotes || "")) {
     try {
       const cleaned = (user.profileNotes || "").replace(/\s*\|?\s*(?:paused_until|sick_until|sick_since):\d{4}-\d{2}-\d{2}/g, "").trim();
