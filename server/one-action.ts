@@ -276,9 +276,17 @@ export function chooseAction(s: DayState): OneAction {
   // 5. PROTEIN. The single highest-leverage nutrition action for BOTH goals — it protects muscle
   //    on a cut and builds it on a bulk — so it outranks everything else about food.
   if (s.loggedToday && s.proteinPct < 0.6) {
+    // AFTER 20:00 THE INSTRUCTION FACES TOMORROW (absorbed 2026-08-21 from the deleted second
+    // constitution, theNextMove, which had this rule and this reason: "a to-do at 21:00 proves
+    // the coach is not reading the clock the client is living in"). Collapsing two ladders into
+    // one must not lose what the deleted one knew — "make your next meal a protein one" sent at
+    // nine at night is an instruction nobody can act on.
+    const closingTheDay = s.hour >= 20;
     return {
       kind: "protein",
-      todo: struggle === "time"
+      todo: closingTheDay
+        ? "Start tomorrow with protein — eggs, amasi or tin fish at breakfast."
+        : struggle === "time"
         ? "Make your next meal a protein one — tin fish, eggs or amasi. Two minutes."
         : struggle === "money"
         ? "Get protein into your next meal — eggs, pilchards or sugar beans."
@@ -432,6 +440,24 @@ export interface ProactiveDecision {
  */
 const INVESTIGATIVE: ReadonlySet<ActionKind> = new Set<ActionKind>(["come_back", "log", "weigh"]);
 const PRESCRIPTIVE: ReadonlySet<ActionKind> = new Set<ActionKind>(["protein", "walk", "train", "eat_more", "rest"]);
+
+/**
+ * THE POLICY BOUNDARY, EXPORTED (2026-08-21).
+ *
+ * `chooseAction` is the one decision function, but a single function name does not make a single
+ * decision CONTRACT. Two callers reached it without the evidence gate — morning's degraded
+ * fallback and the reactive weekly answer — so the same function was being fed different policy
+ * depending on who called it. That is two policies wearing one name.
+ *
+ * The contract is one line: A PRESCRIPTION REQUIRES EVIDENCE. Where a caller cannot run the full
+ * gate (no ProactiveState to build), it applies this instead, and gets the same answer the gate
+ * would have given: an unevidenced prescription is downgraded to the measurement that would
+ * justify one, or held.
+ */
+export function underPolicy(action: OneAction, opts: { evidenced: boolean; dreamGoal?: string | null }): OneAction {
+  if (!PRESCRIPTIVE.has(action.kind) || opts.evidenced) return action;
+  return holdAction(opts.dreamGoal);
+}
 
 /**
  * ILLNESS IS ITS OWN EVIDENCE (2026-08-18, verdict enforcement pass).

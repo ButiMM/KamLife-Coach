@@ -2844,8 +2844,15 @@ test("sweep: the >7-day client's decision is used, not computed and discarded", 
     "morning asks the decision owner for the client it used to drop");
   assert.ok(/return formatOneAction\(decision\.action, firstName\)/.test(morning),
     "…and the message IS its answer, not a second wording of it");
-  assert.ok(/return formatOneAction\(chooseAction\(\{/.test(morning),
-    "a drifting client must not get silence because a ledger read timed out");
+  // The degraded fallback still SPEAKS — and since 2026-08-21 it speaks under the same policy
+  // contract as the gate, so a ledger failure can no longer turn into a prescription the gate
+  // would have refused. Verified live: the silence rung is come_back (investigative), so
+  // underPolicy passes it through unchanged and the drifting client still hears something.
+  assert.ok(/return formatOneAction\(underPolicy\(chooseAction\(\{/.test(morning),
+    "a drifting client must not get silence because a ledger read timed out — and the fallback "
+    + "must reach the decision owner through the policy contract, not around it");
+  assert.ok(/evidenced: false/.test(morning),
+    "…with evidence stated honestly: the state read is what just failed");
 });
 
 // ── VERDICT ENFORCEMENT: the decision stops being advisory ──────────────────────────────────

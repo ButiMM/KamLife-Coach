@@ -877,16 +877,36 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // had first refusal; the coach was eighth — which is why ENGINE_ACTIONS has been `on` for weeks
   // with an EMPTY action log. Food logs still fall through to food-context below.
   const tag = (reply: string, src: string) => { recordReplyPath(src); return isCoach ? `${reply}\n\n_· ${src} ·_` : reply; }; // tag() is the one chokepoint all model paths cross
-  // A FOOD LOG IS A COACHING MOMENT, NOT A RAIL (2026-08-04). The two conditions removed here
-  // — isTransactionReport and "the message names a food" — were the other half of the lockout.
-  // Between them and REPORTED_NUMBER, every single log a client sends bypassed the coach.
-  // STANDS DOWN ON A MULTI-FACT NOTE (Cut 2). This sits above the ledger and returns the turn,
-  // so a freeform reply could answer instead of the facts being committed. Two or more facts is
-  // a LOG; the deterministic rails own it. mustStayDeterministic was reaching for this.
-  if (engineLive() && !multiFact && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isBareGreeting(m)) {
-    const engineFront = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
-    if (engineFront !== null) return tag(engineFront, "🧠 new engine");
-  }
+  /*
+   * ENGINE FRONT PASS — REMOVED (2026-08-21, turn boundary).
+   *
+   * It sat HERE, above six deterministic owners (early-commands 894, workout 909, water 1019,
+   * food-context 1027, misc 1064, lifecycle 1068), and its only protection was
+   * mustStayDeterministic — a phrase-based DENY-LIST. Deny-lists miss. Measured against the
+   * phrases those rails actually own:
+   *
+   *     7 of 16 leaked.  "this week" · "my targets" · "all time" · "transformation"
+   *                      · "my body" · "what are my steps" · "my week"
+   *
+   * "this week" is the phrase this entire convergence series was about. The engine could take it
+   * before its owner ran. That is not one owner per turn; it is one WINNER per turn, decided by
+   * whether a list happened to contain the words a client used.
+   *
+   * The single engine call now sits BELOW every deterministic owner. The invariant becomes
+   * structural instead of lexical: the engine cannot consume a turn a rail would have claimed,
+   * because every rail has already been asked and declined. mustStayDeterministic stays as a
+   * cheap skip, but it is no longer what protects the boundary.
+   *
+   * It also puts the engine on the correct side of the hierarchy: it now sees state the rails
+   * have already committed, rather than pre-turn state — judgment AFTER authoritative state,
+   * which is what the order requires.
+   *
+   * WHAT THIS COSTS, stated plainly: the 2026-08-04 decision that "a food log is a coaching
+   * moment, not a rail" gave the engine first refusal on a log. It no longer has that. Most of
+   * that mandate was already walked back on 2026-08-19, when stated meal reports were sent back
+   * to the deterministic path because the engine answered a logged meal with "I don't have a meal
+   * logged". What remains of it is a product decision, and it is named here rather than lost.
+   */
 
   // COMMITS, DOES NOT CLAIM THE TURN (Cut 2/3). On "2 litres of water and took my creatine" the
   // supplement handler inside it used to end the turn and the water was never logged. Standing
@@ -1069,33 +1089,18 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (lifecycleResult !== null) return lifecycleResult;
 
 
-  /*
-   * ENGINE SECOND PASS — REMOVED (2026-08-21, turn authority).
-   *
-   * The engine was invoked TWICE in one turn, from the same function, and either call could end
-   * the turn. That is two independent final-answer opportunities for one owner, separated only by
-   * chain position — and the two sites applied OPPOSITE policy about the same message: the front
-   * pass may claim a stated food log ("a food log is a coaching moment, not a rail", 2026-08-04),
-   * this one may not (2026-08-19, four live failures where it answered a logged meal with "I don't
-   * have a meal logged / what did you eat"). Which policy the engine held depended on when you
-   * asked it.
-   *
-   * WHY DELETING THIS ONE IS SAFE, and not a judgement call:
-   *
-   *   this guard  = front guard && !isTransactionReport
-   *
-   * — a strict subset. Every guard variable (multiFact, m, normalizedQuestion, mediaUrl,
-   * isTransactionReport) is computed above the FRONT call and is never reassigned between the two
-   * sites. So any message able to satisfy this guard had already satisfied the front guard, had
-   * already been offered to runMeaningEngineLive on this turn, and had already been declined.
-   * This call could only ever re-roll the same model on the same preconditions. Nor is there
-   * pending state to change the answer: !multiFact and !isTransactionReport together mean the
-   * intervening handlers have essentially nothing to commit.
-   *
-   * The engine keeps its one shot, at the front, where the product reason for it lives. What it
-   * declines falls to the deterministic owners and then to gpt-block — one path authoritative per
-   * turn, which is the invariant this removal exists to establish.
-   */
+  // ---- THE MEANING ENGINE — the turn's one judgment path, below every deterministic owner.
+  //
+  // Position is the guarantee. Everything above has been asked and declined, so this cannot take
+  // a turn that belongs to a rail — no phrase list is standing between them. Fail-open: if the
+  // engine has nothing, gpt-block answers.
+  //
+  // !isTransactionReport stays (2026-08-19, four live failures): a stated meal report is a write,
+  // and until branded/voice LOG_MEAL is proven under the engine, food-context owns those turns.
+  if (engineLive() && !multiFact && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+    const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
+    if (engineReply !== null) return tag(engineReply, "🧠 new engine");
+  }
 
   // MODEL_BRAIN path deleted 2026-07-30. Two paths answer a client: the engine, then gpt-block.
   // Stated meal report that food-context could not finish: NEVER freeform invent macros.

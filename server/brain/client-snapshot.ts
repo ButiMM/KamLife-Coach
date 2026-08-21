@@ -120,7 +120,16 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     const phase = getPhaseNames()[user.programmePhase || 1] || "Foundation";
     lines.push(`Programme: ${phase} phase, week ${user.programmeWeek || 1}, day ${user.programmeDayInWeek || 1} (week is phase-relative — it resets each phase; sessions below are the lifetime count).`);
 
-    const total = user.totalWorkoutsCompleted || 0;
+    // ONE SOURCE PER FACT, INSIDE ONE SENTENCE (2026-08-21). This read the lifetime total from
+    // users.totalWorkoutsCompleted and the 7- and 28-day counts from workoutLogs — two clocks in
+    // the same line, handed to the model as fact. The counter drifts from the log table the moment
+    // one write fails, and a model given contradictory facts can manufacture the contradiction
+    // back out. Fixing only the deterministic reply left this door open; it is shut now.
+    const [totalRow] = await db.select({ n: sql<number>`COUNT(*)::int` })
+      .from(workoutLogs)
+      .where(and(eq(workoutLogs.userId, user.id), eq(workoutLogs.workoutCompleted, true)))
+      .catch(() => [{ n: 0 }] as { n: number }[]);
+    const total = Number(totalRow?.n || 0);
     const wLogs = await db.select({ loggedAt: workoutLogs.loggedAt })
       .from(workoutLogs)
       .where(and(eq(workoutLogs.userId, user.id), eq(workoutLogs.workoutCompleted, true)))

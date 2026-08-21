@@ -228,8 +228,14 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  * so a caller that only needs the number does not have to run a progress query for it;
  * getProgressTruth exposes the same function's answer as `daysOnProgramme`.
  */
-export function daysOnProgramme(user: { programmeStartDate?: Date | string | null }): number {
-  const start = user?.programmeStartDate;
+export function daysOnProgramme(
+  user: { programmeStartDate?: Date | string | null; createdAt?: Date | string | null },
+): number {
+  // ONE ANCHOR (2026-08-21). gpt.ts measured this from `createdAt` while everything else measured
+  // it from `programmeStartDate`, so the model was told a different number of days than the
+  // deterministic replies used. Falling back to createdAt keeps the model path working for a
+  // client with no start date on record, without leaving two anchors in the codebase.
+  const start = user?.programmeStartDate || user?.createdAt;
   if (!start) return 0;
   return Math.max(0, Math.floor((Date.now() - new Date(start).getTime()) / 86_400_000));
 }

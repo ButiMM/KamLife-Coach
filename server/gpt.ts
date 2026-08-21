@@ -123,7 +123,7 @@ export function recordGptCost(opts: {
   }).catch(e => console.warn("[gptCosts] insert failed (non-fatal):", e?.message || e));
 }
 
-export function buildContext(user: any): string {
+export async function buildContext(user: any): Promise<string> {
   // Sanitize all free-text user fields before they enter the system prompt.
   const name = sanitizeProfileField(getDisplayName(user)) || "a client";
   const goal = user.goalType || "general fitness";
@@ -154,8 +154,25 @@ export function buildContext(user: any): string {
     : "";
 
   // Age-derived coaching tone and safety flags
-  const daysOnProgramme = Math.floor((Date.now() - new Date(user.createdAt || Date.now()).getTime()) / 86400000);
+  // ONE SOURCE PER FACT, IN THE MODEL'S CONTEXT TOO (2026-08-21). Fixing the deterministic
+  // replies was only half of it: this block handed the model `totalWorkoutsCompleted` (the
+  // users-row counter, which drifts from workoutLogs), a day count anchored to `createdAt` while
+  // everything else anchors to `programmeStartDate`, and TWO week numbers that mean different
+  // things under labels that read as the same thing. A model given contradictory facts can
+  // manufacture the contradiction back out — which is how "Day 35, week 1" was born.
+  const { daysOnProgramme: daysOn } = await import("./day-ledger-core");
+  const daysOnProgramme = daysOn(user);
   const weeksOnProgramme = Math.max(1, Math.floor(daysOnProgramme / 7));
+  const sessionsLifetime = await (async () => {
+    try {
+      const { db } = await import("./db");
+      const { workoutLogs } = await import("../shared/schema");
+      const { eq, and, sql: s2 } = await import("drizzle-orm");
+      const [row] = await db.select({ n: s2<number>`COUNT(*)::int` }).from(workoutLogs)
+        .where(and(eq(workoutLogs.userId, user.id), eq(workoutLogs.workoutCompleted, true)));
+      return Number((row as any)?.n || 0);
+    } catch { return 0; }
+  })();
   const isYouth = age < 18;
   const isElderly = age >= 60;
   const gender = user.gender || "unknown";
@@ -201,7 +218,7 @@ export function buildContext(user: any): string {
     ? `\nDietary restrictions: ${gptDietaryParts.join(", ")}. NEVER suggest foods that violate these restrictions — not even as an example or alternative.`
     : "";
 
-  return `CLIENT PROFILE:\nName: ${name}\nGender: ${gender}\nGoal: ${goal}\nAge: ${age}\nPhase: ${phase} — ${phaseName}\nCalorie target: ${calories}\nProtein target: ${protein}g\nStep target: ${steps}\nTraining mode: ${mode}\nEquipment: ${equipment}\nLife situation: ${situation}\nJob type: ${job}\nActivity level: ${activity}\nPrimary focus: ${focus}\nInjuries: ${injuries}\nMedical conditions: ${medicalConditions}\nExperience: ${experience}\nWater today: ${water}L\nDays on programme: ${daysOnProgramme} (week ${weeksOnProgramme})\nCompliance level: ${user.complianceLevel || 'RESET'}\nWorkout streak: ${user.workoutStreak || 0} consecutive sessions\nTotal sessions completed: ${user.totalWorkoutsCompleted || 0}\nProgramme week: ${user.programmeWeek || 1}\nSubscription status: ${user.subscriptionStatus || 'inactive'}\nShopping store tier: ${storeTier}${dietaryContext}\n\n${coachingTone}\n${ageGuidelines}${medicalDisclaimer}`;
+  return `CLIENT PROFILE:\nName: ${name}\nGender: ${gender}\nGoal: ${goal}\nAge: ${age}\nPhase: ${phase} — ${phaseName}\nCalorie target: ${calories}\nProtein target: ${protein}g\nStep target: ${steps}\nTraining mode: ${mode}\nEquipment: ${equipment}\nLife situation: ${situation}\nJob type: ${job}\nActivity level: ${activity}\nPrimary focus: ${focus}\nInjuries: ${injuries}\nMedical conditions: ${medicalConditions}\nExperience: ${experience}\nWater today: ${water}L\nDays on programme: ${daysOnProgramme} (calendar week ${weeksOnProgramme} since they started)\nCompliance level: ${user.complianceLevel || 'RESET'}\nWorkout streak: ${user.workoutStreak || 0} consecutive sessions\nTotal sessions completed: ${sessionsLifetime} (counted from logged sessions)\nProgramme position: ${phaseName} phase, week ${user.programmeWeek || 1} OF THAT PHASE — this resets each phase and is NOT the calendar week above; never present the two as the same number\nSubscription status: ${user.subscriptionStatus || 'inactive'}\nShopping store tier: ${storeTier}${dietaryContext}\n\n${coachingTone}\n${ageGuidelines}${medicalDisclaimer}`;
 }
 
 // ============================================================
@@ -1043,7 +1060,7 @@ async function isUnderMonthlyCostCap(userId: string): Promise<boolean> {
 const STATIC_HOT_BRAIN = COACH_K_SYSTEM.slice(0, 20_000);
 
 export async function askCoachK(userMessage: string, user: any, extraInstruction?: string, memoryContext?: string, staticGuide?: string): Promise<string> {
-  const context = buildContext(user);
+  const context = await buildContext(user);
   const [patternSummary, cipNarrative] = await Promise.all([
     buildPatternSummary(user),
     getClientNarrative(user.id).catch(() => null),

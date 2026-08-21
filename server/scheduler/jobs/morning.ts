@@ -15,7 +15,7 @@ import { readHealthState } from "../../health-state";
 // message, so the experiment measured nothing. Deleting the send deletes an empty measurement.
 import { morningClosingLine, composeMorning, yesterdayObservation } from "../../morning-message";
 import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
-import { chooseAction, decideProactive, formatOneAction } from "../../one-action";
+import { chooseAction, decideProactive, formatOneAction, underPolicy } from "../../one-action";
 
 /**
  * WHAT WE SAY TO SOMEONE WHO HAS GONE — decided by the ladder, not written here.
@@ -53,7 +53,12 @@ async function silenceAsk(client: any, daysSilent: number): Promise<string> {
     // Only the silence rung is reachable from here — `daysSinceAnyLog >= 3` is the first branch
     // chooseAction tests, and a client silent three days cannot have logged inside them. The
     // remaining fields are neutral inputs it will never read, not a second opinion about the day.
-    return formatOneAction(chooseAction({
+    // SAME POLICY BOUNDARY AS THE GATE (2026-08-21). This called chooseAction raw, so on a ledger
+    // read failure the morning could send a PRESCRIPTION that decideProactive would have refused
+    // for lack of evidence — one decision function, two policies, chosen by which branch ran.
+    // We cannot build a ProactiveState here (that is what just failed), so we apply the contract
+    // directly: no evidence, no prescription.
+    return formatOneAction(underPolicy(chooseAction({
       firstName, goal: (client.goalType as any) || "general",
       dreamGoal: client.dreamGoal, biggestStruggle: client.biggestStruggle,
       lifeContext: client.lifeContext, doNotMention: client.doNotMention,
@@ -61,7 +66,7 @@ async function silenceAsk(client: any, daysSilent: number): Promise<string> {
       daysSinceAnyLog: daysSilent, daysSinceWeighIn: 0, loggedToday: false,
       proteinPct: 1, caloriePct: 1, sessionsThisWeek: 0, sessionsTarget: 0,
       stepsToday: 0, stepsTarget: 0, hour: 7,
-    }), firstName);
+    }), { evidenced: false, dreamGoal: client.dreamGoal }), firstName);
   }
 }
 

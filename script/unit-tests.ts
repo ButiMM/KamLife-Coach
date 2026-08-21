@@ -1818,29 +1818,47 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 // a weight number for a week he never weighed in, and hummus recommended to a man who said
 // "I live in a poor country".
 {
-  const { theNextMove } = await import("../server/education");
+  // ONE CONSTITUTION (2026-08-21). These four cases tested theNextMove(), a SECOND ranked ladder
+  // for "what should this member do next". It is deleted; chooseAction is the only one. The
+  // intents are re-pointed at the survivor — except one, which is recorded as a real difference
+  // rather than quietly re-fitted to whatever the survivor happens to do.
+  const { chooseAction } = await import("../server/one-action");
   const { tellDontAsk, endsWithHandback } = await import("../server/reply-hygiene");
-  const base = {
-    hourSAST: 7, proteinLeft: 0, calLeft: 0, stepsToday: 9000, stepsTarget: 8500,
-    daysSinceSession: 0, daysSinceWeighIn: 1, isTrainingDayToday: false, building: true,
-  };
+  const dayState = (over: Record<string, unknown> = {}) => ({
+    goal: "muscle_gain", weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 1,
+    loggedToday: true, proteinPct: 1, caloriePct: 1, sessionsThisWeek: 3, sessionsTarget: 3,
+    stepsToday: 9000, stepsTarget: 8500, hour: 7, atKeyboard: true, ...over,
+  }) as any;
 
-  test("next move: a training day nobody has used outranks everything else", () => {
-    const m = theNextMove({ ...base, isTrainingDayToday: true, daysSinceSession: 3, proteinLeft: 90 });
-    assert.match(m, /session/i, `training must win the triage: ${m}`);
+  test("next move: protein is instructed as FOOD, never as a macro number", () => {
+    const m = chooseAction(dayState({ proteinPct: 0.4 })).todo;
+    assert.match(m, /eggs|tin fish|amasi|pilchards|protein/i, `must name food: ${m}`);
+    assert.ok(!/\d+\s*g\b/i.test(m), `must not hand back a gram figure: ${m}`);
     assert.ok(!/\?/.test(m), "a next move is never a question");
   });
-  test("next move: protein is instructed as FOOD, never as a macro number", () => {
-    const m = theNextMove({ ...base, proteinLeft: 60 });
-    assert.match(m, /eggs|tin fish|protein/i, `must name food: ${m}`);
-    assert.ok(!/\d+\s*g\b/i.test(m), `must not hand back a gram figure: ${m}`);
+
+  test("next move: after 20:00 it faces tomorrow instead of setting a task for tonight", () => {
+    // The rule the deleted ladder had, absorbed into the survivor rather than lost: "a to-do at
+    // 21:00 proves the coach is not reading the clock the client is living in."
+    const m = chooseAction(dayState({ proteinPct: 0.4, hour: 21 })).todo;
+    assert.match(m, /tomorrow/i, `a to-do at 21:00 proves it can't read the clock: ${m}`);
   });
-  test("next move: after 20:00 it closes the day out instead of setting a task", () => {
-    const m = theNextMove({ ...base, hourSAST: 21, proteinLeft: 60 });
-    assert.match(m, /tomorrow|day wrapped/i, `a to-do at 21:00 proves it can't read the clock: ${m}`);
+
+  test("next move: nothing worth saying holds — it never invents a task", () => {
+    // computeNextMove maps "hold" to "", which is what the old ladder returned directly.
+    assert.equal(chooseAction(dayState()).kind, "hold",
+      "a client who is on top of everything gets no nag");
   });
-  test("next move: nothing worth saying returns empty — it never invents a task", () => {
-    assert.equal(theNextMove({ ...base }), "", "a client who is on top of everything gets no nag");
+
+  test("next move: the two constitutions ordered training and protein differently", () => {
+    // RECORDED, NOT RE-FITTED. theNextMove put an unused training day above protein; chooseAction
+    // puts protein first, and that order is the one the decision-boundary suite measured. The
+    // deleted ladder's order was never measured, so collapsing to the survivor keeps the measured
+    // one — but the difference is real and is asserted here so it stays visible rather than
+    // becoming folklore.
+    const both = chooseAction(dayState({ sessionsThisWeek: 0, proteinPct: 0.4 }));
+    assert.equal(both.kind, "protein",
+      "the surviving constitution ranks protein above an unused training day");
   });
 
   test("tell don't ask: every hand-back from that morning is replaced by the instruction", () => {

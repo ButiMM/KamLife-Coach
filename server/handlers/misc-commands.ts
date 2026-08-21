@@ -591,8 +591,16 @@ export async function handleMiscCommands(ctx: {
         // ONE NEXT MOVE, NEVER A QUESTION BACK. The model's version ended "What's one action you
         // can take this week?" — the coach asking the client to coach himself, which is the exact
         // inverse of the product contract.
-        const { chooseAction } = await import("../one-action");
-        const act = chooseAction({
+        // THE SAME DECISION CONTRACT AS THE PROACTIVE PATH (2026-08-21). This called chooseAction
+        // raw, so the weekly card could prescribe on a week the proactive gate would have refused
+        // to prescribe on — one decision function fed two policies, chosen by caller. It cannot
+        // run the full gate (that needs a ProactiveState), so it applies the contract directly.
+        //
+        // EVIDENCE, from the same truth object the card is built from: a week with fewer than
+        // three logged days is the sparse-log case the gate exists for. Two days is not evidence,
+        // and acting on it is how the product invented the over-target accusation.
+        const { chooseAction, underPolicy } = await import("../one-action");
+        const act = underPolicy(chooseAction({
           goal: (user.goalType as any) || "general", weeksOnProgramme: Math.max(0, (user.programmeWeek || 1) - 1),
           dreamGoal: user.dreamGoal, biggestStruggle: user.biggestStruggle, lifeContext: user.lifeContext,
           doNotMention: user.doNotMention, daysSinceAnyLog: truth.window.daysLogged > 0 ? 0 : 7,
@@ -601,7 +609,7 @@ export async function handleMiscCommands(ctx: {
           caloriePct: calTarget > 0 ? truth.window.avgKcal / calTarget : 1,
           sessionsThisWeek: truth.sessions, sessionsTarget: Number(user.trainingDaysPerWeek) || 3,
           stepsToday: truth.avgSteps, stepsTarget: Number(user.stepsTarget) || 0, hour: 12,
-        });
+        }), { evidenced: truth.window.daysLogged >= 3, dreamGoal: user.dreamGoal });
         return `*${name} — last 7 days*\n\n💪 Sessions: *${truth.sessions}*\n📋 Days logged: *${truth.window.daysLogged}/7*\n🔥 Avg: *${truth.window.avgKcal} kcal* · *${truth.window.avgProtein}g* protein\n👟 Avg steps: *${truth.avgSteps.toLocaleString()}*${weightLine}\n\n*${act.todo}*`;
       }
       const todayLine = truth.today.kcal > 0

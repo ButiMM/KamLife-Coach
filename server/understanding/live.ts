@@ -52,38 +52,50 @@ import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable,
 // computed instruction the engine uses. One owner for "what should this member do next".
 export async function computeNextMove(user: any): Promise<string> {
   try {
-    const { theNextMove } = await import("../education");
-    const { recomputeTodayFoodTotals } = await import("../handlers/food-scanner");
-    const { sastHour, sastDayStart } = await import("../sast");
-    const { db } = await import("../db");
-    const { stepLogs, workoutLogs, weightLogs } = await import("../../shared/schema");
-    const { eq, desc, and, gte } = await import("drizzle-orm");
-
-    const [totals, steps, lastSession, lastWeigh] = await Promise.all([
-      recomputeTodayFoodTotals(user.id).catch(() => ({ calories: 0, protein: 0 })),
-      db.select({ steps: stepLogs.steps }).from(stepLogs)
-        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart()))).limit(1).catch(() => []),
-      db.select({ at: workoutLogs.loggedAt }).from(workoutLogs)
-        .where(eq(workoutLogs.userId, user.id)).orderBy(desc(workoutLogs.loggedAt)).limit(1).catch(() => []),
-      db.select({ at: weightLogs.loggedAt }).from(weightLogs)
-        .where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(1).catch(() => []),
-    ]);
-    const daysSince = (rows: any[]): number | null => rows[0]?.at
-      ? Math.floor((Date.now() - new Date(rows[0].at).getTime()) / 86_400_000) : null;
+    // ONE CONSTITUTION (2026-08-21). This called theNextMove(), a SECOND ranked ladder —
+    // training → protein → calories → steps → scale — that produced "the one thing to do" from
+    // its own priority order, independently of chooseAction. Two ladders answering the same
+    // question is two decision owners, whatever the second one is called; and because this
+    // instruction is appended to BOTH the engine's reply and the GPT fallback's, the model path
+    // was prescribing under a constitution the canonical decision never saw.
+    //
+    // It now asks the decision owner, on canonical state, under the same policy contract every
+    // other caller uses. theNextMove is deleted.
+    const { chooseAction, underPolicy } = await import("../one-action");
+    const { getProgressTruth } = await import("../day-ledger");
+    const { sastHour } = await import("../sast");
     const { getTodayWorkoutState } = await import("../workout-state");
-    const wState = await getTodayWorkoutState(user).catch(() => ({ type: "REST" as const }));
+    const { readHealthState } = await import("../health-state");
+    const { getDisplayName } = await import("../utils");
 
-    return theNextMove({
-      hourSAST: sastHour(),
-      proteinLeft: (user.proteinTarget || 120) - (totals.protein || 0),
-      calLeft: (user.calorieTarget || 1800) - (totals.calories || 0),
-      stepsToday: steps[0]?.steps ?? 0,
-      stepsTarget: user.stepsTarget || 8500,
-      daysSinceSession: daysSince(lastSession),
-      daysSinceWeighIn: daysSince(lastWeigh),
-      isTrainingDayToday: wState.type !== "REST",
-      building: (user.goalType || "") === "muscle_gain",
-    });
+    const truth = await getProgressTruth(user, { days: 7 });
+    const wState = await getTodayWorkoutState(user).catch(() => ({ type: "REST" as const }));
+    const calTarget = Number(user.calorieTarget) || 0;
+    const protTarget = Number(user.proteinTarget) || 0;
+
+    const act = underPolicy(chooseAction({
+      firstName: getDisplayName(user) || undefined,
+      goal: (user.goalType as any) || "general",
+      dreamGoal: user.dreamGoal, biggestStruggle: user.biggestStruggle,
+      lifeContext: user.lifeContext, doNotMention: user.doNotMention,
+      weeksOnProgramme: Math.max(0, (user.programmeWeek || 1) - 1),
+      daysSinceAnyLog: truth.today.kcal > 0 ? 0 : (truth.window.daysLogged > 0 ? 1 : 7),
+      daysSinceWeighIn: truth.weight.known ? 0 : null,
+      loggedToday: truth.today.kcal > 0,
+      proteinPct: protTarget > 0 ? truth.today.protein / protTarget : 1,
+      caloriePct: calTarget > 0 ? truth.today.kcal / calTarget : 1,
+      sessionsThisWeek: truth.sessions,
+      sessionsTarget: wState.type === "REST" ? 0 : (Number(user.trainingDaysPerWeek) || 3),
+      stepsToday: truth.today.steps, stepsTarget: Number(user.stepsTarget) || 0,
+      sick: readHealthState(user).isSick,
+      hour: sastHour(),
+      // They are typing to us right now — this rides out on a reply, not as a nudge.
+      atKeyboard: true,
+    } as any), { evidenced: truth.window.daysLogged >= 3, dreamGoal: user.dreamGoal });
+
+    // "hold" means the honest answer is that nothing needs changing. An empty string is what
+    // tellDontAsk expects in that case, and it is what the old ladder returned too.
+    return act.kind === "hold" ? "" : act.todo;
   } catch { return ""; }
 }
 import { classifyDomain } from "./domain-guard";

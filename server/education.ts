@@ -252,63 +252,21 @@ export function goalStatusLine(goalType: string | null | undefined, calRemaining
  * instructing, it returns "" and the caller says nothing rather than inventing a task.
  * ──────────────────────────────────────────────────────────────────────────── */
 
-export type NextMoveFacts = {
-  hourSAST: number;
-  /** Protein still to eat today. Negative or 0 = done. */
-  proteinLeft: number;
-  /** Calories still to eat today. Negative = over. */
-  calLeft: number;
-  stepsToday: number;
-  stepsTarget: number;
-  /** Days since their last logged session; null when they have never trained. */
-  daysSinceSession: number | null;
-  /** Days since their last weigh-in; null when they have never weighed. */
-  daysSinceWeighIn: number | null;
-  isTrainingDayToday: boolean;
-  building: boolean;
-};
-
-/**
- * The moves themselves, as a table rather than a ladder of returns — one place to read the
- * coach's whole vocabulary of instructions, and one place to change his voice.
+/*
+ * theNextMove() and NextMoveFacts — DELETED (2026-08-21, one constitution).
+ *
+ * A SECOND ranked ladder for "what should this member do next": training → protein → calories →
+ * steps → scale, with its own evening branch and its own thresholds, sitting beside chooseAction,
+ * which answers the same question with a different order and a different vocabulary.
+ *
+ * Two ladders is two decision owners regardless of what the second one is called. It mattered
+ * because computeNextMove() appends this instruction to BOTH the engine's reply and the GPT
+ * fallback's — so the model path was prescribing under a constitution the canonical decision
+ * never saw, and could contradict what the deterministic surfaces told the same client the same
+ * morning.
+ *
+ * computeNextMove() now asks chooseAction, on canonical state, under the same policy contract as
+ * every other caller. The MOVES table went with it: chooseAction owns the coach's instruction
+ * vocabulary, and one voice is the point.
  */
-const MOVES = {
-  breakfastProtein: "Tomorrow, get a real protein in at breakfast — eggs or tin fish",
-  weighTomorrow: "Weigh in first thing tomorrow, before food",
-  sessionTomorrow: "Tomorrow, get the session done before the day takes it",
-  dayWrapped: "That's the day wrapped — same again tomorrow",
-  oneSession: "Get one session in today — just one, and the week turns around",
-  sessionToday: "Get today's session done",
-  addProtein: "Add eggs or tin fish to your next meal",
-  proteinFirst: "Put protein first on your next plate",
-  eatMore: "Eat a proper meal tonight — you're leaving fuel on the table",
-  holdTheLine: "Keep tonight's plate protein and veg — no seconds",
-  walk: "Get a 20-minute walk in today",
-} as const;
 
-export function theNextMove(f: NextMoveFacts): string {
-  const noSessionYet = f.daysSinceSession === null || f.daysSinceSession >= 1;
-  const scaleStale = f.daysSinceWeighIn === null || f.daysSinceWeighIn >= 10;
-
-  // EVENING closes the day out and faces tomorrow — a to-do at 21:00 proves the coach is not
-  // reading the clock the client is living in.
-  if (f.hourSAST >= 20) {
-    return f.proteinLeft >= 35 ? MOVES.breakfastProtein
-      : (f.daysSinceWeighIn === null || f.daysSinceWeighIn >= 7) ? MOVES.weighTomorrow
-      : (f.isTrainingDayToday && noSessionYet) ? MOVES.sessionTomorrow
-      : MOVES.dayWrapped;
-  }
-
-  // TRAINING first on a training day they have not used — the hardest thing to start, the
-  // easiest thing to lose. Then FOOD, always as food. Then movement while there is daylight.
-  // The scale last, and only when genuinely stale, so it never nags.
-  return (f.isTrainingDayToday && noSessionYet)
-      ? (f.daysSinceSession !== null && f.daysSinceSession >= 7 ? MOVES.oneSession : MOVES.sessionToday)
-    : f.proteinLeft >= 30 ? MOVES.addProtein
-    : f.proteinLeft >= 15 ? MOVES.proteinFirst
-    : (f.building && f.calLeft >= 500) ? MOVES.eatMore
-    : (!f.building && f.calLeft <= -200) ? MOVES.holdTheLine
-    : (f.stepsTarget > 0 && f.stepsToday < f.stepsTarget * 0.6 && f.hourSAST < 18) ? MOVES.walk
-    : scaleStale ? MOVES.weighTomorrow
-    : "";
-}

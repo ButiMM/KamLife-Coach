@@ -215,6 +215,17 @@ async function main() {
       + counterUses.map(l => l.trim()).join("\n      "));
   });
 
+  check("the weekly image and the weekly text derive from one object", () => {
+    // NOT byte-identity. "my week" renders an image and "this week" renders text; different
+    // presentation is fine. What is not fine is different TRUTH. The report card must read the
+    // canonical object rather than query for itself.
+    const card = readFileSync("server/report-card.ts", "utf-8");
+    const code = card.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/getProgressTruth\(/.test(code), "the shareable card reads the canonical progress object");
+    assert.ok(!/db\.select\(|pool\.query\(/.test(code),
+      "the shareable card queries for itself — that is a second truth behind a second renderer");
+  });
+
   check("the weekly recap narrates the same week the client can ask for", () => {
     const recap = readFileSync("server/weekly-recap.ts", "utf-8");
     const code = recap.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
@@ -429,6 +440,30 @@ async function main() {
   // be invoked twice in one turn, from the same function, either call able to end it — two
   // independent final-answer opportunities separated only by chain position, and applying
   // opposite policy about the same message.
+  // ── THE TURN BOUNDARY IS STRUCTURAL, NOT LEXICAL ─────────────────────────────────────────
+  // The engine used to sit ABOVE six deterministic owners, protected only by mustStayDeterministic
+  // — a phrase-based DENY-LIST. Measured against the phrases those rails actually own, 7 of 16
+  // leaked, including "this week", the phrase this whole convergence was about. A deny-list makes
+  // the leak unlikely; position makes it impossible.
+  check("the engine cannot take a turn a deterministic owner would claim", () => {
+    const chain = readFileSync("server/routes.ts", "utf-8");
+    const code = chain.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const engineAt = code.indexOf("runMeaningEngineLive(");
+    assert.ok(engineAt > 0, "the engine is invoked");
+    // Every deterministic owner must be ASKED before the engine is given the turn.
+    for (const rail of ["handleEarlyCommands(", "handleWorkoutCommands(", "handleWater(",
+                        "handleFoodContext(", "handleMiscCommands(", "handleLifecycle("]) {
+      const at = code.indexOf(rail);
+      assert.ok(at > 0, `${rail} is not in the chain`);
+      assert.ok(at < engineAt,
+        `${rail} runs AFTER the engine. The engine can then consume a turn that rail owns, and the `
+        + `only thing standing between them is a phrase list — which is how "this week" leaked.`);
+    }
+    // …and the engine still runs before the model fallback, so it is the judgment path, not a peer.
+    const gptAt = code.indexOf("handleGptBlock(");
+    assert.ok(engineAt < gptAt, "the engine must precede the gpt fallback");
+  });
+
   check("the meaning engine gets one shot per turn, not two", () => {
     const chain = readFileSync("server/routes.ts", "utf-8");
     const code = chain.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
@@ -464,34 +499,67 @@ async function main() {
       "the verifier calls the decision owner — that would make it a second decision point");
   });
 
-  // ── THE DECISION OWNER HAS A KNOWN SET OF ENTRY POINTS ────────────────────────────────────
-  // chooseAction is the only decision, but it is reachable two ways: through decideProactive,
-  // which downgrades a prescription under insufficient evidence, and directly. Those are not the
-  // same policy, so the call sites are pinned by name and a third cannot appear quietly.
-  //
-  // The distinction is deliberate, not an oversight. An UNSOLICITED message must clear the
-  // evidence bar before it prescribes — that gate exists because the proactive path invented a
-  // plan change from two logged days. A client who typed "this week" has asked, and answering a
-  // direct question is not the same act as pushing advice at someone who did not.
-  check("the decision owner has exactly the entry points we know about", () => {
-    const sites: Array<[string, string]> = [
-      ["server/one-action.ts", "decideProactive delegates to it — the evidence-gated entry"],
-      ["server/scheduler/jobs/morning.ts", "documented degraded fallback when the ledger read fails"],
-      ["server/handlers/misc-commands.ts", "the weekly answer to a question the client asked"],
-    ];
-    const found: string[] = [];
+  // ── ONE DECISION FUNCTION IS NOT ENOUGH; ONE DECISION CONTRACT IS ────────────────────────
+  // Pinning call sites by name was the wrong fix — it fossilises two policies instead of removing
+  // one. chooseAction was reached three ways: inside decideProactive (evidence-gated), by
+  // morning's degraded fallback, and by the reactive weekly answer. The last two prescribed on
+  // evidence the gate would have refused. The contract is one line — A PRESCRIPTION REQUIRES
+  // EVIDENCE — and every caller outside the gate now applies it through underPolicy().
+  check("every decision call outside the gate applies the policy contract", () => {
+    const owner = "server/one-action.ts";
+    const offenders: string[] = [];
     for (const f of ["server/one-action.ts", "server/scheduler/jobs/morning.ts",
-                     "server/handlers/misc-commands.ts", "server/handlers/gpt-block.ts",
-                     "server/handlers/early-commands.ts", "server/handlers/lifecycle.ts",
-                     "server/routes.ts", "server/weekly-recap.ts", "server/report-card.ts"]) {
+                     "server/handlers/misc-commands.ts", "server/handlers/one-action-command.ts",
+                     "server/handlers/gpt-block.ts", "server/handlers/early-commands.ts",
+                     "server/handlers/lifecycle.ts", "server/routes.ts",
+                     "server/weekly-recap.ts", "server/report-card.ts"]) {
       const code = readFileSync(f, "utf-8")
         .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-      if (/(?<!function )\bchooseAction\(/.test(code)) found.push(f);
+      for (const line of code.split("\n")) {
+        if (!/(?<!function )\bchooseAction\(/.test(line)) continue;
+        if (f === owner) continue;                       // the gate itself
+        if (/underPolicy\(\s*chooseAction\(/.test(line)) continue;  // the contract, applied
+        offenders.push(`${f}: ${line.trim().slice(0, 80)}`);
+      }
     }
-    assert.deepEqual(found.sort(), sites.map(([f]) => f).sort(),
-      `the decision owner is entered from an unexpected place. Known entries:\n      `
-      + sites.map(([f, why]) => `${f} — ${why}`).join("\n      ")
-      + `\n      Found: ${found.join(", ")}`);
+    assert.deepEqual(offenders, [],
+      `a caller reaches the decision owner without the policy contract. Either run decideProactive `
+      + `or wrap it in underPolicy(). Otherwise the same function carries two policies:\n      `
+      + offenders.join("\n      "));
+  });
+
+  check("there is one constitution — no second ladder for 'what should they do next'", () => {
+    // theNextMove() was a SECOND ranked ladder (training → protein → calories → steps → scale)
+    // with its own thresholds and its own evening branch, appended to BOTH the engine's reply and
+    // the GPT fallback's. Two ladders answering one question is two decision owners whatever the
+    // second is called — and this one could contradict what the deterministic surfaces told the
+    // same client the same morning.
+    for (const f of ["server/education.ts", "server/understanding/live.ts",
+                     "server/handlers/gpt-block.ts", "server/reply-hygiene.ts"]) {
+      const code = readFileSync(f, "utf-8")
+        .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+      assert.ok(!/\btheNextMove\s*\(/.test(code), `${f} still calls the deleted second constitution`);
+    }
+  });
+
+  check("the model paths prescribe THROUGH the decision owner, never beside it", () => {
+    // Every place that appends an instruction to a model reply must take it from computeNextMove,
+    // and computeNextMove must ask chooseAction under the policy contract. Otherwise GPT or the
+    // engine is prescribing where a canonical decision already exists.
+    for (const f of ["server/handlers/gpt-block.ts", "server/understanding/live.ts"]) {
+      const code = readFileSync(f, "utf-8")
+        .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+      for (const line of code.split("\n")) {
+        if (!/tellDontAsk\(/.test(line)) continue;
+        assert.ok(/computeNextMove\(/.test(line),
+          `${f} appends an instruction that did not come from the decision owner: ${line.trim().slice(0, 90)}`);
+      }
+    }
+    const live = readFileSync("server/understanding/live.ts", "utf-8");
+    assert.ok(/underPolicy\(chooseAction\(/.test(live),
+      "computeNextMove must reach chooseAction through the policy contract");
+    assert.ok(/getProgressTruth\(/.test(live),
+      "…and decide on canonical state, not on numbers it gathered itself");
   });
 
   check("chooseAction is the only coaching decision owner", () => {
