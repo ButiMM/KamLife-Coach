@@ -1397,7 +1397,12 @@ async function main() {
     const from = CONSOLE_LINES.length;
     const out = await say(msg);
     const lines = CONSOLE_LINES.slice(from);
-    return { out, meal: lines.some(l => /INSERT meal/i.test(l)), workout: lines.some(l => /INSERT workout/i.test(l)) };
+    return {
+      out,
+      meal: lines.some(l => /INSERT meal/i.test(l)),
+      workout: lines.some(l => /INSERT workout/i.test(l)),
+      continues: lines.some(l => /question continues to Coach K/i.test(l)),
+    };
   });
 
   check("the handset turn: the meal is written, and the coach does not ask for it again", async () => {
@@ -1407,7 +1412,8 @@ async function main() {
       `the client was asked to log the meal they just reported: ${r.out}`);
     assert.ok(!/snap a photo when you get it/i.test(r.out),
       "an educator answered a finished breakfast as a future street purchase");
-    assert.ok(/\b(got it|logged)\b/i.test(r.out), `the reply does not acknowledge the write: ${r.out}`);
+    assert.ok(!/send the items in one line/i.test(r.out),
+      `mustForceFoodLog stole the turn after the write: ${r.out}`);
   });
 
   check("a fact is not vetoed by a question in another clause — and not only for food", async () => {
@@ -1453,6 +1459,101 @@ async function main() {
       "resolveTurn must be told what was durably written, not left to infer it");
     assert.ok(/factsStillOwed\(\)\.length === 0 && !mustStayDeterministic/.test(routes),
       "the engine is a mouth above the writers and must stand down on an owed fact");
+  });
+
+  // WRITE → COACH (2026-08-22). The meal now writes; the turn still died at the ack because
+  // alsoAsksCoach required isMultiPartAsk (≥35 words / two '?') or a feeling. The handset
+  // bubble is 27 words and one '?'. Continuation is: question AND this turn durably wrote.
+  check("a question after a durable write continues — the ack is not terminal", async () => {
+    const { resolveTurn, newTurnLedger, commitFact, durableDomains } = await import("../server/understanding/messy-intake");
+    const { looksLikeQuestion } = await import("../server/utils");
+
+    const eggs = "I had eggs";
+    assert.equal(looksLikeQuestion(eggs), false);
+    const eggsLedger = newTurnLedger(["food"]);
+    commitFact(eggsLedger, "food", "Got it — eggs.");
+    const eggsResolved = resolveTurn(eggsLedger, {
+      hasFeeling: false,
+      alsoAsksCoach: looksLikeQuestion(eggs) && durableDomains(["INSERT meal"]).length > 0,
+      durableWrites: ["INSERT meal"],
+    });
+    assert.ok(eggsResolved.reply, "a food report with no question must still ack");
+    assert.ok(/got it/i.test(eggsResolved.reply!), `ack vanished: ${eggsResolved.reply}`);
+
+    const permission = "Is chicken liver okay?";
+    assert.equal(looksLikeQuestion(permission), true);
+    const permResolved = resolveTurn(newTurnLedger(), {
+      hasFeeling: false,
+      alsoAsksCoach: looksLikeQuestion(permission) && durableDomains([]).length > 0,
+      durableWrites: [],
+    });
+    assert.equal(permResolved.reply, null, "no write → no ack; existing question path continues");
+    assert.equal(permResolved.committed, "");
+
+    const plan = "I had eggs. What's the plan for the rest of my day?";
+    assert.equal(looksLikeQuestion(plan), true);
+    const planLedger = newTurnLedger(["food"]);
+    commitFact(planLedger, "food", "Got it — eggs.");
+    const planResolved = resolveTurn(planLedger, {
+      hasFeeling: false,
+      alsoAsksCoach: looksLikeQuestion(plan) && durableDomains(["INSERT meal kcal=1"]).length > 0,
+      durableWrites: ["INSERT meal kcal=1"],
+    });
+    assert.equal(planResolved.reply, null, "write + question must not finish at the ack");
+    assert.equal(planResolved.committed, "food");
+
+    const handsetLedger = newTurnLedger(["food"]);
+    commitFact(handsetLedger, "food", "Got it — bread, eggs, chicken livers.");
+    const handsetResolved = resolveTurn(handsetLedger, {
+      hasFeeling: false,
+      alsoAsksCoach: looksLikeQuestion(HANDSET) && durableDomains(["INSERT meal"]).length > 0,
+      durableWrites: ["INSERT meal"],
+    });
+    assert.equal(looksLikeQuestion(HANDSET), true, "the handset bubble is a question");
+    assert.equal(handsetResolved.reply, null, "the handset ack must not be terminal");
+  });
+
+  check("I had eggs acks; a plan-ask after a meal write continues; a bare food question does not write", async () => {
+    const report = await writesFor("I had eggs");
+    assert.ok(report.meal, "I had eggs must write");
+    assert.ok(!report.continues, "a report with no question must not continue to the coach");
+    assert.ok(/\b(got it|logged)\b/i.test(report.out), `ack-only vanished: ${report.out}`);
+
+    const ask = await writesFor("Is chicken liver okay?");
+    assert.ok(!ask.meal, "a permission ask must not write a meal");
+
+    const both = await writesFor("I had eggs. What's the plan for the rest of my day?");
+    assert.ok(both.meal, "eggs + plan lost the meal");
+    assert.ok(both.continues, "eggs + plan finished at the ack — the plan never ran");
+    assert.ok(!/log a meal or your steps and ask me again/i.test(both.out), both.out);
+    assert.ok(!/send the items in one line/i.test(both.out),
+      `mustForceFoodLog asked them to retype a meal that was written: ${both.out}`);
+
+    const live = await writesFor(HANDSET);
+    assert.ok(live.meal, "handset breakfast not written");
+    assert.ok(live.continues, "handset turn died at the ack — coaching request discarded");
+    assert.ok(!/log a meal or your steps and ask me again/i.test(live.out), live.out);
+    assert.ok(!/send the items in one line/i.test(live.out), live.out);
+  });
+
+  check("continuation is load-bearing — isMultiPartAsk must not gate alsoAsksCoach", () => {
+    const routes = readFileSync("server/routes.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/alsoAsksCoach: looksLikeQuestion\(message\) && durableDomains\(turnMutations\(\)\)\.length > 0/.test(routes),
+      "alsoAsksCoach must be: question AND this turn durably wrote");
+    assert.ok(!/alsoAsksCoach: looksLikeQuestion\(message\) && \(isMultiPartAsk/.test(routes),
+      "NEGATIVE CONTROL: restoring isMultiPartAsk as the continuation gate must fail this test — the handset is 27 words and one '?'");
+    assert.ok(/mustForceFoodLog && !durableDomains\(turnMutations\(\)\)\.includes\("food"\)/.test(routes),
+      "mustForceFoodLog must not steal a turn that already wrote the meal");
+    // chooseAction stays the owner; continuation reaches it only because handleGptBlock sits
+    // below resolveTurn. Position is the guarantee — do not invent a second decision path.
+    const resolveAt = routes.indexOf("resolveTurn(turn,");
+    const gptAt = routes.indexOf("handleGptBlock({");
+    const decisionOwner = readFileSync("server/handlers/gpt-block.ts", "utf-8");
+    assert.ok(resolveAt > 0 && gptAt > resolveAt,
+      "GPT must run AFTER the write/resolve, so canonicalDecision sees the new row");
+    assert.ok(/canonicalDecision\(user\)/.test(decisionOwner),
+      "the continuation path still decides through canonicalDecision → chooseAction");
   });
 
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────

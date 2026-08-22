@@ -51,7 +51,7 @@ import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedg
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
-import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, isMultiPartAsk, getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
+import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { mentionsConditionOrMedication, conditionWelcome } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
@@ -1127,15 +1127,21 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ── THE ONE COMPOSE ── replaces the food+feeling special case that used to live here, and
   // the food+steps string concatenation that lived inside food-context before that.
   const hasFeeling = turnFacts.hasFeeling || carriesFeelingClause(message);
+  // WRITE THEN COACH (2026-08-22). alsoAsksCoach used to require isMultiPartAsk (≥35 words or
+  // two '?') or a feeling. The live bubble was 27 words and one '?':
+  //   "What's the plan for me? / My breakfast was … / Guide for the rest of the day"
+  // The meal wrote; resolveTurn then returned the ack and the plan never ran. A question on a
+  // turn that durably wrote is two jobs — the adapter must not finish. isMultiPartAsk stays
+  // elsewhere; it is not the continuation rule.
   const resolved = resolveTurn(turn, {
     hasFeeling,
-    alsoAsksCoach: looksLikeQuestion(message) && (isMultiPartAsk(message) || hasFeeling),
+    alsoAsksCoach: looksLikeQuestion(message) && durableDomains(turnMutations()).length > 0,
     // `committed` means COMMITTED now — read off the turn's durable write record.
     durableWrites: turnMutations(),
   });
   if (resolved.committed) {
     turnMutation(`TURN committed ${resolved.committed}${resolved.reply ? "" : "; question continues to Coach K"}`);
-    console.log(`[TURN] committed ${resolved.committed} — "${message.slice(0, 70)}"`);
+    console.log(`[TURN] committed ${resolved.committed}${resolved.reply ? "" : "; question continues to Coach K"} — "${message.slice(0, 70)}"`);
   }
   if (resolved.reply) return resolved.reply;
 
@@ -1181,8 +1187,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // MODEL_BRAIN path deleted 2026-07-30. Two paths answer a client: the engine, then gpt-block.
-  // Stated meal report that food-context could not finish: NEVER freeform invent macros.
-  if (turnFacts.mustForceFoodLog) {
+  // Stated meal that food-context could not finish: NEVER freeform invent macros.
+  // If this turn already wrote the meal, this net must not fire — continuation is
+  // supposed to reach the coach with the row in the ledger, not ask them to retype it.
+  if (turnFacts.mustForceFoodLog && !durableDomains(turnMutations()).includes("food")) {
     const clarify = `Got it — you ate something. Send the items in one line (e.g. "McDonald's breakfast and a mocha") and I'll log it.`;
     const { logChat: lc } = await import("./handlers/chat-log");
     await lc(user.id, message, clarify, "FOOD_CLARIFY").catch(() => {});
