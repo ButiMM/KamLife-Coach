@@ -261,6 +261,38 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   // canonical instruction is ALWAYS the one appended; what it does not buy is structural
   // impossibility of a stray model directive surviving. That would require the model to emit
   // structured fields instead of prose across all ten exits — a larger change than this one.
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  // P0-A — WRITE INTEGRITY. The coach may not confirm a write that did not happen.
+  //
+  // 2026-08-21, handset:
+  //     client 14:36 "I did all four workouts this week / Take note"
+  //     coach  14:36 "That's impressive — all four workouts done this week! Noted 👌"
+  //     card   14:38  WORKOUTS 1
+  //
+  // Two minutes apart. The client gave us a fact, we confirmed it as recorded, and nothing was
+  // written. That is not a phrasing defect — it is the continuity promise being false, and a
+  // general assistant that stays vague about memory is more honest than a coach that does this.
+  //
+  // The check is structural on the half that matters: `scope.mutations` is appended by every
+  // durable writer (food, corrections, workouts, steps, weight, engine actions), so the turn
+  // KNOWS whether anything was committed. A model-authored reply on a turn that wrote nothing
+  // may not claim it wrote something.
+  //
+  // The confirmation vocabulary is short, closed, and specified rather than discovered — these
+  // are the words the CTO enumerated. It is not a phrase hunt: any word here is a claim about
+  // state, and a claim about state is checkable against state.
+  if (scope.evidence?.modelAuthored && scope.mutations.length === 0) {
+    const CLAIMS_A_WRITE = /\b(?:logged|noted|saved|recorded|updated|tracked|added (?:it|that)|got (?:it|that) down|put (?:it|that) down|marked (?:it|that))\b/i;
+    if (CLAIMS_A_WRITE.test(draft)) {
+      console.log(`[WRITE_INTEGRITY] blocked a confirmation with no write on the turn: ${draft.slice(0, 90)}`);
+      const { recordFalseConfirmation } = await import("../self-check");
+      recordFalseConfirmation();
+      // The honest reply: we heard them, and we are asking for what we can actually record.
+      draft = "I've got that — but I haven't written it down yet, and I won't say I have when I "
+        + "haven't. Send it the way you'd log it and I'll put it on your record properly.";
+    }
+  }
+
   if (scope.evidence?.modelAuthored) {
     const { stripModelDirectives } = await import("../brain/reply-verifier");
     const { renderActionLine } = await import("../one-action");

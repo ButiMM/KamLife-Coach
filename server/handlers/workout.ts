@@ -18,7 +18,7 @@ import { checkPerfectDay } from "./checks";
 import { storeMemory } from "../memory";
 import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
-import { logChat } from "./chat-log";
+import { logChat, turnMutation } from "./chat-log";
 import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone } from "../utils";
 import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
@@ -195,6 +195,7 @@ export async function handleWorkoutCommands(ctx: {
 
     // Log workout session
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
+    turnMutation("INSERT workout completed=true", "[WORKOUT_LOG]");
     invalidatePatternCache(user.id); // GPT's cached pattern summary must see this session immediately
 
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
@@ -304,6 +305,7 @@ export async function handleWorkoutCommands(ctx: {
     }
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true, loggedAt: retroDate });
+    turnMutation(`INSERT workout completed=true at=${String(retroDate).slice(0, 10)}`, "[WORKOUT_LOG]");
     invalidatePatternCache(user.id);
 
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
@@ -331,8 +333,41 @@ export async function handleWorkoutCommands(ctx: {
     return `${n ? n + " — " : ""}got it, logged to ${dateLabel}. ${newTotal} session${newTotal !== 1 ? "s" : ""} in total.\n\nNow log your food or send today's workout when you're ready.[BUTTONS:Log food|My progress|Today's workout]`;
   }
 
+  /*
+   * TALKING IS THE LOG, FOR TRAINING TOO (2026-08-21, handset).
+   *
+   * `isDone` below is anchored ^…$ — it matches a bare "done", "workout done", "just finished my
+   * session", and nothing else. So neither of these reached a writer:
+   *
+   *     "I went to the gym in the morning"   → fell through → "Nice work getting to the gym!"
+   *     "I did all four workouts this week"  → fell through → "…all four done! Noted 👌"
+   *
+   * and two minutes later the week card said WORKOUTS 1. The client told us, we agreed, we wrote
+   * nothing. That is the continuity promise being false.
+   *
+   * A SHAPE, not a phrase list: a first-person past-tense verb plus a training noun, with the
+   * guards that actually matter — future/intent, negation, third party, question, and other
+   * domains. Tested against each of those before it was wired.
+   *
+   * A COUNT CLAIM IS NOT A SESSION. "I did all four workouts this week" tells us how many but not
+   * WHICH DAYS, and writing four undated rows is inventing data. So it deliberately does not
+   * write — and the write-integrity guard at the outbound boundary makes sure it is not confirmed
+   * as logged either. Recognised, not fabricated.
+   */
+  const TRAINING_NOUN = /\b(gym|workouts?|sessions?|training|trained|train)\b/i;
+  const REPORTED_PAST = /\b(?:i\s+)?(?:went\s+to|hit|did|had|got|finished|completed|smashed|made\s+it\s+to|was\s+at|trained)\b|\b(?:gym|workout|session|training)\s+(?:done|finished)\b/i;
+  const FUTURE_OR_INTENT = /\b(?:going\s+to|gonna|will|i'?ll|later|tomorrow|planning|plan\s+to|about\s+to|should\s+i|thinking\s+of|need\s+to|want\s+to)\b/i;
+  const NEGATED_SESSION = /\b(?:didn'?t|did\s+not|haven'?t|have\s+not|couldn'?t|could\s+not|missed|skipped|no\s+gym)\b/i;
+  const SOMEONE_ELSE = /\b(?:my\s+(?:brother|sister|wife|husband|friend|mate|partner|mom|mum|dad)|he|she|they)\b/i;
+  const SESSION_COUNT = /\b(?:all\s+)?(?:two|three|four|five|six|seven|\d+)\s+(?:workouts?|sessions?|trainings?)\b|\b(?:workouts?|sessions?)\s*[x×]\s*\d+/i;
+  const OTHER_DOMAIN = /\b(?:steps?|km|walked|ate|had\s+lunch|meal|calories|water)\b/i;
+
+  const reportsOneSession = TRAINING_NOUN.test(m) && REPORTED_PAST.test(m)
+    && !FUTURE_OR_INTENT.test(m) && !NEGATED_SESSION.test(m) && !SOMEONE_ELSE.test(m)
+    && !looksLikeQuestion(m) && !SESSION_COUNT.test(m) && !OTHER_DOMAIN.test(m);
+
   // ---- WORKOUT DONE — log completion ----
-  const isDone = (
+  const isDone = reportsOneSession || (
     /^(done|finished|complete|completed|trained)[.!?]?$/i.test(m)
     || /^done\s*[💪✅🔥][.!?]?$/.test(m)
     || /^(?:workout|session|training|gym)\s+(?:done|complete|finished)[.!?]?$/i.test(m)

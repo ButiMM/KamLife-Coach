@@ -97,6 +97,22 @@ export function _resetReplyPaths(): void { replyPaths.clear(); messagesSeen = 0;
  *
  * A rising first number is the honest read on whether the residual matters.
  */
+/**
+ * A CONFIRMATION THE COACH COULD NOT BACK (2026-08-21). Counted, so the beta can tell whether
+ * this is a rare model flourish or a systematic gap between what clients tell us and what the
+ * writers actually claim.
+ */
+export function recordFalseConfirmation(): void { bump("writeintegrity:false_confirmation"); }
+
+/**
+ * A TURN THAT WOULD HAVE ENDED IN SILENCE (2026-08-21). Counted by cause, because the founder
+ * found the first one by waiting 80 minutes and then typing "?" — which is not a monitoring
+ * strategy. Silence is a product failure; it now leaves a trace.
+ */
+export function recordSilentTurnAvoided(cause: "duplicate" | "empty"): void {
+  bump(`silentturn:${cause}`);
+}
+
 export function recordDirectiveStripped(onDecisionTurn: boolean): void {
   bump(`coachdirective:${onDecisionTurn ? "stripped_on_action" : "stripped_on_hold"}`);
 }

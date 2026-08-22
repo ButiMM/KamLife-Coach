@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { turnMutation } from "./chat-log";
 import { stepLogs } from "../../shared/schema";
 import { eq, desc, and, gte, lt } from "drizzle-orm";
 import { neverSilentLine } from "../reply-hygiene";
@@ -28,6 +29,7 @@ export async function logStepsForUser(userId: string, steps: number, opts?: { co
     return existing[0].steps ?? steps;
   }
   await db.insert(stepLogs).values({ userId, steps, loggedAt: at });
+  turnMutation(`INSERT steps=${steps} at=${String(at).slice(0, 10)}`, "[STEP_LOG]");
   return steps;
 }
 

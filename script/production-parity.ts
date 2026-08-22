@@ -1013,6 +1013,80 @@ async function main() {
     });
   }
 
+  // ── P0-1 · TRAINING SPEECH BECOMES AUTHORITATIVE STATE ────────────────────────────────────
+  // 2026-08-21 handset: "I went to the gym in the morning" and "I did all four workouts this
+  // week" both fell past the workout writer (isDone was ^…$ anchored) and were confirmed by the
+  // model — "Noted 👌" — while the card two minutes later said WORKOUTS 1.
+  check("a reported session reaches the writer; a count claim does not fabricate rows", () => {
+    const wk = readFileSync("server/handlers/workout.ts", "utf-8");
+    const code = wk.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/const isDone = reportsOneSession \|\|/.test(code),
+      "the completion path must accept a natural session report, not only the anchored forms");
+    assert.ok(/SESSION_COUNT/.test(code) && /!SESSION_COUNT\.test\(m\)/.test(code),
+      "a count claim must NOT be logged — we know how many, not which days, and undated rows are invented data");
+    for (const guard of ["FUTURE_OR_INTENT", "NEGATED_SESSION", "SOMEONE_ELSE", "OTHER_DOMAIN"]) {
+      assert.ok(new RegExp(`!${guard}\\.test\\(m\\)`).test(code),
+        `the session report must be guarded by ${guard} — "I'm going to the gym later" is not a log`);
+    }
+  });
+
+  check("every durable write records itself on the turn", () => {
+    // The turn must KNOW whether anything was committed; that is what makes the write-integrity
+    // check structural rather than a guess about prose.
+    for (const [f, what] of [["server/handlers/workout.ts", "workout"], ["server/handlers/steps.ts", "steps"],
+                             ["server/handlers/weight.ts", "weight"], ["server/day-ledger.ts", "meal"]] as const) {
+      const src = readFileSync(f, "utf-8");
+      assert.ok(/turnMutation\(/.test(src), `${what} writes without recording a mutation on the turn`);
+    }
+  });
+
+  check("a confirmation requires a write that actually happened", () => {
+    const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/scope\.evidence\?\.modelAuthored && scope\.mutations\.length === 0/.test(log),
+      "the boundary must know the turn wrote nothing");
+    assert.ok(/CLAIMS_A_WRITE/.test(log) && /recordFalseConfirmation\(\)/.test(log),
+      "…refuse the confirmation, and count it");
+  });
+
+  // ── P0-2 · THE MORNING BRIEF CANNOT CONTRADICT ITSELF ─────────────────────────────────────
+  check("a rest day cannot be told to train", async () => {
+    // The 06:00 brief sent "🛌 Rest day. No training" and "Get today's session done." in one
+    // message, because the rest-day headline was computed in morning.ts while the action line came
+    // from decideProactive — which was handed sessionsTarget: trainingDaysPerWeek regardless of
+    // what day it was. The decision owner could not know, so it did its job on false input.
+    const { chooseAction } = await import("../server/one-action");
+    const base = {
+      goal: "fat_loss", weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 2,
+      loggedToday: true, proteinPct: 0.8, caloriePct: 0.7, sessionsThisWeek: 0,
+      stepsToday: 3000, stepsTarget: 6000, hour: 7,
+    } as any;
+    const rest = chooseAction({ ...base, sessionsTarget: 0 });
+    assert.ok(!/session|train|gym/i.test(rest.todo),
+      `a rest day still produced a training instruction: ${rest.todo}`);
+    const training = chooseAction({ ...base, sessionsTarget: 4 });
+    assert.ok(/session|train/i.test(training.todo), "…and a training day still gets one");
+
+    const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/sessionsTarget: isTodayTrainingDay \?/.test(morning),
+      "the morning decision must be told whether today is a training day — the schedule is state, not a second policy");
+  });
+
+  // ── P0-3 · SILENCE IS NOT A TERMINAL STATE ────────────────────────────────────────────────
+  check("a suppressed duplicate does not become silence", () => {
+    const wa = readFileSync("server/routes/whatsapp.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const dupBlock = /if \(isDuplicateOutbound\(phone, out\)\) \{([\s\S]*?)\n  \}/.exec(wa);
+    assert.ok(dupBlock, "the duplicate branch must exist");
+    assert.ok(!/\breturn;/.test(dupBlock[1]),
+      "a duplicate reply must not end the turn in silence — the client asked twice because the "
+      + "first answer did not land, which is when silence costs most");
+    assert.ok(/out = /.test(dupBlock[1]), "…it must say something different instead");
+    assert.ok(/recordSilentTurnAvoided\("duplicate"\)/.test(wa) && /recordSilentTurnAvoided\("empty"\)/.test(wa),
+      "both silent-terminal causes must be counted, by cause");
+  });
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");

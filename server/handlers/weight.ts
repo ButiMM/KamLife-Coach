@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { turnMutation } from "./chat-log";
 import { users, weightLogs, escalations } from "../../shared/schema";
 import { neverSilentLine } from "../reply-hygiene";
 import { trendCalorieAdjust } from "../adaptive-targets";
@@ -163,6 +164,7 @@ export async function handleWeightLog(
       await tx.update(weightLogs).set({ weight: newKg.toString() }).where(eq(weightLogs.id, existingToday[0].id));
     } else {
       await tx.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
+      turnMutation(`INSERT weight=${newKg}kg`, "[WEIGHT_LOG]");
     }
   });
   // The cached pattern summary feeds every GPT reply for up to an hour — without this,

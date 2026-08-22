@@ -494,7 +494,25 @@ export async function runMorningCheckin(): Promise<void> {
             lifeContext: client.lifeContext,
             doNotMention: client.doNotMention,
             weeksOnProgramme: Math.floor(progDays / 7),
-            sessionsTarget: Number(client.trainingDaysPerWeek) || 3,
+            // THE SCHEDULE IS PART OF THE STATE THE DECISION READS (2026-08-21, handset).
+            //
+            // The 06:00 brief sent this, in one message:
+            //
+            //     🛌 Rest day. No training — stay on food and steps.
+            //     …
+            //     Get today's session done.
+            //
+            // Because the rest-day headline was computed HERE from isTodayTrainingDay, and the
+            // action line came from decideProactive — which was handed
+            // `sessionsTarget: trainingDaysPerWeek` regardless of what day it was. The decision
+            // owner literally could not know today was a rest day, so it did its job correctly on
+            // false input and told a resting client to train.
+            //
+            // This is the same dual-authority disease the whole cut removed from the reactive
+            // path, sitting in the proactive brief. The fix is not a new policy: it is telling
+            // the one decision owner the truth. On a rest day no session is expected today, and
+            // sessionsTarget: 0 says exactly that in the vocabulary chooseAction already has.
+            sessionsTarget: isTodayTrainingDay ? (Number(client.trainingDaysPerWeek) || 3) : 0,
             calorieTarget: Number(client.calorieTarget) || 0,
             proteinTarget: Number(client.proteinTarget) || 0,
             stepsTarget: Number(client.stepsTarget) || 0,

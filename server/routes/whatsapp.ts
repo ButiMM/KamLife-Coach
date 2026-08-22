@@ -3,6 +3,7 @@ import twilio from "twilio";
 import type { RouteDeps } from "./types";
 import { requireAdminKey } from "./auth";
 import { sendWhatsAppButtons } from "../twilio-interactive";
+import { recordSilentTurnAvoided } from "../self-check";
 import { voiceReplyFor } from "../tts";
 import { db } from "../db";
 import { processedWebhooks, users } from "../../shared/schema";
@@ -68,11 +69,37 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   out = stripInternalMarkers(out);
   // 2. The same words twice in ten minutes is never the right outcome, whatever upstream
   //    produced the repeat. Live: two different messages got byte-identical replies.
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  // P0-C — SILENCE IS NOT AN ACCEPTABLE TERMINAL STATE (2026-08-21, handset).
+  //
+  //     14:45  "What's the way forward?"        → the withhold reply
+  //     14:46  "As my coach, what is the way    → NOTHING. 80 minutes.
+  //             forwards for me? In terms of
+  //             everything"
+  //     16:05  "?"                              → only then did the coach speak
+  //
+  // Two near-identical questions a minute apart. The withhold string is deterministic, so the
+  // second reply was byte-identical to the first, and this dedupe swallowed it — the client was
+  // punished for asking again after a bad answer, with silence.
+  //
+  // The dedupe earns its place: two different messages once got byte-identical replies. But
+  // suppressing a repeat is not the same as saying nothing. A client who asks twice is telling us
+  // the first answer did not land, and that is the one moment where silence is least affordable.
   if (isDuplicateOutbound(phone, out)) {
     console.warn(`[DUPLICATE_SUPPRESSED] ${phone.slice(-4)} — identical reply within the window: "${out.slice(0, 70)}"`);
+    recordSilentTurnAvoided("duplicate");
+    // Say something DIFFERENT rather than nothing. Short, honest, and it moves the conversation
+    // on instead of repeating the answer that already failed to land.
+    out = "I gave you the same answer twice there — that means mine wasn't useful. Tell me the one "
+      + "thing you want sorted and I'll deal with that specifically.";
+  }
+  if (!out.trim()) {
+    // An empty reply reaching the door is a bug upstream, and it used to end the turn in silence
+    // with no record at all. It is counted now, so it can be found.
+    console.error(`[EMPTY_REPLY] ${phone.slice(-4)} — the pipeline produced nothing to send`);
+    recordSilentTurnAvoided("empty");
     return;
   }
-  if (!out.trim()) return;
 
   // 3. SHADOW (2026-08-04). Placed here — after the gate, the hygiene pass, the marker
   //    strip and the dedupe — so what lands in the table is byte-for-byte what the client
