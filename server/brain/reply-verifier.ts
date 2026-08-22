@@ -400,12 +400,15 @@ function verifySessionAttribution(reply: string, clientMessage: string, evidence
     return { ok: false, violation: `Your reply says the client has done ${claimed[0]} training session(s), but the record holds ${held} in the last ${windowDays} days. Never confirm a training history the log contradicts — not even when the client states it themselves. Tell them plainly what is on the record and ask them to send the missing sessions so you can log them.` };
   }
 
-  // Nothing held this turn: a figure the CLIENT put in this message may be echoed, nothing else.
-  const reported = sessionCountsIn(clientMessage || "");
-  if (reported.length === 0 || claimed.some(n => !reported.includes(n))) {
-    return { ok: false, violation: "Your reply states a number of training sessions that is neither on the record nor in the client's message. Do not assert how many times someone has trained unless the count came from their log." };
-  }
-  return { ok: true };
+  // NOTHING HELD — AND THAT IS NOT A PASS (2026-08-22, P0-A).
+  //
+  // This used to let a figure through when the CLIENT had put the same figure in their message.
+  // That is the 21 August turn exactly: they said four, the coach said four, the log said one.
+  // Echoing a client's claim back as the coach's own confirmation is the failure, not a form of
+  // provenance — so with no authoritative count on the turn there is no basis for the sentence
+  // at all. The boundary reads the count before asking, so reaching here means the read failed
+  // or was impossible, and silence about the number is the only honest outcome.
+  return { ok: false, violation: "Your reply states how many training sessions the client has done, and there is no authoritative count on this turn to support it — a number they mentioned themselves is not the record. Do not confirm, repeat or total their sessions. Answer without the count, or tell them you will check the log." };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────────────────────

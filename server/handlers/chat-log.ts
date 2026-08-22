@@ -7,7 +7,7 @@ import { classifyMediaFailure } from "../coach-guardrails";
 import { detectEscalation, escalationSLA, isSyntheticTestClient } from "../safety-detection";
 import { currentRuntimeDecision } from "../understanding/state";
 import { verifyBrainReply, mentionsForbidden, stripForbidden, HONOURED_SILENCE } from "../brain/reply-verifier";
-import { looksLikeQuestion } from "../utils";
+import { looksLikeQuestion, sessionCountsIn } from "../utils";
 import { sastDayStart } from "../utils";
 
 export async function checkEscalation(userId: string, messageIn: string): Promise<void> {
@@ -348,6 +348,41 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
       }
     } else if (!draft) {
       draft = "I'm here — tell me what's going on and we'll take it from there.";
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════════════════
+  // P0-A — THE CHECK MUST HAVE THE STATE IT CHECKS AGAINST (2026-08-22).
+  //
+  // The training-count rule was correct and could be walked around by ROUTE. `sessionsWindow`
+  // arrived on the turn only because getProgressTruth happened to run, and most model paths
+  // never call it — the specialist agents, the short/punct replies, a plain conversational
+  // turn. On any of those the boundary held no count, and the fallback was "a figure the client
+  // put in their own message may be echoed", which is precisely the 21 August sentence:
+  //
+  //     client "I did all four workouts this week"   →   coach "all four workouts done"
+  //
+  // Both halves said four, so the echo rule passed it, with a log holding one. A rule that
+  // depends on an unrelated read having happened is not a boundary.
+  //
+  // So the boundary FETCHES what it needs, and only when it needs it: a model-authored draft
+  // that actually asserts a session count triggers one COUNT(*) — the same query getProgressTruth
+  // runs, through the same owner. Nothing else on the turn pays for it. If the read fails the
+  // evidence stays absent and the verifier refuses the claim, which is the correct direction:
+  // an unevidenced training history is never worth saying.
+  if (scope.evidence?.modelAuthored
+      && scope.evidence.sessionsWindow == null
+      && sessionCountsIn(draft).length > 0) {
+    const { sessionsSince } = await import("../day-ledger");
+    // Seven days — getProgressTruth's default, and the window every weekly surface already uses.
+    // NOT a progress door: this reads a count to REFUSE a sentence, and the client is never shown
+    // a number from here. The refusal path emits no total, which is why the reply below says what
+    // it cannot confirm rather than answering with the figure.
+    const days = 7;
+    try {
+      turnEvidence({ sessionsWindow: await sessionsSince(scope.userId, days), sessionsWindowDays: days });
+    } catch (e: any) {
+      console.error(`[SESSION_EVIDENCE] could not read the training count, refusing the claim: ${e?.message || e}`);
     }
   }
 

@@ -1021,8 +1021,9 @@ async function main() {
   check("a reported session reaches the writer; a count claim does not fabricate rows", async () => {
     const wk = readFileSync("server/handlers/workout.ts", "utf-8");
     const code = wk.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-    assert.ok(/const isDone = reportsOneSession \|\|/.test(code),
-      "the completion path must accept a natural session report, not only the anchored forms");
+    assert.ok(/const isDone = when\.when === "today" && \(reportsOneSession \|\|/.test(code),
+      "the completion path must accept a natural session report, not only the anchored forms — and "
+      + "only when the client said today");
     assert.ok(/sessionCountsIn\(m\)\.length === 0/.test(code),
       "a count claim must NOT be logged — we know how many, not which days, and undated rows are invented data");
     for (const guard of ["FUTURE_OR_INTENT", "NEGATED_SESSION", "SOMEONE_ELSE", "OTHER_DOMAIN"]) {
@@ -1077,14 +1078,65 @@ async function main() {
       + `these, so the coach can say "Noted" over them:\n      ${unrecorded.join("\n      ")}`);
   });
 
-  // NEGATIVE CONTROL 2 — remove the historical-day guard and this must go red.
-  check("a session reported for a NAMED DAY is never written as today", async () => {
+  // NEGATIVE CONTROL 2 / P0-B — the temporal contract, graded on what actually gets written.
+  //
+  //   explicit today            → today write
+  //   explicit historical date  → retro write, on the day they named
+  //   a span, or ambiguous      → NO today write
+  //
+  // Graded by watching the durable-write records the turn emits, not by reading the source: the
+  // previous version of this check asserted a variable name, and a variable name is not a write.
+  check("a training report is written to the day the client actually named", async () => {
+    const { trainingWhen } = await import("../server/utils");
+    const { sastDayKey } = await import("../server/sast");
+    const today = sastDayKey();
+    const yesterday = sastDayKey(new Date(Date.now() - 86_400_000));
+
+    // What the pipeline COMMITTED this turn. "INSERT workout … at=<date>" is the retro writer;
+    // an "INSERT workout" with no date is a write to today.
+    const writesFor = async (msg: string) => {
+      const lines: string[] = [];
+      const real = console.log;
+      console.log = (...a: any[]) => { lines.push(a.map(String).join(" ")); };
+      try { await say(msg); } finally { console.log = real; }
+      const workoutWrites = lines.filter(l => /INSERT workout\b/.test(l));
+      return {
+        today: workoutWrites.some(l => !/\bat=/.test(l)),
+        retro: workoutWrites.map(l => /\bat=(\d{4}-\d{2}-\d{2})/.exec(l)?.[1]).filter(Boolean) as string[],
+      };
+    };
+
+    // 1. "I trained Monday" — a day is named. It may NOT become today.
+    assert.equal(trainingWhen("I trained Monday").when, "historical");
+    const monday = await writesFor("I trained Monday");
+    assert.ok(!monday.today, "a session reported for Monday was written to today");
+    assert.ok(monday.retro.length === 0 || monday.retro.every(d => d !== today),
+      `the Monday session landed on today: ${monday.retro.join(",")}`);
+
+    // 2. "I trained last week" — a SPAN. No day to write, so nothing is written.
+    assert.equal(trainingWhen("I trained last week").when, "ambiguous");
+    const lastWeek = await writesFor("I trained last week");
+    assert.ok(!lastWeek.today, "a session reported for 'last week' was written to today");
+
+    // 3. "I trained yesterday" still reaches the retro writer, on yesterday.
+    assert.equal(trainingWhen("I trained yesterday").when, "historical");
+    const yday = await writesFor("I trained yesterday");
+    assert.ok(!yday.today, "yesterday's session was written to today");
+    assert.ok(yday.retro.includes(yesterday),
+      `yesterday's session was not written to ${yesterday}: ${yday.retro.join(",") || "no write"}`);
+
+    // 4. "I trained this morning" still logs today.
+    assert.equal(trainingWhen("I trained this morning").when, "today");
+    const thisMorning = await writesFor("I trained this morning");
+    assert.ok(thisMorning.today, "an explicit today report no longer logs today");
+
+    // The writer must not keep a second opinion about dates.
     const wk = readFileSync("server/handlers/workout.ts", "utf-8")
       .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-    assert.ok(/reportsOneSession\s*=[\s\S]{0,600}?!hasRetroDayRef/.test(wk),
-      "the natural session report must decline any message that names a day — the retro block owns "
-      + "those and writes the day the client actually said. A workout on the wrong date is worse "
-      + "than a workout not logged: it is a fact the client cannot correct because it looks right.");
+    assert.ok(!/hasRetroDayRef/.test(wk) && !/parseMealDate\(m\)/.test(wk),
+      "the workout writer must consult the one temporal owner, not re-derive the day itself");
+    assert.ok(/const isDone = when\.when === "today" &&/.test(wk),
+      "every today-write must be gated on the temporal verdict, including the anchored short forms");
   });
 
   // NEGATIVE CONTROL 1b (P0-1B) — the model may not confirm a training history the log denies.
@@ -1118,6 +1170,71 @@ async function main() {
     // The count has to REACH the turn, or none of the above can fire.
     assert.ok(/turnEvidence\(\{ sessionsWindow/.test(readFileSync("server/day-ledger.ts", "utf-8")),
       "the authoritative session count must be left on the turn by the read that already ran");
+  });
+
+  // P0-A — THE CHECK CANNOT BE WALKED AROUND BY ROUTE ────────────────────────────────────────
+  //
+  // The rule above only bound turns where getProgressTruth happened to run. Most model paths do
+  // not call it, and on those the boundary held no count — so the fallback ("the client said four
+  // themselves") passed the exact 21 August sentence. This drives a REAL turn through the one
+  // outbound boundary, with the log holding 1, having never called getProgressTruth.
+  check("a model count claim cannot reach the client on a turn that never read the count", async () => {
+    const { inTurn, turnUser, turnEvidence } = await import("../server/handlers/chat-log");
+    const { workoutLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+
+    g.__KAMLIFE_STUB_ROWS = new Map([[workoutLogs, [{ n: 1 }]]]);   // authoritative count = 1
+    try {
+      const out = await inTurn("text", "I did all four workouts this week", async () => {
+        turnUser(USER.id);
+        // A model path, and NOTHING else: no getProgressTruth, no canonical decision, no ledger
+        // read. This is the shape of a specialist-agent or short-reply turn.
+        turnEvidence({ modelAuthored: true });
+        return "That's four workouts this week — great going.";
+      });
+
+      assert.notEqual(out, "That's four workouts this week — great going.",
+        "the model's count claim reached the client unchanged on a turn that held no count");
+      assert.ok(!/\bfour\b|\b4\b/i.test(out),
+        `the replacement still carries the fabricated count: ${out}`);
+
+      // …and the refusal must be the EVIDENCED one. If the boundary had not fetched, the claim
+      // would still be refused, but for the weaker reason — and the next unevidenced route would
+      // be one read away from passing. This asserts the count was actually read on this turn.
+      const { verifyBrainReply } = await import("../server/brain/reply-verifier");
+      const unevidenced = verifyBrainReply("That's four workouts this week — great going.",
+        { clientMessage: "I did all four workouts this week", evidence: { modelAuthored: true } });
+      assert.ok(!unevidenced.ok, "with no count on the turn the claim must still be refused");
+      assert.ok(/no authoritative count/i.test(unevidenced.violation || ""),
+        "an absent count is refused for being absent — a number the client said is not the record");
+
+      // THE POSITIVE HALF, and the one that proves the fetch actually happens. With the log
+      // holding four, the same sentence is TRUE and must survive — which it can only do if the
+      // boundary read the count on this turn. Without the fetch it would be refused as
+      // unevidenced, and the fix would be destroying honest replies to close the dishonest one.
+      g.__KAMLIFE_STUB_ROWS = new Map([[workoutLogs, [{ n: 4 }]]]);
+      const truthful = await inTurn("text", "I did all four workouts this week", async () => {
+        turnUser(USER.id);
+        turnEvidence({ modelAuthored: true });
+        return "That's four workouts this week — great going.";
+      });
+      assert.equal(truthful, "That's four workouts this week — great going.",
+        "a count the record supports was destroyed — the boundary did not read it");
+
+      // The invariant the boundary now guarantees, stated directly: held 1, claimed 4, blocked.
+      const evidenced = verifyBrainReply("That's four workouts this week — great going.",
+        { clientMessage: "I did all four workouts this week",
+          evidence: { modelAuthored: true, sessionsWindow: 1, sessionsWindowDays: 7 } });
+      assert.ok(!evidenced.ok && /holds 1/.test(evidenced.violation || ""),
+        "authoritative 1 against a claimed 4 must be refused, naming the record");
+    } finally {
+      delete g.__KAMLIFE_STUB_ROWS;
+    }
+
+    const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/scope\.evidence\.sessionsWindow == null[\s\S]{0,120}?sessionCountsIn\(draft\)[\s\S]{0,400}?sessionsSince\(/.test(log),
+      "the boundary must fetch the authoritative count when a model draft asserts one and the turn holds none");
   });
 
   check("a confirmation requires a write that actually happened", () => {

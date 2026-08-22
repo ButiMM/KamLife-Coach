@@ -337,6 +337,21 @@ export interface ProgressTruth {
   provenance: FoodProvenance;
 }
 
+/**
+ * THE AUTHORITATIVE TRAINING COUNT, ON ITS OWN (2026-08-22, P0-A).
+ *
+ * getProgressTruth already ran this query, but only a turn that happened to need a full progress
+ * read got the number — and the reply boundary cannot decline to check a training claim just
+ * because the turn took a different route to the model. This is the same query, callable by the
+ * one place that must never accept an unevidenced count, and getProgressTruth calls it too so
+ * there is still exactly one definition of "how many sessions in the last N days".
+ */
+export async function sessionsSince(userId: string, days: number): Promise<number> {
+  const [row] = await db.select({ n: sql<number>`COUNT(*)::int` }).from(workoutLogs)
+    .where(and(eq(workoutLogs.userId, userId), gte(workoutLogs.loggedAt, new Date(Date.now() - days * 86_400_000))));
+  return Number((row as any)?.n || 0);
+}
+
 export async function getProgressTruth(
   user: any,
   opts?: { days?: number; clientMessage?: string | null; weightWindowDays?: number },
@@ -351,15 +366,14 @@ export async function getProgressTruth(
     ? new Date(Date.now() - opts.weightWindowDays * 86_400_000)
     : null;
 
-  const [today, windowRows, sessionRows, stepRows, weighIns] = await Promise.all([
+  const [today, windowRows, sessions, stepRows, weighIns] = await Promise.all([
     getDayLedger(user.id, { user }),
     db.select({
       label: mealLogs.mealLabel, kcal: mealLogs.kcalInt, protein: mealLogs.proteinInt,
       carbs: mealLogs.carbsInt, fat: mealLogs.fatInt, loggedAt: mealLogs.loggedAt,
       source: mealLogs.source, items: mealLogs.items, rawMessage: mealLogs.rawMessage,
     }).from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, since))),
-    db.select({ n: sql<number>`COUNT(*)::int` }).from(workoutLogs)
-      .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, since))),
+    sessionsSince(user.id, days),
     db.select({
       avg: sql<number>`COALESCE(AVG(${stepLogs.steps}),0)::int`,
       total: sql<number>`COALESCE(SUM(${stepLogs.steps}),0)::int`,
@@ -383,7 +397,6 @@ export async function getProgressTruth(
   const change = weightChangeKg(weighIns as Array<{ weight: unknown }>);
   const latest = weighIns.length ? Number((weighIns[weighIns.length - 1] as any).weight) : NaN;
 
-  const sessions = Number((sessionRows[0] as any)?.n || 0);
   // THE TRAINING COUNT WE ACTUALLY HOLD, left on the turn (2026-08-22). Exactly what the step
   // read above does, for exactly the same reason: the mouth has to be able to tell a recital from
   // an invention. This query already ran; nothing extra is asked of the database. The WINDOW rides

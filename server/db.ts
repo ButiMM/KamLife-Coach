@@ -21,7 +21,15 @@ function makeStubDb(): any {
       get(_t, prop: string | symbol) {
         if (prop === "then") {
           const stubUser = (globalThis as any).__KAMLIFE_STUB_USER;
-          const rows = state.table === (schema as any).users && stubUser ? [{ ...stubUser }] : [];
+          // SEEDED LEDGER ROWS (2026-08-22). Same opt-in shape as __KAMLIFE_STUB_USER, one table
+          // deeper: a suite that needs the stub to hold a real workout/step/meal history sets
+          // globalThis.__KAMLIFE_STUB_ROWS to a Map keyed by the drizzle table. Unset — which is
+          // every existing caller — nothing changes and non-users selects still resolve to [].
+          // Needed because "the log says 1, the model said 4" cannot be proved against a log that
+          // can only ever say 0.
+          const seeded = (globalThis as any).__KAMLIFE_STUB_ROWS as Map<any, any[]> | undefined;
+          const rows = seeded?.get(state.table)
+            ?? (state.table === (schema as any).users && stubUser ? [{ ...stubUser }] : []);
           return (res: any, rej: any) => Promise.resolve(rows).then(res, rej);
         }
         if (prop === "catch") return (h: any) => Promise.resolve([]).catch(h);

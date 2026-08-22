@@ -191,6 +191,47 @@ export function parseMealDate(message: string): Date {
   return new Date(); // default to now
 }
 
+/**
+ * WHEN DID THIS HAPPEN? The temporal classifier a durable write consults (2026-08-22, P0-B).
+ *
+ * The workout writer decided this with its own day-word list, and that list was a SUBSET of what
+ * parseMealDate below already resolves — so "I trained Monday" (no "on") named a day the parser
+ * understands, the detector missed it, and the session was written to TODAY. "I trained last
+ * week" named no day at all and also landed on today.
+ *
+ * The fix is not more day words; it is to stop asking a second question.
+ *
+ *   historical  parseMealDate resolves it to a SAST day that is not today — every form the
+ *               parser knows is inherited, which is the point of asking it.
+ *   ambiguous   it points at a SPAN rather than a day ("last week", "over the weekend"), or it
+ *               names both today and a past day. A date we cannot pin is not one we may write.
+ *   today       an explicit today anchor, or no temporal reference at all — the ordinary case,
+ *               behaving exactly as before.
+ *
+ * The span list is the only literal vocabulary, and it is closed by grammar: the ways English
+ * names a period without naming a day. It is not a list of ways to say "I trained".
+ */
+export type TrainingWhen = "today" | "historical" | "ambiguous";
+
+/** "Does this message say TODAY?" — moved here from handlers/food-context.ts (2026-08-22) when
+ *  the temporal classifier below needed the same answer. One owner; food-context imports it. */
+export const SAYS_TODAY_RE = /\b(today|this morning|this afternoon|this evening|tonight|just now|right now|earlier today)\b/i;
+const A_SPAN_NOT_A_DAY = /\b(?:last|past|previous|this)\s+(?:week|month|fortnight)\b|\bweekend\b|\bthe\s+other\s+day\b|\ba\s+while\s+(?:back|ago)\b|\brecently\b|\blately\b|\bpast\s+few\s+days\b|\bcouple\s+of\s+(?:weeks|months)\b/i;
+
+export function trainingWhen(message: string): { when: TrainingWhen; date: Date } {
+  const text = String(message || "");
+  const resolved = parseMealDate(text);
+  const isToday = sastDayStart(resolved).getTime() === sastDayStart().getTime();
+
+  // A span first: "last week" resolves to nothing, so the parser would hand back today and the
+  // write would land on the wrong day silently. This is the case that has no date to fall back on.
+  if (A_SPAN_NOT_A_DAY.test(text)) return { when: "ambiguous", date: resolved };
+  // Both a today anchor and a past day in one message — we are being told two things and may
+  // act on neither. Refusing costs a log; guessing corrupts a date the client cannot see to fix.
+  if (!isToday && SAYS_TODAY_RE.test(text)) return { when: "ambiguous", date: resolved };
+  return { when: isToday ? "today" : "historical", date: resolved };
+}
+
 // Returns true if the message contains a clear retroactive date reference (not today).
 export function isRetroactiveMeal(message: string): boolean {
   const m = message.toLowerCase();

@@ -26,7 +26,7 @@ import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from 
 import { logChat, withTimeout, turnMutation } from "./chat-log";
 import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
-import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
+import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
 import { explicitMealSlot } from "../understanding/actions";
 import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, classifyPortionUnit, scalePortionDescription, type PortionStat, type SlotContext } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
@@ -83,7 +83,8 @@ export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: n
  * Exported so it can be asserted — segmentation had no direct regression coverage at all.
  */
 /** Explicit "this is TODAY" markers — an event saying so overrides a message-level retro date. */
-export const SAYS_TODAY_RE = /\b(today|this morning|this afternoon|this evening|tonight|just now|right now)\b/i;
+// SAYS_TODAY_RE moved to ../utils (2026-08-22) — the temporal classifier needs the same answer.
+export { SAYS_TODAY_RE } from "../utils";
 
 export const MEAL_BOUNDARY_RE = /\b(?:for|in|at|during|as)\s+(?:a\s+|my\s+|the\s+)?(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b/gi;
 

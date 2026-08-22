@@ -19,7 +19,8 @@ import { storeMemory } from "../memory";
 import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat, turnMutation } from "./chat-log";
-import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone, sessionCountsIn } from "../utils";
+import { sastDayKey } from "../sast";
+import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone, sessionCountsIn, trainingWhen } from "../utils";
 import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { handleWeightLog } from "./weight";
@@ -272,7 +273,11 @@ export async function handleWorkoutCommands(ctx: {
   }
 
   // ---- RETROACTIVE WORKOUT — "trained yesterday", "did legs yesterday", "done on Sunday" ----
-  const hasRetroDayRef = /\b(yesterday|last night|2 days ago|two days ago|on\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|last\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i.test(m);
+  // ONE TEMPORAL OWNER (2026-08-22, P0-B). This was a private day-word list that parseMealDate
+  // already out-resolved, so "I trained Monday" and "I trained last week" both wrote TODAY.
+  // utils.trainingWhen answers today / historical / ambiguous for both branches below, from the
+  // parser that owns dates — and hands back the date it resolved, so nothing parses twice.
+  const when = trainingWhen(m);
   // "done/finished/completed" alone is too generic — must appear beside a workout word.
   // "trained", "did my workout/session/legs/etc." are workout-specific by themselves.
   const hasCompletionWord =
@@ -284,10 +289,10 @@ export async function handleWorkoutCommands(ctx: {
   // Question guard uses the shared looksLikeQuestion (not a bare "?" check): a voice
   // transcript that drops the mark — "is yesterday's session logged", "should that
   // have counted" — must not retro-log a session it's only asking about.
-  const isRetroDone = !looksLikeQuestion(m) && hasRetroDayRef && hasCompletionWord && !hasMissWord;
+  const isRetroDone = !looksLikeQuestion(m) && when.when === "historical" && hasCompletionWord && !hasMissWord;
 
   if (isRetroDone) {
-    const retroDate = parseMealDate(m);
+    const retroDate = when.date;
     const retroStart = new Date(retroDate);
     retroStart.setUTCHours(0, 0, 0, 0);
     const retroEnd = new Date(retroStart.getTime() + 86_400_000);
@@ -306,7 +311,9 @@ export async function handleWorkoutCommands(ctx: {
     }
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true, loggedAt: retroDate });
-    turnMutation(`INSERT workout completed=true at=${String(retroDate).slice(0, 10)}`, "[WORKOUT_LOG]");
+    // The SAST day, not String(Date).slice(0,10) — which produced "Fri Aug 2" and made the write
+    // record unreadable by anything that needed to know WHICH day was written (2026-08-22).
+    turnMutation(`INSERT workout completed=true at=${sastDayKey(retroDate)}`, "[WORKOUT_LOG]");
     invalidatePatternCache(user.id);
 
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
@@ -376,11 +383,12 @@ export async function handleWorkoutCommands(ctx: {
   // unwritten session cannot be confirmed as logged.
   const reportsOneSession = TRAINING_NOUN.test(m) && REPORTED_PAST.test(m)
     && !FUTURE_OR_INTENT.test(m) && !NEGATED_SESSION.test(m) && !SOMEONE_ELSE.test(m)
-    && !looksLikeQuestion(m) && sessionCountsIn(m).length === 0 && !OTHER_DOMAIN.test(m)
-    && !hasRetroDayRef;
+    && !looksLikeQuestion(m) && sessionCountsIn(m).length === 0 && !OTHER_DOMAIN.test(m);
 
   // ---- WORKOUT DONE — log completion ----
-  const isDone = reportsOneSession || (
+  // NO TODAY WRITE UNLESS TODAY IS WHAT THEY SAID. The verdict gates the whole branch, including
+  // the anchored short forms — an invariant on the write, not a guard bolted to one matcher.
+  const isDone = when.when === "today" && (reportsOneSession || (
     /^(done|finished|complete|completed|trained)[.!?]?$/i.test(m)
     || /^done\s*[💪✅🔥][.!?]?$/.test(m)
     || /^(?:workout|session|training|gym)\s+(?:done|complete|finished)[.!?]?$/i.test(m)
@@ -388,7 +396,7 @@ export async function handleWorkoutCommands(ctx: {
     || m === "done today" || m === "finished today"
   ) && !looksLikeQuestion(m)  // "done?" / "workout done?" is asking, not reporting — the [.!?]? anchors otherwise allow a trailing ?
     && !/\b(?:steps?|km|walked|walk)\b/i.test(m)
-    && !/\b(?:ate|had|food|meal|eaten|eating|calories)\b/i.test(m);
+    && !/\b(?:ate|had|food|meal|eaten|eating|calories)\b/i.test(m));
 
   if (isDone) {
     const todayStart = sastDayStart();
