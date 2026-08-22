@@ -1162,7 +1162,15 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // stays the fallback (ENGINE_LIVE=off reverts instantly). Advisory-only, so nothing is
   // lost by deferring it.
 
-  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion });
+  // Claimants between resolveTurn and GPT, classified (2026-08-22):
+  //   trajectory        — FACTUAL RENDERER (whole-message forecast only)
+  //   misc oneAction / looksLikeDirectionRequest — genuine coaching owner (keep)
+  //   misc plate/portion — EDUCATIONAL MOUTH (stands down when this turn wrote)
+  //   lifecycle         — command adapter (menu keys; does not match a mixed log+ask)
+  //   engine / gpt      — genuine coaching owner (chooseAction)
+  //   mustForceFoodLog  — adapter; already stood down after INSERT meal
+  const wroteThisTurn = durableDomains(turnMutations()).length > 0;
+  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });
   if (miscResult !== null) return miscResult;
 
 

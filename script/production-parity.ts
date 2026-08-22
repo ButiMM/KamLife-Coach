@@ -1414,6 +1414,8 @@ async function main() {
       "an educator answered a finished breakfast as a future street purchase");
     assert.ok(!/send the items in one line/i.test(r.out),
       `mustForceFoodLog stole the turn after the write: ${r.out}`);
+    assert.ok(!/plate method/i.test(r.out),
+      `the plate educator stole the continuation: ${r.out.slice(0, 180)}`);
   });
 
   check("a fact is not vetoed by a question in another clause — and not only for food", async () => {
@@ -1534,6 +1536,30 @@ async function main() {
     assert.ok(live.continues, "handset turn died at the ack — coaching request discarded");
     assert.ok(!/log a meal or your steps and ask me again/i.test(live.out), live.out);
     assert.ok(!/send the items in one line/i.test(live.out), live.out);
+    assert.ok(!/plate method/i.test(live.out),
+      `misc plate stole the day-plan: ${live.out.slice(0, 180)}`);
+
+    const rest = await writesFor("My breakfast was 3 slices of bread, eggs and chicken livers.\nGuide the rest of the day?");
+    assert.ok(rest.meal, "exact regression lost the meal");
+    assert.ok(rest.continues, "exact regression died at the ack");
+    assert.ok(!/plate method/i.test(rest.out),
+      `plate educator consumed the rest-of-day ask: ${rest.out.slice(0, 180)}`);
+  });
+
+  check("a genuine plate ask still owns the turn — only a write on this turn stands it down", async () => {
+    const plate = await writesFor("show me the breakfast plate");
+    assert.ok(!plate.meal, "a plate ask must not log a meal");
+    assert.ok(/plate method/i.test(plate.out), `genuine plate request lost the guide: ${plate.out.slice(0, 160)}`);
+    assert.ok(!plate.continues, "a plate-only ask is not a write-then-coach continuation");
+
+    const routes = readFileSync("server/routes.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const misc = readFileSync("server/handlers/misc-commands.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/wroteThisTurn/.test(routes) && /if \(wroteThisTurn\) return null/.test(misc),
+      "the plate educator must stand down on wroteThisTurn — deleting getPortionGuide is not the fix");
+    assert.ok(/getPortionGuide\(mealType\)/.test(misc),
+      "NEGATIVE CONTROL: the plate capability stays; ownership is what changed");
   });
 
   check("continuation is load-bearing — isMultiPartAsk must not gate alsoAsksCoach", () => {

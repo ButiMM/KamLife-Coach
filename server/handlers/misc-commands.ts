@@ -59,8 +59,10 @@ export async function handleMiscCommands(ctx: {
   m: string;
   user: any;
   isQuestion?: boolean; // systemic QUESTION gate — see early-commands.ts
+  /** This turn already INSERT-ed a durable fact. Educational mouths must not consume a remaining ask. */
+  wroteThisTurn?: boolean;
 }): Promise<string | null> {
-  const { phone, message, m, user } = ctx;
+  const { phone, message, m, user, wroteThisTurn } = ctx;
 
   // ---- DIRECTION / OVERALL PLAN ---- The client wants the WHOLE plan across every pillar (train/rest, food, steps, water), not a bare workout dump (2026-07-09: a client asked and got an exercise list). Deterministic, from their real targets and today's training state. The shared detector (utils.looksLikeDirectionRequest) ALSO gates the brain in routes.ts, so a direction ask can never be swallowed by the model (2026-07-11: the brain answered it with a workout dump on a rest day).
   // THE ONE ACTION FIRST (2026-07-28): "just tell me what to do" is a different question from "give me my whole plan", and the answer to the first must never be the second. See server/one-action.ts.
@@ -1313,10 +1315,14 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- MEAL PLATE IMAGES — "breakfast plate", "show me lunch portions", "dinner plate guide" ----
+  // EDUCATOR, not the Coach. "breakfast" in a logged meal + "guide" in a day-plan ask used to
+  // claim the resumed turn (live 2026-08-22 13:05) and return The Plate Method while chooseAction
+  // never ran. A genuine plate ask still owns the turn — only a write on THIS turn stands it down.
   {
     const plateMealMatch = m.match(/\b(breakfast|lunch|dinner|supper)\b/i);
     const isPlateRequest = plateMealMatch && /\b(plate|portion|image|pic|show|guide|look|example|what does|how does)\b/i.test(m);
     if (isPlateRequest) {
+      if (wroteThisTurn) return null;
       const rawMeal = plateMealMatch[1].toLowerCase();
       const mealType = rawMeal === "supper" ? "dinner" : rawMeal as "breakfast" | "lunch" | "dinner";
       const { imageUrl, caption } = getPortionGuide(mealType);
@@ -1327,7 +1333,7 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- PORTION SIZE GUIDE — "portions", "how much should I eat", "serving size" ----
-  if ((m === "portions" || m === "portion guide" || m === "serving size" || /\b(portion\s*(?:size|guide|control)|serving\s*size|how\s*much\s*(?:should|must|do)\s*i\s*eat|plate\s*size|hand\s*portion)\b/i.test(m))
+  if (!wroteThisTurn && (m === "portions" || m === "portion guide" || m === "serving size" || /\b(portion\s*(?:size|guide|control)|serving\s*size|how\s*much\s*(?:should|must|do)\s*i\s*eat|plate\s*size|hand\s*portion)\b/i.test(m))
     && !/\b(weight|gain(?:ing)?|los(?:e|ing)|per week|kg)\b/i.test(m)) {
     const goal = user.goalType || "fat_loss";
     const name = user.name?.split(" ")[0] || "";
