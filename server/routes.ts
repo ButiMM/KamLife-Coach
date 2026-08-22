@@ -37,7 +37,7 @@ import { stripSignupSource } from "./signup-source";
 import { captureSignupSource } from "./signup-capture";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
-import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnEvidence } from "./handlers/chat-log";
+import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnMutations, turnEvidence } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
 import { handleWorkoutCommands } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
@@ -47,7 +47,7 @@ import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
-import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog } from "./understanding/messy-intake";
+import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains } from "./understanding/messy-intake";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
@@ -635,6 +635,45 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const turn = newTurnLedger(turnFacts.factTypes);
   if (multiFact) console.log(`[TURN] ${turnFacts.factTypes.join("+")} in the client's own words — no handler may end this turn`);
 
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  // THE WRITER OUTRANKS THE EDUCATOR (2026-08-22, live P0).
+  //
+  // 21 August, 11:24 — one bubble: "That day is today / What's the plan for me? / My breakfast was
+  // 3 slices of bread, eggs and chicken livers / Guide for the rest of the day". An EDUCATOR
+  // claimed it above the writer: matchStreetDish fired on "what" from the QUESTION clause, while
+  // its past-tense stand-down list ("i had", "i ate") did not know "my breakfast WAS". It priced
+  // the livers and said "snap a photo when you get it" — a finished breakfast read as a future
+  // purchase. The food writer never ran; the verifier correctly refused a reply that priced a meal
+  // with no write behind it; and the repair path, reading an empty ledger, asked the client to log
+  // the meal they had just reported.
+  //
+  // The general defect: an informational mouth can become the FINAL OWNER of a message containing
+  // an unambiguous durable fact in its own domain. Adding "my breakfast was" to a list would fix
+  // this sentence and nothing else. Both halves of the real mechanism already existed and neither
+  // was connected — journeyMustKeepFacts ("the facts in a messy note cannot be dropped because a
+  // classifier called the whole turn a question") had ZERO callers, and `if (!multiFact) return`
+  // already knew how to stop a handler ending a turn but only when TWO write domains were present.
+  // One write plus a question is the ordinary shape, and it was uncovered.
+  //
+  // THE INVARIANT: for an unambiguous durable fact, every applicable state write happens before
+  // any educational or coaching response can become final. Measured against turnMutations() — the
+  // durable record, not an in-memory ledger.
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  const statedFacts = journeyMustKeepFacts(message);
+  const factsStillOwed = (): string[] => {
+    const written = durableDomains(turnMutations());
+    return (["food", "steps", "workout"] as const)
+      .filter(d => (statedFacts as any)[d] && !written.includes(d));
+  };
+  /** May THIS handler's reply end the turn, or is a fact the client stated still unwritten? */
+  const mayEndTurn = (who: string): boolean => {
+    if (multiFact) return false;
+    const owed = factsStillOwed();
+    if (owed.length === 0) return true;
+    console.log(`[TURN_OWED] ${who} stood down — ${owed.join("+")} stated and not yet written`);
+    return false;
+  };
+
   if (process.env.NORMALIZER !== "off" && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
       const pre = await Promise.race([
@@ -769,7 +808,17 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ask "how many DAYS?" rather than react to one isolated message. Fire-and-forget.
   if (reportsHunger(message)) captureSymptom("hunger", { userId: user.id, phone, messageIn: message });
   const foodLogMgmtResult = await handleFoodLogMgmt(user, m);
-  if (foodLogMgmtResult !== null) return foodLogMgmtResult;
+  if (foodLogMgmtResult !== null) {
+    // This is where the street-food educator claimed the 11:24 turn. It may still answer — after
+    // the fact it is talking about has been written, not instead of it.
+    if (mayEndTurn("food-log-mgmt")) return foodLogMgmtResult;
+    // STOOD DOWN FOR AN OWED WRITE ≠ CONTRIBUTED A PART. Under multiFact this handler's answer
+    // is one voice in a composed reply and still belongs in the ledger. When it stood down
+    // because a stated fact is unwritten, its answer DESCRIBED that fact without recording it —
+    // that is the 11:24 defect itself, and promoting it into the compose would ship it anyway.
+    // The writer downstream owns the answer.
+    if (multiFact) commitFact(turn, "other", foodLogMgmtResult);
+  }
 
   // ---- SHOPPING / GROCERY LIST GUARD — must run BEFORE early commands ----
   // Detect grocery/pantry lists in any format: checkboxes [ ]/[x], bullets, dashes, numbered or
@@ -936,7 +985,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // down loses the supplement instead — it must run, and commit.
   const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
   if (earlyResult !== null) {
-    if (!multiFact) return earlyResult;
+    if (mayEndTurn("early-commands")) return earlyResult;
     commitFact(turn, "other", earlyResult);
   }
 
@@ -951,7 +1000,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // had chicken and pap" logged the session and deleted the meal.
   const workoutResult = await handleWorkoutCommands({ phone, message, m, user });
   if (workoutResult !== null) {
-    if (!multiFact) return workoutResult;
+    if (mayEndTurn("workout")) return workoutResult;
     commitFact(turn, "workout", workoutResult);
   }
 
@@ -1043,7 +1092,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
       // ONE RULE, NOT A PAIR BRANCH: this asked `alsoHasFood` with its own 30-word food regex,
       // a second list of which facts were allowed to coexist with steps. The ledger knows.
-      if (!multiFact) return stepPart;
+      if (mayEndTurn("steps")) return stepPart;
     }
   }
 
@@ -1063,7 +1112,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     : await handleWater({ phone, message, m, user });
   if (waterPart !== null) {
     commitFact(turn, "water", waterPart);
-    if (!multiFact) return waterPart;
+    if (mayEndTurn("water")) return waterPart;
   }
 
   // ---- FOOD CONTEXT (corrections, braai, eating out, relog, scanner, GPT fallback) ----
@@ -1081,6 +1130,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const resolved = resolveTurn(turn, {
     hasFeeling,
     alsoAsksCoach: looksLikeQuestion(message) && (isMultiPartAsk(message) || hasFeeling),
+    // `committed` means COMMITTED now — read off the turn's durable write record.
+    durableWrites: turnMutations(),
   });
   if (resolved.committed) {
     turnMutation(`TURN committed ${resolved.committed}${resolved.reply ? "" : "; question continues to Coach K"}`);
@@ -1121,7 +1172,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   //
   // !isTransactionReport stays (2026-08-19, four live failures): a stated meal report is a write,
   // and until branded/voice LOG_MEAL is proven under the engine, food-context owns those turns.
-  if (engineLive() && !multiFact && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+  // THE ENGINE IS A MOUTH ABOVE THE WRITERS, so it stands down on an owed fact for the same
+  // reason every other handler does: a freeform reply must never be composed from state that is
+  // missing a fact the client stated in this very message (2026-08-22).
+  if (engineLive() && !multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
     if (engineReply !== null) return tag(engineReply, "🧠 new engine");
   }

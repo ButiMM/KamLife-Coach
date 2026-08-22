@@ -146,11 +146,17 @@ test("cut 1: no handler may end a multi-fact turn", () => {
   const routes = readFileSync("server/routes.ts", "utf-8");
   const code = routes.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
   // Every co-occurring handler commits and continues; only a single-fact note keeps a fast path.
+  // WIDENED 2026-08-22. The condition was `!multiFact` — two write DOMAINS. A message carrying
+  // one write plus a question ("my breakfast was eggs. what's the plan?") is the ordinary shape
+  // and it was not covered: the educator claimed it and the meal was never written. mayEndTurn
+  // is the same gate asking a stronger question — is any fact this client stated still unwritten.
   for (const guard of [
-    /if \(!multiFact\) return workoutResult;/,
-    /if \(!multiFact\) return stepPart;/,
-    /if \(!multiFact\) return waterPart;/,
+    /if \(mayEndTurn\("workout"\)\) return workoutResult;/,
+    /if \(mayEndTurn\("steps"\)\) return stepPart;/,
+    /if \(mayEndTurn\("water"\)\) return waterPart;/,
   ]) assert.ok(guard.test(code), `a co-occurring handler still claims the turn: ${guard}`);
+  assert.ok(/const mayEndTurn = \(who: string\): boolean => \{[\s\S]{0,200}?if \(multiFact\) return false;[\s\S]{0,200}?factsStillOwed\(\)/.test(code),
+    "mayEndTurn must refuse on multiFact AND on any fact stated-but-unwritten");
   assert.ok(/commitFact\(turn, "food", foodCtxResult\)/.test(code), "food commits like the rest");
 });
 
@@ -220,13 +226,13 @@ test("cut 2: nothing above the ledger may answer a multi-fact note", () => {
   assert.ok(invocations.length >= 1, "the engine is invoked somewhere");
   for (const { i } of invocations) {
     const guard = lines.slice(Math.max(0, i - 3), i + 1).join(" ");
-    assert.ok(/!multiFact/.test(guard),
+    assert.ok(/!multiFact/.test(guard) || /factsStillOwed\(\)\.length === 0/.test(guard),
       `an engine pass does not stand down on a multi-fact note: ${lines[i].trim().slice(0, 90)}`);
   }
   // early-commands now RUNS and COMMITS rather than standing down: on "had 2 litres of water and
   // took my creatine" the supplement handler inside it is the only thing that knows what a
   // supplement is, and standing down lost the confirmation entirely.
-  assert.ok(/if \(!multiFact\) return earlyResult;\s*\n\s*commitFact\(turn, "other", earlyResult\);/.test(code),
+  assert.ok(/if \(mayEndTurn\("early-commands"\)\) return earlyResult;\s*\n\s*commitFact\(turn, "other", earlyResult\);/.test(code),
     "early-commands must commit its confirmation, not end the turn and not vanish");
 });
 

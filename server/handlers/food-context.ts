@@ -6,6 +6,7 @@
  */
 
 import { db } from "../db";
+import { journeyMustKeepFacts } from "../understanding/messy-intake";
 import { users, mealLogs, chatHistory, stepLogs } from "../../shared/schema";
 import { eq, and, gte, lt, desc } from "drizzle-orm";
 import { type SAFood } from "../foods";
@@ -667,7 +668,13 @@ export async function handleFoodContext(ctx: {
     || /^(is |does |do |will |can |should |are |have |has |what |why |which )\b/i.test(m)
     // WO2 fix 3: an ask stands this path down UNLESS the meal was dated in the PAST (J4 dates it, J3's "KFC tonight?" does not). Both sides asserted in acceptance-hold.ts.
     || (isAskingNotReporting(m) && !isRetroactiveMeal(m));
-  const foodLogOverride = hasLogTrigger && hasActualFood && !hasSubstantiveQuestion && !classifierQuestion;
+  // A QUESTION IN ONE CLAUSE DOES NOT DELETE A FACT IN ANOTHER (2026-08-22, live P0).
+  // hasSubstantiveQuestion reads the WHOLE message: "My breakfast was 3 slices of bread, eggs and
+  // chicken livers" logs 669 kcal; prefix "What's the plan for me?" and nothing is written, then
+  // the client is told to log it. journeyMustKeepFacts owns "is this an unambiguous food REPORT".
+  const factOwed = journeyMustKeepFacts(message).food;
+  const foodLogOverride = hasLogTrigger && hasActualFood
+    && (factOwed || (!hasSubstantiveQuestion && !classifierQuestion));
   // Diagnostic: when a meal silently fails to log in production, this line names the reason instantly.
   if (hasActualFood) {
     console.log(`[FOOD_GATE] user=...${String(user.id || "").slice(-6)} foods=[${foodsInMsg.map(f => f.name).join("|")}] q=${isQuestion} frus=${isFrustration} emo=${isEmotionalOnly} future=${isFuturePlanning} trig=${hasLogTrigger} direct=${directFoodScan} override=${foodLogOverride} words=${m.split(/\s+/).length}`);

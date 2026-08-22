@@ -62,6 +62,24 @@ function check(name: string, fn: () => void | Promise<void>) {
   } catch (e: any) { record(e); }
 }
 
+/**
+ * WATCHING WHAT A TURN WROTE, WITHOUT TWO CHECKS FIGHTING OVER console.log (2026-08-22).
+ *
+ * The first version of this saved and restored console.log per call. Two async checks doing that
+ * concurrently leaves one override permanently installed — the suite's own tally went into an
+ * array and the run printed nothing while exiting 1. A single tee, installed once, plus a queue
+ * that serialises every check which drives a turn: slices cannot interleave because turns cannot.
+ */
+const CONSOLE_LINES: string[] = [];
+const REAL_LOG = console.log;
+console.log = (...a: any[]) => { CONSOLE_LINES.push(a.map(String).join(" ")); REAL_LOG(...a); };
+let turnQueue: Promise<unknown> = Promise.resolve();
+function serialise<T>(fn: () => Promise<T>): Promise<T> {
+  const next = turnQueue.then(fn, fn);
+  turnQueue = next.catch(() => {});
+  return next;
+}
+
 const NOW = Date.now();
 const USER = {
   id: "test-user-production-parity",
@@ -1027,7 +1045,7 @@ async function main() {
     assert.ok(/sessionCountsIn\(m\)\.length === 0/.test(code),
       "a count claim must NOT be logged — we know how many, not which days, and undated rows are invented data");
     for (const guard of ["FUTURE_OR_INTENT", "NEGATED_SESSION", "SOMEONE_ELSE", "OTHER_DOMAIN"]) {
-      assert.ok(new RegExp(`!${guard}\\.test\\(m\\)`).test(code),
+      assert.ok(new RegExp(`!${guard}\\.test\\((?:m|clause)\\)`).test(code),
         `the session report must be guarded by ${guard} — "I'm going to the gym later" is not a log`);
     }
 
@@ -1094,17 +1112,15 @@ async function main() {
 
     // What the pipeline COMMITTED this turn. "INSERT workout … at=<date>" is the retro writer;
     // an "INSERT workout" with no date is a write to today.
-    const writesFor = async (msg: string) => {
-      const lines: string[] = [];
-      const real = console.log;
-      console.log = (...a: any[]) => { lines.push(a.map(String).join(" ")); };
-      try { await say(msg); } finally { console.log = real; }
-      const workoutWrites = lines.filter(l => /INSERT workout\b/.test(l));
+    const writesFor = (msg: string) => serialise(async () => {
+      const from = CONSOLE_LINES.length;
+      await say(msg);
+      const workoutWrites = CONSOLE_LINES.slice(from).filter(l => /INSERT workout\b/.test(l));
       return {
         today: workoutWrites.some(l => !/\bat=/.test(l)),
         retro: workoutWrites.map(l => /\bat=(\d{4}-\d{2}-\d{2})/.exec(l)?.[1]).filter(Boolean) as string[],
       };
-    };
+    });
 
     // 1. "I trained Monday" — a day is named. It may NOT become today.
     assert.equal(trainingWhen("I trained Monday").when, "historical");
@@ -1359,6 +1375,84 @@ async function main() {
     const afterBranches = wa.slice(wa.indexOf("if (!out.trim())"));
     assert.ok(/sendParts|sendTwilio|messages\.create/.test(afterBranches),
       "the repaired reply must still be sent");
+  });
+
+  // ── MULTI-INTENT TURN: WRITE BEFORE COACHING (2026-08-22 live P0) ─────────────────────────
+  //
+  // 21 August 11:24, verbatim. One bubble carrying a date correction, a coaching question, a food
+  // report and a planning request. The food was never written: an EDUCATOR above the writer
+  // claimed the turn on "what" from the question clause, priced the livers, and told the client to
+  // "snap a photo when you get it". The verifier correctly refused a reply that priced a meal with
+  // no write behind it, and the repair path, reading an empty ledger, asked the client to log the
+  // meal they had just reported.
+  //
+  // THE INVARIANT: for an unambiguous durable fact, every applicable state write happens before
+  // any educational or coaching response can become final.
+  const HANDSET = "That day is today\nWhat's the plan for me?\n"
+    + "My breakfast was 3 slices of bread, eggs and chicken livers\n\nGuide for the rest of the day";
+
+  // Durable writes are observed through the turn's own mutation log — the record the write-
+  // integrity boundary already trusts — not by reading source or trusting a reply's wording.
+  const writesFor = (msg: string) => serialise(async () => {
+    const from = CONSOLE_LINES.length;
+    const out = await say(msg);
+    const lines = CONSOLE_LINES.slice(from);
+    return { out, meal: lines.some(l => /INSERT meal/i.test(l)), workout: lines.some(l => /INSERT workout/i.test(l)) };
+  });
+
+  check("the handset turn: the meal is written, and the coach does not ask for it again", async () => {
+    const r = await writesFor(HANDSET);
+    assert.ok(r.meal, "the breakfast the client reported was not written");
+    assert.ok(!/log a meal or your steps and ask me again/i.test(r.out),
+      `the client was asked to log the meal they just reported: ${r.out}`);
+    assert.ok(!/snap a photo when you get it/i.test(r.out),
+      "an educator answered a finished breakfast as a future street purchase");
+    assert.ok(/\b(got it|logged)\b/i.test(r.out), `the reply does not acknowledge the write: ${r.out}`);
+  });
+
+  check("a fact is not vetoed by a question in another clause — and not only for food", async () => {
+    const food = await writesFor("My breakfast was 3 slices of bread, eggs and chicken livers. What's the plan for today?");
+    assert.ok(food.meal, "food + question lost the meal");
+    const workout = await writesFor("I trained chest today. What should I eat now?");
+    assert.ok(workout.workout, "workout + question lost the session — the fix is food-specific");
+    // The question BEFORE the fact, and a planning clause after it — both suppressed the report
+    // at a different layer (the door's veto, and the fact parser's own planning guard).
+    for (const both of ["My breakfast was eggs and pap. What should I eat next?",
+                        "Is that enough protein? My breakfast was eggs and pap."]) {
+      assert.ok((await writesFor(both)).meal, `a reported meal was lost to its neighbour clause: ${both}`);
+    }
+    // …and an ASK is still an ask. These must write nothing.
+    for (const ask of ["Is chicken good for me?", "What should I eat for lunch?",
+                       "I'm at the taxi rank, what should I get?", "Can I have a beer tonight?",
+                       "Should I hit the gym today?", "Did I train today?",
+                       "I'll have chicken and rice later", "Is a kota ok?"]) {
+      const r = await writesFor(ask);
+      assert.ok(!r.meal && !r.workout, `a question was written as a fact: "${ask}" → ${r.out.slice(0, 60)}`);
+    }
+  });
+
+  check("a handler that stands down for an owed write does not lose its own answer", async () => {
+    // "No send removed until its behaviour is accounted for by the new owner." The supplement
+    // confirmation is the only thing that knows what creatine is; it must survive the stand-down.
+    const r = await writesFor("I took my creatine. My breakfast was eggs and pap.");
+    assert.ok(r.meal, "the meal beside the supplement was lost");
+    assert.ok(/taken|creatine/i.test(r.out), `the supplement confirmation vanished: ${r.out}`);
+  });
+
+  check("committed means committed", async () => {
+    const { durableDomains } = await import("../server/understanding/messy-intake");
+    assert.deepEqual(durableDomains([]), [], "an empty turn has committed nothing");
+    assert.deepEqual(durableDomains(["INSERT meal kcal=669 prot=63"]), ["food"]);
+    // The 21 August turn "But I'll be at restaurants / Come on / Did you even log the food?"
+    // carries no food and wrote nothing, and printed `[TURN] committed food`.
+    assert.deepEqual(durableDomains(["TURN committed food"]), [],
+      "a ledger key is not a row — `committed` must read the durable write record");
+    const routes = readFileSync("server/routes.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/durableWrites: turnMutations\(\)/.test(routes),
+      "resolveTurn must be told what was durably written, not left to infer it");
+    assert.ok(/factsStillOwed\(\)\.length === 0 && !mustStayDeterministic/.test(routes),
+      "the engine is a mouth above the writers and must stand down on an owed fact");
   });
 
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────

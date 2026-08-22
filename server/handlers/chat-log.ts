@@ -108,6 +108,9 @@ interface TurnScope {
   /** Values an authoritative source produced this turn — see turnEvidence. */
   evidence?: {
     stepsToday?: number | null;
+    /** Domains this turn durably WROTE, from turnMutation. The mouth no longer has to guess
+     *  whether a log happened by looking for the word "logged" in its own prose. */
+    writtenDomains?: string[];
     /** Training sessions counted from workoutLogs this turn, and the window they cover. The same
      *  contract as stepsToday: a count we HOLD, so the mouth can be checked against it. */
     sessionsWindow?: number | null;
@@ -386,7 +389,15 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
     }
   }
 
-  const verifier = verifyBrainReply(draft, { clientMessage: scope.inputText, evidence: scope.evidence });
+  // WHAT THIS TURN WROTE, handed to the verifier (2026-08-22). Its meal-macro rule carried the
+  // note "VerifierFacts does not yet carry mealLoggedThisTurn — treat unanchored precision as
+  // unsafe", and so it refused an honest confirmation of a meal that HAD just been committed,
+  // purely because the sentence did not contain the word "logged". The turn knows. Ask it.
+  const { durableDomains } = await import("../understanding/messy-intake");
+  const verifier = verifyBrainReply(draft, {
+    clientMessage: scope.inputText,
+    evidence: { ...(scope.evidence || {}), writtenDomains: durableDomains(scope.mutations) },
+  });
 
   // ════════════════════════════════════════════════════════════════════════════════════════
   // CUT 3 — THE VERDICT BINDS THE MOUTH, AND THE MOUTH IS DETERMINISTIC.
@@ -540,6 +551,15 @@ export async function inTurn<T>(inputType: string, inputText: string, fn: () => 
 }
 
 export function turnUser(userId: string): void { const t = turnStore.getStore(); if (t) t.userId = userId; }
+/**
+ * WHAT THIS TURN HAS ACTUALLY WRITTEN, so far (2026-08-22).
+ *
+ * turnMutation has been recording durable writes since the write-integrity cut; nothing could
+ * READ them mid-turn, so the router had no way to ask "has the fact this client stated been
+ * committed yet?" and resolveTurn invented its own answer from an in-memory object. This is the
+ * reader. It is the same list the write-integrity boundary already trusts.
+ */
+export function turnMutations(): string[] { return turnStore.getStore()?.mutations ?? []; }
 export function turnMutation(note: string, logPrefix?: string): void { const t = turnStore.getStore(); if (t && t.mutations.length < 40) t.mutations.push(note); if (logPrefix) console.log(`${logPrefix} ${note}`); }
 export function turnState(facts: Record<string, unknown>, resolvedDay?: string | null): void { const t = turnStore.getStore(); if (!t) return; Object.assign(t.stateRead, facts); if (resolvedDay) t.resolvedDay = resolvedDay; }
 

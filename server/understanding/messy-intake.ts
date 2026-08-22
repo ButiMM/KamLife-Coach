@@ -428,12 +428,33 @@ export const FEELING_ACK = "Heard you on how you're feeling. Showing up still co
  * their confirmations are in the ledger, so the question is answered by someone who knows what
  * just happened rather than instead of it.
  */
+/**
+ * WHICH DOMAINS THIS TURN DURABLY WROTE — read off the turn's own mutation record.
+ *
+ * `committed` used to mean "a key was placed in an in-memory object", and it was logged and
+ * reasoned about as though it meant a row existed. It did not. On 21 August the turn
+ * "But I'll be at restaurants / Come on / Did you even log the food?" — which contains no food
+ * at all — printed `[TURN] committed food` while writing precisely nothing. An internal truth
+ * that can be false is worse than no internal truth, because everything downstream believes it.
+ */
+const DURABLE_WRITE: Array<[string, RegExp]> = [
+  ["food", /INSERT meal/i], ["steps", /INSERT steps/i],
+  ["workout", /INSERT workout/i], ["weight", /INSERT weight/i],
+];
+
+export function durableDomains(writes: string[]): string[] {
+  const all = (writes || []).join(" | ");
+  return DURABLE_WRITE.filter(([, re]) => re.test(all)).map(([d]) => d);
+}
+
 export function resolveTurn(
   ledger: TurnLedger,
-  opts: { hasFeeling: boolean; alsoAsksCoach: boolean },
+  opts: { hasFeeling: boolean; alsoAsksCoach: boolean; durableWrites?: string[] },
 ): { reply: string | null; committed: string } {
   if (opts.hasFeeling && !opts.alsoAsksCoach) commitFact(ledger, "feeling", FEELING_ACK);
-  const committed = Object.keys(ledger.parts).join("+");
+  // WHAT WAS WRITTEN, not what was composed. The ledger parts below still drive the ACK text —
+  // that is what they are for — but `committed` now answers the question its name asks.
+  const committed = durableDomains(opts.durableWrites || []).join("+");
   if (committedCount(ledger) === 0) return { reply: null, committed };
   if (opts.alsoAsksCoach) return { reply: null, committed };
   return { reply: composeMessyAck(ledger) || null, committed };
@@ -447,6 +468,7 @@ export function resolveTurn(
 export function journeyMustKeepFacts(message: string): {
   food: boolean;
   steps: boolean;
+  workout: boolean;
   stepCount: number | null;
   feeling: boolean;
   isRetro: boolean;
@@ -454,10 +476,20 @@ export function journeyMustKeepFacts(message: string): {
   logStepsEvenIfClassifiedQuestion: boolean;
 } {
   const r = parseMessyIntake(message);
+  // CLAUSE-LEVEL, WHEN THE BUBBLE-LEVEL PARSE SAYS NOTHING (2026-08-22). parseMessyIntake's
+  // planning guard reads the whole text, so "My breakfast was eggs and pap. What should I eat
+  // next?" reported NO food at all — the planning clause suppressed the report clause, which is
+  // the same defect as the door-level question veto, one layer down. Only the negative case is
+  // re-examined and only per sentence, so nothing that already parsed as a fact changes, and a
+  // pure ask ("what should I eat for lunch?") still has no clause that reports a meal.
+  const byClause = r.hasFoodReport ? null : String(message || "")
+    .split(/(?<=[.!?])\s+|\n+/).map(c => c.trim()).filter(c => c.length > 3)
+    .map(c => parseMessyIntake(c)).find(c => c.hasFoodReport);
   const explicitSteps = r.stepCount != null && r.stepCount > 100;
   return {
-    food: r.hasFoodReport,
+    food: r.hasFoodReport || !!byClause,
     steps: r.hasStepsReport || explicitSteps,
+    workout: r.hasWorkoutReport,
     stepCount: r.stepCount,
     feeling: r.hasFeeling,
     isRetro: r.isRetro,

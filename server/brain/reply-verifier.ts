@@ -47,6 +47,8 @@ export interface VerifierFacts {
      * this week", and workoutLogs held ONE. The count is authoritative state; a model claim about
      * it is checkable against it.
      */
+    /** Domains this turn durably WROTE. A write is a fact; do not infer one from wording. */
+    writtenDomains?: string[];
     sessionsWindow?: number | null;
     /** The window that count covers. Without it the number has no context to be checked in. */
     sessionsWindowDays?: number | null;
@@ -682,9 +684,13 @@ export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOv
     return { ok: false, violation: "Contradiction: you said no meal is logged (or asked what they ate) and also stated precise kcal/protein. You cannot invent macros for a meal you claim is missing. Either log the stated food without fake precision, or ask one clarifying question with no numbers." };
   }
   if (clientHasFood && claimsMealMacros && asksWhatAte === false && /\bi don'?t have a meal logged\b/i.test(r) === false) {
-    // Still block precise macros when we have no proof a log write happened this turn.
-    // VerifierFacts does not yet carry mealLoggedThisTurn — treat unanchored precision as unsafe.
-    if (!/\b(logged|on the log|in the books|saved)\b/i.test(r)) {
+    // A WRITE IS A FACT, NOT A TURN OF PHRASE (2026-08-22). This used to demand the word
+    // "logged" in the reply because the verifier had no way to know whether a row existed — so a
+    // truthful confirmation of a meal committed moments earlier was destroyed, and the repair
+    // path then told the client to log the meal they had just reported. The turn carries its own
+    // durable write record now; unanchored precision is still unsafe, but only when nothing wrote.
+    const wroteMeal = (facts.evidence?.writtenDomains || []).includes("food");
+    if (!wroteMeal && !/\b(logged|on the log|in the books|saved)\b/i.test(r)) {
       return { ok: false, violation: "Client described food but your reply states precise kcal/protein without confirming a log write. Log first (or confirm amounts), then reply in their words. If estimating, say it is an estimate and do not treat it as logged truth." };
     }
   }

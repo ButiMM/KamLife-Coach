@@ -22,6 +22,7 @@ import { generateMealPlan } from "../meal-plan";
 import { answerSwapAsk } from "../food-swaps";
 import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
 import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from "../street-food";
+import { journeyMustKeepFacts } from "../understanding/messy-intake";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel , commaName} from "../utils";
 
 export async function handleFoodCommands(ctx: { phone: string; message: string; m: string; user: any }): Promise<string | null> {
@@ -49,7 +50,19 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
   // ---- STREET / INFORMAL EATING — taxi rank, spaza, vendor, shisa nyama (server/street-food.ts).
   // ADVICE only: a past-tense log ("I had a kota") stays with the scanner; this fires on
   // "what should I get" / "I'm at the rank" / "is a kota ok".
-  if (!/\b(i had|i ate|i just (had|ate)|ate a|had a|just had|logged|i'?m eating a)\b/i.test(m)
+  // AN EDUCATOR MAY NOT OWN A MESSAGE THAT REPORTS A MEAL (2026-08-22, live P0).
+  //
+  // The past-tense stand-down beside this ("i had", "i ate", …) is a phrase list, and on
+  // 21 August it did not know "my breakfast WAS 3 slices of bread, eggs and chicken livers".
+  // The trigger list below then matched "what" — from the client's SEPARATE question — so a
+  // completed breakfast was answered as a street-food purchase ("snap a photo when you get it"),
+  // the meal was never written, and the client was later told nothing was logged.
+  //
+  // The general rule, not another phrase: if this message contains an unambiguous food REPORT,
+  // it belongs to the writer and this path does not run. journeyMustKeepFacts is the existing
+  // owner of that question and separates "my breakfast was eggs" from "is a kota ok?".
+  if (!journeyMustKeepFacts(m).food
+      && !/\b(i had|i ate|i just (had|ate)|ate a|had a|just had|logged|i'?m eating a)\b/i.test(m)
       && /\b(order|eat|eating|get|getting|should|what|which|is (it|a|this)|good|healthy|instead|best|ok\b|okay|advice|help)\b/i.test(m)) {
     const streetHit = matchStreetDish(m);
     const g = streetHit ? formatStreetDish(streetHit, user.goalType || "fat_loss")

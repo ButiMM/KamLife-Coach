@@ -20,6 +20,7 @@ import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat, turnMutation } from "./chat-log";
 import { sastDayKey } from "../sast";
+import { journeyMustKeepFacts } from "../understanding/messy-intake";
 import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone, sessionCountsIn, trainingWhen } from "../utils";
 import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
@@ -381,9 +382,23 @@ export async function handleWorkoutCommands(ctx: {
   // So a message carrying a day reference is never written as today. It is either handled by the
   // retro path or not written at all — and the write-integrity guard at the boundary means an
   // unwritten session cannot be confirmed as logged.
-  const reportsOneSession = TRAINING_NOUN.test(m) && REPORTED_PAST.test(m)
-    && !FUTURE_OR_INTENT.test(m) && !NEGATED_SESSION.test(m) && !SOMEONE_ELSE.test(m)
-    && !looksLikeQuestion(m) && sessionCountsIn(m).length === 0 && !OTHER_DOMAIN.test(m);
+  // A QUESTION IN ONE CLAUSE DOES NOT DELETE A FACT IN ANOTHER — the food door's rule, applied
+  // to the domain next to it (2026-08-22). "I trained chest today. What should I eat now?" lost
+  // the session to the whole-message question test, exactly as the breakfast was lost. The
+  // override is journeyMustKeepFacts, whose WORKOUT pattern is past-report forms only, and the
+  // FUTURE_OR_INTENT guard below still owns "should I hit the gym?" — which is why an override
+  // here cannot turn an ask into a log.
+  // CLAUSE-LEVEL, NOT BUBBLE-LEVEL. Every guard below asks something about the REPORT — is it an
+  // intention, a negation, someone else, a question — and each was reading the whole bubble. So
+  // "I trained chest today. What should I eat now?" was refused because FUTURE_OR_INTENT matched
+  // "should I" in the sentence about FOOD. The fact and the question are different clauses and
+  // must be judged separately; that is the whole lesson of the 11:24 turn.
+  const statedWorkout = journeyMustKeepFacts(m).workout;
+  const clause = m.split(/(?<=[.!?])\s+|\n+/).map(c => c.trim()).filter(Boolean)
+    .find(c => TRAINING_NOUN.test(c) && REPORTED_PAST.test(c)) || m;
+  const reportsOneSession = TRAINING_NOUN.test(clause) && REPORTED_PAST.test(clause)
+    && !FUTURE_OR_INTENT.test(clause) && !NEGATED_SESSION.test(clause) && !SOMEONE_ELSE.test(clause)
+    && (!looksLikeQuestion(clause) || statedWorkout) && sessionCountsIn(m).length === 0 && !OTHER_DOMAIN.test(clause);
 
   // ---- WORKOUT DONE — log completion ----
   // NO TODAY WRITE UNLESS TODAY IS WHAT THEY SAID. The verdict gates the whole branch, including
