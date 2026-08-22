@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { turnMutation } from "./handlers/chat-log";
 import {
   users, weightLogs, workoutLogs, stepLogs, weeklyCheckins, chatHistory,
   clothingCheckins, bodyMeasurements,
@@ -94,16 +95,19 @@ export class DatabaseStorage implements IStorage {
 
   async createWeightLog(userId: string, weight: string): Promise<WeightLog> {
     const [log] = await db.insert(weightLogs).values({ userId, weight }).returning();
+    turnMutation("INSERT weight", "[WRITE]");
     return log;
   }
 
   async createWorkoutLog(userId: string, completed: boolean): Promise<WorkoutLog> {
     const [log] = await db.insert(workoutLogs).values({ userId, workoutCompleted: completed }).returning();
+    turnMutation("INSERT workout", "[WRITE]");
     return log;
   }
 
   async createStepLog(userId: string, steps: number): Promise<StepLog> {
     const [log] = await db.insert(stepLogs).values({ userId, steps }).returning();
+    turnMutation("INSERT steps", "[WRITE]");
     return log;
   }
 

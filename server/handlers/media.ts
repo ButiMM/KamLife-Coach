@@ -1,6 +1,7 @@
 /** Media message handler — images, audio/voice, video. Every branch returns a string. */
 
 import crypto from "crypto";
+import { turnMutation } from "./chat-log";
 import { sttVocabularyPrompt } from "../foods";
 import { verdictFromLabelLine } from "../food-swaps";
 import { tmpdir } from "os";
@@ -424,6 +425,7 @@ export async function handleMediaMessage(ctx: {
               }
             } else {
               await db.insert(stepLogs).values({ userId: user.id, steps: extractedSteps });
+              turnMutation("INSERT steps", "[WRITE]");
             }
             await db.update(users).set({ lastActiveAt: new Date(), awaitingInputType: null }).where(eq(users.phoneNumber, phone));
             const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 120), getStepStreak(user.id)]);
@@ -463,6 +465,7 @@ export async function handleMediaMessage(ctx: {
                     userId: user.id, source: "photo", kcalInt: kcal, proteinInt: prot,
                     loggedAt: new Date(), rawMessage: "[Collage food]", mealLabel: "Collage meal",
                   }).catch((e) => console.error("[COLLAGE_FOOD] mealLogs insert failed:", e));
+                  turnMutation("INSERT meal", "[WRITE]");
                   await logChat(user.id, "[Photo - collage meal]", txt, "FOOD_LOG");
                   invalidateFoodTotalsCache(user.id);
                   const totals = await recomputeTodayFoodTotals(user.id).catch(() => null);
@@ -525,6 +528,7 @@ export async function handleMediaMessage(ctx: {
                       userId: user.id, source: "photo", kcalInt: kcal, proteinInt: prot,
                       loggedAt: new Date(), rawMessage: "[Album photo]", mealLabel: "Album meal",
                     }).catch((e) => console.error("[ALBUM_FOOD] mealLogs insert failed:", e));
+                    turnMutation("INSERT meal", "[WRITE]");
                     await logChat(user.id, "[Photo - album meal]", text, "FOOD_LOG");
                   }
                   if (albumKcal > 0) {
@@ -1105,6 +1109,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
                     }
                   } else {
                     await db.insert(stepLogs).values({ userId: user.id, steps: extraSteps });
+                    turnMutation("INSERT steps", "[WRITE]");
                   }
                   const stepTarget = user.stepsTarget || 8500;
                   const stepStreak = await getStepStreak(user.id);

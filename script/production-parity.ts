@@ -36,7 +36,8 @@ process.env.APP_URL = process.env.APP_URL || "https://kamlife-coach-production.u
 process.env.NODE_ENV = "production";
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { DOMAIN_OWNERS } from "./domain-owners";
 
 let passed = 0;
@@ -1017,27 +1018,106 @@ async function main() {
   // 2026-08-21 handset: "I went to the gym in the morning" and "I did all four workouts this
   // week" both fell past the workout writer (isDone was ^…$ anchored) and were confirmed by the
   // model — "Noted 👌" — while the card two minutes later said WORKOUTS 1.
-  check("a reported session reaches the writer; a count claim does not fabricate rows", () => {
+  check("a reported session reaches the writer; a count claim does not fabricate rows", async () => {
     const wk = readFileSync("server/handlers/workout.ts", "utf-8");
     const code = wk.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
     assert.ok(/const isDone = reportsOneSession \|\|/.test(code),
       "the completion path must accept a natural session report, not only the anchored forms");
-    assert.ok(/SESSION_COUNT/.test(code) && /!SESSION_COUNT\.test\(m\)/.test(code),
+    assert.ok(/sessionCountsIn\(m\)\.length === 0/.test(code),
       "a count claim must NOT be logged — we know how many, not which days, and undated rows are invented data");
     for (const guard of ["FUTURE_OR_INTENT", "NEGATED_SESSION", "SOMEONE_ELSE", "OTHER_DOMAIN"]) {
       assert.ok(new RegExp(`!${guard}\\.test\\(m\\)`).test(code),
         `the session report must be guarded by ${guard} — "I'm going to the gym later" is not a log`);
     }
+
+    // ONE OWNER, BOTH SIDES. The writer refuses to invent rows from a count claim and the verifier
+    // refuses to confirm one; they must be reading the same sentence the same way, or the exact
+    // message that caused both rules will be classified differently by each.
+    const { sessionCountsIn } = await import("../server/utils");
+    assert.deepEqual(sessionCountsIn("I did all four workouts this week"), [4],
+      "the count claim that started this must be seen as a count");
+    for (const single of ["I did a 45 minute session today", "I went to the gym in the morning",
+                          "did my 45 min workout", "my fourth session today", "3 sets of 10"]) {
+      assert.deepEqual(sessionCountsIn(single), [],
+        `a single dated report must still reach the writer: ${single}`);
+    }
+    assert.ok(!/const SESSION_COUNT = /.test(code),
+      "the writer must not keep a private copy of the count matcher — that is the drift this cut removed");
   });
 
-  check("every durable write records itself on the turn", () => {
-    // The turn must KNOW whether anything was committed; that is what makes the write-integrity
-    // check structural rather than a guess about prose.
-    for (const [f, what] of [["server/handlers/workout.ts", "workout"], ["server/handlers/steps.ts", "steps"],
-                             ["server/handlers/weight.ts", "weight"], ["server/day-ledger.ts", "meal"]] as const) {
-      const src = readFileSync(f, "utf-8");
-      assert.ok(/turnMutation\(/.test(src), `${what} writes without recording a mutation on the turn`);
+  // NEGATIVE CONTROL 1 — remove turnMutation from the workout writer and this must go red.
+  //
+  // The previous version of this check asked whether the STRING "turnMutation(" appeared anywhere
+  // in four files. workout.ts contains four separate inserts; three of them could lose their
+  // recording and the file would still contain the word. That is the proxy-instead-of-the-property
+  // defect this harness exists to catch, and it was in the harness. It now audits every durable
+  // insert in the server, which is how the 15 unrecorded ones were found.
+  check("EVERY durable write records itself on the turn — not just one per file", () => {
+    const LEDGER = /\.insert\((workoutLogs|stepLogs|weightLogs|mealLogs)\)/;
+    const WINDOW = 18;   // statement + .values({…}) + the recording that follows it
+    const unrecorded: string[] = [];
+    const walk = (dir: string, out: string[] = []): string[] => {
+      for (const e of readdirSync(dir)) {
+        const full = join(dir, e);
+        if (statSync(full).isDirectory()) walk(full, out);
+        else if (e.endsWith(".ts")) out.push(full);
+      }
+      return out;
+    };
+    for (const file of walk("server")) {
+      const lines = readFileSync(file, "utf-8").split("\n");
+      lines.forEach((line, i) => {
+        if (!LEDGER.test(line)) return;
+        const after = lines.slice(i, i + WINDOW).join("\n");
+        if (!/\bturnMutation\(/.test(after)) unrecorded.push(`${file}:${i + 1} — ${line.trim().slice(0, 60)}`);
+      });
     }
+    assert.equal(unrecorded.length, 0,
+      `durable writes that the turn does not know about — the write-integrity check cannot see `
+      + `these, so the coach can say "Noted" over them:\n      ${unrecorded.join("\n      ")}`);
+  });
+
+  // NEGATIVE CONTROL 2 — remove the historical-day guard and this must go red.
+  check("a session reported for a NAMED DAY is never written as today", async () => {
+    const wk = readFileSync("server/handlers/workout.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/reportsOneSession\s*=[\s\S]{0,600}?!hasRetroDayRef/.test(wk),
+      "the natural session report must decline any message that names a day — the retro block owns "
+      + "those and writes the day the client actually said. A workout on the wrong date is worse "
+      + "than a workout not logged: it is a fact the client cannot correct because it looks right.");
+  });
+
+  // NEGATIVE CONTROL 1b (P0-1B) — the model may not confirm a training history the log denies.
+  check("workoutLogs says 1, the model says 4 — the client hears the record", async () => {
+    const { verifyBrainReply } = await import("../server/brain/reply-verifier");
+    const held = { modelAuthored: true, sessionsWindow: 1, sessionsWindowDays: 7 };
+    // The handset sentence, verbatim (2026-08-21 14:36).
+    const live = verifyBrainReply("That's impressive — all four workouts done this week! Noted 👌",
+      { clientMessage: "I did all four workouts this week", evidence: held });
+    assert.ok(!live.ok, "the coach agreed with a training history the record contradicts");
+    assert.ok(/\b1\b/.test(live.violation || ""), "…and the correction must name what the record holds");
+
+    // Agreeing with the CLIENT is not provenance. Held state outranks their own figure.
+    assert.ok(!verifyBrainReply("You've done 4 sessions this week.",
+      { clientMessage: "I did 4 sessions", evidence: held }).ok,
+      "the client saying it does not make it true when the log says otherwise");
+
+    // The count we hold, recited, must pass — and so must the programme, which is not a claim.
+    for (const ok of ["That's 1 session on the record this week.", "Your programme is 3 sessions a week.",
+                      "Your target is 4 workouts this week."]) {
+      assert.ok(verifyBrainReply(ok, { clientMessage: "", evidence: held }).ok,
+        `an honest reply was destroyed: ${ok}`);
+    }
+    // The window is half the claim: a 7-day count is not a lifetime total.
+    assert.ok(!verifyBrainReply("That's 1 workout in total since you started.",
+      { clientMessage: "", evidence: held }).ok, "a count for a window we never counted must not ship");
+    // Deterministic replies recite counts they read themselves.
+    assert.ok(verifyBrainReply("That's 4 workouts this week.",
+      { clientMessage: "", evidence: { sessionsWindow: 1, sessionsWindowDays: 7 } }).ok,
+      "the rule must apply to model prose only");
+    // The count has to REACH the turn, or none of the above can fire.
+    assert.ok(/turnEvidence\(\{ sessionsWindow/.test(readFileSync("server/day-ledger.ts", "utf-8")),
+      "the authoritative session count must be left on the turn by the read that already ran");
   });
 
   check("a confirmation requires a write that actually happened", () => {
@@ -1073,6 +1153,61 @@ async function main() {
       "the morning decision must be told whether today is a training day — the schedule is state, not a second policy");
   });
 
+  // NEGATIVE CONTROL 3 — restore the STRUGGLING closing prescription and this must go red.
+  //
+  // Graded on the COMPLETE MESSAGE, not on decisionLine. decisionLine was already correct on
+  // 21 August; the contradiction came from a DIFFERENT part of the same message, so a test that
+  // only reads the decision cannot see the defect it is meant to catch.
+  check("the whole morning brief carries exactly one instruction, from one owner", async () => {
+    const { composeMorning, morningClosingLine } = await import("../server/morning-message");
+    const { carriesDirective } = await import("../server/brain/reply-verifier");
+
+    const restDay = ["*Today:*", "👟 8,500 steps", "🛌 Rest day. No training — stay on food and steps."];
+    const base = {
+      firstName: "Kam", targetFixLine: "", identityLine: "", streakLine: "", workoutLine: "",
+      yesterdayLine: "120g protein logged yesterday, against a 150g target.",
+      todayLines: restDay, decisionLine: "", breakfastAsk: "🍳 What's for breakfast?",
+      adaptLine: "", sickYesterday: false,
+    };
+
+    for (const trajectory of ["ON_A_RUN", "ON_TRACK", "RECOVERING", "STRUGGLING", "DISENGAGED"] as const) {
+      for (const activelyEngaged of [true, false]) {
+        const closingLine = morningClosingLine(trajectory, { activelyEngaged, completedSessions28: 2 }).trim();
+        const message = composeMorning({ ...base, closingLine });
+
+        // THE PART THAT IS NOT THE PLAN AND NOT THE DECISION MAY NOT INSTRUCT. On this brief the
+        // decision is `hold` — the honest verdict on a rest day — so ANY instruction in the
+        // message is a second authority, and on 21 August it was "let's get one in today" three
+        // lines under "Rest day. No training".
+        const narrative = message.split("\n\n")
+          .filter(p => !p.startsWith("*Today:*") && !restDay.some(l => p.includes(l)) && !p.startsWith("🍳"));
+        for (const part of narrative) {
+          for (const sentence of part.split(/(?<=[.!?])\s+/)) {
+            assert.ok(!carriesDirective(sentence),
+              `${trajectory}/engaged=${activelyEngaged}: the brief instructs outside the decision — `
+              + `"${sentence.trim()}" — in a message whose plan line says "Rest day. No training"`);
+          }
+        }
+        // The recognition itself must survive. A filter that empties the sign-off has not fixed
+        // the contradiction, it has deleted the part the client earned.
+        if (trajectory !== "ON_TRACK") {
+          assert.ok(/\d/.test(message) && message.includes("_"),
+            `${trajectory}: the recognition was destroyed rather than the prescription removed`);
+        }
+      }
+    }
+
+    // …and when there IS a decision, it is the one instruction, and it arrives whole.
+    const withDecision = composeMorning({
+      ...base,
+      closingLine: morningClosingLine("STRUGGLING", { activelyEngaged: false, completedSessions28: 2 }).trim(),
+      decisionLine: "Kam — one thing today:\n\n*Log one meal today. Any meal.*\n\n_Six days of nothing logged is six days I can't coach._",
+    });
+    assert.ok(withDecision.includes("*Log one meal today. Any meal.*"), "the decision must reach the client intact");
+    assert.ok(!/get one in today|Reply 1 and I'll send it/i.test(withDecision),
+      "the closing line is prescribing beside the decision again");
+  });
+
   // ── P0-3 · SILENCE IS NOT A TERMINAL STATE ────────────────────────────────────────────────
   check("a suppressed duplicate does not become silence", () => {
     const wa = readFileSync("server/routes/whatsapp.ts", "utf-8")
@@ -1085,6 +1220,28 @@ async function main() {
     assert.ok(/out = /.test(dupBlock[1]), "…it must say something different instead");
     assert.ok(/recordSilentTurnAvoided\("duplicate"\)/.test(wa) && /recordSilentTurnAvoided\("empty"\)/.test(wa),
       "both silent-terminal causes must be counted, by cause");
+  });
+
+  // NEGATIVE CONTROL 4 — remove the empty-response fallback and this must go red.
+  //
+  // Counting the silence was half a fix: `recordSilentTurnAvoided("empty"); return;` told US
+  // about the dropped turn and told the CLIENT nothing, which is the same 80 minutes of nothing
+  // the founder sat through on 21 August. The two silent-terminal causes get the same treatment.
+  check("an empty reply does not end the turn in silence either", () => {
+    const wa = readFileSync("server/routes/whatsapp.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const emptyBlock = /if \(!out\.trim\(\)\) \{([\s\S]*?)\n  \}/.exec(wa);
+    assert.ok(emptyBlock, "the empty-reply branch must exist");
+    assert.ok(!/\breturn;/.test(emptyBlock[1]),
+      "an empty reply must not end the turn in silence — the client is left staring at a message "
+      + "nobody answered, and knowing about it upstream does not answer it");
+    assert.ok(/out = /.test(emptyBlock[1]),
+      "…it must put an honest reply on the wire and carry on to the send");
+    // Both branches must reach the same door. A fallback that is assigned and then skipped is
+    // the same silence with extra steps.
+    const afterBranches = wa.slice(wa.indexOf("if (!out.trim())"));
+    assert.ok(/sendParts|sendTwilio|messages\.create/.test(afterBranches),
+      "the repaired reply must still be sent");
   });
 
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────

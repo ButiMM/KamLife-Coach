@@ -383,10 +383,19 @@ export async function getProgressTruth(
   const change = weightChangeKg(weighIns as Array<{ weight: unknown }>);
   const latest = weighIns.length ? Number((weighIns[weighIns.length - 1] as any).weight) : NaN;
 
+  const sessions = Number((sessionRows[0] as any)?.n || 0);
+  // THE TRAINING COUNT WE ACTUALLY HOLD, left on the turn (2026-08-22). Exactly what the step
+  // read above does, for exactly the same reason: the mouth has to be able to tell a recital from
+  // an invention. This query already ran; nothing extra is asked of the database. The WINDOW rides
+  // along because the number is meaningless without it — a 7-day count is not a calendar month
+  // and not an all-time total, and a claim that names the wrong window is wrong even when the
+  // digits match.
+  turnEvidence({ sessionsWindow: sessions, sessionsWindowDays: days });
+
   return {
     today,
     window,
-    sessions: Number((sessionRows[0] as any)?.n || 0),
+    sessions,
     avgSteps: Number((stepRows[0] as any)?.avg || 0),
     totalSteps: Number((stepRows[0] as any)?.total || 0),
     daysOnProgramme: daysOnProgramme(user),

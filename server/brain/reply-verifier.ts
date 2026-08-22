@@ -11,7 +11,7 @@ import { currentRuntimeDecision, forceRuntimeReferral, type RuntimeDecisionResul
 import { detectMedicationContext } from "../medication-context";
 // The canonical "is this a question" owner. utils.ts imports only ./sast, so this module stays
 // free of the database and the model.
-import { looksLikeQuestion } from "../utils";
+import { looksLikeQuestion, sessionCountsIn } from "../utils";
 
 export interface VerifierFacts {
   goalType?: string | null;
@@ -40,6 +40,16 @@ export interface VerifierFacts {
   evidence?: {
     /** Today's step total from the day ledger, when the caller read it this turn. */
     stepsToday?: number | null;
+    /**
+     * Training sessions in `sessionsWindowDays`, counted from workoutLogs, when the caller read
+     * them this turn. The same contract as `stepsToday` and for the same failure: on 21 August the
+     * client wrote "I did all four workouts this week", the coach replied "all four workouts done
+     * this week", and workoutLogs held ONE. The count is authoritative state; a model claim about
+     * it is checkable against it.
+     */
+    sessionsWindow?: number | null;
+    /** The window that count covers. Without it the number has no context to be checked in. */
+    sessionsWindowDays?: number | null;
     /** The coaching decision this turn actually made, from chooseAction. */
     canonicalKind?: string | null;
     canonicalTodo?: string | null;
@@ -264,8 +274,15 @@ function isExplicitStepQuery(text: string): boolean {
  * must still fail. Redaction, not an exemption — a reply that ALSO makes a real attribution still
  * gets caught on that clause.
  */
-/** A segment is prescriptive when it frames the number as something to reach. */
-const TARGET_MARKER = /\btargets?\b|\bgoals?\b|\baim\s+for\b|\/\s*day\b|\bper\s+day\b|\ba\s+day\b|\bnon-negotiable\b/i;
+/**
+ * A segment is prescriptive when it frames the number as something to reach.
+ *
+ * The per-WEEK forms were added 2026-08-22 when the training count came under the same rule.
+ * "Three sessions a week" and "aim for four workouts" are the programme, not a claim about what
+ * happened — and the CLIENT_DID_IT guard below is what stops that becoming a hole, because
+ * "you've done three sessions this week" says a target word and is still an attribution.
+ */
+const TARGET_MARKER = /\btargets?\b|\bgoals?\b|\baim\s+for\b|\/\s*day\b|\bper\s+day\b|\ba\s+day\b|\bnon-negotiable\b|\/\s*week\b|\bper\s+week\b|\ba\s+week\b|\bweekly\b/i;
 
 /**
  * …and it stops being prescriptive the moment it also says the CLIENT DID IT. "You did 6,000
@@ -273,32 +290,40 @@ const TARGET_MARKER = /\btargets?\b|\bgoals?\b|\baim\s+for\b|\/\s*day\b|\bper\s+
  * subject to the rule. Deliberately generous: a false hit here only restores the strict old
  * behaviour, which is the safe direction to fail in.
  */
-const CLIENT_DID_IT = /\b(?:you(?:'ve| have| are|'re)?\s+(?:already\s+)?(?:walked|did|done|hit|got|clocked|logged|managed|racked|at)|walked|clocked|racked\s+up)\b/i;
+const CLIENT_DID_IT = /\b(?:you(?:'ve| have| are|'re)?\s+(?:already\s+)?(?:walked|did|done|hit|got|clocked|logged|managed|racked|at|trained|completed|finished|smashed)|walked|clocked|trained|racked\s+up|\bthat'?s\s+\w+\s+(?:workouts?|sessions?)\b)\b/i;
 
 /**
  * Blank out prescriptive segments before the attribution check. Split per line AND per sentence,
  * so one bullet in a target list cannot borrow an attribution verb from another line.
  */
-function withoutStepTargets(reply: string): string {
+function withoutTargetSegments(reply: string): string {
   return (reply || "")
     .split(/(\n+|(?<=[.!?])\s+)/)
     .map(seg => (TARGET_MARKER.test(seg) && !CLIENT_DID_IT.test(seg) ? " " : seg))
     .join("");
 }
 
-/** Does this reply attribute the number to a window we actually hold — today — or to a narrower
- *  one we do not? "3,000 steps today" is evidenced; "3,000 steps before lunch" is not. */
-const NARROWER_THAN_A_DAY = /\b(?:before|after|by)\s+(?:lunch|breakfast|dinner|noon|midday|\d{1,2}\s?(?:am|pm))\b|\bthis (?:morning|afternoon|evening)\b|\bin the (?:morning|afternoon|evening)\b|\bper hour\b|\bsince (?:lunch|breakfast|this morning)\b/i;
+/**
+ * DOES THIS CLAIM NAME A WINDOW WE MEASURED? One question, one owner (merged 2026-08-22).
+ *
+ * Steps are held as a DAILY total, sessions as a rolling multi-day count, and the failure is
+ * identical in both directions: a claim attached to a span we never counted is unevidenced even
+ * when the digits are right. "3,000 steps before lunch" is not a day; "four sessions since you
+ * started" is not the last seven days. Splitting this into a narrower-than and a wider-than
+ * matcher gave each rule half a guard — the step rule could not see "this month" and the session
+ * rule could not see "this morning" — so it is one list of the windows we do not hold.
+ */
+const OUT_OF_WINDOW = /\b(?:before|after|by)\s+(?:lunch|breakfast|dinner|noon|midday|\d{1,2}\s?(?:am|pm))\b|\bthis (?:morning|afternoon|evening)\b|\bin the (?:morning|afternoon|evening)\b|\bper hour\b|\bsince (?:lunch|breakfast|this morning)\b|\b(?:this|last|the past|next)\s+month\b|\bin total\b|\ball[\s-]?time\b|\bsince you (?:started|began|joined)\b|\bthis year\b|\baltogether\b/i;
 
 function verifyStepAttribution(reply: string, clientMessage: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
-  const replySteps = extractStepNumbers(withoutStepTargets(reply));
+  const replySteps = extractStepNumbers(withoutTargetSegments(reply));
   if (replySteps.length === 0) return { ok: true };
   // PROVENANCE BEFORE PHRASING. A number we hold for this client today is a recital, not an
   // attribution — regardless of how they happened to word the question. The context guard is the
   // half that keeps this honest: we hold a DAILY total, so a claim about part of a day is still
   // unevidenced even though the digits match.
   const held = evidence?.stepsToday;
-  if (typeof held === "number" && held > 0 && replySteps.every(n => n === held) && !NARROWER_THAN_A_DAY.test(reply)) {
+  if (typeof held === "number" && held > 0 && replySteps.every(n => n === held) && !OUT_OF_WINDOW.test(reply)) {
     return { ok: true };
   }
   // REMOVED 2026-08-21: `if (isExplicitStepQuery(clientMessage)) return { ok: true }`.
@@ -317,6 +342,68 @@ function verifyStepAttribution(reply: string, clientMessage: string, evidence?: 
   }
   if (replySteps.some(n => !reported.includes(n))) {
     return { ok: false, violation: "Your reply attributes a step count that is not one of the numbers the client reported in this message. Do not substitute a stored/context step value for the client's own current-turn number." };
+  }
+  return { ok: true };
+}
+
+/* ────────────────────────────────────────────────────────────────────────────────────────────
+ * TRAINING-COUNT PROVENANCE — workoutLogs says 1, the model says 4 (2026-08-22, P0-1B)
+ *
+ * 21 August, handset:
+ *
+ *     14:36  client   "I did all four workouts this week / Take note"
+ *     14:36  coach    "That's impressive — all four workouts done this week! Noted 👌"
+ *     14:38  card      WORKOUTS 1
+ *
+ * The write-integrity rule in reconcileTurnReply catches the "Noted" half — a confirmation on a
+ * turn that committed nothing. It does NOT catch the other half, and the other half is worse: the
+ * coach agreed, in its own voice, with a training history the record contradicts. A client who is
+ * told they trained four times when they trained once cannot use this product to know anything.
+ *
+ * This is deliberately NOT a list of the sentences that failed. It is the rule the step
+ * attribution has followed since 20 August, applied to the second durable count we hold:
+ *
+ *     claim → source → value → context
+ *
+ *   source  workoutLogs, read this turn by getProgressTruth, left on the turn as sessionsWindow
+ *   value   the claim's number must BE that number
+ *   context the claim's window must be the window we counted — a 7-day count is not "this month",
+ *           not "in total", not "since you started", and not "today"
+ *
+ * The fallback when we hold nothing is the step rule's fallback: a number the client themselves
+ * put in this message may be echoed; a number from nowhere may not. Held state OUTRANKS the
+ * client's own figure, which is the whole point — "I did all four" plus a log of one is exactly
+ * the case, and agreeing with the client is what broke it.
+ *
+ * HONEST BOUND. The claim has to be RECOGNISED to be checked, and what is recognised is a number
+ * next to a training noun ("four workouts", "sessions: 4", "your fourth session"). A bare
+ * "that's four this week" with the noun only in the client's message is not caught. That is a
+ * detection bound, not a licence: nothing here makes an unrecognised claim correct, and the
+ * canonical-decision boundary above already withholds model prose entirely on a decision turn.
+ * ──────────────────────────────────────────────────────────────────────────────────────────── */
+
+function verifySessionAttribution(reply: string, clientMessage: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
+  // Deterministic replies recite counts they read themselves. Only model prose is held to this.
+  if (!evidence?.modelAuthored) return { ok: true };
+  // ONE OWNER for "how many sessions does this text assert" — the same reader the workout writer
+  // consults before it refuses to invent rows. See utils.sessionCountsIn.
+  const claimed = sessionCountsIn(withoutTargetSegments(reply));
+  if (claimed.length === 0) return { ok: true };
+
+  const held = evidence?.sessionsWindow;
+  const windowDays = Number(evidence?.sessionsWindowDays) || 0;
+  if (typeof held === "number" && windowDays > 0) {
+    if (OUT_OF_WINDOW.test(reply)) {
+      return { ok: false, violation: `Your reply states a training count for a period we did not count. What the record holds is ${held} session(s) in the last ${windowDays} days — nothing about a month, a year, or a lifetime total. Say the window we actually know, or say nothing about the count.` };
+    }
+    if (claimed.every(n => n === held)) return { ok: true };
+    return { ok: false, violation: `Your reply says the client has done ${claimed[0]} training session(s), but the record holds ${held} in the last ${windowDays} days. Never confirm a training history the log contradicts — not even when the client states it themselves. Tell them plainly what is on the record and ask them to send the missing sessions so you can log them.` };
+  }
+
+  // Nothing held this turn: a figure the CLIENT put in this message may be echoed, nothing else.
+  const reported = sessionCountsIn(clientMessage || "");
+  if (reported.length === 0 || claimed.some(n => !reported.includes(n))) {
+    return { ok: false, violation: "Your reply states a number of training sessions that is neither on the record nor in the client's message. Do not assert how many times someone has trained unless the count came from their log." };
   }
   return { ok: true };
 }
@@ -403,6 +490,22 @@ const IMPERATIVE = /(?:^|[.!?]\s+|\n)\s*(?:train|do|hit|get|go|take|skip|rest|wa
 function directiveDomains(sentence: string): Set<string> {
   const shaped = ADVISORY.test(sentence) || IMPERATIVE.test(sentence);
   return shaped ? domainsIn(sentence) : new Set<string>();
+}
+
+/**
+ * THE SAME QUESTION, ASKED BY A COMPOSER RATHER THAN A VERIFIER (2026-08-22).
+ *
+ * The morning brief has narrative parts that are supposed to be RECOGNITION — a streak, a
+ * milestone, a sign-off — and one part that is supposed to be the INSTRUCTION. One of the
+ * sign-offs was quietly an instruction ("let's get one in today"), so a rest-day brief could
+ * carry two. composeMorning enforces the separation with this, so it holds for every trajectory
+ * and every one added later, rather than for the one branch that was caught.
+ *
+ * Exported rather than reimplemented: "is this English telling someone to do something" has one
+ * owner and this is it. A second copy in the composer would drift from this one within a month.
+ */
+export function carriesDirective(sentence: string): boolean {
+  return directiveDomains(sentence).size > 0;
 }
 
 /**
@@ -594,6 +697,9 @@ export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOv
 
   const stepAttribution = verifyStepAttribution(r, facts.clientMessage || "", facts.evidence);
   if (!stepAttribution.ok) return stepAttribution;
+
+  const sessionAttribution = verifySessionAttribution(r, facts.clientMessage || "", facts.evidence);
+  if (!sessionAttribution.ok) return sessionAttribution;
 
   const goal = String(facts.goalType || "").toLowerCase();
   if (goal === "muscle_gain" && /\b(?:focus on (?:a )?calorie deficit|let'?s (?:focus on|aim for|target) (?:fat|weight) loss|we(?:'?ll| will)? (?:focus|aim|work) on losing (?:weight|fat)|great (?:progress|work|job)[^.!?]{0,40}\blos(?:ing|t)\b[^.!?]{0,20}\b(?:kg|weight)|keep losing|stay in (?:a|your) deficit)\b/i.test(r)) {

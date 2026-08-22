@@ -94,11 +94,20 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
       + "thing you want sorted and I'll deal with that specifically.";
   }
   if (!out.trim()) {
-    // An empty reply reaching the door is a bug upstream, and it used to end the turn in silence
-    // with no record at all. It is counted now, so it can be found.
+    // AND THE EMPTY CASE ENDS THE SAME WAY (2026-08-22, P0-3 completion).
+    //
+    // Counting the silence was half a fix. This still ran `return` — the turn ended with the
+    // client staring at a message nobody answered, and the only difference from before was that
+    // we now knew about it. The two ways a turn can go quiet are the same failure to the person
+    // holding the phone, so they get the same treatment: something honest goes out.
+    //
+    // An empty reply here means the pipeline produced nothing, which is a bug upstream every
+    // time. This does not hide it — it is logged at error, counted, and the client is told the
+    // truth rather than left waiting. Silence is the one outcome a coach may never have.
     console.error(`[EMPTY_REPLY] ${phone.slice(-4)} — the pipeline produced nothing to send`);
     recordSilentTurnAvoided("empty");
-    return;
+    out = "Something went wrong on my side and I lost that one — it's me, not you. Send it again "
+      + "and I'll pick it up properly.";
   }
 
   // 3. SHADOW (2026-08-04). Placed here — after the gate, the hygiene pass, the marker

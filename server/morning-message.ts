@@ -33,6 +33,8 @@
  * closings also make no "session today" push, so they stay honest on a rest day.
  */
 
+import { carriesDirective } from "./brain/reply-verifier";
+
 export type MorningTrajectory = "ON_A_RUN" | "ON_TRACK" | "RECOVERING" | "STRUGGLING" | "DISENGAGED";
 
 export function morningClosingLine(
@@ -50,7 +52,15 @@ export function morningClosingLine(
         ? `\n\n_You're logging every day — that consistency is exactly what changes bodies. Keep the chain going._`
         : `\n\n_Good to have you back. One day at a time — this week counts._`;
     case "STRUGGLING":
-      return `\n\n_${completedSessions28} sessions in 4 weeks — let's get one in today. Just one. Reply 1 and I'll send it._`;
+      // WAS: "— let's get one in today. Just one. Reply 1 and I'll send it."
+      //
+      // That was a second coaching decision, arrived at from a 28-day session count, sitting three
+      // lines above the one the decision owner made from the whole of the client's state. On a rest
+      // day it contradicted the brief's own headline; on a hold turn it invented an instruction
+      // where the verdict was to change nothing. The count is real and the client earned the right
+      // to see it, so the RECOGNITION stays and the prescription goes to its owner: if a session
+      // today is the right call, chooseAction says so and decisionLine carries it (2026-08-22).
+      return `\n\n_${completedSessions28} sessions in the last 4 weeks. Today is a fresh page._`;
     case "DISENGAGED":
       return activelyEngaged
         ? `\n\n_Logging your food every single day — that's the hard habit, and it's yours. When you're ready to train, reply 1._`
@@ -116,7 +126,7 @@ export function composeMorning(i: MorningInputs): string {
   }
 
   const opening = [greeting, i.identityLine, i.streakLine, i.workoutLine, i.yesterdayLine]
-    .map(s => (s || "").trim()).filter(Boolean).join(" ");
+    .map(recognitionOnly).filter(Boolean).join(" ");
 
   const today = i.todayLines.filter(Boolean).join("\n");
   // The adapt reason sits WITH the numbers it changed. Below the ask it would leave the client
@@ -126,9 +136,46 @@ export function composeMorning(i: MorningInputs): string {
   return join([
     i.targetFixLine ? i.targetFixLine.trim() + " " + opening : opening,
     todayBlock,
-    i.closingLine.trim(),
+    recognitionOnly(i.closingLine),
     i.decisionLine || i.breakfastAsk,
   ]);
+}
+
+/**
+ * ONE PART OF THIS MESSAGE MAY INSTRUCT, AND IT IS `decisionLine` (2026-08-22, P0-2).
+ *
+ * The STRUGGLING sign-off is the branch that was caught prescribing, and deleting its instruction
+ * is half the fix. The other half is that nothing structural stopped it, or any of the other five
+ * narrative inputs, from doing it again — every one of them is declared "recognition, not
+ * instruction" in MorningInputs and every one of them is free text assembled somewhere else.
+ *
+ * So the separation is enforced here, once, uniformly: a sentence in a RECOGNITION part that
+ * names a behaviour this programme coaches AND is shaped as an instruction does not travel. It is
+ * not a rule about STRUGGLING; it is the rule the whole composer was written on, finally
+ * executable. `carriesDirective` is the verifier's own directive test — the same grammar that
+ * holds the model's mouth, applied to our own.
+ *
+ * DELIBERATELY NOT APPLIED TO two inputs. `todayLines` is the day's PLAN — the targets and whether
+ * today is a training day — which the decision owner is now handed as input (sessionsTarget: 0 on
+ * a rest day), so the two cannot disagree; filtering it would delete the schedule. `decisionLine`
+ * is the authority itself.
+ */
+function recognitionOnly(part: string): string {
+  const text = (part || "").trim();
+  if (!text) return "";
+  // The closing lines are italic-wrapped for WhatsApp. Unwrap before splitting so a dropped
+  // sentence cannot leave a dangling `_` behind, and re-wrap only if anything survived.
+  const italic = text.length > 2 && text.startsWith("_") && text.endsWith("_");
+  const body = italic ? text.slice(1, -1) : text;
+
+  const kept = body.split(/(?<=[.!?])\s+/).filter(s => {
+    if (!carriesDirective(s)) return true;
+    console.log(`[MORNING_AUTHORITY] dropped an instruction from a recognition line: ${s.trim().slice(0, 70)}`);
+    return false;
+  }).join(" ").trim();
+
+  if (!kept) return "";
+  return italic ? `_${kept}_` : kept;
 }
 
 const join = (parts: string[]) => parts.map(p => (p || "").trim()).filter(Boolean).join("\n\n");

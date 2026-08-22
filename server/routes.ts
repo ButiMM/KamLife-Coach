@@ -1016,6 +1016,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
         }
       } else {
         await db.insert(stepLogs).values({ userId: user.id, steps, loggedAt: stepLoggedAt });
+        turnMutation("INSERT steps", "[WRITE]");
       }
       await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
       invalidatePatternCache(user.id);

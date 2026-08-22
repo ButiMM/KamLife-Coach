@@ -224,6 +224,25 @@ export function isFutureIntent(message: string): boolean {
   return /\bi'll\b|\bi\s+will\b|\b(?:wanna|gonna)\b|\bgoing\s+to\b|\bplann?ing\s+to\b|\bplan\s+to\b|\babout\s+to\b|\bhoping\s+to\b|\bwant\s+to\b|\btomorrow\b|\bnext\s+week\b|\blater\s+today\b/i.test(m);
 }
 
+/**
+ * CANONICAL "HOW MANY TRAINING SESSIONS DOES THIS TEXT ASSERT?" (2026-08-22). Two callers, one
+ * answer: handlers/workout.ts refuses to write undated rows from a count claim, and
+ * brain/reply-verifier refuses to confirm a count the log denies — the two halves of the same
+ * 21 August turn, which two matchers would have classified differently within a month.
+ *
+ * CARDINAL PLURALS ONLY: "my fourth session today" is a single dated report and must keep
+ * reaching the writer. The unit lookahead is load-bearing — without it "a 45 minute session"
+ * reads as forty-five sessions and neither caller behaves correctly.
+ */
+const COUNT_WORD: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
+const SESSION_COUNT = /\b(?:all\s+)?(\d{1,2}|one|two|three|four|five|six|seven)\s+(?!(?:min|mins|minute|minutes|hour|hours|hr|hrs|second|seconds|kg|km|rep|reps|set|sets|week|weeks|day|days|month|months)\b)(?:\w+\s+){0,2}?(?:gym\s+)?(?:workouts?|sessions?|trainings?)\b|\b(?:gym\s+)?(?:workouts?|sessions?|trainings?)\s*(?:[:x×-]|\bx\b)\s*(\d{1,2})\b/gi;
+
+export function sessionCountsIn(text: string): number[] {
+  return [...String(text || "").matchAll(SESSION_COUNT)]
+    .map(m => { const raw = (m[1] || m[2] || "").toLowerCase(); return COUNT_WORD[raw] ?? Number(raw); })
+    .filter(n => Number.isFinite(n));
+}
+
 // Canonical "is this phrased as a QUESTION?" check — the single source of truth a
 // side-effect handler consults before it logs, flips training mode, removes a meal,
 // charges, or dumps a workout/chart. Reinventing this per-handler is exactly how the
@@ -532,16 +551,11 @@ function _getPool(user: ProteinUser): _ProteinOption[] {
   return pool.length ? pool : _PROTEIN_POOLS.low.filter(o => !o.label.includes("tuna"));
 }
 
-export function proteinHint(user: ProteinUser, gap: number): string {
-  const dow = new Date(Date.now() + 2 * 3_600_000).getUTCDay(); // 0–6 SAST
-  const pool = _getPool(user);
-  const primary = pool[dow % pool.length];
-  const secondary = pool[(dow + 2) % pool.length];
-  if (gap > 50) {
-    return `Add ${primary.label} and ${secondary.label} to every meal today.`;
-  }
-  return `${primary.portion} today closes that gap.`;
-}
+// DELETED 2026-08-22: proteinHint(). An unreachable mouth — it returned "Add X and Y to every
+// meal today", a behavioural instruction issued from a day-of-week rotation with no reference to
+// the coaching decision, and nothing had called it for some time. A prescriber nobody calls is
+// still a prescriber the next reader wires back up. proteinOptions() below is the live one and
+// names foods without instructing.
 
 // Returns two varied protein label strings (comma-separated) for use in coaching messages.
 export function proteinOptions(user: ProteinUser): string {

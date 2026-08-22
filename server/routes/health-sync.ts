@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import { turnMutation } from "../handlers/chat-log";
 import crypto from "crypto";
 import { db } from "../db";
 import { users, stepLogs, userIntegrations } from "../../shared/schema";
@@ -250,6 +251,7 @@ export function registerHealthSyncRoutes(app: Express): void {
       }
 
       await db.insert(stepLogs).values({ userId: user.id, steps });
+      turnMutation("INSERT steps", "[WRITE]");
 
       // Mark the integration as active so the morning job knows steps are synced
       await db.insert(userIntegrations).values({

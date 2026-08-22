@@ -12,6 +12,7 @@
  *    webhook retry must not double-log the meal and inflate the day's calories.
  */
 import { db } from "../db";
+import { turnMutation } from "./chat-log";
 import { users, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { sastDayStart, slotFromSastHour } from "../utils";
@@ -180,6 +181,7 @@ export async function handleMealRepeat(ctx: {
       mealLabel: targetLabel || sourceHint || match.mealLabel || null,
       items: match.items,
     });
+    turnMutation("INSERT meal", "[WRITE]");
     invalidateFoodTotalsCache(user.id);
     const recomputed = await recomputeTodayFoodTotals(user.id);
     await db.update(users).set({

@@ -19,7 +19,7 @@ import { storeMemory } from "../memory";
 import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat, turnMutation } from "./chat-log";
-import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone } from "../utils";
+import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone, sessionCountsIn } from "../utils";
 import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { handleWeightLog } from "./weight";
@@ -190,6 +190,7 @@ export async function handleWorkoutCommands(ctx: {
       const derivedSteps = Math.round(distanceKm * stepsPerKm);
       try {
         await db.insert(stepLogs).values({ userId: user.id, steps: derivedSteps });
+        turnMutation("INSERT steps", "[WRITE]");
       } catch (e) { console.warn("[CARDIO] step insert failed:", e); }
     }
 
@@ -359,12 +360,24 @@ export async function handleWorkoutCommands(ctx: {
   const FUTURE_OR_INTENT = /\b(?:going\s+to|gonna|will|i'?ll|later|tomorrow|planning|plan\s+to|about\s+to|should\s+i|thinking\s+of|need\s+to|want\s+to)\b/i;
   const NEGATED_SESSION = /\b(?:didn'?t|did\s+not|haven'?t|have\s+not|couldn'?t|could\s+not|missed|skipped|no\s+gym)\b/i;
   const SOMEONE_ELSE = /\b(?:my\s+(?:brother|sister|wife|husband|friend|mate|partner|mom|mum|dad)|he|she|they)\b/i;
-  const SESSION_COUNT = /\b(?:all\s+)?(?:two|three|four|five|six|seven|\d+)\s+(?:workouts?|sessions?|trainings?)\b|\b(?:workouts?|sessions?)\s*[x×]\s*\d+/i;
+  // "how many sessions does this text assert" has ONE owner now — utils.sessionCountsIn — and
+  // the reply verifier asks it the same question about the coach's own prose (2026-08-22).
   const OTHER_DOMAIN = /\b(?:steps?|km|walked|ate|had\s+lunch|meal|calories|water)\b/i;
 
+  // NEVER WRITE A REPORTED DAY AS TODAY (2026-08-21). "I trained on Monday" names a day. The
+  // retro block above owns those and writes the day the client actually said — but if it declines
+  // for any reason (its completion-word test is narrower than this one), a today-write here would
+  // silently move the session to the wrong date. A workout on the wrong day is worse than a
+  // workout not logged: the client cannot see it to correct it, and every streak and weekly count
+  // downstream inherits the error.
+  //
+  // So a message carrying a day reference is never written as today. It is either handled by the
+  // retro path or not written at all — and the write-integrity guard at the boundary means an
+  // unwritten session cannot be confirmed as logged.
   const reportsOneSession = TRAINING_NOUN.test(m) && REPORTED_PAST.test(m)
     && !FUTURE_OR_INTENT.test(m) && !NEGATED_SESSION.test(m) && !SOMEONE_ELSE.test(m)
-    && !looksLikeQuestion(m) && !SESSION_COUNT.test(m) && !OTHER_DOMAIN.test(m);
+    && !looksLikeQuestion(m) && sessionCountsIn(m).length === 0 && !OTHER_DOMAIN.test(m)
+    && !hasRetroDayRef;
 
   // ---- WORKOUT DONE — log completion ----
   const isDone = reportsOneSession || (
@@ -388,6 +401,7 @@ export async function handleWorkoutCommands(ctx: {
     }
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
+    turnMutation("INSERT workout", "[WRITE]");
     invalidatePatternCache(user.id); // GPT's cached pattern summary must see this session immediately
 
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
@@ -597,6 +611,7 @@ async function logProseSession(
   }
 
   await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
+  turnMutation("INSERT workout", "[WRITE]");
   invalidatePatternCache(user.id);
 
   const newTotal = (user.totalWorkoutsCompleted || 0) + 1;

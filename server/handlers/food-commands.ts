@@ -7,6 +7,7 @@
  */
 
 import { db } from "../db";
+import { turnMutation } from "./chat-log";
 import { users, mealLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, desc, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
@@ -103,6 +104,7 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
       mealLabel: "alcohol",
       loggedAt: alcoholLoggedAt,
     }).catch(e => console.warn("[alcohol mealLog insert]", e));
+    turnMutation("INSERT meal", "[WRITE]");
     invalidateFoodTotalsCache(user.id);
 
     let alcoholReply: string;

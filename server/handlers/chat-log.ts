@@ -108,6 +108,10 @@ interface TurnScope {
   /** Values an authoritative source produced this turn — see turnEvidence. */
   evidence?: {
     stepsToday?: number | null;
+    /** Training sessions counted from workoutLogs this turn, and the window they cover. The same
+     *  contract as stepsToday: a count we HOLD, so the mouth can be checked against it. */
+    sessionsWindow?: number | null;
+    sessionsWindowDays?: number | null;
     /**
      * PRESCRIPTION PROVENANCE (2026-08-21). The canonical action this turn decided, if any, and
      * whether the reply was authored by a model path. A behaviour-changing directive in
