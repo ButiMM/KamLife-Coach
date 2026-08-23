@@ -322,32 +322,16 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
     }
 
     if (decisionTurn) {
-      // STRICT BOUNDARY (2026-08-21, live acceptance failure). Stripping recognised directives was
-      // not enough, and the handset proved it:
-      //
-      //     canonical REST → "Today's a chest day."  →  "Rest today…"
-      //
-      // "Today's a chest day" has no imperative verb and no advisory shape, so nothing matched it
-      // and it shipped directly above the opposite instruction. Every version of this that keeps
-      // free model prose on a decision turn has the same hole, because recognising an instruction
-      // in arbitrary English is the thing that cannot be done.
-      //
-      // So on a turn that carries a decision, the customer sees the DETERMINISTIC reply and
-      // nothing the model wrote. Not stripped — not authored. There is exactly one behavioural
-      // instruction because there is exactly one sentence that could be one, and code wrote it.
-      //
-      // The model still runs, still reads state, still shapes the NONE turns, and every scanner,
-      // writer and safety rail is untouched. What it no longer does is talk over a decision.
-      const rendered = String(scope.evidence.canonicalReply || "").trim();
-      if (rendered) {
-        if (draft && draft !== rendered) {
-          console.log(`[DECISION_TURN] model prose withheld (${draft.length} chars) — the turn carries a decision`);
-        }
+      // Situation-shaped coaching (2026-08-23): the model may keep non-directive prose
+      // (occasion, empathy) so PROTEIN can be spoken at a birthday outing. Extra actions
+      // already came out via stripModelDirectives. The canonical line must still appear —
+      // specialists are no longer the mouth, so this is the one instruction.
+      const rendered = String(scope.evidence.canonicalReply || "").trim() || renderActionLine(todo);
+      const hasTodo = draft.toLowerCase().includes(todo.toLowerCase().replace(/[.!]$/, "").slice(0, 32));
+      if (!draft) {
         draft = rendered;
-      } else {
-        // No rendered reply (the decision was read but formatting failed): fall back to the one
-        // line rather than shipping prose that could contradict it.
-        draft = renderActionLine(todo);
+      } else if (!hasTodo) {
+        draft = `${draft}\n\n${rendered}`.trim();
       }
     } else if (!draft) {
       draft = "I'm here — tell me what's going on and we'll take it from there.";

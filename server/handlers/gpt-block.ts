@@ -8,7 +8,7 @@ import { canonicalDecision, decisionBrief } from "../understanding/live";
 import { getToneMode, toneSteer } from "../tone-mode";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { recomputeTodayFoodTotals } from "./food-scanner";
-import { storeMemory, retrieveMemories } from "../memory";
+import { storeMemory, retrieveMemories, loadSalientSituation } from "../memory";
 import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
 import { tellDontAsk } from "../reply-hygiene";
 import { logChat, withTimeout, turnEvidence } from "./chat-log";
@@ -647,29 +647,38 @@ SA voice. Direct. Coach forward, not backward.`;
   // replies (just without the live picture, exactly as before) — a coach reply must
   // never hang on context assembly.
   const liveSnapshot = await withTimeout("live_snapshot", 4000, () => buildClientSnapshot(user)).catch(() => "");
+  const situationLine = await loadSalientSituation(phone, message).catch(() => "");
 
   try {
+    // SPECIALISTS ARE ADVISORS, NOT MOUTHS (2026-08-23). routeToAgent still picks a domain so
+    // nutrition/programme facts reach the Coach. Their string must never be the WhatsApp reply —
+    // 13:27 live: chooseAction=protein, nutritionAgent invented chicken+rice+walk.
+    let specialistNotes = "";
     if (agentType === "nutrition") {
-      gptReply = await nutritionAgent(user, message, memoryContext, saContext, liveSnapshot);
+      specialistNotes = await nutritionAgent(user, message, memoryContext, saContext, liveSnapshot);
     } else if (agentType === "programming") {
       const prog = getKamlifeProgramme(user);
-      gptReply = await programmingAgent(user, message, memoryContext, prog, saContext, liveSnapshot);
+      specialistNotes = await programmingAgent(user, message, memoryContext, prog, saContext, liveSnapshot);
     } else if (agentType === "mindset") {
-      gptReply = await mindsetAgent(user, message, memoryContext, liveSnapshot, saContext, deepEmotional);
+      const notes = await mindsetAgent(user, message, memoryContext, liveSnapshot, saContext, deepEmotional);
+      if (/SADAG/.test(notes) && /0800\s*567\s*567/.test(notes)) {
+        gptReply = notes;
+        await logChat(user.id, message, gptReply, "MINDSET").catch(() => {});
+        return applyReplyVerifier(gptReply, user, message);
+      }
+      specialistNotes = notes;
     } else if (agentType === "admin") {
       const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 120}g | Steps target: ${user.stepsTarget || 8500}`;
-      gptReply = await adminAgent(user, message, "log", message, targetValue);
-    } else {
-      // THE DECISION IS DECLARED BEFORE THE PROSE (2026-08-21). It used to be computed AFTER
-      // generation and stapled on by tellDontAsk, which meant the model wrote whatever it liked
-      // and a verifier tried to work out afterwards what it had decided. Now the already-made
-      // decision goes into the prompt, the model RENDERS it, and the validator checks a declared
-      // fact. chooseAction is still the only thing that decides; this only tells the model what
-      // it decided.
-      finalInstruction = `${decisionBrief(decision)}\n\n${finalInstruction}`;
-      gptReply = await withTimeout("gpt_coach", 30000, () => askCoachK(message, user, finalInstruction, memoryContext, SCENARIO_GUIDE));
+      specialistNotes = await adminAgent(user, message, "log", message, targetValue);
     }
-    // If specialist agent returned its own error string, fall back to full Coach K
+
+    finalInstruction = `${decisionBrief(decision)}\n\n`
+      + (situationLine ? `${situationLine}\n\n` : "")
+      + (specialistNotes && specialistNotes !== AGENT_ERROR
+        ? `DOMAIN NOTES (facts for you — do not send this block, do not add an action from it):\n${specialistNotes}\n\n`
+        : "")
+      + finalInstruction;
+    gptReply = await withTimeout("gpt_coach", 30000, () => askCoachK(message, user, finalInstruction, memoryContext, SCENARIO_GUIDE));
     if (gptReply === AGENT_ERROR) {
       gptReply = await withTimeout("gpt_coach_fallback", 30000, () => askCoachK(message, user, finalInstruction, memoryContext, SCENARIO_GUIDE));
     }

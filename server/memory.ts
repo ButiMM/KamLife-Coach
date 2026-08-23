@@ -408,3 +408,49 @@ export async function factsLine(phone: string): Promise<string> {
     return "";
   }
 }
+
+/**
+ * ONE LINE ABOUT WHAT IS HAPPENING AROUND THEM TODAY. Not a dump, not embeddings.
+ * Occasion is context for the Coach mouth — it is not an ActionKind.
+ */
+export function extractSalientSituation(clientMessages: string[]): string {
+  const texts = (clientMessages || []).map(s => String(s || "").trim()).filter(Boolean);
+  if (texts.length === 0) return "";
+  const blob = texts.join("\n").toLowerCase();
+  const birthday = /\b(birthday|anniversary|wedding)\b/.test(blob);
+  const eatingOut = /\b(restaurants?|eating out|go(?:ing)? out to eat|outing|date night)\b/.test(blob);
+  const todayish = /\b(today|tonight|this weekend|that day is today|the day is today)\b/.test(blob);
+  if (birthday && (eatingOut || todayish)) {
+    return "CURRENT SITUATION: Client has a celebration outing around today; restaurant eating is expected.";
+  }
+  if (eatingOut && todayish) {
+    return "CURRENT SITUATION: Client expects to eat out today.";
+  }
+  return "";
+}
+
+export async function loadSalientSituation(phone: string, currentMessage?: string): Promise<string> {
+  const fromThisTurn = currentMessage ? [currentMessage] : [];
+  try {
+    const result = await pool.query(
+      `SELECT message_in
+         FROM chat_history
+        WHERE user_id = (SELECT id FROM users WHERE phone_number = $1 LIMIT 1)
+          AND message_in IS NOT NULL
+          AND length(trim(message_in)) > 0
+          AND message_in NOT LIKE '[%'
+        ORDER BY created_at DESC
+        LIMIT 24`,
+      [phone],
+    );
+    const prior = (result.rows as { message_in: string }[])
+      .map(r => String(r.message_in || "").trim())
+      .filter(Boolean);
+    return extractSalientSituation([...fromThisTurn, ...prior]);
+  } catch (err) {
+    console.warn("[SITUATION] unavailable:", (err as any)?.message || err);
+    return extractSalientSituation(fromThisTurn);
+  }
+}
+
+

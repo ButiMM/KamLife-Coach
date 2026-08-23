@@ -620,10 +620,10 @@ async function main() {
     assert.ok(/scope\.evidence\.canonicalTodo/.test(log), "…reads the canonical decision");
     assert.ok(/renderActionLine\s*\}\s*=\s*await import\("\.\.\/one-action"\)/.test(log),
       "…and renders the instruction with the canonical renderer, not by hand");
-    // Updated 2026-08-21: a decision turn no longer composes prose + line. The deterministic
-    // reply REPLACES the model's prose entirely — asserted in its own check above.
-    assert.ok(/draft = rendered;/.test(log),
-      "…and on a decision turn the rendered reply is what the client receives");
+    // Updated 2026-08-23: specialists are no longer mouths. Situation prose may remain;
+    // the canonical line still has to appear. Full withhold of model prose is gone.
+    assert.ok(/canonical line must still appear|draft = rendered/.test(log),
+      "a decision turn must still land the canonical instruction");
     const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
     const code = gpt.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
     // The decision must be computed before the FIRST exit, not before the last one.
@@ -716,17 +716,14 @@ async function main() {
     }
   });
 
-  check("the boundary withholds model prose on a decision turn", () => {
+  check("the boundary keeps situation prose and still lands the canonical line", () => {
     const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
       .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-    // Asserted as wiring: the rendered reply REPLACES the draft, it is not appended to it. An
-    // append would leave the model's sentence above the instruction — the live failure.
-    assert.ok(/const rendered = String\(scope\.evidence\.canonicalReply \|\| ""\)\.trim\(\);/.test(log),
+    assert.ok(/canonicalReply \|\| ""\)\.trim\(\) \|\| renderActionLine\(todo\)/.test(log),
       "the boundary must read the deterministically rendered reply");
-    assert.ok(/draft = rendered;/.test(log),
-      "…and REPLACE the draft with it, not append to it");
-    assert.ok(!/draft = `\$\{draft\}[\s\S]{0,40}\$\{rendered\}`/.test(log),
-      "the model's prose must not survive above the instruction");
+    assert.ok(/hasTodo/.test(log), "the canonical todo must still appear in the client string");
+    assert.ok(/rendered/.test(log) && /draft = `\$\{draft\}/.test(log),
+      "situation prose may remain; the instruction is appended, not a second mouth");
   });
 
   check("a decision turn sends exactly one instruction, and code wrote it", async () => {
@@ -1581,6 +1578,54 @@ async function main() {
     assert.ok(/canonicalDecision\(user\)/.test(decisionOwner),
       "the continuation path still decides through canonicalDecision → chooseAction");
   });
+
+  check("specialists are advisors — they cannot be the WhatsApp mouth", () => {
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(!/gptReply = await nutritionAgent\(/.test(gpt), "nutritionAgent is still a mouth");
+    assert.ok(!/gptReply = await programmingAgent\(/.test(gpt), "programmingAgent is still a mouth");
+    assert.ok(!/gptReply = await mindsetAgent\(/.test(gpt), "mindsetAgent is still a mouth");
+    assert.ok(!/gptReply = await adminAgent\(/.test(gpt), "adminAgent is still a mouth");
+    assert.ok(/specialistNotes = await nutritionAgent\(/.test(gpt), "nutrition must still supply notes");
+    assert.ok(/DOMAIN NOTES/.test(gpt), "notes must be labelled as not-the-reply");
+    assert.ok(/decisionBrief\(decision\)/.test(gpt), "the one mouth still receives the canonical decision");
+    const notesAt = gpt.indexOf("specialistNotes = await nutritionAgent");
+    const mouthAt = gpt.indexOf("askCoachK(message, user, finalInstruction");
+    assert.ok(notesAt > 0 && mouthAt > notesAt, "askCoachK must run AFTER the specialist, as the mouth");
+    const agents = readFileSync("server/agents.ts", "utf-8");
+    assert.ok(/ADVISOR_LIMIT/.test(agents), "specialists must not be told to always end with an action");
+    assert.ok(!/Always end with one specific action/.test(agents),
+      "NEGATIVE CONTROL: restoring HARD_LIMIT on specialists would re-invent the 13:27 walk");
+  });
+
+  check("salient situation is one line from client facts, not a chat dump", async () => {
+    const { extractSalientSituation } = await import("../server/memory");
+    const birthday = extractSalientSituation([
+      "This weekend is my girlfriend's birthday. We going to restaurants.",
+      "That day is today\nWhat's the plan for me?\nMy breakfast was eggs\nGuide for the rest of the day",
+    ]);
+    assert.match(birthday, /celebration outing|restaurant/i);
+    assert.ok(!birthday.includes("eggs"), "breakfast is state, not situation");
+    assert.equal(extractSalientSituation(["I had eggs"]), "");
+    assert.equal(extractSalientSituation(["show me the breakfast plate"]), "");
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
+    assert.ok(/loadSalientSituation\(phone, message\)/.test(gpt),
+      "the one mouth must receive the situation line");
+    assert.ok(!/OccasionEngine|RelationshipContextService/.test(gpt),
+      "do not invent a situation service");
+  });
+
+  check("HOLD cannot be turned into a walk by leftover specialist copy", () => {
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/do not add an action from it/.test(gpt),
+      "DOMAIN NOTES must forbid turning HOLD into an action");
+    const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/stripModelDirectives\(draft, scope\.evidence\)/.test(log),
+      "HOLD still strips specialist-shaped instructions at the chokepoint");
+  });
+
 
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {

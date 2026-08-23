@@ -8,7 +8,7 @@ const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
 });
 
-const HARD_LIMIT = "HARD RULE: Max 3 sentences. 60 words maximum for conversational responses. Always end with one specific action. Never use bullets in conversation. Always use the client's actual name.";
+const ADVISOR_LIMIT = "You are a domain advisor to Coach K, not the Coach. Return 2–4 short factual notes. No greeting, no 'you should', no walk/train/rest/weigh/log instruction, no customer-facing paragraph. Facts and food or programme details only.";
 
 // ============================================================
 // NUTRITION AGENT
@@ -21,9 +21,7 @@ ABSOLUTE RULES:
 - Never say "Great choice" or "Good choice" as standalone praise
 - Never give a bulleted list in a conversational response
 - One food swap suggestion maximum — never give 3 things to fix
-- Coach the next meal, not the last mistake
-- Never mention water unless the client specifically asked about water
-- Always use the client's actual name`;
+- Never mention water unless the client specifically asked about water`;
 
 export async function nutritionAgent(user: any, message: string, memoryContext: string, saFlags: string, liveSnapshot = ""): Promise<string> {
   const name = getDisplayName(user) || "there";
@@ -57,7 +55,7 @@ Medical conditions: ${medicalConditions}
 Nutrition protocol: ${protocol || "standard"}
 ${liveSnapshot ? `\nTHIS CLIENT'S LIVE PICTURE RIGHT NOW (real data — today's food, protein trend, weight direction; use these exact numbers, never generic advice when you can name where they actually are):\n${liveSnapshot}\n` : ""}${saFlags ? "\n" + saFlags : ""}${foodDbContext}${memoryContext ? "\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n" + memoryContext : ""}
 
-${HARD_LIMIT}`;
+${ADVISOR_LIMIT}`;
 
   try {
     assertAiOnline("agent");
@@ -118,7 +116,7 @@ ${liveSnapshot ? `\nTHIS CLIENT'S LIVE PICTURE RIGHT NOW (real data — sessions
 THEIR CURRENT PROGRAMME (${mode.toUpperCase()}, ${experience.toUpperCase()}):
 ${programme}
 
-${HARD_LIMIT}`;
+${ADVISOR_LIMIT}`;
 
   try {
     assertAiOnline("agent");
@@ -210,7 +208,7 @@ ${liveSnapshot
   : "Real data point to reference: They showed up and sent this message — that means they have not quit."}
 ${saFlags ? "\n" + saFlags : ""}${memoryContext ? "\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n" + memoryContext : ""}
 
-${HARD_LIMIT}`;
+${ADVISOR_LIMIT}`;
 
   try {
     assertAiOnline("agent");
@@ -254,7 +252,7 @@ Log type: ${logType}
 What was logged: ${logValue}
 Their target: ${targetValue}
 
-${HARD_LIMIT}`;
+${ADVISOR_LIMIT}`;
 
   try {
     assertAiOnline("agent");
