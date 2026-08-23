@@ -61,7 +61,7 @@ export interface VerifierFacts {
      * carries an instruction.
      */
     canonicalReply?: string | null;
-    /** True when the reply came off a model path — the one chokepoint tag() marks. */
+    situationFrame?: string | null;
     modelAuthored?: boolean;
     /** The CoachAction the engine emitted this turn, when it emitted one. Structured
      *  provenance — checked BEFORE the prose backstop. */
@@ -491,6 +491,21 @@ const domainsIn = (text: string): Set<string> => {
 const ADVISORY = /\b(?:you\s+(?:should|need\s+to|have\s+to|could|might\s+want\s+to|ought\s+to)|i'?d\s+\w+|let'?s\b|try\s+to\b|make\s+sure\b|aim\s+(?:to|for)\b|would\s+help\b|(?:it'?s|today\s+is)\s+a\s+good\s+(?:day|time)\s+(?:for|to)\b)/i;
 const IMPERATIVE = /(?:^|[.!?]\s+|\n)\s*(?:train|do|hit|get|go|take|skip|rest|walk|weigh|eat|add|drop|lower|raise|push|bring|start|stop|keep|make|try|sit|jump|step|log|send)\b/i;
 
+/**
+ * CHOOSING THE IMPLEMENTATION (2026-08-23). "How about grilled chicken with rice?" is not
+ * explanation of PROTEIN — it picks the plate. It escaped ADVISORY/IMPERATIVE because it has
+ * no "you should" and names no domain noun (chicken is not in BEHAVIOUR_DOMAINS on purpose:
+ * a food-word museum is the thing this file exists to stop).
+ *
+ * Closed grammar of *selecting the thing*, not a list of foods or exercises. Domain-free:
+ * the shape is the decision, whatever noun follows.
+ */
+const IMPLEMENTATION_CHOICE = /\b(?:how about|what about|why don'?t you|why not (?:go|try|do|have)|i (?:suggest|recommend)|go for)\b/i;
+
+export function isImplementationChoice(sentence: string): boolean {
+  return IMPLEMENTATION_CHOICE.test(sentence || "");
+}
+
 /** Is this sentence telling the client to change what they DO? */
 function directiveDomains(sentence: string): Set<string> {
   const shaped = ADVISORY.test(sentence) || IMPERATIVE.test(sentence);
@@ -573,6 +588,11 @@ export function stripModelDirectives(
     .filter(sentence => {
       const t = sentence.trim().toLowerCase().replace(/[.!]$/, "");
       if (todo && (t === todo || t.includes(todo))) return true;
+      // Picking the plate/session/walk is a second decision even when no domain noun fires.
+      if (isImplementationChoice(sentence)) {
+        removed.push(sentence.trim());
+        return false;
+      }
       if (directiveDomains(sentence).size === 0) return true;
       removed.push(sentence.trim());
       return false;

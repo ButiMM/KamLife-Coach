@@ -63,7 +63,7 @@ import { mustStayDeterministic } from "../server/understanding/action-router";
 import { parseIdentityCorrection, correctionCandidates } from "../server/food-identity-correction";
 import { adaptTraining, applySetsDelta } from "../server/adaptive-training";
 import { ceilingState } from "../server/spend-ceiling";
-import { isBareReaction, readsAsTherapySpeak, bareReactionFallback } from "../server/reaction-guard";
+import { isBareReaction, readsAsTherapySpeak, bareReactionFallback, isDiagnosticQuestion } from "../server/reaction-guard";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
 import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, isAskingNotReporting } from "../server/utils";
@@ -1189,6 +1189,19 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   test("morning close: ON_A_RUN unchanged for everyone", () => {
     assert.match(morningClosingLine("ON_A_RUN", eng), /sessions in over 4 weeks/);
     assert.equal(morningClosingLine("ON_TRACK", eng), "");
+  });
+}
+
+{
+  const { breakfastReplayLine } = await import("../server/morning-message");
+  test("breakfast replay: mixed bubble is not a meal; items are", () => {
+    const mixed = "That day is today\nWhat's the plan for me?\nMy breakfast was 3 slices of bread, eggs and chicken livers\nGuide for the rest of the day";
+    assert.equal(breakfastReplayLine({ rawMessage: mixed, items: [], mealLabel: "breakfast" }), "");
+    assert.equal(
+      breakfastReplayLine({ rawMessage: mixed, items: [{ name: "Bread" }, { name: "Eggs" }, { name: "Chicken livers" }], mealLabel: "breakfast" }),
+      "Bread, Eggs, Chicken livers",
+    );
+    assert.equal(breakfastReplayLine({ rawMessage: "2 eggs and toast", items: [], mealLabel: "breakfast" }), "2 eggs and toast");
   });
 }
 
@@ -7672,6 +7685,15 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   test("reaction guard: an ordinary corrective reply is left alone", () => {
     const good = "That was wrong — your session is already logged for today. Type *my progress* for the week so far.";
     assert.equal(readsAsTherapySpeak(good), false);
+  });
+
+  test("reaction guard: WOW cannot manufacture a diagnostic question", () => {
+    assert.equal(isDiagnosticQuestion("What happened? Tell me."), true);
+    assert.equal(isDiagnosticQuestion("What happened?"), true);
+    assert.equal(isDiagnosticQuestion("Make your next meal a proper protein meal."), false);
+    assert.equal(isBareReaction("WOW"), true);
+    const fallback = bareReactionFallback("Kam");
+    assert.equal(isDiagnosticQuestion(fallback), false);
   });
 }
 

@@ -10,7 +10,7 @@
  * Alert while balance is still ABOVE zero (default $15) is deliberate: at zero the
  * WhatsApp alert couldn't send. sendCriticalAlert also falls back to SMS if needed.
  */
-import { sendCriticalAlert, fetchTwilioBalance } from "../shared";
+import { sendCriticalAlert, fetchTwilioBalance, resolveOpsAlertMsisdn } from "../shared";
 
 // Threshold (account currency, usually USD) below which we warn. Env-tunable so the
 // founder can raise it as the base grows without a redeploy.
@@ -31,9 +31,9 @@ export function buildLowBalanceAlert(
 
 export async function runBalanceCheck(): Promise<void> {
   console.log("[SCHEDULER] JOB: Twilio balance check");
-  const alertTo = process.env.COACH_ALERT_PHONE;
+  const alertTo = await resolveOpsAlertMsisdn();
   if (!alertTo) {
-    console.warn("[BALANCE] COACH_ALERT_PHONE not set — cannot send balance alert, skipping");
+    console.warn("[BALANCE] no ops destination (unset, or it is a client thread) — skipping");
     return;
   }
   const res = await fetchTwilioBalance();

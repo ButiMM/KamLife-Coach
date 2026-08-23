@@ -129,6 +129,11 @@ interface TurnScope {
      * carries an instruction.
      */
     canonicalReply?: string | null;
+    /**
+     * Structured situation frame for a decision turn (birthday outing, eating out today).
+     * Rendered by code from extractSalientSituation — not GPT prose.
+     */
+    situationFrame?: string | null;
     modelAuthored?: boolean;
     /**
      * This turn is a CLARIFICATION or a de-escalation, not a coaching turn. It still gets its
@@ -314,25 +319,18 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
 
     const { kept, removed } = stripModelDirectives(draft, scope.evidence);
     if (removed.length > 0) {
-      // COUNTED, NOT ARGUED. On a no-decision turn this is the model trying to instruct where the
-      // coach decided to change nothing — the residual the beta is meant to measure.
       recordDirectiveStripped(decisionTurn);
       console.log(`[ACTION_LINE] removed ${removed.length} model instruction(s) on a ${decisionTurn ? "decision" : "hold"} turn: ${removed[0].slice(0, 70)}`);
       draft = kept;
     }
 
     if (decisionTurn) {
-      // Situation-shaped coaching (2026-08-23): the model may keep non-directive prose
-      // (occasion, empathy) so PROTEIN can be spoken at a birthday outing. Extra actions
-      // already came out via stripModelDirectives. The canonical line must still appear —
-      // specialists are no longer the mouth, so this is the one instruction.
+      // STRUCTURAL MOUTH (2026-08-23). The model body is discarded. Context is the
+      // situation frame code already owns. The action is the canonical line. Concatenating
+      // `kept` in front of the action is the leak the reviewer proved ("Eggs tonight").
+      const { composeDecisionTurn } = await import("../one-action");
       const rendered = String(scope.evidence.canonicalReply || "").trim() || renderActionLine(todo);
-      const hasTodo = draft.toLowerCase().includes(todo.toLowerCase().replace(/[.!]$/, "").slice(0, 32));
-      if (!draft) {
-        draft = rendered;
-      } else if (!hasTodo) {
-        draft = `${draft}\n\n${rendered}`.trim();
-      }
+      draft = composeDecisionTurn(String(scope.evidence.situationFrame || ""), rendered);
     } else if (!draft) {
       draft = "I'm here — tell me what's going on and we'll take it from there.";
     }

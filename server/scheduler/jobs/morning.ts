@@ -13,7 +13,7 @@ import { readHealthState } from "../../health-state";
 // nothing is lost: it called selectVariantMessage and then DISCARDED the text it chose
 // (`const { text: _variantMsg }`) before sending the buttons unchanged. Every arm sent the same
 // message, so the experiment measured nothing. Deleting the send deletes an empty measurement.
-import { morningClosingLine, composeMorning, yesterdayObservation } from "../../morning-message";
+import { morningClosingLine, composeMorning, yesterdayObservation, breakfastReplayLine } from "../../morning-message";
 import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
 import { chooseAction, decideProactive, formatOneAction, underPolicy } from "../../one-action";
 
@@ -401,35 +401,22 @@ export async function runMorningCheckin(): Promise<void> {
       }
 
 
-      // One-tap repeat breakfast suggestion
+      // One-tap repeat breakfast — from the meal row, never from a chat bubble.
       let repeatSuggestion = "";
       try {
         const weekAgo = new Date(Date.now() - 7 * 86_400_000);
-        const recentFoods = await db.select({ messageIn: chatHistory.messageIn })
-          .from(chatHistory)
-          .where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, weekAgo)))
-          .orderBy(desc(chatHistory.createdAt)).limit(14);
-        const MEAL_CORRECTION_RE = /\b(has?\s+no\b|have\s+no\b|there.?s\s+no\b|without\b|didn.?t\s+(?:add|put|use|have|spread)\b|no\s+\w+\s+(?:on|in)\b|not\s+have\b)\b/i;
-        const breakfastLog = recentFoods.find(l =>
-          !!l.messageIn &&
-          /\b(breakfast|morning|oats|eggs?|cereal|toast|bread)\b/i.test(l.messageIn) &&
-          !MEAL_CORRECTION_RE.test(l.messageIn)
-        );
-        if (breakfastLog?.messageIn) {
-          const meal = breakfastLog.messageIn.replace(/\b(for breakfast|breakfast was|this morning|had|ate|eating|having|i |my )\b/gi, "").trim();
-          // The client is told to send this string BACK to log it — it must never be cut
-          // mid-word (2026-07-11 live: '…3 slices of bread and coff' — a broken food list
-          // the client was asked to type verbatim). Fit whole items or trim at the last
-          // comma so items survive; skip the suggestion entirely if it can't fit cleanly.
-          let mealShort = meal.length <= 90 ? meal : "";
-          if (!mealShort && meal.length > 90) {
-            const cut = meal.slice(0, 90);
-            const lastComma = cut.lastIndexOf(",");
-            if (lastComma > 20) mealShort = cut.slice(0, lastComma).trim();
-          }
-          if (mealShort.length > 3) {
-            repeatSuggestion = `\n\n💡 Same breakfast as last time? Reply *"${mealShort}"* to log it instantly.`;
-          }
+        const recentMeals = await db.select({
+          items: mealLogs.items,
+          rawMessage: mealLogs.rawMessage,
+          mealLabel: mealLogs.mealLabel,
+        })
+          .from(mealLogs)
+          .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, weekAgo)))
+          .orderBy(desc(mealLogs.loggedAt)).limit(14);
+        const breakfastRow = recentMeals.find(r => r.mealLabel === "breakfast");
+        const mealShort = breakfastRow ? breakfastReplayLine(breakfastRow) : "";
+        if (mealShort.length > 3 && mealShort.length <= 90) {
+          repeatSuggestion = `\n\n💡 Same breakfast as last time? Reply *"${mealShort}"* to log it instantly.`;
         }
       } catch { /* non-critical */ }
 

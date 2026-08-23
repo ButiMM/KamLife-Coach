@@ -20,7 +20,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 // Frozen 2026-07-29 after removing every full-name-in-prose use. LOWER THIS, NEVER RAISE IT.
-const BUDGET = 99;   // 2026-08-21: the monthly and workout-history blocks moved to getDisplayName
+const BUDGET = 97;   // 2026-08-23: gpt-block short/punct fallbacks moved to getDisplayName
 
 /** Prose shapes that put a FULL name in front of a client. These may never come back at all. */
 const FORBIDDEN: Array<[RegExp, string]> = [

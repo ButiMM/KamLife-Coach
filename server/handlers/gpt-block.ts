@@ -2,13 +2,14 @@ import { db } from "../db";
 import { users, chatHistory, stepLogs } from "../../shared/schema";
 import { eq, desc, and, gte } from "drizzle-orm";
 import { askCoachK, getSAContextFlags, getNowContextSA, isUnderGPTCallLimit, selectModel, classifyIntent, type ClassifiedIntent } from "../gpt";
-import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "../agents";
+import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent, factsOnlyNotes } from "../agents";
 import { buildClientSnapshot } from "../brain/client-snapshot";
 import { canonicalDecision, decisionBrief } from "../understanding/live";
+import { composeDecisionTurn, renderActionLine } from "../one-action";
 import { getToneMode, toneSteer } from "../tone-mode";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { recomputeTodayFoodTotals } from "./food-scanner";
-import { storeMemory, retrieveMemories, loadSalientSituation } from "../memory";
+import { storeMemory, retrieveMemories, loadSalientSituation, frameSituationForClient } from "../memory";
 import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
 import { tellDontAsk } from "../reply-hygiene";
 import { logChat, withTimeout, turnEvidence } from "./chat-log";
@@ -20,7 +21,7 @@ import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
 import { safetyGate } from "../verifiers/response-gate";
 import { verifyBrainReply } from "../brain/reply-verifier";
-import { isBareReaction, readsAsTherapySpeak, bareReactionFallback } from "../reaction-guard";
+import { isBareReaction, readsAsTherapySpeak, bareReactionFallback, isDiagnosticQuestion } from "../reaction-guard";
 
 // ── SCENARIO GUIDE — the coach's situation playbook ────────────────────────────
 // Module-level and byte-identical on every call: askCoachK places it in the STATIC
@@ -435,7 +436,9 @@ RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K — apply the SCENARIO GUIDE f
       const lastIntent = lastExchange[0]?.intent || "";
       const punctCtx = `Client sent only "${message}" (pure frustration/reaction). They are responding to your previous message (intent: ${lastIntent}): "${lastOut.slice(0, 300)}". This means they are either frustrated, confused, or surprised by your last reply. Acknowledge the reaction briefly and either clarify your last response or ask what specifically they need. Do not ask what they mean — you know they are reacting to your last message. Be direct, max 2 sentences, SA voice.`;
       let punctReply = sanitizeCoachReply(await withTimeout("gpt_punct", 15000, () => askCoachK(message, user, punctCtx, memoryContext)), message, user.weeklyFoodBudget, user.injuries);
-      if (readsAsTherapySpeak(punctReply)) punctReply = bareReactionFallback(user.name?.split(" ")[0] || "");
+      if (readsAsTherapySpeak(punctReply) || isDiagnosticQuestion(punctReply)) {
+        punctReply = bareReactionFallback(getDisplayName(user) || "");
+      }
       await logChat(user.id, message, punctReply, "SHORT_REPLY");
       // CLARIFICATION, NOT COACHING (2026-08-21). This exit answers a question or de-escalates;
       // appending "Log one meal today" to it would be the coach talking over the question it just
@@ -495,8 +498,8 @@ Do not ask "what do you mean" — interpret from context. Max 2 sentences.`;
       // it and the model did it anyway, so the bad output is rejected in code rather than
       // asked away again. A bare reaction carries no life content — there is nothing to be
       // overwhelmed about — so a feelings diagnosis is always the wrong read.
-      if (isBareReaction(message) && readsAsTherapySpeak(shortReply)) {
-        shortReply = bareReactionFallback(user.name?.split(" ")[0] || "");
+      if (isBareReaction(message) && (readsAsTherapySpeak(shortReply) || isDiagnosticQuestion(shortReply))) {
+        shortReply = bareReactionFallback(getDisplayName(user) || "");
       }
       await logChat(user.id, message, shortReply, "SHORT_REPLY");
       // CLARIFICATION, NOT COACHING (2026-08-21). This exit answers a question or de-escalates;
@@ -648,17 +651,37 @@ SA voice. Direct. Coach forward, not backward.`;
   // never hang on context assembly.
   const liveSnapshot = await withTimeout("live_snapshot", 4000, () => buildClientSnapshot(user)).catch(() => "");
   const situationLine = await loadSalientSituation(phone, message).catch(() => "");
+  const situationFrame = frameSituationForClient(situationLine);
+  turnEvidence({ situationFrame });
 
   try {
+    // DECISION TURN — CODE OWNS THE MOUTH (2026-08-23). GPT free prose concatenated in
+    // front of canonicalTodo is the architecture the reviewer disproved. Specialists
+    // still run only for SADAG; they do not write the reply. HOLD still uses the model.
+    if (decision.todo) {
+      if (agentType === "mindset") {
+        const notes = await mindsetAgent(user, message, memoryContext, liveSnapshot, saContext, deepEmotional);
+        if (/SADAG/.test(notes) && /0800\s*567\s*567/.test(notes)) {
+          gptReply = notes;
+          turnEvidence({ conversationalOnly: true });
+          await logChat(user.id, message, gptReply, "MINDSET").catch(() => {});
+          return applyReplyVerifier(gptReply, user, message);
+        }
+      }
+      gptReply = composeDecisionTurn(
+        situationFrame,
+        decision.reply || renderActionLine(decision.todo),
+      );
+    } else {
     // SPECIALISTS ARE ADVISORS, NOT MOUTHS (2026-08-23). routeToAgent still picks a domain so
     // nutrition/programme facts reach the Coach. Their string must never be the WhatsApp reply —
     // 13:27 live: chooseAction=protein, nutritionAgent invented chicken+rice+walk.
     let specialistNotes = "";
     if (agentType === "nutrition") {
-      specialistNotes = await nutritionAgent(user, message, memoryContext, saContext, liveSnapshot);
+      specialistNotes = factsOnlyNotes(await nutritionAgent(user, message, memoryContext, saContext, liveSnapshot));
     } else if (agentType === "programming") {
       const prog = getKamlifeProgramme(user);
-      specialistNotes = await programmingAgent(user, message, memoryContext, prog, saContext, liveSnapshot);
+      specialistNotes = factsOnlyNotes(await programmingAgent(user, message, memoryContext, prog, saContext, liveSnapshot));
     } else if (agentType === "mindset") {
       const notes = await mindsetAgent(user, message, memoryContext, liveSnapshot, saContext, deepEmotional);
       if (/SADAG/.test(notes) && /0800\s*567\s*567/.test(notes)) {
@@ -666,10 +689,10 @@ SA voice. Direct. Coach forward, not backward.`;
         await logChat(user.id, message, gptReply, "MINDSET").catch(() => {});
         return applyReplyVerifier(gptReply, user, message);
       }
-      specialistNotes = notes;
+      specialistNotes = factsOnlyNotes(notes);
     } else if (agentType === "admin") {
       const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 120}g | Steps target: ${user.stepsTarget || 8500}`;
-      specialistNotes = await adminAgent(user, message, "log", message, targetValue);
+      specialistNotes = factsOnlyNotes(await adminAgent(user, message, "log", message, targetValue));
     }
 
     finalInstruction = `${decisionBrief(decision)}\n\n`
@@ -682,9 +705,12 @@ SA voice. Direct. Coach forward, not backward.`;
     if (gptReply === AGENT_ERROR) {
       gptReply = await withTimeout("gpt_coach_fallback", 30000, () => askCoachK(message, user, finalInstruction, memoryContext, SCENARIO_GUIDE));
     }
+    }
   } catch (e) {
     console.warn("[agent-routing]", e);
-    gptReply = await withTimeout("gpt_coach_catch", 30000, () => askCoachK(message, user, finalInstruction, memoryContext, SCENARIO_GUIDE));
+    gptReply = decision.todo
+      ? composeDecisionTurn(situationFrame, decision.reply || renderActionLine(decision.todo))
+      : await withTimeout("gpt_coach_catch", 30000, () => askCoachK(message, user, finalInstruction, memoryContext, SCENARIO_GUIDE));
   }
 
   // ── Safety gate: injury/medical conflict detection + LLM revision ──────────

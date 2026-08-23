@@ -429,6 +429,18 @@ export function extractSalientSituation(clientMessages: string[]): string {
   return "";
 }
 
+/** Client-facing frame for a decision turn. Code owns this; the model does not paraphrase it. */
+export function frameSituationForClient(situationLine: string): string {
+  const s = String(situationLine || "");
+  if (/celebration outing/i.test(s)) {
+    return "Today is the birthday outing, so we're not trying to make the whole day perfect. Enjoy yourself — we'll keep the rest of the day sensible.";
+  }
+  if (/eat out today/i.test(s)) {
+    return "You're eating out today, so we're not chasing a perfect day. Keep the rest of it sensible.";
+  }
+  return "";
+}
+
 export async function loadSalientSituation(phone: string, currentMessage?: string): Promise<string> {
   const fromThisTurn = currentMessage ? [currentMessage] : [];
   try {

@@ -210,3 +210,46 @@ export function yesterdayObservation(
     ? `${o.proteinLogged}g protein logged yesterday — target hit.`
     : `${o.proteinLogged}g protein logged yesterday, against a ${o.proteinTarget}g target.`;
 }
+
+/**
+ * One-tap breakfast replay — from the meal row, never from a chat bubble.
+ *
+ * 06:00 2026-08-23 replayed yesterday's entire multi-intent turn as "same breakfast":
+ * "That day is today / What's the plan / 3 slices of bread / Guide the rest of the day".
+ * chatHistory FOOD_LOG.message_in is a conversational bubble. mealLogs.items is the meal.
+ */
+export function breakfastReplayLine(row: {
+  items?: unknown;
+  rawMessage?: string | null;
+  mealLabel?: string | null;
+}): string {
+  const names = mealItemNames(row.items);
+  if (names.length > 0) return names.join(", ");
+  const raw = String(row.rawMessage || "").trim();
+  if (!isStandaloneMealText(raw)) return "";
+  return raw
+    .replace(/\b(for breakfast|breakfast was|this morning|i had|i ate|had|ate|eating|having|i |my )\b/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function mealItemNames(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+  const names: string[] = [];
+  for (const it of items) {
+    if (typeof it === "string" && it.trim()) names.push(it.trim());
+    else if (it && typeof it === "object" && "name" in it) {
+      const n = String((it as { name?: unknown }).name || "").trim();
+      if (n) names.push(n);
+    }
+  }
+  return names;
+}
+
+function isStandaloneMealText(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 3 || t.length > 90) return false;
+  if (/[?\n]/.test(t)) return false;
+  if (/\b(what'?s the plan|guide (for )?the rest|that day is today|for me)\b/i.test(t)) return false;
+  return true;
+}

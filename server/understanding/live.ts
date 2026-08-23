@@ -141,12 +141,11 @@ export async function computeNextMove(user: any): Promise<string> {
 export function decisionBrief(d: { todo: string; kind: string }): string {
   return d.todo
     ? `COACHING DECISION FOR THIS TURN (already made, by the coach's own decision engine): "${d.todo}"\n`
-      + `Say this in your own words, naturally, as part of your reply. You may phrase it however `
-      + `fits the conversation. Do NOT add any other instruction, and do NOT attach a number to it `
-      + `that is not already in the sentence above.`
+      + `Write CONTEXT only — the situation, empathy, why this matters for them today.\n`
+      + `Do NOT rephrase the decision. Do NOT choose how they do it: no specific food, plate, session, or walk.\n`
+      + `Do NOT write "how about", "what about", "try", "go for", or "have X". The system appends the only action.`
     : `COACHING DECISION FOR THIS TURN: none. The verdict is to change nothing today.\n`
-      + `Answer them, explain, encourage — but do NOT tell them to train, rest, walk, weigh, eat `
-      + `differently, or change any target. There is no instruction to give this turn.`;
+      + `Write CONTEXT only. Do NOT tell them to train, rest, walk, weigh, eat a specific plate, or change any target.`;
 }
 import { classifyDomain } from "./domain-guard";
 import { captureFriction } from "../friction";

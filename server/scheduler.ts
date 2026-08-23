@@ -6,7 +6,7 @@
 
 import cron from "node-cron";
 import { pool } from "./db";
-import { deliveryStats, sendWhatsApp, sendWhatsAppTemplate, loadState, saveState, todaySAST, hasRunToday, weeklyKeyedSent, dailyProactiveCount, recordJobRun, hydrateSchedulerStateFromDb, escalations, sentProactive, processedWebhooks, db, lt, eq, lte, and, sql } from "./scheduler/shared";
+import { deliveryStats, sendWhatsApp, sendWhatsAppTemplate, loadState, saveState, todaySAST, hasRunToday, weeklyKeyedSent, dailyProactiveCount, recordJobRun, hydrateSchedulerStateFromDb, escalations, sentProactive, processedWebhooks, db, lt, eq, lte, and, sql, resolveOpsAlertMsisdn } from "./scheduler/shared";
 
 // Job imports
 import { runMorningCheckin } from "./scheduler/jobs/morning";
@@ -72,7 +72,7 @@ cron.schedule("0 5 * * *", async () => {
       )
     ).limit(20);
     if (overdueEscalations.length > 0) {
-      const coachPhone = process.env.COACH_ALERT_PHONE || process.env.COACH_PHONE;
+      const coachPhone = await resolveOpsAlertMsisdn();
       if (coachPhone) {
         const urgentCount = overdueEscalations.filter(e => e.priority === "urgent").length;
         const highCount = overdueEscalations.filter(e => e.priority === "high").length;
@@ -106,7 +106,7 @@ cron.schedule("*/30 * * * *", async () => {
       )
     ).limit(5);
     if (urgent.length > 0) {
-      const coachPhone = process.env.COACH_ALERT_PHONE || process.env.COACH_PHONE;
+      const coachPhone = await resolveOpsAlertMsisdn();
       if (coachPhone) {
         const details = urgent.map(e => `• ${e.reason}`).join("\n");
         await sendWhatsApp(`whatsapp:${coachPhone}`,
@@ -125,10 +125,10 @@ cron.schedule("*/30 * * * *", async () => {
       const today = todaySAST();
       if (loadState()["delivery_quality_alert"] !== today) {
         saveState("delivery_quality_alert", today);
-        const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
+        const coachPhone = await resolveOpsAlertMsisdn();
         if (coachPhone) {
           const pct = Math.round((deliveryStats.failed / total) * 100);
-          await sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`,
+          await sendWhatsApp(`whatsapp:${coachPhone}`,
             `⚠️ KamLife delivery alert: ${deliveryStats.failed}/${total} WhatsApp sends failed today (${pct}%).\n\nCheck Twilio status and your WhatsApp sender quality rating now — a high failure/block rate is the path to a number suspension.`
           ).catch(e => console.error("[DELIVERY_ALERT_SEND]", e?.message || e));
         }
@@ -182,10 +182,10 @@ export async function initScheduler(): Promise<void> {
       const alertThreshold = isCritical ? 1 : 2;
       const criticalJobs = ["runAdaptiveTargets", "runMorningCheckin", "runEveningAccountability", "runSundayWeeklyReport", "runPhaseAdvancement", "runSubscriptionExpiryCheck"];
       if (failures >= alertThreshold && (isCritical || criticalJobs.includes(name))) {
-        const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
+        const coachPhone = await resolveOpsAlertMsisdn();
         if (coachPhone) {
           const alertMsg = `⚠️ KamLife Scheduler Alert: "${name}" has failed ${failures} time${failures === 1 ? "" : "s"}${failures === 1 ? "" : " in a row"}.\n\nError: ${String(e).slice(0, 200)}\n\nCheck Railway logs immediately.`;
-          sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`, alertMsg).catch(alertErr => console.error("[SCHEDULER_ALERT_SEND]", alertErr?.message || alertErr));
+          sendWhatsApp(`whatsapp:${coachPhone}`, alertMsg).catch(alertErr => console.error("[SCHEDULER_ALERT_SEND]", alertErr?.message || alertErr));
         }
       }
     });
@@ -292,7 +292,7 @@ export async function initScheduler(): Promise<void> {
   // Each line silences itself the moment the corresponding env var / DB table
   // is present — the whole message disappears when everything is done.
   cron.schedule("0 7 * * *", async () => {
-    const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
+    const coachPhone = await resolveOpsAlertMsisdn();
     if (!coachPhone) return;
 
     const items: string[] = [];
@@ -350,7 +350,7 @@ export async function initScheduler(): Promise<void> {
       "This message disappears item-by-item as you complete each one.",
     ].join("\n");
 
-    await sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`, msg)
+    await sendWhatsApp(`whatsapp:${coachPhone}`, msg)
       .catch(e => console.error("[SETUP CHECKLIST] send failed:", e));
   }, { timezone: "UTC" });
 

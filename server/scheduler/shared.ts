@@ -4,7 +4,7 @@
  */
 
 import twilio from "twilio";
-import { isTwilioCircuitOpen, recordTwilioSuccess, recordTwilioFailure, sastDayStart, buildContentVariables, splitWhatsAppBody } from "../utils";
+import { isTwilioCircuitOpen, recordTwilioSuccess, recordTwilioFailure, sastDayStart, buildContentVariables, splitWhatsAppBody, normaliseMsisdn } from "../utils";
 import { db, pool } from "../db";
 import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles } from "../../shared/schema";
 import { eq, gte, and, lt, desc, or, sql, like } from "drizzle-orm";
@@ -31,6 +31,38 @@ export { getShoppingList, formatShoppingList } from "../shopping-lists";
 export { PRICING } from "../../shared/pricing";
 export { selectVariantMessage, recordDelivery } from "../ab";
 export { asc, lte, count, inArray, isNotNull } from "drizzle-orm";
+
+/**
+ * Ops WhatsApp destination. Never a coached client's number, never a silent fallback
+ * onto ADMIN_PHONE_OVERRIDE. Missing destination → log only (2026-08-23 09:00: the
+ * setup checklist landed in the founder's client thread because COACH_ALERT_PHONE
+ * was his WhatsApp).
+ */
+export async function resolveOpsAlertMsisdn(): Promise<string | null> {
+  const raw = process.env.COACH_ALERT_PHONE;
+  if (!raw) {
+    console.warn("[OPS_ALERT] COACH_ALERT_PHONE unset — ops stays off WhatsApp");
+    return null;
+  }
+  const msisdn = normaliseMsisdn(raw);
+  if (!msisdn) return null;
+  try {
+    const { rows } = await pool.query<{ n: string }>(
+      `SELECT phone_number AS n FROM users
+        WHERE regexp_replace(coalesce(phone_number, ''), '\\D', '', 'g') LIKE $1
+        LIMIT 1`,
+      ["%" + msisdn.slice(-9)],
+    );
+    if (rows.length > 0) {
+      console.warn("[OPS_ALERT] destination is a coached client — not sending ops into that thread");
+      return null;
+    }
+  } catch (e) {
+    console.warn("[OPS_ALERT] client-check failed — not sending:", e);
+    return null;
+  }
+  return msisdn;
+}
 
 // ============================================================
 // SCHEDULER STATE — persists last-run dates across restarts

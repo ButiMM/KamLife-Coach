@@ -3,12 +3,34 @@ import { queryFoodDatabase } from "./foods";
 import { HANDLING_CONFUSION } from "./coach-prompt";
 import { assertAiOnline, isAiOfflineError } from "./ai-offline";
 import { getDisplayName } from "./utils";
+import { isImplementationChoice } from "./brain/reply-verifier";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
 });
 
-const ADVISOR_LIMIT = "You are a domain advisor to Coach K, not the Coach. Return 2–4 short factual notes. No greeting, no 'you should', no walk/train/rest/weigh/log instruction, no customer-facing paragraph. Facts and food or programme details only.";
+const ADVISOR_LIMIT = `You are a domain advisor to Coach K, not the Coach.
+Return ONLY lines in this exact shape, nothing else:
+FACT: <one observed number, logged item, or programme field>
+STATE: <where they sit versus a target, as a number>
+No OPTION lines. No greeting. No paragraph. No sentence that tells anyone to do anything.
+A food name is data on a FACT line ("FACT: breakfast included chicken livers"), never a suggestion.
+Coach K decides the action.`;
+
+/**
+ * Advisor contract, enforced. Prefix filter first (FACT/STATE only — OPTION was a
+ * recommendation with a label). Then drop any remaining line that chooses an
+ * implementation ("how about", "take a walk"). Drop, do not rewrite.
+ */
+export function factsOnlyNotes(raw: string): string {
+  if (!raw) return "";
+  return raw
+    .split(/\n/)
+    .map(l => l.replace(/^\s*[-*]\s*/, "").trim())
+    .filter(l => /^(FACT|STATE)\s*:/i.test(l))
+    .filter(l => !isImplementationChoice(l.replace(/^(FACT|STATE)\s*:/i, "")))
+    .join("\n");
+}
 
 // ============================================================
 // NUTRITION AGENT
@@ -18,10 +40,9 @@ const NUTRITION_SYSTEM = `You are Coach K's nutrition specialist. You have 20 ye
 
 ABSOLUTE RULES:
 - Use the exact calorie and protein numbers provided to you — never estimate when database values are given
-- Never say "Great choice" or "Good choice" as standalone praise
-- Never give a bulleted list in a conversational response
-- One food swap suggestion maximum — never give 3 things to fix
-- Never mention water unless the client specifically asked about water`;
+- Never write a customer-facing paragraph
+- Never prescribe a meal, a walk, a session, or a next action
+- Name foods only as already-logged FACTS, never as a next plate`;
 
 export async function nutritionAgent(user: any, message: string, memoryContext: string, saFlags: string, liveSnapshot = ""): Promise<string> {
   const name = getDisplayName(user) || "there";
@@ -67,10 +88,10 @@ ${ADVISOR_LIMIT}`;
         { role: "user", content: message }
       ]
     });
-    return response.choices[0]?.message?.content?.trim() || "Log that and keep your protein up today.";
+    return factsOnlyNotes(response.choices[0]?.message?.content || "");
   } catch (err) {
     if (!isAiOfflineError(err)) console.error("[NUTRITION_AGENT]", err);
-    return "Eish Coach K had a moment. Try that again.";
+    return "";
   }
 }
 
@@ -128,10 +149,10 @@ ${ADVISOR_LIMIT}`;
         { role: "user", content: message }
       ]
     });
-    return response.choices[0]?.message?.content?.trim() || "Check the programme above and get your session done today.";
+    return factsOnlyNotes(response.choices[0]?.message?.content || "");
   } catch (err) {
     if (!isAiOfflineError(err)) console.error("[PROGRAMMING_AGENT]", err);
-    return "Eish Coach K had a moment. Try that again.";
+    return "";
   }
 }
 
@@ -221,10 +242,10 @@ ${ADVISOR_LIMIT}`;
         { role: "user", content: message }
       ]
     });
-    return response.choices[0]?.message?.content?.trim() || "I hear you — that's a lot to carry. Talk to me, what's weighing on you most right now?";
+    return factsOnlyNotes(response.choices[0]?.message?.content || "");
   } catch (err) {
     if (!isAiOfflineError(err)) console.error("[MINDSET_AGENT]", err);
-    return "Eish Coach K had a moment. Try that again.";
+    return "";
   }
 }
 
@@ -264,10 +285,10 @@ ${ADVISOR_LIMIT}`;
         { role: "user", content: message }
       ]
     });
-    return response.choices[0]?.message?.content?.trim() || "Logged. Keep going.";
+    return factsOnlyNotes(response.choices[0]?.message?.content || "");
   } catch (err) {
     if (!isAiOfflineError(err)) console.error("[ADMIN_AGENT]", err);
-    return "Eish Coach K had a moment. Try that again.";
+    return "";
   }
 }
 

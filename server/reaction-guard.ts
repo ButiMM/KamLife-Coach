@@ -53,6 +53,11 @@ export function isBareReaction(message: string): boolean {
   return BARE_REACTION.has(collapsed);
 }
 
+/** Live 10:06 2026-08-23: "WOW" came back as a diagnostic question about an event that never happened. */
+export function isDiagnosticQuestion(reply: string): boolean {
+  return /^\s*what happened\??(?:\s*tell me\.?)?\s*$/i.test(reply || "");
+}
+
 // Emotion-labelling and wellness language. Every one of these is the model diagnosing a
 // feeling instead of answering — the exact register that made the live thread worse.
 const THERAPY_SPEAK = [

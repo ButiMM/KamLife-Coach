@@ -27,6 +27,7 @@ import {
   saveState,
   todaySAST,
   sastDayStart,
+  resolveOpsAlertMsisdn,
 } from "../shared";
 import { gptCosts } from "../../../shared/schema";
 
@@ -39,8 +40,8 @@ function softCapUsd(): number {
 
 export async function runSpendWatchdog(): Promise<void> {
   try {
-    const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
-    if (!coachPhone) return; // nobody to alert — nothing to do
+    const coachPhone = await resolveOpsAlertMsisdn();
+    if (!coachPhone) return; // nobody to alert, or destination is a client thread
 
     const cap = softCapUsd();
     const dayStart = sastDayStart();

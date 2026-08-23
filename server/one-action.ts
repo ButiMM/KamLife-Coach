@@ -470,6 +470,20 @@ export function renderActionLine(todo: string): string {
   return t ? `*${t.replace(/\s*[.!]\s*$/, "")}*` : "";
 }
 
+/**
+ * THE DECISION-TURN MOUTH (2026-08-23). Context from structured situation, action from
+ * chooseAction. The model body is not an input — that is the whole point. Concatenating GPT
+ * prose in front of the action line is the architecture the reviewer disproved ("Eggs tonight."
+ * sitting above PROTEIN).
+ */
+export function composeDecisionTurn(situationFrame: string, actionLine: string): string {
+  const ctx = String(situationFrame || "").trim();
+  const action = String(actionLine || "").trim();
+  if (!action) return ctx;
+  if (!ctx) return action;
+  return `${ctx}\n\n${action}`;
+}
+
 export function underPolicy(action: OneAction, opts: { evidenced: boolean; dreamGoal?: string | null }): OneAction {
   if (!PRESCRIPTIVE.has(action.kind) || opts.evidenced) return action;
   return holdAction(opts.dreamGoal);

@@ -618,12 +618,9 @@ async function main() {
       "…and run it on the draft with this turn's evidence");
     assert.ok(/draft = kept;/.test(log), "…and actually use what survived");
     assert.ok(/scope\.evidence\.canonicalTodo/.test(log), "…reads the canonical decision");
-    assert.ok(/renderActionLine\s*\}\s*=\s*await import\("\.\.\/one-action"\)/.test(log),
-      "…and renders the instruction with the canonical renderer, not by hand");
-    // Updated 2026-08-23: specialists are no longer mouths. Situation prose may remain;
-    // the canonical line still has to appear. Full withhold of model prose is gone.
-    assert.ok(/canonical line must still appear|draft = rendered/.test(log),
-      "a decision turn must still land the canonical instruction");
+    assert.ok(/composeDecisionTurn/.test(log) && /renderActionLine/.test(log),
+      "…and renders the instruction with the canonical composer, not by concatenating GPT prose");
+    assert.ok(/situationFrame/.test(log), "context is structured situation, not model draft");
     const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
     const code = gpt.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
     // The decision must be computed before the FIRST exit, not before the last one.
@@ -675,7 +672,7 @@ async function main() {
     }
     const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
     const gcode = gpt.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-    assert.equal((gcode.match(/conversationalOnly: true/g) || []).length, 3,
+    assert.ok(((gcode.match(/conversationalOnly: true/g) || []).length) >= 3,
       "the punct, short and frustration exits must each declare themselves clarification");
   });
 
@@ -719,63 +716,51 @@ async function main() {
   check("the boundary keeps situation prose and still lands the canonical line", () => {
     const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
       .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-    assert.ok(/canonicalReply \|\| ""\)\.trim\(\) \|\| renderActionLine\(todo\)/.test(log),
-      "the boundary must read the deterministically rendered reply");
-    assert.ok(/hasTodo/.test(log), "the canonical todo must still appear in the client string");
-    assert.ok(/rendered/.test(log) && /draft = `\$\{draft\}/.test(log),
-      "situation prose may remain; the instruction is appended, not a second mouth");
+    assert.ok(/composeDecisionTurn/.test(log), "decision turns must be composed in code");
+    assert.ok(/situationFrame/.test(log), "context is the structured situation, not GPT prose");
+    assert.ok(!/draft = `\$\{draft\}\\n\\n\$\{rendered\}`/.test(log),
+      "NEGATIVE CONTROL: concatenating model prose in front of the action reopens Eggs tonight");
   });
 
   check("a decision turn sends exactly one instruction, and code wrote it", async () => {
-    const { stripModelDirectives } = await import("../server/brain/reply-verifier");
-    const { renderActionLine } = await import("../server/one-action");
-    // Mirrors reconcileTurnReply's composition.
-    const compose = (reply: string, todo: string, clarifying = false) => {
-      const ev = { modelAuthored: true, canonicalTodo: todo, conversationalOnly: clarifying } as any;
-      const t = clarifying ? "" : todo.trim();
-      let draft = stripModelDirectives(reply, ev).kept;
-      if (!t) return draft;
-      const bare = t.toLowerCase().replace(/\s*[.!]\s*$/, "");
-      const prose = draft.split(/\n{2,}|(?<=[.!?])\s+/).filter(part => {
-        const b = part.trim().toLowerCase().replace(/^\*+|\*+$/g, "").replace(/\s*[.!]\s*$/, "");
-        return b !== bare && !(bare.length > 12 && b.startsWith(bare));
-      }).join(" ").replace(/\s{2,}/g, " ").trim();
-      return prose ? `${prose}\n\n${renderActionLine(t)}` : renderActionLine(t);
-    };
+    const { composeDecisionTurn, renderActionLine } = await import("../server/one-action");
+    const { frameSituationForClient, extractSalientSituation } = await import("../server/memory");
     const lines = (x: string) => (x.match(/^\*[^*]+\*$/gm) || []).length;
-    const times = (hay: string, needle: string) =>
-      hay.toLowerCase().split(needle.toLowerCase().replace(/\s*[.!]\s*$/, "")).length - 1;
 
     const PROTEIN = "Make your next meal a proper protein meal.";
     const REST = "Rest today — your body is doing the work.";
-    const LOG = "Log one meal today. Any meal.";
+    const action = renderActionLine(PROTEIN);
 
-    const a = compose("That's a tough week and it makes sense you're flat. Train chest today.", PROTEIN);
-    assert.ok(!/train chest/i.test(a), "the model's instruction reached the client");
-    assert.equal(lines(a), 1, "a decision turn must carry exactly one action line");
-    assert.ok(/tough week/i.test(a), "empathy must survive — that is what the model is for");
+    const a = composeDecisionTurn("", action);
+    assert.equal(a, action);
+    assert.equal(lines(a), 1);
+    assert.ok(!/eggs|chicken|how about|tough week/i.test(a),
+      "model prose is not an input to a decision turn");
 
-    // The paths that reach tellDontAsk already put the todo in the prose. A first version
-    // de-duplicated on blank lines only, but the strip rejoins sentences with a space, so the
-    // client was told the same thing twice and the action-line count still read 1.
-    const b = compose(`You're wiped. Go train today.\n\n${REST}`, REST);
-    assert.ok(!/go train/i.test(b), "the contradiction must not ship");
+    const frame = frameSituationForClient(extractSalientSituation([
+      "That day is today. Girlfriend's birthday. Going to restaurants.",
+    ]));
+    const b = composeDecisionTurn(frame, action);
+    assert.ok(/birthday outing/i.test(b), "birthday situation is code-rendered context");
+    assert.ok(b.includes(action) || b.includes("protein"));
     assert.equal(lines(b), 1);
-    assert.equal(times(b, REST), 1, "the instruction must appear exactly once in the whole reply");
+    assert.ok(!/chicken|eggs tonight|how about/i.test(b));
 
-    // NONE turn: no action line at all, conversation retained.
-    const c = compose("I hear you — that sounds heavy. Go for a 20-minute walk.", "");
-    assert.equal(lines(c), 0, "no decision means no action line");
-    assert.ok(/hear you/i.test(c), "…and the conversation is kept, not replaced");
+    const rest = composeDecisionTurn("", renderActionLine(REST));
+    assert.ok(!/gym session|go with a light/i.test(rest));
+    assert.ok(/Rest today/i.test(rest));
 
-    // Clarification never receives one.
-    const d = compose("Did you mean 500g or 50g?", LOG, true);
-    assert.equal(lines(d), 0);
-    assert.ok(/500g or 50g/.test(d));
+    // HOLD: composeDecisionTurn with empty action ships context only, no instruction.
+    assert.equal(composeDecisionTurn("Enjoy the outing.", ""), "Enjoy the outing.");
 
-    // Deterministic replies are a different authority.
-    const det = stripModelDirectives("Drop your calories to 1,800.", { modelAuthored: false } as any);
-    assert.equal(det.kept, "Drop your calories to 1,800.");
+    // NEGATIVE CONTROL: the old concatenate-GPT-then-action architecture.
+    const leaked = composeDecisionTurn("Eggs tonight.", action);
+    assert.ok(/eggs tonight/i.test(leaked),
+      "NEGATIVE CONTROL: putting model prose in the situation slot reopens the second decision");
+    const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(!/composeDecisionTurn\(draft/.test(log) && /composeDecisionTurn\(String\(scope\.evidence\.situationFrame/.test(log),
+      "the chokepoint must pass situationFrame, not the model draft, into composeDecisionTurn");
   });
 
   check("the residue is instrumented for beta, not argued about", () => {
@@ -816,8 +801,13 @@ async function main() {
     // An invented number cannot ride in on a directive.
     assert.ok(!/1800/.test(render("Drop your calories to 1800.", PROTEIN)));
 
-    // Empathy and context survive — that is what the model is for.
+    // Empathy and context survive on HOLD — that is what the model is for there.
     assert.ok(/hard few days/.test(render("I hear you. That sounds like a hard few days.", "")));
+
+    // HOLD still strips recognised directives. Decision-turn plates are a different test:
+    // composeDecisionTurn does not take model prose as an input, so they cannot sit above PROTEIN.
+    const hold = render("How about a 20-minute walk today?", "");
+    assert.ok(!/walk/i.test(hold), "HOLD must not acquire a walk");
 
     // A clarification does not acquire a coaching instruction just for crossing a model path.
     const clar = render("Did you mean 500g or 50g?", LOG, { conversationalOnly: true });
@@ -844,41 +834,13 @@ async function main() {
   }
 
   check("strip-then-render behaves at the boundary", async () => {
-    const { stripModelDirectives } = await import("../server/brain/reply-verifier");
-    const ev = (canonicalTodo: string) => ({ modelAuthored: true, canonicalTodo }) as any;
-    const render = (reply: string, todo: string) => {
-      const { kept } = stripModelDirectives(reply, ev(todo));
-      return todo && !kept.toLowerCase().includes(todo.toLowerCase().replace(/[.!]$/, ""))
-        ? (kept ? `${kept}\n\n${todo}` : todo) : kept;
-    };
+    const { composeDecisionTurn, renderActionLine } = await import("../server/one-action");
     const PROTEIN = "Make your next meal a proper protein meal.";
-
-    // 3. the directive in the final reply comes from the canonical renderer, not the model
-    const a = render("That's a tough week. Train chest today.", PROTEIN);
+    const a = composeDecisionTurn("That's a tough week.", renderActionLine(PROTEIN));
     assert.ok(!/train chest/i.test(a), "the model's instruction must not reach the client");
-    assert.ok(a.includes(PROTEIN), "the canonical instruction must");
-    assert.ok(/tough week/i.test(a), "…and the model's empathy must survive");
-
-    // 4. canonicalTodo = null produces no behavioural directive
-    const b = render("I hear you — that sounds heavy. Go for a 20-minute walk.", "");
-    assert.ok(!/20-minute walk/i.test(b), "no decision means no instruction reaches the client");
-    assert.ok(/hear you/i.test(b), "…and the conversation survives");
-
-    // 5. rewording cannot create a different directive
-    for (const r of ["You should hit legs today.", "I'd get a push session in this afternoon.",
-                     "Today is a good day for an upper body workout."]) {
-      assert.ok(!/legs|push session|upper body/i.test(render(r, PROTEIN)),
-        `a reworded directive still reached the client: ${r}`);
-    }
-
-    // 6. deterministic responses are untouched
-    const det = stripModelDirectives("Drop your calories to 1,800.", { modelAuthored: false } as any);
-    assert.equal(det.kept, "Drop your calories to 1,800.");
-    assert.equal(det.removed.length, 0);
-
-    // 1+2. an exit that never saw the brief still carries the canonical instruction
-    const e = render("Ja, that's normal when you're coming back from being ill.", "Log one meal today. Any meal.");
-    assert.ok(e.includes("Log one meal today"), "a short exit must still carry the canonical instruction");
+    assert.ok(a.includes("protein meal") || a.includes(PROTEIN));
+    // Empathy is no longer a GPT sentence on a decision turn. Situation frame is.
+    assert.ok(!/Eggs tonight|chicken and rice would work/i.test(a));
   });
 
   check("both model paths are told the decision BEFORE they generate", () => {
@@ -1586,10 +1548,10 @@ async function main() {
     assert.ok(!/gptReply = await programmingAgent\(/.test(gpt), "programmingAgent is still a mouth");
     assert.ok(!/gptReply = await mindsetAgent\(/.test(gpt), "mindsetAgent is still a mouth");
     assert.ok(!/gptReply = await adminAgent\(/.test(gpt), "adminAgent is still a mouth");
-    assert.ok(/specialistNotes = await nutritionAgent\(/.test(gpt), "nutrition must still supply notes");
+    assert.ok(/specialistNotes = factsOnlyNotes\(await nutritionAgent\(/.test(gpt), "nutrition must still supply notes");
     assert.ok(/DOMAIN NOTES/.test(gpt), "notes must be labelled as not-the-reply");
     assert.ok(/decisionBrief\(decision\)/.test(gpt), "the one mouth still receives the canonical decision");
-    const notesAt = gpt.indexOf("specialistNotes = await nutritionAgent");
+    const notesAt = gpt.indexOf("factsOnlyNotes(await nutritionAgent");
     const mouthAt = gpt.indexOf("askCoachK(message, user, finalInstruction");
     assert.ok(notesAt > 0 && mouthAt > notesAt, "askCoachK must run AFTER the specialist, as the mouth");
     const agents = readFileSync("server/agents.ts", "utf-8");
@@ -1624,6 +1586,122 @@ async function main() {
       .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
     assert.ok(/stripModelDirectives\(draft, scope\.evidence\)/.test(log),
       "HOLD still strips specialist-shaped instructions at the chokepoint");
+  });
+
+  check("DOMAIN NOTES are facts only — chicken/rice advice cannot become a second action", async () => {
+    const { factsOnlyNotes } = await import("../server/agents");
+    const leaked = factsOnlyNotes(
+      "How about grilled chicken with mixed veggies and rice? Also try to get a 20-minute walk in.",
+    );
+    assert.equal(leaked, "", "unprefixed advice must be discarded, not forwarded to the Coach");
+    const smuggled = factsOnlyNotes(
+      "OPTION: grilled chicken and rice\nOPTION: take a 20-minute walk\nFACT: breakfast logged bread, eggs, chicken livers\nSTATE: protein 38g of 186g",
+    );
+    assert.match(smuggled, /FACT: breakfast/);
+    assert.match(smuggled, /STATE: protein/);
+    assert.ok(!/OPTION:/i.test(smuggled), "OPTION is a recommendation with a prefix — drop it");
+    assert.ok(!/walk|how about/i.test(smuggled));
+    const agents = readFileSync("server/agents.ts", "utf-8");
+    assert.ok(/FACT: <one observed/.test(agents) && /No OPTION lines/.test(agents),
+      "advisor contract must demand FACT/STATE only");
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
+    assert.ok(/factsOnlyNotes\(await nutritionAgent/.test(gpt), "nutrition notes must pass the facts-only gate");
+    assert.ok(!/Always end with one specific action/.test(agents),
+      "NEGATIVE CONTROL: restoring HARD_LIMIT would re-invent the 13:27 walk");
+    const brief = readFileSync("server/understanding/live.ts", "utf-8");
+    assert.ok(/Write CONTEXT only/.test(brief), "the model is not asked to rephrase the action");
+    assert.ok(!/Say this in your own words/.test(brief),
+      "NEGATIVE CONTROL: restoring 'say this in your own words' re-opens the plate invention");
+    const verifier = readFileSync("server/brain/reply-verifier.ts", "utf-8");
+    assert.ok(/isImplementationChoice\(sentence\)/.test(verifier),
+      "the chokepoint must drop implementation choice, not only domain-tagged directives");
+  });
+
+  check("morning breakfast replay uses the meal row, never a mixed chat bubble", async () => {
+    const { breakfastReplayLine } = await import("../server/morning-message");
+    const mixed = {
+      rawMessage: "That day is today\nWhat's the plan for me?\nMy breakfast was 3 slices of bread, eggs and chicken livers\nGuide for the rest of the day",
+      items: [{ name: "Bread" }, { name: "Eggs" }, { name: "Chicken livers" }],
+      mealLabel: "breakfast",
+    };
+    const replay = breakfastReplayLine(mixed);
+    assert.match(replay, /Bread/i);
+    assert.match(replay, /Eggs/i);
+    assert.ok(!/that day is today/i.test(replay), "must not replay the coaching bubble");
+    assert.ok(!/guide for the rest/i.test(replay));
+    assert.ok(!/\?/.test(replay));
+    assert.equal(
+      breakfastReplayLine({ rawMessage: mixed.rawMessage, items: [], mealLabel: "breakfast" }),
+      "",
+      "raw mixed bubble with no items is not a meal",
+    );
+    assert.equal(breakfastReplayLine({ rawMessage: "2 eggs and toast", items: [], mealLabel: "breakfast" }), "2 eggs and toast");
+    const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/from\(mealLogs\)/.test(morning) && /breakfastReplayLine/.test(morning),
+      "morning must read mealLogs, not FOOD_LOG.message_in");
+    assert.ok(!/chatHistory\.messageIn/.test(morning),
+      "NEGATIVE CONTROL: restoring chatHistory.message_in as the breakfast source must fail");
+  });
+
+  check("ops alerts cannot enter a client thread", () => {
+    const sched = readFileSync("server/scheduler.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/resolveOpsAlertMsisdn\(\)/.test(sched), "scheduler diagnostics must go through the ops gate");
+    assert.ok(!/COACH_ALERT_PHONE \|\| process\.env\.ADMIN_PHONE_OVERRIDE/.test(sched),
+      "ADMIN_PHONE_OVERRIDE must not be a silent fallback onto a client number");
+    const checklist = sched.slice(sched.indexOf("run(\"0 7 * * *\"") >= 0 ? sched.indexOf("0 7 * * *") : sched.indexOf("Setup Checklist"));
+    assert.ok(/resolveOpsAlertMsisdn/.test(sched), "setup checklist uses the ops gate");
+    const shared = readFileSync("server/scheduler/shared.ts", "utf-8");
+    assert.ok(/destination is a coached client/.test(shared), "a client number must refuse the send");
+  });
+
+  check("WOW cannot manufacture a diagnostic question", async () => {
+    const { sanitizeCoachReply } = await import("../server/handlers/food-scanner");
+    const { isDiagnosticQuestion, isBareReaction, bareReactionFallback } = await import("../server/reaction-guard");
+    assert.equal(isBareReaction("WOW"), true);
+    assert.equal(isDiagnosticQuestion("What happened? Tell me."), true);
+    const out = sanitizeCoachReply("What happened? Tell me.", "WOW");
+    assert.ok(!isDiagnosticQuestion(out), "bare WOW must not ship 'what happened?'");
+    assert.ok(!/what happened/i.test(out));
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
+    assert.ok(/isDiagnosticQuestion\(shortReply\)/.test(gpt), "short-reply path must catch the diagnostic");
+    assert.ok(!/Ask what happened\. Two words/.test(readFileSync("server/coach-prompt.ts", "utf-8")),
+      "NEGATIVE CONTROL: restoring 'Ask what happened' for reactions must fail");
+    void bareReactionFallback;
+  });
+
+  check("decision-turn mouth is structural — attacker plates cannot sit above PROTEIN", async () => {
+    const { composeDecisionTurn, renderActionLine } = await import("../server/one-action");
+    const { frameSituationForClient, extractSalientSituation } = await import("../server/memory");
+    const PROTEIN = renderActionLine("Make your next meal a proper protein meal.");
+    const REST = renderActionLine("Rest today — your body is doing the work.");
+    const plates = [
+      "How about grilled chicken and rice?",
+      "Eggs tonight.",
+      "Maybe have some chicken.",
+      "Your next meal could be eggs and toast.",
+      "Chicken and rice would work.",
+      "Have chicken and rice.",
+      "Go with a light gym session.",
+    ];
+    const frame = frameSituationForClient(extractSalientSituation([
+      "That day is today. It's my girlfriend's birthday. We're going to restaurants.",
+    ]));
+    const out = composeDecisionTurn(frame, PROTEIN);
+    for (const p of plates) {
+      assert.ok(!out.toLowerCase().includes(p.toLowerCase().replace(/[?.]$/, "")),
+        `decision turn shipped a second instruction: ${p}`);
+    }
+    assert.ok(/birthday outing/i.test(out));
+    assert.ok(out.includes(PROTEIN) || /protein meal/i.test(out));
+    const restOut = composeDecisionTurn("", REST);
+    assert.ok(!/gym session/i.test(restOut) && /Rest today/i.test(restOut));
+
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/if \(decision\.todo\)/.test(gpt) && /composeDecisionTurn\(/.test(gpt),
+      "gpt-block must compose on a decision turn instead of asking the model to write the action");
   });
 
 

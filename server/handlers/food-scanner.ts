@@ -18,6 +18,7 @@ import { mealLogs, chatHistory, users } from "../../shared/schema";
 import { eq, and, gte, sql, desc, inArray, isNotNull } from "drizzle-orm";
 import { sastDayStart, sastToday } from "../utils";
 import { turnMutation } from "./chat-log";
+import { isBareReaction, isDiagnosticQuestion, bareReactionFallback } from "../reaction-guard";
 
 // ── Per-user in-memory cache for recomputeTodayFoodTotals ──────────────────
 // Prevents redundant DB queries when the same totals are read multiple times
@@ -531,7 +532,10 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
     return "I had a glitch. Send your last message again and I will respond properly.";
   }
 
-  if (/^what happened\??$/i.test(trimmed)) {
+  if (/^what happened\??$/i.test(trimmed) || isDiagnosticQuestion(trimmed)) {
+    if (isBareReaction(userMessage)) {
+      return bareReactionFallback();
+    }
     if (looksSteps) {
       return "Send the screenshot again with this caption: \"steps screenshot\" — I will pull the number.";
     }
