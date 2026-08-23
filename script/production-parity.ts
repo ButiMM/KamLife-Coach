@@ -1671,6 +1671,64 @@ async function main() {
     void bareReactionFallback;
   });
 
+  check("recall claims require evidence — birthday weekend, targets, miss", async () => {
+    const { groundedRecallAnswer, looksLikeRecallQuestion } = await import("../server/memory");
+    const prior = ["This weekend is my girlfriend's birthday. We're going out."];
+    const q = "Do you remember what I said about my weekend?";
+    assert.equal(looksLikeRecallQuestion(q), true);
+    const hit = groundedRecallAnswer({ question: q, clientMessages: prior });
+    assert.match(hit, /girlfriend'?s birthday/i);
+    assert.ok(!/usually different/i.test(hit), "must not invent a generic weekend memory");
+    assert.match(hit, /^Yes — you said:/);
+
+    const viaSituation = groundedRecallAnswer({
+      question: q,
+      clientMessages: ["That day is today. Girlfriend's birthday. Going to restaurants."],
+    });
+    assert.match(viaSituation, /girlfriend'?s birthday/i);
+    assert.ok(!/usually different/i.test(viaSituation));
+
+    const miss = groundedRecallAnswer({
+      question: "Do you remember what I said about Saturday?",
+      clientMessages: ["I had eggs for breakfast"],
+    });
+    assert.equal(miss, "I don't have the exact detail in front of me. Remind me.");
+    assert.ok(!/^Yes/i.test(miss));
+
+    const targets = groundedRecallAnswer({
+      question: "Do you remember my target?",
+      clientMessages: [],
+      calorieTarget: 2800,
+      proteinTarget: 195,
+      stepsTarget: 6000,
+    });
+    assert.match(targets, /2800/);
+    assert.match(targets, /195/);
+    assert.ok(!/usually/i.test(targets));
+
+    const trained = groundedRecallAnswer({
+      question: "Do you remember when I last trained?",
+      clientMessages: [],
+      lastWorkoutDate: "2026-08-17T08:00:00.000Z",
+    });
+    assert.match(trained, /17/i);
+    assert.ok(!/usually/i.test(trained));
+
+    const noTrain = groundedRecallAnswer({
+      question: "Do you remember when I last trained?",
+      clientMessages: [],
+    });
+    assert.equal(noTrain, "I don't have the exact detail in front of me. Remind me.");
+
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/looksLikeRecallQuestion\(message\)/.test(gpt) && /answerRecall\(user, message\)/.test(gpt),
+      "recall must not fall through to GPT");
+    const recallAt = gpt.indexOf("looksLikeRecallQuestion(message)");
+    const composeAt = gpt.indexOf("if (decision.todo)");
+    assert.ok(recallAt > 0 && recallAt < composeAt, "recall must run before the decision-turn mouth");
+  });
+
   check("decision-turn mouth is structural — attacker plates cannot sit above PROTEIN", async () => {
     const { composeDecisionTurn, renderActionLine } = await import("../server/one-action");
     const { frameSituationForClient, extractSalientSituation } = await import("../server/memory");

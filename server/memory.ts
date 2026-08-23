@@ -443,6 +443,11 @@ export function frameSituationForClient(situationLine: string): string {
 
 export async function loadSalientSituation(phone: string, currentMessage?: string): Promise<string> {
   const fromThisTurn = currentMessage ? [currentMessage] : [];
+  const prior = await recentClientMessages(phone);
+  return extractSalientSituation([...fromThisTurn, ...prior]);
+}
+
+export async function recentClientMessages(phone: string): Promise<string[]> {
   try {
     const result = await pool.query(
       `SELECT message_in
@@ -455,14 +460,114 @@ export async function loadSalientSituation(phone: string, currentMessage?: strin
         LIMIT 24`,
       [phone],
     );
-    const prior = (result.rows as { message_in: string }[])
+    return (result.rows as { message_in: string }[])
       .map(r => String(r.message_in || "").trim())
       .filter(Boolean);
-    return extractSalientSituation([...fromThisTurn, ...prior]);
   } catch (err) {
     console.warn("[SITUATION] unavailable:", (err as any)?.message || err);
-    return extractSalientSituation(fromThisTurn);
+    return [];
   }
+}
+
+const RECALL_SHAPE = /\b(?:do you remember|what did i (?:tell|say|mention)|did i (?:tell|say|mention)|can you remember)\b/i;
+
+/**
+ * TRUST DOCTRINE (locked): owner holds it → say it; owner doesn't → don't invent it.
+ * A recall question never reaches GPT. Quote owned evidence or abstain.
+ * This is not a memory product and not RAG.
+ */
+
+export function looksLikeRecallQuestion(text: string): boolean {
+  return RECALL_SHAPE.test(String(text || ""));
+}
+
+const RECALL_STOP = new Set([
+  "do", "you", "remember", "what", "did", "i", "me", "my", "said", "say", "tell", "told",
+  "mention", "mentioned", "about", "the", "a", "an", "your", "to", "of", "for", "on", "in",
+  "is", "was", "when", "last", "please", "can", "could", "would", "have", "had", "that",
+  "this", "with", "from", "just", "like",
+]);
+
+const RECALL_MISS = "I don't have the exact detail in front of me. Remind me.";
+
+function recallTopic(question: string): string[] {
+  return String(question || "").toLowerCase().split(/[^a-z0-9]+/)
+    .filter(w => w.length >= 4 && !RECALL_STOP.has(w));
+}
+
+function quoteClient(line: string): string {
+  const cleaned = String(line || "").replace(/\s+/g, " ").trim().slice(0, 220);
+  return cleaned ? `Yes — you said: "${cleaned}"` : RECALL_MISS;
+}
+
+export function groundedRecallAnswer(opts: {
+  question: string;
+  clientMessages: string[];
+  calorieTarget?: number | null;
+  proteinTarget?: number | null;
+  stepsTarget?: number | null;
+  lastWorkoutDate?: string | Date | null;
+  currentWeightKg?: number | null;
+}): string {
+  const q = String(opts.question || "");
+  if (!looksLikeRecallQuestion(q)) return RECALL_MISS;
+  const prior = (opts.clientMessages || []).filter(m => m && !looksLikeRecallQuestion(m));
+
+  if (/\b(targets?|calories?|kcal|protein|steps?)\b/i.test(q)) {
+    const cal = Number(opts.calorieTarget) || 0;
+    const prot = Number(opts.proteinTarget) || 0;
+    const steps = Number(opts.stepsTarget) || 0;
+    const bits: string[] = [];
+    if (cal) bits.push(`${cal} kcal`);
+    if (prot) bits.push(`${prot}g protein`);
+    if (steps) bits.push(`${steps} steps`);
+    return bits.length
+      ? `Yes — your targets are ${bits.join(", ")}.`
+      : RECALL_MISS;
+  }
+
+  if (/\b(train(?:ed|ing)?|workout|gym|session)\b/i.test(q)) {
+    const raw = opts.lastWorkoutDate;
+    const d = raw ? new Date(raw) : null;
+    if (d && !Number.isNaN(d.getTime())) {
+      const when = d.toLocaleDateString("en-ZA", { day: "numeric", month: "long", timeZone: "Africa/Johannesburg" });
+      return `Yes — your last logged session is ${when}.`;
+    }
+    return RECALL_MISS;
+  }
+
+  if (/\b(weight|scale)\b/i.test(q)) {
+    const kg = Number(opts.currentWeightKg);
+    return kg > 0 ? `Yes — the last weight on record is ${kg}kg.` : RECALL_MISS;
+  }
+
+  const topic = recallTopic(q);
+  const overlap = topic.length
+    ? prior.find(m => topic.some(t => new RegExp(`\\b${t}\\b`, "i").test(m)))
+    : undefined;
+  if (overlap) return quoteClient(overlap);
+
+  // Occasion already detected by extractSalientSituation: quote the client line that
+  // triggered it. Not a new store — the same 24-message scan, the client's words.
+  if (/\b(weekend|saturday|sunday|today|tonight)\b/i.test(q) && extractSalientSituation(prior)) {
+    const hit = prior.find(m => /\b(birthday|anniversary|wedding|restaurants?|outing|date night)\b/i.test(m));
+    if (hit) return quoteClient(hit);
+  }
+
+  return RECALL_MISS;
+}
+
+export async function answerRecall(user: any, message: string): Promise<string> {
+  const prior = await recentClientMessages(String(user?.phoneNumber || ""));
+  return groundedRecallAnswer({
+    question: message,
+    clientMessages: prior,
+    calorieTarget: user?.calorieTarget,
+    proteinTarget: user?.proteinTarget,
+    stepsTarget: user?.stepsTarget,
+    lastWorkoutDate: user?.lastWorkoutDate,
+    currentWeightKg: user?.currentWeight,
+  });
 }
 
 

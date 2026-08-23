@@ -9,7 +9,7 @@ import { composeDecisionTurn, renderActionLine } from "../one-action";
 import { getToneMode, toneSteer } from "../tone-mode";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { recomputeTodayFoodTotals } from "./food-scanner";
-import { storeMemory, retrieveMemories, loadSalientSituation, frameSituationForClient } from "../memory";
+import { storeMemory, retrieveMemories, loadSalientSituation, frameSituationForClient, looksLikeRecallQuestion, answerRecall } from "../memory";
 import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
 import { tellDontAsk } from "../reply-hygiene";
 import { logChat, withTimeout, turnEvidence } from "./chat-log";
@@ -635,6 +635,13 @@ SA voice. Direct. Coach forward, not backward.`;
   if (!checkGptRateLimit(user.id)) {
     console.warn(`[RATE] GPT rate limit hit for user ${user.id.slice(0, 8)}`);
     return "You're sending messages very fast — give Coach K a moment and try again.";
+  }
+
+  if (looksLikeRecallQuestion(message)) {
+    const recall = await answerRecall(user, message);
+    turnEvidence({ conversationalOnly: true });
+    await logChat(user.id, message, recall, "RECALL").catch(() => {});
+    return applyReplyVerifier(recall, user, message);
   }
 
   let gptReply: string;
