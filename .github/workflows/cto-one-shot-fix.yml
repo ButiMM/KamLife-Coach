@@ -26,6 +26,7 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
 
           # 1) Canonical decision type boundary
           p = Path('server/handlers/gpt-block.ts')
@@ -57,23 +58,27 @@ jobs:
           if old in s: s = s.replace(old, new, 1)
           p.write_text(s)
 
-          # 4) Existing situation owner becomes aware that a completed weekend event mentioned in a message today is retrospective.
+          # 4) Existing situation owner uses the stamped resolver so older messages cannot contaminate a newer current-day message.
           p = Path('server/memory.ts')
           s = p.read_text()
-          old = '  const todayish = /\\b(today|tonight|this weekend|that day is today|the day is today)\\b/.test(blob);\n'
-          new = '''  const retrospective = /\\b(was|were|happened|already happened|finished|ended|last weekend|last night|yesterday|not today)\\b/.test(blob);\n  const todayish = /\\b(today|tonight|this afternoon|this evening|that day is today|the day is today)\\b/.test(blob)\n    || (/\\bthis weekend\\b/.test(blob) && !retrospective);\n'''
-          assert old in s
-          s = s.replace(old, new, 1)
-          s = s.replace('return "CURRENT SITUATION: Client has a celebration outing around today; restaurant eating is expected.";', 'return "CURRENT SITUATION: Client has a celebration outing around the referenced period; restaurant eating is expected.";', 1)
-          s = s.replace('return "CURRENT SITUATION: Client expects to eat out today.";', 'return "CURRENT SITUATION: Client expects to eat out around the referenced period.";', 1)
-          s = s.replace('return "CURRENT SITUATION: Client has closed food for the rest of today.";', 'return "CURRENT SITUATION: Client has closed food around the referenced period.";', 1)
-          old = '''export function situationWhen(stamped: Array<{ text: string; at: Date }>, now?: Date | number): "today" | "last_night" | "stale" | "" {\n  if (!stamped.length) return "";\n  const newest = stamped.reduce((a, b) => (a.at > b.at ? a : b));\n  const days = sastDaysBetween(newest.at, now);\n  if (days <= 0) return "today";\n  if (days === 1) return "last_night";\n  return "stale";\n}\n'''
-          new = '''export function situationWhen(stamped: Array<{ text: string; at: Date }>, now?: Date | number): "today" | "last_night" | "stale" | "" {\n  if (!stamped.length) return "";\n  const newest = stamped.reduce((a, b) => (a.at > b.at ? a : b));\n  const text = newest.text.toLowerCase();\n  const days = sastDaysBetween(newest.at, now);\n  const retrospective = /\\b(?:yesterday|last night|last weekend|this weekend)\\b/i.test(text)\n    && /\\b(?:was|were|happened|already|finished|ended|not today)\\b/i.test(text);\n  if (retrospective) return days <= 1 ? "last_night" : "stale";\n  if (days <= 0) return "today";\n  if (days === 1) return "last_night";\n  return "stale";\n}\n'''
-          assert old in s
-          s = s.replace(old, new, 1)
+          if 'from "./understanding/day-relative-situation"' not in s:
+              needle_import = 'import { sastDaysBetween } from "./sast";\n'
+              assert needle_import in s
+              s = s.replace(needle_import, needle_import + 'import { resolveRecentSituation } from "./understanding/day-relative-situation";\n', 1)
+          helper = '''function situationLineForResolved(resolved: { kind: string; moment: string }): string {\n  if (resolved.kind === "celebration_outing") return "CURRENT SITUATION: Client has a celebration outing around the referenced period; restaurant eating is expected.";\n  if (resolved.kind === "eating_out") return "CURRENT SITUATION: Client expects to eat out around the referenced period.";\n  if (resolved.kind === "food_closed") return "CURRENT SITUATION: Client has closed food around the referenced period.";\n  return "";\n}\n'''
+          if 'function situationLineForResolved' not in s:
+              s = s.replace('export function extractSalientSituation(clientMessages: string[]): string {', helper + '\nexport function extractSalientSituation(clientMessages: string[]): string {', 1)
+          old_load = re.search(r'export async function loadSalientSituation\(phone: string, currentMessage\?: string\): Promise<string> \{.*?\n\}\n\nexport async function loadSituationFrame', s, re.S)
+          new_load = '''export async function loadSalientSituation(phone: string, currentMessage?: string): Promise<string> {\n  const stamped = await recentClientMessagesStamped(phone);\n  if (currentMessage) stamped.unshift({ text: currentMessage, at: new Date() });\n  return situationLineForResolved(resolveRecentSituation(stamped));\n}\n\nexport async function loadSituationFrame'''
+          if old_load:
+              s = s[:old_load.start()] + new_load + s[old_load.end():]
+          old_frame = re.search(r'export async function loadSituationFrame\(phone: string, currentMessage\?: string\): Promise<string> \{.*?\n\}\n\nexport async function recentClientMessagesStamped', s, re.S)
+          new_frame = '''export async function loadSituationFrame(phone: string, currentMessage?: string): Promise<string> {\n  const stamped = await recentClientMessagesStamped(phone);\n  if (currentMessage) stamped.unshift({ text: currentMessage, at: new Date() });\n  const resolved = resolveRecentSituation(stamped);\n  if (!resolved.kind || resolved.moment === "stale") return "";\n  return frameSituationForClient(situationLineForResolved(resolved), resolved.moment as any);\n}\n\nexport async function recentClientMessagesStamped'''
+          if old_frame:
+              s = s[:old_frame.start()] + new_frame + s[old_frame.end():]
           p.write_text(s)
 
-          # 5) Unicode pictographs after a reaction word are still reaction filler, not message content.
+          # 5) Unicode pictographs after a reaction word are reaction filler, not message content.
           p = Path('server/reaction-guard.ts')
           s = p.read_text()
           old = '    .replace(/[\\u200d\\ufe0f\\u{1f3fb}-\\u{1f3ff}]/gu, "")\n'
