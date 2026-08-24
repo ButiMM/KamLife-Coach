@@ -32,8 +32,7 @@ jobs:
           s = p.read_text()
           old = 'const decision = await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold" }));'
           new = 'const decision = (await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold", reply: "" }))) as { todo: string; kind: string; reply: string };'
-          if old in s:
-              s = s.replace(old, new, 1)
+          if old in s: s = s.replace(old, new, 1)
           p.write_text(s)
 
           # 2) Deterministic current-date and natural step follow-up in the existing misc owner.
@@ -55,11 +54,10 @@ jobs:
           s = p.read_text()
           old = '''export function carriesFeelingClause(text: string): boolean {\n  return /\\b(i feel|i\\'m feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can\\'?t cope)\\b/i.test(text || "");\n}\n'''
           new = '''export function carriesFeelingClause(text: string): boolean {\n  const raw = String(text || "");\n  if (/\\b(?:i think i(?:\\'m| am) going to|i(?:\\'m| am) going to|i\\'?ll|i will)\\b/i.test(raw)) return false;\n  return /\\b(i feel|i\\'m feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can\\'?t cope)\\b/i.test(raw);\n}\n'''
-          if old in s:
-              s = s.replace(old, new, 1)
+          if old in s: s = s.replace(old, new, 1)
           p.write_text(s)
 
-          # 4) Make the existing situation owner content-aware about retrospective weekend language.
+          # 4) Existing situation owner becomes aware that a completed weekend event mentioned in a message today is retrospective.
           p = Path('server/memory.ts')
           s = p.read_text()
           old = '  const todayish = /\\b(today|tonight|this weekend|that day is today|the day is today)\\b/.test(blob);\n'
@@ -69,11 +67,19 @@ jobs:
           s = s.replace('return "CURRENT SITUATION: Client has a celebration outing around today; restaurant eating is expected.";', 'return "CURRENT SITUATION: Client has a celebration outing around the referenced period; restaurant eating is expected.";', 1)
           s = s.replace('return "CURRENT SITUATION: Client expects to eat out today.";', 'return "CURRENT SITUATION: Client expects to eat out around the referenced period.";', 1)
           s = s.replace('return "CURRENT SITUATION: Client has closed food for the rest of today.";', 'return "CURRENT SITUATION: Client has closed food around the referenced period.";', 1)
-
           old = '''export function situationWhen(stamped: Array<{ text: string; at: Date }>, now?: Date | number): "today" | "last_night" | "stale" | "" {\n  if (!stamped.length) return "";\n  const newest = stamped.reduce((a, b) => (a.at > b.at ? a : b));\n  const days = sastDaysBetween(newest.at, now);\n  if (days <= 0) return "today";\n  if (days === 1) return "last_night";\n  return "stale";\n}\n'''
           new = '''export function situationWhen(stamped: Array<{ text: string; at: Date }>, now?: Date | number): "today" | "last_night" | "stale" | "" {\n  if (!stamped.length) return "";\n  const newest = stamped.reduce((a, b) => (a.at > b.at ? a : b));\n  const text = newest.text.toLowerCase();\n  const days = sastDaysBetween(newest.at, now);\n  const retrospective = /\\b(?:yesterday|last night|last weekend|this weekend)\\b/i.test(text)\n    && /\\b(?:was|were|happened|already|finished|ended|not today)\\b/i.test(text);\n  if (retrospective) return days <= 1 ? "last_night" : "stale";\n  if (days <= 0) return "today";\n  if (days === 1) return "last_night";\n  return "stale";\n}\n'''
           assert old in s
           s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # 5) Unicode pictographs after a reaction word are still reaction filler, not message content.
+          p = Path('server/reaction-guard.ts')
+          s = p.read_text()
+          old = '    .replace(/[\\u200d\\ufe0f\\u{1f3fb}-\\u{1f3ff}]/gu, "")\n'
+          new = '    .replace(/[\\u200d\\ufe0f\\u{1f3fb}-\\u{1f3ff}]/gu, "")\n    .replace(/\\p{Extended_Pictographic}/gu, "")\n'
+          assert old in s
+          if 'Extended_Pictographic' not in s: s = s.replace(old, new, 1)
           p.write_text(s)
 
       - name: Validate integrated slice
@@ -89,6 +95,6 @@ jobs:
         run: |
           git config user.name 'KamLife CTO Builder'
           git config user.email 'cto-builder@kamlife.local'
-          git add server/handlers/gpt-block.ts server/handlers/misc-commands.ts server/unlogged-notice.ts server/memory.ts
-          git commit -m 'Coach loop: integrate date, situation and follow-up owners'
+          git add server/handlers/gpt-block.ts server/handlers/misc-commands.ts server/unlogged-notice.ts server/memory.ts server/reaction-guard.ts
+          git commit -m 'Coach loop: harden natural comprehension and continuity'
           git push origin HEAD:${GITHUB_HEAD_REF}
