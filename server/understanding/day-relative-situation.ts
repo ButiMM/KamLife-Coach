@@ -40,7 +40,7 @@ export function resolveSituationMoment(text: string, at: Date, now = new Date())
     if (diffDays > 1) return "stale";
   }
   if (explicitPast && /\b(?:weekend|last night|yesterday)\b/i.test(raw) && /^(Mon|Tue)$/i.test(sastWeekday(now))) return "last_night";
-  return explicitPast ? ageMoment(at, now) : ageMoment(at, now);
+  return ageMoment(at, now);
 }
 export function classifySituationMessage(text: string, at: Date, now = new Date()): ResolvedSituation {
   const raw = String(text || "").trim(); const birthday = CELEBRATION_RE.test(raw); const eatingOut = OUTING_RE.test(raw); const foodClosed = FOOD_CLOSED_RE.test(raw);
@@ -72,7 +72,7 @@ function resolveAttributionReference(token: string, now: Date): { dayKey: string
   const dayMatch = t.match(/^(this|last|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/);
   if (dayMatch) { const mode = dayMatch[1], target = DAY_WORDS[dayMatch[2]], current = attributionSastParts(now).weekday; let delta = (target - current + 7) % 7; if (mode === "last") delta = delta === 0 ? -7 : delta - 7; else if (mode === "this") { if (delta > 0) delta -= 7; } else return { dayKey: null, confidence: "ambiguous" }; return { dayKey: attributionDateKey(attributionShiftDays(now, delta)), confidence: "explicit" }; }
   const bareDay = t.match(/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/);
-  if (bareDay) { const target = DAY_WORDS[bareDay[1]], current = attributionSastParts(now).weekday; let delta = (target - current + 7) % 7; if (delta > 0) delta -= 7; return { dayKey: attributionDateKey(attributionShiftDays(now, delta)), confidence: "explicit" }; }
+  if (bareDay) { const target = DAY_WORDS[bareDay[1]], current = attributionSastParts(now).weekday; let delta = (target - current + 7) % 7; delta = delta === 0 ? -7 : delta - 7; return { dayKey: attributionDateKey(attributionShiftDays(now, delta)), confidence: "explicit" }; }
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) { const d = new Date(`${t}T12:00:00Z`); return Number.isNaN(d.getTime()) ? { dayKey: null, confidence: "ambiguous" } : { dayKey: t, confidence: "explicit" }; }
   const dmy = t.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
   if (dmy) { const year = dmy[3].length === 2 ? 2000 + Number(dmy[3]) : Number(dmy[3]); const iso = `${String(year).padStart(4, "0")}-${String(Number(dmy[2])).padStart(2, "0")}-${String(Number(dmy[1])).padStart(2, "0")}`; const parsed = new Date(`${iso}T12:00:00Z`); return Number.isNaN(parsed.getTime()) ? { dayKey: null, confidence: "ambiguous" } : { dayKey: iso, confidence: "explicit" }; }
