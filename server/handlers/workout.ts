@@ -18,7 +18,7 @@ import { checkPerfectDay } from "./checks";
 import { storeMemory } from "../memory";
 import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
-import { logChat, turnMutation } from "./chat-log";
+import { logChat, turnMutation, turnAlreadyWrote } from "./chat-log";
 import { sastDayKey } from "../sast";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
 import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen } from "../utils";
@@ -290,7 +290,10 @@ export async function handleWorkoutCommands(ctx: {
   // Question guard uses the shared looksLikeQuestion (not a bare "?" check): a voice
   // transcript that drops the mark — "is yesterday's session logged", "should that
   // have counted" — must not retro-log a session it's only asking about.
-  const isRetroDone = !looksLikeQuestion(m) && when.when === "historical" && hasCompletionWord && !hasMissWord;
+  // A multi-day report is dated by the owner that can date it; this door must not write the same
+  // session again on the first day the bubble happens to mention (2026-08-25).
+  const alreadyLoggedThisTurn = turnAlreadyWrote("workout");
+  const isRetroDone = !alreadyLoggedThisTurn && !looksLikeQuestion(m) && when.when === "historical" && hasCompletionWord && !hasMissWord;
 
   if (isRetroDone) {
     const retroDate = when.date;
@@ -318,21 +321,28 @@ export async function handleWorkoutCommands(ctx: {
     invalidatePatternCache(user.id);
 
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
-    const trainingDays = user.trainingDaysPerWeek || 3;
-    const todaySlot = getTodaySlot(user);
-    const nextDay = (todaySlot % trainingDays) + 1;
-    const weekAdvance = todaySlot === trainingDays;
-    const newWeek = weekAdvance ? (user.programmeWeek || 1) + 1 : (user.programmeWeek || 1);
 
-    // Advance lastWorkoutDate only if the retroactive session is more recent — keeps
-    // streak tracking correct when someone logs yesterday before doing today's session.
+    // ── A HISTORICAL WRITE MAY NOT MOVE TODAY (2026-08-25, P0-3) ──────────────────────────────
+    //
+    // This block used to advance programmeDayInWeek and programmeWeek. So "I trained on Monday"
+    // moved TODAY's programme cursor forward — the client was told, correctly, that Monday was
+    // logged, and silently lost today's session slot with it. Backfilling a past day is a
+    // statement about that day and about nothing else.
+    //
+    // WHAT A PAST DAY MAY STILL CHANGE, and why:
+    //   totalWorkoutsCompleted  a session really happened; the lifetime count is a fact about the
+    //                           past, not a claim about today.
+    //   lastWorkoutDate         only when the backfilled day is genuinely MORE RECENT than what
+    //                           we hold — it is a max over real events, so a Monday log cannot
+    //                           overwrite a Wednesday one.
+    //
+    // WHAT IT MAY NOT CHANGE: the programme cursor. Which session is due TODAY is decided by the
+    // schedule and by what was done today, and a backfill answers neither question.
     const currentLastWorkout = user.lastWorkoutDate ? new Date(user.lastWorkoutDate).getTime() : 0;
     const updateLastWorkout = retroDate.getTime() > currentLastWorkout;
 
     await db.update(users).set({
       totalWorkoutsCompleted: newTotal,
-      programmeDayInWeek: nextDay,
-      programmeWeek: newWeek,
       lastActiveAt: new Date(),
       ...(updateLastWorkout ? { lastWorkoutDate: retroDate } : {}),
     }).where(eq(users.phoneNumber, phone));
@@ -448,7 +458,7 @@ export async function handleWorkoutCommands(ctx: {
   // ---- WORKOUT DONE — log completion ----
   // NO TODAY WRITE UNLESS TODAY IS WHAT THEY SAID. The verdict gates the whole branch, including
   // the anchored short forms — an invariant on the write, not a guard bolted to one matcher.
-  const isDone = when.when === "today" && (reportsOneSession || (
+  const isDone = !alreadyLoggedThisTurn && when.when === "today" && (reportsOneSession || (
     /^(done|finished|complete|completed|trained)[.!?]?$/i.test(m)
     || /^done\s*[💪✅🔥][.!?]?$/.test(m)
     || /^(?:workout|session|training|gym)\s+(?:done|complete|finished)[.!?]?$/i.test(m)

@@ -64,6 +64,19 @@ const BUDGET = {
    */
   regexLiterals: 449,
   /**
+   * GUARD #13 — see unreachableExports above. Sixty-two capabilities cannot be reached by a
+   * client message today. This budget is deliberately set THREE BELOW that, so this guard is RED
+   * on the commit that introduces it and goes green only when the multi-day attribution owner —
+   * attributeMultiDayReport, resolveRecentSituation, classifySituationMessage — is wired into the
+   * live path. A guard that arrives already satisfied teaches nothing.
+   *
+   * The remaining 59 are declared debt, not permission. The largest block is the 21 scheduler
+   * jobs that are exported and never registered; whether the product wants a Monday check-in or
+   * a plateau nudge is a product decision, and this number is where that decision gets made
+   * rather than forgotten. LOWER THIS as capabilities are wired or deleted. Never raise it.
+   */
+  unreachableCapabilities: 59,
+  /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
    * something other than the engine can put words in front of a client.
    *
@@ -508,6 +521,51 @@ function countClientFacingMouths(files: string[]): number {
   return n;
 }
 
+/**
+ * GUARD #13 — REACHABILITY (2026-08-25).
+ *
+ * THE DEFECT THIS EXISTS TO STOP, measured on main@0950344d: `attributeMultiDayReport` — the
+ * multi-day attribution merged in PR #52 and described as a shipped product slice — had EIGHT
+ * test references and ZERO production callers. A client message could not reach it. The suite was
+ * green because the suite tests the library, not the pipeline.
+ *
+ * It was not an isolated mistake. `journeyMustKeepFacts` was written for the multi-intent failure
+ * and sat with no callers until 24 August. A `sessionsTarget` wiring added on 24 August was
+ * unreachable and was deleted when its own negative control refused to fail. And 21 of the 44
+ * scheduler jobs in this repo are exported and never registered with cron — half the proactive
+ * surface, including plateau detection, injury follow-up and the weekly check-in.
+ *
+ * That is the six-month loop in one sentence: correct owners were built, and nothing checked that
+ * the live path could reach them. So the founder's handset became the first integration test, the
+ * old behaviour was blamed on the architecture, and another layer was added.
+ *
+ * A capability is not implemented because it is written, and not shipped because it is tested. It
+ * is shipped when a client message can reach it.
+ *
+ * WHAT COUNTS AS REACHABLE: referenced by another server/shared module, used inside its own file,
+ * or named as a string (dynamic dispatch). `_`-prefixed exports are test seams by convention and
+ * are exempt. HONEST BOUND: only `export function` declarations are examined — an unreachable
+ * `export const fn = () => …` is not yet seen. That is a detector gap, not a licence.
+ */
+function unreachableExports(prod: string[], probes: string[]): Array<{ file: string; name: string; tested: boolean }> {
+  const src = prod.map(f => [f, readFileSync(f, "utf-8")] as const);
+  const blob = src.map(([, s]) => s).join("\n");
+  const probeSrc = probes.map(f => readFileSync(f, "utf-8"));
+  const out: Array<{ file: string; name: string; tested: boolean }> = [];
+  for (const [f, s] of src) {
+    for (const m of s.matchAll(/^export (?:async )?function (\w+)/gm)) {
+      const name = m[1];
+      if (name.startsWith("_")) continue;
+      const word = new RegExp(`\\b${name}\\b`);
+      if (src.some(([g, t]) => g !== f && word.test(t))) continue;      // another module calls it
+      if ((s.match(new RegExp(`\\b${name}\\b`, "g")) || []).length > 1) continue;  // used in-file
+      if (new RegExp(`["'\`]${name}["'\`]`).test(blob)) continue;      // dispatched by name
+      out.push({ file: f, name, tested: probeSrc.some(t => word.test(t)) });
+    }
+  }
+  return out;
+}
+
 const files = [...walk("server"), ...walk("shared")];
 const read = (f: string) => readFileSync(f, "utf-8");
 const all = files.map(read);
@@ -529,6 +587,8 @@ const actual = {
   // and can only fall from here.
   regexLiterals: all.join("\n").match(/=\s*\/(?:[^/\\\n]|\\.){10,}\/[gimsuy]*/g)?.length || 0,
   authorshipPoints: countClientFacingMouths(files),
+  /** Exported capabilities no client message can reach. See GUARD #13. */
+  unreachableCapabilities: unreachableExports(files, walk("script")).length,
   // EVERY PLACE THAT TALKS TO TWILIO DIRECTLY (2026-08-05).
   //
   // Twilio is a reseller of Meta's WhatsApp API, not the destination — OUTSTANDING.md has
@@ -741,6 +801,14 @@ const ownership = problems.filter(p => p.includes("[OWNERSHIP]"));
 console.log(ownership.length === 0
   ? "ownership: OK — one owner per declared question, one reader per declared fact"
   : `ownership: ${ownership.length} VIOLATION(S) — a second authority exists`);
+
+const unreachable = unreachableExports(files, walk("script"));
+if (actual.unreachableCapabilities > BUDGET.unreachableCapabilities) {
+  problems.push(`  ↳ unreachable capabilities (${unreachable.length}) — no client message can reach these:`);
+  for (const u of unreachable.filter(x => x.tested).slice(0, 12)) {
+    problems.push(`      ${u.name}  ${u.file}${u.tested ? "   [tested, unshipped]" : ""}`);
+  }
+}
 
 if (problems.length > 0) {
   console.error("architecture guard: FAILED\n");

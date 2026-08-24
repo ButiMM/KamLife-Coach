@@ -37,7 +37,7 @@ import { stripSignupSource } from "./signup-source";
 import { captureSignupSource } from "./signup-capture";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
-import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnMutations, turnEvidence } from "./handlers/chat-log";
+import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnMutations, turnAlreadyWrote, turnEvidence } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
 import { handleWorkoutCommands } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
@@ -49,6 +49,7 @@ import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
 import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains } from "./understanding/messy-intake";
 import { foodDayIsClosed, trainingDayIsDeclined } from "./one-action";
+import { backfillAttributedDays } from "./backfill";
 import { isCoachCriticism } from "./reaction-guard";
 import { bareReactionFallback } from "./reaction-guard";
 import { mustStayDeterministic } from "./understanding/action-router";
@@ -828,6 +829,49 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // whatever handler would have answered it; this observes in passing so the hunger doctrine can
   // ask "how many DAYS?" rather than react to one isolated message. Fire-and-forget.
   if (reportsHunger(message)) captureSymptom("hunger", { userId: user.id, phone, messageIn: message });
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  // THE BATCH LOGGER'S TURN (2026-08-25, P0-2).
+  //
+  // "Monday pap and chicken. Tuesday eggs and toast. Wednesday I trained and walked 8k."
+  //
+  // Our cohort does not log meal-by-meal; they disappear and then send several days at once. The
+  // owner that dates those beats has existed since PR #52 and had zero production callers — the
+  // capability was merged, tested and unreachable. This is where a client message reaches it.
+  //
+  // It runs BEFORE the single-domain handlers because each of them would claim the whole message
+  // and write one day. It declines anything that is not a multi-day report, so every existing
+  // single-day path is untouched.
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  let _backfillNote = "";
+  if (!mediaUrl) {
+    const backfilled = await backfillAttributedDays(user, message).catch(e => {
+      console.warn("[BACKFILL] skipped:", (e as any)?.message || e);
+      return null;
+    });
+    if (backfilled && backfilled.writes.length > 0 && backfilled.foodOwnedElsewhere) {
+      // The food owner composes this turn's reply. The session and steps were still written, on
+      // the days the client named, and an unacknowledged write is how "did you even log it?"
+      // happens — so the line rides along on the reply that does go out.
+      _backfillNote = "\n\n" + backfilled.days.map(day =>
+        `*${mealDateLabel(new Date(`${day}T12:00:00+02:00`))}:* ` +
+        backfilled.writes.filter(w => w.dayKey === day).map(w => w.detail).join(" · ")).join("\n");
+    }
+    if (backfilled && backfilled.writes.length > 0 && !backfilled.foodOwnedElsewhere) {
+      const byDay = backfilled.days.map(day => {
+        const label = mealDateLabel(new Date(`${day}T12:00:00+02:00`));
+        const what = backfilled.writes.filter(w => w.dayKey === day).map(w => w.detail).join(" · ");
+        return `• ${label}: ${what}`;
+      }).join("\n");
+      const missing = backfilled.undated.length > 0
+        ? `\n\nI couldn't place "${backfilled.undated[0].slice(0, 40)}" — which day was that?`
+        : "";
+      const backfillReply = `Got it — logged across ${backfilled.days.length} day${backfilled.days.length === 1 ? "" : "s"}:\n${byDay}${missing}`;
+      await logChat(user.id, message, backfillReply, "MULTI_DAY_BACKFILL");
+      return backfillReply;
+    }
+  }
+
   const foodLogMgmtResult = await handleFoodLogMgmt(user, m);
   if (foodLogMgmtResult !== null) {
     // This is where the street-food educator claimed the 11:24 turn. It may still answer — after
@@ -1073,7 +1117,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // Future-intent guard: "I'll walk 10k tomorrow" slips past the question check — must not log
   // today. Explicit "walked 8,000 steps" is a log even if the classifier tagged the note a
   // QUESTION because they also said "I'm exhausted" (live 2026-08-19 mixed note — steps dropped).
-  if (sd.loggableByForm && !isFutureIntent(m) && !mentionsNotDone(m) && (sd.isExplicitLog || !normalizedQuestion) && sd.matched) {
+  if (sd.loggableByForm && !turnAlreadyWrote("steps") && !isFutureIntent(m) && !mentionsNotDone(m) && (sd.isExplicitLog || !normalizedQuestion) && sd.matched) {
     let steps = sd.steps;                       // a "8000 not 5000" correction rewrites it below
     const stepHasMovementSignal = sd.hasMovementSignal;
     if (!isNaN(steps) && steps > 0 && steps <= 100 && stepHasMovementSignal) {
@@ -1179,7 +1223,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     classifierQuestion: normalizedQuestion,
     forceLog: turnFacts.mustForceFoodLog,
   });
-  if (foodCtxResult !== null) commitFact(turn, "food", foodCtxResult);
+  if (foodCtxResult !== null) commitFact(turn, "food", foodCtxResult + _backfillNote);
 
   // ── THE ONE COMPOSE ── replaces the food+feeling special case that used to live here, and
   // the food+steps string concatenation that lived inside food-context before that.

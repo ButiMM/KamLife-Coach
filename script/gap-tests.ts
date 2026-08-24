@@ -157,7 +157,10 @@ test("cut 1: no handler may end a multi-fact turn", () => {
   ]) assert.ok(guard.test(code), `a co-occurring handler still claims the turn: ${guard}`);
   assert.ok(/const mayEndTurn = \(who: string\): boolean => \{[\s\S]{0,200}?if \(multiFact\) return false;[\s\S]{0,200}?factsStillOwed\(\)/.test(code),
     "mayEndTurn must refuse on multiFact AND on any fact stated-but-unwritten");
-  assert.ok(/commitFact\(turn, "food", foodCtxResult\)/.test(code), "food commits like the rest");
+  // The backfill note rides along on the food reply so a written session is acknowledged in the
+  // same message (2026-08-25) — the commit is still the food owner's, with that line appended.
+  assert.ok(/commitFact\(turn, "food", foodCtxResult \+ _backfillNote\)/.test(code),
+    "food commits like the rest");
 });
 
 test("cut 1: the hand-stitched pair branches are gone", () => {
