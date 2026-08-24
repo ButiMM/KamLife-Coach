@@ -25,9 +25,8 @@ export function morningClosingLine(
   if (ctx.activelyEngaged) return "";
   switch (trajectory) {
     case "RECOVERING":
-      return `\n\n_Good to have you back. This week counts._`;
     case "DISENGAGED":
-      return `\n\n_Today starts from where you are. Nothing is reset._`;
+      return `\n\n_Good to have you back. This week counts._`;
     default:
       return "";
   }
