@@ -2254,6 +2254,66 @@ async function main() {
     assert.equal(after.totalWorkoutsCompleted, 8, "the lifetime session count was not updated");
   });
 
+  // ── P0-4 · ONE COACH AT BOTH DOORS (2026-08-25) ───────────────────────────────────────────
+  //
+  // The behavioural-authority work lives in reconcileTurnReply, inside `inTurn` — so it governed
+  // REACTIVE replies only. 69 proactive sends across 14 files, 3 of which consult the decision
+  // owner. This grades the shared floor: a claim about durable state, checked against durable
+  // state, on the proactive path too.
+  check("P0-4 . a proactive send may not assert a training count the record denies", async () => {
+    const { enforceOutboundTruth } = await import("../server/outbound-authority");
+    const { mealLogs, workoutLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+
+    const verdicts = await serialise(async () => {
+      // The record holds ONE session in the window.
+      g.__KAMLIFE_STUB_ROWS = new Map([[workoutLogs, [{ n: 1 }]]]);
+      const out = {
+        contradicts: await enforceOutboundTruth(USER.id, "whatsapp:+27000000101", "Strong week — that's 4 sessions in the bag."),
+        matches: await enforceOutboundTruth(USER.id, "whatsapp:+27000000102", "That's 1 session this week — let's build on it."),
+        noClaim: await enforceOutboundTruth(USER.id, "whatsapp:+27000000103", "Morning Kam. 8,500 steps today and protein first."),
+        firstSend: await enforceOutboundTruth(USER.id, "whatsapp:+27000000104", "Same message body for the duplicate check."),
+        repeat: await enforceOutboundTruth(USER.id, "whatsapp:+27000000104", "Same message body for the duplicate check."),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+
+    assert.ok(!verdicts.contradicts.ok, "a proactive message claimed 4 sessions against a record of 1");
+    assert.equal(verdicts.contradicts.reason, "session_count_contradicts_record");
+    assert.ok(verdicts.matches.ok, `a truthful count was blocked: ${verdicts.matches.detail}`);
+    // THE CONTROL THAT KEEPS THIS HONEST: the morning brief's step TARGET carries no evidence and
+    // must still go out. Porting verifyBrainReply wholesale would have silenced it.
+    assert.ok(verdicts.noClaim.ok, `an ordinary proactive message was blocked: ${verdicts.noClaim.detail}`);
+    assert.ok(verdicts.firstSend.ok, "the first send of a message was blocked");
+    assert.ok(!verdicts.repeat.ok && verdicts.repeat.reason === "duplicate",
+      "the same proactive message went out twice");
+  });
+
+  check("P0-4b . the proactive DOOR consults the floor, not just the floor existing", async () => {
+    // The first version of this asserted the source contained the call — and stayed green when
+    // the door was changed to ignore the verdict. This drives sendWhatsApp itself.
+    const { sendWhatsApp } = await import("../server/scheduler/shared");
+    const { workoutLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+    const seen = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map([[workoutLogs, [{ n: 1 }]]]);
+      const from = CONSOLE_LINES.length;
+      const realErr = console.error;
+      const errs: string[] = [];
+      console.error = (...a: any[]) => { errs.push(a.map(String).join(" ")); };
+      try {
+        await sendWhatsApp("whatsapp:+27000000201", "Strong week — that's 4 sessions in the bag.").catch(() => undefined);
+      } finally { console.error = realErr; }
+      delete g.__KAMLIFE_STUB_ROWS;
+      return { errs, after: CONSOLE_LINES.slice(from) };
+    });
+    assert.ok(seen.errs.some(l => /OUTBOUND_AUTHORITY\] BLOCKED/.test(l)),
+      `the door sent a message the floor rejected: ${JSON.stringify(seen.errs).slice(0, 160)}`);
+    assert.ok(!seen.after.some(l => /SCHEDULER\] Sent|delivery/i.test(l)),
+      "a rejected proactive message still reached the send path");
+  });
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");
