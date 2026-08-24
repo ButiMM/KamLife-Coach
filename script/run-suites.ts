@@ -44,7 +44,7 @@ for (const name of SUITES) {
 
 const failures = results.filter(r => !r.ok);
 for (const f of failures) {
-  console.log(`\n${"─".repeat(78)}\n✗ ${f.name}${f.note ? ` — ${f.note}` : ""}\n${"─".repeat(78}`);
+  console.log(`\n${"─".repeat(78)}\n✗ ${f.name}${f.note ? ` — ${f.note}` : ""}\n${"─".repeat(78)}`);
   console.log(f.output.trimEnd() || "(no output)");
 }
 
