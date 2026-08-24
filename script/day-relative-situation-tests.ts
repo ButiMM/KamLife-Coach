@@ -29,7 +29,7 @@ const mixed = resolveRecentSituation([
   { text: "This weekend is my girlfriend's birthday and we're going out.", at: friday },
   { text: completedWeekend, at: monday },
 ], monday);
-assert.equal(mixed.kind, "celebration_outing");
+assert.equal(mixed.kind, "celebration");
 assert.equal(mixed.moment, "last_night");
 assert.equal(mixed.sourceText, completedWeekend);
 
