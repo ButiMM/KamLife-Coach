@@ -1,0 +1,49 @@
+name: CTO one-shot fix
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/heads/${{ github.head_ref }}
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Patch exact type error
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('server/handlers/gpt-block.ts')
+          s = p.read_text()
+          old = 'const decision = await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold", reply: "" }));'
+          new = 'const decision = (await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold", reply: "" }))) as { todo: string; kind: string; reply: string };'
+          assert old in s
+          p.write_text(s.replace(old, new, 1))
+      - name: Validate
+        run: |
+          npm run check
+          npx tsx script/reaction-guard-tests.ts
+          npx tsx script/current-date-tests.ts
+          npx tsx script/day-relative-situation-tests.ts
+          npx tsx script/coach-loop-foundation-tests.ts
+          git diff --check
+      - name: Commit to builder branch
+        run: |
+          git config user.name 'KamLife CTO Builder'
+          git config user.email 'cto-builder@kamlife.local'
+          git add server/handlers/gpt-block.ts
+          git commit -m 'Fix canonical decision type boundary'
+          git push origin HEAD:${GITHUB_HEAD_REF}
