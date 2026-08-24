@@ -270,7 +270,7 @@ export function foodDayIsClosed(text: string): boolean {
   const t = String(text || "");
   if (!t.trim()) return false;
   if (/\b(?:won'?t|will not|not (?:going to|gonna)|can'?t|cannot)\s+(?:be able to\s+)?eat(?:\s+anymore)?\b/i.test(t)) return true;
-  if (/\bno more food\b/i.test(t) || /\bdone eating\b/i.test(t)) return true;
+  if (/\bno more food\b/i.test(t)) return true;
   // A STATED CESSATION OF EATING, COMPOSED RATHER THAN LISTED (2026-08-24).
   //
   // "I think I'm going to stop eating today" and "I'm not eating anymore today" are the same
@@ -281,8 +281,13 @@ export function foodDayIsClosed(text: string): boolean {
   //
   // The closure marker must follow the verb IMMEDIATELY: "not eating anymore today" closes the
   // day, "not eating junk today" is a food choice and must not.
+  // THE CESSATION MUST APPLY TO EATING ITSELF (2026-08-24). "I'm done eating badly" and "I'm done
+  // eating junk" are about the MANNER and the OBJECT of eating — the client is still eating. The
+  // bare `done eating` clause this replaces read both as a closed food day. So the verb must be
+  // followed by the end of the clause or by a marker that scopes it in TIME; an adverb or a food
+  // noun after it means they described how they eat, not that they have stopped.
   if (!/\b(?:can'?t|cannot|couldn'?t|struggle(?:s|d)? to|unable to)\s+(?:stop|quit)\s+eating\b/i.test(t)
-      && /\b(?:not|no longer|done|finished|stop|stopping|quit|quitting)\s+(?:going\s+to\s+|gonna\s+)?eat(?:ing)?\s+(?:anymore|any\s+more|again|today|tonight|for\s+(?:the\s+)?(?:rest\s+of\s+the\s+)?(?:day|today))\b/i.test(t)) return true;
+      && /\b(?:not|no longer|done|finished|stop|stopping|quit|quitting)\s+(?:going\s+to\s+|gonna\s+)?eat(?:ing)?(?=\s*(?:$|[.!?,;])|\s+(?:anymore|any\s+more|again|today|tonight|for\s+(?:the\s+)?(?:rest\s+of\s+the\s+)?(?:day|today|night|evening)|for\s+now|until\s+tomorrow)\b)/i.test(t)) return true;
   if (/\b(?:just|only)\s+(?:going to |gonna )?(?:have )?(?:alcohol|drinks|zero[- ]calorie)/i.test(t)) return true;
   if (/\b(?:alcohol|zero[- ]calorie drinks).{0,60}(?:today|tonight|the rest of the day)\b/i.test(t)) return true;
   return false;

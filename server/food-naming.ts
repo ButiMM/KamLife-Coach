@@ -80,11 +80,6 @@ export function displayFoodName(clientWords: string, entryName: string): string 
  */
 const NUMBERS_MOVING = /\b(in oil|in brine|in syrup|full cream|fried)\b/i;
 
-export function assumptionNote(pairs: Array<{ clientWords: string; entryName: string }>): string {
-  const notable = pairs.filter(p =>
-    inventedQualifiers(p.clientWords, p.entryName).some(q => NUMBERS_MOVING.test(q)),
-  );
-  if (notable.length === 0) return "";
-  const first = notable[0];
-  return `\n\n_Counted your ${first.clientWords.toLowerCase()} as ${first.entryName.toLowerCase()} — tell me if it was different and I'll fix it._`;
-}
+// DELETED 2026-08-24: assumptionNote() — an unreachable mouth. It returned client-facing prose
+// ("Counted your X as Y…") and nothing called it, in this file or any other. A mouth nobody
+// calls is still a mouth the next reader wires back up.

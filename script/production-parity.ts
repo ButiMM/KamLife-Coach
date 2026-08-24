@@ -2072,9 +2072,16 @@ async function main() {
                           "I'm done eating for today", "No more food today"]) {
       assert.ok(foodDayIsClosed(closed), `a stated cessation was not read as one: ${closed}`);
     }
+    // THE CESSATION MUST APPLY TO EATING ITSELF. "done eating badly" / "done eating junk" describe
+    // the MANNER and the OBJECT — the client is still eating.
     for (const open of ["I can't stop eating", "I cannot stop eating today",
-                        "I'm not eating junk today", "I'm eating out tonight"]) {
+                        "I'm not eating junk today", "I'm eating out tonight",
+                        "I'm done eating badly", "I'm done eating junk",
+                        "I stopped eating gluten today", "I'm done eating out for today"]) {
       assert.ok(!foodDayIsClosed(open), `the food day was closed by mistake: ${open}`);
+    }
+    for (const closed2 of ["I'm done eating", "I'm done eating for the night"]) {
+      assert.ok(foodDayIsClosed(closed2), `a real closure was lost to the manner guard: ${closed2}`);
     }
     const base = {
       goal: "fat_loss", weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 1,
@@ -2153,6 +2160,25 @@ async function main() {
       assert.match(reply, /rest today|when you'?re ready/i,
         `the refusal was not acknowledged: ${reply.slice(0, 90)}`);
     }
+    // A REQUEST TO MOVE A WORKOUT IS A SCHEDULE DECISION, NOT A REQUEST TO RENDER IT.
+    // "Can I do my workout tomorrow instead?" answered with the session was the client asking
+    // permission and being handed the object. The renderer stays one message away, on their terms.
+    for (const ask of ["Can I do my workout tomorrow instead?", "Can I train tomorrow instead?"]) {
+      const reply = await serialise(() => say(ask));
+      assert.ok(!/Week \d|Next Session|Foundation Phase|Send \*?DONE/i.test(reply),
+        `a schedule question was answered with the workout: ${ask} → ${reply.slice(0, 80)}`);
+      assert.match(reply, /rest day|do this session tomorrow|do it later today/i,
+        `the schedule question got no schedule answer: ${ask} → ${reply.slice(0, 80)}`);
+    }
+    // …and asking to SEE it still renders it — including when the ASK is phrased as permission.
+    // "Can I get tomorrow's session?" is a possessive naming the object; "Can I do my workout
+    // tomorrow?" proposes a time. Grammar decides, not a verb list.
+    for (const view of ["Show me tomorrow's workout.", "Tomorrow's workout?",
+                        "Can I see tomorrow's workout?", "Can I get tomorrow's session?"]) {
+      const reply = await serialise(() => say(view));
+      assert.match(reply, /Week \d/i, `a view request stopped rendering: ${view} → ${reply.slice(0, 70)}`);
+    }
+
     // The opposite still holds end to end: a reported session is still written to today.
     const trained = await writesFor("I trained chest today. What should I eat now?");
     assert.ok(trained.workout, "a reported session stopped being recorded");

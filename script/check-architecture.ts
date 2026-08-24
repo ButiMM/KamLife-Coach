@@ -62,7 +62,7 @@ const BUDGET = {
    * to the true figure in one deliberate commit. Until then this red line is the marker, and it is
    * the ONLY thing in this guard that is red — one red line means something, four never did.
    */
-  regexLiterals: 318,
+  regexLiterals: 449,
   /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
    * something other than the engine can put words in front of a client.
@@ -163,6 +163,28 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "regexLiterals", from: 318, to: 449, date: "2026-08-24",
+    why: "NOT A RAISE — A CORRECTED MEASUREMENT, and the follow-up this budget's own comment "
+      + "declared owed on 2026-08-17: \"repair the matcher to see multi-line assignments and "
+      + "re-baseline to the true figure in one deliberate commit.\" This is that commit. The "
+      + "matcher required `= /` on a single line and its `[^/\\n]` class stopped at the first "
+      + "slash, so it missed both the multi-line assignment form AND every pattern containing an "
+      + "escaped slash. Nothing was added to the codebase to move this number: 377 was what the "
+      + "broken matcher could see, 449 is what has been there all along, and the delta is 72 "
+      + "patterns that existed before this commit and were never counted. The old note estimated "
+      + "~381; the measured figure is 449, because the escaped-slash blind spot was not in that "
+      + "estimate. TRIED FIRST, and rejected: leaving the matcher broken and the line red, which "
+      + "is what the 2026-08-17 note explicitly refused to accept as a final state — a counter "
+      + "that cannot see 16% of its subject cannot support a decision about growth, and a red "
+      + "line nobody can act on trains people to ignore the guard. PAID BACK by the same commit: "
+      + "server/replit_integrations/{chat,image,batch,audio}/index.ts deleted (four unreferenced "
+      + "barrel re-exports; the one apparent importer was a line inside a comment), which returned "
+      + "modules from 243 to 239 — GREEN, unraised — and two unreachable functions removed, "
+      + "food-naming.assumptionNote (a client-facing mouth nothing called) and "
+      + "food-swaps.substituteFor. FROM HERE IT FALLS ONLY. Every pattern this now sees is a real "
+      + "pattern, and the honest count is the one worth arguing about.",
+  },
   {
     key: "modules", from: 237, to: 239, date: "2026-08-17",
     why: "TWO modules, TWO DISTINCT REASONS — recorded separately because collapsing them into "
@@ -496,7 +518,16 @@ const actual = {
   cronRegistrations: all.join("\n").match(/cron\.schedule\(|schedule\("/g)?.length || 0,
   messageDeciders: all.filter(s => /\.test\(m\)/.test(s)).length,
   looksLikePredicates: new Set(all.join("\n").match(/function looksLike[A-Za-z]*/g) || []).size,
-  regexLiterals: all.join("\n").match(/= \/[^/\n]{10,}\/[gimsuy]*/g)?.length || 0,
+  // MATCHER REPAIRED 2026-08-24 — the follow-up this guard's own note declared owed. It had TWO
+  // blind spots: `= /` had to be on ONE line, so the multi-line form
+  //     const isProfileUpdateMsg =
+  //       /\b(train(ing)?…)/i.test(m);
+  // was invisible; and `[^/\n]` stopped at the first slash, so any pattern containing an ESCAPED
+  // slash (`\/\s*day\b`) was missed too. 377 counted, 449 actually present — 16% of this
+  // metric's own subject was unseen, which is how duplicate patterns sat unnoticed long enough to
+  // need a migration. The budget below is re-baselined to the true figure ONCE, in this commit,
+  // and can only fall from here.
+  regexLiterals: all.join("\n").match(/=\s*\/(?:[^/\\\n]|\\.){10,}\/[gimsuy]*/g)?.length || 0,
   authorshipPoints: countClientFacingMouths(files),
   // EVERY PLACE THAT TALKS TO TWILIO DIRECTLY (2026-08-05).
   //

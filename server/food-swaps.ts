@@ -341,12 +341,8 @@ const SUBSTITUTES: Array<{ match: RegExp; job: FoodJob; sub: Substitution }> = [
 export const UNAVAILABLE_RE = /\b(could ?n[o']?t find|couldn t find|did ?n[o']?t have|don't have|dont have|no more|out of stock|sold out|finished|too expensive|can'?t afford|too pricey|nothing left|they were out)\b/i;
 
 /** The substitution for a named food, or null when we have nothing honest to offer. */
-export function substituteFor(foodName: string): Substitution | null {
-  const f = (foodName || "").toLowerCase().trim();
-  if (!f) return null;
-  for (const row of SUBSTITUTES) if (row.match.test(f)) return row.sub;
-  return null;
-}
+// DELETED 2026-08-24: substituteFor() — unreferenced. The SUBSTITUTES table it read is still
+// used by the live swap path below; only this unused accessor is gone.
 
 /**
  * A LOCAL CHANGE TO A LIST ALREADY SENT — answered locally, never by rebuilding the list
