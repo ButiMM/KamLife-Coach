@@ -1,4 +1,4 @@
-name: CTO one-shot fix
+name: CTO one-shot situation
 
 on:
   pull_request:
@@ -22,108 +22,31 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Integrate exact Coach-loop owners
+      - name: Fix semantic day-relative situation
         shell: python
         run: |
           from pathlib import Path
           import re
 
-          p = Path('server/handlers/gpt-block.ts')
-          s = p.read_text()
-          old = 'const decision = await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold" }));'
-          new = 'const decision = (await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold", reply: "" }))) as { todo: string; kind: string; reply: string };'
-          if old in s: s = s.replace(old, new, 1)
-          p.write_text(s)
-
-          p = Path('server/handlers/misc-commands.ts')
-          s = p.read_text()
-          if 'from "../understanding/current-date"' not in s:
-              needle_import = 'import { daysOnProgramme } from "../day-ledger-core";\n'
-              assert needle_import in s
-              s = s.replace(needle_import, needle_import + 'import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";\n', 1)
-          anchor = '  const { phone, message, m, user, wroteThisTurn } = ctx;\n'
-          block = '''  if (isCurrentDateQuestion(message)) {\n    const reply = currentDateAnswer();\n    await logChat(user.id, message, reply, "CURRENT_DATE");\n    return reply;\n  }\n\n  if (/^(?:and|what about|how about)\\s+(?:the\\s+)?steps\\s*\\?$/i.test(m.trim())) {\n    const [todayStep] = await db.select({ steps: stepLogs.steps })\n      .from(stepLogs)\n      .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart())))\n      .orderBy(desc(stepLogs.loggedAt))\n      .limit(1);\n    const steps = Number(todayStep?.steps || 0);\n    const target = Number(user.stepsTarget) || 8500;\n    const name = getDisplayName(user) || "there";\n    const reply = !steps\n      ? `${name} — nothing logged yet today. Your target is ${target.toLocaleString()} steps.`\n      : steps >= target\n        ? `${name} — ${steps.toLocaleString()} steps today. Target hit ✅`\n        : `${name} — ${steps.toLocaleString()} steps so far. ${Math.max(0, target - steps).toLocaleString()} to hit your target.`;\n    await logChat(user.id, message, reply, "STEP_FOLLOW_UP");\n    return reply;\n  }\n'''
-          if 'CURRENT_DATE' not in s:
-              assert anchor in s
-              s = s.replace(anchor, anchor + '\n' + block, 1)
-          p.write_text(s)
-
-          p = Path('server/unlogged-notice.ts')
-          s = p.read_text()
-          old_import = 'import { parseMessyIntake } from "./understanding/messy-intake";\nimport { isFutureIntent } from "./utils";\n'
-          s = s.replace(old_import, 'import { parseMessyIntake } from "./understanding/messy-intake";\n', 1)
-          old = '''export function carriesFeelingClause(text: string): boolean {\n  return /\\b(i feel|i\\'m feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can\\'?t cope)\\b/i.test(text || "");\n}\n'''
-          new = '''export function carriesFeelingClause(text: string): boolean {\n  const raw = String(text || "");\n  const explicitFuture = /\\b(?:i(?:\\'m| am)?\\s+going\\s+to|i\\'?ll|i will|i won\\'?t|i plan to|i\\'?m planning to|i\\'?m about to)\\b/i.test(raw);\n  if (explicitFuture) return false;\n  return /\\b(i feel|i\\'m feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can\\'?t cope)\\b/i.test(raw);\n}\n'''
-          assert old in s
-          s = s.replace(old, new, 1)
-          p.write_text(s)
-
-          p = Path('server/memory.ts')
-          s = p.read_text()
-          if 'from "./understanding/day-relative-situation"' not in s:
-              needle_import = 'import { sastDaysBetween } from "./sast";\n'
-              assert needle_import in s
-              s = s.replace(needle_import, needle_import + 'import { resolveRecentSituation } from "./understanding/day-relative-situation";\n', 1)
-          helper = '''function situationLineForResolved(resolved: { kind: string; moment: string }): string {\n  if (resolved.kind === "celebration_outing") return "CURRENT SITUATION: Client has a celebration outing around the referenced period; restaurant eating is expected.";\n  if (resolved.kind === "celebration") return "CURRENT SITUATION: Client is in a birthday/celebration period around the referenced day.";\n  if (resolved.kind === "eating_out") return "CURRENT SITUATION: Client expects to eat out around the referenced period.";\n  if (resolved.kind === "food_closed") return "CURRENT SITUATION: Client has closed food around the referenced period.";\n  return "";\n}\n'''
-          if 'function situationLineForResolved' not in s:
-              s = s.replace('export function extractSalientSituation(clientMessages: string[]): string {', helper + '\nexport function extractSalientSituation(clientMessages: string[]): string {', 1)
-          old_load = re.search(r'export async function loadSalientSituation\(phone: string, currentMessage\?: string\): Promise<string> \{.*?\n\}\n\nexport async function loadSituationFrame', s, re.S)
-          new_load = '''export async function loadSalientSituation(phone: string, currentMessage?: string): Promise<string> {\n  const stamped = await recentClientMessagesStamped(phone);\n  if (currentMessage) stamped.unshift({ text: currentMessage, at: new Date() });\n  return situationLineForResolved(resolveRecentSituation(stamped));\n}\n\nexport async function loadSituationFrame'''
-          if old_load:
-              s = s[:old_load.start()] + new_load + s[old_load.end():]
-          old_frame = re.search(r'export async function loadSituationFrame\(phone: string, currentMessage\?: string\): Promise<string> \{.*?\n\}\n\nexport async function recentClientMessagesStamped', s, re.S)
-          new_frame = '''export async function loadSituationFrame(phone: string, currentMessage?: string): Promise<string> {\n  const stamped = await recentClientMessagesStamped(phone);\n  if (currentMessage) stamped.unshift({ text: currentMessage, at: new Date() });\n  const resolved = resolveRecentSituation(stamped);\n  if (!resolved.kind || resolved.moment === "stale") return "";\n  return frameSituationForClient(situationLineForResolved(resolved), resolved.moment as any);\n}\n\nexport async function recentClientMessagesStamped'''
-          if old_frame:
-              s = s[:old_frame.start()] + new_frame + s[old_frame.end():]
-          old_render = '''  if (/celebration outing/i.test(s)) {\n    return when === "last_night"\n      ? "Last night was the birthday outing. Today we start the week — no chasing yesterday."\n      : "Today is the birthday outing, so we're not trying to make the whole day perfect. Enjoy yourself — we'll keep the rest of the day sensible.";\n  }\n'''
-          new_render = '''  if (/celebration outing/i.test(s)) {\n    return when === "last_night"\n      ? "Last night was the birthday outing. Today we start the week — no chasing yesterday."\n      : "Today is the birthday outing, so we're not trying to make the whole day perfect. Enjoy yourself — we'll keep the rest of the day sensible.";\n  }\n  if (/birthday\\/celebration period/i.test(s)) {\n    return when === "last_night"\n      ? "Last night was part of the birthday weekend. Today we start the week — no chasing yesterday."\n      : "It's a birthday period today. Enjoy it without trying to make the day perfect.";\n  }\n'''
-          if old_render in s: s = s.replace(old_render, new_render, 1)
-          p.write_text(s)
-
-          p = Path('server/reaction-guard.ts')
-          s = p.read_text()
-          old = '    .replace(/[\\u200d\\ufe0f\\u{1f3fb}-\\u{1f3ff}]/gu, "")\n'
-          new = '    .replace(/[\\u200d\\ufe0f\\u{1f3fb}-\\u{1f3ff}]/gu, "")\n    .replace(/\\p{Extended_Pictographic}/gu, "")\n'
-          assert old in s
-          if 'Extended_Pictographic' not in s: s = s.replace(old, new, 1)
-          p.write_text(s)
-
-          p = Path('server/handlers/food-context.ts')
-          s = p.read_text()
-          anchor = '''  if (isBotMissedMeal) {\n    const todayStartMissed = sastDayStart();\n'''
-          insert = '''  if (isBotMissedMeal) {\n    const missedPhrase = m.replace(/^.*?\\b(?:you (?:missed|forgot|skipped|left out)|you did(?:n\\'?t| not) (?:log|count|track|record)|you never logged|bot (?:missed|forgot))\\b/i, "").trim();\n    const missedFoods = missedPhrase.length > 1 ? scanForSAFoods(missedPhrase) : [];\n    if (missedFoods.length > 0) {\n      try {\n        const [lastMeal] = await db.select({ id: mealLogs.id, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt, mealLabel: mealLogs.mealLabel })\n          .from(mealLogs)\n          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sastDayStart())))\n          .orderBy(desc(mealLogs.loggedAt))\n          .limit(1);\n        if (lastMeal) {\n          const additions = adjustFoodsForSegment(missedFoods, missedPhrase, await getPortionMemory(user.id));\n          const items = Array.isArray(lastMeal.items) ? [...(lastMeal.items as any[])] : [];\n          const newItems = [...items];\n          let addedKcal = 0;\n          let addedProtein = 0;\n          for (const food of additions) {\n            const duplicate = newItems.some((item: any) => String(item?.name || item?.foodName || "").toLowerCase() === String(food.name || "").toLowerCase());\n            if (duplicate) continue;\n            newItems.push({ name: food.name, kcal: food.adjustedCalories || 0, protein: food.adjustedProtein || 0 });\n            addedKcal += food.adjustedCalories || 0;\n            addedProtein += food.adjustedProtein || 0;\n          }\n          if (newItems.length > items.length) {\n            const newKcal = Number(lastMeal.kcalInt || 0) + addedKcal;\n            const newProtein = Number(lastMeal.proteinInt || 0) + addedProtein;\n            await db.update(mealLogs).set({ items: newItems as any, kcalInt: newKcal, proteinInt: newProtein, corrected: true }).where(eq(mealLogs.id, lastMeal.id));\n            invalidateFoodTotalsCache(user.id);\n            const totals = await recomputeTodayFoodTotals(user.id);\n            await db.update(users).set({ todayCalories: totals.calories, todayProteinG: totals.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));\n            turnMutation(`MISSED_ITEM added=[${missedFoods.map(f => f.name).join(", ")}] to=${lastMeal.mealLabel || "last meal"}`);\n            const addedNames = newItems.slice(items.length).map((i: any) => i.name).join(", ");\n            const label = lastMeal.mealLabel || "your last meal";\n            await logChat(user.id, message, `Added ${addedNames} to ${label} ✅\\n\\nToday: ~${totals.calories} kcal | ~${totals.protein}g protein.`, "FOOD_LOG_CORRECTION");\n            return `Added ${addedNames} to ${label} ✅\\n\\nToday: ~${totals.calories} kcal | ~${totals.protein}g protein.`;\n          }\n        }\n      } catch (e) { console.warn("[MISSED_MEAL_ITEM]", e); }\n    }\n    const todayStartMissed = sastDayStart();\n'''
-          assert anchor in s
-          if 'MISSED_ITEM added=' not in s: s = s.replace(anchor, insert, 1)
-          p.write_text(s)
-
           p = Path('server/understanding/day-relative-situation.ts')
           s = p.read_text()
-          old = '''export function resolveSituationMoment(text: string, at: Date, now = new Date()): SituationMoment {\n  const raw = String(text || "").trim();\n  const explicitPast = EXPLICIT_PAST_NIGHT_RE.test(raw) || EXPLICIT_PAST_RE.test(raw);\n\n  // On Monday/Tuesday, a retrospective "this weekend was..." refers to the just-finished\n  // weekend. Do not let the word "today" elsewhere in that sentence promote it back to today.\n  if (THIS_WEEKEND_RE.test(raw) && explicitPast && /^(Mon|Tue)$/i.test(sastWeekday(now))) {\n    return "last_night";\n  }\n\n  if (explicitPast) return ageMoment(at, now);\n  if (EXPLICIT_TODAY_RE.test(raw)) return "today";\n  return ageMoment(at, now);\n}\n'''
-          new = '''function sastCalendarDay(date: Date): string {\n  return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);\n}\n\nconst WEEKEND_RE = /\\bweekend\\b/i;\n\nexport function resolveSituationMoment(text: string, at: Date, now = new Date()): SituationMoment {\n  const raw = String(text || "").trim();\n  const explicitPast = EXPLICIT_PAST_NIGHT_RE.test(raw) || EXPLICIT_PAST_RE.test(raw);\n  const senderDay = sastCalendarDay(at);\n  const currentDay = sastCalendarDay(now);\n\n  if (WEEKEND_RE.test(raw) && explicitPast && /^(Mon|Tue)$/i.test(sastWeekday(now))) return "last_night";\n  if (EXPLICIT_PAST_NIGHT_RE.test(raw)) return ageMoment(at, now) === "today" ? "last_night" : ageMoment(at, now);\n\n  if (EXPLICIT_TODAY_RE.test(raw)) {\n    if (senderDay === currentDay) return explicitPast ? ageMoment(at, now) : "today";\n    const senderDate = new Date(`${senderDay}T12:00:00Z`).getTime();\n    const currentDate = new Date(`${currentDay}T12:00:00Z`).getTime();\n    const diffDays = Math.floor((currentDate - senderDate) / 86_400_000);\n    if (diffDays === 1) return "last_night";\n    if (diffDays > 1) return "stale";\n  }\n\n  if (explicitPast && /\\b(?:weekend|last night|yesterday)\\b/i.test(raw) && /^(Mon|Tue)$/i.test(sastWeekday(now))) return "last_night";\n  if (explicitPast) return ageMoment(at, now);\n  return ageMoment(at, now);\n}\n'''
-          assert old in s
-          p.write_text(s.replace(old, new, 1))
-
-          p = Path('script/coach-loop-foundation-tests.ts')
-          s = p.read_text()
-          if 'carriesFeelingClause' not in s:
-              s = s.replace('import { morningClosingLine, composeMorning } from "../server/morning-message";\n', 'import { morningClosingLine, composeMorning } from "../server/morning-message";\nimport { carriesFeelingClause } from "../server/unlogged-notice";\n', 1)
-              s = s.replace('  console.log("coach-loop-foundation: all checks passed");', '  assert.equal(carriesFeelingClause("I think I am going to stop eating today"), false);\n  assert.equal(carriesFeelingClause("I feel overwhelmed today"), true);\n\n  console.log("coach-loop-foundation: all checks passed");', 1)
+          if 'const WEEKEND_RE = /\\bweekend\\b/i;' not in s:
+              s = s.replace('const THIS_WEEKEND_RE = /\\bthis weekend\\b/i;\n', 'const THIS_WEEKEND_RE = /\\bthis weekend\\b/i;\nconst WEEKEND_RE = /\\bweekend\\b/i;\n', 1)
+          pattern = r'export function resolveSituationMoment\(text: string, at: Date, now = new Date\): SituationMoment \{.*?\n\}\n\nexport function classifySituationMessage'
+          replacement = '''function sastCalendarDay(date: Date): string {\n  return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);\n}\n\nexport function resolveSituationMoment(text: string, at: Date, now = new Date()): SituationMoment {\n  const raw = String(text || "").trim();\n  const explicitPast = EXPLICIT_PAST_NIGHT_RE.test(raw) || EXPLICIT_PAST_RE.test(raw);\n  const senderDay = sastCalendarDay(at);\n  const currentDay = sastCalendarDay(now);\n\n  // Semantic past beats a co-occurring literal "today/tonight". Monday: "birthday weekend was hectic,\n  // skipping today" describes the finished weekend, not a current birthday outing.\n  if (WEEKEND_RE.test(raw) && explicitPast && /^(Mon|Tue)$/i.test(sastWeekday(now))) return "last_night";\n  if (EXPLICIT_PAST_NIGHT_RE.test(raw)) return ageMoment(at, now) === "today" ? "last_night" : ageMoment(at, now);\n\n  // Relative today/tonight belongs to the sender's SAST calendar day. A Sunday message saying "tonight"\n  // becomes last_night when read Monday.\n  if (EXPLICIT_TODAY_RE.test(raw)) {\n    if (senderDay === currentDay) return explicitPast ? ageMoment(at, now) : "today";\n    const senderDate = new Date(`${senderDay}T12:00:00Z`).getTime();\n    const currentDate = new Date(`${currentDay}T12:00:00Z`).getTime();\n    const diffDays = Math.floor((currentDate - senderDate) / 86_400_000);\n    if (diffDays === 1) return "last_night";\n    if (diffDays > 1) return "stale";\n  }\n\n  if (explicitPast && /\\b(?:weekend|last night|yesterday)\\b/i.test(raw) && /^(Mon|Tue)$/i.test(sastWeekday(now))) return "last_night";\n  if (explicitPast) return ageMoment(at, now);\n  return ageMoment(at, now);\n}\n\nexport function classifySituationMessage'''
+          s, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          assert n == 1, f'expected one situation resolver, got {n}'
           p.write_text(s)
-
-      - name: Validate integrated slice
+      - name: Validate
         run: |
           npm run check
-          npx tsx script/reaction-guard-tests.ts
-          npx tsx script/current-date-tests.ts
           npx tsx script/day-relative-situation-tests.ts
-          npx tsx script/coach-loop-foundation-tests.ts
           git diff --check
-
-      - name: Commit integrated slice and remove temporary workflow
+      - name: Commit and remove temporary workflow
         run: |
           git config user.name 'KamLife CTO Builder'
           git config user.email 'cto-builder@kamlife.local'
-          git add server/handlers/gpt-block.ts server/handlers/misc-commands.ts server/unlogged-notice.ts server/memory.ts server/reaction-guard.ts server/handlers/food-context.ts server/understanding/day-relative-situation.ts script/coach-loop-foundation-tests.ts
+          git add server/understanding/day-relative-situation.ts
           git rm -f .github/workflows/cto-one-shot-fix.yml
-          git commit -m 'Coach loop: preserve lived context and conversational corrections'
+          git commit -m 'Fix semantic day-relative situation'
           git push origin HEAD:${GITHUB_HEAD_REF}
