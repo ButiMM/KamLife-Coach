@@ -4,7 +4,6 @@
  * Calendar questions are factual, not coaching prompts. This keeps the answer tied to the
  * existing South African clock boundary and makes the behavior independently testable.
  */
-import { sastToday } from "../utils";
 
 export function currentDateSAST(now = new Date()): string {
   return new Intl.DateTimeFormat("en-ZA", {
@@ -21,6 +20,5 @@ export function isCurrentDateQuestion(message: string): boolean {
 }
 
 export function currentDateAnswer(now = new Date()): string {
-  void sastToday();
   return `Today is ${currentDateSAST(now)}.`;
 }
