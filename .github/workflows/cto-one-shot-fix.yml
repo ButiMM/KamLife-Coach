@@ -22,17 +22,61 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Patch exact type error
+      - name: Integrate exact Coach-loop owners
         shell: python
         run: |
           from pathlib import Path
+
+          # 1) Canonical decision type boundary
           p = Path('server/handlers/gpt-block.ts')
           s = p.read_text()
           old = 'const decision = await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold" }));'
           new = 'const decision = (await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold", reply: "" }))) as { todo: string; kind: string; reply: string };'
+          if old in s:
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # 2) Deterministic current-date and natural step follow-up in the existing misc owner.
+          p = Path('server/handlers/misc-commands.ts')
+          s = p.read_text()
+          if 'from "../understanding/current-date"' not in s:
+              needle_import = 'import { daysOnProgramme } from "../day-ledger-core";\n'
+              assert needle_import in s
+              s = s.replace(needle_import, needle_import + 'import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";\n', 1)
+          anchor = '  const { phone, message, m, user, wroteThisTurn } = ctx;\n'
+          block = '''  if (isCurrentDateQuestion(message)) {\n    const reply = currentDateAnswer();\n    await logChat(user.id, message, reply, "CURRENT_DATE");\n    return reply;\n  }\n\n  if (/^(?:and|what about|how about)\\s+(?:the\\s+)?steps\\s*\\?$/i.test(m.trim())) {\n    const [todayStep] = await db.select({ steps: stepLogs.steps })\n      .from(stepLogs)\n      .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart())))\n      .orderBy(desc(stepLogs.loggedAt))\n      .limit(1);\n    const steps = Number(todayStep?.steps || 0);\n    const target = Number(user.stepsTarget) || 8500;\n    const name = getDisplayName(user) || "there";\n    const reply = !steps\n      ? `${name} — nothing logged yet today. Your target is ${target.toLocaleString()} steps.`\n      : steps >= target\n        ? `${name} — ${steps.toLocaleString()} steps today. Target hit ✅`\n        : `${name} — ${steps.toLocaleString()} steps so far. ${Math.max(0, target - steps).toLocaleString()} to hit your target.`;\n    await logChat(user.id, message, reply, "STEP_FOLLOW_UP");\n    return reply;\n  }\n'''
+          if 'CURRENT_DATE' not in s:
+              assert anchor in s
+              s = s.replace(anchor, anchor + '\n' + block, 1)
+          p.write_text(s)
+
+          # 3) Future intent must beat the broad feeling detector.
+          p = Path('server/unlogged-notice.ts')
+          s = p.read_text()
+          old = '''export function carriesFeelingClause(text: string): boolean {\n  return /\\b(i feel|i\\'m feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can\\'?t cope)\\b/i.test(text || "");\n}\n'''
+          new = '''export function carriesFeelingClause(text: string): boolean {\n  const raw = String(text || "");\n  if (/\\b(?:i think i(?:\\'m| am) going to|i(?:\\'m| am) going to|i\\'?ll|i will)\\b/i.test(raw)) return false;\n  return /\\b(i feel|i\\'m feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can\\'?t cope)\\b/i.test(raw);\n}\n'''
+          if old in s:
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # 4) Make the existing situation owner content-aware about retrospective weekend language.
+          p = Path('server/memory.ts')
+          s = p.read_text()
+          old = '  const todayish = /\\b(today|tonight|this weekend|that day is today|the day is today)\\b/.test(blob);\n'
+          new = '''  const retrospective = /\\b(was|were|happened|already happened|finished|ended|last weekend|last night|yesterday|not today)\\b/.test(blob);\n  const todayish = /\\b(today|tonight|this afternoon|this evening|that day is today|the day is today)\\b/.test(blob)\n    || (/\\bthis weekend\\b/.test(blob) && !retrospective);\n'''
           assert old in s
-          p.write_text(s.replace(old, new, 1))
-      - name: Validate
+          s = s.replace(old, new, 1)
+          s = s.replace('return "CURRENT SITUATION: Client has a celebration outing around today; restaurant eating is expected.";', 'return "CURRENT SITUATION: Client has a celebration outing around the referenced period; restaurant eating is expected.";', 1)
+          s = s.replace('return "CURRENT SITUATION: Client expects to eat out today.";', 'return "CURRENT SITUATION: Client expects to eat out around the referenced period.";', 1)
+          s = s.replace('return "CURRENT SITUATION: Client has closed food for the rest of today.";', 'return "CURRENT SITUATION: Client has closed food around the referenced period.";', 1)
+
+          old = '''export function situationWhen(stamped: Array<{ text: string; at: Date }>, now?: Date | number): "today" | "last_night" | "stale" | "" {\n  if (!stamped.length) return "";\n  const newest = stamped.reduce((a, b) => (a.at > b.at ? a : b));\n  const days = sastDaysBetween(newest.at, now);\n  if (days <= 0) return "today";\n  if (days === 1) return "last_night";\n  return "stale";\n}\n'''
+          new = '''export function situationWhen(stamped: Array<{ text: string; at: Date }>, now?: Date | number): "today" | "last_night" | "stale" | "" {\n  if (!stamped.length) return "";\n  const newest = stamped.reduce((a, b) => (a.at > b.at ? a : b));\n  const text = newest.text.toLowerCase();\n  const days = sastDaysBetween(newest.at, now);\n  const retrospective = /\\b(?:yesterday|last night|last weekend|this weekend)\\b/i.test(text)\n    && /\\b(?:was|were|happened|already|finished|ended|not today)\\b/i.test(text);\n  if (retrospective) return days <= 1 ? "last_night" : "stale";\n  if (days <= 0) return "today";\n  if (days === 1) return "last_night";\n  return "stale";\n}\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+      - name: Validate integrated slice
         run: |
           npm run check
           npx tsx script/reaction-guard-tests.ts
@@ -40,10 +84,11 @@ jobs:
           npx tsx script/day-relative-situation-tests.ts
           npx tsx script/coach-loop-foundation-tests.ts
           git diff --check
-      - name: Commit to builder branch
+
+      - name: Commit integrated slice to builder branch
         run: |
           git config user.name 'KamLife CTO Builder'
           git config user.email 'cto-builder@kamlife.local'
-          git add server/handlers/gpt-block.ts
-          git commit -m 'Fix canonical decision type boundary'
+          git add server/handlers/gpt-block.ts server/handlers/misc-commands.ts server/unlogged-notice.ts server/memory.ts
+          git commit -m 'Coach loop: integrate date, situation and follow-up owners'
           git push origin HEAD:${GITHUB_HEAD_REF}
