@@ -70,26 +70,6 @@ function shiftDays(date: Date, days: number): Date {
   return noonUtc;
 }
 
-function extractReference(text: string): { token: string; offset: number; kind: "explicit" | "relative" | "future" } | null {
-  const patterns: Array<{ re: RegExp; kind: "explicit" | "relative" | "future" }> = [
-    { re: /\b(today|this morning|this afternoon|this evening|tonight)\b/i, kind: "relative" },
-    { re: /\b(yesterday|last night)\b/i, kind: "relative" },
-    { re: /\b(this|last)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i, kind: "explicit" },
-    { re: /\b(next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i, kind: "future" },
-    { re: /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i, kind: "explicit" },
-    { re: /\b(?:on\s+)?(\d{4}-\d{2}-\d{2})\b/i, kind: "explicit" },
-    { re: /\b(?:on\s+)?(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\b/i, kind: "explicit" },
-  ];
-
-  let best: { token: string; offset: number; kind: "explicit" | "relative" | "future" } | null = null;
-  for (const p of patterns) {
-    const m = p.re.exec(text);
-    if (!m) continue;
-    if (!best || m.index < best.offset) best = { token: m[0], offset: m.index, kind: p.kind };
-  }
-  return best;
-}
-
 function resolveReference(token: string, now: Date): { dayKey: string | null; confidence: AttributedBeat["confidence"] } {
   const t = token.toLowerCase().trim();
   const today = now;
@@ -111,9 +91,9 @@ function resolveReference(token: string, now: Date): { dayKey: string | null; co
       delta = delta === 0 ? -7 : delta - 7;
     } else if (mode === "this") {
       if (delta > 0) delta -= 7;
-    } else if (mode === "next") {
-      delta = delta === 0 ? 7 : delta;
-      return { dayKey: dateKey(shiftDays(today, delta)), confidence: "ambiguous" };
+    } else {
+      // Future intent is never a writable date. The caller must ask rather than log it.
+      return { dayKey: null, confidence: "ambiguous" };
     }
     return { dayKey: dateKey(shiftDays(today, delta)), confidence: "explicit" };
   }
