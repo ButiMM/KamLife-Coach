@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { attributeMultiDayReport } from "../server/understanding/multi-day-attribution";
+import { attributeMultiDayReport } from "../server/understanding/day-relative-situation";
 
 const NOW = new Date("2026-08-24T10:00:00+02:00"); // Monday SAST
 
@@ -12,9 +12,9 @@ assert.equal(multi.ambiguous, false);
 assert.deepEqual(
   multi.beats.map(b => [b.dayKey, b.dayReference, b.text]),
   [
-    ["2026-08-24", "Monday", "I had pap and chicken."],
-    ["2026-08-18", "Tuesday", "I had eggs and toast."],
-    ["2026-08-19", "Wednesday", "I trained and walked 8k steps."],
+    ["2026-08-18", "Monday", "I had pap and chicken."],
+    ["2026-08-19", "Tuesday", "I had eggs and toast."],
+    ["2026-08-20", "Wednesday", "I trained and walked 8k steps."],
   ],
 );
 
