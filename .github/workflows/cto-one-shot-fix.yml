@@ -34,9 +34,6 @@ jobs:
   const isBotMissedMeal = /\b(you (missed|forgot|skipped|left out|didn.?t (log|count|track|record))|bot (missed|forgot)|you never logged|didn.?t log (my|the|that|a))\b/i.test(m);
   if (isBotMissedMeal) {
     const todayStartMissed = sastDayStart();
-
-    // Natural correction: "You missed the black coffee" names the missing item, not a whole meal.
-    // Add it to the latest meal today rather than forcing the client to restate breakfast.
     const missedPhrase = m
       .replace(/^.*?\b(?:you (?:missed|forgot|skipped|left out)|you did(?:n\'?t| not) (?:log|count|track|record)|you never logged|bot (?:missed|forgot))\b/i, "")
       .trim();
@@ -57,22 +54,15 @@ jobs:
           .limit(1);
 
         if (lastMeal) {
-          const adjusted = adjustFoodsForSegment(
-            missedFoods,
-            missedPhrase,
-            await getPortionMemory(user.id),
-          );
+          const adjusted = adjustFoodsForSegment(missedFoods, missedPhrase, await getPortionMemory(user.id));
           const existingItems = Array.isArray(lastMeal.items) ? [...(lastMeal.items as any[])] : [];
           const addedItems: any[] = [];
           let addedKcal = 0;
           let addedProtein = 0;
-
           for (const food of adjusted) {
             const foodName = String(food.name || "").trim();
             if (!foodName) continue;
-            const duplicate = existingItems.some(item =>
-              String(item?.name || item?.foodName || "").trim().toLowerCase() === foodName.toLowerCase(),
-            );
+            const duplicate = existingItems.some(item => String(item?.name || item?.foodName || "").trim().toLowerCase() === foodName.toLowerCase());
             if (duplicate) continue;
             const item = {
               name: foodName,
@@ -87,20 +77,20 @@ jobs:
             addedKcal += item.kcal;
             addedProtein += item.protein;
           }
-
           if (addedItems.length > 0) {
-            const newKcal = Number(lastMeal.kcalInt || 0) + addedKcal;
-            const newProtein = Number(lastMeal.proteinInt || 0) + addedProtein;
-            await db.update(mealLogs)
-              .set({ items: existingItems as any, kcalInt: newKcal, proteinInt: newProtein, corrected: true })
-              .where(eq(mealLogs.id, lastMeal.id));
-
+            await db.update(mealLogs).set({
+              items: existingItems as any,
+              kcalInt: Number(lastMeal.kcalInt || 0) + addedKcal,
+              proteinInt: Number(lastMeal.proteinInt || 0) + addedProtein,
+              corrected: true,
+            }).where(eq(mealLogs.id, lastMeal.id));
             invalidateFoodTotalsCache(user.id);
             const totals = await recomputeTodayFoodTotals(user.id);
-            await db.update(users)
-              .set({ todayCalories: totals.calories, todayProteinG: totals.protein, todayCaloriesDate: sastToday() })
-              .where(eq(users.id, user.id));
-
+            await db.update(users).set({
+              todayCalories: totals.calories,
+              todayProteinG: totals.protein,
+              todayCaloriesDate: sastToday(),
+            }).where(eq(users.id, user.id));
             turnMutation(`MISSED_ITEM appended=[${addedItems.map(i => i.name).join(", ")}] to=${lastMeal.mealLabel || "last meal"}`);
             const addedNames = addedItems.map(i => i.name).join(", ");
             const label = lastMeal.mealLabel || "your last meal";
@@ -114,7 +104,6 @@ jobs:
       }
     }
 
-    // Preserve the existing fallback when the client names no food or no current meal exists.
     const recentLogs = await db.select({ mealLabel: mealLogs.mealLabel, kcalInt: mealLogs.kcalInt, loggedAt: mealLogs.loggedAt })
       .from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartMissed)))
       .orderBy(desc(mealLogs.loggedAt)).limit(5);
@@ -130,9 +119,8 @@ jobs:
           s = s[:start] + replacement + s[end:]
           p.write_text(s)
 
-          # Add a focused source-level regression so the owner cannot revert to the old prompt-only behavior.
           t = Path('script/food-correction-owner-tests.ts')
-          t.write_text('''import assert from "node:assert/strict";\n\nconst source = await import("../server/handlers/food-context.ts");\nassert.equal(typeof source.handleFoodContext, "function");\n\nconsole.log("food-correction-owner: handler imports successfully");\n''')
+          t.write_text('''import assert from "node:assert/strict";\nconst source = await import("../server/handlers/food-context.ts");\nassert.equal(typeof source.handleFoodContext, "function");\nconsole.log("food-correction-owner: handler imports successfully");\n''')
       - name: Validate
         run: |
           npm run check
