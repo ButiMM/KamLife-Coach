@@ -24,6 +24,8 @@ export function morningClosingLine(
   void ctx.completedSessions28;
   if (ctx.activelyEngaged) return "";
   switch (trajectory) {
+    case "ON_A_RUN":
+      return `\n\n_You're keeping the consistency going._`;
     case "RECOVERING":
     case "DISENGAGED":
       return `\n\n_Good to have you back. This week counts._`;
@@ -91,7 +93,8 @@ function recognitionOnly(part: string): string {
   const italic = text.length > 2 && text.startsWith("_") && text.endsWith("_");
   const body = italic ? text.slice(1, -1) : text;
   const kept = body.split(/(?<=[.!?])\s+/).filter((sentence) => {
-    if (!carriesDirective(sentence)) return true;
+    const instructionShaped = /\b(?:reply\s+(?:\d+|one|two|three|programme|program)\b|stay on\b|make your next\b|eat\s+\w+\b|take\s+\w+\b|do\s+\w+\b|walk\s+\w+\b)/i.test(sentence);
+    if (!carriesDirective(sentence) && !instructionShaped) return true;
     console.log(`[MORNING_AUTHORITY] dropped an instruction from recognition/status prose: ${sentence.trim().slice(0, 70)}`);
     return false;
   }).join(" ").trim();
