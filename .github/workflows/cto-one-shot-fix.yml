@@ -22,21 +22,19 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Fix semantic day-relative situation
+      - name: Normalize canonical decision fallback
         shell: python
         run: |
           from pathlib import Path
-          p = Path('server/understanding/day-relative-situation.ts')
+          p = Path('server/handlers/gpt-block.ts')
           s = p.read_text()
-          if 'const WEEKEND_RE = /\\bweekend\\b/i;' not in s:
-              anchor = 'const THIS_WEEKEND_RE = /\\bthis weekend\\b/i;'
-              assert anchor in s
-              s = s.replace(anchor, anchor + '\nconst WEEKEND_RE = /\\bweekend\\b/i;', 1)
-          start = s.index('export function resolveSituationMoment(')
-          end = s.index('export function classifySituationMessage', start)
-          replacement = '''function sastCalendarDay(date: Date): string {\n  return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);\n}\n\nexport function resolveSituationMoment(text: string, at: Date, now = new Date()): SituationMoment {\n  const raw = String(text || "").trim();\n  const explicitPast = EXPLICIT_PAST_NIGHT_RE.test(raw) || EXPLICIT_PAST_RE.test(raw);\n  const senderDay = sastCalendarDay(at);\n  const currentDay = sastCalendarDay(now);\n\n  // Semantic past beats a co-occurring literal "today/tonight". Monday: "birthday weekend was hectic,\n  // skipping today" describes the finished weekend, not a current birthday outing.\n  if (WEEKEND_RE.test(raw) && explicitPast && /^(Mon|Tue)$/i.test(sastWeekday(now))) return "last_night";\n  if (EXPLICIT_PAST_NIGHT_RE.test(raw)) return ageMoment(at, now) === "today" ? "last_night" : ageMoment(at, now);\n\n  // Relative today/tonight belongs to the sender's SAST calendar day. A Sunday message saying "tonight"\n  // becomes last_night when read Monday.\n  if (EXPLICIT_TODAY_RE.test(raw)) {\n    if (senderDay === currentDay) return explicitPast ? ageMoment(at, now) : "today";\n    const senderDate = new Date(`${senderDay}T12:00:00Z`).getTime();\n    const currentDate = new Date(`${currentDay}T12:00:00Z`).getTime();\n    const diffDays = Math.floor((currentDate - senderDate) / 86_400_000);\n    if (diffDays === 1) return "last_night";\n    if (diffDays > 1) return "stale";\n  }\n\n  if (explicitPast && /\\b(?:weekend|last night|yesterday)\\b/i.test(raw) && /^(Mon|Tue)$/i.test(sastWeekday(now))) return "last_night";\n  if (explicitPast) return ageMoment(at, now);\n  return ageMoment(at, now);\n}\n\n'''
-          s = s[:start] + replacement + s[end:]
+          old = 'const decision = await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold" }));'
+          new = 'const decision = (await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold", reply: "" }))) as { todo: string; kind: string; reply: string };'
+          assert old in s, 'canonicalDecision fallback pattern not found'
+          s = s.replace(old, new, 1)
           p.write_text(s)
+          check = p.read_text()
+          assert 'catch(() => ({ todo: "", kind: "hold", reply: "" }))' in check
       - name: Validate
         run: |
           npm run check
@@ -46,7 +44,7 @@ jobs:
         run: |
           git config user.name 'KamLife CTO Builder'
           git config user.email 'cto-builder@kamlife.local'
-          git add server/understanding/day-relative-situation.ts
+          git add server/understanding/day-relative-situation.ts server/handlers/gpt-block.ts
           git rm -f .github/workflows/cto-one-shot-fix.yml
-          git commit -m 'Fix semantic day-relative situation'
+          git commit -m 'Validate Coach loop type boundary'
           git push origin HEAD:${GITHUB_HEAD_REF}
