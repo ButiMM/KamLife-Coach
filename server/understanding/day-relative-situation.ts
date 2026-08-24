@@ -30,6 +30,7 @@ const EXPLICIT_TODAY_RE = /\b(today|tonight|this afternoon|this evening)\b/i;
 const EXPLICIT_PAST_RE = /\b(was|were|happened|already happened|finished|ended|we went|we had|we did)\b/i;
 const EXPLICIT_PAST_NIGHT_RE = /\b(yesterday|last night|last weekend|previous weekend)\b/i;
 const WEEKEND_RE = /\bweekend\b/i;
+const RECENT_DAY_PAST_RE = /\b(yesterday|last night)\b/i;
 
 function sastWeekday(now: Date): string {
   return new Intl.DateTimeFormat("en-ZA", {
@@ -54,24 +55,26 @@ function ageMoment(at: Date, now: Date): SituationMoment {
   return "stale";
 }
 
-/**
- * Resolve the time of the situation expressed by one message.
- * Semantic retrospective language outranks literal "today/tonight".
- */
+/** Resolve the time of the situation expressed by one message. */
 export function resolveSituationMoment(text: string, at: Date, now = new Date()): SituationMoment {
   const raw = String(text || "").trim();
   const explicitPast = EXPLICIT_PAST_NIGHT_RE.test(raw) || EXPLICIT_PAST_RE.test(raw);
   const senderDay = sastCalendarDay(at);
   const currentDay = sastCalendarDay(now);
 
-  if (WEEKEND_RE.test(raw) && explicitPast && /^(Mon|Tue)$/i.test(sastWeekday(now))) {
+  // "birthday weekend was..." on Monday is the just-finished weekend unless the client explicitly
+  // said "last weekend", which must remain age-based so it can become stale a week later.
+  if (WEEKEND_RE.test(raw) && explicitPast && !EXPLICIT_PAST_NIGHT_RE.test(raw) && /^(Mon|Tue)$/i.test(sastWeekday(now))) {
     return "last_night";
   }
 
-  if (EXPLICIT_PAST_NIGHT_RE.test(raw)) {
+  // "yesterday" and "last night" are immediate retrospective references; "last weekend" ages normally.
+  if (RECENT_DAY_PAST_RE.test(raw)) {
     const age = ageMoment(at, now);
     return age === "today" ? "last_night" : age;
   }
+
+  if (EXPLICIT_PAST_NIGHT_RE.test(raw)) return ageMoment(at, now);
 
   if (EXPLICIT_TODAY_RE.test(raw)) {
     if (senderDay === currentDay) return explicitPast ? ageMoment(at, now) : "today";
@@ -107,11 +110,7 @@ export function classifySituationMessage(text: string, at: Date, now = new Date(
   return { kind, moment: resolveSituationMoment(raw, at, now), sourceText: raw };
 }
 
-/** Pick the newest relevant situation while preserving the message that produced it. */
-export function resolveRecentSituation(
-  messages: StampedSituationMessage[],
-  now = new Date(),
-): ResolvedSituation {
+export function resolveRecentSituation(messages: StampedSituationMessage[], now = new Date()): ResolvedSituation {
   const candidates = messages
     .map(message => ({ message, situation: classifySituationMessage(message.text, message.at, now) }))
     .filter(({ situation }) => situation.kind && situation.moment !== "stale")
