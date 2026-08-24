@@ -65,7 +65,7 @@ jobs:
               needle_import = 'import { sastDaysBetween } from "./sast";\n'
               assert needle_import in s
               s = s.replace(needle_import, needle_import + 'import { resolveRecentSituation } from "./understanding/day-relative-situation";\n', 1)
-          helper = '''function situationLineForResolved(resolved: { kind: string; moment: string }): string {\n  if (resolved.kind === "celebration_outing") return "CURRENT SITUATION: Client has a celebration outing around the referenced period; restaurant eating is expected.";\n  if (resolved.kind === "eating_out") return "CURRENT SITUATION: Client expects to eat out around the referenced period.";\n  if (resolved.kind === "food_closed") return "CURRENT SITUATION: Client has closed food around the referenced period.";\n  return "";\n}\n'''
+          helper = '''function situationLineForResolved(resolved: { kind: string; moment: string }): string {\n  if (resolved.kind === "celebration_outing") return "CURRENT SITUATION: Client has a celebration outing around the referenced period; restaurant eating is expected.";\n  if (resolved.kind === "celebration") return "CURRENT SITUATION: Client is in a celebration period around the referenced day.";\n  if (resolved.kind === "eating_out") return "CURRENT SITUATION: Client expects to eat out around the referenced period.";\n  if (resolved.kind === "food_closed") return "CURRENT SITUATION: Client has closed food around the referenced period.";\n  return "";\n}\n'''
           if 'function situationLineForResolved' not in s:
               s = s.replace('export function extractSalientSituation(clientMessages: string[]): string {', helper + '\nexport function extractSalientSituation(clientMessages: string[]): string {', 1)
           old_load = re.search(r'export async function loadSalientSituation\(phone: string, currentMessage\?: string\): Promise<string> \{.*?\n\}\n\nexport async function loadSituationFrame', s, re.S)
@@ -93,8 +93,23 @@ jobs:
           anchor = '''  if (isBotMissedMeal) {\n    const todayStartMissed = sastDayStart();\n'''
           insert = '''  if (isBotMissedMeal) {\n    const missedPhrase = m.replace(/^.*?\\b(?:you (?:missed|forgot|skipped|left out)|you did(?:n\\'?t| not) (?:log|count|track|record)|you never logged|bot (?:missed|forgot))\\b/i, "").trim();\n    const missedFoods = missedPhrase.length > 1 ? scanForSAFoods(missedPhrase) : [];\n    if (missedFoods.length > 0) {\n      try {\n        const [lastMeal] = await db.select({ id: mealLogs.id, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt, mealLabel: mealLogs.mealLabel })\n          .from(mealLogs)\n          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sastDayStart())))\n          .orderBy(desc(mealLogs.loggedAt))\n          .limit(1);\n        if (lastMeal) {\n          const additions = adjustFoodsForSegment(missedFoods, missedPhrase, await getPortionMemory(user.id));\n          const items = Array.isArray(lastMeal.items) ? [...(lastMeal.items as any[])] : [];\n          const newItems = [...items];\n          let addedKcal = 0;\n          let addedProtein = 0;\n          for (const food of additions) {\n            const duplicate = newItems.some((item: any) => String(item?.name || item?.foodName || "").toLowerCase() === String(food.name || "").toLowerCase());\n            if (duplicate) continue;\n            newItems.push({ name: food.name, kcal: food.adjustedCalories || 0, protein: food.adjustedProtein || 0 });\n            addedKcal += food.adjustedCalories || 0;\n            addedProtein += food.adjustedProtein || 0;\n          }\n          if (newItems.length > items.length) {\n            const newKcal = Number(lastMeal.kcalInt || 0) + addedKcal;\n            const newProtein = Number(lastMeal.proteinInt || 0) + addedProtein;\n            await db.update(mealLogs).set({ items: newItems as any, kcalInt: newKcal, proteinInt: newProtein, corrected: true }).where(eq(mealLogs.id, lastMeal.id));\n            invalidateFoodTotalsCache(user.id);\n            const totals = await recomputeTodayFoodTotals(user.id);\n            await db.update(users).set({ todayCalories: totals.calories, todayProteinG: totals.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));\n            turnMutation(`MISSED_ITEM added=[${missedFoods.map(f => f.name).join(", ")}] to=${lastMeal.mealLabel || "last meal"}`);\n            const addedNames = newItems.slice(items.length).map((i: any) => i.name).join(", ");\n            const label = lastMeal.mealLabel || "your last meal";\n            await logChat(user.id, message, `Added ${addedNames} to ${label} ✅\\n\\nToday: ~${totals.calories} kcal | ~${totals.protein}g protein.`, "FOOD_LOG_CORRECTION");\n            return `Added ${addedNames} to ${label} ✅\\n\\nToday: ~${totals.calories} kcal | ~${totals.protein}g protein.`;\n          }\n        }\n      } catch (e) { console.warn("[MISSED_MEAL_ITEM]", e); }\n    }\n    const todayStartMissed = sastDayStart();\n'''
           assert anchor in s
-          if 'MISSED_ITEM added=' not in s:
-              s = s.replace(anchor, insert, 1)
+          if 'MISSED_ITEM added=' not in s: s = s.replace(anchor, insert, 1)
+          p.write_text(s)
+
+          # 7) Broaden the pure situation resolver to recognize a birthday/celebration weekend even when no restaurant word is present.
+          p = Path('server/understanding/day-relative-situation.ts')
+          s = p.read_text()
+          s = s.replace('export type SituationKind = "celebration_outing" | "eating_out" | "food_closed" | "";', 'export type SituationKind = "celebration_outing" | "celebration" | "eating_out" | "food_closed" | "";')
+          s = s.replace('const THIS_WEEKEND_RE = /\\bthis weekend\\b/i;\n', 'const THIS_WEEKEND_RE = /\\bthis weekend\\b/i;\nconst CELEBRATION_PERIOD_RE = /\\b(?:birthday|anniversary|wedding)(?:\\s+weekend)?\\b|\\bcelebration(?:\\s+weekend)?\\b|\\bparty\\b/i;\n')
+          s = s.replace('  if (birthday && eatingOut) kind = "celebration_outing";\n  else if (eatingOut) kind = "eating_out";', '  if (birthday && eatingOut) kind = "celebration_outing";\n  else if (birthday && (THIS_WEEKEND_RE.test(raw) || CELEBRATION_PERIOD_RE.test(raw))) kind = "celebration";\n  else if (eatingOut) kind = "eating_out";')
+          p.write_text(s)
+
+          # 8) Keep the situation regression explicit.
+          p = Path('script/day-relative-situation-tests.ts')
+          s = p.read_text()
+          if 'birthday weekend was hectic' not in s:
+              s = s.replace('assert.equal(\n  resolveSituationMoment(', 'assert.equal(\n  resolveSituationMoment(', 1)
+              s += '''\nconst monday = new Date("2026-08-24T08:00:00+02:00");\nconst weekend = new Date("2026-08-24T07:50:00+02:00");\nconst resolvedBirthday = resolveRecentSituation([{ text: "The birthday weekend was hectic, so we're thinking about skipping today", at: weekend }], monday);\nassert.equal(resolvedBirthday.kind, "celebration");\nassert.equal(resolvedBirthday.moment, "last_night");\n'''
           p.write_text(s)
 
       - name: Validate integrated slice
@@ -110,6 +125,6 @@ jobs:
         run: |
           git config user.name 'KamLife CTO Builder'
           git config user.email 'cto-builder@kamlife.local'
-          git add server/handlers/gpt-block.ts server/handlers/misc-commands.ts server/unlogged-notice.ts server/memory.ts server/reaction-guard.ts server/handlers/food-context.ts
-          git commit -m 'Coach loop: make corrections frictionless'
+          git add server/handlers/gpt-block.ts server/handlers/misc-commands.ts server/unlogged-notice.ts server/memory.ts server/reaction-guard.ts server/handlers/food-context.ts server/understanding/day-relative-situation.ts script/day-relative-situation-tests.ts
+          git commit -m 'Coach loop: preserve lived context and conversational corrections'
           git push origin HEAD:${GITHUB_HEAD_REF}
