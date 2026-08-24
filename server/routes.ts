@@ -48,12 +48,13 @@ import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
 import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains } from "./understanding/messy-intake";
-import { foodDayIsClosed } from "./one-action";
+import { foodDayIsClosed, trainingDayIsDeclined } from "./one-action";
+import { isCoachCriticism } from "./reaction-guard";
 import { bareReactionFallback } from "./reaction-guard";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
-import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
+import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { mentionsConditionOrMedication, conditionWelcome } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
@@ -632,7 +633,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   let turnFacts = parseMessyIntake(message);
   // Scanner is the food owner; FOOD_NOUN is a short list. Without this merge, "apple and a
   // pear and one litre of water" is water-only and the fruit never reaches the ledger.
-  turnFacts = withKnownFood(turnFacts, scanForSAFoods(message).some(f => !/^water$/i.test(f.name)));
+  // The scanner is the authority on whether there is a NAMEABLE food here — i.e. whether a row
+  // could be written at all. Held, because the owed-fact gate below needs the same answer.
+  const scannerSawFood = scanForSAFoods(message).some(f => !/^water$/i.test(f.name));
+  turnFacts = withKnownFood(turnFacts, scannerSawFood);
   const multiFact = turnFacts.factTypes.length >= 2;
   const turn = newTurnLedger(turnFacts.factTypes);
   if (multiFact) console.log(`[TURN] ${turnFacts.factTypes.join("+")} in the client's own words — no handler may end this turn`);
@@ -661,11 +665,26 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // any educational or coaching response can become final. Measured against turnMutations() — the
   // durable record, not an in-memory ledger.
   // ════════════════════════════════════════════════════════════════════════════════════════════
+  // AN OWED FACT IS ONE A WRITER COULD ACTUALLY COMMIT (2026-08-24). "I've only had breakfast"
+  // names a MEAL SLOT and no food, but the fact parser reads it as a food report — so the gate
+  // held every handler down waiting for a write that could never happen, including the
+  // deterministic deficit owner that had the answer. The scanner decides whether a row is even
+  // possible, and the router already holds its result (above). The handset case is untouched:
+  // "my breakfast was 3 slices of bread, eggs and chicken livers" scans three foods.
+  // A FACTUAL QUESTION — OR A CRITICISM — MAY NOT BE ANSWERED BY AN UNRELATED ACTION (2026-08-24).
+  // "Am I in a deficit? I've only had breakfast" and "You are not a coach" both came back as
+  // "Stand on a scale this morning": the action ladder replacing the turn instead of answering it.
+  // `conversationalOnly` is the existing flag for "this turn answers, it does not instruct", and
+  // both predicates are existing owners — no new predicate, no second decision owner.
+  if (looksLikeSurplusDeficitQuestion(m) || isCoachCriticism(message)) turnEvidence({ conversationalOnly: true });
+
   const statedFacts = journeyMustKeepFacts(message);
+  const foodIsWritable = scannerSawFood;
   const factsStillOwed = (): string[] => {
     const written = durableDomains(turnMutations());
     return (["food", "steps", "workout"] as const)
-      .filter(d => (statedFacts as any)[d] && !written.includes(d));
+      .filter(d => (d === "food" ? statedFacts.food && foodIsWritable : (statedFacts as any)[d])
+        && !written.includes(d));
   };
   /** May THIS handler's reply end the turn, or is a fact the client stated still unwritten? */
   const mayEndTurn = (who: string): boolean => {
@@ -870,15 +889,51 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // commands) and "about to do my workout" (imminent) still reach the real handler. Stricter
   // than isFutureIntent() on purpose — bare "tomorrow" must not swallow "tomorrow's session".
   const _origWO = originalMBeforeNorm;
+  // A REFUSAL IS NOT A DEFERRAL (2026-08-24). The matcher below detects "I'll do it later" and
+  // needs a first-person future verb AND a later-time word, so "no I'm not training today" matched
+  // none of it and got a full session, post-workout nutrition and "Send DONE" over an explicit
+  // refusal. trainingDayIsDeclined is the twin of foodDayIsClosed — the latest explicit constraint
+  // about today, owned in one-action.
+  const _isWorkoutRefusal = trainingDayIsDeclined(_origWO);
+  // A REQUEST TO MOVE A WORKOUT IS A SCHEDULE DECISION, NOT A REQUEST TO RENDER IT (2026-08-24).
+  //
+  //   "Can I do my workout tomorrow instead?"  →  *Week 5 — Next Session (Day 1)*
+  //
+  // The client asked whether they may shift the session and got the session. A refusal is a
+  // constraint and a deferral is a plan; this is the third shape — asking permission — and it
+  // belongs to the same owner rather than a second workout mouth. The discriminator is grammar:
+  // a modal + first person is asking to MOVE it ("can I do my workout tomorrow?"), while a view
+  // request names the object without asking permission ("show me tomorrow's workout",
+  // "tomorrow's workout?") and must still reach the renderer.
+  const _isWorkoutMoveRequest =
+    /^\s*(?:can|could|may|should|is\s+it\s+ok\s+(?:if\s+)?)\s*i\b/i.test(_origWO.trim())
+    && /\b(?:workout|work\s*out|train(?:ing)?|session|gym|exercise|leg\s+day|chest\s+day|upper\s+body|lower\s+body|push\s+day|pull\s+day)\b/i.test(_origWO)
+    && /\b(?:tomorrow|later|tonight|this\s+evening|after\s+work|next\s+week|another\s+day|a\s+different\s+day|2moro|2morrow)\b/i.test(_origWO)
+    && !/\b(?:show|send|see|view|what'?s|what\s+is|give\s+me)\b/i.test(_origWO)
+    // POSSESSIVE NAMES THE OBJECT; A BARE DAY PROPOSES A TIME. "Can I get tomorrow's session?"
+    // asks to SEE the thing; "Can I do my workout tomorrow?" asks to MOVE it. Grammar, so it
+    // covers see/get/have without a verb list.
+    && !/\b(?:tomorrow|next\s+week)'?s\s+(?:workout|work\s*out|session|training)\b/i.test(_origWO);
   const _isWorkoutDeferral =
     !_origWO.includes("?")
     && /\b(i'?ll|i\s+will|i'?m\s+going\s+to|i\s+am\s+going\s+to|gonna|going\s+to|plann?ing\s+(?:to|on)|plan\s+to)\b/i.test(_origWO)
     && /\b(workout|work\s*out|train(?:ing)?|session|gym|exercise|programme|program|leg\s+day|chest\s+day|upper\s+body|lower\s+body|push\s+day|pull\s+day)\b/i.test(_origWO)
     && /\b(tomorrow|later|tonight|this\s+evening|after\s+work|in\s+the\s+morning|next\s+week|2moro|2morrow)\b/i.test(_origWO)
     && !/\b(done|finished|completed|already\s+did|just\s+did|did\s+my|smashed|crushed)\b/i.test(_origWO);
-  if (_isWorkoutDeferral) {
+  if (_isWorkoutMoveRequest) {
+    const _mvName = getDisplayName(user);
+    const _mvLater = !/\b(tomorrow|next\s+week|another\s+day|a\s+different\s+day|2moro|2morrow)\b/i.test(_origWO);
+    // The schedule answer, and the renderer stays one message away on the client's terms.
+    const moveReply = _mvLater
+      ? `${_mvName ? _mvName + ", y" : "Y"}es — do it later today, it keeps. Send *workout* when you're ready and I'll pull it up 💪`
+      : `${_mvName ? _mvName + ", y" : "Y"}es — take today as a rest day and do this session tomorrow. 💪\n\nFood and steps still count today. When you want it, send *tomorrow's workout*.`;
+    await logChat(user.id, message, moveReply, "WORKOUT_MOVE_REQUEST");
+    return moveReply;
+  }
+
+  if (_isWorkoutDeferral || _isWorkoutRefusal) {
     const _woName = user.name?.split(" ")[0] || "";
-    const _laterToday = !/\b(tomorrow|next\s+week|2moro|2morrow)\b/i.test(_origWO);
+    const _laterToday = !_isWorkoutRefusal && !/\b(tomorrow|next\s+week|2moro|2morrow)\b/i.test(_origWO);
     const deferReply = _laterToday
       ? `${_woName ? _woName + ", n" : "N"}o rush — it'll be right here when you're ready. Just send *workout* and I'll pull up today's session 💪`
       : `${_woName ? _woName + ", n" : "N"}o stress — rest today, hit it fresh tomorrow 💪\n\nWhen you're ready, send *workout* and your session's ready. Today: protein in, keep moving.`;

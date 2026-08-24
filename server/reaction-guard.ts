@@ -1,24 +1,13 @@
 /**
  * REACTION GUARD — telling "annoyed at the coach" apart from "struggling in life".
  *
- * (2026-07-27 live thread.) A client answered two bad replies with "Wow" and then
- * "Jesus" and got therapy-speak back — a paragraph about feeling overwhelmed and being
- * kind to himself. He was not overwhelmed. He was annoyed with the bot.
- *
- * The existing defence was a PROMPT instruction ("read the tone first…"), and the model
- * ignored it. The founder's response to that class of fix was blunt and correct: "can you
- * keep giving me rules on rules on rules? It doesn't work." So this is enforced in code.
- *
- * The deterministic insight: a message that is ONLY an exclamation carries no information
- * about the client's life. There is nothing in "Wow" to be overwhelmed ABOUT. It can only
- * be a reaction to the message the coach just sent. Therefore emotional-support language
- * in reply to a bare reaction is always wrong, and we can reject it without guessing.
- *
- * Pure — no DB, no clock, no model. Unit-tested.
+ * A message that is only a reaction carries no new life information. It should never be
+ * routed into diagnostic/therapy language just because the model cannot tell whether the
+ * client is impressed, frustrated, or shocked.
  */
 
 /** Filler that carries no content — stripped before deciding a message is "bare". */
-const FILLER = /^[\s.!?,]+|[\s.!?,]+$/g;
+const FILLER = /^[\s.!?,\u2755\u2757\u203c\ufe0f]+|[\s.!?,\u2755\u2757\u203c\ufe0f]+$/gu;
 
 // Exclamations that are pure reaction. "Jesus"/"Christ" belong here: as a lone word they
 // are never a religious statement and never a life disclosure — they are exasperation.
@@ -33,15 +22,23 @@ const BARE_REACTION = new Set([
 ]);
 
 /**
- * Is this message ONLY a reaction — no request, no disclosure, no content? Emoji-only and
- * punctuation-only messages count: they are reactions to the previous turn by definition.
+ * Is this message ONLY a reaction — no request, no disclosure, no content?
+ * Emoji-only and punctuation-only messages count: they are reactions to the previous turn.
  */
 export function isBareReaction(message: string): boolean {
   const raw = (message || "").trim();
   if (!raw) return false;
   if (raw.length > 40) return false;
 
-  const stripped = raw.replace(FILLER, "").toLowerCase().replace(/\s+/g, " ");
+  const stripped = raw
+    .replace(FILLER, "")
+    .toLowerCase()
+    // Variation selectors and emoji skin-tone/joiner controls are not user words.
+    .replace(/[\u200d\ufe0f\u{1f3fb}-\u{1f3ff}]/gu, "")
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
   if (!stripped) return true;                       // "!!!!", "???", "..."
   if (BARE_REACTION.has(stripped)) return true;
 
@@ -54,6 +51,38 @@ export function isBareReaction(message: string): boolean {
 }
 
 /** Live 10:06 2026-08-23: "WOW" came back as a diagnostic question about an event that never happened. */
+/**
+ * IS THIS FEEDBACK ABOUT US? (2026-08-24)
+ *
+ * Live: "Wow that's vague and robotic", "No this is a disaster", "You are not a coach". These are
+ * judgements of the COACH — our output, our role, our attention — and they were reaching the
+ * generic support/therapy path, or worse: "You are not a coach" came back as "Stand on a scale
+ * this morning", the action ladder answering a criticism.
+ *
+ * This module already owns the neighbouring question ("annoyed at the coach" vs "struggling in
+ * life"), so the third form lives beside it rather than in a new personality engine. Four shapes,
+ * each a JUDGEMENT WITH US AS ITS SUBJECT, not a list of insults:
+ *
+ *   quality   the output was vague / robotic / generic
+ *   object    "your reply / that answer / this coaching" + a verdict
+ *   identity  second person + negation + what we are or should be doing
+ *   failure   we did not answer, listen, or read what was said
+ */
+export function isCoachCriticism(message: string): boolean {
+  const text = String(message || "");
+  if (!text.trim()) return false;
+  return /\b(vague|robotic|generic)\b/i.test(text)
+    || /\b(this|that|your|the)\s+(response|answer|reply|message|coaching)\s+(is|was|doesn.?t|makes no)\b/i.test(text)
+    || /\b(this is a disaster|that.?s a disaster|no this is)\b/i.test(text)
+    || /\byou(?:'?re|\s+are|\s+ain'?t)?\s+(?:not|no)\s+(?:even\s+)?(?:a\s+|my\s+)?(?:real\s+|proper\s+|actual\s+|good\s+)?(?:coach|coaching|trainer|listening|reading|helping|helpful|useful)\b/i.test(text)
+    || /\bcall\s+(?:yourself|this)\s+a\s+coach\b/i.test(text)
+    || /\byou\s+(?:ignored|didn.?t\s+(?:listen|read|understand|get\s+it))\b/i.test(text)
+    // SUBJECT MATTERS. Unanchored, "didn't answer" matched the CLIENT saying "I didn't answer
+    // your question" — their own admission read as a complaint about us (2026-08-24, own review).
+    || /\bnot what i (?:asked|said|meant)\b/i.test(text)
+    || /\byou\s+(?:didn.?t\s+answer|never\s+answered|ignored\s+(?:my|the)\s+question)\b/i.test(text);
+}
+
 export function isDiagnosticQuestion(reply: string): boolean {
   return /^\s*what happened\??(?:\s*tell me\.?)?\s*$/i.test(reply || "");
 }
@@ -83,8 +112,8 @@ export function readsAsTherapySpeak(reply: string): boolean {
 
 /**
  * What the coach should say instead. A bare reaction means the last reply missed — so
- * own it in one line and give one concrete thing to type. Never a feelings diagnosis,
- * never a topic pivot, never "what do you mean".
+ * own it in one line and keep the door open. Never diagnose their feeling and never turn
+ * a reaction into a support-ticket workflow.
  */
 export function bareReactionFallback(firstName = ""): string {
   const fn = firstName ? `${firstName}, ` : "";

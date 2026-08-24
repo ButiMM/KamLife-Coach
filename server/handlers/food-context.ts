@@ -27,7 +27,7 @@ import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from 
 import { logChat, withTimeout, turnMutation } from "./chat-log";
 import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
-import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
+import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
 import { explicitMealSlot } from "../understanding/actions";
 import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, classifyPortionUnit, scalePortionDescription, type PortionStat, type SlotContext } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
@@ -283,6 +283,40 @@ export async function handleFoodContext(ctx: {
   const isBotMissedMeal = /\b(you (missed|forgot|skipped|left out|didn.?t (log|count|track|record))|bot (missed|forgot)|you never logged|didn.?t log (my|the|that|a))\b/i.test(m);
   if (isBotMissedMeal) {
     const todayStartMissed = sastDayStart();
+    // THEY NAMED THE THING WE MISSED (2026-08-24, live). "You missed the black coffee" was answered
+    // with "Which meal did I miss?", so a client who had already told us had to restate the whole
+    // breakfast to add one item. The scanner is the discriminator and already separates the cases:
+    // "black coffee" resolves to a food, "you missed a meal" / "you forgot my lunch" resolve to
+    // nothing and keep the clarification below. The WRITE is the write door's — it amends the
+    // existing row rather than adding a second one. See day-ledger.appendItemsToRecentMeal.
+    // …AND ON THE DAY THEY SAID. The amend window was "today, no upper bound", so "you missed the
+    // black coffee yesterday" corrected TODAY's row — corrupting a day the client can no longer
+    // see. statedWhen is the one temporal owner; `ambiguous` ("last week") names no day to write,
+    // so we clarify rather than guess.
+    const namedMissing = scanForSAFoods(message);
+    const correctionDay = statedWhen(message);
+    if (namedMissing.length > 0 && correctionDay.when !== "ambiguous") {
+      const { appendItemsToRecentMeal } = await import("../day-ledger");
+      const amended = await appendItemsToRecentMeal(
+        user.id, namedMissing as any,
+        correctionDay.when === "today" ? undefined : correctionDay.date,
+        explicitMealSlot(message),
+      );
+      if (amended) {
+        // THE REPLY STATES WHAT WAS WRITTEN, NOT WHAT WE MEANT TO WRITE. Rendered from
+        // `correctionDay` the two could disagree silently — the write landing on today while the
+        // client is told "yesterday's breakfast". `dayKey` comes back from the write door, derived
+        // from the same bound the query used, so a mismatch shows up in the sentence they read.
+        const writtenDay = amended.dayKey;
+        const isToday = writtenDay === sastToday();
+        const whose = isToday ? "your" : `${mealDateLabel(new Date(`${writtenDay}T12:00:00+02:00`))}'s`;
+        const runningTotal = isToday
+          ? ` _Today: ${amended.calories} kcal | ${amended.protein}g protein_` : "";
+        const addedReply = `You're right — added ${amended.added.join(" and ")} to ${whose} ${amended.mealLabel}.${runningTotal}`;
+        await logChat(user.id, message, addedReply, "MISSED_ITEM_AMENDED");
+        return addedReply;
+      }
+    }
     const recentLogs = await db.select({ mealLabel: mealLogs.mealLabel, kcalInt: mealLogs.kcalInt, loggedAt: mealLogs.loggedAt })
       .from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartMissed)))
       .orderBy(desc(mealLogs.loggedAt)).limit(5);

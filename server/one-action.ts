@@ -211,6 +211,58 @@ function askToWeigh(dream?: string | null, neverWeighed = false): OneAction {
 const LATE = 17; // from 5pm, "log today" and "get a walk in" start to make sense
 
 /**
+ * Latest explicit constraint, TRAINING side: they said they are not training this SAST day.
+ *
+ * The twin of foodDayIsClosed, and named the same way for the same reason — it is a DayState
+ * input, not a new routing predicate. It exists because routes.ts had a DEFERRAL detector
+ * ("I'll do it later") and nothing owned a REFUSAL. So on 24 August:
+ *
+ *   "no I'm not training today"          → a full Foundation Phase programme
+ *   "I'm training tomorrow not today"    → "Week 5 — Next Session (Day 1)"
+ *
+ * Both were answered with today's session, post-workout nutrition and "Send DONE", over an
+ * explicit refusal. The deferral matcher needed a first-person FUTURE verb and a later-time
+ * word, so a plain negation of today matched none of it.
+ *
+ * Two shapes, both statements of fact about today — a QUESTION ("can I train tomorrow instead?")
+ * is a request, not a constraint, and must be answered rather than silently recorded as a
+ * decision the client did not make:
+ *
+ *   refusal      a negation of training, scoped to today
+ *   displacement training named for a later day AND today explicitly excluded
+ *
+ * The inverse must survive untouched: "I trained today" is a REPORT and is still written as
+ * today's session — that is why completion words disqualify.
+ */
+export function trainingDayIsDeclined(text: string): boolean {
+  const t = String(text || "");
+  if (!t.trim()) return false;
+  // A REQUEST IS INTERROGATIVE-LED; A TAG QUESTION IS STILL A STATEMENT (2026-08-24, own review).
+  // Excluding every "?" made "I'm not training today, ok?" not a refusal — two characters away
+  // from the live failure this owner exists to stop. The distinction is grammar: "Can I train
+  // tomorrow instead?" opens with a modal and asks permission; "I'm not training today, ok?"
+  // opens with the client stating what they are doing. When it is genuinely unclear, refusing to
+  // dump a session is the safe direction — the costly error is printing a workout over a refusal.
+  if (/^\s*(?:can|could|should|shall|may|do|does|did|is|are|was|were|will|would|what|why|how|when|which|who)\b/i.test(t)
+      && t.includes("?")) return false;
+  // A report of a session that happened is never a refusal of one.
+  if (/\b(?:done|finished|completed|already\s+did|just\s+did|did\s+my|smashed|crushed|trained)\b/i.test(t)) return false;
+  // A NEGATED CESSATION IS AN AFFIRMATION — the twin of the "can't stop eating" guard above.
+  // "I didn't skip the gym today" and "I never skip a session today" say they DID train, and the
+  // negation + skip words sit in the same alternation as a genuine refusal. Found by adversarial
+  // probe, not by a screenshot: marking a completed session as declined is the worse direction.
+  if (/\b(?:not|never|no\s+way|didn'?t|don'?t|doesn'?t|won'?t|wouldn'?t|isn'?t|ain'?t|couldn'?t)\b[^.!?]{0,20}?\b(?:skip|skipping|skipped|miss|missing|missed)\b/i.test(t)) return false;
+  const trainingToday =
+    /\b(?:not|no|won'?t|will\s+not|can'?t|cannot|skipping|skip|missing)\b[^.!?]{0,40}?\b(?:train(?:ing)?|workout|work\s*out|session|gym|exercis(?:e|ing))\b[^.!?]{0,30}?\btoday\b/i.test(t)
+    || /\b(?:train(?:ing)?|workout|work\s*out|session|gym|exercis(?:e|ing))\b[^.!?]{0,30}?\b(?:not|no)\b[^.!?]{0,15}?\btoday\b/i.test(t);
+  if (trainingToday) return true;
+  // "tomorrow instead" / "tomorrow not today" — a later day named AND today displaced.
+  return /\b(?:tomorrow|next\s+week|2moro|2morrow)\b/i.test(t)
+    && /\b(?:train(?:ing)?|workout|work\s*out|session|gym|exercis(?:e|ing))\b/i.test(t)
+    && /\b(?:instead|not\s+today|rather\s+than\s+today)\b/i.test(t);
+}
+
+/**
  * Latest explicit constraint: they closed food for this SAST day.
  * Named without looksLike* so it is not a new routing predicate; it is a DayState input.
  */
@@ -218,7 +270,24 @@ export function foodDayIsClosed(text: string): boolean {
   const t = String(text || "");
   if (!t.trim()) return false;
   if (/\b(?:won'?t|will not|not (?:going to|gonna)|can'?t|cannot)\s+(?:be able to\s+)?eat(?:\s+anymore)?\b/i.test(t)) return true;
-  if (/\bno more food\b/i.test(t) || /\bdone eating\b/i.test(t)) return true;
+  if (/\bno more food\b/i.test(t)) return true;
+  // A STATED CESSATION OF EATING, COMPOSED RATHER THAN LISTED (2026-08-24).
+  //
+  // "I think I'm going to stop eating today" and "I'm not eating anymore today" are the same
+  // constraint as "done eating" and neither was recognised, so carriesFeelingClause claimed them
+  // on "i think i" and the client's latest explicit constraint became FEELING_ACK instead of
+  // reaching chooseAction. This is (a way of saying no-more) + (the act of eating) + (a marker
+  // that it applies to the rest of THIS day), which is the shape, not a set of sentences.
+  //
+  // The closure marker must follow the verb IMMEDIATELY: "not eating anymore today" closes the
+  // day, "not eating junk today" is a food choice and must not.
+  // THE CESSATION MUST APPLY TO EATING ITSELF (2026-08-24). "I'm done eating badly" and "I'm done
+  // eating junk" are about the MANNER and the OBJECT of eating — the client is still eating. The
+  // bare `done eating` clause this replaces read both as a closed food day. So the verb must be
+  // followed by the end of the clause or by a marker that scopes it in TIME; an adverb or a food
+  // noun after it means they described how they eat, not that they have stopped.
+  if (!/\b(?:can'?t|cannot|couldn'?t|struggle(?:s|d)? to|unable to)\s+(?:stop|quit)\s+eating\b/i.test(t)
+      && /\b(?:not|no longer|done|finished|stop|stopping|quit|quitting)\s+(?:going\s+to\s+|gonna\s+)?eat(?:ing)?(?=\s*(?:$|[.!?,;])|\s+(?:anymore|any\s+more|again|today|tonight|for\s+(?:the\s+)?(?:rest\s+of\s+the\s+)?(?:day|today|night|evening)|for\s+now|until\s+tomorrow)\b)/i.test(t)) return true;
   if (/\b(?:just|only)\s+(?:going to |gonna )?(?:have )?(?:alcohol|drinks|zero[- ]calorie)/i.test(t)) return true;
   if (/\b(?:alcohol|zero[- ]calorie drinks).{0,60}(?:today|tonight|the rest of the day)\b/i.test(t)) return true;
   return false;

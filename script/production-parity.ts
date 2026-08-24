@@ -1064,7 +1064,7 @@ async function main() {
   // Graded by watching the durable-write records the turn emits, not by reading the source: the
   // previous version of this check asserted a variable name, and a variable name is not a write.
   check("a training report is written to the day the client actually named", async () => {
-    const { trainingWhen } = await import("../server/utils");
+    const { statedWhen } = await import("../server/utils");
     const { sastDayKey } = await import("../server/sast");
     const today = sastDayKey();
     const yesterday = sastDayKey(new Date(Date.now() - 86_400_000));
@@ -1082,26 +1082,26 @@ async function main() {
     });
 
     // 1. "I trained Monday" — a day is named. It may NOT become today.
-    assert.equal(trainingWhen("I trained Monday").when, "historical");
+    assert.equal(statedWhen("I trained Monday").when, "historical");
     const monday = await writesFor("I trained Monday");
     assert.ok(!monday.today, "a session reported for Monday was written to today");
     assert.ok(monday.retro.length === 0 || monday.retro.every(d => d !== today),
       `the Monday session landed on today: ${monday.retro.join(",")}`);
 
     // 2. "I trained last week" — a SPAN. No day to write, so nothing is written.
-    assert.equal(trainingWhen("I trained last week").when, "ambiguous");
+    assert.equal(statedWhen("I trained last week").when, "ambiguous");
     const lastWeek = await writesFor("I trained last week");
     assert.ok(!lastWeek.today, "a session reported for 'last week' was written to today");
 
     // 3. "I trained yesterday" still reaches the retro writer, on yesterday.
-    assert.equal(trainingWhen("I trained yesterday").when, "historical");
+    assert.equal(statedWhen("I trained yesterday").when, "historical");
     const yday = await writesFor("I trained yesterday");
     assert.ok(!yday.today, "yesterday's session was written to today");
     assert.ok(yday.retro.includes(yesterday),
       `yesterday's session was not written to ${yesterday}: ${yday.retro.join(",") || "no write"}`);
 
     // 4. "I trained this morning" still logs today.
-    assert.equal(trainingWhen("I trained this morning").when, "today");
+    assert.equal(statedWhen("I trained this morning").when, "today");
     const thisMorning = await writesFor("I trained this morning");
     assert.ok(thisMorning.today, "an explicit today report no longer logs today");
 
@@ -1280,11 +1280,16 @@ async function main() {
               + `"${sentence.trim()}" — in a message whose plan line says "Rest day. No training"`);
           }
         }
-        // The recognition itself must survive. A filter that empties the sign-off has not fixed
-        // the contradiction, it has deleted the part the client earned.
-        if (trajectory !== "ON_TRACK") {
-          assert.ok(/\d/.test(message) && message.includes("_"),
-            `${trajectory}: the recognition was destroyed rather than the prescription removed`);
+        // REWRITTEN 2026-08-24. This asserted the sign-off still carried a NUMBER — which was the
+        // 28-day progress clock, since deleted as a second customer-facing scoreboard. Asserting
+        // its survival now demands the very behaviour that was removed. The property that still
+        // matters is the one this check exists for: whatever the sign-off says, the message
+        // carries exactly one instruction and it is the decision's. That is asserted above, for
+        // every trajectory. What is asserted here instead is that a genuinely LAPSED client is
+        // still recognised — the warm re-entry that survived the deletion.
+        if (!activelyEngaged && (trajectory === "RECOVERING" || trajectory === "DISENGAGED")) {
+          assert.match(message, /have you back/i,
+            `${trajectory}: a lapsed client lost their re-entry recognition`);
         }
       }
     }
@@ -1361,6 +1366,8 @@ async function main() {
       meal: lines.some(l => /INSERT meal/i.test(l)),
       workout: lines.some(l => /INSERT workout/i.test(l)),
       continues: lines.some(l => /question continues to Coach K/i.test(l)),
+      amended: lines.some(l => /UPDATE meal/i.test(l)),
+      owed: lines.some(l => /\[TURN_OWED\]/.test(l)),
     };
   });
 
@@ -1832,11 +1839,21 @@ async function main() {
     const mondayMorn = new Date("2026-08-24T04:00:00Z");
     assert.equal(situationWhen([{ text: "birthday outing", at: sundayNight }], mondayMorn), "last_night");
 
+    // An engaged client gets no lapse copy AND no second clock. `/4 sessions/` used to be asserted
+    // here; that was the 28-day count, and it is gone rather than reworded (2026-08-24).
     const engaged = morningClosingLine("STRUGGLING", { activelyEngaged: true, completedSessions28: 4 });
     assert.ok(!/fresh page/i.test(engaged), "engaged client must not get lapse copy");
-    assert.match(engaged, /4 sessions/);
+    assert.ok(!/\d/.test(engaged), `engaged client was handed a progress score: ${engaged}`);
+    // "fresh page" was the STRUGGLING sign-off attached to the 28-day score; both are gone
+    // (2026-08-24). STRUGGLING now says nothing rather than scoring the client, and warm
+    // re-entry survives for the trajectories that actually mean a lapse.
     const lapsed = morningClosingLine("STRUGGLING", { activelyEngaged: false, completedSessions28: 4 });
-    assert.match(lapsed, /fresh page/i);
+    assert.ok(!/fresh page/i.test(lapsed) && !/\d/.test(lapsed),
+      `the deleted 28-day sign-off came back: ${lapsed}`);
+    for (const t of ["RECOVERING", "DISENGAGED"] as const) {
+      assert.match(morningClosingLine(t, { activelyEngaged: false, completedSessions28: 4 }),
+        /have you back/i, `${t}: a lapsed client lost their re-entry recognition`);
+    }
     const brief = composeMorning({
       firstName: "Kam", targetFixLine: "", identityLine: "", streakLine: "5-day food streak.",
       workoutLine: "", yesterdayLine: "144g protein logged yesterday, against a 186g target.",
@@ -1862,6 +1879,315 @@ async function main() {
     assert.ok(/foodDayIsClosed\(message\)/.test(routes), "feeling ack must not swallow a closed food day");
   });
 
+
+  // ── COACH-LOOP SLICE, PR #50 (2026-08-24) ─────────────────────────────────────────────────
+  //
+  //   messy input → truthful state → correct window → latest constraint → chooseAction → one Coach
+  //
+  // Five contracts, each graded on behaviour or state, never on source-string presence.
+
+  check("1 . a factual deficit question is answered, not replaced by an action", async () => {
+    const reply = await serialise(() => say("Am I in a deficit? I've only had breakfast"));
+    assert.match(reply, /built into your target/i, `the deficit question was not answered: ${reply}`);
+    assert.match(reply, /\b2800\b/, "...from the client's own target, via the existing owner");
+    assert.ok(!/one thing today|stand on a scale/i.test(reply),
+      `the action ladder replaced the question: ${reply}`);
+  });
+
+  check("1b . a meal SLOT is not a food, and never writes a phantom meal", async () => {
+    // "had breakfast" fuzzy-matched the alias "sa breakfast" and resolved to McDonald's Big
+    // Breakfast - a 760 kcal row the client never ate. Both words were already in
+    // FUZZY_BLACKLIST; the blacklist was only ever applied to single words, not to the pairs.
+    const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+    for (const slot of ["I've only had breakfast", "I had breakfast", "what's for lunch"]) {
+      assert.deepEqual(scanForSAFoods(slot).map((f: any) => f.name), [],
+        `a bare meal slot resolved to a branded food: ${slot}`);
+    }
+    assert.deepEqual(
+      scanForSAFoods("my breakfast was 3 slices of bread, eggs and chicken livers").map((f: any) => f.name),
+      ["Bread", "Eggs", "Chicken livers"], "a named meal stopped scanning");
+    const r = await writesFor("Am I in a deficit? I've only had breakfast");
+    assert.ok(!r.meal, "a question about the deficit wrote a meal");
+    // …and the owed-fact gate must not hold the pipeline down for a fact no writer can commit.
+    // "had breakfast" names a meal SLOT: there is no row to write, so nothing is owed and the
+    // ordinary handlers may answer. Without this the gate stands every handler down forever and
+    // the turn survives only because the ledger compose happens to rescue the reply.
+    assert.ok(!r.owed, "the gate owed a food write for a message naming no food");
+  });
+
+  check("2 . a named missing item amends the meal instead of asking for it again", async () => {
+    const { mealLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+    // SEED INSIDE THE QUEUE. Setting the stub rows outside it lets another check's cleanup run
+    // between the assignment and the turn that needs them — the seeded breakfast vanished and
+    // this check graded an empty ledger.
+    const named = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [{
+        id: "parity-meal-1", mealLabel: "breakfast", kcalInt: 669, proteinInt: 63,
+        carbsInt: 60, fatInt: 25, items: [{ name: "Bread" }, { name: "Eggs" }],
+        loggedAt: new Date(NOW - 3600_000),
+      }]]]);
+      const from = CONSOLE_LINES.length;
+      const out = await say("You missed the black coffee");
+      const lines = CONSOLE_LINES.slice(from);
+      delete g.__KAMLIFE_STUB_ROWS;
+      return {
+        out,
+        meal: lines.some(l => /INSERT meal/i.test(l)),
+        amended: lines.some(l => /UPDATE meal/i.test(l)),
+      };
+    });
+    {
+      assert.match(named.out, /added Coffee \(black\)/i,
+        `a named missing item was not added: ${named.out}`);
+      assert.ok(!/which meal did i miss/i.test(named.out),
+        "the client was asked to restate a meal they had already described");
+      assert.ok(named.amended, "the amendment was not recorded as a durable mutation");
+      assert.ok(!named.meal, "the amendment created a SECOND meal row - the meal is double-counted");
+
+      for (const vague of ["you missed a meal", "you forgot my lunch", "you didn't log that"]) {
+        const r = await writesFor(vague);
+        assert.match(r.out, /which meal did i miss/i, `the clarification fallback was lost: ${vague}`);
+      }
+    }
+  });
+
+  check("2b . a correction lands on the day being corrected, or not at all", async () => {
+    // The amend window was "today, no upper bound", so "you missed the black coffee yesterday"
+    // silently moved the correction onto TODAY's row — corrupting a day the client can no longer
+    // see. The day is resolved by the one temporal owner; an unpinnable day is not written.
+    const { statedWhen } = await import("../server/utils");
+    const { sastDayKey } = await import("../server/sast");
+    const dayOf = (msg: string) => {
+      const w = statedWhen(msg);
+      return w.when === "ambiguous" ? "ambiguous" : sastDayKey(w.when === "today" ? new Date() : w.date);
+    };
+    assert.equal(dayOf("You missed the black coffee"), sastDayKey(), "same-day correction left today");
+    assert.equal(dayOf("You missed the black coffee yesterday"),
+      sastDayKey(new Date(Date.now() - 86_400_000)), "a yesterday correction did not resolve to yesterday");
+    assert.equal(dayOf("you missed the black coffee last week"), "ambiguous",
+      "a span was pinned to a day it does not name");
+
+    // THE WINDOW ITSELF. dayKey is derived from the same `dayStart` that builds the gte/lt bounds,
+    // so it reports the day the query was actually scoped to — not a restatement of the input.
+    const { appendItemsToRecentMeal } = await import("../server/day-ledger");
+    const { mealLogs } = await import("../shared/schema");
+    const coffee = [{ name: "Coffee (black)", category: "drink", typicalPortionGrams: 250,
+      typicalPortionCalories: 5, typicalPortionProtein: 0, carbsPer100g: 0, fatPer100g: 0 }];
+    const g = globalThis as any;
+    const scoped = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [{
+        id: "parity-day-row", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 86_400_000),
+      }]]]);
+      const yesterday = new Date(Date.now() - 86_400_000);
+      const out = {
+        today: await appendItemsToRecentMeal(USER.id, coffee as any),
+        yesterday: await appendItemsToRecentMeal(USER.id, coffee as any, yesterday),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+    assert.equal(scoped.today?.dayKey, sastDayKey(), "the same-day amend was scoped to another day");
+    assert.equal(scoped.yesterday?.dayKey, sastDayKey(new Date(Date.now() - 86_400_000)),
+      "a yesterday correction was written into a different day's window");
+    // NOTE, stated rather than implied: under the offline stub recomputeTodayFoodTotals returns
+    // zero either way, so a `calories` assertion here could not fail and is not made. What is
+    // graded instead is the sentence the client reads, in 2c — which is now rendered from
+    // `dayKey`, so the reply cannot disagree with the row that was written.
+  });
+
+  check("2c . the client is told which day was changed", async () => {
+    const { mealLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+    const replies = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [{
+        id: "parity-day-row-2", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 86_400_000),
+      }]]]);
+      const out = {
+        today: await say("You missed the black coffee"),
+        yesterday: await say("You missed the black coffee yesterday"),
+        saturday: await say("You missed the black coffee from Saturday"),
+        span: await say("you missed the black coffee last week"),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+    assert.match(replies.today, /to your breakfast/i, `same-day wording changed: ${replies.today}`);
+    assert.match(replies.yesterday, /yesterday'?s breakfast/i,
+      `a past-day correction did not name the day: ${replies.yesterday}`);
+    assert.ok(!/_Today:/.test(replies.yesterday), "a past-day correction quoted today's total");
+    assert.match(replies.saturday, /saturday'?s breakfast/i,
+      `a named-day correction did not name the day: ${replies.saturday}`);
+    // …AND THE MEAL THEY NAMED. With dinner logged after breakfast, "at breakfast" must not
+    // attach to dinner — the date defect one axis over, found reviewing this cut.
+    const slotted = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [
+        { id: "p-dinner", mealLabel: "dinner", kcalInt: 800, proteinInt: 50, carbsInt: 70,
+          fatInt: 30, items: [{ name: "Steak" }], loggedAt: new Date(NOW - 3600_000) },
+        { id: "p-bfast", mealLabel: "breakfast", kcalInt: 669, proteinInt: 63, carbsInt: 60,
+          fatInt: 25, items: [{ name: "Bread" }], loggedAt: new Date(NOW - 7 * 3600_000) },
+      ]]]);
+      const out = {
+        named: await say("You missed the black coffee at breakfast"),
+        unnamed: await say("You missed the black coffee"),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+    assert.match(slotted.named, /to your breakfast/i,
+      `the client named the meal and it went elsewhere: ${slotted.named}`);
+    assert.match(slotted.unnamed, /to your dinner/i,
+      `with no meal named, the most recent must stand: ${slotted.unnamed}`);
+    assert.match(replies.span, /which meal did i miss/i,
+      `an unpinnable day was written instead of clarified: ${replies.span}`);
+  });
+
+  check("3 . feedback about the coach is recognised, and never answered with an action", async () => {
+    const { isCoachCriticism } = await import("../server/reaction-guard");
+    for (const criticism of ["Wow that's vague and robotic", "No this is a disaster",
+                             "You are not a coach", "you're not a real coach", "You're not listening",
+                             "You didn't read what I said"]) {
+      assert.ok(isCoachCriticism(criticism), `not recognised as feedback about us: ${criticism}`);
+    }
+    for (const ours of ["You didn't answer my question", "you never answered my question",
+                        "That's not what I asked"]) {
+      assert.ok(isCoachCriticism(ours), `a complaint about us was missed: ${ours}`);
+    }
+    for (const notCriticism of ["I feel like a disaster today", "You are not a doctor, I know",
+                                "I had eggs and pap", "I'm struggling with all of this",
+                                // SUBJECT MATTERS: the client's own admission is not a complaint.
+                                "I didn't answer your question"]) {
+      assert.ok(!isCoachCriticism(notCriticism), `a client's own life read as criticism: ${notCriticism}`);
+    }
+    const reply = await serialise(() => say("You are not a coach"));
+    assert.ok(!/one thing today|stand on a scale/i.test(reply),
+      `an unrelated instruction answered a criticism: ${reply}`);
+  });
+
+  check("4 . the latest explicit constraint reaches the decision, not FEELING_ACK", async () => {
+    const { foodDayIsClosed, chooseAction } = await import("../server/one-action");
+    for (const closed of ["I think I'm going to stop eating today", "I'm not eating anymore today",
+                          "I'm done eating for today", "No more food today"]) {
+      assert.ok(foodDayIsClosed(closed), `a stated cessation was not read as one: ${closed}`);
+    }
+    // THE CESSATION MUST APPLY TO EATING ITSELF. "done eating badly" / "done eating junk" describe
+    // the MANNER and the OBJECT — the client is still eating.
+    for (const open of ["I can't stop eating", "I cannot stop eating today",
+                        "I'm not eating junk today", "I'm eating out tonight",
+                        "I'm done eating badly", "I'm done eating junk",
+                        "I stopped eating gluten today", "I'm done eating out for today"]) {
+      assert.ok(!foodDayIsClosed(open), `the food day was closed by mistake: ${open}`);
+    }
+    for (const closed2 of ["I'm done eating", "I'm done eating for the night"]) {
+      assert.ok(foodDayIsClosed(closed2), `a real closure was lost to the manner guard: ${closed2}`);
+    }
+    const base = {
+      goal: "fat_loss", weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 1,
+      loggedToday: true, proteinPct: 0.3, caloriePct: 0.4, sessionsThisWeek: 2,
+      sessionsTarget: 4, stepsToday: 7000, stepsTarget: 8000, hour: 19,
+    } as any;
+    assert.match(chooseAction({ ...base, foodDayClosed: false }).todo, /protein|eat/i,
+      "the open-day control no longer produces a food action, so the closed-day assertion proves nothing");
+    assert.ok(!/\beat\b|protein/i.test(chooseAction({ ...base, foodDayClosed: true }).todo),
+      "a client who said they are done eating was told to eat");
+    const reply = await serialise(() => say("I think I'm going to stop eating today"));
+    assert.ok(!/showing up still counts|heard you on how you'?re feeling/i.test(reply),
+      `a stated constraint was answered as a feeling: ${reply}`);
+  });
+
+  // ── AN EXPLICIT REFUSAL DOMINATES TODAY'S WORKOUT (2026-08-24 live) ───────────────────────
+  //
+  //   "I am NOT training today. I will train tomorrow."
+  //   → a full session, post-workout nutrition and "Send DONE"
+  //
+  // routes.ts had a DEFERRAL matcher ("I'll do it later") requiring a first-person future verb
+  // and a later-time word; a plain negation of today matched none of it, and nothing else owned
+  // a refusal. trainingDayIsDeclined is the twin of foodDayIsClosed — a DayState input, not a
+  // routing predicate — and it reaches both the renderer and chooseAction.
+  check("5 . a refusal to train today dominates the workout, and a report still logs", async () => {
+    const { trainingDayIsDeclined, chooseAction } = await import("../server/one-action");
+    for (const refusal of ["I am not training today. I will train tomorrow",
+                           "no I'm not training today", "I'm training tomorrow not today",
+                           "I'm not doing the workout today", "Skipping the gym today",
+                           "I'll train tomorrow instead"]) {
+      assert.ok(trainingDayIsDeclined(refusal), `an explicit refusal was not read as one: ${refusal}`);
+    }
+    // THE INVERSE. A report of training is not a refusal of it, and a question is a request.
+    for (const notRefusal of ["I trained today", "I did my workout today", "I'm training today",
+                              "Can I do my workout tomorrow instead?", "What is tomorrow's session?",
+                              "workout", "I'm not eating anymore today",
+                              // A NEGATED CESSATION IS AN AFFIRMATION. These say they DID train,
+                              // and marking a completed session as declined is the worse error.
+                              "I didn't skip the gym today", "I never skip the gym today",
+                              "no way I'm skipping the gym today", "I did not skip my session today"]) {
+      assert.ok(!trainingDayIsDeclined(notRefusal), `wrongly read as a refusal: ${notRefusal}`);
+    }
+    // ADVERSARIAL REVIEW OF THIS CUT (2026-08-24). A tag question is still a statement — the
+    // blanket "?" exclusion put the live failure two characters away from returning.
+    assert.ok(trainingDayIsDeclined("I'm not training today, ok?"),
+      "a refusal with a tag question was read as a request");
+    for (const request of ["Can I do my workout tomorrow instead?", "Should I train today?",
+                           "Do I train today?", "What is tomorrow's session?"]) {
+      assert.ok(!trainingDayIsDeclined(request), `an interrogative was recorded as a constraint: ${request}`);
+    }
+    // …while a genuine refusal that uses the same verb must survive the guard.
+    for (const stillRefusal of ["Skipping the gym today", "I want to skip the gym today",
+                                "I'm skipping training today"]) {
+      assert.ok(trainingDayIsDeclined(stillRefusal), `the negation guard swallowed a refusal: ${stillRefusal}`);
+    }
+
+    // The decision owner's own contract, as a unit: sessionsTarget 0 means no session today.
+    // NOTE: the router returns the deferral reply before chooseAction runs on a refusal turn, so
+    // this asserts the contract, not a wiring path — and no wiring was added that nothing reaches.
+    const base = {
+      goal: "fat_loss", weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 2,
+      loggedToday: true, proteinPct: 0.9, caloriePct: 0.8, sessionsThisWeek: 0,
+      stepsToday: 3000, stepsTarget: 6000, hour: 9,
+    } as any;
+    assert.match(chooseAction({ ...base, sessionsTarget: 4 }).todo, /session|train/i,
+      "the training-day control no longer prescribes a session, so the refusal case proves nothing");
+    assert.ok(!/session|train|gym/i.test(chooseAction({ ...base, sessionsTarget: 0 }).todo),
+      "a client who said they are not training today was told to train");
+
+    // …and the renderer stands down rather than printing the session over the refusal.
+    for (const refusal of ["no I'm not training today", "I'm training tomorrow not today",
+                           "I am not training today. I will train tomorrow"]) {
+      const reply = await serialise(() => say(refusal));
+      assert.ok(!/Week \d|Next Session|Foundation Phase|Send \*?DONE/i.test(reply),
+        `today's session was printed over an explicit refusal: ${reply.slice(0, 90)}`);
+      assert.match(reply, /rest today|when you'?re ready/i,
+        `the refusal was not acknowledged: ${reply.slice(0, 90)}`);
+    }
+    // A REQUEST TO MOVE A WORKOUT IS A SCHEDULE DECISION, NOT A REQUEST TO RENDER IT.
+    // "Can I do my workout tomorrow instead?" answered with the session was the client asking
+    // permission and being handed the object. The renderer stays one message away, on their terms.
+    for (const ask of ["Can I do my workout tomorrow instead?", "Can I train tomorrow instead?"]) {
+      const reply = await serialise(() => say(ask));
+      assert.ok(!/Week \d|Next Session|Foundation Phase|Send \*?DONE/i.test(reply),
+        `a schedule question was answered with the workout: ${ask} → ${reply.slice(0, 80)}`);
+      assert.match(reply, /rest day|do this session tomorrow|do it later today/i,
+        `the schedule question got no schedule answer: ${ask} → ${reply.slice(0, 80)}`);
+    }
+    // …and asking to SEE it still renders it — including when the ASK is phrased as permission.
+    // "Can I get tomorrow's session?" is a possessive naming the object; "Can I do my workout
+    // tomorrow?" proposes a time. Grammar decides, not a verb list.
+    for (const view of ["Show me tomorrow's workout.", "Tomorrow's workout?",
+                        "Can I see tomorrow's workout?", "Can I get tomorrow's session?"]) {
+      const reply = await serialise(() => say(view));
+      assert.match(reply, /Week \d/i, `a view request stopped rendering: ${view} → ${reply.slice(0, 70)}`);
+    }
+
+    // The opposite still holds end to end: a reported session is still written to today.
+    const trained = await writesFor("I trained chest today. What should I eat now?");
+    assert.ok(trained.workout, "a reported session stopped being recorded");
+    // And the ordinary workout doors are untouched.
+    for (const view of ["workout", "What is tomorrow's session?"]) {
+      const reply = await serialise(() => say(view));
+      assert.match(reply, /Week \d/i, `a legitimate workout view was broken: ${view} → ${reply.slice(0, 70)}`);
+    }
+  });
 
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
