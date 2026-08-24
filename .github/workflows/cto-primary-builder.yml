@@ -1,0 +1,197 @@
+name: CTO primary-builder integration
+
+on:
+  push:
+    branches:
+      - ctos/coach-loop-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Patch existing owners
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          # 1) Existing situation owner: event timing must not be inferred from a whole-message
+          # "todayish" blob. Wire the pure day-relative resolver into the existing memory boundary.
+          p = Path("server/memory.ts")
+          s = p.read_text()
+          if 'from "./understanding/day-relative-situation"' not in s:
+              s = s.replace(
+                  'import { sastDaysBetween } from "./sast";\n',
+                  'import { sastDaysBetween } from "./sast";\nimport { resolveRecentSituation } from "./understanding/day-relative-situation";\n',
+                  1,
+              )
+
+          situation_helpers = r'''
+function situationLineForResolved(resolved: { kind: string; moment: string }): string {
+  if (resolved.kind === "celebration_outing") return "CURRENT SITUATION: Client has a celebration outing around the referenced day; restaurant eating is expected.";
+  if (resolved.kind === "eating_out") return "CURRENT SITUATION: Client expects to eat out around the referenced day.";
+  if (resolved.kind === "food_closed") return "CURRENT SITUATION: Client has closed food for the referenced day.";
+  return "";
+}
+'''
+          if 'function situationLineForResolved' not in s:
+              s = s.replace(
+                  'export function extractSalientSituation(clientMessages: string[]): string {',
+                  situation_helpers + '\nexport function extractSalientSituation(clientMessages: string[]): string {',
+                  1,
+              )
+
+          extract_replacement = r'''export function extractSalientSituation(clientMessages: string[]): string {
+  const stamped = (clientMessages || [])
+    .map(text => String(text || "").trim())
+    .filter(Boolean)
+    .map(text => ({ text, at: new Date() }));
+  return situationLineForResolved(resolveRecentSituation(stamped));
+}
+'''
+          s, n = re.subn(
+              r'export function extractSalientSituation\(clientMessages: string\[\]\): string \{.*?\n\}\n\nfunction foodDayClosedIn',
+              extract_replacement + '\nfunction foodDayClosedIn',
+              s,
+              count=1,
+              flags=re.S,
+          )
+          assert n == 1, "extractSalientSituation boundary not found"
+
+          salient_replacement = r'''export async function loadSalientSituation(phone: string, currentMessage?: string): Promise<string> {
+  const stamped = await recentClientMessagesStamped(phone);
+  if (currentMessage) stamped.unshift({ text: currentMessage, at: new Date() });
+  return situationLineForResolved(resolveRecentSituation(stamped));
+}
+'''
+          s, n = re.subn(
+              r'export async function loadSalientSituation\(phone: string, currentMessage\?: string\): Promise<string> \{.*?\n\}\n\nexport async function loadSituationFrame',
+              salient_replacement + '\nexport async function loadSituationFrame',
+              s,
+              count=1,
+              flags=re.S,
+          )
+          assert n == 1, "loadSalientSituation boundary not found"
+
+          frame_replacement = r'''export async function loadSituationFrame(phone: string, currentMessage?: string): Promise<string> {
+  const stamped = await recentClientMessagesStamped(phone);
+  if (currentMessage) stamped.unshift({ text: currentMessage, at: new Date() });
+  const resolved = resolveRecentSituation(stamped);
+  if (!resolved.kind || resolved.moment === "stale") return "";
+  return frameSituationForClient(situationLineForResolved(resolved), resolved.moment as any);
+}
+'''
+          s, n = re.subn(
+              r'export async function loadSituationFrame\(phone: string, currentMessage\?: string\): Promise<string> \{.*?\n\}\n\nexport async function recentClientMessagesStamped',
+              frame_replacement + '\nexport async function recentClientMessagesStamped',
+              s,
+              count=1,
+              flags=re.S,
+          )
+          assert n == 1, "loadSituationFrame boundary not found"
+          p.write_text(s)
+
+          # 2) Deterministic current-date question owner before generic misc/GPT paths.
+          p = Path("server/handlers/misc-commands.ts")
+          s = p.read_text()
+          if 'from "../understanding/current-date"' not in s:
+              s = s.replace(
+                  'import { daysOnProgramme } from "../day-ledger-core";\n',
+                  'import { daysOnProgramme } from "../day-ledger-core";\nimport { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";\n',
+                  1,
+              )
+          needle = '  const { phone, message, m, user, wroteThisTurn } = ctx;\n'
+          insert = needle + '''\n  // CURRENT DATE — factual owner, never a GPT coaching turn.\n  if (isCurrentDateQuestion(message)) {\n    const reply = currentDateAnswer();\n    await logChat(user.id, message, reply, "CURRENT_DATE");\n    return reply;\n  }\n'''
+          assert needle in s, "misc handler entry not found"
+          if 'CURRENT_DATE — factual owner' not in s:
+              s = s.replace(needle, insert, 1)
+          p.write_text(s)
+
+          # 3) Natural short follow-up: "And the steps?" must use the authoritative day ledger
+          # before the generic Coach path. This is not a new decision owner; it is the existing
+          # deterministic step fact answering a direct factual follow-up.
+          p = Path("server/routes.ts")
+          s = p.read_text()
+          needle = '  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });\n'
+          insert = r'''  // NATURAL STEP FOLLOW-UP — "And the steps?" is a factual continuation of the current
+  // conversation, not a new generic coaching prompt. Read the same SAST day ledger and answer it
+  // deterministically before the GPT mouth.
+  if (/^(?:and|what about|how about)\s+(?:the\s+)?steps\s*\?$/i.test(m.trim())) {
+    const [todayStep] = await db.select({ steps: stepLogs.steps })
+      .from(stepLogs)
+      .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart())))
+      .orderBy(desc(stepLogs.loggedAt))
+      .limit(1);
+    const steps = Number(todayStep?.steps || 0);
+    const target = Number(user.stepsTarget) || 8500;
+    turnEvidence({ stepsToday: steps });
+    const name = getDisplayName(user) || "there";
+    const reply = !steps
+      ? `${name} — nothing logged yet today. Your target is ${target.toLocaleString()} steps.`
+      : steps >= target
+        ? `${name} — ${steps.toLocaleString()} steps today. Target hit ✅`
+        : `${name} — ${steps.toLocaleString()} steps so far. ${Math.max(0, target - steps).toLocaleString()} to hit your target.`;
+    await logChat(user.id, message, reply, "STEP_FOLLOW_UP");
+    return reply;
+  }
+
+''' + needle
+          assert needle in s, "misc result anchor not found"
+          if 'NATURAL STEP FOLLOW-UP' not in s:
+              s = s.replace(needle, insert, 1)
+          p.write_text(s)
+
+          # 4) A future plan is not a feeling acknowledgement. Keep genuine emotion detection,
+          # but do not let "I think I'm going to ..." trip the feeling-only exit.
+          p = Path("server/unlogged-notice.ts")
+          s = p.read_text()
+          old = '''export function carriesFeelingClause(text: string): boolean {\n  return /\\b(i feel|i'm feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can'?t cope)\\b/i.test(text || "");\n}\n'''
+          new = '''export function carriesFeelingClause(text: string): boolean {\n  const raw = String(text || "");\n  // Future-plan language must reach the coaching decision. "I think I'm going to stop eating"\n  // is an intention/constraint, not a feeling merely because it begins with "I think I".\n  if (/\\b(?:i think i(?:'m| am) going to|i(?:'m| am) going to|i'?ll|i will)\\b/i.test(raw)) return false;\n  return /\\b(i feel|i'm feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can'?t cope)\\b/i.test(raw);\n}\n'''
+          assert old in s, "feeling function body not found"
+          if 'Future-plan language must reach the coaching decision' not in s:
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # 5) Lock the phone-shaped regression into the existing foundation suite.
+          p = Path("script/coach-loop-foundation-tests.ts")
+          s = p.read_text()
+          if 'carriesFeelingClause' not in s:
+              s = s.replace(
+                  'import { morningClosingLine, composeMorning } from "../server/morning-message";\n',
+                  'import { morningClosingLine, composeMorning } from "../server/morning-message";\nimport { carriesFeelingClause } from "../server/unlogged-notice";\n',
+                  1,
+              )
+              s = s.replace(
+                  '  console.log("coach-loop-foundation: all checks passed");\n',
+                  '  assert.equal(carriesFeelingClause("I think I\'m going to stop eating today"), false, "future plan must not be swallowed as feeling");\n  assert.equal(carriesFeelingClause("I feel overwhelmed today"), true, "genuine feeling must remain detectable");\n\n  console.log("coach-loop-foundation: all checks passed");\n',
+                  1,
+              )
+          p.write_text(s)
+
+          # Ensure this workflow never becomes permanent infrastructure.
+          Path(".github/workflows/cto-primary-builder.yml").unlink()
+
+      - name: Validate focused slice
+        run: |
+          npx tsx script/reaction-guard-tests.ts
+          npx tsx script/current-date-tests.ts
+          npx tsx script/day-relative-situation-tests.ts
+          npx tsx script/coach-loop-foundation-tests.ts
+          git diff --check
+
+      - name: Commit integrated slice back to builder branch
+        run: |
+          git config user.name "KamLife CTO Builder"
+          git config user.email "cto-builder@kamlife.local"
+          git add server/memory.ts server/handlers/misc-commands.ts server/routes.ts server/unlogged-notice.ts script/coach-loop-foundation-tests.ts .github/workflows/cto-primary-builder.yml
+          git commit -m "Coach loop: integrate continuity owners"
+          git push origin HEAD:${GITHUB_REF_NAME}
