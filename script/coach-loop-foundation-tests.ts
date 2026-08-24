@@ -8,10 +8,14 @@ function run(): void {
   assert.equal(runLine, "", "28-day ON_A_RUN recognition must not become a client-facing score");
 
   const struggling = morningClosingLine("STRUGGLING", oldTrajectoryContext);
-  assert.equal(struggling, "_Today starts from where you are. Nothing is reset._".replace(/^/, "\n\n"), "struggling morning must not ship the 28-day score or fresh-page shame");
+  assert.equal(struggling, "", "STRUGGLING must not create a second closing/action owner");
 
   const engagedStruggling = morningClosingLine("STRUGGLING", { activelyEngaged: true, completedSessions28: 1 });
   assert.equal(engagedStruggling, "", "engaged clients must not receive lapse framing");
+
+  const lapsedRecovering = morningClosingLine("RECOVERING", oldTrajectoryContext);
+  assert.match(lapsedRecovering, /have you back/i, "lapsed clients keep warm re-entry recognition");
+  assert.doesNotMatch(lapsedRecovering, /sessions in the last 4 weeks|reply Hi/i, "warm recognition must not become a second behavioral instruction");
 
   const message = composeMorning({
     firstName: "KAM",
