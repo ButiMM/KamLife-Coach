@@ -64,19 +64,15 @@ export function resolveSituationMoment(text: string, at: Date, now = new Date())
   const senderDay = sastCalendarDay(at);
   const currentDay = sastCalendarDay(now);
 
-  // Monday/Tuesday + any weekend reference in past tense = the just-finished weekend.
   if (WEEKEND_RE.test(raw) && explicitPast && /^(Mon|Tue)$/i.test(sastWeekday(now))) {
     return "last_night";
   }
 
-  // Explicit "last night" / "yesterday" is always retrospective.
   if (EXPLICIT_PAST_NIGHT_RE.test(raw)) {
     const age = ageMoment(at, now);
     return age === "today" ? "last_night" : age;
   }
 
-  // "Today/tonight" belongs to the sender's SAST calendar day. A Sunday message that says
-  // "tonight" becomes last_night when the Coach reads it Monday.
   if (EXPLICIT_TODAY_RE.test(raw)) {
     if (senderDay === currentDay) return explicitPast ? ageMoment(at, now) : "today";
 
