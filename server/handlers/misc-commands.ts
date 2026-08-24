@@ -39,6 +39,7 @@ import { SA_FOODS_SEED } from "../foods";
 import { turnEvidence } from "./chat-log";
 import { getProgressTruth, sessionsThisCalendarWeek } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
+import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
 const PROTEIN_WORDS: string[] = Array.from(new Set([
@@ -63,6 +64,13 @@ export async function handleMiscCommands(ctx: {
   wroteThisTurn?: boolean;
 }): Promise<string | null> {
   const { phone, message, m, user, wroteThisTurn } = ctx;
+
+  // Calendar facts are deterministic SAST state, not coaching.
+  if (isCurrentDateQuestion(message)) {
+    const reply = currentDateAnswer();
+    await logChat(user.id, message, reply, "CURRENT_DATE");
+    return reply;
+  }
 
   // ---- DIRECTION / OVERALL PLAN ---- The client wants the WHOLE plan across every pillar (train/rest, food, steps, water), not a bare workout dump (2026-07-09: a client asked and got an exercise list). Deterministic, from their real targets and today's training state. The shared detector (utils.looksLikeDirectionRequest) ALSO gates the brain in routes.ts, so a direction ask can never be swallowed by the model (2026-07-11: the brain answered it with a workout dump on a rest day).
   // THE ONE ACTION FIRST (2026-07-28): "just tell me what to do" is a different question from "give me my whole plan", and the answer to the first must never be the second. See server/one-action.ts.
@@ -482,6 +490,7 @@ export async function handleMiscCommands(ctx: {
 
   // ---- STEPS QUERY (bare "steps", "my steps", or explicit today query) ----
   const isStepWeekQuery = /\b(steps?\s*(?:this\s+)?week|my\s+step\s*(?:history|stats?|average|trend)|step\s*(?:history|stats?|average|trend|report)|weekly\s*steps?|7[\s-]day\s*steps?)\b/i.test(m);
+  const isNaturalStepFollowUp = /^(?:and|what about|how about)\s+(?:the\s+)?steps?\s*\?$/i.test(m.trim());
   // "what are my steps" reached NONE of these and fell through to the model, which has no step
   // ledger and answered with the offline-agent apology (2026-08-21, found by the factual-question
   // check once production-parity started awaiting its async cases). A held number must never be
@@ -490,7 +499,7 @@ export async function handleMiscCommands(ctx: {
   if (["steps", "my steps", "step target", "steps target", "daily steps"].includes(m) ||
       /\b(steps?\s*today|how many steps|steps?\s*logged|did i hit my steps?|steps?\s*(count|so far|this morning|tonight)|today.?s steps?)\b/i.test(m) ||
       /\b(?:what(?:'|’)?s|what is|what are|show me|tell me)\b[^?]{0,24}\bmy\s+steps?\b/i.test(m) ||
-      isStepWeekQuery) {
+      isStepWeekQuery || isNaturalStepFollowUp) {
     try {
       const target = user.stepsTarget || 8500;
       const name2 = user.name?.split(" ")[0] || "";
