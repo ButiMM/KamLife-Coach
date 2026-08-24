@@ -526,13 +526,18 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   // try/catch, not `.catch()` on the query chain: a rejected chain and an empty result are
   // different things, and conflating them silently disabled this floor the first time.
   let recipientId: string | null = null;
+  // profile_notes carries the durable illness state the held-constraint rule reads. Selected here
+  // rather than re-queried inside the floor: this lookup already runs, and one read is one read.
+  let recipientRow: { id: string; profileNotes: string | null } | null = null;
   try {
-    const rows = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, to)).limit(1);
-    recipientId = rows[0]?.id ?? null;
+    const rows = await db.select({ id: users.id, profileNotes: users.profileNotes })
+      .from(users).where(eq(users.phoneNumber, to)).limit(1);
+    recipientRow = (rows[0] as any) ?? null;
+    recipientId = recipientRow?.id ?? null;
   } catch (e: any) {
     console.warn(`[OUTBOUND_AUTHORITY] recipient lookup failed for ${to.slice(-8)}: ${e?.message || e}`);
   }
-  const verdict = await enforceOutboundTruth(recipientId, to, body);
+  const verdict = await enforceOutboundTruth(recipientId, to, body, recipientRow);
   if (!verdict.ok) {
     console.error(`[OUTBOUND_AUTHORITY] BLOCKED proactive send to ${to.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
     return;

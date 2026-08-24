@@ -19,7 +19,7 @@ function makeStubDb(): any {
     const fn: any = () => {};
     return new Proxy(fn, {
       get(_t, prop: string | symbol) {
-        if (prop === "then") {
+        if (prop === "then" || prop === "catch" || prop === "finally") {
           const stubUser = (globalThis as any).__KAMLIFE_STUB_USER;
           // SEEDED LEDGER ROWS (2026-08-22). Same opt-in shape as __KAMLIFE_STUB_USER, one table
           // deeper: a suite that needs the stub to hold a real workout/step/meal history sets
@@ -30,16 +30,30 @@ function makeStubDb(): any {
           const seeded = (globalThis as any).__KAMLIFE_STUB_ROWS as Map<any, any[]> | undefined;
           const rows = seeded?.get(state.table)
             ?? (state.table === (schema as any).users && stubUser ? [{ ...stubUser }] : []);
+          // `.catch()` USED TO DISCARD THE SEED (fixed 2026-08-25). It returned
+          // `Promise.resolve([]).catch(h)` — a resolved promise of the EMPTY array, whatever the
+          // suite had seeded. Every query in loadProactiveState ends in `.catch(() => [])`, so a
+          // seeded ledger reached none of them: the state came back all-null and any test built on
+          // it graded the come_back rung instead of the one it meant to. Same class of defect as
+          // the `.catch()` on the drizzle chain that silently disabled the outbound floor.
+          if (prop === "catch") return (h: any) => Promise.resolve(rows).catch(h);
+          if (prop === "finally") return (h: any) => Promise.resolve(rows).finally(h);
           return (res: any, rej: any) => Promise.resolve(rows).then(res, rej);
         }
-        if (prop === "catch") return (h: any) => Promise.resolve([]).catch(h);
-        if (prop === "finally") return (h: any) => Promise.resolve([]).finally(h);
         return (...args: any[]) => {
           if (prop === "from" || prop === "into") return chain({ table: args[0] });
           if ((prop === "set" || prop === "values") && state.table === (schema as any).users
               && args[0] && typeof args[0] === "object" && !Array.isArray(args[0])) {
             const stubUser = (globalThis as any).__KAMLIFE_STUB_USER;
             if (stubUser) Object.assign(stubUser, args[0]);
+          }
+          // WRITES ARE OBSERVABLE (2026-08-25). A suite that needs to grade what a code path wrote
+          // — as opposed to what it returned — sets globalThis.__KAMLIFE_STUB_WRITES to an array
+          // and reads it back. The proactive door captures its final outbound body through
+          // shadowDoor's insert, so this is how "what would the client have read" is graded end to
+          // end without patching Twilio or adding a seam to production code. Unset: no-op.
+          if (prop === "values" && Array.isArray((globalThis as any).__KAMLIFE_STUB_WRITES)) {
+            (globalThis as any).__KAMLIFE_STUB_WRITES.push({ table: state.table, values: args[0] });
           }
           return chain(state);
         };
@@ -98,7 +112,18 @@ function makeRealDb(p: ReturnType<typeof makeRealPool>) {
 }
 
 const stubPool = {
-  query: async () => ({ rows: [] }),
+  // SEEDED RAW ROWS (2026-08-25). The drizzle stub grew __KAMLIFE_STUB_ROWS for the same reason
+  // this needs one: the held-constraint reader goes through pool.query, not drizzle, so "the
+  // client said at 08:00 that they are not training today" could not be expressed offline — and
+  // an invariant about held state cannot be graded against a history that is always empty.
+  // Opt-in: a function of (sql, params) returning rows, or a flat array. Unset — which is every
+  // existing caller — behaves exactly as before.
+  query: async (text?: any, params?: any) => {
+    const seed = (globalThis as any).__KAMLIFE_STUB_PGROWS;
+    if (typeof seed === "function") return { rows: seed(text, params) ?? [] };
+    if (Array.isArray(seed)) return { rows: seed };
+    return { rows: [] };
+  },
   connect: async () => ({ query: async () => ({ rows: [] }), release() {} }),
   end: async () => {},
   on() {},

@@ -74,7 +74,8 @@ export async function canonicalDecision(user: any, message?: string): Promise<{ 
     //
     // It now asks the decision owner, on canonical state, under the same policy contract every
     // other caller uses. theNextMove is deleted.
-    const { chooseAction, underPolicy, foodDayIsClosed } = await import("../one-action");
+    const { chooseAction, underPolicy, foodDayIsClosed, trainingDayIsDeclined } = await import("../one-action");
+    const { readHeldConstraints } = await import("../held-constraints");
     const { getProgressTruth, sessionsThisCalendarWeek } = await import("../day-ledger");
     const { sastHour } = await import("../sast");
     const { getTodayWorkoutState } = await import("../workout-state");
@@ -82,6 +83,7 @@ export async function canonicalDecision(user: any, message?: string): Promise<{ 
     const { getDisplayName } = await import("../utils");
 
     const truth = await getProgressTruth(user, { days: 7 });
+    const held = await readHeldConstraints(user.phoneNumber, user).catch(() => ({ foodDayClosed: false, trainingDeclined: false, sick: false }));
     const weekSessions = await sessionsThisCalendarWeek(user.id).catch(() => 0);
     const wState = await getTodayWorkoutState(user).catch(() => ({ type: "REST" as const }));
     const calTarget = Number(user.calorieTarget) || 0;
@@ -105,7 +107,14 @@ export async function canonicalDecision(user: any, message?: string): Promise<{ 
       hour: sastHour(),
       // They are typing to us right now — this rides out on a reply, not as a nudge.
       atKeyboard: true,
-      foodDayClosed: foodDayIsClosed(message || ""),
+      // A CONSTRAINT OUTLIVES THE SENTENCE THAT STATED IT (2026-08-25, P0-4b). This read only the
+      // CURRENT message, so a client who closed food at 12:00 and asked an unrelated question at
+      // 19:00 was decided for as though they had never said it — the constraint expired at the end
+      // of the turn that carried it. `held` is today's statements; the live message is folded in
+      // because it has not reached chat_history yet. trainingDeclined is the twin, and until now
+      // it had no field at all: routes.ts computed it into `_isWorkoutRefusal` and dropped it.
+      foodDayClosed: held.foodDayClosed || foodDayIsClosed(message || ""),
+      trainingDeclined: held.trainingDeclined || trainingDayIsDeclined(message || ""),
     } as any), { evidenced: truth.window.daysLogged >= 3, dreamGoal: user.dreamGoal });
 
     // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,

@@ -2314,6 +2314,229 @@ async function main() {
       "a rejected proactive message still reached the send path");
   });
 
+  /**
+   * FIRE A REAL SCHEDULER JOB AND READ WHAT THE CLIENT WOULD HAVE READ.
+   *
+   * Not a call to the composer, and not a call to the decision — the exported cron entry point,
+   * through server/scheduler/shared.sendWhatsApp: the outbound floor, the provenance gate,
+   * humanizeReply, and the bubble split. Capture is via SHADOW mode, which is the product's own
+   * "record instead of send" door, so nothing here is a seam that exists only for the test.
+   *
+   * `saidToday` is chat_history as the held-constraint reader sees it — the client's own words.
+   */
+  async function runEveningThroughTheDoor(
+    saidToday: Array<{ message_in: string; created_at: Date }>,
+    ledger: { proteinTarget?: number; who: string },
+  ): Promise<string[]> {
+    const { runEveningAccountability } = await import("../server/scheduler/jobs/evening");
+    const { shadowReplies, sentProactive, mealLogs, workoutLogs, weightLogs, stepLogs, chatHistory } =
+      await import("../shared/schema");
+    const g = globalThis as any;
+    const today = new Date();
+
+    return serialise(async () => {
+      const priorShadow = process.env.SHADOW;
+      const priorPause = process.env.PROACTIVE_PAUSED;
+      process.env.SHADOW = "on";
+      // The harness pins PROACTIVE_PAUSED=true so no cron fires while the reactive cases run. This
+      // case IS the cron, so the killswitch is lifted for its duration and restored after. Inside
+      // serialise(), so nothing else is running while it is off.
+      process.env.PROACTIVE_PAUSED = "false";
+      g.__KAMLIFE_STUB_PGROWS = (sql: string) => (/chat_history/i.test(String(sql)) ? saidToday : []);
+      g.__KAMLIFE_STUB_USER = {
+        ...USER,
+        // A DISTINCT CLIENT PER CASE. The proactive budget is per user and in memory, so two cases
+        // sharing an id means the second one is silenced by the first — and "it said nothing"
+        // would read as "it obeyed the constraint".
+        id: `parity-${ledger.who}`,
+        phoneNumber: `whatsapp:+2782000${ledger.who.length}${ledger.who.charCodeAt(0)}`,
+        trainingDaysPerWeek: 4,      // this week = 0/4 — by the ledger they are behind
+        totalWorkoutsCompleted: 0,
+        proteinTarget: ledger.proteinTarget ?? 140,
+        calorieTarget: 2000,
+        stepsTarget: 8500,
+        lastActiveAt: today,
+        profileNotes: "",
+      };
+      // A LEDGER THAT SUPPORTS A PRESCRIPTION. Without evidence, decideProactive downgrades every
+      // prescription to a question — which would make "it did not say train" true for the wrong
+      // reason. Two weigh-ins twenty days apart make the weight trend usable, which is the
+      // evidence gate's own sufficiency condition.
+      //
+      // Rows carry BOTH the column name and the alias each query selects it under, because the
+      // stub returns seeded rows verbatim rather than applying drizzle's projection.
+      const meal = { id: 1, at: today, loggedAt: today, kcalInt: 900, proteinInt: 0,
+                     todayCal: 900, todayProt: 0 };
+      g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([
+        [sentProactive, [{ id: 1 }]],                       // claimDailySlot must be winnable
+        [chatHistory, [{ id: 1, createdAt: today, intent: "FOOD_LOG", messageIn: "chicken and rice" }]],
+        [mealLogs, [meal]],
+        [workoutLogs, []],                                  // zero sessions this week
+        [weightLogs, [
+          { id: 2, weight: "82.0", w: "82.0", at: new Date(NOW - 86_400_000), loggedAt: new Date(NOW - 86_400_000) },
+          { id: 1, weight: "83.4", w: "83.4", at: new Date(NOW - 20 * 86_400_000), loggedAt: new Date(NOW - 20 * 86_400_000) },
+        ]],
+        [stepLogs, [{ avg: 9000, steps: 9000, at: today, loggedAt: today }]],
+      ]);
+      const writes: Array<{ table: any; values: any }> = [];
+      g.__KAMLIFE_STUB_WRITES = writes;
+      try {
+        await runEveningAccountability().catch(() => undefined);
+      } finally {
+        delete g.__KAMLIFE_STUB_WRITES;
+        delete g.__KAMLIFE_STUB_ROWS;
+        delete g.__KAMLIFE_STUB_PGROWS;
+        g.__KAMLIFE_STUB_USER = { ...USER };
+        if (priorShadow === undefined) delete process.env.SHADOW; else process.env.SHADOW = priorShadow;
+        if (priorPause === undefined) delete process.env.PROACTIVE_PAUSED; else process.env.PROACTIVE_PAUSED = priorPause;
+      }
+      return writes
+        .filter(w => w.table === shadowReplies && typeof w.values?.body === "string")
+        .map(w => String(w.values.body));
+    });
+  }
+
+  // ── P0-4b · HELD STATE CANNOT BE CONTRADICTED BY A PROACTIVE MESSAGE (2026-08-25) ─────────
+  //
+  // The CTO's acceptance shape, and deliberately NOT "does weekly.ts call chooseAction" — that is
+  // a source-string trap that stays green when the call is made and its answer discarded.
+  //
+  // Held state: rest day (training declined in the client's own words) / food day closed / last
+  // night's birthday outing / this week = 0 of 4. A proactive sender fires. It must not tell the
+  // client to train, must not tell them to eat more, and the instruction it does carry must be the
+  // canonical one.
+  const BIRTHDAY = { message_in: "was my cousin's birthday last night, we ate out", created_at: new Date(NOW - 12 * 3_600_000) };
+  const SAYS_TRAINING = /\b(?:get|do|finish|start|complete)\b[^.!?\n]{0,40}\b(?:today'?s |the |your |a )?(?:session|workout)\b|training day and the session is still not done/i;
+  const SAYS_EAT = /\bget to \d+\s*g\b|\badd one more (?:proper )?meal\b|\bmake your next meal\b|\bget protein into your next meal\b/i;
+
+  // Four cases, one job, one door. Each PROHIBITION is paired with the identical fixture minus the
+  // constraint, which must produce the very instruction the other one forbids — so neither
+  // assertion can pass because the job went quiet or because the ladder never reached that rung.
+  check("P0-4b . training declined today — a real scheduler job must not tell them to train", async () => {
+    // proteinTarget 0 takes the food rungs out of the ladder, so `train` is what the decision
+    // would otherwise reach on 0 of 4 sessions. That is the rung under test.
+    const all = (await runEveningThroughTheDoor(
+      [{ message_in: "I'm not training today", created_at: new Date() }, BIRTHDAY],
+      { who: "trainheld", proteinTarget: 0 },
+    )).join("\n---\n");
+    assert.ok(!SAYS_TRAINING.test(all),
+      `told a client who said they are not training today to train: ${all.slice(0, 300)}`);
+  });
+
+  check("P0-4b control . same state, nothing said — it DOES tell them to train", async () => {
+    const sent = await runEveningThroughTheDoor([BIRTHDAY], { who: "traincontrol", proteinTarget: 0 });
+    assert.ok(sent.length > 0, "the evening job sent nothing at all — the prohibition above proves nothing");
+    const all = sent.join("\n---\n");
+    assert.ok(SAYS_TRAINING.test(all),
+      `0 of 4 sessions and no constraint, and the job never asked for a session: ${all.slice(0, 300)}`);
+    // …and it is the canonical renderer saying it, not a string this job wrote.
+    assert.ok(/One thing today:/i.test(all), `the instruction did not come from formatOneAction: ${all.slice(0, 300)}`);
+  });
+
+  check("P0-4b . food day closed — a real scheduler job must not tell them to eat", async () => {
+    const all = (await runEveningThroughTheDoor(
+      [{ message_in: "I'm not eating anything else today", created_at: new Date() }, BIRTHDAY],
+      { who: "foodheld", proteinTarget: 140 },
+    )).join("\n---\n");
+    assert.ok(!SAYS_EAT.test(all),
+      `told a client who closed their food day to eat: ${all.slice(0, 300)}`);
+  });
+
+  check("P0-4b control . same state, nothing said — it DOES ask for protein", async () => {
+    const sent = await runEveningThroughTheDoor([BIRTHDAY], { who: "foodcontrol", proteinTarget: 140 });
+    assert.ok(sent.length > 0, "the evening job sent nothing at all — the prohibition above proves nothing");
+    const all = sent.join("\n---\n");
+    // At or after 20:00 the same rung faces tomorrow — one rung, two renderings, both a real ask.
+    assert.ok(SAYS_EAT.test(all) || /start tomorrow with protein/i.test(all),
+      `protein at zero against a 140g target and the job asked for nothing: ${all.slice(0, 300)}`);
+  });
+
+  // The decision half, isolated: `trainingDeclined` is a DayState INPUT, not a filter applied to
+  // the sentence afterwards. Same state twice, one field apart.
+  check("P0-4b . trainingDeclined stands `train` down, and nothing else", async () => {
+    const { chooseAction } = await import("../server/one-action");
+    const behind = {
+      goal: "fat_loss" as any, weeksOnProgramme: 3,
+      daysSinceAnyLog: 0, daysSinceWeighIn: 1, loggedToday: true,
+      proteinPct: 1, caloriePct: 1,
+      sessionsThisWeek: 0, sessionsTarget: 4,
+      stepsToday: 9000, stepsTarget: 8500, hour: 19,
+    };
+    assert.equal(chooseAction(behind).kind, "train", "0 of 4 sessions and the ladder did not reach train");
+    assert.notEqual(chooseAction({ ...behind, trainingDeclined: true }).kind, "train",
+      "a client who ruled today out was still told to train");
+    // It suppresses ONE rung, it does not silence the coach: the same client short on protein
+    // still gets the protein ask, because that is not what they declined.
+    assert.equal(chooseAction({ ...behind, trainingDeclined: true, proteinPct: 0.2 }).kind, "protein",
+      "declining training silenced an unrelated rung");
+  });
+
+  // The door half, isolated: the floor blocks a contradiction written by hand, so a sender nobody
+  // has migrated still cannot say it. Without this the migration protects only what it touched.
+  check("P0-4b . the outbound floor blocks a contradiction from an unmigrated sender", async () => {
+    const { enforceOutboundTruth } = await import("../server/outbound-authority");
+    const g = globalThis as any;
+    const out = await serialise(async () => {
+      g.__KAMLIFE_STUB_PGROWS = (sql: string) => (/chat_history/i.test(String(sql))
+        ? [{ message_in: "I'm not training today", created_at: new Date() },
+           { message_in: "I'm done eating for today", created_at: new Date() }]
+        : []);
+      const r = {
+        train: await enforceOutboundTruth(USER.id, "whatsapp:+27000000301", "Kam, get today's session done before bed."),
+        eat: await enforceOutboundTruth(USER.id, "whatsapp:+27000000302", "Kam, get to 140g protein tonight."),
+        recognition: await enforceOutboundTruth(USER.id, "whatsapp:+27000000303", "Kam, 9,000 steps today. Strong."),
+      };
+      delete g.__KAMLIFE_STUB_PGROWS;
+      return r;
+    });
+    assert.ok(!out.train.ok && out.train.reason === "contradicts_held_constraint",
+      `a training instruction reached a client who declined training: ${JSON.stringify(out.train)}`);
+    assert.ok(!out.eat.ok && out.eat.reason === "contradicts_held_constraint",
+      `a food instruction reached a client who closed their food day: ${JSON.stringify(out.eat)}`);
+    // THE CONTROL. A floor that blocks recognition is a floor that will be routed around.
+    assert.ok(out.recognition.ok, `recognition was blocked by the constraint rule: ${out.recognition.detail}`);
+  });
+
+  // THE FALSE-POSITIVE CONTROL, and it caught a real one. The first matcher took any eating verb
+  // near any food noun, which would have suppressed Sunday's meal plan and the shopping list for a
+  // client who closed their food day that afternoon — a week's artefact lost to a constraint about
+  // tonight. A rule that swallows the deliverable is a rule people route around.
+  check("P0-4b . the constraint rule does not swallow artefacts, logging asks or recognition", async () => {
+    const { asksForFoodToday, asksForTrainingToday } = await import("../server/held-constraints");
+    const mustPass = [
+      "*Kam — your 3-day plan for the week ahead:*\n\nDay 1 breakfast: eggs + toast. Prep protein on Sunday.",
+      "Your R100 week plan — eggs 12 pack R45, pilchards 3 tins R36. Shop at Shoprite this weekend.",
+      "One quick thing before bed: tell me what you ate.",
+      "Kam, 9,000 steps and a session done today. Strong.",
+      "Reply *1* to see tomorrow's workout.",
+      "Week 5 wrap-up: 3 workouts done, 5 days food logged.",
+    ];
+    for (const m of mustPass) {
+      assert.ok(!asksForFoodToday(m), `a non-instruction was read as an ask for food: ${m.slice(0, 70)}`);
+      assert.ok(!asksForTrainingToday(m), `a non-instruction was read as an ask to train: ${m.slice(0, 70)}`);
+    }
+    // …and it still sees the two things it exists to see.
+    assert.ok(asksForFoodToday("Make your next meal a protein one — tin fish, eggs or amasi."));
+    assert.ok(asksForTrainingToday("Get today's session done."));
+  });
+
+  // The reader half: "anything else" is a quantity, "anything fried" is an object. Found while
+  // building the fixture above, and the distinction is the whole reason this owner is narrow.
+  check("P0-4b . a closed food day is read from the client's own words, not the topic", async () => {
+    const { foodDayIsClosed } = await import("../server/one-action");
+    for (const closed of [
+      "I'm not eating anything else today",
+      "not eating anything more today",
+      "I'm done eating for today",
+    ]) assert.ok(foodDayIsClosed(closed), `a plain closure was not read as one: ${closed}`);
+    for (const open of [
+      "I'm not eating anything fried today",
+      "I'm done eating badly",
+      "I'm done eating junk",
+      "I can't stop eating today",
+    ]) assert.ok(!foodDayIsClosed(open), `a food CHOICE was recorded as a closed day: ${open}`);
+  });
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");

@@ -39,12 +39,13 @@
 
 import { sessionCountsIn } from "./utils";
 import { isDuplicateOutbound } from "./reply-hygiene";
+import { readHeldConstraints, asksForFoodToday, asksForTrainingToday } from "./held-constraints";
 
 export interface OutboundVerdict {
   /** May this leave the building? */
   ok: boolean;
   /** Machine-readable cause, for the counters. */
-  reason?: "session_count_contradicts_record" | "duplicate";
+  reason?: "session_count_contradicts_record" | "duplicate" | "contradicts_held_constraint";
   detail?: string;
 }
 
@@ -59,6 +60,8 @@ export async function enforceOutboundTruth(
   userId: string | null,
   recipientKey: string,
   text: string,
+  /** The recipient's row, when the door already holds it — carries the durable illness state. */
+  recipientUser?: { profileNotes?: string | null } | null,
 ): Promise<OutboundVerdict> {
   const body = String(text || "");
   if (!body.trim()) return { ok: true };
@@ -85,7 +88,36 @@ export async function enforceOutboundTruth(
     }
   }
 
-  // 2. THE SAME MESSAGE TWICE IS NEVER RIGHT. The reactive door has said so since 2026-08-21; two
+  // 2. A MESSAGE MAY NOT CONTRADICT WHAT THE CLIENT ALREADY SETTLED TODAY (2026-08-25, P0-4b).
+  //
+  //    This is the rule that makes the migration hold. Eleven of fourteen proactive senders ran
+  //    their own action ladder — "if sessions < target then say train", "if protein short then say
+  //    get to 120g" — computed from the LEDGER, which records what a client did and knows nothing
+  //    about what they SAID. So "I'm not training today" at 08:00 and "training day and the
+  //    session is still not done" at 19:00 were both correct by their own inputs.
+  //
+  //    Migrating a sender to chooseAction fixes that sender. This fixes the door, which is the
+  //    only place the property can be true for senders nobody has migrated yet and for the next
+  //    one somebody writes. The migration below it exists so that senders pass this rule by
+  //    construction rather than by being blocked.
+  //
+  //    Opt-in, like rule 1: the constraint read only happens when the text is actually ASKING for
+  //    food or training today. Recognition ("you trained 3 times this week") costs nothing.
+  const asksFood = asksForFoodToday(body);
+  const asksTraining = asksForTrainingToday(body);
+  if (asksFood || asksTraining) {
+    // The lookup key is the phone, which is what recipientKey is on this door.
+    const held = await readHeldConstraints(recipientKey, recipientUser ?? null);
+    if (asksFood && held.foodDayClosed) {
+      return { ok: false, reason: "contradicts_held_constraint", detail: `food day closed; text asks for food: ${body.slice(0, 60)}` };
+    }
+    if (asksTraining && (held.trainingDeclined || held.sick)) {
+      const which = held.sick ? "sick" : "training declined";
+      return { ok: false, reason: "contradicts_held_constraint", detail: `${which}; text asks for training: ${body.slice(0, 60)}` };
+    }
+  }
+
+  // 3. THE SAME MESSAGE TWICE IS NEVER RIGHT. The reactive door has said so since 2026-08-21; two
   //    crons covering the same ground on the same morning had nothing stopping them.
   if (isDuplicateOutbound(`proactive:${recipientKey}`, body)) {
     return { ok: false, reason: "duplicate", detail: body.slice(0, 60) };

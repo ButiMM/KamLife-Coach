@@ -15,9 +15,9 @@ import { readHealthState } from "../../health-state";
 // message, so the experiment measured nothing. Deleting the send deletes an empty measurement.
 import { morningClosingLine, composeMorning, yesterdayObservation, breakfastReplayLine } from "../../morning-message";
 import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
-import { chooseAction, decideProactive, formatOneAction, underPolicy, foodDayIsClosed } from "../../one-action";
-import { loadSituationFrame, recentClientMessagesStamped } from "../../memory";
-import { sastDaysBetween } from "../../sast";
+import { chooseAction, decideProactive, formatOneAction, underPolicy } from "../../one-action";
+import { loadSituationFrame } from "../../memory";
+import { readHeldConstraints } from "../../held-constraints";
 
 /**
  * WHAT WE SAY TO SOMEONE WHO HAS GONE — decided by the ladder, not written here.
@@ -477,6 +477,11 @@ export async function runMorningCheckin(): Promise<void> {
         const breakfastAsk = `🍳 What's for breakfast?${repeatSuggestion || ""}`;
         let decisionLine = "";
         try {
+          // ONE READER FOR BOTH CONSTRAINTS (2026-08-25, P0-4b). This was an inline copy of the
+          // query that read only the food half — trainingDayIsDeclined existed and had nowhere to
+          // go, so a client who said "I'm not training today" could still be told to. Now the
+          // outbound floor and the decision read the same held state about the same day.
+          const held = await readHeldConstraints(phone, client);
           const decision = decideProactive(state, {
             dreamGoal: client.dreamGoal,
             biggestStruggle: client.biggestStruggle,
@@ -489,8 +494,8 @@ export async function runMorningCheckin(): Promise<void> {
             stepsTarget: Number(client.stepsTarget) || 0,
           }, {
             hour: 7,
-            foodDayClosed: (await recentClientMessagesStamped(phone).catch(() => []))
-              .some(s => sastDaysBetween(s.at) === 0 && foodDayIsClosed(s.text)),
+            foodDayClosed: held.foodDayClosed,
+            trainingDeclined: held.trainingDeclined,
           });
           decisionLine = decision.line;
           console.log(`[MORNING] ${client.id.slice(-6)} decision=${decision.state} evidence=${decision.evidence} action=${decision.action.kind}`);

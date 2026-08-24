@@ -13,6 +13,7 @@ import { getTrajectoryForUser } from "../../trajectory-report";
 import { runWeeklyRecaps } from "../../weekly-recap";
 import { generateMealPlan } from "../../meal-plan";
 import { mentionsForbidden } from "../../brain/reply-verifier";
+import { canonicalNextMove } from "../proactive-decision";
 
 export async function runFridayWeekendStrategy(): Promise<void> {
   console.log("[SCHEDULER] JOB: Friday weekend strategy");
@@ -60,6 +61,13 @@ export async function runFridayWeekendStrategy(): Promise<void> {
         : weightChange > 0.2 ? `⬆️ Up ${weightChange.toFixed(1)}kg`
         : `➡️ Weight holding`;
 
+      // THE WRAP-UP REPORTS; IT DOES NOT PRESCRIBE (2026-08-25, P0-4b). The four closings this
+      // replaces were a local ladder over (sessions, foodDays, account age) that always landed on
+      // the same two rules — "protein at every meal and one session before Sunday night" — and one
+      // of them said "Reply *1* right now" to a client who might have told us that morning they
+      // were not training. The numbers above are a real report and stay; the instruction is the
+      // canonical one, which has read what they said.
+      const move = await canonicalNextMove(client);
       const lines = [
         `*${name} — Week ${week} wrap-up:*`,
         ``,
@@ -67,15 +75,8 @@ export async function runFridayWeekendStrategy(): Promise<void> {
         `📋 ${foodDays} day${foodDays !== 1 ? "s" : ""} food logged`,
         avgSteps > 0 ? `👟 ${avgSteps.toLocaleString()} avg steps` : "",
         weightLine,
-        ``,
-        sessions >= (client.trainingDaysPerWeek || 3) && foodDays >= 5
-          ? `Sharp week, ${name}. Two rules this weekend — protein at every meal and one session before Sunday night. That is it.`
-          : sessions === 0 && new Date(client.createdAt || 0).getTime() > Date.now() - 7 * 86_400_000
-          ? `${name}, first week is about building the habit. Get one session in before Sunday and you'll be on track from day one.`
-          : sessions === 0
-          ? `Zero sessions this week — still time to change that. One session before Sunday is all it takes. Reply *1* right now.`
-          : `Weekend is where most people lose the week. Two rules only — protein at every meal and one session before Sunday night.`,
       ].filter(Boolean);
+      if (move.line) lines.push(``, move.line);
 
       await sendWhatsApp(client.phoneNumber, lines.join("\n"));
       sent++;
@@ -106,14 +107,22 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const clientAgeDays = client.createdAt
         ? Math.floor((Date.now() - new Date(client.createdAt).getTime()) / 86_400_000)
         : 999;
+      // THE THIN-WEEK EXITS GO THROUGH THE LADDER TOO (2026-08-25, P0-4b). "Send me what you're
+      // eating right now" and "Target this week: 5 days" were the fifth and sixth hand-written
+      // versions of chooseAction's `come_back` and `log` rungs, and they were the versions that
+      // reached the client who had gone quietest — the one the ladder's escalation was written
+      // for. A week of silence and six weeks of silence got the same sentence here.
       if (chats.length === 0) {
         if (clientAgeDays < 2) continue; // just onboarded today — skip
-        await sendWhatsApp(client.phoneNumber, `${name}, nothing logged this week. The restart is simple — send me what you're eating right now. One meal. That's the whole task.`);
+        const quiet = await canonicalNextMove(client);
+        if (quiet.line) await sendWhatsApp(client.phoneNumber, `${name}, nothing logged this week.\n\n${quiet.line}`);
         continue;
       }
       const daysWithLogs = new Set(chats.map(c => new Date(c.createdAt!).toDateString())).size;
       if (daysWithLogs < 3) {
-        await sendWhatsApp(client.phoneNumber, `${name}, ${daysWithLogs} day${daysWithLogs !== 1 ? "s" : ""} logged. You're in it — keep going. Target this week: 5 days, just one meal a day is enough.`);
+        const thin = await canonicalNextMove(client);
+        const opener = `${name}, ${daysWithLogs} day${daysWithLogs !== 1 ? "s" : ""} logged this week. You're in it.`;
+        await sendWhatsApp(client.phoneNumber, thin.line ? `${opener}\n\n${thin.line}` : opener);
         continue;
       }
 
@@ -174,40 +183,24 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const clientGoalWeekly = client.goalType || "fat_loss";
       const isMuscleGainWeekly = clientGoalWeekly === "muscle_gain";
       const budgetTierWeekly = client.weeklyFoodBudget || "100_300";
-      const isBudgetTight = budgetTierWeekly === "under_50" || budgetTierWeekly === "50_100" || budgetTierWeekly === "under_100" || budgetTierWeekly === "100_300";
-      let warning = "";
-      if (completedSessions === 0) {
-        warning = `⚠️ Zero sessions this week — one session this week is all I need from you.`;
-      } else if (junkCount >= 3) {
-        warning = isMuscleGainWeekly
-          ? `Processed & fried food showed up ${junkCount}x this week. For muscle gain this hurts — your calories need to come from protein-dense sources, not fried food. Keep the calories, fix the source. Chicken, rice, eggs over KFC and chips.`
-          : `Takeaways & cooldrinks showed up ${junkCount}x this week — no stress, enjoy them now and then. Just keep the other days protein-first.`;
-      } else if (noProteinDays >= 3) {
-        const proteinSources = isBudgetTight
-          ? `pilchards (R12/tin, 25g protein) and eggs (R3–4 each, 6g protein) — protein on any budget`
-          : `chicken, eggs, pilchards, Greek yoghurt, or biltong`;
-        warning = isMuscleGainWeekly
-          ? `⚠️ ${noProteinDays} days this week with no protein logged. Muscle cannot grow without it — this is the single biggest limiter right now. Tonight: ${proteinSources}. This is non-negotiable.`
-          : `Protein: ${noProteinDays} days this week without protein logged. Even one egg or a tin of pilchards (R12, 25g protein) counts — start with one meal tonight.`;
-      }
 
-      let focus = "";
-      if (completedSessions > 0 && completedSessions < plannedSessions) {
-        const sessionsShort = plannedSessions - completedSessions;
-        focus = isMuscleGainWeekly
-          ? `Train ${sessionsShort} more time${sessionsShort !== 1 ? "s" : ""} than last week — muscle growth requires the stimulus. No sessions = no signal to grow.`
-          : `Train ${sessionsShort} more time${sessionsShort !== 1 ? "s" : ""} than last week.`;
-      } else if (proteinHitRate < 60) {
-        focus = isBudgetTight
-          ? `Protein at every meal — pilchards, eggs, beans. Pilchards are R12 for 25g protein — the best protein per rand in SA.`
-          : isMuscleGainWeekly
-          ? `Protein at every meal, no exceptions. This is what drives your goal — eggs, pilchards, chicken, Greek yoghurt.`
-          : `Protein at every meal — eggs, pilchards, beans, chicken.`;
-      } else if (stepEntries.length === 0) {
-        focus = `Log your steps at least 3 days this week.`;
-      } else {
-        focus = `Maintain the consistency — same output or better.`;
-      }
+      // ── TWO LADDERS BECOME ONE OBSERVATION AND ONE DECISION (2026-08-25, P0-4b) ────────────
+      //
+      // `warning` and `focus` were both if-else ladders over the same week, disagreeing by
+      // construction: a client with zero sessions and thin protein got "one session this week is
+      // all I need from you" in one slot and "Protein at every meal" in the other — two next moves
+      // in one message, from two ladders, neither of them the decision owner. Add the third one in
+      // the morning brief and the product had three opinions about Sunday.
+      //
+      // What survives is what was genuinely an OBSERVATION rather than an instruction: the junk
+      // count is a real pattern in their own logs, and naming it without prescribing is exactly
+      // what recognition is for. The instruction is the canonical move, once.
+      const observation = junkCount >= 3
+        ? `Takeaways & cooldrinks showed up ${junkCount}x this week.`
+        : noProteinDays >= 3
+        ? `${noProteinDays} day${noProteinDays !== 1 ? "s" : ""} this week without protein logged.`
+        : "";
+      const move = await canonicalNextMove(client);
 
       const logScore = Math.round((daysWithLogs / 7) * 25);
       const trainScore = Math.round((Math.min(completedSessions, plannedSessions) / plannedSessions) * 35);
@@ -247,14 +240,14 @@ export async function runSundayWeeklyReport(): Promise<void> {
       ].filter(l => l !== null);
 
       if (milestoneLine) lines.push(milestoneLine, ``);
-      if (warning) lines.push(warning, ``);
-      // Adaptive step goal takes the "This week" slot when warranted — it's the most
-      // useful, most personal instruction we can give (meet them where they are).
+      if (observation) lines.push(observation, ``);
+      // The adaptive step goal is a TARGET CHANGE this job is offering, not a next move — it is
+      // the client's call, one tap, and it stays. It does not compete with the decision below.
       if (stepAdj) lines.push(`👟 *Your steps:* ${stepAdj.reason}`);
-      else lines.push(`*This week:* ${focus}`);
-      if (totalScore >= 85) lines.push(``, `${name}, this is what results look like. Same energy next week.`);
-      else if (totalScore >= 60) lines.push(``, `Solid week, ${name}. One more push and you are in the top tier. Go.`);
-      else lines.push(``, `${name}, below your best but you are still here. That matters. Reset Sunday night and go again Monday.`);
+      if (totalScore >= 85) lines.push(``, `${name}, this is what results look like.`);
+      else if (totalScore >= 60) lines.push(``, `Solid week, ${name}.`);
+      else lines.push(``, `${name}, below your best but you are still here. That matters.`);
+      if (move.line) lines.push(``, move.line);
       // One-tap acceptance — routes to the deterministic step-target updater. Client's call.
       if (stepAdj) lines.push(``, `[BUTTONS:Set steps to ${stepAdj.newTarget}]`);
 
@@ -385,14 +378,21 @@ export async function runWeekendFoodAudit(): Promise<void> {
       const weekendProteinRate = weekendLogs.length > 0 ? weekendProtein / weekendLogs.length : 0;
       const name = client.name || "there";
 
+      // THE PATTERN IS OURS TO SEE; THE MOVE IS NOT OURS TO INVENT (2026-08-25, P0-4b). The
+      // weekday-versus-weekend comparison is a genuine observation nothing else in the product
+      // makes, and it stays. Both branches then ended in the same locally-chosen prescription —
+      // "protein first at every meal" — which is chooseAction's rung 5, written a seventh time and
+      // sent without ever asking whether the client had closed food or was ill.
+      const pattern = weekendJunkRate > weekdayJunkRate + 0.3
+        ? `${name} — pattern spotted. Your weekday eating is solid. But ${weekendJunk > 0 ? `${weekendJunk} weekend meal${weekendJunk !== 1 ? "s" : ""}` : "your weekends"} this week looked different from your weekdays.`
+        : weekendProteinRate < weekdayProteinRate - 0.3
+        ? `${name} — you are hitting protein well during the week. But weekends your protein drops.`
+        : "";
+      if (!pattern) continue;
       // Claim only when there is actually a pattern to flag — DB-backed weekly dedup.
-      if (weekendJunkRate > weekdayJunkRate + 0.3) {
-        if (!(await claimProactive(client.id, "weekend_food_audit", thisWeekUTC()))) continue;
-        await sendWhatsApp(client.phoneNumber, `${name} — pattern spotted. Your weekday eating is solid. But ${weekendJunk > 0 ? `${weekendJunk} weekend meal${weekendJunk !== 1 ? "s" : ""}` : "your weekends"} this week had foods that are undoing the weekday work. One rule for weekends: protein first at every meal, then eat what you want after. That single rule changes everything.`);
-      } else if (weekendProteinRate < weekdayProteinRate - 0.3) {
-        if (!(await claimProactive(client.id, "weekend_food_audit", thisWeekUTC()))) continue;
-        await sendWhatsApp(client.phoneNumber, `${name} — you are hitting protein well during the week. But weekends your protein drops. When you are out, at a braai, or grabbing food on the go — always anchor the meal with protein first.`);
-      }
+      if (!(await claimProactive(client.id, "weekend_food_audit", thisWeekUTC()))) continue;
+      const audit = await canonicalNextMove(client);
+      await sendWhatsApp(client.phoneNumber, audit.line ? `${pattern}\n\n${audit.line}` : pattern);
     } catch (err) { console.error(`[SCHEDULER] Weekend food audit error — ${client.phoneNumber}:`, err); }
   }
 }
