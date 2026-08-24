@@ -87,6 +87,16 @@ jobs:
           if 'Extended_Pictographic' not in s: s = s.replace(old, new, 1)
           p.write_text(s)
 
+          # 6) Extend the existing missed-meal owner to merge an explicitly named missing food into the latest logged meal.
+          p = Path('server/handlers/food-context.ts')
+          s = p.read_text()
+          anchor = '''  if (isBotMissedMeal) {\n    const todayStartMissed = sastDayStart();\n'''
+          insert = '''  if (isBotMissedMeal) {\n    const missedPhrase = m.replace(/^.*?\\b(?:you (?:missed|forgot|skipped|left out)|you did(?:n\\'?t| not) (?:log|count|track|record)|you never logged|bot (?:missed|forgot))\\b/i, "").trim();\n    const missedFoods = missedPhrase.length > 1 ? scanForSAFoods(missedPhrase) : [];\n    if (missedFoods.length > 0) {\n      try {\n        const [lastMeal] = await db.select({ id: mealLogs.id, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt, mealLabel: mealLogs.mealLabel })\n          .from(mealLogs)\n          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sastDayStart())))\n          .orderBy(desc(mealLogs.loggedAt))\n          .limit(1);\n        if (lastMeal) {\n          const additions = adjustFoodsForSegment(missedFoods, missedPhrase, await getPortionMemory(user.id));\n          const items = Array.isArray(lastMeal.items) ? [...(lastMeal.items as any[])] : [];\n          const newItems = [...items];\n          let addedKcal = 0;\n          let addedProtein = 0;\n          for (const food of additions) {\n            const duplicate = newItems.some((item: any) => String(item?.name || item?.foodName || "").toLowerCase() === String(food.name || "").toLowerCase());\n            if (duplicate) continue;\n            newItems.push({ name: food.name, kcal: food.adjustedCalories || 0, protein: food.adjustedProtein || 0 });\n            addedKcal += food.adjustedCalories || 0;\n            addedProtein += food.adjustedProtein || 0;\n          }\n          if (newItems.length > items.length) {\n            const newKcal = Number(lastMeal.kcalInt || 0) + addedKcal;\n            const newProtein = Number(lastMeal.proteinInt || 0) + addedProtein;\n            await db.update(mealLogs).set({ items: newItems as any, kcalInt: newKcal, proteinInt: newProtein, corrected: true }).where(eq(mealLogs.id, lastMeal.id));\n            invalidateFoodTotalsCache(user.id);\n            const totals = await recomputeTodayFoodTotals(user.id);\n            await db.update(users).set({ todayCalories: totals.calories, todayProteinG: totals.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));\n            turnMutation(`MISSED_ITEM added=[${missedFoods.map(f => f.name).join(", ")}] to=${lastMeal.mealLabel || "last meal"}`);\n            const addedNames = newItems.slice(items.length).map((i: any) => i.name).join(", ");\n            const label = lastMeal.mealLabel || "your last meal";\n            await logChat(user.id, message, `Added ${addedNames} to ${label} ✅\\n\\nToday: ~${totals.calories} kcal | ~${totals.protein}g protein.`, "FOOD_LOG_CORRECTION");\n            return `Added ${addedNames} to ${label} ✅\\n\\nToday: ~${totals.calories} kcal | ~${totals.protein}g protein.`;\n          }\n        }\n      } catch (e) { console.warn("[MISSED_MEAL_ITEM]", e); }\n    }\n    const todayStartMissed = sastDayStart();\n'''
+          assert anchor in s
+          if 'MISSED_ITEM added=' not in s:
+              s = s.replace(anchor, insert, 1)
+          p.write_text(s)
+
       - name: Validate integrated slice
         run: |
           npm run check
@@ -100,6 +110,6 @@ jobs:
         run: |
           git config user.name 'KamLife CTO Builder'
           git config user.email 'cto-builder@kamlife.local'
-          git add server/handlers/gpt-block.ts server/handlers/misc-commands.ts server/unlogged-notice.ts server/memory.ts server/reaction-guard.ts
-          git commit -m 'Coach loop: harden natural comprehension and continuity'
+          git add server/handlers/gpt-block.ts server/handlers/misc-commands.ts server/unlogged-notice.ts server/memory.ts server/reaction-guard.ts server/handlers/food-context.ts
+          git commit -m 'Coach loop: make corrections frictionless'
           git push origin HEAD:${GITHUB_HEAD_REF}
