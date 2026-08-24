@@ -10,9 +10,9 @@ const multi = attributeMultiDayReport(
 assert.equal(multi.hasMultipleDays, true);
 assert.equal(multi.ambiguous, false);
 assert.deepEqual(multi.beats.map(b => [b.dayKey, b.dayReference, b.text]), [
-  ["2026-08-18", "Monday", "I had pap and chicken."],
-  ["2026-08-19", "Tuesday", "I had eggs and toast."],
-  ["2026-08-20", "Wednesday", "I trained and walked 8k steps."],
+  ["2026-08-17", "Monday", "I had pap and chicken."],
+  ["2026-08-18", "Tuesday", "I had eggs and toast."],
+  ["2026-08-19", "Wednesday", "I trained and walked 8k steps."],
 ]);
 
 const relative = attributeMultiDayReport(
