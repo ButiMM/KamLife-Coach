@@ -35,6 +35,7 @@ export function isBareReaction(message: string): boolean {
     .toLowerCase()
     // Variation selectors and emoji skin-tone/joiner controls are not user words.
     .replace(/[\u200d\ufe0f\u{1f3fb}-\u{1f3ff}]/gu, "")
+    .replace(/\p{Extended_Pictographic}/gu, "")
     .replace(/\s+/g, " ")
     .trim();
 
