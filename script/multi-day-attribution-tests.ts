@@ -26,6 +26,10 @@ const explicitPast = attributeMultiDayReport("Friday dinner was chicken and rice
 assert.equal(explicitPast.ambiguous, false);
 assert.equal(explicitPast.beats[0]?.dayKey, "2026-08-21");
 
+const bareSaturday = attributeMultiDayReport("Saturday I trained legs.", NOW);
+assert.equal(bareSaturday.ambiguous, false);
+assert.equal(bareSaturday.beats[0]?.dayKey, "2026-08-22");
+
 const future = attributeMultiDayReport("Next Monday I'll train chest.", NOW);
 assert.equal(future.ambiguous, true);
 assert.equal(future.beats[0]?.dayKey, null);
