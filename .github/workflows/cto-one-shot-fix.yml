@@ -99,17 +99,13 @@ jobs:
           if 'MISSED_ITEM added=' not in s: s = s.replace(anchor, insert, 1)
           p.write_text(s)
 
-          # 7) Broaden the pure situation resolver to recognize birthday/celebration periods without a restaurant word.
+          # 7) Make the pure resolver's semantic weekend rule explicit.
           p = Path('server/understanding/day-relative-situation.ts')
           s = p.read_text()
-          s = s.replace('export type SituationKind = "celebration_outing" | "eating_out" | "food_closed" | "";', 'export type SituationKind = "celebration_outing" | "celebration" | "eating_out" | "food_closed" | "";')
-          s = s.replace('const THIS_WEEKEND_RE = /\\bthis weekend\\b/i;\n', 'const THIS_WEEKEND_RE = /\\bthis weekend\\b/i;\nconst CELEBRATION_PERIOD_RE = /\\b(?:birthday|anniversary|wedding)(?:\\s+weekend)?\\b|\\bcelebration(?:\\s+weekend)?\\b|\\bparty\\b/i;\n')
-          s = s.replace('  if (birthday && eatingOut) kind = "celebration_outing";\n  else if (eatingOut) kind = "eating_out";', '  if (birthday && eatingOut) kind = "celebration_outing";\n  else if (birthday && (THIS_WEEKEND_RE.test(raw) || CELEBRATION_PERIOD_RE.test(raw))) kind = "celebration";\n  else if (eatingOut) kind = "eating_out";')
-          p.write_text(s)
-
-          # 8) Correct existing regression to the more precise celebration kind.
-          p = Path('script/day-relative-situation-tests.ts')
-          s = p.read_text().replace('assert.equal(mixed.kind, "celebration_outing");', 'assert.equal(mixed.kind, "celebration");')
+          old = '''export function resolveSituationMoment(text: string, at: Date, now = new Date()): SituationMoment {\n  const raw = String(text || "").trim();\n  const explicitPast = EXPLICIT_PAST_NIGHT_RE.test(raw) || EXPLICIT_PAST_RE.test(raw);\n\n  // On Monday/Tuesday, a retrospective "this weekend was..." refers to the just-finished\n  // weekend. Do not let the word "today" elsewhere in that sentence promote it back to today.\n  if (THIS_WEEKEND_RE.test(raw) && explicitPast && /^(Mon|Tue)$/i.test(sastWeekday(now))) {\n    return "last_night";\n  }\n\n  if (explicitPast) return ageMoment(at, now);\n  if (EXPLICIT_TODAY_RE.test(raw)) return "today";\n  return ageMoment(at, now);\n}\n'''
+          new = '''export function resolveSituationMoment(text: string, at: Date, now = new Date()): SituationMoment {\n  const raw = String(text || "").trim();\n  const explicitPast = EXPLICIT_PAST_NIGHT_RE.test(raw) || EXPLICIT_PAST_RE.test(raw);\n\n  // Semantic weekend references outrank the message timestamp. A Monday morning message can\n  // describe a weekend that just finished while also containing the word "today".\n  if (THIS_WEEKEND_RE.test(raw) && explicitPast && /^(Mon|Tue)$/i.test(sastWeekday(now))) return "last_night";\n  if (EXPLICIT_PAST_NIGHT_RE.test(raw)) return ageMoment(at, now) === "today" ? "last_night" : ageMoment(at, now);\n  if (explicitPast && /\\b(?:weekend|last night|yesterday)\\b/i.test(raw) && /^(Mon|Tue)$/i.test(sastWeekday(now))) return "last_night";\n  if (explicitPast) return ageMoment(at, now);\n  if (EXPLICIT_TODAY_RE.test(raw)) return "today";\n  return ageMoment(at, now);\n}\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
           p.write_text(s)
 
       - name: Validate integrated slice
@@ -125,6 +121,6 @@ jobs:
         run: |
           git config user.name 'KamLife CTO Builder'
           git config user.email 'cto-builder@kamlife.local'
-          git add server/handlers/gpt-block.ts server/handlers/misc-commands.ts server/unlogged-notice.ts server/memory.ts server/reaction-guard.ts server/handlers/food-context.ts server/understanding/day-relative-situation.ts script/day-relative-situation-tests.ts
+          git add server/handlers/gpt-block.ts server/handlers/misc-commands.ts server/unlogged-notice.ts server/memory.ts server/reaction-guard.ts server/handlers/food-context.ts server/understanding/day-relative-situation.ts
           git commit -m 'Coach loop: preserve lived context and conversational corrections'
           git push origin HEAD:${GITHUB_HEAD_REF}
