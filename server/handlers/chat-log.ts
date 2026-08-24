@@ -542,6 +542,21 @@ export function turnUser(userId: string): void { const t = turnStore.getStore();
  * reader. It is the same list the write-integrity boundary already trusts.
  */
 export function turnMutations(): string[] { return turnStore.getStore()?.mutations ?? []; }
+/**
+ * ONE DURABLE WRITE PER DOMAIN PER TURN (2026-08-25).
+ *
+ * A multi-day report is written by the owner that can date it. The single-day doors downstream
+ * see the same message and write it again — on the wrong day, because they read the whole bubble:
+ * "Monday pap. Tuesday eggs. Wednesday I trained and walked 8000 steps" put the session on MONDAY
+ * (the first day named) and the steps on TODAY. Two rows for one event, both wrong.
+ *
+ * The turn already records every durable write; this asks it. A door that finds its domain
+ * already written this turn stands down instead of guessing a second date.
+ */
+export function turnAlreadyWrote(domain: "food" | "steps" | "workout" | "weight"): boolean {
+  const re = { food: /INSERT meal/i, steps: /INSERT steps/i, workout: /INSERT workout/i, weight: /INSERT weight/i }[domain];
+  return turnMutations().some(m => re.test(m));
+}
 export function turnMutation(note: string, logPrefix?: string): void { const t = turnStore.getStore(); if (t && t.mutations.length < 40) t.mutations.push(note); if (logPrefix) console.log(`${logPrefix} ${note}`); }
 export function turnState(facts: Record<string, unknown>, resolvedDay?: string | null): void { const t = turnStore.getStore(); if (!t) return; Object.assign(t.stateRead, facts); if (resolvedDay) t.resolvedDay = resolvedDay; }
 

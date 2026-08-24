@@ -80,6 +80,7 @@ function serialise<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
+const sastDayKeyOf = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 const NOW = Date.now();
 const USER = {
   id: "test-user-production-parity",
@@ -998,7 +999,7 @@ async function main() {
   check("a reported session reaches the writer; a count claim does not fabricate rows", async () => {
     const wk = readFileSync("server/handlers/workout.ts", "utf-8");
     const code = wk.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-    assert.ok(/const isDone = when\.when === "today" && \(reportsOneSession \|\|/.test(code),
+    assert.ok(/const isDone = !alreadyLoggedThisTurn && when\.when === "today" && \(reportsOneSession \|\|/.test(code),
       "the completion path must accept a natural session report, not only the anchored forms — and "
       + "only when the client said today");
     assert.ok(/sessionCountsIn\(m\)\.length === 0/.test(code),
@@ -1110,7 +1111,7 @@ async function main() {
       .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
     assert.ok(!/hasRetroDayRef/.test(wk) && !/parseMealDate\(m\)/.test(wk),
       "the workout writer must consult the one temporal owner, not re-derive the day itself");
-    assert.ok(/const isDone = when\.when === "today" &&/.test(wk),
+    assert.ok(/const isDone = !alreadyLoggedThisTurn && when\.when === "today" &&/.test(wk),
       "every today-write must be gated on the temporal verdict, including the anchored short forms");
   });
 
@@ -1368,6 +1369,14 @@ async function main() {
       continues: lines.some(l => /question continues to Coach K/i.test(l)),
       amended: lines.some(l => /UPDATE meal/i.test(l)),
       owed: lines.some(l => /\[TURN_OWED\]/.test(l)),
+      mealDays: lines.filter(l => /INSERT meal/i.test(l)).map(l => /at=(\S+ \S+ \d+)/.exec(l)?.[1] || "").filter(Boolean),
+      backfillWorkoutDays: lines.filter(l => /\[BACKFILL\] INSERT workout/.test(l)).map(l => /at=(\d{4}-\d{2}-\d{2})/.exec(l)?.[1] || "").filter(Boolean),
+      // EVERY workout write this turn, whoever made it — a duplicate row on another day is the
+      // defect the one-write-per-domain guard exists to stop, and it is invisible if we only
+      // count the backfill's own writes.
+      allWorkoutWrites: lines.filter(l => /INSERT workout/i.test(l)).length,
+      allStepWrites: lines.filter(l => /INSERT steps/i.test(l)).length,
+      backfillStepDays: lines.filter(l => /\[BACKFILL\] INSERT steps/.test(l)).map(l => /at=(\d{4}-\d{2}-\d{2})/.exec(l)?.[1] || "").filter(Boolean),
     };
   });
 
@@ -2187,6 +2196,62 @@ async function main() {
       const reply = await serialise(() => say(view));
       assert.match(reply, /Week \d/i, `a legitimate workout view was broken: ${view} → ${reply.slice(0, 70)}`);
     }
+  });
+
+  // ── P0-2 / P0-3 · THE BATCH LOGGER (2026-08-25) ───────────────────────────────────────────
+  //
+  // attributeMultiDayReport shipped in PR #52 with EIGHT test references and ZERO production
+  // callers. These grade the wiring, not the library.
+  check("P0-2 . a multi-day report writes each day, in one reply", async () => {
+    const r = await writesFor("Monday pap and chicken. Tuesday eggs and toast. Wednesday I trained and walked 8000 steps");
+    assert.ok(r.mealDays.length >= 2, `expected meals on two named days, got ${JSON.stringify(r.mealDays)}`);
+    // ONE reply, covering every domain — food from its own owner, training and steps from the
+    // backfill that dated them. An unacknowledged write is how "did you even log it?" happens.
+    assert.match(r.out, /Monday/i, `the reply lost a day: ${r.out.slice(0, 120)}`);
+    assert.match(r.out, /Wednesday/i, `the backfilled day was written but never acknowledged: ${r.out.slice(0, 120)}`);
+    assert.match(r.out, /session/i, "the reply does not mention the session it wrote");
+    assert.match(r.out, /8,000 steps/i, "the reply does not mention the steps it wrote");
+    assert.match(r.out, /kcal/i, "food lost its quantity-aware owner");
+    assert.ok(r.backfillWorkoutDays.length === 1, `expected one backfilled session, got ${JSON.stringify(r.backfillWorkoutDays)}`);
+    assert.ok(r.backfillStepDays.length === 1, `expected one backfilled step row, got ${JSON.stringify(r.backfillStepDays)}`);
+    // ONE row per event. Without the guard the single-day doors write the session again on the
+    // first day the bubble mentions, and the steps to today — two rows for one event, both wrong.
+    assert.equal(r.allWorkoutWrites, 1, `${r.allWorkoutWrites} workout rows written for one session`);
+    assert.equal(r.allStepWrites, 1, `${r.allStepWrites} step rows written for one report`);
+    // Distinct days, and none of them today — the whole point is that they land where named.
+    const days = new Set([...r.backfillWorkoutDays, ...r.backfillStepDays]);
+    assert.equal(days.size, 1, "the Wednesday session and steps landed on different days");
+    assert.ok(!days.has(sastDayKeyOf(new Date())), "a named past day was written as today");
+    // ONE reply, and it says what was written.
+
+  });
+
+  check("P0-2b . a single-day message is untouched by the batch path", async () => {
+    // The gate is hasMultipleDays. Every existing single-day route must behave exactly as before.
+    for (const single of ["I had pap and eggs", "I trained chest today. What should I eat now?",
+                          "You missed the black coffee"]) {
+      const r = await writesFor(single);
+      assert.ok(!/logged across \d+ day/i.test(r.out),
+        `the batch path claimed a single-day turn: ${single} → ${r.out.slice(0, 70)}`);
+    }
+  });
+
+  check("P0-3 . a historical write does not move today's programme", async () => {
+    // The retro path advanced programmeDayInWeek and programmeWeek, so "I trained on Monday"
+    // silently consumed TODAY's session slot. A backfill is a statement about that day only.
+    const g = globalThis as any;
+    const before = { ...USER, programmeDayInWeek: 2, programmeWeek: 5, totalWorkoutsCompleted: 7 };
+    const after = await serialise(async () => {
+      g.__KAMLIFE_STUB_USER = { ...before };
+      await say("I trained on Monday");
+      const u = { ...g.__KAMLIFE_STUB_USER };
+      g.__KAMLIFE_STUB_USER = { ...USER };
+      return u;
+    });
+    assert.equal(after.programmeDayInWeek, 2, "a backfill advanced today's programme slot");
+    assert.equal(after.programmeWeek, 5, "a backfill advanced the programme week");
+    // …while the facts about the past may still move.
+    assert.equal(after.totalWorkoutsCompleted, 8, "the lifetime session count was not updated");
   });
 
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
