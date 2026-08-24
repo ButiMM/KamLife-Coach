@@ -9,7 +9,7 @@ import { composeDecisionTurn, renderActionLine } from "../one-action";
 import { getToneMode, toneSteer } from "../tone-mode";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { recomputeTodayFoodTotals } from "./food-scanner";
-import { storeMemory, retrieveMemories, loadSalientSituation, frameSituationForClient, looksLikeRecallQuestion, answerRecall } from "../memory";
+import { storeMemory, retrieveMemories, loadSalientSituation, loadSituationFrame, frameSituationForClient, looksLikeRecallQuestion, answerRecall } from "../memory";
 import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
 import { tellDontAsk } from "../reply-hygiene";
 import { logChat, withTimeout, turnEvidence } from "./chat-log";
@@ -371,7 +371,7 @@ RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K — apply the SCENARIO GUIDE f
   let finalInstruction = instruction;
   // Computed here rather than after generation: canonicalDecision reads state, never the reply,
   // so nothing forces it to run late. Reused by tellDontAsk below, so it is asked once per turn.
-  const decision = await canonicalDecision(user).catch(() => ({ todo: "", kind: "hold" }));
+  const decision = await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold" }));
   if (isDiabetic && isNutritionOrExerciseQ) {
     finalInstruction = `DIABETES COACHING ACTIVE: This client has diabetes. Apply ALL of the following:\n- Low GI carbs only: samp and beans, oats, sweet potato, brown rice. Never white pap alone.\n- Never recommend skipping meals — blood sugar stability is critical.\n- Train 1-2 hours after eating, never fasted.\n- Consistent meal timing is non-negotiable — same times every day.\n- Metformin causes nausea if taken without food — always advise with a meal.\n- Weight loss of even 5% significantly improves insulin sensitivity — celebrate every kg lost.\n\n` + instruction;
   }
@@ -658,7 +658,8 @@ SA voice. Direct. Coach forward, not backward.`;
   // never hang on context assembly.
   const liveSnapshot = await withTimeout("live_snapshot", 4000, () => buildClientSnapshot(user)).catch(() => "");
   const situationLine = await loadSalientSituation(phone, message).catch(() => "");
-  const situationFrame = frameSituationForClient(situationLine);
+  const situationFrame = (await loadSituationFrame(phone, message).catch(() => ""))
+    || frameSituationForClient(situationLine);
   turnEvidence({ situationFrame });
 
   try {

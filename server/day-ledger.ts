@@ -352,6 +352,14 @@ export async function sessionsSince(userId: string, days: number): Promise<numbe
   return Number((row as any)?.n || 0);
 }
 
+/** This SAST Monday–Sunday, not a rolling 7 days. */
+export async function sessionsThisCalendarWeek(userId: string, at?: Date | number): Promise<number> {
+  const { sastWeekStart } = await import("./sast");
+  const [row] = await db.select({ n: sql<number>`COUNT(*)::int` }).from(workoutLogs)
+    .where(and(eq(workoutLogs.userId, userId), gte(workoutLogs.loggedAt, sastWeekStart(at))));
+  return Number((row as any)?.n || 0);
+}
+
 export async function getProgressTruth(
   user: any,
   opts?: { days?: number; clientMessage?: string | null; weightWindowDays?: number },

@@ -63,7 +63,7 @@ import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable,
  *
  * rather than the model deciding in prose and a verifier trying to work out what it decided.
  */
-export async function canonicalDecision(user: any): Promise<{ todo: string; kind: string; reply: string }> {
+export async function canonicalDecision(user: any, message?: string): Promise<{ todo: string; kind: string; reply: string }> {
   try {
     // ONE CONSTITUTION (2026-08-21). This called theNextMove(), a SECOND ranked ladder —
     // training → protein → calories → steps → scale — that produced "the one thing to do" from
@@ -74,14 +74,15 @@ export async function canonicalDecision(user: any): Promise<{ todo: string; kind
     //
     // It now asks the decision owner, on canonical state, under the same policy contract every
     // other caller uses. theNextMove is deleted.
-    const { chooseAction, underPolicy } = await import("../one-action");
-    const { getProgressTruth } = await import("../day-ledger");
+    const { chooseAction, underPolicy, foodDayIsClosed } = await import("../one-action");
+    const { getProgressTruth, sessionsThisCalendarWeek } = await import("../day-ledger");
     const { sastHour } = await import("../sast");
     const { getTodayWorkoutState } = await import("../workout-state");
     const { readHealthState } = await import("../health-state");
     const { getDisplayName } = await import("../utils");
 
     const truth = await getProgressTruth(user, { days: 7 });
+    const weekSessions = await sessionsThisCalendarWeek(user.id).catch(() => 0);
     const wState = await getTodayWorkoutState(user).catch(() => ({ type: "REST" as const }));
     const calTarget = Number(user.calorieTarget) || 0;
     const protTarget = Number(user.proteinTarget) || 0;
@@ -97,13 +98,14 @@ export async function canonicalDecision(user: any): Promise<{ todo: string; kind
       loggedToday: truth.today.kcal > 0,
       proteinPct: protTarget > 0 ? truth.today.protein / protTarget : 1,
       caloriePct: calTarget > 0 ? truth.today.kcal / calTarget : 1,
-      sessionsThisWeek: truth.sessions,
+      sessionsThisWeek: weekSessions,
       sessionsTarget: wState.type === "REST" ? 0 : (Number(user.trainingDaysPerWeek) || 3),
       stepsToday: truth.today.steps, stepsTarget: Number(user.stepsTarget) || 0,
       sick: readHealthState(user).isSick,
       hour: sastHour(),
       // They are typing to us right now — this rides out on a reply, not as a nudge.
       atKeyboard: true,
+      foodDayClosed: foodDayIsClosed(message || ""),
     } as any), { evidenced: truth.window.daysLogged >= 3, dreamGoal: user.dreamGoal });
 
     // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,
@@ -410,7 +412,7 @@ export async function runMeaningEngineLive(ctx: {
     // nothing forced it to run after generation — it just always had. Declaring it here makes the
     // model a renderer of a decision chooseAction already made, and makes the downstream check a
     // validation of a stated fact rather than an inference from English.
-    const engineDecision = await canonicalDecision(user).catch(() => ({ todo: "", kind: "hold" }));
+    const engineDecision = await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold" }));
     const result = await runMeaningEngine({ openai, user, message, prior, snapshot, hungerEvidence, deficitEvidence, history: bridgeNote ? [...history, bridgeNote] : history, emitActions: actionMode !== "off" && !strategyTurn, decisionBrief: decisionBrief(engineDecision) });
     if (!result) return null; // fail-open → existing pipeline runs
 

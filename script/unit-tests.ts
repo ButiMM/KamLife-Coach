@@ -7679,7 +7679,7 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     const fixed = bareReactionFallback("Thabo");
     assert.equal(readsAsTherapySpeak(fixed), false);
     assert.match(fixed, /Thabo/);
-    assert.match(fixed, /missed the mark/i);
+    assert.match(fixed, /got you/i);
   });
 
   test("reaction guard: an ordinary corrective reply is left alone", () => {

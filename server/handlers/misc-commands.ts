@@ -37,7 +37,7 @@ import { sastToday, sastDayStart, looksLikeDirectionRequest, classifyPainReport 
 import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
 import { turnEvidence } from "./chat-log";
-import { getProgressTruth } from "../day-ledger";
+import { getProgressTruth, sessionsThisCalendarWeek } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
@@ -67,6 +67,43 @@ export async function handleMiscCommands(ctx: {
   // ---- DIRECTION / OVERALL PLAN ---- The client wants the WHOLE plan across every pillar (train/rest, food, steps, water), not a bare workout dump (2026-07-09: a client asked and got an exercise list). Deterministic, from their real targets and today's training state. The shared detector (utils.looksLikeDirectionRequest) ALSO gates the brain in routes.ts, so a direction ask can never be swallowed by the model (2026-07-11: the brain answered it with a workout dump on a rest day).
   // THE ONE ACTION FIRST (2026-07-28): "just tell me what to do" is a different question from "give me my whole plan", and the answer to the first must never be the second. See server/one-action.ts.
   if (/^(?:one thing|what now|what should i do(?: today)?|whats? my one thing|today.?s one thing)\??$/i.test(m.trim())) return await oneActionCommand(user);
+
+  // Distance to goal is a progress-truth question, not the daily-direction card.
+  // "How far am I from my goal???" must not fall through to GPT or to the plan menu.
+  if (/\bhow far (?:am i|are we) (?:from|to) (?:my |the |our )?(?:goal|target|dream)\b/i.test(m)
+      || /\bhow far from (?:my |the )?(?:goal|target)\b/i.test(m)) {
+    try {
+      const seed = user.programmeStartDate || user.createdAt;
+      const daysOn = seed
+        ? Math.max(1, Math.floor((Date.now() - new Date(seed).getTime()) / 86_400_000))
+        : 1;
+      const truth = await getProgressTruth(user, { days: daysOn + 1, clientMessage: message });
+      const weekN = await sessionsThisCalendarWeek(user.id).catch(() => 0);
+      const want = Number(user.trainingDaysPerWeek) || 0;
+      const name = getDisplayName(user) || "there";
+      const bits: string[] = [];
+      const change = truth.weight.changeKg;
+      const scaleOff = /\b(weight|scale|weigh)\b/i.test(String(user.doNotMention || ""));
+      if (!scaleOff && truth.weight.known && change !== null) {
+        bits.push(change < 0
+          ? `Scale: down ${Math.abs(change).toFixed(1)}kg since you started.`
+          : change > 0
+            ? `Scale: up ${change.toFixed(1)}kg since you started.`
+            : `Scale: unchanged since you started.`);
+      } else if (!scaleOff && truth.weight.currentKg) {
+        bits.push(`Scale: ${truth.weight.currentKg}kg — not enough weigh-ins for a trend.`);
+      } else if (!scaleOff) {
+        bits.push("I don't have a trend I can stand behind. Hop on the scale and I'll give you a straight read.");
+      }
+      if (want) bits.push(`This week: ${weekN}/${want} sessions.`);
+      if (truth.today.protein || user.proteinTarget) {
+        bits.push(`Today's protein: ${truth.today.protein}g / ${user.proteinTarget || "—"}g.`);
+      }
+      const reply = `${name} — ${bits.join(" ")}\n\nThat's the distance. The next move is still one thing.`;
+      await logChat(user.id, message, reply, "GOAL_DISTANCE");
+      return reply;
+    } catch (e) { console.error("[GOAL_DISTANCE]", e); }
+  }
 
   if (looksLikeDirectionRequest(m)) {
     const ws = await getTodayWorkoutState(user).catch(() => ({ type: "NORMAL" as const }));

@@ -16,6 +16,7 @@ import { db } from "./db";
 import { workoutLogs } from "../shared/schema";
 import { eq, and, gte } from "drizzle-orm";
 import { sastDayStart } from "./utils";
+import { sastDayKey, sastWeekStart } from "./sast";
 
 const DOW_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -39,6 +40,48 @@ export function getTodaySlot(user: any): number {
   const idx = schedDOWs.indexOf(sastDOW);
   if (idx === -1) return user.programmeDayInWeek || 1; // rest day — fall back
   return idx + 1; // 1-indexed
+}
+
+/**
+ * A week-count claim ("I did all four this week") may become dated rows ONLY when every
+ * assigned date is deterministically attributable: claimed count equals the schedule length,
+ * every scheduled day of that week is already past, and none of those days already have a row.
+ * Otherwise return null — the caller abstains. Never invents a Friday for a Monday.
+ */
+export function weekStartForTrainingClaim(message: string, now?: Date | number): Date | null {
+  const t = String(message || "");
+  if (/\blast\s+week\b/i.test(t)) {
+    return new Date(sastWeekStart(now).getTime() - 7 * 86_400_000);
+  }
+  if (/\bthis\s+week\b/i.test(t)) return sastWeekStart(now);
+  return null;
+}
+
+export function attributableWeekSessionDates(opts: {
+  claimed: number;
+  trainingDaysPerWeek: number;
+  weekStart: Date;
+  existingDayKeys: string[];
+  now?: Date | number;
+}): Date[] | null {
+  const schedule = SCHEDULE_MAP[Math.min(6, Math.max(2, opts.trainingDaysPerWeek || 3))] || SCHEDULE_MAP[3];
+  if (opts.claimed !== schedule.length) return null;
+  if ((opts.existingDayKeys || []).length > 0) return null;
+  const today = sastDayStart(opts.now).getTime();
+  const dates: Date[] = [];
+  for (const dow of schedule) {
+    const offset = dow === 0 ? 6 : dow - 1; // Mon=1 → 0 days from weekStart
+    const day = new Date(opts.weekStart.getTime() + offset * 86_400_000);
+    if (day.getTime() >= today) return null;
+    dates.push(day);
+  }
+  if (dates.length !== opts.claimed) return null;
+  return dates;
+}
+
+/** SAST day keys for those dates — the write record and the existing-row check use the same key. */
+export function weekSessionDayKeys(dates: Date[]): string[] {
+  return dates.map(d => sastDayKey(d));
 }
 
 export type WorkoutStateType = "REST" | "NORMAL" | "MISSED" | "ALREADY_DONE";

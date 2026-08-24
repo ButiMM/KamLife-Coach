@@ -23,7 +23,7 @@ import { sastDayKey } from "../sast";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
 import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone, sessionCountsIn, trainingWhen } from "../utils";
 import { invalidatePatternCache } from "../cache";
-import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
+import { getTodayWorkoutState, getTodaySlot, weekStartForTrainingClaim, attributableWeekSessionDates } from "../workout-state";
 import { handleWeightLog } from "./weight";
 import { calculateTargets } from "../targets";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
@@ -359,10 +359,55 @@ export async function handleWorkoutCommands(ctx: {
    * domains. Tested against each of those before it was wired.
    *
    * A COUNT CLAIM IS NOT A SESSION. "I did all four workouts this week" tells us how many but not
-   * WHICH DAYS, and writing four undated rows is inventing data. So it deliberately does not
-   * write — and the write-integrity guard at the outbound boundary makes sure it is not confirmed
-   * as logged either. Recognised, not fabricated.
+   * WHICH DAYS, and writing four undated rows is inventing data. Continuity slice: if every
+   * scheduled day of that week is already past and none already have a row, the dates are
+   * attributable and we write them. Otherwise we refuse — never "Noted" over an empty ledger.
    */
+  const weekClaimed = sessionCountsIn(m);
+  if (!looksLikeQuestion(m) && !mentionsNotDone(m) && weekClaimed.length === 1 && weekClaimed[0] >= 2
+      && /\b(?:this|last)\s+week\b/i.test(m)) {
+    const weekStart = weekStartForTrainingClaim(m);
+    const n = weekClaimed[0];
+    const refuse = `${firstName ? firstName + ", I" : "I"} heard ${n} session${n === 1 ? "" : "s"} — tell me the days and I'll log them. I won't guess.`;
+    if (!weekStart) {
+      await logChat(user.id, message, refuse, "WORKOUT_WEEK_REFUSE");
+      return refuse;
+    }
+    const weekEnd = new Date(weekStart.getTime() + 7 * 86_400_000);
+    const existing = await db.select({ loggedAt: workoutLogs.loggedAt }).from(workoutLogs)
+      .where(and(
+        eq(workoutLogs.userId, user.id),
+        gte(workoutLogs.loggedAt, weekStart),
+        lt(workoutLogs.loggedAt, weekEnd),
+      ));
+    const existingKeys = existing.map(r => sastDayKey(r.loggedAt as Date));
+    const dates = attributableWeekSessionDates({
+      claimed: n,
+      trainingDaysPerWeek: Number(user.trainingDaysPerWeek) || 3,
+      weekStart,
+      existingDayKeys: existingKeys,
+    });
+    if (!dates) {
+      await logChat(user.id, message, refuse, "WORKOUT_WEEK_REFUSE");
+      return refuse;
+    }
+    for (const day of dates) {
+      await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true, loggedAt: day });
+      turnMutation(`INSERT workout completed=true at=${sastDayKey(day)}`, "[WORKOUT_LOG]");
+    }
+    invalidatePatternCache(user.id);
+    const last = dates[dates.length - 1];
+    await db.update(users).set({
+      totalWorkoutsCompleted: (user.totalWorkoutsCompleted || 0) + dates.length,
+      lastWorkoutDate: last,
+      lastActiveAt: new Date(),
+    }).where(eq(users.phoneNumber, phone));
+    const days = dates.map(d => mealDateLabel(d)).join(", ");
+    const ok = `${firstName ? firstName + " — " : ""}logged ${dates.length} sessions (${days}).`;
+    await logChat(user.id, message, ok, "WORKOUT_WEEK_LOG");
+    return ok;
+  }
+
   const TRAINING_NOUN = /\b(gym|workouts?|sessions?|training|trained|train)\b/i;
   const REPORTED_PAST = /\b(?:i\s+)?(?:went\s+to|hit|did|had|got|finished|completed|smashed|made\s+it\s+to|was\s+at|trained)\b|\b(?:gym|workout|session|training)\s+(?:done|finished)\b/i;
   const FUTURE_OR_INTENT = /\b(?:going\s+to|gonna|will|i'?ll|later|tomorrow|planning|plan\s+to|about\s+to|should\s+i|thinking\s+of|need\s+to|want\s+to)\b/i;

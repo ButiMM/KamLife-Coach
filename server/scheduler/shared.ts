@@ -867,7 +867,7 @@ export interface ProactiveState {
   food: { avgKcal7d: number | null; avgProtein7d: number | null; loggedDays7d: number | null;
     /** Days since ANY food log. null = never logged, which is not the same as "logged long ago". */
     daysSinceAnyLog: number | null };
-  workout: { sessionsLast7d: number; daysSinceLastSession: number | null };
+  workout: { sessionsLast7d: number; sessionsThisWeek: number; daysSinceLastSession: number | null };
   steps: { avg7d: number | null };
   weight: { weeklyKgChange: number | null; trendUsable: boolean; stalledWeeks: number;
     /** Unbounded, unlike weeklyKgChange's 28-day window — "never weighed" and "weighed in March"
@@ -920,7 +920,7 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
   const sickYesterday = health.wasSickYesterday;
 
   const { getDayLedger } = await import("../day-ledger");
-  const { sastDayStart, sastDaysBetween, sastHour } = await import("../sast");
+  const { sastDayStart, sastDaysBetween, sastHour, sastWeekStart } = await import("../sast");
   const dayStart0 = sastDayStart();
 
   const [intake, wRows, stepAgg, workoutRows, lastMeal, lastWeigh, todaySteps, ledger] = await Promise.all([
@@ -969,6 +969,8 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
   }
 
   const lastSession = (workoutRows as any[])[0]?.at;
+  const weekStart = sastWeekStart();
+  const sessionsThisWeek = (workoutRows as any[]).filter((r: any) => r.at && new Date(r.at).getTime() >= weekStart.getTime()).length;
   const loggedDays7d = intake ? intake.distinctDaysLogged : null;
   const lastMealAt = (lastMeal as any[])[0]?.at ? new Date((lastMeal as any[])[0].at) : null;
   const lastWeighAt = (lastWeigh as any[])[0]?.at ? new Date((lastWeigh as any[])[0].at) : null;
@@ -1002,6 +1004,7 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
     },
     workout: {
       sessionsLast7d: (workoutRows as any[]).length,
+      sessionsThisWeek,
       daysSinceLastSession: lastSession
         ? Math.floor((Date.now() - new Date(lastSession).getTime()) / 86_400_000) : null,
     },

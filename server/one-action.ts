@@ -86,6 +86,12 @@ export interface DayState {
    * honest fix is to never choose the ask: the ordering below simply continues past it.
    */
   doNotMention?: string | null;
+  /**
+   * They closed food for today, in their own words. Not a feeling. Not a maybe.
+   * eat_more and protein stand down — a coach who heard "I won't eat anymore" and still
+   * prescribed a meal is the 19:55 screenshot.
+   */
+  foodDayClosed?: boolean;
 }
 
 export type ActionKind =
@@ -204,6 +210,20 @@ function askToWeigh(dream?: string | null, neverWeighed = false): OneAction {
 
 const LATE = 17; // from 5pm, "log today" and "get a walk in" start to make sense
 
+/**
+ * Latest explicit constraint: they closed food for this SAST day.
+ * Named without looksLike* so it is not a new routing predicate; it is a DayState input.
+ */
+export function foodDayIsClosed(text: string): boolean {
+  const t = String(text || "");
+  if (!t.trim()) return false;
+  if (/\b(?:won'?t|will not|not (?:going to|gonna)|can'?t|cannot)\s+(?:be able to\s+)?eat(?:\s+anymore)?\b/i.test(t)) return true;
+  if (/\bno more food\b/i.test(t) || /\bdone eating\b/i.test(t)) return true;
+  if (/\b(?:just|only)\s+(?:going to |gonna )?(?:have )?(?:alcohol|drinks|zero[- ]calorie)/i.test(t)) return true;
+  if (/\b(?:alcohol|zero[- ]calorie drinks).{0,60}(?:today|tonight|the rest of the day)\b/i.test(t)) return true;
+  return false;
+}
+
 export function chooseAction(s: DayState): OneAction {
   const struggle = readStruggle(s.biggestStruggle);
   const isBulk = s.goal === "muscle_gain";
@@ -263,7 +283,8 @@ export function chooseAction(s: DayState): OneAction {
   }
 
   // 4. UNDER-FUELLED ON A BULK. Nothing else works if they aren't eating.
-  if (isBulk && s.loggedToday && s.caloriePct < 0.6 && s.hour >= LATE) {
+  // Closed food day wins: they told us the next meal is not happening.
+  if (isBulk && s.loggedToday && s.caloriePct < 0.6 && s.hour >= LATE && !s.foodDayClosed) {
     return {
       kind: "eat_more",
       todo: struggle === "money"
@@ -275,7 +296,7 @@ export function chooseAction(s: DayState): OneAction {
 
   // 5. PROTEIN. The single highest-leverage nutrition action for BOTH goals — it protects muscle
   //    on a cut and builds it on a bulk — so it outranks everything else about food.
-  if (s.loggedToday && s.proteinPct < 0.6) {
+  if (s.loggedToday && s.proteinPct < 0.6 && !s.foodDayClosed) {
     // AFTER 20:00 THE INSTRUCTION FACES TOMORROW (absorbed 2026-08-21 from the deleted second
     // constitution, theNextMove, which had this rule and this reason: "a to-do at 21:00 proves
     // the coach is not reading the clock the client is living in"). Collapsing two ladders into
@@ -355,7 +376,7 @@ export interface ProactiveStateForDecision {
   goalType: string;
   health: { sick: boolean };
   food: { loggedDays7d: number | null; daysSinceAnyLog: number | null };
-  workout: { sessionsLast7d: number };
+  workout: { sessionsLast7d: number; sessionsThisWeek?: number };
   steps: { avg7d: number | null };
   weight: { daysSinceWeighIn: number | null; trendUsable: boolean };
   today: { kcal: number; protein: number; steps: number; logged: boolean; hour: number };
@@ -384,7 +405,7 @@ export interface ProactiveProfile {
  * already in buildDayState; it is stated here so both callers cannot disagree about it.
  */
 export function dayStateFrom(
-  s: ProactiveStateForDecision, p: ProactiveProfile, opts?: { atKeyboard?: boolean; hour?: number },
+  s: ProactiveStateForDecision, p: ProactiveProfile, opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean },
 ): DayState {
   return {
     firstName: s.name,
@@ -399,7 +420,7 @@ export function dayStateFrom(
     // 1 = "at target", i.e. nothing to say — the same fail-safe buildDayState used.
     proteinPct: p.proteinTarget > 0 ? s.today.protein / p.proteinTarget : 1,
     caloriePct: p.calorieTarget > 0 ? s.today.kcal / p.calorieTarget : 1,
-    sessionsThisWeek: s.workout.sessionsLast7d,
+    sessionsThisWeek: s.workout.sessionsThisWeek ?? s.workout.sessionsLast7d,
     sessionsTarget: p.sessionsTarget,
     stepsToday: s.today.steps,
     stepsTarget: p.stepsTarget,
@@ -408,6 +429,7 @@ export function dayStateFrom(
     doNotMention: p.doNotMention,
     hour: opts?.hour ?? s.today.hour,
     atKeyboard: opts?.atKeyboard,
+    foodDayClosed: opts?.foodDayClosed,
   };
 }
 
@@ -508,7 +530,7 @@ function evidenceFor(s: ProactiveStateForDecision, kind: ActionKind): DecisionEv
 }
 
 export function decideProactive(
-  s: ProactiveStateForDecision, p: ProactiveProfile, opts?: { atKeyboard?: boolean; hour?: number },
+  s: ProactiveStateForDecision, p: ProactiveProfile, opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean },
 ): ProactiveDecision {
   let action = chooseAction(dayStateFrom(s, p, opts));
   let evidence = evidenceFor(s, action.kind);

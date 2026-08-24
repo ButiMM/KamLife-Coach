@@ -88,5 +88,5 @@ export function readsAsTherapySpeak(reply: string): boolean {
  */
 export function bareReactionFallback(firstName = ""): string {
   const fn = firstName ? `${firstName}, ` : "";
-  return `${fn}that reply missed the mark. Tell me in one line what you actually needed and I'll get it right.\n\nOr type *menu* for your options.`;
+  return `${fn}got you. I'm here.`;
 }

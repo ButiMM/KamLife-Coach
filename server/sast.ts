@@ -69,3 +69,19 @@ export function sastDaysBetween(from: Date | number, to?: Date | number): number
 export function sastDayKeyBefore(n: number, at?: Date | number): string {
   return sastDayKey(sastDayStart(at).getTime() - n * 86_400_000);
 }
+
+/**
+ * Monday 00:00 SAST of the week containing `at`. "This week" is this window, never a rolling
+ * 7-day lookback. Rolling windows on a Monday steal last week's sessions and call them this week's.
+ */
+export function sastWeekStart(at?: Date | number): Date {
+  const start = sastDayStart(at);
+  const dow = inSast(start).getUTCDay(); // 0 Sun … 6 Sat
+  const daysFromMonday = (dow + 6) % 7;
+  return new Date(start.getTime() - daysFromMonday * 86_400_000);
+}
+
+/** Exclusive end of that SAST calendar week (next Monday 00:00). */
+export function sastWeekEnd(at?: Date | number): Date {
+  return new Date(sastWeekStart(at).getTime() + 7 * 86_400_000);
+}

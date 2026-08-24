@@ -48,6 +48,8 @@ import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
 import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains } from "./understanding/messy-intake";
+import { foodDayIsClosed } from "./one-action";
+import { bareReactionFallback } from "./reaction-guard";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
@@ -503,7 +505,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION) {
     captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "brief frustration outburst" });
     const _bfName = user.name?.split(" ")[0] || "";
-    const _bfReply = `${_bfName ? `${_bfName}, ` : ""}what specifically didn't work? Tell me and I'll fix it.\n\nOr type *menu* to see your options.`;
+    const _bfReply = bareReactionFallback(_bfName);
     await logChat(user.id, message, _bfReply, "BRIEF_FRUSTRATION");
     return _bfReply;
   }
@@ -1126,7 +1128,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
   // ── THE ONE COMPOSE ── replaces the food+feeling special case that used to live here, and
   // the food+steps string concatenation that lived inside food-context before that.
-  const hasFeeling = turnFacts.hasFeeling || carriesFeelingClause(message);
+  const hasFeeling = (turnFacts.hasFeeling || carriesFeelingClause(message)) && !foodDayIsClosed(message);
   // WRITE THEN COACH (2026-08-22). alsoAsksCoach used to require isMultiPartAsk (≥35 words or
   // two '?') or a feeling. The live bubble was 27 words and one '?':
   //   "What's the plan for me? / My breakfast was … / Guide for the rest of the day"

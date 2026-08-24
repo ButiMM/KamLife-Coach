@@ -1,6 +1,7 @@
 import { pool } from "./db";
 import OpenAI from "openai";
 import { assertAiOnline, isAiOfflineError } from "./ai-offline";
+import { sastDaysBetween } from "./sast";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -420,23 +421,52 @@ export function extractSalientSituation(clientMessages: string[]): string {
   const birthday = /\b(birthday|anniversary|wedding)\b/.test(blob);
   const eatingOut = /\b(restaurants?|eating out|go(?:ing)? out to eat|outing|date night)\b/.test(blob);
   const todayish = /\b(today|tonight|this weekend|that day is today|the day is today)\b/.test(blob);
+  const foodClosed = foodDayClosedIn(blob);
+  const drinks = /\b(alcohol|zero[- ]calorie drinks|just drinks)\b/.test(blob);
   if (birthday && (eatingOut || todayish)) {
     return "CURRENT SITUATION: Client has a celebration outing around today; restaurant eating is expected.";
   }
   if (eatingOut && todayish) {
     return "CURRENT SITUATION: Client expects to eat out today.";
   }
+  if (foodClosed || drinks) {
+    return "CURRENT SITUATION: Client has closed food for the rest of today.";
+  }
   return "";
 }
 
+function foodDayClosedIn(blob: string): boolean {
+  return /won'?t be able to eat|not (?:going to|gonna) eat anymore|no more food|done eating|zero[- ]calorie drinks/.test(blob);
+}
+
+/** Day-relative: 0 = today, 1 = last night, else stale (do not coach as if it is still happening). */
+export function situationWhen(stamped: Array<{ text: string; at: Date }>, now?: Date | number): "today" | "last_night" | "stale" | "" {
+  if (!stamped.length) return "";
+  const newest = stamped.reduce((a, b) => (a.at > b.at ? a : b));
+  const days = sastDaysBetween(newest.at, now);
+  if (days <= 0) return "today";
+  if (days === 1) return "last_night";
+  return "stale";
+}
+
 /** Client-facing frame for a decision turn. Code owns this; the model does not paraphrase it. */
-export function frameSituationForClient(situationLine: string): string {
+export function frameSituationForClient(situationLine: string, when: "today" | "last_night" | "stale" | "" = ""): string {
   const s = String(situationLine || "");
+  if (!s || when === "stale") return "";
+  if (/closed food/i.test(s)) {
+    return when === "last_night"
+      ? "You closed food last night. Today is a new day — we start from what's in front of you."
+      : "You've closed food for today. We're not adding another meal.";
+  }
   if (/celebration outing/i.test(s)) {
-    return "Today is the birthday outing, so we're not trying to make the whole day perfect. Enjoy yourself — we'll keep the rest of the day sensible.";
+    return when === "last_night"
+      ? "Last night was the birthday outing. Today we start the week — no chasing yesterday."
+      : "Today is the birthday outing, so we're not trying to make the whole day perfect. Enjoy yourself — we'll keep the rest of the day sensible.";
   }
   if (/eat out today/i.test(s)) {
-    return "You're eating out today, so we're not chasing a perfect day. Keep the rest of it sensible.";
+    return when === "last_night"
+      ? "You ate out last night. Today we keep it ordinary."
+      : "You're eating out today, so we're not chasing a perfect day. Keep the rest of it sensible.";
   }
   return "";
 }
@@ -447,10 +477,22 @@ export async function loadSalientSituation(phone: string, currentMessage?: strin
   return extractSalientSituation([...fromThisTurn, ...prior]);
 }
 
-export async function recentClientMessages(phone: string): Promise<string[]> {
+export async function loadSituationFrame(phone: string, currentMessage?: string): Promise<string> {
+  const stamped = await recentClientMessagesStamped(phone);
+  if (currentMessage) stamped.unshift({ text: currentMessage, at: new Date() });
+  const line = extractSalientSituation(stamped.map(s => s.text));
+  if (!line) return "";
+  const when = situationWhen(stamped.filter(s => {
+    const blob = s.text.toLowerCase();
+    return /birthday|restaurant|outing|eat anymore|alcohol|zero[- ]calorie|closed food/.test(blob);
+  }));
+  return frameSituationForClient(line, when || "today");
+}
+
+export async function recentClientMessagesStamped(phone: string): Promise<Array<{ text: string; at: Date }>> {
   try {
     const result = await pool.query(
-      `SELECT message_in
+      `SELECT message_in, created_at
          FROM chat_history
         WHERE user_id = (SELECT id FROM users WHERE phone_number = $1 LIMIT 1)
           AND message_in IS NOT NULL
@@ -460,13 +502,17 @@ export async function recentClientMessages(phone: string): Promise<string[]> {
         LIMIT 24`,
       [phone],
     );
-    return (result.rows as { message_in: string }[])
-      .map(r => String(r.message_in || "").trim())
-      .filter(Boolean);
+    return (result.rows as { message_in: string; created_at: Date }[])
+      .map(r => ({ text: String(r.message_in || "").trim(), at: new Date(r.created_at) }))
+      .filter(r => r.text);
   } catch (err) {
     console.warn("[SITUATION] unavailable:", (err as any)?.message || err);
     return [];
   }
+}
+
+export async function recentClientMessages(phone: string): Promise<string[]> {
+  return (await recentClientMessagesStamped(phone)).map(r => r.text);
 }
 
 const RECALL_SHAPE = /\b(?:do you remember|what did i (?:tell|say|mention)|did i (?:tell|say|mention)|can you remember)\b/i;

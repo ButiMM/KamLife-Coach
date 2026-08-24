@@ -52,15 +52,12 @@ export function morningClosingLine(
         ? `\n\n_You're logging every day — that consistency is exactly what changes bodies. Keep the chain going._`
         : `\n\n_Good to have you back. One day at a time — this week counts._`;
     case "STRUGGLING":
-      // WAS: "— let's get one in today. Just one. Reply 1 and I'll send it."
-      //
-      // That was a second coaching decision, arrived at from a 28-day session count, sitting three
-      // lines above the one the decision owner made from the whole of the client's state. On a rest
-      // day it contradicted the brief's own headline; on a hold turn it invented an instruction
-      // where the verdict was to change nothing. The count is real and the client earned the right
-      // to see it, so the RECOGNITION stays and the prescription goes to its owner: if a session
-      // today is the right call, chooseAction says so and decisionLine carries it (2026-08-22).
-      return `\n\n_${completedSessions28} sessions in the last 4 weeks. Today is a fresh page._`;
+      // Recognition of a thin month is for someone who left. An engaged logger (food streak)
+      // is not a fresh page — that was the Monday 06:00 insult. The week's count belongs
+      // on the decision line via calendar-week sessionsThisWeek, not here.
+      return activelyEngaged
+        ? `\n\n_${completedSessions28} sessions in the last 4 weeks._`
+        : `\n\n_${completedSessions28} sessions in the last 4 weeks. Today is a fresh page._`;
     case "DISENGAGED":
       return activelyEngaged
         ? `\n\n_Logging your food every single day — that's the hard habit, and it's yours. When you're ready to train, reply 1._`
@@ -94,6 +91,8 @@ export interface MorningInputs {
   decisionLine: string;
   /** Fallback ask when the decision has nothing to add. */
   breakfastAsk: string;
+  /** Day-relative last-night / today situation. Empty when stale or absent. */
+  situationLine?: string;
   /** The adaptive job's reason, when it moved targets this morning. */
   adaptLine: string;
   /** Sick clients get the short form: care, and nothing to do. */
@@ -135,6 +134,7 @@ export function composeMorning(i: MorningInputs): string {
 
   return join([
     i.targetFixLine ? i.targetFixLine.trim() + " " + opening : opening,
+    recognitionOnly(i.situationLine || ""),
     todayBlock,
     recognitionOnly(i.closingLine),
     i.decisionLine || i.breakfastAsk,

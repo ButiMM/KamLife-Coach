@@ -1537,7 +1537,7 @@ async function main() {
     const decisionOwner = readFileSync("server/handlers/gpt-block.ts", "utf-8");
     assert.ok(resolveAt > 0 && gptAt > resolveAt,
       "GPT must run AFTER the write/resolve, so canonicalDecision sees the new row");
-    assert.ok(/canonicalDecision\(user\)/.test(decisionOwner),
+    assert.ok(/canonicalDecision\(user/.test(decisionOwner),
       "the continuation path still decides through canonicalDecision → chooseAction");
   });
 
@@ -1760,6 +1760,106 @@ async function main() {
       .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
     assert.ok(/if \(decision\.todo\)/.test(gpt) && /composeDecisionTurn\(/.test(gpt),
       "gpt-block must compose on a decision turn instead of asking the model to write the action");
+  });
+
+  // ── COACH CONTINUITY SLICE (2026-08-24) ──────────────────────────────────────────────────
+  check("continuity: this week is a SAST calendar week, not a rolling 7 days", async () => {
+    const { sastWeekStart, sastDayKey } = await import("../server/sast");
+    const monday = new Date("2026-08-24T04:00:00Z"); // 06:00 SAST Monday
+    assert.equal(sastDayKey(sastWeekStart(monday)), "2026-08-24");
+    const friday = new Date("2026-08-21T16:00:00Z");
+    assert.equal(sastDayKey(sastWeekStart(friday)), "2026-08-17");
+    const live = readFileSync("server/understanding/live.ts", "utf-8");
+    assert.ok(/sessionsThisCalendarWeek\(user\.id\)/.test(live),
+      "canonicalDecision must count this SAST week, not getProgressTruth({days:7})");
+    const cmd = readFileSync("server/handlers/one-action-command.ts", "utf-8");
+    assert.ok(/const weekStart = sastWeekStart\(\)/.test(cmd),
+      "reactive one-action must count this SAST calendar week");
+  });
+
+  check("continuity: a week-count claim never invents dates, and never says Noted", async () => {
+    const { attributableWeekSessionDates, weekStartForTrainingClaim } = await import("../server/workout-state");
+    const { sessionCountsIn } = await import("../server/utils");
+    assert.deepEqual(sessionCountsIn("I did all four workouts this week"), [4]);
+    const friday = new Date("2026-08-21T16:00:00Z"); // Friday this week — Fri is not past
+    const thisWeek = weekStartForTrainingClaim("I did all four workouts this week", friday)!;
+    assert.equal(attributableWeekSessionDates({
+      claimed: 4, trainingDaysPerWeek: 4, weekStart: thisWeek, existingDayKeys: [], now: friday,
+    }), null, "Friday cannot place all four days — today is still one of them");
+    const sunday = new Date("2026-08-23T16:00:00Z");
+    const lastWeek = weekStartForTrainingClaim("I did all four last week", sunday)!;
+    const placed = attributableWeekSessionDates({
+      claimed: 4, trainingDaysPerWeek: 4, weekStart: lastWeek, existingDayKeys: [], now: sunday,
+    });
+    assert.ok(placed && placed.length === 4, "last week on Sunday is fully past and attributable");
+    assert.equal(attributableWeekSessionDates({
+      claimed: 4, trainingDaysPerWeek: 4, weekStart: lastWeek, existingDayKeys: ["2026-08-17"], now: sunday,
+    }), null, "existing rows → abstain, do not fill gaps");
+    assert.equal(attributableWeekSessionDates({
+      claimed: 3, trainingDaysPerWeek: 4, weekStart: lastWeek, existingDayKeys: [], now: sunday,
+    }), null, "claimed !== schedule → abstain");
+    const wk = readFileSync("server/handlers/workout.ts", "utf-8");
+    assert.ok(/I won't guess/.test(wk) && /WORKOUT_WEEK_REFUSE/.test(wk),
+      "unattributable count must refuse, not fall through to Noted");
+  });
+
+  check("continuity: last sentence can change the action; last night frames morning", async () => {
+    const { chooseAction, foodDayIsClosed } = await import("../server/one-action");
+    const { frameSituationForClient, extractSalientSituation, situationWhen } = await import("../server/memory");
+    const { morningClosingLine, composeMorning } = await import("../server/morning-message");
+    const closed = "Honestly, I won't be able to eat anymore for the rest of the day. We just going to have alcohol and zero calorie drinks";
+    assert.equal(foodDayIsClosed(closed), true);
+    const eat = chooseAction({
+      goal: "muscle_gain" as any, weeksOnProgramme: 5, daysSinceAnyLog: 0, daysSinceWeighIn: 2,
+      loggedToday: true, proteinPct: 0.4, caloriePct: 0.4, sessionsThisWeek: 0, sessionsTarget: 4,
+      stepsToday: 5000, stepsTarget: 6000, hour: 19, foodDayClosed: true,
+    });
+    assert.notEqual(eat.kind, "eat_more", "closed food day must stand eat_more down");
+    assert.notEqual(eat.kind, "protein", "closed food day must stand protein down too");
+    const still = chooseAction({
+      goal: "muscle_gain" as any, weeksOnProgramme: 5, daysSinceAnyLog: 0, daysSinceWeighIn: 2,
+      loggedToday: true, proteinPct: 0.4, caloriePct: 0.4, sessionsThisWeek: 0, sessionsTarget: 4,
+      stepsToday: 5000, stepsTarget: 6000, hour: 19, foodDayClosed: false,
+    });
+    assert.equal(still.kind, "eat_more", "negative control: without the constraint, eat_more still fires");
+
+    const line = extractSalientSituation(["This weekend is my girlfriend's birthday. We're going to restaurants."]);
+    const lastNight = frameSituationForClient(line, "last_night");
+    assert.match(lastNight, /last night/i);
+    assert.ok(!/today is the birthday/i.test(lastNight));
+    assert.equal(frameSituationForClient(line, "stale"), "");
+    const sundayNight = new Date("2026-08-23T18:00:00Z");
+    const mondayMorn = new Date("2026-08-24T04:00:00Z");
+    assert.equal(situationWhen([{ text: "birthday outing", at: sundayNight }], mondayMorn), "last_night");
+
+    const engaged = morningClosingLine("STRUGGLING", { activelyEngaged: true, completedSessions28: 4 });
+    assert.ok(!/fresh page/i.test(engaged), "engaged client must not get lapse copy");
+    assert.match(engaged, /4 sessions/);
+    const lapsed = morningClosingLine("STRUGGLING", { activelyEngaged: false, completedSessions28: 4 });
+    assert.match(lapsed, /fresh page/i);
+    const brief = composeMorning({
+      firstName: "Kam", targetFixLine: "", identityLine: "", streakLine: "5-day food streak.",
+      workoutLine: "", yesterdayLine: "144g protein logged yesterday, against a 186g target.",
+      todayLines: ["*Today:*", "👟 6,000 steps", "💪 Training day. Reply *1* for your workout."],
+      closingLine: engaged, decisionLine: "*Get today's session done.*", breakfastAsk: "",
+      adaptLine: "", situationLine: lastNight, sickYesterday: false,
+    });
+    assert.match(brief, /last night was the birthday/i);
+    assert.ok(!/fresh page/i.test(brief));
+  });
+
+  check("continuity: how-far is progress truth; WOW is not a ticket", async () => {
+    const misc = readFileSync("server/handlers/misc-commands.ts", "utf-8");
+    const distAt = misc.indexOf("how far (?:am i");
+    const dirAt = misc.indexOf("looksLikeDirectionRequest(m)");
+    assert.ok(distAt > 0 && distAt < dirAt, "distance-to-goal must claim before the plan card");
+    const { bareReactionFallback, isDiagnosticQuestion } = await import("../server/reaction-guard");
+    const wow = bareReactionFallback("Kam");
+    assert.equal(isDiagnosticQuestion(wow), false);
+    assert.ok(!/menu/i.test(wow) && !/didn't work/i.test(wow) && !/what happened/i.test(wow));
+    const routes = readFileSync("server/routes.ts", "utf-8");
+    assert.ok(/bareReactionFallback\(_bfName\)/.test(routes), "OMG must reuse the reaction mouth, not a ticket form");
+    assert.ok(/foodDayIsClosed\(message\)/.test(routes), "feeling ack must not swallow a closed food day");
   });
 
 
