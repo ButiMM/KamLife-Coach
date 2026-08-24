@@ -77,7 +77,10 @@ export function isCoachCriticism(message: string): boolean {
     || /\byou(?:'?re|\s+are|\s+ain'?t)?\s+(?:not|no)\s+(?:even\s+)?(?:a\s+|my\s+)?(?:real\s+|proper\s+|actual\s+|good\s+)?(?:coach|coaching|trainer|listening|reading|helping|helpful|useful)\b/i.test(text)
     || /\bcall\s+(?:yourself|this)\s+a\s+coach\b/i.test(text)
     || /\byou\s+(?:ignored|didn.?t\s+(?:listen|read|understand|get\s+it))\b/i.test(text)
-    || /\b(not what i (asked|said|meant)|didn.?t answer|ignored (my|the) question)\b/i.test(text);
+    // SUBJECT MATTERS. Unanchored, "didn't answer" matched the CLIENT saying "I didn't answer
+    // your question" — their own admission read as a complaint about us (2026-08-24, own review).
+    || /\bnot what i (?:asked|said|meant)\b/i.test(text)
+    || /\byou\s+(?:didn.?t\s+answer|never\s+answered|ignored\s+(?:my|the)\s+question)\b/i.test(text);
 }
 
 export function isDiagnosticQuestion(reply: string): boolean {

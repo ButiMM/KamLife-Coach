@@ -300,6 +300,7 @@ export async function handleFoodContext(ctx: {
       const amended = await appendItemsToRecentMeal(
         user.id, namedMissing as any,
         correctionDay.when === "today" ? undefined : correctionDay.date,
+        explicitMealSlot(message),
       );
       if (amended) {
         // THE REPLY STATES WHAT WAS WRITTEN, NOT WHAT WE MEANT TO WRITE. Rendered from

@@ -236,7 +236,15 @@ const LATE = 17; // from 5pm, "log today" and "get a walk in" start to make sens
  */
 export function trainingDayIsDeclined(text: string): boolean {
   const t = String(text || "");
-  if (!t.trim() || t.includes("?")) return false;
+  if (!t.trim()) return false;
+  // A REQUEST IS INTERROGATIVE-LED; A TAG QUESTION IS STILL A STATEMENT (2026-08-24, own review).
+  // Excluding every "?" made "I'm not training today, ok?" not a refusal — two characters away
+  // from the live failure this owner exists to stop. The distinction is grammar: "Can I train
+  // tomorrow instead?" opens with a modal and asks permission; "I'm not training today, ok?"
+  // opens with the client stating what they are doing. When it is genuinely unclear, refusing to
+  // dump a session is the safe direction — the costly error is printing a workout over a refusal.
+  if (/^\s*(?:can|could|should|shall|may|do|does|did|is|are|was|were|will|would|what|why|how|when|which|who)\b/i.test(t)
+      && t.includes("?")) return false;
   // A report of a session that happened is never a refusal of one.
   if (/\b(?:done|finished|completed|already\s+did|just\s+did|did\s+my|smashed|crushed|trained)\b/i.test(t)) return false;
   // A NEGATED CESSATION IS AN AFFIRMATION — the twin of the "can't stop eating" guard above.

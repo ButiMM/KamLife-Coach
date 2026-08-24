@@ -2020,6 +2020,26 @@ async function main() {
     assert.ok(!/_Today:/.test(replies.yesterday), "a past-day correction quoted today's total");
     assert.match(replies.saturday, /saturday'?s breakfast/i,
       `a named-day correction did not name the day: ${replies.saturday}`);
+    // …AND THE MEAL THEY NAMED. With dinner logged after breakfast, "at breakfast" must not
+    // attach to dinner — the date defect one axis over, found reviewing this cut.
+    const slotted = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [
+        { id: "p-dinner", mealLabel: "dinner", kcalInt: 800, proteinInt: 50, carbsInt: 70,
+          fatInt: 30, items: [{ name: "Steak" }], loggedAt: new Date(NOW - 3600_000) },
+        { id: "p-bfast", mealLabel: "breakfast", kcalInt: 669, proteinInt: 63, carbsInt: 60,
+          fatInt: 25, items: [{ name: "Bread" }], loggedAt: new Date(NOW - 7 * 3600_000) },
+      ]]]);
+      const out = {
+        named: await say("You missed the black coffee at breakfast"),
+        unnamed: await say("You missed the black coffee"),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+    assert.match(slotted.named, /to your breakfast/i,
+      `the client named the meal and it went elsewhere: ${slotted.named}`);
+    assert.match(slotted.unnamed, /to your dinner/i,
+      `with no meal named, the most recent must stand: ${slotted.unnamed}`);
     assert.match(replies.span, /which meal did i miss/i,
       `an unpinnable day was written instead of clarified: ${replies.span}`);
   });
@@ -2031,8 +2051,14 @@ async function main() {
                              "You didn't read what I said"]) {
       assert.ok(isCoachCriticism(criticism), `not recognised as feedback about us: ${criticism}`);
     }
+    for (const ours of ["You didn't answer my question", "you never answered my question",
+                        "That's not what I asked"]) {
+      assert.ok(isCoachCriticism(ours), `a complaint about us was missed: ${ours}`);
+    }
     for (const notCriticism of ["I feel like a disaster today", "You are not a doctor, I know",
-                                "I had eggs and pap", "I'm struggling with all of this"]) {
+                                "I had eggs and pap", "I'm struggling with all of this",
+                                // SUBJECT MATTERS: the client's own admission is not a complaint.
+                                "I didn't answer your question"]) {
       assert.ok(!isCoachCriticism(notCriticism), `a client's own life read as criticism: ${notCriticism}`);
     }
     const reply = await serialise(() => say("You are not a coach"));
@@ -2090,6 +2116,14 @@ async function main() {
                               "I didn't skip the gym today", "I never skip the gym today",
                               "no way I'm skipping the gym today", "I did not skip my session today"]) {
       assert.ok(!trainingDayIsDeclined(notRefusal), `wrongly read as a refusal: ${notRefusal}`);
+    }
+    // ADVERSARIAL REVIEW OF THIS CUT (2026-08-24). A tag question is still a statement — the
+    // blanket "?" exclusion put the live failure two characters away from returning.
+    assert.ok(trainingDayIsDeclined("I'm not training today, ok?"),
+      "a refusal with a tag question was read as a request");
+    for (const request of ["Can I do my workout tomorrow instead?", "Should I train today?",
+                           "Do I train today?", "What is tomorrow's session?"]) {
+      assert.ok(!trainingDayIsDeclined(request), `an interrogative was recorded as a constraint: ${request}`);
     }
     // …while a genuine refusal that uses the same verb must survive the guard.
     for (const stillRefusal of ["Skipping the gym today", "I want to skip the gym today",

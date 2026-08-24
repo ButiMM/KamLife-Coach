@@ -153,6 +153,7 @@ export async function appendItemsToRecentMeal(
     typicalPortionCalories?: number | null; typicalPortionProtein?: number | null;
     carbsPer100g?: number | null; fatPer100g?: number | null }>,
   forDate?: Date,
+  namedSlot?: string | null,
 ): Promise<{ mealLabel: string; added: string[]; dayKey: string; calories: number; protein: number } | null> {
   if (!foods.length) return null;
   // A CORRECTION LANDS ON THE DAY BEING CORRECTED (2026-08-24).
@@ -164,13 +165,19 @@ export async function appendItemsToRecentMeal(
   // the one temporal owner and refuses to guess; this bounds the window at both ends.
   const dayStart = sastDayStart(forDate);
   const dayEnd = new Date(dayStart.getTime() + 86_400_000);
-  const [target] = await db.select({
+  // AND THE MEAL THEY NAMED, not merely the newest one. "You missed the black coffee at
+  // breakfast" attached the coffee to DINNER — the client named the meal and we ignored it, which
+  // is the date defect above one axis over. The slot comes from explicitMealSlot, the existing
+  // owner of "does this message name a meal"; with no slot named, most-recent stands.
+  const rows = await db.select({
     id: mealLogs.id, items: mealLogs.items, mealLabel: mealLogs.mealLabel,
     kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
     carbsInt: mealLogs.carbsInt, fatInt: mealLogs.fatInt,
   }).from(mealLogs)
     .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, dayStart), lt(mealLogs.loggedAt, dayEnd)))
-    .orderBy(desc(mealLogs.loggedAt)).limit(1);
+    .orderBy(desc(mealLogs.loggedAt)).limit(8);
+  const slot = String(namedSlot || "").toLowerCase();
+  const target = (slot ? rows.find(r => String(r.mealLabel || "").toLowerCase() === slot) : null) || rows[0];
   if (!target?.id) return null;
 
   const existing = Array.isArray(target.items) ? target.items as any[] : [];
