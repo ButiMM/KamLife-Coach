@@ -1178,16 +1178,27 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     }
   });
   test("morning close: an actually-lapsed client still gets the warm return line", () => {
-    assert.match(morningClosingLine("RECOVERING", lapsed), /have you back/i);
-    assert.match(morningClosingLine("DISENGAGED", lapsed), /reply Hi/i);
+    // The PROPERTY, not the old sentence. "reply Hi" was part of the deleted 28-day voice; a
+    // lapsed client is still owed warm re-entry recognition, and that is what is asserted.
+    for (const t of ["RECOVERING", "DISENGAGED"] as const) {
+      assert.match(morningClosingLine(t, lapsed), /have you back/i, `no warm re-entry for ${t}`);
+    }
   });
   test("morning close: engaged lines make NO 'session today' push — safe on a rest day", () => {
     for (const t of ["RECOVERING", "DISENGAGED"] as const) {
       assert.ok(!/(one|a session).*today|today.*session|get one in today/i.test(morningClosingLine(t, eng)), `rest-day-unsafe (${t})`);
     }
   });
-  test("morning close: ON_A_RUN unchanged for everyone", () => {
-    assert.match(morningClosingLine("ON_A_RUN", eng), /sessions in over 4 weeks/);
+  // REPLACED 2026-08-24. This asserted /sessions in over 4 weeks/ — the client-facing 28-day
+  // progress clock, deleted because it was a second scoreboard beside the calendar-week decision
+  // and could frame a completed week as failure. The assertion is now the rule that replaced it:
+  // an ENGAGED client gets no lapse framing and no second clock, from any trajectory.
+  test("morning close: an engaged client is never scored or lapse-framed", () => {
+    for (const t of ["ON_A_RUN", "ON_TRACK", "RECOVERING", "STRUGGLING", "DISENGAGED"] as const) {
+      const line = morningClosingLine(t, eng);
+      assert.ok(!/\d/.test(line), `${t} put a number in front of an engaged client: ${line}`);
+      assert.ok(!/have you back|welcome back|weeks?\b/i.test(line), `${t} lapse-framed an engaged client: ${line}`);
+    }
     assert.equal(morningClosingLine("ON_TRACK", eng), "");
   });
 }

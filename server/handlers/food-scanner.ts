@@ -415,6 +415,14 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
   const combos: string[] = [...words];
   const rawWords = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 2);
   for (let i = 0; i < rawWords.length - 1; i++) {
+    // THE BLACKLIST APPLIES TO PAIRS TOO (2026-08-24). It was consulted for single words and not
+    // for the two-word combos built here, so "had breakfast" — BOTH words already declared
+    // not-a-food on line 45 and 52 of food-fuzzy — fuzzy-matched the alias "sa breakfast" and
+    // resolved to McDonald's Big Breakfast. "Am I in a deficit? I've only had breakfast" therefore
+    // wrote a phantom 760 kcal meal the client never ate, and the client's question was answered
+    // by the action ladder instead. A pair is only a candidate food if both halves could be food;
+    // any genuine food token in it is still tried on its own by `words` above.
+    if (FUZZY_BLACKLIST.has(rawWords[i]) || FUZZY_BLACKLIST.has(rawWords[i + 1])) continue;
     combos.push(rawWords[i] + " " + rawWords[i + 1]);
   }
 

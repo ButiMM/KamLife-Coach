@@ -21,7 +21,7 @@ import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
 import { safetyGate } from "../verifiers/response-gate";
 import { verifyBrainReply } from "../brain/reply-verifier";
-import { isBareReaction, readsAsTherapySpeak, bareReactionFallback, isDiagnosticQuestion } from "../reaction-guard";
+import { isBareReaction, isCoachCriticism, readsAsTherapySpeak, bareReactionFallback, isDiagnosticQuestion } from "../reaction-guard";
 
 // ── SCENARIO GUIDE — the coach's situation playbook ────────────────────────────
 // Module-level and byte-identical on every call: askCoachK places it in the STATIC
@@ -528,11 +528,10 @@ Do not ask "what do you mean" — interpret from context. Max 2 sentences.`;
   // Client critiquing the bot's RESPONSE QUALITY — not personal emotional distress.
   // "vague", "robotic", "that was wrong", "no this is a disaster" = coaching feedback.
   // These must NOT route to the mindset agent (which treats everything as personal struggle).
-  const isMetaCriticism =
-    /\b(vague|robotic|generic)\b/i.test(m) ||
-    /\b(this|that|your|the)\s+(response|answer|reply|message|coaching)\s+(is|was|doesn.?t|makes no)\b/i.test(m) ||
-    /\b(this is a disaster|that.?s a disaster|no this is|you (ignored|didn.?t (listen|read|understand|get it)))\b/i.test(m) ||
-    /\b(not what i (asked|said|meant)|didn.?t answer|ignored (my|the) question)\b/i.test(m);
+  // ONE OWNER for "is this feedback about US" — reaction-guard already owns the neighbouring
+  // question. The four shapes that lived here moved there intact, plus the identity form
+  // ("you are not a coach") that was missing and was being answered by the action ladder.
+  const isMetaCriticism = isCoachCriticism(m);
 
   const isFrustrated =
     /\b(wow just wow|seriously\?|what the|this is ridiculous|what is this|are you serious|come on|wtf|what the hell|this is useless|pathetic|this doesn.?t make sense|that.?s wrong|you.?re wrong|bad response|wrong answer|that.?s not what i|you didn.?t even|you ignored|you didn.?t listen|not what i asked|not worth|waste of money|waste of time|cancel|refund|unsubscribe|this is bad|this is shit|this sucks|useless|rubbish|garbage|disappointed|i.?m done|giving up on this|doesn.?t work|broken|stupid)\b/i.test(m) ||

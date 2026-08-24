@@ -283,6 +283,23 @@ export async function handleFoodContext(ctx: {
   const isBotMissedMeal = /\b(you (missed|forgot|skipped|left out|didn.?t (log|count|track|record))|bot (missed|forgot)|you never logged|didn.?t log (my|the|that|a))\b/i.test(m);
   if (isBotMissedMeal) {
     const todayStartMissed = sastDayStart();
+    // THEY NAMED THE THING WE MISSED (2026-08-24, live). "You missed the black coffee" was answered
+    // with "Which meal did I miss?", so a client who had already told us had to restate the whole
+    // breakfast to add one item. The scanner is the discriminator and already separates the cases:
+    // "black coffee" resolves to a food, "you missed a meal" / "you forgot my lunch" resolve to
+    // nothing and keep the clarification below. The WRITE is the write door's — it amends the
+    // existing row rather than adding a second one. See day-ledger.appendItemsToRecentMeal.
+    const namedMissing = scanForSAFoods(message);
+    if (namedMissing.length > 0) {
+      const { appendItemsToRecentMeal } = await import("../day-ledger");
+      const amended = await appendItemsToRecentMeal(user.id, namedMissing as any);
+      if (amended) {
+        const addedReply = `You're right — added ${amended.added.join(" and ")} to your ${amended.mealLabel}. `
+          + `_Today: ${amended.calories} kcal | ${amended.protein}g protein_`;
+        await logChat(user.id, message, addedReply, "MISSED_ITEM_AMENDED");
+        return addedReply;
+      }
+    }
     const recentLogs = await db.select({ mealLabel: mealLogs.mealLabel, kcalInt: mealLogs.kcalInt, loggedAt: mealLogs.loggedAt })
       .from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartMissed)))
       .orderBy(desc(mealLogs.loggedAt)).limit(5);

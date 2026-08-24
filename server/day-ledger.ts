@@ -134,6 +134,68 @@ async function netSameMessageCorrection(
   return net.items as CommitFoodLogParams["items"];
 }
 
+/**
+ * APPEND NAMED ITEMS TO THE MOST RECENT MEAL OF THE DAY (2026-08-24).
+ *
+ * "You missed the black coffee" — the client names the one thing we did not record. Amending the
+ * existing row is the only correct write: a second row double-counts the meal, and asking them to
+ * restate the whole breakfast makes them re-type what they already said.
+ *
+ * It lives HERE because this module is the declared write door. The first version of this sat
+ * inside food-context and the ownership guard caught it immediately: a handler that acts on a
+ * message and writes to the database is a second write owner.
+ *
+ * Returns null when there is nothing to amend, so the caller keeps its existing clarification.
+ */
+export async function appendItemsToRecentMeal(
+  userId: string,
+  foods: Array<{ name: string; category?: string; typicalPortionGrams?: number | null;
+    typicalPortionCalories?: number | null; typicalPortionProtein?: number | null;
+    carbsPer100g?: number | null; fatPer100g?: number | null }>,
+): Promise<{ mealLabel: string; added: string[]; calories: number; protein: number } | null> {
+  if (!foods.length) return null;
+  const [target] = await db.select({
+    id: mealLogs.id, items: mealLogs.items, mealLabel: mealLogs.mealLabel,
+    kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
+    carbsInt: mealLogs.carbsInt, fatInt: mealLogs.fatInt,
+  }).from(mealLogs)
+    .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, sastDayStart())))
+    .orderBy(desc(mealLogs.loggedAt)).limit(1);
+  if (!target?.id) return null;
+
+  const existing = Array.isArray(target.items) ? target.items as any[] : [];
+  const already = new Set(existing.map(i => String(i?.name || "").toLowerCase()));
+  const additions = foods.filter(f => !already.has(f.name.toLowerCase()));
+  if (additions.length === 0) return null;
+
+  const added = additions.map(f => ({
+    name: f.name, grams: f.typicalPortionGrams || 100,
+    kcal: f.typicalPortionCalories || 0, protein: f.typicalPortionProtein || 0,
+    category: f.category || "other",
+  }));
+  const per100 = (f: typeof additions[number], k: "carbsPer100g" | "fatPer100g") =>
+    Math.round(((f[k] || 0) * (f.typicalPortionGrams || 100)) / 100);
+
+  await db.update(mealLogs).set({
+    items: [...existing, ...added],
+    kcalInt: (target.kcalInt || 0) + added.reduce((t, a) => t + a.kcal, 0),
+    proteinInt: (target.proteinInt || 0) + added.reduce((t, a) => t + a.protein, 0),
+    carbsInt: (target.carbsInt || 0) + additions.reduce((t, f) => t + per100(f, "carbsPer100g"), 0),
+    fatInt: (target.fatInt || 0) + additions.reduce((t, f) => t + per100(f, "fatPer100g"), 0),
+    corrected: true,
+  }).where(eq(mealLogs.id, target.id));
+  turnMutation(`UPDATE meal ${target.id} += ${added.map(a => a.name).join(", ")}`, "[MEAL_AMEND]");
+
+  const { recomputeTodayFoodTotals, invalidateFoodTotalsCache } = await import("./handlers/food-scanner");
+  invalidateFoodTotalsCache(userId);
+  const totals = await recomputeTodayFoodTotals(userId);
+  return {
+    mealLabel: target.mealLabel || "that meal",
+    added: added.map(a => a.name),
+    calories: totals.calories, protein: totals.protein,
+  };
+}
+
 // THE single chokepoint for every food-log write (Box 2). GUARANTEE: complete macros — kcal +
 // protein with no carbs/fat get filled from the trusted numbers so the card can't be zero-
 // dragged. Fills only when BOTH are absent (an all-protein meal still lands ~0).

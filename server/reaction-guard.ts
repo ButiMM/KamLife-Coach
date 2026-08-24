@@ -51,6 +51,35 @@ export function isBareReaction(message: string): boolean {
 }
 
 /** Live 10:06 2026-08-23: "WOW" came back as a diagnostic question about an event that never happened. */
+/**
+ * IS THIS FEEDBACK ABOUT US? (2026-08-24)
+ *
+ * Live: "Wow that's vague and robotic", "No this is a disaster", "You are not a coach". These are
+ * judgements of the COACH — our output, our role, our attention — and they were reaching the
+ * generic support/therapy path, or worse: "You are not a coach" came back as "Stand on a scale
+ * this morning", the action ladder answering a criticism.
+ *
+ * This module already owns the neighbouring question ("annoyed at the coach" vs "struggling in
+ * life"), so the third form lives beside it rather than in a new personality engine. Four shapes,
+ * each a JUDGEMENT WITH US AS ITS SUBJECT, not a list of insults:
+ *
+ *   quality   the output was vague / robotic / generic
+ *   object    "your reply / that answer / this coaching" + a verdict
+ *   identity  second person + negation + what we are or should be doing
+ *   failure   we did not answer, listen, or read what was said
+ */
+export function isCoachCriticism(message: string): boolean {
+  const text = String(message || "");
+  if (!text.trim()) return false;
+  return /\b(vague|robotic|generic)\b/i.test(text)
+    || /\b(this|that|your|the)\s+(response|answer|reply|message|coaching)\s+(is|was|doesn.?t|makes no)\b/i.test(text)
+    || /\b(this is a disaster|that.?s a disaster|no this is)\b/i.test(text)
+    || /\byou(?:'?re|\s+are|\s+ain'?t)?\s+(?:not|no)\s+(?:even\s+)?(?:a\s+|my\s+)?(?:real\s+|proper\s+|actual\s+|good\s+)?(?:coach|coaching|trainer|listening|reading|helping|helpful|useful)\b/i.test(text)
+    || /\bcall\s+(?:yourself|this)\s+a\s+coach\b/i.test(text)
+    || /\byou\s+(?:ignored|didn.?t\s+(?:listen|read|understand|get\s+it))\b/i.test(text)
+    || /\b(not what i (asked|said|meant)|didn.?t answer|ignored (my|the) question)\b/i.test(text);
+}
+
 export function isDiagnosticQuestion(reply: string): boolean {
   return /^\s*what happened\??(?:\s*tell me\.?)?\s*$/i.test(reply || "");
 }

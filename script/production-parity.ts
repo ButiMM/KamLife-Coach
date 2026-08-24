@@ -1280,11 +1280,16 @@ async function main() {
               + `"${sentence.trim()}" — in a message whose plan line says "Rest day. No training"`);
           }
         }
-        // The recognition itself must survive. A filter that empties the sign-off has not fixed
-        // the contradiction, it has deleted the part the client earned.
-        if (trajectory !== "ON_TRACK") {
-          assert.ok(/\d/.test(message) && message.includes("_"),
-            `${trajectory}: the recognition was destroyed rather than the prescription removed`);
+        // REWRITTEN 2026-08-24. This asserted the sign-off still carried a NUMBER — which was the
+        // 28-day progress clock, since deleted as a second customer-facing scoreboard. Asserting
+        // its survival now demands the very behaviour that was removed. The property that still
+        // matters is the one this check exists for: whatever the sign-off says, the message
+        // carries exactly one instruction and it is the decision's. That is asserted above, for
+        // every trajectory. What is asserted here instead is that a genuinely LAPSED client is
+        // still recognised — the warm re-entry that survived the deletion.
+        if (!activelyEngaged && (trajectory === "RECOVERING" || trajectory === "DISENGAGED")) {
+          assert.match(message, /have you back/i,
+            `${trajectory}: a lapsed client lost their re-entry recognition`);
         }
       }
     }
@@ -1361,6 +1366,8 @@ async function main() {
       meal: lines.some(l => /INSERT meal/i.test(l)),
       workout: lines.some(l => /INSERT workout/i.test(l)),
       continues: lines.some(l => /question continues to Coach K/i.test(l)),
+      amended: lines.some(l => /UPDATE meal/i.test(l)),
+      owed: lines.some(l => /\[TURN_OWED\]/.test(l)),
     };
   });
 
@@ -1832,11 +1839,21 @@ async function main() {
     const mondayMorn = new Date("2026-08-24T04:00:00Z");
     assert.equal(situationWhen([{ text: "birthday outing", at: sundayNight }], mondayMorn), "last_night");
 
+    // An engaged client gets no lapse copy AND no second clock. `/4 sessions/` used to be asserted
+    // here; that was the 28-day count, and it is gone rather than reworded (2026-08-24).
     const engaged = morningClosingLine("STRUGGLING", { activelyEngaged: true, completedSessions28: 4 });
     assert.ok(!/fresh page/i.test(engaged), "engaged client must not get lapse copy");
-    assert.match(engaged, /4 sessions/);
+    assert.ok(!/\d/.test(engaged), `engaged client was handed a progress score: ${engaged}`);
+    // "fresh page" was the STRUGGLING sign-off attached to the 28-day score; both are gone
+    // (2026-08-24). STRUGGLING now says nothing rather than scoring the client, and warm
+    // re-entry survives for the trajectories that actually mean a lapse.
     const lapsed = morningClosingLine("STRUGGLING", { activelyEngaged: false, completedSessions28: 4 });
-    assert.match(lapsed, /fresh page/i);
+    assert.ok(!/fresh page/i.test(lapsed) && !/\d/.test(lapsed),
+      `the deleted 28-day sign-off came back: ${lapsed}`);
+    for (const t of ["RECOVERING", "DISENGAGED"] as const) {
+      assert.match(morningClosingLine(t, { activelyEngaged: false, completedSessions28: 4 }),
+        /have you back/i, `${t}: a lapsed client lost their re-entry recognition`);
+    }
     const brief = composeMorning({
       firstName: "Kam", targetFixLine: "", identityLine: "", streakLine: "5-day food streak.",
       workoutLine: "", yesterdayLine: "144g protein logged yesterday, against a 186g target.",
@@ -1862,6 +1879,118 @@ async function main() {
     assert.ok(/foodDayIsClosed\(message\)/.test(routes), "feeling ack must not swallow a closed food day");
   });
 
+
+  // ── COACH-LOOP SLICE, PR #50 (2026-08-24) ─────────────────────────────────────────────────
+  //
+  //   messy input → truthful state → correct window → latest constraint → chooseAction → one Coach
+  //
+  // Five contracts, each graded on behaviour or state, never on source-string presence.
+
+  check("1 . a factual deficit question is answered, not replaced by an action", async () => {
+    const reply = await serialise(() => say("Am I in a deficit? I've only had breakfast"));
+    assert.match(reply, /built into your target/i, `the deficit question was not answered: ${reply}`);
+    assert.match(reply, /\b2800\b/, "...from the client's own target, via the existing owner");
+    assert.ok(!/one thing today|stand on a scale/i.test(reply),
+      `the action ladder replaced the question: ${reply}`);
+  });
+
+  check("1b . a meal SLOT is not a food, and never writes a phantom meal", async () => {
+    // "had breakfast" fuzzy-matched the alias "sa breakfast" and resolved to McDonald's Big
+    // Breakfast - a 760 kcal row the client never ate. Both words were already in
+    // FUZZY_BLACKLIST; the blacklist was only ever applied to single words, not to the pairs.
+    const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+    for (const slot of ["I've only had breakfast", "I had breakfast", "what's for lunch"]) {
+      assert.deepEqual(scanForSAFoods(slot).map((f: any) => f.name), [],
+        `a bare meal slot resolved to a branded food: ${slot}`);
+    }
+    assert.deepEqual(
+      scanForSAFoods("my breakfast was 3 slices of bread, eggs and chicken livers").map((f: any) => f.name),
+      ["Bread", "Eggs", "Chicken livers"], "a named meal stopped scanning");
+    const r = await writesFor("Am I in a deficit? I've only had breakfast");
+    assert.ok(!r.meal, "a question about the deficit wrote a meal");
+    // …and the owed-fact gate must not hold the pipeline down for a fact no writer can commit.
+    // "had breakfast" names a meal SLOT: there is no row to write, so nothing is owed and the
+    // ordinary handlers may answer. Without this the gate stands every handler down forever and
+    // the turn survives only because the ledger compose happens to rescue the reply.
+    assert.ok(!r.owed, "the gate owed a food write for a message naming no food");
+  });
+
+  check("2 . a named missing item amends the meal instead of asking for it again", async () => {
+    const { mealLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+    // SEED INSIDE THE QUEUE. Setting the stub rows outside it lets another check's cleanup run
+    // between the assignment and the turn that needs them — the seeded breakfast vanished and
+    // this check graded an empty ledger.
+    const named = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [{
+        id: "parity-meal-1", mealLabel: "breakfast", kcalInt: 669, proteinInt: 63,
+        carbsInt: 60, fatInt: 25, items: [{ name: "Bread" }, { name: "Eggs" }],
+        loggedAt: new Date(NOW - 3600_000),
+      }]]]);
+      const from = CONSOLE_LINES.length;
+      const out = await say("You missed the black coffee");
+      const lines = CONSOLE_LINES.slice(from);
+      delete g.__KAMLIFE_STUB_ROWS;
+      return {
+        out,
+        meal: lines.some(l => /INSERT meal/i.test(l)),
+        amended: lines.some(l => /UPDATE meal/i.test(l)),
+      };
+    });
+    {
+      assert.match(named.out, /added Coffee \(black\)/i,
+        `a named missing item was not added: ${named.out}`);
+      assert.ok(!/which meal did i miss/i.test(named.out),
+        "the client was asked to restate a meal they had already described");
+      assert.ok(named.amended, "the amendment was not recorded as a durable mutation");
+      assert.ok(!named.meal, "the amendment created a SECOND meal row - the meal is double-counted");
+
+      for (const vague of ["you missed a meal", "you forgot my lunch", "you didn't log that"]) {
+        const r = await writesFor(vague);
+        assert.match(r.out, /which meal did i miss/i, `the clarification fallback was lost: ${vague}`);
+      }
+    }
+  });
+
+  check("3 . feedback about the coach is recognised, and never answered with an action", async () => {
+    const { isCoachCriticism } = await import("../server/reaction-guard");
+    for (const criticism of ["Wow that's vague and robotic", "No this is a disaster",
+                             "You are not a coach", "you're not a real coach", "You're not listening",
+                             "You didn't read what I said"]) {
+      assert.ok(isCoachCriticism(criticism), `not recognised as feedback about us: ${criticism}`);
+    }
+    for (const notCriticism of ["I feel like a disaster today", "You are not a doctor, I know",
+                                "I had eggs and pap", "I'm struggling with all of this"]) {
+      assert.ok(!isCoachCriticism(notCriticism), `a client's own life read as criticism: ${notCriticism}`);
+    }
+    const reply = await serialise(() => say("You are not a coach"));
+    assert.ok(!/one thing today|stand on a scale/i.test(reply),
+      `an unrelated instruction answered a criticism: ${reply}`);
+  });
+
+  check("4 . the latest explicit constraint reaches the decision, not FEELING_ACK", async () => {
+    const { foodDayIsClosed, chooseAction } = await import("../server/one-action");
+    for (const closed of ["I think I'm going to stop eating today", "I'm not eating anymore today",
+                          "I'm done eating for today", "No more food today"]) {
+      assert.ok(foodDayIsClosed(closed), `a stated cessation was not read as one: ${closed}`);
+    }
+    for (const open of ["I can't stop eating", "I cannot stop eating today",
+                        "I'm not eating junk today", "I'm eating out tonight"]) {
+      assert.ok(!foodDayIsClosed(open), `the food day was closed by mistake: ${open}`);
+    }
+    const base = {
+      goal: "fat_loss", weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 1,
+      loggedToday: true, proteinPct: 0.3, caloriePct: 0.4, sessionsThisWeek: 2,
+      sessionsTarget: 4, stepsToday: 7000, stepsTarget: 8000, hour: 19,
+    } as any;
+    assert.match(chooseAction({ ...base, foodDayClosed: false }).todo, /protein|eat/i,
+      "the open-day control no longer produces a food action, so the closed-day assertion proves nothing");
+    assert.ok(!/\beat\b|protein/i.test(chooseAction({ ...base, foodDayClosed: true }).todo),
+      "a client who said they are done eating was told to eat");
+    const reply = await serialise(() => say("I think I'm going to stop eating today"));
+    assert.ok(!/showing up still counts|heard you on how you'?re feeling/i.test(reply),
+      `a stated constraint was answered as a feeling: ${reply}`);
+  });
 
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {

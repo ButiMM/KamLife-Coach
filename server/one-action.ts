@@ -219,6 +219,18 @@ export function foodDayIsClosed(text: string): boolean {
   if (!t.trim()) return false;
   if (/\b(?:won'?t|will not|not (?:going to|gonna)|can'?t|cannot)\s+(?:be able to\s+)?eat(?:\s+anymore)?\b/i.test(t)) return true;
   if (/\bno more food\b/i.test(t) || /\bdone eating\b/i.test(t)) return true;
+  // A STATED CESSATION OF EATING, COMPOSED RATHER THAN LISTED (2026-08-24).
+  //
+  // "I think I'm going to stop eating today" and "I'm not eating anymore today" are the same
+  // constraint as "done eating" and neither was recognised, so carriesFeelingClause claimed them
+  // on "i think i" and the client's latest explicit constraint became FEELING_ACK instead of
+  // reaching chooseAction. This is (a way of saying no-more) + (the act of eating) + (a marker
+  // that it applies to the rest of THIS day), which is the shape, not a set of sentences.
+  //
+  // The closure marker must follow the verb IMMEDIATELY: "not eating anymore today" closes the
+  // day, "not eating junk today" is a food choice and must not.
+  if (!/\b(?:can'?t|cannot|couldn'?t|struggle(?:s|d)? to|unable to)\s+(?:stop|quit)\s+eating\b/i.test(t)
+      && /\b(?:not|no longer|done|finished|stop|stopping|quit|quitting)\s+(?:going\s+to\s+|gonna\s+)?eat(?:ing)?\s+(?:anymore|any\s+more|again|today|tonight|for\s+(?:the\s+)?(?:rest\s+of\s+the\s+)?(?:day|today))\b/i.test(t)) return true;
   if (/\b(?:just|only)\s+(?:going to |gonna )?(?:have )?(?:alcohol|drinks|zero[- ]calorie)/i.test(t)) return true;
   if (/\b(?:alcohol|zero[- ]calorie drinks).{0,60}(?:today|tonight|the rest of the day)\b/i.test(t)) return true;
   return false;

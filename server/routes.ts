@@ -49,11 +49,12 @@ import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
 import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains } from "./understanding/messy-intake";
 import { foodDayIsClosed } from "./one-action";
+import { isCoachCriticism } from "./reaction-guard";
 import { bareReactionFallback } from "./reaction-guard";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
-import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
+import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { mentionsConditionOrMedication, conditionWelcome } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
@@ -632,7 +633,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   let turnFacts = parseMessyIntake(message);
   // Scanner is the food owner; FOOD_NOUN is a short list. Without this merge, "apple and a
   // pear and one litre of water" is water-only and the fruit never reaches the ledger.
-  turnFacts = withKnownFood(turnFacts, scanForSAFoods(message).some(f => !/^water$/i.test(f.name)));
+  // The scanner is the authority on whether there is a NAMEABLE food here — i.e. whether a row
+  // could be written at all. Held, because the owed-fact gate below needs the same answer.
+  const scannerSawFood = scanForSAFoods(message).some(f => !/^water$/i.test(f.name));
+  turnFacts = withKnownFood(turnFacts, scannerSawFood);
   const multiFact = turnFacts.factTypes.length >= 2;
   const turn = newTurnLedger(turnFacts.factTypes);
   if (multiFact) console.log(`[TURN] ${turnFacts.factTypes.join("+")} in the client's own words — no handler may end this turn`);
@@ -661,11 +665,26 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // any educational or coaching response can become final. Measured against turnMutations() — the
   // durable record, not an in-memory ledger.
   // ════════════════════════════════════════════════════════════════════════════════════════════
+  // AN OWED FACT IS ONE A WRITER COULD ACTUALLY COMMIT (2026-08-24). "I've only had breakfast"
+  // names a MEAL SLOT and no food, but the fact parser reads it as a food report — so the gate
+  // held every handler down waiting for a write that could never happen, including the
+  // deterministic deficit owner that had the answer. The scanner decides whether a row is even
+  // possible, and the router already holds its result (above). The handset case is untouched:
+  // "my breakfast was 3 slices of bread, eggs and chicken livers" scans three foods.
+  // A FACTUAL QUESTION — OR A CRITICISM — MAY NOT BE ANSWERED BY AN UNRELATED ACTION (2026-08-24).
+  // "Am I in a deficit? I've only had breakfast" and "You are not a coach" both came back as
+  // "Stand on a scale this morning": the action ladder replacing the turn instead of answering it.
+  // `conversationalOnly` is the existing flag for "this turn answers, it does not instruct", and
+  // both predicates are existing owners — no new predicate, no second decision owner.
+  if (looksLikeSurplusDeficitQuestion(m) || isCoachCriticism(message)) turnEvidence({ conversationalOnly: true });
+
   const statedFacts = journeyMustKeepFacts(message);
+  const foodIsWritable = scannerSawFood;
   const factsStillOwed = (): string[] => {
     const written = durableDomains(turnMutations());
     return (["food", "steps", "workout"] as const)
-      .filter(d => (statedFacts as any)[d] && !written.includes(d));
+      .filter(d => (d === "food" ? statedFacts.food && foodIsWritable : (statedFacts as any)[d])
+        && !written.includes(d));
   };
   /** May THIS handler's reply end the turn, or is a fact the client stated still unwritten? */
   const mayEndTurn = (who: string): boolean => {
