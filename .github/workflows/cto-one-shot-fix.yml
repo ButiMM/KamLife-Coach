@@ -28,7 +28,7 @@ jobs:
           from pathlib import Path
           p = Path('server/handlers/gpt-block.ts')
           s = p.read_text()
-          old = 'const decision = await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold", reply: "" }));'
+          old = 'const decision = await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold" }));'
           new = 'const decision = (await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold", reply: "" }))) as { todo: string; kind: string; reply: string };'
           assert old in s
           p.write_text(s.replace(old, new, 1))
