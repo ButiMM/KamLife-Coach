@@ -211,6 +211,50 @@ function askToWeigh(dream?: string | null, neverWeighed = false): OneAction {
 const LATE = 17; // from 5pm, "log today" and "get a walk in" start to make sense
 
 /**
+ * Latest explicit constraint, TRAINING side: they said they are not training this SAST day.
+ *
+ * The twin of foodDayIsClosed, and named the same way for the same reason — it is a DayState
+ * input, not a new routing predicate. It exists because routes.ts had a DEFERRAL detector
+ * ("I'll do it later") and nothing owned a REFUSAL. So on 24 August:
+ *
+ *   "no I'm not training today"          → a full Foundation Phase programme
+ *   "I'm training tomorrow not today"    → "Week 5 — Next Session (Day 1)"
+ *
+ * Both were answered with today's session, post-workout nutrition and "Send DONE", over an
+ * explicit refusal. The deferral matcher needed a first-person FUTURE verb and a later-time
+ * word, so a plain negation of today matched none of it.
+ *
+ * Two shapes, both statements of fact about today — a QUESTION ("can I train tomorrow instead?")
+ * is a request, not a constraint, and must be answered rather than silently recorded as a
+ * decision the client did not make:
+ *
+ *   refusal      a negation of training, scoped to today
+ *   displacement training named for a later day AND today explicitly excluded
+ *
+ * The inverse must survive untouched: "I trained today" is a REPORT and is still written as
+ * today's session — that is why completion words disqualify.
+ */
+export function trainingDayIsDeclined(text: string): boolean {
+  const t = String(text || "");
+  if (!t.trim() || t.includes("?")) return false;
+  // A report of a session that happened is never a refusal of one.
+  if (/\b(?:done|finished|completed|already\s+did|just\s+did|did\s+my|smashed|crushed|trained)\b/i.test(t)) return false;
+  // A NEGATED CESSATION IS AN AFFIRMATION — the twin of the "can't stop eating" guard above.
+  // "I didn't skip the gym today" and "I never skip a session today" say they DID train, and the
+  // negation + skip words sit in the same alternation as a genuine refusal. Found by adversarial
+  // probe, not by a screenshot: marking a completed session as declined is the worse direction.
+  if (/\b(?:not|never|no\s+way|didn'?t|don'?t|doesn'?t|won'?t|wouldn'?t|isn'?t|ain'?t|couldn'?t)\b[^.!?]{0,20}?\b(?:skip|skipping|skipped|miss|missing|missed)\b/i.test(t)) return false;
+  const trainingToday =
+    /\b(?:not|no|won'?t|will\s+not|can'?t|cannot|skipping|skip|missing)\b[^.!?]{0,40}?\b(?:train(?:ing)?|workout|work\s*out|session|gym|exercis(?:e|ing))\b[^.!?]{0,30}?\btoday\b/i.test(t)
+    || /\b(?:train(?:ing)?|workout|work\s*out|session|gym|exercis(?:e|ing))\b[^.!?]{0,30}?\b(?:not|no)\b[^.!?]{0,15}?\btoday\b/i.test(t);
+  if (trainingToday) return true;
+  // "tomorrow instead" / "tomorrow not today" — a later day named AND today displaced.
+  return /\b(?:tomorrow|next\s+week|2moro|2morrow)\b/i.test(t)
+    && /\b(?:train(?:ing)?|workout|work\s*out|session|gym|exercis(?:e|ing))\b/i.test(t)
+    && /\b(?:instead|not\s+today|rather\s+than\s+today)\b/i.test(t);
+}
+
+/**
  * Latest explicit constraint: they closed food for this SAST day.
  * Named without looksLike* so it is not a new routing predicate; it is a DayState input.
  */

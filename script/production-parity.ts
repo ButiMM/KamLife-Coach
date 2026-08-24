@@ -1064,7 +1064,7 @@ async function main() {
   // Graded by watching the durable-write records the turn emits, not by reading the source: the
   // previous version of this check asserted a variable name, and a variable name is not a write.
   check("a training report is written to the day the client actually named", async () => {
-    const { trainingWhen } = await import("../server/utils");
+    const { statedWhen } = await import("../server/utils");
     const { sastDayKey } = await import("../server/sast");
     const today = sastDayKey();
     const yesterday = sastDayKey(new Date(Date.now() - 86_400_000));
@@ -1082,26 +1082,26 @@ async function main() {
     });
 
     // 1. "I trained Monday" — a day is named. It may NOT become today.
-    assert.equal(trainingWhen("I trained Monday").when, "historical");
+    assert.equal(statedWhen("I trained Monday").when, "historical");
     const monday = await writesFor("I trained Monday");
     assert.ok(!monday.today, "a session reported for Monday was written to today");
     assert.ok(monday.retro.length === 0 || monday.retro.every(d => d !== today),
       `the Monday session landed on today: ${monday.retro.join(",")}`);
 
     // 2. "I trained last week" — a SPAN. No day to write, so nothing is written.
-    assert.equal(trainingWhen("I trained last week").when, "ambiguous");
+    assert.equal(statedWhen("I trained last week").when, "ambiguous");
     const lastWeek = await writesFor("I trained last week");
     assert.ok(!lastWeek.today, "a session reported for 'last week' was written to today");
 
     // 3. "I trained yesterday" still reaches the retro writer, on yesterday.
-    assert.equal(trainingWhen("I trained yesterday").when, "historical");
+    assert.equal(statedWhen("I trained yesterday").when, "historical");
     const yday = await writesFor("I trained yesterday");
     assert.ok(!yday.today, "yesterday's session was written to today");
     assert.ok(yday.retro.includes(yesterday),
       `yesterday's session was not written to ${yesterday}: ${yday.retro.join(",") || "no write"}`);
 
     // 4. "I trained this morning" still logs today.
-    assert.equal(trainingWhen("I trained this morning").when, "today");
+    assert.equal(statedWhen("I trained this morning").when, "today");
     const thisMorning = await writesFor("I trained this morning");
     assert.ok(thisMorning.today, "an explicit today report no longer logs today");
 
@@ -1952,6 +1952,78 @@ async function main() {
     }
   });
 
+  check("2b . a correction lands on the day being corrected, or not at all", async () => {
+    // The amend window was "today, no upper bound", so "you missed the black coffee yesterday"
+    // silently moved the correction onto TODAY's row — corrupting a day the client can no longer
+    // see. The day is resolved by the one temporal owner; an unpinnable day is not written.
+    const { statedWhen } = await import("../server/utils");
+    const { sastDayKey } = await import("../server/sast");
+    const dayOf = (msg: string) => {
+      const w = statedWhen(msg);
+      return w.when === "ambiguous" ? "ambiguous" : sastDayKey(w.when === "today" ? new Date() : w.date);
+    };
+    assert.equal(dayOf("You missed the black coffee"), sastDayKey(), "same-day correction left today");
+    assert.equal(dayOf("You missed the black coffee yesterday"),
+      sastDayKey(new Date(Date.now() - 86_400_000)), "a yesterday correction did not resolve to yesterday");
+    assert.equal(dayOf("you missed the black coffee last week"), "ambiguous",
+      "a span was pinned to a day it does not name");
+
+    // THE WINDOW ITSELF. dayKey is derived from the same `dayStart` that builds the gte/lt bounds,
+    // so it reports the day the query was actually scoped to — not a restatement of the input.
+    const { appendItemsToRecentMeal } = await import("../server/day-ledger");
+    const { mealLogs } = await import("../shared/schema");
+    const coffee = [{ name: "Coffee (black)", category: "drink", typicalPortionGrams: 250,
+      typicalPortionCalories: 5, typicalPortionProtein: 0, carbsPer100g: 0, fatPer100g: 0 }];
+    const g = globalThis as any;
+    const scoped = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [{
+        id: "parity-day-row", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 86_400_000),
+      }]]]);
+      const yesterday = new Date(Date.now() - 86_400_000);
+      const out = {
+        today: await appendItemsToRecentMeal(USER.id, coffee as any),
+        yesterday: await appendItemsToRecentMeal(USER.id, coffee as any, yesterday),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+    assert.equal(scoped.today?.dayKey, sastDayKey(), "the same-day amend was scoped to another day");
+    assert.equal(scoped.yesterday?.dayKey, sastDayKey(new Date(Date.now() - 86_400_000)),
+      "a yesterday correction was written into a different day's window");
+    // NOTE, stated rather than implied: under the offline stub recomputeTodayFoodTotals returns
+    // zero either way, so a `calories` assertion here could not fail and is not made. What is
+    // graded instead is the sentence the client reads, in 2c — which is now rendered from
+    // `dayKey`, so the reply cannot disagree with the row that was written.
+  });
+
+  check("2c . the client is told which day was changed", async () => {
+    const { mealLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+    const replies = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [{
+        id: "parity-day-row-2", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 86_400_000),
+      }]]]);
+      const out = {
+        today: await say("You missed the black coffee"),
+        yesterday: await say("You missed the black coffee yesterday"),
+        saturday: await say("You missed the black coffee from Saturday"),
+        span: await say("you missed the black coffee last week"),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+    assert.match(replies.today, /to your breakfast/i, `same-day wording changed: ${replies.today}`);
+    assert.match(replies.yesterday, /yesterday'?s breakfast/i,
+      `a past-day correction did not name the day: ${replies.yesterday}`);
+    assert.ok(!/_Today:/.test(replies.yesterday), "a past-day correction quoted today's total");
+    assert.match(replies.saturday, /saturday'?s breakfast/i,
+      `a named-day correction did not name the day: ${replies.saturday}`);
+    assert.match(replies.span, /which meal did i miss/i,
+      `an unpinnable day was written instead of clarified: ${replies.span}`);
+  });
+
   check("3 . feedback about the coach is recognised, and never answered with an action", async () => {
     const { isCoachCriticism } = await import("../server/reaction-guard");
     for (const criticism of ["Wow that's vague and robotic", "No this is a disaster",
@@ -1990,6 +2062,71 @@ async function main() {
     const reply = await serialise(() => say("I think I'm going to stop eating today"));
     assert.ok(!/showing up still counts|heard you on how you'?re feeling/i.test(reply),
       `a stated constraint was answered as a feeling: ${reply}`);
+  });
+
+  // ── AN EXPLICIT REFUSAL DOMINATES TODAY'S WORKOUT (2026-08-24 live) ───────────────────────
+  //
+  //   "I am NOT training today. I will train tomorrow."
+  //   → a full session, post-workout nutrition and "Send DONE"
+  //
+  // routes.ts had a DEFERRAL matcher ("I'll do it later") requiring a first-person future verb
+  // and a later-time word; a plain negation of today matched none of it, and nothing else owned
+  // a refusal. trainingDayIsDeclined is the twin of foodDayIsClosed — a DayState input, not a
+  // routing predicate — and it reaches both the renderer and chooseAction.
+  check("5 . a refusal to train today dominates the workout, and a report still logs", async () => {
+    const { trainingDayIsDeclined, chooseAction } = await import("../server/one-action");
+    for (const refusal of ["I am not training today. I will train tomorrow",
+                           "no I'm not training today", "I'm training tomorrow not today",
+                           "I'm not doing the workout today", "Skipping the gym today",
+                           "I'll train tomorrow instead"]) {
+      assert.ok(trainingDayIsDeclined(refusal), `an explicit refusal was not read as one: ${refusal}`);
+    }
+    // THE INVERSE. A report of training is not a refusal of it, and a question is a request.
+    for (const notRefusal of ["I trained today", "I did my workout today", "I'm training today",
+                              "Can I do my workout tomorrow instead?", "What is tomorrow's session?",
+                              "workout", "I'm not eating anymore today",
+                              // A NEGATED CESSATION IS AN AFFIRMATION. These say they DID train,
+                              // and marking a completed session as declined is the worse error.
+                              "I didn't skip the gym today", "I never skip the gym today",
+                              "no way I'm skipping the gym today", "I did not skip my session today"]) {
+      assert.ok(!trainingDayIsDeclined(notRefusal), `wrongly read as a refusal: ${notRefusal}`);
+    }
+    // …while a genuine refusal that uses the same verb must survive the guard.
+    for (const stillRefusal of ["Skipping the gym today", "I want to skip the gym today",
+                                "I'm skipping training today"]) {
+      assert.ok(trainingDayIsDeclined(stillRefusal), `the negation guard swallowed a refusal: ${stillRefusal}`);
+    }
+
+    // The decision owner's own contract, as a unit: sessionsTarget 0 means no session today.
+    // NOTE: the router returns the deferral reply before chooseAction runs on a refusal turn, so
+    // this asserts the contract, not a wiring path — and no wiring was added that nothing reaches.
+    const base = {
+      goal: "fat_loss", weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 2,
+      loggedToday: true, proteinPct: 0.9, caloriePct: 0.8, sessionsThisWeek: 0,
+      stepsToday: 3000, stepsTarget: 6000, hour: 9,
+    } as any;
+    assert.match(chooseAction({ ...base, sessionsTarget: 4 }).todo, /session|train/i,
+      "the training-day control no longer prescribes a session, so the refusal case proves nothing");
+    assert.ok(!/session|train|gym/i.test(chooseAction({ ...base, sessionsTarget: 0 }).todo),
+      "a client who said they are not training today was told to train");
+
+    // …and the renderer stands down rather than printing the session over the refusal.
+    for (const refusal of ["no I'm not training today", "I'm training tomorrow not today",
+                           "I am not training today. I will train tomorrow"]) {
+      const reply = await serialise(() => say(refusal));
+      assert.ok(!/Week \d|Next Session|Foundation Phase|Send \*?DONE/i.test(reply),
+        `today's session was printed over an explicit refusal: ${reply.slice(0, 90)}`);
+      assert.match(reply, /rest today|when you'?re ready/i,
+        `the refusal was not acknowledged: ${reply.slice(0, 90)}`);
+    }
+    // The opposite still holds end to end: a reported session is still written to today.
+    const trained = await writesFor("I trained chest today. What should I eat now?");
+    assert.ok(trained.workout, "a reported session stopped being recorded");
+    // And the ordinary workout doors are untouched.
+    for (const view of ["workout", "What is tomorrow's session?"]) {
+      const reply = await serialise(() => say(view));
+      assert.match(reply, /Week \d/i, `a legitimate workout view was broken: ${view} → ${reply.slice(0, 70)}`);
+    }
   });
 
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────

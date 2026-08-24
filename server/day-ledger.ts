@@ -152,14 +152,24 @@ export async function appendItemsToRecentMeal(
   foods: Array<{ name: string; category?: string; typicalPortionGrams?: number | null;
     typicalPortionCalories?: number | null; typicalPortionProtein?: number | null;
     carbsPer100g?: number | null; fatPer100g?: number | null }>,
-): Promise<{ mealLabel: string; added: string[]; calories: number; protein: number } | null> {
+  forDate?: Date,
+): Promise<{ mealLabel: string; added: string[]; dayKey: string; calories: number; protein: number } | null> {
   if (!foods.length) return null;
+  // A CORRECTION LANDS ON THE DAY BEING CORRECTED (2026-08-24).
+  //
+  // This queried `gte(loggedAt, sastDayStart())` — today, with no upper bound — so "you missed the
+  // black coffee yesterday" silently moved the correction onto TODAY's row. That is worse than not
+  // amending at all: the ledger now disagrees with the client about a day they can no longer see,
+  // and every window that reads either day inherits the error. The caller resolves the day through
+  // the one temporal owner and refuses to guess; this bounds the window at both ends.
+  const dayStart = sastDayStart(forDate);
+  const dayEnd = new Date(dayStart.getTime() + 86_400_000);
   const [target] = await db.select({
     id: mealLogs.id, items: mealLogs.items, mealLabel: mealLogs.mealLabel,
     kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
     carbsInt: mealLogs.carbsInt, fatInt: mealLogs.fatInt,
   }).from(mealLogs)
-    .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, sastDayStart())))
+    .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, dayStart), lt(mealLogs.loggedAt, dayEnd)))
     .orderBy(desc(mealLogs.loggedAt)).limit(1);
   if (!target?.id) return null;
 
@@ -188,10 +198,13 @@ export async function appendItemsToRecentMeal(
 
   const { recomputeTodayFoodTotals, invalidateFoodTotalsCache } = await import("./handlers/food-scanner");
   invalidateFoodTotalsCache(userId);
-  const totals = await recomputeTodayFoodTotals(userId);
+  // The running total is TODAY's; a correction to a past day must not print it as if it were.
+  const isToday = dayStart.getTime() === sastDayStart().getTime();
+  const totals = isToday ? await recomputeTodayFoodTotals(userId) : { calories: 0, protein: 0 };
   return {
     mealLabel: target.mealLabel || "that meal",
     added: added.map(a => a.name),
+    dayKey: sastDayKey(dayStart),
     calories: totals.calories, protein: totals.protein,
   };
 }

@@ -21,7 +21,7 @@ import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat, turnMutation } from "./chat-log";
 import { sastDayKey } from "../sast";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
-import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone, sessionCountsIn, trainingWhen } from "../utils";
+import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen } from "../utils";
 import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot, weekStartForTrainingClaim, attributableWeekSessionDates } from "../workout-state";
 import { handleWeightLog } from "./weight";
@@ -276,9 +276,9 @@ export async function handleWorkoutCommands(ctx: {
   // ---- RETROACTIVE WORKOUT — "trained yesterday", "did legs yesterday", "done on Sunday" ----
   // ONE TEMPORAL OWNER (2026-08-22, P0-B). This was a private day-word list that parseMealDate
   // already out-resolved, so "I trained Monday" and "I trained last week" both wrote TODAY.
-  // utils.trainingWhen answers today / historical / ambiguous for both branches below, from the
+  // utils.statedWhen answers today / historical / ambiguous for both branches below, from the
   // parser that owns dates — and hands back the date it resolved, so nothing parses twice.
-  const when = trainingWhen(m);
+  const when = statedWhen(m);
   // "done/finished/completed" alone is too generic — must appear beside a workout word.
   // "trained", "did my workout/session/legs/etc." are workout-specific by themselves.
   const hasCompletionWord =

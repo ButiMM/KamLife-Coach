@@ -48,7 +48,7 @@ import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
 import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains } from "./understanding/messy-intake";
-import { foodDayIsClosed } from "./one-action";
+import { foodDayIsClosed, trainingDayIsDeclined } from "./one-action";
 import { isCoachCriticism } from "./reaction-guard";
 import { bareReactionFallback } from "./reaction-guard";
 import { mustStayDeterministic } from "./understanding/action-router";
@@ -889,15 +889,21 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // commands) and "about to do my workout" (imminent) still reach the real handler. Stricter
   // than isFutureIntent() on purpose — bare "tomorrow" must not swallow "tomorrow's session".
   const _origWO = originalMBeforeNorm;
+  // A REFUSAL IS NOT A DEFERRAL (2026-08-24). The matcher below detects "I'll do it later" and
+  // needs a first-person future verb AND a later-time word, so "no I'm not training today" matched
+  // none of it and got a full session, post-workout nutrition and "Send DONE" over an explicit
+  // refusal. trainingDayIsDeclined is the twin of foodDayIsClosed — the latest explicit constraint
+  // about today, owned in one-action.
+  const _isWorkoutRefusal = trainingDayIsDeclined(_origWO);
   const _isWorkoutDeferral =
     !_origWO.includes("?")
     && /\b(i'?ll|i\s+will|i'?m\s+going\s+to|i\s+am\s+going\s+to|gonna|going\s+to|plann?ing\s+(?:to|on)|plan\s+to)\b/i.test(_origWO)
     && /\b(workout|work\s*out|train(?:ing)?|session|gym|exercise|programme|program|leg\s+day|chest\s+day|upper\s+body|lower\s+body|push\s+day|pull\s+day)\b/i.test(_origWO)
     && /\b(tomorrow|later|tonight|this\s+evening|after\s+work|in\s+the\s+morning|next\s+week|2moro|2morrow)\b/i.test(_origWO)
     && !/\b(done|finished|completed|already\s+did|just\s+did|did\s+my|smashed|crushed)\b/i.test(_origWO);
-  if (_isWorkoutDeferral) {
+  if (_isWorkoutDeferral || _isWorkoutRefusal) {
     const _woName = user.name?.split(" ")[0] || "";
-    const _laterToday = !/\b(tomorrow|next\s+week|2moro|2morrow)\b/i.test(_origWO);
+    const _laterToday = !_isWorkoutRefusal && !/\b(tomorrow|next\s+week|2moro|2morrow)\b/i.test(_origWO);
     const deferReply = _laterToday
       ? `${_woName ? _woName + ", n" : "N"}o rush — it'll be right here when you're ready. Just send *workout* and I'll pull up today's session 💪`
       : `${_woName ? _woName + ", n" : "N"}o stress — rest today, hit it fresh tomorrow 💪\n\nWhen you're ready, send *workout* and your session's ready. Today: protein in, keep moving.`;

@@ -193,6 +193,8 @@ export function parseMealDate(message: string): Date {
 
 /**
  * WHEN DID THIS HAPPEN? The temporal classifier a durable write consults (2026-08-22, P0-B).
+ * Renamed from trainingWhen 2026-08-24: it reads a MESSAGE, not a workout, and the food
+ * correction path needs the same answer — a correction must land on the day being corrected.
  *
  * The workout writer decided this with its own day-word list, and that list was a SUBSET of what
  * parseMealDate below already resolves — so "I trained Monday" (no "on") named a day the parser
@@ -211,14 +213,14 @@ export function parseMealDate(message: string): Date {
  * The span list is the only literal vocabulary, and it is closed by grammar: the ways English
  * names a period without naming a day. It is not a list of ways to say "I trained".
  */
-export type TrainingWhen = "today" | "historical" | "ambiguous";
+export type StatedWhen = "today" | "historical" | "ambiguous";
 
 /** "Does this message say TODAY?" — moved here from handlers/food-context.ts (2026-08-22) when
  *  the temporal classifier below needed the same answer. One owner; food-context imports it. */
 export const SAYS_TODAY_RE = /\b(today|this morning|this afternoon|this evening|tonight|just now|right now|earlier today)\b/i;
 const A_SPAN_NOT_A_DAY = /\b(?:last|past|previous|this)\s+(?:week|month|fortnight)\b|\bweekend\b|\bthe\s+other\s+day\b|\ba\s+while\s+(?:back|ago)\b|\brecently\b|\blately\b|\bpast\s+few\s+days\b|\bcouple\s+of\s+(?:weeks|months)\b/i;
 
-export function trainingWhen(message: string): { when: TrainingWhen; date: Date } {
+export function statedWhen(message: string): { when: StatedWhen; date: Date } {
   const text = String(message || "");
   const resolved = parseMealDate(text);
   const isToday = sastDayStart(resolved).getTime() === sastDayStart().getTime();
