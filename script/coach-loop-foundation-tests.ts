@@ -5,7 +5,8 @@ function run(): void {
   const oldTrajectoryContext = { activelyEngaged: false, completedSessions28: 4 };
 
   const runLine = morningClosingLine("ON_A_RUN", oldTrajectoryContext);
-  assert.equal(runLine, "", "28-day ON_A_RUN recognition must not become a client-facing score");
+  assert.match(runLine, /keeping the consistency going/i, "ON_A_RUN keeps recognition without the old 28-day score");
+  assert.doesNotMatch(runLine, /sessions in the last 4 weeks/i, "ON_A_RUN must not expose the old 28-day clock");
 
   const struggling = morningClosingLine("STRUGGLING", oldTrajectoryContext);
   assert.equal(struggling, "", "STRUGGLING must not create a second closing/action owner");
