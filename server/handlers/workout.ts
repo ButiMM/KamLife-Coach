@@ -23,6 +23,7 @@ import { sastDayKey } from "../sast";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
 import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen } from "../utils";
 import { applyRetroSessionState } from "../day-ledger";
+import { readTrainingDay } from "../one-action";
 import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot, weekStartForTrainingClaim, attributableWeekSessionDates } from "../workout-state";
 import { handleWeightLog } from "./weight";
@@ -286,7 +287,15 @@ export async function handleWorkoutCommands(ctx: {
     /\b(trained|did\s+(?:my\s+)?(?:workout|session|training|gym|legs?|upper(?:\s+body)?|lower(?:\s+body)?|chest|back|push|pull|cardio|arms?|shoulders?|squats?)|workout\s+(?:done|complete[d]?|finished)|session\s+(?:done|complete[d]?|finished)|training\s+(?:done|complete[d]?|finished)|gym\s+(?:done|complete[d]?|finished))\b/i.test(m)
     || /\b(?:done|finished|complete[d]?)\b.{0,40}\b(?:workout|session|training|gym|legs?|upper|lower|chest|back|push|pull|cardio)\b/i.test(m)
     || /\b(?:workout|session|training|gym|legs?|upper|lower|chest|back|push|pull|cardio)\b.{0,40}\b(?:done|finished|complete[d]?)\b/i.test(m);
-  const hasMissWord = /\b(missed?|couldn.?t|skipped?|didn.?t|won.?t|rest\s+day|sick|injur|cancel)\b/i.test(m);
+  // TWO QUESTIONS, NOT ONE (2026-08-25). This regex conflated "did they report a training miss"
+  // — which readTrainingDay owns — with "are they sick or injured", which is a health question and
+  // is not this owner's to answer. The training half now comes from the owner; the health half
+  // stays local and is named for what it is. Proven equivalent on a 17-string battery before the
+  // swap: the retro-logging guard behaves identically.
+  const _trainingRead = readTrainingDay(m);
+  const reportsMiss = _trainingRead === "missed" || _trainingRead === "declined";
+  const hasHealthBlock = /\b(sick|injur|cancel)\b/i.test(m);
+  const hasMissWord = reportsMiss || hasHealthBlock;
 
   // Question guard uses the shared looksLikeQuestion (not a bare "?" check): a voice
   // transcript that drops the mark — "is yesterday's session logged", "should that

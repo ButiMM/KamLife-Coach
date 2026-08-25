@@ -48,7 +48,7 @@ import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
 import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains } from "./understanding/messy-intake";
-import { foodDayIsClosed, trainingDayIsDeclined } from "./one-action";
+import { foodDayIsClosed, readTrainingDay } from "./one-action";
 import { backfillAttributedDays } from "./backfill";
 import { isCoachCriticism } from "./reaction-guard";
 import { bareReactionFallback } from "./reaction-guard";
@@ -938,7 +938,12 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // none of it and got a full session, post-workout nutrition and "Send DONE" over an explicit
   // refusal. trainingDayIsDeclined is the twin of foodDayIsClosed — the latest explicit constraint
   // about today, owned in one-action.
-  const _isWorkoutRefusal = trainingDayIsDeclined(_origWO);
+  // ONE READER (2026-08-25). This computed a refusal into an underscore-prefixed local that
+  // NOTHING read — a seventh opinion on "is the client training today" that never reached a
+  // decision. Recorded rather than quietly deleted: it is the clearest example of why six
+  // separate readers of one question produced six different answers.
+  const _trainingDay = readTrainingDay(_origWO);
+  const _isWorkoutRefusal = _trainingDay === "declined";
   // A REQUEST TO MOVE A WORKOUT IS A SCHEDULE DECISION, NOT A REQUEST TO RENDER IT (2026-08-24).
   //
   //   "Can I do my workout tomorrow instead?"  →  *Week 5 — Next Session (Day 1)*
@@ -949,21 +954,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // a modal + first person is asking to MOVE it ("can I do my workout tomorrow?"), while a view
   // request names the object without asking permission ("show me tomorrow's workout",
   // "tomorrow's workout?") and must still reach the renderer.
-  const _isWorkoutMoveRequest =
-    /^\s*(?:can|could|may|should|is\s+it\s+ok\s+(?:if\s+)?)\s*i\b/i.test(_origWO.trim())
-    && /\b(?:workout|work\s*out|train(?:ing)?|session|gym|exercise|leg\s+day|chest\s+day|upper\s+body|lower\s+body|push\s+day|pull\s+day)\b/i.test(_origWO)
-    && /\b(?:tomorrow|later|tonight|this\s+evening|after\s+work|next\s+week|another\s+day|a\s+different\s+day|2moro|2morrow)\b/i.test(_origWO)
-    && !/\b(?:show|send|see|view|what'?s|what\s+is|give\s+me)\b/i.test(_origWO)
-    // POSSESSIVE NAMES THE OBJECT; A BARE DAY PROPOSES A TIME. "Can I get tomorrow's session?"
-    // asks to SEE the thing; "Can I do my workout tomorrow?" asks to MOVE it. Grammar, so it
-    // covers see/get/have without a verb list.
-    && !/\b(?:tomorrow|next\s+week)'?s\s+(?:workout|work\s*out|session|training)\b/i.test(_origWO);
-  const _isWorkoutDeferral =
-    !_origWO.includes("?")
-    && /\b(i'?ll|i\s+will|i'?m\s+going\s+to|i\s+am\s+going\s+to|gonna|going\s+to|plann?ing\s+(?:to|on)|plan\s+to)\b/i.test(_origWO)
-    && /\b(workout|work\s*out|train(?:ing)?|session|gym|exercise|programme|program|leg\s+day|chest\s+day|upper\s+body|lower\s+body|push\s+day|pull\s+day)\b/i.test(_origWO)
-    && /\b(tomorrow|later|tonight|this\s+evening|after\s+work|in\s+the\s+morning|next\s+week|2moro|2morrow)\b/i.test(_origWO)
-    && !/\b(done|finished|completed|already\s+did|just\s+did|did\s+my|smashed|crushed)\b/i.test(_origWO);
+  const _isWorkoutMoveRequest = _trainingDay === "move_request";
+  const _isWorkoutDeferral = _trainingDay === "deferred";
   if (_isWorkoutMoveRequest) {
     const _mvName = getDisplayName(user);
     const _mvLater = !/\b(tomorrow|next\s+week|another\s+day|a\s+different\s+day|2moro|2morrow)\b/i.test(_origWO);

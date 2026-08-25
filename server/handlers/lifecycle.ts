@@ -36,6 +36,7 @@ import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
 import { scanForSAFoods, weeklyNetLine } from "./food-scanner";
 import { getWeightTruth } from "../day-ledger";
+import { readTrainingDay } from "../one-action";
 
 export async function handleLifecycle(ctx: {
   phone: string;
@@ -1323,8 +1324,11 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- REST DAY HANDLER ----
-  const isRestDayMsg =
-    /\b(rest day|no gym today|off today|taking a rest|rest today|not training today|skipping gym|not going to gym|day off|recovery day|active recovery|not working out today|off day)\b/i.test(m);
+  // ONE READER FOR "IS THE CLIENT TRAINING TODAY?" (2026-08-25). This held its own rest-day
+  // vocabulary — and "No I moved yesterdays workout to today" was read as a refusal elsewhere
+  // while this file had no opinion on it at all. The reply below is unchanged; only the question
+  // moved to its owner. See readTrainingDay.
+  const isRestDayMsg = readTrainingDay(m) === "declined";
 
   if (isRestDayMsg) {
     const name = spaceName(user);
@@ -1339,8 +1343,8 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- MISSED WORKOUT / SKIPPED SESSION HANDLER ----
-  const isMissedWorkout =
-    /\b(missed.*(?:workout|session|gym|training)|couldn.?t.*(?:train|gym|workout)|skipped.*(?:gym|session|workout|training)|didn.?t.*(?:train|go to gym|workout)|missed.*gym|didn.?t make it|couldn.?t make it|no gym yesterday|missed yesterday|no training today|didn.?t train)\b/i.test(m);
+  // Same owner, the "a session did not happen" answer. (2026-08-25.)
+  const isMissedWorkout = readTrainingDay(m) === "missed";
 
   // A SINGLE-FACT HANDLER MAY NOT CLAIM A MULTI-PART TURN (2026-08-10, Work Order 2).
   //
