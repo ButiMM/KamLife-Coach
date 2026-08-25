@@ -365,7 +365,6 @@ export async function buildPatternSummary(user: any): Promise<string> {
     const foodLogs = recentChats.filter(c => c.intent === "FOOD_LOG");
     let avgProtein: number | null = null;
     try {
-      // Same owner bucket: the boundary decides the divisor as well as the totals (P0-5).
       const dailyProtein = await db.select({
         day: sastDayBucketSql(mealLogs.loggedAt),
         protein: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
