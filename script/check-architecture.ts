@@ -89,6 +89,31 @@ const BUDGET = {
    */
   localDecisionSenders: 6,
   /**
+   * GUARD #15 — see directLedgerReads above. Client-facing reads of weight_logs that do not go
+   * through getWeightTruth, and therefore cannot honour do_not_mention.
+   *
+   * MEASURED 26 on main@266a8c2b, 15 after this cut. The eleven that went are every surface that
+   * SPOKE A FIGURE without asking: the model context (client-snapshot, gpt.ts x2), the plateau
+   * nudge, monthly photo day, the "not seeing results" stats line, the three client-asked commands
+   * in misc-commands (which now say WHY they may answer, rather than answering by never checking),
+   * and one dead duplicate in macro-card-attach that nothing called.
+   *
+   * The fifteen that remain are deliberately still here, and they are not the same kind of thing:
+   *
+   *   6  read only `loggedAt` — "is a trend assertable", "when did they last weigh" — and quote
+   *      nothing. response-gate, one-action-command, understanding/live, chat-log, monday x2.
+   *      They come home when trend-usability gets an owner, which is P0-7.
+   *   6  monday and weekly already apply the rule themselves (mentionsForbidden, in-file). Moving
+   *      them is consolidation, not a behaviour fix, and mixing the two in one PR is how a
+   *      behavioural claim gets buried in a refactor.
+   *   2  scheduler/shared.ts — loadProactiveState, which feeds chooseAction, and chooseAction has
+   *      carried its own scaleIsOffLimits gate since Cut 7.
+   *   1  business.ts runAutoCalAdjust — a target computation, not a sentence.
+   *
+   * LOWER THIS as each of those lands. Never raise it.
+   */
+  directWeightReads: 15,
+  /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
    * something other than the engine can put words in front of a client.
    *
@@ -616,6 +641,46 @@ function unclassifiedSenders(): { missing: string[]; legacy: number } {
   return { missing, legacy };
 }
 
+/**
+ * GUARD #15 — THE LEDGER HAS OWNERS, AND THE CLIENT PATH USES THEM (2026-08-25, P0-5).
+ *
+ * THE DEFECT THIS EXISTS TO STOP, measured on main@266a8c2b: `users.do_not_mention` is the client
+ * saying "stop bringing up my weight". Exactly ONE reader on the client path honoured it —
+ * getProgressTruth. Four others read weight_logs directly and spoke the figure with no check:
+ * the model's context (twice, one of them under "Quote these figures EXACTLY as written"), the
+ * plateau nudge, and monthly photo day. The reactive mouth's strip is a last resort that only
+ * covers reactive TEXT — not a proactive send, and not a rendered card.
+ *
+ * That is the same shape as every other defect in this repo's last six months: a correct owner
+ * exists, and the surfaces that speak simply do not go through it. So the number of direct reads
+ * is not a tidiness metric — it is the count of places where a client-facing claim is made without
+ * the rule that governs it. It may only FALL, and it falls one DOMAIN at a time.
+ *
+ * SCOPE, stated so it cannot drift: files that compose something a client sees. Excluded by
+ * declaration and not by accident — the owner itself, the domain WRITERS (a handler that inserts
+ * a weigh-in must address the table), admin and dashboard routes, and storage/audit tooling, none
+ * of which are the coach speaking. server/handlers/safety.ts is excluded DELIBERATELY and
+ * permanently: a rapid-loss check that stands down because the client asked us not to discuss the
+ * scale is the one place where honouring that request would be dangerous.
+ */
+const LEDGER_OWNER_FILES = ["server/day-ledger.ts", "server/day-ledger-core.ts"];
+const DOMAIN_WRITERS: Record<string, string[]> = {
+  weight: ["server/handlers/weight.ts", "server/handlers/safety.ts"],
+};
+function directLedgerReads(table: string, writers: string[]): string[] {
+  const clientPath = files.filter(f =>
+    (f.startsWith("server/handlers/") || f.startsWith("server/brain/") || f.startsWith("server/scheduler/")
+      || f.startsWith("server/understanding/") || f.startsWith("server/verifiers/")
+      || f === "server/gpt.ts" || f === "server/macro-card-attach.ts")
+    && !LEDGER_OWNER_FILES.includes(f) && !writers.includes(f));
+  const hits: string[] = [];
+  for (const f of clientPath) {
+    const n = (readFileSync(f, "utf-8").match(new RegExp(`from\\(${table}\\)`, "g")) || []).length;
+    for (let i = 0; i < n; i++) hits.push(f);
+  }
+  return hits;
+}
+
 const files = [...walk("server"), ...walk("shared")];
 const read = (f: string) => readFileSync(f, "utf-8");
 const all = files.map(read);
@@ -641,6 +706,8 @@ const actual = {
   unreachableCapabilities: unreachableExports(files, walk("script")).length,
   /** Proactive senders still running their own action ladder. See GUARD #14. */
   localDecisionSenders: unclassifiedSenders().legacy,
+  /** Client-facing reads of weight_logs that bypass getWeightTruth. See GUARD #15. */
+  directWeightReads: directLedgerReads("weightLogs", DOMAIN_WRITERS.weight).length,
   // EVERY PLACE THAT TALKS TO TWILIO DIRECTLY (2026-08-05).
   //
   // Twilio is a reseller of Meta's WhatsApp API, not the destination — OUTSTANDING.md has

@@ -5,6 +5,7 @@ import {
   getActiveClients, isPaused, programmeDaysSince, sastDayStart,
 } from "../shared";
 import { getGoalProfile } from "../../goal-profiles";
+import { getWeightTruth } from "../../day-ledger";
 
 // One-time catch-up: send step sync guide to any active client who has never
 // received it (existing beta testers signed up before Day 3 auto-message was added).
@@ -108,17 +109,20 @@ export async function runMonthlyMeasurements(): Promise<void> {
     if (!(await claimDailySlot(client.id, "monthly_measurements"))) continue;
     try {
       const name = (client.name || "there").split(" ")[0];
-      const [latestWeight] = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(desc(weightLogs.loggedAt)).limit(1);
-      const [oldestWeight] = await db.select({ weight: weightLogs.weight }).from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, threeMonthsAgo))).orderBy(asc(weightLogs.loggedAt)).limit(1);
-      let contextLine = "";
-      if (latestWeight && oldestWeight && latestWeight.weight !== oldestWeight.weight) {
-        const diff = parseFloat(String(latestWeight.weight)) - parseFloat(String(oldestWeight.weight));
-        const direction = diff < 0 ? `down ${Math.abs(diff).toFixed(1)}kg` : `up ${diff.toFixed(1)}kg`;
-        const goal = client.goalType || "fat_loss";
-        const onTrack = (goal === "fat_loss" && diff < 0) || (goal === "muscle_gain" && diff > 0);
-        contextLine = `\n\nScale says you're ${direction} since we started. ${onTrack ? "That's the right direction." : "Let's look at what needs to change."}`;
-      }
-      const msg = latestWeight
+      // THE SCALE COMES FROM ITS OWNER (2026-08-25, P0-5 · weight). Two direct weight_logs reads
+      // fed "Scale says you're down 1.4kg since we started" into a proactive send — and proactive
+      // text never passes the reactive mouth, so the do-not-mention strip could not reach it
+      // either. Nothing in this file had ever asked. A withheld client keeps photo day and the
+      // energy-and-clothes question, which is the part of this message that was never about a
+      // number anyway.
+      const wt = await getWeightTruth(client, { windowDays: 92 }).catch(() => null);
+      const contextLine = wt?.known && wt.changeKg !== null && Math.abs(wt.changeKg) > 0
+        ? `\n\nScale says you're ${wt.changeKg < 0 ? `down ${Math.abs(wt.changeKg).toFixed(1)}kg` : `up ${wt.changeKg.toFixed(1)}kg`} since we started. ${
+            ((client.goalType || "fat_loss") === "fat_loss" && wt.changeKg < 0)
+            || ((client.goalType || "fat_loss") === "muscle_gain" && wt.changeKg > 0)
+              ? "That's the right direction." : "Let's look at what needs to change."}`
+        : "";
+      const msg = wt?.currentKg != null
         ? `${name}, it's the 1st — *photo day* 📸\n\nWeigh in this morning (before food, after bathroom) and send me the number.\n\nThen send a *progress photo* — front on, good light, same spot as last month, relaxed. And tell me how your *energy and clothes* are feeling.${contextLine}`
         : `${name}, it's the 1st — *photo day* 📸\n\nStep on the scale this morning, before food, after bathroom. Send me the number.\n\nThen send a *progress photo* — front on, good light, relaxed — and tell me how your *energy* is and how your *clothes* are fitting.\n\nYour shape and your energy show the change long before the scale does. No tape measure — we go on how you look and feel.`;
       await sendWhatsApp(client.phoneNumber, msg);

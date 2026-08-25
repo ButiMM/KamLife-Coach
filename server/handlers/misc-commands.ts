@@ -37,7 +37,7 @@ import { sastToday, sastDayStart, looksLikeDirectionRequest, classifyPainReport 
 import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
 import { turnEvidence } from "./chat-log";
-import { getProgressTruth, sessionsThisCalendarWeek } from "../day-ledger";
+import { getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
 
@@ -559,21 +559,22 @@ export async function handleMiscCommands(ctx: {
   // ---- WEIGHT HISTORY — "weight history", "weight trend", "how much have I lost" ----
   if (/\b(weight history|weight trend|my weights|all my weights|weight progress|how much (weight )?(have i|did i) (lost?|gained?)|total (weight )?(lost?|gained?)|weight (since|over time))\b/i.test(m)) {
     try {
-      const logs = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
-        .from(weightLogs)
-        .where(eq(weightLogs.userId, user.id))
-        .orderBy(asc(weightLogs.loggedAt));
+      // THEY ASKED, SO THEY GET AN ANSWER (2026-08-25, P0-5 · weight). The owner applies the
+      // do-not-mention rule, and `clientMessage` is what tells it this client raised the scale
+      // themselves — "don't mention my weight" is not "refuse to tell me my weight when I ask".
+      // That exemption used to be accidental: this command simply never checked. Now it is stated.
+      const wt = await getWeightTruth(user, { clientMessage: m });
+      const logs = wt.points;
       if (logs.length === 0) return `No weight history yet. Log your first weight — just send "84kg".`;
-      const first = parseFloat(String(logs[0].weight));
-      const latest = parseFloat(String(logs[logs.length - 1].weight));
+      const first = logs[0].kg;
+      const latest = logs[logs.length - 1].kg;
       const totalChange = latest - first;
       const goal = user.goalType || "fat_loss";
       const changeDir = totalChange < 0 ? `Down ${Math.abs(totalChange).toFixed(1)}kg` : totalChange > 0 ? `Up ${totalChange.toFixed(1)}kg` : "No change";
       const verdict = goal === "fat_loss" && totalChange < -1 ? "Moving in the right direction." : goal === "muscle_gain" && totalChange > 0.5 ? "Scale is going up — keep fuelling." : goal === "fat_loss" && totalChange >= 0 ? "Scale hasn't moved yet — check food logging consistency." : "";
-      const recent = logs.slice(-5).map(l => {
-        const d = new Date(l.loggedAt as Date);
-        return `• ${parseFloat(String(l.weight)).toFixed(1)}kg — ${d.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`;
-      }).join("\n");
+      const recent = logs.slice(-5).map(l =>
+        `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`,
+      ).join("\n");
       const name2 = user.name?.split(" ")[0] || "";
       return `*${name2 ? name2 + "'s " : ""}Weight History*\n\n${recent}\n\n${changeDir} since you started. ${verdict}`.trim();
     } catch { /* fall through */ }
@@ -1005,8 +1006,8 @@ export async function handleMiscCommands(ctx: {
   if (m === "my body" || m === "body check" || m === "recomp" || m === "body recomp" || m === "body composition" || /\b(body\s*check|body\s*comp|recomp|my\s*body|body\s*progress)\b/i.test(m)) {
     try {
       const [weights, measurements, workouts, clothingData] = await Promise.all([
-        db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt }).from(weightLogs)
-          .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt)),
+        // Same owner, same reason: "body check" is the client asking about their own body.
+        getWeightTruth(user, { clientMessage: m }).then(w => w.points.map(p => ({ weight: p.kg, date: p.at }))),
         db.select({ type: bodyMeasurements.measurementType, value: bodyMeasurements.value, date: bodyMeasurements.loggedAt })
           .from(bodyMeasurements).where(eq(bodyMeasurements.userId, user.id)).orderBy(desc(bodyMeasurements.loggedAt)).limit(20),
         db.select({ id: workoutLogs.id }).from(workoutLogs).where(eq(workoutLogs.userId, user.id)),
@@ -1411,8 +1412,9 @@ export async function handleMiscCommands(ctx: {
   const asksWeightProjection = /\b(should|target|goal|aim)\b.{0,40}\bweight\b|\bweight\b.{0,40}\b(in|by)\s+(\d+\s*(?:weeks?|months?)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|next year)\b/i.test(m);
   if (!asksWeightProjection && !ctx.isQuestion && (m === "weight chart" || m === "weight graph" || m === "weight trend" || m === "my weight" || /\b(weight\s*(?:chart|graph|trend|history|journey)|scale\s*trend)\b/i.test(m))) {
     try {
-      const weights = await db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt })
-        .from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt));
+      // "my weight" / "weight chart" — they raised it, so the owner answers rather than withholds.
+      const weights = (await getWeightTruth(user, { clientMessage: m })).points
+        .map(p => ({ weight: p.kg, date: p.at }));
 
       if (weights.length < 2) {
         return `Not enough weight logs for a trend. Log your weight regularly — "84.5kg" — and I will show you the full picture over time.`;

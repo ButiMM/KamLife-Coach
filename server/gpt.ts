@@ -11,6 +11,7 @@ import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
 import { verifyBrainReply } from "./brain/reply-verifier";
 import { weightInContextLine } from "./weight-context";
+import { getWeightTruth } from "./day-ledger";
 import { captureQualitySignal } from "./quality-signals";
 import { verifyMealEstimate } from "./verifiers/meal-verifier";
 import { assertAiOnline, isAiOfflineError } from "./ai-offline";
@@ -330,17 +331,14 @@ export async function buildPatternSummary(user: any): Promise<string> {
         .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, sevenDaysAgo)))
         .orderBy(desc(chatHistory.createdAt))
         .limit(100),
-      db.select().from(weightLogs)
-        .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, sevenDaysAgo)))
-        .orderBy(desc(weightLogs.loggedAt))
-        .limit(5),
-      db.select().from(weightLogs)
-        .where(and(
-          eq(weightLogs.userId, user.id),
-          gte(weightLogs.loggedAt, twentyEightDaysAgo)
-        ))
-        .orderBy(desc(weightLogs.loggedAt))
-        .limit(12),
+      // THE SCALE COMES FROM ITS OWNER (2026-08-25, P0-5 · weight). These were two direct
+      // weight_logs reads feeding a line straight into the model's context, and neither asked
+      // whether the client had told us to stop bringing up their weight. `withheld` returns no
+      // points at all, so weightInContextLine gets nothing to say and the block below falls to
+      // "No weight data this week" — the model is never told a figure is being kept from it,
+      // because that is an invitation to ask about it.
+      getWeightTruth(user, { windowDays: 7 }).catch(() => null),
+      getWeightTruth(user, { windowDays: 28 }).catch(() => null),
       db.select().from(stepLogs)
         .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)))
         .orderBy(desc(stepLogs.loggedAt))
@@ -411,14 +409,17 @@ export async function buildPatternSummary(user: any): Promise<string> {
     // WEIGHT IN CONTEXT (2026-07-22): bare "up 1.3kg this week" was the intelligence gap —
     // no attribution to WHEN the weight moved or the client's STATE. Engine in weight-context.ts.
     const restingNow = readHealthState(user).isSick;
+    // `points` is oldest-first from the owner; weightInContextLine took newest-first rows.
+    const monthPoints = [...(monthWeights?.points ?? [])].reverse();
     let weightTrend = weightInContextLine({
       goalType: user.goalType,
-      weighIns: (monthWeights as any[]).map((w) => ({ weight: parseFloat(String(w.weight)), at: w.loggedAt })),
+      weighIns: monthPoints.map(p => ({ weight: p.kg, at: p.at })),
       resting: restingNow,
     });
     if (!weightTrend) {
-      weightTrend = recentWeights.length > 0
-        ? `Weight logged: ${recentWeights[0].weight}kg — no trend yet.`
+      const latest7 = recentWeights?.currentKg;
+      weightTrend = latest7 != null
+        ? `Weight logged: ${latest7}kg — no trend yet.`
         : "No weight data this week.";
     }
 

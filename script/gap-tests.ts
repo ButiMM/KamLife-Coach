@@ -3745,7 +3745,18 @@ test("cut11: don't-mention is enforced by the object, not by each renderer", () 
   // The object refuses to carry the number, so every presentation is safe with nothing to print.
   assert.ok(/const withheld = !askedThemselves && mentionsForbidden\("weight scale weigh", user\?\.doNotMention\)/.test(dl),
     "the truth object applies the prohibition");
-  assert.ok(/withheld\s*\?\s*\{ known: false, currentKg: null, changeKg: null, withheld: true \}/.test(dl),
+  // THE OBJECT REFUSES TO CARRY THE NUMBER. This matched one exact literal, so when the weight
+  // block moved into getWeightTruth (2026-08-25, P0-5) — same rule, same nulls, now reachable by
+  // the surfaces that were bypassing it entirely — the assertion broke while the property it
+  // names got STRONGER. That is what a source-string test does: it grades where the code is.
+  //
+  // Kept here as a structural smoke check, deliberately tolerant of layout. The behavioural
+  // grading lives in production-parity — "P0-5 . getWeightTruth withholds, and stands down rather
+  // than filtering", which calls it against a seeded ledger and asserts the returned object
+  // carries no weigh-ins at all. Assert behaviour there, not shape here.
+  const withheldBranch = dl.slice(dl.indexOf("if (withheld) {"), dl.indexOf("if (withheld) {") + 260);
+  assert.ok(/known: false/.test(withheldBranch) && /currentKg: null/.test(withheldBranch)
+    && /changeKg: null/.test(withheldBranch) && /points: \[\]/.test(withheldBranch),
     "a withheld weight is absent, not merely unrendered");
   // Cut 8's rule still holds: a prohibition is about US raising it, never about refusing to answer.
   assert.ok(/const askedThemselves = mentionsForbidden\(String\(opts\?\.clientMessage \|\| ""\), user\?\.doNotMention\)/.test(dl),
