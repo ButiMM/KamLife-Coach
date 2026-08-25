@@ -9,13 +9,46 @@ import { existsSync } from "node:fs";
 
 /**
  * The one list. check-architecture's suite-liveness guard reads this same array.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ * IT HAS TO BE EVERY SUITE CI RUNS, NOT MOST OF THEM (2026-08-25)
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * `npm test` is the working signal — the thing a change is verified against before it is pushed.
+ * Four suites ran in CI and not here: decision-state-tests, decision-runtime-tests,
+ * reply-context-verifier-tests and decision-doctrine-guard, in the `decision-engine-p0` workflow.
+ *
+ * That workflow is PATH-TRIGGERED on six files, so it fires only when one of them changes — and
+ * nothing had touched them between #52 and #57. In that window,
+ * script/reply-context-verifier-tests was RED on main: it asserted a rule deliberately deleted on
+ * 2026-08-21 (`isExplicitStepQuery` — "phrasing is not provenance"). Verified by checking out
+ * main directly and running it. A month of green PRs, each honestly reporting "26/28, the known
+ * baseline", none of which had run it.
+ *
+ * The defect was not the workflow and not the suites. It was that local green and CI green meant
+ * different things, so "26/28" was never a complete statement for a change touching those paths.
+ * A working signal that is a subset of the real one teaches you to trust the subset.
+ *
+ * These four are cheap — about a second and a half together — and there is no reason for them to
+ * be reachable only by a path filter.
+ *
+ * WHAT IS STILL NOT HERE, AND WHY. Three suites run in CI and deliberately do not run in
+ * `npm test`: drill-battery (model-drill.yml), gauntlet (coach-voice-gauntlet.yml) and
+ * reality-test (reality-test.yml). All three grade the LIVE model and are gated on a real
+ * OPENAI_API_KEY secret; putting them here would make every local run need a key and spend money.
+ * That is an exclusion, not an oversight — but it is the reason `npm test` green does not mean
+ * "the coach's WORDS are good", only "the deterministic surface holds". Stated so the next person
+ * reading a green run knows exactly what it covered.
  */
 export const SUITES = [
   "unit-tests", "integration-tests", "food-scanner-tests", "safety-audit", "golden-regression",
   "routing-audit", "gap-tests", "onboarding-e2e", "video-path-verify", "phrasing-battery",
   "check-file-sizes", "check-pricing", "check-schema-safety", "check-sast", "check-names",
   "check-reach", "check-prompt-integrity", "hunger-gauntlet", "decision-boundary-tests",
-  "reentry-state-tests", "reentry-bridge-tests", "reaction-guard-tests", "current-date-tests", "day-relative-situation-tests", "coach-loop-foundation-tests", "multi-day-attribution-tests", "production-parity", "check-architecture",
+  "reentry-state-tests", "reentry-bridge-tests", "reaction-guard-tests", "current-date-tests", "day-relative-situation-tests", "coach-loop-foundation-tests", "multi-day-attribution-tests",
+  // The decision-engine-p0 workflow's four. Here so local and CI cover the same surface.
+  "decision-state-tests", "decision-runtime-tests", "reply-context-verifier-tests", "decision-doctrine-guard",
+  "production-parity", "check-architecture",
 ];
 
 const PER_SUITE_TIMEOUT_MS = 10 * 60_000;
