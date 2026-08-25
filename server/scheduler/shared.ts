@@ -16,6 +16,7 @@ import { checkOutboundMessage } from "../verifiers/proactive-gate";
 import { readHealthState } from "../health-state";
 import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply } from "../reply-hygiene";
+import { enforceOutboundTruth } from "../outbound-authority";
 import { templateSid, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
 
 export { db, pool };
@@ -517,6 +518,31 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   // false claim this product ever made was sent by a cron job.
   //
   // Runs before the bubble split so a claim spanning a "---" boundary is still one sentence.
+  // ── THE OUTBOUND FLOOR (2026-08-25, P0-4) ─────────────────────────────────────────────────
+  // Provenance and hygiene have run on this path since July; the TRUTH checks never did. 69
+  // proactive sends across 14 files, of which 3 consult the decision owner — so the Coach could
+  // be one thing in conversation and another at 06:00. This is the shared boundary. It reads the
+  // ledger only when the message actually asserts a training count, so the ordinary send is free.
+  // try/catch, not `.catch()` on the query chain: a rejected chain and an empty result are
+  // different things, and conflating them silently disabled this floor the first time.
+  let recipientId: string | null = null;
+  // profile_notes carries the durable illness state the held-constraint rule reads. Selected here
+  // rather than re-queried inside the floor: this lookup already runs, and one read is one read.
+  let recipientRow: { id: string; profileNotes: string | null } | null = null;
+  try {
+    const rows = await db.select({ id: users.id, profileNotes: users.profileNotes })
+      .from(users).where(eq(users.phoneNumber, to)).limit(1);
+    recipientRow = (rows[0] as any) ?? null;
+    recipientId = recipientRow?.id ?? null;
+  } catch (e: any) {
+    console.warn(`[OUTBOUND_AUTHORITY] recipient lookup failed for ${to.slice(-8)}: ${e?.message || e}`);
+  }
+  const verdict = await enforceOutboundTruth(recipientId, to, body, recipientRow);
+  if (!verdict.ok) {
+    console.error(`[OUTBOUND_AUTHORITY] BLOCKED proactive send to ${to.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
+    return;
+  }
+
   const checked = await provenanceGate(to, body);
   // VOICE, ENFORCED (2026-07-30). humanizeReply — the numbered-list reshape, the platitude strip,
   // the wall-of-text break — existed since 22 July and was wired into exactly ONE caller

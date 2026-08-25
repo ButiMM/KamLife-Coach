@@ -77,6 +77,18 @@ const BUDGET = {
    */
   unreachableCapabilities: 59,
   /**
+   * GUARD #14 — see unclassifiedSenders above. Six proactive senders still choose their own
+   * behavioural instruction: monday's weigh-in reminder and diet-break restore, programme's weekly
+   * check-in and plateau ladder, business's supplement nudge, onboarding's step-sync catch-up.
+   *
+   * Set to the measured figure, and it may only FALL. Two of the six are waiting on P0-7 (one pace
+   * owner) rather than on wiring — naming that here is what stops it being rediscovered in a
+   * transcript. The senders classified RECOGNITION, RESOURCE and OPERATIONAL are not in this
+   * number because they carry no next-move instruction at all; that is a decision recorded per
+   * job in the register, not an exemption anyone can take silently.
+   */
+  localDecisionSenders: 6,
+  /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
    * something other than the engine can put words in front of a client.
    *
@@ -566,6 +578,44 @@ function unreachableExports(prod: string[], probes: string[]): Array<{ file: str
   return out;
 }
 
+/**
+ * GUARD #14 — EVERY PROACTIVE SENDER IS CLASSIFIED (2026-08-25, P0-4b).
+ *
+ * THE DEFECT THIS EXISTS TO STOP, measured on main@d005081: eleven of fourteen sending files ran
+ * their own action ladder — 32 sends deciding what the client should do next, from the ledger
+ * alone, with no knowledge of the decision owner or of anything the client had said that day.
+ * Nobody decided that; each one was a locally-reasonable addition and there was nothing that had
+ * to be updated when a twelfth appeared.
+ *
+ * This is the thing that has to be updated. A new cron that talks to a client is a product
+ * decision about what the coach is allowed to say, and it does not compile past this guard until
+ * somebody makes it: CANONICAL (the instruction comes from chooseAction), RECOGNITION (it asks
+ * for nothing), RESOURCE (it delivers an artefact), OPERATIONAL (it is not coaching), or
+ * LEGACY_LOCAL (it still decides locally, and is counted as debt below).
+ *
+ * READ STATICALLY ON PURPOSE. Importing the register would pull in the scheduler, the database
+ * and the Twilio client to answer a question about a declaration. The subject of this guard IS
+ * the declaration, so reading the source is reading the subject — unlike a behavioural claim,
+ * where a source match proves nothing.
+ */
+function unclassifiedSenders(): { missing: string[]; legacy: number } {
+  const register = readFileSync("server/scheduler/proactive-decision.ts", "utf-8");
+  const declared = new Set([...register.matchAll(/\bjob:\s*"(\w+)"/g)].map(m => m[1]));
+  const legacy = [...register.matchAll(/cls:\s*"LEGACY_LOCAL"/g)].length;
+  const missing: string[] = [];
+  for (const f of readdirSync("server/scheduler/jobs").filter(n => n.endsWith(".ts"))) {
+    const src = readFileSync(`server/scheduler/jobs/${f}`, "utf-8");
+    // Split at each exported job entry point; a segment that sends is a sender.
+    const marks = [...src.matchAll(/^export (?:async )?function (\w+)/gm)];
+    for (let i = 0; i < marks.length; i++) {
+      const body = src.slice(marks[i].index!, marks[i + 1]?.index ?? src.length);
+      if (!/\bsendWhatsApp(?:Buttons)?\s*\(/.test(body)) continue;
+      if (!declared.has(marks[i][1])) missing.push(`${marks[i][1]}  server/scheduler/jobs/${f}`);
+    }
+  }
+  return { missing, legacy };
+}
+
 const files = [...walk("server"), ...walk("shared")];
 const read = (f: string) => readFileSync(f, "utf-8");
 const all = files.map(read);
@@ -589,6 +639,8 @@ const actual = {
   authorshipPoints: countClientFacingMouths(files),
   /** Exported capabilities no client message can reach. See GUARD #13. */
   unreachableCapabilities: unreachableExports(files, walk("script")).length,
+  /** Proactive senders still running their own action ladder. See GUARD #14. */
+  localDecisionSenders: unclassifiedSenders().legacy,
   // EVERY PLACE THAT TALKS TO TWILIO DIRECTLY (2026-08-05).
   //
   // Twilio is a reseller of Meta's WhatsApp API, not the destination — OUTSTANDING.md has
@@ -801,6 +853,15 @@ const ownership = problems.filter(p => p.includes("[OWNERSHIP]"));
 console.log(ownership.length === 0
   ? "ownership: OK — one owner per declared question, one reader per declared fact"
   : `ownership: ${ownership.length} VIOLATION(S) — a second authority exists`);
+
+// GUARD #14. An unclassified sender is not a budget overrun — it is a product decision nobody
+// made, so it names the job and refuses rather than incrementing a number.
+const senders = unclassifiedSenders();
+if (senders.missing.length > 0) {
+  problems.push(`  ✗ ${senders.missing.length} proactive sender(s) talk to a client with no classification in server/scheduler/proactive-decision.ts:`);
+  for (const m of senders.missing) problems.push(`      ${m}`);
+  problems.push(`      Decide what it is allowed to say: CANONICAL | RECOGNITION | RESOURCE | OPERATIONAL | LEGACY_LOCAL.`);
+}
 
 const unreachable = unreachableExports(files, walk("script"));
 if (actual.unreachableCapabilities > BUDGET.unreachableCapabilities) {

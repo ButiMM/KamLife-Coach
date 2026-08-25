@@ -92,6 +92,20 @@ export interface DayState {
    * prescribed a meal is the 19:55 screenshot.
    */
   foodDayClosed?: boolean;
+  /**
+   * They ruled out training today, in their own words — the twin of foodDayClosed.
+   *
+   * `trainingDayIsDeclined` has existed since 2026-08-24 and DayState had no field to put its
+   * answer in, so the constraint was computed at the reactive door and then discarded: the
+   * decision itself never heard it. A client who said "I'm not training today" and is behind for
+   * the week still reached rung 8 and was told to get today's session done — by BOTH doors, since
+   * the proactive path runs the same ladder. `train` stands down here for the same reason
+   * `eat_more` stands down for a closed food day: they told us, and being told is the point.
+   *
+   * It does not excuse the week. Steps still rank above it, and the week's count is unchanged —
+   * this suppresses one instruction for one day, it does not rewrite the record.
+   */
+  trainingDeclined?: boolean;
 }
 
 export type ActionKind =
@@ -287,7 +301,12 @@ export function foodDayIsClosed(text: string): boolean {
   // followed by the end of the clause or by a marker that scopes it in TIME; an adverb or a food
   // noun after it means they described how they eat, not that they have stopped.
   if (!/\b(?:can'?t|cannot|couldn'?t|struggle(?:s|d)? to|unable to)\s+(?:stop|quit)\s+eating\b/i.test(t)
-      && /\b(?:not|no longer|done|finished|stop|stopping|quit|quitting)\s+(?:going\s+to\s+|gonna\s+)?eat(?:ing)?(?=\s*(?:$|[.!?,;])|\s+(?:anymore|any\s+more|again|today|tonight|for\s+(?:the\s+)?(?:rest\s+of\s+the\s+)?(?:day|today|night|evening)|for\s+now|until\s+tomorrow)\b)/i.test(t)) return true;
+      // "ANYTHING ELSE" IS A QUANTITY, NOT AN OBJECT (2026-08-25, found while building the P0-4b
+      // acceptance fixture). "I'm not eating anything else today" is the plainest possible closure
+      // and it fell through, because the marker after the verb was a noun phrase rather than a
+      // time word. It is admitted only in the `else`/`more` forms — those mean NOTHING FURTHER.
+      // A bare `anything` stays out, so "not eating anything fried today" is still a food choice.
+      && /\b(?:not|no longer|done|finished|stop|stopping|quit|quitting)\s+(?:going\s+to\s+|gonna\s+)?eat(?:ing)?(?=\s*(?:$|[.!?,;])|\s+(?:anymore|any\s+more|again|today|tonight|(?:any|no)\s*thing\s+(?:else|more)|for\s+(?:the\s+)?(?:rest\s+of\s+the\s+)?(?:day|today|night|evening)|for\s+now|until\s+tomorrow)\b)/i.test(t)) return true;
   if (/\b(?:just|only)\s+(?:going to |gonna )?(?:have )?(?:alcohol|drinks|zero[- ]calorie)/i.test(t)) return true;
   if (/\b(?:alcohol|zero[- ]calorie drinks).{0,60}(?:today|tonight|the rest of the day)\b/i.test(t)) return true;
   return false;
@@ -405,8 +424,8 @@ export function chooseAction(s: DayState): OneAction {
     };
   }
 
-  // 8. TRAINING, behind for the week.
-  if (s.sessionsTarget > 0 && s.sessionsThisWeek < s.sessionsTarget) {
+  // 8. TRAINING, behind for the week — unless they already ruled today out.
+  if (s.sessionsTarget > 0 && s.sessionsThisWeek < s.sessionsTarget && !s.trainingDeclined) {
     const left = s.sessionsTarget - s.sessionsThisWeek;
     return {
       kind: "train",
@@ -474,7 +493,8 @@ export interface ProactiveProfile {
  * already in buildDayState; it is stated here so both callers cannot disagree about it.
  */
 export function dayStateFrom(
-  s: ProactiveStateForDecision, p: ProactiveProfile, opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean },
+  s: ProactiveStateForDecision, p: ProactiveProfile,
+  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean },
 ): DayState {
   return {
     firstName: s.name,
@@ -499,6 +519,7 @@ export function dayStateFrom(
     hour: opts?.hour ?? s.today.hour,
     atKeyboard: opts?.atKeyboard,
     foodDayClosed: opts?.foodDayClosed,
+    trainingDeclined: opts?.trainingDeclined,
   };
 }
 
@@ -599,7 +620,8 @@ function evidenceFor(s: ProactiveStateForDecision, kind: ActionKind): DecisionEv
 }
 
 export function decideProactive(
-  s: ProactiveStateForDecision, p: ProactiveProfile, opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean },
+  s: ProactiveStateForDecision, p: ProactiveProfile,
+  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean },
 ): ProactiveDecision {
   let action = chooseAction(dayStateFrom(s, p, opts));
   let evidence = evidenceFor(s, action.kind);
