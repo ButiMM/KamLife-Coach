@@ -445,10 +445,18 @@ function verifyStepAttribution(reply: string, clientMessage: string, evidence?: 
 function verifySessionAttribution(reply: string, clientMessage: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
   // Deterministic replies recite counts they read themselves. Only model prose is held to this.
   if (!evidence?.modelAuthored) return { ok: true };
-  // ONE OWNER for "how many sessions does this text assert" — the same reader the workout writer
-  // consults before it refuses to invent rows. See utils.sessionCountsIn.
-  const claimed = sessionCountsIn(withoutTargetSegments(reply));
-  if (claimed.length === 0) return { ok: true };
+  // THE SAME CLAIM READER AS THE OUTBOUND FLOOR (2026-08-25). This composed
+  // sessionCountsIn(withoutTargetSegments(reply)) itself, which is one of the two halves — so
+  // "Training: 2/4 sessions" still read as a claim of 4 (the denominator is not a target SEGMENT,
+  // it is a number inside an otherwise ordinary one), and "30 total sessions" was offered up for
+  // comparison against a 7-day count. Identical to the defect that blocked the weekly Report Card
+  // at the proactive door; smaller blast radius here only because this runs on model prose.
+  // DOES THIS REPLY ASSERT A SESSION COUNT AT ALL — before deciding which ones are comparable.
+  // The order matters and an existing case proved it: dropping the lifetime segments FIRST made
+  // `claimed` empty for "1 workout in total since you started", which returned ok and shipped a
+  // count for a window we never measured. Out-of-window is a REFUSAL here, not an abstention.
+  const asserted = sessionCountsIn(withoutTargetSegments(reply));
+  if (asserted.length === 0) return { ok: true };
 
   const held = evidence?.sessionsWindow;
   const windowDays = Number(evidence?.sessionsWindowDays) || 0;
@@ -456,8 +464,16 @@ function verifySessionAttribution(reply: string, clientMessage: string, evidence
     if (OUT_OF_WINDOW.test(reply)) {
       return { ok: false, violation: `Your reply states a training count for a period we did not count. What the record holds is ${held} session(s) in the last ${windowDays} days — nothing about a month, a year, or a lifetime total. Say the window we actually know, or say nothing about the count.` };
     }
-    if (claimed.every(n => n === held)) return { ok: true };
-    return { ok: false, violation: `Your reply says the client has done ${claimed[0]} training session(s), but the record holds ${held} in the last ${windowDays} days. Never confirm a training history the log contradicts — not even when the client states it themselves. Tell them plainly what is on the record and ask them to send the missing sessions so you can log them.` };
+    // WHY THIS REFUSES WHAT THE OUTBOUND FLOOR ALLOWS. The floor gates text WE composed from our
+    // own columns — a milestone line built from totalWorkoutsCompleted is a true statement it has
+    // no 7-day basis to judge, so it stands down. This gates MODEL prose: a lifetime figure the
+    // model was never given has no provenance at all. Same reading of the claim, different judge.
+    const claimed = adjudicableSessionCounts(reply);
+    const wrong = claimed.find(n => n !== held);
+    if (wrong === undefined) return { ok: true };
+    // NAME THE NUMBER THAT FAILED, not claimed[0]. The model is being asked to correct itself; a
+    // violation that quotes a figure which actually matched the record teaches it nothing.
+    return { ok: false, violation: `Your reply says the client has done ${wrong} training session(s), but the record holds ${held} in the last ${windowDays} days. Never confirm a training history the log contradicts — not even when the client states it themselves. Tell them plainly what is on the record and ask them to send the missing sessions so you can log them.` };
   }
 
   // NOTHING HELD — AND THAT IS NOT A PASS (2026-08-22, P0-A).
