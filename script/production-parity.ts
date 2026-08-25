@@ -2772,6 +2772,41 @@ async function main() {
       [4], "one lifetime line swallowed the whole message");
   });
 
+  // ── THE REACTIVE MOUTH READS CLAIMS THE SAME WAY THE DOOR DOES (2026-08-25) ───────────────
+  //
+  // #57 fixed the proactive floor. verifySessionAttribution composed its own half of the same
+  // rule — sessionCountsIn(withoutTargetSegments(reply)) — so it still read "Training: 2/4
+  // sessions" as a claim of 4, and still offered a lifetime total up against a 7-day count.
+  // Same defect, smaller blast radius: this runs on model prose only.
+  check("verifier . a model reply is judged on the counts it actually claims", async () => {
+    const { verifyBrainReply } = await import("../server/brain/reply-verifier");
+    const facts = (extra: Record<string, unknown> = {}) => ({
+      goalType: "fat_loss",
+      clientMessage: "how am I doing this week?",
+      evidence: { modelAuthored: true, sessionsWindow: 2, sessionsWindowDays: 7, ...extra },
+    });
+
+    // A TARGET IS NOT A CLAIM. The record holds 2; the reply states 2 done against a target of 4.
+    assert.ok(verifyBrainReply("You're at 2/4 sessions this week — one more and you're close.", facts()).ok,
+      "the model was corrected for naming its own target");
+
+    // A LIFETIME IS NOT A 7-DAY CLAIM — the whole-reply OUT_OF_WINDOW rule owns that refusal, and
+    // it must refuse rather than mis-compare. Either way it must not say "you said 30, we hold 2".
+    const lifetime = verifyBrainReply("That's 30 total sessions since you started.", facts());
+    assert.ok(!/says the client has done 30 training session/.test(lifetime.violation || ""),
+      `a lifetime total was compared against a 7-day count: ${lifetime.violation}`);
+
+    // THE RULE STILL BITES, and now names the number that failed.
+    const lying = verifyBrainReply("Strong week — that's 4 sessions in the bag.", facts());
+    assert.ok(!lying.ok, "a false session count passed the reactive mouth");
+    assert.match(lying.violation || "", /has done 4 training session/,
+      `the violation quotes the wrong figure: ${lying.violation}`);
+
+    // …and a truthful count still passes.
+    assert.ok(verifyBrainReply("That's 2 sessions this week — solid.", facts()).ok,
+      "a truthful count was corrected");
+  });
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");
