@@ -331,12 +331,9 @@ export async function buildPatternSummary(user: any): Promise<string> {
         .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, sevenDaysAgo)))
         .orderBy(desc(chatHistory.createdAt))
         .limit(100),
-      // THE SCALE COMES FROM ITS OWNER (2026-08-25, P0-5 · weight). These were two direct
-      // weight_logs reads feeding a line straight into the model's context, and neither asked
-      // whether the client had told us to stop bringing up their weight. `withheld` returns no
-      // points at all, so weightInContextLine gets nothing to say and the block below falls to
-      // "No weight data this week" — the model is never told a figure is being kept from it,
-      // because that is an invitation to ask about it.
+      // THE SCALE COMES FROM ITS OWNER (2026-08-25, P0-5). Two direct weight_logs reads used to
+      // feed this straight into the model's context, neither asking do_not_mention. Why in
+      // getWeightTruth; withheld yields no points, so the block below says "No weight data".
       getWeightTruth(user, { windowDays: 7 }).catch(() => null),
       getWeightTruth(user, { windowDays: 28 }).catch(() => null),
       db.select().from(stepLogs)
