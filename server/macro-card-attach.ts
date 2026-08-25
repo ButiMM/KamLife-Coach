@@ -295,30 +295,15 @@ const HINT_SUBJECTS: Array<[string, RegExp]> = [
 
 
 
-/**
- * kg changed since their first weigh-in — NEGATIVE when they have lost weight, matching
- * AchievementFacts.weightChangeKg. Undefined when there are fewer than two weigh-ins, because
- * one reading is a starting point and not yet progress. Fail-open: a DB miss returns undefined
- * and the card falls back to the next true thing, never to an invented one.
- */
-async function weightChangeSinceStart(userId?: string): Promise<number | undefined> {
-  if (!userId) return undefined;
-  try {
-    // Imported HERE, not at module scope. This module is statically imported by unit-tests.ts
-    // for its pure helpers, and a top-level `import { db }` makes db.ts evaluate at load —
-    // which demands a real DATABASE_URL and takes the whole pure suite down. (It survived
-    // before only because `db` was imported and never used, so esbuild elided it: a live
-    // import that nothing depended on. The first real use is what exposed it.)
-    const { db } = await import("./db");
-    const rows = await db.select({ weight: weightLogs.weight }).from(weightLogs)
-      .where(eq(weightLogs.userId, userId)).orderBy(asc(weightLogs.loggedAt));
-    if (rows.length < 2) return undefined;
-    const first = parseFloat(String(rows[0].weight));
-    const last = parseFloat(String(rows[rows.length - 1].weight));
-    if (!Number.isFinite(first) || !Number.isFinite(last)) return undefined;
-    return last - first;
-  } catch { return undefined; }
-}
+// A SECOND WEIGH-IN READER WITH NOTHING CALLING IT — DELETED (2026-08-25, P0-5 · weight).
+//
+// `weightChangeSinceStart` computed kg-since-start from weight_logs directly, with no
+// do-not-mention check, for a card that no code path builds: zero callers, and it did not carry
+// the `export` that GUARD #13 examines, so reachability never saw it either. It was not leaking a
+// figure in production — nothing ran it — but it was a loaded second definition of "what the scale
+// says", sitting in the module that renders IMAGES, where the reply boundary's text strip cannot
+// reach. The next person to want a weight line on a card would have found it and used it.
+// getWeightTruth in day-ledger.ts is the reader. There is no reason for a second one here.
 
 /** Render an achievement card and return its media marker, or "" if it can't be served. */
 export function achievementCardMarker(ach: AchievementCardData): string {

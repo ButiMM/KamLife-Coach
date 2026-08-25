@@ -17,13 +17,33 @@ let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-  } catch (err: any) {
+/**
+ * THE SAME REPAIR AS THE OTHER THREE SUITES (2026-08-25).
+ *
+ * Every case in this file is synchronous today, so this runner has never actually lost a failure —
+ * this is not a bug fix, it is closing the trap before someone falls into it. The identical defect
+ * was found and fixed in food-scanner-tests.ts, then again in unit-tests.ts, then again in
+ * gap-tests.ts where it was hiding 86 non-blocking cases and three real failures. Three times is
+ * not a coincidence: the shape invites it, because an `async` case looks exactly like a working
+ * one right up until it needs to fail. Left as-is, the first async test added here would be
+ * unfailable on the day it was written, and nobody would find out.
+ */
+const pending: Array<Promise<void>> = [];
+
+function test(name: string, fn: () => void | Promise<void>) {
+  const fail = (err: any) => {
     failed++;
-    failures.push(`  ✗ ${name}\n    ${err.message}`);
+    failures.push(`  ✗ ${name}\n    ${err?.message || err}`);
+  };
+  try {
+    const result = fn();
+    if (result && typeof (result as Promise<void>).then === "function") {
+      pending.push((result as Promise<void>).then(() => { passed++; }, fail));
+    } else {
+      passed++;
+    }
+  } catch (err: any) {
+    fail(err);
   }
 }
 
@@ -329,6 +349,9 @@ test("proactive pause: PROACTIVE_PAUSED=1 (wrong value) → not paused", () => {
 }
 
 // ── Results ──────────────────────────────────────────────────────────────────
+
+// Every async case must land before the tally, or the counts are printed mid-run.
+await Promise.all(pending);
 
 console.log(`\nintegration-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {

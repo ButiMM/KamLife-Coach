@@ -6,6 +6,7 @@ import {
   todaySAST, thisWeekUTC, claimProactive, claimDailySlot,
 } from "../shared";
 import { getGoalProfile } from "../../goal-profiles";
+import { getWeightTruth } from "../../day-ledger";
 
 export async function runPhaseAdvancement(): Promise<void> {
   console.log("[SCHEDULER] JOB: Phase advancement check");
@@ -192,10 +193,16 @@ export async function runPlateauDetection(): Promise<void> {
       }
 
       // ── STAGE 1 — detect a fresh 3-week plateau and issue the first change ───
-      const recentWeights = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, twentyOneDaysAgo))).orderBy(asc(weightLogs.loggedAt));
+      // THE SCALE COMES FROM ITS OWNER (2026-08-25, P0-5 · weight). A direct weight_logs read
+      // whose whole output is a message ABOUT the scale — "your weight has been stable for 3
+      // weeks" — sent to a client who may have asked us to stop raising it, on the proactive path
+      // where the reactive strip never runs. Withheld now returns no points, so the plateau nudge
+      // stands down for that client rather than being stripped into nonsense afterwards.
+      const wt = await getWeightTruth(client, { windowDays: 21 }).catch(() => null);
+      const recentWeights = wt?.points ?? [];
       if (recentWeights.length < 2) continue;
-      const oldest = parseFloat(String(recentWeights[0].weight));
-      const newest = parseFloat(String(recentWeights[recentWeights.length - 1].weight));
+      const oldest = recentWeights[0].kg;
+      const newest = recentWeights[recentWeights.length - 1].kg;
       if (Math.abs(newest - oldest) > 0.5) continue;
       // DB claim (weekly window) replaces the old state-file flag, which a container
       // recycle would wipe — causing a repeat plateau message on restart.

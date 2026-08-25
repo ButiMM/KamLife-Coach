@@ -400,6 +400,93 @@ export interface ProgressWeight {
   changeKg: number | null;
   /** True only in the don't-mention case, so a caller can tell "we don't know" from "not ours to say". */
   withheld: boolean;
+  /** The first weigh-in in the window — what "since you started" is measured from. */
+  startKg: number | null;
+  /** Days between the first and last weigh-in. 0 when there are fewer than two. */
+  spanDays: number;
+  /** Every weigh-in in the window, oldest first. Empty when withheld. For a chart or a trend. */
+  points: Array<{ kg: number; at: Date }>;
+}
+
+/**
+ * THE SCALE HAS ONE READER, AND IT KNOWS WHO ASKED US TO DROP IT (2026-08-25, P0-5 · weight).
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ * THE DEFECT THIS EXISTS TO STOP
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * `users.do_not_mention` is the client saying "stop bringing up my weight". Measured on
+ * main@266a8c2b, exactly ONE reader on the client path honoured it — getProgressTruth. Four
+ * others read weight_logs directly and spoke the number with no check at all:
+ *
+ *   brain/client-snapshot.ts   builds the model's context: "Weight: started 83.4kg, now 82.0kg
+ *                              … Quote these figures EXACTLY as written."
+ *   gpt.ts                     two more weigh-in reads into the same context
+ *   macro-card-attach.ts       renders the change into a card IMAGE — the reactive mouth strips
+ *                              forbidden TEXT, and cannot touch a picture
+ *   handlers/lifecycle.ts      "Weight: ↓ 1.4kg lost (83.4kg → 82.0kg)"
+ *
+ * The reply boundary's strip is a last resort, not the rule: the architecture note on
+ * DayState.doNotMention says it plainly — the decision must stand down, because stripping the
+ * sentence afterwards leaves the coach with nothing to say. And it only guards the reactive path,
+ * so a proactive weight line and a rendered card were never guarded at all.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ * WHAT THIS IS NOT
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * Not a new service and not a second progress owner. It is the weight block that was already
+ * inside getProgressTruth, lifted so the surfaces that need ONLY weight can reach it without
+ * pulling a full progress read — and getProgressTruth calls it, so there is still exactly one
+ * definition of "what the scale says". Same move, and the same reason, as sessionsSince.
+ *
+ * THEY MAY RAISE IT THEMSELVES. `clientMessage` carries the turn's text: "don't mention my
+ * weight" is not "refuse to tell me my weight when I ask", and a coach who won't answer a direct
+ * question is not honouring anything. Three commands in misc-commands.ts — weight history, my
+ * weight, body check — are exactly that case, and they now say so by passing the message rather
+ * than by not having asked.
+ */
+export async function getWeightTruth(
+  user: any,
+  opts?: { clientMessage?: string | null; windowDays?: number },
+): Promise<ProgressWeight> {
+  const since = opts?.windowDays && opts.windowDays > 0
+    ? new Date(Date.now() - opts.windowDays * 86_400_000)
+    : null;
+
+  const askedThemselves = mentionsForbidden(String(opts?.clientMessage || ""), user?.doNotMention);
+  const withheld = !askedThemselves && mentionsForbidden("weight scale weigh", user?.doNotMention);
+  // THE READ DOES NOT HAPPEN WHEN IT IS NOT OURS TO SAY. Returning nulls after querying would
+  // still leave the rows one careless destructure away from a caller; not asking is the honest
+  // shape of standing down, and it is cheaper.
+  if (withheld) {
+    return { known: false, currentKg: null, changeKg: null, withheld: true, startKg: null, spanDays: 0, points: [] };
+  }
+
+  const rows = await db.select({ weight: weightLogs.weight, at: weightLogs.loggedAt })
+    .from(weightLogs)
+    .where(since ? and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, since)) : eq(weightLogs.userId, user.id))
+    .orderBy(weightLogs.loggedAt);
+
+  const points = (rows as Array<{ weight: unknown; at: Date | null }>)
+    .map(r => ({ kg: Number(r.weight), at: new Date(r.at as Date) }))
+    .filter(p => Number.isFinite(p.kg));
+
+  const change = weightChangeKg(rows as Array<{ weight: unknown }>);
+  const latest = points.length ? points[points.length - 1].kg : NaN;
+  const spanDays = points.length >= 2
+    ? Math.max(1, Math.round((points[points.length - 1].at.getTime() - points[0].at.getTime()) / 86_400_000))
+    : 0;
+
+  return {
+    known: change !== null,
+    currentKg: Number.isFinite(latest) ? latest : null,
+    changeKg: change,
+    withheld: false,
+    startKg: points.length ? points[0].kg : null,
+    spanDays,
+    points,
+  };
 }
 
 export interface ProgressTruth {
@@ -456,7 +543,7 @@ export async function getProgressTruth(
     ? new Date(Date.now() - opts.weightWindowDays * 86_400_000)
     : null;
 
-  const [today, windowRows, sessions, stepRows, weighIns] = await Promise.all([
+  const [today, windowRows, sessions, stepRows, weight] = await Promise.all([
     getDayLedger(user.id, { user }),
     db.select({
       label: mealLogs.mealLabel, kcal: mealLogs.kcalInt, protein: mealLogs.proteinInt,
@@ -469,11 +556,10 @@ export async function getProgressTruth(
       total: sql<number>`COALESCE(SUM(${stepLogs.steps}),0)::int`,
     }).from(stepLogs)
       .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, since))),
-    db.select({ weight: weightLogs.weight }).from(weightLogs)
-      .where(weightSince
-        ? and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, weightSince))
-        : eq(weightLogs.userId, user.id))
-      .orderBy(weightLogs.loggedAt),
+    // ONE DEFINITION OF WHAT THE SCALE SAYS (2026-08-25). This was the weight query, the
+    // don't-mention check and the change arithmetic, inline — the only copy that honoured the
+    // client's request, which is why four other surfaces could speak a figure it had withheld.
+    getWeightTruth(user, { clientMessage: opts?.clientMessage, windowDays: opts?.weightWindowDays }),
   ]);
 
   const window = foldWindowRows(windowRows as LedgerRow[], days, d => sastDayKey(d));
@@ -481,11 +567,6 @@ export async function getProgressTruth(
   const provenance = summariseProvenance(
     (windowRows as any[]).map(r => ({ kcal: Number(r.kcal) || 0, items: r.items, source: r.source })),
   );
-
-  const askedThemselves = mentionsForbidden(String(opts?.clientMessage || ""), user?.doNotMention);
-  const withheld = !askedThemselves && mentionsForbidden("weight scale weigh", user?.doNotMention);
-  const change = weightChangeKg(weighIns as Array<{ weight: unknown }>);
-  const latest = weighIns.length ? Number((weighIns[weighIns.length - 1] as any).weight) : NaN;
 
   // THE TRAINING COUNT WE ACTUALLY HOLD, left on the turn (2026-08-22). Exactly what the step
   // read above does, for exactly the same reason: the mouth has to be able to tell a recital from
@@ -503,13 +584,6 @@ export async function getProgressTruth(
     totalSteps: Number((stepRows[0] as any)?.total || 0),
     daysOnProgramme: daysOnProgramme(user),
     provenance,
-    weight: withheld
-      ? { known: false, currentKg: null, changeKg: null, withheld: true }
-      : {
-        known: change !== null,
-        currentKg: Number.isFinite(latest) ? latest : null,
-        changeKg: change,
-        withheld: false,
-      },
+    weight,
   };
 }

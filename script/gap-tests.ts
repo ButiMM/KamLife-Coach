@@ -64,13 +64,41 @@ let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-  } catch (err: any) {
+/**
+ * A SUITE THAT CANNOT FAIL IS A GREEN LIGHT WIRED TO NOTHING (fixed 2026-08-25).
+ *
+ * This ran `fn()`, ignored what came back, and incremented `passed`. 86 of the 332 cases in this
+ * file are async, so for every one of them `fn()` returned immediately, the try/catch could not
+ * see the rejection, and the pass was recorded whether or not the assertions held. The file then
+ * ends with a synchronous `process.exit(0)`, which kills the process before the rejection can even
+ * surface as an unhandled one — so there was no symptom at all. Not a theory: a control asserting
+ * `1 === 2` was counted as PASSED and the suite exited 0.
+ *
+ * THE PART THAT MATTERS MOST. This exact defect was found and fixed in food-scanner-tests.ts, then
+ * found and fixed again in unit-tests.ts — whose comment reads "the same defect was found and
+ * fixed in script/food-scanner-tests.ts; it was never fixed here." It was never fixed here either.
+ * The repair existed, was written down twice, and two suites were left behind: the same
+ * owner-exists-but-callers-do-not shape as every production defect in this repo's last six months,
+ * turned on the instrument that is supposed to catch them.
+ *
+ * `pending` is awaited before the tally below. See the PROBE control at the end of the file.
+ */
+const pending: Array<Promise<void>> = [];
+
+function test(name: string, fn: () => void | Promise<void>) {
+  const fail = (err: any) => {
     failed++;
-    failures.push(`  ✗ ${name}\n    ${err.message}`);
+    failures.push(`  ✗ ${name}\n    ${err?.message || err}`);
+  };
+  try {
+    const result = fn();
+    if (result && typeof (result as Promise<void>).then === "function") {
+      pending.push((result as Promise<void>).then(() => { passed++; }, fail));
+    } else {
+      passed++;
+    }
+  } catch (err: any) {
+    fail(err);
   }
 }
 
@@ -2930,9 +2958,14 @@ test("verdict: the downgrade asks for what is missing, never for what they just 
   assert.notEqual(loggedToday.action.kind, "log", "they already logged today");
 
   // Not logged today and thin: asking for the log is exactly right.
+  // HOUR 18, NOT 12 (fixture repaired 2026-08-25, unmasked by the runner fix). The rung this
+  // exercises is "nothing logged and the day is NEARLY OVER", gated on LATE = 17. At noon the day
+  // is not nearly over and the decision correctly returns `hold` — so this case had been asserting
+  // `log` against a state that cannot produce it, and passing anyway because the runner discarded
+  // the rejection. The product is right; the fixture named an hour the rung does not cover.
   const notLogged = decideProactive(decisionState({
     food: { loggedDays7d: 2, daysSinceAnyLog: 1 },
-    today: { kcal: 0, protein: 0, steps: 8200, logged: false, hour: 12 },
+    today: { kcal: 0, protein: 0, steps: 8200, logged: false, hour: 18 },
     weight: { daysSinceWeighIn: 1, trendUsable: false },
     evidence: { foodSufficient: false, weightSufficient: false },
   }), decisionProfile);
@@ -3053,7 +3086,15 @@ test("event boundaries: segmentation needs TWO, so one mention is not a split", 
   const n = (msg: string) => [...msg.matchAll(new RegExp(MEAL_BOUNDARY_RE.source, "gi"))].length;
   assert.equal(n("I had chicken and pap at lunch"), 1, "one meal is one meal");
   assert.equal(n("2 spoons of pap"), 0, "no meal word, no boundary");
-  assert.equal(n("I had a pre-workout snack"), 1, "snack counts, and one is not a split");
+  // A BOUNDARY NEEDS THE PREPOSITION (assertion repaired 2026-08-25, unmasked by the runner fix).
+  // MEAL_BOUNDARY_RE is `(for|in|at|during|as) + (a|my|the)? + <meal word>`. "I had a pre-workout
+  // snack" is a BARE mention with no preposition, so it is deliberately 0 — which is exactly what
+  // the next test in this file documents for "then two amagwinya around four". This case asserted
+  // 1 against a pattern that cannot return 1 for it, and contradicted its own neighbour, and both
+  // stayed green because the runner never saw the rejection. `as a snack` is the real one-boundary
+  // form, so the case keeps its subject: a snack counts, and one boundary is not a split.
+  assert.equal(n("I had biltong as a snack"), 1, "snack counts, and one is not a split");
+  assert.equal(n("I had a pre-workout snack"), 0, "a bare mention with no preposition is not a boundary");
 });
 
 test("event boundaries: PRE-positioned phrasing is still unhandled — documented, not hidden", async () => {
@@ -3418,7 +3459,15 @@ test("cut6: the ladder is reachable for a client who has actually vanished", asy
   // AND THE ASK MUST SHRINK. A month gone is not a bigger version of three days gone — it is
   // someone who has decided they failed, and the only ask small enough is to say hi.
   assert.match(gone(30).todo, /say hi/i, "month-plus is the smallest ask on the ladder");
-  assert.ok(gone(30).todo.length < gone(3).todo.length, "the ask gets smaller, not louder");
+  // SMALLER IN EFFORT, NOT IN CHARACTERS (assertion repaired 2026-08-25, unmasked by the runner
+  // fix). This compared `todo.length` — a PROXY for the size of the ask, and the wrong one:
+  // "Just say hi. That's the whole ask today." (39 chars) is a smaller ask than "Log one meal
+  // today. Any meal." (29 chars) while being the longer string. The property is what the client is
+  // asked to DO, so that is what is asserted: at three days we still ask for a log; at a month we
+  // ask for nothing but a hello. The product had this right the whole time.
+  assert.match(gone(3).todo, /log|tell me/i, "three days gone still asks for one real log");
+  assert.ok(!/log|meal|train|weigh|walk/i.test(gone(30).todo),
+    `a month gone must ask for no work at all, got: ${gone(30).todo}`);
   assert.match(gone(30).why + gone(3).why, /haven't blown anything|nothing is lost/i,
     "absolution is explicit — silence is usually shame, not busyness");
 });
@@ -3745,7 +3794,18 @@ test("cut11: don't-mention is enforced by the object, not by each renderer", () 
   // The object refuses to carry the number, so every presentation is safe with nothing to print.
   assert.ok(/const withheld = !askedThemselves && mentionsForbidden\("weight scale weigh", user\?\.doNotMention\)/.test(dl),
     "the truth object applies the prohibition");
-  assert.ok(/withheld\s*\?\s*\{ known: false, currentKg: null, changeKg: null, withheld: true \}/.test(dl),
+  // THE OBJECT REFUSES TO CARRY THE NUMBER. This matched one exact literal, so when the weight
+  // block moved into getWeightTruth (2026-08-25, P0-5) — same rule, same nulls, now reachable by
+  // the surfaces that were bypassing it entirely — the assertion broke while the property it
+  // names got STRONGER. That is what a source-string test does: it grades where the code is.
+  //
+  // Kept here as a structural smoke check, deliberately tolerant of layout. The behavioural
+  // grading lives in production-parity — "P0-5 . getWeightTruth withholds, and stands down rather
+  // than filtering", which calls it against a seeded ledger and asserts the returned object
+  // carries no weigh-ins at all. Assert behaviour there, not shape here.
+  const withheldBranch = dl.slice(dl.indexOf("if (withheld) {"), dl.indexOf("if (withheld) {") + 260);
+  assert.ok(/known: false/.test(withheldBranch) && /currentKg: null/.test(withheldBranch)
+    && /changeKg: null/.test(withheldBranch) && /points: \[\]/.test(withheldBranch),
     "a withheld weight is absent, not merely unrendered");
   // Cut 8's rule still holds: a prohibition is about US raising it, never about refusing to answer.
   assert.ok(/const askedThemselves = mentionsForbidden\(String\(opts\?\.clientMessage \|\| ""\), user\?\.doNotMention\)/.test(dl),
@@ -3944,6 +4004,26 @@ test("startup: /health answers without a database", () => {
   assert.ok(earlyReturn > 0 && dbCall > 0 && earlyReturn < dbCall,
     "it reports startup state BEFORE requiring a live query — the two states we most need to tell apart both used to come back as one opaque error");
 });
+
+// ── THE INSTRUMENT CHECKS ITSELF (2026-08-25) ────────────────────────────────────────────────
+//
+// The control the harness fix exists for. `PROBE_MUST_FAIL=1` makes this one async case throw;
+// with the runner repaired the suite must then exit RED and name it, and without the variable it
+// must pass. That red/green pair is the only evidence that an async failure in this file is
+// actually observed — before the fix, an async case asserting 1 === 2 was counted as PASSED.
+//
+// It is async ON PURPOSE. A synchronous control would have passed through the broken runner too
+// and proved nothing about the 86 cases that were silently non-blocking.
+test("PROBE: an async failure in this suite is actually observed", async () => {
+  await Promise.resolve();
+  if (process.env.PROBE_MUST_FAIL === "1") {
+    assert.fail("deliberate async failure — the suite MUST report this and exit non-zero");
+  }
+});
+
+// EVERY ASYNC CASE MUST LAND BEFORE THE TALLY. Without this the counts below are printed while
+// most of the file is still running, which is what made the whole suite advisory.
+await Promise.all(pending);
 
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {

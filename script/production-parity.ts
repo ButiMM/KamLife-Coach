@@ -2182,10 +2182,22 @@ async function main() {
     // …and asking to SEE it still renders it — including when the ASK is phrased as permission.
     // "Can I get tomorrow's session?" is a possessive naming the object; "Can I do my workout
     // tomorrow?" proposes a time. Grammar decides, not a verb list.
+    // THE RENDERER ANSWERED — a session, or its own rest-day answer for a day that has none.
+    //
+    // This asserted `Week \d` alone, which encodes an assumption the fixture cannot keep: with
+    // trainingDaysPerWeek 3 the schedule is Mon/Wed/Fri, so "tomorrow" is a rest day on four days
+    // out of seven and the renderer correctly returns "*Tuesday — Rest Day.*". It failed on
+    // main@266a8c2b for that reason and passed the day before. The property under test is the
+    // GRAMMAR — a possessive naming the object reaches the workout owner, rather than being
+    // answered as a schedule question — and the rest-day render is that owner answering.
+    const RENDERED = /Week \d|\*\s*\w+day\s+—\s+Rest Day/i;
     for (const view of ["Show me tomorrow's workout.", "Tomorrow's workout?",
                         "Can I see tomorrow's workout?", "Can I get tomorrow's session?"]) {
       const reply = await serialise(() => say(view));
-      assert.match(reply, /Week \d/i, `a view request stopped rendering: ${view} → ${reply.slice(0, 70)}`);
+      assert.match(reply, RENDERED, `a view request stopped rendering: ${view} → ${reply.slice(0, 70)}`);
+      // …and it is NOT the schedule answer, which is the failure this whole block exists to catch.
+      assert.ok(!/do this session tomorrow|do it later today/i.test(reply),
+        `a view request was answered as a schedule question: ${view} → ${reply.slice(0, 70)}`);
     }
 
     // The opposite still holds end to end: a reported session is still written to today.
@@ -2194,7 +2206,7 @@ async function main() {
     // And the ordinary workout doors are untouched.
     for (const view of ["workout", "What is tomorrow's session?"]) {
       const reply = await serialise(() => say(view));
-      assert.match(reply, /Week \d/i, `a legitimate workout view was broken: ${view} → ${reply.slice(0, 70)}`);
+      assert.match(reply, RENDERED, `a legitimate workout view was broken: ${view} → ${reply.slice(0, 70)}`);
     }
   });
 
@@ -2203,12 +2215,23 @@ async function main() {
   // attributeMultiDayReport shipped in PR #52 with EIGHT test references and ZERO production
   // callers. These grade the wiring, not the library.
   check("P0-2 . a multi-day report writes each day, in one reply", async () => {
-    const r = await writesFor("Monday pap and chicken. Tuesday eggs and toast. Wednesday I trained and walked 8000 steps");
+    // THE FIXTURE IS DATED RELATIVE TO TODAY (determinism fix, 2026-08-25). It named Monday,
+    // Tuesday and Wednesday literally, so on a Tuesday one of the three resolved to TODAY and the
+    // three-day report collapsed into two — the suite graded a different scenario depending on the
+    // weekday CI happened to run. It failed on main@266a8c2b for exactly that reason, and passed
+    // in the same repo the day before. A guard whose verdict is a function of the calendar cannot
+    // hold a ratchet. These are the three days ending yesterday, so they are always distinct and
+    // always in the past, which is what this test was always about. Days 4-2 back, not 3-1:
+    // the reply renders the most recent day as "yesterday" rather than by name, which is correct
+    // and friendly — and would make a name assertion fail for the wrong reason.
+    const [d1, d2, d3] = [4, 3, 2].map(n =>
+      new Date(NOW - n * 86_400_000).toLocaleDateString("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" }));
+    const r = await writesFor(`${d1} pap and chicken. ${d2} eggs and toast. ${d3} I trained and walked 8000 steps`);
     assert.ok(r.mealDays.length >= 2, `expected meals on two named days, got ${JSON.stringify(r.mealDays)}`);
     // ONE reply, covering every domain — food from its own owner, training and steps from the
     // backfill that dated them. An unacknowledged write is how "did you even log it?" happens.
-    assert.match(r.out, /Monday/i, `the reply lost a day: ${r.out.slice(0, 120)}`);
-    assert.match(r.out, /Wednesday/i, `the backfilled day was written but never acknowledged: ${r.out.slice(0, 120)}`);
+    assert.match(r.out, new RegExp(d1, "i"), `the reply lost a day: ${r.out.slice(0, 120)}`);
+    assert.match(r.out, new RegExp(d3, "i"), `the backfilled day was written but never acknowledged: ${r.out.slice(0, 120)}`);
     assert.match(r.out, /session/i, "the reply does not mention the session it wrote");
     assert.match(r.out, /8,000 steps/i, "the reply does not mention the steps it wrote");
     assert.match(r.out, /kcal/i, "food lost its quantity-aware owner");
@@ -2220,7 +2243,7 @@ async function main() {
     assert.equal(r.allStepWrites, 1, `${r.allStepWrites} step rows written for one report`);
     // Distinct days, and none of them today — the whole point is that they land where named.
     const days = new Set([...r.backfillWorkoutDays, ...r.backfillStepDays]);
-    assert.equal(days.size, 1, "the Wednesday session and steps landed on different days");
+    assert.equal(days.size, 1, `the ${d3} session and steps landed on different days`);
     assert.ok(!days.has(sastDayKeyOf(new Date())), "a named past day was written as today");
     // ONE reply, and it says what was written.
 
@@ -2535,6 +2558,83 @@ async function main() {
       "I'm done eating junk",
       "I can't stop eating today",
     ]) assert.ok(!foodDayIsClosed(open), `a food CHOICE was recorded as a closed day: ${open}`);
+  });
+
+  // ── P0-5 · THE SCALE HAS ONE READER, AND IT KNOWS WHO ASKED US TO DROP IT (2026-08-25) ────
+  //
+  // `users.do_not_mention` is the client saying "stop bringing up my weight". One reader honoured
+  // it. These grade the surfaces that did not — and each prohibition is paired with the identical
+  // fixture minus the request, so none can pass because a figure was missing anyway.
+  //
+  // Deliberately NOT "does client-snapshot import getWeightTruth". The property is what the
+  // client-facing text CONTAINS.
+  const KG = /\b\d{2,3}(?:\.\d)?\s*kg\b/i;
+
+  async function snapshotFor(doNotMention: string | null): Promise<string> {
+    const { buildClientSnapshot } = await import("../server/brain/client-snapshot");
+    const { weightLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+    return serialise(async () => {
+      const today = new Date();
+      g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[weightLogs, [
+        { weight: "83.4", at: new Date(NOW - 20 * 86_400_000), loggedAt: new Date(NOW - 20 * 86_400_000) },
+        { weight: "82.0", at: today, loggedAt: today },
+      ]]]);
+      // The user is PASSED, never written to the global. Reassigning __KAMLIFE_STUB_USER here made
+      // two unrelated checks red: they run concurrently and read that global, so for the length of
+      // this case they were coaching a client who had asked us to drop the scale, and the mouth
+      // stripped their replies. A fixture that changes what other tests are testing is not a
+      // fixture, and the failures it caused looked like product regressions.
+      try { return String(await buildClientSnapshot({ ...USER, doNotMention }) ?? ""); }
+      finally { delete g.__KAMLIFE_STUB_ROWS; }
+    });
+  }
+
+  check("P0-5 . the model's context carries no weight figure for a client who asked us to drop it", async () => {
+    const held = await snapshotFor("weight");
+    const weightLines = held.split("\n").filter(l => /^Weight:/.test(l) || KG.test(l));
+    assert.ok(!weightLines.some(l => KG.test(l)),
+      `a kg figure reached the model for a do-not-mention client: ${weightLines.join(" | ").slice(0, 200)}`);
+    // AND IT MUST NOT ADVERTISE THE WITHHOLDING. "Weight withheld" in the context is an invitation
+    // to ask about it, which is the thing the client asked us to stop doing.
+    assert.ok(!/withheld|not allowed|do not mention/i.test(held),
+      "the context told the model a weight figure was being kept from it");
+  });
+
+  check("P0-5 control . the same client without the request DOES get the figure", async () => {
+    const open = await snapshotFor(null);
+    assert.ok(/^Weight: started/m.test(open) && KG.test(open),
+      `the snapshot carried no weight figure at all — the prohibition above proves nothing: ${open.slice(0, 200)}`);
+  });
+
+  check("P0-5 . getWeightTruth withholds, and stands down rather than filtering", async () => {
+    const { getWeightTruth } = await import("../server/day-ledger");
+    const { weightLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+    const out = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[weightLogs, [
+        { weight: "83.4", at: new Date(NOW - 20 * 86_400_000), loggedAt: new Date(NOW - 20 * 86_400_000) },
+        { weight: "82.0", at: new Date(), loggedAt: new Date() },
+      ]]]);
+      const r = {
+        held: await getWeightTruth({ ...USER, doNotMention: "weight" }),
+        asked: await getWeightTruth({ ...USER, doNotMention: "weight" }, { clientMessage: "what is my weight?" }),
+        open: await getWeightTruth({ ...USER, doNotMention: null }),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return r;
+    });
+    assert.ok(out.held.withheld && out.held.points.length === 0 && out.held.currentKg === null,
+      `a withheld read still carried weigh-ins: ${JSON.stringify(out.held).slice(0, 160)}`);
+    // THEY MAY RAISE IT THEMSELVES. A coach who won't answer a direct question is not honouring
+    // anything, it is sulking — the same rule chat-log has applied at the mouth since Cut 8.
+    assert.ok(!out.asked.withheld && out.asked.currentKg !== null,
+      `a client who asked about their own weight was refused: ${JSON.stringify(out.asked).slice(0, 160)}`);
+    assert.ok(out.open.known && out.open.startKg === 83.4 && out.open.currentKg === 82,
+      `the ordinary read is wrong: ${JSON.stringify(out.open).slice(0, 160)}`);
+    // NEGATIVE means lost — one convention, and the surfaces that print a direction depend on it.
+    assert.ok(out.open.changeKg !== null && out.open.changeKg < 0,
+      `sign convention broke: ${out.open.changeKg}`);
   });
 
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────

@@ -35,6 +35,7 @@ import { isAskingNotReporting, sastToday, sastDayStart, proteinOptions , commaNa
 import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
 import { scanForSAFoods, weeklyNetLine } from "./food-scanner";
+import { getWeightTruth } from "../day-ledger";
 
 export async function handleLifecycle(ctx: {
   phone: string;
@@ -494,12 +495,16 @@ export async function handleLifecycle(ctx: {
       const daysActive = user.createdAt
         ? Math.max(1, Math.round((Date.now() - new Date(user.createdAt).getTime()) / 86_400_000))
         : 0;
-      const firstWeightRow = await db.select({ weight: weightLogs.weight })
-        .from(weightLogs).where(eq(weightLogs.userId, user.id))
-        .orderBy(asc(weightLogs.loggedAt)).limit(1);
-      const startWeight = firstWeightRow[0] ? parseFloat(String(firstWeightRow[0].weight)) : null;
-      const currentWeight = user.currentWeight ? parseFloat(String(user.currentWeight)) : null;
-      const weightDelta = startWeight && currentWeight ? currentWeight - startWeight : null;
+      // THE SCALE COMES FROM ITS OWNER (2026-08-25, P0-5 · weight). This read weight_logs for the
+      // start figure and took `current` from users.currentWeight — a second, unchecked definition
+      // of the same fact — then printed "Weight: ↓ 1.4kg lost (83.4kg → 82.0kg)" to a client who
+      // may have asked us to stop bringing up their weight. They did not raise it here: the branch
+      // fires on "not seeing results", which is about the PROGRAMME. So no clientMessage is passed
+      // and a withheld client simply gets sessions and days, which is the honest set.
+      const wt = await getWeightTruth(user).catch(() => null);
+      const startWeight = wt?.startKg ?? null;
+      const currentWeight = wt?.currentKg ?? null;
+      const weightDelta = wt?.known ? wt.changeKg : null;
 
       let statsLine = "";
       if (sessions > 0 || daysActive > 7) {

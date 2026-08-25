@@ -12,7 +12,8 @@
  */
 
 import { db } from "../db";
-import { weightLogs, workoutLogs, mealLogs, stepLogs, chatHistory } from "../../shared/schema";
+import { workoutLogs, mealLogs, stepLogs, chatHistory } from "../../shared/schema";
+import { getWeightTruth } from "../day-ledger";
 import { eq, gte, desc, asc, and, sql } from "drizzle-orm";
 import { weeklyTrendSlopeKg } from "../handlers/weight";
 import { getPhaseNames } from "../programme";
@@ -137,20 +138,26 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     const inLast = (days: number) => wLogs.filter(w => w.loggedAt && new Date(w.loggedAt).getTime() >= now - days * DAY).length;
     lines.push(`Sessions: ${total} total (lifetime), ${inLast(7)} in the last 7 days, ${inLast(28)} in the last 4 weeks. Current streak: ${user.workoutStreak || 0}.`);
 
-    const wl = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
-      .from(weightLogs).where(eq(weightLogs.userId, user.id))
-      .orderBy(desc(weightLogs.loggedAt)).limit(40).catch(() => [] as { weight: string; loggedAt: Date | null }[]);
-    if (wl.length === 0) {
+    // THE SCALE COMES FROM THE OWNER THAT KNOWS WHO ASKED US TO DROP IT (2026-08-25, P0-5).
+    //
+    // This was a direct weight_logs read, and the block below hands the model a figure with
+    // "Quote these figures EXACTLY as written". A client who said "stop bringing up my weight" got
+    // theirs handed over anyway, with an instruction to repeat it. The reactive mouth's strip is
+    // the last resort — and a last resort that has to fire is a decision nobody made.
+    //
+    // `withheld` and "none logged" are deliberately the SAME branch here. The model must not be
+    // told a figure is being kept from it: a context line saying "weight withheld" is an invitation
+    // to ask about it, which is the thing the client asked us to stop doing.
+    const wt = await getWeightTruth(user).catch(() => null);
+    if (!wt || !wt.known || wt.points.length === 0) {
       lines.push(`Weight: none logged yet — do not quote a weight figure.`);
     } else {
-      const cur = parseFloat(String(wl[0].weight));
-      const oldest = wl[wl.length - 1];
-      const start = parseFloat(String(oldest.weight));
-      const spanDays = Math.max(1, Math.round((now - new Date(oldest.loggedAt || now).getTime()) / DAY));
-      const weeks = Math.max(1, Math.round(spanDays / 7));
+      const cur = wt.currentKg!;
+      const start = wt.startKg!;
+      const weeks = Math.max(1, Math.round(Math.max(1, wt.spanDays) / 7));
       const totalChange = +(cur - start).toFixed(1);
-      const recent = wl.filter(r => r.loggedAt && new Date(r.loggedAt).getTime() >= now - 21 * DAY);
-      const points = recent.map(r => ({ dayOffset: Math.round(new Date(r.loggedAt!).getTime() / DAY), kg: parseFloat(String(r.weight)) }));
+      const recent = wt.points.filter(p => p.at.getTime() >= now - 21 * DAY);
+      const points = recent.map(p => ({ dayOffset: Math.round(p.at.getTime() / DAY), kg: p.kg }));
       const slope = weeklyTrendSlopeKg(points, 2, 5);
       const recentTrend = slope === null ? "not enough recent weigh-ins to call a trend yet"
         : Math.abs(slope) < 0.1 ? "flat over the last ~3 weeks (a plateau)"
@@ -217,7 +224,9 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     }
     for (const r of stepRows) { const e = slot(r.resolvedDay!); e.steps = Math.max(e.steps, Number(r.steps) || 0); }
     for (const w of wLogs) if (w.loggedAt && new Date(w.loggedAt).getTime() >= now - 7 * DAY) slot(sastDayKey(w.loggedAt ?? now)).trained = true;
-    for (const r of wl) if (r.loggedAt && new Date(r.loggedAt).getTime() >= now - 7 * DAY) slot(sastDayKey(r.loggedAt ?? now)).kg = parseFloat(String(r.weight));
+    // The seven-day story carries a per-day kg too, and it was reading the same raw rows. Withheld
+    // means `points` is empty, so the days simply carry no scale figure — the story still runs.
+    for (const p of wt?.points ?? []) if (p.at.getTime() >= now - 7 * DAY) slot(sastDayKey(p.at)).kg = p.kg;
     for (const r of said as any[]) {
       const t = String(r.messageIn || "").replace(/\s+/g, " ").trim();
       const e = slot(sastDayKey(r.createdAt ?? now));
