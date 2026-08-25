@@ -2286,6 +2286,81 @@ async function main() {
 
   });
 
+  // ── PHASE 2.2 · THE FRONT DOOR MAY NOT COLLAPSE DAYS ────────────────────────────────────────
+  //
+  // Issue #63 mechanism 2: a correct capability made unreachable by an earlier transformation.
+  // The multi-fact brake counts DOMAINS (factTypes.length >= 2), so three days of meals is
+  // `["food"]` — length 1 — and a catch-up note sailed past it. The batch logger downstream is
+  // correct; it never saw the raw text.
+  //
+  // SCOPE, STATED HONESTLY. This grades the DETERMINISTIC rule: given a message that names several
+  // days, is the rewrite refused? It does NOT establish what the live model returns for that
+  // message — that needs the recorded corpus, and normalizer-replay-tests reports the production
+  // surface as uncovered until it exists. Two different claims; only the first is proven here.
+  check("2.2 . a note naming several days is never spoken for by one canonical", async () => {
+    const { attributeMultiDayReport } = await import("../server/understanding/day-relative-situation");
+    const bonolo = "Monday I had pap and chicken, eggs and bread for breakfast, and rice with beef stew "
+      + "for dinner. Tuesday was oats, a chicken salad, and pasta with mince. Wednesday I had eggs "
+      + "and bacon, a burger and chips, and lamb chops with rice.";
+
+    // The premise the old brake missed: this IS one domain, which is why multiFact could not see it.
+    const { parseMessyIntake } = await import("../server/understanding/messy-intake");
+    assert.deepEqual(parseMessyIntake(bonolo).factTypes, ["food"],
+      "if this ever becomes multi-domain the original brake covers it and this check is moot");
+    assert.equal(parseMessyIntake(bonolo).factTypes.length >= 2, false,
+      "multiFact must still be FALSE here — that is the hole this closes");
+
+    // …and the day owner does see it. The brake now consults this, rather than a second opinion.
+    assert.equal(attributeMultiDayReport(bonolo).hasMultipleDays, true,
+      "the day owner did not see three days — the brake has nothing to consult");
+
+    // THE CONTROL. A single-day note must still be rewritable, or the fix is just a global veto
+    // that disables the normalizer for everything and calls it preservation.
+    for (const single of ["i had pap and eggs for breakfast", "yesterday I had chicken and rice"]) {
+      assert.equal(attributeMultiDayReport(single).hasMultipleDays, false,
+        `a single-day note was treated as multi-day, which would disable the rewrite wholesale: "${single}"`);
+    }
+  });
+
+  // AND THE BRAKE ACTUALLY FIRES — the effect, not the premise.
+  //
+  // The brake only runs with the normalizer ON, which every offline harness disables. So this uses
+  // the replay seam from #66 to hand the front door a canonical that COLLAPSES the three days, and
+  // asserts the client's meal still lands as three days — i.e. the raw text reached the batch owner.
+  //
+  // The fixture is synthetic ON PURPOSE and that is legitimate here: the claim under test is "given
+  // a rewrite that destroys days, does the brake refuse it", not "this is what gpt-4o-mini returns".
+  // The second claim needs the recorded corpus and is asserted in normalizer-replay-tests, which
+  // reports the production surface as uncovered until that recording exists.
+  check("2.2 outcome . a collapsing rewrite is refused and the days survive to the logger", async () => {
+    const g = globalThis as any;
+    const bonolo = "Monday I had pap and chicken, eggs and bread for breakfast, and rice with beef stew "
+      + "for dinner. Tuesday was oats, a chicken salad, and pasta with mince. Wednesday I had eggs "
+      + "and bacon, a burger and chips, and lamb chops with rice.";
+    const collapsed = "i had pap and chicken, eggs and bread, rice with beef stew, oats, chicken salad, "
+      + "pasta with mince, eggs and bacon, burger and chips, lamb chops and rice";
+
+    const out = await serialise(async () => {
+      const prevNorm = process.env.NORMALIZER;
+      delete process.env.NORMALIZER;                       // front door ON, as in production
+      g.__KAMLIFE_INTENT_FIXTURES = {
+        [bonolo.toLowerCase()]: { intent: "FOOD_LOG", confidence: 0.95, canonical: collapsed },
+      };
+      g.__KAMLIFE_STUB_USER = { ...USER };
+      try { return String(await handleMessage(USER.phoneNumber, bonolo) ?? ""); }
+      finally {
+        delete g.__KAMLIFE_INTENT_FIXTURES;
+        if (prevNorm === undefined) delete process.env.NORMALIZER; else process.env.NORMALIZER = prevNorm;
+      }
+    });
+
+    assertCustomerOutcome(out, {
+      got: /across \d+ day|logged 3 days|3 days/i,
+      because: "three days of meals reported in one message must be logged as three days, not one — "
+        + "a rewrite that names no day must never be allowed to speak for all of them",
+    });
+  });
+
   check("P0-2b . a single-day message is untouched by the batch path", async () => {
     // The gate is hasMultipleDays. Every existing single-day route must behave exactly as before.
     for (const single of ["I had pap and eggs", "I trained chest today. What should I eat now?",

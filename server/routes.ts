@@ -53,6 +53,7 @@ import { backfillAttributedDays } from "./backfill";
 import { isCoachCriticism } from "./reaction-guard";
 import { bareReactionFallback } from "./reaction-guard";
 import { mustStayDeterministic } from "./understanding/action-router";
+import { attributeMultiDayReport } from "./understanding/day-relative-situation";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
 import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
@@ -742,6 +743,26 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       // however faithful it looks. Fidelity below stays a tripwire for single-fact notes.
       if (multiFact && canon) {
         console.log(`[NORMALIZER] ${turnFacts.factTypes.join("+")} — multi-fact note is never rewritten; raw text proceeds`);
+        canon = "";
+      }
+      // …AND SEVERAL DAYS IS SEVERAL REPORTS (2026-08-25, issue #63 Phase 2.2).
+      //
+      // The brake above counts DOMAINS: multiFact is factTypes.length >= 2. Three days of meals is
+      // one domain — `["food"]`, length 1 — so a client catching up on Monday, Tuesday and
+      // Wednesday sailed straight past it and the rewrite was free to speak for all three days at
+      // once. The batch logger downstream is CORRECT: it answers "Logged 3 days ✅" on the raw
+      // text. It simply never saw the raw text.
+      //
+      // That is mechanism 2 in #63 — a capability made unreachable by an earlier transformation,
+      // rather than a wrong rule anywhere. The reported failure is ~7,700 kcal landing on a single
+      // day against a ~2,700 target.
+      //
+      // The day question already has an owner — attributeMultiDayReport, which backfill.ts uses to
+      // decide the same thing — so this consults it rather than adding a second opinion about what
+      // "multiple days" means. The comment above states the principle exactly; it was only ever
+      // applied to one of the two ways a note can carry more than one report.
+      if (canon && attributeMultiDayReport(originalMBeforeNorm).hasMultipleDays) {
+        console.log(`[NORMALIZER] multi-DAY note is never rewritten; raw text proceeds — "${originalMBeforeNorm.slice(0, 60)}"`);
         canon = "";
       }
       if (ACTION_INTENTS.has(pre.intent) && pre.confidence >= 0.75 && canon.length >= 3 && canon.length <= message.length * 2.5 + 20) {
