@@ -14,8 +14,104 @@ const { Pool } = pg;
 // reassign __KAMLIFE_STUB_USER per case (routing-audit already does).
 const STUB = process.env.KAMLIFE_DB_STUB === "1";
 
+/**
+ * THE STUB COULD NOT EXPRESS TIME (2026-08-25, issue #63).
+ *
+ * `.where(...)` used to `return chain(state)` — it discarded the condition entirely, so seeded
+ * rows came back for EVERY query on that table whatever the date window. A handler asking "what
+ * did they log today" and a handler asking "what did they log this month" received identical
+ * answers, which means no offline suite could test day attribution, retro-day resolution, or
+ * multi-day catch-up. The one product requirement that is entirely about time had a test double
+ * that had no concept of it.
+ *
+ * That is not a missing fixture. It is a substrate that cannot represent the customer scenario,
+ * and it is why a reproduction of "logged from yesterday" had to be thrown away as an artifact:
+ * the harness handed the handler yesterday's row because it could not filter.
+ *
+ * This walks drizzle's condition tree and evaluates the comparisons a ledger query actually uses.
+ * It is DELIBERATELY PARTIAL. Anything it cannot interpret — a subquery, a function call, an
+ * operator not listed — returns `undefined` and the row is KEPT, so an unrecognised condition
+ * behaves exactly as before rather than silently emptying a result set. A stub that quietly
+ * dropped rows it did not understand would be a worse lie than the one being fixed.
+ */
+type Cmp = ">=" | "<=" | ">" | "<" | "=" | "<>";
+const CMP: Record<Cmp, (a: any, b: any) => boolean> = {
+  ">=": (a, b) => a >= b, "<=": (a, b) => a <= b, ">": (a, b) => a > b,
+  "<": (a, b) => a < b, "=": (a, b) => a === b, "<>": (a, b) => a !== b,
+};
+
+/** Values arrive as Date, string or number; compare on one scale or `>=` is lexicographic. */
+function comparable(v: any): any {
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === "string") {
+    const t = Date.parse(v);
+    if (!Number.isNaN(t) && /\d{4}-\d{2}-\d{2}/.test(v)) return t;
+  }
+  return v;
+}
+
+/**
+ * Returns true (keep), false (drop), or undefined (not interpretable — keep).
+ * `undefined` is distinct from `true` so an AND can tell "passed" from "unknown".
+ */
+function evalCondition(cond: any, row: Record<string, any>): boolean | undefined {
+  if (!cond || typeof cond !== "object") return undefined;
+  const chunks: any[] = cond.queryChunks;
+  if (!Array.isArray(chunks)) return undefined;
+
+  // A composite (and/or) is a chunk list whose own chunks are SQL nodes. Recurse, then combine on
+  // the separator drizzle wrote between them.
+  const nested = chunks.filter(c => c && typeof c === "object" && Array.isArray(c.queryChunks));
+  if (nested.length > 1) {
+    const joiner = chunks.map(c => (typeof c?.value === "string" ? c.value : "")).join(" ").toLowerCase();
+    const results = nested.map(n => evalCondition(n, row));
+    if (joiner.includes(" or ")) {
+      if (results.some(r => r === true)) return true;
+      return results.every(r => r === false) ? false : undefined;
+    }
+    // AND: any definite false drops the row; otherwise unknown unless all definitely true.
+    if (results.some(r => r === false)) return false;
+    return results.every(r => r === true) ? true : undefined;
+  }
+  if (nested.length === 1) return evalCondition(nested[0], row);
+
+  // A leaf: [ StringChunk, Column, StringChunk(" >= "), Param, StringChunk ].
+  // StringChunk.value is a string ARRAY, not a string — reading it as a string silently found no
+  // operator and every row was kept, which is the same "quietly does nothing" failure this whole
+  // change exists to remove.
+  const asText = (c: any): string => {
+    if (typeof c === "string") return c;
+    if (Array.isArray(c?.value)) return c.value.join(" ");
+    if (typeof c?.value === "string") return c.value;
+    return "";
+  };
+  // A StringChunk is identified by SHAPE (its value is a string array), never by whether it
+  // happens to render non-empty. The leading chunk is `[""]`, so testing "did this produce text"
+  // let the empty separator be read as the parameter and every comparison silently became
+  // `undefined` — keep-everything, exactly the behaviour being replaced.
+  let col: any, op: Cmp | undefined, param: any, sawParam = false;
+  for (const c of chunks) {
+    if (typeof c === "string" || Array.isArray(c?.value)) {
+      const m = asText(c).match(/(>=|<=|<>|!=|=|>|<)/);
+      if (m && !op) op = (m[1] === "!=" ? "<>" : m[1]) as Cmp;
+      continue;
+    }
+    if (c && typeof c === "object" && typeof c.name === "string" && c.name && !col) { col = c; continue; }
+    if (c && typeof c === "object" && "value" in c && !sawParam) { param = c.value; sawParam = true; }
+  }
+  if (!col || !op || !sawParam) return undefined;
+
+  // Drizzle columns carry the DB name; seeded rows are written in camelCase, so accept either.
+  const camel = String(col.name).replace(/_([a-z])/g, (_m, c) => c.toUpperCase());
+  const key = camel in row ? camel : (col.name in row ? col.name : undefined);
+  if (key === undefined) return undefined;   // column not seeded — cannot judge, keep
+
+  const fn = CMP[op];
+  return fn ? fn(comparable(row[key]), comparable(param)) : undefined;
+}
+
 function makeStubDb(): any {
-  function chain(state: { table?: any }): any {
+  function chain(state: { table?: any; conds?: any[] }): any {
     const fn: any = () => {};
     return new Proxy(fn, {
       get(_t, prop: string | symbol) {
@@ -28,8 +124,14 @@ function makeStubDb(): any {
           // Needed because "the log says 1, the model said 4" cannot be proved against a log that
           // can only ever say 0.
           const seeded = (globalThis as any).__KAMLIFE_STUB_ROWS as Map<any, any[]> | undefined;
-          const rows = seeded?.get(state.table)
+          const all = seeded?.get(state.table)
             ?? (state.table === (schema as any).users && stubUser ? [{ ...stubUser }] : []);
+          // THE WHERE IS APPLIED (2026-08-25). Only to SEEDED rows: the users row is the pipeline's
+          // own client and is looked up by phone/id in ways the evaluator has no reason to judge,
+          // so narrowing it would break every existing suite for no gain.
+          const rows = (seeded?.get(state.table) && state.conds?.length)
+            ? all.filter(r => state.conds!.every(c => evalCondition(c, r) !== false))
+            : all;
           // `.catch()` USED TO DISCARD THE SEED (fixed 2026-08-25). It returned
           // `Promise.resolve([]).catch(h)` — a resolved promise of the EMPTY array, whatever the
           // suite had seeded. Every query in loadProactiveState ends in `.catch(() => [])`, so a
@@ -41,7 +143,9 @@ function makeStubDb(): any {
           return (res: any, rej: any) => Promise.resolve(rows).then(res, rej);
         }
         return (...args: any[]) => {
-          if (prop === "from" || prop === "into") return chain({ table: args[0] });
+          if (prop === "from" || prop === "into") return chain({ ...state, table: args[0] });
+          // Conditions accumulate: drizzle allows .where() once, but a builder may re-wrap.
+          if (prop === "where" && args[0]) return chain({ ...state, conds: [...(state.conds || []), args[0]] });
           if ((prop === "set" || prop === "values") && state.table === (schema as any).users
               && args[0] && typeof args[0] === "object" && !Array.isArray(args[0])) {
             const stubUser = (globalThis as any).__KAMLIFE_STUB_USER;
