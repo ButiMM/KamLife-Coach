@@ -14,6 +14,7 @@
 import { db } from "./db";
 import { mealLogs, stepLogs, users, workoutLogs, weightLogs } from "../shared/schema";
 import { and, eq, gte, lt, desc, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { sastDayStart, sastToday } from "./utils";
 import { sastDayKey } from "./sast";
 import { foldLedgerRows, freshTodayWater, foldWindowRows, weightChangeKg, summariseProvenance,
@@ -504,6 +505,46 @@ export interface ProgressTruth {
   /** How much of this window we actually KNOW — db / label / ai / photo / unknown, and the
    *  confidence that falls out of it. Known / likely / unknown, measured rather than asserted. */
   provenance: FoodProvenance;
+}
+
+/**
+ * WHICH SAST DAY A ROW BELONGS TO, IN SQL (2026-08-25, P0-5 · food).
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ * THE DEFECT THIS EXISTS TO STOP
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * `sastDayKey` has owned "which day is this" in TypeScript since the SAST cut. A query that
+ * GROUPs BY day answers the same question in SQL, and there were three different answers to it
+ * in this repo, measured on main@86f1c1e1:
+ *
+ *   early-commands.ts   DATE(logged_at + INTERVAL '2 hours')            SAST ✓
+ *   food-scanner.ts     to_char(logged_at + interval '2 hours', …)      SAST ✓
+ *   gpt.ts  (×2)        DATE(logged_at)                                 UTC  ✗
+ *
+ * South Africa is UTC+2 and observes no DST, so `DATE(logged_at)` on a UTC timestamp is the UTC
+ * calendar day. A meal eaten between 22:00 and 23:59 UTC — that is 00:00 to 01:59 SAST, an
+ * ordinary late supper here — is pulled BACK into the previous day's bucket. Two SAST days become
+ * one, which changes both the daily totals and the number of days they are averaged over:
+ *
+ *   dinner 21:00 SAST (70g) + late snack 00:30 SAST (50g), target 140g
+ *     SAST (owner)  →  2 logged days, avg  60g, 0 days at ≥80% of target
+ *     UTC  (gpt.ts) →  1 logged day,  avg 120g, 1 day  at ≥80% of target
+ *
+ * Those two numbers reach the model as "Average protein logged is …" and as protCompliance28,
+ * which drives the trajectory label. The Coach reads the client's week differently depending on
+ * which of the three rules the query happened to use.
+ *
+ * THIS IS THE SECOND TIME. client-snapshot.ts carries a comment dated 2026-08-13 describing the
+ * identical bug — "this file grouped the protein average by UTC and the 7-day story by SAST" —
+ * and fixing it there is what this repo does instead of fixing the rule. So the rule now has one
+ * home, and GUARD #16 refuses a second spelling of it.
+ *
+ * Returns text (YYYY-MM-DD) so it matches sastDayKey's output exactly, and so a caller can join
+ * or compare against a TypeScript day key without a cast.
+ */
+export function sastDayBucketSql(col: AnyPgColumn) {
+  return sql<string>`to_char(${col} + interval '2 hours', 'YYYY-MM-DD')`;
 }
 
 /**

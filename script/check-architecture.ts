@@ -114,6 +114,26 @@ const BUDGET = {
    */
   directWeightReads: 15,
   /**
+   * GUARD #16 — see handRolledDayBuckets above. SQL that decides which SAST day a ledger row
+   * belongs to, written somewhere other than the owner.
+   *
+   * MEASURED 7 on main@86f1c1e1, 5 after this cut. FOUR different spellings of one rule:
+   *
+   *   early-commands.ts   ×2   DATE(logged_at + INTERVAL '2 hours')                   correct
+   *   food-scanner.ts     ×2   to_char(logged_at + interval '2 hours', 'YYYY-MM-DD')  correct
+   *   one-action-cmd.ts   ×1   DATE(logged_at AT TIME ZONE 'UTC' + INTERVAL …)        correct
+   *   gpt.ts              ×2   DATE(logged_at)                                        WRONG — UTC
+   *
+   * The two wrong ones are gone; they take the bucket from sastDayBucketSql now. The five that
+   * remain are CORRECT TODAY and are still counted, deliberately. Four correct copies of a rule is
+   * exactly the state this repo was in when the fifth was written as DATE(logged_at) and nobody
+   * noticed for months — and it is the state client-snapshot.ts was fixed out of in August without
+   * the rule itself ever getting a home.
+   *
+   * LOWER THIS by moving them onto the owner. Never raise it.
+   */
+  handRolledDayBuckets: 5,
+  /**
    * GUARD #9 — AUTHORSHIP POINTS (2026-08-04). Every `return "…"` in server/ is a place
    * something other than the engine can put words in front of a client.
    *
@@ -681,6 +701,48 @@ function directLedgerReads(table: string, writers: string[]): string[] {
   return hits;
 }
 
+/**
+ * GUARD #16 — ONE DAY BOUNDARY, INCLUDING IN SQL (2026-08-25, P0-5 · food).
+ *
+ * `sastDayKey` has owned "which SAST day is this" in TypeScript since the SAST cut. A query that
+ * GROUPs BY day asks the same question in SQL, and TypeScript ownership does not reach it — so
+ * three different answers grew, measured on main@86f1c1e1:
+ *
+ *   early-commands   DATE(logged_at + INTERVAL '2 hours')          SAST
+ *   food-scanner     to_char(logged_at + interval '2 hours', …)    SAST
+ *   gpt.ts (×2)      DATE(logged_at)                               UTC   ← wrong
+ *
+ * South Africa is UTC+2, no DST, so the UTC form pulls a supper logged after 22:00 UTC — midnight
+ * SAST — back into the previous day. Two SAST days merge into one, changing the daily totals and
+ * the divisor they are averaged over. The Coach was handed "avg 120g, target hit" for a client the
+ * owner scores at "avg 60g, target missed".
+ *
+ * This is the SECOND time the same bug has been fixed: client-snapshot.ts carries a comment dated
+ * 2026-08-13 describing it exactly. Fixing the site and not the rule is what let it survive in
+ * gpt.ts, so the rule now has one home — sastDayBucketSql in day-ledger.ts — and this refuses a
+ * second spelling of it.
+ *
+ * SCOPE: SQL day-bucketing over a LEDGER table, in files that speak to a client. The owner is
+ * exempt because it is the definition. A bare `DATE(...)` on any other expression is not matched —
+ * this guard is about the ledger's day boundary, not about SQL style.
+ */
+const DAY_BUCKET_SQL = /(?:DATE|to_char|date_trunc)\s*\(\s*\$\{(?:mealLogs|stepLogs|workoutLogs|weightLogs)\./gi;
+function handRolledDayBuckets(): string[] {
+  const out: string[] = [];
+  for (const f of files) {
+    if (f === "server/day-ledger.ts" || f === "server/day-ledger-core.ts") continue;
+    const clientFacing = f.startsWith("server/handlers/") || f.startsWith("server/brain/")
+      || f.startsWith("server/scheduler/") || f.startsWith("server/understanding/")
+      || f.startsWith("server/verifiers/") || f === "server/gpt.ts";
+    if (!clientFacing) continue;
+    const src = readFileSync(f, "utf-8").split("\n");
+    src.forEach((ln, i) => {
+      if (new RegExp(DAY_BUCKET_SQL.source, "i").test(ln)) out.push(`${f}:${i + 1}  ${ln.trim().slice(0, 88)}`);
+    });
+  }
+  return out;
+}
+
 const files = [...walk("server"), ...walk("shared")];
 const read = (f: string) => readFileSync(f, "utf-8");
 const all = files.map(read);
@@ -708,6 +770,8 @@ const actual = {
   localDecisionSenders: unclassifiedSenders().legacy,
   /** Client-facing reads of weight_logs that bypass getWeightTruth. See GUARD #15. */
   directWeightReads: directLedgerReads("weightLogs", DOMAIN_WRITERS.weight).length,
+  /** Hand-rolled SQL day buckets over a ledger table. See GUARD #16. */
+  handRolledDayBuckets: handRolledDayBuckets().length,
   // EVERY PLACE THAT TALKS TO TWILIO DIRECTLY (2026-08-05).
   //
   // Twilio is a reseller of Meta's WhatsApp API, not the destination — OUTSTANDING.md has

@@ -2637,6 +2637,67 @@ async function main() {
       `sign convention broke: ${out.open.changeKg}`);
   });
 
+  // ── P0-5 · FOOD · ONE SAST DAY BOUNDARY, IN SQL TOO (2026-08-25) ──────────────────────────
+  //
+  // The exact case that exposed the defect. `sastDayKey` has owned "which day is this" in
+  // TypeScript for months; a GROUP BY answers the same question in SQL, and gpt.ts answered it
+  // with DATE(logged_at) — the UTC day — while every other food surface used SAST.
+  //
+  // South Africa is UTC+2 with no DST, so a supper logged after 22:00 UTC is 00:00+ SAST: the UTC
+  // bucket pulls it BACK into the previous day. Two SAST days become one, which changes the daily
+  // totals AND the divisor they are averaged over.
+  check("P0-5 food . the SAST day bucket is one rule, and it is not the UTC day", async () => {
+    const { sastDayKey } = await import("../server/sast");
+
+    // Dinner 21:00 SAST and a late snack 00:30 SAST — two SAST days, ONE UTC day.
+    const dinner = new Date("2026-08-20T19:00:00Z");   // 21:00 SAST on the 20th
+    const lateSnack = new Date("2026-08-20T22:30:00Z");  // 00:30 SAST on the 21st
+
+    const utcDay = (d: Date) => d.toISOString().slice(0, 10);
+    assert.equal(utcDay(dinner), utcDay(lateSnack),
+      "fixture broken: these must share a UTC day, or the case proves nothing");
+    assert.notEqual(sastDayKey(dinner), sastDayKey(lateSnack),
+      "fixture broken: these must be different SAST days");
+    assert.equal(sastDayKey(lateSnack), "2026-08-21", "the small-hours meal belongs to the NEXT SAST day");
+
+    // The consequence, stated as the numbers the model is handed. 70g + 50g against a 140g target.
+    const sastBuckets = [dinner, lateSnack].reduce((m, d, i) => {
+      const k = sastDayKey(d); m.set(k, (m.get(k) || 0) + [70, 50][i]); return m;
+    }, new Map<string, number>());
+    const utcBuckets = [dinner, lateSnack].reduce((m, d, i) => {
+      const k = utcDay(d); m.set(k, (m.get(k) || 0) + [70, 50][i]); return m;
+    }, new Map<string, number>());
+    const avg = (m: Map<string, number>) => Math.round([...m.values()].reduce((a, b) => a + b, 0) / m.size);
+    const compliant = (m: Map<string, number>) => [...m.values()].filter(p => p >= 140 * 0.8).length;
+
+    assert.equal(sastBuckets.size, 2); assert.equal(avg(sastBuckets), 60); assert.equal(compliant(sastBuckets), 0);
+    assert.equal(utcBuckets.size, 1); assert.equal(avg(utcBuckets), 120); assert.equal(compliant(utcBuckets), 1);
+  });
+
+  // …and the SQL the owner hands out actually shifts. A rule stated only in TypeScript is how the
+  // two boundaries diverged in the first place.
+  check("P0-5 food . the owner's SQL day bucket shifts to SAST, and gpt.ts uses it", async () => {
+    const { sastDayBucketSql } = await import("../server/day-ledger");
+    const { mealLogs } = await import("../shared/schema");
+    // Read the literal chunks of the fragment. JSON.stringify cannot be used — a drizzle SQL
+    // object holds a column reference and is circular.
+    const frag = sastDayBucketSql(mealLogs.loggedAt as any) as any;
+    const rendered = (frag.queryChunks ?? [])
+      .flatMap((c: any) => (Array.isArray(c?.value) ? c.value : []))
+      .join(" ");
+    assert.match(rendered, /interval '2 hours'/i,
+      `the owner's day bucket does not shift to SAST: ${rendered.slice(0, 160)}`);
+    assert.match(rendered, /to_char/i, "the bucket must render a YYYY-MM-DD key, comparable to sastDayKey");
+
+    // THE REACHABILITY HALF. An owner nothing calls is the defect this repo keeps repeating, so
+    // this asserts the two client-facing food claims no longer carry their own UTC rule.
+    const gpt = readFileSync("server/gpt.ts", "utf-8");
+    assert.ok(!/DATE\(\$\{mealLogs\.loggedAt\}\)/.test(gpt),
+      "gpt.ts still buckets meals by the UTC calendar day");
+    assert.equal((gpt.match(/sastDayBucketSql\(mealLogs\.loggedAt\)/g) || []).length, 4,
+      "both food claims must take the bucket from the owner, in select AND group by");
+  });
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");

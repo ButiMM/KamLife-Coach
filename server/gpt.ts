@@ -11,7 +11,7 @@ import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
 import { verifyBrainReply } from "./brain/reply-verifier";
 import { weightInContextLine } from "./weight-context";
-import { getWeightTruth } from "./day-ledger";
+import { getWeightTruth, sastDayBucketSql } from "./day-ledger";
 import { captureQualitySignal } from "./quality-signals";
 import { verifyMealEstimate } from "./verifiers/meal-verifier";
 import { assertAiOnline, isAiOfflineError } from "./ai-offline";
@@ -345,13 +345,13 @@ export async function buildPatternSummary(user: any): Promise<string> {
         .from(workoutLogs)
         .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, twentyEightDaysAgo)))
         .catch(() => [{ count: 0 }]),
-      // 28-day protein compliance — days at ≥80% of target
+      // 28-day protein compliance. Day bucket from the owner — was DATE(), the UTC day (P0-5).
       db.select({
-        day: sql<string>`DATE(${mealLogs.loggedAt})`,
+        day: sastDayBucketSql(mealLogs.loggedAt),
         total: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
       }).from(mealLogs)
         .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, twentyEightDaysAgo)))
-        .groupBy(sql`DATE(${mealLogs.loggedAt})`)
+        .groupBy(sastDayBucketSql(mealLogs.loggedAt))
         .catch(() => [] as { day: string; total: number }[]),
     ]);
 
@@ -366,12 +366,12 @@ export async function buildPatternSummary(user: any): Promise<string> {
     let avgProtein: number | null = null;
     try {
       const dailyProtein = await db.select({
-        day: sql<string>`DATE(${mealLogs.loggedAt})`,
+        day: sastDayBucketSql(mealLogs.loggedAt),
         protein: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
       })
         .from(mealLogs)
         .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sevenDaysAgo)))
-        .groupBy(sql`DATE(${mealLogs.loggedAt})`);
+        .groupBy(sastDayBucketSql(mealLogs.loggedAt));
       const dailyTotals = dailyProtein.map(d => d.protein).filter(p => p > 0);
       if (dailyTotals.length >= 2) {
         avgProtein = Math.round(dailyTotals.reduce((a, b) => a + b, 0) / dailyTotals.length);
