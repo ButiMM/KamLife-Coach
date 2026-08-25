@@ -39,6 +39,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DOMAIN_OWNERS } from "./domain-owners";
+import { assertCustomerOutcome, reportPending } from "./outcome";
 
 let passed = 0;
 const failures: string[] = [];
@@ -374,8 +375,13 @@ async function main() {
     assert.ok(!week.startsWith("__THREW__"), `handler threw: ${week}`);
     // The model's version closed with "What's one action you can take this week to boost your
     // protein intake?" — the coach handing the decision back to the client.
-    assert.ok(!/\?\s*$/.test(week.trim()),
-      `the weekly answer ends by asking the client what to do:\n      ${week.slice(-140)}`);
+    // POSITIVE FORM (item 1.2): the title claims it ends in an INSTRUCTION, so that is asserted.
+    // "does not end in ?" was satisfied by any statement at all, including a non-answer.
+    assertCustomerOutcome(week, {
+      got: /\b(get|keep|add|hit|log|walk|eat|train|aim|start|stick|focus|send|take|tell|give|reply|show|pick|drop)\b/i,
+      notGot: /\?\s*$/,
+      because: "the week must end in something the client can do, not a question handed back",
+    });
   });
 
   check("progress: every declared owner is reachable and none is the model", () => {
@@ -437,8 +443,13 @@ async function main() {
     // it — the exact defect despair.ts was written for. It must not come back as a numbers dump.
     const struggle = await say("I'm struggling with all of this");
     assert.ok(!struggle.startsWith("__THREW__"), `handler threw: ${struggle}`);
-    assert.ok(!/Days logged|Avg: \*|last 7 days|Sessions:/i.test(struggle),
-      `a life question was answered with a progress scoreboard:\n      ${struggle.slice(0, 200)}`);
+    // POSITIVE FORM: absence of a scoreboard was satisfied by silence or a crash fallback. What
+    // the client needs is to be ANSWERED — the struggle acknowledged in words.
+    assertCustomerOutcome(struggle, {
+      got: /\b(hear|heard|tough|hard|rough|with you|start|small|one thing|talk|going on|not alone)\b/i,
+      notGot: /Days logged|Avg: \*|last 7 days|Sessions:/i,
+      because: "a client saying they are struggling must be answered, not handed a scoreboard",
+    });
   });
 
   // ── PROACTIVE: ONE DECISION OWNER, NO SECOND POLICY ───────────────────────────────────────
@@ -2280,8 +2291,13 @@ async function main() {
     for (const single of ["I had pap and eggs", "I trained chest today. What should I eat now?",
                           "You missed the black coffee"]) {
       const r = await writesFor(single);
-      assert.ok(!/logged across \d+ day/i.test(r.out),
-        `the batch path claimed a single-day turn: ${single} → ${r.out.slice(0, 70)}`);
+      // POSITIVE FORM (item 1.2): "the batch claim is absent" was equally satisfied by the turn
+      // doing nothing at all — which is the failure a regression guard most needs to catch.
+      assertCustomerOutcome(r.out, {
+        got: (t) => t.trim().length > 0,
+        notGot: /logged across \d+ day/i,
+        because: `a single-day message must still be served, unchanged: "${single}"`,
+      });
     }
   });
 
@@ -2967,10 +2983,21 @@ async function main() {
 
   // THE OUTCOME, not the classification. A sentence that says "I am training today" must not be
   // answered with a rest-day reply — which is what the client actually saw.
-  check("training day . a session moved into today is not answered with 'rest today'", async () => {
+  // THE CANONICAL CASE FOR THE POSITIVE-OUTCOME LAW (rewritten 2026-08-25, issue #63 item 1.2).
+  //
+  // This check shipped green in #61 asserting only that "rest today" was absent. It was — and the
+  // client was asked what they ate instead of being given the session they had just said they
+  // moved. `readTrainingDay` returns `moved_to_today` correctly; nothing consumes it; the turn
+  // falls to the generic ladder. The old form could not see that, because "not rest today" is
+  // equally satisfied by silence, by a crash fallback, and by an answer to another question.
+  check("training day . a session moved into today is DELIVERED, not merely not-refused", async () => {
     const reply = await serialise(() => say("No I moved yesterdays workout to today"));
-    assert.ok(!/rest today|hit it fresh tomorrow|rest day is part of the programme/i.test(reply),
-      `the client said they are training today and was told to rest: ${reply.slice(0, 160)}`);
+    assertCustomerOutcome(reply, {
+      got: /Week \d|Next Session|Send \*?DONE|sets?\b|reps?\b/i,
+      notGot: /rest today|hit it fresh tomorrow|rest day is part of the programme/i,
+      because: "a client who says they moved a session into today must be given that session",
+      pending: "#63 — moved_to_today is computed by readTrainingDay and consumed by nothing",
+    });
   });
 
   // THE CONTROL. A genuine refusal must still be honoured, or the case above passes by making
@@ -3093,6 +3120,7 @@ async function main() {
 
   await Promise.all(pending); // every async check must land before the tally is printed
   console.log(`\nproduction-parity: ${passed}/${passed + failures.length} passed`);
+  reportPending();
   if (failures.length > 0) {
     console.log("\nFailures:");
     console.log(failures.join("\n\n"));
