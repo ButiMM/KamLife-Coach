@@ -31,6 +31,16 @@ export function buildLowBalanceAlert(
 
 export async function runBalanceCheck(): Promise<void> {
   console.log("[SCHEDULER] JOB: Twilio balance check");
+
+  // DATA RETENTION RIDES HERE, AND IT RUNS FIRST (2026-08-25). turn_ledger holds raw client
+  // conversation plus the health values a turn read, so its 90-day purge is a POPIA obligation,
+  // not housekeeping — it must not be skipped just because no ops alert number is configured,
+  // and every return below this line is an early exit. It has its own try/catch and cannot throw.
+  //
+  // It rides on this job rather than taking its own cron because cronRegistrations is frozen at
+  // 27, and a purge has no reason to keep a separate clock from the daily ops pass.
+  await (await import("../../routes/admin-turns")).purgeExpiredTurns();
+
   const alertTo = await resolveOpsAlertMsisdn();
   if (!alertTo) {
     console.warn("[BALANCE] no ops destination (unset, or it is a client thread) — skipping");
