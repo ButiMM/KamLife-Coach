@@ -956,6 +956,47 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // "tomorrow's workout?") and must still reach the renderer.
   const _isWorkoutMoveRequest = _trainingDay === "move_request";
   const _isWorkoutDeferral = _trainingDay === "deferred";
+
+  // A SESSION MOVED INTO TODAY IS A DELIVERY (2026-08-25, issue #63 Phase 2.1).
+  //
+  //   "No I moved yesterdays workout to today"  →  "Kam — one thing today: tell me what you ate."
+  //
+  // readTrainingDay read that correctly as `moved_to_today` and NOTHING consumed it. Its three
+  // siblings above — move_request, deferred, declined — each end in a reply; this one fell past
+  // them to the generic ladder, which picked the highest unmet thing and asked about food. The
+  // comprehension was right and the client still did not get their session.
+  //
+  // That is the shape Phase 2 exists to remove: an interpretation is not a feature until its
+  // downstream action is defined, reachable and tested end to end. The session is rendered by the
+  // same owner the `workout` command uses, so the two answers cannot drift apart.
+  if (_trainingDay === "moved_to_today") {
+    const { renderSession } = await import("./programme");
+    const { getTodaySlot, getTodayWorkoutState } = await import("./workout-state");
+    const _mvState = await getTodayWorkoutState(user).catch(() => null);
+    // ONLY an already-logged session stands this down. A SCHEDULED REST DAY DOES NOT.
+    //
+    // The first version of this branch also refused on REST — "today's a rest day, do it
+    // Wednesday" — and that is the original defect wearing better manners: comprehension correct,
+    // session still not delivered. The programme's rest day is OUR schedule; a client saying they
+    // moved a session into today has already decided they are training. Arguing with them is the
+    // behaviour that made them repeat themselves in the first place.
+    if (_mvState?.type === "ALREADY_DONE") {
+      const _mvNote = `Today's session is already logged ✅ — that's the moved one counted.`;
+      await logChat(user.id, message, _mvNote, "WORKOUT_MOVED_ALREADY_DONE");
+      return _mvNote;
+    }
+    const _mvFirst = getDisplayName(user);
+    const _mvDone = (user.trainingMode === "walk_only" || user.trainingMode === "walk")
+      ? `Send *done* when you finish, or just tell me how it went (e.g. "25 min, felt strong").`
+      : `Send *done* when finished.`;
+    const movedReply = renderSession(user, {
+      slot: getTodaySlot(user),
+      intro: `${_mvFirst ? _mvFirst + ", g" : "G"}ood — moved into today. Here it is 💪\n\n`,
+      doneHint: _mvDone,
+    });
+    await logChat(user.id, message, movedReply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_MOVED_TO_TODAY");
+    return movedReply;
+  }
   if (_isWorkoutMoveRequest) {
     const _mvName = getDisplayName(user);
     const _mvLater = !/\b(tomorrow|next\s+week|another\s+day|a\s+different\s+day|2moro|2morrow)\b/i.test(_origWO);

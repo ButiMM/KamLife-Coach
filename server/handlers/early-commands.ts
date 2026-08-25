@@ -5,7 +5,7 @@ import { reportCardMarker } from "../report-card";
 import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../shared/schema";
 import { eq, and, gte, desc, count, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
-import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, sessionHeaderLine } from "../programme";
+import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, sessionHeaderLine, renderSession } from "../programme";
 import { calculateTargets, stepBurnKcal, recalcTargetsForProfile } from "../targets";
 import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
@@ -588,21 +588,13 @@ export async function handleEarlyCommands(ctx: {
     }
 
     // NORMAL — scheduled training day, nothing done yet
-    const todaySlot = getTodaySlot(user);
-    const workout = buildDayWorkout({ ...effectiveUser, programmeDayInWeek: todaySlot });
-    const week = user.programmeWeek || 1;
-    const sessionNum = user.totalWorkoutsCompleted || 0;
-    const weekNote = `${sessionHeaderLine(week, sessionNum)}\n\n`;
-    const injuryNote = user.injuries && user.injuries.trim() && user.injuries.toLowerCase() !== "none"
-      ? `\n\n⚠️ *Active injury noted (${user.injuries}):* Skip any exercise that causes sharp pain. Reply *injury* for safe alternatives.`
-      : "";
-    const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
-    const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-    // BUTTONS ANSWER A QUESTION (2026-08-07 live-model gauntlet). A workout is a DELIVERY, and
-    // three buttons under it were a menu nobody was offered. They are the answers to one
-    // question, so the question is now asked — the sweep's rule, applied to the path that
-    // taught us the rule and then broke it.
-    const reply = `${sickViewHeader}${weekNote}${workout}${injuryNote}\n\n${doneHint}\n\nHow's that looking?${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+    // ONE MOUTH (2026-08-25, Phase 2.1). This composition used to live here, which was fine while
+    // the `workout` command was its only caller. It is now renderSession() in programme.ts, so the
+    // moved-session path reaches the SAME rendering rather than a second copy of it — see the
+    // comment there for why a flag into this file was the wrong shape.
+    const reply = renderSession({ ...effectiveUser, injuries: user.injuries,
+      programmeWeek: user.programmeWeek, totalWorkoutsCompleted: user.totalWorkoutsCompleted },
+      { slot: getTodaySlot(user), intro: sickViewHeader, doneHint });
     await logChat(user.id, message, reply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_VIEW");
     return reply;
   }
