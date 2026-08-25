@@ -3,7 +3,7 @@
 // All workout programme content and builder functions
 // ============================================================
 
-import { resolveExerciseSlug } from "./exercise-media";
+import { resolveExerciseSlug, getPrimaryWorkoutGifUrl } from "./exercise-media";
 import { validateProgramme } from "./verifiers/programme-validator";
 import { adaptTraining, trainingAdjustHeader, applySetsDelta, trainingStateFromUser, type TrainingInput } from "./adaptive-training";
 import { enforceMessageBudget, MESSAGE_BUDGET } from "./reply-contract";
@@ -1694,6 +1694,51 @@ export function sessionHeaderLine(week: number, sessionsDone: number): string {
   return done > 0 ? `*Week ${w} — Session ${done + 1} overall*` : `*Week ${w}*`;
 }
 
+/**
+ * THE ONE MOUTH FOR A DELIVERED SESSION (2026-08-25, issue #63 Phase 2.1).
+ *
+ * Until now the only way to receive today's session was the `workout` command, composed inline in
+ * early-commands.ts. That was fine while there was one caller. It stopped being fine the moment a
+ * second question needed the same answer:
+ *
+ *     "No I moved yesterdays workout to today"
+ *
+ * readTrainingDay() reads that correctly as `moved_to_today`, and NOTHING consumed it. routes.ts
+ * branches on `move_request`, `deferred` and `declined` — three siblings of the same enum, each
+ * with a real consumer — while `moved_to_today` sat between them with none, so the turn fell to
+ * the generic ladder and the client was asked what they ate. Correct comprehension, no action.
+ *
+ * The tempting fix was a flag that early-commands reads. That would have produced a SECOND route
+ * to the same rendering, which is the architecture being removed, not added to: `sessionHeaderLine`
+ * had exactly two composition sites and they diverged, which is how "*Week 1 — Session 25*" reached
+ * a handset after the header had supposedly been fixed six weeks earlier.
+ *
+ * So both questions now end at one function. Change the session's wording here and BOTH the
+ * `workout` command and the moved-session path change together — that is the property worth
+ * having, and the one a synchronised copy can never offer.
+ */
+export function renderSession(user: any, opts: {
+  slot: number;
+  /** Anything that belongs above the header — a sickness view note, or a moved-day acknowledgement. */
+  intro?: string;
+  /** Walk-only clients get a different closer; the caller knows the training mode. */
+  doneHint: string;
+}): string {
+  const workout = buildDayWorkout({ ...user, programmeDayInWeek: opts.slot });
+  const header = sessionHeaderLine(user.programmeWeek || 1, user.totalWorkoutsCompleted || 0);
+  const injuries = String(user.injuries || "").trim();
+  const injuryNote = injuries && injuries.toLowerCase() !== "none"
+    ? `\n\n⚠️ *Active injury noted (${injuries}):* Skip any exercise that causes sharp pain. Reply *injury* for safe alternatives.`
+    : "";
+  const gif = getPrimaryWorkoutGifUrl(workout);
+  const gifMarker = gif ? `\n[MEDIA:${gif}]` : "";
+  // BUTTONS ANSWER A QUESTION (2026-08-07 live-model gauntlet). A workout is a DELIVERY, and three
+  // buttons under it were a menu nobody was offered. They are the answers to one question, so the
+  // question is asked — the sweep's rule, applied to the path that taught us the rule.
+  return `${opts.intro || ""}${header}\n\n${workout}${injuryNote}\n\n${opts.doneHint}\n\n`
+    + `How's that looking?${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+}
+
 export function buildDayWorkout(user: any): string {
   return withSafetyNote(buildDayWorkoutInner(user), user);
 }
@@ -1724,12 +1769,14 @@ function buildDayWorkoutInner(user: any): string {
     const walkerNotes = (user.profileNotes || "").toLowerCase();
     const hasInjury = injuries.trim() !== "" && injuries.toLowerCase() !== "none";
     const isLifestyleWalker = walkerNotes.includes("walk:lifestyle") && !hasInjury;
-    if (isLifestyleWalker && (day === 1 || day === 3)) {
-      const reps = phase === 1 ? "8-10" : phase === 2 ? "10-12" : "12-15";
-      const toneUp = `\n\n*Muscle insurance — 10 min, optional but worth it:*\n2 easy rounds, ${reps} reps each:\n• Bodyweight squats (sit to a chair and stand)\n• Push-ups — on your knees or against a wall is fine\n• Glute bridges\n• Plank — hold 20-30 sec\n\nThis is what keeps the weight you lose as *fat, not muscle*. Skip anything that hurts.`;
-      return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n${walkBlock}${toneUp}\n\nSend DONE when finished.`;
-    }
-    return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n${walkBlock}\n\nSend DONE when finished.`;
+    // ONE SENTENCE, ONE PLACE (2026-08-25). This was written out twice — identical but for whether
+    // ${toneUp} was interpolated — so the walk day had two mouths for one message and a change to
+    // the wording had to be made in both. The tone-up is a BLOCK, not a different reply.
+    const reps = phase === 1 ? "8-10" : phase === 2 ? "10-12" : "12-15";
+    const toneUp = (isLifestyleWalker && (day === 1 || day === 3))
+      ? `\n\n*Muscle insurance — 10 min, optional but worth it:*\n2 easy rounds, ${reps} reps each:\n• Bodyweight squats (sit to a chair and stand)\n• Push-ups — on your knees or against a wall is fine\n• Glute bridges\n• Plank — hold 20-30 sec\n\nThis is what keeps the weight you lose as *fat, not muscle*. Skip anything that hurts.`
+      : "";
+    return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n${walkBlock}${toneUp}\n\nSend DONE when finished.`;
   }
 
   const trainingDays = user.trainingDaysPerWeek || 3;

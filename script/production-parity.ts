@@ -2996,8 +2996,35 @@ async function main() {
       got: /Week \d|Next Session|Send \*?DONE|sets?\b|reps?\b/i,
       notGot: /rest today|hit it fresh tomorrow|rest day is part of the programme/i,
       because: "a client who says they moved a session into today must be given that session",
-      pending: "#63 — moved_to_today is computed by readTrainingDay and consumed by nothing",
     });
+  });
+
+  // ONE MOUTH, NOT TWO SYNCHRONISED COPIES (2026-08-25, Phase 2.1).
+  //
+  // The weak version of this fix is a second composition site that happens to agree today.
+  // sessionHeaderLine had exactly that — two call sites — and they diverged, which is how
+  // "*Week 1 — Session 25*" reached a handset weeks after the header was "fixed".
+  //
+  // So this asserts the property that a synchronised copy cannot offer: the session BODY the
+  // moved-session path sends is the same string renderSession() produces. Change the renderer and
+  // both callers move together; fork one of them and this goes red on the next run.
+  check("one mouth . the moved session is the renderer's output, not a lookalike", async () => {
+    const { renderSession } = await import("../server/programme");
+    const { getTodaySlot } = await import("../server/workout-state");
+    const g = globalThis as any;
+    const moved = await serialise(async () => {
+      g.__KAMLIFE_STUB_USER = { ...USER, trainingDaysPerWeek: 6 };
+      try { return String(await handleMessage(USER.phoneNumber, "No I moved yesterdays workout to today") ?? ""); }
+      finally { g.__KAMLIFE_STUB_USER = { ...USER }; }
+    });
+    const canonical = renderSession({ ...USER, trainingDaysPerWeek: 6 },
+      { slot: getTodaySlot({ ...USER, trainingDaysPerWeek: 6 }), doneHint: "Send *done* when finished." });
+    // The exercise block is the part a second copy would drift on — compare that, not the intro.
+    const body = canonical.split("\n\n").filter(p => /\d/.test(p) && p.length > 40)[0] || "";
+    assert.ok(body.length > 40, "the renderer produced no session body to compare against");
+    assert.ok(moved.includes(body),
+      `the moved-session reply is not the renderer's output — a second composition site has appeared.\n`
+      + `      renderer: ${body.slice(0, 120)}\n      moved:    ${moved.slice(0, 200)}`);
   });
 
   // THE CONTROL. A genuine refusal must still be honoured, or the case above passes by making
