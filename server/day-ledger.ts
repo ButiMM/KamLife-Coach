@@ -543,6 +543,68 @@ export interface ProgressTruth {
  * Returns text (YYYY-MM-DD) so it matches sastDayKey's output exactly, and so a caller can join
  * or compare against a TypeScript day key without a cast.
  */
+/**
+ * WHAT A RETROACTIVELY ATTRIBUTED SESSION CHANGES (2026-08-25, P0-5 · workout).
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ * THE CONTRACT, AND WHERE IT CAME FROM
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * Five paths write a session row. They disagreed about what else changes, so this states the
+ * rule once — derived from what the paths already agreed on, plus the reasons workout.ts had
+ * already written down beside its own retro write:
+ *
+ *   workoutLogs             the caller inserts it. Idempotent per day; not this function's job.
+ *   totalWorkoutsCompleted  +N. A session really happened, and the lifetime count is a fact
+ *                           about the past rather than a claim about today.
+ *   lastWorkoutDate         MAX(held, newest attributed day). It is a max over real events, so
+ *                           logging Monday cannot overwrite a Wednesday already on the record.
+ *   programmeWeek / DayInWeek   NEVER. (P0-3.) Which session is due TODAY is decided by the
+ *                           schedule and by what was done today; a backfill answers neither.
+ *   workoutStreak           NEVER incremented here. The live rule is `wasYesterday ? +1 : 1`,
+ *                           which is only valid for a write about today — a backfilled Tuesday
+ *                           cannot be folded in by incrementing. A correct historical streak has
+ *                           to be DERIVED from the ledger, which is a different owner and a
+ *                           different question. Both retro paths already left it alone; this
+ *                           makes that the stated rule rather than an accident.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ * THE TWO DEFECTS IT CLOSES
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ *
+ *   backfillAttributedDays  wrote the ledger row and touched `users` not at all — so a multi-day
+ *                           report moved workoutLogs and left totalWorkoutsCompleted behind, and
+ *                           two readers answered "how many sessions have I done" differently.
+ *   the multi-day retro     set `lastWorkoutDate: last` UNCONDITIONALLY. Reporting a batch of old
+ *                           days moved the field BACKWARD past a more recent session. The guard
+ *                           for exactly this already existed 65 lines above it, in the sibling
+ *                           single-day path, and was not used.
+ *
+ * One owner rather than three patches, because three call sites each re-deriving the rule is
+ * precisely how they came to disagree.
+ */
+export async function applyRetroSessionState(
+  user: { id?: string; phoneNumber?: string | null; totalWorkoutsCompleted?: number | null; lastWorkoutDate?: Date | string | null },
+  attributedDays: Date[],
+): Promise<{ total: number; lastWorkoutDate: Date | null }> {
+  const held = user.lastWorkoutDate ? new Date(user.lastWorkoutDate) : null;
+  if (attributedDays.length === 0) {
+    return { total: Number(user.totalWorkoutsCompleted) || 0, lastWorkoutDate: held };
+  }
+  const total = (Number(user.totalWorkoutsCompleted) || 0) + attributedDays.length;
+  const newest = attributedDays.reduce((a, b) => (b.getTime() > a.getTime() ? b : a));
+  const advances = !held || newest.getTime() > held.getTime();
+  const lastWorkoutDate = advances ? newest : held;
+
+  await db.update(users).set({
+    totalWorkoutsCompleted: total,
+    lastActiveAt: new Date(),
+    ...(advances ? { lastWorkoutDate: newest } : {}),
+  }).where(user.id ? eq(users.id, user.id) : eq(users.phoneNumber, String(user.phoneNumber || "")));
+
+  return { total, lastWorkoutDate };
+}
+
 export function sastDayBucketSql(col: AnyPgColumn) {
   return sql<string>`to_char(${col} + interval '2 hours', 'YYYY-MM-DD')`;
 }

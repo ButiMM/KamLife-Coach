@@ -22,6 +22,7 @@ import { logChat, turnMutation, turnAlreadyWrote } from "./chat-log";
 import { sastDayKey } from "../sast";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
 import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen } from "../utils";
+import { applyRetroSessionState } from "../day-ledger";
 import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot, weekStartForTrainingClaim, attributableWeekSessionDates } from "../workout-state";
 import { handleWeightLog } from "./weight";
@@ -338,14 +339,8 @@ export async function handleWorkoutCommands(ctx: {
     //
     // WHAT IT MAY NOT CHANGE: the programme cursor. Which session is due TODAY is decided by the
     // schedule and by what was done today, and a backfill answers neither question.
-    const currentLastWorkout = user.lastWorkoutDate ? new Date(user.lastWorkoutDate).getTime() : 0;
-    const updateLastWorkout = retroDate.getTime() > currentLastWorkout;
-
-    await db.update(users).set({
-      totalWorkoutsCompleted: newTotal,
-      lastActiveAt: new Date(),
-      ...(updateLastWorkout ? { lastWorkoutDate: retroDate } : {}),
-    }).where(eq(users.phoneNumber, phone));
+    // The rule this path already applied, now applied from one place. See applyRetroSessionState.
+    await applyRetroSessionState(user, [retroDate]);
 
     await logChat(user.id, message, `[RETRO WORKOUT: ${dateLabel}]`, "WORKOUT_LOG");
     const n = firstName || "";
@@ -406,12 +401,10 @@ export async function handleWorkoutCommands(ctx: {
       turnMutation(`INSERT workout completed=true at=${sastDayKey(day)}`, "[WORKOUT_LOG]");
     }
     invalidatePatternCache(user.id);
-    const last = dates[dates.length - 1];
-    await db.update(users).set({
-      totalWorkoutsCompleted: (user.totalWorkoutsCompleted || 0) + dates.length,
-      lastWorkoutDate: last,
-      lastActiveAt: new Date(),
-    }).where(eq(users.phoneNumber, phone));
+    // THE SHARED RETRO TRANSITION (2026-08-25). This set `lastWorkoutDate: last` unconditionally,
+    // so reporting a batch of older days moved the field BACKWARD past a more recent session —
+    // while the sibling single-day path 65 lines above guarded exactly that. One owner now.
+    await applyRetroSessionState(user, dates);
     const days = dates.map(d => mealDateLabel(d)).join(", ");
     const ok = `${firstName ? firstName + " — " : ""}logged ${dates.length} sessions (${days}).`;
     await logChat(user.id, message, ok, "WORKOUT_WEEK_LOG");
