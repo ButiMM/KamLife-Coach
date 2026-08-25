@@ -4,9 +4,11 @@
 // the duration, remembers it (sick_until) and holds the whole proactive machine
 // (paused_until — every scheduler job checks isPaused). Recovery clears both.
 
-import { db } from "../db";
-import { users } from "../../shared/schema";
-import { eq } from "drizzle-orm";
+// NO DIRECT DB HANDLE, DELIBERATELY (2026-08-25). `db`, `users` and `eq` were imported here and
+// never used — leftovers from the migration that moved this file's writes behind openHold /
+// clearHold, so that "how a sick hold is stored" lives in health-state.ts and nowhere else. The
+// architecture guard had been reporting this file as an action file that no longer acts on a
+// message; that was a stale classification left by that migration, not a lost write.
 import { comebackPlan, trainingStateFromUser } from "../adaptive-training";
 import { logChat } from "./chat-log";
 import { parseSickDays, isReturnFromSicknessQuestion, looksLikeComebackQuestion } from "../utils";

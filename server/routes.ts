@@ -1376,6 +1376,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   const { registerAdminOutcomes } = await import("./routes/admin-outcomes");
   const { registerAdminClient } = await import("./routes/admin-client");
   const { registerAdminQr } = await import("./routes/admin-qr");
+  const { registerAdminTurns } = await import("./routes/admin-turns");
 
   // Deps that route modules need from this file
   const routeDeps = { handleMessage, logChat, checkRateLimit };
@@ -1391,6 +1392,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   registerAdminOutcomes(app);
   registerAdminClient(app);
   registerAdminQr(app);
+  registerAdminTurns(app);
   registerWhatsAppRoutes(app, routeDeps);
   registerDashboardRoutes(app, routeDeps);
   registerFinanceRoutes(app);

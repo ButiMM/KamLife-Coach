@@ -181,7 +181,6 @@ const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT 
   "server/handlers/media.ts": "guarded",
   "server/handlers/workout.ts": "guarded",
   "server/handlers/water.ts": "guarded",
-  "server/handlers/sick-flow.ts": "guarded",
   "server/handlers/lifecycle.ts": "guarded",
   "server/routes.ts": "guarded",
   // 2026-08-19, Cut 7/8b. recordClientFacts writes six durable columns off the client's own

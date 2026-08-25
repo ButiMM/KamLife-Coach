@@ -304,8 +304,21 @@ export const turnLedger = pgTable("turn_ledger", {
   replyMs: integer("reply_ms"),
   version: text("version"),               // the build that produced this turn
   failureCategory: text("failure_category"), // STATE | UNDERSTANDING | REASONING | ACTION | RESPONSE
+  // THE VERDICT AND ITS LIFECYCLE (2026-08-25). failureCategory says what KIND of failure a human
+  // judged this to be; lifecycleStatus says how far the fix has actually got. "fixed" is a claim
+  // about a diff and "deployed" a claim about a build — only "revalidated" means this turn was
+  // replayed against the build that shipped and behaved. Every recurrence we traced stopped short
+  // of that last step.
+  lifecycleStatus: text("lifecycle_status"), // observed | confirmed | fixed | deployed | revalidated
+  fixRef: text("fix_ref"),                   // the PR or commit claiming the fix
+  triageNote: text("triage_note"),           // why the human classified it that way
+  triagedAt: timestamp("triaged_at"),
 }, (table) => ({
   userDateIdx: index("turn_ledger_user_date_idx").on(table.userId, table.createdAt),
+  createdIdx: index("turn_ledger_created_idx").on(table.createdAt),
+  versionIdx: index("turn_ledger_version_idx").on(table.version),
+  failureIdx: index("turn_ledger_failure_idx").on(table.failureCategory),
+  lifecycleIdx: index("turn_ledger_lifecycle_idx").on(table.lifecycleStatus),
 }));
 
 export const clothingCheckins = pgTable(
