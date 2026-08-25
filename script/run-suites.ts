@@ -72,8 +72,16 @@ for (const name of SUITES) {
   const output = `${r.stdout || ""}${r.stderr || ""}`;
   const timedOut = r.status === null;
   const ok = !timedOut && r.status === 0;
-  results.push({ name, ok, ms, output, note: timedOut ? `TIMED OUT after ${PER_SUITE_TIMEOUT_MS / 1000}s` : "" });
-  console.log(`${ok ? "✓" : "✗"} ${name} (${(ms / 1000).toFixed(1)}s)${ok ? "" : "  ← see below"}`);
+  // A SUITE THAT COVERED NOTHING IS NOT A SUITE THAT PASSED (2026-08-25).
+  // normalizer-replay exits 0 when its recording is absent — correctly, because a missing
+  // recording is not a product failure. But it was rendering as `✓`, and a green tick on a suite
+  // that asserted nothing is precisely the vacuous pass this chain exists to catch. A suite that
+  // stood down says so, every run, so the gap cannot quietly become "covered".
+  const skipped = ok && /^SUITE_SKIPPED:/m.test(output);
+  const reason = skipped ? (output.match(/^SUITE_SKIPPED:\s*(.*)$/m) || [])[1] || "" : "";
+  results.push({ name, ok, ms, output, note: timedOut ? `TIMED OUT after ${PER_SUITE_TIMEOUT_MS / 1000}s` : (skipped ? `SKIPPED — ${reason}` : "") });
+  console.log(`${skipped ? "⊘" : ok ? "✓" : "✗"} ${name} (${(ms / 1000).toFixed(1)}s)`
+    + `${skipped ? `  ← covered nothing: ${reason}` : ok ? "" : "  ← see below"}`);
 }
 
 const failures = results.filter(r => !r.ok);
@@ -82,8 +90,14 @@ for (const f of failures) {
   console.log(f.output.trimEnd() || "(no output)");
 }
 
+const stoodDown = results.filter(r => r.note.startsWith("SKIPPED"));
 console.log(`\n${"═".repeat(78)}`);
-console.log(`suites: ${results.length - failures.length}/${results.length} green in ${((Date.now() - started) / 1000).toFixed(0)}s`);
+console.log(`suites: ${results.length - failures.length - stoodDown.length}/${results.length} green`
+  + `${stoodDown.length ? `, ${stoodDown.length} covered nothing` : ""} in ${((Date.now() - started) / 1000).toFixed(0)}s`);
+for (const s of stoodDown) {
+  console.log(`⊘ ${s.name} — ${s.note.replace(/^SKIPPED — /, "")}`);
+  console.log("  Green here would mean this surface is tested. It is not.");
+}
 if (failures.length > 0) {
   console.log(`RED: ${failures.map(f => f.name).join(", ")}`);
   console.log("Every suite ran. Nothing below a failure was skipped.");

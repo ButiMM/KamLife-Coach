@@ -42,11 +42,14 @@ async function check(name: string, fn: () => Promise<void> | void) {
 
 async function main() {
   if (!existsSync(CORPUS_PATH)) {
+    // THE MARKER MATTERS AS MUCH AS THE MESSAGE (2026-08-25). Exiting 0 with a printed notice made
+    // run-suites report `✓ normalizer-replay-tests` — a green tick on a suite that asserted
+    // nothing, which is the exact vacuous pass this file exists to prevent, reproduced by the file
+    // itself. run-suites reads this marker and renders ⊘, and counts it as not covered.
     console.log(
-      `\n⊘ normalizer-replay: SKIPPED — no recording at ${CORPUS_PATH}.\n` +
-      `  The production front door is therefore NOT covered by any offline suite.\n` +
+      `SUITE_SKIPPED: no recording at ${CORPUS_PATH} — the production front door is NOT covered\n` +
       `  Record it once with a real key:  OPENAI_API_KEY=sk-… npx tsx script/record-normalizer.ts\n` +
-      `  ${CORPUS.length} corpus inputs are waiting. This is a stated gap, not a pass.\n`);
+      `  ${CORPUS.length} corpus inputs are waiting. This is a stated gap, not a pass.`);
     process.exit(0);
   }
 
