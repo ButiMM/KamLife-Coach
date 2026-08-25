@@ -236,3 +236,37 @@ const stubPool = {
 // Cast stubs to the real types so type inference across the codebase is unchanged.
 export const pool = (STUB ? (stubPool as unknown) : makeRealPool()) as ReturnType<typeof makeRealPool>;
 export const db = (STUB ? (makeStubDb() as unknown) : makeRealDb(pool)) as ReturnType<typeof makeRealDb>;
+
+/**
+ * RECORDED NORMALIZATION — the front door, replayed offline (2026-08-25, issue #63 item 1.1).
+ *
+ * Production runs the normalizer on every message before any handler sees it. Eight deterministic
+ * harnesses set NORMALIZER=off because it calls a live model, so the transformation that reaches
+ * production FIRST has never been exercised by an offline suite — "351/355 green" describes a path
+ * production does not run for messy input. The classifier's regex fast paths cannot stand in for
+ * it: they classify and never return a `canonical`, and the rewrite is the half that can destroy
+ * information before the capability built for it is reached.
+ *
+ * So the real model is recorded once (script/record-normalizer.ts) and replayed here — production's
+ * actual rewrite, with no key and no bill per run.
+ *
+ * IT LIVES HERE, beside the DB stub, because this file is where offline test doubles belong. A
+ * seam scattered into gpt.ts is a test concern sitting in the middle of a production code path,
+ * and the next reader has to work out whether it can fire in production. It cannot: it returns
+ * undefined unless a suite has explicitly installed fixtures.
+ *
+ * STRICT IS THE IMPORTANT HALF. Under replay, an input that was never recorded THROWS. Falling
+ * through would reach the offline model shim, return OTHER with no canonical, and the test would
+ * pass having exercised nothing — the vacuous-pass trap that #63 found three times in one day.
+ */
+export function recordedIntent<T>(message: string): T | undefined {
+  const fixtures = (globalThis as any).__KAMLIFE_INTENT_FIXTURES as Record<string, T> | undefined;
+  if (!fixtures) return undefined;
+  const hit = fixtures[message.trim().toLowerCase()];
+  if (hit) return hit;
+  if (process.env.NORMALIZER_FIXTURES_STRICT === "1") {
+    throw new Error(`[NORMALIZER_FIXTURES] no recorded normalization for ${JSON.stringify(message)}`
+      + ` — re-record with script/record-normalizer.ts`);
+  }
+  return undefined;
+}

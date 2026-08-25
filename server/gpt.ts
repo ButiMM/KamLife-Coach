@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { readHealthState } from "./health-state";
-import { db } from "./db";
+import { db, recordedIntent } from "./db";
 import { users, chatHistory, weightLogs, stepLogs, workoutLogs, mealLogs, gptCosts } from "../shared/schema";
 import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
 import { COACH_K_SYSTEM } from "./coach-prompt";
@@ -1380,6 +1380,11 @@ export async function classifyIntent(message: string, userId?: string): Promise<
   for (const [pattern, intent] of INTENT_FAST_PATHS) {
     if (pattern.test(m)) return { intent, confidence: 0.95 };
   }
+
+  // RECORDED NORMALIZATION (issue #63 item 1.1) — the offline replay of production's own rewrite.
+  // The seam lives with the other test doubles in db.ts; see recordedIntent() for why.
+  const recorded = recordedIntent<IntentClassification>(m);
+  if (recorded) return recorded;
 
   if (m.length > 500) return { intent: "OTHER", confidence: 0 };
 
