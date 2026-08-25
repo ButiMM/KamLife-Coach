@@ -37,9 +37,9 @@
  * missed message, so a proactive send that fails this floor is dropped and recorded.
  */
 
-import { sessionCountsIn } from "./utils";
 import { isDuplicateOutbound } from "./reply-hygiene";
 import { readHeldConstraints, asksForFoodToday, asksForTrainingToday } from "./held-constraints";
+import { adjudicableSessionCounts } from "./brain/reply-verifier";
 
 export interface OutboundVerdict {
   /** May this leave the building? */
@@ -70,16 +70,25 @@ export async function enforceOutboundTruth(
   //    history the log denies since 2026-08-22; a weekly or programme message asserting the same
   //    number was never checked at all. Opt-in: this only reads the ledger when the text actually
   //    asserts a count, so the common send pays nothing.
-  const claimed = sessionCountsIn(body);
+  // ONLY WHAT THIS RULE CAN ACTUALLY JUDGE (2026-08-25). This called sessionCountsIn — a pure
+  // extractor answering "what session numbers appear here", which is NOT "what does this message
+  // claim about completed sessions in the window we hold". The difference blocked the weekly
+  // Report Card for every client whose sessions did not exactly equal their target, because
+  // "Training: 2/4 sessions" reads as a claim of both 2 AND 4. See adjudicableSessionCounts.
+  const claimed = adjudicableSessionCounts(body);
   if (claimed.length > 0 && userId) {
     try {
       const { sessionsSince } = await import("./day-ledger");
       const held = await sessionsSince(userId, SESSION_WINDOW_DAYS);
-      if (!claimed.every(n => n === held)) {
+      const wrong = claimed.find(n => n !== held);
+      if (wrong !== undefined) {
         return {
           ok: false,
           reason: "session_count_contradicts_record",
-          detail: `said ${claimed[0]}, record holds ${held} in ${SESSION_WINDOW_DAYS} days`,
+          // THE NUMBER THAT ACTUALLY FAILED. This printed claimed[0], so a body claiming [2, 4]
+          // against a record of 2 was refused with "said 2, record holds 2" — a log line that
+          // reads as the floor malfunctioning at random and hides which claim was the problem.
+          detail: `said ${wrong}, record holds ${held} in ${SESSION_WINDOW_DAYS} days`,
         };
       }
     } catch (e: any) {

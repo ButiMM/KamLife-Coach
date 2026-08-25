@@ -2698,6 +2698,80 @@ async function main() {
       "both food claims must take the bucket from the owner, in select AND group by");
   });
 
+  // ── THE FLOOR MAY ONLY JUDGE WHAT IT CAN ACTUALLY ADJUDICATE (2026-08-25) ─────────────────
+  //
+  // PR #54 gave this rule authority over outbound communication without giving it enough
+  // information to know what each number MEANS. It extracted every session-shaped number and
+  // required all of them to equal the 7-day ledger count, so "Training: 2/4 sessions" read as a
+  // claim of 2 AND 4 — and the weekly Report Card was blocked for every client whose sessions did
+  // not exactly equal their target. These are the real message bodies, through the real floor.
+  check("floor . a real Report Card is not blocked by its own target", async () => {
+    const { enforceOutboundTruth } = await import("../server/outbound-authority");
+    const { workoutLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+
+    const REPORT_CARD = [
+      "*Kam — Week 5 Report Card*", "",
+      "📅 Showed up: 5/7 days",
+      "💪 Training: 2/4 sessions",
+      "👟 Steps: 7,400 avg (87% of 8,500 target)",
+      "", "*Weekly Score: 68/100 — Building*",
+    ].join("\n");
+
+    const out = await serialise(async () => {
+      // The record genuinely holds 2 sessions in the window.
+      g.__KAMLIFE_STUB_ROWS = new Map([[workoutLogs, [{ n: 2 }]]]);
+      const r = {
+        card: await enforceOutboundTruth(USER.id, "whatsapp:+27000000401", REPORT_CARD),
+        milestone: await enforceOutboundTruth(USER.id, "whatsapp:+27000000402", "🏆 30 total sessions — milestone"),
+        bank: await enforceOutboundTruth(USER.id, "whatsapp:+27000000403", "Kam, Week 5 — 24 sessions in the bank."),
+        truthful: await enforceOutboundTruth(USER.id, "whatsapp:+27000000404", "That's 2 sessions this week — let's build on it."),
+        lying: await enforceOutboundTruth(USER.id, "whatsapp:+27000000405", "Strong week — that's 4 sessions in the bag."),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return r;
+    });
+
+    // THE THREE THAT WERE BEING SUPPRESSED.
+    assert.ok(out.card.ok,
+      `the weekly Report Card was blocked by its own target: ${out.card.detail}`);
+    assert.ok(out.milestone.ok,
+      `a lifetime milestone was judged against a 7-day count: ${out.milestone.detail}`);
+    assert.ok(out.bank.ok,
+      `a lifetime total was judged against a 7-day count: ${out.bank.detail}`);
+    // …AND THE RULE STILL DOES ITS JOB. Without this the fix could be "adjudicate nothing".
+    assert.ok(out.truthful.ok, `a truthful windowed count was blocked: ${out.truthful.detail}`);
+    assert.ok(!out.lying.ok && out.lying.reason === "session_count_contradicts_record",
+      "a false session count reached a client — the rule this floor exists for is gone");
+    assert.match(String(out.lying.detail), /said 4, record holds 2/,
+      `the block names the wrong number: ${out.lying.detail}`);
+  });
+
+  // The claim reader on its own, so a future change to the message bodies cannot quietly move the
+  // property. Each line is a real string from a real sender.
+  check("floor . the claim reader tells a count from a target from a lifetime", async () => {
+    const { adjudicableSessionCounts } = await import("../server/brain/reply-verifier");
+    // ADJUDICABLE — a plain count of completed sessions.
+    assert.deepEqual(adjudicableSessionCounts("Strong week — that's 4 sessions in the bag."), [4]);
+    assert.deepEqual(adjudicableSessionCounts("💪 Training: 2/4 sessions"), [2],
+      "the denominator of N/M is the target, not a second claim");
+    // NOT ADJUDICABLE — a span the 7-day ledger cannot speak to.
+    for (const lifetime of ["🏆 30 total sessions — milestone", "Week 5 — 24 sessions in the bank",
+                            "12 sessions since you started", "8 sessions altogether"]) {
+      assert.deepEqual(adjudicableSessionCounts(lifetime), [],
+        `a lifetime count was offered up for a 7-day comparison: ${lifetime}`);
+    }
+    // NOT ADJUDICABLE — a target, named as one.
+    for (const target of ["Target for this week: 4 sessions", "3 of 4 planned sessions done"]) {
+      assert.deepEqual(adjudicableSessionCounts(target), [],
+        `a target was read as a claim about completed sessions: ${target}`);
+    }
+    // SEGMENT-WISE. A lifetime line must not silence the adjudicable line beside it.
+    assert.deepEqual(
+      adjudicableSessionCounts("🏆 30 total sessions — milestone\nThat's 4 sessions in the bag."),
+      [4], "one lifetime line swallowed the whole message");
+  });
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");

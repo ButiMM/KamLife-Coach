@@ -284,7 +284,7 @@ function isExplicitStepQuery(text: string): boolean {
  * happened — and the CLIENT_DID_IT guard below is what stops that becoming a hole, because
  * "you've done three sessions this week" says a target word and is still an attribution.
  */
-const TARGET_MARKER = /\btargets?\b|\bgoals?\b|\baim\s+for\b|\/\s*day\b|\bper\s+day\b|\ba\s+day\b|\bnon-negotiable\b|\/\s*week\b|\bper\s+week\b|\ba\s+week\b|\bweekly\b/i;
+const TARGET_MARKER = /\btargets?\b|\bgoals?\b|\bplanned\b|\baim\s+for\b|\/\s*day\b|\bper\s+day\b|\ba\s+day\b|\bnon-negotiable\b|\/\s*week\b|\bper\s+week\b|\ba\s+week\b|\bweekly\b/i;
 
 /**
  * …and it stops being prescriptive the moment it also says the CLIENT DID IT. "You did 6,000
@@ -306,6 +306,64 @@ function withoutTargetSegments(reply: string): string {
 }
 
 /**
+ * WHICH SESSION NUMBERS MAY BE ADJUDICATED AGAINST A WINDOWED COUNT (2026-08-25).
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ * THE DEFECT THIS EXISTS TO STOP
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * The outbound truth floor (PR #54) took EVERY session-shaped number out of a message and
+ * required all of them to equal the 7-day ledger count. `sessionCountsIn` is a pure extractor —
+ * it answers "what session numbers appear here", which is not the same question as "what does
+ * this message CLAIM about completed sessions in the window we hold".
+ *
+ * Given authority over outbound communication without that distinction, the floor suppressed
+ * legitimate messages. Measured against a ledger genuinely holding 2 sessions:
+ *
+ *   "💪 Training: 2/4 sessions"     → extracted [2, 4] → BLOCKED (4 is the TARGET)
+ *   "🏆 30 total sessions"          → extracted [30]   → BLOCKED (30 is a LIFETIME)
+ *
+ * The first of those is the weekly Report Card, blocked for every client whose sessions did not
+ * exactly equal their target — which is nearly all of them, every week, since #54 merged.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ * THE RULE
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * Only validate a number the message presents as a COUNT OF COMPLETED SESSIONS in the window the
+ * record represents. Two things are therefore removed before extraction, both segment-wise so a
+ * neighbouring line cannot lend its meaning:
+ *
+ *   the denominator of N/M    "2/4 sessions" states one count and one target. The count is 2.
+ *   a lifetime segment        "30 total sessions", "24 in the bank" — real numbers about a span
+ *                             the 7-day ledger cannot speak to. Refusing to adjudicate is not
+ *                             the same as approving: it means this rule is not the right judge.
+ *
+ * A segment naming a TARGET is dropped whole rather than partially read. That is the conservative
+ * direction on purpose: the cost of not adjudicating is a number that goes unchecked by THIS rule,
+ * and the cost of mis-adjudicating is a true message the client never receives.
+ *
+ * Everything else still adjudicates, so the case this floor was built for is untouched:
+ * "that's 4 sessions in the bag" against a record of 1 is still refused.
+ *
+ * NO NEW MATCHERS. Both halves of this already had an owner in this file — TARGET_MARKER for "this
+ * segment is prescriptive" and OUT_OF_WINDOW for "this names a span we do not hold". Writing a
+ * third and a fourth would have been the exact duplication the day-bucket cut just finished
+ * removing, so each was extended by the forms it was missing instead: `planned` on the first,
+ * and the session-specific lifetime phrasings on the second. Both extensions are session-shaped
+ * or unambiguous, so neither widens what the step verifier rejects.
+ */
+export function adjudicableSessionCounts(text: string): number[] {
+  return String(text || "")
+    .split(/(\n+|(?<=[.!?])\s+)/)
+    .filter(seg => !OUT_OF_WINDOW.test(seg) && !TARGET_MARKER.test(seg))
+    // "2/4 sessions" — keep the numerator, drop the denominator. The trailing space matters:
+    // without it "2/4" would become "24".
+    .map(seg => seg.replace(/(\d{1,2})\s*\/\s*\d{1,2}/g, "$1 "))
+    .flatMap(seg => sessionCountsIn(seg));
+}
+
+/**
  * DOES THIS CLAIM NAME A WINDOW WE MEASURED? One question, one owner (merged 2026-08-22).
  *
  * Steps are held as a DAILY total, sessions as a rolling multi-day count, and the failure is
@@ -315,7 +373,7 @@ function withoutTargetSegments(reply: string): string {
  * matcher gave each rule half a guard — the step rule could not see "this month" and the session
  * rule could not see "this morning" — so it is one list of the windows we do not hold.
  */
-const OUT_OF_WINDOW = /\b(?:before|after|by)\s+(?:lunch|breakfast|dinner|noon|midday|\d{1,2}\s?(?:am|pm))\b|\bthis (?:morning|afternoon|evening)\b|\bin the (?:morning|afternoon|evening)\b|\bper hour\b|\bsince (?:lunch|breakfast|this morning)\b|\b(?:this|last|the past|next)\s+month\b|\bin total\b|\ball[\s-]?time\b|\bsince you (?:started|began|joined)\b|\bthis year\b|\baltogether\b/i;
+const OUT_OF_WINDOW = /\b(?:before|after|by)\s+(?:lunch|breakfast|dinner|noon|midday|\d{1,2}\s?(?:am|pm))\b|\bthis (?:morning|afternoon|evening)\b|\bin the (?:morning|afternoon|evening)\b|\bper hour\b|\bsince (?:lunch|breakfast|this morning)\b|\b(?:this|last|the past|next)\s+month\b|\bin total\b|\ball[\s-]?time\b|\bsince you (?:started|began|joined)\b|\bthis year\b|\baltogether\b|\blifetime\b|\bin the bank\b|\btotal\s+(?:workouts?|sessions?|trainings?)\b/i;
 
 function verifyStepAttribution(reply: string, clientMessage: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
   const replySteps = extractStepNumbers(withoutTargetSegments(reply));
