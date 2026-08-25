@@ -81,6 +81,14 @@ function serialise<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 const sastDayKeyOf = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+/** Midday on the most recent past Saturday — for fixtures that correct a named weekday. */
+function lastSaturday(): Date {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  const back = (d.getDay() - 6 + 7) % 7 || 7;   // never today: "from Saturday" means a past one
+  d.setDate(d.getDate() - back);
+  return d;
+}
 const NOW = Date.now();
 const USER = {
   id: "test-user-production-parity",
@@ -1985,9 +1993,17 @@ async function main() {
       typicalPortionCalories: 5, typicalPortionProtein: 0, carbsPer100g: 0, fatPer100g: 0 }];
     const g = globalThis as any;
     const scoped = await serialise(async () => {
+      // BOTH DAYS ARE SEEDED, and they have to be (2026-08-25, issue #63). This seeded only a
+      // YESTERDAY row and then asserted that a TODAY-scoped amend succeeded. It passed because the
+      // stub ignored `where`, so a today-scoped query was handed yesterday's row. Against a stub
+      // that honours the window, a correct implementation finds nothing — so the assertion below
+      // could never have failed for the right reason. One row per day is what the check meant.
       g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [{
         id: "parity-day-row", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
         carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 86_400_000),
+      }, {
+        id: "parity-day-row-today", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 3600_000),
       }]]]);
       const yesterday = new Date(Date.now() - 86_400_000);
       const out = {
@@ -2010,9 +2026,19 @@ async function main() {
     const { mealLogs } = await import("../shared/schema");
     const g = globalThis as any;
     const replies = await serialise(async () => {
+      // One row per day the check corrects — see 2b. A single yesterday row made the today case
+      // vacuous under a stub that could not filter.
       g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [{
         id: "parity-day-row-2", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
         carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 86_400_000),
+      }, {
+        id: "parity-day-row-2-today", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 3600_000),
+      }, {
+        // …and the named day the check corrects. Computed, not hard-coded, so the fixture does not
+        // depend on which weekday the suite happens to run.
+        id: "parity-day-row-2-sat", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: lastSaturday(),
       }]]]);
       const out = {
         today: await say("You missed the black coffee"),
@@ -3020,6 +3046,39 @@ async function main() {
     if (/Session/.test(header)) {
       assert.match(header, /Session \d+ overall/,
         `a session number without its clock named: ${header}`);
+    }
+  });
+
+  // ── THE HARNESS MUST BE ABLE TO EXPRESS TIME ──────────────────────────────────────────────
+  //
+  // Until 2026-08-25 the stub's `.where()` discarded its condition, so a today-scoped query and an
+  // all-time query returned the same rows. Two checks in this file (2b, 2c) asserted that a
+  // TODAY-scoped correction succeeded while seeding only a YESTERDAY row — they passed because the
+  // window was never applied, and could not have failed for the right reason.
+  //
+  // Every temporal assertion in this suite now rests on that filter working, which is exactly why
+  // it gets its own check: if the evaluator silently stops matching, the failure mode is not a red
+  // suite, it is a green one that has quietly stopped testing days again.
+  check("harness: a day-scoped query does not see another day's row", async () => {
+    const { db } = await import("../server/db");
+    const { mealLogs } = await import("../shared/schema");
+    const { gte } = await import("drizzle-orm");
+    const g = globalThis as any;
+    const before = g.__KAMLIFE_STUB_ROWS;
+    try {
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [
+        { id: "h-today", loggedAt: new Date(NOW - 3600_000) },
+        { id: "h-yesterday", loggedAt: new Date(NOW - 30 * 3600_000) },
+      ]]]);
+      const scoped: any[] = await db.select().from(mealLogs)
+        .where(gte(mealLogs.loggedAt, new Date(NOW - 12 * 3600_000)));
+      assert.deepEqual(scoped.map(r => r.id), ["h-today"],
+        `the window returned ${scoped.length} rows — the stub is ignoring \`where\` again`);
+      // …and an unfiltered read must still see everything, or the filter has become a truncation.
+      const all: any[] = await db.select().from(mealLogs);
+      assert.equal(all.length, 2, "an unscoped read lost rows");
+    } finally {
+      if (before) g.__KAMLIFE_STUB_ROWS = before; else delete g.__KAMLIFE_STUB_ROWS;
     }
   });
 
