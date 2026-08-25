@@ -2894,6 +2894,67 @@ async function main() {
     assert.equal(out.after.workoutStreak, 3, "the batch logger incremented the streak");
   });
 
+  // ── ONE QUESTION, ONE OWNER: "IS THE CLIENT TRAINING TODAY?" (2026-08-25) ─────────────────
+  //
+  // THE HANDSET FAILURE. Coach sent the session with buttons [Done | Too hard | Skip today].
+  //
+  //   Client: "No I moved yesterdays workout to today"
+  //   Coach:  "Kam, no stress — rest today, hit it fresh tomorrow 💪"
+  //
+  // He answered our own menu, told us he was training, and we told him to rest. Six readers
+  // decided this question independently and MOVED INTO TODAY was a shape none of them held, so
+  // the leading "No" plus "workout" plus "today" read as a refusal.
+  //
+  // These are customer sentences, not helper booleans — the first fixtures of the matrix.
+  check("training day . the six readers now give one answer", async () => {
+    const { readTrainingDay, trainingDayIsDeclined } = await import("../server/one-action");
+
+    // THE SCREENSHOT. This is the case the whole cut exists for.
+    assert.equal(readTrainingDay("No I moved yesterdays workout to today"), "moved_to_today",
+      "the sentence from the handset is still read as a refusal");
+    assert.equal(trainingDayIsDeclined("No I moved yesterdays workout to today"), false,
+      "…and the DayState input still carries it as a constraint against training");
+
+    // THE ADJACENT SHAPES, which is what makes the answer meaningful rather than a special case.
+    const expect: Array<[string, string]> = [
+      ["I'm doing yesterday's session today", "moved_to_today"],
+      ["rest day", "declined"],
+      ["taking a rest day", "declined"],
+      ["no gym today", "declined"],
+      ["I'm not training today, ok?", "declined"],
+      ["Can I do my workout tomorrow instead?", "move_request"],
+      ["I'll train tomorrow", "deferred"],
+      ["I missed gym on Monday", "missed"],
+      ["I didn't do my workout", "missed"],
+      // …and the words that merely CONTAIN "skip" but ask a different question entirely.
+      ["skip the numbers", "none"],
+      ["I'm done eating for today", "none"],
+      ["I trained today", "none"],
+      ["I didn't skip the gym today", "none"],
+      ["Show me tomorrow's workout", "none"],
+      ["Is today a rest day?", "none"],
+    ];
+    for (const [sentence, want] of expect) {
+      assert.equal(readTrainingDay(sentence), want, `"${sentence}" read as ${readTrainingDay(sentence)}, expected ${want}`);
+    }
+  });
+
+  // THE OUTCOME, not the classification. A sentence that says "I am training today" must not be
+  // answered with a rest-day reply — which is what the client actually saw.
+  check("training day . a session moved into today is not answered with 'rest today'", async () => {
+    const reply = await serialise(() => say("No I moved yesterdays workout to today"));
+    assert.ok(!/rest today|hit it fresh tomorrow|rest day is part of the programme/i.test(reply),
+      `the client said they are training today and was told to rest: ${reply.slice(0, 160)}`);
+  });
+
+  // THE CONTROL. A genuine refusal must still be honoured, or the case above passes by making
+  // the coach incapable of hearing "no".
+  check("training day control . a genuine rest day is still honoured", async () => {
+    const reply = await serialise(() => say("rest day today"));
+    assert.ok(!/Week \d|Next Session|Send \*?DONE/i.test(reply),
+      `a rest day was answered with the session: ${reply.slice(0, 120)}`);
+  });
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");

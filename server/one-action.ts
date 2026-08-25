@@ -248,9 +248,108 @@ const LATE = 17; // from 5pm, "log today" and "get a walk in" start to make sens
  * The inverse must survive untouched: "I trained today" is a REPORT and is still written as
  * today's session — that is why completion words disqualify.
  */
+/**
+ * IS THE CLIENT TRAINING TODAY? ONE READER (2026-08-25).
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ * THE HANDSET FAILURE THIS EXISTS TO STOP
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ *
+ *   Coach:  [today's session] … Done 💪 | Too hard — modify | Skip today
+ *   Client: "No I moved yesterdays workout to today"
+ *   Coach:  "Kam, no stress — rest today, hit it fresh tomorrow 💪"
+ *
+ * He answered our own button menu, told us he was training, and we told him to rest. The old
+ * matcher saw "No" … "workout" … "today" and called it a refusal — because MOVED INTO TODAY was
+ * a shape none of the readers represented.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ * WHY A CLASSIFIER AND NOT ANOTHER BOOLEAN
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * Six places decided this question independently and each held a different piece of it:
+ *
+ *   one-action     trainingDayIsDeclined   refusal
+ *   routes         _isWorkoutRefusal       called the owner and DISCARDED the result
+ *   routes         _isWorkoutMoveRequest   "can I shift it?"
+ *   routes         _isWorkoutDeferral      "I'll do it later"
+ *   lifecycle      isRestDayMsg            rest day
+ *   lifecycle      isMissedWorkout         reported a past miss
+ *   workout        hasMissWord             don't retro-log a miss as a completion
+ *
+ * Every one of them is a partial answer to "is this client training today". Kept apart, a fix to
+ * any single one reaches none of the others — which is precisely why this defect kept returning
+ * after each patch. One reader returns the whole answer; the callers keep their own actions.
+ *
+ * ORDER IS THE WHOLE DESIGN. `moved_to_today` is tested BEFORE `declined`, because the sentence
+ * that broke carries both signals and only one of them is what he meant.
+ *
+ * HONEST BOUND: this is still pattern matching, and pattern matching has an unbounded failure
+ * surface — a phrasing nobody thought of will get through. What it no longer has is SIX surfaces.
+ * The next step is for the classifier to lead and this to be the narrow safety net beneath it.
+ */
+export type TrainingDayRead =
+  | "declined"        // not training today, in their own words
+  | "moved_to_today"  // another day's session pulled INTO today — they ARE training
+  | "move_request"    // asking permission to shift it
+  | "deferred"        // stating they will do it later
+  | "missed"          // reporting a session that did not happen
+  | "none";
+
+export function readTrainingDay(text: string): TrainingDayRead {
+  const t = String(text || "");
+  if (!t.trim()) return "none";
+  // The vocabulary this question is asked in. REST_SHAPE is the half lifecycle's isRestDayMsg
+  // held and this owner did not: "rest day", "day off", "recovery day" name the same decision
+  // without ever using a training word.
+  const TRAINING = /(?:train(?:ing)?|workout|work\s*out|session|gym|exercis(?:e|ing))/i;
+  const REST_SHAPE = /\b(?:rest\s+day|day\s+off|off\s+day|recovery\s+day|active\s+recovery|taking\s+a\s+rest|rest\s+today|off\s+today)\b/i;
+  if (REST_SHAPE.test(t) && !/\?/.test(t)) return "declined";
+  if (!TRAINING.test(t)) return "none";
+
+  // 1. MOVED INTO TODAY — they are training, whatever else the sentence contains. This must
+  //    outrank the refusal test: "No I moved yesterdays workout to today" satisfies both.
+  if (/\b(?:moved?|moving|shifted?|swapped?|pushed|bumped|brought)\b[^.!?]{0,40}?\b(?:to|into|for)\s+(?:today|now|this\s+(?:morning|afternoon|evening))\b/i.test(t)
+      || /\b(?:doing|i'?m\s+doing|did)\b[^.!?]{0,40}?\b(?:yesterday'?s|monday'?s|tuesday'?s|wednesday'?s|thursday'?s|friday'?s|saturday'?s|sunday'?s|missed|skipped)\b[^.!?]{0,30}?\b(?:today|now)\b/i.test(t)) {
+    return "moved_to_today";
+  }
+
+  // 2. ASKING PERMISSION TO SHIFT IT. Modal + first person, and not a request to SEE it.
+  if (/^\s*(?:can|could|may|should|is\s+it\s+ok\s+(?:if\s+)?)\s*i\b/i.test(t.trim())
+      && /\b(?:tomorrow|later|tonight|this\s+evening|after\s+work|next\s+week|another\s+day|a\s+different\s+day|2moro|2morrow)\b/i.test(t)
+      && !/\b(?:show|send|see|view|what'?s|what\s+is|give\s+me)\b/i.test(t)
+      && !/\b(?:tomorrow|next\s+week)'?s\s+(?:workout|work\s*out|session|training)\b/i.test(t)) {
+    return "move_request";
+  }
+
+  if (trainingDayIsDeclined(t)) return "declined";
+
+  // 3. STATING A LATER PLAN — a deferral is a plan, not a constraint on today.
+  if (!t.includes("?")
+      && /\b(?:i'?ll|i\s+will|i'?m\s+going\s+to|i\s+am\s+going\s+to|gonna|going\s+to|plann?ing\s+(?:to|on)|plan\s+to)\b/i.test(t)
+      && /\b(?:tomorrow|later|tonight|this\s+evening|after\s+work|in\s+the\s+morning|next\s+week|2moro|2morrow)\b/i.test(t)
+      && !/\b(?:done|finished|completed|already\s+did|just\s+did|did\s+my|smashed|crushed)\b/i.test(t)) {
+    return "deferred";
+  }
+
+  // 4. A SESSION THAT DID NOT HAPPEN. Past tense, and not a negated cessation ("didn't skip").
+  if (!/\b(?:not|never|didn'?t|don'?t)\b[^.!?]{0,20}?\b(?:skip|skipping|skipped|miss|missing|missed)\b/i.test(t)
+      && (/\b(?:missed|skipped|couldn'?t|could\s+not|didn'?t\s+(?:make|get|train|go))\b/i.test(t)
+          // "I didn't do my workout" — a negation anywhere near the training word. Absorbed from
+          // workout.ts's hasMissWord, which had this reach and this owner did not.
+          || /\b(?:didn'?t|did\s+not|couldn'?t|won'?t|will\s+not|haven'?t|hasn'?t)\b[^.!?]{0,40}?(?:train|workout|work\s*out|session|gym|exercis)/i.test(t))) {
+    return "missed";
+  }
+  return "none";
+}
+
 export function trainingDayIsDeclined(text: string): boolean {
   const t = String(text || "");
   if (!t.trim()) return false;
+  // MOVED INTO TODAY IS NOT A REFUSAL. Checked here too, because this function is the DayState
+  // input and is called directly by the decision — it must not read "I moved it to today" as a
+  // constraint against training just because readTrainingDay happens to be the richer door.
+  if (/\b(?:moved?|moving|shifted?|swapped?|pushed|bumped|brought)\b[^.!?]{0,40}?\b(?:to|into|for)\s+(?:today|now|this\s+(?:morning|afternoon|evening))\b/i.test(t)) return false;
   // A REQUEST IS INTERROGATIVE-LED; A TAG QUESTION IS STILL A STATEMENT (2026-08-24, own review).
   // Excluding every "?" made "I'm not training today, ok?" not a refusal — two characters away
   // from the live failure this owner exists to stop. The distinction is grammar: "Can I train
