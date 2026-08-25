@@ -2955,6 +2955,74 @@ async function main() {
       `a rest day was answered with the session: ${reply.slice(0, 120)}`);
   });
 
+  // ── OUTPUT DEFECTS FROM THE HANDSET (2026-08-25) ──────────────────────────────────────────
+  //
+  // Two of the five screenshots are NOT comprehension failures. The system understood correctly
+  // and then told the client something else. Both are fixtures now.
+  check("receipt . the confirmation names every food, or says how many it did not", async () => {
+    const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
+    // The voice note, verbatim: four foods, all scanned, all priced, all written.
+    const said = "So my breakfast was, uh, three eggs, three slices of bread, some chakalaka and a piece of chicken";
+    const mk = (lines: string[]) => buildFoodLogReply({
+      foodLines: lines.join("\n"), mealLabel: "breakfast", totalMealCals: 810, totalMealProtein: 72,
+      runningCals: 856, runningProtein: 72, calorieTarget: 3140, proteinTarget: 186,
+      user: { name: "Kam", goalType: "muscle_gain", numbersMode: "low" },
+      userMessage: said, terse: true, isRetro: false,
+    } as any);
+
+    const four = String(await mk(["• Bread: 240 kcal", "• Eggs: 210 kcal",
+      "• Chicken thigh (150g): 280 kcal", "• Chakalaka: 80 kcal"]));
+    assert.match(four, /chakalaka/i,
+      `the receipt dropped a food that was logged — this is what makes clients "correct" us: ${four}`);
+
+    // A cap is still right for a long photo list. What is not right is a cap that HIDES.
+    const six = String(await mk(["• Bread: 1", "• Eggs: 1", "• Chicken thigh: 1",
+      "• Chakalaka: 1", "• Slices: 1", "• Piece: 1"]));
+    assert.match(six, /and 2 more/i, `six foods were truncated with no count: ${six}`);
+    assert.ok(!/Chakalaka\.\s*👌/.test(six) || /more/.test(six),
+      "a truncated list must say how many it left out");
+  });
+
+  check("header . Week and Session are on different clocks, and it says so", async () => {
+    const { sessionHeaderLine } = await import("../server/programme");
+    // THE SCREENSHOT: "*Week 1 — Session 25*". programmeWeek is PHASE-RELATIVE and resets; the
+    // session count is LIFETIME. Both numbers were right and the header was a contradiction.
+    const h = sessionHeaderLine(1, 24);
+    assert.match(h, /Session 25 overall/,
+      `Week and Session still read as one clock: ${h}`);
+    assert.equal(sessionHeaderLine(1, 0), "*Week 1*",
+      "a client with no sessions should not be given a session number at all");
+    assert.equal(sessionHeaderLine(3, 8), "*Week 3 — Session 9 overall*");
+    // …and the string that shipped this morning must not be reachable from the owner.
+    for (const [w, d] of [[1, 24], [3, 8], [5, 2]] as Array<[number, number]>) {
+      assert.ok(!/— Session \d+\*$/.test(sessionHeaderLine(w, d)),
+        `the unqualified header is back: ${sessionHeaderLine(w, d)}`);
+    }
+  });
+
+  // THE OUTCOME, not the owner. The parity USER is already programmeWeek 1 with 24 sessions —
+  // the screenshot's exact state — so the composed message is reachable, and asserting the owner
+  // alone would pass even if no caller used it. This is the string on the handset.
+  check("header outcome . the workout the client is sent does not contradict itself", async () => {
+    const g = globalThis as any;
+    // The parity user trains 3x/week, so "today" is a rest day on most calendar days and the
+    // session is never composed. Six days puts today inside the programme whenever this runs.
+    const reply = await serialise(async () => {
+      g.__KAMLIFE_STUB_USER = { ...USER, trainingDaysPerWeek: 6 };
+      try { return String(await handleMessage(USER.phoneNumber, "workout") ?? ""); }
+      catch (e: any) { return `__THREW__ ${e?.message || e}`; }
+      finally { g.__KAMLIFE_STUB_USER = { ...USER }; }
+    });
+    const header = reply.split("\n").find(l => /\*Week \d/.test(l)) || "";
+    assert.ok(header, `no week header in the workout reply: ${reply.slice(0, 200)}`);
+    assert.ok(!/— Session \d+\*\s*$/.test(header.trim()),
+      `Week and Session are still printed as one clock: ${header}`);
+    if (/Session/.test(header)) {
+      assert.match(header, /Session \d+ overall/,
+        `a session number without its clock named: ${header}`);
+    }
+  });
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");

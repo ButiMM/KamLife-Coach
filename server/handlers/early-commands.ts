@@ -5,7 +5,7 @@ import { reportCardMarker } from "../report-card";
 import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../shared/schema";
 import { eq, and, gte, desc, count, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
-import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme } from "../programme";
+import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, sessionHeaderLine } from "../programme";
 import { calculateTargets, stepBurnKcal, recalcTargetsForProfile } from "../targets";
 import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
@@ -582,7 +582,7 @@ export async function handleEarlyCommands(ctx: {
         : "";
       const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
       const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-      const missedReply = `${catchupIntro}\n\n*Week ${week} — Session ${sessionNum + 1}*\n\n${workout}${injuryNote}\n\n${doneHint}\n\nHow's that looking?${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+      const missedReply = `${catchupIntro}\n\n${sessionHeaderLine(week, sessionNum)}\n\n${workout}${injuryNote}\n\n${doneHint}\n\nHow's that looking?${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
       await logChat(user.id, message, missedReply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_MISSED_CATCHUP");
       return missedReply;
     }
@@ -592,8 +592,7 @@ export async function handleEarlyCommands(ctx: {
     const workout = buildDayWorkout({ ...effectiveUser, programmeDayInWeek: todaySlot });
     const week = user.programmeWeek || 1;
     const sessionNum = user.totalWorkoutsCompleted || 0;
-    const sessionNote = sessionNum > 0 ? ` — Session ${sessionNum + 1}` : "";
-    const weekNote = `*Week ${week}${sessionNote}*\n\n`;
+    const weekNote = `${sessionHeaderLine(week, sessionNum)}\n\n`;
     const injuryNote = user.injuries && user.injuries.trim() && user.injuries.toLowerCase() !== "none"
       ? `\n\n⚠️ *Active injury noted (${user.injuries}):* Skip any exercise that causes sharp pain. Reply *injury* for safe alternatives.`
       : "";

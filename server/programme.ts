@@ -1670,6 +1670,30 @@ function filterInjuredGymExercises(exercises: Exercise[], injuries: string): { s
   return { safeEx, skippedNames };
 }
 
+/**
+ * THE SESSION HEADER — two clocks, said as two clocks (2026-08-25).
+ *
+ * THE HANDSET FAILURE: "*Week 1 — Session 25*". Both numbers were correct and the header was a
+ * contradiction, because they are measured on different clocks:
+ *
+ *   programmeWeek           PHASE-RELATIVE. It resets to 1 at every phase change and at a goal
+ *                           change, so "Week 1" can be someone's ninth month.
+ *   totalWorkoutsCompleted  LIFETIME. It never resets.
+ *
+ * The system already knew this — client-snapshot.ts tells the MODEL "week is phase-relative; it
+ * resets each phase; sessions below are the lifetime count" — and never told the client.
+ *
+ * This exact string was patched on 2026-07-16 after "Week 1 — Session 21" reached a client with a
+ * 125kg chest fly. That patch changed the RATIONALE COPY underneath and left the header alone, so
+ * it printed again this morning. Saying which clock each number is on is the fix the copy change
+ * was standing in for.
+ */
+export function sessionHeaderLine(week: number, sessionsDone: number): string {
+  const w = Math.max(1, Number(week) || 1);
+  const done = Math.max(0, Number(sessionsDone) || 0);
+  return done > 0 ? `*Week ${w} — Session ${done + 1} overall*` : `*Week ${w}*`;
+}
+
 export function buildDayWorkout(user: any): string {
   return withSafetyNote(buildDayWorkoutInner(user), user);
 }
