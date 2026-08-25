@@ -2807,6 +2807,93 @@ async function main() {
       "a truthful count was corrected");
   });
 
+  // ── P0-5 · WORKOUT · WHAT A RETROACTIVE SESSION CHANGES (2026-08-25) ──────────────────────
+  //
+  // Five paths write a session row and they disagreed about what else moves. Two defects:
+  // backfillAttributedDays touched `users` not at all, so the ledger and the lifetime counter
+  // answered "how many sessions have I done" differently; and the multi-day retro path set
+  // lastWorkoutDate unconditionally, moving it BACKWARD past a more recent session — while the
+  // sibling single-day path 65 lines above guarded exactly that.
+  check("P0-5 workout . a retro session moves the count, never the cursor, never backwards", async () => {
+    const { applyRetroSessionState } = await import("../server/day-ledger");
+    const g = globalThis as any;
+
+    const held = new Date(NOW - 1 * 86_400_000);   // they last trained YESTERDAY
+    const older = new Date(NOW - 4 * 86_400_000);  // …and now report a session from four days ago
+    const newer = new Date(NOW);
+
+    const run = (attributed: Date[]) => serialise(async () => {
+      g.__KAMLIFE_STUB_USER = {
+        ...USER, id: "retro-contract", totalWorkoutsCompleted: 24, workoutStreak: 3,
+        lastWorkoutDate: held, programmeWeek: 3, programmeDayInWeek: 2,
+      };
+      const before = { ...g.__KAMLIFE_STUB_USER };
+      const out = await applyRetroSessionState(before, attributed);
+      const after = { ...g.__KAMLIFE_STUB_USER };
+      g.__KAMLIFE_STUB_USER = { ...USER };
+      return { out, after, before };
+    });
+
+    // 2. THE LIFETIME COUNT MOVES, once per attributed day.
+    const one = await run([older]);
+    assert.equal(one.out.total, 25, "one attributed session did not move the lifetime count");
+    const two = await run([older, new Date(NOW - 3 * 86_400_000)]);
+    assert.equal(two.out.total, 26, "two attributed sessions must count twice, not once");
+    assert.equal((await run([])).out.total, 24, "an empty attribution changed the count");
+
+    // 3. lastWorkoutDate IS A MAX OVER REAL EVENTS. The negative case is the point: an OLDER
+    //    session must never drag it back past a more recent one.
+    assert.equal(one.out.lastWorkoutDate?.getTime(), held.getTime(),
+      "an older attributed session moved lastWorkoutDate backwards");
+    assert.equal(one.after.lastWorkoutDate ? new Date(one.after.lastWorkoutDate).getTime() : 0, held.getTime(),
+      "…and it was written backwards to the row");
+    const forward = await run([newer]);
+    assert.equal(forward.out.lastWorkoutDate?.getTime(), newer.getTime(),
+      "a genuinely more recent session failed to advance lastWorkoutDate");
+
+    // 4. THE PROGRAMME CURSOR NEVER MOVES. (P0-3.) Which session is due today is decided by the
+    //    schedule and by what was done today; a backfill answers neither question.
+    assert.equal(one.after.programmeWeek, 3, "a retro write advanced the programme week");
+    assert.equal(one.after.programmeDayInWeek, 2, "a retro write advanced the programme day");
+
+    // 5. THE STREAK IS NEVER INCREMENTED HERE. The live rule is `wasYesterday ? +1 : 1`, which is
+    //    only valid for a write about today. A correct historical streak must be derived from the
+    //    ledger — a different owner, deliberately out of this cut.
+    assert.equal(one.after.workoutStreak, 3, "a retro write incremented the streak");
+  });
+
+  // …and the path that had none of it. The defect was that backfill wrote the ledger and left the
+  // counter behind, so this drives the real module and reads the real user row.
+  check("P0-5 workout . the batch logger now carries the derived state", async () => {
+    const { backfillAttributedDays } = await import("../server/backfill");
+    const g = globalThis as any;
+    const day = (n: number) => new Date(NOW - n * 86_400_000)
+      .toLocaleDateString("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" });
+
+    const out = await serialise(async () => {
+      const before = {
+        ...USER, id: "backfill-contract", totalWorkoutsCompleted: 24, workoutStreak: 3,
+        lastWorkoutDate: new Date(NOW - 1 * 86_400_000), programmeWeek: 3, programmeDayInWeek: 2,
+      };
+      g.__KAMLIFE_STUB_USER = { ...before };
+      const res = await backfillAttributedDays(
+        before, `${day(4)} pap and chicken. ${day(3)} eggs and toast. ${day(2)} I trained and walked 8000 steps`);
+      const after = { ...g.__KAMLIFE_STUB_USER };
+      g.__KAMLIFE_STUB_USER = { ...USER };
+      return { res, after };
+    });
+
+    const sessions = (out.res?.writes || []).filter(w => w.domain === "workout");
+    assert.equal(sessions.length, 1, `expected one backfilled session, got ${JSON.stringify(sessions)}`);
+    assert.equal(out.after.totalWorkoutsCompleted, 25,
+      "the batch logger wrote a session row and left the lifetime count behind");
+    // The attributed day is OLDER than the held one, so the max rule must hold here too.
+    assert.equal(new Date(out.after.lastWorkoutDate).getTime(), NOW - 1 * 86_400_000,
+      "a backfilled older session moved lastWorkoutDate backwards");
+    assert.equal(out.after.programmeWeek, 3, "the batch logger advanced the programme cursor");
+    assert.equal(out.after.workoutStreak, 3, "the batch logger incremented the streak");
+  });
+
   // ── THE HARNESS ITSELF MUST RUN THE PRODUCTION BRANCH ─────────────────────────────────────
   check("harness: the card branch is enabled, and the verifier is not skipped", async () => {
     const { cardBaseUrl } = await import("../server/macro-card-attach");

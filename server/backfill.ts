@@ -31,7 +31,8 @@
  * A historical write is a statement about that day and about NOTHING ELSE. It may add the row
  * and move lifetime counters, because those are facts about the past. It may not advance the
  * programme cursor, declare today's session done, or move a streak forward — today's questions
- * are answered by today. Nothing here writes to `users` at all.
+ * are answered by today. The `users` write is exactly that permitted half, and it is delegated to
+ * applyRetroSessionState so this module cannot drift from the two retro paths in workout.ts.
  */
 
 import { db } from "./db";
@@ -40,6 +41,7 @@ import { and, eq, gte, lt } from "drizzle-orm";
 import { attributeMultiDayReport } from "./understanding/day-relative-situation";
 import { journeyMustKeepFacts, detectStepLog } from "./understanding/messy-intake";
 import { turnMutation } from "./handlers/chat-log";
+import { applyRetroSessionState } from "./day-ledger";
 
 export interface BackfillWrite { dayKey: string; domain: "food" | "workout" | "steps"; detail: string; }
 export interface BackfillResult {
@@ -65,7 +67,9 @@ function dayWindow(dayKey: string): { start: Date; end: Date } {
  * `hasMultipleDays` gate: this adds a capability, it does not re-route the product.
  */
 export async function backfillAttributedDays(
-  user: { id: string },
+  // NOT `{ id: string }`. applyRetroSessionState increments FROM the held total, so a caller
+  // passing only an id would reset the lifetime count to the number of days in this message.
+  user: { id: string; phoneNumber?: string | null; totalWorkoutsCompleted?: number | null; lastWorkoutDate?: Date | string | null },
   message: string,
   now: Date = new Date(),
 ): Promise<BackfillResult | null> {
@@ -126,6 +130,21 @@ export async function backfillAttributedDays(
         turnMutation(`INSERT steps=${step.steps} at=${beat.dayKey}`, "[BACKFILL]");
         writes.push({ dayKey: beat.dayKey, domain: "steps", detail: `${step.steps.toLocaleString()} steps` });
       }
+    }
+  }
+
+  // THE DERIVED STATE A SESSION CARRIES (2026-08-25, P0-5 · workout). This module wrote the
+  // ledger row and touched `users` not at all — so a multi-day report moved workoutLogs and left
+  // totalWorkoutsCompleted behind, and two readers answered "how many sessions have I done"
+  // with different numbers. The contract is shared with both retro paths in workout.ts; see
+  // applyRetroSessionState. Only days we ACTUALLY inserted count, so the idempotency guard above
+  // keeps a repeated report from inflating the total.
+  const sessionDays = writes.filter(w => w.domain === "workout").map(w => noonOn(w.dayKey));
+  if (sessionDays.length > 0) {
+    try {
+      await applyRetroSessionState(user, sessionDays);
+    } catch (e: any) {
+      console.warn(`[BACKFILL] retro session state failed for ${String(user.id || "").slice(-6)}: ${e?.message || e}`);
     }
   }
 
