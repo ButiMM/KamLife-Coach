@@ -905,16 +905,35 @@ export async function buildFoodLogReply(p: {
   // the words they used survive. A name with no overlap at all (a photo, where they typed
   // nothing) is dropped rather than guessed at — "Got it. 👌" is a complete reply and it cannot
   // put a word in their mouth.
+  // ── NEVER REPORT A SUBSET AS IF IT WERE THE WHOLE (2026-08-25) ──────────────────────────────
+  //
+  // THE HANDSET FAILURE. Voice note: "three eggs, three slices of bread, some chakalaka and a
+  // piece of chicken". Four foods were scanned, priced and WRITTEN — the ledger was right, the
+  // 856 kcal was right. The receipt said:
+  //
+  //     "Got it — Bread, Eggs and Chicken. 👌"
+  //
+  // `.slice(0, 3)` dropped the chakalaka silently. The client reads the receipt, sees a food
+  // missing, and corrects us — for something that was never wrong. That is where "the vision
+  // keeps getting my food wrong" comes from: not the scanner, which read it correctly, but a
+  // confirmation that quietly told them otherwise. Then the correction logs it AGAIN.
+  //
+  // A cap is still right — an eight-item photo should not produce an eight-name sentence. What is
+  // not right is a cap that HIDES. Four names, then the count of what is left, so the client can
+  // always tell whether we heard everything.
   const said = String(p.userMessage || "").toLowerCase();
-  const bareNames = String(p.foodLines || "")
+  const allNames = String(p.foodLines || "")
     .split("\n")
     .map(l => l.replace(/^[•\-\s]+/, "").split(/[:(]/)[0].trim())
     .map(name => name.split(/\s+/).filter(w => w.length > 2 && said.includes(w.toLowerCase())).join(" ").trim())
-    .filter(Boolean)
-    .slice(0, 3);
-  const label = bareNames.length > 1
+    .filter(Boolean);
+  const NAMED = 4;
+  const bareNames = allNames.slice(0, NAMED);
+  const hidden = allNames.length - bareNames.length;
+  const joined = bareNames.length > 1
     ? `${bareNames.slice(0, -1).join(", ")} and ${bareNames[bareNames.length - 1]}`
     : bareNames[0] || "";
+  const label = hidden > 0 ? `${bareNames.join(", ")} and ${hidden} more` : joined;
   const line = neverSilentLine("meal", { label, carryingShame: carriesFeelingClause(p.userMessage || "") });
   // The retro day is a FACT the client needs — logging to the wrong day is the one error they
   // cannot see. It rides as a clause, not as a second sentence.
