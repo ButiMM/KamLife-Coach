@@ -603,3 +603,30 @@ export async function runMeaningEngineLive(ctx: {
     return null; // fail-open
   }
 }
+
+/**
+ * CLOSE A COACHING TURN: a durable write is followed by ONE next move (2026-08-26, issue #63).
+ *
+ * Lives here, beside canonicalDecision, because it is the decision owner's own last step — the
+ * decision APPLIED to a turn that just wrote. routes.ts keeps a one-line closure over it so every
+ * exit calls the same thing; the router is not where this reasoning belongs.
+ *
+ * Only a turn that DURABLY WROTE earns a move, and the turn's own mutation record answers that —
+ * not what was composed. A question or a chat turn is not a coaching moment. Whether the reply
+ * already owns the client's next action is asked ONCE, inside withNextMove, which is the policy
+ * owner; asking it here too would cost what this repo keeps paying for, two copies of one rule.
+ *
+ * Rationale, measurements and both-ways grading: script/tracking-contract-tests.ts, LAW 4.
+ */
+export async function closeCoachingTurn(user: any, message: string, reply: string | null): Promise<string> {
+  const out = String(reply ?? "");
+  const { turnMutations } = await import("../handlers/chat-log");
+  const { durableDomains } = await import("./messy-intake");
+  const { withNextMove } = await import("../reply-hygiene");
+  const wrote = durableDomains(turnMutations());
+  if (!out || wrote.length === 0) return out;
+  const decided = await canonicalDecision(user, message).catch(() => ({ todo: "" } as any));
+  const next = withNextMove(out, String(decided?.todo || ""));
+  if (next !== out) console.log(`[COACH_TURN] appended one next move after ${wrote.join("+")}`);
+  return next;
+}

@@ -178,10 +178,15 @@ test("cut 1: no handler may end a multi-fact turn", () => {
   // one write plus a question ("my breakfast was eggs. what's the plan?") is the ordinary shape
   // and it was not covered: the educator claimed it and the meal was never written. mayEndTurn
   // is the same gate asking a stronger question — is any fact this client stated still unwritten.
+  // THE GATE IS THE PROPERTY, NOT THE EXPRESSION (widened 2026-08-26, issue #63). These matched
+  // `return workoutResult;` exactly, so wrapping the fast path's VALUE — closeCoachingTurn, which
+  // appends the one next coaching move after a durable write — read as the gate having been
+  // removed. It had not: mayEndTurn still decides whether the turn may end, which is all this
+  // test is about. The identifier stays pinned so a handler cannot quietly return something else.
   for (const guard of [
-    /if \(mayEndTurn\("workout"\)\) return workoutResult;/,
-    /if \(mayEndTurn\("steps"\)\) return stepPart;/,
-    /if \(mayEndTurn\("water"\)\) return waterPart;/,
+    /if \(mayEndTurn\("workout"\)\) return [\w.(]*workoutResult\)?;/,
+    /if \(mayEndTurn\("steps"\)\) return [\w.(]*stepPart\)?;/,
+    /if \(mayEndTurn\("water"\)\) return [\w.(]*waterPart\)?;/,
   ]) assert.ok(guard.test(code), `a co-occurring handler still claims the turn: ${guard}`);
   assert.ok(/const mayEndTurn = \(who: string\): boolean => \{[\s\S]{0,200}?if \(multiFact\) return false;[\s\S]{0,200}?factsStillOwed\(\)/.test(code),
     "mayEndTurn must refuse on multiFact AND on any fact stated-but-unwritten");
@@ -263,7 +268,9 @@ test("cut 2: nothing above the ledger may answer a multi-fact note", () => {
   // early-commands now RUNS and COMMITS rather than standing down: on "had 2 litres of water and
   // took my creatine" the supplement handler inside it is the only thing that knows what a
   // supplement is, and standing down lost the confirmation entirely.
-  assert.ok(/if \(mayEndTurn\("early-commands"\)\) return earlyResult;\s*\n\s*commitFact\(turn, "other", earlyResult\);/.test(code),
+  // Same widening as cut 1: the fast path's VALUE may be wrapped by closeCoachingTurn, but the
+  // gate and the commit that follows it are the two things this asserts.
+  assert.ok(/if \(mayEndTurn\("early-commands"\)\) return [\w.(]*earlyResult\)?;\s*\n\s*commitFact\(turn, "other", earlyResult\);/.test(code),
     "early-commands must commit its confirmation, not end the turn and not vanish");
 });
 

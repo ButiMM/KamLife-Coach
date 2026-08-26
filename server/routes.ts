@@ -45,7 +45,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
+import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor } from "./understanding/live";
 import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains } from "./understanding/messy-intake";
 import { foodDayIsClosed, readTrainingDay } from "./one-action";
 import { backfillAttributedDays } from "./backfill";
@@ -696,6 +696,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     return false;
   };
 
+  /** Every exit for a durable-write turn closes through the decision owner — see
+   *  understanding/live.closeCoachingTurn and tracking-contract-tests LAW 4. */
+  const closeCoachingTurn = (reply: string | null) => closeCoachingTurnFor(user, message, reply);
+
   if (process.env.NORMALIZER !== "off" && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
       const pre = await Promise.race([
@@ -896,7 +900,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (foodLogMgmtResult !== null) {
     // This is where the street-food educator claimed the 11:24 turn. It may still answer — after
     // the fact it is talking about has been written, not instead of it.
-    if (mayEndTurn("food-log-mgmt")) return foodLogMgmtResult;
+    if (mayEndTurn("food-log-mgmt")) return closeCoachingTurn(foodLogMgmtResult);
     // STOOD DOWN FOR AN OWED WRITE ≠ CONTRIBUTED A PART. Under multiFact this handler's answer
     // is one voice in a composed reply and still belongs in the ledger. When it stood down
     // because a stated fact is unwritten, its answer DESCRIBED that fact without recording it —
@@ -1139,7 +1143,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // down loses the supplement instead — it must run, and commit.
   const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
   if (earlyResult !== null) {
-    if (mayEndTurn("early-commands")) return earlyResult;
+    if (mayEndTurn("early-commands")) return closeCoachingTurn(earlyResult);
     commitFact(turn, "other", earlyResult);
   }
 
@@ -1154,7 +1158,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // had chicken and pap" logged the session and deleted the meal.
   const workoutResult = await handleWorkoutCommands({ phone, message, m, user });
   if (workoutResult !== null) {
-    if (mayEndTurn("workout")) return workoutResult;
+    if (mayEndTurn("workout")) return closeCoachingTurn(workoutResult);
     commitFact(turn, "workout", workoutResult);
   }
 
@@ -1242,7 +1246,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
       // ONE RULE, NOT A PAIR BRANCH: this asked `alsoHasFood` with its own 30-word food regex,
       // a second list of which facts were allowed to coexist with steps. The ledger knows.
-      if (mayEndTurn("steps")) return stepPart;
+      if (mayEndTurn("steps")) return closeCoachingTurn(stepPart);
     }
   }
 
@@ -1262,7 +1266,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     : await handleWater({ phone, message, m, user });
   if (waterPart !== null) {
     commitFact(turn, "water", waterPart);
-    if (mayEndTurn("water")) return waterPart;
+    if (mayEndTurn("water")) return closeCoachingTurn(waterPart);
   }
 
   // ---- FOOD CONTEXT (corrections, braai, eating out, relog, scanner, GPT fallback) ----
@@ -1293,7 +1297,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     turnMutation(`TURN committed ${resolved.committed}${resolved.reply ? "" : "; question continues to Coach K"}`);
     console.log(`[TURN] committed ${resolved.committed}${resolved.reply ? "" : "; question continues to Coach K"} — "${message.slice(0, 70)}"`);
   }
-  if (resolved.reply) return resolved.reply;
+  if (resolved.reply) return closeCoachingTurn(resolved.reply);
 
   // ---- WEIGHT FORECAST / TRAJECTORY ----
   // The anti-"it's a scam" tool: from the client's OWN logged food + steps vs their
