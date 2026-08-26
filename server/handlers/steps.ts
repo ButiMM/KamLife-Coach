@@ -8,10 +8,22 @@ import { stepBurnKcal } from "../targets";
 import { sastDayStart } from "../utils";
 
 /**
- * STRUCTURED STEP WRITE (2026-07-19) — the executor's reuse point, mirroring the routes.ts
- * inline upsert exactly: one row per SAST day, keep the HIGHER count (clients re-log a
- * growing daily total) unless it's an explicit correction. Additive — routes keeps its
- * own path; this is a clean callable for the action executor. Returns the day's count.
+ * THE STEP WRITE — all of it, for every door (2026-07-19; bypass removed 2026-08-26, issue #63).
+ *
+ * One row per SAST day, keep the HIGHER count (clients re-log a growing daily total) unless it is
+ * an explicit correction. Returns the count the day now HOLDS, which is not always the count that
+ * was passed in — that return value is the point, and it is what a caller must put in front of the
+ * client.
+ *
+ * This shipped as "the executor's reuse point, mirroring the routes.ts inline upsert exactly.
+ * Additive — routes keeps its own path." Both halves of that sentence were the defect. A mirror is
+ * a copy, and the copy drifted where it mattered most: routes carried the count from the MESSAGE
+ * into its reply instead of the count from the LEDGER, so a client with 9 000 already logged who
+ * sent "walked 3000 steps today" kept their 9 000 (right) and was congratulated on 3 000 (wrong).
+ * Two write paths for one fact, disagreeing about what the client is told.
+ *
+ * Every conversational door now comes through here. If you are about to add another upsert for
+ * this fact, that is the bug — call this instead, and answer the client with what it returns.
  */
 export async function logStepsForUser(userId: string, steps: number, opts?: { correction?: boolean; at?: Date }): Promise<number> {
   const at = opts?.at || new Date();

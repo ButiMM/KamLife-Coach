@@ -172,12 +172,72 @@ const MUST_WRITE: [string, string][] = [
     }
   }
 
-  const total = MUST_NOT_WRITE.length + MUST_WRITE.length;
+  /**
+   * LAW 3 — THE ANSWER MUST QUOTE THE LEDGER, NOT THE MESSAGE (2026-08-26, issue #63).
+   *
+   * The write owner returns the count the day now HOLDS. Where a second write path existed, that
+   * distinction was exactly what it lost: with 9 000 already logged, "walked 3000 steps today"
+   * correctly kept the row at 9 000 and then congratulated the client on 3 000 — the ledger and
+   * the mouth disagreeing inside one turn, which is the outbound-truth failure in miniature.
+   *
+   * Graded both ways, because "keep the higher" and "a correction wins downward" are the two
+   * halves of one rule and a guard that only satisfies the first is wrong in the other direction.
+   */
+  const dayStart = (await import("../server/utils")).sastDayStart();
+
+  /** Every number the client can read, thousands separators folded away. Deliberately NOT a
+   *  `\b9000\b` test on a de-spaced string: "9 000 steps" collapses to "9000steps", where there
+   *  is no word boundary after the zero and the assertion passes for the wrong reason. The
+   *  separator class excludes newlines, so numbers on separate lines never fuse into one. */
+  function numbersIn(text: string): Set<number> {
+    return new Set([...text.matchAll(/\d[\d ,\u00a0\u202f]*\d|\d/g)]
+      .map(mm => Number(mm[0].replace(/[ ,\u00a0\u202f]/g, "")))
+      .filter(n => Number.isFinite(n)));
+  }
+
+  async function turnOnDayAt9k(message: string): Promise<{ reply: string; stored: number }> {
+    g.__KAMLIFE_STUB_USER = { ...USER, todayWater: "0" };
+    g.__KAMLIFE_STUB_ROWS = new Map([[schema.stepLogs, [
+      { id: "s1", userId: USER.id, steps: 9000, loggedAt: new Date(dayStart.getTime() + 3_600_000) },
+    ]]]);
+    g.__KAMLIFE_STUB_WRITES = [];
+    g.__KAMLIFE_STUB_UPDATES = [];
+    const reply = String(await handleMessage(USER.phoneNumber, message).catch(() => ""));
+    // The day holds 9 000 unless this turn changed it — by inserting a row, or by updating the one
+    // already there. Both channels must be read, or an update looks exactly like a no-op.
+    const ins = (g.__KAMLIFE_STUB_WRITES || []).filter((w: any) => w.table === schema.stepLogs);
+    const upd = (g.__KAMLIFE_STUB_UPDATES || []).filter((w: any) => w.table === schema.stepLogs);
+    const changed = ins.length ? ins[0].values?.steps
+      : upd.length ? upd[upd.length - 1].set?.steps : undefined;
+    delete g.__KAMLIFE_STUB_UPDATES;
+    return { reply, stored: changed === undefined ? 9000 : Number(changed) };
+  }
+
+  // A LOWER re-log leaves the day at 9 000 — so the answer may not say 3 000.
+  {
+    const { reply, stored } = await turnOnDayAt9k("walked 3000 steps today");
+    const said = numbersIn(reply);
+    const first = reply.split("\n")[0];
+    if (stored !== 9000) failures.push(`A lower re-log overwrote the day: stored ${stored}, expected 9000`);
+    if (said.has(3000)) failures.push(`The reply quoted the message, not the ledger: day holds 9000, reply said 3 000 — "${first}"`);
+    if (!said.has(9000)) failures.push(`The reply never quoted the stored count: day holds 9000 — "${first}"`);
+  }
+
+  // An explicit CORRECTION still wins downward, and the answer quotes the corrected number.
+  {
+    const { reply, stored } = await turnOnDayAt9k("3000 steps not 9000");
+    const said = numbersIn(reply);
+    const first = reply.split("\n")[0];
+    if (stored !== 3000) failures.push(`A correction failed to write downward: stored ${stored}, expected 3000`);
+    if (!said.has(3000)) failures.push(`A correction was not quoted back: day now holds 3000 — "${first}"`);
+  }
+
+  const total = MUST_NOT_WRITE.length + MUST_WRITE.length + 2;
   if (failures.length > 0) {
     for (const f of failures) console.log(`✗ ${f}`);
     console.log(`\n✗ tracking contract: ${failures.length}/${total} violations`);
     process.exit(1);
   }
-  console.log(`✓ tracking contract: ${MUST_NOT_WRITE.length} questions wrote nothing, ${MUST_WRITE.length} reports reached their writer`);
+  console.log(`✓ tracking contract: ${MUST_NOT_WRITE.length} questions wrote nothing, ${MUST_WRITE.length} reports reached their writer, the answer quoted the ledger both ways`);
   process.exit(0);
 })();

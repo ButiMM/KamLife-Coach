@@ -159,6 +159,16 @@ function makeStubDb(): any {
           if (prop === "values" && Array.isArray((globalThis as any).__KAMLIFE_STUB_WRITES)) {
             (globalThis as any).__KAMLIFE_STUB_WRITES.push({ table: state.table, values: args[0] });
           }
+          // UPDATES ARE OBSERVABLE TOO (2026-08-26, issue #63) — and separately, on purpose.
+          // __KAMLIFE_STUB_WRITES records inserts only, so no suite could see a row being CHANGED:
+          // "an explicit correction overwrites the day's step count downward" was ungradeable, and
+          // an upsert that took its update branch looked identical to one that did nothing. This
+          // is a second channel rather than more entries in the first because `db.update(users)
+          // .set({ lastActiveAt })` runs on nearly every turn — folding those in would add a row
+          // to every write assertion in every suite. Opt in by assigning an array; unset: no-op.
+          if (prop === "set" && Array.isArray((globalThis as any).__KAMLIFE_STUB_UPDATES)) {
+            (globalThis as any).__KAMLIFE_STUB_UPDATES.push({ table: state.table, set: args[0] });
+          }
           return chain(state);
         };
       },
