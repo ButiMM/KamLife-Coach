@@ -6,7 +6,7 @@
  */
 
 import { db } from "../db";
-import { users, workoutLogs, stepLogs, chatHistory } from "../../shared/schema";
+import { users, workoutLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, lt, desc } from "drizzle-orm";
 import { classifyWorkoutFeedback, workoutFeedbackReply } from "../workout-feedback";
 import { parseSessionReport, sessionReportReply, sessionMemoryLine, type SessionReport } from "../session-report";
@@ -27,6 +27,7 @@ import { readTrainingDay } from "../one-action";
 import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot, weekStartForTrainingClaim, attributableWeekSessionDates } from "../workout-state";
 import { handleWeightLog } from "./weight";
+import { logStepsForUser } from "./steps";
 import { calculateTargets } from "../targets";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { sendWhatsApp, saveState } from "../scheduler/shared";
@@ -210,14 +211,25 @@ export async function handleWorkoutCommands(ctx: {
         ? Math.round(distanceKm * (/run|ran|jog|parkrun/i.test(m) ? 72 : 55) * weightFactor)
         : null;
 
-    // km → steps: log to stepLogs so step streak / target tracking reflects the activity
+    // km → steps: log to stepLogs so step streak / target tracking reflects the activity.
+    //
+    // THROUGH THE OWNER, NOT AROUND IT (2026-08-26, issue #63). This was a bare INSERT with no
+    // day-window read, so it broke the one rule logStepsForUser exists to hold — one row per SAST
+    // day. Measured: a client whose day already held 8 000 steps sent "ran 5km" and ended the turn
+    // with TWO rows, 8 000 and 5 500, where the owner would have kept 8 000 and written nothing.
+    //
+    // Two rows also make the day's own read non-deterministic: both day-row reads are `.limit(1)`
+    // with no ORDER BY, so which count the client is told becomes a matter of which row Postgres
+    // hands back. No customer-visible divergence was demonstrated for that — stated plainly, it
+    // was not — but the precondition is created here and the unordered read is real.
+    //
+    // The conversion stays exactly as it was; only the write door changes.
     if (distanceKm && distanceKm > 0 && distanceKm < 120) {
       const stepsPerKm = /run|ran|jog|parkrun/i.test(m) ? 1100 : 1300;
       const derivedSteps = Math.round(distanceKm * stepsPerKm);
       try {
-        await db.insert(stepLogs).values({ userId: user.id, steps: derivedSteps });
-        turnMutation("INSERT steps", "[WRITE]");
-      } catch (e) { console.warn("[CARDIO] step insert failed:", e); }
+        await logStepsForUser(user.id, derivedSteps);
+      } catch (e) { console.warn("[CARDIO] step write failed:", e); }
     }
 
     // Log workout session
