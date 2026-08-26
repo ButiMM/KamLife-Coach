@@ -446,6 +446,11 @@ export const FEELING_ACK = "Heard you on how you're feeling. Showing up still co
 const DURABLE_WRITE: Array<[string, RegExp]> = [
   ["food", /INSERT meal/i], ["steps", /INSERT steps/i],
   ["workout", /INSERT workout/i], ["weight", /INSERT weight/i],
+  // Water is an UPDATE, not an INSERT — the day carries one running total rather than a row per
+  // sip — so it needs its own pattern rather than sharing the INSERT shape (2026-08-26, #63).
+  // Note the anchor: "TURN committed water", which this very function's caller writes back onto
+  // the turn, must NOT read as a fifth durable write. Matching the verb keeps the two apart.
+  ["water", /UPDATE water/i],
 ];
 
 export function durableDomains(writes: string[]): string[] {

@@ -267,13 +267,20 @@ const MUST_WRITE: [string, string][] = [
    * just logged 8 000 steps is not told to go for a walk. That is not a detail — it is the #71
    * defect, and the negative control below proves the assertion is sensitive to it.
    *
-   * WATER IS NOT COVERED, AND THAT IS A STATED GAP, NOT AN OVERSIGHT. Water persists by updating
-   * users.todayWater and records no turn mutation, so durableDomains() — the turn's own record of
-   * what it wrote — cannot see it, and a water log still ends in a bare "2L of water — good. 👌".
-   * Closing it means giving water a durable-write record, which changes what resolveTurn reports
-   * as `committed` and therefore when a turn continues to the coach. That is a behavioural change
-   * to the turn resolver and belongs in its own cut with its own controls, not smuggled into this
-   * one. Four of the five tracked facts are covered here; water is the fifth and is next.
+   * WATER JOINED LAST, AND IT IS THE REASON THE OTHER FOUR WERE NOT ENOUGH. Water persists by
+   * UPDATEing users.todayWater rather than inserting a row, and it recorded nothing on the turn —
+   * so durableDomains(), the turn's own record of what it wrote, could not see it. It was the one
+   * tracked fact invisible to that record, and a water log therefore ended in a bare
+   * "2L of water — good. 👌" while the other four earned a move. The fix is not special-casing
+   * water in the coaching turn; it is water telling the truth about itself, after which the
+   * existing mechanism covers it with no change of its own.
+   *
+   * That made `committed` able to say "water", which changes when a turn CONTINUES to the coach —
+   * alsoAsksCoach is durableDomains().length > 0 — and when the educational mouths stand down.
+   * Both move in the intended direction (write, then coach; do not lecture over a log), and both
+   * are behaviour, so they are graded here rather than assumed.
+   *
+   * All five tracked facts now travel one path: write -> state -> decision -> response.
    */
   const EVIDENCED_DAYS = 5;   // underPolicy prescribes only for a client it can actually read
   async function coachingTurn(message: string, opts?: { seeWrites?: boolean }) {
@@ -299,7 +306,20 @@ const MUST_WRITE: [string, string][] = [
     return blocks.length > 1 && !last.includes("?") && !/\[(?:BUTTONS|MEDIA)/i.test(last) ? last : "";
   };
 
-  // A bare receipt must gain exactly one move.
+  // A bare receipt must gain exactly one move — on EVERY tracked fact that writes durably.
+  // Water is listed explicitly: it was the fact this law could not reach, and a regression there
+  // would look exactly like the bare receipt this whole cut exists to end.
+  for (const [surface, message] of [
+    ["water", "2 litres of water"],
+    ["water", "drank 3 litres today"],
+    ["weight", "84kg"],
+  ] as [string, string][]) {
+    const reply = await coachingTurn(message);
+    if (!closingMove(reply)) {
+      failures.push(`A durable ${surface} write ended with a receipt and no next move: "${reply.replace(/\n/g, " ⏎ ")}"`);
+    }
+  }
+
   {
     const reply = await coachingTurn("walked 8000 steps today");
     const move = closingMove(reply);
@@ -338,7 +358,7 @@ const MUST_WRITE: [string, string][] = [
     if (move) failures.push(`A turn that wrote nothing was given a coaching move: "${quiet}" ended with "${move}"`);
   }
 
-  const total = MUST_NOT_WRITE.length + MUST_WRITE.length + 2 + 7;
+  const total = MUST_NOT_WRITE.length + MUST_WRITE.length + 2 + 10;
   if (failures.length > 0) {
     for (const f of failures) console.log(`✗ ${f}`);
     console.log(`\n✗ tracking contract: ${failures.length}/${total} violations`);
