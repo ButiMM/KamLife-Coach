@@ -28,6 +28,7 @@ export function buildContentVariables(vars?: Record<string, string | number | nu
 // codebase. These two stay as re-exports so the existing call sites keep working unchanged while
 // they migrate; new code should import from ./sast directly.
 import { sastDayKey, sastDayStart } from "./sast";
+import { clausesOf } from "./understanding/messy-intake";
 export { sastDayStart };
 export const sastToday = sastDayKey;
 
@@ -1157,7 +1158,12 @@ export function digitizeSpokenAmounts(m: string): string {
 export function looksLikeWaterReport(raw: string): boolean {
   const m = digitizeSpokenAmounts(raw);
   return /\b(?:drank|drinking|had)\b.{0,24}\b\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?|glass(?:es)?|bottles?)\s*(?:of\s+)?(?:water)?\b/i.test(m)
-    || /^\s*\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?)(?:\s+(?:of\s+)?water)?\s*$/i.test(m)
+    // A FULL STOP IS NOT A DISQUALIFIER (2026-08-26, issue #63). This anchored to end-of-string,
+    // so "2 litres of water." was not a water report while "2 litres of water" was — and once
+    // clauses carry their own terminator, that made the first sentence of every mixed bubble
+    // invisible here. looksLikeWeightReport, its sibling, has always ended `[.!]?\s*$`; this now
+    // matches it. "?" stays out: a question mark is a disqualifier, and must remain one.
+    || /^\s*\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?)(?:\s+(?:of\s+)?water)?\s*[.!]?\s*$/i.test(m)
     // THE COPULA FORM (2026-08-26, issue #63). "My water is 2 litres" reported nothing to the
     // water owner — it needed `drank/drinking/had` or a bare amount — so it fell past Water to
     // FoodContext, where the scanner logged a FOOD called "Water" with a macro card and todayWater
@@ -1213,6 +1219,27 @@ export function isAskingNotReporting(message: string): boolean {
   if (/\b(?:any|some|a few)\s+(?:suggestions?|ideas?|options?|recommendations?)\b/i.test(s)) return true;
   if (/\b(?:suggestion|recommendation)s?\b/i.test(s) && !/\bi (?:had|ate|have eaten|just had)\b/i.test(s)) return true;
   return false;
+}
+
+/**
+ * A QUESTION IN ONE CLAUSE MUST NOT ERASE A REPORT IN ANOTHER (2026-08-26, issue #63).
+ *
+ * Some clause REPORTS the fact, and that clause is itself neither a question nor an intention.
+ * NOT "does the message mention the fact" — that was measured and it re-opens every false write
+ * #73 closed, because naming a fact is what a question does too.
+ *
+ * Composes the two floors that already own those questions and adds no domain knowledge:
+ * `isReport` stays with the caller, so each fact keeps its ONE recogniser. Callers must NOT
+ * re-check asking/intent themselves — that duplication made this floor unfalsifiable once.
+ * Lives beside the floors; messy-intake owns the splitter and is import-free by design.
+ * Rationale and both-ways grading: script/tracking-contract-tests.ts, LAW 5.
+ */
+export function reportedInSomeClause(message: string, isReport: (clause: string) => boolean): string | null {
+  for (const clause of clausesOf(message)) {
+    if (isAskingNotReporting(clause) || isFutureIntent(clause)) continue;
+    if (isReport(clause)) return clause;
+  }
+  return null;
 }
 
 // Goal-change vocabulary gate for the normalizer. A GOAL_CHANGE canonical rewrites

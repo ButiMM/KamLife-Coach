@@ -55,7 +55,7 @@ import { mustStayDeterministic } from "./understanding/action-router";
 import { attributeMultiDayReport } from "./understanding/day-relative-situation";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
-import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
+import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, reportedInSomeClause, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { mentionsConditionOrMedication, conditionWelcome } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
@@ -681,10 +681,20 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
   const statedFacts = journeyMustKeepFacts(message);
   const foodIsWritable = scannerSawFood;
+  // WATER AND WEIGHT ARE OWED TOO (2026-08-26, issue #63). This tracked three facts, so on
+  // "2 litres of water. what should I eat?" nothing was outstanding, mayEndTurn said yes, and
+  // early-commands ended the turn before the water door ever ran. The same message with STEPS
+  // survived because steps WAS owed — that asymmetry was the defect, not the meal plan.
+  // Stated-ness is read per clause, so a pure question can never make a fact "owed".
+  const statedWater = () => !!reportedInSomeClause(message, c => looksLikeWaterReport(c.toLowerCase()));
+  const statedWeight = () => !!reportedInSomeClause(message, c => looksLikeWeightReport(c.toLowerCase()));
   const factsStillOwed = (): string[] => {
     const written = durableDomains(turnMutations());
-    return (["food", "steps", "workout"] as const)
-      .filter(d => (d === "food" ? statedFacts.food && foodIsWritable : (statedFacts as any)[d])
+    return (["food", "steps", "workout", "water", "weight"] as const)
+      .filter(d => (d === "food" ? statedFacts.food && foodIsWritable
+        : d === "water" ? statedWater()
+        : d === "weight" ? statedWeight()
+        : (statedFacts as any)[d])
         && !written.includes(d));
   };
   /** May THIS handler's reply end the turn, or is a fact the client stated still unwritten? */
@@ -1170,7 +1180,19 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ALL STEP PARSING HAS ONE OWNER (Cut 5b). ~50 lines of regexes and the number arithmetic
   // lived here, beside messy-intake's own extractStepCount — two step parsers for one fact, in
   // two files. Moved whole; the guards that need this function's context stay here.
-  const sd = detectStepLog(m);
+  let sd = detectStepLog(m);
+  // A QUESTION IN ONE CLAUSE DOES NOT ERASE A REPORT IN ANOTHER (2026-08-26, issue #63). On
+  // "walked 8000 steps. what should I eat?" the extractor found 8 000 and threw it away, because
+  // isQuestionForm matches "should i" ANYWHERE in the bubble. Re-read per clause, only when the
+  // whole-message read already said no, and the clause's own parse becomes the parse — so the
+  // number stays tied to the sentence that reported it. See tracking-contract-tests, LAW 5.
+  if (!sd.loggableByForm) {
+    const stepClause = reportedInSomeClause(m, c => {
+      const d = detectStepLog(c);
+      return d.matched && d.loggableByForm && d.isExplicitLog;
+    });
+    if (stepClause) sd = detectStepLog(stepClause);
+  }
   // Future-intent guard: "I'll walk 10k tomorrow" slips past the question check — must not log
   // today. Explicit "walked 8,000 steps" is a log even if the classifier tagged the note a
   // QUESTION because they also said "I'm exhausted" (live 2026-08-19 mixed note — steps dropped).

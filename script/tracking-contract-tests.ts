@@ -10,8 +10,9 @@
  *        -> ONE action          ("what does this change about the coaching?")
  *        -> ONE response        ("what does the client read?")
  *
- * and the contract has four laws. The first two protect the STATE; the second two are what turns
- * a logger into a coach — they are enforced further down, where the code that grades them is:
+ * and the contract has five laws. The first two protect the STATE, the next two are what turns a
+ * logger into a coach, and the fifth is what makes all four survive a real client's phrasing —
+ * they are enforced further down, where the code that grades them is:
  *
  *   LAW 1 — RECOGNISER AND EXTRACTOR MUST AGREE.
  *     If the recogniser says "yes, a step report" and the extractor returns zero, the fact is
@@ -33,6 +34,7 @@
  *
  *   LAW 3 — THE ANSWER QUOTES THE LEDGER, NOT THE MESSAGE.  (graded at "LAW 3" below)
  *   LAW 4 — A DURABLE WRITE IS FOLLOWED BY ONE NEXT MOVE.   (graded at "LAW 4" below)
+ *   LAW 5 — A QUESTION IN ONE CLAUSE DOES NOT ERASE A REPORT IN ANOTHER. (at "LAW 5" below)
  *
  * WHY THIS FILE IS BEHAVIOURAL AND NOT A PREDICATE TEST. Both defects above sat in code whose
  * predicates were individually defensible. The steps gate already asked isFutureIntent and got a
@@ -115,6 +117,31 @@ const MUST_NOT_WRITE: [string, string][] = [
   ["food", "is bread ok?"],
 ];
 
+/**
+ * WATER'S OWN NEGATIVE-INTENT VOCABULARY — graded on the WATER surface only, and the reason for
+ * that narrowing is stated rather than hidden.
+ *
+ * These are not asking, and isFutureIntent does not own them: "trying to" is excluded from that
+ * floor ON PURPOSE, because a report can carry it ("trying to lose weight, weighed 84kg this
+ * morning"), and the obligation forms have no pronoun for the asking floor to key on. So water
+ * refuses them itself. These cases exist because the first version of this cut deleted that
+ * vocabulary as a "duplicate" and two of them began writing water.
+ *
+ * WHY NOT MUST_NOT_WRITE, WHICH FORBIDS EVERY SURFACE: because on these inputs the FOOD scanner
+ * claims the message and logs a meal called "Water" — on main too, unchanged by this cut. That is
+ * a real Law 2 violation on a different surface, with its own cause (the food door's planning
+ * vocabulary has the same gap, and water is treated as a food at all). Asserting it here would
+ * mean fixing the food door in a water cut. Asserting "nothing wrote" and quietly deleting the
+ * case would mean hiding it. So it is graded where this cut has authority, and the food claim is
+ * REPORTED on every run below so it cannot be forgotten.
+ */
+const WATER_INTENT: string[] = [
+  "trying to drink 2 litres of water",
+  "must drink 2 litres of water",
+  "should drink 2 litres of water",
+  "will drink 2 litres of water",
+];
+
 /** THE NEGATIVE CONTROL. Real reports, in the shapes clients actually send. Every one must still
  *  reach its writer — a guard that passes the list above by refusing everything fails here.
  *  The "trying to lose weight" line is deliberate: it carries an intention AND a measurement, and
@@ -140,6 +167,32 @@ const MUST_WRITE: [string, string][] = [
   const g = globalThis as any;
   const { handleMessage } = await import("../server/routes");
   const schema = await import("../shared/schema");
+  // EVERY GRADED TURN STARTS FROM CLEAN PROCESS STATE, and this is not housekeeping — without it
+  // the suite grades a different product further down than it does at the top.
+  //
+  //   the pattern summary  is memoised per user for an hour, in module state.
+  //   the GPT rate limiter allows 10 calls per user per 60s, in module state — and this suite
+  //                        runs ~65 turns in ten seconds.
+  //   the card dump window suppresses a second macro card for the same client inside the window.
+  //                        This is CORRECT product behaviour — six photos in ninety seconds get
+  //                        one card — but it meant the "a card owns the next action" case only
+  //                        held for the FIRST food turn of the run. Adding cases above it turned
+  //                        the card off, the reply became a bare receipt, Law 4 correctly appended
+  //                        a move, and the assertion failed for a reason that had nothing to do
+  //                        with what it tests.
+  //
+  // A suite whose verdict depends on how many turns ran before it is not measuring the product,
+  // and it fails in the worst direction — silently changing behaviour rather than erroring.
+  // The limiter is reset through its own exported function with a zero window, so no production
+  // code exists solely to be testable.
+  const { invalidatePatternCache } = await import("../server/cache");
+  const { checkGptRateLimit } = await import("../server/utils");
+  const { _resetDumpWindow } = await import("../server/card-policy");
+  const freshTurn = () => {
+    invalidatePatternCache(USER.id);
+    checkGptRateLimit(USER.id, 1_000_000, 0);
+    _resetDumpWindow();
+  };
   const NAME = new Map<any, string>([
     [schema.stepLogs, "steps"], [schema.weightLogs, "weight"],
     [schema.workoutLogs, "workout"], [schema.mealLogs, "food"],
@@ -150,6 +203,7 @@ const MUST_WRITE: [string, string][] = [
    *  read of it silently reports "no write" — which is how a water false-write could hide from a
    *  probe that looked clean. "Did todayWater move off the seeded 0" is the honest test. */
   async function wroteFor(message: string): Promise<Set<string>> {
+    freshTurn();
     g.__KAMLIFE_STUB_USER = { ...USER, todayWater: "0" };
     g.__KAMLIFE_STUB_WRITES = [];
     await handleMessage(USER.phoneNumber, message).catch(() => "");
@@ -167,6 +221,15 @@ const MUST_WRITE: [string, string][] = [
     if (wrote.size > 0) {
       failures.push(`A question mutated tracking state: ${surface} | "${message}" wrote ${[...wrote].join(", ")}`);
     }
+  }
+
+  const knownFoodClaim: string[] = [];
+  for (const message of WATER_INTENT) {
+    const wrote = await wroteFor(message);
+    if (wrote.has("water")) {
+      failures.push(`An intention wrote water: "${message}" — water's own negative vocabulary is gone`);
+    }
+    if (wrote.has("food")) knownFoodClaim.push(message);
   }
 
   for (const [surface, message] of MUST_WRITE) {
@@ -200,6 +263,7 @@ const MUST_WRITE: [string, string][] = [
   }
 
   async function turnOnDayAt9k(message: string): Promise<{ reply: string; stored: number }> {
+    freshTurn();
     g.__KAMLIFE_STUB_USER = { ...USER, todayWater: "0" };
     g.__KAMLIFE_STUB_ROWS = new Map([[schema.stepLogs, [
       { id: "s1", userId: USER.id, steps: 9000, loggedAt: new Date(dayStart.getTime() + 3_600_000) },
@@ -285,9 +349,21 @@ const MUST_WRITE: [string, string][] = [
   const EVIDENCED_DAYS = 5;   // underPolicy prescribes only for a client it can actually read
   async function coachingTurn(message: string, opts?: { seeWrites?: boolean }) {
     const meals = Array.from({ length: EVIDENCED_DAYS }, (_, i) => ({
-      id: `m${i}`, userId: USER.id, kcalInt: 1800, proteinInt: 70, items: ["chicken"],
-      mealLabel: "lunch", loggedAt: new Date(dayStart.getTime() - i * 86_400_000 + 3_600_000), corrected: false,
+      id: `m${i}`, userId: USER.id, items: ["chicken"], mealLabel: "lunch",
+      loggedAt: new Date(dayStart.getTime() - i * 86_400_000 + 3_600_000), corrected: false,
+      // BOTH THE COLUMN NAME AND THE SELECT ALIAS. The stub returns raw rows and does not apply
+      // drizzle projections, so `db.select({ kcal: mealLogs.kcalInt })` reads undefined and the
+      // client silently looked like they had logged NOTHING today — which quietly moved the
+      // coaching ladder onto its "log something" rung and made both ordering assertions below
+      // pass without proving anything. Seeding only kcalInt is how that hid.
+      // PROTEIN IS AT TARGET ON PURPOSE. At 70g against a 180g target the ladder stops on the
+      // protein rung, which outranks every step-sensitive rung — so whether the decision could
+      // see this turn's step write made no difference to the move, and BOTH ordering assertions
+      // below passed while proving nothing. The client has to be one where the property is
+      // actually observable.
+      kcalInt: 2000, proteinInt: 200, kcal: 2000, protein: 200, carbs: 0, fat: 0,
     }));
+    freshTurn();
     g.__KAMLIFE_STUB_USER = { ...USER, todayWater: "0" };
     g.__KAMLIFE_STUB_ROWS = new Map([
       [schema.mealLogs, meals], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
@@ -329,12 +405,20 @@ const MUST_WRITE: [string, string][] = [
     if (/\bwalk\b/i.test(move)) failures.push(`The move ignored the row this turn wrote — 8 000 steps logged, and the coach said: "${move}"`);
   }
 
-  // NEGATIVE CONTROL FOR THE ORDERING. Deny the decision sight of the write and the same turn
-  // must produce the wrong move — proving the assertion above grades ordering, not just presence.
+  // NEGATIVE CONTROL FOR THE ORDERING. Deny the decision sight of the write and the move must
+  // CHANGE — that is the property, and it is what proves the assertion above grades ordering
+  // rather than mere presence.
+  //
+  // It asserted the blind move contained "walk" and that was too specific: which rung the ladder
+  // reaches depends on state this suite does not fully pin (the pattern cache carries across
+  // turns in-process), so simply adding cases ABOVE this one flipped the blind move to the log
+  // rung and the control started failing for a reason that had nothing to do with ordering. A
+  // control that breaks when unrelated tests are added is not measuring what it claims.
   {
+    const sighted = closingMove(await coachingTurn("walked 8000 steps today"));
     const blind = closingMove(await coachingTurn("walked 8000 steps today", { seeWrites: false }));
-    if (blind && !/\bwalk\b/i.test(blind)) {
-      failures.push(`The ordering control did not reproduce the defect: a decision blind to the write still said "${blind}", so the check above proves nothing`);
+    if (sighted && blind && sighted === blind) {
+      failures.push(`The ordering control did not reproduce the defect: a decision blind to the write produced the SAME move ("${blind}"), so the check above proves nothing`);
     }
   }
 
@@ -358,12 +442,66 @@ const MUST_WRITE: [string, string][] = [
     if (move) failures.push(`A turn that wrote nothing was given a coaching move: "${quiet}" ended with "${move}"`);
   }
 
-  const total = MUST_NOT_WRITE.length + MUST_WRITE.length + 2 + 10;
+  /**
+   * LAW 5 — A QUESTION IN ONE CLAUSE DOES NOT ERASE A REPORT IN ANOTHER (2026-08-26, issue #63).
+   *
+   * Real clients do not send one fact per bubble. "I walked 8,000 steps, what should I eat?" is
+   * the ordinary shape, and the system already UNDERSTOOD the step count — it then threw it away
+   * because a whole-message question guard read the second clause. Measured on main, five of ten
+   * mixed turns lost the fact. Food and workout had each learned this rule separately; steps,
+   * water and weight never had, and each lost it a different way:
+   *
+   *     steps   detectStepLog extracted 8 000, then isQuestionForm matched "should i" anywhere
+   *     water   waterIsQuestion begins with m.includes("?")
+   *     weight  looksLikeWeightReport is anchored ^...$, so a clause was never examined
+   *
+   * THE RULE IS NOT "DOES THE MESSAGE MENTION THE FACT", and that is the whole difficulty. That
+   * version was tried and measured, and it resurrects every false write #73 closed:
+   * journeyMustKeepFacts reports logStepsEvenIfClassifiedQuestion === true for "Is 8000 steps
+   * enough?" and for "I need to do 10000 steps". Naming a fact is what a question does too.
+   *
+   * So: some clause REPORTS the fact, and that clause is itself neither a question nor an
+   * intention — utils.reportedInSomeClause, composing the two floors that already own those
+   * questions. No domain recogniser was added; each fact keeps the one it had.
+   *
+   * GRADED BOTH WAYS IN THE SAME BREATH. Every widening here is one regex away from re-opening
+   * Law 2, so the MUST_NOT_WRITE list above is this law's negative control as much as its own —
+   * and the two run against the same pipeline. A fix that preserves the fact by loosening the
+   * floors fails there, loudly, on "I need to do 10000 steps".
+   */
+  const MIXED: [string, string][] = [
+    ["steps", "walked 8000 steps. what should I eat?"],
+    ["water", "2 litres of water. what should I eat?"],
+    ["weight", "84kg. what should I eat?"],
+    ["workout", "workout done. what should I eat?"],
+    ["food", "I had eggs. what should I eat?"],
+    ["steps", "walked 8000 steps. how am I doing?"],
+    ["water", "2 litres of water. how am I doing?"],
+    ["weight", "84kg. how am I doing?"],
+    ["workout", "workout done. how am I doing?"],
+    ["food", "I had eggs. how am I doing?"],
+    ["water", "drank 1 litre. what is a portion of rice?"],
+    ["steps", "10k steps done. is that enough?"],
+  ];
+  for (const [surface, message] of MIXED) {
+    const wrote = await wroteFor(message);
+    if (!wrote.has(surface)) {
+      failures.push(`A question in one clause erased a ${surface} report in another: "${message}" wrote ${[...wrote].join(", ") || "nothing"}`);
+    }
+  }
+
+  const total = MUST_NOT_WRITE.length + MUST_WRITE.length + 2 + 10 + MIXED.length;
   if (failures.length > 0) {
     for (const f of failures) console.log(`✗ ${f}`);
     console.log(`\n✗ tracking contract: ${failures.length}/${total} violations`);
     process.exit(1);
   }
-  console.log(`✓ tracking contract: ${MUST_NOT_WRITE.length} questions wrote nothing, ${MUST_WRITE.length} reports reached their writer, the answer quoted the ledger, and a durable write ended in one next move`);
+  if (knownFoodClaim.length > 0) {
+    console.log(`⚠ KNOWN, NOT FIXED HERE — the food door logs a meal on ${knownFoodClaim.length} water INTENTION(s):`);
+    for (const m of knownFoodClaim) console.log(`    "${m}" -> a meal called "Water" is written`);
+    console.log(`  Unchanged from main. Water correctly refuses these; the food door's planning`);
+    console.log(`  vocabulary has the same gap, and treats water as a food at all. Its own cut.`);
+  }
+  console.log(`✓ tracking contract: ${MUST_NOT_WRITE.length} questions wrote nothing, ${MUST_WRITE.length} reports reached their writer, the answer quoted the ledger, and a durable write ended in one next move, and ${MIXED.length} period-separated mixed turns kept their fact (the COMMA form is not covered — see LAW 5)`);
   process.exit(0);
 })();

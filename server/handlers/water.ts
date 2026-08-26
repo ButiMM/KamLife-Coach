@@ -8,7 +8,7 @@ import { users } from "../../shared/schema";
 import { neverSilentLine } from "../reply-hygiene";
 import { eq, sql } from "drizzle-orm";
 import { logChat, turnMutation } from "./chat-log";
-import { sastToday, mentionsNotDone, digitizeSpokenAmounts } from "../utils";
+import { sastToday, mentionsNotDone, reportedInSomeClause, digitizeSpokenAmounts } from "../utils";
 import { waterTargetLitres } from "../targets";
 import { scanForSAFoods } from "./food-scanner";
 
@@ -50,9 +50,43 @@ export async function tryLogWater(ctx: {
     || /^\s*is\s+\d/i.test(m);
   const waterNotConsumed = mentionsNotDone(m)  // couldn't/skipped/didn't finish my water — never consumed
     || /\b(need\s+to|should\s+(?:i|drink)|must\s+drink|gonna|going\s+to|will\s+drink|plan\s+to|trying\s+to|still\s+need)\b/i.test(m);
-  if (waterMatch && hasWaterKeyword && !isNonWaterDrink && !waterIsQuestion && !waterNotConsumed) {
-    const amount = parseFloat(waterMatch[1]);
-    const unit = waterMatch[2].toLowerCase();
+  // ONE WATER-REPORT SHAPE, APPLIED TO WHATEVER TEXT IT IS GIVEN — the same amount/keyword/drink
+  // tests as above, so there is no second water recogniser; only the text they read changes.
+  //
+  // IT DOES NOT RE-CHECK ASKING, OR THE INTENT FORMS THE FLOORS OWN. It is only ever called
+  // through reportedInSomeClause, which refuses any clause that is asking or intending first.
+  // Asking twice was measured and it made that floor unfalsifiable — the suite stayed green with
+  // the floor deleted, because a full copy of it here was quietly doing the job.
+  //
+  // BUT DELETING THE WHOLE COPY WAS TOO MUCH: "trying to drink 2 litres of water" and "must drink
+  // 2 litres of water" then WROTE. What stays below is exactly what no floor owns —
+  //   trying to     isFutureIntent excludes it ON PURPOSE, because a report can carry it:
+  //                 "trying to lose weight, weighed 84kg this morning". Water has no such
+  //                 counterpart — "trying to drink 2L" is never a report of having drunk it.
+  //   must/should/will drink   obligation with no pronoun, so the asking floor has nothing to key
+  //                 on and isFutureIntent's forms ("I'll", "I will") do not match.
+  //   mentionsNotDone   "haven't had my 2L yet" is a NEGATION, neither question nor intention.
+  // Everything else — gonna, going to, plan to, need to, should I — is left to the floors, and
+  // deleting them there still turns this suite red.
+  const waterReportIn = (t: string) => !!t.match(/(\d+(?:\.\d+)?)\s*(l|litre|liter|litres|liters|ml|millilitre|milliliter|glass(?:es)?|cup(?:s)?|bottle(?:s)?)\b/i)
+    && WATER_WORDS.test(t)
+    && !/\b(wine|beer|whisky|brandy|rum|vodka|gin|shots?|alcohol|henny|hennessy|smirnoff|hunters|savanna|castle|black label|flying fish|brutal fruit|cider|juice|coffee|tea|milo|milk|cooldrink|cool drink|fanta|sprite|coke|pepsi|energy drink|redbull|monster|cream soda|softdrink|soda water|tonic)\b/i.test(t)
+    && !/\btrying\s+to\b/i.test(t)
+    && !/\b(?:must|should|will)\s+drink\b/i.test(t)
+    && !mentionsNotDone(t);
+  // A QUESTION IN ONE CLAUSE DOES NOT ERASE A REPORT IN ANOTHER (2026-08-26, issue #63).
+  // waterIsQuestion begins with `m.includes("?")`, so a single question mark ANYWHERE in the
+  // bubble refused the write: "2 litres of water, what should I eat?" logged no water at all, and
+  // the meal plan answered only because this door had already declined. Re-read per clause, and
+  // only when the whole-message read said no, so nothing that logs today changes.
+  const wholeIsReport = !!waterMatch && hasWaterKeyword && !isNonWaterDrink && !waterIsQuestion && !waterNotConsumed;
+  const waterClause = wholeIsReport ? null : reportedInSomeClause(message, c => waterReportIn(c.toLowerCase()));
+  const waterText = waterClause ? waterClause.toLowerCase() : m;
+  if (wholeIsReport || waterClause) {
+    // The amount comes from the sentence that reported it, never from elsewhere in the bubble.
+    const clauseMatch = waterText.match(/(\d+(?:\.\d+)?)\s*(l|litre|liter|litres|liters|ml|millilitre|milliliter|glass(?:es)?|cup(?:s)?|bottle(?:s)?)\b/i)!;
+    const amount = parseFloat(clauseMatch[1]);
+    const unit = clauseMatch[2].toLowerCase();
     let litres = amount;
     if (unit === "ml" || unit === "millilitre" || unit === "milliliter") litres = amount / 1000;
     else if (unit === "glass" || unit === "glasses") litres = amount * 0.25;

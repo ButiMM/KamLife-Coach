@@ -473,6 +473,21 @@ export function resolveTurn(
 
 
 /**
+ * THE SENTENCES OF A BUBBLE (2026-08-26, issue #63) — named because four surfaces need it.
+ *
+ * The food door has split on sentence boundaries since 2026-08-22 to stop a planning clause
+ * suppressing a report clause. Steps, water and weight had the same defect and no splitter, so
+ * this is lifted out of the food fallback verbatim rather than written again three times.
+ *
+ * Pure, and it stays here because this module has no imports by design. It does not decide
+ * anything — deciding whether a clause REPORTS a fact needs the asking and intent floors, which
+ * live in utils; that composition is utils.reportedInSomeClause, and it calls this.
+ */
+export function clausesOf(message: string): string[] {
+  return String(message || "").split(/(?<=[.!?])\s+|\n+/).map(c => c.trim()).filter(c => c.length > 3);
+}
+
+/**
  * REBUILD GATE — the three facts in a messy note cannot be dropped because a classifier
  * called the whole turn a question. This is the product, not a helper.
  */
@@ -493,9 +508,8 @@ export function journeyMustKeepFacts(message: string): {
   // the same defect as the door-level question veto, one layer down. Only the negative case is
   // re-examined and only per sentence, so nothing that already parsed as a fact changes, and a
   // pure ask ("what should I eat for lunch?") still has no clause that reports a meal.
-  const byClause = r.hasFoodReport ? null : String(message || "")
-    .split(/(?<=[.!?])\s+|\n+/).map(c => c.trim()).filter(c => c.length > 3)
-    .map(c => parseMessyIntake(c)).find(c => c.hasFoodReport);
+  const byClause = r.hasFoodReport ? null
+    : clausesOf(message).map(c => parseMessyIntake(c)).find(c => c.hasFoodReport);
   const explicitSteps = r.stepCount != null && r.stepCount > 100;
   return {
     food: r.hasFoodReport || !!byClause,
