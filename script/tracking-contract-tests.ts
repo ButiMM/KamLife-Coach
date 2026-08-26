@@ -10,8 +10,9 @@
  *        -> ONE action          ("what does this change about the coaching?")
  *        -> ONE response        ("what does the client read?")
  *
- * and the contract has four laws. The first two protect the STATE; the second two are what turns
- * a logger into a coach — they are enforced further down, where the code that grades them is:
+ * and the contract has five laws. The first two protect the STATE, the next two are what turns a
+ * logger into a coach, and the fifth is what makes all four survive a real client's phrasing —
+ * they are enforced further down, where the code that grades them is:
  *
  *   LAW 1 — RECOGNISER AND EXTRACTOR MUST AGREE.
  *     If the recogniser says "yes, a step report" and the extractor returns zero, the fact is
@@ -33,6 +34,7 @@
  *
  *   LAW 3 — THE ANSWER QUOTES THE LEDGER, NOT THE MESSAGE.  (graded at "LAW 3" below)
  *   LAW 4 — A DURABLE WRITE IS FOLLOWED BY ONE NEXT MOVE.   (graded at "LAW 4" below)
+ *   LAW 5 — A QUESTION IN ONE CLAUSE DOES NOT ERASE A REPORT IN ANOTHER. (at "LAW 5" below)
  *
  * WHY THIS FILE IS BEHAVIOURAL AND NOT A PREDICATE TEST. Both defects above sat in code whose
  * predicates were individually defensible. The steps gate already asked isFutureIntent and got a
@@ -358,12 +360,60 @@ const MUST_WRITE: [string, string][] = [
     if (move) failures.push(`A turn that wrote nothing was given a coaching move: "${quiet}" ended with "${move}"`);
   }
 
-  const total = MUST_NOT_WRITE.length + MUST_WRITE.length + 2 + 10;
+  /**
+   * LAW 5 — A QUESTION IN ONE CLAUSE DOES NOT ERASE A REPORT IN ANOTHER (2026-08-26, issue #63).
+   *
+   * Real clients do not send one fact per bubble. "I walked 8,000 steps, what should I eat?" is
+   * the ordinary shape, and the system already UNDERSTOOD the step count — it then threw it away
+   * because a whole-message question guard read the second clause. Measured on main, five of ten
+   * mixed turns lost the fact. Food and workout had each learned this rule separately; steps,
+   * water and weight never had, and each lost it a different way:
+   *
+   *     steps   detectStepLog extracted 8 000, then isQuestionForm matched "should i" anywhere
+   *     water   waterIsQuestion begins with m.includes("?")
+   *     weight  looksLikeWeightReport is anchored ^...$, so a clause was never examined
+   *
+   * THE RULE IS NOT "DOES THE MESSAGE MENTION THE FACT", and that is the whole difficulty. That
+   * version was tried and measured, and it resurrects every false write #73 closed:
+   * journeyMustKeepFacts reports logStepsEvenIfClassifiedQuestion === true for "Is 8000 steps
+   * enough?" and for "I need to do 10000 steps". Naming a fact is what a question does too.
+   *
+   * So: some clause REPORTS the fact, and that clause is itself neither a question nor an
+   * intention — utils.reportedInSomeClause, composing the two floors that already own those
+   * questions. No domain recogniser was added; each fact keeps the one it had.
+   *
+   * GRADED BOTH WAYS IN THE SAME BREATH. Every widening here is one regex away from re-opening
+   * Law 2, so the MUST_NOT_WRITE list above is this law's negative control as much as its own —
+   * and the two run against the same pipeline. A fix that preserves the fact by loosening the
+   * floors fails there, loudly, on "I need to do 10000 steps".
+   */
+  const MIXED: [string, string][] = [
+    ["steps", "walked 8000 steps. what should I eat?"],
+    ["water", "2 litres of water. what should I eat?"],
+    ["weight", "84kg. what should I eat?"],
+    ["workout", "workout done. what should I eat?"],
+    ["food", "I had eggs. what should I eat?"],
+    ["steps", "walked 8000 steps. how am I doing?"],
+    ["water", "2 litres of water. how am I doing?"],
+    ["weight", "84kg. how am I doing?"],
+    ["workout", "workout done. how am I doing?"],
+    ["food", "I had eggs. how am I doing?"],
+    ["water", "drank 1 litre. what is a portion of rice?"],
+    ["steps", "10k steps done. is that enough?"],
+  ];
+  for (const [surface, message] of MIXED) {
+    const wrote = await wroteFor(message);
+    if (!wrote.has(surface)) {
+      failures.push(`A question in one clause erased a ${surface} report in another: "${message}" wrote ${[...wrote].join(", ") || "nothing"}`);
+    }
+  }
+
+  const total = MUST_NOT_WRITE.length + MUST_WRITE.length + 2 + 10 + MIXED.length;
   if (failures.length > 0) {
     for (const f of failures) console.log(`✗ ${f}`);
     console.log(`\n✗ tracking contract: ${failures.length}/${total} violations`);
     process.exit(1);
   }
-  console.log(`✓ tracking contract: ${MUST_NOT_WRITE.length} questions wrote nothing, ${MUST_WRITE.length} reports reached their writer, the answer quoted the ledger, and a durable write ended in one next move`);
+  console.log(`✓ tracking contract: ${MUST_NOT_WRITE.length} questions wrote nothing, ${MUST_WRITE.length} reports reached their writer, the answer quoted the ledger, and a durable write ended in one next move, and ${MIXED.length} mixed turns kept their fact`);
   process.exit(0);
 })();

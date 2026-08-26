@@ -21,7 +21,7 @@ import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat, turnMutation, turnAlreadyWrote } from "./chat-log";
 import { sastDayKey } from "../sast";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
-import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen } from "../utils";
+import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, reportedInSomeClause, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen } from "../utils";
 import { applyRetroSessionState } from "../day-ledger";
 import { readTrainingDay } from "../one-action";
 import { invalidatePatternCache } from "../cache";
@@ -85,11 +85,22 @@ export async function handleWorkoutCommands(ctx: {
 
   // ---- WEIGHT LOG — standalone "84kg" or brief weight check-in ----
   // Only fires if message is clearly about body weight, not exercise weight
+  // ONE WEIGH-IN SHAPE, APPLIED TO WHATEVER TEXT IT IS GIVEN. Factored out of the two inline
+  // tests below so the same recogniser can read a single clause — no second weight recogniser.
+  const weighInShape = (t: string) => /^(\d{2,3}(?:\.\d+)?)\s*kg[.!]?$/i.test(t)
+    || /\b(?:weigh(?:ed|s|ing)?|morning weight|body weight|on the scale|scale said|scale reads|weighed in|my weight)\b.*\b(\d{2,3}(?:\.\d+)?)\s*kg\b/i.test(t)
+    || /\b(\d{2,3}(?:\.\d+)?)\s*kg\b.*\b(?:today|this morning|just weighed)\b/i.test(t);
   const isStandaloneWeight = /^(\d{2,3}(?:\.\d+)?)\s*kg[.!]?$/i.test(m);
   const isWeightCheckIn = (
     /\b(?:weigh(?:ed|s|ing)?|morning weight|body weight|on the scale|scale said|scale reads|weighed in|my weight)\b.*\b(\d{2,3}(?:\.\d+)?)\s*kg\b/i.test(m)
     || /\b(\d{2,3}(?:\.\d+)?)\s*kg\b.*\b(?:today|this morning|just weighed)\b/i.test(m)
   );
+  // A QUESTION IN ONE CLAUSE DOES NOT ERASE A REPORT IN ANOTHER (2026-08-26, issue #63). The two
+  // tests above are anchored to the WHOLE bubble, so "84kg. how am I doing?" was not a weigh-in at
+  // all — the scale reading was simply not seen. Re-read per clause, only when the whole-message
+  // read already said no, and only for a clause that is neither a question nor an intention.
+  const weightClause = (isStandaloneWeight || isWeightCheckIn) ? null
+    : reportedInSomeClause(message, c => weighInShape(c.toLowerCase()));
   // Retrospective brake: "I weighed 83kg last week", "I started at 95kg", "used to be 90kg"
   // are HISTORICAL — they must not overwrite today's weight or recalc targets off a past number.
   const isRetrospectiveWeight = /\b(last\s+(?:week|month|year|time)|used\s+to|back\s+(?:then|in|when)|previously|a\s+(?:week|month|year)\s+ago|(?:weeks?|months?|years?)\s+ago|started\s+(?:at|on|out|off)|when\s+i\s+(?:started|began))\b/i.test(m);
@@ -103,8 +114,14 @@ export async function handleWorkoutCommands(ctx: {
   // protein targets off it, and replied "🏆 you hit 85kg — that's the goal, done." The two
   // branches either side of this one — the session report above and the cardio log below — have
   // always asked isFutureIntent. This one never did; that asymmetry was the whole defect.
-  if ((isStandaloneWeight || isWeightCheckIn) && !isRetrospectiveWeight && !isFutureIntent(m) && !looksLikeQuestion(m) && !EXERCISE_PATTERN.test(m)) {
-    const kgMatch = m.match(/(\d{2,3}(?:\.\d+)?)\s*kg/i);
+  // When the weigh-in came from a clause, the clause is the text every guard below reads: the
+  // whole-bubble question test is precisely what was wrong, and the number must come from the
+  // sentence that reported it.
+  const weightText = weightClause ? weightClause.toLowerCase() : m;
+  if ((isStandaloneWeight || isWeightCheckIn || !!weightClause)
+      && !isRetrospectiveWeight && !isFutureIntent(weightText)
+      && !looksLikeQuestion(weightText) && !EXERCISE_PATTERN.test(weightText)) {
+    const kgMatch = weightText.match(/(\d{2,3}(?:\.\d+)?)\s*kg/i);
     if (kgMatch) {
       const kg = parseFloat(kgMatch[1]);
       if (Number.isFinite(kg) && kg >= 30 && kg <= 250) {
