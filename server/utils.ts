@@ -262,9 +262,10 @@ export function stripInventedRetroDate(canonical: string, original: string): str
 // done. Used by the step and cardio loggers, which match the activity + number
 // regardless of tense. Note: i'll requires the apostrophe so "ill"/"I feel ill"
 // does not match; voice transcripts that drop it are covered by tomorrow/going to.
+// Narrow on purpose: widening this loses real reports. See script/tracking-contract-tests.ts (#63).
 export function isFutureIntent(message: string): boolean {
   const m = message.toLowerCase();
-  return /\bi'll\b|\bi\s+will\b|\b(?:wanna|gonna)\b|\bgoing\s+to\b|\bplann?ing\s+to\b|\bplan\s+to\b|\babout\s+to\b|\bhoping\s+to\b|\bwant\s+to\b|\btomorrow\b|\bnext\s+week\b|\blater\s+today\b/i.test(m);
+  return /\bi'll\b|\bi\s+will\b|\b(?:wanna|gonna)\b|\bgoing\s+to\b|\bplann?ing\s+to\b|\bplan\s+to\b|\babout\s+to\b|\bhoping\s+to\b|\bwant\s+to\b|\bneeds?\s+to\b|\bhas\s+to\b|\bhave\s+to\b|\bsupposed\s+to\b|\baiming\s+(?:to|for)\b|\bmeant\s+to\b|\bthinking\s+(?:of|about)\b|\btomorrow\b|\bnext\s+week\b|\blater\s+today\b/i.test(m);
 }
 
 /**

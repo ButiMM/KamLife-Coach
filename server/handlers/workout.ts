@@ -98,7 +98,12 @@ export async function handleWorkoutCommands(ctx: {
   // logging it silently recalculates calorie & protein targets and can flip the goal,
   // all off a message the user framed as a question. Let it reach GPT; a clean "84kg"
   // still logs.
-  if ((isStandaloneWeight || isWeightCheckIn) && !isRetrospectiveWeight && !looksLikeQuestion(m) && !EXERCISE_PATTERN.test(m)) {
+  // Intent brake: "I want to weigh 85kg" / "I need to be 85kg" is a GOAL. Without this it wrote
+  // 85kg as today's measurement for a client on the scale at 95kg, recalculated their calorie and
+  // protein targets off it, and replied "🏆 you hit 85kg — that's the goal, done." The two
+  // branches either side of this one — the session report above and the cardio log below — have
+  // always asked isFutureIntent. This one never did; that asymmetry was the whole defect.
+  if ((isStandaloneWeight || isWeightCheckIn) && !isRetrospectiveWeight && !isFutureIntent(m) && !looksLikeQuestion(m) && !EXERCISE_PATTERN.test(m)) {
     const kgMatch = m.match(/(\d{2,3}(?:\.\d+)?)\s*kg/i);
     if (kgMatch) {
       const kg = parseFloat(kgMatch[1]);
