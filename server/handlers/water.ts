@@ -7,7 +7,7 @@ import { db } from "../db";
 import { users } from "../../shared/schema";
 import { neverSilentLine } from "../reply-hygiene";
 import { eq, sql } from "drizzle-orm";
-import { logChat } from "./chat-log";
+import { logChat, turnMutation } from "./chat-log";
 import { sastToday, mentionsNotDone, digitizeSpokenAmounts } from "../utils";
 import { waterTargetLitres } from "../targets";
 import { scanForSAFoods } from "./food-scanner";
@@ -68,6 +68,16 @@ export async function tryLogWater(ctx: {
       waterLastResetDate: today,
     }).where(eq(users.phoneNumber, phone)).returning({ todayWater: users.todayWater });
     const newTotal = Math.round((Number(waterUpdated[0]?.todayWater) || 0) * 10) / 10;
+    // WATER IS A DURABLE WRITE AND NOW SAYS SO (2026-08-26, issue #63). It persists by UPDATEing
+    // users.todayWater, and recorded nothing on the turn — so durableDomains(), the turn's own
+    // record of what it wrote, could not see it. Water was the one tracked fact invisible to that
+    // record, which is why a water log ended in a bare receipt while the other four earned a
+    // coaching move. UPDATE, not INSERT, because that is honestly what happened: the day has one
+    // running total, not a row per sip.
+    // The AMOUNT ADDED leads, because it is the value this turn actually knows: the day total
+    // comes back from the UPDATE's returning() and reads 0 if that read fails, which would put a
+    // number in the forensic record that never happened.
+    turnMutation(`UPDATE water +${litres}L (day ${newTotal}L)`, "[WATER_LOG]");
     const currentWater = Math.max(0, newTotal - litres);
 
     const yesterdaySAST = new Date(Date.now() + 2 * 3_600_000 - 86_400_000).toISOString().slice(0, 10);

@@ -763,6 +763,7 @@ export async function handleMediaMessage(ctx: {
               waterLastResetDate: todayStr,
             }).where(eq(users.id, user.id)).returning({ todayWater: users.todayWater });
             const newTotal = Math.round((Number(waterUpdated[0]?.todayWater) || litres) * 10) / 10;
+            turnMutation(`UPDATE water +${litres}L (day ${newTotal}L)`, "[WATER_LOG]");
             const remaining = Math.max(0, Math.round((waterTarget - newTotal) * 10) / 10);
             const targetHit = newTotal >= waterTarget;
             const bottleReply = targetHit
