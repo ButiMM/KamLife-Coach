@@ -478,3 +478,56 @@ export function tellDontAsk(text: string, nextMove: string): string {
 export function endsWithHandback(text: string): boolean {
   return HANDBACK_QUESTION.test((text || "").trim());
 }
+
+/**
+ * DOES THIS REPLY ALREADY OWN THE CLIENT'S NEXT ACTION? (2026-08-26, issue #63)
+ *
+ * The coaching turn is "durable write -> one next move", and the operative word is ONE. Three
+ * surfaces already answer this question for themselves and must not be spoken over:
+ *
+ *   a CARD  — the macro card's own nextMoveLine ("Add eggs to your next meal") is rendered into
+ *             the image; a second instruction in the chat text is the coach contradicting the
+ *             picture he just sent.
+ *   BUTTONS — "How did that session feel? [Too easy|Just right|Too hard]" IS the next action, and
+ *             it owns the next turn too: the answer sets the following session's weights.
+ *   A QUESTION the coach asked — same rule as tellDontAsk in reverse. There, a hand-back question
+ *             is replaced because it does no work. Here, a WORKING question ("how did it feel")
+ *             is protected, because answering it is the move.
+ *
+ * Deliberately not a judgement about quality — only about whether a next action is already
+ * present. A bare "8 000 steps — nice one" owns nothing, and that is the case this exists for.
+ */
+export function ownsNextAction(reply: string): boolean {
+  const t = (reply || "").trim();
+  if (!t) return true;                                   // nothing to append to
+  if (/\[(?:BUTTONS|MEDIA|CARD|IMAGE)[:\]]/i.test(t)) return true;
+  // THE QUESTION NEED NOT BE THE LAST WORDS (measured 2026-08-26). A trailing-"?" test let this
+  // through, because the working question is followed by the reason for it:
+  //
+  //     "How did it feel — easy, about right, or too hard? I'll set next session's weights off
+  //      that."   +   "Get a 20-minute walk in today."
+  //
+  // which is the coach asking and then talking over his own question. The whole closing block is
+  // one move, so a question anywhere in it means the next action is already claimed. Erring
+  // toward NOT appending is the right direction for a rule whose entire purpose is "exactly one".
+  const lastBlock = t.split(/\n\s*\n/).pop() || t;
+  return lastBlock.includes("?");
+}
+
+/**
+ * Append the coach's ONE next move to a reply that owns no next action.
+ *
+ * `todo` is the decision owner's canonical instruction — chooseAction under policy, the same
+ * value the model paths are handed. An unevidenced client gets an empty todo from underPolicy and
+ * therefore gets nothing appended, which is the correct silence: we do not prescribe to a client
+ * we cannot yet read. Never invents a move, never picks one, never rewrites the acknowledgement it
+ * is given — it is the join, and the decision belongs to its owner.
+ */
+export function withNextMove(reply: string, todo: string): string {
+  const t = (reply || "").trim();
+  const move = (todo || "").trim().replace(/[.\s]*$/, "");
+  if (!move || ownsNextAction(t)) return reply;
+  // Same separator composeMessyAck uses — a blank line, never `\n\n---\n\n`, which WhatsApp
+  // splits into a second billed message.
+  return `${t}\n\n${move}.`;
+}

@@ -159,6 +159,19 @@ function makeStubDb(): any {
           if (prop === "values" && Array.isArray((globalThis as any).__KAMLIFE_STUB_WRITES)) {
             (globalThis as any).__KAMLIFE_STUB_WRITES.push({ table: state.table, values: args[0] });
           }
+          // WRITES CAN BE READ BACK (2026-08-26, issue #63). Reads served the seeded rows and
+          // nothing else, so a row this turn INSERTED was invisible to every later read in the
+          // same turn. That makes "the coach decides on state that includes what just happened"
+          // untestable — the exact ordering the coaching turn depends on, where asking before the
+          // write tells a client who just logged 8 000 steps to go for a walk. Opt-in via
+          // __KAMLIFE_STUB_REFLECT_WRITES so the suites that do not ask for it see no change.
+          if (prop === "values" && (globalThis as any).__KAMLIFE_STUB_REFLECT_WRITES && state.table) {
+            const seed = (globalThis as any).__KAMLIFE_STUB_ROWS as Map<any, any[]> | undefined;
+            if (seed) {
+              const held = seed.get(state.table) || [];
+              seed.set(state.table, [...held, { id: `stubw${held.length + 1}`, loggedAt: new Date(), ...args[0] }]);
+            }
+          }
           // UPDATES ARE OBSERVABLE TOO (2026-08-26, issue #63) — and separately, on purpose.
           // __KAMLIFE_STUB_WRITES records inserts only, so no suite could see a row being CHANGED:
           // "an explicit correction overwrites the day's step count downward" was ungradeable, and

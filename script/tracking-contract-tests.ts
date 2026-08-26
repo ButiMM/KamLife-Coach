@@ -10,7 +10,8 @@
  *        -> ONE action          ("what does this change about the coaching?")
  *        -> ONE response        ("what does the client read?")
  *
- * and the contract has exactly two laws:
+ * and the contract has four laws. The first two protect the STATE; the second two are what turns
+ * a logger into a coach — they are enforced further down, where the code that grades them is:
  *
  *   LAW 1 — RECOGNISER AND EXTRACTOR MUST AGREE.
  *     If the recogniser says "yes, a step report" and the extractor returns zero, the fact is
@@ -29,6 +30,9 @@
  *                                         the scale at 95kg, calorie and protein targets
  *                                         recalculated off it, and the reply was
  *                                         "🏆 you hit 85kg — that's the goal, done."
+ *
+ *   LAW 3 — THE ANSWER QUOTES THE LEDGER, NOT THE MESSAGE.  (graded at "LAW 3" below)
+ *   LAW 4 — A DURABLE WRITE IS FOLLOWED BY ONE NEXT MOVE.   (graded at "LAW 4" below)
  *
  * WHY THIS FILE IS BEHAVIOURAL AND NOT A PREDICATE TEST. Both defects above sat in code whose
  * predicates were individually defensible. The steps gate already asked isFutureIntent and got a
@@ -232,12 +236,114 @@ const MUST_WRITE: [string, string][] = [
     if (!said.has(3000)) failures.push(`A correction was not quoted back: day now holds 3000 — "${first}"`);
   }
 
-  const total = MUST_NOT_WRITE.length + MUST_WRITE.length + 2;
+  /**
+   * LAW 4 — A DURABLE WRITE IS FOLLOWED BY ONE NEXT MOVE (2026-08-26, issue #63).
+   *
+   * The contract's last two stages are "one action -> one response", and the product was stopping
+   * at the response.
+   *
+   * NOTHING NEW DECIDES ANYTHING. canonicalDecision is the existing reactive decision owner —
+   * authoritative state -> chooseAction -> underPolicy — already used by both model paths and
+   * built for exactly this case: it sets atKeyboard because "they are typing to us right now".
+   * It was simply never reachable from a deterministic rail, the same bypass shape as the step
+   * write in #74. The cut asks it. underPolicy is also the brake: a client with fewer than three
+   * days logged yields an empty todo and therefore no move, which is the correct silence — we do
+   * not prescribe to a client we cannot yet read.
+   *
+   * Measured on main, for a client mid-programme:
+   *
+   *     "walked 8000 steps today"  ->  "8 000 steps — nice one. 👌"
+   *     "84kg"                     ->  "84kg — noted. 👌"
+   *
+   * Receipts, not coaching — what reply-hygiene.ts already calls the calculator behaviour, and
+   * what chat-log.ts had been counting as [REPLY_THIN] while nothing acted on it.
+   *
+   * ONE is the operative word, so this is graded in BOTH directions: a bare acknowledgement must
+   * gain a move, and a reply that already owns the client's next action — a card, buttons, or a
+   * working question — must gain nothing. A rule that only checks the first half is satisfied by
+   * a coach who talks over his own question, which is what the first cut of this did.
+   *
+   * AND THE MOVE MUST READ THE WRITE. The decision runs after the row lands, so a client who has
+   * just logged 8 000 steps is not told to go for a walk. That is not a detail — it is the #71
+   * defect, and the negative control below proves the assertion is sensitive to it.
+   *
+   * WATER IS NOT COVERED, AND THAT IS A STATED GAP, NOT AN OVERSIGHT. Water persists by updating
+   * users.todayWater and records no turn mutation, so durableDomains() — the turn's own record of
+   * what it wrote — cannot see it, and a water log still ends in a bare "2L of water — good. 👌".
+   * Closing it means giving water a durable-write record, which changes what resolveTurn reports
+   * as `committed` and therefore when a turn continues to the coach. That is a behavioural change
+   * to the turn resolver and belongs in its own cut with its own controls, not smuggled into this
+   * one. Four of the five tracked facts are covered here; water is the fifth and is next.
+   */
+  const EVIDENCED_DAYS = 5;   // underPolicy prescribes only for a client it can actually read
+  async function coachingTurn(message: string, opts?: { seeWrites?: boolean }) {
+    const meals = Array.from({ length: EVIDENCED_DAYS }, (_, i) => ({
+      id: `m${i}`, userId: USER.id, kcalInt: 1800, proteinInt: 70, items: ["chicken"],
+      mealLabel: "lunch", loggedAt: new Date(dayStart.getTime() - i * 86_400_000 + 3_600_000), corrected: false,
+    }));
+    g.__KAMLIFE_STUB_USER = { ...USER, todayWater: "0" };
+    g.__KAMLIFE_STUB_ROWS = new Map([
+      [schema.mealLogs, meals], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
+    ]);
+    // The decision reads state that INCLUDES this turn's write — the production ordering.
+    if (opts?.seeWrites !== false) g.__KAMLIFE_STUB_REFLECT_WRITES = 1;
+    g.__KAMLIFE_STUB_WRITES = [];
+    const reply = String(await handleMessage(USER.phoneNumber, message).catch(() => ""));
+    delete g.__KAMLIFE_STUB_REFLECT_WRITES;
+    return reply;
+  }
+  /** A move is a separate closing block that is not a question — what withNextMove appends. */
+  const closingMove = (reply: string) => {
+    const blocks = reply.trim().split(/\n\s*\n/);
+    const last = (blocks[blocks.length - 1] || "").trim();
+    return blocks.length > 1 && !last.includes("?") && !/\[(?:BUTTONS|MEDIA)/i.test(last) ? last : "";
+  };
+
+  // A bare receipt must gain exactly one move.
+  {
+    const reply = await coachingTurn("walked 8000 steps today");
+    const move = closingMove(reply);
+    if (!move) failures.push(`A durable write ended with a receipt and no next move: "${reply.replace(/\n/g, " ⏎ ")}"`);
+    // …and the move must have read the write. Telling a client who just logged 8 000 steps to
+    // walk is the defect this ordering exists to prevent.
+    if (/\bwalk\b/i.test(move)) failures.push(`The move ignored the row this turn wrote — 8 000 steps logged, and the coach said: "${move}"`);
+  }
+
+  // NEGATIVE CONTROL FOR THE ORDERING. Deny the decision sight of the write and the same turn
+  // must produce the wrong move — proving the assertion above grades ordering, not just presence.
+  {
+    const blind = closingMove(await coachingTurn("walked 8000 steps today", { seeWrites: false }));
+    if (blind && !/\bwalk\b/i.test(blind)) {
+      failures.push(`The ordering control did not reproduce the defect: a decision blind to the write still said "${blind}", so the check above proves nothing`);
+    }
+  }
+
+  // A reply that already owns the next action must gain nothing — three ways of owning it.
+  for (const [message, owner] of [
+    ["workout done", "buttons"],
+    ["I trained chest today", "a working question"],
+    ["I had eggs and toast", "a card"],
+  ] as [string, string][]) {
+    const reply = await coachingTurn(message);
+    const move = closingMove(reply);
+    if (move) failures.push(`A second next move was appended over ${owner}: "${message}" ended with "${move}"`);
+  }
+
+  // A turn that wrote nothing is not a coaching moment. "what are my totals today?" is chosen
+  // deliberately: it RETURNS THROUGH A WIRED EXIT (early-commands) while writing nothing, so it
+  // actually exercises the durable-write guard. A message that never reaches one of the six exits
+  // would pass this whether the guard existed or not, which is no test at all.
+  for (const quiet of ["what are my totals today?", "how many steps have I done?"]) {
+    const move = closingMove(await coachingTurn(quiet));
+    if (move) failures.push(`A turn that wrote nothing was given a coaching move: "${quiet}" ended with "${move}"`);
+  }
+
+  const total = MUST_NOT_WRITE.length + MUST_WRITE.length + 2 + 7;
   if (failures.length > 0) {
     for (const f of failures) console.log(`✗ ${f}`);
     console.log(`\n✗ tracking contract: ${failures.length}/${total} violations`);
     process.exit(1);
   }
-  console.log(`✓ tracking contract: ${MUST_NOT_WRITE.length} questions wrote nothing, ${MUST_WRITE.length} reports reached their writer, the answer quoted the ledger both ways`);
+  console.log(`✓ tracking contract: ${MUST_NOT_WRITE.length} questions wrote nothing, ${MUST_WRITE.length} reports reached their writer, the answer quoted the ledger, and a durable write ended in one next move`);
   process.exit(0);
 })();
