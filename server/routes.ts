@@ -4,7 +4,7 @@ import crypto from "crypto";
 import path from "path";
 import { db, pool } from "./db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos, escalations, abAssignments, mealLogs } from "../shared/schema";
-import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
+import { eq, desc, asc, and, gte, sql, count } from "drizzle-orm";
 import OpenAI from "openai";
 import twilio from "twilio";
 import { SA_FOODS_SEED, type SAFood } from "./foods";
@@ -21,7 +21,7 @@ import { recordClientFacts } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { sendWhatsApp } from "./scheduler";
 import { recordConversion } from "./ab";
-import { getStepStreak, getStepResponse as _getStepResponse } from "./handlers/steps";
+import { getStepStreak, getStepResponse as _getStepResponse, logStepsForUser } from "./handlers/steps";
 import { captureFriction } from "./friction";
 import { getSleepResponse } from "./handlers/sleep";
 import { handleMediaMessage, bumpVoiceFailure, clearVoiceFailure } from "./handlers/media";
@@ -55,7 +55,7 @@ import { mustStayDeterministic } from "./understanding/action-router";
 import { attributeMultiDayReport } from "./understanding/day-relative-situation";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
-import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
+import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { mentionsConditionOrMedication, conditionWelcome } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
@@ -1196,12 +1196,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       );
       const stepIsRetro = isRetroactiveMeal(message);
       const stepLoggedAt = stepIsRetro ? parseMealDate(message) : new Date();
-      const stepDayStart = sastDayStart(stepLoggedAt);
-      const stepDayEnd = new Date(stepDayStart.getTime() + 86_400_000);
-      const existingStep = await db.select({ id: stepLogs.id, steps: stepLogs.steps })
-        .from(stepLogs)
-        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, stepDayStart), lt(stepLogs.loggedAt, stepDayEnd)))
-        .limit(1);
       // Allow a downward CORRECTION ("8000 steps not 50000", "wrong, 6k steps") to overwrite the
       // day's count. Normally we keep only the HIGHER number (clients re-log a growing daily
       // total), but an explicit correction must win in either direction. For "X not Y", X is the
@@ -1213,14 +1207,16 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       }
       const isStepCorrection = !!stepNotMatch
         || /\b(wrong|actually|correction|i\s+meant|meant|should\s+be|mistake|typo|miscount|oops|my\s+bad)\b/i.test(m);
-      if (existingStep.length > 0) {
-        if (steps > (existingStep[0].steps ?? 0) || isStepCorrection) {
-          await db.update(stepLogs).set({ steps }).where(eq(stepLogs.id, existingStep[0].id));
-        }
-      } else {
-        await db.insert(stepLogs).values({ userId: user.id, steps, loggedAt: stepLoggedAt });
-        turnMutation("INSERT steps", "[WRITE]");
-      }
+      // ONE WRITE OWNER FOR THE STEP FACT (2026-08-26, issue #63). This built its own day-window
+      // query and upsert — twenty lines that logStepsForUser already was, and steps.ts said so at
+      // the top of itself: "mirroring the routes.ts inline upsert exactly ... Additive, routes
+      // keeps its own path." A mirror is a copy, and this one had already drifted on the half that
+      // reaches the client: the owner returns the count now STORED, while this path carried the
+      // count from the MESSAGE into the reply. With 9 000 already logged, "walked 3000 steps
+      // today" correctly left the row at 9 000 and answered "3 000 steps — nice one", quoting a
+      // number the ledger does not hold. So the write moves to the owner AND the answer is built
+      // from what the owner returns — that second half is the only reason the bypass mattered.
+      const storedSteps = await logStepsForUser(user.id, steps, { correction: isStepCorrection, at: stepLoggedAt });
       await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
       invalidatePatternCache(user.id);
       const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
@@ -1238,9 +1234,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
         ? Math.round(recentStepLogs.reduce((s, r) => s + r.steps, 0) / recentStepLogs.length)
         : undefined;
       void stepGoalCtx; // used by getStepResponse via user.goalType
-      const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg, user, workedOutToday);
+      const stepReply = getStepResponse(storedSteps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg, user, workedOutToday);
       const stepRetroNote = stepIsRetro ? `\n_Logged to ${mealDateLabel(stepLoggedAt)}._` : "";
-      const stepPart = (isStepCorrection ? `Fixed ✅ — step count updated to *${steps.toLocaleString()}*.\n\n` : "") + stepReply + stepRetroNote + (perfectDay || "");
+      const stepPart = (isStepCorrection ? `Fixed ✅ — step count updated to *${storedSteps.toLocaleString()}*.\n\n` : "") + stepReply + stepRetroNote + (perfectDay || "");
       commitFact(turn, "steps", stepPart);
       await logChat(user.id, message, stepPart, "STEP_LOG");
 
