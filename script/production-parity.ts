@@ -3083,6 +3083,69 @@ async function main() {
   // So this asserts the property that a synchronised copy cannot offer: the session BODY the
   // moved-session path sends is the same string renderSession() produces. Change the renderer and
   // both callers move together; fork one of them and this goes red on the next run.
+  // ── TWO PREDICATES FOR ONE QUESTION MUST AGREE (2026-08-26, issue #63) ───────────────────────
+  //
+  // "My steps are 10k today" was RECOGNISED as a step report by looksLikeStepsReport and extracted
+  // as ZERO by detectStepLog. One owner said yes, the other said no, and the client's 10 000 steps
+  // vanished between them — after which the coaching ladder, seeing no steps, told a client who
+  // had just walked 10 000 to go for a walk. That is the reported failure, and neither predicate
+  // was individually "wrong": they simply disagreed on the copula forms (`are|is|was|were`).
+  //
+  // The invariant is the durable part. Fixing the regex fixes one phrasing; asserting that the two
+  // predicates AGREE catches the whole class the next time either is edited alone.
+  check("steps . the recogniser and the extractor agree on what a step report is", async () => {
+    const { looksLikeStepsReport } = await import("../server/utils");
+    const { detectStepLog } = await import("../server/understanding/messy-intake");
+    const reports = [
+      "my steps are 10k today", "my steps are 10000", "steps are 8000", "steps: 9000",
+      "i walked 8000 steps today", "10000 steps", "i did 12k steps", "i've done 10k steps already",
+    ];
+    for (const r of reports) {
+      const recognised = looksLikeStepsReport(r);
+      const extracted = detectStepLog(r).steps;
+      assert.ok(recognised && extracted > 0,
+        `the two owners disagree on "${r}" — recognised=${recognised}, extracted=${extracted}. `
+        + `A step report seen by one and not the other is a client's steps disappearing.`);
+    }
+  });
+
+  check("steps . a client who reports steps has them written, and is told so", async () => {
+    const { stepLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+    const logged = async (msg: string) => {
+      g.__KAMLIFE_STUB_USER = { ...USER };
+      g.__KAMLIFE_STUB_WRITES = [];
+      const out = String(await handleMessage(USER.phoneNumber, msg).catch(() => "") ?? "");
+      const rows = (g.__KAMLIFE_STUB_WRITES || []).filter((w: any) => w.table === stepLogs);
+      delete g.__KAMLIFE_STUB_WRITES;
+      return { out, steps: rows[0]?.values?.steps ?? 0 };
+    };
+    const r = await serialise(() => logged("My steps are 10k today"));
+    assert.equal(r.steps, 10000, `the reported steps were not written: got ${r.steps}`);
+    assertCustomerOutcome(r.out, {
+      got: /10[\s,]?000\s*steps/i,
+      because: "a client who reports 10 000 steps must have them counted, not be asked to walk",
+    });
+  });
+
+  // THE CONTROL. A question about steps is not a report of steps. Widening the extractor must not
+  // turn "how many steps should I do?" into a log of zero.
+  check("steps control . a question about steps is never logged as one", async () => {
+    const { stepLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+    for (const q of ["Are steps important?", "How many steps should I do?", "is 8000 steps enough?"]) {
+      const wrote = await serialise(async () => {
+        g.__KAMLIFE_STUB_USER = { ...USER };
+        g.__KAMLIFE_STUB_WRITES = [];
+        await handleMessage(USER.phoneNumber, q).catch(() => "");
+        const rows = (g.__KAMLIFE_STUB_WRITES || []).filter((w: any) => w.table === stepLogs);
+        delete g.__KAMLIFE_STUB_WRITES;
+        return rows.length;
+      });
+      assert.equal(wrote, 0, `a question was logged as a step report: "${q}"`);
+    }
+  });
+
   // ── THE CLAIM MATRIX — who is allowed to answer the customer (2026-08-25, issue #63) ─────────
   //
   // A broad upstream predicate could prevent the correct specialist from ever seeing a message.

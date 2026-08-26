@@ -298,7 +298,13 @@ export function detectStepLog(text: string): StepLogDetection {
   // Device/app references without an explicit "steps" keyword after the number.
   const devRaw = !numMatch ? (
     text.match(/\b(?:fitbit|garmin|apple\s*health|health\s*app|samsung\s*health|google\s*fit|my\s*(?:watch|tracker|band|phone)|strava|polar|whoop|oura|mi\s*band|galaxy\s*watch)\b[^.!?]*?([\d,]+(?:\.\d+)?)\s*(k)?\s*(?:steps?|staps?)?/i)
-    || text.match(/\bsteps?\s*(?:today|count|total|for\s*today)?\s*[:=]\s*([\d,]+(?:\.\d+)?)\s*(k)?\b/i)
+    // THE COPULA FORM (2026-08-26, issue #63). This accepted only `steps: 8000` / `steps = 8000`,
+    // while looksLikeStepsReport — the OTHER predicate for "is this a step report" — has always
+    // accepted `are|is|was|were` too. So "my steps are 10k today" was RECOGNISED as a step report
+    // and then extracted as zero: one owner said yes, the other said no, and the client's steps
+    // vanished between them. The coaching ladder then saw no steps and told a client who had just
+    // walked 10 000 to go for a walk, which is the reported failure.
+    || text.match(/\bsteps?\s*(?:today|count|total|for\s*today)?\s*(?:[:=]|\b(?:are|is|was|were)\b)\s*([\d,]+(?:\.\d+)?)\s*(k)?\b/i)
   ) : null;
   const dev = (devRaw && !/\b(?:heart\s*rate|bpm|pulse|calories?\s*burned|sleep\s*score|blood|oxygen)\b/i.test(text)) ? devRaw : null;
   const km = text.match(/(?:walked|loop|walk)\s+([\d.]+)\s*km/i);
