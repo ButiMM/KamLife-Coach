@@ -463,12 +463,28 @@ export async function handleWorkoutCommands(ctx: {
   const isDone = !alreadyLoggedThisTurn && when.when === "today" && (reportsOneSession || (
     /^(done|finished|complete|completed|trained)[.!?]?$/i.test(m)
     || /^done\s*[💪✅🔥][.!?]?$/.test(m)
-    || /^(?:workout|session|training|gym)\s+(?:done|complete|finished)[.!?]?$/i.test(m)
+    // THE COPULA FORM (2026-08-26, issue #63). This was anchored to the bare "workout done", so
+    // "my workout is done" and "my session is done" — ordinary phrasing — matched nothing here and
+    // fell all the way to the model, which logged no session. Same construction that broke steps
+    // (#71) and water: three of four tracking surfaces missed "my X is/are …".
+    // Still fully anchored, so it claims a short completion report and nothing longer.
+    || /^(?:my\s+)?(?:workout|session|training|gym)\s+(?:is\s+|was\s+)?(?:done|complete|completed|finished)[.!?]?$/i.test(m)
     || /^(?:just\s+)?(?:done|finished)\s+(?:my\s+)?(?:workout|session|training|gym)[.!?]?$/i.test(m)
     || m === "done today" || m === "finished today"
   ) && !looksLikeQuestion(m)  // "done?" / "workout done?" is asking, not reporting — the [.!?]? anchors otherwise allow a trailing ?
     && !/\b(?:steps?|km|walked|walk)\b/i.test(m)
-    && !/\b(?:ate|had|food|meal|eaten|eating|calories)\b/i.test(m));
+    && !/\b(?:ate|had|food|meal|eaten|eating|calories)\b/i.test(m))
+    // ASKING WHETHER IT IS DONE IS NOT REPORTING THAT IT IS (2026-08-26, issue #63, pre-existing).
+    //
+    // "Is my workout done?" WROTE A SESSION. reportsOneSession waives the question guard when
+    // statedWorkout is true — reasonable for "did my workout", which is a report — but that waiver
+    // also covered the interrogative form, so a client checking their own record had one
+    // fabricated. A false write is worse than a missed one: it tells the client they trained when
+    // they did not, and the session count carries the invention forward.
+    //
+    // Anchored on BOTH the opening interrogative and a question mark, so "did my workout" (a
+    // report, no mark) still logs while "did my workout?" and "is my workout done?" do not.
+    && !(m.includes("?") && /^\s*(?:is|are|was|were|am|have|has|did|do|does)\b/i.test(m.trim()));
 
   if (isDone) {
     const todayStart = sastDayStart();

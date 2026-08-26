@@ -3083,6 +3083,74 @@ async function main() {
   // So this asserts the property that a synchronised copy cannot offer: the session BODY the
   // moved-session path sends is the same string renderSession() produces. Change the renderer and
   // both callers move together; fork one of them and this goes red on the next run.
+  // ── "MY X IS N" — THE SHARED REPORTING PATTERN (2026-08-26, issue #63) ──────────────────────
+  //
+  // Three of four tracking surfaces mishandled the same ordinary construction, each differently:
+  //   steps   — recogniser said yes, extractor said no (#71)
+  //   water   — the water owner's own question-guard classified the report as a question, so it
+  //             fell past Water and the FOOD scanner logged a food called "Water"
+  //   workout — the completion matcher was anchored to the bare "workout done"
+  //   weight  — worked throughout
+  //
+  // It is ordinary phrasing, arguably more natural than "I drank 2 litres". These assert the whole
+  // family in one place so the next tracker cannot quietly miss it.
+  check("my-X-is-N . a report in copula form reaches its tracker, on every surface", async () => {
+    const S = await import("../shared/schema");
+    const g = globalThis as any;
+    const run = async (msg: string) => {
+      g.__KAMLIFE_STUB_USER = { ...USER, todayWater: "0" };
+      g.__KAMLIFE_STUB_WRITES = [];
+      const out = String(await handleMessage(USER.phoneNumber, msg).catch(() => "") ?? "");
+      const w = g.__KAMLIFE_STUB_WRITES || [];
+      const hit = (t: any) => w.filter((x: any) => x.table === t).length > 0;
+      delete g.__KAMLIFE_STUB_WRITES;
+      return { out, steps: hit(S.stepLogs), weight: hit(S.weightLogs), workout: hit(S.workoutLogs), meal: hit(S.mealLogs) };
+    };
+
+    const steps = await serialise(() => run("My steps are 8000"));
+    assert.ok(steps.steps, "\"My steps are 8000\" did not reach the step tracker");
+
+    const weight = await serialise(() => run("My weight is 92kg"));
+    assert.ok(weight.weight, "\"My weight is 92kg\" did not reach the weight tracker");
+
+    const workout = await serialise(() => run("My workout is done"));
+    assert.ok(workout.workout, "\"My workout is done\" did not reach the workout tracker");
+
+    // WATER IS THE ONE THAT CORRUPTED STATE. Asserting the food table stays EMPTY is the point:
+    // the failure was not silence, it was a food called "Water" written to the client's record.
+    const water = await serialise(() => run("My water is 2 litres"));
+    assert.ok(!water.meal, "a water report was logged as FOOD — the client's record now carries an invented meal");
+    assertCustomerOutcome(water.out, {
+      got: /\d+(?:\.\d+)?\s*L\b|litre/i,
+      because: "a client who reports their water must have it counted as water",
+    });
+  });
+
+  // THE CONTROLS. Widening a report matcher must not turn a QUESTION into a write. A false log is
+  // worse than a missed one: it tells the client they did something they did not.
+  check("my-X-is-N control . asking is never writing", async () => {
+    const S = await import("../shared/schema");
+    const g = globalThis as any;
+    const wrote = async (msg: string) => {
+      g.__KAMLIFE_STUB_USER = { ...USER, todayWater: "0" };
+      g.__KAMLIFE_STUB_WRITES = [];
+      await handleMessage(USER.phoneNumber, msg).catch(() => "");
+      const n = (g.__KAMLIFE_STUB_WRITES || [])
+        .filter((x: any) => [S.stepLogs, S.weightLogs, S.workoutLogs].includes(x.table)).length;
+      delete g.__KAMLIFE_STUB_WRITES;
+      return n;
+    };
+    // "Is my workout done?" WROTE A SESSION before this cut — a fabricated workout, pre-existing.
+    for (const q of ["Is my workout done?", "did my workout?", "Have I trained today?",
+                     "my workout is not done", "How much water should I drink?", "Is 2 litres of water enough?"]) {
+      assert.equal(await serialise(() => wrote(q)), 0, `a question or negation was written as a report: "${q}"`);
+    }
+    // …and the report forms these guards sit beside must still write.
+    for (const r of ["did my workout", "workout done"]) {
+      assert.ok(await serialise(() => wrote(r)) > 0, `a genuine report stopped writing: "${r}"`);
+    }
+  });
+
   // ── TWO PREDICATES FOR ONE QUESTION MUST AGREE (2026-08-26, issue #63) ───────────────────────
   //
   // "My steps are 10k today" was RECOGNISED as a step report by looksLikeStepsReport and extracted
