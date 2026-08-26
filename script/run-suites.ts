@@ -48,7 +48,7 @@ export const SUITES = [
   "reentry-state-tests", "reentry-bridge-tests", "reaction-guard-tests", "current-date-tests", "day-relative-situation-tests", "coach-loop-foundation-tests", "multi-day-attribution-tests",
   // The decision-engine-p0 workflow's four. Here so local and CI cover the same surface.
   "decision-state-tests", "decision-runtime-tests", "reply-context-verifier-tests", "decision-doctrine-guard",
-  "turn-triage-tests", "normalizer-replay-tests",
+  "turn-triage-tests", "normalizer-replay-tests", "tracking-contract-tests",
   "production-parity", "check-architecture",
 ];
 

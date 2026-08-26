@@ -38,7 +38,6 @@ import { captureSignupSource } from "./signup-capture";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
 import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnMutations, turnAlreadyWrote, turnEvidence } from "./handlers/chat-log";
-import { handleWeightLog } from "./handlers/weight";
 import { handleWorkoutCommands } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
 import { handleMiscCommands } from "./handlers/misc-commands";
