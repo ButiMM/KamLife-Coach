@@ -301,6 +301,84 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * ONE CUSTOMER MEANING -> ONE OWNER. Claim precedence, not capability (2026-08-26, live trace).
+   *
+   * The capability was never missing. SMART NEXT MEAL answers "what should I eat next" against the
+   * day's remaining calories, and has since long before this. What went wrong on a real phone is
+   * that a door ~145 lines EARLIER in the pipeline claimed the turn first:
+   *
+   *     client: "Give me a meal for my last 668 calories"
+   *     coach : "Kam, today: 2032/2700 kcal · 150g/180g protein. 668 kcal left." + a card
+   *
+   * He asked for a MEAL and was handed a NUMBER. The totals branch matched on "my … calories" and
+   * ended the turn; the owner never ran. Same disease as #70, one phrasing further out — that guard
+   * recognised only INTERROGATIVE food questions ("what can I eat"), and this is the IMPERATIVE.
+   *
+   * BOTH HALVES ARE THE CUT, and the first attempt proved why. Stopping the wrong claimant alone
+   * left the message with NO owner — it fell through to the model and came back "Eish Coach K had
+   * a moment." A precedence fix is only finished when the right door actually takes the turn, so
+   * the owner's recogniser learned the same request verbs the guard uses.
+   *
+   * GRADED BOTH WAYS, because the failure mode here is symmetric: divert too little and the client
+   * still gets a number; divert too much and a genuine "how many calories do I have left?" stops
+   * being answerable. "show me my calories" is the case that pins it — same request verb, no meal.
+   */
+  {
+    const answered = async (message: string) => {
+      freshTurn();
+      const todayMeal = [{
+        id: "cm0", userId: USER.id, items: ["chicken", "rice"], mealLabel: "lunch",
+        loggedAt: new Date(dayStart.getTime() + 3_600_000), corrected: false,
+        kcalInt: 2032, proteinInt: 150, kcal: 2032, protein: 150, carbs: 0, fat: 0,
+      }];
+      g.__KAMLIFE_STUB_USER = { ...USER };
+      g.__KAMLIFE_STUB_ROWS = new Map([
+        [schema.mealLogs, todayMeal], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
+      ]);
+      g.__KAMLIFE_STUB_WRITES = [];
+      return String(await handleMessage(USER.phoneNumber, message).catch(() => ""));
+    };
+    const isMealSuggestion = (r: string) => /next meal suggestion/i.test(r);
+    const isTotalsReadout = (r: string) => /\d+\s*\/\s*\d+\s*kcal|kcal\b.*\bleft\b|still available/i.test(r);
+
+    // A MEAL REQUEST REACHES ITS OWNER.
+    for (const ask of [
+      "Give me a meal for my last 668 calories",
+      "give me a meal",
+      "suggest a meal for my remaining calories",
+      "what can I eat with my remaining calories?",
+    ]) {
+      const r = await answered(ask);
+      if (!isMealSuggestion(r)) {
+        failures.push(`A meal request did not reach SMART NEXT MEAL: "${ask}" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
+      }
+    }
+
+    // A CALORIE QUESTION STILL REACHES THE TOTALS OWNER — the control that stops this from being
+    // "fixed" by diverting everything that mentions food.
+    for (const ask of [
+      "Today's calories",
+      "how many calories do I have left?",
+      "my calorie target",
+      "show me my calories",
+    ]) {
+      const r = await answered(ask);
+      if (!isTotalsReadout(r) || isMealSuggestion(r)) {
+        failures.push(`A calorie question was diverted away from the totals owner: "${ask}" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
+      }
+    }
+
+    // AND THE MEAL-PLAN DOOR IS UNTOUCHED. "send me a meal plan" contains the request verb AND the
+    // meal noun, so a careless guard would strip it from the branch that owns it.
+    {
+      const r = await answered("send me a meal plan");
+      if (!/meal plan/i.test(r)) {
+        failures.push(`The meal-plan door lost its message: "send me a meal plan" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
+      }
+    }
+  }
+
+  /**
    * STAGE 3 OF THE CONTRACT — ONE WRITE OWNER, AND EVERY CONVERSATIONAL DOOR GOES THROUGH IT.
    *
    * logStepsForUser holds one rule that no caller can hold for itself: ONE ROW PER SAST DAY, keep

@@ -185,7 +185,32 @@ export async function handleEarlyCommands(ctx: {
   // than ending the turn, so the message falls through to the specialists below. A genuinely
   // multi-part question is already excluded by !isMultiPartAsk(m) inside the condition, so what
   // reaches here is a single food question the totals list mis-claimed.
-  const alsoAsksFood = /\b(?:(?:what|which|where)\b[^?]{0,60}\b(?:can|should|do) i (?:eat|have|buy|order|get)|taxi rank|spaza|shisa nyama|kota|takeaway|restaurant|canteen|braai)\b/i.test(m);
+  // A PERSON CAN ASK BY INSTRUCTING (2026-08-26, live phone trace). This recognised only
+  // INTERROGATIVE food questions — "what can I eat" — so the imperative form walked straight into
+  // the totals branch:
+  //
+  //     client: "Give me a meal for my last 668 calories"
+  //     coach : "Kam, today: 2032/2700 kcal · 150g/180g protein. 668 kcal left." + a card
+  //
+  // He asked for a MEAL and was handed a number. SMART NEXT MEAL — the owner of that question —
+  // sits ~145 lines further down the pipeline and never ran, because this branch had already
+  // claimed the turn on "my … calories".
+  //
+  // The vocabulary is not invented here: utils.isAskingNotReporting already treats
+  // give/send/show/suggest/recommend as asking-by-instructing, and was written for exactly this
+  // blind spot ("Give me a dinner suggestion" reaching the food LOGGER). That predicate cannot
+  // decide precedence at this door, because it is equally true of "how many calories do I have
+  // left?" — a genuine totals question. What separates them is whether a MEAL or a NUMBER was
+  // asked for, which is the question this guard already exists to answer. So the same request
+  // verbs are applied to the food noun this guard already deals in, as one more alternative.
+  //
+  // SCOPED TO WHAT THE OWNER WILL TAKE. The first version of this covered breakfast/lunch/dinner/
+  // supper/snack/plate/food too, and that was wrong in the other direction: SMART NEXT MEAL
+  // EXCLUDES the named meals, so stopping the totals claim on "give me a dinner" would have left
+  // the message with no owner at all — trading a wrong answer for none. Only "meal" is covered
+  // here, because only "meal" is what the owner below accepts.
+  const alsoAsksFood = /\b(?:(?:what|which|where)\b[^?]{0,60}\b(?:can|should|do) i (?:eat|have|buy|order|get)|taxi rank|spaza|shisa nyama|kota|takeaway|restaurant|canteen|braai)\b/i.test(m)
+    || /\b(?:give|send|show|suggest|recommend)\s+(?:me\s+)?(?:a|an|another|the)?\s*meal\b/i.test(m);
 
   if (
     !alsoAsksFood && (

@@ -276,7 +276,12 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- SMART NEXT MEAL — "what should I eat next?" based on daily gap ----
-  if (/\b(what should i eat next|next meal|suggest.?a?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(breakfast|lunch|dinner|supper|braai|social)\b/i.test(m)) {
+  // A PERSON CAN ASK BY INSTRUCTING (2026-08-26, live phone trace). This accepted "suggest a meal"
+  // but not "give me a meal", so the imperative form reached no owner at all once the totals
+  // branch correctly stopped claiming it. Stopping the wrong claimant is only half the fix — the
+  // right one has to take the turn. Same request verbs as the guard in early-commands, so the two
+  // doors agree on what a meal request looks like.
+  if (/\b(what should i eat next|next meal|(?:suggest|give|send|show|recommend)(?:\s+me)?\s*a?n?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(breakfast|lunch|dinner|supper|braai|social)\b/i.test(m)) {
     const todayStr = sastToday();
     const todayCals = user.todayCaloriesDate === todayStr ? (user.todayCalories || 0) : 0;
     const todayProt = user.todayCaloriesDate === todayStr ? (user.todayProteinG || 0) : 0;
