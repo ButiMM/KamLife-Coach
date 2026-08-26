@@ -168,7 +168,27 @@ export async function handleEarlyCommands(ctx: {
     }
   }
 
+  // A STAND-DOWN MUST NOT END THE TURN FOR EVERYONE ELSE (2026-08-25, issue #63).
+  //
+  // This was computed INSIDE the branch below and answered with `return null`, which exits
+  // handleEarlyCommands entirely — and handleFoodCommands, which owns restaurant / street food /
+  // swaps / grocery, is invoked at the bottom of this same function. So "I don't own the food
+  // half" became "nobody after me may own the food half", and six specialists were unreachable
+  // for any sentence the totals list happened to match.
+  //
+  // Measured before the change: "What can I eat at Nandos?", "…at the taxi rank?", "…instead of
+  // rice?", "…before the gym?" all landed on the generic next-meal card, while the same questions
+  // phrased "what should I order/get" reached their owner and answered well.
+  //
+  // The guard's intent (2026-08-07, Constitution law 20 — answer every part of what they said) is
+  // right and is kept. Only its mechanism changes: it now KEEPS THIS BRANCH FROM CLAIMING rather
+  // than ending the turn, so the message falls through to the specialists below. A genuinely
+  // multi-part question is already excluded by !isMultiPartAsk(m) inside the condition, so what
+  // reaches here is a single food question the totals list mis-claimed.
+  const alsoAsksFood = /\b(?:(?:what|which|where)\b[^?]{0,60}\b(?:can|should|do) i (?:eat|have|buy|order|get)|taxi rank|spaza|shisa nyama|kota|takeaway|restaurant|canteen|braai)\b/i.test(m);
+
   if (
+    !alsoAsksFood && (
     /\b(daily calories|calorie target|calories target|my calories|my calorie|kcal target|daily kcal)\b/i.test(m) ||
     /\b(calorie|calories|kcal)\b.*\b(target|goal|limit|daily|mine|my|remaining|left|still|remain)\b/i.test(m) ||
     // A SINGLE-FACT HANDLER MAY NOT CLAIM A MULTI-PART QUESTION (2026-07-29 live, and this is
@@ -184,7 +204,7 @@ export async function handleEarlyCommands(ctx: {
     !isMultiPartAsk(m) && (
     /\b(daily|my|total|remaining)\b.*\b(calorie|calories|kcal)\b/i.test(m) ||
     /\b(how many|how much).*(calorie|calories|kcal|left|remaining)\b/i.test(m) ||
-    /\b(calories today|today.?s calories|today calories|calories for today|protein today|what.?s left|whats left|calories left|calories remaining|remaining calories|total remaining|how much.*left|how much.*remaining|can i still eat|what can i eat|how much more|am i over|what (have|did) i (eat|ate|log|track)|food today|what i (ate|ate today|had today)|today.?s food|today.?s intake|today.?s totals?|total today|totals today|macros today|today.?s macros?|today.?s progress|progress today|daily progress|today.?s summary|my day so far|how.?s my day|how is my day|how am i doing today|where am i today)\b/i.test(m) ||
+    /\b(calories today|today.?s calories|today calories|calories for today|protein today|what.?s left|whats left|calories left|calories remaining|remaining calories|total remaining|how much.*left|how much.*remaining|can i still eat|how much more|am i over|what (have|did) i (eat|ate|log|track)|food today|what i (ate|ate today|had today)|today.?s food|today.?s intake|today.?s totals?|total today|totals today|macros today|today.?s macros?|today.?s progress|progress today|daily progress|today.?s summary|my day so far|how.?s my day|how is my day|how am i doing today|where am i today)\b/i.test(m) ||
     m === "calories" || m === "calorie" || m === "kcal" || m === "remaining" || m === "what's left" ||
     m === "today's calories" || m === "todays calories" || m === "today's food" || m === "today's intake" ||
     // TODAY beats the week (2026-07-28 live: "Today's progress" found no deterministic owner and
@@ -192,19 +212,11 @@ export async function handleEarlyCommands(ctx: {
     // the one thing that must never happen. The button says "My progress" and means the week;
     // anything carrying "today" means today, and today is the card.)
     m === "today's progress" || m === "todays progress"
-    )
+    ))
   ) {
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
     const name = user.name ? `${user.name}, ` : "";
-    // DON'T SWALLOW THE OTHER HALF (2026-08-07, live-model gauntlet). "What can I eat at the
-    // taxi rank AND how many calories do I have left?" matched here, answered the calories, and
-    // returned — the food half was never seen by anything. Constitution law 20 says answer every
-    // part of what they said; a deterministic handler that returns early makes that impossible
-    // for the engine to obey. So when a second, non-numeric question rides along, this stands
-    // down and lets the coach answer both.
-    const alsoAsksFood = /\b(?:(?:what|which|where)\b[^?]{0,60}\b(?:can|should|do) i (?:eat|have|buy|order|get)|taxi rank|spaza|shisa nyama|kota|takeaway|restaurant|canteen|braai)\b/i.test(m);
-    if (alsoAsksFood) return null; // the engine answers both halves — see law 20
 
     // THE DAY THEY NAMED BEATS THE DAY THE SERVER ASSUMES (2026-08-10 directive, P0.1).
     // "What did I eat yesterday?" matched here and was answered with TODAY's totals — the same

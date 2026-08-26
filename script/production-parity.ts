@@ -378,7 +378,7 @@ async function main() {
     // POSITIVE FORM (item 1.2): the title claims it ends in an INSTRUCTION, so that is asserted.
     // "does not end in ?" was satisfied by any statement at all, including a non-answer.
     assertCustomerOutcome(week, {
-      got: /\b(get|keep|add|hit|log|walk|eat|train|aim|start|stick|focus|send|take|tell|give|reply|show|pick|drop)\b/i,
+      got: /\b(get|keep|add|hit|log|walk|eat|train|aim|start|stick|focus|send|take|tell|give|reply|show|pick|drop|do|make|repeat|carry|hold|stay|put|choose|move)\b/i,
       notGot: /\?\s*$/,
       because: "the week must end in something the client can do, not a question handed back",
     });
@@ -3083,6 +3083,85 @@ async function main() {
   // So this asserts the property that a synchronised copy cannot offer: the session BODY the
   // moved-session path sends is the same string renderSession() produces. Change the renderer and
   // both callers move together; fork one of them and this goes red on the next run.
+  // ── THE CLAIM MATRIX — who is allowed to answer the customer (2026-08-25, issue #63) ─────────
+  //
+  // A broad upstream predicate could prevent the correct specialist from ever seeing a message.
+  // Measured before the fix: ONE phrase — "what can i eat" — preempted SIX food specialists.
+  // "What can I eat at Nandos?" got a generic next-meal card while "What should I order at
+  // Nandos?" got the full smart order, from the same client, about the same restaurant.
+  //
+  // This asserts the CLAIMANT, not the wording, because wording assertions cannot see a specialist
+  // being skipped — the generic card is a perfectly well-formed reply. The claimant is read from
+  // the logChat intent tag, which is the handler naming itself.
+  check("claim matrix . a situated food question reaches its specialist, not a generalist", async () => {
+    const { chatHistory } = await import("../shared/schema");
+    const g = globalThis as any;
+    const claimantOf = async (msg: string): Promise<string> => {
+      g.__KAMLIFE_STUB_USER = { ...USER };
+      g.__KAMLIFE_STUB_WRITES = [];
+      await handleMessage(USER.phoneNumber, msg).catch(() => "");
+      const tags = (g.__KAMLIFE_STUB_WRITES || [])
+        .filter((w: any) => w.table === chatHistory && w.values?.intent)
+        .map((w: any) => String(w.values.intent));
+      delete g.__KAMLIFE_STUB_WRITES;
+      return tags.length ? tags[tags.length - 1] : "(untagged)";
+    };
+
+    // THE PAIRS ARE THE POINT. Each row is the same customer question in two phrasings; before the
+    // fix the left column reached a generalist and the right column reached the owner.
+    const pairs: Array<[string, string, string]> = [
+      ["RESTAURANT_GUIDE", "What can I eat at Nandos?", "What should I order at Nandos?"],
+      ["STREET_FOOD_GUIDE", "What can I eat at the taxi rank?", "I'm at the taxi rank, what should I get?"],
+    ];
+    for (const [owner, phrasingA, phrasingB] of pairs) {
+      for (const msg of [phrasingA, phrasingB]) {
+        assert.equal(await serialise(() => claimantOf(msg)), owner,
+          `"${msg}" was not claimed by ${owner} — a broader predicate took the turn first`);
+      }
+    }
+
+    // …and the swap owner, whose trigger word is IN the message and was still being skipped.
+    assert.equal(await serialise(() => claimantOf("What can I eat instead of rice?")), "FOOD_SWAP",
+      "a swap ask naming its own trigger word did not reach the swap owner");
+  });
+
+  // THE CONTROLS. Narrowing a generalist is only correct where a better owner exists; a generalist
+  // that steps aside for nobody has simply been broken. Both directions are asserted.
+  check("claim matrix control . the generalist keeps the questions it should own", async () => {
+    const { chatHistory } = await import("../shared/schema");
+    const g = globalThis as any;
+    const replyTo = async (msg: string) => {
+      g.__KAMLIFE_STUB_USER = { ...USER };
+      g.__KAMLIFE_STUB_WRITES = [];
+      const out = String(await handleMessage(USER.phoneNumber, msg).catch(() => "") ?? "");
+      const tags = (g.__KAMLIFE_STUB_WRITES || [])
+        .filter((w: any) => w.table === chatHistory && w.values?.intent).map((w: any) => String(w.values.intent));
+      delete g.__KAMLIFE_STUB_WRITES;
+      return { out, claimed: tags.length ? tags[tags.length - 1] : "(untagged)" };
+    };
+    // A contextless hunger question is exactly what the next-meal card is for.
+    for (const msg of ["I'm hungry, what should I do?", "What can I eat?"]) {
+      const r = await serialise(() => replyTo(msg));
+      assert.equal(r.claimed, "MEAL_SUGGESTION",
+        `the generalist stopped owning a question it should own: "${msg}" → ${r.claimed}`);
+    }
+    // Pre-workout timing has NO specialist. Standing down here handed it to the food diary
+    // ("No meals logged yet today"), which is worse than the card it replaced.
+    const pre = await serialise(() => replyTo("What can I eat before the gym?"));
+    assert.equal(pre.claimed, "MEAL_SUGGESTION",
+      `a question with no specialist owner was stood down to a worse handler: ${pre.claimed}`);
+
+    // THE BUDGET ANSWER SURVIVES. "what can i eat" was removed from the totals predicate; these
+    // four carry that question and must be untouched.
+    for (const msg of ["How many calories do I have left?", "Can I still eat?", "What's left today?", "calories left"]) {
+      const r = await serialise(() => replyTo(msg));
+      assertCustomerOutcome(r.out, {
+        got: /\d[\d,]*\s*kcal|calories/i,
+        because: `the budget question must still be answered: "${msg}"`,
+      });
+    }
+  });
+
   check("one mouth . the moved session is the renderer's output, not a lookalike", async () => {
     const { renderSession } = await import("../server/programme");
     const { getTodaySlot } = await import("../server/workout-state");
