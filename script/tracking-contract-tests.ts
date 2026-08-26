@@ -301,6 +301,70 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * STAGE 3 OF THE CONTRACT — ONE WRITE OWNER, AND EVERY CONVERSATIONAL DOOR GOES THROUGH IT.
+   *
+   * logStepsForUser holds one rule that no caller can hold for itself: ONE ROW PER SAST DAY, keep
+   * the higher count unless it is an explicit correction. The cardio door did not go through it —
+   * it ran a bare INSERT with no day-window read — so a client whose day already held 8 000 steps
+   * and sent "ran 5km" ended the turn with TWO rows, 8 000 and 5 500.
+   *
+   * NO CUSTOMER-VISIBLE DIVERGENCE WAS DEMONSTRATED FOR THAT, and this test does not pretend one
+   * was: the direct step query, the streak, the weekly average and a later same-day log all
+   * returned identical answers with one row and with two. What is proven is the contract breach,
+   * plus a real latent risk — both day-row reads are `.limit(1)` with NO ORDER BY, so once a
+   * second row exists, which count the client is told depends on which row Postgres returns. The
+   * cardio door is what creates that precondition. The harness cannot exercise the ambiguity
+   * because the stub always returns the first seeded row, so it is named here, not asserted.
+   *
+   * The conversion (km × 1100 running, × 1300 walking) is untouched — only the write door moved.
+   */
+  {
+    const cardioRows = async (existing: number | null) => {
+      freshTurn();
+      const { handleWorkoutCommands } = await import("../server/handlers/workout");
+      const seeded = existing === null ? []
+        : [{ id: "s1", userId: USER.id, steps: existing, loggedAt: new Date(dayStart.getTime() + 3_600_000) }];
+      g.__KAMLIFE_STUB_USER = { ...USER };
+      g.__KAMLIFE_STUB_ROWS = new Map([
+        [schema.stepLogs, seeded], [schema.workoutLogs, []], [schema.mealLogs, []], [schema.weightLogs, []],
+      ]);
+      g.__KAMLIFE_STUB_WRITES = []; g.__KAMLIFE_STUB_UPDATES = [];
+      const reply = String(await handleWorkoutCommands(
+        { phone: USER.phoneNumber, message: "ran 5km", m: "ran 5km", user: { ...USER } } as any,
+      ).catch(() => ""));
+      const ins = (g.__KAMLIFE_STUB_WRITES || []).filter((w: any) => w.table === schema.stepLogs);
+      const upd = (g.__KAMLIFE_STUB_UPDATES || []).filter((w: any) => w.table === schema.stepLogs);
+      delete g.__KAMLIFE_STUB_UPDATES;
+      return {
+        reply,
+        rows: (existing === null ? 0 : 1) + ins.length,
+        held: ins.length ? Number(ins[0].values?.steps)
+          : upd.length ? Number(upd[upd.length - 1].set?.steps) : existing,
+      };
+    };
+
+    // THE CONTRACT: one row per day, whatever the day already held.
+    for (const [existing, expectRows, expectHeld, why] of [
+      [null, 1, 5500, "an empty day takes the derived count"],
+      [8000, 1, 8000, "a higher existing count is kept, and nothing is written"],
+      [3000, 1, 5500, "a lower existing count is raised, still in one row"],
+    ] as [number | null, number, number, string][]) {
+      const r = await cardioRows(existing);
+      if (r.rows !== expectRows) {
+        failures.push(`Cardio broke one-row-per-day (${why}): day held ${existing}, ended with ${r.rows} rows`);
+      }
+      if (r.held !== expectHeld) {
+        failures.push(`Cardio wrote the wrong count (${why}): day held ${existing}, now ${r.held}, expected ${expectHeld}`);
+      }
+      // EXISTING CUSTOMER BEHAVIOUR IS PRESERVED. The cardio reply never quoted steps and must not
+      // start to — this cut moves a write, it does not change what the client reads.
+      if (!/5\s*km/i.test(r.reply) || !/kcal/i.test(r.reply)) {
+        failures.push(`Cardio reply changed: "${r.reply.split("\n")[0]}"`);
+      }
+    }
+  }
+
+  /**
    * LAW 4 — A DURABLE WRITE IS FOLLOWED BY ONE NEXT MOVE (2026-08-26, issue #63).
    *
    * The contract's last two stages are "one action -> one response", and the product was stopping
