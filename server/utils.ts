@@ -1156,7 +1156,20 @@ export function digitizeSpokenAmounts(m: string): string {
 export function looksLikeWaterReport(raw: string): boolean {
   const m = digitizeSpokenAmounts(raw);
   return /\b(?:drank|drinking|had)\b.{0,24}\b\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?|glass(?:es)?|bottles?)\s*(?:of\s+)?(?:water)?\b/i.test(m)
-    || /^\s*\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?)(?:\s+(?:of\s+)?water)?\s*$/i.test(m);
+    || /^\s*\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?)(?:\s+(?:of\s+)?water)?\s*$/i.test(m)
+    // THE COPULA FORM (2026-08-26, issue #63). "My water is 2 litres" reported nothing to the
+    // water owner — it needed `drank/drinking/had` or a bare amount — so it fell past Water to
+    // FoodContext, where the scanner logged a FOOD called "Water" with a macro card and todayWater
+    // stayed at 0. Wrong data written to the client's record, not merely a missed reply.
+    //
+    // The same construction broke steps (#71) and workout. It is ordinary phrasing — arguably more
+    // natural than "I drank 2 litres" — and three of four tracking surfaces mishandled it.
+    //
+    // A QUESTION IS NOT A REPORT: "how much water should I drink" and "is 2 litres enough" carry
+    // the same words and must not log. The leading-verb guard below is what separates them.
+    || (/\bwater(?:\s+intake)?\s*(?:[:=]|\b(?:is|was|were|are)\b)\s*\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?|glass(?:es)?|bottles?)\b/i.test(m)
+        && !/^(?:how|what|why|when|should|shouldn.?t|is|are|can|could|do|does|don.?t|must)\b/i.test(m.trim())
+        && !/\b(?:enough|too much|too little|target|goal|supposed to|meant to)\b/i.test(m));
 }
 
 export function looksLikeWeightReport(m: string): boolean {

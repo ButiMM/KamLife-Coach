@@ -42,7 +42,12 @@ export async function tryLogWater(ctx: {
   // Question ("is 500ml enough water?", "how much is 2 litres?") must NOT log — reaches
   // the water-question handler below or GPT. Negation/intent ("haven't had my 2L of water
   // yet", "need to drink 2 litres") must NOT log water that was never consumed.
-  const waterIsQuestion = m.includes("?") || /\b(how much|how many|should i|do i need|is\s+\d|enough|too much|target|recommend)\b/i.test(m);
+  // `is\s+\d` WAS UNANCHORED (2026-08-26, issue #63). It exists to catch "is 500ml enough?",
+  // but it also matched "my water IS 2 litres" — a report — so the copula form was classified as
+  // a question and never logged. The client's water went to the food scanner instead, which
+  // logged a FOOD called "Water". Anchored: a question opens with "is", a report does not.
+  const waterIsQuestion = m.includes("?") || /\b(how much|how many|should i|do i need|enough|too much|target|recommend)\b/i.test(m)
+    || /^\s*is\s+\d/i.test(m);
   const waterNotConsumed = mentionsNotDone(m)  // couldn't/skipped/didn't finish my water — never consumed
     || /\b(need\s+to|should\s+(?:i|drink)|must\s+drink|gonna|going\s+to|will\s+drink|plan\s+to|trying\s+to|still\s+need)\b/i.test(m);
   if (waterMatch && hasWaterKeyword && !isNonWaterDrink && !waterIsQuestion && !waterNotConsumed) {
@@ -119,7 +124,12 @@ export async function handleWater(ctx: {
   // in tryLogWater now, so these are no longer in scope here).
   const waterMatch = m.match(/(\d+(?:\.\d+)?)\s*(l|litre|liter|litres|liters|ml|millilitre|milliliter|glass(?:es)?|cup(?:s)?|bottle(?:s)?)\b/i);
   const hasWaterKeyword = WATER_WORDS.test(m);
-  const waterIsQuestion = m.includes("?") || /\b(how much|how many|should i|do i need|is\s+\d|enough|too much|target|recommend)\b/i.test(m);
+  // `is\s+\d` WAS UNANCHORED (2026-08-26, issue #63). It exists to catch "is 500ml enough?",
+  // but it also matched "my water IS 2 litres" — a report — so the copula form was classified as
+  // a question and never logged. The client's water went to the food scanner instead, which
+  // logged a FOOD called "Water". Anchored: a question opens with "is", a report does not.
+  const waterIsQuestion = m.includes("?") || /\b(how much|how many|should i|do i need|enough|too much|target|recommend)\b/i.test(m)
+    || /^\s*is\s+\d/i.test(m);
   const waterNotConsumed = mentionsNotDone(m)  // couldn't/skipped/didn't finish my water — never consumed
     || /\b(need\s+to|should\s+(?:i|drink)|must\s+drink|gonna|going\s+to|will\s+drink|plan\s+to|trying\s+to|still\s+need)\b/i.test(m);
 
