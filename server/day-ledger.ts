@@ -403,6 +403,12 @@ export interface ProgressWeight {
   withheld: boolean;
   /** The first weigh-in in the window — what "since you started" is measured from. */
   startKg: number | null;
+  /**
+   * HOW FAR THEY STILL HAVE TO GO. Signed, same convention as changeKg: NEGATIVE MEANS DOWN THE
+   * SCALE — still to lose — and positive means still to gain. null when no target weight is set,
+   * when there is no weigh-in to measure from, or when the scale is withheld.
+   */
+  toGoalKg: number | null;
   /** Days between the first and last weigh-in. 0 when there are fewer than two. */
   spanDays: number;
   /** Every weigh-in in the window, oldest first. Empty when withheld. For a chart or a trend. */
@@ -461,7 +467,7 @@ export async function getWeightTruth(
   // still leave the rows one careless destructure away from a caller; not asking is the honest
   // shape of standing down, and it is cheaper.
   if (withheld) {
-    return { known: false, currentKg: null, changeKg: null, withheld: true, startKg: null, spanDays: 0, points: [] };
+    return { known: false, currentKg: null, changeKg: null, withheld: true, startKg: null, toGoalKg: null, spanDays: 0, points: [] };
   }
 
   const rows = await db.select({ weight: weightLogs.weight, at: weightLogs.loggedAt })
@@ -479,12 +485,26 @@ export async function getWeightTruth(
     ? Math.max(1, Math.round((points[points.length - 1].at.getTime() - points[0].at.getTime()) / 86_400_000))
     : 0;
 
+  // THE DISTANCE BELONGS TO THE SCALE'S OWNER (2026-08-27, live: "How far am I from my goal?").
+  //
+  // GOAL_DISTANCE answered that question with a progress recital — change since start, sessions
+  // this week, protein today — and closed on "That's the distance" while never naming the target
+  // or the gap. The fact was not missing from the system; it was missing from the one reader that
+  // holds both halves. It is computed here rather than at the mouth because three inline copies of
+  // this arithmetic already exist (trajectory.ts, handlers/weight.ts, scheduler/jobs/monday.ts)
+  // and a fourth at a call site is how that happens a fifth time.
+  const targetKg = Number(user?.targetWeightKg);
+  const toGoalKg = Number.isFinite(latest) && Number.isFinite(targetKg) && targetKg > 0
+    ? Math.round((targetKg - latest) * 10) / 10
+    : null;
+
   return {
     known: change !== null,
     currentKg: Number.isFinite(latest) ? latest : null,
     changeKg: change,
     withheld: false,
     startKg: points.length ? points[0].kg : null,
+    toGoalKg,
     spanDays,
     points,
   };
