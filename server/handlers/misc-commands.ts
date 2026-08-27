@@ -92,6 +92,24 @@ export async function handleMiscCommands(ctx: {
       const bits: string[] = [];
       const change = truth.weight.changeKg;
       const scaleOff = /\b(weight|scale|weigh)\b/i.test(String(user.doNotMention || ""));
+      // THE DISTANCE FIRST — it is the question (2026-08-27, live phone trace).
+      //
+      // This block already ended on "That's the distance" and never contained one: it recited the
+      // change since start, the week's sessions and today's protein, and left a client holding
+      // 92kg with an 85kg target no closer to knowing they had 7kg to go. The gap now comes from
+      // getWeightTruth, the one reader that owns what the scale says, so this mouth and every
+      // other surface cannot disagree about it.
+      //
+      // It leads, and the recital still follows: they asked how far, and the rest is the context
+      // that makes the number mean something. When there is no target or no weigh-in there is no
+      // distance to state, and the answer is exactly what it was before.
+      const toGoal = truth.weight.toGoalKg;
+      if (!scaleOff && toGoal !== null && truth.weight.currentKg !== null) {
+        const kg = Math.abs(toGoal);
+        bits.push(kg < 0.1
+          ? `You're at your goal weight — ${truth.weight.currentKg}kg.`
+          : `${kg.toFixed(1)}kg to ${toGoal < 0 ? "go" : "gain"}: ${truth.weight.currentKg}kg now, ${Number(user.targetWeightKg)}kg the goal.`);
+      }
       if (!scaleOff && truth.weight.known && change !== null) {
         bits.push(change < 0
           ? `Scale: down ${Math.abs(change).toFixed(1)}kg since you started.`

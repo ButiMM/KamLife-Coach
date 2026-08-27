@@ -522,6 +522,76 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * THE ANSWER MUST CONTAIN THE FACT IT WAS ASKED FOR (2026-08-27, live phone trace).
+   *
+   * "How far am I from my goal?" is claimed correctly — GOAL_DISTANCE in misc-commands owns it and
+   * says so in its own comment: "must not fall through to GPT or to the plan menu". It then answers
+   * a different question. Measured on main 31444ce, for a client holding 92kg with an 85kg target:
+   *
+   *     Kam — Scale: down 6.0kg since you started. This week: 0/3 sessions.
+   *     Today's protein: 200g / 180g.
+   *
+   *     That's the distance. The next move is still one thing.
+   *
+   * The target is never named. The gap is never named. The reply asserts "that's the distance" while
+   * containing no distance. This is not a claim-precedence defect like the meal request above — the
+   * right owner answered — it is the owner reciting adjacent progress instead of the fact asked for.
+   *
+   * The gap now comes from getWeightTruth, the documented single reader of what the scale says,
+   * which already held the current weight and the client's target. Graded on the reply the client
+   * reads, with both directions of over-fire controlled: no target and a withheld scale must each
+   * leave the answer exactly as it was.
+   */
+  {
+    const goalTurn = async (message: string, opts?: { target?: string | null; doNotMention?: string }) => {
+      freshTurn();
+      // Ascending by loggedAt — getWeightTruth orders that way and the stub does not sort, so a
+      // reversed seed reads as a 6kg GAIN and would have this suite grading a fiction.
+      const weighIns = Array.from({ length: 9 }, (_, i) => ({
+        id: `w${i}`, userId: USER.id, weight: 98 - i * 0.75, weightKg: 98 - i * 0.75,
+        loggedAt: new Date(dayStart.getTime() - (8 - i) * 7 * 86_400_000),
+      }));
+      g.__KAMLIFE_STUB_USER = {
+        ...USER, todayWater: "0", currentWeight: 92,
+        targetWeightKg: opts?.target === undefined ? "85" : opts.target,
+        doNotMention: opts?.doNotMention || "",
+      };
+      g.__KAMLIFE_STUB_ROWS = new Map([
+        [schema.mealLogs, []], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, weighIns],
+      ]);
+      g.__KAMLIFE_STUB_WRITES = [];
+      return String(await handleMessage(USER.phoneNumber, message).catch(() => ""));
+    };
+    const ASK = "How far am I from my goal?";
+    const statesADistance = (r: string) => /\bto (?:go|gain)\b|at your goal weight/i.test(r);
+
+    // THE DEFECT: 92kg now, 85kg the goal — the answer must carry the 7kg and the target.
+    {
+      const r = await goalTurn(ASK);
+      const said = numbersIn(r);
+      if (!said.has(7)) failures.push(`A distance question was answered without the distance — 92kg now, 85kg the goal: "${r.replace(/\n/g, " ⏎ ")}"`);
+      if (!said.has(85)) failures.push(`A distance question was answered without naming the goal weight: "${r.replace(/\n/g, " ⏎ ")}"`);
+    }
+
+    // CONTROL — NO TARGET SET. There is no distance to state, so none may be invented, and the
+    // answer is the one this handler always gave.
+    {
+      const r = await goalTurn(ASK, { target: null });
+      if (statesADistance(r)) failures.push(`A client with no goal weight was told a distance anyway: "${r.replace(/\n/g, " ⏎ ")}"`);
+      if (!/that's the distance/i.test(r)) failures.push(`A client with no goal weight lost the GOAL_DISTANCE answer entirely: "${r.replace(/\n/g, " ⏎ ")}"`);
+    }
+
+    // CONTROL — THE CLIENT ASKED US TO DROP THE SCALE. do_not_mention is honoured by exactly one
+    // reader; a distance is a weight figure, and stating it here would walk straight through that.
+    {
+      const r = await goalTurn(ASK, { doNotMention: "weight" });
+      if (statesADistance(r) || numbersIn(r).has(85)) {
+        failures.push(`A withheld scale still produced a weight distance: "${r.replace(/\n/g, " ⏎ ")}"`);
+      }
+    }
+  }
+
+  /**
    * STAGE 3 OF THE CONTRACT — ONE WRITE OWNER, AND EVERY CONVERSATIONAL DOOR GOES THROUGH IT.
    *
    * logStepsForUser holds one rule that no caller can hold for itself: ONE ROW PER SAST DAY, keep
