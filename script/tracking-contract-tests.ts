@@ -680,6 +680,35 @@ const MUST_WRITE: [string, string][] = [
         failures.push(`Coach Health rule "${rule.id}" has no trigger kind — its denominator cannot be labelled honestly`);
       }
     }
+
+    /**
+     * THE RATIO'S TWO HALVES MUST BE THE SAME SIDE OF THE FIX (2026-08-27, first live reading).
+     *
+     * The panel showed, for a rule whose only matching turn predated its fix:
+     *
+     *     Distance question answered without the distance   0 of 1 matching request · 1 before the fix
+     *
+     * which reads as "someone asked since the fix and got the right answer". Nobody had. The
+     * numerator excluded pre-fix hits and the denominator included pre-fix asks, so an UNTESTED
+     * rule displayed as a verified one — failing in the flattering direction, which is the only
+     * direction that matters on a page whose job is to be believed.
+     *
+     * Graded on the same split the endpoint performs, over a synthetic window straddling a merge.
+     */
+    {
+      const rule = COACH_HEALTH_RULES.find(r => r.id === "goal-distance-missing")!;
+      const merged = Date.parse(rule.fixedAt);
+      const window = [new Date(merged - 60_000), new Date(merged + 60_000)];
+      const since = window.filter(at => isRegression(rule, at)).length;
+      const before = window.filter(at => !isRegression(rule, at)).length;
+      if (since !== 1 || before !== 1) {
+        failures.push(`Coach Health cannot separate a window that straddles a fix: ${since} since / ${before} before, expected 1 and 1`);
+      }
+      // And the two must never be added together into one headline number.
+      if (since + before !== window.length) {
+        failures.push(`Coach Health lost a turn when splitting around the fix — every turn must land on exactly one side`);
+      }
+    }
     const check = (id: string, input: string, reply: string, mutations: string[] = []) => {
       const rule = COACH_HEALTH_RULES.find(r => r.id === id);
       if (!rule) { failures.push(`Coach Health lost the rule "${id}" — the dashboard now watches one fewer adjudicated failure`); return null; }
