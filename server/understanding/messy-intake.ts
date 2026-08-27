@@ -444,7 +444,11 @@ export const FEELING_ACK = "Heard you on how you're feeling. Showing up still co
  * that can be false is worse than no internal truth, because everything downstream believes it.
  */
 const DURABLE_WRITE: Array<[string, RegExp]> = [
-  ["food", /INSERT meal/i], ["steps", /INSERT steps/i],
+  ["food", /INSERT meal/i],
+  // Steps are one row per day that a client tops up ("5k so far" at noon, "9k" at night), so the
+  // RAISE is as durable as the first report and owes the same next move (2026-08-27). Same anchor
+  // discipline as water below: the verb is what keeps "TURN committed steps" out of this.
+  ["steps", /(?:INSERT|UPDATE) steps/i],
   ["workout", /INSERT workout/i], ["weight", /INSERT weight/i],
   // Water is an UPDATE, not an INSERT — the day carries one running total rather than a row per
   // sip — so it needs its own pattern rather than sharing the INSERT shape (2026-08-26, #63).

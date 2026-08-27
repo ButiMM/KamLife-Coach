@@ -657,7 +657,7 @@ const MUST_WRITE: [string, string][] = [
    * week; the ordering control alone asks for `proteinAtTarget`, and it is the only case that
    * depends on which day it runs.
    */
-  async function coachingTurn(message: string, opts?: { seeWrites?: boolean; proteinAtTarget?: boolean; weeksOnProgramme?: number }) {
+  async function coachingTurn(message: string, opts?: { seeWrites?: boolean; proteinAtTarget?: boolean; weeksOnProgramme?: number; stepsAlready?: number }) {
     // BOTH THE COLUMN NAME AND THE SELECT ALIAS. The stub returns raw rows and does not apply
     // drizzle projections, so `db.select({ kcal: mealLogs.kcalInt })` reads undefined and the
     // client silently looked like they had logged NOTHING today — which quietly moved the ladder
@@ -673,8 +673,11 @@ const MUST_WRITE: [string, string][] = [
       ...USER, todayWater: "0",
       ...(opts?.weeksOnProgramme === undefined ? {} : { programmeWeek: opts.weeksOnProgramme + 1 }),
     };
+    // A step row ALREADY on today, for the turns that grade a raise over an existing count.
+    const steps = opts?.stepsAlready === undefined ? []
+      : [{ id: "s1", userId: USER.id, steps: opts.stepsAlready, loggedAt: new Date(dayStart.getTime() + 3_600_000) }];
     g.__KAMLIFE_STUB_ROWS = new Map([
-      [schema.mealLogs, meals], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
+      [schema.mealLogs, meals], [schema.stepLogs, steps], [schema.workoutLogs, []], [schema.weightLogs, []],
     ]);
     // The decision reads state that INCLUDES this turn's write — the production ordering.
     if (opts?.seeWrites !== false) g.__KAMLIFE_STUB_REFLECT_WRITES = 1;
@@ -711,6 +714,52 @@ const MUST_WRITE: [string, string][] = [
     // …and the move must have read the write. Telling a client who just logged 8 000 steps to
     // walk is the defect this ordering exists to prevent.
     if (/\bwalk\b/i.test(move)) failures.push(`The move ignored the row this turn wrote — 8 000 steps logged, and the coach said: "${move}"`);
+  }
+
+  /**
+   * A RAISE IS A DURABLE WRITE (2026-08-27, traced through handleMessage on main 5e38582).
+   *
+   * Steps are one row per SAST day that a client tops up through the day — "5k so far" at noon,
+   * "9k" at night. logStepsForUser recorded a mutation on the INSERT and not on the UPDATE, so
+   * the SAME client sending the SAME message on the SAME day got a coach or a receipt depending
+   * only on whether they had logged earlier:
+   *
+   *     no row yet   -> "8 500 steps — nice one. 👌 ⏎⏎ Stand on a scale this morning, before you eat."
+   *     3 000 stored -> "8 500 steps — nice one. 👌"
+   *
+   * The day moved from 3 000 to 8 500 in both. closeCoachingTurn asked durableDomains what this
+   * turn changed, was told nothing, and stood down — Law 4 exempting the commonest shape of step
+   * report there is. Graded as a PAIR: the contrast between the two is the evidence, and grading
+   * the raise alone would pass on a build where neither gets a move.
+   */
+  {
+    const first = await coachingTurn("walked 8500 steps today");
+    const raise = await coachingTurn("walked 8500 steps today", { stepsAlready: 3000 });
+    if (!closingMove(first)) {
+      failures.push(`A first step report of the day ended with a receipt and no next move: "${first.replace(/\n/g, " ⏎ ")}"`);
+    }
+    if (!closingMove(raise)) {
+      failures.push(`A step RAISE (3 000 -> 8 500) ended with a receipt and no next move, while the same message on an empty day earned one: "${raise.replace(/\n/g, " ⏎ ")}"`);
+    }
+  }
+
+  /**
+   * AND THE CONTROL: a report the day does NOT take is not a durable write.
+   *
+   * The client holds 9 000 and sends 3 000 — an earlier reading arriving late. logStepsForUser
+   * keeps the 9 000 and answers with it (Law 3, proven above). Nothing changed, so nothing is
+   * owed. Recording the mutation unconditionally instead of inside the raise branch would satisfy
+   * every assertion above and manufacture a coaching move out of a read.
+   */
+  {
+    const reply = await coachingTurn("walked 3000 steps today", { stepsAlready: 9000 });
+    const move = closingMove(reply);
+    if (move) {
+      failures.push(`A report the day did not take produced a next move anyway — nothing was written: "${move}"`);
+    }
+    if (!numbersIn(reply).has(9000)) {
+      failures.push(`A superseded step report was not answered from the ledger — the day holds 9 000: "${reply.replace(/\n/g, " ⏎ ")}"`);
+    }
   }
 
   // NEGATIVE CONTROL FOR THE ORDERING. Deny the decision sight of the write and the move must
