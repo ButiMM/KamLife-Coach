@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
+import CoachHealthPage from "@/pages/coach-health";
 import Analytics from "@/pages/analytics";
 import Finance from "@/pages/finance";
 import UsersList from "@/pages/users";
@@ -53,6 +54,7 @@ function Router() {
       <Route path="/users">{() => <AuthGuard component={UsersList} />}</Route>
       <Route path="/users/:id">{() => <AuthGuard component={UserDetail} />}</Route>
       <Route path="/observability">{() => <AuthGuard component={Observability} />}</Route>
+      <Route path="/coach-health">{() => <AuthGuard component={CoachHealthPage} />}</Route>
       <Route path="/escalations">{() => <AuthGuard component={Escalations} />}</Route>
       <Route path="/ab-tests">{() => <AuthGuard component={ABTests} />}</Route>
       <Route path="/admin/test">{() => <AuthGuard component={AdminTest} />}</Route>

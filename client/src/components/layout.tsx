@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Users, BarChart3, Activity, ShieldAlert, FlaskConical, Mic, LogOut, Menu, X, HeartPulse } from "lucide-react";
+import { LayoutDashboard, Users, BarChart3, Activity, ShieldAlert, FlaskConical, Mic, LogOut, Menu, X, HeartPulse, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { markLoggedOut } from "@/lib/auth";
@@ -15,6 +15,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     { href: "/users", label: "Users", icon: Users },
     { href: "/voice-broadcast", label: "Voice Broadcast", icon: Mic },
     { href: "/observability", label: "Message Feed", icon: Activity },
+    { href: "/coach-health", label: "Coach Health", icon: Stethoscope },
     { href: "/escalations", label: "Escalations", icon: ShieldAlert },
     { href: "/ab-tests", label: "A/B Tests", icon: FlaskConical },
   ];

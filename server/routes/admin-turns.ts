@@ -299,9 +299,20 @@ export function registerAdminTurns(app: Express) {
         // THE DENOMINATOR MEANS DIFFERENT THINGS FOR THE TWO TRIGGERS, so it is not one number
         // wearing one label: a request rule counts people who asked, a mutation rule counts turns
         // scanned. Calling 88 scanned turns "88 asked" would be a false operator statistic.
-        const candidates = rule.trigger === "request"
-          ? rows.filter(r => rule.asks(String(r.inputText || ""))).length
-          : rows.length;
+        //
+        // AND IT MUST BE SCOPED TO THE SAME SIDE OF THE FIX AS THE NUMERATOR (2026-08-27, first
+        // live reading). It was not, and the panel said:
+        //
+        //     Distance question answered without the distance   0 of 1 matching request · 1 before the fix
+        //
+        // which reads as "one client asked since the fix and got it right". Not true: that one
+        // request was the pre-fix one, and NOTHING has exercised the rule since. A ratio whose top
+        // excludes pre-fix hits and whose bottom includes pre-fix asks is not a ratio, and it fails
+        // in the flattering direction — untested looks like verified.
+        const matches = (r: typeof rows[number]) =>
+          rule.trigger === "request" ? rule.asks(String(r.inputText || "")) : true;
+        const candidates = rows.filter(r => matches(r) && isRegression(rule, r.createdAt as any)).length;
+        const historicalCandidates = rows.filter(r => matches(r) && !isRegression(rule, r.createdAt as any)).length;
         return {
           id: rule.id, label: rule.label, layer: rule.layer, fixRef: rule.fixRef,
           expected: rule.expected, fixedAt: rule.fixedAt, trigger: rule.trigger,
@@ -309,6 +320,7 @@ export function registerAdminTurns(app: Express) {
           historical: before.length,
           clients: new Set(after.map(h => h.userId)).size,
           candidates,
+          historicalCandidates,
           examples: after.slice(0, 5).map(h => ({
             turnId: h.id, at: h.createdAt, version: h.version,
             input: String(h.inputText || "").slice(0, 140),
