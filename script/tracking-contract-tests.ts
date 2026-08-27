@@ -640,6 +640,78 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * COACH HEALTH MUST DETECT THE FAILURES IT CLAIMS TO WATCH (2026-08-27).
+   *
+   * The dashboard's rules are the only thing standing between "we measure our adjudicated failures
+   * in production" and a page of comforting zeros. A rule that matches nothing reports a healthy
+   * product forever, and it fails in the safest-looking direction — which is exactly the shape of
+   * defect this suite exists for.
+   *
+   * So the rules are graded against the STRINGS ACTUALLY OBSERVED in the traces that justified
+   * each cut: the pre-fix reply must flag, and the post-fix reply must not. Both directions, from
+   * real output rather than from a sentence describing it.
+   */
+  {
+    const { COACH_HEALTH_RULES, isRegression } = await import("../server/routes/admin-turns");
+
+    /**
+     * A HIT FROM BEFORE THE FIX IS NOT A REGRESSION (2026-08-27, CTO review).
+     *
+     * The first version scanned a 1/7/30-day window and counted every match, so a turn from before
+     * the fix merged — the old behaviour doing exactly what we found it doing — was reported as
+     * "a merged fix is not holding". The count meant the opposite of what the page said. Every
+     * rule's merge instant is graded from both sides, one second apart, so the boundary itself is
+     * the thing under test rather than a comfortable distance either way.
+     */
+    for (const rule of COACH_HEALTH_RULES) {
+      const merged = Date.parse(rule.fixedAt);
+      if (!Number.isFinite(merged)) {
+        failures.push(`Coach Health rule "${rule.id}" has no usable fixedAt ("${rule.fixedAt}") — every hit would be attributed to the wrong side of its fix`);
+        continue;
+      }
+      if (isRegression(rule, new Date(merged - 1000))) {
+        failures.push(`Coach Health counts a PRE-fix turn as a regression for "${rule.id}" — the page would report a fix as not holding using the evidence that justified it`);
+      }
+      if (!isRegression(rule, new Date(merged + 1000))) {
+        failures.push(`Coach Health does not count a POST-fix turn as a regression for "${rule.id}" — a genuine recurrence would be filed as history and never surface`);
+      }
+      // The denominator label is chosen from this, so a wrong value is a false operator statistic.
+      if (rule.trigger !== "request" && rule.trigger !== "mutation") {
+        failures.push(`Coach Health rule "${rule.id}" has no trigger kind — its denominator cannot be labelled honestly`);
+      }
+    }
+    const check = (id: string, input: string, reply: string, mutations: string[] = []) => {
+      const rule = COACH_HEALTH_RULES.find(r => r.id === id);
+      if (!rule) { failures.push(`Coach Health lost the rule "${id}" — the dashboard now watches one fewer adjudicated failure`); return null; }
+      return rule.asks(input) && rule.failed({ reply, mutations });
+    };
+    // [message, pre-fix reply that MUST flag, post-fix reply that must NOT, mutations]
+    const OBSERVED: Array<[string, string, string, string, string[]]> = [
+      ["plate-ask-routing", "what should I eat?",
+        "*Your 3-Day Meal Plan*\nGoal: Fat loss · 2700 kcal/day · 180g protein\nBudget: R100–R300/week",
+        "*🍽️ Next Meal Suggestion — Kam*\n\nYou need *100g more protein* today. That is the priority.", []],
+      ["goal-distance-missing", "How far am I from my goal?",
+        "Kam — Scale: down 6.0kg since you started. This week: 0/3 sessions.\n\nThat's the distance. The next move is still one thing.",
+        "Kam — 7.0kg to go: 92kg now, 85kg the goal. Scale: down 6.0kg since you started.", []],
+      ["meal-for-calories-claim", "Give me a meal for my last 668 calories",
+        "Kam, today: *2000/2700 kcal* · *200g/180g* protein. *700 kcal* left.",
+        "*🍽️ Next Meal Suggestion — Kam*\n\nYou need *100g more protein* today.", []],
+      ["step-raise-no-move", "I walked 8500 steps today",
+        "8 500 steps — nice one. 👌",
+        "8 500 steps — nice one. 👌\n\nStand on a scale this morning, before you eat.",
+        ["UPDATE steps=8500 (was 3000)"]],
+    ];
+    for (const [id, input, broken, fixed, mutations] of OBSERVED) {
+      if (check(id, input, broken, mutations) === false) {
+        failures.push(`Coach Health would not have caught the failure it was built from — rule "${id}" passed the observed pre-fix reply: "${broken.replace(/\n/g, " ⏎ ")}"`);
+      }
+      if (check(id, input, fixed, mutations) === true) {
+        failures.push(`Coach Health flags the FIXED reply as a failure — rule "${id}" would report a permanent false positive: "${fixed.replace(/\n/g, " ⏎ ")}"`);
+      }
+    }
+  }
+
+  /**
    * STAGE 3 OF THE CONTRACT — ONE WRITE OWNER, AND EVERY CONVERSATIONAL DOOR GOES THROUGH IT.
    *
    * logStepsForUser holds one rule that no caller can hold for itself: ONE ROW PER SAST DAY, keep
