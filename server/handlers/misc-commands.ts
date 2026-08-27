@@ -299,7 +299,10 @@ export async function handleMiscCommands(ctx: {
   // branch correctly stopped claiming it. Stopping the wrong claimant is only half the fix — the
   // right one has to take the turn. Same request verbs as the guard in early-commands, so the two
   // doors agree on what a meal request looks like.
-  if (/\b(what should i eat next|next meal|(?:suggest|give|send|show|recommend)(?:\s+me)?\s*a?n?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(breakfast|lunch|dinner|supper|braai|social)\b/i.test(m)) {
+  // `what should i eat` (not `...next`): the bare form is the SAME plate-ask as "what can I eat",
+  // which this door already owns. Requiring the suffix is what sent it to the meal-plan door
+  // instead (2026-08-27). Dropping one word covers both, and adds no new vocabulary.
+  if (/\b(what should i eat|next meal|(?:suggest|give|send|show|recommend)(?:\s+me)?\s*a?n?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(breakfast|lunch|dinner|supper|braai|social)\b/i.test(m)) {
     const todayStr = sastToday();
     const todayCals = user.todayCaloriesDate === todayStr ? (user.todayCalories || 0) : 0;
     const todayProt = user.todayCaloriesDate === todayStr ? (user.todayProteinG || 0) : 0;
