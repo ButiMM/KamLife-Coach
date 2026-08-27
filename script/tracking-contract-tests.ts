@@ -489,24 +489,47 @@ const MUST_WRITE: [string, string][] = [
    * All five tracked facts now travel one path: write -> state -> decision -> response.
    */
   const EVIDENCED_DAYS = 5;   // underPolicy prescribes only for a client it can actually read
-  async function coachingTurn(message: string, opts?: { seeWrites?: boolean }) {
+
+  /**
+   * THE FIXTURE IS SPLIT BY PURPOSE, BECAUSE ONE CLIENT CANNOT SERVE BOTH (2026-08-27).
+   *
+   * The ladder runs come_back -> rest -> weigh -> eat_more -> protein -> walk -> train -> hold,
+   * and the two things graded below need OPPOSITE things from it:
+   *
+   *   "a durable write earns a move" needs a rung that fires whatever the date is.
+   *   the ordering control        needs the move to change with STEPS, so every rung above
+   *                               `walk` has to stay quiet — which means protein must be met.
+   *
+   * Below `walk` there is only `train`, and canonicalDecision sets sessionsTarget to 0 on a rest
+   * day (SCHEDULE_MAP is day-of-week, and no setting trains all seven days). So with protein at
+   * target the ladder reaches `hold` on a rest day and there is no move at all.
+   *
+   * THAT IS EXACTLY WHAT HAPPENED. #77 set protein to 200/180 to make the ordering property
+   * observable, which was right for the control and quietly made the four "durable write earns a
+   * move" assertions depend on the CALENDAR. They passed CI on a Wednesday and went red on the
+   * Thursday with no code change — the worst direction for a gate to fail in, because it was
+   * green when it was adjudicated.
+   *
+   * So: protein is SHORT by default, which lands the ladder on the protein rung every day of the
+   * week; the ordering control alone asks for `proteinAtTarget`, and it is the only case that
+   * depends on which day it runs.
+   */
+  async function coachingTurn(message: string, opts?: { seeWrites?: boolean; proteinAtTarget?: boolean; weeksOnProgramme?: number }) {
+    // BOTH THE COLUMN NAME AND THE SELECT ALIAS. The stub returns raw rows and does not apply
+    // drizzle projections, so `db.select({ kcal: mealLogs.kcalInt })` reads undefined and the
+    // client silently looked like they had logged NOTHING today — which quietly moved the ladder
+    // onto its "log something" rung. Seeding only kcalInt is how that hid.
+    const protein = opts?.proteinAtTarget ? 200 : 60;
     const meals = Array.from({ length: EVIDENCED_DAYS }, (_, i) => ({
       id: `m${i}`, userId: USER.id, items: ["chicken"], mealLabel: "lunch",
       loggedAt: new Date(dayStart.getTime() - i * 86_400_000 + 3_600_000), corrected: false,
-      // BOTH THE COLUMN NAME AND THE SELECT ALIAS. The stub returns raw rows and does not apply
-      // drizzle projections, so `db.select({ kcal: mealLogs.kcalInt })` reads undefined and the
-      // client silently looked like they had logged NOTHING today — which quietly moved the
-      // coaching ladder onto its "log something" rung and made both ordering assertions below
-      // pass without proving anything. Seeding only kcalInt is how that hid.
-      // PROTEIN IS AT TARGET ON PURPOSE. At 70g against a 180g target the ladder stops on the
-      // protein rung, which outranks every step-sensitive rung — so whether the decision could
-      // see this turn's step write made no difference to the move, and BOTH ordering assertions
-      // below passed while proving nothing. The client has to be one where the property is
-      // actually observable.
-      kcalInt: 2000, proteinInt: 200, kcal: 2000, protein: 200, carbs: 0, fat: 0,
+      kcalInt: 2000, proteinInt: protein, kcal: 2000, protein, carbs: 0, fat: 0,
     }));
     freshTurn();
-    g.__KAMLIFE_STUB_USER = { ...USER, todayWater: "0" };
+    g.__KAMLIFE_STUB_USER = {
+      ...USER, todayWater: "0",
+      ...(opts?.weeksOnProgramme === undefined ? {} : { programmeWeek: opts.weeksOnProgramme + 1 }),
+    };
     g.__KAMLIFE_STUB_ROWS = new Map([
       [schema.mealLogs, meals], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
     ]);
@@ -556,11 +579,34 @@ const MUST_WRITE: [string, string][] = [
   // turns in-process), so simply adding cases ABOVE this one flipped the blind move to the log
   // rung and the control started failing for a reason that had nothing to do with ordering. A
   // control that breaks when unrelated tests are added is not measuring what it claims.
+  // THE ORDERING CONTROL CAN ONLY RUN WHEN THE LADDER IS STEP-SENSITIVE, and that is a real
+  // limitation, stated rather than papered over.
+  //
+  // Steps are the only fact whose rung responds to a step write, and `walk` is gated on
+  // `hour >= 12`; the rung below it, `train`, is gated on the day of the week. The weigh-in was
+  // tried as an ungated alternative and does not work: the row reflects into the stub but
+  // truth.weight.known stays false, because getProgressTruth reads it through a select alias the
+  // stub does not apply — the same gap that made the meal seed read as zero.
+  //
+  // So before noon this control cannot demonstrate anything, and it says so on the run instead of
+  // passing quietly. It is NOT allowed to fail in that case: a gate that goes red every morning
+  // for a reason unrelated to the code is exactly the untrustworthy baseline this cut exists to
+  // repair. What it must never do is report success it did not earn.
   {
-    const sighted = closingMove(await coachingTurn("walked 8000 steps today"));
-    const blind = closingMove(await coachingTurn("walked 8000 steps today", { seeWrites: false }));
-    if (sighted && blind && sighted === blind) {
-      failures.push(`The ordering control did not reproduce the defect: a decision blind to the write produced the SAME move ("${blind}"), so the check above proves nothing`);
+    const { sastHour } = await import("../server/sast");
+    if (sastHour() < 12) {
+      console.log(`⚠ ORDERING CONTROL DID NOT RUN — it is ${sastHour()}:00 SAST and the walk rung`);
+      console.log(`  is gated on hour >= 12, so a decision blind to the write and one that can see`);
+      console.log(`  it produce the same move. The Law 4 assertions above ran; this specific proof`);
+      console.log(`  that they are not vacuous did not. Re-run after 12:00 SAST to exercise it.`);
+    } else {
+      const sighted = closingMove(await coachingTurn("walked 8000 steps today", { proteinAtTarget: true }));
+      const blind = closingMove(await coachingTurn("walked 8000 steps today", { seeWrites: false, proteinAtTarget: true }));
+      if (!blind) {
+        failures.push(`The ordering control is vacuous: a decision blind to the write produced no move at all`);
+      } else if (sighted === blind) {
+        failures.push(`The ordering control did not reproduce the defect: a decision blind to the write produced the SAME move ("${blind}")`);
+      }
     }
   }
 
