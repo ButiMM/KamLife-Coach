@@ -301,6 +301,90 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * THE CARD MAY NOT CONTRADICT THE DECISION (2026-08-26, live phone trace).
+   *
+   * The client said they were done eating for the day. The text respected it. The card told them
+   * to eat more. Both were produced by the same turn, from the same day-state, by two different
+   * owners of the same question:
+   *
+   *     chooseAction        eat_more and protein rungs, each guarded by !s.foodDayClosed
+   *     nextMoveLine        the SAME two rungs on the card, with no such guard
+   *
+   * Reproduced deterministically on one day-state — fat-loss client, 19:00, protein 60 of 180:
+   *
+   *     text: "Get today's session done."                    (closure respected)
+   *     card: "Get a real protein into your next two meals"  (still selling food)
+   *
+   * The fix adds no prose. A closed day is a finished day, and nextMoveLine already owned four
+   * close-out lines for the after-20:00 case — "That's the day. Tomorrow get a real protein in at
+   * breakfast" is exactly right for someone who stopped eating short of protein. Closure enters
+   * the same branch the clock does.
+   *
+   * GRADED THROUGH THE REAL PATH, not just the pure function: the card markers read closure from
+   * held-constraints, the same durable owner canonicalDecision consults. That read goes through
+   * raw pool.query, so it is seeded here via __KAMLIFE_STUB_PGROWS — the seam that exists because
+   * "the client said at 08:00 they are not training today" could not otherwise be expressed
+   * offline. Without it this test would only prove the parameter works, not that anything passes it.
+   */
+  {
+    const { nextMoveLine, mealCard } = await import("../server/macro-card-attach");
+    const { chooseAction } = await import("../server/one-action");
+    const { readHeldConstraints } = await import("../server/held-constraints");
+
+    const rows = [
+      { label: "Calories", current: 1400, target: 2700 },
+      { label: "Protein", current: 60, target: 180 },
+      { label: "Fat", current: 40, target: 80 },
+      { label: "Carbs", current: 100, target: 300 },
+    ] as any;
+    const dayState = (closed: boolean) => ({
+      goal: "fat_loss", weeksOnProgramme: 5, daysSinceAnyLog: 0, daysSinceWeighIn: 1,
+      loggedToday: true, proteinPct: 60 / 180, caloriePct: 1400 / 2700,
+      sessionsThisWeek: 2, sessionsTarget: 3, stepsToday: 6000, stepsTarget: 10000,
+      hour: 19, atKeyboard: true, foodDayClosed: closed,
+    }) as any;
+    const sells = (line: string) => /\beat\b|\bnext meal\b|next two meals|proper protein|add eggs|yoghurt|boiled egg/i.test(line)
+      && !/tomorrow/i.test(line);
+
+    // THE DEFECT: on a closed day the card must not sell food while the text stands down.
+    {
+      const textMove = chooseAction(dayState(true)).todo;
+      const cardMove = mealCard({
+        firstName: "Kam", mealName: "Today", rows, isBulk: false, usesNumbers: true,
+        hour: 19, foodDayClosed: true,
+      }).sub;
+      if (sells(cardMove)) {
+        failures.push(`The card sold food on a closed day while the text stood down — text: "${textMove}" / card: "${cardMove}"`);
+      }
+    }
+
+    // THE CONTROL: an OPEN day is untouched. A guard that silences the card always would pass the
+    // assertion above and leave every ordinary day without its next move.
+    {
+      const cardMove = mealCard({
+        firstName: "Kam", mealName: "Today", rows, isBulk: false, usesNumbers: true,
+        hour: 19, foodDayClosed: false,
+      }).sub;
+      if (!sells(cardMove)) {
+        failures.push(`An open day lost its card instruction: "${cardMove}"`);
+      }
+    }
+
+    // AND THE MARKERS ACTUALLY READ THE OWNER. Without this the parameter above could be correct
+    // and permanently false in production.
+    {
+      g.__KAMLIFE_STUB_PGROWS = [{ message_in: "I'm done eating for the day", created_at: new Date(Date.now() - 600_000) }];
+      const held = await readHeldConstraints(USER.phoneNumber, USER as any).catch(() => ({ foodDayClosed: false } as any));
+      delete g.__KAMLIFE_STUB_PGROWS;
+      if (!held.foodDayClosed) {
+        failures.push(`held-constraints did not see the closure the card now depends on — the card's read is wired to a fact that never becomes true`);
+      }
+    }
+
+    void nextMoveLine;
+  }
+
+  /**
    * ONE CUSTOMER MEANING -> ONE OWNER. Claim precedence, not capability (2026-08-26, live trace).
    *
    * The capability was never missing. SMART NEXT MEAL answers "what should I eat next" against the

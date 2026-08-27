@@ -157,7 +157,7 @@ function stripWrapQuotes(s: string): string {
 // so "Good start 👌" reached the founder as "Good start ☐" (2026-08-04 live, one hour after I
 // put them in). Emoji belong in the CHAT text, where WhatsApp renders them; on the card they
 // are a tofu box. His register survives without them — the words were always the voice.
-export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), isPastDay = false): string {
+export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), isPastDay = false, foodDayClosed = false): string {
   const r = (label: string) => rows.find(x => x.label === label);
   if (isPastDay) return "Yesterday's log — today's plate is a separate day";
   const ratio = (x?: Row) => (x && x.target > 0 ? x.current / x.target : 0);
@@ -174,7 +174,21 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), is
   // So after 20:00 the directive stops being a to-do and becomes a close-out that faces
   // tomorrow. Same principle — one instruction, one lever, his voice — chosen from WHEN the
   // report arrived rather than from an ideal real-time flow nobody actually lives.
-  if (hour >= 20) {
+  // THE CARD MAY NOT SELL FOOD TO A CLIENT WHO SAID THEY ARE DONE (2026-08-26, live phone trace).
+  //
+  // chooseAction guards its eat_more and protein rungs with `!s.foodDayClosed`. This function is
+  // the SAME two rungs, on the card, and it had no such guard — so on one day-state the client
+  // read both of these in one turn:
+  //
+  //     text: "Get today's session done."                    <- closure respected
+  //     card: "Get a real protein into your next two meals"  <- still selling food
+  //
+  // Two owners of "what should they do next", one closure-aware and one blind. The fix is not new
+  // prose: a closed day is a finished day, and this function already owns the four close-out lines
+  // for that — "That's the day. Tomorrow get a real protein in at breakfast" is exactly the right
+  // coaching for a client who has stopped eating short of protein. So closure enters the SAME
+  // branch the clock does, and the lines below are unchanged.
+  if (foodDayClosed || hour >= 20) {
     return !isBulk && ratio(cal) > 1.05 ? "Day's done. Tomorrow, first meal before you leave the house"
       : protLeft >= 35 ? "That's the day. Tomorrow get a real protein in at breakfast"
       : isBulk && calLeft > 500 ? "Day's wrapped. Tomorrow, eat earlier — that's the whole fix"
@@ -423,6 +437,8 @@ export function mealCard(opts: {
   firstName: string; mealName: string; rows: Row[]; isBulk: boolean; usesNumbers: boolean;
   hour?: number;
   isPastDay?: boolean;
+  /** They said they are done eating today. The card's next move must agree with the decision's. */
+  foodDayClosed?: boolean;
 }): AchievementCardData {
   const r = (label: string) => opts.rows.find(x => x.label === label);
   const prot = r("Protein");
@@ -442,8 +458,22 @@ export function mealCard(opts: {
     figure: opts.usesNumbers ? `${protSoFar}g` : verdict,
     unit: opts.usesNumbers ? (opts.isPastDay ? "protein yesterday" : "protein today") : (opts.isPastDay ? "yesterday" : "so far today"),
     line: `${opts.firstName ? opts.firstName + ": " : ""}${opts.mealName} logged.`,
-    sub: nextMoveLine(opts.rows, opts.isBulk, opts.hour, !!opts.isPastDay),
+    sub: nextMoveLine(opts.rows, opts.isBulk, opts.hour, !!opts.isPastDay, !!opts.foodDayClosed),
   };
+}
+
+/**
+ * DID THEY CLOSE THE DAY? Read from held-constraints — the same durable owner canonicalDecision
+ * consults, so the card and the text cannot disagree about it. A constraint outlives the sentence
+ * that stated it, which is why this is a stored read and not a look at the current message.
+ * Fail-open to "not closed": a card is a bonus, never a blocker, and the pre-existing behaviour
+ * on an unreadable constraint is exactly what it was before.
+ */
+async function dayClosedFor(user: any): Promise<boolean> {
+  try {
+    const { readHeldConstraints } = await import("./held-constraints");
+    return !!(await readHeldConstraints(user?.phoneNumber, user)).foodDayClosed;
+  } catch { return false; }
 }
 
 export async function macroCardMarker(opts: { user: any; mealName: string; mealKcal: number; forDate?: Date; achievementStreak?: number }): Promise<string> {
@@ -473,6 +503,7 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
       firstName: firstNameOf(opts.user),
       mealName: opts.mealName || "Meal",
       rows: today.rows,
+      foodDayClosed: isPastDay ? false : await dayClosedFor(opts.user),
       isBulk: today.isBulk,
       usesNumbers: getNumbersMode(opts.user) !== "low" && getGoalProfile(opts.user?.goalType).usesMacros,
       isPastDay,
@@ -512,6 +543,7 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
       firstName: firstNameOf(user),
       mealName: "Today",
       rows: today.rows,
+      foodDayClosed: await dayClosedFor(user),
       isBulk: today.isBulk,
       usesNumbers: getNumbersMode(user) !== "low" && getGoalProfile(user?.goalType).usesMacros,
     });
