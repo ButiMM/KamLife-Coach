@@ -320,68 +320,127 @@ const MUST_WRITE: [string, string][] = [
    * breakfast" is exactly right for someone who stopped eating short of protein. Closure enters
    * the same branch the clock does.
    *
-   * GRADED THROUGH THE REAL PATH, not just the pure function: the card markers read closure from
-   * held-constraints, the same durable owner canonicalDecision consults. That read goes through
-   * raw pool.query, so it is seeded here via __KAMLIFE_STUB_PGROWS — the seam that exists because
-   * "the client said at 08:00 they are not training today" could not otherwise be expressed
-   * offline. Without it this test would only prove the parameter works, not that anything passes it.
+   * GRADED THROUGH THE PRODUCTION MARKER, NOT A HAND-PASSED BOOLEAN.
+   *
+   * The first version of this test called nextMoveLine(rows, ..., foodDayClosed) directly and
+   * asserted on the string. That proved the parameter works and NOTHING about whether production
+   * supplies it — delete both `foodDayClosed: await dayClosedFor(...)` lines from the markers and
+   * that test stays green while the client keeps reading "eat more" on a day they closed. A test
+   * that can be green while the customer is wrong is not evidence.
+   *
+   * So the graded path is the real one, end to end:
+   *
+   *     dailyMacroCardMarker(user) -> dayClosedFor -> readHeldConstraints -> nextMoveLine -> PNG
+   *
+   * The card's words are rasterised into that PNG and cannot be read back, so the assertion is on
+   * BYTES: render the two cards this day-state can produce, then check which one the production
+   * marker actually emitted. Byte equality is exact — it pins the specific close-out line, not
+   * merely "some different card".
+   *
+   * Three things had to be pinned for those bytes to mean anything:
+   *   - THE CLOCK. nextMoveLine takes the same branch after 20:00 on its own, so at 20:00 a broken
+   *     wiring would look fixed. Date.now is frozen at 19:00 SAST on a fixed date — the #82 rule:
+   *     a test must not change its answer because of when it ran.
+   *   - THE LEDGER. An empty day, so the rows are known and the protein rung is the one in play.
+   *   - THE CLOSURE. readHeldConstraints goes through raw pool.query, seeded via
+   *     __KAMLIFE_STUB_PGROWS — the seam that exists because a constraint stated at 08:00 cannot
+   *     otherwise be expressed offline.
    */
   {
-    const { nextMoveLine, mealCard } = await import("../server/macro-card-attach");
-    const { chooseAction } = await import("../server/one-action");
+    const { mealCard, todayRows, dailyMacroCardMarker, macroCardMarker } = await import("../server/macro-card-attach");
+    const { _resetDumpWindow: resetDump } = await import("../server/card-policy");
+    const { renderAchievementCard } = await import("../server/achievement-card");
+    const { getCard } = await import("../server/card-store");
+    const { getNumbersMode } = await import("../server/numbers-mode");
+    const { getGoalProfile } = await import("../server/goal-profiles");
     const { readHeldConstraints } = await import("../server/held-constraints");
+    const { mealLogs, stepLogs } = await import("../shared/schema");
 
-    const rows = [
-      { label: "Calories", current: 1400, target: 2700 },
-      { label: "Protein", current: 60, target: 180 },
-      { label: "Fat", current: 40, target: 80 },
-      { label: "Carbs", current: 100, target: 300 },
-    ] as any;
-    const dayState = (closed: boolean) => ({
-      goal: "fat_loss", weeksOnProgramme: 5, daysSinceAnyLog: 0, daysSinceWeighIn: 1,
-      loggedToday: true, proteinPct: 60 / 180, caloriePct: 1400 / 2700,
-      sessionsThisWeek: 2, sessionsTarget: 3, stepsToday: 6000, stepsTarget: 10000,
-      hour: 19, atKeyboard: true, foodDayClosed: closed,
-    }) as any;
-    const sells = (line: string) => /\beat\b|\bnext meal\b|next two meals|proper protein|add eggs|yoghurt|boiled egg/i.test(line)
-      && !/tomorrow/i.test(line);
+    const realNow = Date.now;
+    const FROZEN = Date.parse("2026-03-11T17:00:00Z");   // 19:00 SAST, before the 20:00 close-out
+    const priorRows = g.__KAMLIFE_STUB_ROWS;
+    Date.now = () => FROZEN;
+    g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[mealLogs, []], [stepLogs, []]]);
+    try {
+      const pngOf = (marker: string) => {
+        const t = marker.match(/\/card\/([^.]+)\.png/);
+        return t ? getCard(t[1]) : null;
+      };
+      const closure = () => [{ message_in: "I'm done eating for the day", created_at: new Date(FROZEN - 600_000) }];
 
-    // THE DEFECT: on a closed day the card must not sell food while the text stands down.
-    {
-      const textMove = chooseAction(dayState(true)).todo;
-      const cardMove = mealCard({
-        firstName: "Kam", mealName: "Today", rows, isBulk: false, usesNumbers: true,
-        hour: 19, foodDayClosed: true,
-      }).sub;
-      if (sells(cardMove)) {
-        failures.push(`The card sold food on a closed day while the text stood down — text: "${textMove}" / card: "${cardMove}"`);
+      const today = await todayRows(USER, false);
+      const cardFor = (mealName: string, foodDayClosed: boolean) => mealCard({
+        firstName: "Kam", mealName, rows: today!.rows, isBulk: today!.isBulk,
+        usesNumbers: getNumbersMode(USER) !== "low" && getGoalProfile(USER.goalType).usesMacros,
+        foodDayClosed,
+      });
+      const openCard = cardFor("Today", false), closedCard = cardFor("Today", true);
+      const sells = (line: string) => /\beat\b|\bnext meal\b|next two meals|proper protein|add eggs|yoghurt|boiled egg/i.test(line)
+        && !/tomorrow/i.test(line);
+
+      // BOTH CALL SITES. The wiring is two lines in two functions, and grading one of them leaves
+      // the other free to be deleted with the suite still green — which is the whole defect this
+      // block exists to catch. The meal-log card is the one a client sees most: it rides every
+      // food log they send.
+      const MARKERS: [string, string, () => Promise<string>][] = [
+        ["the daily-calories card", "Today", () => dailyMacroCardMarker(USER)],
+        ["the meal-log card", "Chicken and rice", () => macroCardMarker({ user: USER, mealName: "Chicken and rice", mealKcal: 600 })],
+      ];
+      for (const [what, mealName, emit] of MARKERS) {
+        delete g.__KAMLIFE_STUB_PGROWS;
+        resetDump();                       // the dump window collapses repeat cards to one
+        const openA = pngOf(await emit());
+        resetDump();
+        const openB = pngOf(await emit());
+        g.__KAMLIFE_STUB_PGROWS = closure();
+        resetDump();
+        const closed = pngOf(await emit());
+        delete g.__KAMLIFE_STUB_PGROWS;
+
+        if (!openA || !openB || !closed) {
+          failures.push(`${what} produced no image, so its closed-day wiring is ungraded — this proves nothing`);
+          continue;
+        }
+        // WITHOUT THIS the "closed differs from open" assertion would pass on rendering noise.
+        if (!openA.equals(openB)) {
+          failures.push(`Two identical renders of ${what} differ byte-for-byte — the comparison below cannot mean anything`);
+          continue;
+        }
+        // THE WIRING. Remove `foodDayClosed: await dayClosedFor(...)` from this marker and the
+        // closed run becomes identical to the open one, and this fails.
+        if (closed.equals(openA)) {
+          failures.push(`A held closed-day constraint did not reach ${what}: it emitted the same image as an open day — card said "${cardFor(mealName, false).sub}"`);
+        }
+        // AND IT IS THE CLOSED-DAY CARD SPECIFICALLY, not merely a different one.
+        if (!closed.equals(renderAchievementCard(cardFor(mealName, true)))) {
+          failures.push(`${what} did not emit the closed-day card — expected the close-out "${cardFor(mealName, true).sub}"`);
+        }
+        if (!openA.equals(renderAchievementCard(cardFor(mealName, false)))) {
+          failures.push(`${what} did not emit the open-day card — expected "${cardFor(mealName, false).sub}"`);
+        }
       }
-    }
-
-    // THE CONTROL: an OPEN day is untouched. A guard that silences the card always would pass the
-    // assertion above and leave every ordinary day without its next move.
-    {
-      const cardMove = mealCard({
-        firstName: "Kam", mealName: "Today", rows, isBulk: false, usesNumbers: true,
-        hour: 19, foodDayClosed: false,
-      }).sub;
-      if (!sells(cardMove)) {
-        failures.push(`An open day lost its card instruction: "${cardMove}"`);
-      }
-    }
-
-    // AND THE MARKERS ACTUALLY READ THE OWNER. Without this the parameter above could be correct
-    // and permanently false in production.
-    {
-      g.__KAMLIFE_STUB_PGROWS = [{ message_in: "I'm done eating for the day", created_at: new Date(Date.now() - 600_000) }];
+      g.__KAMLIFE_STUB_PGROWS = closure();
       const held = await readHeldConstraints(USER.phoneNumber, USER as any).catch(() => ({ foodDayClosed: false } as any));
       delete g.__KAMLIFE_STUB_PGROWS;
-      if (!held.foodDayClosed) {
-        failures.push(`held-constraints did not see the closure the card now depends on — the card's read is wired to a fact that never becomes true`);
-      }
-    }
 
-    void nextMoveLine;
+      // THE CUSTOMER OUTCOME, on the card the production path actually emitted.
+      if (sells(closedCard.sub)) {
+        failures.push(`The card sold food on a closed day: "${closedCard.sub}"`);
+      }
+      // THE CONTROL: an OPEN day keeps its instruction. A guard that silences the card always
+      // would satisfy every assertion above and leave every ordinary day without a next move.
+      if (!sells(openCard.sub)) {
+        failures.push(`An open day lost its card instruction: "${openCard.sub}"`);
+      }
+      // Which half broke, when it breaks: the marker not reading, or the fact never becoming true.
+      if (!held.foodDayClosed) {
+        failures.push(`held-constraints did not see the closure the card depends on — the card's read is wired to a fact that never becomes true`);
+      }
+    } finally {
+      Date.now = realNow;
+      delete g.__KAMLIFE_STUB_PGROWS;
+      if (priorRows === undefined) delete g.__KAMLIFE_STUB_ROWS; else g.__KAMLIFE_STUB_ROWS = priorRows;
+    }
   }
 
   /**
