@@ -378,10 +378,14 @@ interface CoachHealthPayload {
   turns: number;
   flagged: number;
   unresolved: number;
+  historical: number;
+  attribution: string;
   clusters: Array<{
     id: string; label: string; layer: string; fixRef: string; expected: string;
-    occurrences: number; clients: number; asked: number;
+    fixedAt: string; trigger: "request" | "mutation";
+    occurrences: number; historical: number; clients: number; candidates: number;
     examples: Array<{ turnId: string; at: string; version: string | null; input: string; reply: string; status: string | null }>;
+    historicalExamples: Array<{ turnId: string; at: string; version: string | null; input: string; reply: string; status: string | null }>;
   }>;
   cannotSurface: Array<{ id: string; fixRef: string; why: string }>;
 }
@@ -415,8 +419,8 @@ function CoachHealth() {
         <div>
           <h3 className="text-xl font-bold font-display">🩺 Coach Health</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            {data.turns.toLocaleString()} turns · {data.flagged} flagged · {data.unresolved} pattern
-            {data.unresolved === 1 ? "" : "s"} recurring
+            {data.turns.toLocaleString()} turns · {data.flagged} regression
+            {data.flagged === 1 ? "" : "s"} since fix · {data.historical} historical
           </p>
         </div>
         <div className="flex gap-1">
@@ -435,8 +439,9 @@ function CoachHealth() {
 
       {data.flagged === 0 && (
         <div className="text-sm text-muted-foreground mb-4 p-3 rounded-md bg-muted/40">
-          No adjudicated failure recurred in this window. Rules showing <strong>0 asked</strong> below
-          were not exercised at all — that is untested, not proven healthy.
+          No adjudicated failure has recurred since its fix merged. A rule whose denominator is
+          <strong> 0</strong> below was not exercised at all in this window — that is untested,
+          not proven healthy.
         </div>
       )}
 
@@ -459,7 +464,11 @@ function CoachHealth() {
                   {c.occurrences}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  of {c.asked} asked{c.clients > 0 ? ` · ${c.clients} client${c.clients === 1 ? "" : "s"}` : ""}
+                  {c.trigger === "request"
+                    ? `of ${c.candidates} matching request${c.candidates === 1 ? "" : "s"}`
+                    : `${c.candidates} turn${c.candidates === 1 ? "" : "s"} scanned`}
+                  {c.clients > 0 ? ` · ${c.clients} client${c.clients === 1 ? "" : "s"}` : ""}
+                  {c.historical > 0 ? ` · ${c.historical} before the fix` : ""}
                 </span>
               </div>
             </button>
@@ -467,11 +476,15 @@ function CoachHealth() {
             {open === c.id && (
               <div className="border-t p-3 bg-muted/20 text-sm space-y-3">
                 <p className="text-muted-foreground">Expected: {c.expected}</p>
+                <p className="text-muted-foreground text-xs">
+                  Fixed {new Date(c.fixedAt).toLocaleString("en-ZA")} ({c.fixRef}). Turns before that
+                  are the failure we corrected, not a regression — they are counted separately.
+                </p>
                 {c.examples.length === 0 ? (
                   <p className="text-muted-foreground italic">
-                    {c.asked === 0
-                      ? "Not exercised in this window — no client asked this."
-                      : "Asked, and answered correctly every time in this window."}
+                    {c.candidates === 0
+                      ? "Not exercised in this window — nothing matched this rule at all."
+                      : "Exercised, and answered correctly every time since the fix."}
                   </p>
                 ) : c.examples.map(ex => (
                   <div key={ex.turnId} className="border rounded p-2 bg-background">

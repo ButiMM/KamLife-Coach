@@ -166,6 +166,23 @@ type HealthRule = {
   layer: "Claim" | "Decision" | "Response" | "Coaching";
   fixRef: string;
   expected: string;
+  /**
+   * WHEN THE FIX LANDED ON MAIN — the commit date of the squash merge, not an estimate.
+   *
+   * A COUNT WITHOUT THIS IS A LIE (2026-08-27, CTO review of the first version). The page said a
+   * non-zero count meant "a merged fix is not holding in production". It scanned a 1/7/30-day
+   * window and applied each rule to every row in it, so a turn from BEFORE the fix merged — where
+   * the failure is the expected, already-corrected behaviour — was counted exactly the same as a
+   * genuine regression. "7 failures" could have been seven turns that the fix has since repaired.
+   */
+  fixedAt: string;
+  /**
+   * WHAT PUTS A TURN IN THE DENOMINATOR. A `request` rule is triggered by the client's words, so
+   * the denominator is how many people asked. A `mutation` rule is triggered by what the turn
+   * WROTE, so every scanned turn is a candidate and calling them "asked" would be a false
+   * operator statistic — 88 turns scanned is not 88 people asking for anything.
+   */
+  trigger: "request" | "mutation";
   /** Does this turn ask the question the rule is about? Read from the client's own words. */
   asks: (input: string) => boolean;
   /** Given it was asked, did the reply fail to carry what was owed? */
@@ -178,11 +195,24 @@ const lastBlockIsAMove = (reply: string) => {
   return blocks.length > 1 && !last.includes("?") && !/\[(?:BUTTONS|MEDIA)/i.test(last);
 };
 
+/**
+ * IS THIS HIT A REGRESSION, OR THE FAILURE WE ALREADY FIXED?
+ *
+ * Exported because it is the property the whole page rests on: a turn from before the fix merged
+ * is the old behaviour doing exactly what we found it doing, and counting it as "the fix is not
+ * holding" would make the number mean the opposite of what the page says. Graded in the contract
+ * suite against both sides of each fix's merge instant.
+ */
+export function isRegression(rule: Pick<HealthRule, "fixedAt">, turnAt: Date | string | number): boolean {
+  return new Date(turnAt).getTime() >= Date.parse(rule.fixedAt);
+}
+
 export const COACH_HEALTH_RULES: HealthRule[] = [
   {
     id: "plate-ask-routing",
     label: "Plate-ask reached the meal-plan owner",
     layer: "Claim", fixRef: "#86",
+    fixedAt: "2026-08-27T12:14:47+02:00", trigger: "request",
     expected: "Next Meal Suggestion, not a 3-day plan",
     asks: i => /\bwhat (?:can|should|must) i eat\b/i.test(i)
       && !/\bthis week\b/i.test(i)
@@ -193,6 +223,7 @@ export const COACH_HEALTH_RULES: HealthRule[] = [
     id: "goal-distance-missing",
     label: "Distance question answered without the distance",
     layer: "Response", fixRef: "#85",
+    fixedAt: "2026-08-27T11:03:23+02:00", trigger: "request",
     expected: "kg to go, and the goal weight",
     asks: i => /\bhow far (?:am i|are we) (?:from|to)\b/i.test(i) && /\b(goal|target)\b/i.test(i),
     failed: t => !/\bto (?:go|gain)\b|at your goal weight/i.test(t.reply),
@@ -201,6 +232,7 @@ export const COACH_HEALTH_RULES: HealthRule[] = [
     id: "meal-for-calories-claim",
     label: "Meal request answered with a calorie readout",
     layer: "Claim", fixRef: "#81",
+    fixedAt: "2026-08-27T09:19:40+02:00", trigger: "request",
     expected: "a meal, not the day's totals",
     asks: i => /\b(?:give|send|show|suggest|recommend)\s+(?:me\s+)?(?:a|an|another|the)?\s*meal\b/i.test(i),
     failed: t => !/Next Meal Suggestion/i.test(t.reply) && /kcal\b.*\bleft\b|\d+\s*\/\s*\d+\s*kcal/i.test(t.reply),
@@ -209,6 +241,7 @@ export const COACH_HEALTH_RULES: HealthRule[] = [
     id: "step-raise-no-move",
     label: "Step raise ended in a receipt, no next move",
     layer: "Coaching", fixRef: "#84",
+    fixedAt: "2026-08-27T10:37:40+02:00", trigger: "mutation",
     expected: "one coaching move after the write",
     asks: () => true,   // decided by the WRITE, not the wording — see below
     failed: t => t.mutations.some(mm => /UPDATE steps/i.test(mm)) && !lastBlockIsAMove(t.reply),
@@ -258,16 +291,31 @@ export function registerAdminTurns(app: Express) {
           if (!rule.asks(input)) return false;
           return rule.failed({ reply: String(r.reply || ""), mutations: muts });
         });
-        // ASKED vs FAILED, both reported. A rule with 0 failures and 0 asks is untested in
-        // production, which is a different statement from "this failure is not happening".
-        const asked = rows.filter(r => rule.asks(String(r.inputText || ""))).length;
+        // BEFORE THE FIX IS NOT A REGRESSION. A hit older than the merge is the failure behaving
+        // exactly as it did when we found it — evidence the cut was real, not evidence it is
+        // broken now. Only the after bucket may be called a regression, and the two are never summed.
+        const after = hits.filter(h => isRegression(rule, h.createdAt as any));
+        const before = hits.filter(h => !isRegression(rule, h.createdAt as any));
+        // THE DENOMINATOR MEANS DIFFERENT THINGS FOR THE TWO TRIGGERS, so it is not one number
+        // wearing one label: a request rule counts people who asked, a mutation rule counts turns
+        // scanned. Calling 88 scanned turns "88 asked" would be a false operator statistic.
+        const candidates = rule.trigger === "request"
+          ? rows.filter(r => rule.asks(String(r.inputText || ""))).length
+          : rows.length;
         return {
           id: rule.id, label: rule.label, layer: rule.layer, fixRef: rule.fixRef,
-          expected: rule.expected,
-          occurrences: hits.length,
-          clients: new Set(hits.map(h => h.userId)).size,
-          asked,
-          examples: hits.slice(0, 5).map(h => ({
+          expected: rule.expected, fixedAt: rule.fixedAt, trigger: rule.trigger,
+          occurrences: after.length,
+          historical: before.length,
+          clients: new Set(after.map(h => h.userId)).size,
+          candidates,
+          examples: after.slice(0, 5).map(h => ({
+            turnId: h.id, at: h.createdAt, version: h.version,
+            input: String(h.inputText || "").slice(0, 140),
+            reply: String(h.reply || "").replace(/\n/g, " ").slice(0, 160),
+            status: h.lifecycleStatus,
+          })),
+          historicalExamples: before.slice(0, 3).map(h => ({
             turnId: h.id, at: h.createdAt, version: h.version,
             input: String(h.inputText || "").slice(0, 140),
             reply: String(h.reply || "").replace(/\n/g, " ").slice(0, 160),
@@ -281,9 +329,17 @@ export function registerAdminTurns(app: Express) {
         windowDays: days,
         turns: rows.length,
         flagged: clusters.reduce((s, c) => s + c.occurrences, 0),
+        historical: clusters.reduce((s, c) => s + c.historical, 0),
         unresolved: clusters.filter(c => c.occurrences > 0).length,
         clusters,
         cannotSurface: CANNOT_SURFACE,
+        // ATTRIBUTION IS BY MERGE TIME, NOT BY VERIFIED DEPLOYMENT — said in the payload so the
+        // page cannot quietly overstate it. turn_ledger stores the build SHA that served each
+        // turn, but nothing here knows which SHAs contain a given fix: that is git ancestry, and
+        // there is no deployments table to ask. A turn shortly after a merge may still have run
+        // the old build, so a fresh regression should be read against the build on the example
+        // before it is believed. Building that mapping is a separate cut, not a caveat to bury.
+        attribution: "merge-time",
       });
     } catch (e: any) {
       console.error("[COACH_HEALTH] failed:", e?.message);

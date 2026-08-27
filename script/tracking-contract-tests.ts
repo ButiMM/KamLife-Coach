@@ -652,7 +652,34 @@ const MUST_WRITE: [string, string][] = [
    * real output rather than from a sentence describing it.
    */
   {
-    const { COACH_HEALTH_RULES } = await import("../server/routes/admin-turns");
+    const { COACH_HEALTH_RULES, isRegression } = await import("../server/routes/admin-turns");
+
+    /**
+     * A HIT FROM BEFORE THE FIX IS NOT A REGRESSION (2026-08-27, CTO review).
+     *
+     * The first version scanned a 1/7/30-day window and counted every match, so a turn from before
+     * the fix merged — the old behaviour doing exactly what we found it doing — was reported as
+     * "a merged fix is not holding". The count meant the opposite of what the page said. Every
+     * rule's merge instant is graded from both sides, one second apart, so the boundary itself is
+     * the thing under test rather than a comfortable distance either way.
+     */
+    for (const rule of COACH_HEALTH_RULES) {
+      const merged = Date.parse(rule.fixedAt);
+      if (!Number.isFinite(merged)) {
+        failures.push(`Coach Health rule "${rule.id}" has no usable fixedAt ("${rule.fixedAt}") — every hit would be attributed to the wrong side of its fix`);
+        continue;
+      }
+      if (isRegression(rule, new Date(merged - 1000))) {
+        failures.push(`Coach Health counts a PRE-fix turn as a regression for "${rule.id}" — the page would report a fix as not holding using the evidence that justified it`);
+      }
+      if (!isRegression(rule, new Date(merged + 1000))) {
+        failures.push(`Coach Health does not count a POST-fix turn as a regression for "${rule.id}" — a genuine recurrence would be filed as history and never surface`);
+      }
+      // The denominator label is chosen from this, so a wrong value is a false operator statistic.
+      if (rule.trigger !== "request" && rule.trigger !== "mutation") {
+        failures.push(`Coach Health rule "${rule.id}" has no trigger kind — its denominator cannot be labelled honestly`);
+      }
+    }
     const check = (id: string, input: string, reply: string, mutations: string[] = []) => {
       const rule = COACH_HEALTH_RULES.find(r => r.id === id);
       if (!rule) { failures.push(`Coach Health lost the rule "${id}" — the dashboard now watches one fewer adjudicated failure`); return null; }
