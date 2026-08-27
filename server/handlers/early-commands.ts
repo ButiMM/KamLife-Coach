@@ -942,7 +942,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   }
 
   // ---- PERSONALISED MEAL PLAN — built from actual user profile + recent food logs ----
-  // Triggers: "meal plan", "my meal plan", "give me a meal plan", "what should I eat",
+  // Triggers: "meal plan", "my meal plan", "give me a meal plan",
   //           "eating plan", "diet plan", "weekly meals"
   // Generates a static 3-day rotating plan — no GPT, instant, personalised.
   // ONE MEAL IS NOT A PLAN (2026-08-06 sweep). "what should I eat for lunch" matched the bare

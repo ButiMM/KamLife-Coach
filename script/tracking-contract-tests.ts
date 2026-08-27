@@ -557,6 +557,15 @@ const MUST_WRITE: [string, string][] = [
           failures.push(`A plan request was diverted to the next-meal owner: "${ask}" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
         }
       }
+      // THE ADJACENCY THIS CUT CREATED. A separate door owns "what should i eat THIS WEEK", and the
+      // recogniser above now matches the bare phrase inside that longer one. Only pipeline order
+      // keeps them apart — early-commands runs before misc — so the ordering is graded, not assumed.
+      for (const ask of ["what should I eat this week", "what should i eat this week"]) {
+        const r = await answered(ask);
+        if (isMealSuggestion(r)) {
+          failures.push(`A week-long plan request was claimed by the next-meal owner: "${ask}" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
+        }
+      }
     }
   }
 
