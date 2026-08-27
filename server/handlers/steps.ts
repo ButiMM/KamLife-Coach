@@ -35,9 +35,25 @@ export async function logStepsForUser(userId: string, steps: number, opts?: { co
     .limit(1);
   if (existing.length > 0) {
     if (steps > (existing[0].steps ?? 0) || opts?.correction) {
+      const was = existing[0].steps ?? 0;
       await db.update(stepLogs).set({ steps }).where(eq(stepLogs.id, existing[0].id));
+      // THE RAISE IS A DURABLE WRITE TOO (2026-08-27, traced through handleMessage).
+      //
+      // Only the INSERT below recorded a mutation, so the same client sending the same message
+      // on the same day got a coach or a receipt depending on whether they had logged earlier:
+      //
+      //     no row yet   -> "8 500 steps — nice one. Stand on a scale this morning, before you eat."
+      //     3 000 stored -> "8 500 steps — nice one."
+      //
+      // The day moved from 3 000 to 8 500 either way. closeCoachingTurn asks durableDomains what
+      // this turn changed, got nothing, and stood down — the coaching contract's "durable write ->
+      // one next move" silently exempting the commonest shape of step report, the client topping
+      // up a total they already sent. Water is the precedent: its durable write is an UPDATE too.
+      turnMutation(`UPDATE steps=${steps} (was ${was})`, "[STEP_LOG]");
       return steps;
     }
+    // NOT a durable write: the day already holds a higher count and nothing changed. Recording a
+    // mutation here would manufacture a next move out of a read, which is the opposite defect.
     return existing[0].steps ?? steps;
   }
   await db.insert(stepLogs).values({ userId, steps, loggedAt: at });
