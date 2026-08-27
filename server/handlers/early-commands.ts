@@ -942,7 +942,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   }
 
   // ---- PERSONALISED MEAL PLAN — built from actual user profile + recent food logs ----
-  // Triggers: "meal plan", "my meal plan", "give me a meal plan", "what should I eat",
+  // Triggers: "meal plan", "my meal plan", "give me a meal plan",
   //           "eating plan", "diet plan", "weekly meals"
   // Generates a static 3-day rotating plan — no GPT, instant, personalised.
   // ONE MEAL IS NOT A PLAN (2026-08-06 sweep). "what should I eat for lunch" matched the bare
@@ -953,15 +953,27 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   const asksAboutOneMeal =
     /\b(lunch|breakfast|supper|dinner|brunch|snack)\b/i.test(m)
     && !/\b(meal|eating|diet|food|nutrition)\s*plan\b/i.test(m);
+  // "WHAT SHOULD I EAT" IS A PLATE-ASK, NOT A PLAN REQUEST (2026-08-27, live trace).
+  //
+  // Every other term in both lists below names a plan — meal plan, eating plan, diet plan, weekly
+  // meals, nutrition plan. "What should I eat" named none, and this door runs ~9 handlers earlier
+  // than the one that owns the question, so two ways of asking the SAME thing split in two:
+  //
+  //     "what can I eat?"    -> Next Meal Suggestion, against today's remaining calories
+  //     "what should I eat?" -> a 3-day meal plan with a weekly grocery budget
+  //
+  // Same customer meaning, two mouths. The plan door stands down for the bare plate-ask and keeps
+  // every phrasing that actually asks for a plan; "meal plan" and friends are untouched, and
+  // asksAboutOneMeal above still routes "what should I eat for lunch" exactly as it did.
   const isMealPlanRequest = !asksAboutOneMeal && (
     ["meal plan", "my meal plan", "mealplan", "eating plan", "diet plan", "weekly meals",
-      "what should i eat", "give me a meal plan", "i need a meal plan", "i want a meal plan",
+      "give me a meal plan", "i need a meal plan", "i want a meal plan",
       "food plan", "my food plan", "weekly meal plan",
       // "Nutrition side?" asked right after a workout got the WORKOUT re-sent
       // (2026-07-05 audit) — the eating half of the plan had no aliases here.
       "nutrition side", "nutrition side?", "nutrition plan", "my nutrition plan",
       "food side", "food side?", "eating side", "eating side?", "nutrition?"].includes(m)
-    || /\b(give me a meal plan|my meal plan|send.*meal plan|meal plan please|eating plan|what should i eat|i need a meal plan|diet plan|weekly meals|nutrition (side|plan))\b/i.test(m)
+    || /\b(give me a meal plan|my meal plan|send.*meal plan|meal plan please|eating plan|i need a meal plan|diet plan|weekly meals|nutrition (side|plan))\b/i.test(m)
   );
   if (isMealPlanRequest) {
     // Fetch last 7 days of meal logs to surface recently eaten foods

@@ -519,6 +519,54 @@ const MUST_WRITE: [string, string][] = [
         failures.push(`The meal-plan door lost its message: "send me a meal plan" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
       }
     }
+
+    /**
+     * SAME CUSTOMER MEANING -> SAME CLAIMANT (2026-08-27, live trace on main 6d6b92f).
+     *
+     * "What can I eat?" and "What should I eat?" are one question. They reached two mouths:
+     *
+     *     "what can I eat?"    -> Next Meal Suggestion, against today's remaining calories
+     *     "what should I eat?" -> a 3-day meal plan with a weekly grocery budget
+     *
+     * Same shape as the meal-for-calories defect above: a door ~9 handlers EARLIER in the pipeline
+     * claimed it first. Every other term in that door's vocabulary names a plan — meal plan, eating
+     * plan, diet plan, weekly meals, nutrition plan — and "what should i eat" named none. It stands
+     * down for the bare plate-ask; the owner's recogniser drops a `next` suffix it never needed.
+     *
+     * Graded on the CLASS of answer for every equivalent phrasing, with the plan door as the
+     * control: a fix that simply gutted the plan vocabulary would satisfy the convergence and cost
+     * every client their meal plan.
+     */
+    {
+      // The unpunctuated form is a SEPARATE case, not a cosmetic variant: the plan door holds an
+      // exact-match list checked with .includes(m), which "what should I eat?" can never hit and
+      // "what should i eat" hits exactly. Grading only the question-mark form leaves half the
+      // claimant untested.
+      const plateAsks = ["what can I eat?", "what should I eat?", "what should i eat",
+        "what should I eat next?", "I'm hungry"];
+      for (const ask of plateAsks) {
+        const r = await answered(ask);
+        if (!isMealSuggestion(r)) {
+          failures.push(`A plate-ask did not reach the next-meal owner: "${ask}" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
+        }
+      }
+      // THE CONTROL: a request that actually asks for a PLAN still gets the plan.
+      for (const ask of ["give me a meal plan", "my meal plan", "eating plan"]) {
+        const r = await answered(ask);
+        if (!/meal plan/i.test(r) || isMealSuggestion(r)) {
+          failures.push(`A plan request was diverted to the next-meal owner: "${ask}" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
+        }
+      }
+      // THE ADJACENCY THIS CUT CREATED. A separate door owns "what should i eat THIS WEEK", and the
+      // recogniser above now matches the bare phrase inside that longer one. Only pipeline order
+      // keeps them apart — early-commands runs before misc — so the ordering is graded, not assumed.
+      for (const ask of ["what should I eat this week", "what should i eat this week"]) {
+        const r = await answered(ask);
+        if (isMealSuggestion(r)) {
+          failures.push(`A week-long plan request was claimed by the next-meal owner: "${ask}" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
+        }
+      }
+    }
   }
 
   /**
