@@ -11,18 +11,75 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           ref: cto/shot-implementation
-      - name: Apply exact commit patch
+      - name: Apply weight seam
         run: |
           set -euo pipefail
-          git config user.name 'cto-builder'
-          git config user.email 'cto-builder@users.noreply.github.com'
-          git fetch origin d2cfeb1cd771bdb6c3c25916a417b9b8956d7b76 --no-tags
-          git show --format= --binary d2cfeb1cd771bdb6c3c25916a417b9b8956d7b76 > /tmp/weight.patch
-          git apply --3way /tmp/weight.patch
-          git rm -f .github/workflows/zz-shot-cherry-pick.yml .github/shot-trigger.txt || true
-          git add -A
-          git diff --cached --check
-          git commit -m 'fix: make weight coaching a structured terminal turn'
-          git push origin HEAD:cto/shot-implementation
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, subprocess
+
+          # 1) Existing final-authority module gets the structured weight result + renderer.
+          live = Path('server/understanding/live.ts')
+          s = live.read_text()
+          if 'export type CoachingTurn' not in s:
+              marker = 'export async function canonicalDecision('
+              if marker not in s:
+                  raise SystemExit('canonicalDecision anchor missing')
+              block = '''export type CoachingTurn = {\n  kind: "coach";\n  decision: "HOLD" | "REPORT_TREND";\n  facts: {\n    currentKg: number | null;\n    changeKg: number;\n    trendUsable: boolean;\n    trendWhy: string | null;\n    goal: string;\n    points: Array<{ kg: number; date: string }>;\n  };\n};\n\nexport function composeCoachingTurn(turn: CoachingTurn): string {\n  const { changeKg, trendUsable, trendWhy, goal, points } = turn.facts;\n  const recent = points.map(p => `• ${p.kg.toFixed(1)}kg — ${p.date}`).join("\\n");\n  const history = recent ? `*Weight History*\\n\\n${recent}` : `*Weight History*`;\n  if (turn.decision === "HOLD" || !trendUsable) {\n    const hold = trendWhy === "illness"\n      ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."\n      : "I don't have enough clean weigh-ins yet to call a trend.";\n    return `${history}\\n\\n${hold}`.trim();\n  }\n  const direction = changeKg < 0\n    ? `Down ${Math.abs(changeKg).toFixed(1)}kg since you started.`\n    : changeKg > 0\n      ? `Up ${changeKg.toFixed(1)}kg since you started.`\n      : "No change since you started.";\n  const verdict = goal === "muscle_gain" && changeKg > 0.5\n    ? "Scale is up — keep fuelling."\n    : goal === "fat_loss" && changeKg < -1\n      ? "Moving in the right direction."\n      : goal === "fat_loss" && changeKg >= 0\n        ? "Scale hasn't moved yet — check food logging consistency."\n        : "";\n  return `${history}\\n\\n${direction}${verdict ? ` ${verdict}` : ""}`.trim();\n}\n\n'''
+              live.write_text(s.replace(marker, block + marker, 1))
+
+          # 2) Weight handler returns structured CoachingTurn, never coaching prose.
+          misc = Path('server/handlers/misc-commands.ts')
+          s = misc.read_text()
+          if 'import { type CoachingTurn } from "../understanding/live";' not in s:
+              anchor = 'import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";'
+              if anchor not in s: raise SystemExit('misc import anchor missing')
+              s = s.replace(anchor, anchor + '\nimport { type CoachingTurn } from "../understanding/live";', 1)
+          s = re.sub(r'export async function handleMiscCommands\((.*?)\): Promise<string \| null>',
+                     r'export async function handleMiscCommands(\1): Promise<string | CoachingTurn | null>', s, count=1, flags=re.S)
+          old = '      return `*${name2 ? name2 + "\'s " : ""}Weight History*\\n\\n${recent}\\n\\n${changeDir} since you started. ${verdict}`.trim();'
+          if old not in s:
+              # Accept the exact current variation seen on the branch.
+              old = '      return `*${name2 ? name2 + "\'s " : ""}Weight History*\\n\\n${recent}\\n\\n${changeDir} ${verdict}`.trim();'
+          if old not in s:
+              raise SystemExit('weight prose return not found')
+          new = '''      return {\n        kind: "coach",\n        decision: trend.usable ? "REPORT_TREND" : "HOLD",\n        facts: {\n          currentKg: logs[logs.length - 1]?.kg ?? null,\n          changeKg: totalChange,\n          trendUsable: trend.usable,\n          trendWhy: trend.usable ? null : trend.why,\n          goal,\n          points: logs.slice(-5).map(l => ({\n            kg: l.kg,\n            date: l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" }),\n          })),\n        },\n      };'''
+          misc.write_text(s.replace(old, new, 1))
+
+          # 3) Route this coaching object through the existing live composer. Transactional strings stay strings.
+          routes = Path('server/routes.ts')
+          r = routes.read_text()
+          if 'composeCoachingTurn' not in r:
+              old_import = 'import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor } from "./understanding/live";'
+              if old_import not in r: raise SystemExit('live import anchor missing')
+              r = r.replace(old_import, 'import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor, composeCoachingTurn } from "./understanding/live";', 1)
+          marker = '  const miscResult = await handleMiscCommands('
+          start = r.find(marker)
+          if start < 0: raise SystemExit('miscResult block start missing')
+          end = r.find('  const lifecycleResult = await handleLifecycle', start)
+          if end < 0: raise SystemExit('lifecycle boundary missing')
+          current = r[start:end]
+          if 'composeCoachingTurn(miscResult' not in current:
+              replacement = '''  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });\n  if (miscResult !== null) {\n    if (typeof miscResult === "object" && miscResult.kind === "coach") {\n      return composeCoachingTurn(miscResult);\n    }\n    if (mayEndTurn("misc")) return closeCoachingTurn(miscResult);\n    commitFact(turn, "other", miscResult);\n  }\n\n'''
+              r = r[:start] + replacement + r[end:]
+          routes.write_text(r)
+
+          # 4) T1/T4 regression against the existing renderer.
+          tests = Path('script/tracking-contract-tests.ts')
+          t = tests.read_text()
+          if 'WEIGHT COACHING TURN IS TERMINAL' not in t:
+              marker = '  /**\n   * LAW 3 — THE ANSWER MUST QUOTE THE LEDGER'
+              if marker not in t: raise SystemExit('tracking test anchor missing')
+              block = '''  /**\n   * WEIGHT COACHING TURN IS TERMINAL — HOLD cannot grow a direction/action tail.\n   */\n  {\n    const { composeCoachingTurn } = await import("../server/understanding/live");\n    const hold = composeCoachingTurn({\n      kind: "coach", decision: "HOLD",\n      facts: { currentKg: 85.75, changeKg: 1.2, trendUsable: false, trendWhy: "illness", goal: "muscle_gain",\n        points: [{ kg: 85.75, date: "28 Aug" }] },\n    });\n    if (/going up|going down|keep fuelling|trend is/i.test(hold)) {\n      failures.push("HOLD leaked direction/action: " + hold);\n    }\n  }\n\n'''
+              tests.write_text(t.replace(marker, block + marker, 1))
+
+          subprocess.run(['git','rm','-f','.github/workflows/zz-shot-cherry-pick.yml','.github/shot-trigger.txt'], check=False)
+          subprocess.run(['git','add','server/understanding/live.ts','server/handlers/misc-commands.ts','server/routes.ts','script/tracking-contract-tests.ts'],check=True)
+          subprocess.run(['git','diff','--cached','--check'],check=True)
+          subprocess.run(['git','config','user.name','cto-builder'],check=True)
+          subprocess.run(['git','config','user.email','cto-builder@users.noreply.github.com'],check=True)
+          subprocess.run(['git','commit','-m','fix: make weight coaching a structured terminal turn'],check=True)
+          subprocess.run(['git','push','origin','HEAD:cto/shot-implementation'],check=True)
+          PY
