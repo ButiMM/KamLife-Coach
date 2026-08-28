@@ -5,7 +5,7 @@ import re
 def sub_once(path, pattern, replacement, label, flags=re.MULTILINE):
     p = Path(path)
     s = p.read_text()
-    out, n = re.subn(pattern, replacement, s, count=1, flags=flags)
+    out, n = re.subn(pattern, lambda _m: replacement, s, count=1, flags=flags)
     if n != 1:
         raise RuntimeError(f"{path}: {label}: expected 1 match, found {n}")
     p.write_text(out)
@@ -105,8 +105,8 @@ sub_once(
 )
 sub_once(
     "server/gpt.ts",
-    r'(db\.select\(\{ count: sql<number>`COUNT\(\*\)::int` \} \)\n        \.from\(workoutLogs\)\n        \.where\(and\(eq\(workoutLogs\.userId, user\.id\), gte\(workoutLogs\.loggedAt, twentyEightDaysAgo\)\)\)\n        \.catch\(\(\) => \[\{ count: 0 \}\]\),)',
-    '''      db.select({ loggedAt: workoutLogs.loggedAt }).from(workoutLogs)
+    r'db\.select\(\{ count: sql<number>`COUNT\(\*\)::int` \} \)\n        \.from\(workoutLogs\)\n        \.where\(and\(eq\(workoutLogs\.userId, user\.id\), gte\(workoutLogs\.loggedAt, twentyEightDaysAgo\)\)\)\n        \.catch\(\(\) => \[\{ count: 0 \}\]\),',
+    '''db.select({ loggedAt: workoutLogs.loggedAt }).from(workoutLogs)
         .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo)))
         .orderBy(desc(workoutLogs.loggedAt)),
       db.select({ count: sql<number>`COUNT(*)::int` })
