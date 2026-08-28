@@ -236,7 +236,7 @@ export type ClaimKind = "weight-trend" | "meal-eaten" | "target-value";
 const NOT_AN_ASSERTION = /\?\s*$|_"|^\s*[">]|^\s*(?:if|when|once|unless|should|would|could|did|do|does|have|has|are|is|was|were|can|shall|let|want|try)\b/i;
 
 /** A direction word bound to a kg quantity, or an explicit statement about their weight moving. */
-const WEIGHT_TREND = /\b(?:down|up|lost|gained|dropped|added)\s+(?:about\s+|around\s+|roughly\s+)?\d[\d.,]*\s*kgs?\b|\byou(?:'re| are)\s+(?:losing|gaining|dropping)\b(?!\s+(?:strength|muscle|confidence|momentum|motivation|focus|interest|inches|cm|form|ground)\b)|\b(?:losing|gaining)\s+(?:weight|too\s+fast|quicker|faster)\b/i;
+const WEIGHT_TREND = /\\b(?:scale\\s+(?:is\\s+)?(?:going\\s+)?(?:up|down)|weight\\s+(?:is\\s+)?(?:going\\s+)?(?:up|down)|down|up|lost|gained|dropped|added)\\s+(?:about\\s+|around\\s+|roughly\\s+)?\\d[\\d.,]*\\s*kgs?\\b|\\b(?:scale|weight)\\s+(?:is\\s+)?(?:going\\s+)?(?:up|down)\\b|\\byou(?:'re| are)\\s+(?:losing|gaining|dropping)\\b(?!\\s+(?:strength|muscle|confidence|momentum|motivation|focus|interest|inches|cm|form|ground)\\b)|\\b(?:losing|gaining)\\s+(?:weight|too\\s+fast|quicker|faster)\\b/i;
 
 /**
  * An assertion that they ate something. BOTH halves must be present — the eating verb and a food

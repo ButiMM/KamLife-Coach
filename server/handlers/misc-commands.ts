@@ -28,6 +28,8 @@ import { getOnboardingMealPlan } from "../onboarding";
 import { askCoachK } from "../gpt";
 import { withTimeout, logChat } from "./chat-log";
 import { calculateTargets, waterTargetLitres } from "../targets";
+import { weightTrendUsable } from "../adaptive-targets";
+import { readHealthState } from "../health-state";
 import { JUNK_WORDS } from "./checks";
 import { getStepStreak } from "./steps";
 import { scanForSAFoods } from "./food-scanner";
@@ -595,9 +597,27 @@ export async function handleMiscCommands(ctx: {
       const first = logs[0].kg;
       const latest = logs[logs.length - 1].kg;
       const totalChange = latest - first;
+      const { sickSince, sickUntil } = readHealthState(user);
+      const trend = logs.length >= 2 ? weightTrendUsable({
+        count: logs.length,
+        newestAt: logs[logs.length - 1].at.getTime(),
+        oldestAt: logs[0].at.getTime(),
+        now: Date.now(),
+        sickSince: sickSince ? new Date(sickSince).getTime() : undefined,
+        sickUntil: sickUntil ? new Date(sickUntil).getTime() : undefined,
+      }) : { usable: false, why: "too_few" as const };
       const goal = user.goalType || "fat_loss";
-      const changeDir = totalChange < 0 ? `Down ${Math.abs(totalChange).toFixed(1)}kg` : totalChange > 0 ? `Up ${totalChange.toFixed(1)}kg` : "No change";
-      const verdict = goal === "fat_loss" && totalChange < -1 ? "Moving in the right direction." : goal === "muscle_gain" && totalChange > 0.5 ? "Scale is going up — keep fuelling." : goal === "fat_loss" && totalChange >= 0 ? "Scale hasn't moved yet — check food logging consistency." : "";
+      const changeDir = trend.usable
+        ? totalChange < 0 ? `Down ${Math.abs(totalChange).toFixed(1)}kg` : totalChange > 0 ? `Up ${totalChange.toFixed(1)}kg` : "No change"
+        : "Trend not called";
+      const verdict = !trend.usable
+        ? trend.why === "illness"
+          ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."
+          : "I don't have enough clean weigh-ins yet to call a trend."
+        : goal === "fat_loss" && totalChange < -1 ? "Moving in the right direction."
+        : goal === "muscle_gain" && totalChange > 0.5 ? "Scale is up — keep fuelling."
+        : goal === "fat_loss" && totalChange >= 0 ? "Scale hasn't moved yet — check food logging consistency."
+        : "";
       const recent = logs.slice(-5).map(l =>
         `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`,
       ).join("\n");
