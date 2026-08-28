@@ -923,6 +923,37 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * "HAS THIS CLIENT BEEN AWAY?" HAS ONE OWNER (2026-08-28, traced on two client states).
+   *
+   * The milestone voice decided `lapsed` — which selects the "comeback" register, the firm
+   * welcome-back tone — by regexing `(\d+ days silent)` out of the pattern summary it had just
+   * written. A number round-tripped through English. And it was never absence: that figure is
+   * `7 - daysWithLogs`, days in the week with no inbound message. The two facts disagree in both
+   * directions, and the first is the one a client feels:
+   *
+   *   spoke TODAY, logged 3 of 7 days     contactState: present    voice: "comeback"
+   *   away 5 days, logged 6 of 7 before   contactState: returning  voice: warm
+   *
+   * Graded on the OWNER's answer for both shapes, and on the absence of the round-trip.
+   */
+  {
+    const { contactState, RETURNING_DAYS } = await import("../server/understanding/reentry");
+    const now = Date.now();
+    const present = contactState(new Date(now).toISOString(), now);
+    const away = contactState(new Date(now - 5 * 86_400_000).toISOString(), now);
+    if (present.isReturning) {
+      failures.push(`A client who messaged today reads as returning — the coach would greet a present client as though they had vanished`);
+    }
+    if (!away.isReturning) {
+      failures.push(`A client absent 5 days does not read as returning (RETURNING_DAYS=${RETURNING_DAYS}) — re-entry would never fire`);
+    }
+    // NOT ASSERTED HERE: that gpt.ts calls this owner. Proving it behaviourally needs
+    // generateMilestoneVoiceScript, which calls OpenAI and cannot run offline, and a source-string
+    // check would break on wording rather than behaviour — the failure mode gap-tests hit today.
+    // The runtime trace on this cut showed both shapes agreeing; that is the evidence, not this.
+  }
+
+  /**
    * STAGE 3 OF THE CONTRACT — ONE WRITE OWNER, AND EVERY CONVERSATIONAL DOOR GOES THROUGH IT.
    *
    * logStepsForUser holds one rule that no caller can hold for itself: ONE ROW PER SAST DAY, keep
