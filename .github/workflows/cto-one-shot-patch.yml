@@ -20,57 +20,69 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          
           live = Path('server/understanding/live.ts')
           routes = Path('server/routes.ts')
           misc = Path('server/handlers/misc-commands.ts')
-          
+          test = Path('script/tracking-contract-tests.ts')
+
           # Structured coaching turn + single renderer for weight/trend.
           s = live.read_text()
           if 'export type CoachingTurn' not in s:
               marker = 'export async function canonicalDecision('
               idx = s.index(marker)
-              block = '''export type CoachingTurn = {\n  kind: "coach";\n  decision: "HOLD" | "REPORT_TREND";\n  facts: {\n    currentKg: number | null;\n    changeKg: number;\n    trendUsable: boolean;\n    trendWhy: string | null;\n    goal: string;\n    recent: string[];\n  };\n};\n\nexport function composeCoachingTurn(turn: CoachingTurn): string {\n  const { currentKg, changeKg, trendUsable, trendWhy, goal, recent } = turn.facts;\n  const history = recent.length ? `Weight History\\n\\n${recent.join("\\n")}` : "Weight History";\n  if (turn.decision === "HOLD" || !trendUsable) {\n    const hold = trendWhy === "illness"\n      ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."\n      : "I don't have enough clean weigh-ins yet to call a trend.";\n    return `${history}\\n\\n${hold}`.trim();\n  }\n  const name = currentKg !== null ? `Scale: ${currentKg.toFixed(1)}kg. ` : "";\n  if (goal === "muscle_gain" && changeKg > 0.5) return `${history}\\n\\n${name}Scale is up — keep fuelling.`.trim();\n  if (goal === "fat_loss" && changeKg < -1) return `${history}\\n\\n${name}Moving in the right direction.`.trim();\n  if (goal === "fat_loss" && changeKg >= 0) return `${history}\\n\\n${name}Scale hasn't moved yet — let's look at food logging consistency.`.trim();\n  return `${history}\\n\\n${name}Scale: ${changeKg > 0 ? "up" : changeKg < 0 ? "down" : "unchanged"} ${Math.abs(changeKg).toFixed(1)}kg since you started.`.trim();\n}\n\n'''
+              block = '''export type CoachingTurn = {\n  kind: "coach";\n  decision: "HOLD" | "REPORT_TREND";\n  facts: {\n    currentKg: number | null;\n    changeKg: number;\n    trendUsable: boolean;\n    trendWhy: string | null;\n    goal: string;\n    recent: string[];\n  };\n};\n\nexport function composeCoachingTurn(turn: CoachingTurn): string {\n  const { currentKg, changeKg, trendUsable, trendWhy, goal, recent } = turn.facts;\n  const history = recent.length ? `Weight History\\n\\n${recent.join("\\n")}` : "Weight History";\n  if (turn.decision === "HOLD" || !trendUsable) {\n    const hold = trendWhy === "illness"\n      ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."\n      : "I don't have enough clean weigh-ins yet to call a trend.";\n    return `${history}\\n\\n${hold}`.trim();\n  }\n  const prefix = currentKg !== null ? `Scale: ${currentKg.toFixed(1)}kg. ` : "";\n  if (goal === "muscle_gain" && changeKg > 0.5) return `${history}\\n\\n${prefix}Scale is up — keep fuelling.`.trim();\n  if (goal === "fat_loss" && changeKg < -1) return `${history}\\n\\n${prefix}Moving in the right direction.`.trim();\n  if (goal === "fat_loss" && changeKg >= 0) return `${history}\\n\\n${prefix}Scale hasn't moved yet — let's look at food logging consistency.`.trim();\n  return `${history}\\n\\n${prefix}Scale: ${changeKg > 0 ? "up" : changeKg < 0 ? "down" : "unchanged"} ${Math.abs(changeKg).toFixed(1)}kg since you started.`.trim();\n}\n\n'''
               s = s[:idx] + block + s[idx:]
               live.write_text(s)
-          
-          # Route structured coaching result from misc through the existing boundary.
+
           r = routes.read_text()
           old_import = 'import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor } from "./understanding/live";'
-          if old_import in r:
+          if old_import in r and 'composeCoachingTurn' not in r:
               r = r.replace(old_import, 'import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor, composeCoachingTurn, type CoachingTurn } from "./understanding/live";', 1)
-          old_block = '  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });\n  if (miscResult !== null) return miscResult;'
-          new_block = '''  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });\n  if (miscResult !== null) {\n    if (typeof miscResult === "object" && (miscResult as CoachingTurn).kind === "coach") {\n      return composeCoachingTurn(miscResult as CoachingTurn);\n    }\n    return miscResult;\n  }'''
-          assert old_block in r, 'misc route block missing'
-          r = r.replace(old_block, new_block, 1)
+
+          # #94 already added a weight-specific early-return guard. Replace that whole guard with
+          # structured-result handling: other misc strings keep their current behavior for now.
+          old_route = '''  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });
+  // COACHING SEAM: weight-progress is owned by the live Meaning Engine when it is enabled.
+  // The deterministic evidence reader remains there; this handler must not terminate the turn
+  // with prose before policy can decide.
+  const _isWeightCoachingQuestion = /\\b(weight history|weight trend|my weights|all my weights|weight progress|how much (weight )?(have i|did i) (lost?|gained?)|total (weight )?(lost?|gained?)|weight (since|over time))\\b/i.test(m);
+  if (miscResult !== null && !(_isWeightCoachingQuestion && engineLive())) return miscResult;'''
+          new_route = '''  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });
+  if (miscResult !== null) {
+    if (typeof miscResult === "object" && (miscResult as CoachingTurn).kind === "coach") {
+      return composeCoachingTurn(miscResult as CoachingTurn);
+    }
+    return miscResult;
+  }'''
+          assert old_route in r, 'current misc route guard not found'
+          r = r.replace(old_route, new_route, 1)
           routes.write_text(r)
-          
-          # Weight handler becomes structured and prose-free.
+
           m = misc.read_text()
-          old_sig = '}): Promise<string | null> {'
-          assert old_sig in m, 'misc signature missing'
-          m = m.replace(old_sig, '}): Promise<string | import("../understanding/live").CoachingTurn | null> {', 1)
+          if 'import("../understanding/live").CoachingTurn' not in m:
+              old_sig = '}): Promise<string | null> {'
+              assert old_sig in m, 'misc signature missing'
+              m = m.replace(old_sig, '}): Promise<string | import("../understanding/live").CoachingTurn | null> {', 1)
           old_ret = '      return `*${name2 ? name2 + "\'s " : ""}Weight History*\\n\\n${recent}\\n\\n${changeSummary} ${verdict}`.trim();'
-          new_ret = '''      return {\n        kind: "coach",\n        decision: trend.usable ? "REPORT_TREND" : "HOLD",\n        facts: {\n          currentKg: logs[logs.length - 1]?.kg ?? null,\n          changeKg: totalChange,\n          trendUsable: trend.usable,\n          trendWhy: trend.usable ? null : trend.why,\n          goal,\n          recent: logs.slice(-5).map(l => `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`),\n        },\n      };'''
           assert old_ret in m, 'weight return missing'
+          new_ret = '''      return {\n        kind: "coach",\n        decision: trend.usable ? "REPORT_TREND" : "HOLD",\n        facts: {\n          currentKg: logs[logs.length - 1]?.kg ?? null,\n          changeKg: totalChange,\n          trendUsable: trend.usable,\n          trendWhy: trend.usable ? null : trend.why,\n          goal,\n          recent: logs.slice(-5).map(l => `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`),\n        },\n      };'''
           m = m.replace(old_ret, new_ret, 1)
           misc.write_text(m)
-          
-          # Exact HOLD regression in existing tracking suite.
-          test = Path('script/tracking-contract-tests.ts')
+
+          # Exact T1 regression; keep test file only once.
           t = test.read_text()
           if '16:55 TREND CONTRADICTION' not in t:
               marker = '  /**\\n   * LAW 3 — THE ANSWER MUST QUOTE THE LEDGER'
-              if marker not in t:
-                  raise SystemExit('tracking test insertion marker missing')
+              assert marker in t, 'tracking test insertion marker missing'
               block = '''  /** 16:55 TREND CONTRADICTION — HOLD must own the whole response. */\n  {\n    const { composeCoachingTurn } = await import("../server/understanding/live");\n    const hold = composeCoachingTurn({\n      kind: "coach",\n      decision: "HOLD",\n      facts: { currentKg: 85.75, changeKg: 1.2, trendUsable: false, trendWhy: "illness", goal: "muscle_gain", recent: [] },\n    });\n    if (/going up|going down|keep fuelling|trend is/i.test(hold)) {\n      failures.push(`16:55 HOLD leaked a trend act: ${hold}`);\n    }\n  }\n\n'''
               t = t.replace(marker, block + marker, 1)
               test.write_text(t)
-          
-          # Remove temporary runner files from the branch after doing the patch.
+
+          # Remove all temporary patch artifacts from the branch.
           for p in [Path('.github/ONE_SHOT_TRIGGER.tmp'), Path('.github/workflows/one-shot-weight-seam.yml')]:
               if p.exists(): p.unlink()
-          
+
+          # Final assertions.
           assert 'export type CoachingTurn' in live.read_text()
           assert 'composeCoachingTurn(miscResult as CoachingTurn)' in routes.read_text()
           assert 'kind: "coach"' in misc.read_text()
@@ -80,5 +92,5 @@ jobs:
           git config user.email 'cto-builder@users.noreply.github.com'
           git add -A
           git diff --cached --check
-          git commit -m 'feat: route weight coaching through structured turn authority'
+          git commit -m 'feat: close weight coaching response seam'
           git push origin HEAD:cto/one-shot-final
