@@ -11,10 +11,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { ref: cto/one-shot-final, fetch-depth: 0 }
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
       - name: Apply
-        run: node scripts/cto-apply-session-source.mjs
+        run: python3 scripts/cto-apply-session-source.py
       - name: Commit
         run: |
           git config user.name "cto-builder"
