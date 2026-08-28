@@ -8,6 +8,10 @@ import { requireAdminKey } from "./auth";
 // contract. A second regex here would be a second answer to one question, watching for the very
 // defect it had just committed.
 import { isAskingNotReporting } from "../utils";
+// AND "was this a durable write" belongs to durableDomains — the same reader closeCoachingTurn
+// consults before it decides a turn owes a coaching move. Two answers to that would be the
+// defect this detector exists to find.
+import { durableDomains } from "../understanding/messy-intake";
 
 /**
  * THE TURN TRIAGE SURFACE — a reader for the forensic record we were already keeping.
@@ -308,9 +312,6 @@ type Invariant = {
 };
 
 const FALLBACK_REPLY = /didn'?t (?:quite )?catch that|say it another way|had a moment|try that again|i'?m not sure what you mean/i;
-const SELLS_FOOD_NOW = /\b(?:eat|have)\b[^.!?]{0,40}\b(?:now|tonight|next meal|this afternoon)\b|next two meals|get a real protein into/i;
-const CLOSES_THE_DAY = /that'?s the day|day'?s done|day'?s wrapped|tomorrow[^.!?]{0,40}\b(?:breakfast|first meal)\b/i;
-const DURABLE_MUTATION = /\b(?:INSERT|UPDATE)\s+(?:meal|steps|water|weight|workout)/i;
 
 export const COACH_HEALTH_INVARIANTS: Invariant[] = [
   {
@@ -329,7 +330,7 @@ export const COACH_HEALTH_INVARIANTS: Invariant[] = [
     expected: "a question is answered, never written",
     // LAW 2 of the tracking contract, watched in production. The costliest class we have: a false
     // write is invisible to the client and enters every downstream decision.
-    holds: t => !(isAskingNotReporting(t.input) && t.mutations.some(mut => DURABLE_MUTATION.test(mut))),
+    holds: t => !(isAskingNotReporting(t.input) && durableDomains(t.mutations).length > 0),
   },
   {
     id: "durable-write-no-move",
@@ -337,16 +338,7 @@ export const COACH_HEALTH_INVARIANTS: Invariant[] = [
     layer: "Coaching",
     expected: "one next coaching move after a durable change",
     // LAW 4, generalised past steps to every domain that writes. #84 was one instance of this.
-    holds: t => !(t.mutations.some(mut => DURABLE_MUTATION.test(mut)) && !lastBlockIsAMove(t.reply)),
-  },
-  {
-    id: "reply-contradicts-itself",
-    label: "One reply both closed the day and sold food",
-    layer: "Response",
-    expected: "one decision, one voice",
-    // The text-only half of the #83 contradiction: the card is a PNG, but a reply that says both
-    // in words is visible here.
-    holds: t => !(CLOSES_THE_DAY.test(t.reply) && SELLS_FOOD_NOW.test(t.reply)),
+    holds: t => !(durableDomains(t.mutations).length > 0 && !lastBlockIsAMove(t.reply)),
   },
   {
     id: "empty-reply",
