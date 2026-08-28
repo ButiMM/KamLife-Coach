@@ -1,0 +1,128 @@
+name: shot-clean-apply
+on:
+  push:
+    branches: ["cto/shot-clean"]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: cto/shot-clean
+      - name: Apply validated weight delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'cto-builder'
+          git config user.email 'cto-builder@users.noreply.github.com'
+          P=131f10dcdb212699f002bda16aaec9563dc7f5a6
+          Q=d2cfeb1cd771bdb6c3c25916a417b9b8956d7b76
+          git fetch origin "$P" --no-tags
+          git fetch origin "$Q" --no-tags
+          git diff --binary "$P" "$Q" -- script/tracking-contract-tests.ts server/handlers/misc-commands.ts server/routes.ts server/understanding/live.ts > /tmp/weight.diff
+          python3 - <<'PY'
+          from pathlib import Path
+          from difflib import SequenceMatcher
+          import re
+
+          patch = Path('/tmp/weight.diff').read_text()
+          files = ['script/tracking-contract-tests.ts','server/handlers/misc-commands.ts','server/routes.ts','server/understanding/live.ts']
+
+          chunks = re.split(r'(?m)^diff --git ', patch)
+          per_file = {}
+          for chunk in chunks[1:]:
+              header, *rest = chunk.split('\n', 1)
+              m = re.match(r'a/(.+?) b/(.+?)$', header.strip())
+              if not m:
+                  continue
+              path = m.group(2)
+              if path not in files:
+                  continue
+              per_file[path] = rest[0] if rest else ''
+
+          def parse_hunks(text):
+              lines = text.splitlines()
+              hunks=[]
+              i=0
+              while i < len(lines):
+                  if lines[i].startswith('@@'):
+                      m=re.match(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', lines[i])
+                      if not m:
+                          raise SystemExit(f'bad hunk header: {lines[i]}')
+                      old_start=int(m.group(1)); body=[]; i+=1
+                      while i < len(lines) and not lines[i].startswith('@@') and not lines[i].startswith('diff --git '):
+                          if lines[i] == r'\\ No newline at end of file':
+                              i+=1; continue
+                          body.append(lines[i]); i+=1
+                      old=[]; new=[]
+                      for line in body:
+                          if not line:
+                              # empty context line in unified diff
+                              old.append(''); new.append('')
+                          elif line[0]==' ':
+                              old.append(line[1:]); new.append(line[1:])
+                          elif line[0]=='-':
+                              old.append(line[1:])
+                          elif line[0]=='+':
+                              new.append(line[1:])
+                          else:
+                              raise SystemExit(f'bad hunk line: {line!r}')
+                      hunks.append((old_start, old, new))
+                  else:
+                      i+=1
+              return hunks
+
+          def apply_file(path, text):
+              current = Path(path).read_text().splitlines()
+              offset=0
+              for old_start, old, new in parse_hunks(text):
+                  expected=max(0, old_start-1+offset)
+                  found=None
+                  if old and expected+len(old)<=len(current) and current[expected:expected+len(old)]==old:
+                      found=expected
+                  else:
+                      # Candidate starts from exact context anchors, then score windows.
+                      context=[x for line in [] for x in []]
+                      anchors=[x for x in old if x.strip()]
+                      candidates=set()
+                      if anchors:
+                          anchor=anchors[0]
+                          for j,v in enumerate(current):
+                              if v==anchor:
+                                  candidates.add(max(0,j-old.index(anchor)))
+                      lo=max(0,expected-1000); hi=min(len(current),expected+1000)
+                      candidates.update(range(lo,hi+1))
+                      best=None
+                      for s in candidates:
+                          e=s+len(old)
+                          if e>len(current): continue
+                          score=SequenceMatcher(None, old, current[s:e], autojunk=False).ratio()
+                          if best is None or score>best[0]: best=(score,s)
+                      if best is None or best[0] < 0.82:
+                          raise SystemExit(f'{path}: no safe fuzzy match for hunk at {old_start}; best={best}')
+                      found=best[1]
+                  current[found:found+len(old)] = new
+                  offset += len(new)-len(old)
+              Path(path).write_text('\n'.join(current)+'\n')
+
+          for f in files:
+              if f not in per_file:
+                  raise SystemExit(f'missing patch for {f}')
+              apply_file(f, per_file[f])
+          print('validated weight delta applied')
+          PY
+          if find . -name '*.rej' -o -name '*.orig' | grep -q .; then
+            echo 'Reject/orig files detected'; exit 1
+          fi
+          git diff --check
+          git add script/tracking-contract-tests.ts server/handlers/misc-commands.ts server/routes.ts server/understanding/live.ts
+          git diff --cached --check
+          git commit -m 'fix: make weight coaching a structured terminal turn'
+          git rm -f .github/workflows/zz-shot-clean-apply.yml
+          git add -A
+          git commit --amend --no-edit
+          git push origin HEAD:cto/shot-clean
