@@ -23,11 +23,6 @@ s = replaceOnce(p, s,
 "session report return");
 
 s = replaceOnce(p, s,
-`  return { script: fallbacks[milestoneType], emotion };\n}`,
-`  return { script: fallbacks[milestoneType], emotion };\n}`,
-"noop anchor");
-
-s = replaceOnce(p, s,
 `export function sessionReportReply(r: SessionReport, firstName = "", totalSessions?: number): string {\n  const fn = firstName ? \`${firstName}, \` : "";\n  const tally = totalSessions && totalSessions > 0\n    ? \` That's *\${totalSessions} session\${totalSessions === 1 ? "" : "s"}* logged.\`\n    : "";\n  const logged = \`✅ \${fn}logged today's session.\${tally}\`;`,
 `export function sessionReportReply(r: SessionReport, firstName = "", totalSessions?: number, weekSession?: number): string {\n  const fn = firstName ? \`${firstName}, \` : "";\n  const tally = weekSession && weekSession > 0\n    ? \` That's session *\${weekSession} this week*.\`\n    : totalSessions && totalSessions > 0\n      ? \` That's *\${totalSessions} session\${totalSessions === 1 ? "" : "s"}* logged.\`\n      : "";\n  const split = r.dayType ? \` *\${r.dayType} day*.\` : "";\n  const logged = \`✅ \${fn}logged today's session.\${tally}\${split}\`;`,
 "session reply signature");
