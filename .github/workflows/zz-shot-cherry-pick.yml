@@ -1,0 +1,36 @@
+name: shot-apply-patch
+on:
+  push:
+    branches: ["cto/shot-implementation"]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: cto/shot-implementation
+      - name: Apply exact commit diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'cto-builder'
+          git config user.email 'cto-builder@users.noreply.github.com'
+          git fetch origin 131f10dcdb212699f002bda16aaec9563dc7f5a6 --no-tags
+          git fetch origin d2cfeb1cd771bdb6c3c25916a417b9b8956d7b76 --no-tags
+          git diff --binary 131f10dcdb212699f002bda16aaec9563dc7f5a6 d2cfeb1cd771bdb6c3c25916a417b9b8956d7b76 -- script/tracking-contract-tests.ts server/handlers/misc-commands.ts server/routes.ts server/understanding/live.ts > /tmp/weight.diff
+          patch -p1 -F5 < /tmp/weight.diff
+          if find . -name '*.rej' -o -name '*.orig' | grep -q .; then
+            echo 'Patch produced reject/orig files'
+            exit 1
+          fi
+          git add script/tracking-contract-tests.ts server/handlers/misc-commands.ts server/routes.ts server/understanding/live.ts
+          git diff --cached --check
+          git commit -m 'fix: make weight coaching a structured terminal turn'
+          git rm -f .github/workflows/zz-shot-cherry-pick.yml .github/shot-trigger.txt || true
+          git add -A
+          git commit --amend --no-edit
+          git push origin HEAD:cto/shot-implementation
