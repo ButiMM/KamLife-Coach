@@ -722,6 +722,24 @@ export function composeDecisionTurn(situationFrame: string, actionLine: string):
  *
  * So the gate stops taking a verdict and takes the EVIDENCE, then reaches the verdict through the
  * same two functions decideProactive uses. Neither path can hold an opinion the other does not.
+ *
+ * FOUND, NOT FIXED — SPARSE EVIDENCE ACTION DIVERGENCE (parked 2026-08-28 by CTO decision).
+ *
+ * One evidence -> one policy is what this cut establishes. One policy -> one ACTION is NOT
+ * established, and on the insufficient branch the two paths still differ:
+ *
+ *     sparse but healthy   decideProactive -> weigh  "Stand on a scale this morning."
+ *                          underPolicy     -> hold   "Nothing new today."
+ *
+ * decideProactive downgrades to the measurement that would justify a prescription; this gate
+ * holds. There is a plausible product reason — proactively the ask IS the whole message, so
+ * silence wastes the contact, while reactively the client has already been answered and this line
+ * is supplementary — but that reason is UNPROVEN. No client has been traced to establish it.
+ *
+ * It is therefore a product-policy question, not a defect to patch: decide the desired reactive
+ * behaviour from production evidence BEFORE changing it. Closing it would mean this gate also
+ * performing the askToLog/askToWeigh downgrade, which needs today.logged, daysSinceWeighIn and
+ * doNotMention at the reactive call sites.
  */
 export function underPolicy(
   action: OneAction,
