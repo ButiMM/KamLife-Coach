@@ -1,0 +1,26 @@
+name: shot-cherry-pick
+on:
+  push:
+    branches: ["cto/shot-implementation"]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: cto/shot-implementation
+      - name: Cherry-pick validated weight seam
+        run: |
+          set -e
+          git config user.name 'cto-builder'
+          git config user.email 'cto-builder@users.noreply.github.com'
+          git cherry-pick d2cfeb1cd771bdb6c3c25916a417b9b8956d7b76 || { git cherry-pick --abort; exit 1; }
+          git rm -f .github/workflows/zz-shot-cherry-pick.yml || true
+          git add -A
+          git diff --cached --check
+          git commit -m 'chore: remove temporary shot cherry-pick runner' || true
+          git push origin HEAD:cto/shot-implementation
