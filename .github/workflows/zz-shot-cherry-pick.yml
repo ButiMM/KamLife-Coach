@@ -18,9 +18,10 @@ jobs:
           set -euo pipefail
           git config user.name 'cto-builder'
           git config user.email 'cto-builder@users.noreply.github.com'
+          git fetch origin d2cfeb1cd771bdb6c3c25916a417b9b8956d7b76 --no-tags
           git show --format= --binary d2cfeb1cd771bdb6c3c25916a417b9b8956d7b76 > /tmp/weight.patch
           git apply --3way /tmp/weight.patch
-          git rm -f .github/workflows/zz-shot-cherry-pick.yml || true
+          git rm -f .github/workflows/zz-shot-cherry-pick.yml .github/shot-trigger.txt || true
           git add -A
           git diff --cached --check
           git commit -m 'fix: make weight coaching a structured terminal turn'
