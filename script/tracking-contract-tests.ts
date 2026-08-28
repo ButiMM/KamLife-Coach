@@ -240,6 +240,28 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * WEIGHT COACHING TURN IS TERMINAL — the 16:55 HOLD cannot grow a direction/action tail.
+   */
+  {
+    const { closeCoachingTurn } = await import("../server/understanding/live");
+    const hold = {
+      kind: "coach" as const,
+      decision: "HOLD" as const,
+      facts: {
+        currentKg: 85.75, changeKg: 1.2, trendUsable: false, trendWhy: "illness", goal: "muscle_gain",
+        points: [{ kg: 85.75, date: "28 Aug" }],
+      },
+    };
+    const out = await closeCoachingTurn({}, "what is my weight trend", hold);
+    if (/going up|going down|keep fuelling|trend is/i.test(out)) {
+      failures.push(`16:55 HOLD leaked direction/action: ${out}`);
+    }
+    if ((out.match(/\n\n/g) || []).length > 1) {
+      failures.push(`HOLD rendered more than one act: ${out}`);
+    }
+  }
+
+  /**
    * LAW 3 — THE ANSWER MUST QUOTE THE LEDGER, NOT THE MESSAGE (2026-08-26, issue #63).
    *
    * The write owner returns the count the day now HOLDS. Where a second write path existed, that

@@ -63,6 +63,38 @@ import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable,
  *
  * rather than the model deciding in prose and a verifier trying to work out what it decided.
  */
+export type CoachingTurn = {
+  kind: "coach";
+  decision: "HOLD" | "REPORT_TREND";
+  facts: {
+    currentKg: number | null;
+    changeKg: number;
+    trendUsable: boolean;
+    trendWhy: string | null;
+    goal: string;
+    points: Array<{ kg: number; date: string }>;
+  };
+};
+
+function renderStructuredCoachingTurn(turn: CoachingTurn): string {
+  const recent = turn.facts.points.map(p =>
+    `• ${p.kg.toFixed(1)}kg — ${p.date}`,
+  ).join("\n");
+  const history = recent ? `*Weight History*\n\n${recent}` : "*Weight History*";
+  if (turn.decision === "HOLD" || !turn.facts.trendUsable) {
+    const hold = turn.facts.trendWhy === "illness"
+      ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."
+      : "I don't have enough clean weigh-ins yet to call a trend.";
+    return `${history}\n\n${hold}`.trim();
+  }
+  const direction = turn.facts.changeKg < 0
+    ? `Down ${Math.abs(turn.facts.changeKg).toFixed(1)}kg since you started.`
+    : turn.facts.changeKg > 0
+      ? `Up ${turn.facts.changeKg.toFixed(1)}kg since you started.`
+      : "No change since you started.";
+  return `${history}\n\n${direction}`.trim();
+}
+
 export async function canonicalDecision(user: any, message?: string): Promise<{ todo: string; kind: string; reply: string }> {
   try {
     // ONE CONSTITUTION (2026-08-21). This called theNextMove(), a SECOND ranked ladder —
@@ -623,7 +655,17 @@ export async function runMeaningEngineLive(ctx: {
  *
  * Rationale, measurements and both-ways grading: script/tracking-contract-tests.ts, LAW 4.
  */
-export async function closeCoachingTurn(user: any, message: string, reply: string | null): Promise<string> {
+export async function closeCoachingTurn(
+  user: any,
+  message: string,
+  reply: string | CoachingTurn | null,
+): Promise<string> {
+  // Structured coaching turns already carry the decision. Never feed them back through
+  // canonicalDecision/withNextMove: that is the 16:55 second-act join.
+  if (reply && typeof reply === "object" && (reply as CoachingTurn).kind === "coach") {
+    return renderStructuredCoachingTurn(reply as CoachingTurn);
+  }
+
   const out = String(reply ?? "");
   const { turnMutations } = await import("../handlers/chat-log");
   const { durableDomains } = await import("./messy-intake");

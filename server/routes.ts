@@ -1347,7 +1347,12 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   //   mustForceFoodLog  — adapter; already stood down after INSERT meal
   const wroteThisTurn = durableDomains(turnMutations()).length > 0;
   const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });
-  if (miscResult !== null) return miscResult;
+  if (miscResult !== null) {
+    if (typeof miscResult === "object" && (miscResult as any).kind === "coach") {
+      return closeCoachingTurn(user, message, miscResult as any);
+    }
+    return miscResult;
+  }
 
 
   const lifecycleResult = await handleLifecycle({ phone, message, m, user, isQuestion: normalizedQuestion });

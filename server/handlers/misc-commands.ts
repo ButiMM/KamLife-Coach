@@ -62,7 +62,7 @@ export async function handleMiscCommands(ctx: {
   isQuestion?: boolean; // systemic QUESTION gate — see early-commands.ts
   /** This turn already INSERT-ed a durable fact. Educational mouths must not consume a remaining ask. */
   wroteThisTurn?: boolean;
-}): Promise<string | null> {
+}): Promise<string | import("../understanding/live").CoachingTurn | null> {
   const { phone, message, m, user, wroteThisTurn } = ctx;
 
   // Calendar facts are deterministic SAST state, not coaching.
@@ -596,13 +596,32 @@ export async function handleMiscCommands(ctx: {
       const latest = logs[logs.length - 1].kg;
       const totalChange = latest - first;
       const goal = user.goalType || "fat_loss";
-      const changeDir = totalChange < 0 ? `Down ${Math.abs(totalChange).toFixed(1)}kg` : totalChange > 0 ? `Up ${totalChange.toFixed(1)}kg` : "No change";
-      const verdict = goal === "fat_loss" && totalChange < -1 ? "Moving in the right direction." : goal === "muscle_gain" && totalChange > 0.5 ? "Scale is going up — keep fuelling." : goal === "fat_loss" && totalChange >= 0 ? "Scale hasn't moved yet — check food logging consistency." : "";
-      const recent = logs.slice(-5).map(l =>
-        `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`,
-      ).join("\n");
-      const name2 = user.name?.split(" ")[0] || "";
-      return `*${name2 ? name2 + "'s " : ""}Weight History*\n\n${recent}\n\n${changeDir} since you started. ${verdict}`.trim();
+      const { readHealthState } = await import("../health-state");
+      const health = readHealthState(user);
+      const { weightTrendUsable } = await import("../adaptive-targets");
+      const trend = weightTrendUsable({
+        count: logs.length,
+        newestAt: new Date(logs[logs.length - 1].at).getTime(),
+        oldestAt: new Date(logs[0].at).getTime(),
+        now: Date.now(),
+        sickSince: health.sickSince ? new Date(health.sickSince).getTime() : undefined,
+        sickUntil: health.sickUntil ? new Date(health.sickUntil).getTime() : undefined,
+      });
+      return {
+        kind: "coach",
+        decision: trend.usable ? "REPORT_TREND" : "HOLD",
+        facts: {
+          currentKg: latest,
+          changeKg: totalChange,
+          trendUsable: trend.usable,
+          trendWhy: trend.usable ? null : trend.why,
+          goal,
+          points: logs.slice(-5).map(l => ({
+            kg: l.kg,
+            date: l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" }),
+          })),
+        },
+      };
     } catch { /* fall through */ }
   }
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
