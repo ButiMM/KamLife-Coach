@@ -74,7 +74,7 @@ export async function canonicalDecision(user: any, message?: string): Promise<{ 
     //
     // It now asks the decision owner, on canonical state, under the same policy contract every
     // other caller uses. theNextMove is deleted.
-    const { chooseAction, underPolicy, foodDayIsClosed, trainingDayIsDeclined } = await import("../one-action");
+    const { chooseAction, underPolicy, foodDayIsClosed, trainingDayIsDeclined, PROACTIVE_LOG_FLOOR } = await import("../one-action");
     const { readHeldConstraints } = await import("../held-constraints");
     const { getProgressTruth, sessionsThisCalendarWeek } = await import("../day-ledger");
     const { sastHour } = await import("../sast");
@@ -115,7 +115,12 @@ export async function canonicalDecision(user: any, message?: string): Promise<{ 
       // it had no field at all: routes.ts computed it into `_isWorkoutRefusal` and dropped it.
       foodDayClosed: held.foodDayClosed || foodDayIsClosed(message || ""),
       trainingDeclined: held.trainingDeclined || trainingDayIsDeclined(message || ""),
-    } as any), { evidenced: truth.window.daysLogged >= 3, dreamGoal: user.dreamGoal });
+    } as any), { foodSufficient: truth.window.daysLogged >= PROACTIVE_LOG_FLOOR,
+         // WEIGHT EVIDENCE IS NOT COUNTED HERE, and that is a known gap rather than a
+         // decision: the proactive side reads a stall verdict this path never computes, so
+         // passing anything but false would be inventing evidence. It means a client with a
+         // usable weight trend and a thin food log is still held on this path.
+         weightSufficient: false, dreamGoal: user.dreamGoal });
 
     // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,
     // so it can tell a model reply that CARRIES the decision from one that invented its own.

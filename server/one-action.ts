@@ -649,6 +649,13 @@ export interface ProactiveDecision {
  * ask for the measurement that would let us decide, which is precisely INVESTIGATE. Everything
  * else alters what the client does today, and may only be said on sufficient evidence.
  */
+/**
+ * DISTINCT DAYS OF FOOD LOGGING BEFORE THE LEDGER CAN CARRY A PRESCRIPTION. Lives here, with the
+ * policy that applies it, because it was previously defined in the scheduler and hand-copied as a
+ * literal by every reactive caller — at a different number.
+ */
+export const PROACTIVE_LOG_FLOOR = 4;
+
 const INVESTIGATIVE: ReadonlySet<ActionKind> = new Set<ActionKind>(["come_back", "log", "weigh"]);
 const PRESCRIPTIVE: ReadonlySet<ActionKind> = new Set<ActionKind>(["protein", "walk", "train", "eat_more", "rest"]);
 
@@ -695,8 +702,52 @@ export function composeDecisionTurn(situationFrame: string, actionLine: string):
   return `${ctx}\n\n${action}`;
 }
 
-export function underPolicy(action: OneAction, opts: { evidenced: boolean; dreamGoal?: string | null }): OneAction {
-  if (!PRESCRIPTIVE.has(action.kind) || opts.evidenced) return action;
+/**
+ * TWO CONSTITUTIONS, ONE CLIENT (2026-08-28, traced on one state through both paths).
+ *
+ * This gate and decideProactive both answer "may we prescribe?", and they answered it differently.
+ * Measured on one client — sick, two of seven days logged, 09:00:
+ *
+ *     decideProactive  ->  rest    "Rest today. No training, no targets."
+ *     underPolicy      ->  hold    "Nothing new today. Do exactly what you did yesterday."
+ *
+ * Telling a sick person to repeat yesterday is the wrong instruction, and it re-broke a finding
+ * this file already carries: illness is DIRECTLY OBSERVED durable state, sufficient by
+ * construction (2026-08-18). decideProactive knew that through evidenceFor; this gate took a bare
+ * boolean from its caller and could not.
+ *
+ * The second disagreement was the threshold itself. Callers here asked `daysLogged >= 3` while the
+ * proactive side used PROACTIVE_LOG_FLOOR — so a client with exactly three logged days was
+ * evidenced on one path and not the other. One floor now, the named one.
+ *
+ * So the gate stops taking a verdict and takes the EVIDENCE, then reaches the verdict through the
+ * same two functions decideProactive uses. Neither path can hold an opinion the other does not.
+ *
+ * FOUND, NOT FIXED — SPARSE EVIDENCE ACTION DIVERGENCE (parked 2026-08-28 by CTO decision).
+ *
+ * One evidence -> one policy is what this cut establishes. One policy -> one ACTION is NOT
+ * established, and on the insufficient branch the two paths still differ:
+ *
+ *     sparse but healthy   decideProactive -> weigh  "Stand on a scale this morning."
+ *                          underPolicy     -> hold   "Nothing new today."
+ *
+ * decideProactive downgrades to the measurement that would justify a prescription; this gate
+ * holds. There is a plausible product reason — proactively the ask IS the whole message, so
+ * silence wastes the contact, while reactively the client has already been answered and this line
+ * is supplementary — but that reason is UNPROVEN. No client has been traced to establish it.
+ *
+ * It is therefore a product-policy question, not a defect to patch: decide the desired reactive
+ * behaviour from production evidence BEFORE changing it. Closing it would mean this gate also
+ * performing the askToLog/askToWeigh downgrade, which needs today.logged, daysSinceWeighIn and
+ * doNotMention at the reactive call sites.
+ */
+export function underPolicy(
+  action: OneAction,
+  opts: { foodSufficient: boolean; weightSufficient: boolean; dreamGoal?: string | null },
+): OneAction {
+  const verdict = evidenceFromKind(action.kind)
+    ?? evidenceFromLedger(opts.foodSufficient, opts.weightSufficient);
+  if (!PRESCRIPTIVE.has(action.kind) || verdict === "sufficient") return action;
   return holdAction(opts.dreamGoal);
 }
 
@@ -712,10 +763,20 @@ export function underPolicy(action: OneAction, opts: { evidenced: boolean; dream
  *
  * Silence is the same kind of fact: `come_back` follows from an observed absence, not a guess.
  */
-function evidenceFor(s: ProactiveStateForDecision, kind: ActionKind): DecisionEvidence {
+function evidenceFromKind(kind: ActionKind): DecisionEvidence | null {
   if (kind === "rest") return "sufficient";
   if (INVESTIGATIVE.has(kind)) return "insufficient";
-  return s.evidence.foodSufficient || s.evidence.weightSufficient ? "sufficient" : "insufficient";
+  return null;   // nothing follows from the kind alone — ask the ledger
+}
+
+/** The ledger half. Either source on its own is enough; that is one rule, stated once. */
+function evidenceFromLedger(foodSufficient: boolean, weightSufficient: boolean): DecisionEvidence {
+  return foodSufficient || weightSufficient ? "sufficient" : "insufficient";
+}
+
+function evidenceFor(s: ProactiveStateForDecision, kind: ActionKind): DecisionEvidence {
+  return evidenceFromKind(kind)
+    ?? evidenceFromLedger(s.evidence.foodSufficient, s.evidence.weightSufficient);
 }
 
 export function decideProactive(

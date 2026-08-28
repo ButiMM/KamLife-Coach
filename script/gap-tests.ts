@@ -2895,7 +2895,11 @@ test("sweep: the >7-day client's decision is used, not computed and discarded", 
   assert.ok(/return formatOneAction\(underPolicy\(chooseAction\(\{/.test(morning),
     "a drifting client must not get silence because a ledger read timed out — and the fallback "
     + "must reach the decision owner through the policy contract, not around it");
-  assert.ok(/evidenced: false/.test(morning),
+  // The shape changed on 2026-08-28 when the gate stopped taking a pre-computed verdict and
+  // started taking the evidence itself, so that it and decideProactive reach one answer through
+  // one function. The property this line protects is unchanged: the degraded fallback claims NO
+  // evidence, because the state read is what just failed.
+  assert.ok(/foodSufficient: false, weightSufficient: false/.test(morning),
     "…with evidence stated honestly: the state read is what just failed");
 });
 

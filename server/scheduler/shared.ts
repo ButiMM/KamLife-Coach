@@ -909,7 +909,9 @@ export interface ProactiveState {
 /** Below this many logged days in seven, intake averages are not evidence. Same floor as the
  *  hunger and deficit contracts — one client must not be "well logged" for one subsystem and
  *  "thinly logged" for another on the same morning. */
-export const PROACTIVE_LOG_FLOOR = 4;
+// ONE FLOOR, OWNED BY THE POLICY. Re-exported so existing importers are undisturbed.
+import { PROACTIVE_LOG_FLOOR } from "../one-action";
+export { PROACTIVE_LOG_FLOOR };
 
 /** Weeks of no meaningful weight movement (<0.3kg swing) from a series, newest first.
  *  Moved here from adaptive.ts so the stall a message TALKS about and the stall the engine ACTS
