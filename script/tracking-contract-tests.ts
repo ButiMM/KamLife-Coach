@@ -760,6 +760,18 @@ const MUST_WRITE: [string, string][] = [
       if (sig("I'm hungry, what can I eat?") !== sig("im hungry what can i eat")) {
         failures.push(`Coach Health V2 splits one question into two candidates on punctuation alone: "${sig("I'm hungry, what can I eat?")}" vs "${sig("im hungry what can i eat")}"`);
       }
+      // THE FRAGMENTATION CASE (2026-08-27, proof harness). Three clients asked one question and
+      // got three one-client candidates, split by a possessive and a missing preposition. Each
+      // ranked low and none surfaced — the detector missing a repeated failure by breaking it up,
+      // which looks exactly like a healthy queue.
+      const nandos = [
+        "I'm at Nando's, what should I order?",
+        "at nandos what should i order",
+        "Nando's — what should I order?",
+      ].map(sig);
+      if (new Set(nandos).size !== 1) {
+        failures.push(`Coach Health V2 fragments one question into ${new Set(nandos).size} candidates: ${nandos.map(n => `"${n}"`).join(" vs ")}`);
+      }
       if (sig("what can I eat") === sig("how far am I from my goal")) {
         failures.push(`Coach Health V2 groups two unrelated questions into one candidate — the packet would send an engineer after a pattern that does not exist`);
       }

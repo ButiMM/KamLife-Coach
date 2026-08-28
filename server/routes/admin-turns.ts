@@ -382,8 +382,24 @@ export function candidateSignature(input: string): string {
     .replace(/[0-9]+/g, "")
     .replace(/[^a-z\s]/g, " ")
     .split(/\s+/)
+    .map(w => w.replace(/s$/, ""))            // nando / nandos are one place
     .filter(w => w.length > 1 && !STOPWORDS.has(w));
-  return words.slice(0, 5).join(" ") || "(no words)";
+  // THE CARRYING WORDS, ORDER-INDEPENDENT (2026-08-27, proof harness).
+  //
+  // The first version took the first five words in order. Three clients asking one question —
+  // "I'm at Nando's, what should I order?", "at nandos what should i order", "Nando's — what
+  // should I order?" — produced THREE candidates of one client each, split by a possessive and a
+  // missing preposition. Each landed as low priority and none surfaced, which is the detector
+  // missing a real repeated failure by fragmenting it rather than by ignoring it.
+  //
+  // Longest-first picks the words that carry meaning over the connectives that vary between
+  // people, and sorting makes word order irrelevant. Still deliberately crude: the failure mode
+  // to avoid is merging things that are not the same question.
+  const carrying = [...new Set(words)]
+    .sort((a, b) => (b.length - a.length) || a.localeCompare(b))
+    .slice(0, 4)
+    .sort();
+  return carrying.join(" ") || "(no words)";
 }
 
 export function registerAdminTurns(app: Express) {
