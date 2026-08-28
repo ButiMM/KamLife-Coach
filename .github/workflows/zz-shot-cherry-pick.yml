@@ -1,4 +1,4 @@
-name: shot-cherry-pick
+name: shot-apply-patch
 on:
   push:
     branches: ["cto/shot-implementation"]
@@ -13,14 +13,15 @@ jobs:
         with:
           fetch-depth: 0
           ref: cto/shot-implementation
-      - name: Cherry-pick validated weight seam
+      - name: Apply exact commit patch
         run: |
-          set -e
+          set -euo pipefail
           git config user.name 'cto-builder'
           git config user.email 'cto-builder@users.noreply.github.com'
-          git cherry-pick d2cfeb1cd771bdb6c3c25916a417b9b8956d7b76 || { git cherry-pick --abort; exit 1; }
+          git show --format= --binary d2cfeb1cd771bdb6c3c25916a417b9b8956d7b76 > /tmp/weight.patch
+          git apply --3way /tmp/weight.patch
           git rm -f .github/workflows/zz-shot-cherry-pick.yml || true
           git add -A
           git diff --cached --check
-          git commit -m 'chore: remove temporary shot cherry-pick runner' || true
+          git commit -m 'fix: make weight coaching a structured terminal turn'
           git push origin HEAD:cto/shot-implementation
