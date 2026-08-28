@@ -22,7 +22,7 @@ import { logChat, turnMutation, turnAlreadyWrote } from "./chat-log";
 import { sastDayKey } from "../sast";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
 import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, reportedInSomeClause, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen } from "../utils";
-import { applyRetroSessionState } from "../day-ledger";
+import { applyRetroSessionState, sessionsThisCalendarWeek } from "../day-ledger";
 import { readTrainingDay } from "../one-action";
 import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot, weekStartForTrainingClaim, attributableWeekSessionDates } from "../workout-state";
@@ -734,7 +734,8 @@ async function logProseSession(
   // Already on the board — don't double-count, but still answer the feeling, because
   // being ignored is what the client actually complained about.
   if (existing.length > 0) {
-    const dupe = sessionReportReply(report, firstName, user.totalWorkoutsCompleted || 0)
+    const weekSession = report.weekSessionNumber || await sessionsThisCalendarWeek(user.id).catch(() => undefined);
+    const dupe = sessionReportReply(report, firstName, undefined, weekSession)
       .replace(/^✅[^\n]*\n\n/, `✅ ${firstName ? firstName + ", " : ""}today's session is already logged.\n\n`);
     await logChat(user.id, message, dupe, "WORKOUT_FEEDBACK");
     return dupe;
@@ -769,7 +770,8 @@ async function logProseSession(
   // How it felt has to outlive this message — next session's coaching depends on it.
   storeMemory(phone, sessionMemoryLine(report), "workout").catch(() => {});
 
-  const reply = sessionReportReply(report, firstName, newTotal);
+  const weekSession = report.weekSessionNumber || await sessionsThisCalendarWeek(user.id).catch(() => undefined);
+  const reply = sessionReportReply(report, firstName, undefined, weekSession);
   await logChat(user.id, message, reply, "WORKOUT_DONE");
   return reply;
 }

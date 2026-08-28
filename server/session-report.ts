@@ -29,6 +29,10 @@ export interface SessionReport {
   feel: SessionFeel | null;
   /** First session back after illness or a layoff — changes the coaching completely. */
   returning: boolean;
+  /** Client-stated weekly session ordinal, when supplied. */
+  weekSessionNumber: number | null;
+  /** Client-stated split for this session, when supplied. */
+  dayType: "upper" | "lower" | null;
 }
 
 // Past-tense training report. "I'm training today" is deliberately absent — present
@@ -51,6 +55,13 @@ const DID_SESSION =
   /\b(?:did|finished|completed|smashed|pushed\s+through)\s+(?:my\s+|the\s+|a\s+|today.?s\s+)?(?:workout|session|training|gym|legs?|leg\s+day|upper(?:\s+body)?|lower(?:\s+body)?|chest|back|push|pull|cardio|arms?|shoulders?)\b/i;
 const FIRST_DAY_BACK =
   /\b(?:first|1st)\s+(?:day|session|workout|time)\s+back\b|\bback\s+(?:in|at)\s+(?:the\s+)?gym\b|\bback\s+to\s+training\b/i;
+const WEEK_SESSION = /\b(?:my\s+)?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:workout|session)\s+(?:of|this)\s+week\b/i;
+const DAY_TYPE = /\b(upper|lower)\s*(?:body|day)?\b/i;
+
+function parseOrdinal(value: string): number {
+  const map: Record<string, number> = { first: 1, "1st": 1, second: 2, "2nd": 2, third: 3, "3rd": 3, fourth: 4, "4th": 4, fifth: 5, "5th": 5, sixth: 6, "6th": 6 };
+  return map[value.toLowerCase()] || Number(value) || 0;
+}
 
 // "Today" in the widest sense a client means it — including a bare report with no time
 // word at all ("just finished my session"), which always means now.
@@ -89,14 +100,19 @@ export function parseSessionReport(message: string): SessionReport | null {
   if (!s) return null;
   if (OTHER_DAY.test(s)) return null;
 
-  const didTrain = TRAINED_PAST.test(s) || WENT_TO_GYM.test(s) || DID_SESSION.test(s) || FIRST_DAY_BACK.test(s);
+  const weekMatch = s.match(WEEK_SESSION);
+  const didTrain = TRAINED_PAST.test(s) || WENT_TO_GYM.test(s) || DID_SESSION.test(s) || FIRST_DAY_BACK.test(s) || !!weekMatch;
   if (!didTrain) return null;
 
-  // It has to be about TODAY. A bare "just finished my session" counts; "first day back"
-  // with no other day named counts too — nobody reports a comeback in the abstract.
-  if (!TODAY_REF.test(s) && !JUST_NOW.test(s) && !FIRST_DAY_BACK.test(s)) return null;
+  if (!TODAY_REF.test(s) && !JUST_NOW.test(s) && !FIRST_DAY_BACK.test(s) && !weekMatch) return null;
 
-  return { trainedToday: true, feel: readFeel(s), returning: RETURNING.test(s) };
+  return {
+    trainedToday: true,
+    feel: readFeel(s),
+    returning: RETURNING.test(s),
+    weekSessionNumber: weekMatch ? parseOrdinal(weekMatch[1]) : null,
+    dayType: (s.match(DAY_TYPE)?.[1]?.toLowerCase() as "upper" | "lower" | undefined) || null,
+  };
 }
 
 /** How the session felt, worst-first — "bad" outranks everything, it is the quit signal. */
@@ -114,12 +130,15 @@ export function readFeel(message: string): SessionFeel | null {
  * is ON THE BOARD, answer the feeling honestly, and say what happens next session.
  * Short by reply contract — this is a coaching moment, not a physiology lecture.
  */
-export function sessionReportReply(r: SessionReport, firstName = "", totalSessions?: number): string {
+export function sessionReportReply(r: SessionReport, firstName = "", totalSessions?: number, weekSession?: number): string {
   const fn = firstName ? `${firstName}, ` : "";
-  const tally = totalSessions && totalSessions > 0
-    ? ` That's *${totalSessions} session${totalSessions === 1 ? "" : "s"}* logged.`
-    : "";
-  const logged = `✅ ${fn}logged today's session.${tally}`;
+  const tally = weekSession && weekSession > 0
+    ? ` That's session *${weekSession} this week.`
+    : totalSessions && totalSessions > 0
+      ? ` That's *${totalSessions} session${totalSessions === 1 ? "" : "s"}* logged.`
+      : "";
+  const split = r.dayType ? ` *${r.dayType} day*.` : "";
+  const logged = `✅ ${fn}logged today's session.${tally}${split}`;
 
   // The comeback-that-felt-terrible case — the exact message that got ignored.
   if (r.feel === "bad" && r.returning) {

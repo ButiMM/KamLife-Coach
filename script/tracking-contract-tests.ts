@@ -938,6 +938,17 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * WEEK SESSION IDENTITY — ordinal reports must reach the session owner.
+   */
+  {
+    const { parseSessionReport } = await import("../server/session-report");
+    const r = parseSessionReport("Did my second workout of the week. It was a lower day.");
+    if (!r?.trainedToday || r.weekSessionNumber !== 2 || r.dayType !== "lower") {
+      failures.push("ordinal weekly workout report did not resolve to session 2 / lower");
+    }
+  }
+
+  /**
    * STAGE 3 OF THE CONTRACT — ONE WRITE OWNER, AND EVERY CONVERSATIONAL DOOR GOES THROUGH IT.
    *
    * logStepsForUser holds one rule that no caller can hold for itself: ONE ROW PER SAST DAY, keep
