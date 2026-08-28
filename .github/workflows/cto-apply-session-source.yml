@@ -1,0 +1,24 @@
+name: CTO apply session source
+on:
+  push:
+    branches: ["cto/one-shot-final"]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: "!contains(github.event.head_commit.message, '[cto-session]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: cto/one-shot-final, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Apply
+        run: node scripts/cto-apply-session-source.mjs
+      - name: Commit
+        run: |
+          git config user.name "cto-builder"
+          git config user.email "cto-builder@users.noreply.github.com"
+          git add server/session-report.ts server/handlers/workout.ts server/gpt.ts script/tracking-contract-tests.ts
+          git diff --cached --quiet || git commit -m "fix: bind workout identity to weekly session truth [cto-session]"
+          git push origin cto/one-shot-final
