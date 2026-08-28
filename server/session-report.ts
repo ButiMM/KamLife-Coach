@@ -52,12 +52,9 @@ const TRAINED_PAST =
 const WENT_TO_GYM =
   /\b(?:went|been|got\s+back)\s+(?:to\s+|from\s+)?(?:the\s+)?(?:gym|training|session)\b|\bhit\s+the\s+gym\b|\bwas\s+at\s+(?:the\s+)?gym\b/i;
 const DID_SESSION =
-  /\b(?:did|finished|completed|smashed|pushed\s+through)\s+(?:my\s+|the\s+|a\s+|today.?s\s+)?(?:workout|session|training|gym|legs?|leg\s+day|upper(?:\s+body)?|lower(?:\s+body)?|chest|back|push|pull|cardio|arms?|shoulders?)\b/i;
+  /\b(?:did|finished|completed|smashed|pushed\s+through)\s+(?:(?:my\s+|the\s+|a\s+|today.?s\s+)?(?:first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+)?(?:workout|session|training|gym|legs?|leg\s+day|upper(?:\s+body)?|lower(?:\s+body)?|chest|back|push|pull|cardio|arms?|shoulders?)\b/i;
 const FIRST_DAY_BACK =
   /\b(?:first|1st)\s+(?:day|session|workout|time)\s+back\b|\bback\s+(?:in|at)\s+(?:the\s+)?gym\b|\bback\s+to\s+training\b/i;
-const WEEK_SESSION = /\b(?:my\s+)?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:workout|session)\s+(?:of|this)\s+week\b/i;
-const DAY_TYPE = /\b(upper|lower)\s*(?:body|day)?\b/i;
-
 function parseOrdinal(value: string): number {
   const map: Record<string, number> = { first: 1, "1st": 1, second: 2, "2nd": 2, third: 3, "3rd": 3, fourth: 4, "4th": 4, fifth: 5, "5th": 5, sixth: 6, "6th": 6 };
   return map[value.toLowerCase()] || Number(value) || 0;
@@ -100,18 +97,21 @@ export function parseSessionReport(message: string): SessionReport | null {
   if (!s) return null;
   if (OTHER_DAY.test(s)) return null;
 
-  const weekMatch = s.match(WEEK_SESSION);
-  const didTrain = TRAINED_PAST.test(s) || WENT_TO_GYM.test(s) || DID_SESSION.test(s) || FIRST_DAY_BACK.test(s) || !!weekMatch;
+  const sessionMatch = s.match(DID_SESSION);
+  const didTrain = TRAINED_PAST.test(s) || WENT_TO_GYM.test(s) || DID_SESSION.test(s) || FIRST_DAY_BACK.test(s);
   if (!didTrain) return null;
 
-  if (!TODAY_REF.test(s) && !JUST_NOW.test(s) && !FIRST_DAY_BACK.test(s) && !weekMatch) return null;
+  if (!TODAY_REF.test(s) && !JUST_NOW.test(s) && !FIRST_DAY_BACK.test(s) && !sessionMatch?.[1]) return null;
 
+  const ordinal = sessionMatch?.[1] ? parseOrdinal(sessionMatch[1]) : null;
+  const lowerDay = s.includes("lower day") || s.includes("lower-body");
+  const upperDay = s.includes("upper day") || s.includes("upper-body");
   return {
     trainedToday: true,
     feel: readFeel(s),
     returning: RETURNING.test(s),
-    weekSessionNumber: weekMatch ? parseOrdinal(weekMatch[1]) : null,
-    dayType: (s.match(DAY_TYPE)?.[1]?.toLowerCase() as "upper" | "lower" | undefined) || null,
+    weekSessionNumber: ordinal,
+    dayType: lowerDay ? "lower" : upperDay ? "upper" : null,
   };
 }
 
