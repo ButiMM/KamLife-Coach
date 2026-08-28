@@ -622,7 +622,8 @@ export async function handleMiscCommands(ctx: {
         `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`,
       ).join("\n");
       const name2 = user.name?.split(" ")[0] || "";
-      return `*${name2 ? name2 + "'s " : ""}Weight History*\n\n${recent}\n\n${changeDir} since you started. ${verdict}`.trim();
+      const changeSummary = trend.usable ? `${changeDir} since you started.` : changeDir;
+      return `*${name2 ? name2 + "'s " : ""}Weight History*\n\n${recent}\n\n${changeSummary} ${verdict}`.trim();
     } catch { /* fall through */ }
   }
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
