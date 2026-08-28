@@ -1,0 +1,96 @@
+name: shot-workout-apply
+on:
+  push:
+    branches: ["cto/shot-clean"]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: cto/shot-clean
+      - name: Convert workout prose to structured coaching turn
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          live = Path('server/understanding/live.ts')
+          workout = Path('server/handlers/workout.ts')
+          routes = Path('server/routes.ts')
+          s = live.read_text()
+
+          old_type = '''export type CoachingTurn = {\n  kind: "coach";\n  decision: "HOLD" | "REPORT_TREND";\n  facts: {\n    currentKg: number | null;\n    changeKg: number;\n    trendUsable: boolean;\n    trendWhy: string | null;\n    goal: string;\n    points: Array<{ kg: number; date: string }>;\n  };\n};'''
+          assert s.count(old_type) == 1, 'current CoachingTurn shape not found'
+          new_type = '''export type CoachingTurn =\n  | {\n      kind: "coach";\n      domain: "weight";\n      decision: "HOLD" | "REPORT_TREND";\n      facts: {\n        currentKg: number | null;\n        changeKg: number;\n        trendUsable: boolean;\n        trendWhy: string | null;\n        goal: string;\n        points: Array<{ kg: number; date: string }>;\n      };\n    }\n  | {\n      kind: "coach";\n      domain: "workout";\n      decision: "SESSION_REPORTED";\n      facts: {\n        sessionInWeek: number | null;\n        dayType: string | null;\n        feel: "bad" | "hard" | "fine" | "strong" | null;\n        returning: boolean;\n        totalSessions: number;\n        alreadyLogged: boolean;\n      };\n    };'''
+          s = s.replace(old_type, new_type, 1)
+
+          old_render = '''function renderStructuredCoachingTurn(turn: CoachingTurn): string {\n  const recent = turn.facts.points.map(p =>\n    `• ${p.kg.toFixed(1)}kg — ${p.date}`,\n  ).join("\\n");\n  const history = recent ? `*Weight History*\\n\\n${recent}` : "*Weight History*";\n  if (turn.decision === "HOLD" || !turn.facts.trendUsable) {\n    const hold = turn.facts.trendWhy === "illness"\n      ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."\n      : "I don't have enough clean weigh-ins yet to call a trend.";\n    return `${history}\\n\\n${hold}`.trim();\n  }\n  const direction = turn.facts.changeKg < 0\n    ? `Down ${Math.abs(turn.facts.changeKg).toFixed(1)}kg since you started.`\n    : turn.facts.changeKg > 0\n      ? `Up ${turn.facts.changeKg.toFixed(1)}kg since you started.`\n      : "No change since you started.";\n  return `${history}\\n\\n${direction}`.trim();\n}'''
+          assert s.count(old_render) == 1, 'existing structured renderer not found'
+          new_render = '''function renderStructuredCoachingTurn(turn: CoachingTurn): string {\n  if (turn.domain === "weight") {\n    const recent = turn.facts.points.map(p =>\n      `• ${p.kg.toFixed(1)}kg — ${p.date}`,\n    ).join("\\n");\n    const history = recent ? `*Weight History*\\n\\n${recent}` : "*Weight History*";\n    if (turn.decision === "HOLD" || !turn.facts.trendUsable) {\n      const hold = turn.facts.trendWhy === "illness"\n        ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."\n        : "I don't have enough clean weigh-ins yet to call a trend.";\n      return `${history}\\n\\n${hold}`.trim();\n    }\n    const direction = turn.facts.changeKg < 0\n      ? `Down ${Math.abs(turn.facts.changeKg).toFixed(1)}kg since you started.`\n      : turn.facts.changeKg > 0\n        ? `Up ${turn.facts.changeKg.toFixed(1)}kg since you started.`\n        : "No change since you started.";\n    return `${history}\\n\\n${direction}`.trim();\n  }\n\n  const f = turn.facts;\n  const identity = f.sessionInWeek !== null\n    ? ` That's session ${f.sessionInWeek} this week${f.dayType ? ` — ${f.dayType} day` : ""}.`\n    : "";\n  if (f.alreadyLogged) {\n    return `✅ Today's session is already logged.${identity}`.trim();\n  }\n  const feel = f.feel === "bad" ? "That session felt bad, so we adjust rather than pretend it was normal."\n    : f.feel === "hard" ? "Too hard means we scale it, not that you failed."\n    : f.feel === "strong" ? "That's a strong session — you're adapting."\n    : f.feel === "fine" ? "That's the zone we want — hard but doable."\n    : "";\n  const question = f.feel ? "How did that session feel next time?" : "How did that session feel?";\n  const count = f.sessionInWeek !== null ? `✅ Logged today's session — session ${f.sessionInWeek} this week.` : "✅ Logged today's session.";\n  return `${count}${identity}${feel ? `\\n\\n${feel}` : ""}\\n\\n${question}`.trim();\n}'''
+          s = s.replace(old_render, new_render, 1)
+          live.write_text(s)
+
+          # Workout handler: structured return from prose-session path only.
+          w = workout.read_text()
+          if 'type CoachingTurn' not in w:
+              anchor = 'import { sendWhatsApp, saveState } from "../scheduler/shared";'
+              assert w.count(anchor) == 1, 'workout import anchor missing'
+              w = w.replace(anchor, anchor + '\nimport type { CoachingTurn } from "../understanding/live";', 1)
+          sig = 'export async function handleWorkoutCommands(ctx: {\n  phone: string;\n  message: string;\n  m: string;\n  user: any;\n}): Promise<string | null> {'
+          assert w.count(sig) == 1, 'workout handler signature missing'
+          w = w.replace(sig, 'export async function handleWorkoutCommands(ctx: {\n  phone: string;\n  message: string;\n  m: string;\n  user: any;\n}): Promise<string | CoachingTurn | null> {', 1)
+          sig2 = '): Promise<string | null> {\n  const todayStart = sastDayStart();'
+          assert w.count(sig2) == 1, 'logProseSession signature anchor missing'
+          w = w.replace(sig2, '): Promise<string | CoachingTurn | null> {\n  const todayStart = sastDayStart();', 1)
+
+          # Existing-session prose report: return structured identity, not a finished speech.
+          old_dupe = '''    const dupe = sessionReportReply(report, firstName, user.totalWorkoutsCompleted || 0)\n      .replace(/^✅[^\\n]*\\n\\n/, `✅ ${firstName ? firstName + ", " : ""}today's session is already logged.\\n\\n`);\n    await logChat(user.id, message, dupe, "WORKOUT_FEEDBACK");\n    return dupe;'''
+          assert w.count(old_dupe) == 1, 'duplicate prose return not found'
+          new_dupe = '''    const claimed = sessionCountsIn(message);\n    const dayTypeMatch = message.match(/\\b(lower(?:\\s+body)?|upper(?:\\s+body)?|legs?|chest|back|push|pull|full\\s+body)\\s*(?:day|workout|session)?\\b/i);\n    const turn: CoachingTurn = {\n      kind: "coach",\n      domain: "workout",\n      decision: "SESSION_REPORTED",\n      facts: {\n        sessionInWeek: claimed.length ? claimed[0] : null,\n        dayType: dayTypeMatch ? dayTypeMatch[1].replace(/\\s+/g, " ").toLowerCase() : null,\n        feel: report.feel,\n        returning: report.returning,\n        totalSessions: user.totalWorkoutsCompleted || 0,\n        alreadyLogged: true,\n      },\n    };\n    await logChat(user.id, message, "[STRUCTURED_WORKOUT_TURN]", "WORKOUT_FEEDBACK");\n    return turn;'''
+          w = w.replace(old_dupe, new_dupe, 1)
+
+          old_end = '''  const reply = sessionReportReply(report, firstName, newTotal);\n  await logChat(user.id, message, reply, "WORKOUT_DONE");\n  return reply;'''
+          assert w.count(old_end) == 1, 'prose session final reply block not found'
+          new_end = '''  const claimed = sessionCountsIn(message);\n  const dayTypeMatch = message.match(/\\b(lower(?:\\s+body)?|upper(?:\\s+body)?|legs?|chest|back|push|pull|full\\s+body)\\s*(?:day|workout|session)?\\b/i);\n  const turn: CoachingTurn = {\n    kind: "coach",\n    domain: "workout",\n    decision: "SESSION_REPORTED",\n    facts: {\n      sessionInWeek: claimed.length ? claimed[0] : null,\n      dayType: dayTypeMatch ? dayTypeMatch[1].replace(/\\s+/g, " ").toLowerCase() : null,\n      feel: report.feel,\n      returning: report.returning,\n      totalSessions: newTotal,\n      alreadyLogged: false,\n    },\n  };\n  await logChat(user.id, message, "[STRUCTURED_WORKOUT_TURN]", "WORKOUT_DONE");\n  return turn;'''
+          w = w.replace(old_end, new_end, 1)
+          workout.write_text(w)
+
+          # Route: structured workout result terminates through existing finalization boundary.
+          r = routes.read_text()
+          old_route = '''  const workoutResult = await handleWorkoutCommands({ phone, message, m, user });\n  if (workoutResult !== null) {\n    if (mayEndTurn("workout")) return closeCoachingTurn(workoutResult);\n    commitFact(turn, "workout", workoutResult);\n  }'''
+          assert r.count(old_route) == 1, 'workout route block not found'
+          new_route = '''  const workoutResult = await handleWorkoutCommands({ phone, message, m, user });\n  if (workoutResult !== null) {\n    if (typeof workoutResult === "object" && (workoutResult as any).kind === "coach") {\n      return closeCoachingTurn(user, message, workoutResult as any);\n    }\n    if (mayEndTurn("workout")) return closeCoachingTurn(workoutResult);\n    commitFact(turn, "workout", workoutResult);\n  }'''
+          r = r.replace(old_route, new_route, 1)
+          routes.write_text(r)
+
+          # T2 proof: parser understands the user's actual report shape.
+          t = Path('script/tracking-contract-tests.ts')
+          ts = t.read_text()
+          if 'WORKOUT ORDINAL IDENTITY' not in ts:
+              marker = '  /**\n   * LAW 3'
+              assert marker in ts, 'tracking insertion marker missing'
+              test = '''  /**\n   * WORKOUT ORDINAL IDENTITY — the live "second workout of the week, lower day" shape is parsed.\n   */\n  {\n    const { parseSessionReport } = await import("../server/session-report");\n    const r = parseSessionReport("Did my second workout of the week. It was a lower day.");\n    if (!r?.trainedToday) failures.push("Workout ordinal report did not parse as today's session");\n  }\n\n'''
+              ts = ts.replace(marker, test + marker, 1)
+          t.write_text(ts)
+
+          assert 'domain: "workout"' in workout.read_text(), 'structured workout result missing'
+          assert 'typeof workoutResult === "object"' in routes.read_text(), 'structured workout route missing'
+          print('WORKOUT_STRUCTURED_SEAM_OK')
+          PY
+          git diff --check
+          git add server/understanding/live.ts server/handlers/workout.ts server/routes.ts script/tracking-contract-tests.ts
+          git diff --cached --check
+          git config user.name 'cto-builder'
+          git config user.email 'cto-builder@users.noreply.github.com'
+          git commit -m 'fix: route workout reports through turn authority'
+          git rm -f .github/workflows/zz-shot-workout.yml
+          git add -A
+          git commit --amend --no-edit
+          git push origin HEAD:cto/shot-clean
