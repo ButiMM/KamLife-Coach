@@ -1,7 +1,7 @@
 name: cto-one-shot-patch
 on:
-  pull_request:
-    types: [opened, synchronize]
+  pull_request_review:
+    types: [submitted]
 jobs:
   patch:
     if: github.event.pull_request.number == 94 && github.actor != 'github-actions[bot]'
@@ -17,8 +17,6 @@ jobs:
         with:
           python-version: '3.x'
       - name: Apply convergence patches
-        env:
-          BRANCH: cto/one-shot-final
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -27,7 +25,7 @@ jobs:
           routes = Path('server/routes.ts')
           misc = Path('server/handlers/misc-commands.ts')
           
-          # 1) Structured coaching turn + single renderer for weight/trend.
+          # Structured coaching turn + single renderer for weight/trend.
           s = live.read_text()
           if 'export type CoachingTurn' not in s:
               marker = 'export async function canonicalDecision('
@@ -36,31 +34,29 @@ jobs:
               s = s[:idx] + block + s[idx:]
               live.write_text(s)
           
-          # 2) Routes understands a structured coaching result from misc.
+          # Route structured coaching result from misc through the existing boundary.
           r = routes.read_text()
           old_import = 'import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor } from "./understanding/live";'
-          new_import = 'import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor, composeCoachingTurn, type CoachingTurn } from "./understanding/live";'
-          assert old_import in r, 'live import missing'
-          r = r.replace(old_import, new_import, 1)
+          if old_import in r:
+              r = r.replace(old_import, 'import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor, composeCoachingTurn, type CoachingTurn } from "./understanding/live";', 1)
           old_block = '  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });\n  if (miscResult !== null) return miscResult;'
           new_block = '''  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });\n  if (miscResult !== null) {\n    if (typeof miscResult === "object" && (miscResult as CoachingTurn).kind === "coach") {\n      return composeCoachingTurn(miscResult as CoachingTurn);\n    }\n    return miscResult;\n  }'''
           assert old_block in r, 'misc route block missing'
           r = r.replace(old_block, new_block, 1)
           routes.write_text(r)
           
-          # 3) Misc weight history returns structured CoachingTurn, no coaching prose.
+          # Weight handler becomes structured and prose-free.
           m = misc.read_text()
           old_sig = '}): Promise<string | null> {'
-          new_sig = '}): Promise<string | import("../understanding/live").CoachingTurn | null> {'
           assert old_sig in m, 'misc signature missing'
-          m = m.replace(old_sig, new_sig, 1)
+          m = m.replace(old_sig, '}): Promise<string | import("../understanding/live").CoachingTurn | null> {', 1)
           old_ret = '      return `*${name2 ? name2 + "\'s " : ""}Weight History*\\n\\n${recent}\\n\\n${changeSummary} ${verdict}`.trim();'
           new_ret = '''      return {\n        kind: "coach",\n        decision: trend.usable ? "REPORT_TREND" : "HOLD",\n        facts: {\n          currentKg: logs[logs.length - 1]?.kg ?? null,\n          changeKg: totalChange,\n          trendUsable: trend.usable,\n          trendWhy: trend.usable ? null : trend.why,\n          goal,\n          recent: logs.slice(-5).map(l => `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`),\n        },\n      };'''
           assert old_ret in m, 'weight return missing'
           m = m.replace(old_ret, new_ret, 1)
           misc.write_text(m)
           
-          # 4) Exact 16:55 regression in existing tracking suite.
+          # Exact HOLD regression in existing tracking suite.
           test = Path('script/tracking-contract-tests.ts')
           t = test.read_text()
           if '16:55 TREND CONTRADICTION' not in t:
@@ -71,16 +67,18 @@ jobs:
               t = t.replace(marker, block + marker, 1)
               test.write_text(t)
           
-          # Strong sanity assertions.
-          assert 'kind: "coach"' in misc.read_text()
-          assert 'composeCoachingTurn(miscResult as CoachingTurn)' in routes.read_text()
-          assert 'export type CoachingTurn' in live.read_text()
-          assert '16:55 TREND CONTRADICTION' in test.read_text()
+          # Remove temporary runner files from the branch after doing the patch.
+          for p in [Path('.github/ONE_SHOT_TRIGGER.tmp'), Path('.github/workflows/one-shot-weight-seam.yml')]:
+              if p.exists(): p.unlink()
           
+          assert 'export type CoachingTurn' in live.read_text()
+          assert 'composeCoachingTurn(miscResult as CoachingTurn)' in routes.read_text()
+          assert 'kind: "coach"' in misc.read_text()
+          assert '16:55 TREND CONTRADICTION' in test.read_text()
           PY
           git config user.name 'cto-builder'
           git config user.email 'cto-builder@users.noreply.github.com'
-          git add server/understanding/live.ts server/routes.ts server/handlers/misc-commands.ts script/tracking-contract-tests.ts
+          git add -A
           git diff --cached --check
-          git commit -m 'feat: close weight coaching response seam'
+          git commit -m 'feat: route weight coaching through structured turn authority'
           git push origin HEAD:cto/one-shot-final
