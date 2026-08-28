@@ -1,0 +1,40 @@
+name: CTO inline session fix
+on:
+  push:
+    branches: ["cto/one-shot-file-fix"]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, '[cto-inline-fix]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: cto/one-shot-file-fix, fetch-depth: 0 }
+      - name: Patch session parser
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('server/session-report.ts')
+          s=p.read_text()
+          old='const DID_SESSION =\n  /\\b(?:did|finished|completed|smashed|pushed\\s+through)\\s+(?:my\\s+|the\\s+|a\\s+|today.?s\\s+)?(?:workout|session|training|gym|legs?|leg\\s+day|upper(?:\\s+body)?|lower(?:\\s+body)?|chest|back|push|pull|cardio|arms?|shoulders?)\\b/i;\nconst FIRST_DAY_BACK ='
+          new='const DID_SESSION =\n  /\\b(?:did|finished|completed|smashed|pushed\\s+through)\\s+(?:(?:my\\s+|the\\s+|a\\s+|today.?s\\s+)?(?:first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\\s+)?(?:workout|session|training|gym|legs?|leg\\s+day|upper(?:\\s+body)?|lower(?:\\s+body)?|chest|back|push|pull|cardio|arms?|shoulders?)\\b/i;\nconst FIRST_DAY_BACK ='
+          if s.count(old)!=1: raise SystemExit(f'DID_SESSION anchor count={s.count(old)}')
+          s=s.replace(old,new)
+          old='const WEEK_SESSION = /\\b(?:my\\s+)?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\\s+(?:workout|session)\\s+(?:of|this)\\s+week\\b/i;\nconst DAY_TYPE = /\\b(upper|lower)\\s*(?:body|day)?\\b/i;\n\n'
+          if s.count(old)!=1: raise SystemExit(f'new constants anchor count={s.count(old)}')
+          s=s.replace(old,'')
+          old='  const weekMatch = s.match(WEEK_SESSION);\n  const didTrain = TRAINED_PAST.test(s) || WENT_TO_GYM.test(s) || DID_SESSION.test(s) || FIRST_DAY_BACK.test(s) || !!weekMatch;\n  if (!didTrain) return null;\n\n  if (!TODAY_REF.test(s) && !JUST_NOW.test(s) && !FIRST_DAY_BACK.test(s) && !weekMatch) return null;\n\n  return {\n    trainedToday: true,\n    feel: readFeel(s),\n    returning: RETURNING.test(s),\n    weekSessionNumber: weekMatch ? parseOrdinal(weekMatch[1]) : null,\n    dayType: (s.match(DAY_TYPE)?.[1]?.toLowerCase() as "upper" | "lower" | undefined) || null,\n  };'
+          new='  const sessionMatch = s.match(DID_SESSION);\n  const didTrain = TRAINED_PAST.test(s) || WENT_TO_GYM.test(s) || DID_SESSION.test(s) || FIRST_DAY_BACK.test(s);\n  if (!didTrain) return null;\n\n  if (!TODAY_REF.test(s) && !JUST_NOW.test(s) && !FIRST_DAY_BACK.test(s) && !sessionMatch?.[1]) return null;\n\n  const ordinal = sessionMatch?.[1] ? parseOrdinal(sessionMatch[1]) : null;\n  const lowerDay = s.includes("lower day") || s.includes("lower-body");\n  const upperDay = s.includes("upper day") || s.includes("upper-body");\n  return {\n    trainedToday: true,\n    feel: readFeel(s),\n    returning: RETURNING.test(s),\n    weekSessionNumber: ordinal,\n    dayType: lowerDay ? "lower" : upperDay ? "upper" : null,\n  };'
+          if s.count(old)!=1: raise SystemExit(f'parser body anchor count={s.count(old)}')
+          s=s.replace(old,new)
+          p.write_text(s)
+          print('patched')
+          PY
+      - name: Commit
+        run: |
+          git config user.name "cto-builder"
+          git config user.email "cto-builder@users.noreply.github.com"
+          git add server/session-report.ts
+          git diff --cached --quiet || git commit -m "fix: fold ordinal session into existing parser [cto-inline-fix]"
+          git push origin cto/one-shot-file-fix
