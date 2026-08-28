@@ -14,55 +14,53 @@ jobs:
           fetch-depth: 0
           ref: cto/one-shot-final
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
       - name: Apply exact weight seam
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import subprocess
+          root=Path('.')
 
-          root = Path('.')
-
-          live = root/'server/understanding/live.ts'
-          s = live.read_text()
-          marker = 'export async function canonicalDecision('
+          live=root/'server/understanding/live.ts'
+          s=live.read_text()
+          marker='export async function canonicalDecision('
           assert marker in s
-          block = '''export type CoachingTurn = {\n  kind: "coach";\n  decision: "HOLD" | "REPORT_TREND";\n  facts: {\n    currentKg: number | null;\n    changeKg: number;\n    trendUsable: boolean;\n    trendWhy: string | null;\n    goal: string;\n    points: Array<{ kg: number; date: string }>;\n  };\n};\n\n/** Single renderer for the structured weight coaching turn. No other writer may append an act. */\nexport function composeCoachingTurn(turn: CoachingTurn): string {\n  const { changeKg, trendUsable, trendWhy, goal, points } = turn.facts;\n  const recent = points.map(p => `• ${p.kg.toFixed(1)}kg — ${p.date}`).join("\\n");\n  const history = recent ? `*Weight History*\\n\\n${recent}` : `*Weight History*`;\n  if (turn.decision === "HOLD" || !trendUsable) {\n    const hold = trendWhy === "illness"\n      ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."\n      : "I don't have enough clean weigh-ins yet to call a trend.";\n    return `${history}\\n\\n${hold}`.trim();\n  }\n  const direction = changeKg < 0\n    ? `Down ${Math.abs(changeKg).toFixed(1)}kg since you started.`\n    : changeKg > 0\n      ? `Up ${changeKg.toFixed(1)}kg since you started.`\n      : "No change since you started.";\n  const verdict = goal === "muscle_gain" && changeKg > 0.5\n    ? "Scale is up — keep fuelling."\n    : goal === "fat_loss" && changeKg < -1\n      ? "Moving in the right direction."\n      : goal === "fat_loss" && changeKg >= 0\n        ? "Scale hasn't moved yet — check food logging consistency."\n        : "";\n  return `${history}\\n\\n${direction}${verdict ? ` ${verdict}` : ""}`.trim();\n}\n\n'''
-          assert 'export type CoachingTurn' not in s
-          live.write_text(s.replace(marker, block+marker, 1))
+          if 'export type CoachingTurn' not in s:
+              block='''export type CoachingTurn = {\n  kind: "coach";\n  decision: "HOLD" | "REPORT_TREND";\n  facts: {\n    currentKg: number | null;\n    changeKg: number;\n    trendUsable: boolean;\n    trendWhy: string | null;\n    goal: string;\n    points: Array<{ kg: number; date: string }>;\n  };\n};\n\nexport function composeCoachingTurn(turn: CoachingTurn): string {\n  const { changeKg, trendUsable, trendWhy, goal, points } = turn.facts;\n  const recent = points.map(p => `• ${p.kg.toFixed(1)}kg — ${p.date}`).join("\\n");\n  const history = recent ? `*Weight History*\\n\\n${recent}` : `*Weight History*`;\n  if (turn.decision === "HOLD" || !trendUsable) {\n    const hold = trendWhy === "illness"\n      ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."\n      : "I don't have enough clean weigh-ins yet to call a trend.";\n    return `${history}\\n\\n${hold}`.trim();\n  }\n  const direction = changeKg < 0\n    ? `Down ${Math.abs(changeKg).toFixed(1)}kg since you started.`\n    : changeKg > 0\n      ? `Up ${changeKg.toFixed(1)}kg since you started.`\n      : "No change since you started.";\n  const verdict = goal === "muscle_gain" && changeKg > 0.5\n    ? "Scale is up — keep fuelling."\n    : goal === "fat_loss" && changeKg < -1\n      ? "Moving in the right direction."\n      : goal === "fat_loss" && changeKg >= 0\n        ? "Scale hasn't moved yet — check food logging consistency."\n        : "";\n  return `${history}\\n\\n${direction}${verdict ? ` ${verdict}` : ""}`.trim();\n}\n\n'''
+              live.write_text(s.replace(marker,block+marker,1))
 
-          misc = root/'server/handlers/misc-commands.ts'
-          s = misc.read_text()
-          old = '''      return `*${name2 ? name2 + "'s " : ""}Weight History*\\n\\n${recent}\\n\\n${changeDir} ${verdict}`.trim();'''
+          misc=root/'server/handlers/misc-commands.ts'
+          s=misc.read_text()
+          old='''      return `*${name2 ? name2 + "'s " : ""}Weight History*\\n\\n${recent}\\n\\n${changeDir} ${verdict}`.trim();'''
           assert old in s
-          new = '''      return {\n        kind: "coach",\n        decision: trend.usable ? "REPORT_TREND" : "HOLD",\n        facts: {\n          currentKg: logs[logs.length - 1]?.kg ?? null,\n          changeKg: totalChange,\n          trendUsable: trend.usable,\n          trendWhy: trend.usable ? null : trend.why,\n          goal,\n          points: logs.slice(-5).map(l => ({\n            kg: l.kg,\n            date: l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" }),\n          })),\n        },\n      };'''
-          misc.write_text(s.replace(old, new, 1))
+          new='''      return {\n        kind: "coach",\n        decision: trend.usable ? "REPORT_TREND" : "HOLD",\n        facts: {\n          currentKg: logs[logs.length - 1]?.kg ?? null,\n          changeKg: totalChange,\n          trendUsable: trend.usable,\n          trendWhy: trend.usable ? null : trend.why,\n          goal,\n          points: logs.slice(-5).map(l => ({\n            kg: l.kg,\n            date: l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" }),\n          })),\n        },\n      };'''
+          misc.write_text(s.replace(old,new,1))
 
-          routes = root/'server/routes.ts'
-          assert 'handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });' in routes.read_text()
-          r = routes.read_text()
-          needle = '  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });'
-          start = r.index(needle)
-          end_marker = '  const lifecycleResult = await handleLifecycle'
-          end = r.index(end_marker, start)
-          replacement = '''  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });\n  if (miscResult !== null) {\n    if (typeof miscResult === "object" && (miscResult as any).kind === "coach") {\n      const { composeCoachingTurn } = await import("./understanding/live");\n      return composeCoachingTurn(miscResult as any);\n    }\n    return miscResult;\n  }\n\n'''
-          routes.write_text(r[:start] + replacement + r[end:])
+          routes=root/'server/routes.ts'
+          s=routes.read_text()
+          needle='  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });'
+          assert needle in s
+          start=s.index(needle)
+          end=s.index('  const lifecycleResult = await handleLifecycle',start)
+          repl='''  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });\n  if (miscResult !== null) {\n    if (typeof miscResult === "object" && (miscResult as any).kind === "coach") {\n      const { composeCoachingTurn } = await import("./understanding/live");\n      return composeCoachingTurn(miscResult as any);\n    }\n    return miscResult;\n  }\n\n'''
+          routes.write_text(s[:start]+repl+s[end:])
 
-          tests = root/'script/tracking-contract-tests.ts'
-          s = tests.read_text()
-          block = '''  /**\n   * WEIGHT COACHING TURN IS TERMINAL — HOLD cannot grow a direction/action tail.\n   */\n  {\n    const { composeCoachingTurn } = await import("../server/understanding/live");\n    const hold = composeCoachingTurn({\n      kind: "coach", decision: "HOLD",\n      facts: { currentKg: 85.75, changeKg: 1.2, trendUsable: false, trendWhy: "illness", goal: "muscle_gain",\n        points: [{ kg: 85.75, date: "28 Aug" }] },\n    });\n    if (/going up|going down|keep fuelling|trend is/i.test(hold)) failures.push("HOLD leaked direction/action: " + hold);\n    const report = composeCoachingTurn({\n      kind: "coach", decision: "REPORT_TREND",\n      facts: { currentKg: 84, changeKg: -2, trendUsable: true, trendWhy: null, goal: "fat_loss",\n        points: [{ kg: 86, date: "21 Aug" }, { kg: 84, date: "28 Aug" }] },\n    });\n    if (!/Down 2.0kg/.test(report) || /keep fuelling/i.test(report)) failures.push("REPORT_TREND wrong: " + report);\n  }\n\n'''
+          tests=root/'script/tracking-contract-tests.ts'
+          s=tests.read_text()
           if 'WEIGHT COACHING TURN IS TERMINAL' not in s:
-              anchor = '  /**\n   * LAW 3 — THE ANSWER MUST QUOTE THE LEDGER'
-              pos = s.index(anchor)
-              tests.write_text(s[:pos] + block + s[pos:])
+              marker2='  /**\n   * LAW 3 — THE ANSWER MUST QUOTE THE LEDGER'
+              assert marker2 in s
+              block2='''  /**\n   * WEIGHT COACHING TURN IS TERMINAL — HOLD cannot grow a direction/action tail.\n   */\n  {\n    const { composeCoachingTurn } = await import("../server/understanding/live");\n    const hold = composeCoachingTurn({\n      kind: "coach", decision: "HOLD",\n      facts: { currentKg: 85.75, changeKg: 1.2, trendUsable: false, trendWhy: "illness", goal: "muscle_gain",\n        points: [{ kg: 85.75, date: "28 Aug" }] },\n    });\n    if (/going up|going down|keep fuelling|trend is/i.test(hold)) failures.push("HOLD leaked direction/action: " + hold);\n    const report = composeCoachingTurn({\n      kind: "coach", decision: "REPORT_TREND",\n      facts: { currentKg: 84, changeKg: -2, trendUsable: true, trendWhy: null, goal: "fat_loss",\n        points: [{ kg: 86, date: "21 Aug" }, { kg: 84, date: "28 Aug" }] },\n    });\n    if (!/Down 2.0kg/.test(report) || /keep fuelling/i.test(report)) failures.push("REPORT_TREND wrong: " + report);\n  }\n\n'''
+              tests.write_text(s.replace(marker2,block2+marker2,1))
 
-          subprocess.run(['git','rm','-f','.github/workflows/zz-apply-weight-seam.yml'], check=True)
-          subprocess.run(['git','add','server/understanding/live.ts','server/handlers/misc-commands.ts','server/routes.ts','script/tracking-contract-tests.ts'], check=True)
-          subprocess.run(['git','diff','--cached','--check'], check=True)
-          subprocess.run(['git','config','user.name','cto-builder'], check=True)
-          subprocess.run(['git','config','user.email','cto-builder@users.noreply.github.com'], check=True)
-          subprocess.run(['git','commit','-m','fix: make weight coaching a structured terminal turn'], check=True)
-          subprocess.run(['git','push','origin','HEAD:cto/one-shot-final'], check=True)
+          wf=Path('.github/workflows/zz-apply-weight-seam.yml')
+          subprocess.run(['git','rm','-f',str(wf)],check=True)
+          subprocess.run(['git','add','server/understanding/live.ts','server/handlers/misc-commands.ts','server/routes.ts','script/tracking-contract-tests.ts'],check=True)
+          subprocess.run(['git','diff','--cached','--check'],check=True)
+          subprocess.run(['git','config','user.name','cto-builder'],check=True)
+          subprocess.run(['git','config','user.email','cto-builder@users.noreply.github.com'],check=True)
+          if subprocess.run(['git','diff','--cached','--quiet']).returncode != 0:
+              subprocess.run(['git','commit','-m','fix: make weight coaching a structured terminal turn'],check=True)
+              subprocess.run(['git','push','origin','HEAD:cto/one-shot-final'],check=True)
           PY
