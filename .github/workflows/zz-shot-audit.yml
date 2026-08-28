@@ -1,0 +1,34 @@
+name: shot-audit
+on:
+  push:
+    branches: ["cto/shot-clean"]
+permissions:
+  contents: write
+jobs:
+  audit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: cto/shot-clean
+      - name: Audit coaching mouths
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '--- EXACT STRINGS ---'
+          rg -n -F -e 'Scale is going up' -e "I'm not going to call a trend" -e 'keep fuelling' -e 'I heard:' -e "I didn't catch that one" -e 'I gave you the same answer twice' . || true
+          echo '--- ROUTE RETURNS ---'
+          rg -n -A6 -B4 'return .*Result|return .*Reply|return closeCoachingTurn|return tag\(' server/routes.ts || true
+          echo '--- closeCoachingTurn ---'
+          rg -n -A35 -B8 'export async function closeCoachingTurn' server/understanding/live.ts || true
+          echo '--- withNextMove ---'
+          rg -n -A40 -B8 'export function withNextMove|function withNextMove' server || true
+          echo '--- CARDS / PROTEIN IMPERATIVE ---'
+          rg -n -A8 -B8 'Tomorrow get a real protein|real protein in at breakfast|132g|breakfast' server | head -n 220 || true
+          echo '--- ALCOHOL / ROUGHLY ---'
+          rg -n -A10 -B10 -i 'alcohol|roughly|same answer twice' server | head -n 260 || true
+          echo '--- WORKOUT REPORT ---'
+          rg -n -A30 -B8 'sessionReportReply|logProseSession|parseSessionReport' server/handlers/workout.ts server/session-report.ts || true
+          echo '--- DONE ---'
