@@ -3,6 +3,11 @@ import { db } from "../db";
 import { sql, eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { turnLedger, adminEvents, users } from "../../shared/schema";
 import { requireAdminKey } from "./auth";
+// THE ASKING FLOOR HAS AN OWNER, and this file is not it (2026-08-27). The detector needs to know
+// whether a turn was a question — the exact thing isAskingNotReporting decides for the tracking
+// contract. A second regex here would be a second answer to one question, watching for the very
+// defect it had just committed.
+import { isAskingNotReporting } from "../utils";
 
 /**
  * THE TURN TRIAGE SURFACE — a reader for the forensic record we were already keeping.
@@ -306,7 +311,6 @@ const FALLBACK_REPLY = /didn'?t (?:quite )?catch that|say it another way|had a m
 const SELLS_FOOD_NOW = /\b(?:eat|have)\b[^.!?]{0,40}\b(?:now|tonight|next meal|this afternoon)\b|next two meals|get a real protein into/i;
 const CLOSES_THE_DAY = /that'?s the day|day'?s done|day'?s wrapped|tomorrow[^.!?]{0,40}\b(?:breakfast|first meal)\b/i;
 const DURABLE_MUTATION = /\b(?:INSERT|UPDATE)\s+(?:meal|steps|water|weight|workout)/i;
-const ASKS_SOMETHING = /\?\s*$|^(?:what|when|where|why|how|which|who|can i|should i|is it|do i|am i|are we)\b/i;
 
 export const COACH_HEALTH_INVARIANTS: Invariant[] = [
   {
@@ -325,7 +329,7 @@ export const COACH_HEALTH_INVARIANTS: Invariant[] = [
     expected: "a question is answered, never written",
     // LAW 2 of the tracking contract, watched in production. The costliest class we have: a false
     // write is invisible to the client and enters every downstream decision.
-    holds: t => !(ASKS_SOMETHING.test(t.input.trim()) && t.mutations.some(m => DURABLE_MUTATION.test(m))),
+    holds: t => !(isAskingNotReporting(t.input) && t.mutations.some(mut => DURABLE_MUTATION.test(mut))),
   },
   {
     id: "durable-write-no-move",
@@ -333,7 +337,7 @@ export const COACH_HEALTH_INVARIANTS: Invariant[] = [
     layer: "Coaching",
     expected: "one next coaching move after a durable change",
     // LAW 4, generalised past steps to every domain that writes. #84 was one instance of this.
-    holds: t => !(t.mutations.some(m => DURABLE_MUTATION.test(m)) && !lastBlockIsAMove(t.reply)),
+    holds: t => !(t.mutations.some(mut => DURABLE_MUTATION.test(mut)) && !lastBlockIsAMove(t.reply)),
   },
   {
     id: "reply-contradicts-itself",
