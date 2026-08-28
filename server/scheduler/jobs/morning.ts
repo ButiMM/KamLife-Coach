@@ -68,7 +68,7 @@ async function silenceAsk(client: any, daysSilent: number): Promise<string> {
       daysSinceAnyLog: daysSilent, daysSinceWeighIn: 0, loggedToday: false,
       proteinPct: 1, caloriePct: 1, sessionsThisWeek: 0, sessionsTarget: 0,
       stepsToday: 0, stepsTarget: 0, hour: 7,
-    }), { evidenced: false, dreamGoal: client.dreamGoal }), firstName);
+    }), { foodSufficient: false, weightSufficient: false, dreamGoal: client.dreamGoal }), firstName);
   }
 }
 

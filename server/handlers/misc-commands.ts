@@ -685,7 +685,7 @@ export async function handleMiscCommands(ctx: {
         // The CARD is a weekly recap; the ACTION is what to do next, which is a daily question and
         // the only one chooseAction was built to answer. So the numbers stay weekly and the
         // decision context becomes today's — identical semantics to computeNextMove and morning.
-        const { chooseAction, underPolicy } = await import("../one-action");
+        const { chooseAction, underPolicy, PROACTIVE_LOG_FLOOR } = await import("../one-action");
         const { sastHour } = await import("../sast");
         const act = underPolicy(chooseAction({
           goal: (user.goalType as any) || "general", weeksOnProgramme: Math.max(0, (user.programmeWeek || 1) - 1),
@@ -698,7 +698,12 @@ export async function handleMiscCommands(ctx: {
           sessionsThisWeek: truth.sessions, sessionsTarget: Number(user.trainingDaysPerWeek) || 3,
           stepsToday: truth.today.steps, stepsTarget: Number(user.stepsTarget) || 0,
           hour: sastHour(), atKeyboard: true,
-        } as any), { evidenced: truth.window.daysLogged >= 3, dreamGoal: user.dreamGoal });
+        } as any), { foodSufficient: truth.window.daysLogged >= PROACTIVE_LOG_FLOOR,
+         // WEIGHT EVIDENCE IS NOT COUNTED HERE, and that is a known gap rather than a
+         // decision: the proactive side reads a stall verdict this path never computes, so
+         // passing anything but false would be inventing evidence. It means a client with a
+         // usable weight trend and a thin food log is still held on this path.
+         weightSufficient: false, dreamGoal: user.dreamGoal });
         return `*${name} — last 7 days*\n\n💪 Sessions: *${truth.sessions}*\n📋 Days logged: *${truth.window.daysLogged}/7*\n🔥 Avg: *${truth.window.avgKcal} kcal* · *${truth.window.avgProtein}g* protein\n👟 Avg steps: *${truth.avgSteps.toLocaleString()}*${weightLine}\n\n*${act.todo}*`;
       }
       const todayLine = truth.today.kcal > 0

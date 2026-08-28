@@ -114,7 +114,7 @@ export async function canonicalNextMove(
       hour: opts?.hour ?? 12,
       foodDayClosed: held.foodDayClosed,
       trainingDeclined: held.trainingDeclined,
-    }), { evidenced: false, dreamGoal: client.dreamGoal });
+    }), { foodSufficient: false, weightSufficient: false, dreamGoal: client.dreamGoal });
     return {
       line: action.kind === "hold" ? "" : formatOneAction(action, firstName),
       action,

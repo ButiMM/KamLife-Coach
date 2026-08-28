@@ -812,6 +812,80 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * ONE CLIENT STATE -> ONE PROACTIVE ANSWER (2026-08-28, traced through both policy paths).
+   *
+   * underPolicy and decideProactive both answer "may we prescribe?" and answered it differently.
+   * Measured on ONE state — sick, two of seven days logged, 09:00:
+   *
+   *     decideProactive  ->  rest    "Rest today. No training, no targets."
+   *     underPolicy      ->  hold    "Nothing new today. Do exactly what you did yesterday."
+   *
+   * Telling a sick person to repeat yesterday is the wrong instruction, and it re-broke a finding
+   * one-action.ts already carried: illness is directly observed durable state, sufficient by
+   * construction (2026-08-18). decideProactive knew it; the gate took a bare boolean and could not.
+   *
+   * Graded on the ACTIONS BOTH PATHS PRODUCE from one state, not on the predicate that chooses
+   * them — the two must agree, and the sparse-evidence protection must survive.
+   */
+  {
+    const { chooseAction, underPolicy, decideProactive, dayStateFrom } = await import("../server/one-action");
+    const profile: any = {
+      dreamGoal: null, biggestStruggle: null, doNotMention: null, lifeContext: null,
+      weeksOnProgramme: 5, sessionsTarget: 3, calorieTarget: 2700, proteinTarget: 180, stepsTarget: 10000,
+    };
+    const stateOf = (over: any) => ({
+      name: "Kam", goalType: "fat_loss",
+      health: { sick: false },
+      food: { loggedDays7d: 2, daysSinceAnyLog: 0 },
+      workout: { sessionsLast7d: 1, sessionsThisWeek: 1 },
+      steps: { avg7d: 3000 },
+      weight: { daysSinceWeighIn: 4, trendUsable: false },
+      today: { kcal: 1200, protein: 70, steps: 2000, logged: true, hour: 9 },
+      evidence: { foodSufficient: false, weightSufficient: false },
+      ...over,
+    }) as any;
+    // Both paths, from one state, with the evidence each genuinely holds.
+    const bothPaths = (s: any) => {
+      const proactive = decideProactive(s, profile, { hour: 9 });
+      const reactive = underPolicy(chooseAction(dayStateFrom(s, profile, { hour: 9 })), {
+        foodSufficient: s.evidence.foodSufficient,
+        weightSufficient: s.evidence.weightSufficient,
+        dreamGoal: null,
+      });
+      return { proactive: proactive.action, reactive };
+    };
+
+    // THE DEFECT: illness is its own evidence, and both paths must know it.
+    {
+      const { proactive, reactive } = bothPaths(stateOf({ health: { sick: true } }));
+      if (proactive.kind !== reactive.kind) {
+        failures.push(`Two proactive constitutions disagree on one client: decideProactive says "${proactive.todo}" and underPolicy says "${reactive.todo}"`);
+      }
+      if (reactive.kind !== "rest") {
+        failures.push(`A sick client did not get rest from the reactive gate — it said "${reactive.todo}"`);
+      }
+    }
+
+    // CONTROL — SPARSE EVIDENCE STILL PROTECTS. A thin ledger must not buy a prescription just
+    // because the paths now agree. Agreement is worthless if both agree to over-reach.
+    {
+      const { reactive } = bothPaths(stateOf({}));
+      if (["protein", "walk", "train", "eat_more"].includes(reactive.kind)) {
+        failures.push(`A client with two logged days and no weight trend was prescribed "${reactive.todo}" — sparse evidence stopped protecting`);
+      }
+    }
+
+    // CONTROL — REAL EVIDENCE STILL EARNS AN ANSWER. A gate that holds everything would satisfy
+    // the control above and make the coach mute.
+    {
+      const { reactive } = bothPaths(stateOf({ evidence: { foodSufficient: true, weightSufficient: false } }));
+      if (reactive.kind === "hold") {
+        failures.push(`A well-evidenced client was held silent by the gate — it now refuses to coach at all`);
+      }
+    }
+  }
+
+  /**
    * STAGE 3 OF THE CONTRACT — ONE WRITE OWNER, AND EVERY CONVERSATIONAL DOOR GOES THROUGH IT.
    *
    * logStepsForUser holds one rule that no caller can hold for itself: ONE ROW PER SAST DAY, keep
