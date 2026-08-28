@@ -883,6 +883,43 @@ const MUST_WRITE: [string, string][] = [
         failures.push(`A well-evidenced client was held silent by the gate — it now refuses to coach at all`);
       }
     }
+
+    /**
+     * ILLNESS CONSTRAINS THE LADDER, NOT THE PROSE.
+     *
+     * The distinction the whole cut rests on. If chooseAction could still pick `train` for a sick
+     * client and a wrapper rewrote the sentence afterwards, we would have replaced one
+     * contradiction with a politer one — the decision would still be wrong, and only the words
+     * would agree. Illness is rung 2 of the ladder, ahead of every prescriptive rung, so the
+     * refusal happens where the decision is made.
+     *
+     * Graded from states that DO reach a prescription when healthy, so the assertion cannot pass
+     * because nothing was going to be prescribed anyway.
+     */
+    for (const [label, over] of [
+      ["would train", { workout: { sessionsLast7d: 0, sessionsThisWeek: 0 }, evidence: { foodSufficient: true, weightSufficient: true } }],
+      ["would walk", { steps: { avg7d: 500 }, today: { kcal: 1200, protein: 70, steps: 200, logged: true, hour: 14 }, evidence: { foodSufficient: true, weightSufficient: true } }],
+      ["would protein", { today: { kcal: 1200, protein: 20, steps: 2000, logged: true, hour: 9 }, evidence: { foodSufficient: true, weightSufficient: true } }],
+    ] as [string, any][]) {
+      const healthy = chooseAction(dayStateFrom(stateOf(over), profile, { hour: 9 }));
+      const sick = chooseAction(dayStateFrom(stateOf({ ...over, health: { sick: true } }), profile, { hour: 9 }));
+      if (healthy.kind === "hold" || healthy.kind === "rest") {
+        failures.push(`The "${label}" fixture no longer reaches a prescription when healthy (${healthy.kind}) — the illness assertion below would pass for the wrong reason`);
+      }
+      if (sick.kind !== "rest") {
+        failures.push(`The decision ladder prescribed "${sick.todo}" to a sick client — illness is not constraining the decision, only the wording`);
+      }
+    }
+    // AND THE GATE DOES NOT RE-WORD WHAT THE LADDER DECIDED. Object identity, not string equality:
+    // a gate that rebuilt an equivalent action would be a second author of the same decision.
+    {
+      const s = stateOf({ health: { sick: true } });
+      const raw = chooseAction(dayStateFrom(s, profile, { hour: 9 }));
+      const passed = underPolicy(raw, { foodSufficient: false, weightSufficient: false, dreamGoal: null });
+      if (passed !== raw) {
+        failures.push(`The policy gate returned a different object than the ladder chose — it is re-authoring the decision, not applying a policy to it`);
+      }
+    }
   }
 
   /**
