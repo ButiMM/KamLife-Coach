@@ -266,9 +266,274 @@ const CANNOT_SURFACE = [
   { id: "closed-day-card", fixRef: "#83", why: "the card's next-move line is rendered into a PNG; the ledger stores the marker, not the pixels" },
 ];
 
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════════════════
+ * COACH HEALTH V2 — WHAT NOBODY HAS ADJUDICATED YET (2026-08-27)
+ * ═══════════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * V1 watches four failures we already fixed. That answers "are our fixes holding" and NOTHING
+ * about what else is broken — so the founder was still the only sensor for anything new. This is
+ * the half that finds the unknown.
+ *
+ * THE DISCIPLINE THAT MAKES IT SAFE. An invariant here never says "this is a defect". It says a
+ * property the coach is supposed to hold did not hold on this turn, and attaches the turn. That
+ * distinction is the whole design: a detector that declares defects would flood the queue with
+ * confident nonsense, and every hour spent disproving it is an hour not spent fixing the product.
+ * Candidates are ranked evidence, and adjudication stays with a human.
+ *
+ * WHY RULES AND NOT A MODEL. A model asked "was this reply good?" produces an opinion that cannot
+ * be controlled, cannot be reproduced, and costs money per turn — and it would run precisely when
+ * nobody is watching it. Every check below is a property over fields the ledger already stores,
+ * so it is free, deterministic, and reviewable as code.
+ *
+ * WHAT IT CANNOT SEE, and this bounds every count below: turn_ledger stores the inbound text, the
+ * state read, the mutations, the outbound reply, the latency and the build. It does NOT store the
+ * claimant. So "the wrong door answered" is only visible where the REPLY betrays it — a plan when
+ * a plate was asked for, a fallback where an owner exists. A claim defect whose reply looks
+ * plausible is invisible here, and stamping the claimant on the turn is the cut that would fix
+ * that. Named so the absence is not mistaken for health.
+ */
+type Invariant = {
+  id: string;
+  label: string;
+  layer: "Claim" | "State" | "Decision" | "Response" | "Coaching";
+  /** What the coach was supposed to do. Shown next to every candidate. */
+  expected: string;
+  holds: (t: { input: string; reply: string; mutations: string[]; state: any }) => boolean;
+};
+
+const FALLBACK_REPLY = /didn'?t (?:quite )?catch that|say it another way|had a moment|try that again|i'?m not sure what you mean/i;
+const SELLS_FOOD_NOW = /\b(?:eat|have)\b[^.!?]{0,40}\b(?:now|tonight|next meal|this afternoon)\b|next two meals|get a real protein into/i;
+const CLOSES_THE_DAY = /that'?s the day|day'?s done|day'?s wrapped|tomorrow[^.!?]{0,40}\b(?:breakfast|first meal)\b/i;
+const DURABLE_MUTATION = /\b(?:INSERT|UPDATE)\s+(?:meal|steps|water|weight|workout)/i;
+const ASKS_SOMETHING = /\?\s*$|^(?:what|when|where|why|how|which|who|can i|should i|is it|do i|am i|are we)\b/i;
+
+export const COACH_HEALTH_INVARIANTS: Invariant[] = [
+  {
+    id: "unowned-message",
+    label: "The coach did not understand a message",
+    layer: "Claim",
+    expected: "an owner answers, or the coach asks one specific question back",
+    // The fallback is the shape of "no door claimed this". It is not always a defect — a genuinely
+    // unparseable message exists — which is exactly why it is a candidate and clusters by wording.
+    holds: t => !FALLBACK_REPLY.test(t.reply),
+  },
+  {
+    id: "question-mutated-state",
+    label: "A question changed tracking state",
+    layer: "State",
+    expected: "a question is answered, never written",
+    // LAW 2 of the tracking contract, watched in production. The costliest class we have: a false
+    // write is invisible to the client and enters every downstream decision.
+    holds: t => !(ASKS_SOMETHING.test(t.input.trim()) && t.mutations.some(m => DURABLE_MUTATION.test(m))),
+  },
+  {
+    id: "durable-write-no-move",
+    label: "A durable write ended in a receipt",
+    layer: "Coaching",
+    expected: "one next coaching move after a durable change",
+    // LAW 4, generalised past steps to every domain that writes. #84 was one instance of this.
+    holds: t => !(t.mutations.some(m => DURABLE_MUTATION.test(m)) && !lastBlockIsAMove(t.reply)),
+  },
+  {
+    id: "reply-contradicts-itself",
+    label: "One reply both closed the day and sold food",
+    layer: "Response",
+    expected: "one decision, one voice",
+    // The text-only half of the #83 contradiction: the card is a PNG, but a reply that says both
+    // in words is visible here.
+    holds: t => !(CLOSES_THE_DAY.test(t.reply) && SELLS_FOOD_NOW.test(t.reply)),
+  },
+  {
+    id: "empty-reply",
+    label: "The client received nothing",
+    layer: "Response",
+    expected: "every turn answers",
+    holds: t => t.reply.trim().length > 0,
+  },
+];
+
+/**
+ * THE SIGNATURE A CANDIDATE CLUSTERS ON.
+ *
+ * Turns are grouped by (invariant, shape of the question) so the queue reads "this KIND of message
+ * keeps doing this", not "here are 400 unrelated turns". Numbers, punctuation and the filler that
+ * varies between people are stripped, and the first few content words carry the meaning: "im
+ * hungry what can i eat" and "I'm hungry, what can I eat?" land together.
+ *
+ * Deliberately crude. A cleverer similarity measure would merge things that are not the same
+ * question and produce a confident cluster nobody can act on — the failure mode of this whole
+ * feature is a queue that wastes engineering hours, not a queue that misses a variant.
+ */
+const STOPWORDS = new Set(["the", "a", "an", "my", "me", "i", "im", "is", "it", "to", "for", "of", "and", "please", "hey", "hi", "coach", "kam"]);
+
+/**
+ * A SHORT, STABLE REFERENCE for one candidate — "CH-3F2A" — so it can be named in a brief, a
+ * commit message or a conversation and still mean the same cluster tomorrow. Derived from the
+ * cluster's own identity rather than stored, so it needs no table and cannot drift from what it
+ * points at. Same invariant plus same message shape always yields the same handle.
+ */
+export function candidateRef(invariantId: string, signature: string): string {
+  let h = 2166136261;
+  for (const ch of `${invariantId}::${signature}`) {
+    h ^= ch.charCodeAt(0);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).toUpperCase().padStart(8, "0").slice(0, 4);
+}
+export function candidateSignature(input: string): string {
+  const words = String(input || "").toLowerCase()
+    .replace(/[0-9]+/g, "")
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !STOPWORDS.has(w));
+  return words.slice(0, 5).join(" ") || "(no words)";
+}
+
 export function registerAdminTurns(app: Express) {
   // ── COACH HEALTH ────────────────────────────────────────────────────────────────────────────
   // Rule-based, no model, no new telemetry: it reads the turns the ledger already holds.
+  // ── THE MORNING BRIEF ───────────────────────────────────────────────────────────────────────
+  // Known regressions, unknown candidates, unexercised rules and build warnings — computed from
+  // the ledger on read. There is no second store and no background job: the evidence persists
+  // because turn_ledger persists, which is what lets a weekend of testing accumulate while every
+  // agent involved in this project is switched off.
+  app.get("/api/admin/coach-health/brief", requireAdminKey, async (req: any, res) => {
+    try {
+      const days = Math.min(30, Math.max(1, parseInt(String(req.query.days || "1"))));
+      const since = new Date(Date.now() - days * 86_400_000);
+      const rows = await db.select({
+        id: turnLedger.id, userId: turnLedger.userId, createdAt: turnLedger.createdAt,
+        inputText: turnLedger.inputText, reply: turnLedger.reply,
+        mutations: turnLedger.mutations, stateRead: turnLedger.stateRead,
+        version: turnLedger.version, lifecycleStatus: turnLedger.lifecycleStatus,
+        failureCategory: turnLedger.failureCategory,
+        fixRef: turnLedger.fixRef,
+      })
+        .from(turnLedger)
+        .where(gte(turnLedger.createdAt, since))
+        .orderBy(desc(turnLedger.createdAt))
+        .limit(5000);
+
+      const shaped = rows.map(r => ({
+        row: r,
+        input: String(r.inputText || ""),
+        reply: String(r.reply || ""),
+        mutations: Array.isArray(r.mutations) ? (r.mutations as string[]).map(String) : [],
+        state: r.stateRead,
+      }));
+
+      // ── KNOWN REGRESSIONS: the V1 rules, post-fix only, so this half of the brief means what
+      // it says. Reusing the same rules rather than restating them keeps one definition.
+      const known = COACH_HEALTH_RULES.map(rule => {
+        const hits = shaped.filter(t =>
+          rule.asks(t.input) && rule.failed({ reply: t.reply, mutations: t.mutations }));
+        const since_ = hits.filter(t => isRegression(rule, t.row.createdAt as any));
+        const exercised = shaped.filter(t =>
+          (rule.trigger === "request" ? rule.asks(t.input) : true) && isRegression(rule, t.row.createdAt as any)).length;
+        return { id: rule.id, label: rule.label, fixRef: rule.fixRef, regressions: since_.length, exercised };
+      });
+
+      // ── CANDIDATES: an invariant that did not hold, clustered by the shape of the message.
+      // NEVER called a defect. The queue is evidence, and adjudication stays with a person.
+      const clusters = new Map<string, { invariant: Invariant; signature: string; turns: typeof shaped }>();
+      for (const t of shaped) {
+        for (const inv of COACH_HEALTH_INVARIANTS) {
+          if (inv.holds({ input: t.input, reply: t.reply, mutations: t.mutations, state: t.state })) continue;
+          const signature = candidateSignature(t.input);
+          const key = `${inv.id}::${signature}`;
+          const bucket = clusters.get(key) || { invariant: inv, signature, turns: [] };
+          bucket.turns.push(t);
+          clusters.set(key, bucket);
+        }
+      }
+
+      const candidates = [...clusters.values()]
+        .map(c => {
+          const clients = new Set(c.turns.map(t => t.row.userId)).size;
+          const triaged = c.turns.filter(t => !!t.row.failureCategory);
+          const withFix = c.turns.filter(t => !!t.row.fixRef);
+          const lifecycles = new Set(c.turns.map(t => String(t.row.lifecycleStatus || "")).filter(Boolean));
+          return {
+          // A STABLE HANDLE, so a candidate can be referred to in a brief, a commit message or a
+          // conversation and still be the same thing tomorrow. Derived from what defines the
+          // cluster rather than stored, so it survives without a table and cannot drift from its
+          // own contents.
+          id: `CH-${candidateRef(c.invariant.id, c.signature)}`,
+          invariant: c.invariant.id,
+          label: c.invariant.label,
+          layer: c.invariant.layer,
+          expected: c.invariant.expected,
+          pattern: c.signature,
+          turns: c.turns.length,
+          clients,
+          firstSeen: c.turns[c.turns.length - 1]?.row.createdAt,
+          lastSeen: c.turns[0]?.row.createdAt,
+          triaged: triaged.length,
+          // THE STATUS IS DERIVED, NOT DECLARED. The per-turn lifecycle already exists and is
+          // already editable through PATCH /api/admin/turns/:id — the verdict machinery this file
+          // has had since 2026-08-25. A candidate's status is what its turns say, so triaging a
+          // turn moves the candidate and there is no second source of truth to fall out of step.
+          //
+          //   candidate    nobody has ruled on any of these turns yet
+          //   adjudicated  a human recorded a failure category
+          //   engineering  a fix is claimed against them (fix_ref)
+          //   deployed     a build carrying the fix has been recorded
+          //   resolved     replayed against that build and behaved
+          status: lifecycles.has("revalidated") ? "resolved"
+            : lifecycles.has("deployed") ? "deployed"
+            : withFix.length ? "engineering"
+            : triaged.length ? "adjudicated"
+            : "candidate",
+          // RANK, SAID OUT LOUD. Breadth beats frequency: nine clients hitting something once is
+          // the product misbehaving; one client hitting it nine times is one conversation.
+          priority: clients >= 5 ? "high" : clients >= 2 ? "medium" : "low",
+          // THE EVIDENCE PACKET — the message and the reply, not a summary of them. Whoever picks
+          // this up traces from the client's own words; a paraphrase would be the screenshot
+          // problem again, one layer further in.
+          examples: c.turns.slice(0, 5).map(t => ({
+            turnId: t.row.id, at: t.row.createdAt, version: t.row.version,
+            input: t.input.slice(0, 300),
+            reply: t.reply.replace(/\n/g, " ").slice(0, 300),
+            status: t.row.lifecycleStatus,
+          })),
+        }; })
+        // RANKED BY HOW MANY PEOPLE IT HAPPENED TO, then by how often. One client hitting the same
+        // thing nine times is a story about one client; nine clients hitting it once is the product.
+        .sort((a, b) => (b.clients - a.clients) || (b.turns - a.turns))
+        .slice(0, 40);
+
+      // ── BUILDS: attribution here is merge-time, so a window served by more than one build is
+      // the case where a "regression" may just be a turn that ran the old code. Surfaced rather
+      // than assumed away.
+      const byVersion = new Map<string, number>();
+      for (const t of shaped) byVersion.set(String(t.row.version || "?"), (byVersion.get(String(t.row.version || "?")) || 0) + 1);
+      const builds = [...byVersion.entries()].map(([version, turns]) => ({ version, turns }))
+        .sort((a, b) => b.turns - a.turns);
+
+      await auditRead("coach_health_brief", { days, turns: rows.length });
+      res.json({
+        windowDays: days,
+        turns: rows.length,
+        clients: new Set(shaped.map(t => t.row.userId)).size,
+        known,
+        knownRegressions: known.reduce((s, k) => s + k.regressions, 0),
+        unexercised: known.filter(k => k.exercised === 0).map(k => k.fixRef),
+        candidates,
+        candidateTurns: candidates.reduce((s, c) => s + c.turns, 0),
+        builds,
+        buildWarning: builds.length > 1
+          ? `${builds.length} builds served turns in this window — a regression may be a turn that ran the old code`
+          : null,
+        // The queue is evidence. It is not a defect list, and the page must not render it as one.
+        disclaimer: "Candidates are unadjudicated: a property did not hold on these turns. Confirm before treating any of them as a defect.",
+      });
+    } catch (e: any) {
+      console.error("[COACH_HEALTH] brief failed:", e?.message);
+      res.status(500).json({ message: "Failed to build the brief" });
+    }
+  });
+
   app.get("/api/admin/coach-health", requireAdminKey, async (req: any, res) => {
     try {
       const days = Math.min(30, Math.max(1, parseInt(String(req.query.days || "1"))));

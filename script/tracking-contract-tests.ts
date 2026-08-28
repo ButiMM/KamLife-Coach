@@ -709,6 +709,68 @@ const MUST_WRITE: [string, string][] = [
         failures.push(`Coach Health lost a turn when splitting around the fix — every turn must land on exactly one side`);
       }
     }
+
+    /**
+     * THE V2 DETECTOR MUST CATCH AND MUST CLEAR (2026-08-27).
+     *
+     * V2 finds failures NOBODY has adjudicated, so nothing downstream will notice if it is wrong.
+     * Two ways it fails, and only one of them looks like failure:
+     *
+     *   it misses      -> the queue is empty and the weekend produced nothing
+     *   it over-fires  -> every healthy turn is a candidate, the queue is noise, nobody reads it
+     *
+     * Both are graded here on turns built to break exactly one invariant, and on healthy turns
+     * that must break none. The healthy cases matter more: a detector that flags everything is
+     * indistinguishable from one that works until someone tries to act on it.
+     */
+    {
+      const { COACH_HEALTH_INVARIANTS, candidateSignature, candidateRef } = await import("../server/routes/admin-turns");
+      const check = (id: string, t: { input: string; reply: string; mutations?: string[] }) => {
+        const inv = COACH_HEALTH_INVARIANTS.find(i => i.id === id);
+        if (!inv) { failures.push(`Coach Health V2 lost the invariant "${id}" — the detector now watches one fewer property`); return null; }
+        return inv.holds({ input: t.input, reply: t.reply, mutations: t.mutations || [], state: {} });
+      };
+      // [invariant, a turn that BREAKS it, a healthy turn of the same shape that must not]
+      const BREAKS: Array<[string, { input: string; reply: string; mutations?: string[] }, { input: string; reply: string; mutations?: string[] }]> = [
+        ["unowned-message",
+          { input: "still hungry after lunch", reply: "I didn't catch that one — what was it, roughly?" },
+          { input: "still hungry after lunch", reply: "Protein first — two eggs will hold you to supper." }],
+        ["question-mutated-state",
+          { input: "how many steps should I do?", reply: "10 000 logged.", mutations: ["INSERT steps=10000"] },
+          { input: "how many steps should I do?", reply: "Ten thousand is the target." }],
+        ["durable-write-no-move",
+          { input: "walked 8500 steps", reply: "8 500 steps — nice one.", mutations: ["UPDATE steps=8500 (was 3000)"] },
+          { input: "walked 8500 steps", reply: "8 500 steps — nice one.\n\nStand on a scale in the morning.", mutations: ["UPDATE steps=8500 (was 3000)"] }],
+        ["reply-contradicts-itself",
+          { input: "I'm done eating", reply: "That's the day. Get a real protein into your next two meals." },
+          { input: "I'm done eating", reply: "That's the day. Tomorrow get a real protein in at breakfast." }],
+        ["empty-reply",
+          { input: "hello", reply: "" },
+          { input: "hello", reply: "Howzit Kam." }],
+      ];
+      for (const [id, broken, healthy] of BREAKS) {
+        if (check(id, broken) === true) {
+          failures.push(`Coach Health V2 missed a broken invariant "${id}" — this turn would never reach the queue: "${broken.reply.replace(/\n/g, " ⏎ ")}"`);
+        }
+        if (check(id, healthy) === false) {
+          failures.push(`Coach Health V2 flags a HEALTHY turn under "${id}" — the queue fills with noise and stops being read: "${healthy.reply.replace(/\n/g, " ⏎ ")}"`);
+        }
+      }
+
+      // CLUSTERING: the same question asked two ways is one candidate, and two different questions
+      // are not. A signature that collapses everything produces one giant meaningless cluster.
+      const sig = candidateSignature;
+      if (sig("I'm hungry, what can I eat?") !== sig("im hungry what can i eat")) {
+        failures.push(`Coach Health V2 splits one question into two candidates on punctuation alone: "${sig("I'm hungry, what can I eat?")}" vs "${sig("im hungry what can i eat")}"`);
+      }
+      if (sig("what can I eat") === sig("how far am I from my goal")) {
+        failures.push(`Coach Health V2 groups two unrelated questions into one candidate — the packet would send an engineer after a pattern that does not exist`);
+      }
+      // The handle must be stable, or a candidate cannot be named in a brief and found again.
+      if (candidateRef("a", "b") !== candidateRef("a", "b") || candidateRef("a", "b") === candidateRef("a", "c")) {
+        failures.push(`Coach Health V2 candidate references are not stable-and-distinct — "CH-xxxx" would not survive being written down`);
+      }
+    }
     const check = (id: string, input: string, reply: string, mutations: string[] = []) => {
       const rule = COACH_HEALTH_RULES.find(r => r.id === id);
       if (!rule) { failures.push(`Coach Health lost the rule "${id}" — the dashboard now watches one fewer adjudicated failure`); return null; }
