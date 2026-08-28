@@ -923,6 +923,21 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * RE-ENTRY OWNER — the voice register must follow contact, not logging density.
+   * #91 proved the two directions on the canonical resolver.
+   */
+  {
+    const { contactState } = await import("../server/understanding/reentry");
+    const now = Date.now();
+    if (contactState(new Date(now).toISOString(), now).isReturning) {
+      failures.push("today's contact cannot be classified as returning");
+    }
+    if (!contactState(new Date(now - 5 * 86_400_000).toISOString(), now).isReturning) {
+      failures.push("five-day absence must classify as returning");
+    }
+  }
+
+  /**
    * STAGE 3 OF THE CONTRACT — ONE WRITE OWNER, AND EVERY CONVERSATIONAL DOOR GOES THROUGH IT.
    *
    * logStepsForUser holds one rule that no caller can hold for itself: ONE ROW PER SAST DAY, keep

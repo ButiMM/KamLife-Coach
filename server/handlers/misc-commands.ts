@@ -361,7 +361,19 @@ export async function handleMiscCommands(ctx: {
     } else if (needsProtein) {
       suggestion += `You need *${protLeft}g more protein* today. That is the priority.\n\n`;
       const meals: string[] = [];
-      if (budget === "under_100") {
+      if (protLeft >= 80) {
+        // The priority we just named is a material protein gap. Each option must close a
+        // meaningful fraction of it; otherwise the coach is saying "129g is the priority"
+        // and offering 18g. Keep the options SA and affordable.
+        if (budget === "under_100") {
+          meals.push("Tin of pilchards + 3 eggs + pap (~520 kcal, 42g protein)");
+          meals.push("Tin of tuna + 3 eggs + pap (~480 kcal, 43g protein)");
+        } else {
+          meals.push("200g chicken + rice + spinach (~620 kcal, 62g protein)");
+          meals.push("Tin of tuna + 3 eggs + brown bread + tomato (~540 kcal, 43g protein)");
+          meals.push("Tin of pilchards + 3 eggs + sweet potato (~550 kcal, 42g protein)");
+        }
+      } else if (budget === "under_100") {
         meals.push("2 eggs + pap (~300 kcal, 18g protein)");
         meals.push("Tin of pilchards + pap (~350 kcal, 24g protein)");
       } else {

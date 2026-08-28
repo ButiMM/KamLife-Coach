@@ -1281,14 +1281,13 @@ export async function generateMilestoneVoiceScript(
     workout_sessions: `Completed ${data.sessions} total workout sessions with Coach K`,
   };
 
-  // Pick the emotional register from the REAL pattern data, then let it drive both
-  // the words (prompt below) and the voice delivery (returned to the caller).
-  // buildPatternSummary already computed these signals — read them back out.
-  const silentMatch = patternSummary.match(/\((\d+)\s+days?\s+silent\)/i);
-  const daysSilent = silentMatch ? parseInt(silentMatch[1], 10) : 0;
+  // The emotional register, driving both the words below and the voice delivery. ABSENCE HAS AN
+  // OWNER: do not infer it from days without a food log. That proxy is not contact.
+  const { contactState } = await import("./understanding/reentry");
+  const { isReturning } = contactState(user?.lastActiveAt);
   const lastTrainMatch = patternSummary.match(/Last training was (\d+) days ago/i);
   const daysSinceTraining = lastTrainMatch ? parseInt(lastTrainMatch[1], 10) : 0;
-  const lapsed = daysSilent >= 4 || daysSinceTraining >= 5
+  const lapsed = isReturning || daysSinceTraining >= 5
     || /No training sessions logged this week/i.test(patternSummary);
   const struggling = /too hard or wanting to quit|needs direct accountability|consistently under/i.test(patternSummary);
   const thriving = /solid habit|at or above target|Food logging is consistent/i.test(patternSummary);
