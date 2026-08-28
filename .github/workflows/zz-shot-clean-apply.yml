@@ -11,117 +11,76 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           ref: cto/shot-clean
-      - name: Apply validated weight delta
+      - name: Convert weight coaching to structured terminal turn
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'cto-builder'
-          git config user.email 'cto-builder@users.noreply.github.com'
-          P=131f10dcdb212699f002bda16aaec9563dc7f5a6
-          Q=d2cfeb1cd771bdb6c3c25916a417b9b8956d7b76
-          git fetch origin "$P" --no-tags
-          git fetch origin "$Q" --no-tags
-          git diff --binary "$P" "$Q" -- script/tracking-contract-tests.ts server/handlers/misc-commands.ts server/routes.ts server/understanding/live.ts > /tmp/weight.diff
           python3 - <<'PY'
           from pathlib import Path
-          from difflib import SequenceMatcher
           import re
 
-          patch = Path('/tmp/weight.diff').read_text()
-          files = ['script/tracking-contract-tests.ts','server/handlers/misc-commands.ts','server/routes.ts','server/understanding/live.ts']
+          live = Path('server/understanding/live.ts')
+          misc = Path('server/handlers/misc-commands.ts')
+          routes = Path('server/routes.ts')
+          tests = Path('script/tracking-contract-tests.ts')
 
-          chunks = re.split(r'(?m)^diff --git ', patch)
-          per_file = {}
-          for chunk in chunks[1:]:
-              header, *rest = chunk.split('\n', 1)
-              m = re.match(r'a/(.+?) b/(.+?)$', header.strip())
-              if not m:
-                  continue
-              path = m.group(2)
-              if path not in files:
-                  continue
-              per_file[path] = rest[0] if rest else ''
+          # 1) Existing turn-authority boundary: make it accept structured coaching turns.
+          s = live.read_text()
+          if 'export type CoachingTurn = {' not in s:
+              marker = 'export async function canonicalDecision('
+              assert s.count(marker) == 1, 'canonicalDecision marker count mismatch'
+              block = '''export type CoachingTurn = {\n  kind: "coach";\n  decision: "HOLD" | "REPORT_TREND";\n  facts: {\n    currentKg: number | null;\n    changeKg: number;\n    trendUsable: boolean;\n    trendWhy: string | null;\n    goal: string;\n    points: Array<{ kg: number; date: string }>;\n  };\n};\n\nfunction renderStructuredCoachingTurn(turn: CoachingTurn): string {\n  const recent = turn.facts.points.map(p =>\n    `• ${p.kg.toFixed(1)}kg — ${p.date}`,\n  ).join("\\n");\n  const history = recent ? `*Weight History*\\n\\n${recent}` : "*Weight History*";\n\n  if (turn.decision === "HOLD" || !turn.facts.trendUsable) {\n    const hold = turn.facts.trendWhy === "illness"\n      ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."\n      : "I don't have enough clean weigh-ins yet to call a trend.";\n    return `${history}\\n\\n${hold}`.trim();\n  }\n\n  const direction = turn.facts.changeKg < 0\n    ? `Down ${Math.abs(turn.facts.changeKg).toFixed(1)}kg since you started.`\n    : turn.facts.changeKg > 0\n      ? `Up ${turn.facts.changeKg.toFixed(1)}kg since you started.`\n      : "No change since you started.";\n  return `${history}\\n\\n${direction}`.trim();\n}\n\n'''
+              s = s.replace(marker, block + marker, 1)
 
-          def parse_hunks(text):
-              lines = text.splitlines()
-              hunks=[]
-              i=0
-              while i < len(lines):
-                  if lines[i].startswith('@@'):
-                      m=re.match(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', lines[i])
-                      if not m:
-                          raise SystemExit(f'bad hunk header: {lines[i]}')
-                      old_start=int(m.group(1)); body=[]; i+=1
-                      while i < len(lines) and not lines[i].startswith('@@') and not lines[i].startswith('diff --git '):
-                          if lines[i] == r'\\ No newline at end of file':
-                              i+=1; continue
-                          body.append(lines[i]); i+=1
-                      old=[]; new=[]
-                      for line in body:
-                          if not line:
-                              # empty context line in unified diff
-                              old.append(''); new.append('')
-                          elif line[0]==' ':
-                              old.append(line[1:]); new.append(line[1:])
-                          elif line[0]=='-':
-                              old.append(line[1:])
-                          elif line[0]=='+':
-                              new.append(line[1:])
-                          else:
-                              raise SystemExit(f'bad hunk line: {line!r}')
-                      hunks.append((old_start, old, new))
-                  else:
-                      i+=1
-              return hunks
+          old_close = '''export async function closeCoachingTurn(user: any, message: string, reply: string | null): Promise<string> {\n  const out = String(reply ?? "");\n  const { turnMutations } = await import("../handlers/chat-log");\n  const { durableDomains } = await import("./messy-intake");\n  const { withNextMove } = await import("../reply-hygiene");\n  const wrote = durableDomains(turnMutations());\n  if (!out || wrote.length === 0) return out;\n  const decided = await canonicalDecision(user, message).catch(() => ({ todo: "" } as any));\n  const next = withNextMove(out, String(decided?.todo || ""));\n  if (next !== out) console.log(`[COACH_TURN] appended one next move after ${wrote.join("+")}`);\n  return next;\n}'''
+          assert s.count(old_close) == 1, 'closeCoachingTurn exact block not found'
+          new_close = '''export async function closeCoachingTurn(\n  user: any,\n  message: string,\n  reply: string | CoachingTurn | null,\n): Promise<string> {\n  // Structured coaching turns already carry the canonical decision. They MUST NOT be converted\n  // to prose and sent through the legacy next-move append path, because that would create the\n  // 16:55 second act (HOLD + a fresh canonicalDecision/withNextMove tail).\n  if (reply && typeof reply === "object" && (reply as CoachingTurn).kind === "coach") {\n    return renderStructuredCoachingTurn(reply as CoachingTurn);\n  }\n\n  const out = String(reply ?? "");\n  const { turnMutations } = await import("../handlers/chat-log");\n  const { durableDomains } = await import("./messy-intake");\n  const { withNextMove } = await import("../reply-hygiene");\n  const wrote = durableDomains(turnMutations());\n  if (!out || wrote.length === 0) return out;\n  const decided = await canonicalDecision(user, message).catch(() => ({ todo: "" } as any));\n  const next = withNextMove(out, String(decided?.todo || ""));\n  if (next !== out) console.log(`[COACH_TURN] appended one next move after ${wrote.join("+")}`);\n  return next;\n}'''
+          s = s.replace(old_close, new_close, 1)
+          live.write_text(s)
 
-          def apply_file(path, text):
-              current = Path(path).read_text().splitlines()
-              offset=0
-              for old_start, old, new in parse_hunks(text):
-                  expected=max(0, old_start-1+offset)
-                  found=None
-                  if old and expected+len(old)<=len(current) and current[expected:expected+len(old)]==old:
-                      found=expected
-                  else:
-                      # Candidate starts from exact context anchors, then score windows.
-                      context=[x for line in [] for x in []]
-                      anchors=[x for x in old if x.strip()]
-                      candidates=set()
-                      if anchors:
-                          anchor=anchors[0]
-                          for j,v in enumerate(current):
-                              if v==anchor:
-                                  candidates.add(max(0,j-old.index(anchor)))
-                      lo=max(0,expected-1000); hi=min(len(current),expected+1000)
-                      candidates.update(range(lo,hi+1))
-                      best=None
-                      for s in candidates:
-                          e=s+len(old)
-                          if e>len(current): continue
-                          score=SequenceMatcher(None, old, current[s:e], autojunk=False).ratio()
-                          if best is None or score>best[0]: best=(score,s)
-                      if best is None or best[0] < 0.82:
-                          raise SystemExit(f'{path}: no safe fuzzy match for hunk at {old_start}; best={best}')
-                      found=best[1]
-                  current[found:found+len(old)] = new
-                  offset += len(new)-len(old)
-              Path(path).write_text('\n'.join(current)+'\n')
+          # 2) Weight owner: return structured facts, never a coaching string.
+          m = misc.read_text()
+          sig = '  wroteThisTurn?: boolean;\n  }): Promise<string | null> {'
+          assert m.count(sig) == 1, 'misc return signature anchor not found'
+          m = m.replace(sig, '  wroteThisTurn?: boolean;\n  }): Promise<string | import("../understanding/live").CoachingTurn | string | null> {', 1)
 
-          for f in files:
-              if f not in per_file:
-                  raise SystemExit(f'missing patch for {f}')
-              apply_file(f, per_file[f])
-          print('validated weight delta applied')
+          pattern = re.compile(r'''      const first = logs\[0\]\.kg;\n      const latest = logs\[logs\.length - 1\]\.kg;\n      const totalChange = latest - first;\n      const goal = user\.goalType \|\| "fat_loss";\n      const changeDir = .*?;\n      const verdict = .*?;\n      const recent = logs\.slice\(-5\).*?\n      const name2 = .*?;\n      return `\*\$\{name2 \? name2 \+ "'s " : ""\}Weight History\*\\n\\n\$\{recent\}\\n\\n\$\{changeDir\} since you started\. \$\{verdict\}`\.trim\(\);''', re.S)
+          repl = '''      const first = logs[0].kg;\n      const latest = logs[logs.length - 1].kg;\n      const totalChange = latest - first;\n      const goal = user.goalType || "fat_loss";\n      const health = (await import("../health-state")).readHealthState(user);\n      const newestAt = new Date(logs[logs.length - 1].at).getTime();\n      const oldestAt = new Date(logs[0].at).getTime();\n      const trend = (await import("../adaptive-targets")).weightTrendUsable({\n        count: logs.length,\n        newestAt,\n        oldestAt,\n        now: Date.now(),\n        sickSince: health.sickSince ? new Date(health.sickSince).getTime() : undefined,\n        sickUntil: health.sickUntil ? new Date(health.sickUntil).getTime() : undefined,\n      });\n      const recent = logs.slice(-5).map(l =>\n        `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`,\n      ).join("\\n");\n      const turn: import("../understanding/live").CoachingTurn = {\n        kind: "coach",\n        decision: trend.usable ? "REPORT_TREND" : "HOLD",\n        facts: {\n          currentKg: latest,\n          changeKg: totalChange,\n          trendUsable: trend.usable,\n          trendWhy: trend.usable ? null : trend.why,\n          goal,\n          points: logs.slice(-5).map(l => ({\n            kg: l.kg,\n            date: l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" }),\n          })),\n        },\n      };\n      return turn;'''
+          nm, n = pattern.subn(repl, m, count=1)
+          assert n == 1, 'weight prose block not found'
+          misc.write_text(nm)
+
+          # 3) Route object through existing final boundary, strings remain transactional/non-coaching.
+          r = routes.read_text()
+          old_route = '  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });\n  if (miscResult !== null) return miscResult;'
+          assert r.count(old_route) == 1, 'misc route return anchor not found'
+          new_route = '''  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });\n  if (miscResult !== null) {\n    if (typeof miscResult === "object" && (miscResult as any).kind === "coach") {\n      return closeCoachingTurn(user, message, miscResult as any);\n    }\n    return miscResult;\n  }'''
+          r = r.replace(old_route, new_route, 1)
+          routes.write_text(r)
+
+          # 4) Exact HOLD regression + anti-vacuity contract at the existing tracking suite.
+          t = tests.read_text()
+          if 'WEIGHT COACHING TURN IS TERMINAL' not in t:
+              marker = '  /**\n   * LAW 3'
+              assert t.count(marker) >= 1, 'tracking test insertion marker missing'
+              block = '''  /**\n   * WEIGHT COACHING TURN IS TERMINAL — the 16:55 HOLD cannot grow a direction/action tail.\n   */\n  {\n    const { closeCoachingTurn } = await import("../server/understanding/live");\n    const hold = {\n      kind: "coach" as const, decision: "HOLD" as const,\n      facts: {\n        currentKg: 85.75, changeKg: 1.2, trendUsable: false, trendWhy: "illness", goal: "muscle_gain",\n        points: [{ kg: 85.75, date: "28 Aug" }],\n      },\n    };\n    const out = await closeCoachingTurn({}, "what is my weight trend", hold);\n    if (/going up|going down|keep fuelling|trend is/i.test(out)) {\n      failures.push(`16:55 HOLD leaked direction/action: ${out}`);\n    }\n    if ((out.match(/\\n\\n/g) || []).length > 1) {\n      failures.push(`HOLD rendered more than one act: ${out}`);\n    }\n  }\n\n'''
+              t = t.replace(marker, block + marker, 1)
+          tests.write_text(t)
+
+          # Sanity assertions.
+          assert 'return turn;' in misc.read_text(), 'structured weight return missing'
+          assert 'reply: string | CoachingTurn | null' in live.read_text(), 'structured close signature missing'
+          assert 'typeof miscResult === "object"' in routes.read_text(), 'structured route seam missing'
+          print('WEIGHT_SEAM_PATCH_OK')
           PY
-          if find . -name '*.rej' -o -name '*.orig' | grep -q .; then
-            echo 'Reject/orig files detected'; exit 1
-          fi
           git diff --check
-          git add script/tracking-contract-tests.ts server/handlers/misc-commands.ts server/routes.ts server/understanding/live.ts
+          git add server/understanding/live.ts server/handlers/misc-commands.ts server/routes.ts script/tracking-contract-tests.ts
           git diff --cached --check
-          git commit -m 'fix: make weight coaching a structured terminal turn'
+          git config user.name 'cto-builder'
+          git config user.email 'cto-builder@users.noreply.github.com'
+          git commit -m 'fix: route weight coaching through terminal turn authority'
           git rm -f .github/workflows/zz-shot-clean-apply.yml
           git add -A
           git commit --amend --no-edit
