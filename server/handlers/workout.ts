@@ -31,6 +31,7 @@ import { logStepsForUser } from "./steps";
 import { calculateTargets } from "../targets";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { sendWhatsApp, saveState } from "../scheduler/shared";
+import type { CoachingTurn } from "../understanding/live";
 
 // Exercise-name vocabulary. parseLiftLog was deleted with lift logging on 2026-08-06, but
 // this pattern is NOT a parser input — it is a GUARD used twice below, and both uses are the
@@ -44,7 +45,7 @@ export async function handleWorkoutCommands(ctx: {
   message: string;
   m: string;
   user: any;
-}): Promise<string | null> {
+}): Promise<string | CoachingTurn | null> {
   const { phone, message, m, user } = ctx;
   const firstName = user.name?.split(" ")[0] || "";
 
@@ -725,7 +726,7 @@ export async function handleWorkoutCommands(ctx: {
  */
 async function logProseSession(
   user: any, phone: string, message: string, report: SessionReport, firstName: string,
-): Promise<string | null> {
+): Promise<string | CoachingTurn | null> {
   const todayStart = sastDayStart();
   const existing = await db.select({ id: workoutLogs.id }).from(workoutLogs)
     .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStart)))
@@ -734,10 +735,23 @@ async function logProseSession(
   // Already on the board — don't double-count, but still answer the feeling, because
   // being ignored is what the client actually complained about.
   if (existing.length > 0) {
-    const dupe = sessionReportReply(report, firstName, user.totalWorkoutsCompleted || 0)
-      .replace(/^✅[^\n]*\n\n/, `✅ ${firstName ? firstName + ", " : ""}today's session is already logged.\n\n`);
-    await logChat(user.id, message, dupe, "WORKOUT_FEEDBACK");
-    return dupe;
+    const claimed = sessionCountsIn(message);
+    const dayTypeMatch = message.match(/\b(lower(?:\s+body)?|upper(?:\s+body)?|legs?|chest|back|push|pull|full\s+body)\s*(?:day|workout|session)?\b/i);
+    const turn: CoachingTurn = {
+      kind: "coach",
+      domain: "workout",
+      decision: "SESSION_REPORTED",
+      facts: {
+        sessionInWeek: claimed.length ? claimed[0] : null,
+        dayType: dayTypeMatch ? dayTypeMatch[1].replace(/\s+/g, " ").toLowerCase() : null,
+        feel: report.feel,
+        returning: report.returning,
+        totalSessions: user.totalWorkoutsCompleted || 0,
+        alreadyLogged: true,
+      },
+    };
+    await logChat(user.id, message, "[STRUCTURED_WORKOUT_TURN]", "WORKOUT_FEEDBACK");
+    return turn;
   }
 
   await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
@@ -769,7 +783,21 @@ async function logProseSession(
   // How it felt has to outlive this message — next session's coaching depends on it.
   storeMemory(phone, sessionMemoryLine(report), "workout").catch(() => {});
 
-  const reply = sessionReportReply(report, firstName, newTotal);
-  await logChat(user.id, message, reply, "WORKOUT_DONE");
-  return reply;
+  const claimed = sessionCountsIn(message);
+  const dayTypeMatch = message.match(/\b(lower(?:\s+body)?|upper(?:\s+body)?|legs?|chest|back|push|pull|full\s+body)\s*(?:day|workout|session)?\b/i);
+  const turn: CoachingTurn = {
+    kind: "coach",
+    domain: "workout",
+    decision: "SESSION_REPORTED",
+    facts: {
+      sessionInWeek: claimed.length ? claimed[0] : null,
+      dayType: dayTypeMatch ? dayTypeMatch[1].replace(/\s+/g, " ").toLowerCase() : null,
+      feel: report.feel,
+      returning: report.returning,
+      totalSessions: newTotal,
+      alreadyLogged: false,
+    },
+  };
+  await logChat(user.id, message, "[STRUCTURED_WORKOUT_TURN]", "WORKOUT_DONE");
+  return turn;
 }

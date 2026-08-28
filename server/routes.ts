@@ -1168,6 +1168,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // had chicken and pap" logged the session and deleted the meal.
   const workoutResult = await handleWorkoutCommands({ phone, message, m, user });
   if (workoutResult !== null) {
+    if (typeof workoutResult === "object" && (workoutResult as any).kind === "coach") {
+      return closeCoachingTurn(user, message, workoutResult as any);
+    }
     if (mayEndTurn("workout")) return closeCoachingTurn(workoutResult);
     commitFact(turn, "workout", workoutResult);
   }

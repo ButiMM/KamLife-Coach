@@ -63,36 +63,69 @@ import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable,
  *
  * rather than the model deciding in prose and a verifier trying to work out what it decided.
  */
-export type CoachingTurn = {
-  kind: "coach";
-  decision: "HOLD" | "REPORT_TREND";
-  facts: {
-    currentKg: number | null;
-    changeKg: number;
-    trendUsable: boolean;
-    trendWhy: string | null;
-    goal: string;
-    points: Array<{ kg: number; date: string }>;
-  };
-};
+export type CoachingTurn =
+  | {
+      kind: "coach";
+      domain: "weight";
+      decision: "HOLD" | "REPORT_TREND";
+      facts: {
+        currentKg: number | null;
+        changeKg: number;
+        trendUsable: boolean;
+        trendWhy: string | null;
+        goal: string;
+        points: Array<{ kg: number; date: string }>;
+      };
+    }
+  | {
+      kind: "coach";
+      domain: "workout";
+      decision: "SESSION_REPORTED";
+      facts: {
+        sessionInWeek: number | null;
+        dayType: string | null;
+        feel: "bad" | "hard" | "fine" | "strong" | null;
+        returning: boolean;
+        totalSessions: number;
+        alreadyLogged: boolean;
+      };
+    };
 
 function renderStructuredCoachingTurn(turn: CoachingTurn): string {
-  const recent = turn.facts.points.map(p =>
-    `• ${p.kg.toFixed(1)}kg — ${p.date}`,
-  ).join("\n");
-  const history = recent ? `*Weight History*\n\n${recent}` : "*Weight History*";
-  if (turn.decision === "HOLD" || !turn.facts.trendUsable) {
-    const hold = turn.facts.trendWhy === "illness"
-      ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."
-      : "I don't have enough clean weigh-ins yet to call a trend.";
-    return `${history}\n\n${hold}`.trim();
+  if (turn.domain === "weight") {
+    const recent = turn.facts.points.map(p =>
+      `• ${p.kg.toFixed(1)}kg — ${p.date}`,
+    ).join("\n");
+    const history = recent ? `*Weight History*\n\n${recent}` : "*Weight History*";
+    if (turn.decision === "HOLD" || !turn.facts.trendUsable) {
+      const hold = turn.facts.trendWhy === "illness"
+        ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."
+        : "I don't have enough clean weigh-ins yet to call a trend.";
+      return `${history}\n\n${hold}`.trim();
+    }
+    const direction = turn.facts.changeKg < 0
+      ? `Down ${Math.abs(turn.facts.changeKg).toFixed(1)}kg since you started.`
+      : turn.facts.changeKg > 0
+        ? `Up ${turn.facts.changeKg.toFixed(1)}kg since you started.`
+        : "No change since you started.";
+    return `${history}\n\n${direction}`.trim();
   }
-  const direction = turn.facts.changeKg < 0
-    ? `Down ${Math.abs(turn.facts.changeKg).toFixed(1)}kg since you started.`
-    : turn.facts.changeKg > 0
-      ? `Up ${turn.facts.changeKg.toFixed(1)}kg since you started.`
-      : "No change since you started.";
-  return `${history}\n\n${direction}`.trim();
+
+  const f = turn.facts;
+  const identity = f.sessionInWeek !== null
+    ? ` That's session ${f.sessionInWeek} this week${f.dayType ? ` — ${f.dayType} day` : ""}.`
+    : "";
+  if (f.alreadyLogged) {
+    return `✅ Today's session is already logged.${identity}`.trim();
+  }
+  const feel = f.feel === "bad" ? "That session felt bad, so we adjust rather than pretend it was normal."
+    : f.feel === "hard" ? "Too hard means we scale it, not that you failed."
+    : f.feel === "strong" ? "That's a strong session — you're adapting."
+    : f.feel === "fine" ? "That's the zone we want — hard but doable."
+    : "";
+  const question = f.feel ? "How did that session feel next time?" : "How did that session feel?";
+  const count = f.sessionInWeek !== null ? `✅ Logged today's session — session ${f.sessionInWeek} this week.` : "✅ Logged today's session.";
+  return `${count}${identity}${feel ? `\n\n${feel}` : ""}\n\n${question}`.trim();
 }
 
 export async function canonicalDecision(user: any, message?: string): Promise<{ todo: string; kind: string; reply: string }> {

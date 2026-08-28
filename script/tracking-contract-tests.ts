@@ -262,6 +262,15 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * WORKOUT ORDINAL IDENTITY — the live "second workout of the week, lower day" shape is parsed.
+   */
+  {
+    const { parseSessionReport } = await import("../server/session-report");
+    const r = parseSessionReport("Did my second workout of the week. It was a lower day.");
+    if (!r?.trainedToday) failures.push("Workout ordinal report did not parse as today's session");
+  }
+
+  /**
    * LAW 3 — THE ANSWER MUST QUOTE THE LEDGER, NOT THE MESSAGE (2026-08-26, issue #63).
    *
    * The write owner returns the count the day now HOLDS. Where a second write path existed, that
