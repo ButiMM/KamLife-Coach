@@ -240,6 +240,21 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * WEIGHT COACHING TURN IS TERMINAL — HOLD cannot grow a direction/action tail.
+   */
+  {
+    const { composeCoachingTurn } = await import("../server/understanding/live");
+    const hold = composeCoachingTurn({
+      kind: "coach", decision: "HOLD",
+      facts: { currentKg: 85.75, changeKg: 1.2, trendUsable: false, trendWhy: "illness", goal: "muscle_gain",
+        points: [{ kg: 85.75, date: "28 Aug" }] },
+    });
+    if (/going up|going down|keep fuelling|trend is/i.test(hold)) {
+      failures.push("HOLD leaked direction/action: " + hold);
+    }
+  }
+
+  /**
    * LAW 3 — THE ANSWER MUST QUOTE THE LEDGER, NOT THE MESSAGE (2026-08-26, issue #63).
    *
    * The write owner returns the count the day now HOLDS. Where a second write path existed, that

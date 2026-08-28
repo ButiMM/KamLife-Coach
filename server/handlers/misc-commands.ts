@@ -40,6 +40,7 @@ import { turnEvidence } from "./chat-log";
 import { getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
+import { type CoachingTurn } from "../understanding/live";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
 const PROTEIN_WORDS: string[] = Array.from(new Set([
@@ -62,7 +63,7 @@ export async function handleMiscCommands(ctx: {
   isQuestion?: boolean; // systemic QUESTION gate — see early-commands.ts
   /** This turn already INSERT-ed a durable fact. Educational mouths must not consume a remaining ask. */
   wroteThisTurn?: boolean;
-}): Promise<string | null> {
+}): Promise<string | CoachingTurn | null> {
   const { phone, message, m, user, wroteThisTurn } = ctx;
 
   // Calendar facts are deterministic SAST state, not coaching.
@@ -602,7 +603,21 @@ export async function handleMiscCommands(ctx: {
         `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`,
       ).join("\n");
       const name2 = user.name?.split(" ")[0] || "";
-      return `*${name2 ? name2 + "'s " : ""}Weight History*\n\n${recent}\n\n${changeDir} since you started. ${verdict}`.trim();
+      return {
+        kind: "coach",
+        decision: trend.usable ? "REPORT_TREND" : "HOLD",
+        facts: {
+          currentKg: logs[logs.length - 1]?.kg ?? null,
+          changeKg: totalChange,
+          trendUsable: trend.usable,
+          trendWhy: trend.usable ? null : trend.why,
+          goal,
+          points: logs.slice(-5).map(l => ({
+            kg: l.kg,
+            date: l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" }),
+          })),
+        },
+      };
     } catch { /* fall through */ }
   }
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {

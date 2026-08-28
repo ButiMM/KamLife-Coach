@@ -63,6 +63,44 @@ import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable,
  *
  * rather than the model deciding in prose and a verifier trying to work out what it decided.
  */
+export type CoachingTurn = {
+  kind: "coach";
+  decision: "HOLD" | "REPORT_TREND";
+  facts: {
+    currentKg: number | null;
+    changeKg: number;
+    trendUsable: boolean;
+    trendWhy: string | null;
+    goal: string;
+    points: Array<{ kg: number; date: string }>;
+  };
+};
+
+export function composeCoachingTurn(turn: CoachingTurn): string {
+  const { changeKg, trendUsable, trendWhy, goal, points } = turn.facts;
+  const recent = points.map(p => `• ${p.kg.toFixed(1)}kg — ${p.date}`).join("\n");
+  const history = recent ? `*Weight History*\n\n${recent}` : `*Weight History*`;
+  if (turn.decision === "HOLD" || !trendUsable) {
+    const hold = trendWhy === "illness"
+      ? "I'm not going to call a trend off weigh-ins around your illness. Let's use clean morning weigh-ins."
+      : "I don't have enough clean weigh-ins yet to call a trend.";
+    return `${history}\n\n${hold}`.trim();
+  }
+  const direction = changeKg < 0
+    ? `Down ${Math.abs(changeKg).toFixed(1)}kg since you started.`
+    : changeKg > 0
+      ? `Up ${changeKg.toFixed(1)}kg since you started.`
+      : "No change since you started.";
+  const verdict = goal === "muscle_gain" && changeKg > 0.5
+    ? "Scale is up — keep fuelling."
+    : goal === "fat_loss" && changeKg < -1
+      ? "Moving in the right direction."
+      : goal === "fat_loss" && changeKg >= 0
+        ? "Scale hasn't moved yet — check food logging consistency."
+        : "";
+  return `${history}\n\n${direction}${verdict ? ` ${verdict}` : ""}`.trim();
+}
+
 export async function canonicalDecision(user: any, message?: string): Promise<{ todo: string; kind: string; reply: string }> {
   try {
     // ONE CONSTITUTION (2026-08-21). This called theNextMove(), a SECOND ranked ladder —

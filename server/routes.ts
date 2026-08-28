@@ -45,7 +45,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor } from "./understanding/live";
+import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor, composeCoachingTurn } from "./understanding/live";
 import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains } from "./understanding/messy-intake";
 import { foodDayIsClosed, readTrainingDay } from "./one-action";
 import { backfillAttributedDays } from "./backfill";
@@ -1347,8 +1347,13 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   //   mustForceFoodLog  — adapter; already stood down after INSERT meal
   const wroteThisTurn = durableDomains(turnMutations()).length > 0;
   const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });
-  if (miscResult !== null) return miscResult;
-
+  if (miscResult !== null) {
+    if (typeof miscResult === "object" && miscResult.kind === "coach") {
+      return composeCoachingTurn(miscResult);
+    }
+    if (mayEndTurn("misc")) return closeCoachingTurn(miscResult);
+    commitFact(turn, "other", miscResult);
+  }
 
   const lifecycleResult = await handleLifecycle({ phone, message, m, user, isQuestion: normalizedQuestion });
   if (lifecycleResult !== null) return lifecycleResult;
