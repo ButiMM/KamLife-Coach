@@ -35,28 +35,28 @@ jobs:
 
           misc = root/'server/handlers/misc-commands.ts'
           s = misc.read_text()
-          old = '''      return `*${name2 ? name2 + "'s " : ""}Weight History*\\n\\n${recent}\\n\\n${changeSummary} ${verdict}`.trim();'''
+          old = '''      return `*${name2 ? name2 + "'s " : ""}Weight History*\\n\\n${recent}\\n\\n${changeDir} ${verdict}`.trim();'''
           assert old in s
           new = '''      return {\n        kind: "coach",\n        decision: trend.usable ? "REPORT_TREND" : "HOLD",\n        facts: {\n          currentKg: logs[logs.length - 1]?.kg ?? null,\n          changeKg: totalChange,\n          trendUsable: trend.usable,\n          trendWhy: trend.usable ? null : trend.why,\n          goal,\n          points: logs.slice(-5).map(l => ({\n            kg: l.kg,\n            date: l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" }),\n          })),\n        },\n      };'''
           misc.write_text(s.replace(old, new, 1))
 
           routes = root/'server/routes.ts'
-          s = routes.read_text()
-          assert 'handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });' in s
+          assert 'handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });' in routes.read_text()
+          r = routes.read_text()
           needle = '  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });'
-          start = s.index(needle)
+          start = r.index(needle)
           end_marker = '  const lifecycleResult = await handleLifecycle'
-          end = s.index(end_marker, start)
+          end = r.index(end_marker, start)
           replacement = '''  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });\n  if (miscResult !== null) {\n    if (typeof miscResult === "object" && (miscResult as any).kind === "coach") {\n      const { composeCoachingTurn } = await import("./understanding/live");\n      return composeCoachingTurn(miscResult as any);\n    }\n    return miscResult;\n  }\n\n'''
-          routes.write_text(s[:start] + replacement + s[end:])
+          routes.write_text(r[:start] + replacement + r[end:])
 
           tests = root/'script/tracking-contract-tests.ts'
           s = tests.read_text()
-          anchor = '  /**\\n   * LAW 3 — THE ANSWER MUST QUOTE THE LEDGER'
-          assert anchor.replace('\\\\n','\\n') in s
           block = '''  /**\n   * WEIGHT COACHING TURN IS TERMINAL — HOLD cannot grow a direction/action tail.\n   */\n  {\n    const { composeCoachingTurn } = await import("../server/understanding/live");\n    const hold = composeCoachingTurn({\n      kind: "coach", decision: "HOLD",\n      facts: { currentKg: 85.75, changeKg: 1.2, trendUsable: false, trendWhy: "illness", goal: "muscle_gain",\n        points: [{ kg: 85.75, date: "28 Aug" }] },\n    });\n    if (/going up|going down|keep fuelling|trend is/i.test(hold)) failures.push("HOLD leaked direction/action: " + hold);\n    const report = composeCoachingTurn({\n      kind: "coach", decision: "REPORT_TREND",\n      facts: { currentKg: 84, changeKg: -2, trendUsable: true, trendWhy: null, goal: "fat_loss",\n        points: [{ kg: 86, date: "21 Aug" }, { kg: 84, date: "28 Aug" }] },\n    });\n    if (!/Down 2.0kg/.test(report) || /keep fuelling/i.test(report)) failures.push("REPORT_TREND wrong: " + report);\n  }\n\n'''
-          pos = s.index(anchor.replace('\\\\n','\\n'))
-          tests.write_text(s[:pos] + block + s[pos:])
+          if 'WEIGHT COACHING TURN IS TERMINAL' not in s:
+              anchor = '  /**\n   * LAW 3 — THE ANSWER MUST QUOTE THE LEDGER'
+              pos = s.index(anchor)
+              tests.write_text(s[:pos] + block + s[pos:])
 
           subprocess.run(['git','rm','-f','.github/workflows/zz-apply-weight-seam.yml'], check=True)
           subprocess.run(['git','add','server/understanding/live.ts','server/handlers/misc-commands.ts','server/routes.ts','script/tracking-contract-tests.ts'], check=True)
