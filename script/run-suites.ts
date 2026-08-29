@@ -66,13 +66,18 @@ for (const name of SUITES) {
     continue;
   }
   const t0 = Date.now();
-  const r = spawnSync("node_modules.bin/tsx".replace(".", "/") === "node_modules/tsx" ? "node_modules/.bin/tsx" : "node_modules/.bin/tsx", [path], {
+  const r = spawnSync("node_modules/.bin/tsx", [path], {
     encoding: "utf-8", timeout: PER_SUITE_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024,
   });
   const ms = Date.now() - t0;
   const output = `${r.stdout || ""}${r.stderr || ""}`;
   const timedOut = r.status === null;
   const ok = !timedOut && r.status === 0;
+  // A SUITE THAT COVERED NOTHING IS NOT A SUITE THAT PASSED (2026-08-25).
+  // normalizer-replay exits 0 when its recording is absent — correctly, because a missing
+  // recording is not a product failure. But it was rendering as `✓`, and a green tick on a suite
+  // that asserted nothing is precisely the vacuous pass this chain exists to catch. A suite that
+  // stood down says so, every run, so the gap cannot quietly become "covered".
   const skipped = ok && /^SUITE_SKIPPED:/m.test(output);
   const reason = skipped ? (output.match(/^SUITE_SKIPPED:\s*(.*)$/m) || [])[1] || "" : "";
   results.push({ name, ok, ms, output, note: timedOut ? `TIMED OUT after ${PER_SUITE_TIMEOUT_MS / 1000}s` : (skipped ? `SKIPPED — ${reason}` : "") });
