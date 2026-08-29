@@ -25,7 +25,7 @@ import OpenAI from "openai";
 import { extractBodyParts, checkExercisesAgainstInjuries } from "./injury-rules";
 import { splitSentences } from "../reply-hygiene";
 import { readHealthState } from "../health-state";
-import { weightTrendUsable, type TrendVerdict } from "../adaptive-targets";
+import { weightTrendUsable, trendHoldText, type TrendVerdict } from "../adaptive-targets";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { db } from "../db";
 import { users, weightLogs, mealLogs, shadowReplies } from "../../shared/schema";
@@ -301,17 +301,9 @@ function isBacked(kind: ClaimKind, sentence: string, ev: Evidence): boolean {
  */
 function askInstead(kind: ClaimKind, ev: Evidence): string {
   if (kind === "weight-trend") {
-    if (ev.trend.usable && !ev.weighedThisWeek) {
-      return "You haven't weighed in this week, so I'm not going to put a number on it. Hop on the scale in the morning and I'll tell you exactly where you're going.";
-    }
+    if (ev.trend.usable && !ev.weighedThisWeek) return trendHoldText("this_week");
     const why = ev.trend.usable ? "" : ev.trend.why;
-    if (why === "illness") {
-      return "I'm not going to call a trend off those weigh-ins — they sit around the time you were ill, and weight moves on fluid and appetite then, not on food. Hop on the scale in the morning and I'll give you a straight read.";
-    }
-    if (why === "stale") {
-      return "Your last weigh-in is too far back for me to read anything into it. Jump on the scale in the morning and I'll tell you exactly where you're going.";
-    }
-    return "I don't have enough weigh-ins yet to call which way you're going. Get on the scale in the morning and again next week, and I'll give you a straight read.";
+    return trendHoldText(why);
   }
   if (kind === "meal-eaten") {
     return "I don't have a meal logged for you today. What did you eat?";

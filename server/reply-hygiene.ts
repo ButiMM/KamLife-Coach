@@ -523,8 +523,13 @@ export function ownsNextAction(reply: string): boolean {
  * we cannot yet read. Never invents a move, never picks one, never rewrites the acknowledgement it
  * is given — it is the join, and the decision belongs to its owner.
  */
+export function isHoldReply(text: string): boolean {
+  return /not going to call a trend off those weigh-ins|not going to put a number on it|last weigh-in is too far back|don't have enough weigh-ins yet/i.test(text || "");
+}
+
 export function withNextMove(reply: string, todo: string): string {
   const t = (reply || "").trim();
+  if (isHoldReply(t)) return reply;
   const move = (todo || "").trim().replace(/[.\s]*$/, "");
   if (!move || ownsNextAction(t)) return reply;
   // Same separator composeMessyAck uses — a blank line, never `\n\n---\n\n`, which WhatsApp
