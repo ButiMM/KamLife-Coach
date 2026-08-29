@@ -40,7 +40,7 @@ import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, r
 import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnMutations, turnAlreadyWrote, turnEvidence } from "./handlers/chat-log";
 import { handleWorkoutCommands } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
-import { handleMiscCommands } from "./handlers/misc-commands";
+import { handleMiscCommands, isCoachingTurn, finalizeCoachingTurn } from "./handlers/misc-commands";
 import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
@@ -1347,6 +1347,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   //   mustForceFoodLog  — adapter; already stood down after INSERT meal
   const wroteThisTurn = durableDomains(turnMutations()).length > 0;
   const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });
+  if (isCoachingTurn(miscResult)) return closeCoachingTurn(await finalizeCoachingTurn(user, message, miscResult));
   if (miscResult !== null) return miscResult;
 
 

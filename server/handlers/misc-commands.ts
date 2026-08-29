@@ -1,6 +1,6 @@
 /**
  * Miscellaneous command handlers — supplements, motivation, stats, progress, NPS, etc.
- * Returns string if handled, null to fall through.
+ * Returns string if handled, a structured CoachingTurn for weight/trend, or null to fall through.
  */
 
 import { db } from "../db";
@@ -40,6 +40,8 @@ import { turnEvidence } from "./chat-log";
 import { getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
+import { weightTrendUsable, type CoachingTurn, composeWeightTurn, isCoachingTurn } from "../adaptive-targets";
+import { readHealthState } from "../health-state";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
 const PROTEIN_WORDS: string[] = Array.from(new Set([
@@ -54,6 +56,51 @@ const PROTEIN_WORDS: string[] = Array.from(new Set([
   "droëwors", "droewors", "cottage cheese", "greek yoghurt", "greek yogurt",
 ]));
 
+export { isCoachingTurn, composeWeightTurn };
+export type { CoachingTurn };
+
+export async function finalizeCoachingTurn(
+  user: { id: string },
+  message: string,
+  turn: CoachingTurn,
+): Promise<string> {
+  const text = composeWeightTurn(turn);
+  await logChat(user.id, message, text, turn.decision === "HOLD" ? "WEIGHT_TREND_HOLD" : "WEIGHT_TREND");
+  return text;
+}
+
+async function weightTrendTurn(user: any, m: string): Promise<CoachingTurn> {
+  const wt = await getWeightTruth(user, { clientMessage: m });
+  const logs = wt.points;
+  const health = readHealthState(user);
+  const newestAt = logs.length ? logs[logs.length - 1].at.getTime() : 0;
+  const oldestAt = logs.length ? logs[0].at.getTime() : 0;
+  const isoMs = (iso: string | null | undefined) =>
+    iso ? new Date(iso).getTime() : undefined;
+  const usable = weightTrendUsable({
+    count: logs.length,
+    newestAt,
+    oldestAt,
+    now: Date.now(),
+    sickSince: isoMs(health.sickSince),
+    sickUntil: isoMs(health.sickUntil),
+  });
+  return {
+    kind: "coach",
+    domain: "weight",
+    decision: usable.usable ? "REPORT_TREND" : "HOLD",
+    facts: {
+      currentKg: wt.currentKg,
+      changeKg: wt.changeKg,
+      trendUsable: usable.usable,
+      trendWhy: usable.usable ? null : usable.why,
+      points: logs,
+      goal: user.goalType || "fat_loss",
+      name: user.name?.split(" ")[0] || "",
+    },
+  };
+}
+
 export async function handleMiscCommands(ctx: {
   phone: string;
   message: string;
@@ -62,7 +109,7 @@ export async function handleMiscCommands(ctx: {
   isQuestion?: boolean; // systemic QUESTION gate — see early-commands.ts
   /** This turn already INSERT-ed a durable fact. Educational mouths must not consume a remaining ask. */
   wroteThisTurn?: boolean;
-}): Promise<string | null> {
+}): Promise<string | CoachingTurn | null> {
   const { phone, message, m, user, wroteThisTurn } = ctx;
 
   // Calendar facts are deterministic SAST state, not coaching.
@@ -585,24 +632,7 @@ export async function handleMiscCommands(ctx: {
   // ---- WEIGHT HISTORY — "weight history", "weight trend", "how much have I lost" ----
   if (/\b(weight history|weight trend|my weights|all my weights|weight progress|how much (weight )?(have i|did i) (lost?|gained?)|total (weight )?(lost?|gained?)|weight (since|over time))\b/i.test(m)) {
     try {
-      // THEY ASKED, SO THEY GET AN ANSWER (2026-08-25, P0-5 · weight). The owner applies the
-      // do-not-mention rule, and `clientMessage` is what tells it this client raised the scale
-      // themselves — "don't mention my weight" is not "refuse to tell me my weight when I ask".
-      // That exemption used to be accidental: this command simply never checked. Now it is stated.
-      const wt = await getWeightTruth(user, { clientMessage: m });
-      const logs = wt.points;
-      if (logs.length === 0) return `No weight history yet. Log your first weight — just send "84kg".`;
-      const first = logs[0].kg;
-      const latest = logs[logs.length - 1].kg;
-      const totalChange = latest - first;
-      const goal = user.goalType || "fat_loss";
-      const changeDir = totalChange < 0 ? `Down ${Math.abs(totalChange).toFixed(1)}kg` : totalChange > 0 ? `Up ${totalChange.toFixed(1)}kg` : "No change";
-      const verdict = goal === "fat_loss" && totalChange < -1 ? "Moving in the right direction." : goal === "muscle_gain" && totalChange > 0.5 ? "Scale is going up — keep fuelling." : goal === "fat_loss" && totalChange >= 0 ? "Scale hasn't moved yet — check food logging consistency." : "";
-      const recent = logs.slice(-5).map(l =>
-        `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`,
-      ).join("\n");
-      const name2 = user.name?.split(" ")[0] || "";
-      return `*${name2 ? name2 + "'s " : ""}Weight History*\n\n${recent}\n\n${changeDir} since you started. ${verdict}`.trim();
+      return await weightTrendTurn(user, m);
     } catch { /* fall through */ }
   }
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
@@ -1443,42 +1473,8 @@ export async function handleMiscCommands(ctx: {
   const asksWeightProjection = /\b(should|target|goal|aim)\b.{0,40}\bweight\b|\bweight\b.{0,40}\b(in|by)\s+(\d+\s*(?:weeks?|months?)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|next year)\b/i.test(m);
   if (!asksWeightProjection && !ctx.isQuestion && (m === "weight chart" || m === "weight graph" || m === "weight trend" || m === "my weight" || /\b(weight\s*(?:chart|graph|trend|history|journey)|scale\s*trend)\b/i.test(m))) {
     try {
-      // "my weight" / "weight chart" — they raised it, so the owner answers rather than withholds.
-      const weights = (await getWeightTruth(user, { clientMessage: m })).points
-        .map(p => ({ weight: p.kg, date: p.at }));
-
-      if (weights.length < 2) {
-        return `Not enough weight logs for a trend. Log your weight regularly — "84.5kg" — and I will show you the full picture over time.`;
-      }
-
-      const name = user.name?.split(" ")[0] || "there";
-      const vals = weights.map(w => parseFloat(String(w.weight)));
-
-      // WhatsApp is not a terminal — the old ASCII dot-chart rendered as broken
-      // monospace soup on phones ("nobody's paying R199 for this", 2026-07-03).
-      // A clean start→now line + pace tells the same story properly.
-      const spanDays = weights.length >= 2 && weights[0].date && weights[weights.length - 1].date
-        ? Math.max(1, Math.round((new Date(weights[weights.length - 1].date as any).getTime() - new Date(weights[0].date as any).getTime()) / 86_400_000))
-        : 0;
-      const first = vals[0];
-      const last = vals[vals.length - 1];
-      const diff = last - first;
-      const trend = diff < -0.5 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg` : diff > 0.5 ? `⬆️ Up ${diff.toFixed(1)}kg` : `➡️ Stable`;
-      const paceWk = spanDays >= 7 ? ` · pace ${(diff / (spanDays / 7)) >= 0 ? "+" : ""}${(diff / (spanDays / 7)).toFixed(2)}kg/week` : "";
-      const reply = `*⚖️ Weight — ${name}*\n\n` +
-        `Start: *${first.toFixed(1)}kg* → Now: *${last.toFixed(1)}kg* (${trend})\n` +
-        `${weights.length} weigh-ins over ${spanDays >= 7 ? Math.round(spanDays / 7) + " weeks" : spanDays + " days"}${paceWk}\n\n` +
-        (diff < -2 ? `Consistent progress. The deficit is working — stay patient and stay on plan.` :
-         diff > 2 && user.goalType === "muscle_gain" ? `Gaining as planned. If lifts are going up, this is muscle. Keep training hard.` :
-         Math.abs(diff) < 1 ? `Weight holding. Check measurements — you could be recomping (losing fat, gaining muscle). The tape does not lie.` :
-         `Keep logging. Trends become clear after 4+ weeks of consistent data.`);
-
-      await logChat(user.id, message, reply, "WEIGHT_TREND");
-      return reply;
-    } catch (err) {
-      console.error("[WEIGHT TREND]", err);
-      return `Could not generate weight chart. Try again later.`;
-    }
+      return await weightTrendTurn(user, m);
+    } catch { /* fall through */ }
   }
 
   // ---- SA HOLIDAY MEAL GUIDE — braai, Christmas, Easter, Heritage Day ----

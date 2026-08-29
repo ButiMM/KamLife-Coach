@@ -332,13 +332,67 @@ export function weightTrendUsable(w: TrendWindow): TrendVerdict {
   if (w.count < 2) return { usable: false, why: "too_few" };
   if ((w.newestAt - w.oldestAt) / 86_400_000 < MIN_TREND_SPAN_DAYS) return { usable: false, why: "too_short" };
   if ((w.now - w.newestAt) / 86_400_000 > MAX_TREND_AGE_DAYS) return { usable: false, why: "stale" };
-  // An illness overlaps the span if it began before the newest weigh-in and had not yet finished
-  // (plus its tail) by the oldest. An illness with no end date is still running.
   const illnessEnds = w.sickUntil !== undefined ? w.sickUntil + ILLNESS_TAIL_MS : w.now;
   if (w.sickSince !== undefined && w.sickSince <= w.newestAt && illnessEnds >= w.oldestAt) {
     return { usable: false, why: "illness" };
   }
   return { usable: true };
+}
+
+const TREND_HOLD: Record<string, string> = {
+  illness: "I'm not going to call a trend off those weigh-ins — they sit around the time you were ill, and weight moves on fluid and appetite then, not on food. Hop on the scale in the morning and I'll give you a straight read.",
+  stale: "Your last weigh-in is too far back for me to read anything into it. Jump on the scale in the morning and I'll tell you exactly where you're going.",
+  this_week: "You haven't weighed in this week, so I'm not going to put a number on it. Hop on the scale in the morning and I'll tell you exactly where you're going.",
+  too_few: "I don't have enough weigh-ins yet to call which way you're going. Get on the scale in the morning and again next week, and I'll give you a straight read.",
+  too_short: "I don't have enough weigh-ins yet to call which way you're going. Get on the scale in the morning and again next week, and I'll give you a straight read.",
+};
+
+export function trendHoldText(why?: string | null): string {
+  return TREND_HOLD[why || ""] || TREND_HOLD.too_few;
+}
+
+export type CoachingTurn = {
+  kind: "coach";
+  domain: "weight";
+  decision: "HOLD" | "REPORT_TREND";
+  facts: {
+    currentKg: number | null;
+    changeKg: number | null;
+    trendUsable: boolean;
+    trendWhy: "too_few" | "too_short" | "stale" | "illness" | null;
+    points: Array<{ kg: number; at: Date }>;
+    goal: string;
+    name: string;
+  };
+};
+
+export function isCoachingTurn(x: unknown): x is CoachingTurn {
+  if (!x || typeof x !== "object") return false;
+  const o = x as Record<string, unknown>;
+  return o.kind === "coach" && o.domain === "weight"
+    && (o.decision === "HOLD" || o.decision === "REPORT_TREND")
+    && !("reply" in o);
+}
+
+export function composeWeightTurn(turn: CoachingTurn): string {
+  if (turn.decision === "HOLD" || !turn.facts.trendUsable || turn.facts.points.length === 0) {
+    return trendHoldText(turn.facts.trendWhy || "too_few");
+  }
+  const points = turn.facts.points;
+  const first = points[0].kg;
+  const latest = points[points.length - 1].kg;
+  const totalChange = turn.facts.changeKg ?? (latest - first);
+  const changeDir = totalChange < 0
+    ? `Down ${Math.abs(totalChange).toFixed(1)}kg`
+    : totalChange > 0
+      ? `Up ${totalChange.toFixed(1)}kg`
+      : "No change";
+  const recent = points.slice(-5).map(l =>
+    `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`,
+  ).join("\n");
+  const name2 = turn.facts.name;
+  const report = `*${name2 ? name2 + "'s " : ""}Weight History*\n\n${recent}\n\n${changeDir} since you started.`;
+  return report.trim();
 }
 
 

@@ -625,6 +625,8 @@ export async function runMeaningEngineLive(ctx: {
  */
 export async function closeCoachingTurn(user: any, message: string, reply: string | null): Promise<string> {
   const out = String(reply ?? "");
+  const { isHoldReply } = await import("../reply-hygiene");
+  if (isHoldReply(out)) return out;
   const { turnMutations } = await import("../handlers/chat-log");
   const { durableDomains } = await import("./messy-intake");
   const { withNextMove } = await import("../reply-hygiene");
