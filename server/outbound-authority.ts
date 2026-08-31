@@ -184,23 +184,35 @@ export async function prepareOutbound(
 
   const verdict = await enforceOutboundTruth(userId, recipientKey, text, recipientUser);
   if (!verdict.ok) {
-    console.error(`[OUTBOUND_AUTHORITY] ${mode.toUpperCase()} refused for ${recipientKey.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
     if (mode === "proactive") {
+      // THE OPERATOR SIGNAL IS PART OF THE CONTRACT. production-parity drives sendWhatsApp and
+      // reads this exact line to prove the door consulted the floor rather than merely importing
+      // it — the assertion exists because an earlier source-string version stayed green when the
+      // door was changed to ignore the verdict. Renaming it in a refactor broke the observable
+      // while the behaviour was fine, which is the same defect one layer out. It keeps its name.
+      console.error(`[OUTBOUND_AUTHORITY] BLOCKED proactive send to ${recipientKey.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
       return { text: "", blocked: true, reason: verdict.reason, detail: verdict.detail };
     }
+    console.error(`[OUTBOUND_AUTHORITY] BLOCKED reactive draft to ${recipientKey.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
     // Reactive: the client is waiting, so they get a safe sentence rather than nothing.
     return { text: REACTIVE_REPAIR, blocked: true, reason: verdict.reason, detail: verdict.detail };
   }
 
-  // Shaping is unchanged and stays in this order: a claim spanning a bubble split has to be
-  // checked before the split, and reports quote real replies back, so they are left alone.
-  let out = text;
+  // Shaping stays in this order: a claim spanning a bubble split has to be checked before the
+  // split, and reports quote real replies back, so they are left alone.
+  //
+  // A PREPARATION FAILURE IS NOT A LICENCE TO SEND THE DRAFT. The verifiers are the reason this
+  // function exists; treating their failure as "send raw anyway" would make the floor optional
+  // exactly when it is least safe. Proactive refuses — nobody is waiting. Reactive still may not
+  // go silent, so it gets the same safe sentence a floor refusal produces.
   try {
-    out = await provenanceGate(recipientKey, out);
+    let out = await provenanceGate(recipientKey, text);
     if (!out.includes('_"')) out = humanizeReply(out);
+    return { text: out, blocked: false };
   } catch (e: any) {
-    console.warn(`[OUTBOUND_AUTHORITY] shaping failed, sending raw: ${e?.message || e}`);
-    out = text;
+    console.error(`[OUTBOUND_AUTHORITY] BLOCKED ${mode} send to ${recipientKey.slice(-8)} — preparation failed: ${e?.message || e}`);
+    return mode === "proactive"
+      ? { text: "", blocked: true, detail: "preparation failed" }
+      : { text: REACTIVE_REPAIR, blocked: true, detail: "preparation failed" };
   }
-  return { text: out, blocked: false };
 }

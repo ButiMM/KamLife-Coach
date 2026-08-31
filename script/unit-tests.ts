@@ -9136,11 +9136,21 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     const raw = outside.match(/sendParts\(phone,\s*splitMessage\(/g) || [];
     assert.equal(raw.length, 0, `${raw.length} un-shaped delivery path(s) — route them through sendFinal`);
   });
-  test("reactive: sendFinal runs BOTH gates before splitting into bubbles", () => {
-    const fn = wa.slice(wa.indexOf("async function sendFinal"), wa.indexOf("async function sendParts"));
-    assert.match(fn, /provenanceGate\(phone/, "truth gate");
-    assert.match(fn, /humanizeReply\(/, "voice gate");
-    assert.ok(fn.indexOf("humanizeReply") < fn.indexOf("splitMessage"), "shape the whole reply, not each bubble");
+  test("reactive: BOTH gates run on the whole reply before it is split into bubbles", async () => {
+    // Was a source-shape assertion over sendFinal's body. Cut B moved both gates into
+    // prepareOutbound, so the old test broke on WORDING while the contract held — the failure
+    // mode this suite exists to avoid. It now drives the shared function and asserts the
+    // behaviour: a wall of text comes back as readable blocks, with not one word changed, which
+    // can only be true if the voice gate ran on the WHOLE reply rather than per bubble.
+    const { prepareOutbound } = await import("../server/outbound-authority");
+    const wall = "Feeling weak and winded isn't easy, especially coming back from being ill. For today's session, "
+      + "keep it light and focus on movement. Reduce weights to about 60% of what you usually lift, and consider "
+      + "cutting back on the number of sets. Recovery is key, and you'll build strength back up soon.";
+    const prepared = await prepareOutbound("reactive", null, "whatsapp:+27000000999", wall);
+    assert.equal(prepared.blocked, false, "a clean reply must not be blocked");
+    assert.ok(prepared.text.split("\n\n").length >= 2, "the voice gate must shape the whole reply");
+    assert.equal(prepared.text.replace(/\s+/g, " ").trim(), wall.replace(/\s+/g, " ").trim(),
+      "and not one word may change");
   });
   test("reactive: THE 12:40 REPLY — the live wall of text is now broken into blocks", () => {
     const real = "Feeling weak and winded isn't easy, especially coming back from being ill. For today's session, "
