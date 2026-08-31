@@ -134,3 +134,85 @@ export async function enforceOutboundTruth(
 
   return { ok: true };
 }
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════════════════════
+ * ONE PREPARATION CONTRACT FOR EVERY CUSTOMER-FACING MESSAGE (Cut B, 2026-08-31)
+ * ════════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * THE PROVEN PROBLEM. Two outbound customer authorities:
+ *
+ *   proactive  scheduler/shared.sendWhatsApp -> enforceOutboundTruth -> provenance -> hygiene
+ *   reactive   routes/whatsapp.sendFinal     ->                         provenance -> hygiene
+ *
+ * The truth floor reached the 68 scheduler jobs and nothing a client said hello to. That is the
+ * same shape as the 2026-07-30 finding recorded in whatsapp.ts — provenance and hygiene were
+ * wired into sendWhatsApp and claimed to cover everything, and a wall of text reached the founder
+ * 27 minutes later because the reply path was not on it. The gates moved; the floor did not.
+ *
+ * So preparation lives here, in one function both doors call, and the ONLY thing that differs
+ * between them is what happens when the floor refuses:
+ *
+ *   proactive   BLOCK. Nobody is waiting. A message we cannot stand behind is not worth sending,
+ *               and the block is recorded so the counter sees it.
+ *   reactive    NEVER SILENT. A client is holding their phone. Refusing to answer is its own
+ *               failure, so the caller is handed a safe repair to send instead of the draft.
+ *
+ * NO TWILIO I/O HERE. This module decides what may be said; delivery stays with its owner.
+ */
+export interface OutboundPrepared {
+  /** What to send. On a reactive refusal this is the repair, never the rejected draft. */
+  text: string;
+  /** True when the floor refused. Proactive callers must not send; reactive callers send `text`. */
+  blocked: boolean;
+  reason?: OutboundVerdict["reason"];
+  detail?: string;
+}
+
+/** What a client hears when the floor refuses a reactive draft. Never an apology, never silence. */
+const REACTIVE_REPAIR = "Let me check that properly before I answer — give me one sec and ask me again.";
+
+export async function prepareOutbound(
+  mode: "reactive" | "proactive",
+  userId: string | null,
+  recipientKey: string,
+  text: string,
+  recipientUser?: { profileNotes?: string | null } | null,
+): Promise<OutboundPrepared> {
+  const { provenanceGate } = await import("./verifiers/response-gate");
+  const { humanizeReply } = await import("./reply-hygiene");
+
+  const verdict = await enforceOutboundTruth(userId, recipientKey, text, recipientUser);
+  if (!verdict.ok) {
+    if (mode === "proactive") {
+      // THE OPERATOR SIGNAL IS PART OF THE CONTRACT. production-parity drives sendWhatsApp and
+      // reads this exact line to prove the door consulted the floor rather than merely importing
+      // it — the assertion exists because an earlier source-string version stayed green when the
+      // door was changed to ignore the verdict. Renaming it in a refactor broke the observable
+      // while the behaviour was fine, which is the same defect one layer out. It keeps its name.
+      console.error(`[OUTBOUND_AUTHORITY] BLOCKED proactive send to ${recipientKey.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
+      return { text: "", blocked: true, reason: verdict.reason, detail: verdict.detail };
+    }
+    console.error(`[OUTBOUND_AUTHORITY] BLOCKED reactive draft to ${recipientKey.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
+    // Reactive: the client is waiting, so they get a safe sentence rather than nothing.
+    return { text: REACTIVE_REPAIR, blocked: true, reason: verdict.reason, detail: verdict.detail };
+  }
+
+  // Shaping stays in this order: a claim spanning a bubble split has to be checked before the
+  // split, and reports quote real replies back, so they are left alone.
+  //
+  // A PREPARATION FAILURE IS NOT A LICENCE TO SEND THE DRAFT. The verifiers are the reason this
+  // function exists; treating their failure as "send raw anyway" would make the floor optional
+  // exactly when it is least safe. Proactive refuses — nobody is waiting. Reactive still may not
+  // go silent, so it gets the same safe sentence a floor refusal produces.
+  try {
+    let out = await provenanceGate(recipientKey, text);
+    if (!out.includes('_"')) out = humanizeReply(out);
+    return { text: out, blocked: false };
+  } catch (e: any) {
+    console.error(`[OUTBOUND_AUTHORITY] BLOCKED ${mode} send to ${recipientKey.slice(-8)} — preparation failed: ${e?.message || e}`);
+    return mode === "proactive"
+      ? { text: "", blocked: true, detail: "preparation failed" }
+      : { text: REACTIVE_REPAIR, blocked: true, detail: "preparation failed" };
+  }
+}

@@ -16,7 +16,7 @@ import { checkOutboundMessage } from "../verifiers/proactive-gate";
 import { readHealthState } from "../health-state";
 import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply } from "../reply-hygiene";
-import { enforceOutboundTruth } from "../outbound-authority";
+import { enforceOutboundTruth, prepareOutbound } from "../outbound-authority";
 import { templateSid, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
 
 export { db, pool };
@@ -537,13 +537,14 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   } catch (e: any) {
     console.warn(`[OUTBOUND_AUTHORITY] recipient lookup failed for ${to.slice(-8)}: ${e?.message || e}`);
   }
-  const verdict = await enforceOutboundTruth(recipientId, to, body, recipientRow);
-  if (!verdict.ok) {
-    console.error(`[OUTBOUND_AUTHORITY] BLOCKED proactive send to ${to.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
-    return;
-  }
-
-  const checked = await provenanceGate(to, body);
+  // ONE PREPARATION CONTRACT (Cut B, 2026-08-31). Floor, provenance and hygiene were three steps
+  // written out here and two of them written out again on the reactive path — which is how the
+  // floor came to cover 68 scheduler jobs and no client reply. prepareOutbound is that sequence,
+  // once. Proactive keeps its own failure policy: nobody is waiting, so a refused message is
+  // blocked and recorded rather than repaired.
+  const prepared = await prepareOutbound("proactive", recipientId, to, body, recipientRow);
+  if (prepared.blocked) return;
+  const shaped0 = prepared.text;
   // VOICE, ENFORCED (2026-07-30). humanizeReply — the numbered-list reshape, the platitude strip,
   // the wall-of-text break — existed since 22 July and was wired into exactly ONE caller
   // (food-scanner.ts). Every brain reply, every engine reply and all 68 scheduler jobs went out
@@ -553,7 +554,7 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   // Reports are left alone. `audit` and `replay` quote real replies back at the founder, and a
   // pass that rewrote those quotes would corrupt the instrument that measures this — the same
   // rule the provenance gate follows.
-  const shaped = checked.includes('_"') ? checked : humanizeReply(checked);
+  const shaped = shaped0;
   // SHADOW (2026-08-04) — the proactive half of the door. Captured whole, before the bubble
   // split, so a shadow row holds the message as the client would have read it.
   if (await shadowDoor(to, shaped, "proactive", "server/scheduler/shared.ts", mediaUrl)) return;
