@@ -955,19 +955,72 @@ const MUST_WRITE: [string, string][] = [
       failures.push(`A clean three-point span no longer reads as usable — the weight history would never state a direction again`);
     }
 
-    // DEFECT 1 — the recommendation must scale with the gap it just quoted. Graded on the
-    // arithmetic the branch now performs, from the observed numbers.
+    // DEFECT 1 — the recommendation must address the gap it just quoted, and must offer nothing
+    // the day's remaining calories cannot pay for. Graded on the reply the client reads, driven
+    // through handleMessage from the observed numbers. The first version of this test graded a
+    // re-implementation of the branch's own arithmetic, which is worth nothing: it would have
+    // stayed green with the handler deleted.
     {
-      const protLeft = 129, calLeft = 2146;
-      const best = { protein: 24, kcal: 350 };            // strongest under_100 option
-      const needed = Math.min(Math.ceil(protLeft / best.protein), Math.max(1, Math.floor(calLeft / best.kcal)));
-      if (needed <= 1) {
-        failures.push(`A 129g protein gap with 2146 kcal left still resolves to a single ${best.protein}g meal — the recommendation does not address the need it states`);
+      const { sastToday } = await import("../server/utils");
+      const mealTurn = async (o: { protLeft: number; calLeft: number; budget: string }) => {
+        freshTurn();
+        g.__KAMLIFE_STUB_USER = {
+          ...USER, todayWater: "0", weeklyFoodBudget: o.budget,
+          todayCaloriesDate: sastToday(),
+          calorieTarget: 2400, todayCalories: 2400 - o.calLeft,
+          proteinTarget: 150, todayProteinG: 150 - o.protLeft,
+        };
+        g.__KAMLIFE_STUB_ROWS = new Map([
+          [schema.mealLogs, []], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
+        ]);
+        g.__KAMLIFE_STUB_WRITES = [];
+        return String(await handleMessage(USER.phoneNumber, "what should I eat next?").catch(() => ""));
+      };
+      const flat = (r: string) => r.replace(/\n/g, " ⏎ ");
+
+      // THE OBSERVED TURN: 129g short with 2 146 kcal unspent.
+      {
+        const r = await mealTurn({ protLeft: 129, calLeft: 2146, budget: "under_100" });
+        if (!/129g/.test(r)) {
+          failures.push(`The 129g meal turn no longer reaches the protein branch at all — the rest of this block is grading nothing: "${flat(r)}"`);
+        } else {
+          const strongest = r.indexOf("pilchards"), weakest = r.indexOf("2 eggs + pap");
+          if (strongest < 0 || weakest < 0 || strongest > weakest) {
+            failures.push(`A client 129g short is still led with the weaker option: "${flat(r)}"`);
+          }
+          // The observed defect: state a 129g deficit, then answer it with an 18g plate and say
+          // nothing more. Something in the reply has to acknowledge that one plate is not enough.
+          if (!/none of those closes 129g/i.test(r)) {
+            failures.push(`A 129g gap was answered with a menu and no word that one plate does not close it: "${flat(r)}"`);
+          }
+          // ...but not by inventing a plan. "about 6 protein meals" is a number the client never
+          // gave and the coach cannot stand behind.
+          if (/\bprotein meals\b/i.test(r) || /\b\d+\s*(?:more\s*)?meals\b/i.test(r)) {
+            failures.push(`The reply prescribes a meal count instead of a priority: "${flat(r)}"`);
+          }
+        }
       }
-      // CONTROL: a gap one meal genuinely closes must not be inflated into several.
-      const small = Math.min(Math.ceil(22 / best.protein), Math.max(1, Math.floor(calLeft / best.kcal)));
-      if (small !== 1) {
-        failures.push(`A 22g gap now demands ${small} meals — the fix over-fires on ordinary days`);
+
+      // CONTROL — AFFORDABILITY. 420 kcal left cannot carry the 450 kcal plate, so it may not be
+      // offered. Without this, "lead with the strongest" simply moves the defect: a client is told
+      // to eat something they have no room for.
+      {
+        const r = await mealTurn({ protLeft: 129, calLeft: 420, budget: "100_300" });
+        if (/Chicken breast \+ rice/i.test(r)) {
+          failures.push(`A 450 kcal meal was offered to a client with 420 kcal left: "${flat(r)}"`);
+        }
+        if (!/pilchards/i.test(r)) {
+          failures.push(`Affordability filtering left the client with no option at all: "${flat(r)}"`);
+        }
+      }
+
+      // CONTROL — A SMALL GAP STAYS SIMPLE. 22g is closed by the option on offer, so the reply
+      // must read exactly as it always did, with no shortfall sentence bolted on.
+      {
+        const r = await mealTurn({ protLeft: 22, calLeft: 2146, budget: "under_100" });
+        if (/none of those closes/i.test(r)) {
+          failures.push(`A 22g gap the top option genuinely covers was told it falls short — the fix over-fires on ordinary days: "${flat(r)}"`);
+        }
       }
     }
   }

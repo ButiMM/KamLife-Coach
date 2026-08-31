@@ -365,9 +365,10 @@ export async function handleMiscCommands(ctx: {
       // two lines. A coach that states a deficit and then ignores it is not giving advice, it is
       // reciting a menu.
       //
-      // No new nutrition engine and no threshold: the existing per-meal options already carry
-      // their own protein figures, so the fix is to say how many of them the day still needs and
-      // to lead with the biggest one that the remaining calories can actually pay for.
+      // No new nutrition engine and no threshold. The existing per-meal options already carry
+      // their own protein and calorie figures, so the fix is to lead with the strongest option the
+      // remaining calories can actually pay for, and — when that option still does not reach the
+      // stated gap — to say so and hand the client the priority, not a prescribed meal count.
       suggestion += `You need *${protLeft}g more protein* today. That is the priority.\n\n`;
       const meals: Array<{ text: string; protein: number; kcal: number }> = budget === "under_100"
         ? [
@@ -379,19 +380,20 @@ export async function handleMiscCommands(ctx: {
             { text: "Tin of pilchards + sweet potato (~380 kcal, 24g protein)", protein: 24, kcal: 380 },
             { text: "3 eggs + brown bread + tomato (~400 kcal, 24g protein)", protein: 24, kcal: 400 },
           ];
-      // Biggest first — a client short 129g should not be led with the 18g option.
-      const ranked = [...meals].sort((a, b) => b.protein - a.protein);
-      const best = ranked[0];
-      // ONE MEAL IS NOT ALWAYS THE ANSWER. How many of the strongest option the gap actually
-      // needs, capped by what the remaining calories can carry — both numbers this branch already
-      // holds. A gap one meal closes reads exactly as it did before.
-      const byProtein = Math.ceil(protLeft / best.protein);
-      const byCalories = Math.max(1, Math.floor(calLeft / best.kcal));
-      const needed = Math.min(byProtein, byCalories);
-      suggestion += `Pick one:\n${ranked.map((mm, i) => `${i + 1}. ${mm.text}`).join("\n")}`;
-      if (needed > 1) {
-        // Said plainly rather than prescribed: the client decides how to spread it.
-        suggestion += `\n\nOne of those alone will not close ${protLeft}g — you are looking at about *${needed} protein meals* across the rest of today, and you have *${calLeft} kcal* to play with.`;
+      // Biggest first — a client short 129g should not be led with the 18g option — and only the
+      // ones the day's remaining calories can actually pay for. Offering a 450 kcal plate to
+      // somebody with 300 kcal left is the same defect in the other direction.
+      const affordable = [...meals].sort((a, b) => b.protein - a.protein).filter(mm => mm.kcal <= calLeft);
+      if (affordable.length === 0) {
+        suggestion += `You do not have the calories left for a full meal — go protein-only: eggs, biltong, tuna or plain yoghurt, and leave the starch off the plate.`;
+      } else {
+        suggestion += `Pick one:\n${affordable.map((mm, i) => `${i + 1}. ${mm.text}`).join("\n")}`;
+        if (affordable[0].protein < protLeft) {
+          // SAY IT PLAINLY RATHER THAN PRESCRIBE A NUMBER. How the client spreads the rest across
+          // the eating opportunities they have left is theirs to decide; counting meals for them
+          // would be inventing a plan out of two figures.
+          suggestion += `\n\nNone of those closes ${protLeft}g on its own, so make protein the first thing on the plate for every meal you have left today. You have *${calLeft} kcal* to work with.`;
+        }
       }
     } else {
       suggestion += `${calLeft} kcal and ${protLeft}g protein to go.\n\n`;
