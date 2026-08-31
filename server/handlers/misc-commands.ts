@@ -357,17 +357,44 @@ export async function handleMiscCommands(ctx: {
       suggestion += `You have ${calLeft} kcal left and protein is sorted.\n\n`;
       suggestion += `*Best option:* Vegetable stir-fry or salad (~150 kcal)\nOr just call it — you're close to target. ${goal === "fat_loss" ? "Slight deficit is fine for fat loss." : ""}`;
     } else if (needsProtein) {
+      // THE RECOMMENDATION HAS TO ADDRESS THE NUMBER IT JUST QUOTED (2026-08-28, live trace).
+      //
+      // Observed: "You need 129g more protein today. That is the priority." followed by two eggs
+      // and pap — 18g, with 2,146 kcal still to spend. The branch printed protLeft and then never
+      // read it again, and never read calLeft at all, so a 21g gap and a 129g gap got the same
+      // two lines. A coach that states a deficit and then ignores it is not giving advice, it is
+      // reciting a menu.
+      //
+      // No new nutrition engine and no threshold. The existing per-meal options already carry
+      // their own protein and calorie figures, so the fix is to lead with the strongest option the
+      // remaining calories can actually pay for, and — when that option still does not reach the
+      // stated gap — to say so and hand the client the priority, not a prescribed meal count.
       suggestion += `You need *${protLeft}g more protein* today. That is the priority.\n\n`;
-      const meals: string[] = [];
-      if (budget === "under_100") {
-        meals.push("2 eggs + pap (~300 kcal, 18g protein)");
-        meals.push("Tin of pilchards + pap (~350 kcal, 24g protein)");
+      const meals: Array<{ text: string; protein: number; kcal: number }> = budget === "under_100"
+        ? [
+            { text: "Tin of pilchards + pap (~350 kcal, 24g protein)", protein: 24, kcal: 350 },
+            { text: "2 eggs + pap (~300 kcal, 18g protein)", protein: 18, kcal: 300 },
+          ]
+        : [
+            { text: "Chicken breast + rice + spinach (~450 kcal, 35g protein)", protein: 35, kcal: 450 },
+            { text: "Tin of pilchards + sweet potato (~380 kcal, 24g protein)", protein: 24, kcal: 380 },
+            { text: "3 eggs + brown bread + tomato (~400 kcal, 24g protein)", protein: 24, kcal: 400 },
+          ];
+      // Biggest first — a client short 129g should not be led with the 18g option — and only the
+      // ones the day's remaining calories can actually pay for. Offering a 450 kcal plate to
+      // somebody with 300 kcal left is the same defect in the other direction.
+      const affordable = [...meals].sort((a, b) => b.protein - a.protein).filter(mm => mm.kcal <= calLeft);
+      if (affordable.length === 0) {
+        suggestion += `You do not have the calories left for a full meal — go protein-only: eggs, biltong, tuna or plain yoghurt, and leave the starch off the plate.`;
       } else {
-        meals.push("Chicken breast + rice + spinach (~450 kcal, 35g protein)");
-        meals.push("3 eggs + brown bread + tomato (~400 kcal, 24g protein)");
-        meals.push("Tin of pilchards + sweet potato (~380 kcal, 24g protein)");
+        suggestion += `Pick one:\n${affordable.map((mm, i) => `${i + 1}. ${mm.text}`).join("\n")}`;
+        if (affordable[0].protein < protLeft) {
+          // SAY IT PLAINLY RATHER THAN PRESCRIBE A NUMBER. How the client spreads the rest across
+          // the eating opportunities they have left is theirs to decide; counting meals for them
+          // would be inventing a plan out of two figures.
+          suggestion += `\n\nNone of those closes ${protLeft}g on its own, so make protein the first thing on the plate for every meal you have left today. You have *${calLeft} kcal* to work with.`;
+        }
       }
-      suggestion += `Pick one:\n${meals.map((m, i) => `${i + 1}. ${m}`).join("\n")}`;
     } else {
       suggestion += `${calLeft} kcal and ${protLeft}g protein to go.\n\n`;
       if (budget === "under_100") {
@@ -597,7 +624,35 @@ export async function handleMiscCommands(ctx: {
       const totalChange = latest - first;
       const goal = user.goalType || "fat_loss";
       const changeDir = totalChange < 0 ? `Down ${Math.abs(totalChange).toFixed(1)}kg` : totalChange > 0 ? `Up ${totalChange.toFixed(1)}kg` : "No change";
-      const verdict = goal === "fat_loss" && totalChange < -1 ? "Moving in the right direction." : goal === "muscle_gain" && totalChange > 0.5 ? "Scale is going up — keep fuelling." : goal === "fat_loss" && totalChange >= 0 ? "Scale hasn't moved yet — check food logging consistency." : "";
+      // A DIRECTION IS A TREND CLAIM, AND IT HAS AN OWNER (2026-08-28, live trace).
+      //
+      // Observed, in one message: the response gate refused — "I'm not going to call a trend off
+      // those weigh-ins — they sit around the time you were ill" — and this line then said "Scale
+      // is going up — keep fuelling." Both were true to their own reasoning, because this verdict
+      // was computed from `latest - first` alone and never asked whether those two points can
+      // carry a trend at all. Two owners of "which way is the scale going", one refusing and one
+      // answering, in consecutive paragraphs.
+      //
+      // weightTrendUsable is the owner the gate consults. This asks it too, so the refusal and
+      // the verdict cannot disagree. When the trend is unusable the numbers still ship — the
+      // client asked for their history and gets it — but no direction is asserted over them.
+      const { weightTrendUsable } = await import("../adaptive-targets");
+      const { readHealthState } = await import("../health-state");
+      const health = readHealthState(user);
+      const asMs = (d?: string) => (d ? new Date(`${d}T00:00:00+02:00`).getTime() : undefined);
+      const trend = weightTrendUsable({
+        count: logs.length,
+        oldestAt: logs[0].at.getTime(),
+        newestAt: logs[logs.length - 1].at.getTime(),
+        sickSince: asMs(health.sickSince),
+        sickUntil: asMs(health.sickUntil),
+        now: Date.now(),
+      });
+      const verdict = !trend.usable ? ""
+        : goal === "fat_loss" && totalChange < -1 ? "Moving in the right direction."
+        : goal === "muscle_gain" && totalChange > 0.5 ? "Scale is going up — keep fuelling."
+        : goal === "fat_loss" && totalChange >= 0 ? "Scale hasn't moved yet — check food logging consistency."
+        : "";
       const recent = logs.slice(-5).map(l =>
         `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`,
       ).join("\n");
