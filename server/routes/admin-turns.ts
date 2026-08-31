@@ -313,7 +313,52 @@ type Invariant = {
 
 const FALLBACK_REPLY = /didn'?t (?:quite )?catch that|say it another way|had a moment|try that again|i'?m not sure what you mean/i;
 
+/**
+ * ONE REPLY, TWO POSITIONS — restored 2026-08-31, this time with a production instance.
+ *
+ * I removed a contradiction invariant on 2026-08-28 (a3519ed) because it had been reasoned about
+ * rather than observed, and an invariant with no observed instance is speculation that costs a
+ * budget. Seven hours later the live trace produced one:
+ *
+ *     "I'm not going to call a trend off those weigh-ins — they sit around the time you were
+ *      ill, and weight moves on fluid and appetite then, not on food."
+ *     "Scale is going up — keep fuelling."
+ *
+ * Consecutive paragraphs of one message: a refusal to state a direction, and a direction.
+ *
+ * WHAT I GOT WRONG, so the next person does not repeat it: the absence of a trace was treated as
+ * evidence the failure did not happen, when the real reason we had no trace was that nobody had
+ * looked at production. The detector was live and blind at the moment the failure shipped.
+ *
+ * RESTORING THE OLD ONE VERBATIM WOULD NOT HAVE CAUGHT THIS. The deleted version paired
+ * "the day is closed" against "eat now" — a food contradiction. The observed instance is a WEIGHT
+ * contradiction. So this is the same invariant with the pair the evidence actually gives us, and
+ * the shape is a LIST of pairs rather than named constants: a detector that grows adds a pair,
+ * not a new global. (It also does not add a named regex literal, which matters — that counter
+ * sits at exactly 449/449 on this baseline, so a constant here would breach the governor for a
+ * detector that has a perfectly good structural home.)
+ *
+ * A PAIR IS A CANDIDATE, NEVER A VERDICT. Both halves in one reply is suspicious, not proven
+ * wrong: a coach may legitimately refuse a trend and then discuss weight for another reason. The
+ * queue exists so a human reads the turn.
+ */
+const CONTRADICTION_PAIRS: Array<{ what: string; refuses: RegExp; asserts: RegExp }> = [
+  {
+    what: "weight trend",
+    // The response gate's honest refusals, and the directional claims that must not follow them.
+    refuses: new RegExp("not going to (?:call|put a number)|don'?t have enough weigh-?ins|too far back for me to read", "i"),
+    asserts: new RegExp("scale is going (?:up|down)|you'?re (?:gaining|losing)|moving in the right direction|trending (?:up|down)", "i"),
+  },
+];
+
 export const COACH_HEALTH_INVARIANTS: Invariant[] = [
+  {
+    id: "reply-contradicts-itself",
+    label: "One reply refused a claim and then made it",
+    layer: "Response",
+    expected: "one decision, one voice",
+    holds: t => !CONTRADICTION_PAIRS.some(p => p.refuses.test(t.reply) && p.asserts.test(t.reply)),
+  },
   {
     id: "unowned-message",
     label: "The coach did not understand a message",

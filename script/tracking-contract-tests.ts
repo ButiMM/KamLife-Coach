@@ -923,6 +923,41 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * COACH HEALTH MUST NOW CATCH THE 16:49 CONTRADICTION AUTOMATICALLY (2026-08-31).
+   *
+   * The detector for this class was removed on 2026-08-28 for want of an observed instance. The
+   * live trace produced one seven hours later. Graded on the EXACT production reply, so the
+   * detector is measured against what a client actually received rather than a paraphrase.
+   */
+  {
+    const { COACH_HEALTH_INVARIANTS } = await import("../server/routes/admin-turns");
+    const inv = COACH_HEALTH_INVARIANTS.find(i => i.id === "reply-contradicts-itself");
+    if (!inv) {
+      failures.push(`Coach Health has no reply-contradicts-itself invariant — the 16:49 weight contradiction would ship unflagged again`);
+    } else {
+      const holds = (reply: string) => inv.holds({ input: "What is my weight trend", reply, mutations: [], state: {} });
+
+      // THE OBSERVED REPLY, verbatim from the 2026-08-28 16:49 turn.
+      const observed = "I'm not going to call a trend off those weigh-ins — they sit around the time you were ill, and weight moves on fluid and appetite then, not on food. Hop on the scale in the morning and I'll give you a straight read.\n\nScale is going up — keep fuelling.";
+      if (holds(observed)) {
+        failures.push(`The observed 16:49 contradiction does not trip the detector — it refused a trend and then asserted one, and Coach Health would not raise a candidate`);
+      }
+
+      // CONTROLS — a detector that flags everything is a queue nobody reads.
+      const clean: Array<[string, string]> = [
+        ["an honest refusal alone", "I'm not going to call a trend off those weigh-ins — they sit around the time you were ill. Hop on the scale in the morning and I'll give you a straight read."],
+        ["a confident direction alone", "Down 1.2kg since you started. Moving in the right direction."],
+        ["an unrelated coaching reply", "85.75kg — noted. 👌\n\nMake your next meal a proper protein meal."],
+      ];
+      for (const [what, reply] of clean) {
+        if (!holds(reply)) {
+          failures.push(`Coach Health flags ${what} as a contradiction — the candidate queue fills with noise and stops being read: "${reply.replace(/\n/g, " ⏎ ")}"`);
+        }
+      }
+    }
+  }
+
+  /**
    * STAGE 3 OF THE CONTRACT — ONE WRITE OWNER, AND EVERY CONVERSATIONAL DOOR GOES THROUGH IT.
    *
    * logStepsForUser holds one rule that no caller can hold for itself: ONE ROW PER SAST DAY, keep
