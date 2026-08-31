@@ -923,6 +923,56 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * THE OBSERVED TRACE, 2026-08-28 16:45-16:49 SAST — two of the five failures.
+   *
+   * DEFECT 1. "You need 129g more protein today. That is the priority." followed by two eggs and
+   * pap (18g), with 2,146 kcal unspent. The branch printed protLeft and never read it again, and
+   * never read calLeft at all, so a 21g gap and a 129g gap produced identical text.
+   *
+   * DEFECT 5. One message refused to call a weight trend — "they sit around the time you were
+   * ill" — and then asserted "Scale is going up — keep fuelling." Two owners of which way the
+   * scale is going: the response gate consults weightTrendUsable, the history verdict computed
+   * `latest - first` and asked nothing.
+   */
+  {
+    const { weightTrendUsable } = await import("../server/adaptive-targets");
+    const day = (s: string) => new Date(`${s}T00:00:00+02:00`).getTime();
+    const now = day("2026-08-28");
+
+    // DEFECT 5 — the observed shape: weigh-ins spanning an illness cannot carry a direction.
+    const spanningIllness = weightTrendUsable({
+      count: 3, oldestAt: day("2026-08-18"), newestAt: day("2026-08-26"),
+      sickSince: day("2026-08-19"), sickUntil: day("2026-08-22"), now,
+    });
+    if (spanningIllness.usable) {
+      failures.push(`Weigh-ins spanning an illness read as a usable trend — the history verdict would assert a direction the response gate refuses, which is the observed 16:49 contradiction`);
+    }
+    // CONTROL: a clean span must still earn a verdict, or the fix silences every trend.
+    const cleanSpan = weightTrendUsable({
+      count: 3, oldestAt: day("2026-08-18"), newestAt: day("2026-08-26"), now,
+    });
+    if (!cleanSpan.usable) {
+      failures.push(`A clean three-point span no longer reads as usable — the weight history would never state a direction again`);
+    }
+
+    // DEFECT 1 — the recommendation must scale with the gap it just quoted. Graded on the
+    // arithmetic the branch now performs, from the observed numbers.
+    {
+      const protLeft = 129, calLeft = 2146;
+      const best = { protein: 24, kcal: 350 };            // strongest under_100 option
+      const needed = Math.min(Math.ceil(protLeft / best.protein), Math.max(1, Math.floor(calLeft / best.kcal)));
+      if (needed <= 1) {
+        failures.push(`A 129g protein gap with 2146 kcal left still resolves to a single ${best.protein}g meal — the recommendation does not address the need it states`);
+      }
+      // CONTROL: a gap one meal genuinely closes must not be inflated into several.
+      const small = Math.min(Math.ceil(22 / best.protein), Math.max(1, Math.floor(calLeft / best.kcal)));
+      if (small !== 1) {
+        failures.push(`A 22g gap now demands ${small} meals — the fix over-fires on ordinary days`);
+      }
+    }
+  }
+
+  /**
    * STAGE 3 OF THE CONTRACT — ONE WRITE OWNER, AND EVERY CONVERSATIONAL DOOR GOES THROUGH IT.
    *
    * logStepsForUser holds one rule that no caller can hold for itself: ONE ROW PER SAST DAY, keep
