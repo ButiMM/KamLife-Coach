@@ -259,10 +259,13 @@ export async function handleFoodContext(ctx: {
   classifierQuestion?: boolean;
   /** EXECUTOR resolved an explicit LOG_MEAL: skip advisory branches (2026-07-27: the ordering guide answered a log 3x). */
   forceLog?: boolean;
+  /** Stable inbound id used by the canonical writer to make webhook replays idempotent. */
+  sourceMessageId?: string;
 }): Promise<string | null> {
   const { phone, message, m, user, handleMessage } = ctx;
   const classifierQuestion = !!ctx.classifierQuestion;
   const forceLog = !!ctx.forceLog;
+  const eventGroupId = ctx.sourceMessageId || randomUUID();
 
   // ---- SUPPORT BEFORE LOGGING (2026-07-14) — a deep emotional share ("I ate a whole
   // cake, I've tried everything, I want to quit") must reach emotional support, NOT get
@@ -497,7 +500,7 @@ export async function handleFoodContext(ctx: {
             userId: user.id, phone, rawMessage: "[Photo — checked first, then eaten]", source: "photo",
             kcalInt: vKcal, proteinInt: vProt, carbsInt: 0, fatInt: 0, items: [],
             mealLabel: extractMealLabel(message, undefined, { kcal: vKcal, protein: vProt }, user, await getSlotContext(user.id)),
-            loggedAt: new Date(),
+            loggedAt: new Date(), sourceMessageId: eventGroupId,
           });
           const vReply = `Logged ✅ ~${vKcal} kcal | ${vProt}g protein.\n\n_Today: ${cv.runningCals} kcal | ${cv.runningProtein}g protein_`;
           await logChat(user.id, message, vReply, "FOOD_LOG");
@@ -524,7 +527,7 @@ export async function handleFoodContext(ctx: {
             userId: user.id, phone, rawMessage: lastUnloggedFood.messageIn || "", source: "text",
             kcalInt: totalCals, proteinInt: totalProt2, carbsInt: 0, fatInt: 0, items: [],
             mealLabel: extractMealLabel(lastUnloggedFood.messageIn || "", undefined, { kcal: totalCals, protein: totalProt2 }, user, await getSlotContext(user.id)),
-            loggedAt: new Date(),
+            loggedAt: new Date(), sourceMessageId: eventGroupId,
           });
           return `Logged! ✅\n${parts.join("\n")}\n\n_Today: ${cs.runningCals} kcal | ${cs.runningProtein}g protein_`;
         }
@@ -888,7 +891,7 @@ export async function handleFoodContext(ctx: {
           userId: user.id, phone, rawMessage: p.raw, source: "text",
           kcalInt: p.kcal, proteinInt: p.prot, carbsInt: 0, fatInt: 0, items: [],
           mealLabel: extractMealLabel(p.raw, p.date, { kcal: p.kcal, protein: p.prot }, user, slotCtxMulti),
-          loggedAt: p.date,
+          loggedAt: p.date, sourceMessageId: eventGroupId,
         });
         recomp = { calories: c.runningCals, protein: c.runningProtein };
       }
@@ -1186,7 +1189,6 @@ export async function handleFoodContext(ctx: {
       // utterance stays undoable as one thing. Single-event messages are untouched — one row, as
       // before, and that is the common case. rawMessage carries the EVENT's words: commitFoodLog
       // dedups on it, so four rows sharing the full text would drop three as duplicates.
-      const eventGroupId = randomUUID();
       const eventBuckets = segmentBuckets.filter(b => b.foods.length > 0);
       const splitIntoEvents = eventBuckets.length >= 2;
       let committed!: Awaited<ReturnType<typeof commitFoodLog>>;
@@ -1333,7 +1335,7 @@ export async function handleFoodContext(ctx: {
             origin: "ai",
           })),
           mealLabel: extractMealLabel(message, undefined, { kcal: gptFallbackResult.totalKcal, protein: gptFallbackResult.totalProtein }, user, await getSlotContext(user.id)),
-          loggedAt: gptLoggedAt,
+          loggedAt: gptLoggedAt, sourceMessageId: eventGroupId,
         });
         const { prevCals: fbPrevCals, runningCals, runningProtein } = committed;
         const fallbackReply = await buildFoodLogReply({
@@ -1421,7 +1423,7 @@ export async function handleFoodContext(ctx: {
           name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
         })),
         mealLabel: extractMealLabel(message, undefined, { kcal: gptFallbackResult.totalKcal, protein: gptFallbackResult.totalProtein }, user, await getSlotContext(user.id)),
-        loggedAt: fb2LoggedAt,
+        loggedAt: fb2LoggedAt, sourceMessageId: eventGroupId,
       });
       const { prevCals: fb2PrevCals, runningCals, runningProtein } = committed2;
       const fallbackReply = await buildFoodLogReply({

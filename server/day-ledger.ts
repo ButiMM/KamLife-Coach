@@ -91,6 +91,8 @@ interface CommitFoodLogParams {
   /** EVENT LINEAGE (0004). Rows sharing this came from ONE client message. Omitted → NULL, which
    *  is a group of one and exactly how every row behaved before events existed. */
   sourceMessageId?: string | null;
+  /** Explicit copies and separate photos are distinct eating events even when their foods match. */
+  allowIntentionalRepeat?: boolean;
 }
 
 interface CommitFoodLogResult {
@@ -250,7 +252,17 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
   const dedupWindow = new Date(Date.now() - 4 * 60 * 1000);
   const rawSlice = params.rawMessage.slice(0, 1000);
   const effLoggedAt = effectiveMealLoggedAt(params.loggedAt, params.rawMessage, params.mealLabel);
-  let recentDup = await db.select({ id: mealLogs.id })
+  // Twilio retries keep the inbound message id. Raw event text disambiguates multi-event text
+  // and album images that deliberately share one lineage id.
+  let recentDup = params.sourceMessageId ? await db.select({ id: mealLogs.id })
+    .from(mealLogs)
+    .where(and(
+      eq(mealLogs.userId, params.userId),
+      eq(mealLogs.sourceMessageId, params.sourceMessageId),
+      eq(mealLogs.rawMessage, rawSlice),
+    ))
+    .limit(1) : [];
+  if (recentDup.length === 0) recentDup = await db.select({ id: mealLogs.id })
     .from(mealLogs)
     .where(and(
       eq(mealLogs.userId, params.userId),
@@ -262,7 +274,7 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
   // Voice retries of the same takeaway (McDonald's breakfast x3) have different raw text
   // so exact-match never fires — 127g protein from one breakfast. Treat same-chain items
   // in the last 2 hours as one meal.
-  if (recentDup.length === 0) {
+  if (recentDup.length === 0 && !params.allowIntentionalRepeat) {
     const retryWindow = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const recentRows = await db.select({ id: mealLogs.id, items: mealLogs.items })
       .from(mealLogs)
@@ -283,8 +295,8 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
   }
   // A held row's REPLACEMENT and an AMENDMENT both rewrite an existing row and suppress the
   // insert below. Neither ever creates a second row.
-  const heldId = await replaceHeldMeal(params.userId, `${rawSlice} ${itemNames.join(" ")}`, patch);
-  const amendedId = heldId || await amendRecentMeal(params.userId, itemNames, patch);
+  const heldId = params.allowIntentionalRepeat ? null : await replaceHeldMeal(params.userId, `${rawSlice} ${itemNames.join(" ")}`, patch);
+  const amendedId = heldId || (params.allowIntentionalRepeat ? null : await amendRecentMeal(params.userId, itemNames, patch));
   if (amendedId) { invalidatePatternCache(params.userId); invalidateFoodTotalsCache(params.userId); }
   let insertOk = true;
   const wasDup = recentDup.length > 0 || !!amendedId;

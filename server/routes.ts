@@ -33,6 +33,7 @@ import { verifyBrainReply } from "./brain/reply-verifier";
 import { cardFontLoaded } from "./macro-card";
 import { handleWater, tryLogWater } from "./handlers/water";
 import { handleFoodContext } from "./handlers/food-context";
+import { handleWeightLog } from "./handlers/weight";
 import { stripSignupSource } from "./signup-source";
 import { captureSignupSource } from "./signup-capture";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
@@ -840,13 +841,12 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
           user.trainingMode = "gym";
           console.log("[NORMALIZER] supplementary: training mode → gym from GOAL_CHANGE original");
         }
-        const wtMatch = originalMBeforeNorm.match(/\bmy\s+(?:current\s+)?weight\s+(?:is\s+)?(\d{2,3}(?:\.\d+)?)\b/i)
+        const wtMatch = originalMBeforeNorm.match(/\bmy\s+(?:current\s+)?weight\s+(?:is\s+)?(\d{2,3}(?:\.\d+)?)\s*(?:kg|kgs)?\b/i)
           || originalMBeforeNorm.match(/\bi\s+(?:currently\s+)?weigh\s+(\d{2,3}(?:\.\d+)?)\s*kg/i);
         if (wtMatch) {
           const wt = parseFloat(wtMatch[1]);
-          if (wt >= 30 && wt <= 300) {
-            await db.update(users).set({ currentWeight: wt.toString() }).where(eq(users.phoneNumber, phone));
-            user.currentWeight = wt.toString();
+          if (wt >= 30 && wt <= 250) {
+            await handleWeightLog(phone, user, wt);
             console.log(`[NORMALIZER] supplementary: weight → ${wt}kg from GOAL_CHANGE original`);
           }
         }
@@ -1151,7 +1151,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // COMMITS, DOES NOT CLAIM THE TURN (Cut 2/3). On "2 litres of water and took my creatine" the
   // supplement handler inside it used to end the turn and the water was never logged. Standing
   // down loses the supplement instead — it must run, and commit.
-  const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
+  const earlyResult = await handleEarlyCommands({ phone, message, m, user, sourceMessageId, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
   if (earlyResult !== null) {
     if (mayEndTurn("early-commands")) return closeCoachingTurn(earlyResult);
     commitFact(turn, "other", earlyResult);
@@ -1159,7 +1159,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
   if (mediaUrl) {
-    return handleMediaMessage({ phone, message, mediaUrl, mediaContentType, allMediaUrls, user, isCoach, openai, handleMessage });
+    return handleMediaMessage({ phone, message, mediaUrl, mediaContentType, allMediaUrls, sourceMessageId, user, isCoach, openai, handleMessage });
   }
 
 
@@ -1294,7 +1294,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ---- FOOD CONTEXT (corrections, braai, eating out, relog, scanner, GPT fallback) ----
   // Messy-life intake: stated meal (incl. branded takeaway voice notes) forces food path.
   const foodCtxResult = await handleFoodContext({
-    phone, message, m, user, handleMessage,
+    phone, message, m, user, handleMessage, sourceMessageId,
     classifierQuestion: normalizedQuestion,
     forceLog: turnFacts.mustForceFoodLog,
   });

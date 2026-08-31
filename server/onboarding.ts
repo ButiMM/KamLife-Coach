@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { users, weightLogs, chatHistory, stepLogs, escalations } from "../shared/schema";
+import { users, chatHistory, stepLogs, escalations } from "../shared/schema";
 import { escalationSLA } from "./safety-detection";
 import { generateReferralCode } from "./onboarding-referral";
 import { parseFoodPreferences, parseVisionAnswer, looksLikeBulkIntake, applyIntakeBrake, describeIntake, type BulkIntake } from "./onboarding-intake";
@@ -16,6 +16,7 @@ import { getDisplayName, sastDayStart, timeGreeting } from "./utils";
 import { getTodayWorkoutState } from "./workout-state";
 import { parseFirstName } from "./onboarding-name";
 import { MEDICAL_QUESTION, bodyPhotoAsk } from "./onboarding-physique";
+import { handleWeightLog } from "./handlers/weight";
 
 /**
  * "No thanks" to an OPTIONAL onboarding step — one owner, two callers (2026-08-06).
@@ -465,7 +466,6 @@ async function commitBulkIntake(user: any, bulk: BulkIntake, source: string, pho
   if (bulk.name) set.name = bulk.name;
   if (bulk.gender) set.gender = bulk.gender;
   if (bulk.age) set.age = bulk.age;
-  if (bulk.weightKg) set.currentWeight = String(bulk.weightKg);
   if (bulk.heightCm) set.heightCm = bulk.heightCm;
   if (bulk.goalType) set.goalType = bulk.goalType;
   if (bulk.targetWeightKg) set.targetWeightKg = String(bulk.targetWeightKg);
@@ -475,15 +475,25 @@ async function commitBulkIntake(user: any, bulk: BulkIntake, source: string, pho
   if (bulk.homeEquipment) set.homeEquipment = bulk.homeEquipment;
   if (bulk.trainingExperience) set.trainingExperience = bulk.trainingExperience;
   if (bulk.foodDislikes) set.foodDislikes = bulk.foodDislikes;
-  if (bulk.weightKg && bulk.heightCm) {
+  const reportedWeight = bulk.weightKg && bulk.weightKg >= 30 && bulk.weightKg <= 250
+    ? bulk.weightKg : null;
+  if (reportedWeight && bulk.heightCm) {
     const hM = bulk.heightCm / 100;
-    set.bmi = String(Math.round((bulk.weightKg / (hM * hM)) * 10) / 10);
+    set.bmi = String(Math.round((reportedWeight / (hM * hM)) * 10) / 10);
   }
 
-  const merged = { ...user, ...set, currentWeight: set.currentWeight ?? user.currentWeight };
+  const merged = { ...user, ...set, currentWeight: reportedWeight ? String(reportedWeight) : user.currentWeight };
   const next = BULK_RESUME.find(r => r.missing(merged));
-  set.onboardingState = next ? next.state : "ASK_MEDICAL";
-  await db.update(users).set(set).where(eq(users.phoneNumber, phone));
+  // Height, goal and the rest of the profile must be durable before the weight owner calculates
+  // BMI gates and targets. Weight itself is never staged here: handleWeightLog owns that truth.
+  if (Object.keys(set).length > 0) {
+    await db.update(users).set(set).where(eq(users.phoneNumber, phone));
+  }
+  if (reportedWeight) {
+    await handleWeightLog(phone, merged, reportedWeight, { suppressCustomerLifecycle: true });
+  }
+  const nextState = next ? next.state : "ASK_MEDICAL";
+  await db.update(users).set({ onboardingState: nextState }).where(eq(users.phoneNumber, phone));
 
   // A dislike is a preference that has to outlive onboarding — every meal suggestion
   // from here on must respect it, so it goes to durable memory, not just a column.
@@ -497,7 +507,7 @@ async function commitBulkIntake(user: any, bulk: BulkIntake, source: string, pho
   const who = bulk.name ? ` ${bulk.name}` : "";
   const captured = describeIntake(bulk);
   const question = next ? next.ask(merged) : MEDICAL_QUESTION;
-  console.log(`[BULK_INTAKE] ${phone.slice(-4)} — ${Object.keys(set).length - 1} fields from one message, resuming at ${set.onboardingState}`);
+  console.log(`[BULK_INTAKE] ${phone.slice(-4)} — ${Object.keys(set).length + (reportedWeight ? 1 : 0)} fields from one message, resuming at ${nextState}`);
   return `Sharp${who} 👌 I got all of that — you don't have to type it again.\n\n${captured}\n\nAnything wrong there, just tell me and I'll fix it.\n\n---\n\n${question}`;
 }
 
@@ -729,7 +739,6 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       const fallbackWeight = user.gender === "female" ? 65 : 75;
       const { proteinTarget: skipProt } = calculateTargets(fallbackWeight, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, 170, user.trainingExperience || "beginner");
       await db.update(users).set({
-        currentWeight: fallbackWeight.toString(),
         heightCm: null,
         bmi: null,
         proteinTarget: skipProt,
@@ -744,7 +753,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     }
 
     const weight = parseFloat(weightMatch[1]);
-    if (weight < 30 || weight > 350) {
+    if (weight < 30 || weight > 250) {
       return `That weight looks off. Please send it like: *78kg, 1.72m*`;
     }
 
@@ -771,12 +780,12 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       bmiVal = bmi.toString();
     }
 
-    const { proteinTarget: weightProt } = calculateTargets(weight, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, heightCmVal || 170, user.trainingExperience || "beginner");
     await db.update(users).set({
-      currentWeight: weight.toString(),
       heightCm: heightCmVal,
       bmi: bmiVal,
-      proteinTarget: weightProt,
+    }).where(eq(users.phoneNumber, phone));
+    await handleWeightLog(phone, { ...user, heightCm: heightCmVal, bmi: bmiVal }, weight, { suppressCustomerLifecycle: true });
+    await db.update(users).set({
       // THE STEP THAT WAS NEVER REACHABLE (2026-08-06). onboarding-physique.ts — the day-zero
       // read that catches a client picking a deficit when their body needs a surplus — has
       // existed since July and NOTHING ever set this state, so the module has never run for a
@@ -987,7 +996,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     }
 
     const weight = weightMatch ? parseFloat(weightMatch[1]) : parseFloat(user.currentWeight || "70");
-    if (weight < 30 || weight > 300) return `That doesn't look right. Example: *78kg, 1.72m*`;
+    if (weight < 30 || weight > 250) return `That doesn't look right. Example: *78kg, 1.72m*`;
 
     // Parse height — multiple formats: 1.72m, 172cm, 5'8 — from the message WITHOUT
     // the weight portion. CAPTURE BUG (caught by onboarding-e2e, 2026-07-14): the old
@@ -1015,7 +1024,9 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
     // No height provided OR "don't know" — save weight and offer estimate options
     if (heightCmVal < 100 || heightCmVal > 230) {
-      await db.update(users).set({ currentWeight: weight.toString() }).where(eq(users.phoneNumber, phone));
+      if (weightMatch) {
+        await handleWeightLog(phone, user, weight, { suppressCustomerLifecycle: true });
+      }
       const shortLabel = isFemale ? "Short (under 160cm)" : "Short (under 165cm)";
       const avgLabel   = isFemale ? "Average (163cm)"     : "Average (172cm)";
       const tallLabel  = isFemale ? "Tall (172cm+)"       : "Tall (181cm+)";
@@ -1024,11 +1035,13 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
     const bmi = Math.round((weight / (heightM * heightM)) * 10) / 10;
     await db.update(users).set({
-      currentWeight: weight.toString(),
       heightCm: heightCmVal,
       bmi: bmi.toString(),
-      onboardingState: "ASK_GOAL",
     }).where(eq(users.phoneNumber, phone));
+    if (weightMatch) {
+      await handleWeightLog(phone, { ...user, heightCm: heightCmVal, bmi: bmi.toString() }, weight, { suppressCustomerLifecycle: true });
+    }
+    await db.update(users).set({ onboardingState: "ASK_GOAL" }).where(eq(users.phoneNumber, phone));
     return `${weight}kg, ${heightCmVal}cm — got it. Main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
   }
 

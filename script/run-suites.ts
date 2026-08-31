@@ -49,7 +49,7 @@ export const SUITES = [
   // The decision-engine-p0 workflow's four. Here so local and CI cover the same surface.
   "decision-state-tests", "decision-runtime-tests", "reply-context-verifier-tests", "decision-doctrine-guard",
   "turn-triage-tests", "normalizer-replay-tests", "tracking-contract-tests",
-  "production-parity", "check-architecture",
+  "production-parity", "cut-a-regression-tests", "check-architecture",
 ];
 
 const PER_SUITE_TIMEOUT_MS = 10 * 60_000;

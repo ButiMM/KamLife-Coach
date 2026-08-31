@@ -114,6 +114,7 @@ export async function handleWeightLog(
   phone: string,
   user: any,
   newKg: number,
+  options: { suppressCustomerLifecycle?: boolean } = {},
 ): Promise<string> {
   if (!Number.isFinite(newKg) || newKg < 30 || newKg > 250) {
     return `That weight reads as *${newKg}kg* — that doesn't look right. Send your weight again as just a number followed by kg, like "82kg" or "76.5kg".`;
@@ -167,6 +168,12 @@ export async function handleWeightLog(
       turnMutation(`INSERT weight=${newKg}kg`, "[WEIGHT_LOG]");
     }
   });
+  // Keep the caller's turn-local profile coherent with the durable truth this owner just wrote.
+  // The normalizer can capture weight before later goal handling in the same turn; leaving this
+  // object stale would make that downstream calculation use yesterday's weight.
+  user.currentWeight = newKg.toString();
+  user.calorieTarget = newCals;
+  user.proteinTarget = newProtein;
   // The cached pattern summary feeds every GPT reply for up to an hour — without this,
   // the coach can contradict the weigh-in the client JUST sent ("no weight data this week").
   invalidatePatternCache(user.id);
@@ -193,7 +200,7 @@ export async function handleWeightLog(
       20: `\n\n🏆 *${firstName}, 20 kilograms.* I have coached a lot of people. 20kg is real transformation. This is the version of you that does not go back.`,
     };
     for (const milestone of [2, 5, 10, 15, 20]) {
-      if (totalLoss >= milestone && totalLoss < milestone + 0.6) {
+      if (!options.suppressCustomerLifecycle && totalLoss >= milestone && totalLoss < milestone + 0.6) {
         await storeMemory(phone, `Weight loss milestone: lost ${milestone}kg total — started at ${startKg}kg, now at ${newKg}kg`, "milestone");
         milestoneCelebration = MILESTONE_MESSAGES[milestone] || "";
         generateMilestoneVoiceScript(user, "weight_loss", { kgLost: milestone, currentKg: newKg, startKg })
@@ -235,7 +242,7 @@ export async function handleWeightLog(
 
   const targetKg = parseFloat(user.targetWeightKg || "0");
   const goal = user.goalType || "fat_loss";
-  if (targetKg > 0) {
+  if (!options.suppressCustomerLifecycle && targetKg > 0) {
     const hitGoal = (goal === "fat_loss" && newKg <= targetKg)
       || (goal === "muscle_gain" && newKg >= targetKg);
     if (hitGoal) {

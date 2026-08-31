@@ -33,6 +33,8 @@ process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+270
 
 const { handleMessage } = await import("../server/routes");
 const { calculateTargets, calculateStepsTarget } = await import("../server/targets");
+const { getWeightTruth } = await import("../server/day-ledger");
+const { weightLogs } = await import("../shared/schema");
 
 type Turn = {
   send: string;
@@ -165,6 +167,7 @@ function fail(flow: string, what: string): void {
 
 async function runFlow(flow: Flow): Promise<void> {
   (globalThis as any).__KAMLIFE_STUB_USER = freshUser(flow.phone);
+  (globalThis as any).__KAMLIFE_STUB_WRITES = [];
   const stub = () => (globalThis as any).__KAMLIFE_STUB_USER;
 
   for (const [i, t] of flow.turns.entries()) {
@@ -194,6 +197,15 @@ async function runFlow(flow: Flow): Promise<void> {
   for (const [k, want] of Object.entries(flow.final)) {
     const got = u[k];
     if (got !== want) fail(flow.name, `field ${k}: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  }
+  const weightWrites = ((globalThis as any).__KAMLIFE_STUB_WRITES as any[])
+    .filter(w => w.table === weightLogs);
+  if (weightWrites.length !== 1) fail(flow.name, `reported weight must create exactly one weight event, got ${weightWrites.length}`);
+  if (weightWrites[0]) {
+    (globalThis as any).__KAMLIFE_STUB_ROWS = new Map([[weightLogs, [{ ...weightWrites[0].values, at: new Date() }]]]);
+    const truth = await getWeightTruth(u);
+    if (truth.currentKg !== flow.targetInputs.weight) fail(flow.name, `getWeightTruth current ${truth.currentKg}, expected ${flow.targetInputs.weight}`);
+    delete (globalThis as any).__KAMLIFE_STUB_ROWS;
   }
   // Free-text intake must have landed as non-empty strings
   if (flow === FLOW_A) {
@@ -226,6 +238,22 @@ async function runFlow(flow: Flow): Promise<void> {
 await runFlow(FLOW_A);
 await runFlow(FLOW_B);
 await runFlow(FLOW_C);
+
+// An unreported default may support provisional targets, but it is not a scale reading and must
+// never become either current truth or a weight event.
+{
+  const phone = "whatsapp:+27000000104";
+  const u = freshUser(phone);
+  Object.assign(u, { onboardingState: "ASK_WEIGHT_HEIGHT_FAST", gender: "female", age: 31, goalType: "fat_loss" });
+  (globalThis as any).__KAMLIFE_STUB_USER = u;
+  (globalThis as any).__KAMLIFE_STUB_WRITES = [];
+  const reply = await handleMessage(phone, "skip", undefined, undefined, undefined, "SM-ONBOARD-SKIP");
+  const weightWrites = ((globalThis as any).__KAMLIFE_STUB_WRITES as any[]).filter(w => w.table === weightLogs);
+  if (!/baseline targets/i.test(reply)) fail("Onboarding skip", `unexpected reply: ${JSON.stringify(reply)}`);
+  if (u.currentWeight != null) fail("Onboarding skip", `fabricated durable currentWeight ${u.currentWeight}`);
+  if (weightWrites.length !== 0) fail("Onboarding skip", `fabricated ${weightWrites.length} weight event(s)`);
+  console.log("✓ Onboarding skip — no fabricated current weight and no weight event");
+}
 
 // ── DAY ONE — what happens AFTER signup ───────────────────────────────────────────────────────
 // (2026-07-28, from the review: "every flow is tested up to the moment the client is onboarded,

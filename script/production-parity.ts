@@ -2376,6 +2376,39 @@ async function main() {
     }
   });
 
+  check("CUT A . GOAL_CHANGE supplementary weight crosses the canonical weight owner", async () => {
+    const g = globalThis as any;
+    const msg = "My current weight is 82kg and I joined a gym";
+    const { weightLogs } = await import("../shared/schema");
+    const { getWeightTruth } = await import("../server/day-ledger");
+    const result = await serialise(async () => {
+      const prevNorm = process.env.NORMALIZER;
+      delete process.env.NORMALIZER;
+      g.__KAMLIFE_INTENT_FIXTURES = {
+        [msg.toLowerCase()]: { intent: "GOAL_CHANGE", confidence: 0.95, canonical: "change my goal to muscle gain" },
+      };
+      g.__KAMLIFE_STUB_USER = { ...USER, trainingMode: "home", currentWeight: "84.5" };
+      g.__KAMLIFE_STUB_ROWS = new Map([[weightLogs, []]]);
+      g.__KAMLIFE_STUB_WRITES = [];
+      g.__KAMLIFE_STUB_REFLECT_WRITES = true;
+      try {
+        await handleMessage(USER.phoneNumber, msg, undefined, undefined, undefined, "SM-CUT-A-WEIGHT");
+        const events = g.__KAMLIFE_STUB_WRITES.filter((w: any) => w.table === weightLogs);
+        assert.equal(events.length, 1, "the turn must create one weight event, even if another weight route sees it later");
+        g.__KAMLIFE_STUB_ROWS = new Map([[weightLogs, [{ ...events[0].values, at: new Date() }]]]);
+        return { currentWeight: g.__KAMLIFE_STUB_USER.currentWeight, truth: await getWeightTruth(g.__KAMLIFE_STUB_USER) };
+      } finally {
+        delete g.__KAMLIFE_INTENT_FIXTURES;
+        delete g.__KAMLIFE_STUB_ROWS;
+        delete g.__KAMLIFE_STUB_WRITES;
+        delete g.__KAMLIFE_STUB_REFLECT_WRITES;
+        if (prevNorm === undefined) delete process.env.NORMALIZER; else process.env.NORMALIZER = prevNorm;
+      }
+    });
+    assert.equal(result.currentWeight, "82", "users.currentWeight must be the canonical value");
+    assert.equal(result.truth.currentKg, 82, "getWeightTruth must read the same event as current truth");
+  });
+
   check("P0-3 . a historical write does not move today's programme", async () => {
     // The retro path advanced programmeDayInWeek and programmeWeek, so "I trained on Monday"
     // silently consumed TODAY's session slot. A backfill is a statement about that day only.

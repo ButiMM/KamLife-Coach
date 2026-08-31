@@ -12,21 +12,21 @@
  *    webhook retry must not double-log the meal and inflate the day's calories.
  */
 import { db } from "../db";
-import { turnMutation } from "./chat-log";
-import { users, mealLogs } from "../../shared/schema";
+import { mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { sastDayStart, slotFromSastHour } from "../utils";
 import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../meal-select";
-import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 import { logChat } from "./chat-log";
 import { isAskingNotReporting } from "../utils";
 import { dailyMacroCardMarker } from "../macro-card-attach";
+import { commitFoodLog } from "../day-ledger";
 
 export async function handleMealRepeat(ctx: {
   phone: string;
   message: string;
   m: string;
   user: any;
+  sourceMessageId?: string;
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
 
@@ -170,24 +170,31 @@ export async function handleMealRepeat(ctx: {
       return dupReply;
     }
 
-    await db.insert(mealLogs).values({
+    const repeatedItems = Array.isArray(match.items) ? (match.items as any[]).map(item => ({
+      ...item,
+      name: String(item?.name || item?.foodName || "Repeated item"),
+      grams: Number(item?.grams) || 0,
+      kcal: Number(item?.kcal) || 0,
+      protein: Number(item?.protein) || 0,
+      category: String(item?.category || "other"),
+    })) : [];
+    const committed = await commitFoodLog({
       userId: user.id,
-      rawMessage: match.rawMessage || "[Repeat meal]",
+      phone,
+      rawMessage: message.slice(0, 1000),
       source: "retro",
-      kcalInt: match.kcalInt,
-      proteinInt: match.proteinInt,
+      kcalInt: match.kcalInt || 0,
+      proteinInt: match.proteinInt || 0,
       carbsInt: match.carbsInt || 0,
       fatInt: match.fatInt || 0,
       mealLabel: targetLabel || sourceHint || match.mealLabel || null,
-      items: match.items,
+      items: repeatedItems,
+      loggedAt: new Date(),
+      sourceMessageId: ctx.sourceMessageId,
+      allowIntentionalRepeat: true,
     });
-    turnMutation("INSERT meal", "[WRITE]");
-    invalidateFoodTotalsCache(user.id);
-    const recomputed = await recomputeTodayFoodTotals(user.id);
-    await db.update(users).set({
-      todayCalories: recomputed.calories,
-      todayProteinG: recomputed.protein,
-    }).where(eq(users.phoneNumber, phone));
+    if (!committed.ok) return `I found that meal but couldn't save the copy just now. Send that again in a moment.`;
+    if (committed.wasDup) return `Already logged ✅ — that meal is counted in today's total.`;
 
     const labelDisplay = (targetLabel || sourceHint || match.mealLabel || "Meal").replace(/\b\w/g, c => c.toUpperCase());
     const mealWasToday = match.loggedAt && new Date(match.loggedAt) >= todayStart;
@@ -195,8 +202,8 @@ export async function handleMealRepeat(ctx: {
     const fromNote = crossish && sourceHint && sourceHint !== targetLabel ? `copied from ${sourceHint}`
       : daysBack > 0 ? `from ${daysBack === 1 ? "yesterday" : `${daysBack} days ago`}`
       : mealWasToday ? "from earlier today" : "from yesterday";
-    const remaining = (user.calorieTarget || 1800) - recomputed.calories;
-    const protGap = (user.proteinTarget || 120) - recomputed.protein;
+    const remaining = (user.calorieTarget || 1800) - committed.runningCals;
+    const protGap = (user.proteinTarget || 120) - committed.runningProtein;
     // Echo parsed food names ("Apple, Pear"), never the client's raw sentence verbatim.
     const itemNames = Array.isArray(match.items) ? (match.items as Array<{ name?: string }>).map(i => i?.name).filter(Boolean).join(", ") : "";
     const rawLabel = itemNames ? `_${itemNames}_\n` : match.rawMessage ? `_${match.rawMessage.slice(0, 80)}_\n` : "";
