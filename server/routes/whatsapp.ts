@@ -49,14 +49,32 @@ const TWILIO_FROM = () => process.env.TWILIO_WHATSAPP_NUMBER
  * or a paragraph can straddle a split, so shaping has to happen on the whole reply.
  */
 async function sendFinal(phone: string, text: string, media: string | string[] | null): Promise<void> {
+  // ONE PREPARATION CONTRACT (Cut B, 2026-08-31). This path ran provenance and hygiene but never
+  // the TRUTH FLOOR — enforceOutboundTruth reached the 68 scheduler jobs and nothing a client
+  // said hello to. Exactly the shape of the 2026-07-30 finding recorded above, one layer along:
+  // the gates moved to the shared function and the floor did not follow.
+  //
+  // prepareOutbound runs the floor, then the same provenance and hygiene in the same order. The
+  // only reactive difference is the failure policy: a client is holding their phone, so a refused
+  // draft becomes a safe sentence rather than silence. P0-C below still owns the empty case.
   let out = text;
   try {
-    out = await provenanceGate(phone, out);
-    // Founder-facing reports quote real replies back (audit, replay). Rewriting the quotes would
-    // corrupt the instrument that measures this — same exemption the provenance gate uses.
-    if (!out.includes('_"')) out = humanizeReply(out);
+    const { prepareOutbound } = await import("../outbound-authority");
+    let userId: string | null = null;
+    let userRow: { id: string; profileNotes: string | null } | null = null;
+    try {
+      const rows = await db.select({ id: users.id, profileNotes: users.profileNotes })
+        .from(users).where(eq(users.phoneNumber, phone)).limit(1);
+      userRow = (rows[0] as any) ?? null;
+      userId = userRow?.id ?? null;
+    } catch (e: any) {
+      // The floor degrades honestly without a recipient: the turn-free checks still apply.
+      console.warn(`[SEND_FINAL] recipient lookup failed for ${phone.slice(-8)}: ${e?.message || e}`);
+    }
+    const prepared = await prepareOutbound("reactive", userId, phone, out, userRow);
+    out = prepared.text;
   } catch (e: any) {
-    console.warn("[SEND_FINAL] shaping failed, sending raw:", e?.message || e);
+    console.warn("[SEND_FINAL] preparation failed, sending raw:", e?.message || e);
     out = text;
   }
   // THE DOOR (2026-08-04). Provenance asked whether it is true. Hygiene asked whether it

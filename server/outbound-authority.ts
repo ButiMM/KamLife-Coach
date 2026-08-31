@@ -134,3 +134,73 @@ export async function enforceOutboundTruth(
 
   return { ok: true };
 }
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════════════════════
+ * ONE PREPARATION CONTRACT FOR EVERY CUSTOMER-FACING MESSAGE (Cut B, 2026-08-31)
+ * ════════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * THE PROVEN PROBLEM. Two outbound customer authorities:
+ *
+ *   proactive  scheduler/shared.sendWhatsApp -> enforceOutboundTruth -> provenance -> hygiene
+ *   reactive   routes/whatsapp.sendFinal     ->                         provenance -> hygiene
+ *
+ * The truth floor reached the 68 scheduler jobs and nothing a client said hello to. That is the
+ * same shape as the 2026-07-30 finding recorded in whatsapp.ts — provenance and hygiene were
+ * wired into sendWhatsApp and claimed to cover everything, and a wall of text reached the founder
+ * 27 minutes later because the reply path was not on it. The gates moved; the floor did not.
+ *
+ * So preparation lives here, in one function both doors call, and the ONLY thing that differs
+ * between them is what happens when the floor refuses:
+ *
+ *   proactive   BLOCK. Nobody is waiting. A message we cannot stand behind is not worth sending,
+ *               and the block is recorded so the counter sees it.
+ *   reactive    NEVER SILENT. A client is holding their phone. Refusing to answer is its own
+ *               failure, so the caller is handed a safe repair to send instead of the draft.
+ *
+ * NO TWILIO I/O HERE. This module decides what may be said; delivery stays with its owner.
+ */
+export interface OutboundPrepared {
+  /** What to send. On a reactive refusal this is the repair, never the rejected draft. */
+  text: string;
+  /** True when the floor refused. Proactive callers must not send; reactive callers send `text`. */
+  blocked: boolean;
+  reason?: OutboundVerdict["reason"];
+  detail?: string;
+}
+
+/** What a client hears when the floor refuses a reactive draft. Never an apology, never silence. */
+const REACTIVE_REPAIR = "Let me check that properly before I answer — give me one sec and ask me again.";
+
+export async function prepareOutbound(
+  mode: "reactive" | "proactive",
+  userId: string | null,
+  recipientKey: string,
+  text: string,
+  recipientUser?: { profileNotes?: string | null } | null,
+): Promise<OutboundPrepared> {
+  const { provenanceGate } = await import("./verifiers/response-gate");
+  const { humanizeReply } = await import("./reply-hygiene");
+
+  const verdict = await enforceOutboundTruth(userId, recipientKey, text, recipientUser);
+  if (!verdict.ok) {
+    console.error(`[OUTBOUND_AUTHORITY] ${mode.toUpperCase()} refused for ${recipientKey.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
+    if (mode === "proactive") {
+      return { text: "", blocked: true, reason: verdict.reason, detail: verdict.detail };
+    }
+    // Reactive: the client is waiting, so they get a safe sentence rather than nothing.
+    return { text: REACTIVE_REPAIR, blocked: true, reason: verdict.reason, detail: verdict.detail };
+  }
+
+  // Shaping is unchanged and stays in this order: a claim spanning a bubble split has to be
+  // checked before the split, and reports quote real replies back, so they are left alone.
+  let out = text;
+  try {
+    out = await provenanceGate(recipientKey, out);
+    if (!out.includes('_"')) out = humanizeReply(out);
+  } catch (e: any) {
+    console.warn(`[OUTBOUND_AUTHORITY] shaping failed, sending raw: ${e?.message || e}`);
+    out = text;
+  }
+  return { text: out, blocked: false };
+}
