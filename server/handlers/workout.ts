@@ -75,9 +75,18 @@ export async function handleWorkoutCommands(ctx: {
       .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, sixHoursAgo)))
       .orderBy(desc(chatHistory.createdAt)).limit(12);
     const hadWorkout = recent.some(r => ["WORKOUT_DONE", "WORKOUT_VIEW", "WORKOUT_MISSED_CATCHUP", "WORKOUT_HOLIDAY"].includes(r.intent || ""));
-    if (hadWorkout) {
+    // …or we asked. The recency scan stays as the fallback for a client who volunteers feedback
+    // unprompted; when the coach actually posed the question, that is not something to infer.
+    const weAsked = user.awaitingInputType === "session_feel";
+    if (hadWorkout || weAsked) {
       const reply = workoutFeedbackReply(feedbackKind, firstName);
       storeMemory(phone, `Workout difficulty: last session felt "${feedbackKind.replace("_", " ")}"`, "workout").catch(() => {});
+      // ANSWERED, SO NO LONGER PENDING. An expectation that outlives its answer is the next
+      // turn's bug: tomorrow's "too hard" about the diet would be read as this session's feedback.
+      if (weAsked) {
+        await db.update(users).set({ awaitingInputType: null }).where(eq(users.id, user.id))
+          .catch(e => console.warn("[WORKOUT] could not clear the feel question:", (e as any)?.message));
+      }
       await logChat(user.id, message, reply, "WORKOUT_FEEDBACK");
       return reply;
     }
@@ -663,6 +672,20 @@ export async function handleWorkoutCommands(ctx: {
     // move, then the question — and the answers to that question are the ONLY buttons. Three
     // buttons offering a menu of other topics is a machine changing the subject; a client who
     // has just trained is being asked one thing, so they get the three ways to answer it.
+    // THE QUESTION RECORDS THAT IT WAS ASKED (2026-08-28, live trace).
+    //
+    // Observed: the coach asked this, the client answered "Just right. I pushed", and the answer
+    // was returned as "today's session is already logged" — the reply to our own question read as
+    // a duplicate log. classifyWorkoutFeedback recognised it correctly; the branch that would
+    // have used it is gated on finding a WORKOUT_* intent in the last six hours, and when a
+    // session is logged by a producer outside that list the gate misses and the turn falls
+    // through ~450 lines to the terse `isDone` match.
+    //
+    // A six-hour scan of chat intents is an inference about whether we asked something. The
+    // answer is not an inference: we are asking right now. awaitingInputType is the field ten
+    // other pending questions already use, so the expectation is stated rather than reconstructed.
+    await db.update(users).set({ awaitingInputType: "session_feel" }).where(eq(users.id, user.id))
+      .catch(e => console.warn("[WORKOUT] could not record the feel question:", (e as any)?.message));
     return [
       `${doneResponse}${doneAddOn}`.trim(),
       `How did that session feel?[BUTTONS:Too easy|Just right|Too hard]`,
