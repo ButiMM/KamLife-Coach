@@ -9202,7 +9202,7 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     }
   });
 
-  test("coach health: what the automatic sweep stores, the page actually shows", async () => {
+  test("coach health: what the automatic sweep stores, the page actually shows", () => {
     // A CONTRACT ASSERTION, and source-shaped ON PURPOSE. The first version of A1 added lastSweep
     // to the brief endpoint and never rendered it, so the background loop ran, persisted, and was
     // invisible to the only person who would act on it — the feature's whole claim, unverifiable
@@ -9210,8 +9210,14 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     // ignores" without driving a browser, so this counts instead, the same way check-reach counts
     // senders. Narrow by design: it asserts the operator-facing signals are consumed, not how they
     // are laid out.
-    const { runCoachHealthSweep } = await import("../server/routes/admin-turns");
-    assert.equal(typeof runCoachHealthSweep, "function", "the automatic sweep is gone");
+    // READ, DO NOT IMPORT. The first version of this case did `await import("admin-turns")` just
+    // to assert the export exists. Importing that module pulls in the route layer and leaves
+    // runtime handles open, so the suite reported 1050/1050 and then never exited — it sat until
+    // CI's 600s timeout. The whole check is already a source-shape assertion, so reading the file
+    // is the consistent instrument as well as the safe one: this suite must not need a live server
+    // to answer "is the export still there".
+    const turns = readFileSync("server/routes/admin-turns.ts", "utf-8");
+    assert.match(turns, /export async function runCoachHealthSweep/, "the automatic sweep is gone");
     const page = readFileSync("client/src/pages/coach-health.tsx", "utf-8");
     assert.match(page, /lastSweep/, "the Coach Health page does not read the automatic run at all");
     // The three things that prove the loop ran while the page was closed: WHEN it ran, what it
