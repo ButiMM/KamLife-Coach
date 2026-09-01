@@ -880,6 +880,77 @@ const MUST_WRITE: [string, string][] = [
         if (clean.fresh.length !== 0) {
           failures.push(`A healthy weight reply produced a NEW candidate — the automatic queue would fill with turns that are fine: ${clean.fresh.join(", ")}`);
         }
+
+        /**
+         * A2 — A GENUINE RECURRENCE MUST COME BACK (2026-09-01).
+         *
+         * A1 filtered against a flat "already announced" list forever, so a candidate that aged
+         * out of the window and happened again a week later produced the same stable ref and was
+         * reported as "none new". The suppression that is right for the next hour is wrong for
+         * the next month.
+         *
+         * The window above has just gone clean, so the candidate is absent. What follows is the
+         * same failure recurring with a turn the sweep has never counted — and then the same
+         * evidence re-swept, which must NOT be announced again, or "recurrence" would just mean
+         * "we ran it twice".
+         */
+        const recur = (id: string, at: Date) => new Map<any, any[]>([[schema.turnLedger, [{
+          id, userId: USER.id, createdAt: at,
+          inputText: "how is my weight going?", reply: observed,
+          mutations: [], stateRead: {}, version: "25b2232",
+          lifecycleStatus: null, failureCategory: null, fixRef: null,
+        }]]]);
+
+        g.__KAMLIFE_STUB_ROWS = recur("tl-recurrence", new Date(Date.now() + 60_000));
+        const back = await runCoachHealthSweep(1);
+        if (back.fresh.length === 0) {
+          failures.push(`The same failure recurred after the candidate had gone quiet and was reported as "none new" — a real recurrence is silently suppressed and never reaches a human again`);
+        }
+
+        // ...and it cannot be manufactured by re-running what is already stored.
+        const rerun = await runCoachHealthSweep(1);
+        if (rerun.fresh.length !== 0) {
+          failures.push(`Re-running the sweep over the SAME evidence announced ${rerun.fresh.length} candidate(s) as a recurrence — "new" would mean "we ran again", not "it happened again"`);
+        }
+        if (rerun.candidates === 0) {
+          failures.push(`The re-run lost the candidate — recurrence handling must change what is ANNOUNCED, not what is held`);
+        }
+
+        // ABSENCE IS NOT ENOUGH ON ITS OWN, and this is the case that proves the second half of
+        // the rule carries weight. A candidate can leave the active set and come back with no new
+        // turn behind it — a shorter window, a boundary wobble, a sweep run at a different size.
+        // Announcing that would make "recurrence" mean "the window moved". Here the candidate goes
+        // absent and then the ORIGINAL rows return, older than the evidence already counted.
+        g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[schema.turnLedger, []]]);
+        await runCoachHealthSweep(1);
+        g.__KAMLIFE_STUB_ROWS = recur("tl-observed", new Date(Date.now() - 3 * 3_600_000));
+        const wobble = await runCoachHealthSweep(1);
+        if (wobble.fresh.length !== 0) {
+          failures.push(`A candidate that went absent and came back with NO new evidence was announced as a recurrence — the window moving would read as the failure happening again`);
+        }
+        delete g.__KAMLIFE_STUB_ROWS;
+      }
+
+      /**
+       * A2 — THE SCHEDULED READ IS AUDITED LIKE EVERY OTHER READ.
+       *
+       * buildCoachHealthBrief reads inbound text, replies, mutations and state. The audit call sat
+       * in the route handler, so a person opening the page was recorded and the hourly job reading
+       * the same rows was not. Graded on the row the read actually writes, and on it naming the
+       * scheduler rather than a person — a record that cannot tell them apart is not an audit.
+       */
+      {
+        const { runCoachHealthSweep } = await import("../server/routes/admin-turns");
+        freshTurn();
+        g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[schema.turnLedger, []]]);
+        g.__KAMLIFE_STUB_WRITES = [];
+        await runCoachHealthSweep(1);
+        const audits = (g.__KAMLIFE_STUB_WRITES || []).filter((w: any) => w.table === schema.adminEvents);
+        if (audits.length === 0) {
+          failures.push(`The scheduled Coach Health read wrote no audit record — the background reader bypasses the control every guarded endpoint obeys`);
+        } else if (!audits.some((w: any) => String(w.values?.action || "").includes("sweep") || w.values?.meta?.scheduled === true)) {
+          failures.push(`The scheduled read was audited as though a person had made it: ${JSON.stringify(audits[0]?.values?.action)} — the trail cannot distinguish the job from an operator`);
+        }
         delete g.__KAMLIFE_STUB_ROWS;
       }
     }
