@@ -180,7 +180,19 @@ export async function appendItemsToRecentMeal(
     .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, dayStart), lt(mealLogs.loggedAt, dayEnd)))
     .orderBy(desc(mealLogs.loggedAt)).limit(8);
   const slot = String(namedSlot || "").toLowerCase();
-  const target = (slot ? rows.find(r => String(r.mealLabel || "").toLowerCase() === slot) : null) || rows[0];
+  // A NAMED SLOT THAT IS NOT THERE IS NOT A LICENCE TO PICK ANOTHER MEAL (2026-09-01).
+  //
+  // `find(...) || rows[0]` read as "prefer the named meal", but the `||` also fires when the named
+  // meal simply is not in that day — so a client saying "you missed the black coffee at breakfast"
+  // before their breakfast was logged had the coffee silently attached to whatever they ate last.
+  // That is the same defect the day bound above fixed, one axis over and one step later: we knew
+  // which meal they meant, could not find it, and wrote somewhere else anyway.
+  //
+  // Naming no slot is unchanged — most-recent still stands, which is what "you missed the black
+  // coffee" has always meant. Returning null hands the turn to the clarification the caller
+  // already owns ("Which meal did I miss?"), the same answer an unpinnable DAY gets. Asking is
+  // cheap; a correction on a meal the client did not name is not visible to them.
+  const target = slot ? rows.find(r => String(r.mealLabel || "").toLowerCase() === slot) : rows[0];
   if (!target?.id) return null;
 
   const existing = Array.isArray(target.items) ? target.items as any[] : [];

@@ -2035,6 +2035,7 @@ async function main() {
 
   check("2c . the client is told which day was changed", async () => {
     const { mealLogs } = await import("../shared/schema");
+    const { sastDayStart } = await import("../server/utils");
     const g = globalThis as any;
     const replies = await serialise(async () => {
       // One row per day the check corrects — see 2b. A single yesterday row made the today case
@@ -2069,11 +2070,19 @@ async function main() {
     // …AND THE MEAL THEY NAMED. With dinner logged after breakfast, "at breakfast" must not
     // attach to dinner — the date defect one axis over, found reviewing this cut.
     const slotted = await serialise(async () => {
+      // ANCHORED TO THE SAST DAY, NOT TO "NOW MINUS SEVEN HOURS" (2026-09-01).
+      //
+      // Breakfast was seeded at NOW − 7h, which is the previous SAST day on any run before 07:00.
+      // The amend window is correctly bounded to one day, so before 07:00 the named breakfast row
+      // was not in it, the lookup fell through to dinner, and this check went red on the clock
+      // rather than on the code — it failed identically on dc3c308 and on main at 06:47 SAST.
+      // Both rows now sit inside the day the correction resolves to, at every hour.
+      const dayStart = sastDayStart().getTime();
       g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [
         { id: "p-dinner", mealLabel: "dinner", kcalInt: 800, proteinInt: 50, carbsInt: 70,
-          fatInt: 30, items: [{ name: "Steak" }], loggedAt: new Date(NOW - 3600_000) },
+          fatInt: 30, items: [{ name: "Steak" }], loggedAt: new Date(dayStart + 19 * 3600_000) },
         { id: "p-bfast", mealLabel: "breakfast", kcalInt: 669, proteinInt: 63, carbsInt: 60,
-          fatInt: 25, items: [{ name: "Bread" }], loggedAt: new Date(NOW - 7 * 3600_000) },
+          fatInt: 25, items: [{ name: "Bread" }], loggedAt: new Date(dayStart + 7 * 3600_000) },
       ]]]);
       const out = {
         named: await say("You missed the black coffee at breakfast"),
@@ -2082,10 +2091,27 @@ async function main() {
       delete g.__KAMLIFE_STUB_ROWS;
       return out;
     });
+    // AND THE CONTROL FOR THAT PREFERENCE: a named meal the day does not hold must not be
+    // silently redirected to the meal that happens to be newest. Seeded with dinner only, so the
+    // `find` fails and the old `|| rows[0]` fallback would attach the coffee to dinner.
+    const absentSlot = await serialise(async () => {
+      const dayStart = sastDayStart().getTime();
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [
+        { id: "p-dinner-only", mealLabel: "dinner", kcalInt: 800, proteinInt: 50, carbsInt: 70,
+          fatInt: 30, items: [{ name: "Steak" }], loggedAt: new Date(dayStart + 19 * 3600_000) },
+      ]]]);
+      const out = await say("You missed the black coffee at breakfast");
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
     assert.match(slotted.named, /to your breakfast/i,
       `the client named the meal and it went elsewhere: ${slotted.named}`);
     assert.match(slotted.unnamed, /to your dinner/i,
       `with no meal named, the most recent must stand: ${slotted.unnamed}`);
+    assert.ok(!/to your dinner/i.test(absentSlot),
+      `the client named a meal the day does not hold and it was written to another: ${absentSlot}`);
+    assert.match(absentSlot, /which meal did i miss/i,
+      `a named meal that is absent must be asked about, not guessed: ${absentSlot}`);
     assert.match(replies.span, /which meal did i miss/i,
       `an unpinnable day was written instead of clarified: ${replies.span}`);
   });
