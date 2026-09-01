@@ -27,7 +27,7 @@ import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat, turnMutation, turnAlreadyWrote } from "./chat-log";
 import { sastDayKey } from "../sast";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
-import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, reportedInSomeClause, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen } from "../utils";
+import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, reportedInSomeClause, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen, getDisplayName } from "../utils";
 import { applyRetroSessionState } from "../day-ledger";
 import { readTrainingDay } from "../one-action";
 import { invalidatePatternCache } from "../cache";
@@ -91,7 +91,7 @@ export async function resumeWorkoutFeedbackExpectation(ctx: {
   if (!consumed.length) return null;
   user.awaitingInputType = null;
 
-  const firstName = user.name?.split(" ")[0] || "";
+  const firstName = getDisplayName(user);
   const reply = workoutFeedbackReply(feedbackKind, firstName);
   storeMemory(phone, `Workout difficulty: last session felt "${feedbackKind.replace("_", " ")}"`, "workout").catch(() => {});
   await logChat(user.id, message, reply, "WORKOUT_FEEDBACK");
