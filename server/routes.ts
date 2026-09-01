@@ -39,7 +39,7 @@ import { captureSignupSource } from "./signup-capture";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
 import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnMutations, turnAlreadyWrote, turnEvidence } from "./handlers/chat-log";
-import { handleWorkoutCommands } from "./handlers/workout";
+import { handleWorkoutCommands, resumeWorkoutFeedbackExpectation } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
 import { handleMiscCommands } from "./handlers/misc-commands";
 import { handleLifecycle } from "./handlers/lifecycle";
@@ -709,9 +709,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
   /** Every exit for a durable-write turn closes through the decision owner — see
    *  understanding/live.closeCoachingTurn and tracking-contract-tests LAW 4. */
-  const closeCoachingTurn = (reply: string | null) => closeCoachingTurnFor(user, message, reply);
-
-  if (process.env.NORMALIZER !== "off" && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
+  const closeCoachingTurn = (reply: string | null) => closeCoachingTurnFor(user, message, reply); const feedbackReply = await resumeWorkoutFeedbackExpectation({ phone, message, m, user }); if (feedbackReply !== null) turnEvidence({ conversationalOnly: true });
+  if (feedbackReply !== null && mayEndTurn("workout-feedback")) return closeCoachingTurn(feedbackReply); if (feedbackReply !== null) commitFact(turn, "workout", feedbackReply); if (process.env.NORMALIZER !== "off" && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
       const pre = await Promise.race([
         intentPromise,
@@ -1166,7 +1165,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ---- WORKOUT COMMANDS (gym log, done, lifts, exercises, weight, programme) ----
   // COMMITS, DOES NOT CLAIM THE TURN. Returned unconditionally, so "I trained chest today and
   // had chicken and pap" logged the session and deleted the meal.
-  const workoutResult = await handleWorkoutCommands({ phone, message, m, user });
+  const workoutResult = feedbackReply === null ? await handleWorkoutCommands({ phone, message, m, user }) : null;
   if (workoutResult !== null) {
     if (mayEndTurn("workout")) return closeCoachingTurn(workoutResult);
     commitFact(turn, "workout", workoutResult);

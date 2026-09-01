@@ -8,7 +8,13 @@
 import { db } from "../db";
 import { users, workoutLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, lt, desc } from "drizzle-orm";
-import { classifyWorkoutFeedback, workoutFeedbackReply } from "../workout-feedback";
+import {
+  classifyWorkoutFeedbackAnswer,
+  createWorkoutFeedbackExpectation,
+  isWorkoutFeedbackExpectation,
+  readWorkoutFeedbackExpectation,
+  workoutFeedbackReply,
+} from "../workout-feedback";
 import { parseSessionReport, sessionReportReply, sessionMemoryLine, type SessionReport } from "../session-report";
 import {
   buildDayWorkout,
@@ -21,7 +27,7 @@ import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat, turnMutation, turnAlreadyWrote } from "./chat-log";
 import { sastDayKey } from "../sast";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
-import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, reportedInSomeClause, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen } from "../utils";
+import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, reportedInSomeClause, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen, getDisplayName } from "../utils";
 import { applyRetroSessionState } from "../day-ledger";
 import { readTrainingDay } from "../one-action";
 import { invalidatePatternCache } from "../cache";
@@ -38,6 +44,59 @@ import { sendWhatsApp, saveState } from "../scheduler/shared";
 // training message must not be logged as cardio. Without it, "bench 80kg" sets the client's
 // weight to 80kg and silently recalculates every target.
 const EXERCISE_PATTERN = /\b(?:bench\s*press?|squat|deadlift|leg\s*press?|leg\s*curl|leg\s*extension|hip\s*thrust|rdl|romanian|lunge|lateral\s*raise|shoulder\s*press?|overhead\s*press?|ohp|lat\s*pull[- ]?down|seated\s*row|cable\s*row|face\s*pull|bicep\s*curl|tricep|pushdown|push[- ]?ups?|pull[- ]?ups?|chin[- ]?ups?|dip|plank|fly|chest\s*press?|incline|decline|cable|barbell|bb|dumbbell|db|calf\s*raise|glute|hip|press|rows?|rdls?|step\s*up|abduction|adduction|pull\s*through|hip\s*hinge)\b/i;
+
+/**
+ * Resume the one post-session question before ordinary handlers can reinterpret its answer as a
+ * new workout report. This is the workout-feedback owner's landing pad, analogous to the existing
+ * engine-confirm resume path; it is not a second routing system.
+ *
+ * A non-feedback message spends the expectation and returns null, so changing subject never
+ * leaves a client hostage to a question Coach K asked earlier. Consumption is conditional on the
+ * exact durable marker: only one concurrent turn can clear it and own the feedback response.
+ */
+export async function resumeWorkoutFeedbackExpectation(ctx: {
+  phone: string;
+  message: string;
+  m: string;
+  user: any;
+}): Promise<string | null> {
+  const { phone, message, m, user } = ctx;
+  const marker = String(user?.awaitingInputType || "");
+  if (!isWorkoutFeedbackExpectation(marker)) return null;
+
+  const expectation = readWorkoutFeedbackExpectation(marker);
+  const feedbackKind = expectation ? classifyWorkoutFeedbackAnswer(message) : null;
+
+  // Expiry and a clear subject change both release the one-slot expectation. Do not make a later
+  // "too hard" answer a session question the client has already moved on from.
+  if (!expectation || !feedbackKind) {
+    await db.update(users).set({ awaitingInputType: null })
+      .where(and(eq(users.id, user.id), eq(users.awaitingInputType, marker)))
+      .catch((e) => console.error("[WORKOUT_FEEDBACK] expectation clear failed:", e));
+    user.awaitingInputType = null;
+    return null;
+  }
+
+  // Clear first and condition on the exact marker. If the durable transition cannot be confirmed,
+  // do not manufacture a second feedback answer from a state another turn may already have spent.
+  let consumed: { id: string }[] = [];
+  try {
+    consumed = await db.update(users).set({ awaitingInputType: null })
+      .where(and(eq(users.id, user.id), eq(users.awaitingInputType, marker)))
+      .returning({ id: users.id });
+  } catch (e) {
+    console.error("[WORKOUT_FEEDBACK] expectation consume failed:", e);
+    return null;
+  }
+  if (!consumed.length) return null;
+  user.awaitingInputType = null;
+
+  const firstName = getDisplayName(user);
+  const reply = workoutFeedbackReply(feedbackKind, firstName);
+  storeMemory(phone, `Workout difficulty: last session felt "${feedbackKind.replace("_", " ")}"`, "workout").catch(() => {});
+  await logChat(user.id, message, reply, "WORKOUT_FEEDBACK");
+  return reply;
+}
 
 export async function handleWorkoutCommands(ctx: {
   phone: string;
@@ -64,12 +123,8 @@ export async function handleWorkoutCommands(ctx: {
   // workout was actually delivered or logged in the last 6 hours, and the message
   // isn't about food/money/the app. This recency gate is what keeps "this diet is
   // too hard" from being misread as workout feedback — no state machine needed.
-  const feedbackKind = classifyWorkoutFeedback(m);
-  if (
-    feedbackKind
-    && !/\b(diet|eat|eating|food|meal|protein|carbs?|expensive|money|afford|app|bot|coach|subscription|price|pay)\b/i.test(m)
-    && (m.split(/\s+/).length <= 8 || /\b(workout|session|training|gym|that|it|today)\b/i.test(m))
-  ) {
+  const feedbackKind = classifyWorkoutFeedbackAnswer(message);
+  if (feedbackKind) {
     const sixHoursAgo = new Date(Date.now() - 6 * 3600_000);
     const recent = await db.select({ intent: chatHistory.intent }).from(chatHistory)
       .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, sixHoursAgo)))
@@ -628,6 +683,14 @@ export async function handleWorkoutCommands(ctx: {
 
 
     await logChat(user.id, message, doneResponse, "WORKOUT_DONE");
+
+    // Coach K is now asking one structured question. Reuse the durable pending-answer slot so
+    // its answer survives a process restart and reaches workout-feedback before a prose/logging
+    // handler gets a chance to reinterpret it. A newer question replaces the older single-slot
+    // expectation, matching the existing awaitingInputType contract.
+    const feedbackExpectation = createWorkoutFeedbackExpectation();
+    await db.update(users).set({ awaitingInputType: feedbackExpectation }).where(eq(users.id, user.id));
+    user.awaitingInputType = feedbackExpectation;
 
     // Fire referral nudge 60 seconds later on the very first workout
     if (newTotal === 1) {
