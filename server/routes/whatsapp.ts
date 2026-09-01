@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import twilio from "twilio";
+import twilio from "twilio";   // inbound webhook signature validation only — delivery is outbound-delivery.ts
 import type { RouteDeps } from "./types";
 import { requireAdminKey } from "./auth";
 import { sendWhatsAppButtons } from "../twilio-interactive";
@@ -29,9 +29,9 @@ async function comebackPrefix(phone: string): Promise<string> {
   } catch { return ""; }
 }
 
-const TWILIO_FROM = () => process.env.TWILIO_WHATSAPP_NUMBER
-  ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
-  : "";
+// The sender number and the Twilio client both moved to outbound-delivery.ts with Cut B2. This
+// file resolved its own copy of each, which is how one door can end up sending from a number the
+// other does not know about.
 
 /**
  * THE REACTIVE CHOKEPOINT (2026-07-30).
@@ -159,27 +159,15 @@ async function sendParts(
   parts: string[],
   replyMedia: string | string[] | null,
 ): Promise<void> {
-  const fromNum = TWILIO_FROM();
-  if (!fromNum) { console.error("[TEXT_ASYNC] TWILIO_WHATSAPP_NUMBER not set"); return; }
-  const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
   const mediaUrls = Array.isArray(replyMedia) ? replyMedia.filter(Boolean) : (replyMedia ? [replyMedia] : []);
-  const sendOne = async (params: Record<string, unknown>, label: string) => {
-    const delays = [0, 2000, 5000, 10000];
-    const bodyLen = typeof params.body === "string" ? (params.body as string).length : 0;
-    const hasMedia = Array.isArray(params.mediaUrl) && (params.mediaUrl as unknown[]).length > 0;
-    for (let d = 0; d < delays.length; d++) {
-      if (delays[d] > 0) await new Promise(r => setTimeout(r, delays[d]));
-      try {
-        await twilioC.messages.create(params as unknown as Parameters<typeof twilioC.messages.create>[0]);
-        return;
-      } catch (e: any) {
-        // Structured failure log: Twilio error code + body length make silent drops diagnosable.
-        // Code 21617 = body over 1600 chars; 63016/63021 = media fetch/format rejected.
-        console.error(`[TWILIO_SEND] ${label} attempt ${d + 1}/${delays.length} failed — code=${e?.code ?? "?"} status=${e?.status ?? "?"} bodyLen=${bodyLen} media=${hasMedia} msg="${(e?.message || "").slice(0, 160)}"`);
-        if (d === delays.length - 1) console.error(`[TWILIO_SEND] ${label} GAVE UP after ${delays.length} attempts — reply NOT delivered`);
-      }
-    }
-  };
+  // ONE DELIVERY OWNER (Cut B2, 2026-09-01). This built its own Twilio client, resolved its own
+  // sender and ran its own retry loop — the third copy of that loop in the codebase. The schedule
+  // below is UNCHANGED and stays here because it is genuinely this door's: a client is holding
+  // their phone, so the reply retries sooner and longer than a 06:00 job, and it never throws
+  // because the webhook has already returned 200 and there is nobody left to tell.
+  const { deliverTwilioMessage } = await import("../outbound-delivery");
+  const sendOne = (params: Record<string, unknown>, label: string) =>
+    deliverTwilioMessage(phone, params, { label: `reactive ${label}`, retryDelaysMs: [0, 2000, 5000, 10000] });
   // Hard safety net: never hand Twilio a body over the 1600 limit even if a caller
   // forgot to splitMessage. Re-split any oversized part here so text always lands.
   // Uses the single TWILIO_WHATSAPP_BODY_LIMIT constant — same value splitMessage defaults to.
@@ -194,10 +182,10 @@ async function sendParts(
   // replies — "Today's workout" returned nothing — while text-only menus delivered fine.
   // Decoupling guarantees the reply text always lands; a failed image only loses the image.
   for (let i = 0; i < textParts.length; i++) {
-    await sendOne({ from: fromNum, to: phone, body: textParts[i].trim() }, `part ${i + 1}`);
+    await sendOne({ body: textParts[i].trim() }, `part ${i + 1}`);
   }
   for (let k = 0; k < mediaUrls.length; k++) {
-    await sendOne({ from: fromNum, to: phone, mediaUrl: [mediaUrls[k]] }, `media ${k + 1}`);
+    await sendOne({ mediaUrl: [mediaUrls[k]] }, `media ${k + 1}`);
   }
 }
 

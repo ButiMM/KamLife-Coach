@@ -169,6 +169,57 @@ export interface OutboundPrepared {
   detail?: string;
 }
 
+/**
+ * THE TEMPLATE-LEAK CHECK, folded in from verifiers/proactive-gate.ts (Cut B2, 2026-09-01).
+ *
+ * It lived in its own module named for the only door that called it, and that name was the bug:
+ * its header claimed "every outbound message" while its single caller was sendOneWhatsApp, so
+ * "You ate undefined kcal" was blocked at 06:00 and delivered mid-conversation. It is a "may this
+ * be said" question, this file owns that question for both doors, and a question with one owner
+ * does not need a module of its own to be asked from.
+ *
+ * Pure, never throws, fails OPEN: a broken checker must not become a broken product.
+ */
+interface OutboundCheck { safe: boolean; reason: string }
+
+// Unambiguous template-leak markers. None of these legitimately appear in a
+// South African fitness coaching message, so matching one means a bug rendered
+// a broken value into the text.
+const LEAK_PATTERNS: { re: RegExp; label: string }[] = [
+  { re: /\bundefined\b/i, label: "literal 'undefined'" },
+  { re: /\bNaN\b/, label: "literal 'NaN'" },
+  { re: /\[object Object\]/i, label: "'[object Object]'" },
+  { re: /\$\{[^}]*\}/, label: "unrendered ${...} template" },
+  { re: /\bnull\b\s*(kcal|g protein|kg|steps|kj|sessions?|days?)/i, label: "'null' before a unit" },
+  { re: /(kcal|protein|kg|steps|sessions?|days?)\s*:?\s*\bnull\b/i, label: "unit followed by 'null'" },
+  { re: /\bNaN\s*(kcal|g|kg|steps|%)/i, label: "'NaN' before a unit" },
+];
+
+/**
+ * Check an outbound message body for emptiness and template leaks.
+ * Returns { safe: true } for any normal message.
+ */
+function checkOutboundMessage(body: string | null | undefined): OutboundCheck {
+  try {
+    if (body == null || typeof body !== "string") {
+      return { safe: false, reason: "body is null/undefined or not a string" };
+    }
+    const trimmed = body.trim();
+    if (trimmed.length === 0) {
+      return { safe: false, reason: "empty body" };
+    }
+    for (const { re, label } of LEAK_PATTERNS) {
+      if (re.test(body)) {
+        return { safe: false, reason: `template leak: ${label}` };
+      }
+    }
+    return { safe: true, reason: "" };
+  } catch {
+    // Never block a send because the checker itself errored — fail-open.
+    return { safe: true, reason: "" };
+  }
+}
+
 /** What a client hears when the floor refuses a reactive draft. Never an apology, never silence. */
 const REACTIVE_REPAIR = "Let me check that properly before I answer — give me one sec and ask me again.";
 
@@ -208,6 +259,26 @@ export async function prepareOutbound(
   try {
     let out = await provenanceGate(recipientKey, text);
     if (!out.includes('_"')) out = humanizeReply(out);
+    // THE TEMPLATE-LEAK GATE REACHED THE SCHEDULER AND NOTHING A CLIENT SAID HELLO TO
+    // (Cut B2, 2026-09-01). proactive-gate.ts opens with "Last-line sanity check for every
+    // outbound message" and had exactly ONE caller: sendOneWhatsApp. So "You ate undefined kcal"
+    // was blocked at 06:00 and delivered mid-conversation — the identical shape to the finding
+    // Cut B1 exists for, one layer down, and found by asking which callers a floor actually has
+    // rather than what its header claims.
+    //
+    // It belongs HERE and not in the transport. It is a "may this be said" question, and that
+    // question already has an owner and an established failure policy: proactive refuses,
+    // reactive may not go silent. Putting it at the Twilio call would have forced a leaking reply
+    // to become NO reply, breaking the never-silent rule to fix a rendering bug — and it would
+    // have run per bubble, after the split, where a marker straddling two parts is invisible.
+    const leak = checkOutboundMessage(out);
+    if (!leak.safe) {
+      console.error(`[OUTBOUND_AUTHORITY] BLOCKED ${mode === "proactive" ? "proactive send" : "reactive draft"} `
+        + `to ${recipientKey.slice(-8)} — ${leak.reason}`);
+      return mode === "proactive"
+        ? { text: "", blocked: true, detail: leak.reason }
+        : { text: REACTIVE_REPAIR, blocked: true, detail: leak.reason };
+    }
     return { text: out, blocked: false };
   } catch (e: any) {
     console.error(`[OUTBOUND_AUTHORITY] BLOCKED ${mode} send to ${recipientKey.slice(-8)} — preparation failed: ${e?.message || e}`);
