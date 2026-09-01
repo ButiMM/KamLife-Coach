@@ -12,6 +12,52 @@
 
 export type WorkoutFeedbackKind = "too_easy" | "just_right" | "too_hard";
 
+// The post-session question has one existing durable home: users.awaitingInputType. Other
+// pending-answer flows already use that single slot, including timestamped, payload-carrying
+// holds. Keep this deliberately workout-scoped rather than creating a second conversation state
+// system: its owner, expected answer and source are all fixed by this one product loop.
+const EXPECTATION_OWNER = "workout_feedback";
+const EXPECTATION_TYPE = "session_feel";
+const EXPECTATION_SOURCE = "post_session_checkin";
+export const WORKOUT_FEEDBACK_EXPECTATION_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+export interface WorkoutFeedbackExpectation {
+  owner: typeof EXPECTATION_OWNER;
+  type: typeof EXPECTATION_TYPE;
+  source: typeof EXPECTATION_SOURCE;
+  createdAt: number;
+}
+
+/** Durable pointer for the exact "How did that session feel?" question. */
+export function createWorkoutFeedbackExpectation(now = Date.now()): string {
+  return [EXPECTATION_OWNER, EXPECTATION_TYPE, EXPECTATION_SOURCE, now].join(":");
+}
+
+/**
+ * Recover a live post-session expectation. The timestamp gives this narrow continuation the
+ * same six-hour horizon the previous chat-history inference used; an old "too hard" must become
+ * a fresh message, never an answer to a forgotten session question.
+ */
+export function readWorkoutFeedbackExpectation(
+  marker: string | null | undefined,
+  now = Date.now(),
+): WorkoutFeedbackExpectation | null {
+  const parts = String(marker || "").split(":");
+  if (
+    parts.length !== 4
+    || parts[0] !== EXPECTATION_OWNER
+    || parts[1] !== EXPECTATION_TYPE
+    || parts[2] !== EXPECTATION_SOURCE
+  ) return null;
+  const createdAt = Number(parts[3]);
+  if (!Number.isFinite(createdAt) || createdAt <= 0 || now - createdAt > WORKOUT_FEEDBACK_EXPECTATION_WINDOW_MS) return null;
+  return { owner: EXPECTATION_OWNER, type: EXPECTATION_TYPE, source: EXPECTATION_SOURCE, createdAt };
+}
+
+export function isWorkoutFeedbackExpectation(marker: string | null | undefined): boolean {
+  return String(marker || "").startsWith(`${EXPECTATION_OWNER}:`);
+}
+
 const TOO_EASY = /\b(too\s+easy|was\s+easy|felt\s+easy|that\s+was\s+easy|piece\s+of\s+cake|not\s+(?:challenging|hard\s+enough|enough)|need(?:s|ed)?\s+more|too\s+light|way\s+too\s+easy|bored)\b/i;
 const TOO_HARD = /\b(too\s+hard|too\s+tough|too\s+difficult|too\s+heavy|too\s+much|so\s+hard|really\s+hard|brutal|killed\s+me|kicked\s+my|couldn.?t\s+finish|could\s+not\s+finish|struggled|wiped\s+me|destroyed\s+me|too\s+intense)\b/i;
 const JUST_RIGHT = /\b(just\s+right|just\s+fine|perfect|felt\s+(?:good|great)|good\s+(?:session|workout|one)|spot\s+on|manageable|challenging\s+but|nailed\s+it|just\s+enough)\b/i;

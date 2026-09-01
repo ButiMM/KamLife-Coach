@@ -16,6 +16,7 @@
     "test:scanner": "tsx script/food-scanner-tests.ts",
     "test:decision-boundary": "tsx script/decision-boundary-tests.ts",
     "test:reentry": "tsx script/reentry-state-tests.ts && tsx script/reentry-bridge-tests.ts",
+    "test:continuity": "tsx script/expectation-continuity-tests.ts",
     "test": "tsx script/run-suites.ts",
     "check:filesize": "tsx script/check-file-sizes.ts",
     "check:pricing": "tsx script/check-pricing.ts",

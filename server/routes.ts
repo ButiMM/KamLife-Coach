@@ -39,7 +39,7 @@ import { captureSignupSource } from "./signup-capture";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
 import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnMutations, turnAlreadyWrote, turnEvidence } from "./handlers/chat-log";
-import { handleWorkoutCommands } from "./handlers/workout";
+import { handleWorkoutCommands, resumeWorkoutFeedbackExpectation } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
 import { handleMiscCommands } from "./handlers/misc-commands";
 import { handleLifecycle } from "./handlers/lifecycle";
@@ -342,6 +342,15 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
       user.subscriptionStatus = "trial";
       user.betaBypassUntil = farBypass;
     }
+  }
+
+  // POST-SESSION FEEDBACK RESUME — the question's existing durable pointer has first refusal
+  // before unrelated handlers can turn "Just right. I pushed." into another workout/logging turn.
+  // A non-feedback answer clears the pointer inside its owner and continues normally.
+  const feedbackReply = await resumeWorkoutFeedbackExpectation({ phone, message, m, user });
+  if (feedbackReply !== null) {
+    turnEvidence({ conversationalOnly: true });
+    return feedbackReply;
   }
 
   // ENGINE CONFIRM RESUME — a parked "reply *yes* to log it" lands here before any handler can
