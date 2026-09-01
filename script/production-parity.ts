@@ -2035,6 +2035,7 @@ async function main() {
 
   check("2c . the client is told which day was changed", async () => {
     const { mealLogs } = await import("../shared/schema");
+    const { sastDayStart } = await import("../server/utils");
     const g = globalThis as any;
     const replies = await serialise(async () => {
       // One row per day the check corrects — see 2b. A single yesterday row made the today case
@@ -2069,11 +2070,19 @@ async function main() {
     // …AND THE MEAL THEY NAMED. With dinner logged after breakfast, "at breakfast" must not
     // attach to dinner — the date defect one axis over, found reviewing this cut.
     const slotted = await serialise(async () => {
+      // ANCHORED TO THE SAST DAY, NOT TO "NOW MINUS SEVEN HOURS" (2026-09-01).
+      //
+      // Breakfast was seeded at NOW − 7h, which is the previous SAST day on any run before 07:00.
+      // The amend window is correctly bounded to one day, so before 07:00 the named breakfast row
+      // was not in it, the lookup fell through to dinner, and this check went red on the clock
+      // rather than on the code — it failed identically on dc3c308 and on main at 06:47 SAST.
+      // Both rows now sit inside the day the correction resolves to, at every hour.
+      const dayStart = sastDayStart().getTime();
       g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [
         { id: "p-dinner", mealLabel: "dinner", kcalInt: 800, proteinInt: 50, carbsInt: 70,
-          fatInt: 30, items: [{ name: "Steak" }], loggedAt: new Date(NOW - 3600_000) },
+          fatInt: 30, items: [{ name: "Steak" }], loggedAt: new Date(dayStart + 19 * 3600_000) },
         { id: "p-bfast", mealLabel: "breakfast", kcalInt: 669, proteinInt: 63, carbsInt: 60,
-          fatInt: 25, items: [{ name: "Bread" }], loggedAt: new Date(NOW - 7 * 3600_000) },
+          fatInt: 25, items: [{ name: "Bread" }], loggedAt: new Date(dayStart + 7 * 3600_000) },
       ]]]);
       const out = {
         named: await say("You missed the black coffee at breakfast"),
@@ -2082,10 +2091,27 @@ async function main() {
       delete g.__KAMLIFE_STUB_ROWS;
       return out;
     });
+    // AND THE CONTROL FOR THAT PREFERENCE: a named meal the day does not hold must not be
+    // silently redirected to the meal that happens to be newest. Seeded with dinner only, so the
+    // `find` fails and the old `|| rows[0]` fallback would attach the coffee to dinner.
+    const absentSlot = await serialise(async () => {
+      const dayStart = sastDayStart().getTime();
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [
+        { id: "p-dinner-only", mealLabel: "dinner", kcalInt: 800, proteinInt: 50, carbsInt: 70,
+          fatInt: 30, items: [{ name: "Steak" }], loggedAt: new Date(dayStart + 19 * 3600_000) },
+      ]]]);
+      const out = await say("You missed the black coffee at breakfast");
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
     assert.match(slotted.named, /to your breakfast/i,
       `the client named the meal and it went elsewhere: ${slotted.named}`);
     assert.match(slotted.unnamed, /to your dinner/i,
       `with no meal named, the most recent must stand: ${slotted.unnamed}`);
+    assert.ok(!/to your dinner/i.test(absentSlot),
+      `the client named a meal the day does not hold and it was written to another: ${absentSlot}`);
+    assert.match(absentSlot, /which meal did i miss/i,
+      `a named meal that is absent must be asked about, not guessed: ${absentSlot}`);
     assert.match(replies.span, /which meal did i miss/i,
       `an unpinnable day was written instead of clarified: ${replies.span}`);
   });
@@ -2374,6 +2400,39 @@ async function main() {
         because: `a single-day message must still be served, unchanged: "${single}"`,
       });
     }
+  });
+
+  check("CUT A . GOAL_CHANGE supplementary weight crosses the canonical weight owner", async () => {
+    const g = globalThis as any;
+    const msg = "My current weight is 82kg and I joined a gym";
+    const { weightLogs } = await import("../shared/schema");
+    const { getWeightTruth } = await import("../server/day-ledger");
+    const result = await serialise(async () => {
+      const prevNorm = process.env.NORMALIZER;
+      delete process.env.NORMALIZER;
+      g.__KAMLIFE_INTENT_FIXTURES = {
+        [msg.toLowerCase()]: { intent: "GOAL_CHANGE", confidence: 0.95, canonical: "change my goal to muscle gain" },
+      };
+      g.__KAMLIFE_STUB_USER = { ...USER, trainingMode: "home", currentWeight: "84.5" };
+      g.__KAMLIFE_STUB_ROWS = new Map([[weightLogs, []]]);
+      g.__KAMLIFE_STUB_WRITES = [];
+      g.__KAMLIFE_STUB_REFLECT_WRITES = true;
+      try {
+        await handleMessage(USER.phoneNumber, msg, undefined, undefined, undefined, "SM-CUT-A-WEIGHT");
+        const events = g.__KAMLIFE_STUB_WRITES.filter((w: any) => w.table === weightLogs);
+        assert.equal(events.length, 1, "the turn must create one weight event, even if another weight route sees it later");
+        g.__KAMLIFE_STUB_ROWS = new Map([[weightLogs, [{ ...events[0].values, at: new Date() }]]]);
+        return { currentWeight: g.__KAMLIFE_STUB_USER.currentWeight, truth: await getWeightTruth(g.__KAMLIFE_STUB_USER) };
+      } finally {
+        delete g.__KAMLIFE_INTENT_FIXTURES;
+        delete g.__KAMLIFE_STUB_ROWS;
+        delete g.__KAMLIFE_STUB_WRITES;
+        delete g.__KAMLIFE_STUB_REFLECT_WRITES;
+        if (prevNorm === undefined) delete process.env.NORMALIZER; else process.env.NORMALIZER = prevNorm;
+      }
+    });
+    assert.equal(result.currentWeight, "82", "users.currentWeight must be the canonical value");
+    assert.equal(result.truth.currentKg, 82, "getWeightTruth must read the same event as current truth");
   });
 
   check("P0-3 . a historical write does not move today's programme", async () => {

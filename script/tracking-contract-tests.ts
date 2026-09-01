@@ -205,6 +205,27 @@ const MUST_WRITE: [string, string][] = [
   async function wroteFor(message: string): Promise<Set<string>> {
     freshTurn();
     g.__KAMLIFE_STUB_USER = { ...USER, todayWater: "0" };
+    // THE LEDGER IS PROCESS STATE TOO (2026-09-01, found integrating Cut A).
+    //
+    // freshTurn() resets the caches and limiters above for exactly the reason stated there — a
+    // graded turn must not inherit the previous one. __KAMLIFE_STUB_ROWS was never in that reset,
+    // so every turn here ran against whatever meal/step/weight rows earlier BLOCKS of this file
+    // had left in the Map, and those rows carry only the columns their own block cared about.
+    //
+    // That was invisible while every dedup query happened to carry a leaf the stub could judge
+    // against the residue: commitFoodLog filtered on `loggedAt >= now-4min`, the stale rows are
+    // older, so they were dropped and the count came out right by accident. Cut A's replay
+    // suppression keys on sourceMessageId + rawMessage with NO time bound — correct, because a
+    // Twilio retry can arrive at any distance — and the residue seeds NEITHER column, so the stub
+    // could not judge either leaf, kept all five rows, and "I had eggs. what should I eat?"
+    // reported itself a duplicate and wrote nothing.
+    //
+    // The product is right: in Postgres those rows have sourceMessageId NULL and never match a
+    // real id. The fixture was wrong, and it was wrong before Cut A — Cut A is only what made it
+    // visible. Reset the ledger with the rest of the turn state.
+    g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([
+      [schema.mealLogs, []], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
+    ]);
     g.__KAMLIFE_STUB_WRITES = [];
     await handleMessage(USER.phoneNumber, message).catch(() => "");
     const wrote = new Set<string>(

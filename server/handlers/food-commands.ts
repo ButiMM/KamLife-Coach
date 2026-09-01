@@ -7,15 +7,14 @@
  */
 
 import { db } from "../db";
-import { turnMutation } from "./chat-log";
-import { users, mealLogs, chatHistory } from "../../shared/schema";
+import { users, chatHistory } from "../../shared/schema";
 import { eq, and, gte, desc, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
 import { isAskingNotReporting } from "../utils";
 import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { getGroceryPersonalization } from "../grocery-personalize";
-import { scanForSAFoods, invalidateFoodTotalsCache } from "./food-scanner";
+import { scanForSAFoods } from "./food-scanner";
 import { logChat, withTimeout } from "./chat-log";
 import { tryLogWater } from "./water";
 import { generateMealPlan } from "../meal-plan";
@@ -24,8 +23,9 @@ import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../
 import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from "../street-food";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel , commaName} from "../utils";
+import { commitFoodLog } from "../day-ledger";
 
-export async function handleFoodCommands(ctx: { phone: string; message: string; m: string; user: any }): Promise<string | null> {
+export async function handleFoodCommands(ctx: { phone: string; message: string; m: string; user: any; sourceMessageId?: string }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
   const firstName = user.name?.split(" ")[0] || "";
   const capName = user.name?.split(" ")[0] || "there";
@@ -104,21 +104,21 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
     const alcoholLoggedAt = parseMealDate(m);
     const alcoholDateLabel = mealDateLabel(alcoholLoggedAt);
 
-    // Always insert into mealLogs — alcohol calories must actually be tracked
-    await db.insert(mealLogs).values({
+    const alcoholCommit = await commitFoodLog({
       userId: user.id,
+      phone,
       rawMessage: message.slice(0, 1000),
       source: "alcohol_log",
       kcalInt: totalCal,
       proteinInt: 0,
       carbsInt: Math.round(totalCal * 0.85 / 4),
       fatInt: 0,
-      items: [{ name: `${drinkName} ×${qty}`, kcal: totalCal, protein: 0 }],
+      items: [{ name: `${drinkName} ×${qty}`, grams: 0, kcal: totalCal, protein: 0, category: "alcohol" }],
       mealLabel: "alcohol",
       loggedAt: alcoholLoggedAt,
-    }).catch(e => console.warn("[alcohol mealLog insert]", e));
-    turnMutation("INSERT meal", "[WRITE]");
-    invalidateFoodTotalsCache(user.id);
+      sourceMessageId: ctx.sourceMessageId,
+    });
+    if (!alcoholCommit.ok) return `I worked out the drinks (~${totalCal} kcal) but couldn't save them just now. Send that again in a moment.`;
 
     let alcoholReply: string;
     if (isRetroAlcohol) {

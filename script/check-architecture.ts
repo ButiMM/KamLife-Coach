@@ -173,8 +173,11 @@ const BUDGET = {
  *               backlog, and it is named rather than counted so nobody has to rediscover it.
  */
 const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT RISK"> = {
-  "server/handlers/meal-repeat.ts": "guarded",
-  "server/handlers/food-commands.ts": "guarded",
+  // meal-repeat.ts and food-commands.ts were here until Cut A. Both held their own meal INSERT —
+  // the repeat door copied a previous row, the alcohol door wrote its own — so both were
+  // independent authorities on "a new eating event happened". Both now hand rows to
+  // commitFoodLog and write nothing themselves, which is the whole point of the cut: this list
+  // shrinking is what convergence looks like from the governor's side.
   // food-context.ts was here until commitFoodLog — the write door — moved to server/day-ledger.ts.
   // It now parses and decides and hands rows to that one owner; it writes nothing itself.
   "server/handlers/food-log-mgmt.ts": "guarded",
@@ -845,6 +848,45 @@ for (const rule of ONE_OWNER) {
     problems.push(`  ✗ nobody owns "${rule.question}" — expected ${rule.owner}`);
   } else if (owners.length > 1 || owners[0] !== rule.owner) {
     problems.push(`  ✗ "${rule.question}" is answered in ${owners.join(", ")} — only ${rule.owner} may.`);
+  }
+}
+
+// ── CUT A: ONE AUTHORITATIVE ACTIVITY-WRITE DOOR PER FACT ────────────────────────────────────
+// New events may have many callers, but only these two owners may materialise them. Corrections
+// remain updates/deletes in their existing APIs; this guard only forbids second INSERT authorities.
+{
+  const live = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, " ")
+    .split("\n").filter(line => !/^\s*\/\//.test(line)).join("\n");
+  const canonicalPath = (f: string) => f.replace(/\\/g, "/");
+  const serverFiles = files.filter(f => canonicalPath(f).startsWith("server/"));
+  const mealBypasses = serverFiles.filter(f => canonicalPath(f) !== "server/day-ledger.ts"
+    && /db\s*\.\s*insert\s*\(\s*mealLogs\s*\)/.test(live(read(f))));
+  for (const f of mealBypasses) problems.push(`  ✗ [OWNERSHIP] ${f} inserts a new meal outside server/day-ledger.ts commitFoodLog.`);
+
+  const permittedWeightMutators = new Set(["server/handlers/weight.ts", "server/handlers/safety.ts"]);
+  const weightBypasses = serverFiles.filter(f => !permittedWeightMutators.has(canonicalPath(f)) && (
+    /\.set\s*\(\s*\{[\s\S]{0,600}?\bcurrentWeight\s*:/.test(live(read(f)))
+    || /\bset\s*\.\s*currentWeight\s*=/.test(live(read(f)))
+  ));
+  for (const f of weightBypasses) problems.push(`  ✗ [OWNERSHIP] ${f} mutates currentWeight outside handleWeightLog (safety reset is the only exception).`);
+
+  const cutAContracts: Array<[string, string, RegExp]> = [
+    ["GOAL_CHANGE supplementary weight", "server/routes.ts", /handleWeightLog\(phone, user, wt\)/],
+    ["onboarding reported weight", "server/onboarding.ts", /handleWeightLog\(phone,[\s\S]{0,160}suppressCustomerLifecycle/],
+    ["scale-photo weight", "server/handlers/media.ts", /scaleReply\s*=\s*await handleWeightLog/],
+    ["text food lineage", "server/handlers/food-context.ts", /eventGroupId\s*=\s*ctx\.sourceMessageId\s*\|\|\s*randomUUID/],
+    ["normal photo lineage", "server/handlers/media.ts", /sourceMessageId:\s*mediaSourceId/],
+    ["collage canonical write", "server/handlers/media.ts", /collageCommit\s*=\s*await commitFoodLog/],
+    ["album canonical write", "server/handlers/media.ts", /albumCommit\s*=\s*await commitFoodLog/],
+    ["meal-repeat canonical write", "server/handlers/meal-repeat.ts", /committed\s*=\s*await commitFoodLog/],
+    ["alcohol canonical write", "server/handlers/food-commands.ts", /alcoholCommit\s*=\s*await commitFoodLog/],
+    ["permanent source replay key", "server/day-ledger.ts", /eq\(mealLogs\.sourceMessageId, params\.sourceMessageId\)/],
+    ["same-message correction API", "server/day-ledger.ts", /planCorrection[\s\S]*applyCorrection/],
+    ["held-meal and amendment APIs", "server/day-ledger.ts", /replaceHeldMeal[\s\S]*amendRecentMeal/],
+    ["meal relabel API", "server/handlers/food-context.ts", /update\(mealLogs\)\.set\(\{ mealLabel: relabelTo, corrected: true \}\)/],
+  ];
+  for (const [contract, file, pattern] of cutAContracts) {
+    if (!pattern.test(read(file))) problems.push(`  ✗ [OWNERSHIP] CUT A contract missing: ${contract} in ${file}.`);
   }
 }
 

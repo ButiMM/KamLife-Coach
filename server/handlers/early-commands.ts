@@ -50,6 +50,7 @@ export async function handleEarlyCommands(ctx: {
   message: string;
   m: string;
   user: any;
+  sourceMessageId?: string;
   hasMedia?: boolean;
   /** SYSTEMIC GATE: classifier says this is a QUESTION (conf >= 0.8). Handlers with
    *  SIDE EFFECTS (log, flip mode, dump content) must not fire — questions go to the
@@ -833,7 +834,7 @@ export async function handleEarlyCommands(ctx: {
   // as dinner" — the media pipeline owns it. Firing here copied yesterday's dinner
   // instead and the photo was never analysed (production cascade, 2026-07-02).
   if (!ctx.hasMedia && !ctx.isQuestion) {
-    const sameAsReply = await handleMealRepeat({ phone, message, m, user });
+    const sameAsReply = await handleMealRepeat({ phone, message, m, user, sourceMessageId: ctx.sourceMessageId });
     if (sameAsReply) return sameAsReply;
   }
 
@@ -900,7 +901,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
   // ---- FOOD COMMANDS (server/handlers/food-commands.ts) — restaurant / street food / swaps /
   // meal prep / grocery / supplements; extracted for isolation, identical behaviour + order. ----
-  const foodCmdReply = await handleFoodCommands({ phone, message, m, user });
+  const foodCmdReply = await handleFoodCommands({ phone, message, m, user, sourceMessageId: ctx.sourceMessageId });
   if (foodCmdReply !== null) return foodCmdReply;
 
   // ---- WHY command ----

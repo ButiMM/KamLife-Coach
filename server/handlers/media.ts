@@ -12,7 +12,7 @@ import type OpenAI from "openai";
 import type { ChatCompletionContentPart } from "openai/resources/chat/completions";
 import { db } from "../db";
 import {
-  users, chatHistory, stepLogs, mealLogs, progressPhotos,
+  users, chatHistory, stepLogs, progressPhotos,
 } from "../../shared/schema";
 import { eq, and, gte, lt, asc, desc, sql } from "drizzle-orm";
 import {
@@ -26,7 +26,7 @@ import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
 import { handleWeightLog } from "./weight";
 import { handleWater } from "./water";
-import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods, findDuplicateMealToday, parseFoodLogTotalsFromMessageOut } from "./food-scanner";
+import { recomputeTodayFoodTotals, scanForSAFoods, findDuplicateMealToday, parseFoodLogTotalsFromMessageOut } from "./food-scanner";
 import { buildFoodVisionSystemPrompt, buildFoodVisionUserPrompt, buildMenuPickPrompt } from "./food-vision-prompt";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets, getDailyStepContext, waterTargetLitres } from "../targets";
@@ -170,12 +170,14 @@ export async function handleMediaMessage(ctx: {
   mediaUrl: string;
   mediaContentType: string | undefined;
   allMediaUrls: string[] | undefined;
+  sourceMessageId?: string;
   user: any;
   isCoach: boolean;
   openai: OpenAI;
-  handleMessage: (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
+  handleMessage: (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[], sourceMessageId?: string) => Promise<string>;
 }): Promise<string> {
-  const { phone, message, mediaUrl, allMediaUrls, user, isCoach, openai, handleMessage } = ctx;
+  const { phone, message, mediaUrl, allMediaUrls, user, isCoach, openai, handleMessage, sourceMessageId } = ctx;
+  const mediaSourceId = sourceMessageId || crypto.randomUUID();
   const ctype = ctx.mediaContentType || "";
   const mediaTrace = buildMediaTrace(phone, ctype);
   const mediaFlowStart = Date.now();
@@ -461,15 +463,14 @@ export async function handleMediaMessage(ctx: {
                   const kcal = tl ? parseInt(tl[1].replace(/,/g, ""), 10) : 0;
                   const prot = tl ? parseInt(tl[2], 10) : 0;
                   if (kcal <= 0 && prot <= 0) return;
-                  await db.insert(mealLogs).values({
-                    userId: user.id, source: "photo", kcalInt: kcal, proteinInt: prot,
-                    loggedAt: new Date(), rawMessage: "[Collage food]", mealLabel: "Collage meal",
-                  }).catch((e) => console.error("[COLLAGE_FOOD] mealLogs insert failed:", e));
-                  turnMutation("INSERT meal", "[WRITE]");
+                  const collageCommit = await commitFoodLog({
+                    userId: user.id, phone, source: "photo", kcalInt: kcal, proteinInt: prot,
+                    carbsInt: 0, fatInt: 0, items: itemsFromVisionText(txt), loggedAt: new Date(),
+                    rawMessage: "[Collage food]", mealLabel: "Collage meal", sourceMessageId: mediaSourceId,
+                  });
+                  if (!collageCommit.ok || collageCommit.wasDup) return;
                   await logChat(user.id, "[Photo - collage meal]", txt, "FOOD_LOG");
-                  invalidateFoodTotalsCache(user.id);
-                  const totals = await recomputeTodayFoodTotals(user.id).catch(() => null);
-                  const totalNote = totals?.calories ? `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein._` : "";
+                  const totalNote = collageCommit.runningCals ? `\n\n_Today so far: ~${collageCommit.runningCals} kcal | ${collageCommit.runningProtein}g protein._` : "";
                   const displayTxt = txt.replace(/\nTOTAL:.*$/im, "").trim();
                   await sendWhatsApp(phone, `Also logged your meal from the photo:\n\n${displayTxt}\n\n*~${kcal} kcal | ~${prot}g protein*${totalNote}`);
                   console.log(`[COLLAGE_FOOD] food logged and sent kcal=${kcal} prot=${prot}`);
@@ -486,7 +487,7 @@ export async function handleMediaMessage(ctx: {
                 try {
                   let albumKcal = 0, albumProt = 0;
                   const albumParts: string[] = [];
-                  for (const extraUrl of albumExtras.slice(0, 3)) {
+                  for (const [albumIndex, extraUrl] of albumExtras.slice(0, 3).entries()) {
                     try {
                       await assertSafeMediaUrl(extraUrl);
                     } catch (e) {
@@ -522,17 +523,18 @@ export async function handleMediaMessage(ctx: {
                     const prot = Number.isFinite(protRaw) ? Math.min(200, Math.max(0, protRaw)) : 0;
                     console.log(`[ALBUM_FOOD] extracted kcal=${kcal} prot=${prot}`);
                     if (kcal <= 0 && prot <= 0) continue; // non-food image — skip
+                    const albumCommit = await commitFoodLog({
+                      userId: user.id, phone, source: "photo", kcalInt: kcal, proteinInt: prot,
+                      carbsInt: 0, fatInt: 0, items: itemsFromVisionText(text), loggedAt: new Date(),
+                      rawMessage: `[Album photo ${albumIndex + 1}]`, mealLabel: "Album meal",
+                      sourceMessageId: mediaSourceId, allowIntentionalRepeat: true,
+                    });
+                    if (!albumCommit.ok || albumCommit.wasDup) continue;
                     albumKcal += kcal; albumProt += prot;
                     albumParts.push(text.replace(/\nTOTAL:.*$/i, "").trim());
-                    await db.insert(mealLogs).values({
-                      userId: user.id, source: "photo", kcalInt: kcal, proteinInt: prot,
-                      loggedAt: new Date(), rawMessage: "[Album photo]", mealLabel: "Album meal",
-                    }).catch((e) => console.error("[ALBUM_FOOD] mealLogs insert failed:", e));
-                    turnMutation("INSERT meal", "[WRITE]");
                     await logChat(user.id, "[Photo - album meal]", text, "FOOD_LOG");
                   }
                   if (albumKcal > 0) {
-                    invalidateFoodTotalsCache(user.id);
                     const suffix = albumParts.length > 1 ? "s" : "";
                     const totals = await recomputeTodayFoodTotals(user.id).catch(() => null);
                     const totalNote = totals && totals.calories > 0
@@ -866,7 +868,7 @@ export async function handleMediaMessage(ctx: {
       if (!visionReply || visionReply.length < 10) {
         if (captionHasFood) {
           console.log(`[FOOD_VISION] unreadable photo — logging from caption user=${user.id.slice(-6)}`);
-          return handleMessage(phone, message);
+          return handleMessage(phone, message, undefined, undefined, undefined, mediaSourceId);
         }
         return mealAsk;
       }
@@ -880,7 +882,7 @@ export async function handleMediaMessage(ctx: {
         // Photo isn't food, but the caption names real food — log from the caption.
         if (captionHasFood) {
           console.log(`[FOOD_VISION] not_food photo but caption has food — logging from caption user=${user.id.slice(-6)}`);
-          return handleMessage(phone, message);
+          return handleMessage(phone, message, undefined, undefined, undefined, mediaSourceId);
         }
         if (noCaption) {
           await logChat(user.id, "[Equipment Photo]", "", "EQUIPMENT_ID");
@@ -991,8 +993,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) : 0;
       };
 
-      let totalPhotoKcal = extractKcal(visionReply);
-      let totalPhotoProt = extractProt(visionReply);
+      const primaryPhotoKcal = extractKcal(visionReply);
+      const primaryPhotoProt = extractProt(visionReply);
+      let totalPhotoKcal = primaryPhotoKcal;
+      let totalPhotoProt = primaryPhotoProt;
       // Strip internal TOTAL/ITEMS/LABEL lines; unwrap a scare-quoted food name (reads as
       // sarcasm). "Black coffee logged ☕" (2026-08-05) — scrubbed at source now.
       const visionDisplay = stripFoodLoggedClaim(visionReply
@@ -1049,9 +1053,12 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // ── MULTI-PHOTO: process any extra images sent in the same message ──
       const extraImageUrls = (allMediaUrls || []).filter(u => u !== mediaUrl);
       const extraReplies: string[] = [];
+      const photoLoggedAt = parseMealDate(message || "");
+      const photoIsRetro = isRetroactiveMeal(message || "");
+      let photoCommit: Awaited<ReturnType<typeof commitFoodLog>> | null = null;
       if (extraImageUrls.length > 0) {
         const imgAuthHeaderExtra = "Basic " + Buffer.from(`${process.env.TWILIO_ACCOUNT_SID || ""}:${process.env.TWILIO_AUTH_TOKEN || ""}`).toString("base64");
-        for (const extraUrl of extraImageUrls.slice(0, 3)) {
+        for (const [extraIndex, extraUrl] of extraImageUrls.slice(0, 3).entries()) {
           try {
             try {
               await assertSafeMediaUrl(extraUrl);
@@ -1081,6 +1088,14 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
             const extraKcal = extractKcal(extraText);
             const extraProt = extractProt(extraText);
             if (!(/^NOT_FOOD\b/i.test(extraText)) && (extraKcal > 0 || extraProt > 0)) {
+              const extraLabel = extractMealLabel(message || "", photoLoggedAt, { kcal: extraKcal, protein: extraProt }, user, await (await import("../portion-memory")).getSlotContext(user.id)) || slotFromSastHour(photoLoggedAt);
+              const extraCommit = await commitFoodLog({
+                userId: user.id, phone, rawMessage: `[Album photo ${extraIndex + 2}]`, source: "photo",
+                kcalInt: extraKcal, proteinInt: extraProt, carbsInt: 0, fatInt: 0,
+                items: itemsFromVisionText(extraText), mealLabel: extraLabel, loggedAt: photoLoggedAt,
+                sourceMessageId: mediaSourceId, allowIntentionalRepeat: true,
+              });
+              if (!extraCommit.ok || extraCommit.wasDup) continue;
               extraReplies.push(extraText.replace(/\nTOTAL:.*$/i, "").trim());
               totalPhotoKcal += extraKcal;
               totalPhotoProt += extraProt;
@@ -1123,16 +1138,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         }
       }
 
-      const photoLoggedAt = parseMealDate(message || "");
-      const photoIsRetro = isRetroactiveMeal(message || "");
-      let photoCommit: Awaited<ReturnType<typeof commitFoodLog>> | null = null;
-      if (totalPhotoKcal > 0 || totalPhotoProt > 0) {
+      if (primaryPhotoKcal > 0 || primaryPhotoProt > 0) {
         // Readable description: caption wins, else vision's first real line. (kcal dedup banned.)
         const photoDesc = (message && message.trim().length > 2 ? message.trim().slice(0, 110) : "")
           || (visionDisplay.split("\n").find(l => l.trim().length > 5) || "").replace(/[*_•]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110)
           || "[Photo]";
         // NAME-overlap dupe guard: a photo of a meal ALREADY logged today must not double-log.
-        const dupe = await findDuplicateMealToday(user.id, photoDesc);
+        const dupe = extraImageUrls.length === 0 ? await findDuplicateMealToday(user.id, photoDesc) : null;
         if (dupe) {
           const dupeReply = `📸 That looks like the *${dupe.desc}* you already logged today — I have NOT logged it again, your totals are safe.\n\nIf this is a second helping, say *"same as ${dupe.slot}"* and I'll log it properly.`;
           await logChat(user.id, "[Food Photo — duplicate held]", dupeReply, "FOOD_PHOTO_DUPE");
@@ -1140,12 +1152,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         }
         // ONE WRITE DOOR (Box 2): commitFoodLog dedups + guarantees complete macros;
         // caption wins over the clock for the slot.
-        const photoLabel = extractMealLabel(message || "", photoLoggedAt, { kcal: totalPhotoKcal, protein: totalPhotoProt }, user, await (await import("../portion-memory")).getSlotContext(user.id)) || slotFromSastHour(photoLoggedAt);
+        const photoLabel = extractMealLabel(message || "", photoLoggedAt, { kcal: primaryPhotoKcal, protein: primaryPhotoProt }, user, await (await import("../portion-memory")).getSlotContext(user.id)) || slotFromSastHour(photoLoggedAt);
         // Structured items from the vision reply — names in "my meals", scalable corrections.
         photoCommit = await commitFoodLog({
-          userId: user.id, phone, rawMessage: photoDesc, source: "photo",
-          kcalInt: totalPhotoKcal, proteinInt: totalPhotoProt, carbsInt: 0, fatInt: 0,
+          userId: user.id, phone, rawMessage: extraImageUrls.length > 0 ? `[Album photo 1] ${photoDesc}` : photoDesc, source: "photo",
+          kcalInt: primaryPhotoKcal, proteinInt: primaryPhotoProt, carbsInt: 0, fatInt: 0,
           items: itemsFromVisionText(visionDisplay), mealLabel: photoLabel, loggedAt: photoLoggedAt,
+          sourceMessageId: mediaSourceId, allowIntentionalRepeat: extraImageUrls.length > 0,
         });
       }
 
@@ -1430,7 +1443,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       voiceStage = "coach_reply";
       voiceStageStart = Date.now();
       const voiceReply = await withTimeout("voice_coach_reply", 20000, () =>
-        handleMessage(phone, forBrain + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""))
+        handleMessage(phone, forBrain + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""), undefined, undefined, undefined, mediaSourceId)
       );
       const coachReplyMs = Date.now() - voiceStageStart;
       const voiceTotalMs = Date.now() - voiceFlowStart;
