@@ -765,6 +765,19 @@ const MUST_WRITE: [string, string][] = [
         ["empty-reply",
           { input: "hello", reply: "" },
           { input: "hello", reply: "Howzit Kam." }],
+        // THE OBSERVED 16:49 REPLY, verbatim from the live trace — a refusal to call a trend and a
+        // trend, in consecutive paragraphs of one message. The healthy case is the same refusal
+        // WITHOUT the assertion, which is what the fix in #102 makes the coach say: this must stay
+        // readable as correct behaviour, or the detector punishes the repair.
+        ["reply-contradicts-itself",
+          { input: "how is my weight going?",
+            reply: "I'm not going to call a trend off those weigh-ins — they sit around the time you "
+              + "were ill, and weight moves on fluid and appetite then, not on food.\n\n"
+              + "Scale is going up — keep fuelling." },
+          { input: "how is my weight going?",
+            reply: "I'm not going to call a trend off those weigh-ins — they sit around the time you "
+              + "were ill, and weight moves on fluid and appetite then, not on food.\n\n"
+              + "Weigh in three mornings this week and I'll read it properly." }],
       ];
       for (const [id, broken, healthy] of BREAKS) {
         if (check(id, broken) === true) {
@@ -799,6 +812,75 @@ const MUST_WRITE: [string, string][] = [
       // The handle must be stable, or a candidate cannot be named in a brief and found again.
       if (candidateRef("a", "b") !== candidateRef("a", "b") || candidateRef("a", "b") === candidateRef("a", "c")) {
         failures.push(`Coach Health V2 candidate references are not stable-and-distinct — "CH-xxxx" would not survive being written down`);
+      }
+
+      /**
+       * A1 — THE LOOP RUNS WITH THE DASHBOARD CLOSED (2026-09-01).
+       *
+       * The whole feature previously existed only while somebody had the page open: the rules ran
+       * inside the GET handler and nothing durable came out. Graded on the two things that makes
+       * true — a sweep with no HTTP request in sight produces a candidate, and the result is still
+       * there afterwards for the dashboard to read — plus the property that stops it becoming
+       * noise: running it twice over the same evidence announces nothing the second time.
+       */
+      {
+        const { runCoachHealthSweep, COACH_HEALTH_STATE_KEY } = await import("../server/routes/admin-turns");
+        const { loadState } = await import("../server/scheduler/shared");
+        const observed = "I'm not going to call a trend off those weigh-ins — they sit around the time you "
+          + "were ill, and weight moves on fluid and appetite then, not on food.\n\n"
+          + "Scale is going up — keep fuelling.";
+        g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[schema.turnLedger, [{
+          id: "tl-observed", userId: USER.id, createdAt: new Date(),
+          inputText: "how is my weight going?", reply: observed,
+          mutations: [], stateRead: {}, version: "25b2232",
+          lifecycleStatus: null, failureCategory: null, fixRef: null,
+        }]]]);
+
+        const first = await runCoachHealthSweep(1);
+        if (first.candidates === 0) {
+          failures.push(`The automatic sweep found nothing on the exact observed 16:49 reply — Coach Health still only works when the dashboard is open`);
+        }
+        if (first.fresh.length === 0) {
+          failures.push(`The automatic sweep surfaced no NEW candidate on first run — nothing would ever reach a human`);
+        }
+
+        // DURABLE: the dashboard must be able to read this without recomputing.
+        let stored: any = null;
+        try { stored = JSON.parse(loadState()[COACH_HEALTH_STATE_KEY] || "null"); } catch { /* below */ }
+        if (!stored || !Array.isArray(stored.candidates) || stored.candidates.length === 0) {
+          failures.push(`The automatic sweep left nothing durable behind — reopening the dashboard would show no automatic result`);
+        } else {
+          // PROVENANCE: a candidate has to identify the turn, the client and the build, from
+          // fields the ledger already records.
+          const ex = stored.candidates[0]?.examples?.[0];
+          if (!ex?.turnId || !ex?.version) {
+            failures.push(`A stored candidate carries no turn/build provenance — it cannot be traced back to the turn it came from`);
+          }
+        }
+
+        // NO DUPLICATE SPAM: the same evidence, swept again, announces nothing new.
+        const second = await runCoachHealthSweep(1);
+        if (second.fresh.length !== 0) {
+          failures.push(`Re-running the sweep re-announced ${second.fresh.length} candidate(s) it had already reported — the queue fills with duplicates every hour`);
+        }
+        if (second.candidates === 0) {
+          failures.push(`The second sweep lost the candidate entirely — dedup must suppress the ANNOUNCEMENT, not the evidence`);
+        }
+
+        // CONTROL: a clean window must not manufacture a candidate. Without this, "always report
+        // something" passes both assertions above.
+        g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[schema.turnLedger, [{
+          id: "tl-clean", userId: USER.id, createdAt: new Date(),
+          inputText: "how is my weight going?",
+          reply: "Down 1.2kg over three weeks. Keep the weigh-ins to one morning a week.",
+          mutations: [], stateRead: {}, version: "25b2232",
+          lifecycleStatus: null, failureCategory: null, fixRef: null,
+        }]]]);
+        const clean = await runCoachHealthSweep(1);
+        if (clean.fresh.length !== 0) {
+          failures.push(`A healthy weight reply produced a NEW candidate — the automatic queue would fill with turns that are fine: ${clean.fresh.join(", ")}`);
+        }
+        delete g.__KAMLIFE_STUB_ROWS;
       }
     }
     const check = (id: string, input: string, reply: string, mutations: string[] = []) => {

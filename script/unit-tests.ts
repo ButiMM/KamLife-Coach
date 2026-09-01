@@ -9202,6 +9202,36 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     }
   });
 
+  test("coach health: what the automatic sweep stores, the page actually shows", () => {
+    // A CONTRACT ASSERTION, and source-shaped ON PURPOSE. The first version of A1 added lastSweep
+    // to the brief endpoint and never rendered it, so the background loop ran, persisted, and was
+    // invisible to the only person who would act on it — the feature's whole claim, unverifiable
+    // from the page. No runtime trace in this repo can catch "the server sends a field the client
+    // ignores" without driving a browser, so this counts instead, the same way check-reach counts
+    // senders. Narrow by design: it asserts the operator-facing signals are consumed, not how they
+    // are laid out.
+    // READ, DO NOT IMPORT. The first version of this case did `await import("admin-turns")` just
+    // to assert the export exists. Importing that module pulls in the route layer and leaves
+    // runtime handles open, so the suite reported 1050/1050 and then never exited — it sat until
+    // CI's 600s timeout. The whole check is already a source-shape assertion, so reading the file
+    // is the consistent instrument as well as the safe one: this suite must not need a live server
+    // to answer "is the export still there".
+    const turns = readFileSync("server/routes/admin-turns.ts", "utf-8");
+    assert.match(turns, /export async function runCoachHealthSweep/, "the automatic sweep is gone");
+    const page = readFileSync("client/src/pages/coach-health.tsx", "utf-8");
+    assert.match(page, /lastSweep/, "the Coach Health page does not read the automatic run at all");
+    // The three things that prove the loop ran while the page was closed: WHEN it ran, what it
+    // COVERED, and whether anything is NEW. A band missing any of them cannot make that case.
+    for (const signal of ["lastSweep.at", "lastSweep.turns", "lastSweep.fresh"]) {
+      assert.ok(page.includes(signal),
+        `the page never shows ${signal} — the operator cannot tell the automatic run from the live window`);
+    }
+    // ...and it must say so when nothing has swept yet, rather than rendering an empty band that
+    // reads as "all clear".
+    assert.match(page, /has not run yet/i,
+      "a page with no sweep yet shows nothing, which reads as health rather than as absence");
+  });
+
   test("reactive: BOTH gates run on the whole reply before it is split into bubbles", async () => {
     // Was a source-shape assertion over sendFinal's body. Cut B moved both gates into
     // prepareOutbound, so the old test broke on WORDING while the contract held — the failure

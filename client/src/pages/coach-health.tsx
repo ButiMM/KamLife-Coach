@@ -178,6 +178,16 @@ interface BriefPayload {
   builds: Array<{ version: string; turns: number }>;
   buildWarning: string | null;
   disclaimer: string;
+  // THE LAST AUTOMATIC RUN (Coach Health A1). Everything above is recomputed when this page is
+  // opened; this is what the hourly sweep found while it was closed, read from scheduler_state.
+  // Null until the first sweep has run — a fresh deploy has not swept yet, and saying so is the
+  // point: an empty band would read as "nothing wrong" rather than "nothing has looked".
+  lastSweep: {
+    at: string; windowDays: number; turns: number; clients: number;
+    knownRegressions: number; buildWarning: string | null;
+    candidates: Array<{ id: string; label: string; priority: string; turns: number; clients: number }>;
+    fresh: string[];
+  } | null;
 }
 
 const PRIORITY_CHIP: Record<string, string> = {
@@ -210,6 +220,52 @@ function MorningBrief({ days }: { days: number }) {
           {data.knownRegressions} known regression{data.knownRegressions === 1 ? "" : "s"} ·{" "}
           {data.candidates.length} candidate pattern{data.candidates.length === 1 ? "" : "s"}
         </p>
+        <p className="text-xs text-muted-foreground mt-1">Recomputed now, for the last {data.windowDays} day{data.windowDays === 1 ? "" : "s"}.</p>
+      </div>
+
+      {/* THE AUTOMATIC RUN, kept visibly separate from the live window above. Without this the
+          background loop is invisible to the operator and A1's whole claim is unverifiable from
+          the page — which is what a reviewer caught on the first version of this cut. */}
+      <div className="mb-5 p-3 rounded-md border bg-muted/30">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-sm font-semibold">🤖 Last automatic run</span>
+          {data.lastSweep ? (
+            <span className="text-xs text-muted-foreground font-mono">{new Date(data.lastSweep.at).toLocaleString()}</span>
+          ) : null}
+        </div>
+        {data.lastSweep ? (
+          <>
+            <p className="text-sm text-muted-foreground mt-1">
+              {data.lastSweep.turns.toLocaleString()} turns · {data.lastSweep.clients} client{data.lastSweep.clients === 1 ? "" : "s"} ·{" "}
+              {data.lastSweep.knownRegressions} known regression{data.lastSweep.knownRegressions === 1 ? "" : "s"} ·{" "}
+              {data.lastSweep.candidates.length} candidate pattern{data.lastSweep.candidates.length === 1 ? "" : "s"}
+              {" "}· window {data.lastSweep.windowDays}d
+            </p>
+            {data.lastSweep.fresh.length > 0 ? (
+              <p className="text-sm mt-2">
+                <span className="text-xs px-2 py-0.5 rounded border bg-rose-100 text-rose-700 border-rose-200">
+                  {data.lastSweep.fresh.length} new
+                </span>{" "}
+                <span className="font-mono text-xs text-muted-foreground">{data.lastSweep.fresh.join(" · ")}</span>
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground mt-2 italic">Nothing new since the run before it.</p>
+            )}
+            {data.lastSweep.candidates.length > 0 && (
+              <div className="text-xs text-muted-foreground mt-2 space-y-0.5">
+                {data.lastSweep.candidates.slice(0, 5).map(c => (
+                  <div key={c.id} className="truncate">
+                    <span className="font-mono">{c.id}</span> · {c.label} · {c.clients} client{c.clients === 1 ? "" : "s"}, {c.turns} turn{c.turns === 1 ? "" : "s"}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground mt-1 italic">
+            The background sweep has not run yet — nothing here has been evaluated automatically.
+          </p>
+        )}
       </div>
 
       {data.buildWarning && (
