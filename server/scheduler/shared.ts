@@ -12,12 +12,12 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { schedulerState } from "../../shared/schema";
 import { routineNudgeAllowed, dayOfYearSAST } from "./nudge-policy";
-import { checkOutboundMessage } from "../verifiers/proactive-gate";
 import { readHealthState } from "../health-state";
 import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply } from "../reply-hygiene";
 import { enforceOutboundTruth, prepareOutbound } from "../outbound-authority";
 import { templateSid, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
+import { whatsappFrom } from "../outbound-delivery";
 
 export { db, pool };
 export { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles };
@@ -359,9 +359,11 @@ export async function claimCritical(userId: string, messageKey: string, dedupeWi
 // ── TWILIO ────────────────────────────────────────────────────────────────────
 
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-export const FROM_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER
-  ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
-  : "";
+// ONE SENDER NUMBER (Cut B2). This was the second of three places that turned
+// TWILIO_WHATSAPP_NUMBER into a whatsapp: address. It stays exported because business.ts reads
+// it, but it is no longer its own copy of the rule — and it is no longer frozen at import, which
+// is what made the value depend on module load order.
+export const FROM_NUMBER = whatsappFrom();
 
 // SMS_FROM: set TWILIO_SMS_NUMBER to a Twilio phone number (e.g. +27XXXXXXXXX or a shortcode).
 // When WhatsApp delivery fails with a channel error, critical alerts fall back to SMS.
@@ -570,82 +572,66 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
 
 async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | undefined, smsFallbackText: string): Promise<"sent" | "dropped" | "fallback"> {
   resetDeliveryStatsIfNeeded();
-  // Sanity gate — block template-rendering leaks ("undefined kcal", "NaN", "${name}")
-  // before they ever reach a client. A broken message is worse than a missed one.
-  const outboundCheck = checkOutboundMessage(body);
-  if (!outboundCheck.safe) {
-    deliveryStats.failed++;
-    console.error(`[OUTBOUND_GATE] BLOCKED send to ${to.slice(-8)} — ${outboundCheck.reason}. Body: ${String(body).slice(0, 120)}`);
-    return "dropped";
-  }
-  // Rate limit: enforce minimum gap between sends
-  const now = Date.now();
-  const gap = now - _lastSchedulerSendAt;
-  if (gap < SCHEDULER_MIN_GAP_MS) {
-    await new Promise(r => setTimeout(r, SCHEDULER_MIN_GAP_MS - gap));
-  }
-  _lastSchedulerSendAt = Date.now();
-
-  if (!FROM_NUMBER) {
-    console.warn("[SCHEDULER] TWILIO_WHATSAPP_NUMBER not set — skipping send");
-    deliveryStats.failed++;
-    return "dropped";
-  }
-  if (isTwilioCircuitOpen()) {
-    deliveryStats.failed++;
-    console.warn(`[CIRCUIT] Twilio circuit open — dropping send to ${to.slice(-8)}`);
-    return "dropped";
-  }
-  const params: Record<string, unknown> = { from: FROM_NUMBER, to, body };
+  // THE TEMPLATE-LEAK GATE MOVED TO prepareOutbound (Cut B2, 2026-09-01). It ran here, and only
+  // here, so "You ate undefined kcal" was blocked at 06:00 and delivered mid-conversation. It is
+  // a "may this be said" question and it now sits with the owner of that question, which both
+  // doors already go through. Removed rather than left as a second copy: two owners of one
+  // question is the defect this whole cut exists to remove, and the one that stayed behind is
+  // always the one that drifts.
+  const params: Record<string, unknown> = { body };
   if (mediaUrl) params.mediaUrl = [mediaUrl];
-  const delays = [0, 3000, 8000];
-  for (let i = 0; i < delays.length; i++) {
-    if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
-    try {
-      await twilioClient.messages.create(params as unknown as Parameters<typeof twilioClient.messages.create>[0]);
+  // ONE DELIVERY OWNER (Cut B2). The client, the sender number, the retry loop and the failure
+  // log are shared; everything below is this door's own policy and is UNCHANGED — the send-rate
+  // gate that a webhook reply is deliberately not subject to, the circuit breaker, the delivery
+  // counters, the SMS/template recovery, and throwing so the job records the failure.
+  const { deliverTwilioMessage } = await import("../outbound-delivery");
+  const outcome = await deliverTwilioMessage(to, params, {
+    label: "proactive",
+    retryDelaysMs: [0, 3000, 8000],
+    throwOnTerminal: true,
+    beforeSend: async () => {
+      const gap = Date.now() - _lastSchedulerSendAt;
+      if (gap < SCHEDULER_MIN_GAP_MS) await new Promise(r => setTimeout(r, SCHEDULER_MIN_GAP_MS - gap));
+      _lastSchedulerSendAt = Date.now();
+    },
+    circuitOpen: isTwilioCircuitOpen,
+    onSuccess: () => {
       recordTwilioSuccess();
       deliveryStats.sent++;
       console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);
       void logOutboundToHistory(to, body); // best-effort, non-blocking
-      return "sent";
-    } catch (err: unknown) {
-      const e = err as { status?: number; code?: number; message?: string };
-      // WhatsApp channel errors — don't retry, attempt SMS fallback for this recipient.
-      // The fallback carries smsFallbackText (this bubble + any not yet sent) so a
-      // multi-bubble message still reaches the client whole.
-      if (e?.code && WA_CHANNEL_ERRORS.has(e.code)) {
-        recordTwilioFailure();
-        deliveryStats.failed++;
-        // 63016 = freeform blocked for being OUTSIDE the 24-hour window. If an approved
-        // re-engagement template is configured, send THAT first — it re-opens the WhatsApp
-        // thread (preferred over SMS). Only on its failure do we drop to SMS. Other channel
-        // errors (not opted in, region blocked) go straight to SMS as before.
-        if (e.code === 63016 && reengageTemplateSid()) {
-          console.warn(`[WA:WINDOW] outside 24h window for ${to.slice(-8)} — sending re-engagement template`);
-          try {
-            await sendWhatsAppTemplate(to, reengageTemplateSid(), undefined, { fallbackText: smsFallbackText });
-            return "fallback"; // template path logs history + handles its own SMS fallback
-          } catch {
-            console.warn(`[WA:WINDOW] re-engagement template failed for ${to.slice(-8)} — falling back to SMS`);
-          }
-        } else {
-          console.warn(`[WA:CHANNEL_ERROR] code=${e.code} for ${to.slice(-8)} — attempting SMS fallback`);
+    },
+    onFailure: () => {
+      recordTwilioFailure();
+      deliveryStats.failed++;
+    },
+    // WhatsApp channel errors — a retry cannot fix them, but a template or an SMS can still land
+    // the message. The fallback carries smsFallbackText (this bubble plus any not yet sent) so a
+    // multi-bubble message still reaches the client whole.
+    onChannelError: async (err: any) => {
+      const e = err as { code?: number };
+      if (!e?.code || !WA_CHANNEL_ERRORS.has(e.code)) return null;
+      // 63016 = freeform blocked for being OUTSIDE the 24-hour window. If an approved
+      // re-engagement template is configured, send THAT first — it re-opens the WhatsApp thread
+      // (preferred over SMS). Only on its failure do we drop to SMS. Other channel errors (not
+      // opted in, region blocked) go straight to SMS as before.
+      if (e.code === 63016 && reengageTemplateSid()) {
+        console.warn(`[WA:WINDOW] outside 24h window for ${to.slice(-8)} — sending re-engagement template`);
+        try {
+          await sendWhatsAppTemplate(to, reengageTemplateSid(), undefined, { fallbackText: smsFallbackText });
+          return "fallback"; // template path logs history + handles its own SMS fallback
+        } catch {
+          console.warn(`[WA:WINDOW] re-engagement template failed for ${to.slice(-8)} — falling back to SMS`);
         }
-        await sendSMSFallback(to, smsFallbackText);
-        void logOutboundToHistory(to, smsFallbackText); // best-effort, non-blocking
-        return "fallback";
+      } else {
+        console.warn(`[WA:CHANNEL_ERROR] code=${e.code} for ${to.slice(-8)} — attempting SMS fallback`);
       }
-      const isTransient = !e?.status || e.status === 429 || e.status >= 500 || (e.code as any) === "ECONNRESET" || (e.code as any) === "ETIMEDOUT";
-      if (!isTransient || i === delays.length - 1) {
-        recordTwilioFailure();
-        deliveryStats.failed++;
-        console.error(`[SCHEDULER] ✗ Failed to send to ${to.slice(-8)} after ${i + 1} attempt(s):`, e?.message || err);
-        throw err;
-      }
-      console.warn(`[SCHEDULER] ⚠ Send attempt ${i + 1} failed (${e?.message}), retrying…`);
-    }
-  }
-  return "dropped"; // unreachable — loop either returns or throws; keeps TS exhaustive
+      await sendSMSFallback(to, smsFallbackText);
+      void logOutboundToHistory(to, smsFallbackText); // best-effort, non-blocking
+      return "fallback";
+    },
+  });
+  return outcome;
 }
 
 // ── APPROVED TEMPLATE SEND (Twilio Content API) ────────────────────────────────
@@ -680,57 +666,48 @@ export async function sendWhatsAppTemplate(
   if (gap < SCHEDULER_MIN_GAP_MS) await new Promise(r => setTimeout(r, SCHEDULER_MIN_GAP_MS - gap));
   _lastSchedulerSendAt = Date.now();
 
-  if (!FROM_NUMBER) {
-    console.warn("[SCHEDULER:TEMPLATE] TWILIO_WHATSAPP_NUMBER not set — skipping send");
-    deliveryStats.failed++;
-    return;
-  }
-  if (isTwilioCircuitOpen()) {
-    deliveryStats.failed++;
-    console.warn(`[CIRCUIT] Twilio circuit open — dropping template send to ${to.slice(-8)}`);
-    return;
-  }
-
   // SHADOW (2026-08-04) — templates re-open a closed 24h window, so one escaping in staging
   // is a client pulled back into a conversation the build was not allowed to have.
   const logText = opts?.fallbackText || `[template ${contentSid}]`;
   if (await shadowDoor(to, logText, "template", "server/scheduler/shared.ts", opts?.mediaUrl)) return;
-  const params: Record<string, unknown> = { from: FROM_NUMBER, to, contentSid };
+  const params: Record<string, unknown> = { contentSid };
   const cv = buildContentVariables(variables);
   if (cv) params.contentVariables = cv;
   if (opts?.mediaUrl) params.mediaUrl = [opts.mediaUrl];
 
-  const delays = [0, 3000, 8000];
-  for (let i = 0; i < delays.length; i++) {
-    if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
-    try {
-      await twilioClient.messages.create(params as unknown as Parameters<typeof twilioClient.messages.create>[0]);
+  // ONE DELIVERY OWNER (Cut B2, 2026-09-01). The comment above this function said it "mirrors
+  // sendWhatsApp's resilience", and it did — by copying it. That is the sentence logStepsForUser
+  // carries a warning about: a mirror is a copy, and the copy drifts where it matters. The retry
+  // loop, the client and the sender number are now shared; the policy below is this door's own.
+  //
+  // The circuit-breaker check moved INTO the shared owner, which is why it no longer appears
+  // above: it ran here before the shadow door, so a paused build still consulted a live breaker.
+  const { deliverTwilioMessage } = await import("../outbound-delivery");
+  await deliverTwilioMessage(to, params, {
+    label: "template",
+    retryDelaysMs: [0, 3000, 8000],
+    throwOnTerminal: true,
+    circuitOpen: isTwilioCircuitOpen,
+    onSuccess: () => {
       recordTwilioSuccess();
       deliveryStats.sent++;
       console.log(`[SCHEDULER:TEMPLATE] → ${to.slice(-8)}: ${contentSid}`);
       void logOutboundToHistory(to, logText); // best-effort, non-blocking
-      return;
-    } catch (err: unknown) {
-      const e = err as { status?: number; code?: number; message?: string };
-      // Channel error on a template (e.g. user never opted in) — SMS fallback if we have text.
-      if (e?.code && WA_CHANNEL_ERRORS.has(e.code)) {
-        recordTwilioFailure();
-        deliveryStats.failed++;
-        console.warn(`[WA:CHANNEL_ERROR:TEMPLATE] code=${e.code} for ${to.slice(-8)}`);
-        if (opts?.fallbackText) await sendSMSFallback(to, opts.fallbackText);
-        void logOutboundToHistory(to, logText);
-        return;
-      }
-      const isTransient = !e?.status || e.status === 429 || e.status >= 500 || (e.code as any) === "ECONNRESET" || (e.code as any) === "ETIMEDOUT";
-      if (!isTransient || i === delays.length - 1) {
-        recordTwilioFailure();
-        deliveryStats.failed++;
-        console.error(`[SCHEDULER:TEMPLATE] ✗ Failed to send to ${to.slice(-8)} after ${i + 1} attempt(s):`, e?.message || err);
-        throw err;
-      }
-      console.warn(`[SCHEDULER:TEMPLATE] ⚠ Attempt ${i + 1} failed (${e?.message}), retrying…`);
-    }
-  }
+    },
+    onFailure: () => {
+      recordTwilioFailure();
+      deliveryStats.failed++;
+    },
+    // Channel error on a template (e.g. the client never opted in) — SMS fallback if we have text.
+    onChannelError: async (err: any) => {
+      const e = err as { code?: number };
+      if (!e?.code || !WA_CHANNEL_ERRORS.has(e.code)) return null;
+      console.warn(`[WA:CHANNEL_ERROR:TEMPLATE] code=${e.code} for ${to.slice(-8)}`);
+      if (opts?.fallbackText) await sendSMSFallback(to, opts.fallbackText);
+      void logOutboundToHistory(to, logText);
+      return "fallback";
+    },
+  });
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────

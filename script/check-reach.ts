@@ -38,13 +38,23 @@ type Shaping = "shaped" | "verbatim-by-design" | "not-client-facing";
  */
 const SENDERS: Array<{ file: string; shaping: Shaping; why: string }> = [
   {
-    file: "server/scheduler/shared.ts", shaping: "shaped",
-    why: "sendWhatsApp — every proactive message and all 68 cron jobs.",
+    file: "server/outbound-delivery.ts", shaping: "shaped",
+    why: "deliverTwilioMessage — THE customer transport owner (Cut B2). Every reply and every "
+      + "proactive message reaches Twilio through this one function. It does no shaping itself and "
+      + "must not: what may be said is decided by prepareOutbound, before the reply is split into "
+      + "bubbles, and everything arriving here has already cleared that floor. Listed as shaped "
+      + "because that is what a client reads, not because the gates live in this file.",
   },
   {
-    file: "server/routes/whatsapp.ts", shaping: "shaped",
-    why: "sendFinal — every reply to a client: text, voice, single photo, photo batch.",
+    file: "server/scheduler/shared.ts", shaping: "shaped",
+    why: "sendSMSFallback — the SMS channel, from a different number, when WhatsApp rejects a "
+      + "recipient. Its WhatsApp sends went to the delivery owner in Cut B2; this one stayed "
+      + "because SMS is a different channel, not a second WhatsApp transport.",
   },
+  // server/routes/whatsapp.ts was here until Cut B2 and is deliberately gone: sendParts built its
+  // own Twilio client and ran the third copy of the retry loop, and now calls the owner above.
+  // The reply path still exists — it just can no longer reach a client behind the owner's back,
+  // which is the whole point of counting. unit-tests asserts that file stays at zero direct sends.
   {
     file: "server/handlers/safety.ts", shaping: "verbatim-by-design",
     why: "Crisis routing. A helpline number and the words around it must reach a person EXACTLY as written — no rewrite, no shortening, no gate that could fail. Never shape this.",

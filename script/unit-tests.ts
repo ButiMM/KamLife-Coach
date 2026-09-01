@@ -9136,6 +9136,72 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     const raw = outside.match(/sendParts\(phone,\s*splitMessage\(/g) || [];
     assert.equal(raw.length, 0, `${raw.length} un-shaped delivery path(s) — route them through sendFinal`);
   });
+  // ── CUT B2 — ONE LOW-LEVEL DELIVERY OWNER (2026-09-01) ──────────────────────────────────────
+  test("outbound: the template-leak gate now covers a REPLY, not only a cron", async () => {
+    // THE PROVEN DEFECT. proactive-gate.ts said "Last-line sanity check for every outbound
+    // message" and had one caller: sendOneWhatsApp. So "You ate undefined kcal" was blocked at
+    // 06:00 and delivered mid-conversation — the Cut B1 finding one layer down. Graded on both
+    // doors through the shared contract, because that is where the question now has its owner.
+    const { prepareOutbound } = await import("../server/outbound-authority");
+    const leak = "Nice work today — you ate undefined kcal and hit NaN g protein.";
+
+    const reactive = await prepareOutbound("reactive", null, "whatsapp:+27000000881", leak);
+    assert.equal(reactive.blocked, true, "a leaking REPLY still went out");
+    assert.ok(!/undefined/i.test(reactive.text), `the leak reached the client: ${reactive.text}`);
+    // NEVER SILENT: a reply may be refused, but the client still gets a sentence.
+    assert.ok(reactive.text.trim().length > 0, "a refused reply left the client with nothing");
+
+    const proactive = await prepareOutbound("proactive", null, "whatsapp:+27000000882", leak);
+    assert.equal(proactive.blocked, true, "a leaking cron went out");
+    assert.equal(proactive.text, "", "a blocked proactive send must carry no text");
+
+    // CONTROL — the gate must not eat ordinary coaching. Without this, "block more" passes.
+    const clean = await prepareOutbound("reactive", null, "whatsapp:+27000000883",
+      "You hit 1 850 kcal and 140g protein today. Same again tomorrow.");
+    assert.equal(clean.blocked, false, `an ordinary reply was refused: ${clean.text}`);
+    assert.match(clean.text, /1 ?850 kcal/, "a clean reply was rewritten");
+  });
+
+  test("delivery: the rate gate is the caller's policy, and a reply does not carry it", async () => {
+    // ACCEPTANCE — "reactive replies are never queued behind proactive traffic". The send-rate
+    // gate is proactive-only ON PURPOSE: throttling a reply would make a client wait to protect a
+    // burst window they are not part of. Graded on whether the owner actually awaits the hook,
+    // in both directions, rather than on the shape of either call site.
+    const { deliverTwilioMessage } = await import("../server/outbound-delivery");
+    const prevFrom = process.env.TWILIO_WHATSAPP_NUMBER;
+    process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
+    let gated = 0;
+    // No credentials in test, so the send fails and returns "dropped" — which is fine: what is
+    // being graded is whether beforeSend ran, and it runs before the attempt either way.
+    await deliverTwilioMessage("whatsapp:+27000000884", { body: "hi" },
+      { label: "reactive test", retryDelaysMs: [0] });
+    assert.equal(gated, 0, "a reply consulted the proactive send-rate gate");
+    await deliverTwilioMessage("whatsapp:+27000000885", { body: "hi" },
+      { label: "proactive test", retryDelaysMs: [0], beforeSend: async () => { gated++; } });
+    assert.equal(gated, 1, "the proactive send-rate gate was dropped by the convergence");
+    if (prevFrom === undefined) delete process.env.TWILIO_WHATSAPP_NUMBER;
+    else process.env.TWILIO_WHATSAPP_NUMBER = prevFrom;
+  });
+
+  test("delivery: no customer path calls Twilio behind the owner's back", async () => {
+    // An INVENTORY assertion, and deliberately so: "there is exactly one transport owner" is a
+    // claim about absence across files, which no single runtime trace can establish. Scoped to
+    // the files that carry coaching messages to a client — the alert, admin, dashboard, payments
+    // and button senders are a separate inventory and are named in outbound-delivery.ts.
+    const customerPaths = ["server/routes/whatsapp.ts", "server/scheduler/shared.ts"];
+    const owner = readFileSync("server/outbound-delivery.ts", "utf-8");
+    assert.ok(/messages\.create/.test(owner), "the delivery owner no longer sends anything");
+    for (const f of customerPaths) {
+      const src = readFileSync(f, "utf-8");
+      const calls = (src.match(/messages\.create/g) || []).length;
+      // scheduler/shared.ts keeps ONE: the SMS fallback, which sends from a different number on a
+      // different channel and is not WhatsApp delivery.
+      const allowed = f.endsWith("shared.ts") ? 1 : 0;
+      assert.equal(calls, allowed,
+        `${f} has ${calls} direct Twilio send(s), expected ${allowed} — route customer delivery through outbound-delivery.ts`);
+    }
+  });
+
   test("reactive: BOTH gates run on the whole reply before it is split into bubbles", async () => {
     // Was a source-shape assertion over sendFinal's body. Cut B moved both gates into
     // prepareOutbound, so the old test broke on WORDING while the contract held — the failure
