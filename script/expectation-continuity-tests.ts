@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 
 const { handleMessage } = await import("../server/routes");
 const { resumeWorkoutFeedbackExpectation } = await import("../server/handlers/workout");
-const { users, workoutLogs, chatHistory } = await import("../shared/schema");
+const { users, workoutLogs, chatHistory, mealLogs } = await import("../shared/schema");
 const {
   createWorkoutFeedbackExpectation,
   readWorkoutFeedbackExpectation,
@@ -107,6 +107,16 @@ async function restartAndExpiry(): Promise<void> {
     "an expired expectation must not consume a later standalone message as old workout feedback");
 }
 
+async function mixedFactJourney(): Promise<void> {
+  const g = installUser({ awaitingInputType: createWorkoutFeedbackExpectation() });
+  await handleMessage(PHONE, "Just right, and I had chicken and pap.");
+  assert.equal(g.__KAMLIFE_STUB_USER.awaitingInputType, null, "the feedback expectation must still clear in a mixed turn");
+  assert.equal(writesFor(g, chatHistory).filter((w: any) => w.values.intent === "WORKOUT_FEEDBACK").length, 1,
+    "the feedback owner must contribute once to a mixed turn");
+  assert.ok(writesFor(g, mealLogs).length >= 1,
+    "a feedback answer must not prevent the same turn's meal from reaching its durable writer");
+}
+
 async function replacementAndSubjectChange(): Promise<void> {
   const oldMarker = createWorkoutFeedbackExpectation(Date.now() - 1_000);
   const newer = installUser({ awaitingInputType: oldMarker });
@@ -123,10 +133,17 @@ async function replacementAndSubjectChange(): Promise<void> {
   const later = await resume(changedSubject, "too hard");
   assert.equal(later, null,
     "a later message after subject change must not be captured by the old workout expectation");
+
+  const explicitDiet = installUser({ awaitingInputType: createWorkoutFeedbackExpectation() });
+  const dietReply = await resume(explicitDiet, "this diet is too hard");
+  assert.equal(dietReply, null, "an explicit diet concern must not be consumed as workout feedback");
+  assert.equal(explicitDiet.__KAMLIFE_STUB_USER.awaitingInputType, null,
+    "an explicit subject change must release the workout expectation");
 }
 
 await observedJourney();
 await restartAndExpiry();
+await mixedFactJourney();
 await replacementAndSubjectChange();
 
 console.log("[expectation-continuity] PASS — durable session-feel expectation is recoverable, single-consumed and bounded");

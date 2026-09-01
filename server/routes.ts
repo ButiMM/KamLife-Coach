@@ -344,15 +344,6 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
     }
   }
 
-  // POST-SESSION FEEDBACK RESUME — the question's existing durable pointer has first refusal
-  // before unrelated handlers can turn "Just right. I pushed." into another workout/logging turn.
-  // A non-feedback answer clears the pointer inside its owner and continues normally.
-  const feedbackReply = await resumeWorkoutFeedbackExpectation({ phone, message, m, user });
-  if (feedbackReply !== null) {
-    turnEvidence({ conversationalOnly: true });
-    return feedbackReply;
-  }
-
   // ENGINE CONFIRM RESUME — a parked "reply *yes* to log it" lands here before any handler can
   // swallow a bare "yes" (2026-07-23 live: the confirm had no landing pad → "yes" looped). A
   // non-yes/no reply returns null and flows on to normal understanding.
@@ -719,6 +710,19 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   /** Every exit for a durable-write turn closes through the decision owner — see
    *  understanding/live.closeCoachingTurn and tracking-contract-tests LAW 4. */
   const closeCoachingTurn = (reply: string | null) => closeCoachingTurnFor(user, message, reply);
+
+  // POST-SESSION FEEDBACK RESUME — run at the existing turn-ledger boundary, before ordinary
+  // handlers, rather than returning above it. A feedback answer gets first refusal, while any
+  // other fact in the same message remains owed to its durable writer and contributes to one
+  // composed response. This is the same "write before reply" rule as every mixed-fact turn.
+  let resumedWorkoutFeedback = false;
+  const feedbackReply = await resumeWorkoutFeedbackExpectation({ phone, message, m, user });
+  if (feedbackReply !== null) {
+    turnEvidence({ conversationalOnly: true });
+    if (mayEndTurn("workout-feedback")) return closeCoachingTurn(feedbackReply);
+    commitFact(turn, "workout", feedbackReply);
+    resumedWorkoutFeedback = true;
+  }
 
   if (process.env.NORMALIZER !== "off" && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
@@ -1175,7 +1179,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ---- WORKOUT COMMANDS (gym log, done, lifts, exercises, weight, programme) ----
   // COMMITS, DOES NOT CLAIM THE TURN. Returned unconditionally, so "I trained chest today and
   // had chicken and pap" logged the session and deleted the meal.
-  const workoutResult = await handleWorkoutCommands({ phone, message, m, user });
+  const workoutResult = resumedWorkoutFeedback ? null : await handleWorkoutCommands({ phone, message, m, user });
   if (workoutResult !== null) {
     if (mayEndTurn("workout")) return closeCoachingTurn(workoutResult);
     commitFact(turn, "workout", workoutResult);

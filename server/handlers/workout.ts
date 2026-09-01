@@ -9,7 +9,7 @@ import { db } from "../db";
 import { users, workoutLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, lt, desc } from "drizzle-orm";
 import {
-  classifyWorkoutFeedback,
+  classifyWorkoutFeedbackAnswer,
   createWorkoutFeedbackExpectation,
   isWorkoutFeedbackExpectation,
   readWorkoutFeedbackExpectation,
@@ -65,7 +65,7 @@ export async function resumeWorkoutFeedbackExpectation(ctx: {
   if (!isWorkoutFeedbackExpectation(marker)) return null;
 
   const expectation = readWorkoutFeedbackExpectation(marker);
-  const feedbackKind = expectation ? classifyWorkoutFeedback(m) : null;
+  const feedbackKind = expectation ? classifyWorkoutFeedbackAnswer(message) : null;
 
   // Expiry and a clear subject change both release the one-slot expectation. Do not make a later
   // "too hard" answer a session question the client has already moved on from.
@@ -123,12 +123,8 @@ export async function handleWorkoutCommands(ctx: {
   // workout was actually delivered or logged in the last 6 hours, and the message
   // isn't about food/money/the app. This recency gate is what keeps "this diet is
   // too hard" from being misread as workout feedback — no state machine needed.
-  const feedbackKind = classifyWorkoutFeedback(m);
-  if (
-    feedbackKind
-    && !/\b(diet|eat|eating|food|meal|protein|carbs?|expensive|money|afford|app|bot|coach|subscription|price|pay)\b/i.test(m)
-    && (m.split(/\s+/).length <= 8 || /\b(workout|session|training|gym|that|it|today)\b/i.test(m))
-  ) {
+  const feedbackKind = classifyWorkoutFeedbackAnswer(message);
+  if (feedbackKind) {
     const sixHoursAgo = new Date(Date.now() - 6 * 3600_000);
     const recent = await db.select({ intent: chatHistory.intent }).from(chatHistory)
       .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, sixHoursAgo)))

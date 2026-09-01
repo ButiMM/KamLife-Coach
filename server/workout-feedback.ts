@@ -58,6 +58,20 @@ export function isWorkoutFeedbackExpectation(marker: string | null | undefined):
   return String(marker || "").startsWith(`${EXPECTATION_OWNER}:`);
 }
 
+// A recognised phrase is only a workout answer when the client has not explicitly said what it
+// is about instead. This is shared by the durable-resume and legacy recency paths: "this diet is
+// too hard" must never become an instruction to reduce workout load merely because a session
+// question was still open.
+const NON_WORKOUT_CONTEXT = /\b(diet|eat|eating|food|meal|protein|carbs?|expensive|money|afford|app|bot|coach|subscription|price|pay)\b/i;
+const WORKOUT_CONTEXT = /\b(workout|session|training|gym|that|it|today)\b/i;
+
+export function classifyWorkoutFeedbackAnswer(message: string): WorkoutFeedbackKind | null {
+  const kind = classifyWorkoutFeedback(message);
+  if (!kind || NON_WORKOUT_CONTEXT.test(message || "")) return null;
+  const words = String(message || "").trim().split(/\s+/).filter(Boolean);
+  return words.length <= 8 || WORKOUT_CONTEXT.test(message || "") ? kind : null;
+}
+
 const TOO_EASY = /\b(too\s+easy|was\s+easy|felt\s+easy|that\s+was\s+easy|piece\s+of\s+cake|not\s+(?:challenging|hard\s+enough|enough)|need(?:s|ed)?\s+more|too\s+light|way\s+too\s+easy|bored)\b/i;
 const TOO_HARD = /\b(too\s+hard|too\s+tough|too\s+difficult|too\s+heavy|too\s+much|so\s+hard|really\s+hard|brutal|killed\s+me|kicked\s+my|couldn.?t\s+finish|could\s+not\s+finish|struggled|wiped\s+me|destroyed\s+me|too\s+intense)\b/i;
 const JUST_RIGHT = /\b(just\s+right|just\s+fine|perfect|felt\s+(?:good|great)|good\s+(?:session|workout|one)|spot\s+on|manageable|challenging\s+but|nailed\s+it|just\s+enough)\b/i;
