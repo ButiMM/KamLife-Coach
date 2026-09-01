@@ -370,25 +370,50 @@ export async function handleMiscCommands(ctx: {
       // remaining calories can actually pay for, and — when that option still does not reach the
       // stated gap — to say so and hand the client the priority, not a prescribed meal count.
       suggestion += `You need *${protLeft}g more protein* today. That is the priority.\n\n`;
+      // THE MENU HAD NO FULL PLATE IN IT (2026-09-01, Defect 2).
+      //
+      // Traced before changing anything: protLeft and calLeft are both read and both printed, so
+      // this is not missing evidence and not the wrong claimant. What the owner could not do was
+      // answer in proportion to the evidence it held. Driving the real path on main, a client with
+      // 2 146 kcal of headroom and one with 420 kcal were offered plates from the same 380–450
+      // kcal band, because that band was the entire menu. Headroom could only ever REMOVE an
+      // option; nothing in the list could express "you have most of a day left, eat properly".
+      //
+      // So the correction is to the option set and the ordering, not to the architecture: fuller
+      // plates in the same hand-authored style as the entries already here, and a choice rule that
+      // fits the plate to the need.
       const meals: Array<{ text: string; protein: number; kcal: number }> = budget === "under_100"
         ? [
+            { text: "Tin of pilchards + 2 eggs + pap (~600 kcal, 42g protein)", protein: 42, kcal: 600 },
+            { text: "Sugar beans + 2 eggs + pap + spinach (~620 kcal, 30g protein)", protein: 30, kcal: 620 },
             { text: "Tin of pilchards + pap (~350 kcal, 24g protein)", protein: 24, kcal: 350 },
             { text: "2 eggs + pap (~300 kcal, 18g protein)", protein: 18, kcal: 300 },
           ]
         : [
+            { text: "2 chicken thighs + rice + mixed veg (~680 kcal, 55g protein)", protein: 55, kcal: 680 },
+            { text: "Beef mince + pap + spinach (~640 kcal, 40g protein)", protein: 40, kcal: 640 },
             { text: "Chicken breast + rice + spinach (~450 kcal, 35g protein)", protein: 35, kcal: 450 },
             { text: "Tin of pilchards + sweet potato (~380 kcal, 24g protein)", protein: 24, kcal: 380 },
             { text: "3 eggs + brown bread + tomato (~400 kcal, 24g protein)", protein: 24, kcal: 400 },
           ];
-      // Biggest first — a client short 129g should not be led with the 18g option — and only the
-      // ones the day's remaining calories can actually pay for. Offering a 450 kcal plate to
-      // somebody with 300 kcal left is the same defect in the other direction.
-      const affordable = [...meals].sort((a, b) => b.protein - a.protein).filter(mm => mm.kcal <= calLeft);
-      if (affordable.length === 0) {
+      // FIT THE PLATE TO THE NEED, and it takes no arithmetic beyond a comparison.
+      //
+      // "Biggest protein first" was right while every option was small and becomes wrong the
+      // moment a 680 kcal plate exists: a client 22g short would be led to it. Ranking rule:
+      //   - the SMALLEST plate that actually covers the gap, if one does — enough is enough;
+      //   - otherwise the BIGGEST the day's calories can pay for, because nothing will finish it
+      //     and the largest dent is the most useful answer.
+      // No threshold, no percentage, no division, no meal count. The calorie filter is what stops
+      // the fuller plates being offered to somebody who has no room for them.
+      const affordable = meals.filter(mm => mm.kcal <= calLeft);
+      const covers = affordable.filter(mm => mm.protein >= protLeft).sort((a, b) => a.kcal - b.kcal);
+      const dents = affordable.filter(mm => mm.protein < protLeft).sort((a, b) => b.protein - a.protein);
+      const ordered = [...covers, ...dents];
+      if (ordered.length === 0) {
         suggestion += `You do not have the calories left for a full meal — go protein-only: eggs, biltong, tuna or plain yoghurt, and leave the starch off the plate.`;
       } else {
-        suggestion += `Pick one:\n${affordable.map((mm, i) => `${i + 1}. ${mm.text}`).join("\n")}`;
-        if (affordable[0].protein < protLeft) {
+        suggestion += `Pick one:\n${ordered.map((mm, i) => `${i + 1}. ${mm.text}`).join("\n")}`;
+        if (ordered[0].protein < protLeft) {
           // SAY IT PLAINLY RATHER THAN PRESCRIBE A NUMBER. How the client spreads the rest across
           // the eating opportunities they have left is theirs to decide; counting meals for them
           // would be inventing a plan out of two figures.

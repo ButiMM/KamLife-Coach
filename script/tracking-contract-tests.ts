@@ -1196,6 +1196,71 @@ const MUST_WRITE: [string, string][] = [
           failures.push(`A 22g gap the top option genuinely covers was told it falls short — the fix over-fires on ordinary days: "${flat(r)}"`);
         }
       }
+
+      /**
+       * DEFECT 2 — THE PLATE MUST BE PROPORTIONAL TO THE DAY THAT IS LEFT (2026-09-01).
+       *
+       * Traced before changing anything: protLeft and calLeft were both read and both printed, so
+       * this was never missing evidence or the wrong claimant. The owner simply had nothing in its
+       * option list big enough to answer with. A client holding 2 146 kcal of headroom and one
+       * holding 420 got plates from the same 380–450 kcal band, because that band WAS the menu —
+       * headroom could only ever remove an option, never size one up.
+       *
+       * Graded on the plates the client is actually offered, parsed out of the rendered reply. No
+       * threshold is asserted and none exists in the code: the property is that the two headrooms
+       * must not produce the same leading plate, which is the defect stated as a test.
+       */
+      {
+        const plates = (r: string) => [...r.matchAll(/\(~(\d+) kcal, (\d+)g protein\)/g)]
+          .map(m => ({ kcal: Number(m[1]), protein: Number(m[2]) }));
+
+        const roomy = await mealTurn({ protLeft: 129, calLeft: 2146, budget: "100_300" });
+        const tight = await mealTurn({ protLeft: 129, calLeft: 420, budget: "100_300" });
+        const roomyPlates = plates(roomy), tightPlates = plates(tight);
+        if (roomyPlates.length === 0 || tightPlates.length === 0) {
+          failures.push(`The plate-ask stopped offering plates at all — the rest of this block grades nothing: "${flat(roomy)}"`);
+        } else {
+          // THE DEFECT ITSELF: a whole day of headroom answered with the same plate as 420 kcal.
+          if (roomyPlates[0].kcal === tightPlates[0].kcal && roomyPlates[0].protein === tightPlates[0].protein) {
+            failures.push(`2 146 kcal of headroom and 420 kcal produced the same leading plate (${roomyPlates[0].kcal} kcal, ${roomyPlates[0].protein}g) — the owner still cannot answer in proportion to the evidence it holds: "${flat(roomy)}"`);
+          }
+          if (roomyPlates[0].protein <= tightPlates[0].protein) {
+            failures.push(`With most of the day's calories unspent the client was led to a plate no stronger than the one offered on 420 kcal: "${flat(roomy)}"`);
+          }
+          // AND THE MENU MUST CONTAIN A REAL MEAL, which the two comparisons above do NOT prove:
+          // the old 380–450 kcal menu satisfies both, because filtering alone already makes the
+          // two headrooms differ. 600 kcal is this suite's statement of what counts as a plate for
+          // somebody who has eaten almost nothing all day — an expectation of the product, not a
+          // rule in the code, and the number to revisit if the menu is ever re-authored. Without
+          // it, deleting every fuller plate leaves this block green, which is how the first
+          // version of this test would have shipped a defect it claimed to guard.
+          if (roomyPlates[0].kcal < 600) {
+            failures.push(`With 2 146 kcal unspent the biggest thing on offer was ${roomyPlates[0].kcal} kcal — the menu still has no plate you could call a meal: "${flat(roomy)}"`);
+          }
+          // HEADROOM STILL CONSTRAINS. A fuller plate must never be offered to somebody who has no
+          // room for it — the same defect in the other direction, and the reason the menu could
+          // not simply be made bigger.
+          const unaffordable = tightPlates.filter(p => p.kcal > 420);
+          if (unaffordable.length > 0) {
+            failures.push(`A plate of ${unaffordable[0].kcal} kcal was offered to a client with 420 kcal left: "${flat(tight)}"`);
+          }
+        }
+
+        // AND THE ORDINARY DAY IS NOT OVER-SERVED. 22g short with the same big headroom: the
+        // fuller plates exist and must not be what the client is led to. "Biggest protein first"
+        // was safe while every option was small and is exactly what goes wrong once one is not.
+        const ordinary = await mealTurn({ protLeft: 22, calLeft: 2146, budget: "100_300" });
+        const ordinaryPlates = plates(ordinary);
+        if (ordinaryPlates.length > 1) {
+          const largest = Math.max(...ordinaryPlates.map(p => p.kcal));
+          if (ordinaryPlates[0].kcal === largest) {
+            failures.push(`A client 22g short was led to the largest plate on the menu (${largest} kcal) — enough is enough, and over-serving is how a fat-loss client is talked out of their deficit: "${flat(ordinary)}"`);
+          }
+          if (ordinaryPlates[0].protein < 22) {
+            failures.push(`A client 22g short was led to a plate that does not even cover it: "${flat(ordinary)}"`);
+          }
+        }
+      }
     }
   }
 
