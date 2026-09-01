@@ -62,14 +62,23 @@ export function isWorkoutFeedbackExpectation(marker: string | null | undefined):
 // is about instead. This is shared by the durable-resume and legacy recency paths: "this diet is
 // too hard" must never become an instruction to reduce workout load merely because a session
 // question was still open.
-const NON_WORKOUT_CONTEXT = /\b(diet|eat|eating|food|meal|protein|carbs?|expensive|money|afford|app|bot|coach|subscription|price|pay)\b/i;
-const WORKOUT_CONTEXT = /\b(workout|session|training|gym|that|it|today)\b/i;
+const NON_WORKOUT_CONTEXT_TOKENS = new Set([
+  "diet", "eat", "eating", "food", "meal", "protein", "carb", "carbs", "expensive",
+  "money", "afford", "app", "bot", "coach", "subscription", "price", "pay",
+]);
+const WORKOUT_CONTEXT_TOKENS = new Set(["workout", "session", "training", "gym", "that", "it", "today"]);
+const FEEDBACK_TOKEN_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "word" });
+
+function feedbackTokens(message: string): string[] {
+  return Array.from(FEEDBACK_TOKEN_SEGMENTER.segment(message.toLowerCase()), part => part.isWordLike ? part.segment : "").filter(Boolean);
+}
 
 export function classifyWorkoutFeedbackAnswer(message: string): WorkoutFeedbackKind | null {
   const kind = classifyWorkoutFeedback(message);
-  if (!kind || NON_WORKOUT_CONTEXT.test(message || "")) return null;
+  const tokens = feedbackTokens(message || "");
+  if (!kind || tokens.some(token => NON_WORKOUT_CONTEXT_TOKENS.has(token))) return null;
   const words = String(message || "").trim().split(/\s+/).filter(Boolean);
-  return words.length <= 8 || WORKOUT_CONTEXT.test(message || "") ? kind : null;
+  return words.length <= 8 || tokens.some(token => WORKOUT_CONTEXT_TOKENS.has(token)) ? kind : null;
 }
 
 const TOO_EASY = /\b(too\s+easy|was\s+easy|felt\s+easy|that\s+was\s+easy|piece\s+of\s+cake|not\s+(?:challenging|hard\s+enough|enough)|need(?:s|ed)?\s+more|too\s+light|way\s+too\s+easy|bored)\b/i;
