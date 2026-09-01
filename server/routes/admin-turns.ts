@@ -460,7 +460,7 @@ export function candidateSignature(input: string): string {
  * Still no second store and no new judging: it reads the turns the ledger already holds and runs
  * the rules and invariants already declared above.
  */
-export async function buildCoachHealthBrief(days: number): Promise<any> {
+export async function buildCoachHealthBrief(days: number, readBy = "coach_health_brief"): Promise<any> {
     const since = new Date(Date.now() - days * 86_400_000);
     const rows = await db.select({
       id: turnLedger.id, userId: turnLedger.userId, createdAt: turnLedger.createdAt,
@@ -566,7 +566,18 @@ export async function buildCoachHealthBrief(days: number): Promise<any> {
     // ── BUILDS: attribution here is merge-time, so a window served by more than one build is
     // the case where a "regression" may just be a turn that ran the old code. Surfaced rather
     // than assumed away.
-    const byVersion = new Map<string, number>();
+    // EVERY READ OF THIS IS AUDITED, INCLUDING THE ONE NOBODY ASKED FOR (A2, 2026-09-01).
+  //
+  // The audit call used to sit in the route handler, so it recorded the reads a person made and
+  // not the hourly one A1 added — a background job reading the same inbound text, replies and
+  // state under no audit record at all. Naming the caller and leaving the call outside would have
+  // fixed today's gap and left the next caller free to repeat it, which is the shape of defect
+  // this project keeps paying for. The function that performs the read now records it, so a
+  // reader cannot exist without an audit trail. `readBy` is what distinguishes a person opening
+  // the page from the scheduler, and the endpoint's own record is unchanged.
+  await auditRead(readBy, { days, turns: rows.length, scheduled: readBy !== "coach_health_brief" });
+
+  const byVersion = new Map<string, number>();
     for (const t of shaped) byVersion.set(String(t.row.version || "?"), (byVersion.get(String(t.row.version || "?")) || 0) + 1);
     const builds = [...byVersion.entries()].map(([version, turns]) => ({ version, turns }))
       .sort((a, b) => b.turns - a.turns);
@@ -614,15 +625,65 @@ export const COACH_HEALTH_STATE_KEY = "coach_health_sweep";
 
 export async function runCoachHealthSweep(days = 1): Promise<{ known: number; candidates: number; fresh: string[] }> {
   const { loadState, saveState } = await import("../scheduler/shared");
-  const brief = await buildCoachHealthBrief(days);
-  const refs: string[] = (brief.candidates || []).map((c: any) => String(c.id));
+  const brief = await buildCoachHealthBrief(days, "coach_health_sweep");
+  const active: Array<{ ref: string; lastSeen: string }> = (brief.candidates || []).map((c: any) => ({
+    ref: String(c.id),
+    // The newest turn in the cluster. Already computed for the dashboard; it is what makes
+    // "there is new evidence" a fact about the ledger rather than a fact about when we ran.
+    lastSeen: String(c.lastSeen || ""),
+  }));
+  const refs = active.map(a => a.ref);
 
-  let seen: string[] = [];
+  /**
+   * THE RECURRENCE RULE (A2, 2026-09-01).
+   *
+   * A1 kept a flat seenRefs list and filtered against it forever. Refs are derived from the
+   * cluster's identity, which is the property that makes CH-E17F mean the same thing tomorrow —
+   * and it is also what made a real recurrence invisible: once a candidate aged out of the rolling
+   * window, the same failure a week later produced the same ref and was reported as "none new".
+   * Suppression is right for the hour after we announced it and wrong for the month after.
+   *
+   * A ref is announced when:
+   *   1. it has never been announced, or
+   *   2. it was ABSENT from the previous run's active set, AND its newest turn is newer than the
+   *      newest turn we had when we last saw it.
+   *
+   * Both halves of (2) are load-bearing. Absence alone would re-announce on any window wobble;
+   * newer evidence alone would re-announce while the candidate is still active and noisy. Together
+   * they mean "it went away, and it has come back with turns we have never counted" — which is
+   * exactly a recurrence and cannot be produced by re-running stored evidence, because re-running
+   * moves neither the active set nor the newest turn.
+   */
+  let seen: Record<string, string> = {};
+  let prevActive: string[] = [];
   try {
     const prev = JSON.parse(loadState()[COACH_HEALTH_STATE_KEY] || "{}");
-    if (Array.isArray(prev.seenRefs)) seen = prev.seenRefs.map(String);
+    if (prev.seen && typeof prev.seen === "object") {
+      for (const [k, v] of Object.entries(prev.seen)) seen[String(k)] = String(v ?? "");
+    }
+    if (Array.isArray(prev.activeRefs)) prevActive = prev.activeRefs.map(String);
+    // A snapshot written by A1 has seenRefs and neither of the above. Treat those refs as both
+    // known and active, so the first run after this deploys announces nothing it already had.
+    if (Array.isArray(prev.seenRefs)) {
+      for (const r of prev.seenRefs.map(String)) if (!(r in seen)) seen[r] = "";
+      if (!Array.isArray(prev.activeRefs)) prevActive = prev.seenRefs.map(String);
+    }
   } catch { /* a corrupt snapshot must not stop the sweep — it is rewritten below */ }
-  const fresh = refs.filter(r => !seen.includes(r));
+
+  const fresh = active
+    .filter(a => !(a.ref in seen) || (!prevActive.includes(a.ref) && a.lastSeen > (seen[a.ref] || "")))
+    .map(a => a.ref);
+
+  // What we have now counted for each ref. Never moves backwards: a shorter window must not make
+  // older evidence look new on the next run.
+  const nextSeen: Record<string, string> = { ...seen };
+  for (const a of active) {
+    if (!(a.ref in nextSeen) || a.lastSeen > nextSeen[a.ref]) nextSeen[a.ref] = a.lastSeen;
+  }
+  // Bounded, oldest evidence dropped first.
+  const trimmed = Object.entries(nextSeen)
+    .sort((x, y) => String(y[1]).localeCompare(String(x[1])))
+    .slice(0, 500);
 
   const snapshot = {
     at: new Date().toISOString(),
@@ -642,8 +703,11 @@ export async function runCoachHealthSweep(days = 1): Promise<{ known: number; ca
       firstSeen: c.firstSeen, lastSeen: c.lastSeen,
       examples: (c.examples || []).slice(0, 2),
     })),
-    // Everything ever announced, so a second run of the same evidence announces nothing.
-    seenRefs: [...new Set([...seen, ...refs])].slice(-500),
+    // ref -> the newest turn we have counted for it. Replaces A1's flat seenRefs, which could say
+    // "already announced" but never "already announced, and nothing has happened since".
+    seen: Object.fromEntries(trimmed),
+    // What was live THIS run, so the next one can tell "still here" from "came back".
+    activeRefs: refs,
     fresh,
   };
   saveState(COACH_HEALTH_STATE_KEY, JSON.stringify(snapshot));
@@ -676,7 +740,8 @@ export function registerAdminTurns(app: Express) {
         const raw = loadState()[COACH_HEALTH_STATE_KEY];
         if (raw) lastSweep = JSON.parse(raw);
       } catch { /* a corrupt snapshot must not take the dashboard down */ }
-      await auditRead("coach_health_brief", { days, turns: brief.turns });
+      // buildCoachHealthBrief records the read itself — see the note there. Auditing again here
+      // would put two records on one read.
       res.json({ ...brief, lastSweep });
     } catch (e: any) {
       console.error("[COACH_HEALTH] brief failed:", e?.message);
