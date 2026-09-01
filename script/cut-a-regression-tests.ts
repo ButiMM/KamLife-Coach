@@ -78,7 +78,7 @@ function meal(rawMessage: string, sourceMessageId: string, allowIntentionalRepea
     sourceMessageId: "SM-SOURCE", kcalInt: 420, proteinInt: 32, carbsInt: 48, fatInt: 10,
     items: [{ name: "Chicken and rice", grams: 350, kcal: 420, protein: 32, category: "meal" }],
     mealLabel: "lunch", loggedAt: yesterday,
-  }]]);
+  }]]]);
   g.__KAMLIFE_STUB_WRITES = [];
   g.__KAMLIFE_STUB_REFLECT_WRITES = true;
   const message = "same as yesterday's lunch";

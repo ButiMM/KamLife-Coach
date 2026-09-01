@@ -173,8 +173,11 @@ const BUDGET = {
  *               backlog, and it is named rather than counted so nobody has to rediscover it.
  */
 const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT RISK"> = {
-  "server/handlers/meal-repeat.ts": "guarded",
-  "server/handlers/food-commands.ts": "guarded",
+  // meal-repeat.ts and food-commands.ts were here until Cut A. Both held their own meal INSERT —
+  // the repeat door copied a previous row, the alcohol door wrote its own — so both were
+  // independent authorities on "a new eating event happened". Both now hand rows to
+  // commitFoodLog and write nothing themselves, which is the whole point of the cut: this list
+  // shrinking is what convergence looks like from the governor's side.
   // food-context.ts was here until commitFoodLog — the write door — moved to server/day-ledger.ts.
   // It now parses and decides and hands rows to that one owner; it writes nothing itself.
   "server/handlers/food-log-mgmt.ts": "guarded",
