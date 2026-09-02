@@ -33,11 +33,11 @@ import { getStepStreak } from "./steps";
 import { scanForSAFoods } from "./food-scanner";
 import { storeMemory, addFact } from "../memory";
 import { sendWhatsApp } from "../scheduler";
-import { sastToday, sastDayStart, looksLikeDirectionRequest, classifyPainReport , getDisplayName} from "../utils";
+import { sastDayStart, looksLikeDirectionRequest, classifyPainReport , getDisplayName} from "../utils";
 import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
 import { turnEvidence } from "./chat-log";
-import { getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
+import { getDayLedger, getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
 
@@ -303,9 +303,9 @@ export async function handleMiscCommands(ctx: {
   // which this door already owns. Requiring the suffix is what sent it to the meal-plan door
   // instead (2026-08-27). Dropping one word covers both, and adds no new vocabulary.
   if (/\b(what should i eat|next meal|(?:suggest|give|send|show|recommend)(?:\s+me)?\s*a?n?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(breakfast|lunch|dinner|supper|braai|social)\b/i.test(m)) {
-    const todayStr = sastToday();
-    const todayCals = user.todayCaloriesDate === todayStr ? (user.todayCalories || 0) : 0;
-    const todayProt = user.todayCaloriesDate === todayStr ? (user.todayProteinG || 0) : 0;
+    const ledger = await getDayLedger(user.id, { user });
+    const todayCals = ledger.kcal;
+    const todayProt = ledger.protein;
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 120;
     const calLeftRaw = calTarget - todayCals;

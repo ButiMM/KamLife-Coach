@@ -1257,21 +1257,109 @@ const MUST_WRITE: [string, string][] = [
     // stayed green with the handler deleted.
     {
       const { sastToday } = await import("../server/utils");
-      const mealTurn = async (o: { protLeft: number; calLeft: number; budget: string }) => {
+      type MealPart = { kcal: number; protein: number; source?: string; label?: string };
+      const mealRows = (parts: MealPart[]) => parts.map((part, i) => ({
+        id: `meal-${i}`, userId: USER.id,
+        mealLabel: part.label || "meal", source: part.source || "sa_scanner",
+        loggedAt: new Date(dayStart.getTime() + (i + 1) * 3_600_000), corrected: false,
+        kcalInt: part.kcal, proteinInt: part.protein,
+        kcal: part.kcal, protein: part.protein, carbs: 0, fat: 0,
+      }));
+      const mealTurn = async (o: {
+        protLeft: number; calLeft: number; budget: string;
+        ledger?: MealPart[];
+        overlay?: { calories: number; protein: number };
+      }) => {
         freshTurn();
+        const ledger = o.ledger || [{ kcal: 2400 - o.calLeft, protein: 150 - o.protLeft }];
+        const overlay = o.overlay || { calories: 2400 - o.calLeft, protein: 150 - o.protLeft };
         g.__KAMLIFE_STUB_USER = {
           ...USER, todayWater: "0", weeklyFoodBudget: o.budget,
-          todayCaloriesDate: sastToday(),
-          calorieTarget: 2400, todayCalories: 2400 - o.calLeft,
-          proteinTarget: 150, todayProteinG: 150 - o.protLeft,
+          todayCaloriesDate: sastToday(), calorieTarget: 2400, proteinTarget: 150,
+          todayCalories: overlay.calories, todayProteinG: overlay.protein,
         };
         g.__KAMLIFE_STUB_ROWS = new Map([
-          [schema.mealLogs, []], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
+          [schema.mealLogs, mealRows(ledger)], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
         ]);
         g.__KAMLIFE_STUB_WRITES = [];
         return String(await handleMessage(USER.phoneNumber, "what should I eat next?").catch(() => ""));
       };
       const flat = (r: string) => r.replace(/\n/g, " ⏎ ");
+
+      /**
+       * #127 — SMART NEXT MEAL MUST DECIDE FROM THE DAY LEDGER.
+       *
+       * Each control drives the actual route handler with deliberately disagreeing meal rows and
+       * users overlay. Reverting the owner to todayCalories/todayProteinG makes controls 1–4 read
+       * the stale overlay and fail; the matching control keeps today's rendered recommendation.
+       */
+      {
+        // 1. Protein is met and 700 kcal remain. A stale overlay must not manufacture a gap.
+        const met = await mealTurn({
+          protLeft: 0, calLeft: 700, budget: "100_300",
+          ledger: [{ kcal: 1700, protein: 150 }],
+          overlay: { calories: 400, protein: 20 },
+        });
+        if (!/700 kcal and 0g protein to go/i.test(met) || /130g more protein/i.test(met)) {
+          failures.push(`Ledger protein completion with 700 kcal left was replaced by the stale overlay: "${flat(met)}"`);
+        }
+
+        // 2. Only 200 kcal remain and protein is genuinely short: the ledger must choose a plate
+        // that fits, even when the overlay claims ample calories and protein completion.
+        const tightProtein = await mealTurn({
+          protLeft: 130, calLeft: 200, budget: "100_300",
+          ledger: [{ kcal: 2200, protein: 20 }],
+          overlay: { calories: 1700, protein: 150 },
+        });
+        if (!/200 kcal and 130g protein left/i.test(tightProtein)
+          || !/Tuna salad, no dressing/i.test(tightProtein)
+          || /\(~(?:[3-9]\d\d|[1-9]\d{3,}) kcal/i.test(tightProtein)) {
+          failures.push(`Ledger's tight protein gap did not produce an affordable protein-first plate: "${flat(tightProtein)}"`);
+        }
+
+        // 3. A photo plus another logged row folds before the decision; its stale overlay loses.
+        const photoMultiRow = await mealTurn({
+          protLeft: 0, calLeft: 700, budget: "100_300",
+          ledger: [
+            { kcal: 900, protein: 80, source: "photo", label: "lunch" },
+            { kcal: 800, protein: 70, label: "dinner" },
+          ],
+          overlay: { calories: 300, protein: 10 },
+        });
+        if (!/700 kcal and 0g protein to go/i.test(photoMultiRow) || /140g more protein/i.test(photoMultiRow)) {
+          failures.push(`Photo/multi-row ledger total lost to the stale overlay: "${flat(photoMultiRow)}"`);
+        }
+
+        // 4. Post-removal rows immediately change the same ask while the mirror still holds the
+        // old total. This is the state the correction/removal writer leaves for the next turn.
+        const beforeRemoval = await mealTurn({
+          protLeft: 130, calLeft: 200, budget: "100_300",
+          ledger: [{ kcal: 2200, protein: 20 }],
+          overlay: { calories: 2200, protein: 20 },
+        });
+        const afterRemoval = await mealTurn({
+          protLeft: 0, calLeft: 700, budget: "100_300",
+          ledger: [{ kcal: 1700, protein: 150 }],
+          overlay: { calories: 2200, protein: 20 },
+        });
+        if (!/200 kcal and 130g protein left/i.test(beforeRemoval)
+          || !/700 kcal and 0g protein to go/i.test(afterRemoval)
+          || beforeRemoval === afterRemoval) {
+          failures.push(`Post-correction/removal ledger rows did not immediately change SMART NEXT MEAL: before="${flat(beforeRemoval)}" after="${flat(afterRemoval)}"`);
+        }
+
+        // 5. The ordinary, healthy state is a control: matching mirror and ledger keep the
+        // existing rendered suggestion rather than changing policy or wording.
+        const matching = await mealTurn({
+          protLeft: 1, calLeft: 700, budget: "100_300",
+          ledger: [{ kcal: 1700, protein: 149 }],
+          overlay: { calories: 1700, protein: 149 },
+        });
+        if (!/700 kcal and 1g protein to go/i.test(matching)
+          || !/Chicken \+ sweet potato \+ vegetables/i.test(matching)) {
+          failures.push(`Matching ledger and overlay changed today's SMART NEXT MEAL policy: "${flat(matching)}"`);
+        }
+      }
 
       // THE OBSERVED TURN: 129g short with 2 146 kcal unspent.
       {
