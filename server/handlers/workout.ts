@@ -649,11 +649,19 @@ export async function handleWorkoutCommands(ctx: {
 
     const perfectDay = await checkPerfectDay(user.id, user.proteinTarget || 120);
 
-    // Week 1 Complete badge — fires once when programme week advances from 1 to 2.
-    // Was a five-paragraph second WhatsApp message ("---" splits the bubble); the badge is
-    // worth one line and the split was buzzing a client's phone twice for one thing they did.
+    // FIRST FULL TRAINING WEEK — only a lifetime beginner may receive this history claim.
+    // `programmeWeek` is phase-relative: phase advancement and a goal transition can both put an
+    // experienced client back in Week 1. The old condition read only that clock, so the final
+    // session of a new phase could say "your first full training week" immediately after the
+    // same client had been shown "Session 25 overall". `newTotal` is the lifetime-session owner
+    // used by the completion reply and the session header. At the final scheduled slot of a
+    // genuine first cycle it equals the number of planned sessions; any larger total is history
+    // that makes a first-ever claim false. Keep phase-relative Week 1 itself untouched.
+    //
+    // The badge remains deliberately small — it is the one completion add-on, not a second
+    // programme or re-entry message.
     let week1Badge = "";
-    if (weekAdvance && newWeek === 2) {
+    if (weekAdvance && newWeek === 2 && newTotal === trainingDays) {
       week1Badge = ` 🏆 That's your first full training week — most people quit before this.`;
     }
 
