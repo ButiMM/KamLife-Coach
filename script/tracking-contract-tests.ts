@@ -1666,7 +1666,7 @@ const MUST_WRITE: [string, string][] = [
         // this with a predicate test — this calls the writer that builds the customer reply.
         const { handleWorkoutCommands } = await import("../server/handlers/workout");
         const { inTurn } = await import("../server/handlers/chat-log");
-        return inTurn("tracking_test", message, async () => String(await handleWorkoutCommands({
+        return await inTurn("tracking_test", message, async () => String(await handleWorkoutCommands({
           phone: USER.phoneNumber,
           message,
           m: message,
