@@ -40,6 +40,14 @@ interface CoachHealthPayload {
   cannotSurface: Array<{ id: string; fixRef: string; why: string }>;
 }
 
+/** What the hourly sweep persists to scheduler_state — the automatic run, not the live window. */
+interface SweepSnapshot {
+  at: string; windowDays: number; turns: number; clients: number;
+  knownRegressions: number; buildWarning: string | null;
+  candidates: Array<{ id: string; label: string; priority: string; turns: number; clients: number }>;
+  fresh: string[];
+}
+
 const LAYER_CHIP: Record<string, string> = {
   Claim: "bg-amber-100 text-amber-700 border-amber-200",
   Decision: "bg-blue-100 text-blue-700 border-blue-200",
@@ -47,18 +55,15 @@ const LAYER_CHIP: Record<string, string> = {
   Coaching: "bg-emerald-100 text-emerald-700 border-emerald-200",
 };
 
-function CoachHealthPanel({ days }: { days: number }) {
+// ONE PAGE OPEN, ONE LEDGER EVALUATION (P0 #115, 2026-09-02).
+//
+// This panel used to fetch /api/admin/coach-health itself, while MorningBrief fetched
+// /api/admin/coach-health/brief — both mounting on first render, both scanning up to 5 000
+// turn_ledger rows for the same window, and both writing an audit record, before the operator saw
+// anything. It now RENDERS what the brief already computed. It takes no props but data and owns no
+// request; the endpoint still exists for API callers.
+function CoachHealthPanel({ data }: { data: CoachHealthPayload | null }) {
   const [open, setOpen] = useState<string | null>(null);
-  const { data } = useQuery({
-    queryKey: ["/api/admin/coach-health", days],
-    queryFn: async () => {
-      const res = await fetch(`/api/admin/coach-health?days=${days}`, { headers: authHeaders() });
-      if (!res.ok) return null;
-      return res.json() as Promise<CoachHealthPayload>;
-    },
-    refetchInterval: 5 * 60_000,
-    retry: false,
-  });
 
   if (!data) return null;
 
@@ -182,12 +187,8 @@ interface BriefPayload {
   // opened; this is what the hourly sweep found while it was closed, read from scheduler_state.
   // Null until the first sweep has run — a fresh deploy has not swept yet, and saying so is the
   // point: an empty band would read as "nothing wrong" rather than "nothing has looked".
-  lastSweep: {
-    at: string; windowDays: number; turns: number; clients: number;
-    knownRegressions: number; buildWarning: string | null;
-    candidates: Array<{ id: string; label: string; priority: string; turns: number; clients: number }>;
-    fresh: string[];
-  } | null;
+  adjudicated: CoachHealthPayload | null;
+  lastSweep: SweepSnapshot | null;
 }
 
 const PRIORITY_CHIP: Record<string, string> = {
@@ -196,22 +197,109 @@ const PRIORITY_CHIP: Record<string, string> = {
   low: "bg-slate-100 text-slate-600 border-slate-200",
 };
 
+/**
+ * THE AUTOMATIC RUN, READ WITHOUT PAYING FOR AN EVALUATION (P0 #115, 2026-09-02).
+ *
+ * A1's snapshot was only reachable as a field on the brief response, so the cheapest question an
+ * operator has — "did the hourly sweep run, and what did it find?" — could only be answered by
+ * first evaluating the whole window. This hits /api/admin/coach-health/sweep, which reads one
+ * scheduler_state row and scans no ledger, so it paints immediately and stays truthful even when
+ * the live evaluation below is slow or fails.
+ *
+ * It is deliberately its own request rather than part of the brief: the whole point is that seeing
+ * the sweep must not depend on the heavy path.
+ */
+function SweepBanner() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["/api/admin/coach-health/sweep"],
+    queryFn: async ({ signal }) => {
+      const res = await fetch("/api/admin/coach-health/sweep", { headers: authHeaders(), signal });
+      if (!res.ok) return null;
+      return res.json() as Promise<{ lastSweep: SweepSnapshot | null }>;
+    },
+    refetchInterval: 5 * 60_000,
+    retry: false,
+  });
+  const sweep = data?.lastSweep ?? null;
+
+  return (
+    <Card className="p-4 border-border/50">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <span className="text-sm font-semibold">🤖 Last automatic run</span>
+        {sweep ? (
+          <span className="text-xs text-muted-foreground font-mono">{new Date(sweep.at).toLocaleString()}</span>
+        ) : null}
+      </div>
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground mt-1">Reading the stored sweep…</p>
+      ) : sweep ? (
+        <>
+          <p className="text-sm text-muted-foreground mt-1">
+            {sweep.turns.toLocaleString()} turns · {sweep.clients} client{sweep.clients === 1 ? "" : "s"} ·{" "}
+            {sweep.knownRegressions} known regression{sweep.knownRegressions === 1 ? "" : "s"} ·{" "}
+            {sweep.candidates.length} candidate pattern{sweep.candidates.length === 1 ? "" : "s"} · window {sweep.windowDays}d
+          </p>
+          {sweep.fresh.length > 0 ? (
+            <p className="text-sm mt-2">
+              <span className="text-xs px-2 py-0.5 rounded border bg-rose-100 text-rose-700 border-rose-200">
+                {sweep.fresh.length} new
+              </span>{" "}
+              <span className="font-mono text-xs text-muted-foreground">{sweep.fresh.join(" · ")}</span>
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground mt-2 italic">Nothing new since the run before it.</p>
+          )}
+          <p className="text-xs text-muted-foreground mt-2">
+            Stored by the hourly sweep. The queue below is evaluated live, now.
+          </p>
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground mt-1 italic">
+          The background sweep has not run yet — nothing here has been evaluated automatically.
+        </p>
+      )}
+    </Card>
+  );
+}
+
 function MorningBrief({ days }: { days: number }) {
   const [open, setOpen] = useState<string | null>(null);
-  const { data } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["/api/admin/coach-health/brief", days],
-    queryFn: async () => {
-      const res = await fetch(`/api/admin/coach-health/brief?days=${days}`, { headers: authHeaders() });
-      if (!res.ok) return null;
+    // STALE REQUESTS ARE CANCELLED. Switching 1d -> 7d -> 30d used to leave the earlier
+    // evaluations running server-side with nobody waiting for them; the signal react-query passes
+    // in aborts the fetch so only the window the operator is actually looking at is being paid for.
+    queryFn: async ({ signal }) => {
+      const res = await fetch(`/api/admin/coach-health/brief?days=${days}`, { headers: authHeaders(), signal });
+      if (!res.ok) throw new Error(`brief ${res.status}`);
       return res.json() as Promise<BriefPayload>;
     },
     refetchInterval: 5 * 60_000,
     retry: false,
   });
 
-  if (!data) return null;
+  // A REAL LOADING AND ERROR STATE, not an infinite spinner. Returning null on both was why a slow
+  // or failed evaluation looked identical to an empty window.
+  if (isLoading) {
+    return (
+      <Card className="p-6 border-border/50">
+        <p className="text-sm text-muted-foreground">Evaluating the last {days === 1 ? "day" : `${days} days`} of turns…</p>
+      </Card>
+    );
+  }
+  if (isError || !data) {
+    return (
+      <Card className="p-6 border-border/50">
+        <p className="text-sm text-muted-foreground">
+          The live evaluation did not load. The automatic run above is unaffected — it is read from
+          stored state and does not depend on this request.
+        </p>
+      </Card>
+    );
+  }
 
   return (
+    <>
     <Card className="p-6 border-border/50">
       <div className="mb-5">
         <h3 className="text-xl font-bold font-display">📋 Engineering queue</h3>
@@ -222,51 +310,11 @@ function MorningBrief({ days }: { days: number }) {
         </p>
         <p className="text-xs text-muted-foreground mt-1">Recomputed now, for the last {data.windowDays} day{data.windowDays === 1 ? "" : "s"}.</p>
       </div>
-
-      {/* THE AUTOMATIC RUN, kept visibly separate from the live window above. Without this the
-          background loop is invisible to the operator and A1's whole claim is unverifiable from
-          the page — which is what a reviewer caught on the first version of this cut. */}
-      <div className="mb-5 p-3 rounded-md border bg-muted/30">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <span className="text-sm font-semibold">🤖 Last automatic run</span>
-          {data.lastSweep ? (
-            <span className="text-xs text-muted-foreground font-mono">{new Date(data.lastSweep.at).toLocaleString()}</span>
-          ) : null}
-        </div>
-        {data.lastSweep ? (
-          <>
-            <p className="text-sm text-muted-foreground mt-1">
-              {data.lastSweep.turns.toLocaleString()} turns · {data.lastSweep.clients} client{data.lastSweep.clients === 1 ? "" : "s"} ·{" "}
-              {data.lastSweep.knownRegressions} known regression{data.lastSweep.knownRegressions === 1 ? "" : "s"} ·{" "}
-              {data.lastSweep.candidates.length} candidate pattern{data.lastSweep.candidates.length === 1 ? "" : "s"}
-              {" "}· window {data.lastSweep.windowDays}d
-            </p>
-            {data.lastSweep.fresh.length > 0 ? (
-              <p className="text-sm mt-2">
-                <span className="text-xs px-2 py-0.5 rounded border bg-rose-100 text-rose-700 border-rose-200">
-                  {data.lastSweep.fresh.length} new
-                </span>{" "}
-                <span className="font-mono text-xs text-muted-foreground">{data.lastSweep.fresh.join(" · ")}</span>
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground mt-2 italic">Nothing new since the run before it.</p>
-            )}
-            {data.lastSweep.candidates.length > 0 && (
-              <div className="text-xs text-muted-foreground mt-2 space-y-0.5">
-                {data.lastSweep.candidates.slice(0, 5).map(c => (
-                  <div key={c.id} className="truncate">
-                    <span className="font-mono">{c.id}</span> · {c.label} · {c.clients} client{c.clients === 1 ? "" : "s"}, {c.turns} turn{c.turns === 1 ? "" : "s"}
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground mt-1 italic">
-            The background sweep has not run yet — nothing here has been evaluated automatically.
-          </p>
-        )}
-      </div>
+      {/* The automatic run moved OUT of this component in P0 #115. It was rendered from
+          data.lastSweep — a field on THIS response — so seeing whether the hourly sweep had
+          run required first evaluating the whole window. SweepBanner above reads the stored
+          snapshot directly and scans no ledger, which is the point: the cheapest question an
+          operator has must not be answered by the most expensive request on the page. */}
 
       {data.buildWarning && (
         <div className="text-sm mb-4 p-3 rounded-md bg-amber-50 border border-amber-200 text-amber-900">
@@ -344,6 +392,9 @@ function MorningBrief({ days }: { days: number }) {
         </div>
       )}
     </Card>
+    {/* The adjudicated panel, rendered from the SAME evaluation this component fetched. */}
+    <CoachHealthPanel data={data.adjudicated ?? null} />
+    </>
   );
 }
 
@@ -367,8 +418,8 @@ export default function CoachHealthPage() {
             ))}
           </div>
         </div>
+        <SweepBanner />
         <MorningBrief days={days} />
-        <CoachHealthPanel days={days} />
       </div>
     </DashboardLayout>
   );
