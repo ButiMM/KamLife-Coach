@@ -18,6 +18,7 @@ import {
   todaySAST, isProactivePaused,
 } from "../shared";
 import { TRIAL_DAYS, TRIALS_ENABLED } from "../../pricing-config";
+import { PRICING } from "../../../shared/pricing";
 
 function trialDaysIn(betaBypassUntil: Date | null | undefined): number | null {
   if (!betaBypassUntil) return null;
@@ -75,7 +76,7 @@ export async function runTrialCountdown(): Promise<void> {
         if (await claimProactive(user.id, "trial_day5", todaySAST())) {
           const msg = `${name}, *3 days left on your trial.*\n\n`
             + `You are ${workouts > 0 ? `${workouts} session${workouts === 1 ? "" : "s"} in` : "getting started"} — do not let the momentum stop here.\n\n`
-            + `R199/month. R6.63/day. Less than a cooldrink. Cancel anytime.\n\n`
+            + `${PRICING.monthlyDisplay}. ${PRICING.dailyDisplay}. Less than a cooldrink. Cancel anytime.\n\n`
             + `Tap to continue coaching:\n${payLink || "Reply *pay* for your link."}`;
           await sendWhatsApp(user.phoneNumber, msg);
         }
@@ -89,7 +90,7 @@ export async function runTrialCountdown(): Promise<void> {
           const msg = `${name}, your trial ends *today.*\n\n`
             + `Everything you have built — your programme, your logs, your ${workouts} session${workouts === 1 ? "" : "s"} — is saved. Nothing is lost.\n\n`
             + `To keep coaching going, tap here now:\n${payLink || "Reply *pay* for your link."}\n\n`
-            + `R199/month — cancel anytime. If you have questions about the price or are not sure, just reply and I will sort it out.`;
+            + `${PRICING.monthlyDisplay} — cancel anytime. If you have questions about the price or are not sure, just reply and I will sort it out.`;
           await sendWhatsApp(user.phoneNumber, msg);
         }
       }

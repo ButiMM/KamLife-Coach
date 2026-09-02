@@ -33,6 +33,7 @@ function declinesOptionalStep(msg: string): boolean {
   return DECLINES.has((msg || "").toLowerCase().trim().replace(/[.!]+$/, ""));
 }
 import { welcomeAvatarMarker } from "./macro-card-attach";
+import { PRICING, GUARANTEE_PHRASE } from "../shared/pricing";
 
 // ============================================================
 // ONBOARDING STATE MACHINE — valid states (CTO audit #17/#41)
@@ -322,7 +323,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const heightDisplay = u.heightCm != null ? ` · ${heightCm}cm` : "";
   const bmiDisplay = u.bmi ? ` · BMI ${u.bmi}` : "";
 
-  const refCodeLine = referralCode ? `\n\n🎁 *Your referral code: ${referralCode}* — share it. When a friend joins with it, *you get a free month.* They join at the normal R199, with the same 7-day money-back guarantee — zero risk.` : "";
+  const refCodeLine = referralCode ? `\n\n🎁 *Your referral code: ${referralCode}* — share it. When a friend joins with it, *you get a free month.* They join at the normal R${PRICING.monthlyPriceZAR}, with the same ${GUARANTEE_PHRASE} — zero risk.` : "";
 
   // Goal-specific hook line — personal, not generic
   const goalHook: Record<string, string> = {
@@ -366,7 +367,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const msg1b = `${calExplainer}\n\nLog your first meal and I will show you exactly where it lands. Type what you ate — e.g. *2 eggs and pap* — and Coach K does the maths.`;
 
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;
-  const msg3 = `Your personalised shopping list and weekly meal plan are ready.\n\nPay to unlock them — and Day 2 drops the moment you finish today's session.\n\n*R199/month — cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. *7-day money-back guarantee* — if you're not happy in your first week, full refund, no questions. POPIA protected._`;
+  const msg3 = `Your personalised shopping list and weekly meal plan are ready.\n\nPay to unlock them — and Day 2 drops the moment you finish today's session.\n\n*${PRICING.monthlyDisplay} — cancel anytime:*\n${payLinkOnb}\n\n_${PRICING.dailyDisplay}. Less than a coffee. *${GUARANTEE_PHRASE}* — if it is not for you, full refund, no questions. POPIA protected._`;
   // ACTIVATION MOMENT — the calm, clear expectation-setter (what's required, don't
   // panic, what to expect, at your own pace), then ONE tiny first action to hook the
   // habit in the first five minutes.
@@ -564,7 +565,7 @@ Then on a NEW LINE add: "Reply *yes* when you're ready and I'll build your perso
 Rules: Short sentences. No lists. No bullet points. SA voice — warm, direct, no corporate speak.
 DON'T MAKE THEM THINK: name the OUTCOME plainly (get fit eating the food they already eat, a coach in their pocket), never jargon like "programme" or "accountability".
 Banned words: "I understand", "I hear you", "journey", "wellness", "reach out", "feel free", "awesome", "amazing", "fantastic"
-Do NOT mention price. Do NOT mention R199. Just be a helpful coach.
+Do NOT mention price. Do NOT quote any rand amount. Just be a helpful coach.
 If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one word is enough.`;
       const intakeReply = await askCoachK(message, user, intakeCtx);
       return intakeReply;
@@ -576,7 +577,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     // POPIA + data deletion, and Terms/Privacy links — mirrors the pattern the SA gov health bot
     // used to pass Meta. Tapping "Yes, I agree" (or typing yes/agree) consents; "No thanks" deletes.
     return replyWithButtons(
-      `I'm Coach K. I help you lose weight and get fit using the food you already eat — right here on WhatsApp. No gym. No app. No expensive diet.\n\nJust tell me what you ate — "pap and chicken" — and I'll log it. I check in every day so you actually stick to it.\n\nR199/month — R6.63 a day, less than a coffee. Cancel anytime.\n\n*Before we start:*\n✅ You're 18 or older.\n✅ I'm an AI coach, not a doctor — for any medical condition, follow your doctor.\n🤝 A real coach may check in on you if a message suggests you need extra support.\n🔒 Your info is stored under POPIA — only for your coaching, never sold. Reply *delete my data* anytime.\nTerms: kamlifecoach.co.za/terms · Privacy: kamlifecoach.co.za/privacy\n\nTap *Yes, I agree* and I'll build your plan.`,
+      `I'm Coach K. I help you lose weight and get fit using the food you already eat — right here on WhatsApp. No gym. No app. No expensive diet.\n\nJust tell me what you ate — "pap and chicken" — and I'll log it. I check in every day so you actually stick to it.\n\n${PRICING.monthlyDisplay} — ${PRICING.dailyDisplay}, less than a coffee. Cancel anytime, and a ${GUARANTEE_PHRASE}.\n\n*Before we start:*\n✅ You're 18 or older.\n✅ I'm an AI coach, not a doctor — for any medical condition, follow your doctor.\n🤝 A real coach may check in on you if a message suggests you need extra support.\n🔒 Your info is stored under POPIA — only for your coaching, never sold. Reply *delete my data* anytime.\nTerms: kamlifecoach.co.za/terms · Privacy: kamlifecoach.co.za/privacy\n\nTap *Yes, I agree* and I'll build your plan.`,
       ["Yes, I agree", "No thanks"],
     );
   }

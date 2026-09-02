@@ -61,7 +61,7 @@ import { invalidatePatternCache } from "./cache";
 import { mentionsConditionOrMedication, conditionWelcome } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
 import { reportsHunger } from "./unlogged-notice";
-
+import { PRICING, GUARANTEE_PHRASE } from "../shared/pricing";   // commercial terms have one owner
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 if (!openaiKey) {
   console.error("[FATAL] OPENAI_API_KEY is not set. Server cannot start without it.");
@@ -409,7 +409,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
         const planParts = glimpsePlan.split("\n\n---\n\n");
         const planHeader = planParts[0] || "";
         const day1 = planParts[1] || "";
-        const upsell = `That is Day 1.\n\nDays 2 and 3 rotate the meals so you are not eating the same thing every day. Your weekly shopping list with ZAR prices is in there too.\n\n*Full weekly plan + shopping list + daily coaching — R199/month:*\n${payLink}\n\n_R6.63/day. Not satisfied after week 1? Message us and we will make it right._`;
+        const upsell = `That is Day 1.\n\nDays 2 and 3 rotate the meals so you are not eating the same thing every day. Your weekly shopping list with ZAR prices is in there too.\n\n*Full weekly plan + shopping list + daily coaching — ${PRICING.monthlyDisplay}:*\n${payLink}\n\n_${PRICING.dailyDisplay}. Not satisfied? ${GUARANTEE_PHRASE} — Message us and we will make it right._`;
         const glimpseReply = `${planHeader}\n\n${day1}\n\n---\n\n${upsell}`;
         await logChat(user.id, message, glimpseReply, "MEAL_PLAN_GLIMPSE");
         return glimpseReply;
@@ -421,11 +421,11 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
         const cancelDate = new Date(user.cancelledAt!).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
         const currentKg = user.currentWeight ? `${parseFloat(String(user.currentWeight)).toFixed(1)}kg` : null;
         const progressNote = workouts > 0 ? `${workouts} session${workouts !== 1 ? "s" : ""}${currentKg ? `, currently at ${currentKg}` : ""} — all saved.` : "";
-        gateReply = `${name}, your subscription ended ${cancelDate}. ${progressNote}\n\nReply *pay* to pick up exactly where you left off.\n\n*R199/month — cancel anytime:*\n${payLink}`;
+        gateReply = `${name}, your subscription ended ${cancelDate}. ${progressNote}\n\nReply *pay* to pick up exactly where you left off.\n\n*${PRICING.monthlyDisplay} — cancel anytime:*\n${payLink}`;
       } else if (workouts > 0) {
-        gateReply = `${name}, reactivate to get your workouts, food coaching, and full programme back.\n\n*R199/month — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
+        gateReply = `${name}, reactivate to get your workouts, food coaching, and full programme back.\n\n*${PRICING.monthlyDisplay} — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
       } else {
-        gateReply = `${name}, your programme is built and waiting.\n\n*Start today — R199/month (R6.63/day)*\n${payLink}\n\n_Not satisfied after your first week? Message us and we'll make it right._`;
+        gateReply = `${name}, your programme is built and waiting.\n\n*Start today — ${PRICING.monthlyDisplay} (${PRICING.dailyDisplay})*\n${payLink}\n\n_${GUARANTEE_PHRASE} — not for you, and we make it right._`;
       }
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;

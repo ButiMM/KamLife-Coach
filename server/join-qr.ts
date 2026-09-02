@@ -16,7 +16,7 @@ import { existsSync } from "fs";
 import { join } from "path";
 import qrcode from "qrcode-generator";
 import { buildJoinLink, sanitiseSourceTag } from "./signup-source";
-import { PRICING } from "../shared/pricing";
+import { PRICING, GUARANTEE_PHRASE } from "../shared/pricing";
 
 const FONT = "KamLife Sans";
 let fontReady = false;
@@ -97,7 +97,7 @@ function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: numbe
 export interface JoinCardOpts {
   sourceTag?: string | null; // gym / flyer / ig — labelled small on the card, encoded in the QR
   link?: string;             // override the encoded link (defaults to the wa.me join link)
-  priceLabel?: string;       // e.g. "R199/month" — pulled from pricing by the caller
+  priceLabel?: string;       // e.g. PRICING.monthlyDisplay — pulled from pricing by the caller
 }
 
 // The standalone QR as a PNG (no card chrome) — for embedding elsewhere.
@@ -190,7 +190,7 @@ export function renderJoinCard(opts: JoinCardOpts = {}): Buffer {
   ctx.fillStyle = ORANGE;
   ctx.textAlign = "left";
   ctx.font = `bold 26px "${FONT}"`;
-  ctx.fillText("7-day money-back guarantee", 40, H - 34);
+  ctx.fillText(GUARANTEE_PHRASE, 40, H - 34);
   if (tag) {
     ctx.fillStyle = MUTED;
     ctx.textAlign = "right";

@@ -37,6 +37,7 @@ import { SA_FOODS_SEED } from "../foods";
 import { scanForSAFoods, weeklyNetLine } from "./food-scanner";
 import { getWeightTruth } from "../day-ledger";
 import { readTrainingDay } from "../one-action";
+import { PRICING } from "../../shared/pricing";
 
 export async function handleLifecycle(ctx: {
   phone: string;
@@ -533,7 +534,7 @@ export async function handleLifecycle(ctx: {
 
     // Option 4 or unrecognised — route to confirm flow
     await db.update(users).set({ awaitingInputType: "cancel_confirm" }).where(eq(users.phoneNumber, phone));
-    const confirmReply = `${name}, last check — reply *yes* to cancel completely, or anything else to keep your subscription.\n\n_Your R199/month coaching stops. Data saved 90 days._`;
+    const confirmReply = `${name}, last check — reply *yes* to cancel completely, or anything else to keep your subscription.\n\n_Your ${PRICING.monthlyDisplay} coaching stops. Data saved 90 days._`;
     await logChat(user.id, message, confirmReply, "CANCEL_SAVE_TO_CONFIRM");
     return confirmReply;
   }
@@ -612,11 +613,11 @@ export async function handleLifecycle(ctx: {
     if (merchantId && appUrl) {
       const cleanPhone = phone.replace(/^whatsapp:/, "");
       const payLink = `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}`;
-      const payReply = `Sharp${clientName}. Here is your payment link: ${payLink}\n\nR199/month — cancel anytime. Your profile and progress are saved and will be waiting when you activate.`;
+      const payReply = `Sharp${clientName}. Here is your payment link: ${payLink}\n\n${PRICING.monthlyDisplay} — cancel anytime. Your profile and progress are saved and will be waiting when you activate.`;
       await logChat(user.id, message, payReply, "PAYMENT_REQUEST");
       return payReply;
     } else {
-      const payReply = `Sharp${clientName}. To subscribe or renew, go to ${appUrl} or WhatsApp the team directly. R199/month — cancel anytime.`;
+      const payReply = `Sharp${clientName}. To subscribe or renew, go to ${appUrl} or WhatsApp the team directly. ${PRICING.monthlyDisplay} — cancel anytime.`;
       await logChat(user.id, message, payReply, "PAYMENT_REQUEST");
       return payReply;
     }

@@ -661,6 +661,70 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * #131 — ONE COMMERCIAL CONTRACT: R149, PAID UPFRONT, 14-DAY MONEY-BACK, NO FREE TRIAL.
+   *
+   * The website was corrected to the locked offer while product truth still said R199 and a
+   * 7-day guarantee, so a customer could arrive from a truthful page and be quoted different
+   * terms by the coach — or, worse, be CHARGED different terms. The billing control below is the
+   * one that matters: display copy can be wrong and embarrassing, but the PayFast amount is
+   * money, and it was 199.
+   */
+  {
+    const { PRICING, GUARANTEE_PHRASE } = await import("../shared/pricing");
+
+    // 4. THE BILLING OWNER. routes/payments.ts sends this to PayFast as `amount` and
+    // `recurring_amount`, and verifies the ITN against it. This is the control that goes RED if
+    // the price is reverted.
+    if (PRICING.monthlyPriceZAR !== 149) {
+      failures.push(`The billing amount owner is ${PRICING.monthlyPriceZAR}, not 149 — PayFast would charge that, whatever the website says`);
+    }
+    if (!/^R149\b/.test(PRICING.monthlyDisplay)) {
+      failures.push(`The price display says "${PRICING.monthlyDisplay}" while the charge is R${PRICING.monthlyPriceZAR}`);
+    }
+    // The daily figure is a claim about the monthly price and has to follow it.
+    const dailyStated = Number(String(PRICING.dailyDisplay).replace(/[^0-9.]/g, ""));
+    if (Math.abs(dailyStated - PRICING.monthlyPriceZAR / 30) > 0.05) {
+      failures.push(`"${PRICING.dailyDisplay}" does not follow from R${PRICING.monthlyPriceZAR}/month — one of the two numbers is lying`);
+    }
+    if (PRICING.guaranteeDays !== 14 || !/14-day money-back guarantee/.test(GUARANTEE_PHRASE)) {
+      failures.push(`The guarantee owner says "${GUARANTEE_PHRASE}" — the locked offer is 14 days`);
+    }
+    // 5. TRIAL LENGTH HAS ONE OWNER, and it is not this file. shared/pricing.ts used to declare
+    // trialDays: 7 beside a server default of 0.
+    if ("trialDays" in (PRICING as any)) {
+      failures.push(`shared/pricing.ts declares trialDays again — server/pricing-config.ts owns it, and two owners of one fact is how this drifted`);
+    }
+    const { TRIAL_DAYS, TRIALS_ENABLED } = await import("../server/pricing-config");
+    // 3. Default config grants no trial to a NEW customer...
+    if (TRIAL_DAYS !== 0 || TRIALS_ENABLED) {
+      failures.push(`Default config grants a ${TRIAL_DAYS}-day trial — the locked offer has none for new customers`);
+    }
+
+    // 1 & 2 & 6. WHAT A PROSPECT IS ACTUALLY TOLD, through the real conversion handler.
+    const { handleConversionObjection } = await import("../server/handlers/conversion");
+    const say = (m: string) => handleConversionObjection({ m, payLink: "https://pay.test/x", name: "Kam" })?.reply || "";
+    const price = say("how much is it");
+    const stall = say("let me think about it");
+    const money = say("i can't afford it");
+    for (const [label, r] of [["price question", price], ["stall", stall], ["money objection", money]] as const) {
+      if (!r) { failures.push(`The conversion handler no longer answers a ${label} — the rest of this block grades nothing`); continue; }
+      if (/R199|R6\.63/.test(r)) {
+        failures.push(`A prospect asking about ${label} is still quoted the old offer: "${r.replace(/\n/g, " ⏎ ").slice(0, 160)}"`);
+      }
+    }
+    if (!/R149/.test(price)) {
+      failures.push(`A prospect asking the price is not told R149: "${price.replace(/\n/g, " ⏎ ").slice(0, 160)}"`);
+    }
+    // 2. Risk reversal is the guarantee, not a free week.
+    if (!/14-day money-back/.test(stall)) {
+      failures.push(`Hesitation is answered without the 14-day money-back guarantee: "${stall.replace(/\n/g, " ⏎ ").slice(0, 200)}"`);
+    }
+    if (/free (?:week|trial)|week one we make it right/i.test(stall)) {
+      failures.push(`Hesitation is still de-risked with a free-week promise the offer does not make: "${stall.replace(/\n/g, " ⏎ ").slice(0, 200)}"`);
+    }
+  }
+
+  /**
    * COACH HEALTH MUST DETECT THE FAILURES IT CLAIMS TO WATCH (2026-08-27).
    *
    * The dashboard's rules are the only thing standing between "we measure our adjudicated failures

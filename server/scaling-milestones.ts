@@ -19,7 +19,7 @@ export interface MilestoneAction {
 export interface Milestone {
   clients: number;
   title: string;
-  mrrZar: number; // clients × R199 — shown so every mark reads as money, not vanity
+  mrrZar: number; // clients × the monthly price — shown so every mark reads as money, not vanity
   why: string;
   actions: MilestoneAction[];
 }

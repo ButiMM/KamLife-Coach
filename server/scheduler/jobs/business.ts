@@ -112,11 +112,11 @@ export async function runSignupNudge(): Promise<void> {
         const workouts = client.totalWorkoutsCompleted || 0;
         if (daysSince === 1 && client.subscriptionStatus === "inactive") {
           if (await claimCritical(client.id, "signup_nudge", todaySAST())) {
-            await sendCriticalAlert(client.phoneNumber, `${name}, your programme is built and ready.\n\n${workouts === 0 ? "Day 1 is waiting." : `${workouts} session${workouts > 1 ? "s" : ""} logged.`} Activate now and coaching starts immediately.\n\n*R199/month — cancel anytime:*\n${payLink}\n\nR6.63/day.`);
+            await sendCriticalAlert(client.phoneNumber, `${name}, your programme is built and ready.\n\n${workouts === 0 ? "Day 1 is waiting." : `${workouts} session${workouts > 1 ? "s" : ""} logged.`} Activate now and coaching starts immediately.\n\n*${PRICING.monthlyDisplay} — cancel anytime:*\n${payLink}\n\n${PRICING.dailyDisplay}.`);
           }
         } else if (daysSince === 3 && client.subscriptionStatus === "inactive") {
           if (await claimCritical(client.id, "signup_nudge", todaySAST())) {
-            await sendCriticalAlert(client.phoneNumber, `${name}, your programme is still here and ready to go.\n\nR199/month — activate when you're ready:\n${payLink}`);
+            await sendCriticalAlert(client.phoneNumber, `${name}, your programme is still here and ready to go.\n\n${PRICING.monthlyDisplay} — activate when you're ready:\n${payLink}`);
           }
         }
       } else if (!isNewSignup && cancelled) {
@@ -125,11 +125,11 @@ export async function runSignupNudge(): Promise<void> {
         if (daysSinceCancelled !== 3 && daysSinceCancelled !== 7 && daysSinceCancelled !== 30) continue;
         if (!(await claimCritical(client.id, "winback", todaySAST()))) continue;
         if (daysSinceCancelled === 3) {
-          await sendCriticalAlert(client.phoneNumber, `${name} — you've done ${workouts} sessions with Coach K. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for R199/month:*\n${payLink}`);
+          await sendCriticalAlert(client.phoneNumber, `${name} — you've done ${workouts} sessions with Coach K. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for ${PRICING.monthlyDisplay}:*\n${payLink}`);
         } else if (daysSinceCancelled === 7) {
-          await sendCriticalAlert(client.phoneNumber, `${name}, a week since you left.\n\nThe people who come back after a week are the ones who actually get results — they know what consistency feels like now.\n\nR199/month. Your data is here:\n${payLink}`);
+          await sendCriticalAlert(client.phoneNumber, `${name}, a week since you left.\n\nThe people who come back after a week are the ones who actually get results — they know what consistency feels like now.\n\n${PRICING.monthlyDisplay}. Your data is here:\n${payLink}`);
         } else if (daysSinceCancelled === 30) {
-          await sendCriticalAlert(client.phoneNumber, `${name} — 30 days. Coach K here.\n\nOne message to say your profile is still here if you want it. ${workouts} sessions logged. Progress saved.\n\nR199/month if you're ready:\n${payLink}\n\nIf not — no hard feelings. Reply STOP and I won't message again.`);
+          await sendCriticalAlert(client.phoneNumber, `${name} — 30 days. Coach K here.\n\nOne message to say your profile is still here if you want it. ${workouts} sessions logged. Progress saved.\n\n${PRICING.monthlyDisplay} if you're ready:\n${payLink}\n\nIf not — no hard feelings. Reply STOP and I won't message again.`);
         }
       }
     } catch (err) { console.error(`[SCHEDULER] Signup/win-back error — ${client.phoneNumber}:`, err); }
@@ -159,14 +159,14 @@ export async function runSignupNudge(): Promise<void> {
       let msg: string;
       if (daysSinceExpiry === 1) {
         msg = hasProgress
-          ? `${name}, your free trial ended yesterday.\n\n${workouts} session${workouts !== 1 ? "s" : ""} logged — all saved.\n\nActivate for R199/month to continue exactly where you left off:\n${payLink}\n\nR6.63/day. Cancel anytime.`
-          : `${name}, your free trial ended yesterday. Your personalised programme is ready and waiting.\n\nActivate for R199/month:\n${payLink}\n\nR6.63/day. Cancel anytime.`;
+          ? `${name}, your free trial ended yesterday.\n\n${workouts} session${workouts !== 1 ? "s" : ""} logged — all saved.\n\nActivate for ${PRICING.monthlyDisplay} to continue exactly where you left off:\n${payLink}\n\n${PRICING.dailyDisplay}. Cancel anytime.`
+          : `${name}, your free trial ended yesterday. Your personalised programme is ready and waiting.\n\nActivate for ${PRICING.monthlyDisplay}:\n${payLink}\n\n${PRICING.dailyDisplay}. Cancel anytime.`;
       } else if (daysSinceExpiry === 3) {
         msg = hasProgress
-          ? `${name} — ${workouts} session${workouts !== 1 ? "s" : ""} saved and waiting. 3 days since your trial ended.\n\nR199/month — your programme, food coaching, and progress all pick up immediately:\n${payLink}`
-          : `${name}, 3 days since your trial ended. Your programme is still here.\n\nR199/month — R6.63/day:\n${payLink}`;
+          ? `${name} — ${workouts} session${workouts !== 1 ? "s" : ""} saved and waiting. 3 days since your trial ended.\n\n${PRICING.monthlyDisplay} — your programme, food coaching, and progress all pick up immediately:\n${payLink}`
+          : `${name}, 3 days since your trial ended. Your programme is still here.\n\n${PRICING.monthlyDisplay} — ${PRICING.dailyDisplay}:\n${payLink}`;
       } else {
-        msg = `${name}, last nudge — your trial ended a week ago.\n\n${hasProgress ? `${workouts} sessions and all your data are saved.` : "Your programme is still ready."}\n\nWhen you are ready — R199/month:\n${payLink}\n\nIf you have decided not to continue, reply STOP.`;
+        msg = `${name}, last nudge — your trial ended a week ago.\n\n${hasProgress ? `${workouts} sessions and all your data are saved.` : "Your programme is still ready."}\n\nWhen you are ready — ${PRICING.monthlyDisplay}:\n${payLink}\n\nIf you have decided not to continue, reply STOP.`;
       }
       if (await claimCritical(client.id, "trial_expiry_nudge", todaySAST())) {
         await sendCriticalAlert(client.phoneNumber, msg);
