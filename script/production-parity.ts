@@ -2296,7 +2296,8 @@ async function main() {
     assert.match(r.out, new RegExp(d1, "i"), `the reply lost a day: ${r.out.slice(0, 120)}`);
     assert.match(r.out, new RegExp(d3, "i"), `the backfilled day was written but never acknowledged: ${r.out.slice(0, 120)}`);
     assert.match(r.out, /session/i, "the reply does not mention the session it wrote");
-    assert.match(r.out, /8,000 steps/i, "the reply does not mention the steps it wrote");
+    // renderers use a non-breaking space for thousands; this is still the same client-reported 8,000.
+    assert.match(r.out, /8[\s,]?000 steps/i, `the reply does not mention the steps it wrote: ${r.out.slice(0, 400)}`);
     assert.match(r.out, /kcal/i, "food lost its quantity-aware owner");
     assert.ok(r.backfillWorkoutDays.length === 1, `expected one backfilled session, got ${JSON.stringify(r.backfillWorkoutDays)}`);
     assert.ok(r.backfillStepDays.length === 1, `expected one backfilled step row, got ${JSON.stringify(r.backfillStepDays)}`);
