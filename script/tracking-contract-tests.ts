@@ -1649,7 +1649,103 @@ const MUST_WRITE: [string, string][] = [
     }
   }
 
-  const total = MUST_NOT_WRITE.length + MUST_WRITE.length + 2 + 10 + MIXED.length;
+  /**
+   * TRAINING HISTORY — PHASE WEEK IS NOT FIRST-EVER WEEK (2026-09-01, issue #113).
+   *
+   * The customer-visible pair was real and came from two deterministic producers:
+   *
+   *   `workout`      -> programme.renderSession -> phase Week 1 + lifetime Session 8 overall
+   *   `workout done` -> workout completion      -> `first full training week`
+   *
+   * The header is correct because it labels the phase-relative and lifetime clocks. The second
+   * turn used only the phase clock, so it converted a new Phase 2 / Week 1 into a false
+   * first-ever history claim. These are production turns, not a unit test of a wording helper:
+   * remove the lifetime gate from the completion handler and the veteran control below fails;
+   * remove the badge entirely and the actual beginner control fails.
+   */
+  {
+    const FRIDAY_SAST = Date.parse("2026-09-04T10:00:00Z"); // Friday, the third 3-day-programme slot
+    const RealDate = Date;
+    class FridayDate extends RealDate {
+      constructor(...args: ConstructorParameters<DateConstructor>) {
+        super(...(args.length ? args : [FRIDAY_SAST]) as any);
+      }
+      static now() { return FRIDAY_SAST; }
+    }
+    const completeOrView = async (message: string, userPatch: Record<string, unknown>) => {
+      // The completion branch asks both the temporal owner and the calendar-slot owner what
+      // "today" means. Freeze the Date constructor as well as Date.now so those readers stay on
+      // the same SAST Friday; replacing only Date.now made `done today` ambiguous in the test,
+      // which is a fixture inconsistency rather than a customer path.
+      (globalThis as any).Date = FridayDate;
+      try {
+        freshTurn();
+        g.__KAMLIFE_STUB_USER = {
+          ...USER,
+          programmeWeek: 1,
+          programmeDayInWeek: 3,
+          trainingDaysPerWeek: 3,
+          lastWorkoutDate: null,
+          awaitingInputType: null,
+          ...userPatch,
+        };
+        g.__KAMLIFE_STUB_ROWS = new Map([
+          [schema.mealLogs, []], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
+        ]);
+        g.__KAMLIFE_STUB_WRITES = [];
+        if (message === "workout") {
+          return String(await handleMessage(USER.phoneNumber, message).catch(() => ""));
+        }
+        // The route above is the customer's workout-view path. Completion is deliberately
+        // exercised at its production-capable owner: the top-level route has a separate generic
+        // fall-through for terse "done today" before it reaches workout handling. Do not replace
+        // this with a predicate test — this calls the writer that builds the customer reply.
+        const { handleWorkoutCommands } = await import("../server/handlers/workout");
+        const { inTurn } = await import("../server/handlers/chat-log");
+        return await inTurn("tracking_test", message, async () => String(await handleWorkoutCommands({
+          phone: USER.phoneNumber,
+          message,
+          m: message,
+          user: g.__KAMLIFE_STUB_USER,
+        })));
+      } finally {
+        (globalThis as any).Date = RealDate;
+      }
+    };
+
+    const veteran = {
+      programmePhase: 2,
+      programmeStartDate: new Date(FRIDAY_SAST - 100 * 86_400_000),
+      // Any lifetime total beyond the first planned cycle is the control. Eight avoids the
+      // unrelated 10/25/50/100 milestone side effects while proving this is not a Session-25
+      // exception.
+      totalWorkoutsCompleted: 7,
+    };
+    const veteranSession = await completeOrView("workout", veteran);
+    if (!/Week 1 — Session 8 overall/i.test(veteranSession)) {
+      failures.push(`The canonical workout view lost its phase/lifetime session label: "${veteranSession.split("\n")[0]}"`);
+    }
+
+    // `done today` is the terse, explicit-day command owned by handleWorkoutCommands'
+    // completion writer. "workout done" is deliberately claimed earlier by the prose-session
+    // reporter, while bare "done" has no temporal fact and is allowed to reach the coach.
+    // Using either would test a different path and leave this badge producer unexercised.
+    const veteranCompletion = await completeOrView("done today", veteran);
+    if (/first full training week/i.test(veteranCompletion)) {
+      failures.push(`An experienced Phase-Week-1 client was called a first full training week: "${veteranCompletion.split("\n")[0]}"`);
+    }
+
+    const beginnerCompletion = await completeOrView("done today", {
+      programmePhase: 1,
+      programmeStartDate: new Date(FRIDAY_SAST - 5 * 86_400_000),
+      totalWorkoutsCompleted: 2,
+    });
+    if (!/first full training week/i.test(beginnerCompletion)) {
+      failures.push(`A genuine beginner's first full training week lost its completion recognition: "${beginnerCompletion.split("\n")[0]}"`);
+    }
+  }
+
+  const total = MUST_NOT_WRITE.length + MUST_WRITE.length + 2 + 10 + MIXED.length + 3;
   if (failures.length > 0) {
     for (const f of failures) console.log(`✗ ${f}`);
     console.log(`\n✗ tracking contract: ${failures.length}/${total} violations`);
