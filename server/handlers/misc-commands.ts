@@ -648,7 +648,8 @@ export async function handleMiscCommands(ctx: {
       const latest = logs[logs.length - 1].kg;
       const totalChange = latest - first;
       const goal = user.goalType || "fat_loss";
-      const changeDir = totalChange < 0 ? `Down ${Math.abs(totalChange).toFixed(1)}kg` : totalChange > 0 ? `Up ${totalChange.toFixed(1)}kg` : "No change";
+      // Computed below once the owner has answered — see the note at the return.
+      let changeDir = "";
       // A DIRECTION IS A TREND CLAIM, AND IT HAS AN OWNER (2026-08-28, live trace).
       //
       // Observed, in one message: the response gate refused — "I'm not going to call a trend off
@@ -661,19 +662,12 @@ export async function handleMiscCommands(ctx: {
       // weightTrendUsable is the owner the gate consults. This asks it too, so the refusal and
       // the verdict cannot disagree. When the trend is unusable the numbers still ship — the
       // client asked for their history and gets it — but no direction is asserted over them.
-      const { weightTrendUsable } = await import("../adaptive-targets");
-      const { readHealthState } = await import("../health-state");
-      const health = readHealthState(user);
-      const asMs = (d?: string) => (d ? new Date(`${d}T00:00:00+02:00`).getTime() : undefined);
-      const trend = weightTrendUsable({
-        count: logs.length,
-        oldestAt: logs[0].at.getTime(),
-        newestAt: logs[logs.length - 1].at.getTime(),
-        sickSince: asMs(health.sickSince),
-        sickUntil: asMs(health.sickUntil),
-        now: Date.now(),
-      });
-      const verdict = !trend.usable ? ""
+      // ONE OWNER, ONE CALLER-FACING SHAPE (#126). This assembled the window inline — count,
+      // oldest, newest, the two illness edges — and the chart below did not assemble it at all.
+      // Same owner, same answer, plumbing written once so a second surface cannot forget it.
+      const { weightDirectionSpeakable } = await import("../adaptive-targets");
+      const trend = await weightDirectionSpeakable(logs, user);
+      const verdict = !trend.speakable ? ""
         : goal === "fat_loss" && totalChange < -1 ? "Moving in the right direction."
         : goal === "muscle_gain" && totalChange > 0.5 ? "Scale is going up — keep fuelling."
         : goal === "fat_loss" && totalChange >= 0 ? "Scale hasn't moved yet — check food logging consistency."
@@ -681,8 +675,19 @@ export async function handleMiscCommands(ctx: {
       const recent = logs.slice(-5).map(l =>
         `• ${l.kg.toFixed(1)}kg — ${l.at.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`,
       ).join("\n");
+      // "Up 2.4kg since you started" IS A DIRECTION CLAIM, and the outbound gate reads it as one.
+      // Traced on current main against an illness-spanning window: the gate correctly refused it
+      // and rewrote the WHOLE reply, so the three weigh-ins the client had just asked for were
+      // deleted along with it. Refusing to call a trend must not cost them their own history.
+      //
+      // So when the direction cannot be spoken the same numbers ship as data — start and now,
+      // no up/down word — which is honest and is also what the gate leaves intact.
+      changeDir = trend.speakable
+        ? (totalChange < 0 ? `Down ${Math.abs(totalChange).toFixed(1)}kg` : totalChange > 0 ? `Up ${totalChange.toFixed(1)}kg` : "No change")
+        : `Started ${first.toFixed(1)}kg · now ${latest.toFixed(1)}kg`;
       const name2 = user.name?.split(" ")[0] || "";
-      return `*${name2 ? name2 + "'s " : ""}Weight History*\n\n${recent}\n\n${changeDir} since you started. ${verdict}`.trim();
+      const tail = trend.speakable ? `${changeDir} since you started. ${verdict}` : changeDir;
+      return `*${name2 ? name2 + "'s " : ""}Weight History*\n\n${recent}\n\n${tail}`.trim();
     } catch { /* fall through */ }
   }
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
@@ -1543,12 +1548,41 @@ export async function handleMiscCommands(ctx: {
       const first = vals[0];
       const last = vals[vals.length - 1];
       const diff = last - first;
-      const trend = diff < -0.5 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg` : diff > 0.5 ? `⬆️ Up ${diff.toFixed(1)}kg` : `➡️ Stable`;
-      const paceWk = spanDays >= 7 ? ` · pace ${(diff / (spanDays / 7)) >= 0 ? "+" : ""}${(diff / (spanDays / 7)).toFixed(2)}kg/week` : "";
+      // A DIRECTION IS A TREND CLAIM HERE TOO (#126, 2026-09-02).
+      //
+      // The history command asked weightTrendUsable after the 16:49 contradiction. This one never
+      // did: it computed `last - first` and rendered an arrow, a pace, and a coaching line off it.
+      // Traced on current main with weigh-ins spanning a recorded illness, that produced
+      //
+      //   Start: 95.0kg → Now: 97.4kg (⬆️ Up 2.4kg)
+      //   3 weigh-ins over 2 weeks · pace +1.05kg/week
+      //   Gaining as planned. If lifts are going up, this is muscle. Keep training hard.
+      //
+      // while the canonical evidence refuses to call any direction at all.
+      //
+      // THE OUTBOUND GATE IS NOT A SUBSTITUTE, and the same trace shows why: it classifies claims
+      // one SENTENCE at a time, so it caught the header, deleted the weigh-ins with it, and left
+      // "this is muscle. Keep training hard." standing — a conclusion carrying the direction with
+      // no direction words in it. Deferring the decision to the boundary loses the client's data
+      // and keeps the claim. It has to be made here, before the reply is composed.
+      const { weightDirectionSpeakable } = await import("../adaptive-targets");
+      const speech = await weightDirectionSpeakable(
+        (await getWeightTruth(user, { clientMessage: m })).points, user);
+      const trend = !speech.speakable ? "" : diff < -0.5 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg` : diff > 0.5 ? `⬆️ Up ${diff.toFixed(1)}kg` : `➡️ Stable`;
+      // Pace is a direction with a rate attached — strictly more than the arrow, so it is gated by
+      // the same answer rather than by its own rule.
+      const paceWk = speech.speakable && spanDays >= 7 ? ` · pace ${(diff / (spanDays / 7)) >= 0 ? "+" : ""}${(diff / (spanDays / 7)).toFixed(2)}kg/week` : "";
+      // THE NUMBERS ARE NOT THE CLAIM. They asked for their chart, so start, now, the count and the
+      // span all still ship when the direction cannot — stated as data, with no word that reads as
+      // a direction, which is also what keeps the outbound gate from deleting them.
       const reply = `*⚖️ Weight — ${name}*\n\n` +
-        `Start: *${first.toFixed(1)}kg* → Now: *${last.toFixed(1)}kg* (${trend})\n` +
+        `Start: *${first.toFixed(1)}kg* → Now: *${last.toFixed(1)}kg*${trend ? ` (${trend})` : ""}\n` +
         `${weights.length} weigh-ins over ${spanDays >= 7 ? Math.round(spanDays / 7) + " weeks" : spanDays + " days"}${paceWk}\n\n` +
-        (diff < -2 ? `Consistent progress. The deficit is working — stay patient and stay on plan.` :
+        (!speech.speakable
+          ? (speech.why === "illness"
+            ? `I'm not calling a direction off these — they sit around the time you were ill, and weight moves on fluid and appetite then. Weigh in a few clear mornings and I'll read it properly.`
+            : `I'm not calling a direction off these yet. Weigh in a few more mornings and I'll give you a straight read.`)
+         : diff < -2 ? `Consistent progress. The deficit is working — stay patient and stay on plan.` :
          diff > 2 && user.goalType === "muscle_gain" ? `Gaining as planned. If lifts are going up, this is muscle. Keep training hard.` :
          Math.abs(diff) < 1 ? `Weight holding. Check measurements — you could be recomping (losing fat, gaining muscle). The tape does not lie.` :
          `Keep logging. Trends become clear after 4+ weeks of consistent data.`);

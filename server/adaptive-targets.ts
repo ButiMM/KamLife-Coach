@@ -328,6 +328,52 @@ export const MAX_TREND_AGE_DAYS = 10;
 // disagreeing interpretations of one stored fact; leaving them here as a second entry point to
 // the same answer is how the next caller ends up asking the wrong one.
 
+/**
+ * MAY THE COACH SAY WHICH WAY THE SCALE IS GOING? (#126, 2026-09-02)
+ *
+ * weightTrendUsable is the owner of that question and has been since the 16:49 contradiction.
+ * What it did not have was a caller-facing shape: every surface that wanted an answer had to
+ * assemble the window itself — count, oldest, newest, now, and the two illness edges read out of
+ * profileNotes. The weight-history command does exactly that in eight lines; the weight CHART did
+ * not do it at all, and simply computed `last - first` and spoke.
+ *
+ * So this is the same owner with the plumbing attached once. It is not a second authority and
+ * makes no judgement of its own: it reads the illness window, builds the window object, and
+ * returns what weightTrendUsable said. A surface that wants to state a direction asks this; a
+ * surface that only wants to print numbers does not have to.
+ *
+ * TAKES THE POINTS IT WILL BE SPEAKING ABOUT, deliberately. The response gate asks the same
+ * question against its own 28-day read, and the two can legitimately differ — this answers "may I
+ * call a direction over THESE weigh-ins", which is the only question a rendering surface has.
+ */
+export interface WeightSpeechVerdict {
+  /** May a direction, a pace, or a conclusion drawn from either appear in this reply? */
+  speakable: boolean;
+  /** weightTrendUsable's reason when it refused. Empty when speakable. */
+  why: "too_few" | "too_short" | "stale" | "illness" | "";
+}
+
+export async function weightDirectionSpeakable(
+  points: Array<{ at: Date }>,
+  user: { profileNotes?: string | null } | null | undefined,
+): Promise<WeightSpeechVerdict> {
+  if (!points || points.length < 2) return { speakable: false, why: "too_few" };
+  const { readHealthState } = await import("./health-state");
+  const health = readHealthState(user || {});
+  // profileNotes stores sick_since / sick_until as ISO dates; SAST midnight is the same boundary
+  // the history command already used, kept identical so the two cannot disagree on an edge day.
+  const asMs = (d?: string) => (d ? new Date(`${d}T00:00:00+02:00`).getTime() : undefined);
+  const verdict = weightTrendUsable({
+    count: points.length,
+    oldestAt: points[0].at.getTime(),
+    newestAt: points[points.length - 1].at.getTime(),
+    sickSince: asMs(health.sickSince),
+    sickUntil: asMs(health.sickUntil),
+    now: Date.now(),
+  });
+  return verdict.usable ? { speakable: true, why: "" } : { speakable: false, why: verdict.why };
+}
+
 export function weightTrendUsable(w: TrendWindow): TrendVerdict {
   if (w.count < 2) return { usable: false, why: "too_few" };
   if ((w.newestAt - w.oldestAt) / 86_400_000 < MIN_TREND_SPAN_DAYS) return { usable: false, why: "too_short" };
