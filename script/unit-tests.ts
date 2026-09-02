@@ -2765,9 +2765,18 @@ test("plain goal message returns null (no objection)", async () => {
   const r = handleConversionObjection(convCtx("I want to lose weight"));
   assert.ok(r === null, "non-objection message should return null");
 });
-test("money objection reply contains R6.63", async () => {
-  const r = handleConversionObjection(convCtx("No money right now"));
-  assert.ok(r !== null && r.reply.includes("R6.63"), "money reply should frame the daily cost");
+test("money objection frames the daily cost, from the price owner", async () => {
+  // WAS `includes("R6.63")` — the daily figure frozen as a literal, so it asserted the old offer
+  // and went red the moment the price moved. The property is that the reply frames the monthly
+  // price as a daily one; the number comes from shared/pricing.ts, which is the thing allowed to
+  // change. Written this way it survives the next price change and still fails if the framing is
+  // dropped.
+  const { PRICING } = await import("../shared/pricing");
+  const r = handleConversionObjection(convCtx("I can't afford it"));
+  assert.ok(r !== null, "money objection should be answered");
+  const daily = PRICING.dailyDisplay.replace("/day", "");
+  assert.ok(r!.reply.includes(daily), `money reply should frame the daily cost (${daily}): ${r!.reply.slice(0, 120)}`);
+  assert.ok(!/R199|R6\.63/.test(r!.reply), "money reply still quotes the retired offer");
 });
 
 // ============================================================

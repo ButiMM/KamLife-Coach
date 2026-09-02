@@ -40,6 +40,7 @@ import { turnEvidence } from "./chat-log";
 import { getDayLedger, getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
+import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
 const PROTEIN_WORDS: string[] = Array.from(new Set([
@@ -896,8 +897,8 @@ export async function handleMiscCommands(ctx: {
     const waNum = (process.env.TWILIO_WHATSAPP_NUMBER || "").replace(/^whatsapp:/, "").replace(/\D/g, "");
     const waLink = waNum ? `https://wa.me/${waNum}?text=Hi%2C+I+was+referred+by+${code}` : null;
     const shareMsg = waLink
-      ? `_"I've been using a WhatsApp fitness coach — real SA food, full workouts, daily check-ins. R199/month, no app, and a 7-day money-back guarantee so there's no risk: ${waLink}"_`
-      : `_"I've been using KamLife Coach — WhatsApp fitness coaching, real SA food, R199/month. Use my code ${code} when you join — there's a 7-day money-back guarantee, so zero risk."_`;
+      ? `_"I've been using a WhatsApp fitness coach — real SA food, full workouts, daily check-ins. ${PRICING.monthlyDisplay}, no app, and a ${GUARANTEE_PHRASE} so there's no risk: ${waLink}"_`
+      : `_"I've been using KamLife Coach — WhatsApp fitness coaching, real SA food, ${PRICING.monthlyDisplay}. Use my code ${code} when you join — there's a ${GUARANTEE_PHRASE}, so zero risk."_`;
     const referralReply = `*Your referral code: ${code}* 🎯\n\nSend your friend this:\n\n${shareMsg}\n\nWhen they subscribe, *you get a free month.* No cap — every friend who joins earns you one.`;
     await logChat(user.id, message, referralReply, "REFERRAL");
     return referralReply;

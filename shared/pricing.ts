@@ -7,21 +7,42 @@
 // ============================================================
 
 export const PRICING = {
-  /** Monthly subscription price in ZAR */
-  monthlyPriceZAR: 199,
+  /**
+   * Monthly subscription price in ZAR. THIS IS THE BILLING AMOUNT, not a label:
+   * routes/payments.ts sends it to PayFast as both `amount` and `recurring_amount`, and
+   * verifies the ITN against it. Changing it changes what a customer is charged.
+   */
+  monthlyPriceZAR: 149,
 
   /** Display string for UI/messages */
-  monthlyDisplay: "R199/month",
+  monthlyDisplay: "R149/month",
 
-  /** Daily equivalent (for marketing) */
-  dailyDisplay: "R6.63/day",
+  /** Daily equivalent (for marketing) — 149 / 30, rounded to the cent. */
+  dailyDisplay: "R4.97/day",
 
   /** Currency code */
   currency: "ZAR",
 
-  /** Free trial duration in days */
-  trialDays: 7,
+  /**
+   * THE RISK REVERSAL, and it had no owner until now (2026-09-02).
+   *
+   * "7-day money-back" was hardcoded in five customer-facing places — onboarding's paywall,
+   * two referral messages, the first-session share prompt, and painted onto the join QR
+   * image — so the promise could drift per surface and did. The offer is 14 days; there is
+   * one number to change.
+   */
+  guaranteeDays: 14,
 } as const;
+
+/** "14-day money-back guarantee" — written once so five surfaces cannot disagree. */
+export const GUARANTEE_PHRASE = `${PRICING.guaranteeDays}-day money-back guarantee`;
+
+// TRIAL LENGTH IS NOT DECLARED HERE, deliberately (2026-09-02). This file used to carry
+// `trialDays: 7` while server/pricing-config.ts — the module every trial consumer actually
+// imports — defaulted TRIAL_DAYS to 0. Two owners of one fact, disagreeing, in the file that
+// calls itself the single source of truth. It had zero readers, so it was not a runtime bug;
+// it was a false statement about the product sitting where people go to check. The owner is
+// pricing-config.ts, which also holds the grandfathering rule. Do not add it back here.
 
 // ============================================================
 // METRIC FORMULAS — used by all dashboard/reporting endpoints

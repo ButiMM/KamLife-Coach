@@ -37,6 +37,7 @@ import { logStepsForUser } from "./steps";
 import { calculateTargets } from "../targets";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { sendWhatsApp, saveState } from "../scheduler/shared";
+import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
 
 // Exercise-name vocabulary. parseLiftLog was deleted with lift logging on 2026-08-06, but
 // this pattern is NOT a parser input — it is a GUARD used twice below, and both uses are the
@@ -354,7 +355,7 @@ export async function handleWorkoutCommands(ctx: {
             referralCode = `KAM${rand}`;
             await db.update(users).set({ referralCode }).where(eq(users.phoneNumber, phone));
           }
-          const referralMsg = `One more thing — you just completed your first session. That already puts you ahead of most people who sign up and never start.\n\nIf you know someone who needs this, share your code: *${referralCode}*\n\nWhen they join, *you get a free month* — they come in at R199 with a 7-day money-back guarantee, no risk.`;
+          const referralMsg = `One more thing — you just completed your first session. That already puts you ahead of most people who sign up and never start.\n\nIf you know someone who needs this, share your code: *${referralCode}*\n\nWhen they join, *you get a free month* — they come in at R${PRICING.monthlyPriceZAR} with a ${GUARANTEE_PHRASE}, no risk.`;
           await sendWhatsApp(phone, referralMsg);
           await logChat(userId, "", referralMsg, "REFERRAL_NUDGE_POST_WORKOUT");
         } catch (err) { console.warn("[REFERRAL_NUDGE] Cardio first-workout:", err); }
@@ -715,7 +716,7 @@ export async function handleWorkoutCommands(ctx: {
             referralCode = `KAM${rand}`;
             await db.update(users).set({ referralCode }).where(eq(users.phoneNumber, phone));
           }
-          const referralMsg = `One more thing — you just completed your first session. That already puts you ahead of most people who sign up and never start.\n\nIf you know someone who needs this, share your code: *${referralCode}*\n\nWhen they join, *you get a free month* — they come in at R199 with a 7-day money-back guarantee, no risk. One message to one person is all it takes.`;
+          const referralMsg = `One more thing — you just completed your first session. That already puts you ahead of most people who sign up and never start.\n\nIf you know someone who needs this, share your code: *${referralCode}*\n\nWhen they join, *you get a free month* — they come in at R${PRICING.monthlyPriceZAR} with a ${GUARANTEE_PHRASE}, no risk. One message to one person is all it takes.`;
           await sendWhatsApp(phone, referralMsg);
           await logChat(userId, "", referralMsg, "REFERRAL_NUDGE_POST_WORKOUT");
         } catch (err) {

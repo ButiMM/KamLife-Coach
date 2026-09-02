@@ -156,7 +156,7 @@ export function registerAdminClient(app: Express) {
   <span style="flex:1"></span><button id="refresh">refresh</button></header>
 <div class="summary" id="summary"></div>
 <div id="content"><div class="empty">Loading…</div></div>
-<div class="note">Cost-to-serve = OpenAI + voice + WhatsApp, month-to-date, against the R199 fee. Rates are estimates until real invoices land. A 🐋 whale costs more than half their fee to serve — usually voice or vision. Killswitches: <b>TTS=off</b>, model routing.</div>
+<div class="note">Cost-to-serve = OpenAI + voice + WhatsApp, month-to-date, against the monthly fee. Rates are estimates until real invoices land. A 🐋 whale costs more than half their fee to serve — usually voice or vision. Killswitches: <b>TTS=off</b>, model routing.</div>
 <script>
 (function(){
   var KEY="kamlife-dashboard-key";
