@@ -9219,10 +9219,13 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     const turns = readFileSync("server/routes/admin-turns.ts", "utf-8");
     assert.match(turns, /export async function runCoachHealthSweep/, "the automatic sweep is gone");
     const page = readFileSync("client/src/pages/coach-health.tsx", "utf-8");
-    assert.match(page, /lastSweep/, "the Coach Health page does not read the automatic run at all");
-    // The three things that prove the loop ran while the page was closed: WHEN it ran, what it
-    // COVERED, and whether anything is NEW. A band missing any of them cannot make that case.
-    for (const signal of ["lastSweep.at", "lastSweep.turns", "lastSweep.fresh"]) {
+    // THE SIGNALS MOVED IN P0 #115 AND THE CONTRACT DID NOT. The sweep used to be a field on the
+    // brief response, so the page read data.lastSweep.* and could only show it after evaluating the
+    // whole window. It now comes from its own snapshot-only endpoint, so the same three facts are
+    // read off `sweep`. Updating the names rather than the meaning: what is asserted is still WHEN
+    // the automatic run happened, what it COVERED, and whether anything is NEW.
+    assert.match(page, /coach-health\/sweep/, "the page no longer reads the stored automatic run at all");
+    for (const signal of ["sweep.at", "sweep.turns", "sweep.fresh"]) {
       assert.ok(page.includes(signal),
         `the page never shows ${signal} — the operator cannot tell the automatic run from the live window`);
     }
@@ -9230,6 +9233,65 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     // reads as "all clear".
     assert.match(page, /has not run yet/i,
       "a page with no sweep yet shows nothing, which reads as health rather than as absence");
+  });
+
+  test("coach health: one page open is one live ledger evaluation, not two", () => {
+    // P0 #115. The page mounted MorningBrief and CoachHealthPanel together and each fetched its
+    // own endpoint, so opening it scanned up to 5 000 turn_ledger rows TWICE for the same window
+    // and wrote two audit records before the operator saw anything. Measured at a seeded 5 000-row
+    // ledger: 55–223 ms and ~40 KB per evaluation, so this was waste rather than the founder's
+    // freeze — that was the animation-heavy landing page behind the wrong URL. Waste that a test
+    // can hold is worth holding.
+    //
+    // Source-shaped for the same reason as the case above: "the page issues two heavy requests on
+    // mount" is a claim about the client, and nothing here drives a browser.
+    const page = readFileSync("client/src/pages/coach-health.tsx", "utf-8");
+    assert.ok(!/fetch\(`\/api\/admin\/coach-health\?days=/.test(page),
+      "the Coach Health page fetches the adjudicated endpoint again on mount — that is the duplicate full-ledger scan returning");
+    assert.match(page, /coach-health\/brief\?days=/, "the page no longer evaluates the live window at all");
+    // The adjudicated panel must be fed from the brief it already fetched.
+    assert.match(page, /<CoachHealthPanel data=/, "the adjudicated panel is not being rendered from the shared evaluation");
+
+    // ...and the endpoint that panel used to call must no longer do its own ledger read.
+    const turns = readFileSync("server/routes/admin-turns.ts", "utf-8");
+    const ep = turns.slice(turns.indexOf('app.get("/api/admin/coach-health", requireAdminKey'));
+    const body = ep.slice(0, ep.indexOf("app.get(", 10));
+    assert.ok(!/turnLedger/.test(body),
+      "GET /api/admin/coach-health scans the ledger itself again — it must serve the one evaluation");
+
+    // And the snapshot read must stay free of evaluation, or "observable without heavy work" is a
+    // claim with nothing behind it.
+    const sweepEp = turns.slice(turns.indexOf('app.get("/api/admin/coach-health/sweep"'));
+    const sweepBody = sweepEp.slice(0, sweepEp.indexOf("app.get(", 10));
+    assert.ok(!/buildCoachHealthBrief|turnLedger/.test(sweepBody),
+      "the sweep endpoint evaluates the ledger — reading the stored run must cost nothing");
+    assert.match(sweepBody, /auditRead\(/, "the sweep read is not audited, and the snapshot carries client text");
+
+    // ONLY THE SWEEP IS SCHEDULED. The audit flag was derived as "anything that is not the brief",
+    // so a person opening GET /api/admin/coach-health was recorded as a background execution — an
+    // audit trail that cannot tell an operator from a cron is not an audit trail.
+    assert.match(turns, /scheduled: readBy === "coach_health_sweep"/,
+      "the scheduled audit flag is inferred rather than named — a manual read can be logged as a background one");
+  });
+
+  test("coach health: a failed sweep read reads as unavailable, never as 'has not run'", () => {
+    // The banner returned null on !res.ok, which is the SAME value the endpoint returns when no
+    // sweep has ever run — so a 500 or an expired admin key rendered as "the background sweep has
+    // not run yet". Those are opposite situations: one means nothing has looked, the other means we
+    // cannot see. A monitoring surface reporting its own blindness as health is worse than one that
+    // is visibly down, because nobody investigates it.
+    const page = readFileSync("client/src/pages/coach-health.tsx", "utf-8");
+    const banner = page.slice(page.indexOf("function SweepBanner"), page.indexOf("function MorningBrief"));
+    assert.ok(!/if \(!res\.ok\) return null/.test(banner),
+      "a failed sweep read is swallowed into the same null as 'no sweep yet' — the page would state a fact it has not established");
+    assert.match(banner, /isError/, "the sweep banner has no error state at all");
+    assert.match(banner, /Could not read the stored sweep/,
+      "a failed sweep read does not say so — it must not be presented as an answer about production");
+
+    // ...and the abort must not claim more than it does. Express does not cancel a running
+    // handler, so a superseded evaluation still costs its ledger read.
+    assert.ok(!/only the window the operator is actually looking at is being paid for/.test(page),
+      "the page still claims the browser abort cancels server-side evaluation, which it does not");
   });
 
   test("reactive: BOTH gates run on the whole reply before it is split into bubbles", async () => {

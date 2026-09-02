@@ -575,7 +575,75 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
   // this project keeps paying for. The function that performs the read now records it, so a
   // reader cannot exist without an audit trail. `readBy` is what distinguishes a person opening
   // the page from the scheduler, and the endpoint's own record is unchanged.
-  await auditRead(readBy, { days, turns: rows.length, scheduled: readBy !== "coach_health_brief" });
+  // ── ADJUDICATED REGRESSIONS, FROM THE ROWS THIS FUNCTION ALREADY READ (P0 #115, 2026-09-02).
+  //
+  // This block lived in GET /api/admin/coach-health and did its OWN 5 000-row scan of the same
+  // window, for the same page, at the same moment: coach-health.tsx mounts both panels on first
+  // render, so opening it asked the server to read the same evidence twice and write two audit
+  // records before the operator saw anything.
+  //
+  // MEASURED BEFORE MOVING IT, at a seeded 5 000-row ledger: one evaluation is 55–223 ms and a
+  // ~40 KB payload, both panels bounded to a handful of examples. So the duplicate was waste and
+  // not the machine freeze — that was the animation-heavy landing page reached through the wrong
+  // URL, which no server change here can fix. Waste is still worth removing, and one evaluation is
+  // what makes "one page open, one ledger read" a property a test can hold.
+
+  const ruleClusters = COACH_HEALTH_RULES.map(rule => {
+    const hits = rows.filter(r => {
+      const input = String(r.inputText || "");
+      const muts = Array.isArray(r.mutations) ? (r.mutations as string[]).map(String) : [];
+      if (!rule.asks(input)) return false;
+      return rule.failed({ reply: String(r.reply || ""), mutations: muts });
+    });
+    // BEFORE THE FIX IS NOT A REGRESSION. A hit older than the merge is the failure behaving
+    // exactly as it did when we found it — evidence the cut was real, not evidence it is
+    // broken now. Only the after bucket may be called a regression, and the two are never summed.
+    const after = hits.filter(h => isRegression(rule, h.createdAt as any));
+    const before = hits.filter(h => !isRegression(rule, h.createdAt as any));
+    // THE DENOMINATOR MEANS DIFFERENT THINGS FOR THE TWO TRIGGERS, so it is not one number
+    // wearing one label: a request rule counts people who asked, a mutation rule counts turns
+    // scanned. Calling 88 scanned turns "88 asked" would be a false operator statistic.
+    //
+    // AND IT MUST BE SCOPED TO THE SAME SIDE OF THE FIX AS THE NUMERATOR (2026-08-27, first
+    // live reading). It was not, and the panel said:
+    //
+    //     Distance question answered without the distance   0 of 1 matching request · 1 before the fix
+    //
+    // which reads as "one client asked since the fix and got it right". Not true: that one
+    // request was the pre-fix one, and NOTHING has exercised the rule since. A ratio whose top
+    // excludes pre-fix hits and whose bottom includes pre-fix asks is not a ratio, and it fails
+    // in the flattering direction — untested looks like verified.
+    const matches = (r: typeof rows[number]) =>
+      rule.trigger === "request" ? rule.asks(String(r.inputText || "")) : true;
+    const candidates = rows.filter(r => matches(r) && isRegression(rule, r.createdAt as any)).length;
+    const historicalCandidates = rows.filter(r => matches(r) && !isRegression(rule, r.createdAt as any)).length;
+    return {
+      id: rule.id, label: rule.label, layer: rule.layer, fixRef: rule.fixRef,
+      expected: rule.expected, fixedAt: rule.fixedAt, trigger: rule.trigger,
+      occurrences: after.length,
+      historical: before.length,
+      clients: new Set(after.map(h => h.userId)).size,
+      candidates,
+      historicalCandidates,
+      examples: after.slice(0, 5).map(h => ({
+        turnId: h.id, at: h.createdAt, version: h.version,
+        input: String(h.inputText || "").slice(0, 140),
+        reply: String(h.reply || "").replace(/\n/g, " ").slice(0, 160),
+        status: h.lifecycleStatus,
+      })),
+      historicalExamples: before.slice(0, 3).map(h => ({
+        turnId: h.id, at: h.createdAt, version: h.version,
+        input: String(h.inputText || "").slice(0, 140),
+        reply: String(h.reply || "").replace(/\n/g, " ").slice(0, 160),
+        status: h.lifecycleStatus,
+      })),
+    };
+  }).sort((a, b) => b.occurrences - a.occurrences);
+  // SCHEDULED MEANS SCHEDULED. This derived the flag as "anything that is not the brief", so a
+  // person opening GET /api/admin/coach-health — a manual operator read — was recorded as a
+  // background execution. Exactly one caller runs on a timer, so the flag names it rather than
+  // inferring it from what it is not.
+  await auditRead(readBy, { days, turns: rows.length, scheduled: readBy === "coach_health_sweep" });
 
   const byVersion = new Map<string, number>();
     for (const t of shaped) byVersion.set(String(t.row.version || "?"), (byVersion.get(String(t.row.version || "?")) || 0) + 1);
@@ -597,6 +665,17 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
         : null,
       // The queue is evidence. It is not a defect list, and the page must not render it as one.
       disclaimer: "Candidates are unadjudicated: a property did not hold on these turns. Confirm before treating any of them as a defect.",
+    // The second panel's data, from the SAME evaluation. One page open, one ledger read.
+    adjudicated: {
+      windowDays: days,
+      turns: rows.length,
+      flagged: ruleClusters.reduce((n, c) => n + c.occurrences, 0),
+      historical: ruleClusters.reduce((n, c) => n + c.historical, 0),
+      unresolved: ruleClusters.filter(c => c.occurrences > 0).length,
+      clusters: ruleClusters,
+      cannotSurface: CANNOT_SURFACE,
+      attribution: "merge-time",
+    },
   };
 }
 
@@ -752,90 +831,41 @@ export function registerAdminTurns(app: Express) {
   app.get("/api/admin/coach-health", requireAdminKey, async (req: any, res) => {
     try {
       const days = Math.min(30, Math.max(1, parseInt(String(req.query.days || "1"))));
-      const since = new Date(Date.now() - days * 86_400_000);
-      const rows = await db.select({
-        id: turnLedger.id, userId: turnLedger.userId, createdAt: turnLedger.createdAt,
-        inputText: turnLedger.inputText, reply: turnLedger.reply,
-        mutations: turnLedger.mutations, version: turnLedger.version,
-        lifecycleStatus: turnLedger.lifecycleStatus,
-      })
-        .from(turnLedger)
-        .where(gte(turnLedger.createdAt, since))
-        .orderBy(desc(turnLedger.createdAt))
-        .limit(5000);
-
-      const clusters = COACH_HEALTH_RULES.map(rule => {
-        const hits = rows.filter(r => {
-          const input = String(r.inputText || "");
-          const muts = Array.isArray(r.mutations) ? (r.mutations as string[]).map(String) : [];
-          if (!rule.asks(input)) return false;
-          return rule.failed({ reply: String(r.reply || ""), mutations: muts });
-        });
-        // BEFORE THE FIX IS NOT A REGRESSION. A hit older than the merge is the failure behaving
-        // exactly as it did when we found it — evidence the cut was real, not evidence it is
-        // broken now. Only the after bucket may be called a regression, and the two are never summed.
-        const after = hits.filter(h => isRegression(rule, h.createdAt as any));
-        const before = hits.filter(h => !isRegression(rule, h.createdAt as any));
-        // THE DENOMINATOR MEANS DIFFERENT THINGS FOR THE TWO TRIGGERS, so it is not one number
-        // wearing one label: a request rule counts people who asked, a mutation rule counts turns
-        // scanned. Calling 88 scanned turns "88 asked" would be a false operator statistic.
-        //
-        // AND IT MUST BE SCOPED TO THE SAME SIDE OF THE FIX AS THE NUMERATOR (2026-08-27, first
-        // live reading). It was not, and the panel said:
-        //
-        //     Distance question answered without the distance   0 of 1 matching request · 1 before the fix
-        //
-        // which reads as "one client asked since the fix and got it right". Not true: that one
-        // request was the pre-fix one, and NOTHING has exercised the rule since. A ratio whose top
-        // excludes pre-fix hits and whose bottom includes pre-fix asks is not a ratio, and it fails
-        // in the flattering direction — untested looks like verified.
-        const matches = (r: typeof rows[number]) =>
-          rule.trigger === "request" ? rule.asks(String(r.inputText || "")) : true;
-        const candidates = rows.filter(r => matches(r) && isRegression(rule, r.createdAt as any)).length;
-        const historicalCandidates = rows.filter(r => matches(r) && !isRegression(rule, r.createdAt as any)).length;
-        return {
-          id: rule.id, label: rule.label, layer: rule.layer, fixRef: rule.fixRef,
-          expected: rule.expected, fixedAt: rule.fixedAt, trigger: rule.trigger,
-          occurrences: after.length,
-          historical: before.length,
-          clients: new Set(after.map(h => h.userId)).size,
-          candidates,
-          historicalCandidates,
-          examples: after.slice(0, 5).map(h => ({
-            turnId: h.id, at: h.createdAt, version: h.version,
-            input: String(h.inputText || "").slice(0, 140),
-            reply: String(h.reply || "").replace(/\n/g, " ").slice(0, 160),
-            status: h.lifecycleStatus,
-          })),
-          historicalExamples: before.slice(0, 3).map(h => ({
-            turnId: h.id, at: h.createdAt, version: h.version,
-            input: String(h.inputText || "").slice(0, 140),
-            reply: String(h.reply || "").replace(/\n/g, " ").slice(0, 160),
-            status: h.lifecycleStatus,
-          })),
-        };
-      }).sort((a, b) => b.occurrences - a.occurrences);
-
-      await auditRead("coach_health", { days, turns: rows.length });
-      res.json({
-        windowDays: days,
-        turns: rows.length,
-        flagged: clusters.reduce((s, c) => s + c.occurrences, 0),
-        historical: clusters.reduce((s, c) => s + c.historical, 0),
-        unresolved: clusters.filter(c => c.occurrences > 0).length,
-        clusters,
-        cannotSurface: CANNOT_SURFACE,
-        // ATTRIBUTION IS BY MERGE TIME, NOT BY VERIFIED DEPLOYMENT — said in the payload so the
-        // page cannot quietly overstate it. turn_ledger stores the build SHA that served each
-        // turn, but nothing here knows which SHAs contain a given fix: that is git ancestry, and
-        // there is no deployments table to ask. A turn shortly after a merge may still have run
-        // the old build, so a fresh regression should be read against the build on the example
-        // before it is believed. Building that mapping is a separate cut, not a caveat to bury.
-        attribution: "merge-time",
-      });
+      // ONE EVALUATION, TWO CONSUMERS (P0 #115). This endpoint kept its own copy of the cluster
+      // maths and its own 5 000-row scan; it now serves the block the brief computes, so there is
+      // one definition of an adjudicated regression and one read per request. The API shape is
+      // unchanged. The page no longer calls it — it reads `adjudicated` off the brief — but it
+      // stays for API callers and keeps auditing under its own name.
+      const brief = await buildCoachHealthBrief(days, "coach_health");
+      res.json(brief.adjudicated);
     } catch (e: any) {
       console.error("[COACH_HEALTH] failed:", e?.message);
       res.status(500).json({ message: "Failed to load coach health" });
+    }
+  });
+
+  // ── THE SWEEP, WITHOUT PAYING FOR A LEDGER SCAN TO SEE IT (P0 #115, 2026-09-02).
+  //
+  // A1 persists an hourly snapshot and A2 audits it, but the only way to READ it was to open the
+  // brief — which evaluates the whole window first. So "has the automatic loop run?", the cheapest
+  // question an operator has, could only be answered by triggering the most expensive work on the
+  // page. That is the contract this issue asks to be made observable.
+  //
+  // This reads one scheduler_state row and evaluates nothing. It is still audited: the snapshot
+  // carries example inputs and replies, so it is the same class of personal data as the brief.
+  app.get("/api/admin/coach-health/sweep", requireAdminKey, async (_req: any, res) => {
+    try {
+      const { loadState } = await import("../scheduler/shared");
+      let lastSweep: any = null;
+      try {
+        const raw = loadState()[COACH_HEALTH_STATE_KEY];
+        if (raw) lastSweep = JSON.parse(raw);
+      } catch { /* a corrupt snapshot must not take the page down */ }
+      await auditRead("coach_health_sweep_read", { candidates: lastSweep?.candidates?.length ?? 0 });
+      res.json({ lastSweep });
+    } catch (e: any) {
+      console.error("[COACH_HEALTH] sweep read failed:", e?.message);
+      res.status(500).json({ message: "Failed to read the last sweep" });
     }
   });
 

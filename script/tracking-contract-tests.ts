@@ -932,6 +932,42 @@ const MUST_WRITE: [string, string][] = [
       }
 
       /**
+       * P0 #115 — ONE PAGE OPEN, ONE AUDITED EVALUATION.
+       *
+       * Both Coach Health panels mounted together and each fetched its own endpoint, so opening
+       * the page scanned the same window twice and wrote TWO audit records before the operator saw
+       * anything. The audit trail is the behavioural signal here and it is already in the system:
+       * one ledger evaluation writes exactly one record, so counting them counts evaluations.
+       *
+       * Graded on the real function, with the adjudicated panel's data required to be present in
+       * that same single evaluation — otherwise "one read" would just mean the second panel lost
+       * its data.
+       */
+      {
+        const { buildCoachHealthBrief } = await import("../server/routes/admin-turns");
+        freshTurn();
+        g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[schema.turnLedger, [{
+          id: "tl-perf", userId: USER.id, createdAt: new Date(),
+          inputText: "what can I eat?", reply: "I didn't catch that one — what was it, roughly?",
+          mutations: [], stateRead: {}, version: "47f0789",
+          lifecycleStatus: null, failureCategory: null, fixRef: null,
+        }]]]);
+        g.__KAMLIFE_STUB_WRITES = [];
+        const brief: any = await buildCoachHealthBrief(1);
+        const audits = (g.__KAMLIFE_STUB_WRITES || []).filter((w: any) => w.table === schema.adminEvents);
+        if (audits.length !== 1) {
+          failures.push(`One Coach Health evaluation wrote ${audits.length} audit records — a page open should be one read, and the count is how that is measured`);
+        }
+        if (!brief.adjudicated || !Array.isArray(brief.adjudicated.clusters) || brief.adjudicated.clusters.length === 0) {
+          failures.push(`The single evaluation carries no adjudicated-regression data — the second panel would need its own ledger scan again`);
+        }
+        if (!Array.isArray(brief.candidates)) {
+          failures.push(`The single evaluation lost the candidate queue — one read must still serve both panels`);
+        }
+        delete g.__KAMLIFE_STUB_ROWS;
+      }
+
+      /**
        * A2 — THE SCHEDULED READ IS AUDITED LIKE EVERY OTHER READ.
        *
        * buildCoachHealthBrief reads inbound text, replies, mutations and state. The audit call sat
