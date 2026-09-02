@@ -210,11 +210,17 @@ const PRIORITY_CHIP: Record<string, string> = {
  * the sweep must not depend on the heavy path.
  */
 function SweepBanner() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["/api/admin/coach-health/sweep"],
     queryFn: async ({ signal }) => {
       const res = await fetch("/api/admin/coach-health/sweep", { headers: authHeaders(), signal });
-      if (!res.ok) return null;
+      // THROW, DO NOT RETURN NULL. This swallowed a failed read into the same `null` the endpoint
+      // returns when no sweep has ever run, so a 500 or an expired admin key rendered as "the
+      // background sweep has not run yet" — the page stating a fact about production it had not
+      // established. Those are opposite situations: one means nothing has looked, the other means
+      // we cannot see. A monitoring surface that reports its own blindness as health is worse than
+      // one that is down, because nobody investigates it.
+      if (!res.ok) throw new Error(`sweep ${res.status}`);
       return res.json() as Promise<{ lastSweep: SweepSnapshot | null }>;
     },
     refetchInterval: 5 * 60_000,
@@ -232,6 +238,11 @@ function SweepBanner() {
       </div>
       {isLoading ? (
         <p className="text-sm text-muted-foreground mt-1">Reading the stored sweep…</p>
+      ) : isError ? (
+        <p className="text-sm text-muted-foreground mt-1">
+          Could not read the stored sweep — this is a fault in reading it, not a statement about
+          whether the hourly run happened. Nothing here should be taken as evidence either way.
+        </p>
       ) : sweep ? (
         <>
           <p className="text-sm text-muted-foreground mt-1">
@@ -266,9 +277,17 @@ function MorningBrief({ days }: { days: number }) {
   const [open, setOpen] = useState<string | null>(null);
   const { data, isLoading, isError } = useQuery({
     queryKey: ["/api/admin/coach-health/brief", days],
-    // STALE REQUESTS ARE CANCELLED. Switching 1d -> 7d -> 30d used to leave the earlier
-    // evaluations running server-side with nobody waiting for them; the signal react-query passes
-    // in aborts the fetch so only the window the operator is actually looking at is being paid for.
+    // WHAT THE ABORT ACTUALLY DOES, stated narrowly because the first version of this comment
+    // overclaimed. Passing react-query's signal aborts the BROWSER request when the operator
+    // switches 1d -> 7d -> 30d, so a superseded window cannot land late and overwrite the one they
+    // are looking at, and the page holds one in-flight read instead of three.
+    //
+    // It does NOT cancel the server. Express does not abort a running handler on client
+    // disconnect, and buildCoachHealthBrief never checks for one, so a superseded evaluation runs
+    // to completion and still costs its ledger read. Real server-side cancellation means threading
+    // an abort through the query path, which is a wider change than this cut, and it is not
+    // claimed here. Measured at 5 000 rows an evaluation is 55-223 ms, so the wasted work is
+    // bounded and known rather than hidden.
     queryFn: async ({ signal }) => {
       const res = await fetch(`/api/admin/coach-health/brief?days=${days}`, { headers: authHeaders(), signal });
       if (!res.ok) throw new Error(`brief ${res.status}`);

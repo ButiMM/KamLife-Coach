@@ -9266,6 +9266,32 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.ok(!/buildCoachHealthBrief|turnLedger/.test(sweepBody),
       "the sweep endpoint evaluates the ledger — reading the stored run must cost nothing");
     assert.match(sweepBody, /auditRead\(/, "the sweep read is not audited, and the snapshot carries client text");
+
+    // ONLY THE SWEEP IS SCHEDULED. The audit flag was derived as "anything that is not the brief",
+    // so a person opening GET /api/admin/coach-health was recorded as a background execution — an
+    // audit trail that cannot tell an operator from a cron is not an audit trail.
+    assert.match(turns, /scheduled: readBy === "coach_health_sweep"/,
+      "the scheduled audit flag is inferred rather than named — a manual read can be logged as a background one");
+  });
+
+  test("coach health: a failed sweep read reads as unavailable, never as 'has not run'", () => {
+    // The banner returned null on !res.ok, which is the SAME value the endpoint returns when no
+    // sweep has ever run — so a 500 or an expired admin key rendered as "the background sweep has
+    // not run yet". Those are opposite situations: one means nothing has looked, the other means we
+    // cannot see. A monitoring surface reporting its own blindness as health is worse than one that
+    // is visibly down, because nobody investigates it.
+    const page = readFileSync("client/src/pages/coach-health.tsx", "utf-8");
+    const banner = page.slice(page.indexOf("function SweepBanner"), page.indexOf("function MorningBrief"));
+    assert.ok(!/if \(!res\.ok\) return null/.test(banner),
+      "a failed sweep read is swallowed into the same null as 'no sweep yet' — the page would state a fact it has not established");
+    assert.match(banner, /isError/, "the sweep banner has no error state at all");
+    assert.match(banner, /Could not read the stored sweep/,
+      "a failed sweep read does not say so — it must not be presented as an answer about production");
+
+    // ...and the abort must not claim more than it does. Express does not cancel a running
+    // handler, so a superseded evaluation still costs its ledger read.
+    assert.ok(!/only the window the operator is actually looking at is being paid for/.test(page),
+      "the page still claims the browser abort cancels server-side evaluation, which it does not");
   });
 
   test("reactive: BOTH gates run on the whole reply before it is split into bubbles", async () => {

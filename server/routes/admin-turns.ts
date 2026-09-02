@@ -639,7 +639,11 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
       })),
     };
   }).sort((a, b) => b.occurrences - a.occurrences);
-  await auditRead(readBy, { days, turns: rows.length, scheduled: readBy !== "coach_health_brief" });
+  // SCHEDULED MEANS SCHEDULED. This derived the flag as "anything that is not the brief", so a
+  // person opening GET /api/admin/coach-health — a manual operator read — was recorded as a
+  // background execution. Exactly one caller runs on a timer, so the flag names it rather than
+  // inferring it from what it is not.
+  await auditRead(readBy, { days, turns: rows.length, scheduled: readBy === "coach_health_sweep" });
 
   const byVersion = new Map<string, number>();
     for (const t of shaped) byVersion.set(String(t.row.version || "?"), (byVersion.get(String(t.row.version || "?")) || 0) + 1);
