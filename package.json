@@ -13,6 +13,8 @@
     "test:golden": "tsx script/golden-regression.ts",
     "test:safety": "tsx script/safety-audit.ts",
     "test:unit": "tsx script/unit-tests.ts",
+    "test:unit:baseline": "tsx script/compare-unit-baseline.ts",
+    "test:unit:baseline:control": "tsx script/compare-unit-baseline-tests.ts",
     "test:scanner": "tsx script/food-scanner-tests.ts",
     "test:decision-boundary": "tsx script/decision-boundary-tests.ts",
     "test:reentry": "tsx script/reentry-state-tests.ts && tsx script/reentry-bridge-tests.ts",

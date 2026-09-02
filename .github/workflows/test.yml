@@ -27,6 +27,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  unit-baseline:
+    # This is deliberately PR-only: only a pull request has an authoritative base SHA.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # compare-unit-baseline verifies this is the exact head, then asks git for its merge base.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Baseline comparator positive control
+        run: npm run test:unit:baseline:control
+      - name: Unit failures compared to exact merge base
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: npm run test:unit:baseline
+
   test:
     runs-on: ubuntu-latest
     steps:
