@@ -1149,6 +1149,91 @@ const MUST_WRITE: [string, string][] = [
     const day = (s: string) => new Date(`${s}T00:00:00+02:00`).getTime();
     const now = day("2026-08-28");
 
+    /**
+     * #126 — WEIGHT SPEECH HAS ONE OWNER, AND IT DECIDES BEFORE THE REPLY IS COMPOSED.
+     *
+     * Defect 5 fixed the weight HISTORY command. The weight CHART was never fixed and never asked:
+     * traced on current main with weigh-ins spanning a recorded illness it rendered an arrow, a
+     * pace and a coaching line straight off `last - first`, while the canonical evidence refused
+     * to call any direction at all.
+     *
+     * Graded on what the handler hands over, because that is the owner this cut changes. The
+     * outbound gate is deliberately NOT the instrument here: it classifies one sentence at a time,
+     * and the same trace showed it catching the header, deleting the client's weigh-ins with it,
+     * and leaving "this is muscle. Keep training hard." standing — the direction surviving in a
+     * sentence with no direction words. A boundary that loses the data and keeps the claim cannot
+     * be what this property rests on.
+     */
+    {
+      const day = (d: number) => new Date(Date.now() - d * 86_400_000);
+      const rows = (kgs: number[], days: number[]) => kgs.map((w, i) => ({
+        id: `wq${i}`, userId: USER.id, weight: w, weightKg: w,
+        // BOTH keys on purpose: getWeightTruth selects { at: loggedAt } and the stub returns raw
+        // rows without applying the alias, so a fixture with only loggedAt reads as Invalid Date
+        // and every assertion below would grade a NaN.
+        loggedAt: day(days[i]), at: day(days[i]),
+      }));
+      const iso = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10);
+      const weightTurn = async (ask: string, o: { kgs: number[]; days: number[]; sick: boolean; goal: string }) => {
+        freshTurn();
+        g.__KAMLIFE_STUB_USER = {
+          ...USER, goalType: o.goal, currentWeight: o.kgs[o.kgs.length - 1], todayWater: "0",
+          profileNotes: o.sick ? `sick_since:${iso(14)} sick_until:${iso(6)}` : "",
+        };
+        g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([
+          [schema.weightLogs, rows(o.kgs, o.days)], [schema.mealLogs, []],
+          [schema.stepLogs, []], [schema.workoutLogs, []],
+        ]);
+        g.__KAMLIFE_STUB_WRITES = [];
+        return String(await handleMessage(USER.phoneNumber, ask).catch(() => ""));
+      };
+      const flat2 = (r: string) => r.replace(/\n/g, " ⏎ ");
+      const SPANS_ILLNESS = { kgs: [95.0, 96.2, 97.4], days: [20, 12, 4], sick: true, goal: "muscle_gain" };
+      const CLEAN = { kgs: [98.0, 95.5, 92.0], days: [28, 14, 2], sick: false, goal: "fat_loss" };
+
+      // THE OBSERVED CONTRADICTION, on both weight surfaces.
+      for (const ask of ["weight chart", "weight history"]) {
+        const r = await weightTurn(ask, SPANS_ILLNESS);
+        if (!/95\.0|97\.4/.test(r)) {
+          failures.push(`"${ask}" stopped returning the client's own weigh-ins — the rest of this block grades nothing: "${flat2(r)}"`);
+          continue;
+        }
+        if (/⬆️|⬇️|\bUp \d|\bDown \d|going up|going down|keep fuelling/i.test(r)) {
+          failures.push(`"${ask}" asserted a weight direction over weigh-ins that span an illness — the same contradiction the response gate refuses: "${flat2(r)}"`);
+        }
+        if (/pace [+-]?\d/i.test(r)) {
+          failures.push(`"${ask}" stated a weekly PACE off a trend the evidence refuses — a rate is a direction with a number on it: "${flat2(r)}"`);
+        }
+        if (/Keep training hard|deficit is working|Gaining as planned/i.test(r)) {
+          failures.push(`"${ask}" drew a coaching conclusion from a direction it may not call: "${flat2(r)}"`);
+        }
+        // ...AND THE FACTS THEY ASKED FOR SURVIVE. Refusing to call a trend must not cost the
+        // client their own history.
+        if (!/95\.0/.test(r) || !/97\.4/.test(r)) {
+          failures.push(`"${ask}" dropped the weigh-ins while refusing the trend — they asked for their numbers: "${flat2(r)}"`);
+        }
+      }
+
+      // POSITIVE CONTROL — a clean, usable trend must still be spoken, on both surfaces. Without
+      // this, "never say a direction" passes every assertion above and the product goes mute.
+      {
+        const chart = await weightTurn("weight chart", CLEAN);
+        if (!/⬇️|Down 6\.0kg/.test(chart)) {
+          failures.push(`A clean four-week 6kg loss was no longer called on the chart — the fix went mute instead of honest: "${flat2(chart)}"`);
+        }
+        if (!/pace -/.test(chart)) {
+          failures.push(`A usable trend lost its pace line — legitimate output must be preserved: "${flat2(chart)}"`);
+        }
+        const hist = await weightTurn("weight history", CLEAN);
+        if (!/Down 6\.0kg since you started/.test(hist)) {
+          failures.push(`A clean usable trend lost its direction on the history surface: "${flat2(hist)}"`);
+        }
+        if (!/Moving in the right direction/.test(hist)) {
+          failures.push(`A usable fat-loss trend lost its coaching verdict: "${flat2(hist)}"`);
+        }
+      }
+    }
+
     // DEFECT 5 — the observed shape: weigh-ins spanning an illness cannot carry a direction.
     const spanningIllness = weightTrendUsable({
       count: 3, oldestAt: day("2026-08-18"), newestAt: day("2026-08-26"),
