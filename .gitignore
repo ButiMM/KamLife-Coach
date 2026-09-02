@@ -56,3 +56,7 @@ hunger-gauntlet-*.json
 # The anchor store (docs/p2/anchors.json) IS tracked — it is the rubric, and an untracked
 # rubric is folklore. That file holds only the excerpts deliberately chosen as standards.
 p2-work/
+
+# Ephemeral exact-merge-base checkout made by script/compare-unit-baseline.ts.
+# It must stay under the repository so the base checkout can resolve this checkout's node_modules.
+.unit-baseline-worktree-*/
