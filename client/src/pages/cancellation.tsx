@@ -1,11 +1,10 @@
 import { Link } from "wouter";
 import { ArrowLeft } from "lucide-react";
 
-const EFFECTIVE_DATE = "1 June 2026";
+const EFFECTIVE_DATE = "2 September 2026";
 const BUSINESS_NAME = "KamLife Lifestyle Coach";
 const BUSINESS_EMAIL = "support@kamlifecoach.co.za";
-const PRICE = "R199";
-const TRIAL_DAYS = 7;
+const PRICE = "R149";
 
 export default function CancellationPolicy() {
   return (
@@ -31,9 +30,9 @@ export default function CancellationPolicy() {
             <p className="font-semibold text-base">The short version</p>
             <ul className="space-y-1.5 text-muted-foreground">
               <li>✅ <strong>Cancel anytime</strong> — reply "<em>cancel</em>" to Coach K on WhatsApp</li>
-              <li>✅ <strong>Free trial: no charge</strong> if you cancel before day {TRIAL_DAYS + 1}</li>
+              <li>✅ <strong>14-day money-back guarantee</strong> — ask inside your first 14 days and you get your {PRICE} back</li>
               <li>✅ <strong>Access until billing period ends</strong> after you cancel</li>
-              <li>❌ <strong>No partial-month refunds</strong> for paid months (see below for exceptions)</li>
+              <li>✅ <strong>No interrogation</strong> — one optional question about why, and that is all</li>
             </ul>
           </div>
 
@@ -54,29 +53,30 @@ export default function CancellationPolicy() {
           </section>
 
           <section>
-            <h2 className="text-xl font-bold mb-3">2. Free trial cancellation</h2>
+            <h2 className="text-xl font-bold mb-3">2. The 14-day money-back guarantee</h2>
             <ul className="space-y-2 list-disc pl-5 text-muted-foreground">
-              <li>Your {TRIAL_DAYS}-day free trial begins the moment you complete onboarding with Coach K.</li>
-              <li><strong>Cancel any time before day {TRIAL_DAYS + 1}</strong> and you will <strong>not be charged</strong>.</li>
-              <li>If you let the trial expire without cancelling, your subscription starts and your card is charged <strong>{PRICE}</strong>.</li>
-              <li>We send a reminder on day 6 of your trial to let you know it's about to end.</li>
+              <li>KamLife is <strong>{PRICE} upfront per month</strong>. There is no trial period — you pay first, and the guarantee is what protects you.</li>
+              <li>If you are not happy, tell us <strong>within 14 days</strong> of your first payment and we refund it in full.</li>
+              <li>You do not need a reason. We may ask one optional question about what did not work, and you are free to ignore it.</li>
+              <li>We aim to process approved refunds <strong>within 2 business days</strong> of your request.</li>
             </ul>
           </section>
 
           <section>
             <h2 className="text-xl font-bold mb-3">3. Refund policy</h2>
-            <p className="text-muted-foreground">KamLife is a subscription service that delivers personalised coaching from the moment your subscription starts. Because the coaching is delivered immediately and continuously, we <strong>do not offer refunds for partial months</strong> as a general rule.</p>
+            <p className="text-muted-foreground">Your first 14 days are covered by the money-back guarantee above — inside that window you get your money back on request, no reason required. After 14 days, a month you have already started is not refunded as a general rule, because the coaching is delivered continuously from the day it starts. The exceptions below always apply.</p>
 
-            <h3 className="font-semibold mt-5 mb-2">Exceptions — when we will refund you</h3>
+            <h3 className="font-semibold mt-5 mb-2">We will always refund you when</h3>
             <ul className="space-y-2 list-disc pl-5 text-muted-foreground">
+              <li><strong>You ask within 14 days:</strong> the money-back guarantee, in full, no reason needed.</li>
               <li><strong>Duplicate charge:</strong> If you were charged twice for the same period, we will refund the duplicate immediately.</li>
               <li><strong>Service failure:</strong> If Coach K was completely unavailable (not just slow or degraded, but fully inaccessible) for more than 72 consecutive hours in a billing month, we will provide a pro-rated credit for the downtime.</li>
               <li><strong>Charged after cancellation:</strong> If you were charged after a valid cancellation request, we will refund the incorrect charge in full within 5 business days.</li>
-              <li><strong>Goodwill discretion:</strong> We are a small South African business and we care about being fair. If you have a compelling reason and contact us within 7 days of a charge, email us and we will consider your request honestly.</li>
+              <li><strong>Goodwill discretion:</strong> We are a small South African business and we care about being fair. If you have a compelling reason outside the guarantee window, email us and we will consider your request honestly.</li>
             </ul>
 
             <h3 className="font-semibold mt-5 mb-2">How refunds are processed</h3>
-            <p className="text-muted-foreground">Approved refunds are returned to your original payment method via PayFast. Processing time is typically 3–7 business days depending on your bank. We will email you a confirmation once the refund is initiated.</p>
+            <p className="text-muted-foreground">Approved refunds are returned to your original payment method via PayFast. We aim to initiate approved refunds within 2 business days; your bank then typically takes a further 3–7 business days. We will email you a confirmation once the refund is initiated.</p>
           </section>
 
           <section>

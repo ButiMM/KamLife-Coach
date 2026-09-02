@@ -17,7 +17,24 @@ const CARD      = "#141416";
 const CARD2     = "#1A1A1D";
 const BORDER    = "#26262B";
 
-const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || "27600000000";
+// THE CTA MUST NEVER SILENTLY POINT AT A PLACEHOLDER (2026-09-02).
+//
+// This defaulted to a dummy MSISDN. If VITE_WHATSAPP_NUMBER was missing at BUILD time — and a Vite
+// env var is baked in at build, so a correct Railway variable set afterwards does not help — every
+// button on the site opened WhatsApp to a number that does not exist, and nothing anywhere said
+// so. A launch page whose only call to action is dead is worse than one that is visibly broken,
+// because nobody finds out. The one literal below is the value the guard REFUSES; it is kept
+// spelled out on purpose so the rejection is readable rather than clever.
+//
+// So the real business number is the default, and anything that is not a plausible MSISDN is
+// treated as a fault: the CTA refuses to render a wa.me link and says it is unavailable instead.
+const PRODUCTION_WHATSAPP_NUMBER = "27749190460";   // +27 74 919 0460
+const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || PRODUCTION_WHATSAPP_NUMBER;
+/** A placeholder or a malformed number is a build fault, not something to hand a customer. */
+const WA_NUMBER_OK = /^27\d{9}$/.test(WHATSAPP_NUMBER) && WHATSAPP_NUMBER !== "27600000000";
+if (!WA_NUMBER_OK) {
+  console.error(`[LANDING] WhatsApp CTA disabled — VITE_WHATSAPP_NUMBER is "${WHATSAPP_NUMBER}", which is not a valid SA number. Set it at BUILD time and redeploy.`);
+}
 const WA_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=Hi%2C%20I%27d%20like%20to%20start%20coaching`;
 const HERO_VIDEO_URL  = import.meta.env.VITE_HERO_VIDEO_URL || "";
 
@@ -29,6 +46,17 @@ const WhatsAppIcon = ({ className }: { className?: string }) => (
 );
 
 function WaBtn({ href, children, large }: { href: string; children: React.ReactNode; large?: boolean }) {
+  // A misconfigured number is shown as broken rather than sent to a stranger's WhatsApp.
+  if (!WA_NUMBER_OK) {
+    return (
+      <span
+        className={`inline-flex items-center gap-2.5 font-bold rounded-full text-white/60 bg-neutral-700 cursor-not-allowed ${large ? "px-8 py-4 text-base" : "px-5 py-2.5 text-sm"}`}
+        title="WhatsApp number is not configured for this build">
+        <WhatsAppIcon className={large ? "w-5 h-5" : "w-4 h-4"} />
+        WhatsApp unavailable — contact support
+      </span>
+    );
+  }
   return (
     <a href={href} target="_blank" rel="noopener noreferrer"
       style={{ background: WA_GREEN }}
@@ -294,7 +322,7 @@ export default function LandingPage() {
             </a>
           ))}
         </div>
-        <WaBtn href={WA_LINK}>Start free on WhatsApp</WaBtn>
+        <WaBtn href={WA_LINK}>Start on WhatsApp</WaBtn>
       </nav>
 
       {/* ── HERO ── */}
@@ -341,11 +369,11 @@ export default function LandingPage() {
             </p>
 
             <p className="text-base text-white/40 max-w-lg mb-10">
-              One personal-trainer session costs about R500. Coach K is <span className="text-white font-semibold">R199 for the whole month</span> — less than R7 a day.
+              One personal-trainer session costs about R500. Coach K is <span className="text-white font-semibold">R149 for the whole month</span> — less than R7 a day.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 mb-3">
-              <WaBtn href={WA_LINK} large>Start free on WhatsApp</WaBtn>
+              <WaBtn href={WA_LINK} large>Start on WhatsApp</WaBtn>
               <a href="#how-it-works"
                 className="inline-flex items-center gap-2 px-8 py-4 rounded-full text-base font-semibold text-white/60 border border-white/12 hover:border-white/25 hover:text-white transition-all">
                 See how it works
@@ -357,8 +385,8 @@ export default function LandingPage() {
             </p>
 
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-white/30">
-              <span>7 days free</span><span>·</span>
-              <span>R199/month</span><span>·</span>
+              <span>14-day money-back</span><span>·</span>
+              <span>R149/month</span><span>·</span>
               <span>No app needed</span><span>·</span>
               <span>Cancel on WhatsApp</span>
             </div>
@@ -487,7 +515,7 @@ export default function LandingPage() {
         <div className="flex" style={{ animation: "marquee 32s linear infinite", whiteSpace: "nowrap" }}>
           {[0, 1].map(ri => (
             <div key={ri} className="flex shrink-0 items-center">
-              {["No contracts", "Built for South Africa", "100% on WhatsApp", "Real SA food — pap, wors, pilchards", "R199/month", "7-day money-back", "No app to download", "Cancel anytime"].map(item => (
+              {["No contracts", "Built for South Africa", "100% on WhatsApp", "Real SA food — pap, wors, pilchards", "R149/month", "14-day money-back", "No app to download", "Cancel anytime"].map(item => (
                 <span key={item} className="inline-flex items-center gap-3 px-6 text-sm font-semibold text-white/30">
                   <span className="w-1 h-1 rounded-full shrink-0" style={{ background: ACCENT }} />
                   {item}
@@ -509,7 +537,7 @@ export default function LandingPage() {
             We're taking on our first members right now. Real daily coaching, real SA food, and honest results we'll only ever show when they're real. Be one of the first — and help shape the coach that finally works.
           </p>
           <div className="flex justify-center">
-            <WaBtn href={WA_LINK} large>Start free on WhatsApp</WaBtn>
+            <WaBtn href={WA_LINK} large>Start on WhatsApp</WaBtn>
           </div>
         </div>
       </section>
@@ -519,7 +547,7 @@ export default function LandingPage() {
         <div className="max-w-4xl mx-auto flex flex-wrap justify-center gap-x-14 gap-y-5">
           {[
             { v: "R6.63",     l: "Per day" },
-            { v: "7 days",    l: "Free trial" },
+            { v: "14 days",   l: "Money-back guarantee" },
             { v: "3 min",     l: "Setup time" },
             { v: "WhatsApp",  l: "No app needed" },
           ].map(s => (
@@ -564,7 +592,7 @@ export default function LandingPage() {
             ))}
           </div>
 
-          <WaBtn href={WA_LINK} large>Start free on WhatsApp</WaBtn>
+          <WaBtn href={WA_LINK} large>Start on WhatsApp</WaBtn>
         </div>
       </section>
 
@@ -866,7 +894,7 @@ export default function LandingPage() {
                   </div>
                   <div className="text-white/20 text-2xl font-black">→</div>
                   <div className="text-center">
-                    <div className="text-4xl font-black" style={{ color: ACCENT }}>R199</div>
+                    <div className="text-4xl font-black" style={{ color: ACCENT }}>R149</div>
                     <div className="text-[10px] text-white/25 uppercase tracking-wider mt-1">A whole month · daily</div>
                   </div>
                 </div>
@@ -885,7 +913,7 @@ export default function LandingPage() {
                   </span>
                 </div>
                 <div className="mb-1">
-                  <span className="text-6xl font-black text-white">R199</span>
+                  <span className="text-6xl font-black text-white">R149</span>
                   <span className="text-white/35 text-lg ml-2">/month</span>
                 </div>
                 <p className="text-white/25 text-sm mb-8">R6.63/day — less than a taxi fare. Cancel anytime by WhatsApp.</p>
@@ -898,7 +926,7 @@ export default function LandingPage() {
                     "Weekly Sunday progress report — steps, weight, food, verdict",
                     "All goals: fat loss · muscle gain · recomp · health",
                     "Braai, KFC, kota, Nando's — real SA eating, fully coached",
-                    "7-day free trial — programme sent on Day 1",
+                    "Programme sent on Day 1 — 14-day money-back guarantee",
                   ].map(item => (
                     <li key={item} className="flex items-start gap-2.5 text-sm">
                       <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: ACCENT }} />
@@ -908,8 +936,8 @@ export default function LandingPage() {
                 </ul>
               </div>
               <div>
-                <WaBtn href={WA_LINK} large>Start Your Free Trial on WhatsApp</WaBtn>
-                <p className="text-xs text-white/20 mt-4">7 days free · Then R199/month · Cancel anytime on WhatsApp</p>
+                <WaBtn href={WA_LINK} large>Start on WhatsApp — R149/month</WaBtn>
+                <p className="text-xs text-white/20 mt-4">R149/month · 14-day money-back guarantee · Cancel anytime on WhatsApp</p>
                 <p className="text-sm text-white/25 mt-3">Refer a friend — you both get one month free</p>
               </div>
             </div>
@@ -1011,15 +1039,15 @@ export default function LandingPage() {
           <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }} transition={{ duration: 0.5 }}>
             <h2 className="text-[clamp(40px,8vw,96px)] font-black uppercase leading-[0.9] tracking-tight mb-6">
-              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>R199 A MONTH.</span>
+              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>R149 A MONTH.</span>
               <span className="block text-white">A TRAINER CHARGES R500</span>
               <span className="block" style={{ color: ACCENT }}>FOR ONE SESSION.</span>
             </h2>
             <p className="text-white/40 text-lg mb-10 max-w-lg mx-auto">
               A few quick questions on WhatsApp. Programme on Day 1. Coaching every day after that.
             </p>
-            <WaBtn href={WA_LINK} large>Start free on WhatsApp</WaBtn>
-            <p className="text-white/18 text-sm mt-4">7 days free · R199/month · Cancel anytime · No app needed</p>
+            <WaBtn href={WA_LINK} large>Start on WhatsApp</WaBtn>
+            <p className="text-white/18 text-sm mt-4">R149/month · 14-day money-back guarantee · Cancel anytime · No app needed</p>
 
             {/* Desktop QR — scan with your phone to open WhatsApp (ref=landing for attribution) */}
             <div className="mt-12 flex flex-col items-center gap-3">
@@ -1042,7 +1070,7 @@ export default function LandingPage() {
             <div>
               <p className="text-xs font-bold uppercase tracking-widest text-white/25 mb-4">Get Started</p>
               <ul className="space-y-2.5 text-sm text-white/45">
-                <li><a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Start free on WhatsApp</a></li>
+                <li><a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Start on WhatsApp</a></li>
                 <li><a href="#how-it-works" className="hover:text-white transition-colors">How It Works</a></li>
                 <li><a href="#features" className="hover:text-white transition-colors">Features</a></li>
                 <li><a href="#pricing" className="hover:text-white transition-colors">Pricing</a></li>

@@ -2,7 +2,8 @@ import { CheckCircle, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function PaymentSuccess() {
-  const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || "27600000000";
+  // Same rule as the landing CTA: the real business number is the default, never a placeholder.
+  const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || "27749190460";
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">

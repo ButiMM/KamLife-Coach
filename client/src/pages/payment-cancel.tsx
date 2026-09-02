@@ -2,7 +2,8 @@ import { XCircle, MessageCircle, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function PaymentCancel() {
-  const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || "27600000000";
+  // Same rule as the landing CTA: the real business number is the default, never a placeholder.
+  const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || "27749190460";
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
@@ -30,7 +31,7 @@ export default function PaymentCancel() {
         </div>
 
         <p className="text-gray-500 text-sm">
-          Only R199/month. Cancel anytime. No contracts.
+          Only R149/month, with a 14-day money-back guarantee. Cancel anytime. No contracts.
         </p>
 
         <div className="space-y-3">

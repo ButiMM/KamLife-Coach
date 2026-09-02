@@ -115,7 +115,7 @@ export default function Dashboard() {
             title="Est. MRR"
             value={`R${mrr.toLocaleString()}`}
             icon={DollarSign}
-            trend={`${metrics?.payingClients ?? activeUsers} paying × R199`}
+            trend={`${metrics?.payingClients ?? activeUsers} paying × R149`}
             color="text-green-600 bg-green-100 dark:bg-green-900/20"
           />
           <StatCard

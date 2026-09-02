@@ -1,11 +1,14 @@
 import { Link } from "wouter";
 import { ArrowLeft } from "lucide-react";
 
-const EFFECTIVE_DATE = "1 June 2026";
+const EFFECTIVE_DATE = "2 September 2026";
 const BUSINESS_NAME = "KamLife Lifestyle Coach";
 const BUSINESS_EMAIL = "privacy@kamlifecoach.co.za";
-const INFORMATION_OFFICER = "[Information Officer Name]"; // HUMAN TASK: fill in
-const COMPANY_REG = "[Company Registration Number]";       // HUMAN TASK: fill in
+// NO PLACEHOLDERS ON A LIVE PAGE (2026-09-02). Two bracketed template stubs — a company
+// registration number and an information officer name — rendered verbatim to every visitor,
+// including a Meta/Twilio reviewer reading the POPIA page. Unverified details are REMOVED rather
+// than invented: a policy that states a registration number we cannot evidence is worse than one
+// that does not claim one. Add the lines back when the real values exist.
 
 export default function PrivacyPolicy() {
   return (
@@ -33,8 +36,6 @@ export default function PrivacyPolicy() {
             <p>{BUSINESS_NAME} ("<strong>KamLife</strong>", "<strong>we</strong>", "<strong>us</strong>") is a South African AI-powered fitness coaching service delivered via WhatsApp.</p>
             <ul className="mt-3 space-y-1 list-disc pl-5 text-muted-foreground">
               <li>Business name: {BUSINESS_NAME}</li>
-              <li>Company registration: {COMPANY_REG}</li>
-              <li>Information Officer: {INFORMATION_OFFICER}</li>
               <li>Contact: <a href={`mailto:${BUSINESS_EMAIL}`} className="text-primary underline">{BUSINESS_EMAIL}</a></li>
             </ul>
           </section>
@@ -168,7 +169,7 @@ export default function PrivacyPolicy() {
           </section>
 
           <div className="pt-6 border-t border-border text-xs text-muted-foreground">
-            <p>{BUSINESS_NAME} · {COMPANY_REG} · Last updated: {EFFECTIVE_DATE}</p>
+            <p>{BUSINESS_NAME} · Last updated: {EFFECTIVE_DATE}</p>
             <p className="mt-1">Questions: <a href={`mailto:${BUSINESS_EMAIL}`} className="text-primary underline">{BUSINESS_EMAIL}</a></p>
           </div>
 
