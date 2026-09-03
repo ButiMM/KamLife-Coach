@@ -251,8 +251,61 @@ function applyClientNaming(foods: SAFood[], aliases: Map<string, string>): SAFoo
 // phantom "Chicken and rice", double-counting the chicken). Combo dedup: 2+ components
 // matched separately → the client listed them individually, drop the phantom combo; ≤1
 // matched → the client named the dish, keep the combo and drop the stray component.
-function finalizeMatches(matched: SAFood[], lower: string): SAFood[] {
+function finalizeMatches(matched: SAFood[], lower: string, aliases?: Map<string, string>): SAFood[] {
   let cleaned = [...matched];
+
+  /**
+   * PASS 2b: A COMBO THAT BORROWED ITS WORDS FROM SOMETHING ELSE (#114 P0-1, 2026-09-03).
+   *
+   * "Pap and chicken livers" logged 858 kcal and told the client they had eaten "Chicken livers
+   * AND Chicken and pap" — a plate of livers, plus a whole second dish of chicken they never had.
+   * Both entries matched honestly: `chicken livers` at chars 8–21, and the combo's alias
+   * `pap and chicken` at chars 0–14. They OVERLAP on the word "chicken", and the combo is built
+   * out of a word that belongs to the livers.
+   *
+   * Nothing could see that, because match POSITIONS were thrown away. The substring dedup in
+   * scanForSAFoods compares alias TEXT ("chicken livers" is not inside "pap and chicken", so
+   * neither dominates) and PASS 3 below compares component NAMES (no chicken cut matched, so the
+   * combo looked unchallenged). Two correct rules, both blind to the same fact.
+   *
+   * THE RULE, and both halves of it are load-bearing. The overlap has to STRADDLE: the two spans
+   * intersect and neither contains the other, so each side owns text the other does not. A
+   * CONTAINED span is the combo covering its own words — "peanut butter sandwich" contains the
+   * generic "sandwich", and treating that as borrowing deleted the real dish (caught by gap-tests
+   * on the first draft of this pass). And the straddling food must be one the combo does NOT
+   * bundle, because a combo overlapping its own component is the combo doing its job, which
+   * PASS 3 below already resolves properly.
+   *
+   * "pap and chicken" [0,14] and "chicken livers" [8,21] straddle, and Chicken livers is not a
+   * component of "Chicken and pap" — so the combo is the phantom and the livers survive.
+   * Deliberately runs BEFORE PASS 3, so that dropping the phantom leaves the real Pap standing
+   * rather than letting it be swept away as the phantom's stray component.
+   */
+  if (aliases && aliases.size > 0) {
+    const spanOf = (name: string): [number, number] | null => {
+      const alias = aliases.get(name);
+      if (!alias) return null;
+      const m = new RegExp(`\\b(?:na|ne|no|nga|nge|ka|le|ku|se|di|ma)?${escapeRegex(alias)}(?:es|s)?\\b`, "i").exec(lower);
+      return m ? [m.index, m.index + m[0].length] : null;
+    };
+    const phantomCombos = new Set<string>();
+    for (const combo of cleaned) {
+      const bundled = COMBO_OVERRIDES[combo.name];
+      if (!bundled) continue;
+      const comboSpan = spanOf(combo.name);
+      if (!comboSpan) continue;
+      const borrowed = cleaned.some(other => {
+        if (other.name === combo.name || COMBO_OVERRIDES[other.name] || bundled.includes(other.name)) return false;
+        const s = spanOf(other.name);
+        if (!s) return false;
+        const intersects = comboSpan[0] < s[1] && s[0] < comboSpan[1];
+        const contains = (a: [number, number], b: [number, number]) => a[0] <= b[0] && b[1] <= a[1];
+        return intersects && !contains(comboSpan, s) && !contains(s, comboSpan);
+      });
+      if (borrowed) phantomCombos.add(combo.name);
+    }
+    if (phantomCombos.size > 0) cleaned = cleaned.filter(f => !phantomCombos.has(f.name));
+  }
 
   // PASS 3: Combo meal dedup
   const comboNames = cleaned.filter(f => COMBO_OVERRIDES[f.name]).map(f => f.name);
@@ -409,7 +462,7 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
   // exactOnly: callers gating AUTO-logging (no eating verb present) must not act on
   // fuzzy guesses — fuzzy matched "building phase" to mopani worms and logged a fake
   // meal over a goal-change request (caught by routing-audit).
-  if (matched.length > 0 || opts?.exactOnly) return applyClientNaming(finalizeMatches(matched, lower), matchedAlias);
+  if (matched.length > 0 || opts?.exactOnly) return applyClientNaming(finalizeMatches(matched, lower, matchedAlias), matchedAlias);
 
   const words = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 4 && !FUZZY_BLACKLIST.has(w));
   const combos: string[] = [...words];
@@ -450,7 +503,7 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
     }
   }
 
-  return applyClientNaming(finalizeMatches(matched, lower), matchedAlias);
+  return applyClientNaming(finalizeMatches(matched, lower, matchedAlias), matchedAlias);
 }
 
 export function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories: number; protein: number } | null {
