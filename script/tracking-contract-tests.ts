@@ -1471,6 +1471,92 @@ const MUST_WRITE: [string, string][] = [
       }
 
       /**
+       * #125 — "I'M DONE EATING FOR THE DAY" BINDS THE MEAL DOOR (2026-09-03).
+       *
+       * Found on the 3 Sep sweep, reproducible on 37868c1: a client who had stopped eating on
+       * 188 of 189g protein asked what to eat and was handed two meals to close a 1g gap. The
+       * constraint was not missed — foodDayIsClosed recognised it, readHeldConstraints reported
+       * foodDayClosed: true, and chooseAction was already guarding its eat_more and protein rungs
+       * on it. This one door never asked.
+       *
+       * The outbound floor could not cover for it: enforceOutboundTruth refuses a reply that
+       * asksForFoodToday, and that returns FALSE here because the reply is a MENU with bolded
+       * labels rather than an imperative to eat. So it reached the client.
+       *
+       * Graded through the real handler on the reply a client receives. The held constraint comes
+       * from recentClientMessagesStamped, which is a RAW pool.query — the drizzle stub map cannot
+       * serve it, so the fixture seeds __KAMLIFE_STUB_PGROWS. A fixture that seeds the wrong seam
+       * reports foodDayClosed: false and grades nothing, which is how this nearly went unproven.
+       */
+      {
+        const closedTurn = async (o: { kcal: number; protein: number; closed: boolean }) => {
+          freshTurn();
+          g.__KAMLIFE_STUB_USER = {
+            ...USER, todayWater: "0", weeklyFoodBudget: "100_300", goalType: "muscle_gain",
+            todayCaloriesDate: sastToday(), calorieTarget: 3000, proteinTarget: 189,
+            todayCalories: o.kcal, todayProteinG: o.protein, profileNotes: "",
+          };
+          g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([
+            [schema.mealLogs, [{
+              id: "m-closed", userId: USER.id, mealLabel: "dinner", source: "voice",
+              loggedAt: new Date(dayStart.getTime() + 19 * 3_600_000), corrected: false,
+              kcalInt: o.kcal, proteinInt: o.protein, kcal: o.kcal, protein: o.protein, carbs: 0, fat: 0,
+            }]],
+            [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
+          ]);
+          g.__KAMLIFE_STUB_WRITES = [];
+          g.__KAMLIFE_STUB_PGROWS = o.closed
+            ? [{ message_in: "I'm done eating for the day", created_at: new Date(Date.now() - 3_600_000) }]
+            : [];
+          const out = String(await handleMessage(USER.phoneNumber, "what should I eat next?").catch(() => ""));
+          delete g.__KAMLIFE_STUB_PGROWS;
+          return out;
+        };
+        const offersFood = (r: string) => /Balanced option|Light option|Pick one:|\(~\d+ kcal/i.test(r);
+
+        // THE OBSERVED SHAPE: closed the day on a 1g gap.
+        {
+          const r = await closedTurn({ kcal: 2245, protein: 188, closed: true });
+          if (!/done eating/i.test(r)) {
+            failures.push(`The meal door did not acknowledge a closed food day — the rest of this block grades nothing: "${flat(r)}"`);
+          } else if (offersFood(r)) {
+            failures.push(`A client who said they are done eating was offered food anyway, to close a 1g protein gap: "${flat(r)}"`);
+          }
+          // The facts they logged still ship — standing down is not going quiet.
+          if (!/2245/.test(r) || !/188/.test(r)) {
+            failures.push(`Closing the day cost the client their own totals: "${flat(r)}"`);
+          }
+        }
+
+        // A REAL GAP IS STILL NAMED, but pointed at tomorrow rather than reopening tonight.
+        {
+          const r = await closedTurn({ kcal: 2245, protein: 129, closed: true });
+          if (offersFood(r)) {
+            failures.push(`A closed day with a real 60g gap still produced a meal menu: "${flat(r)}"`);
+          }
+          if (!/60g short/.test(r) || !/tomorrow/i.test(r)) {
+            failures.push(`A genuine 60g shortfall on a closed day was neither named nor carried to tomorrow: "${flat(r)}"`);
+          }
+        }
+
+        // CONTROL — AN OPEN DAY IS UNCHANGED. Without this, "never suggest food" passes every
+        // assertion above and the door goes silent on the ordinary case it exists for.
+        {
+          const open1g = await closedTurn({ kcal: 2245, protein: 188, closed: false });
+          if (!offersFood(open1g)) {
+            failures.push(`An OPEN day stopped offering meals — the fix went mute instead of obedient: "${flat(open1g)}"`);
+          }
+          if (/done eating/i.test(open1g)) {
+            failures.push(`An open day was told it was closed — the constraint is over-firing: "${flat(open1g)}"`);
+          }
+          const openGap = await closedTurn({ kcal: 1500, protein: 80, closed: false });
+          if (!/109g more protein/.test(openGap) || !offersFood(openGap)) {
+            failures.push(`An open day with a real gap lost its protein-first recommendation: "${flat(openGap)}"`);
+          }
+        }
+      }
+
+      /**
        * DEFECT 2 — THE PLATE MUST BE PROPORTIONAL TO THE DAY THAT IS LEFT (2026-09-01).
        *
        * Traced before changing anything: protLeft and calLeft were both read and both printed, so
