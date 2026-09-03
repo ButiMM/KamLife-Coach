@@ -64,6 +64,66 @@ export function voiceCostUsd(charCount: number): number {
 }
 
 /**
+ * VISION — the other half of the whale (2026-09-03). Moved here from gpt.ts, which never called
+ * these and never referenced them: gpt.ts owns TALKING to the model, and this pair owns what a
+ * member is entitled to spend on a photo and what that photo costs us. `voiceCostUsd` above is
+ * the same shape for the other expensive operation, and splitting the price of a decision from
+ * the decision that fixes it would give two files a say in one number.
+ */
+export type VisionUseCase = "food_photo" | "progress_compare" | "exercise_classify" | "step_ocr";
+export type SubscriptionTier = "active" | "trial" | "inactive" | string | null | undefined;
+
+export interface VisionModelDecision {
+  allowed: boolean;
+  model: "gpt-4o" | "gpt-4o-mini";
+  detail: "low" | "auto" | "high";
+  maxTokens: number;
+  reason: string;
+}
+
+export function selectVisionModel(useCase: VisionUseCase, tier: SubscriptionTier): VisionModelDecision {
+  const t = (tier || "").toLowerCase();
+  const paying = t === "active";
+  const onboarded = paying || t === "trial";
+
+  if (!onboarded) {
+    return {
+      allowed: false,
+      model: "gpt-4o-mini",
+      detail: "low",
+      maxTokens: 0,
+      reason: "inactive_tier_blocked",
+    };
+  }
+
+  switch (useCase) {
+    case "progress_compare":
+      return paying
+        ? { allowed: true, model: "gpt-4o", detail: "auto", maxTokens: 400, reason: "progress_paid" }
+        : { allowed: true, model: "gpt-4o-mini", detail: "auto", maxTokens: 350, reason: "progress_trial" };
+
+    case "food_photo":
+      // gpt-4o for paying users — better SA food recognition, fewer "cannot make out" failures
+      return paying
+        ? { allowed: true, model: "gpt-4o", detail: "auto", maxTokens: 400, reason: "food_paid" }
+        : { allowed: true, model: "gpt-4o-mini", detail: "auto", maxTokens: 400, reason: "food_trial" };
+
+    case "exercise_classify":
+    case "step_ocr":
+      return { allowed: true, model: "gpt-4o-mini", detail: "low", maxTokens: useCase === "step_ocr" ? 50 : 8, reason: useCase };
+  }
+}
+
+export function estimateVisionCostUSD(decision: VisionModelDecision, completionTokens: number = 0): number {
+  const imgTok = decision.detail === "low" ? 85 : decision.detail === "high" ? 400 : 170;
+  const promptTok = imgTok + 300;
+  if (decision.model === "gpt-4o-mini") {
+    return (promptTok * 0.15 + completionTokens * 0.6) / 1_000_000;
+  }
+  return (promptTok * 5 + completionTokens * 15) / 1_000_000;
+}
+
+/**
  * Log a non-token service cost (voice, etc.) against a member, reusing the gpt_costs table so it
  * flows into the same per-member/date index and the north-star view. Fire-and-forget.
  */
