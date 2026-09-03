@@ -7,7 +7,7 @@ import { educationNote } from "../education";
 import { stepBurnKcal } from "../targets";
 import { isFutureIntent, isRetroactiveMeal, mealDateLabel, mentionsNotDone, parseMealDate, reportedInSomeClause, sastDayStart } from "../utils";
 import { checkPerfectDay } from "./checks";
-import { detectStepLog, mentionedWalkWithoutCount } from "../understanding/messy-intake";
+import { detectStepLog, getStepReportModifiers, mentionedWalkWithoutCount } from "../understanding/messy-intake";
 import { getDailyStepContext } from "../targets";
 import { getTodayWorkoutState } from "../workout-state";
 import { invalidatePatternCache } from "../cache";
@@ -176,6 +176,7 @@ export async function handleStepReport(ctx: {
   // lived here, beside messy-intake's own extractStepCount — two step parsers for one fact, in
   // two files. Moved whole; the guards that need this function's context stay here.
   let sd = detectStepLog(m);
+  const stepModifiers = getStepReportModifiers(m);
   // A QUESTION IN ONE CLAUSE DOES NOT ERASE A REPORT IN ANOTHER (2026-08-26, issue #63). On
   // "walked 8000 steps. what should I eat?" the extractor found 8 000 and threw it away, because
   // isQuestionForm matches "should i" ANYWHERE in the bubble. Re-read per clause, only when the
@@ -201,7 +202,7 @@ export async function handleStepReport(ctx: {
       // Weekly AVERAGE reports ("my average this week is 6,400") are a summary, not
       // today's count — logging them as today corrupts the day AND the 7-day trend.
       // Coach on the week instead; clients may opt to report a weekly average only.
-      if (/\b(average|avg)\b/i.test(m) || (/\b(this|last|past)\s+week(?:ly)?\b/i.test(m) && !/\btoday\b/i.test(m))) {
+      if (stepModifiers.isWeeklyAverage) {
         const wkTarget = user.stepsTarget || 8500;
         const wkDiff = steps - wkTarget;
         const wkReply = `Weekly average noted: *${steps.toLocaleString()} steps/day* vs your ${wkTarget.toLocaleString()} target — ${wkDiff >= 0 ? "on target. Strong week 🔥" : `${Math.abs(wkDiff).toLocaleString()} short. One 15-minute walk a day closes that.`}\n\n_Daily counts or a weekly-average screenshot both work — whichever is easier for you._`;
@@ -221,13 +222,12 @@ export async function handleStepReport(ctx: {
       // day's count. Normally we keep only the HIGHER number (clients re-log a growing daily
       // total), but an explicit correction must win in either direction. For "X not Y", X is the
       // affirmed value — pull it out so the position of "steps" in the sentence doesn't matter.
-      const stepNotMatch = m.match(/\b([\d,]+)(\s*k)?\s*(?:steps?|staps?)?\s+not\s+[\d,]+/i);
-      if (stepNotMatch) {
-        const corrected = Math.round(parseFloat(stepNotMatch[1].replace(/,/g, "")) * (stepNotMatch[2] ? 1000 : 1));
-        if (corrected > 100 && corrected < 100000) steps = corrected;
+      if (stepModifiers.correctedSteps !== null) {
+        if (stepModifiers.correctedSteps > 100 && stepModifiers.correctedSteps < 100000) {
+          steps = stepModifiers.correctedSteps;
+        }
       }
-      const isStepCorrection = !!stepNotMatch
-        || /\b(wrong|actually|correction|i\s+meant|meant|should\s+be|mistake|typo|miscount|oops|my\s+bad)\b/i.test(m);
+      const isStepCorrection = stepModifiers.isCorrection;
       // ONE WRITE OWNER FOR THE STEP FACT (2026-08-26, issue #63). This built its own day-window
       // query and upsert — twenty lines that logStepsForUser already was, and steps.ts said so at
       // the top of itself: "mirroring the routes.ts inline upsert exactly ... Additive, routes
