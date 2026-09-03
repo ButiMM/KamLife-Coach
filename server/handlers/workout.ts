@@ -18,7 +18,7 @@ import {
 import { parseSessionReport, sessionReportReply, sessionMemoryLine, type SessionReport } from "../session-report";
 import {
   buildDayWorkout,
-  buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES,
+  buildFullProgramme, getKamlifeProgramme, renderSession, WORKOUT_DONE_RESPONSES,
 } from "../programme";
 import { checkPerfectDay } from "./checks";
 import { storeMemory } from "../memory";
@@ -844,4 +844,104 @@ async function logProseSession(
   const reply = sessionReportReply(report, firstName, newTotal);
   await logChat(user.id, message, reply, "WORKOUT_DONE");
   return reply;
+}
+
+
+/** Training-day schedule decisions stay ahead of general workout rendering. */
+export async function handleTrainingDayDecision(ctx: { message: string; originalMessage: string; user: any }): Promise<string | null> {
+  const { message, originalMessage, user } = ctx;  // ---- FUTURE-INTENT WORKOUT GUARD — defer like a coach, don't dump the session ----
+  // "I'll do today's workout tomorrow" is a PLAN, not a request to see the session now. The
+  // Normalizer strips the tense ("tomorrow" → bare "today's workout"), so without this the
+  // sentence matches the view trigger in early-commands and dumps the full workout.
+  // Test the ORIGINAL pre-normalization message, and require a first-person future verb +
+  // an explicit later-time word, so "tomorrow's session" / "next session" (legit future-view
+  // commands) and "about to do my workout" (imminent) still reach the real handler. Stricter
+  // than isFutureIntent() on purpose — bare "tomorrow" must not swallow "tomorrow's session".
+  const _origWO = originalMBeforeNorm;
+  // A REFUSAL IS NOT A DEFERRAL (2026-08-24). The matcher below detects "I'll do it later" and
+  // needs a first-person future verb AND a later-time word, so "no I'm not training today" matched
+  // none of it and got a full session, post-workout nutrition and "Send DONE" over an explicit
+  // refusal. trainingDayIsDeclined is the twin of foodDayIsClosed — the latest explicit constraint
+  // about today, owned in one-action.
+  // ONE READER (2026-08-25). This computed a refusal into an underscore-prefixed local that
+  // NOTHING read — a seventh opinion on "is the client training today" that never reached a
+  // decision. Recorded rather than quietly deleted: it is the clearest example of why six
+  // separate readers of one question produced six different answers.
+  const _trainingDay = readTrainingDay(_origWO);
+  const _isWorkoutRefusal = _trainingDay === "declined";
+  // A REQUEST TO MOVE A WORKOUT IS A SCHEDULE DECISION, NOT A REQUEST TO RENDER IT (2026-08-24).
+  //
+  //   "Can I do my workout tomorrow instead?"  →  *Week 5 — Next Session (Day 1)*
+  //
+  // The client asked whether they may shift the session and got the session. A refusal is a
+  // constraint and a deferral is a plan; this is the third shape — asking permission — and it
+  // belongs to the same owner rather than a second workout mouth. The discriminator is grammar:
+  // a modal + first person is asking to MOVE it ("can I do my workout tomorrow?"), while a view
+  // request names the object without asking permission ("show me tomorrow's workout",
+  // "tomorrow's workout?") and must still reach the renderer.
+  const _isWorkoutMoveRequest = _trainingDay === "move_request";
+  const _isWorkoutDeferral = _trainingDay === "deferred";
+
+  // A SESSION MOVED INTO TODAY IS A DELIVERY (2026-08-25, issue #63 Phase 2.1).
+  //
+  //   "No I moved yesterdays workout to today"  →  "Kam — one thing today: tell me what you ate."
+  //
+  // readTrainingDay read that correctly as `moved_to_today` and NOTHING consumed it. Its three
+  // siblings above — move_request, deferred, declined — each end in a reply; this one fell past
+  // them to the generic ladder, which picked the highest unmet thing and asked about food. The
+  // comprehension was right and the client still did not get their session.
+  //
+  // That is the shape Phase 2 exists to remove: an interpretation is not a feature until its
+  // downstream action is defined, reachable and tested end to end. The session is rendered by the
+  // same owner the `workout` command uses, so the two answers cannot drift apart.
+  if (_trainingDay === "moved_to_today") {
+    const { renderSession } = await import("./programme");
+    const { getTodaySlot, getTodayWorkoutState } = await import("./workout-state");
+    const _mvState = await getTodayWorkoutState(user).catch(() => null);
+    // ONLY an already-logged session stands this down. A SCHEDULED REST DAY DOES NOT.
+    //
+    // The first version of this branch also refused on REST — "today's a rest day, do it
+    // Wednesday" — and that is the original defect wearing better manners: comprehension correct,
+    // session still not delivered. The programme's rest day is OUR schedule; a client saying they
+    // moved a session into today has already decided they are training. Arguing with them is the
+    // behaviour that made them repeat themselves in the first place.
+    if (_mvState?.type === "ALREADY_DONE") {
+      const _mvNote = `Today's session is already logged ✅ — that's the moved one counted.`;
+      await logChat(user.id, message, _mvNote, "WORKOUT_MOVED_ALREADY_DONE");
+      return _mvNote;
+    }
+    const _mvFirst = getDisplayName(user);
+    const _mvDone = (user.trainingMode === "walk_only" || user.trainingMode === "walk")
+      ? `Send *done* when you finish, or just tell me how it went (e.g. "25 min, felt strong").`
+      : `Send *done* when finished.`;
+    const movedReply = renderSession(user, {
+      slot: getTodaySlot(user),
+      intro: `${_mvFirst ? _mvFirst + ", g" : "G"}ood — moved into today. Here it is 💪\n\n`,
+      doneHint: _mvDone,
+    });
+    await logChat(user.id, message, movedReply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_MOVED_TO_TODAY");
+    return movedReply;
+  }
+  if (_isWorkoutMoveRequest) {
+    const _mvName = getDisplayName(user);
+    const _mvLater = !/\b(tomorrow|next\s+week|another\s+day|a\s+different\s+day|2moro|2morrow)\b/i.test(_origWO);
+    // The schedule answer, and the renderer stays one message away on the client's terms.
+    const moveReply = _mvLater
+      ? `${_mvName ? _mvName + ", y" : "Y"}es — do it later today, it keeps. Send *workout* when you're ready and I'll pull it up 💪`
+      : `${_mvName ? _mvName + ", y" : "Y"}es — take today as a rest day and do this session tomorrow. 💪\n\nFood and steps still count today. When you want it, send *tomorrow's workout*.`;
+    await logChat(user.id, message, moveReply, "WORKOUT_MOVE_REQUEST");
+    return moveReply;
+  }
+
+  if (_isWorkoutDeferral || _isWorkoutRefusal) {
+    const _woName = user.name?.split(" ")[0] || "";
+    const _laterToday = !_isWorkoutRefusal && !/\b(tomorrow|next\s+week|2moro|2morrow)\b/i.test(_origWO);
+    const deferReply = _laterToday
+      ? `${_woName ? _woName + ", n" : "N"}o rush — it'll be right here when you're ready. Just send *workout* and I'll pull up today's session 💪`
+      : `${_woName ? _woName + ", n" : "N"}o stress — rest today, hit it fresh tomorrow 💪\n\nWhen you're ready, send *workout* and your session's ready. Today: protein in, keep moving.`;
+    await logChat(user.id, message, deferReply, "WORKOUT_DEFERRED");
+    return deferReply;
+  }
+
+  return null;
 }

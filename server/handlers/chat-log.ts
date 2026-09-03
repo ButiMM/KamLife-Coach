@@ -596,3 +596,44 @@ export async function recordTurn(reply: string): Promise<void> {
     });
   } catch (e) { console.warn("[TURN_LEDGER] non-fatal:", (e as any)?.message); }
 }
+
+
+/** Resolve an explicit receipt check without allowing it to bypass entry gates. */
+export async function handleMediaReceiptFollowup(ctx: {
+  mediaUrl?: string; m: string; user: any;
+}): Promise<string | null> {
+  const { mediaUrl, m, user } = ctx;  // ---- POST-MEDIA FOLLOW-UP: "I sent screenshot/voice" ----
+  // Prevent vague GPT responses after a media upload by resolving against recent media events.
+  // Runs AFTER onboarding/POPIA/subscription gates (it used to run before them, letting
+  // mid-onboarding and unsubscribed users bypass the gates with one phrase) and only on
+  // explicit delivery-check verbs — bare "check/look at" hijacked "check my progress photo".
+  const asksAboutSentMedia = /\b(i (?:have )?sent|did you (?:get|receive)|you got|did (?:it|that) (?:go through|arrive))\b.{0,40}\b(screenshot|photo|image|pic|voice|audio|note)\b/i.test(m);
+  if (asksAboutSentMedia && !mediaUrl) {
+    const recentMedia = await db.select({ messageIn: chatHistory.messageIn, intent: chatHistory.intent, createdAt: chatHistory.createdAt })
+      .from(chatHistory)
+      .where(eq(chatHistory.userId, user.id))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(12);
+    const lastMediaEvent = recentMedia.find(row =>
+      (row.messageIn || "").includes("[Photo]") ||
+      (row.messageIn || "").includes("[Step Screenshot") ||
+      (row.intent || "").includes("PROGRESS_PHOTO")
+    );
+    if (lastMediaEvent) {
+      if ((lastMediaEvent.messageIn || "").includes("[Step Screenshot")) {
+        return "Yes, I got your step screenshot and logged it. Send your next one tonight so we keep your daily average accurate.";
+      }
+      if ((lastMediaEvent.messageIn || "").includes("[Photo]")) {
+        return "Yes, I got your photo. If that was a meal photo, send one short caption like \"chicken and rice\" so I can tighten calories and protein.";
+      }
+      return "Yes, I received it. Send one line on what you want checked so I can give a precise answer.";
+    }
+    if (/\b(voice|audio|note)\b/i.test(m)) {
+      return "I do not see a processed voice note yet. Please resend it, or type your message now and I will respond immediately.";
+    }
+    return "I do not see a processed screenshot yet. Please resend it with the caption \"steps screenshot\" or \"food photo\".";
+  }
+
+
+  return null;
+}

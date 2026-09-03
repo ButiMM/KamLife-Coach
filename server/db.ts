@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const { Pool } = pg;
 
@@ -292,4 +293,41 @@ export function recordedIntent<T>(message: string): T | undefined {
       + ` — re-record with script/record-normalizer.ts`);
   }
   return undefined;
+}
+
+
+/**
+ * Load the caller's durable profile, creating the safe day-zero record exactly once.
+ *
+ * This is deliberately outside the message router: profile creation is persistence
+ * setup, not a routing claimant. The unique-phone recovery preserves the prior
+ * concurrent-first-message behaviour.
+ */
+export async function getOrCreateUser(phone: string): Promise<any> {
+  const existing = await db.select().from(schema.users).where(eq(schema.users.phoneNumber, phone)).limit(1);
+  if (existing.length > 0) {
+    await db.update(schema.users).set({ lastActiveAt: new Date() }).where(eq(schema.users.phoneNumber, phone));
+    return existing[0];
+  }
+  try {
+    const newUsers = await db.insert(schema.users).values({
+      phoneNumber: phone,
+      subscriptionStatus: "inactive",
+      onboardingState: "START",
+      programmePhase: 1,
+      programmeWeek: 1,
+      programmeDayInWeek: 1,
+      trainingMode: "home",
+      stepsTarget: 8500,
+      createdAt: new Date(),
+      lastActiveAt: new Date(),
+    }).returning();
+    return newUsers[0];
+  } catch (err: any) {
+    if (err.code === "23505") {
+      const fallback = await db.select().from(schema.users).where(eq(schema.users.phoneNumber, phone)).limit(1);
+      if (fallback.length > 0) return fallback[0];
+    }
+    throw err;
+  }
 }

@@ -13,6 +13,7 @@
 
 // Money / affordability objection — "no money", "too expensive", "after payday"
 import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
+import { logChat } from "./chat-log";
 
 const MONEY_OBJECTION_RE = /\b(no money|don.?t have (?:the )?money|haven.?t got money|can.?t afford|cannot afford|too expensive|too pricey|so expensive|very expensive|bit expensive|quite expensive|expensive for me|too much money|no cash|i.?m broke|i am broke|broke right now|month.?end|end of month|after (?:i get )?payday|after payday|when i (?:get paid|have money|am paid|get money)|once i (?:get paid|have money)|next month|next pay|tight (?:on money|right now|financially)|money.?s tight|short on cash|not in my budget|out of my budget|can.?t pay|cannot pay)\b/i;
 
@@ -51,4 +52,67 @@ export function handleConversionObjection(ctx: {
   }
 
   return null;
+}
+
+
+/** The inactive-subscription gate, kept ahead of all ordinary coaching claimants. */
+export async function handleSubscriptionGate(ctx: {
+  phone: string;
+  message: string;
+  m: string;
+  user: any;
+  isCoach: boolean;
+  isBetaTester: boolean;
+}): Promise<string | null> {
+  const { phone, message, m, user, isCoach, isBetaTester } = ctx;
+  const trialExpired = user.subscriptionStatus === "trial"
+    && user.betaBypassUntil && new Date(user.betaBypassUntil) < new Date();
+  if (!((user.subscriptionStatus === "inactive" || trialExpired) && !isCoach && !isBetaTester)) return null;
+
+  const isSafety = /\b(chest pain|chest hurts?|chest is (tight|sore|aching|burning)|pain in my chest|chest tightness|can.?t breathe|shortness of breath|can.?t catch my breath|heart racing|heart pounding|dizziness|feeling faint|emergency|hospital|ambulance|crisis|suicid|hurt myself)\b/i.test(m);
+  if (isSafety) return null;
+
+  const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+  const merchantId = process.env.PAYFAST_MERCHANT_ID;
+  const cleanPhone = phone.replace(/^whatsapp:/, "");
+  const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+  const name = user.name?.split(" ")[0] || "there";
+  const conversionResult = handleConversionObjection({ user, m, payLink, name });
+  if (conversionResult) {
+    await logChat(user.id, message, conversionResult.reply, conversionResult.intent);
+    return conversionResult.reply;
+  }
+
+  const isFoodGuidanceQ = /\b(what should i eat|how should i eat|how do i eat|what do i eat|what to eat|meal plan|eating plan|diet plan|give me a meal plan|how do you suggest i eat|what can i eat|how to eat|tell me what to eat|what must i eat|what should i be eating|food plan|i don.?t know what to eat|no idea what to eat|don.?t know how to eat|eating guide|what foods should i|what food should i|nutrition plan)\b/i.test(m);
+  if (isFoodGuidanceQ) {
+    const { generateMealPlan } = await import("../meal-plan");
+    const glimpsePlan = generateMealPlan({
+      calorieTarget: user.calorieTarget || 1800, proteinTarget: user.proteinTarget || 120,
+      weeklyFoodBudget: user.weeklyFoodBudget || "100_300", goalType: user.goalType || "fat_loss",
+      medicalConditions: user.medicalConditions || "", dietaryRestrictions: user.dietaryRestrictions,
+      foodDislikes: user.foodDislikes, otherMedicalNotes: user.otherMedicalNotes || "", recentFoods: [],
+      firstName: user.name?.split(" ")[0] || "",
+    });
+    const planParts = glimpsePlan.split("\n\n---\n\n");
+    const upsell = `That is Day 1.\n\nDays 2 and 3 rotate the meals so you are not eating the same thing every day. Your weekly shopping list with ZAR prices is in there too.\n\n*Full weekly plan + shopping list + daily coaching — ${PRICING.monthlyDisplay}:*\n${payLink}\n\n_${PRICING.dailyDisplay}. Not satisfied? ${GUARANTEE_PHRASE} — Message us and we will make it right._`;
+    const reply = `${planParts[0] || ""}\n\n${planParts[1] || ""}\n\n---\n\n${upsell}`;
+    await logChat(user.id, message, reply, "MEAL_PLAN_GLIMPSE");
+    return reply;
+  }
+
+  const workouts = user.totalWorkoutsCompleted || 0;
+  const isLapsed = !!user.cancelledAt;
+  let reply: string;
+  if (isLapsed) {
+    const cancelDate = new Date(user.cancelledAt!).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
+    const currentKg = user.currentWeight ? `${parseFloat(String(user.currentWeight)).toFixed(1)}kg` : null;
+    const progressNote = workouts > 0 ? `${workouts} session${workouts !== 1 ? "s" : ""}${currentKg ? `, currently at ${currentKg}` : ""} — all saved.` : "";
+    reply = `${name}, your subscription ended ${cancelDate}. ${progressNote}\n\nReply *pay* to pick up exactly where you left off.\n\n*${PRICING.monthlyDisplay} — cancel anytime:*\n${payLink}`;
+  } else if (workouts > 0) {
+    reply = `${name}, reactivate to get your workouts, food coaching, and full programme back.\n\n*${PRICING.monthlyDisplay} — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
+  } else {
+    reply = `${name}, your programme is built and waiting.\n\n*Start today — ${PRICING.monthlyDisplay} (${PRICING.dailyDisplay})*\n${payLink}\n\n_${GUARANTEE_PHRASE} — not for you, and we make it right._`;
+  }
+  await logChat(user.id, message, reply, "SUBSCRIPTION_GATE");
+  return reply;
 }
