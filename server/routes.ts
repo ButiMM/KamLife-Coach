@@ -959,7 +959,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   const stepReply = await handleStepReport({
-    message, m, user, normalizedQuestion,
+    phone, message, m, user, normalizedQuestion,
     commitStep: reply => commitFact(turn, "steps", reply),
     mayEndTurn,
     closeCoachingTurn,

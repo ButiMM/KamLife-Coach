@@ -7,7 +7,7 @@ import { educationNote } from "../education";
 import { stepBurnKcal } from "../targets";
 import { isFutureIntent, isRetroactiveMeal, mealDateLabel, mentionsNotDone, parseMealDate, reportedInSomeClause, sastDayStart } from "../utils";
 import { checkPerfectDay } from "./checks";
-import { detectStepLog } from "../understanding/messy-intake";
+import { detectStepLog, mentionedWalkWithoutCount } from "../understanding/messy-intake";
 import { getDailyStepContext } from "../targets";
 import { getTodayWorkoutState } from "../workout-state";
 import { invalidatePatternCache } from "../cache";
@@ -156,11 +156,11 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
 
 /** The route adapter for the step writer: it preserves turn composition callbacks. */
 export async function handleStepReport(ctx: {
-  message: string; m: string; user: any; normalizedQuestion: boolean;
+  phone: string; message: string; m: string; user: any; normalizedQuestion: boolean;
   commitStep: (reply: string) => void; mayEndTurn: (owner: string) => boolean;
   closeCoachingTurn: (reply: string) => string | Promise<string>; hasStepPart: () => boolean;
 }): Promise<string | null> {
-  const { message, m, user, normalizedQuestion } = ctx;  // ---- STEP LOG DETECTION (direct — no GPT cost) ----
+  const { phone, message, m, user, normalizedQuestion } = ctx;  // ---- STEP LOG DETECTION (direct — no GPT cost) ----
   // NOTE: If message also contains food (e.g. voice note: "I had eggs for breakfast and walked 3000 steps"),
   // we log steps but do NOT return early — let it fall through to food scanning
   // "12k steps", "8.5k steps", "12,000 steps", "12000 steps" — all valid

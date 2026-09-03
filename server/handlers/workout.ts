@@ -857,7 +857,7 @@ export async function handleTrainingDayDecision(ctx: { message: string; original
   // an explicit later-time word, so "tomorrow's session" / "next session" (legit future-view
   // commands) and "about to do my workout" (imminent) still reach the real handler. Stricter
   // than isFutureIntent() on purpose — bare "tomorrow" must not swallow "tomorrow's session".
-  const _origWO = originalMBeforeNorm;
+  const _origWO = originalMessage;
   // A REFUSAL IS NOT A DEFERRAL (2026-08-24). The matcher below detects "I'll do it later" and
   // needs a first-person future verb AND a later-time word, so "no I'm not training today" matched
   // none of it and got a full session, post-workout nutrition and "Send DONE" over an explicit
@@ -895,8 +895,6 @@ export async function handleTrainingDayDecision(ctx: { message: string; original
   // downstream action is defined, reachable and tested end to end. The session is rendered by the
   // same owner the `workout` command uses, so the two answers cannot drift apart.
   if (_trainingDay === "moved_to_today") {
-    const { renderSession } = await import("./programme");
-    const { getTodaySlot, getTodayWorkoutState } = await import("./workout-state");
     const _mvState = await getTodayWorkoutState(user).catch(() => null);
     // ONLY an already-logged session stands this down. A SCHEDULED REST DAY DOES NOT.
     //
