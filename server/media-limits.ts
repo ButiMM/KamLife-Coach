@@ -20,12 +20,13 @@ export const VOICE_MAX_SECONDS = 180;
 // as client behaviour or persisting an inferred fact.
 const voiceFailureMap = new Map<string, { count: number; lastAt: number }>();
 const VOICE_FAILURE_RESET_MS = 30 * 60 * 1000;
-setInterval(() => {
+const voiceFailureCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, val] of voiceFailureMap.entries()) {
     if (now - val.lastAt > VOICE_FAILURE_RESET_MS) voiceFailureMap.delete(key);
   }
 }, 15 * 60 * 1000);
+voiceFailureCleanupTimer.unref();
 
 export function bumpVoiceFailure(userId: string): number {
   const now = Date.now();
