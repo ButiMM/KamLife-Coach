@@ -158,11 +158,38 @@ export async function handleWeightLog(
       .set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein, goalType: user.goalType })
       .where(eq(users.phoneNumber, phone));
 
-    const existingToday = await tx.select({ id: weightLogs.id }).from(weightLogs)
+    // `weight` comes back beside `id` so the correction can say what it replaced. Same query,
+    // one more column — the turn note below is the only consumer.
+    const existingToday = await tx.select({ id: weightLogs.id, weight: weightLogs.weight }).from(weightLogs)
       .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, todayWeightStart)))
       .limit(1);
     if (existingToday.length > 0) {
       await tx.update(weightLogs).set({ weight: newKg.toString() }).where(eq(weightLogs.id, existingToday[0].id));
+      /**
+       * A SECOND WEIGH-IN TODAY IS STILL A DURABLE WRITE (#114 P0-2, 2026-09-03).
+       *
+       * This branch has always corrected the row — that part was never broken. What it did not do
+       * was TELL THE TURN, because turnMutation sat only in the insert branch below. So a client
+       * correcting 84.0 to 83.4 changed the ledger while the turn recorded `mutations: null`, and
+       * every reader of that record was then working from "this turn wrote nothing":
+       *
+       *   • turnAlreadyWrote("weight") stayed false, so a second door could write the day again;
+       *   • routes' `wroteThisTurn` stayed false, so claimants that must stand down after a write
+       *     did not stand down;
+       *   • the workout owner logged "weight stated and not yet written" — a decision made on a
+       *     false premise, and the line that first made this look like a lost correction;
+       *   • Coach Health reads `mutations`, so LAW 4 could never see a same-day weigh-in at all.
+       *
+       * The write and the record of the write are one fact. Worded UPDATE-with-was, matching the
+       * steps owner, so a reader can tell a correction from a first weigh-in.
+       */
+      const wasKg = parseFloat(String(existingToday[0].weight ?? ""));
+      turnMutation(
+        Number.isFinite(wasKg) && wasKg !== newKg
+          ? `UPDATE weight=${newKg}kg (was ${wasKg}kg)`
+          : `UPDATE weight=${newKg}kg`,
+        "[WEIGHT_LOG]",
+      );
     } else {
       await tx.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
       turnMutation(`INSERT weight=${newKg}kg`, "[WEIGHT_LOG]");
