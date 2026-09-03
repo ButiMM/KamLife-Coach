@@ -154,7 +154,7 @@ export function isNightWorker(user: any): boolean {
 // day-of-week names ("Saturday", "on Sunday"), and time-of-day hints within those.
 // Returns a Date set to a reasonable SAST-anchored time for that meal.
 export function parseMealDate(message: string): Date {
-  const m = message.toLowerCase();
+  const text = message.toLowerCase();
   const nowSAST = Date.now() + 2 * 3_600_000; // ms in SAST equivalent
 
   // Relative days are anchored to the SAST calendar day, not UTC-now. The old
@@ -165,19 +165,19 @@ export function parseMealDate(message: string): Date {
   const todayStartSAST = sastDayStart();
 
   // "2 days ago", "two days ago" → noon SAST on that day
-  const daysAgoMatch = m.match(/\b(\d+|one|two|three)\s+days?\s+ago\b/);
+  const daysAgoMatch = text.match(/\b(\d+|one|two|three)\s+days?\s+ago\b/);
   if (daysAgoMatch) {
     const n = { one: 1, two: 2, three: 3 }[daysAgoMatch[1] as string] || parseInt(daysAgoMatch[1]);
     return new Date(todayStartSAST.getTime() - n * 86_400_000 + 12 * 3_600_000);
   }
 
   // "last night" → yesterday at 8pm SAST
-  if (/\b(last night|tonight|yesterday.?night|previous night)\b/.test(m)) {
+  if (/\b(last night|tonight|yesterday.?night|previous night)\b/.test(text)) {
     return new Date(todayStartSAST.getTime() - 86_400_000 + 20 * 3_600_000);
   }
 
   // "yesterday" → yesterday at noon SAST
-  if (/\byesterday\b/.test(m)) {
+  if (/\byesterday\b/.test(text)) {
     return new Date(todayStartSAST.getTime() - 86_400_000 + 12 * 3_600_000);
   }
 
@@ -187,7 +187,7 @@ export function parseMealDate(message: string): Date {
     sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
     thursday: 4, friday: 5, saturday: 6,
   };
-  const dowMatch = m.match(/\b(on\s+)?(last\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+  const dowMatch = text.match(/\b(on\s+)?(last\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
   if (dowMatch) {
     const targetDow = DOW_NAMES_MAP[dowMatch[3]];
     const nowSASTDate = new Date(nowSAST);
@@ -198,15 +198,15 @@ export function parseMealDate(message: string): Date {
     // to UTC-now put day-name meals one day off between 00:00–02:00 SAST (same
     // midnight-window family as the "yesterday" bug, 2026-07-07).
     const dayStartMs = todayStartSAST.getTime() - daysBack * 86_400_000;
-    const timeMatch = m.match(/\b(\d{1,2})[:.h](\d{2})\b/);
+    const timeMatch = text.match(/\b(\d{1,2})[:.h](\d{2})\b/);
     let sastClockMs: number;
     if (timeMatch) {
       sastClockMs = (parseInt(timeMatch[1]) * 60 + parseInt(timeMatch[2])) * 60_000;
-    } else if (/\b(morning|breakfast|after gym)\b/.test(m)) {
+    } else if (/\b(morning|breakfast|after gym)\b/.test(text)) {
       sastClockMs = 8 * 3_600_000;   // 8am SAST
-    } else if (/\b(lunch|midday|afternoon|around noon)\b/.test(m)) {
+    } else if (/\b(lunch|midday|afternoon|around noon)\b/.test(text)) {
       sastClockMs = 12 * 3_600_000;  // noon SAST
-    } else if (/\b(night|dinner|supper|evening)\b/.test(m)) {
+    } else if (/\b(night|dinner|supper|evening)\b/.test(text)) {
       sastClockMs = 20 * 3_600_000;  // 8pm SAST
     } else {
       sastClockMs = 12 * 3_600_000;  // default noon SAST
@@ -216,26 +216,26 @@ export function parseMealDate(message: string): Date {
 
   // "this morning" / "for breakfast" early in message → today at 8am SAST (only if current SAST time is past 11am)
   const sastHour = new Date(nowSAST).getUTCHours();
-  if (/\b(this morning|had.*breakfast|breakfast.*was|morning meal)\b/.test(m) && sastHour >= 11) {
+  if (/\b(this morning|had.*breakfast|breakfast.*was|morning meal)\b/.test(text) && sastHour >= 11) {
     const d = new Date();
     d.setUTCHours(6, 0, 0, 0); // 8am SAST = 6am UTC
     return d;
   }
 
   // "earlier today" / "earlier" → 3 hours ago
-  if (/\b(earlier today|earlier|a few hours ago|hours ago)\b/.test(m)) {
+  if (/\b(earlier today|earlier|a few hours ago|hours ago)\b/.test(text)) {
     return new Date(Date.now() - 3 * 3_600_000);
   }
 
   // "forgot to log dinner" / "missed logging lunch" with no explicit day: decide today vs
   // yesterday by whether the named meal's time has passed yet. Dinner asked in the morning =
   // yesterday's dinner; breakfast asked in the afternoon = today's (forgotten earlier today).
-  if (/\b(forgot|missed|didn.?t|did\s*not|never)\b/.test(m)
-      && /\b(log|logs|logg(?:ed|ing)|add|added|adding|track|tracked|tracking|record|recorded|enter|entered|capture)\b/.test(m)
-      && !/\b(today|this\s+morning|this\s+afternoon|this\s+evening|tonight|just\s+now|now)\b/.test(m)) {
-    const mealHour = /\b(breakfast|brekkie|morning)\b/.test(m) ? 8
-      : /\b(lunch|midday|noon)\b/.test(m) ? 13
-      : /\b(dinner|supper|evening|night)\b/.test(m) ? 19
+  if (/\b(forgot|missed|didn.?t|did\s*not|never)\b/.test(text)
+      && /\b(log|logs|logg(?:ed|ing)|add|added|adding|track|tracked|tracking|record|recorded|enter|entered|capture)\b/.test(text)
+      && !/\b(today|this\s+morning|this\s+afternoon|this\s+evening|tonight|just\s+now|now)\b/.test(text)) {
+    const mealHour = /\b(breakfast|brekkie|morning)\b/.test(text) ? 8
+      : /\b(lunch|midday|noon)\b/.test(text) ? 13
+      : /\b(dinner|supper|evening|night)\b/.test(text) ? 19
       : null;
     if (mealHour !== null) {
       const base = sastHour < mealHour ? Date.now() - 86_400_000 : Date.now(); // not happened yet today → yesterday
@@ -293,8 +293,8 @@ export function statedWhen(message: string): { when: StatedWhen; date: Date } {
 
 // Returns true if the message contains a clear retroactive date reference (not today).
 export function isRetroactiveMeal(message: string): boolean {
-  const m = message.toLowerCase();
-  return /\b(yesterday|last night|days? ago|on\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|last\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|had this (saturday|sunday|monday|tuesday|wednesday|thursday|friday)|saturday|sunday)\b/.test(m);
+  const text = message.toLowerCase();
+  return /\b(yesterday|last night|days? ago|on\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|last\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|had this (saturday|sunday|monday|tuesday|wednesday|thursday|friday)|saturday|sunday)\b/.test(text);
 }
 
 // Retro-date hallucination brake for the normalizer. The intent classifier
@@ -321,6 +321,6 @@ export function stripInventedRetroDate(canonical: string, original: string): str
 // does not match; voice transcripts that drop it are covered by tomorrow/going to.
 // Narrow on purpose: widening this loses real reports. See script/tracking-contract-tests.ts (#63).
 export function isFutureIntent(message: string): boolean {
-  const m = message.toLowerCase();
-  return /\bi'll\b|\bi\s+will\b|\b(?:wanna|gonna)\b|\bgoing\s+to\b|\bplann?ing\s+to\b|\bplan\s+to\b|\babout\s+to\b|\bhoping\s+to\b|\bwant\s+to\b|\bneeds?\s+to\b|\bhas\s+to\b|\bhave\s+to\b|\bsupposed\s+to\b|\baiming\s+(?:to|for)\b|\bmeant\s+to\b|\bthinking\s+(?:of|about)\b|\btomorrow\b|\bnext\s+week\b|\blater\s+today\b/i.test(m);
+  const text = message.toLowerCase();
+  return /\bi'll\b|\bi\s+will\b|\b(?:wanna|gonna)\b|\bgoing\s+to\b|\bplann?ing\s+to\b|\bplan\s+to\b|\babout\s+to\b|\bhoping\s+to\b|\bwant\s+to\b|\bneeds?\s+to\b|\bhas\s+to\b|\bhave\s+to\b|\bsupposed\s+to\b|\baiming\s+(?:to|for)\b|\bmeant\s+to\b|\bthinking\s+(?:of|about)\b|\btomorrow\b|\bnext\s+week\b|\blater\s+today\b/i.test(text);
 }
