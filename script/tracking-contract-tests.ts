@@ -322,6 +322,98 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
+   * A SECOND WEIGH-IN TODAY IS A DURABLE WRITE, AND THE TURN MUST SAY SO (#114 P0-2, 2026-09-03).
+   *
+   * The adjudicated report said a same-day weight correction was acknowledged but never written.
+   * It IS written — handleWeightLog has always updated today's row. The report was wrong because
+   * the trace behind it read only INSERTs, and this path UPDATEs. The same mistake the steps
+   * helper above warns about, made one suite over.
+   *
+   * What was real: turnMutation sat only in the insert branch, so the correction changed the
+   * ledger while the turn recorded NOTHING. turnAlreadyWrote("weight") stayed false, routes'
+   * wroteThisTurn stayed false, and Coach Health — which reads `mutations` — could not see a
+   * same-day weigh-in at all. The write and the record of the write are one fact.
+   *
+   * Graded on both channels and on the turn's own record, because either alone lies here.
+   */
+  {
+    const weighIn = async (todayRow: any | null, message: string) => {
+      freshTurn();
+      g.__KAMLIFE_STUB_USER = { ...USER, currentWeight: "86.0", heightCm: 178, gender: "male", age: 35 };
+      const rows = [{ id: "wl-old", userId: USER.id, weight: "86.0", weightKg: "86.0",
+        loggedAt: new Date(dayStart.getTime() - 7 * 86_400_000), at: new Date(dayStart.getTime() - 7 * 86_400_000) }];
+      if (todayRow) rows.push(todayRow);
+      g.__KAMLIFE_STUB_ROWS = new Map([[schema.weightLogs, rows]]);
+      g.__KAMLIFE_STUB_WRITES = [];
+      g.__KAMLIFE_STUB_UPDATES = [];
+      const reply = String(await handleMessage(USER.phoneNumber, message).catch(() => ""));
+      const ins = (g.__KAMLIFE_STUB_WRITES || []).filter((w: any) => w.table === schema.weightLogs);
+      const upd = (g.__KAMLIFE_STUB_UPDATES || []).filter((w: any) => w.table === schema.weightLogs);
+      const usr = (g.__KAMLIFE_STUB_UPDATES || []).filter((w: any) => w.table === schema.users)
+        .map((w: any) => w.set?.currentWeight).filter(Boolean);
+      const muts: string[] = ((g.__KAMLIFE_STUB_WRITES || [])
+        .filter((w: any) => w.table === schema.turnLedger)
+        .flatMap((w: any) => (Array.isArray(w.values?.mutations) ? w.values.mutations : []))) as string[];
+      delete g.__KAMLIFE_STUB_UPDATES;
+      delete g.__KAMLIFE_STUB_ROWS;
+      return {
+        reply, inserted: ins.length, rowsAdded: ins.length,
+        stored: ins.length ? String(ins[0].values?.weight) : upd.length ? String(upd[upd.length - 1].set?.weight) : null,
+        currentWeight: usr.length ? String(usr[usr.length - 1]) : null,
+        weightMutations: muts.filter(m => /weight=/i.test(m)),
+      };
+    };
+    const TODAY_84 = { id: "wl-today", userId: USER.id, weight: "84.0", weightKg: "84.0",
+      loggedAt: new Date(dayStart.getTime() + 60_000), at: new Date(dayStart.getTime() + 60_000) };
+
+    // 1 — FIRST WEIGHT OF THE DAY WRITES, and records an INSERT.
+    {
+      const r = await weighIn(null, "83.4kg");
+      if (r.stored !== "83.4") failures.push(`The first weigh-in of the day did not reach weight_logs: stored ${r.stored}`);
+      if (r.rowsAdded !== 1) failures.push(`The first weigh-in of the day added ${r.rowsAdded} rows, expected 1`);
+      if (!r.weightMutations.some(m => /^INSERT weight=83.4kg/.test(m))) {
+        failures.push(`The first weigh-in recorded no INSERT on the turn: ${JSON.stringify(r.weightMutations)}`);
+      }
+    }
+
+    // 2 — A CHANGED SAME-DAY WEIGHT CORRECTS THE DAY, and the corrected value is authoritative.
+    {
+      const r = await weighIn(TODAY_84, "83.4kg");
+      if (r.stored !== "83.4") failures.push(`A same-day correction did not reach weight_logs: stored ${r.stored} — the client was told "noted" and 84.0 stayed authoritative`);
+      if (r.rowsAdded !== 0) failures.push(`A same-day correction added ${r.rowsAdded} weight rows — the day must hold one weigh-in, corrected, not two`);
+      if (r.currentWeight !== "83.4") failures.push(`users.currentWeight is ${r.currentWeight} after a correction to 83.4 — every downstream surface reads the corrected-away number`);
+      // THE REPLY MAY NOT ACKNOWLEDGE A VALUE THAT WAS NOT PERSISTED. Graded as an implication:
+      // if the coach says 83.4 back, 83.4 is what the ledger now holds.
+      if (/83[.,]4/.test(r.reply) && r.stored !== "83.4") {
+        failures.push(`The reply acknowledged 83.4kg while the ledger holds ${r.stored} — the coach confirmed a number it did not keep`);
+      }
+      // AND THE TURN MUST RECORD IT. This is the half that was actually broken.
+      if (!r.weightMutations.some(m => /^UPDATE weight=83.4kg/.test(m))) {
+        failures.push(`A same-day weight correction recorded no durable write on the turn: ${JSON.stringify(r.weightMutations)} — turnAlreadyWrote, wroteThisTurn and Coach Health all read that record, so the correction is invisible to every one of them`);
+      }
+      if (!r.weightMutations.some(m => /\(was 84kg\)/.test(m))) {
+        failures.push(`The correction does not say what it replaced: ${JSON.stringify(r.weightMutations)} — a reader cannot tell a correction from a first weigh-in`);
+      }
+    }
+
+    // 3 — AN EXACT REPEAT IS NOT A SECOND WEIGH-IN, AND IS NOT A DURABLE WRITE EITHER.
+    //
+    //     This is the OVER-FIRE control, and it earns its place: the first version of the fix
+    //     recorded `UPDATE weight=84kg` for a client repeating today's number, which contradicts
+    //     this very case. `mutations` is operational state — claimant stand-down and Coach Health
+    //     both read it — so a semantic no-op entering it stands doors down for a turn that changed
+    //     nothing and hands Coach Health a weigh-in that never happened. Asserting ZERO weight
+    //     mutations, not merely zero INSERTs, is what catches that; the weaker form passed it.
+    {
+      const r = await weighIn(TODAY_84, "84kg");
+      if (r.rowsAdded !== 0) failures.push(`Repeating today's weight added ${r.rowsAdded} rows — an unchanged repeat must stay deduped`);
+      if (r.weightMutations.length !== 0) {
+        failures.push(`Repeating today's weight recorded ${JSON.stringify(r.weightMutations)} as a durable write — nothing about the day changed, and claimant stand-down and Coach Health both read that record`);
+      }
+    }
+  }
+
+  /**
    * THE CARD MAY NOT CONTRADICT THE DECISION (2026-08-26, live phone trace).
    *
    * The client said they were done eating for the day. The text respected it. The card told them
