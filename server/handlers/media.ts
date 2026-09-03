@@ -48,7 +48,8 @@ import { sendWhatsApp } from "../scheduler/shared";
 import { coachHomeEquipmentFromPhoto } from "./equipment-vision";
 import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
 import { downscaleForVision } from "../image-downscale";
-import { checkVoiceLength } from "../media-limits";
+import { checkVoiceLength, bumpVoiceFailure, clearVoiceFailure } from "../media-limits";
+export { bumpVoiceFailure, clearVoiceFailure } from "../media-limits";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { commitFoodLog } from "./food-context";
 import { itemsFromVisionText } from "../serving-units";
@@ -66,29 +67,6 @@ function sastToday(): string {
   const sast = new Date(Date.now() + 2 * 3_600_000);
   return sast.toISOString().slice(0, 10);
 }
-
-// VOICE NOTE FAILURE TRACKER — escalates to "please type" after 3 fails in 30 min.
-const voiceFailureMap = new Map<string, { count: number; lastAt: number }>();
-const VOICE_FAILURE_RESET_MS = 30 * 60 * 1000;
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, val] of voiceFailureMap.entries()) {
-    if (now - val.lastAt > VOICE_FAILURE_RESET_MS) voiceFailureMap.delete(key);
-  }
-}, 15 * 60 * 1000);
-
-export function bumpVoiceFailure(userId: string): number {
-  const now = Date.now();
-  const prev = voiceFailureMap.get(userId);
-  const count = prev && (now - prev.lastAt) < VOICE_FAILURE_RESET_MS ? prev.count + 1 : 1;
-  voiceFailureMap.set(userId, { count, lastAt: now });
-  return count;
-}
-
-export function clearVoiceFailure(userId: string): void {
-  voiceFailureMap.delete(userId);
-}
-
 // WORKOUT IDENTIFICATION (TikTok/IG screenshots & video frames)
 
 interface IdentifiedExercise {

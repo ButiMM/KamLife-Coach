@@ -15,6 +15,31 @@
 /** Past this, a voice note stops being a message and starts being a podcast. */
 export const VOICE_MAX_SECONDS = 180;
 
+// Repeated transcription failures should stop consuming retries and offer a typed fallback.
+// This is in-process only: it protects the media boundary without treating a delivery failure
+// as client behaviour or persisting an inferred fact.
+const voiceFailureMap = new Map<string, { count: number; lastAt: number }>();
+const VOICE_FAILURE_RESET_MS = 30 * 60 * 1000;
+const voiceFailureCleanupTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of voiceFailureMap.entries()) {
+    if (now - val.lastAt > VOICE_FAILURE_RESET_MS) voiceFailureMap.delete(key);
+  }
+}, 15 * 60 * 1000);
+voiceFailureCleanupTimer.unref();
+
+export function bumpVoiceFailure(userId: string): number {
+  const now = Date.now();
+  const prev = voiceFailureMap.get(userId);
+  const count = prev && (now - prev.lastAt) < VOICE_FAILURE_RESET_MS ? prev.count + 1 : 1;
+  voiceFailureMap.set(userId, { count, lastAt: now });
+  return count;
+}
+
+export function clearVoiceFailure(userId: string): void {
+  voiceFailureMap.delete(userId);
+}
+
 // Rough bitrates by container (bits/sec). WhatsApp sends Opus in Ogg at ~16kbps; the others are
 // only reached when a client forwards a file, so a conservative guess is fine — we only need the
 // right order of magnitude to tell a 40-second note from a 20-minute one.
