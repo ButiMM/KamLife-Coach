@@ -171,6 +171,22 @@ function stripWrapQuotes(s: string): string {
  */
 export const PROPER_PROTEIN_G = 35;
 
+/**
+ * WHICH NUMBER ANSWERS "DID THEY JUST EAT A PROPER PROTEIN MEAL" (#114 P1 review).
+ *
+ * One message can be several separate eating events — "eggs this morning, pap at lunch" is two
+ * meals, and an album of four photos is four. Each commits its own row. The card's question is
+ * about ONE plate, so the aggregate across those events may never answer it: four ~10g events sum
+ * to 40g and no plate among them was a protein meal, which would have the card say "one proper
+ * protein down" about a meal that never happened.
+ *
+ * One owner for the rule, because both the text path and the photo path ask it and a second
+ * spelling would drift. A single-event message is the common case and returns its own protein.
+ */
+export function biggestEventProtein(events: Array<{ protein: number }>): number {
+  return events.reduce((max, e) => Math.max(max, Math.round(e?.protein || 0)), 0);
+}
+
 export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), isPastDay = false, foodDayClosed = false, justAteProteinMeal = false): string {
   const r = (label: string) => rows.find(x => x.label === label);
   if (isPastDay) return "Yesterday's log — today's plate is a separate day";

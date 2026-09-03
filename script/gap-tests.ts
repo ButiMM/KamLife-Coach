@@ -216,6 +216,41 @@ test("unlogged: roast potatoes + mixed veggies is not an unpriced leftover after
     }
   });
 
+  test("progress card: several small eating events do not add up to a proper protein meal", () => {
+    // #114 P1 review. One message can be several separate meals — "eggs this morning, pap at
+    // lunch" is two events, an album of four photos is four, and each commits its own row. The
+    // card's claim is about ONE plate, so the aggregate across those events may never answer it:
+    // four ~10g events sum to 40g and no plate among them was a protein meal.
+    const { biggestEventProtein, mealCard } = CARD;
+    const fourSmall = [{ protein: 10 }, { protein: 9 }, { protein: 11 }, { protein: 10 }];
+    const sum = fourSmall.reduce((t, e) => t + e.protein, 0);
+    assert.ok(sum >= PROPER_PROTEIN_G,
+      `the fixture must actually be dangerous: ${sum}g summed has to clear the ${PROPER_PROTEIN_G}g bar, or this proves nothing`);
+    assert.ok(biggestEventProtein(fourSmall) < PROPER_PROTEIN_G,
+      `four sub-threshold events combined into a proper protein meal: ${biggestEventProtein(fourSmall)}g`);
+
+    // ...and the card says so. Graded on the line, not on the number.
+    const sub = (mealProtein: number) => mealCard({
+      firstName: "Kam", mealName: "Eggs + Pap", rows: short(61) as any,
+      isBulk: false, usesNumbers: true, hour: 16, mealProtein,
+    }).sub;
+    assert.ok(/\b(make|get)\b[^.]*\b(proper|real) protein\b/i.test(sub(biggestEventProtein(fourSmall))),
+      `four small plates must still be told to get a real protein: "${sub(biggestEventProtein(fourSmall))}"`);
+    assert.ok(!/one proper protein down/i.test(sub(biggestEventProtein(fourSmall))),
+      `the card claimed a proper protein meal that no single event delivered: "${sub(biggestEventProtein(fourSmall))}"`);
+
+    // A REAL single event still qualifies — the control that stops this becoming "never".
+    const oneRealMeal = [{ protein: 8 }, { protein: 61 }];
+    assert.ok(biggestEventProtein(oneRealMeal) >= PROPER_PROTEIN_G,
+      `a genuine 61g event must still qualify: ${biggestEventProtein(oneRealMeal)}g`);
+    assert.ok(!/\b(make|get)\b[^.]*\b(proper|real) protein\b/i.test(sub(biggestEventProtein(oneRealMeal))),
+      `a real protein meal beside a snack must not be re-ordered: "${sub(biggestEventProtein(oneRealMeal))}"`);
+
+    // The single-event case — the common one — is unchanged.
+    assert.equal(biggestEventProtein([{ protein: 61 }]), 61, "one event answers with its own protein");
+    assert.equal(biggestEventProtein([]), 0, "no events is not a protein meal");
+  });
+
   test("progress card: the 'just ate protein' test uses the band the card already owns", () => {
     // One number for both halves. If PROPER_PROTEIN_G drifts from the >= 35 band below it, the
     // card can call a plate a proper protein meal while still asking for one to close the gap.
