@@ -1169,7 +1169,7 @@ export async function handleFoodContext(ctx: {
 
       // BRANDED MACRO CARD (2026-07-21): a macro-goal client gets the orange progress-bar image on the log (marker stripped + sent as media downstream). Wellness clients get "" — no card forced on them. Fail-open.
       const cardName = allAdjustedFoods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || mealLabel;
-      const macroCard = await macroCardMarker({ user, mealName: cardName, mealKcal: totalCals, forDate: scannerIsRetro ? scannerLoggedAt : undefined, achievementStreak: streakCelebration ? foodStreak : undefined });
+      const macroCard = await macroCardMarker({ user, mealName: cardName, mealProtein: Math.round(totalProtein), forDate: scannerIsRetro ? scannerLoggedAt : undefined, achievementStreak: streakCelebration ? foodStreak : undefined });
       const streakLine = achievementCardShown(user, streakCelebration ? foodStreak : undefined, macroCard) ? shortStreakNote(foodStreak, user.name || "") : streakCelebration;
       const guardrail = await nutritionGuardrailNudge(user); // "too much of something" health-standard nudge
       const plannedNote = plannedSegs.length > 0
@@ -1245,7 +1245,7 @@ export async function handleFoodContext(ctx: {
           : "";
         const fbCardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
         const fbStreakNote = await getStreakNote(user.id, fbStreak, user.name || "");
-        const fbCard = await macroCardMarker({ user, mealName: fbCardName, mealKcal: gptFallbackResult.totalKcal, forDate: gptIsRetro ? gptLoggedAt : undefined, achievementStreak: fbStreakNote ? fbStreak : undefined });
+        const fbCard = await macroCardMarker({ user, mealName: fbCardName, mealProtein: Math.round(gptFallbackResult.totalProtein || 0), forDate: gptIsRetro ? gptLoggedAt : undefined, achievementStreak: fbStreakNote ? fbStreak : undefined });
         return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fbStreakNote}${fbGuiltNote}${protClarifyNote}${fbDroppedNote}${cardOrTotals(fbCard, gptFallbackResult.totalKcal, gptFallbackResult.totalProtein, user)}`;
       }
     }
@@ -1334,7 +1334,7 @@ export async function handleFoodContext(ctx: {
         : "";
       const fb2CardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
       const fb2StreakNote = await getStreakNote(user.id, fb2Streak, user.name || "");
-      const fb2Card = await macroCardMarker({ user, mealName: fb2CardName, mealKcal: gptFallbackResult.totalKcal, forDate: fb2IsRetro ? fb2LoggedAt : undefined, achievementStreak: fb2StreakNote ? fb2Streak : undefined });
+      const fb2Card = await macroCardMarker({ user, mealName: fb2CardName, mealProtein: Math.round(gptFallbackResult.totalProtein || 0), forDate: fb2IsRetro ? fb2LoggedAt : undefined, achievementStreak: fb2StreakNote ? fb2Streak : undefined });
       return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fb2StreakNote}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}${cardOrTotals(fb2Card, gptFallbackResult.totalKcal, gptFallbackResult.totalProtein, user)}`;
     }
     // GPT returned null / is_food=false. If the user clearly signalled food (strong trigger),
