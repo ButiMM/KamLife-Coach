@@ -12,7 +12,6 @@ import { eq, and, gte, lt, desc } from "drizzle-orm";
 import { type SAFood } from "../foods";
 import {
   scanForSAFoods, recomputeTodayFoodTotals, buildFoodLogReply, escapeRegex,
-  portionDefaultCount,
   computeFoodLogStreak, getFoodStreakCelebration, shortStreakNote,
   invalidateFoodTotalsCache,
 } from "./food-scanner";
@@ -29,7 +28,7 @@ import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
 import { explicitMealSlot } from "../understanding/actions";
-import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, classifyPortionUnit, scalePortionDescription, type PortionStat, type SlotContext } from "../portion-memory";
+import { getPortionMemory, getSlotContext, resolveInferredSlot, adjustFoodsForSegment, type SlotContext } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
@@ -131,120 +130,6 @@ async function getStreakNote(userId: string, streak: number, name: string): Prom
 
 
 type HandleMessageFn = (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
-
-// Quantity/portion scaling — shared by the scanner, smart-log and multi-day paths.
-function normaliseWordNumbers(text: string): string {
-  const map: Record<string, string> = {
-    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
-    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
-    "half": "0.5", "a": "1", "an": "1",
-  };
-  // Phrase pass FIRST: "half a vienna" must become "0.5 vienna", not "0.5 1 vienna" —
-  // the a→1 word map was eating the half and logging a whole item (2026-07-23).
-  const phrased = text.replace(/\bhalf\s+(?:a|an|the)\s+/gi, "0.5 ");
-  return phrased.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\b/gi, w => map[w.toLowerCase()] ?? w);
-}
-
-export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal?: Map<string, PortionStat>) {
-  const normText = normaliseWordNumbers(segText);
-
-  // Portion-size modifier — "big plate of pap" → 1.5×, "half a portion" → 0.5×
-  // Applied globally across all foods in the segment (whole meal was described as big/small)
-  let sizeMultiplier = 1;
-  if (/(big|large|huge|heaped|extra\s*large|xl|full\s*plate|loaded)\s+(?:plate|bowl|portion|serving|of\b)/i.test(normText)
-    || /\b(double|extra\s+helping|extra\s+large\b)/i.test(normText)) {
-    sizeMultiplier = 1.5;
-  } else if (/(small|tiny|little|mini|quarter)\s+(?:plate|bowl|portion|serving)/i.test(normText)
-    || /\ba\s+(?:small|tiny|little)\s+bit\s+of\b/i.test(normText)
-    || /\bsmall\s+amount\s+of\b/i.test(normText)) {
-    sizeMultiplier = 0.7;
-  } else if (/\b(?:half|halved)\s+(?:a\s+)?(?:plate|bowl|portion|serving|of\b)/i.test(normText)
-    || /\b(?:half\s+(?:the\s+)?(?:pap|rice|pasta|meal|food)\b)/i.test(normText)) {
-    sizeMultiplier = 0.5;
-  }
-
-  return foods.map(f => {
-    const allAliases = [f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())];
-    let quantity = 1;
-    let explicitQty = false; // the client SAID an amount — memory never overrides speech
-    let quantityEstimated = false; // WE interpreted the amount — identity can be db, quantity a guess
-    for (const alias of allAliases) {
-      const qtyDirect = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:${escapeRegex(alias)})`, "i"));
-      // UNIT-AWARE (2026-08-13): capture the unit WORD and classify it — "2 plates", "2 tablespoons",
-      // "2 pieces" and "2 spoons" are four different claims, and the old catch-all made all four N
-      // whole portions, so "2 spoons of pap" logged 660 kcal. See portion-memory.classifyPortionUnit.
-      const qtyWithUnit = qtyDirect ? null : normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+([a-z]+)\\s+(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
-      const qtyBefore = qtyDirect || qtyWithUnit;
-      if (qtyBefore) {
-        explicitQty = true;
-        const userQty = parseFloat(qtyBefore[1]);
-        const unit = qtyWithUnit ? classifyPortionUnit(qtyWithUnit[2], f.typicalPortionDescription, f.typicalPortionGrams) : null;
-        if (unit && unit.fraction !== null) {
-          quantity = unit.cls === "unknown" ? 1 : userQty * unit.fraction;  // never N portions
-          if (unit.estimated) quantityEstimated = true;
-        } else {
-          const defaultQty = portionDefaultCount(f.typicalPortionDescription);
-          if (userQty > 0 && defaultQty > 0 && userQty !== defaultQty) quantity = userQty / defaultQty;
-        }
-        break;
-      }
-    }
-    // VAGUE PER-FOOD AMOUNT (2026-07-23 live: "half a Vienna" logged the 2-vienna default and
-    // the client argued the log DOWN — trust killer). "Half a <food>" = 0.5 of ONE item vs the
-    // portion's default count; "some/a few/a bit of <food>" = half the default. Lean LOW.
-    // Skipped when a global size phrase already scaled the segment (no double-halving).
-    let vagueQty = false;
-    if (!explicitQty && sizeMultiplier === 1) {
-      for (const alias of allAliases) {
-        const a = escapeRegex(alias);
-        // Match on the RAW text: normalisation rewrites "a"→"1", destroying "a bit of".
-        const halfM = segText.match(new RegExp(`\\bhalf\\s+(?:a\\s+|an\\s+|the\\s+|of\\s+(?:a\\s+|the\\s+)?)?(?:${a})`, "i"));
-        const vagueM = !halfM && segText.match(new RegExp(`\\b(?:some|a few|a couple(?:\\s+of)?|a bit of|a little(?:\\s+bit)?(?:\\s+of)?|a small piece of|a taste of)\\s+(?:${a})`, "i"));
-        if (halfM) {
-          quantity = 0.5 / Math.max(1, portionDefaultCount(f.typicalPortionDescription));
-          vagueQty = true;
-        } else if (vagueM) {
-          quantity = 0.5;
-          vagueQty = true;
-        }
-        if (vagueQty) break;
-      }
-    }
-    quantity = quantity * sizeMultiplier;
-    // ADAPTIVE PORTION (2026-07-17): when the client stated NO amount and NO size word,
-    // their own median portion of this food (portion-memory, >=3 logs, clamped) beats
-    // the table default. Memory fills silence; it never overrides what they said —
-    // and a vague amount ("some", "half a") IS speech, so memory stays out of its way.
-    if (!explicitQty && !vagueQty && sizeMultiplier === 1 && personal) {
-      const pp = personalPortionFor(personal, f.name, f.typicalPortionCalories, f.typicalPortionProtein);
-      if (pp.personal) {
-        return {
-          ...f,
-          adjustedCalories: pp.kcal,
-          adjustedProtein: pp.protein,
-          adjustedDescription: `${f.typicalPortionDescription} — your usual`,
-          quantity: 1,
-          portionSource: "personal" as const,
-        };
-      }
-    }
-    // PORTION PROVENANCE (2026-07-19): every inferred portion carries HOW it was decided —
-    // the audit-trail atom the reviews keep asking for, and the signal the confidence layer
-    // reads. "default" = a bare guess (no amount, no size word, no history) — the only case
-    // that's genuinely uncertain.
-    const portionSource = explicitQty ? "explicit" as const : vagueQty ? "vague" as const : sizeMultiplier !== 1 ? "size" as const : "default" as const;
-    return {
-      ...f,
-      adjustedCalories: Math.round(f.typicalPortionCalories * quantity),
-      adjustedProtein: Math.round(f.typicalPortionProtein * quantity),
-      adjustedDescription: scalePortionDescription(f.typicalPortionDescription, quantity),
-      quantity,
-      portionSource,
-      // Identity verified, quantity estimated — "2 spoons of pap" is db-true about pap, a guess about how much.
-      origin: quantityEstimated ? "ai" as const : undefined,
-    };
-  });
-}
 
 export async function handleFoodContext(ctx: {
   phone: string;
