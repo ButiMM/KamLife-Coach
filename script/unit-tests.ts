@@ -9192,6 +9192,31 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.match(clean.text, /1 ?850 kcal/, "a clean reply was rewritten");
   });
 
+  test("reactive: a thrown outbound preparation sends the canonical repair, never its draft", async () => {
+    const { prepareReactiveOutbound, REACTIVE_OUTBOUND_REPAIR } = await import("../server/outbound-authority");
+    const unsafeDraft = "INTERNAL: unverified weight trend says the client gained muscle";
+    const prepared = await prepareReactiveOutbound("whatsapp:+27000000886", async () => {
+      throw new Error(`forced preparation failure for ${unsafeDraft}`);
+    });
+
+    assert.equal(prepared.blocked, true, "a thrown preparation was treated as safe");
+    assert.equal(prepared.text, REACTIVE_OUTBOUND_REPAIR, "the delivery seam did not receive the canonical repair");
+    assert.notEqual(prepared.text, unsafeDraft, "the original unsafe draft reached the delivery seam");
+    assert.ok(prepared.text.trim().length > 0, "the preparation exception left the client with silence");
+
+    const ordinary = { text: "Your prepared reply stays byte-identical.", blocked: false } as const;
+    const unchanged = await prepareReactiveOutbound("whatsapp:+27000000887", async () => ordinary);
+    assert.equal(unchanged, ordinary, "successful preparation was rewritten by the exception guard");
+  });
+
+  test("reactive: sendFinal cannot restore the raw-draft preparation fallback", () => {
+    const sendFinalBody = wa.slice(wa.indexOf("async function sendFinal"), wa.indexOf("async function sendParts"));
+    assert.match(sendFinalBody, /prepareReactiveOutbound\(phone,/,
+      "sendFinal bypassed the outbound owner's reactive exception policy");
+    assert.doesNotMatch(sendFinalBody, /preparation failed, sending raw|out\s*=\s*text/,
+      "sendFinal can still deliver the original draft after preparation throws");
+  });
+
   test("delivery: the rate gate is the caller's policy, and a reply does not carry it", async () => {
     // ACCEPTANCE — "reactive replies are never queued behind proactive traffic". The send-rate
     // gate is proactive-only ON PURPOSE: throttling a reply would make a client wait to protect a
