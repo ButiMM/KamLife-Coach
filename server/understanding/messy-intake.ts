@@ -291,6 +291,32 @@ export interface StepLogDetection {
   hasMovementSignal: boolean;
 }
 
+/**
+ * Step-report qualifiers belong with the canonical step parser. The durable writer consumes this
+ * classification; it must not grow its own opinion about whether a client reported a weekly
+ * summary or corrected a count.
+ */
+export interface StepReportModifiers {
+  isWeeklyAverage: boolean;
+  correctedSteps: number | null;
+  isCorrection: boolean;
+}
+
+export function getStepReportModifiers(message: string): StepReportModifiers {
+  const text = message || "";
+  const correction = text.match(/\b([\d,]+)(\s*k)?\s*(?:steps?|staps?)?\s+not\s+[\d,]+/i);
+  const correctedSteps = correction
+    ? Math.round(parseFloat(correction[1].replace(/,/g, "")) * (correction[2] ? 1000 : 1))
+    : null;
+  return {
+    isWeeklyAverage: /\b(average|avg)\b/i.test(text)
+      || (/\b(this|last|past)\s+week(?:ly)?\b/i.test(text) && !/\btoday\b/i.test(text)),
+    correctedSteps,
+    isCorrection: !!correction
+      || /\b(wrong|actually|correction|i\s+meant|meant|should\s+be|mistake|typo|miscount|oops|my\s+bad)\b/i.test(text),
+  };
+}
+
 export function detectStepLog(text: string): StepLogDetection {
   const numMatch = text.match(/\b([\d,]+(?:\.\d+)?)\s*k\s*(?:steps?|staps?)\b/i)
     || text.match(/\b([\d,]+)\s*(?:steps?|staps?)\b/i)

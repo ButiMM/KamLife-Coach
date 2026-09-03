@@ -17,11 +17,11 @@
  * Pure — no DB, no model. Unit-tested.
  */
 
+// Recognition and the welcome are a single pure boundary. Keeping it here preserves the
+// established import contract without making unit callers load the DB-backed safety handler.
 const MEDICATION_SIGNAL = /\b(on medication|taking medication|my medication|my meds|my pills|blood thinners|antiretroviral|ARVs?|antiretrovirals?|insulin|metformin|warfarin|blood pressure (pills?|medication|tablets?)|epilepsy (medication|tablets?|pills?)|seizure medication|newly diagnosed|just diagnosed|just found out i have|blood test results?|doctor said i have|specialist said)\b/i;
-
 const CHRONIC_CONDITION_SIGNAL = /\b(i have diabetes|i.?m diabetic|pre.?diabetic|type [12] diabetes|my blood sugar|i have hypertension|i.?m hypertensive|my blood pressure is|i have (heart disease|a heart condition|kidney disease|liver disease|thyroid|pcos|epilepsy|hiv|aids))\b/i;
 
-/** Did they just disclose a condition or medication? */
 export function mentionsConditionOrMedication(message: string): boolean {
   const m = message || "";
   return MEDICATION_SIGNAL.test(m) || CHRONIC_CONDITION_SIGNAL.test(m);

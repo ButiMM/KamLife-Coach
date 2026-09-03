@@ -58,10 +58,15 @@ import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
 import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, reportedInSomeClause, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
-import { mentionsConditionOrMedication, conditionWelcome } from "./condition-welcome";
+import { conditionWelcome, mentionsConditionOrMedication } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
 import { reportsHunger } from "./unlogged-notice";
 import { PRICING, GUARANTEE_PHRASE } from "../shared/pricing";   // commercial terms have one owner
+import { getOrCreateUser } from "./db";
+import { handleSubscriptionGate } from "./handlers/conversion";
+import { handleTrainingDayDecision } from "./handlers/workout";
+import { handleStepReport } from "./handlers/steps";
+import { handleMediaReceiptFollowup } from "./handlers/chat-log";
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 if (!openaiKey) {
   console.error("[FATAL] OPENAI_API_KEY is not set. Server cannot start without it.");
@@ -76,35 +81,6 @@ const openai = new OpenAI({ apiKey: openaiKey });
 // GET OR CREATE USER
 // ============================================================
 
-async function getOrCreateUser(phone: string): Promise<any> {
-  const existing = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-  if (existing.length > 0) {
-    await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
-    return existing[0];
-  }
-  try {
-    const newUsers = await db.insert(users).values({
-      phoneNumber: phone,
-      subscriptionStatus: "inactive",
-      onboardingState: "START",
-      programmePhase: 1,
-      programmeWeek: 1,
-      programmeDayInWeek: 1,
-      trainingMode: "home",
-      stepsTarget: 8500,
-      createdAt: new Date(),
-      lastActiveAt: new Date(),
-    }).returning();
-    return newUsers[0];
-  } catch (err: any) {
-    if (err.code === "23505") {
-      // Race condition — concurrent first message created this user; fetch it
-      const fallback = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-      if (fallback.length > 0) return fallback[0];
-    }
-    throw err;
-  }
-}
 
 
 
@@ -362,108 +338,10 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
       return tag(confirmReply, "🧠 new engine");
     }
   }
-  // ---- SUBSCRIPTION GATE — full product requires active subscription, no free tier ----
-  // Safety messages (chest pain, crisis, emergency) always bypass.
-  // Onboarding is handled before this point and bypasses via onboardingState check.
-  const trialExpired = user.subscriptionStatus === "trial" &&
-    user.betaBypassUntil && new Date(user.betaBypassUntil) < new Date();
-  if ((user.subscriptionStatus === 'inactive' || trialExpired) && !isCoach && !isBetaTester) {
-    const isSafety = /\b(chest pain|chest hurts?|chest is (tight|sore|aching|burning)|pain in my chest|chest tightness|can.?t breathe|shortness of breath|can.?t catch my breath|heart racing|heart pounding|dizziness|feeling faint|emergency|hospital|ambulance|crisis|suicid|hurt myself)\b/i.test(m);
-    if (!isSafety) {
-      const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
-      const merchantId = process.env.PAYFAST_MERCHANT_ID;
-      const cleanPhone = phone.replace(/^whatsapp:/, "");
-      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
-      const name = user.name?.split(" ")[0] || "there";
-
-      // ---- CONVERSION OBJECTION HANDLERS — run before generic gate reply ----
-      // Price questions, money objections, and hesitation/stall get tailored responses
-      // that reframe cost and keep the door open instead of just re-showing a link.
-      const { handleConversionObjection } = await import("./handlers/conversion");
-      const conversionResult = handleConversionObjection({ user, m, payLink, name });
-      if (conversionResult) {
-        await logChat(user.id, message, conversionResult.reply, conversionResult.intent);
-        return conversionResult.reply;
-      }
-
-      // ---- FOOD/EATING GUIDANCE GLIMPSE — show Day 1 as proof of value ----
-      // Hard paywall replies to "what should I eat?" convert nobody — they haven't
-      // seen the product yet. Show one personalised day (goal + budget + medical aware),
-      // then gate Days 2–3 and the shopping list behind R199.
-      const isFoodGuidanceQ = /\b(what should i eat|how should i eat|how do i eat|what do i eat|what to eat|meal plan|eating plan|diet plan|give me a meal plan|how do you suggest i eat|what can i eat|how to eat|tell me what to eat|what must i eat|what should i be eating|food plan|i don.?t know what to eat|no idea what to eat|don.?t know how to eat|eating guide|what foods should i|what food should i|nutrition plan)\b/i.test(m);
-      if (isFoodGuidanceQ) {
-        const { generateMealPlan } = await import("./meal-plan");
-        const glimpsePlan = generateMealPlan({
-          calorieTarget: user.calorieTarget || 1800,
-          proteinTarget: user.proteinTarget || 120,
-          weeklyFoodBudget: user.weeklyFoodBudget || "100_300",
-          goalType: user.goalType || "fat_loss",
-          medicalConditions: user.medicalConditions || "",
-          dietaryRestrictions: user.dietaryRestrictions,
-          foodDislikes: user.foodDislikes,
-          otherMedicalNotes: user.otherMedicalNotes || "",
-          recentFoods: [],
-          firstName: user.name?.split(" ")[0] || "",
-        });
-        // Split: part[0] = header, part[1] = Day 1, part[2] = Day 2, part[3] = Day 3
-        const planParts = glimpsePlan.split("\n\n---\n\n");
-        const planHeader = planParts[0] || "";
-        const day1 = planParts[1] || "";
-        const upsell = `That is Day 1.\n\nDays 2 and 3 rotate the meals so you are not eating the same thing every day. Your weekly shopping list with ZAR prices is in there too.\n\n*Full weekly plan + shopping list + daily coaching — ${PRICING.monthlyDisplay}:*\n${payLink}\n\n_${PRICING.dailyDisplay}. Not satisfied? ${GUARANTEE_PHRASE} — Message us and we will make it right._`;
-        const glimpseReply = `${planHeader}\n\n${day1}\n\n---\n\n${upsell}`;
-        await logChat(user.id, message, glimpseReply, "MEAL_PLAN_GLIMPSE");
-        return glimpseReply;
-      }
-      const workouts = user.totalWorkoutsCompleted || 0;
-      const isLapsed = !!user.cancelledAt;
-      let gateReply: string;
-      if (isLapsed) {
-        const cancelDate = new Date(user.cancelledAt!).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
-        const currentKg = user.currentWeight ? `${parseFloat(String(user.currentWeight)).toFixed(1)}kg` : null;
-        const progressNote = workouts > 0 ? `${workouts} session${workouts !== 1 ? "s" : ""}${currentKg ? `, currently at ${currentKg}` : ""} — all saved.` : "";
-        gateReply = `${name}, your subscription ended ${cancelDate}. ${progressNote}\n\nReply *pay* to pick up exactly where you left off.\n\n*${PRICING.monthlyDisplay} — cancel anytime:*\n${payLink}`;
-      } else if (workouts > 0) {
-        gateReply = `${name}, reactivate to get your workouts, food coaching, and full programme back.\n\n*${PRICING.monthlyDisplay} — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
-      } else {
-        gateReply = `${name}, your programme is built and waiting.\n\n*Start today — ${PRICING.monthlyDisplay} (${PRICING.dailyDisplay})*\n${payLink}\n\n_${GUARANTEE_PHRASE} — not for you, and we make it right._`;
-      }
-      await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
-      return gateReply;
-    }
-  }
-
-  // ---- POST-MEDIA FOLLOW-UP: "I sent screenshot/voice" ----
-  // Prevent vague GPT responses after a media upload by resolving against recent media events.
-  // Runs AFTER onboarding/POPIA/subscription gates (it used to run before them, letting
-  // mid-onboarding and unsubscribed users bypass the gates with one phrase) and only on
-  // explicit delivery-check verbs — bare "check/look at" hijacked "check my progress photo".
-  const asksAboutSentMedia = /\b(i (?:have )?sent|did you (?:get|receive)|you got|did (?:it|that) (?:go through|arrive))\b.{0,40}\b(screenshot|photo|image|pic|voice|audio|note)\b/i.test(m);
-  if (asksAboutSentMedia && !mediaUrl) {
-    const recentMedia = await db.select({ messageIn: chatHistory.messageIn, intent: chatHistory.intent, createdAt: chatHistory.createdAt })
-      .from(chatHistory)
-      .where(eq(chatHistory.userId, user.id))
-      .orderBy(desc(chatHistory.createdAt))
-      .limit(12);
-    const lastMediaEvent = recentMedia.find(row =>
-      (row.messageIn || "").includes("[Photo]") ||
-      (row.messageIn || "").includes("[Step Screenshot") ||
-      (row.intent || "").includes("PROGRESS_PHOTO")
-    );
-    if (lastMediaEvent) {
-      if ((lastMediaEvent.messageIn || "").includes("[Step Screenshot")) {
-        return "Yes, I got your step screenshot and logged it. Send your next one tonight so we keep your daily average accurate.";
-      }
-      if ((lastMediaEvent.messageIn || "").includes("[Photo]")) {
-        return "Yes, I got your photo. If that was a meal photo, send one short caption like \"chicken and rice\" so I can tighten calories and protein.";
-      }
-      return "Yes, I received it. Send one line on what you want checked so I can give a precise answer.";
-    }
-    if (/\b(voice|audio|note)\b/i.test(m)) {
-      return "I do not see a processed voice note yet. Please resend it, or type your message now and I will respond immediately.";
-    }
-    return "I do not see a processed screenshot yet. Please resend it with the caption \"steps screenshot\" or \"food photo\".";
-  }
-
+  const subscriptionReply = await handleSubscriptionGate({ phone, message, m, user, isCoach, isBetaTester });
+  if (subscriptionReply !== null) return subscriptionReply;
+  const mediaReceiptReply = await handleMediaReceiptFollowup({ mediaUrl, m, user });
+  if (mediaReceiptReply !== null) return mediaReceiptReply;
 
   // ---- HEART CONDITION CLEARANCE GATE ----
   // Users with heart_condition must confirm doctor clearance before receiving workouts
@@ -957,99 +835,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     return listReply;
   }
 
-  // ---- FUTURE-INTENT WORKOUT GUARD — defer like a coach, don't dump the session ----
-  // "I'll do today's workout tomorrow" is a PLAN, not a request to see the session now. The
-  // Normalizer strips the tense ("tomorrow" → bare "today's workout"), so without this the
-  // sentence matches the view trigger in early-commands and dumps the full workout.
-  // Test the ORIGINAL pre-normalization message, and require a first-person future verb +
-  // an explicit later-time word, so "tomorrow's session" / "next session" (legit future-view
-  // commands) and "about to do my workout" (imminent) still reach the real handler. Stricter
-  // than isFutureIntent() on purpose — bare "tomorrow" must not swallow "tomorrow's session".
-  const _origWO = originalMBeforeNorm;
-  // A REFUSAL IS NOT A DEFERRAL (2026-08-24). The matcher below detects "I'll do it later" and
-  // needs a first-person future verb AND a later-time word, so "no I'm not training today" matched
-  // none of it and got a full session, post-workout nutrition and "Send DONE" over an explicit
-  // refusal. trainingDayIsDeclined is the twin of foodDayIsClosed — the latest explicit constraint
-  // about today, owned in one-action.
-  // ONE READER (2026-08-25). This computed a refusal into an underscore-prefixed local that
-  // NOTHING read — a seventh opinion on "is the client training today" that never reached a
-  // decision. Recorded rather than quietly deleted: it is the clearest example of why six
-  // separate readers of one question produced six different answers.
-  const _trainingDay = readTrainingDay(_origWO);
-  const _isWorkoutRefusal = _trainingDay === "declined";
-  // A REQUEST TO MOVE A WORKOUT IS A SCHEDULE DECISION, NOT A REQUEST TO RENDER IT (2026-08-24).
-  //
-  //   "Can I do my workout tomorrow instead?"  →  *Week 5 — Next Session (Day 1)*
-  //
-  // The client asked whether they may shift the session and got the session. A refusal is a
-  // constraint and a deferral is a plan; this is the third shape — asking permission — and it
-  // belongs to the same owner rather than a second workout mouth. The discriminator is grammar:
-  // a modal + first person is asking to MOVE it ("can I do my workout tomorrow?"), while a view
-  // request names the object without asking permission ("show me tomorrow's workout",
-  // "tomorrow's workout?") and must still reach the renderer.
-  const _isWorkoutMoveRequest = _trainingDay === "move_request";
-  const _isWorkoutDeferral = _trainingDay === "deferred";
-
-  // A SESSION MOVED INTO TODAY IS A DELIVERY (2026-08-25, issue #63 Phase 2.1).
-  //
-  //   "No I moved yesterdays workout to today"  →  "Kam — one thing today: tell me what you ate."
-  //
-  // readTrainingDay read that correctly as `moved_to_today` and NOTHING consumed it. Its three
-  // siblings above — move_request, deferred, declined — each end in a reply; this one fell past
-  // them to the generic ladder, which picked the highest unmet thing and asked about food. The
-  // comprehension was right and the client still did not get their session.
-  //
-  // That is the shape Phase 2 exists to remove: an interpretation is not a feature until its
-  // downstream action is defined, reachable and tested end to end. The session is rendered by the
-  // same owner the `workout` command uses, so the two answers cannot drift apart.
-  if (_trainingDay === "moved_to_today") {
-    const { renderSession } = await import("./programme");
-    const { getTodaySlot, getTodayWorkoutState } = await import("./workout-state");
-    const _mvState = await getTodayWorkoutState(user).catch(() => null);
-    // ONLY an already-logged session stands this down. A SCHEDULED REST DAY DOES NOT.
-    //
-    // The first version of this branch also refused on REST — "today's a rest day, do it
-    // Wednesday" — and that is the original defect wearing better manners: comprehension correct,
-    // session still not delivered. The programme's rest day is OUR schedule; a client saying they
-    // moved a session into today has already decided they are training. Arguing with them is the
-    // behaviour that made them repeat themselves in the first place.
-    if (_mvState?.type === "ALREADY_DONE") {
-      const _mvNote = `Today's session is already logged ✅ — that's the moved one counted.`;
-      await logChat(user.id, message, _mvNote, "WORKOUT_MOVED_ALREADY_DONE");
-      return _mvNote;
-    }
-    const _mvFirst = getDisplayName(user);
-    const _mvDone = (user.trainingMode === "walk_only" || user.trainingMode === "walk")
-      ? `Send *done* when you finish, or just tell me how it went (e.g. "25 min, felt strong").`
-      : `Send *done* when finished.`;
-    const movedReply = renderSession(user, {
-      slot: getTodaySlot(user),
-      intro: `${_mvFirst ? _mvFirst + ", g" : "G"}ood — moved into today. Here it is 💪\n\n`,
-      doneHint: _mvDone,
-    });
-    await logChat(user.id, message, movedReply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_MOVED_TO_TODAY");
-    return movedReply;
-  }
-  if (_isWorkoutMoveRequest) {
-    const _mvName = getDisplayName(user);
-    const _mvLater = !/\b(tomorrow|next\s+week|another\s+day|a\s+different\s+day|2moro|2morrow)\b/i.test(_origWO);
-    // The schedule answer, and the renderer stays one message away on the client's terms.
-    const moveReply = _mvLater
-      ? `${_mvName ? _mvName + ", y" : "Y"}es — do it later today, it keeps. Send *workout* when you're ready and I'll pull it up 💪`
-      : `${_mvName ? _mvName + ", y" : "Y"}es — take today as a rest day and do this session tomorrow. 💪\n\nFood and steps still count today. When you want it, send *tomorrow's workout*.`;
-    await logChat(user.id, message, moveReply, "WORKOUT_MOVE_REQUEST");
-    return moveReply;
-  }
-
-  if (_isWorkoutDeferral || _isWorkoutRefusal) {
-    const _woName = user.name?.split(" ")[0] || "";
-    const _laterToday = !_isWorkoutRefusal && !/\b(tomorrow|next\s+week|2moro|2morrow)\b/i.test(_origWO);
-    const deferReply = _laterToday
-      ? `${_woName ? _woName + ", n" : "N"}o rush — it'll be right here when you're ready. Just send *workout* and I'll pull up today's session 💪`
-      : `${_woName ? _woName + ", n" : "N"}o stress — rest today, hit it fresh tomorrow 💪\n\nWhen you're ready, send *workout* and your session's ready. Today: protein in, keep moving.`;
-    await logChat(user.id, message, deferReply, "WORKOUT_DEFERRED");
-    return deferReply;
-  }
+  const trainingDayReply = await handleTrainingDayDecision({ message, originalMessage: originalMBeforeNorm, user });
+  if (trainingDayReply !== null) return trainingDayReply;
 
   // TRANSACTION PREFLIGHT: a plain steps report must reach the deterministic logger
   // below. The prompt tells the brain to defer these, but on 2026-07-06 it answered
@@ -1171,111 +958,16 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     commitFact(turn, "workout", workoutResult);
   }
 
-  // ---- STEP LOG DETECTION (direct — no GPT cost) ----
-  // NOTE: If message also contains food (e.g. voice note: "I had eggs for breakfast and walked 3000 steps"),
-  // we log steps but do NOT return early — let it fall through to food scanning
-  // "12k steps", "8.5k steps", "12,000 steps", "12000 steps" — all valid
-  // Also: "Fitbit says 8500", "health app: 9000", "steps today: 7500"
-  // ALL STEP PARSING HAS ONE OWNER (Cut 5b). ~50 lines of regexes and the number arithmetic
-  // lived here, beside messy-intake's own extractStepCount — two step parsers for one fact, in
-  // two files. Moved whole; the guards that need this function's context stay here.
-  let sd = detectStepLog(m);
-  // A QUESTION IN ONE CLAUSE DOES NOT ERASE A REPORT IN ANOTHER (2026-08-26, issue #63). On
-  // "walked 8000 steps. what should I eat?" the extractor found 8 000 and threw it away, because
-  // isQuestionForm matches "should i" ANYWHERE in the bubble. Re-read per clause, only when the
-  // whole-message read already said no, and the clause's own parse becomes the parse — so the
-  // number stays tied to the sentence that reported it. See tracking-contract-tests, LAW 5.
-  if (!sd.loggableByForm) {
-    const stepClause = reportedInSomeClause(m, c => {
-      const d = detectStepLog(c);
-      return d.matched && d.loggableByForm && d.isExplicitLog;
-    });
-    if (stepClause) sd = detectStepLog(stepClause);
+  const stepResult = await handleStepReport({
+    phone, message, m, user, normalizedQuestion,
+    commitStep: reply => commitFact(turn, "steps", reply),
+    hasStepPart: () => !!turn.parts.steps,
+  });
+  if (stepResult.kind === "reply") return stepResult.reply;
+  if (stepResult.kind === "committed") {
+    const stepPart = stepResult.reply;
+    if (mayEndTurn("steps")) return closeCoachingTurn(stepPart);
   }
-  // Future-intent guard: "I'll walk 10k tomorrow" slips past the question check — must not log
-  // today. Explicit "walked 8,000 steps" is a log even if the classifier tagged the note a
-  // QUESTION because they also said "I'm exhausted" (live 2026-08-19 mixed note — steps dropped).
-  if (sd.loggableByForm && !turnAlreadyWrote("steps") && !isFutureIntent(m) && !mentionsNotDone(m) && (sd.isExplicitLog || !normalizedQuestion) && sd.matched) {
-    let steps = sd.steps;                       // a "8000 not 5000" correction rewrites it below
-    const stepHasMovementSignal = sd.hasMovementSignal;
-    if (!isNaN(steps) && steps > 0 && steps <= 100 && stepHasMovementSignal) {
-      return `That step count looks low — did the message cut off? Send your actual count, e.g. "8500 steps" or "walked 5km".`;
-    }
-    if (!isNaN(steps) && steps > 100 && steps < 100000) {
-      // Weekly AVERAGE reports ("my average this week is 6,400") are a summary, not
-      // today's count — logging them as today corrupts the day AND the 7-day trend.
-      // Coach on the week instead; clients may opt to report a weekly average only.
-      if (/\b(average|avg)\b/i.test(m) || (/\b(this|last|past)\s+week(?:ly)?\b/i.test(m) && !/\btoday\b/i.test(m))) {
-        const wkTarget = user.stepsTarget || 8500;
-        const wkDiff = steps - wkTarget;
-        const wkReply = `Weekly average noted: *${steps.toLocaleString()} steps/day* vs your ${wkTarget.toLocaleString()} target — ${wkDiff >= 0 ? "on target. Strong week 🔥" : `${Math.abs(wkDiff).toLocaleString()} short. One 15-minute walk a day closes that.`}\n\n_Daily counts or a weekly-average screenshot both work — whichever is easier for you._`;
-        await logChat(user.id, message, wkReply, "STEP_WEEKLY_REPORT");
-        return wkReply;
-      }
-      const baseStepsTarget = user.stepsTarget || 8500;
-      // Detect whether client already worked out today so we can ease step demand.
-      let workedOutToday = false;
-      try { workedOutToday = (await getTodayWorkoutState(user)).alreadyDoneToday; } catch { /* non-critical */ }
-      const { target, goalContext: stepGoalCtx } = getDailyStepContext(
-        baseStepsTarget, user.goalType || "fat_loss", workedOutToday
-      );
-      const stepIsRetro = isRetroactiveMeal(message);
-      const stepLoggedAt = stepIsRetro ? parseMealDate(message) : new Date();
-      // Allow a downward CORRECTION ("8000 steps not 50000", "wrong, 6k steps") to overwrite the
-      // day's count. Normally we keep only the HIGHER number (clients re-log a growing daily
-      // total), but an explicit correction must win in either direction. For "X not Y", X is the
-      // affirmed value — pull it out so the position of "steps" in the sentence doesn't matter.
-      const stepNotMatch = m.match(/\b([\d,]+)(\s*k)?\s*(?:steps?|staps?)?\s+not\s+[\d,]+/i);
-      if (stepNotMatch) {
-        const corrected = Math.round(parseFloat(stepNotMatch[1].replace(/,/g, "")) * (stepNotMatch[2] ? 1000 : 1));
-        if (corrected > 100 && corrected < 100000) steps = corrected;
-      }
-      const isStepCorrection = !!stepNotMatch
-        || /\b(wrong|actually|correction|i\s+meant|meant|should\s+be|mistake|typo|miscount|oops|my\s+bad)\b/i.test(m);
-      // ONE WRITE OWNER FOR THE STEP FACT (2026-08-26, issue #63). This built its own day-window
-      // query and upsert — twenty lines that logStepsForUser already was, and steps.ts said so at
-      // the top of itself: "mirroring the routes.ts inline upsert exactly ... Additive, routes
-      // keeps its own path." A mirror is a copy, and this one had already drifted on the half that
-      // reaches the client: the owner returns the count now STORED, while this path carried the
-      // count from the MESSAGE into the reply. With 9 000 already logged, "walked 3000 steps
-      // today" correctly left the row at 9 000 and answered "3 000 steps — nice one", quoting a
-      // number the ledger does not hold. So the write moves to the owner AND the answer is built
-      // from what the owner returns — that second half is the only reason the bypass mattered.
-      const storedSteps = await logStepsForUser(user.id, steps, { correction: isStepCorrection, at: stepLoggedAt });
-      await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
-      invalidatePatternCache(user.id);
-      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-      const [perfectDay, streak, recentStepLogs] = await Promise.all([
-        checkPerfectDay(user.id, user.proteinTarget || 120, target),
-        getStepStreak(user.id),
-        db.select({ steps: stepLogs.steps }).from(stepLogs)
-          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)))
-          .orderBy(desc(stepLogs.loggedAt))
-          .limit(7),
-      ]);
-      // Divide by days actually logged, not a flat 7 — a new client who logged 9k steps
-      // on each of their first 3 days was told "7-day average: 3,857, below target".
-      const weeklyAvg = recentStepLogs.length >= 3
-        ? Math.round(recentStepLogs.reduce((s, r) => s + r.steps, 0) / recentStepLogs.length)
-        : undefined;
-      void stepGoalCtx; // used by getStepResponse via user.goalType
-      const stepReply = getStepResponse(storedSteps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg, user, workedOutToday);
-      const stepRetroNote = stepIsRetro ? `\n_Logged to ${mealDateLabel(stepLoggedAt)}._` : "";
-      const stepPart = (isStepCorrection ? `Fixed ✅ — step count updated to *${storedSteps.toLocaleString()}*.\n\n` : "") + stepReply + stepRetroNote + (perfectDay || "");
-      commitFact(turn, "steps", stepPart);
-      await logChat(user.id, message, stepPart, "STEP_LOG");
-
-      // ONE RULE, NOT A PAIR BRANCH: this asked `alsoHasFood` with its own 30-word food regex,
-      // a second list of which facts were allowed to coexist with steps. The ledger knows.
-      if (mayEndTurn("steps")) return closeCoachingTurn(stepPart);
-    }
-  }
-
-  // Voice cut off: "I've walked..." with no number. Do not drop the walk.
-  if (!turn.parts.steps && mentionedWalkWithoutCount(message) && !(m.includes("?") || sd.isQuestionForm) && !isFutureIntent(m)) {
-    commitFact(turn, "steps", `Heard you walked — send the step count (e.g. "3000 steps") and I'll log it.`);
-  }
-
   // ---- WATER LOGGING HANDLER (compound-aware) ----
   // "an apple and a pear, and one litre of water" must log BOTH: water logs here, but if the
   // message also carries food, carry the water confirmation and let the food pipeline log the
