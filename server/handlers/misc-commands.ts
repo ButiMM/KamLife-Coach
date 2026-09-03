@@ -37,6 +37,7 @@ import { sastDayStart, looksLikeDirectionRequest, classifyPainReport , getDispla
 import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
 import { turnEvidence } from "./chat-log";
+import { readHeldConstraints } from "../held-constraints";
 import { getDayLedger, getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
@@ -322,6 +323,37 @@ export async function handleMiscCommands(ctx: {
     const highCalBudget = calLeft > 800;
 
     let suggestion = `*🍽️ Next Meal Suggestion${name ? ` — ${name}` : ""}*\n\n`;
+
+    // THE CLIENT ALREADY CLOSED THE DAY (2026-09-03, #125 sweep).
+    //
+    // "I'm done eating for the day" is a decision, and this door was the one place that did not
+    // hear it. The fact was already known and already owned: foodDayIsClosed reads it,
+    // readHeldConstraints holds it for the turn, and chooseAction guards its eat_more and protein
+    // rungs on it. This branch simply never asked, so a client who had stopped eating on 188 of
+    // 189g protein was handed two meals to close a 1g gap.
+    //
+    // THE OUTBOUND FLOOR CANNOT COVER FOR IT, which is why the fix belongs here rather than one
+    // layer out. enforceOutboundTruth refuses a reply that asksForFoodToday, and that recogniser
+    // returns FALSE on this one — it is a menu with bolded option labels, not an imperative to
+    // eat. Widening the recogniser to catch menus would make it fire on every food surface we
+    // have; the door that knows the constraint is the door that should obey it.
+    //
+    // This is the same shape as the calorie branch immediately below, which already stands down
+    // because "suggesting more food contradicts the day's assessment". The difference is only
+    // whose assessment it is: there the ledger's, here the client's own — and theirs outranks it.
+    const held = await readHeldConstraints(phone, user);
+    if (held.foodDayClosed) {
+      const landed = `You finished on *${todayCals} kcal* and *${todayProt}g protein*.`;
+      // needsProtein is this branch's existing bar for "a gap worth acting on". A 1g shortfall is
+      // not a reason to reopen a decision they made; a real one is worth naming for TOMORROW,
+      // which is a next move that does not ask them to eat now.
+      const tomorrow = needsProtein
+        ? `\n\nYou came up ${protLeft}g short on protein — start tomorrow with it at breakfast rather than chasing it tonight.`
+        : "";
+      suggestion += `You said you are done eating today, so I am leaving it there.\n\n${landed}${tomorrow}`;
+      await logChat(user.id, message, suggestion, "MEAL_SUGGESTION_DAY_CLOSED");
+      return suggestion;
+    }
 
     // Calorie target already hit — suggesting more food contradicts the day's assessment
     if (todayCals > 0 && calLeftRaw <= 0) {
