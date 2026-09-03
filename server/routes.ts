@@ -25,7 +25,7 @@ import { getStepStreak, getStepResponse as _getStepResponse, logStepsForUser } f
 import { captureFriction } from "./friction";
 import { getSleepResponse } from "./handlers/sleep";
 import { handleMediaMessage, bumpVoiceFailure, clearVoiceFailure } from "./handlers/media";
-import { runSafetyGuards, mentionsConditionOrMedication } from "./handlers/safety";
+import { runSafetyGuards } from "./handlers/safety";
 import { handleFoodLogMgmt } from "./handlers/food-log-mgmt";
 import { bumpNumericFluency, bumpVoiceNoteUse } from "./handlers/numbers-literacy";
 import { handleOnboardingBodyPhotos } from "./onboarding-physique";
@@ -58,7 +58,7 @@ import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity } from "./normalizer-fidelity";
 import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, reportedInSomeClause, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
-import { conditionWelcome } from "./condition-welcome";
+import { conditionWelcome, mentionsConditionOrMedication } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
 import { reportsHunger } from "./unlogged-notice";
 import { PRICING, GUARANTEE_PHRASE } from "../shared/pricing";   // commercial terms have one owner
@@ -958,14 +958,16 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     commitFact(turn, "workout", workoutResult);
   }
 
-  const stepReply = await handleStepReport({
+  const stepResult = await handleStepReport({
     phone, message, m, user, normalizedQuestion,
     commitStep: reply => commitFact(turn, "steps", reply),
-    mayEndTurn,
-    closeCoachingTurn,
     hasStepPart: () => !!turn.parts.steps,
   });
-  if (stepReply !== null) return stepReply;
+  if (stepResult.kind === "reply") return stepResult.reply;
+  if (stepResult.kind === "committed") {
+    const stepPart = stepResult.reply;
+    if (mayEndTurn("steps")) return closeCoachingTurn(stepPart);
+  }
   // ---- WATER LOGGING HANDLER (compound-aware) ----
   // "an apple and a pear, and one litre of water" must log BOTH: water logs here, but if the
   // message also carries food, carry the water confirmation and let the food pipeline log the

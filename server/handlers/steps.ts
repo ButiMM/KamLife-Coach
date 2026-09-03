@@ -154,12 +154,19 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
 }
 
 
-/** The route adapter for the step writer: it preserves turn composition callbacks. */
+export type StepReportResult =
+  | { kind: "reply"; reply: string }
+  | { kind: "committed"; reply: string }
+  | { kind: "none" };
+
+/**
+ * The step write owner returns what it did; the router alone decides whether the turn may end.
+ * That keeps the step fact composable with every other fact in the client's message.
+ */
 export async function handleStepReport(ctx: {
   phone: string; message: string; m: string; user: any; normalizedQuestion: boolean;
-  commitStep: (reply: string) => void; mayEndTurn: (owner: string) => boolean;
-  closeCoachingTurn: (reply: string) => string | Promise<string>; hasStepPart: () => boolean;
-}): Promise<string | null> {
+  commitStep: (reply: string) => void; hasStepPart: () => boolean;
+}): Promise<StepReportResult> {
   const { phone, message, m, user, normalizedQuestion } = ctx;  // ---- STEP LOG DETECTION (direct — no GPT cost) ----
   // NOTE: If message also contains food (e.g. voice note: "I had eggs for breakfast and walked 3000 steps"),
   // we log steps but do NOT return early — let it fall through to food scanning
@@ -188,7 +195,7 @@ export async function handleStepReport(ctx: {
     let steps = sd.steps;                       // a "8000 not 5000" correction rewrites it below
     const stepHasMovementSignal = sd.hasMovementSignal;
     if (!isNaN(steps) && steps > 0 && steps <= 100 && stepHasMovementSignal) {
-      return `That step count looks low — did the message cut off? Send your actual count, e.g. "8500 steps" or "walked 5km".`;
+      return { kind: "reply", reply: `That step count looks low — did the message cut off? Send your actual count, e.g. "8500 steps" or "walked 5km".` };
     }
     if (!isNaN(steps) && steps > 100 && steps < 100000) {
       // Weekly AVERAGE reports ("my average this week is 6,400") are a summary, not
@@ -199,7 +206,7 @@ export async function handleStepReport(ctx: {
         const wkDiff = steps - wkTarget;
         const wkReply = `Weekly average noted: *${steps.toLocaleString()} steps/day* vs your ${wkTarget.toLocaleString()} target — ${wkDiff >= 0 ? "on target. Strong week 🔥" : `${Math.abs(wkDiff).toLocaleString()} short. One 15-minute walk a day closes that.`}\n\n_Daily counts or a weekly-average screenshot both work — whichever is easier for you._`;
         await logChat(user.id, message, wkReply, "STEP_WEEKLY_REPORT");
-        return wkReply;
+        return { kind: "reply", reply: wkReply };
       }
       const baseStepsTarget = user.stepsTarget || 8500;
       // Detect whether client already worked out today so we can ease step demand.
@@ -254,9 +261,8 @@ export async function handleStepReport(ctx: {
       ctx.commitStep(stepPart);
       await logChat(user.id, message, stepPart, "STEP_LOG");
 
-      // ONE RULE, NOT A PAIR BRANCH: this asked `alsoHasFood` with its own 30-word food regex,
-      // a second list of which facts were allowed to coexist with steps. The ledger knows.
-      if (ctx.mayEndTurn("steps")) return ctx.closeCoachingTurn(stepPart);
+      // The route applies mayEndTurn after this commit. This owner never claims a mixed turn.
+      return { kind: "committed", reply: stepPart };
     }
   }
 
@@ -265,5 +271,5 @@ export async function handleStepReport(ctx: {
     ctx.commitStep(`Heard you walked — send the step count (e.g. "3000 steps") and I'll log it.`);
   }
 
-  return null;
+  return { kind: "none" };
 }

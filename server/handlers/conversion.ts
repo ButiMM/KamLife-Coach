@@ -13,7 +13,6 @@
 
 // Money / affordability objection — "no money", "too expensive", "after payday"
 import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
-import { logChat } from "./chat-log";
 
 const MONEY_OBJECTION_RE = /\b(no money|don.?t have (?:the )?money|haven.?t got money|can.?t afford|cannot afford|too expensive|too pricey|so expensive|very expensive|bit expensive|quite expensive|expensive for me|too much money|no cash|i.?m broke|i am broke|broke right now|month.?end|end of month|after (?:i get )?payday|after payday|when i (?:get paid|have money|am paid|get money)|once i (?:get paid|have money)|next month|next pay|tight (?:on money|right now|financially)|money.?s tight|short on cash|not in my budget|out of my budget|can.?t pay|cannot pay)\b/i;
 
@@ -79,6 +78,7 @@ export async function handleSubscriptionGate(ctx: {
   const name = user.name?.split(" ")[0] || "there";
   const conversionResult = handleConversionObjection({ user, m, payLink, name });
   if (conversionResult) {
+    const { logChat } = await import("./chat-log");
     await logChat(user.id, message, conversionResult.reply, conversionResult.intent);
     return conversionResult.reply;
   }
@@ -96,6 +96,7 @@ export async function handleSubscriptionGate(ctx: {
     const planParts = glimpsePlan.split("\n\n---\n\n");
     const upsell = `That is Day 1.\n\nDays 2 and 3 rotate the meals so you are not eating the same thing every day. Your weekly shopping list with ZAR prices is in there too.\n\n*Full weekly plan + shopping list + daily coaching — ${PRICING.monthlyDisplay}:*\n${payLink}\n\n_${PRICING.dailyDisplay}. Not satisfied? ${GUARANTEE_PHRASE} — Message us and we will make it right._`;
     const reply = `${planParts[0] || ""}\n\n${planParts[1] || ""}\n\n---\n\n${upsell}`;
+    const { logChat } = await import("./chat-log");
     await logChat(user.id, message, reply, "MEAL_PLAN_GLIMPSE");
     return reply;
   }
@@ -113,6 +114,7 @@ export async function handleSubscriptionGate(ctx: {
   } else {
     reply = `${name}, your programme is built and waiting.\n\n*Start today — ${PRICING.monthlyDisplay} (${PRICING.dailyDisplay})*\n${payLink}\n\n_${GUARANTEE_PHRASE} — not for you, and we make it right._`;
   }
+  const { logChat } = await import("./chat-log");
   await logChat(user.id, message, reply, "SUBSCRIPTION_GATE");
   return reply;
 }
