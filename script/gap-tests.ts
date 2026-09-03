@@ -112,6 +112,162 @@ test("unlogged: roast potatoes + mixed veggies is not an unpriced leftover after
 });
 
 
+// A CARD MAY NOT ORDER THE MEAL IT IS CONFIRMING (#114 P1, 2026-09-03, founder). The card that
+// acknowledges a log prints "<meal> logged." directly above the next move. On "chicken breast and
+// rice" — 61g of protein — the two lines read:
+//
+//     Kam: Chicken breast and Rice logged.
+//     Make your next meal a proper protein — chicken, fish or eggs
+//
+// Both true of the ledger (61 of 195), and still absurd: a man holding an empty plate is told to
+// go and make the plate. macro-card-attach already carries the rule in the founder's own words —
+// "A human coach never tells a man who just ate a meal to go and eat a meal" — applied to the bulk
+// eat-more branch and never to the two protein branches whose instruction IS the completed action.
+{
+  const { nextMoveLine, PROPER_PROTEIN_G } = CARD;
+  // 61g in of 195g: protLeft 134, the >= 60 branch. 16:00, so `earlyDay` cannot mask the result.
+  const short = (protIn: number) => [
+    { label: "Calories", current: 900, target: 2800 },
+    { label: "Protein", current: protIn, target: 195 },
+    { label: "Fat", current: 30, target: 84 },
+  ];
+  // 150g in of 195g: protLeft 45, the >= 35 branch.
+  const nearly = (protIn: number) => [
+    { label: "Calories", current: 2000, target: 2800 },
+    { label: "Protein", current: protIn, target: 195 },
+    { label: "Fat", current: 60, target: 84 },
+  ];
+
+  test("progress card: the meal just logged is not re-ordered by the card confirming it", () => {
+    for (const [rows, band] of [[short(61), ">=60"], [nearly(150), ">=35"]] as const) {
+      const line = nextMoveLine(rows, false, 16, false, false, true);
+      assert.ok(!/make (your |lunch )?(next meal )?a proper protein/i.test(line),
+        `${band}: the card ordered the meal it was confirming — "${line}"`);
+      assert.ok(!/^get a real protein into your next two meals$/i.test(line),
+        `${band}: the card restated the action just completed — "${line}"`);
+      assert.ok(/protein/i.test(line) && line.trim().length > 0,
+        `${band}: the protein lever must survive, the instruction just moves forward — "${line}"`);
+    }
+  });
+
+  test("progress card: OVER-FIRE — a plate with no real protein still gets the protein instruction", () => {
+    // The control that stops the fix becoming "never ask for protein after any log". Same day
+    // state, same clock; the only difference is that this plate was not a protein meal.
+    for (const [rows, band] of [[short(61), ">=60"], [nearly(150), ">=35"]] as const) {
+      const line = nextMoveLine(rows, false, 16, false, false, false);
+      assert.ok(/proper protein|real protein/i.test(line),
+        `${band}: a carb-only plate must still be told to get protein into the next meal — "${line}"`);
+    }
+  });
+
+  test("progress card: OVER-FIRE through the card — the THRESHOLD decides, not merely 'a meal landed'", () => {
+    // Graded through mealCard, because that is where the plate's protein is judged. The branch
+    // control above passes the flag by hand and so cannot see a threshold that says yes to
+    // everything — which is exactly the shape "any log counts as a protein meal" would take.
+    const { mealCard } = CARD;
+    const card = (mealProtein: number) => mealCard({
+      firstName: "Kam", mealName: "Pap + Spinach", rows: short(61) as any,
+      isBulk: false, usesNumbers: true, hour: 16, mealProtein,
+    }).sub;
+    // Tested as an INSTRUCTION, not as a phrase: "That's one proper protein down" reports what
+    // they did and contains the same words as the order they must not be given.
+    const ORDERS_A_MEAL = /\b(make|get)\b[^.]*\b(proper|real) protein\b/i;
+    assert.ok(ORDERS_A_MEAL.test(card(8)),
+      `an 8g plate is not a proper protein meal — the card must still ask for one: "${card(8)}"`);
+    assert.ok(!ORDERS_A_MEAL.test(card(61)),
+      `a 61g plate IS a proper protein meal — the card must not re-order it: "${card(61)}"`);
+    // The on-demand "Today" card answers a question; no plate just landed, so nothing is carried
+    // forward and its line must be unchanged from before this cut.
+    const onDemand = mealCard({
+      firstName: "Kam", mealName: "Today", rows: short(61) as any,
+      isBulk: false, usesNumbers: true, hour: 16,
+    }).sub;
+    assert.equal(onDemand, "Get a real protein into your next two meals",
+      `the on-demand card has no just-logged plate and must be untouched: "${onDemand}"`);
+  });
+
+  test("progress card: the carry-forward line may not promise a target it cannot prove", () => {
+    // CTO adjudication on #148. `justAteProteinMeal` proves the plate that landed was >= 35g. It
+    // proves NOTHING about whether one more like it closes the day, and the >=35 branch runs from
+    // 35g owed to 59g owed. The first wording — "one more like that today and you're there" —
+    // was false across most of its own band: at 59g owed, another minimum qualifying meal leaves
+    // 24g.
+    //
+    // Written as the proof obligation rather than as a banned phrase, so a future re-wording is
+    // held to the same standard: a line may claim arrival only where the arithmetic gets there.
+    const CLAIMS_ARRIVAL = /you'?re there|you'?re done|and you'?re set|that'?s it\b|closes? it|sorted|target (?:hit|met|reached|done)|you'?re home/i;
+    for (let protLeft = 35; protLeft <= 59; protLeft++) {
+      const rows = [
+        { label: "Calories", current: 2000, target: 2800 },
+        { label: "Protein", current: 195 - protLeft, target: 195 },
+        { label: "Fat", current: 60, target: 84 },
+      ];
+      const line = nextMoveLine(rows, false, 16, false, false, true);
+      if (CLAIMS_ARRIVAL.test(line)) {
+        // One more meal at the minimum that qualifies as "a proper protein meal" is the best case
+        // the card can assume. If that still leaves a gap, arrival was not the card's to promise.
+        assert.ok(protLeft - PROPER_PROTEIN_G <= 0,
+          `with ${protLeft}g owed the card claimed arrival — one more ${PROPER_PROTEIN_G}g meal `
+          + `leaves ${protLeft - PROPER_PROTEIN_G}g: "${line}"`);
+      }
+      // Whatever it says, it still may not re-order the meal that just landed.
+      assert.ok(!/\b(make|get)\b[^.]*\b(proper|real) protein\b/i.test(line),
+        `with ${protLeft}g owed the card re-ordered the meal it was confirming: "${line}"`);
+    }
+  });
+
+  test("progress card: several small eating events do not add up to a proper protein meal", () => {
+    // #114 P1 review. One message can be several separate meals — "eggs this morning, pap at
+    // lunch" is two events, an album of four photos is four, and each commits its own row. The
+    // card's claim is about ONE plate, so the aggregate across those events may never answer it:
+    // four ~10g events sum to 40g and no plate among them was a protein meal.
+    const { biggestEventProtein, mealCard } = CARD;
+    const fourSmall = [{ protein: 10 }, { protein: 9 }, { protein: 11 }, { protein: 10 }];
+    const sum = fourSmall.reduce((t, e) => t + e.protein, 0);
+    assert.ok(sum >= PROPER_PROTEIN_G,
+      `the fixture must actually be dangerous: ${sum}g summed has to clear the ${PROPER_PROTEIN_G}g bar, or this proves nothing`);
+    assert.ok(biggestEventProtein(fourSmall) < PROPER_PROTEIN_G,
+      `four sub-threshold events combined into a proper protein meal: ${biggestEventProtein(fourSmall)}g`);
+
+    // ...and the card says so. Graded on the line, not on the number.
+    const sub = (mealProtein: number) => mealCard({
+      firstName: "Kam", mealName: "Eggs + Pap", rows: short(61) as any,
+      isBulk: false, usesNumbers: true, hour: 16, mealProtein,
+    }).sub;
+    assert.ok(/\b(make|get)\b[^.]*\b(proper|real) protein\b/i.test(sub(biggestEventProtein(fourSmall))),
+      `four small plates must still be told to get a real protein: "${sub(biggestEventProtein(fourSmall))}"`);
+    assert.ok(!/one proper protein down/i.test(sub(biggestEventProtein(fourSmall))),
+      `the card claimed a proper protein meal that no single event delivered: "${sub(biggestEventProtein(fourSmall))}"`);
+
+    // A REAL single event still qualifies — the control that stops this becoming "never".
+    const oneRealMeal = [{ protein: 8 }, { protein: 61 }];
+    assert.ok(biggestEventProtein(oneRealMeal) >= PROPER_PROTEIN_G,
+      `a genuine 61g event must still qualify: ${biggestEventProtein(oneRealMeal)}g`);
+    assert.ok(!/\b(make|get)\b[^.]*\b(proper|real) protein\b/i.test(sub(biggestEventProtein(oneRealMeal))),
+      `a real protein meal beside a snack must not be re-ordered: "${sub(biggestEventProtein(oneRealMeal))}"`);
+
+    // The single-event case — the common one — is unchanged.
+    assert.equal(biggestEventProtein([{ protein: 61 }]), 61, "one event answers with its own protein");
+    assert.equal(biggestEventProtein([]), 0, "no events is not a protein meal");
+  });
+
+  test("progress card: the 'just ate protein' test uses the band the card already owns", () => {
+    // One number for both halves. If PROPER_PROTEIN_G drifts from the >= 35 band below it, the
+    // card can call a plate a proper protein meal while still asking for one to close the gap.
+    assert.equal(PROPER_PROTEIN_G, 35, "the proper-protein threshold is the card's own 35g band");
+    // And the flag is inert once the gap is small enough that the instruction is no longer a
+    // repeat — those rungs ask for eggs or a shake, not for another meal.
+    const smallGap = [
+      { label: "Calories", current: 2400, target: 2800 },
+      { label: "Protein", current: 180, target: 195 },
+      { label: "Fat", current: 70, target: 84 },
+    ];
+    assert.equal(nextMoveLine(smallGap, false, 16, false, false, true),
+      nextMoveLine(smallGap, false, 16, false, false, false),
+      "a small remaining gap asks for a different, smaller action — it is not a repeat, so it must not change");
+  });
+}
+
 test("progress card: calories at/over target do not sell another meal", () => {
   const { nextMoveLine } = CARD;
   const rows = [

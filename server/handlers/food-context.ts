@@ -15,7 +15,7 @@ import {
   computeFoodLogStreak, getFoodStreakCelebration, shortStreakNote,
   invalidateFoodTotalsCache,
 } from "./food-scanner";
-import { macroCardMarker, cardOrTotals, achievementCardShown, cardBaseUrl } from "../macro-card-attach";
+import { macroCardMarker, cardOrTotals, achievementCardShown, cardBaseUrl, biggestEventProtein } from "../macro-card-attach";
 import { cardWillAttach } from "../card-policy";
 import { claimOncePerDay } from "../once-daily";
 import { estimateCarbsFat } from "../macro-estimate";
@@ -1076,6 +1076,20 @@ export async function handleFoodContext(ctx: {
       // dedups on it, so four rows sharing the full text would drop three as duplicates.
       const eventBuckets = segmentBuckets.filter(b => b.foods.length > 0);
       const splitIntoEvents = eventBuckets.length >= 2;
+      /**
+       * THE BIGGEST SINGLE EATING EVENT, for the card's "did they just eat a proper protein meal"
+       * test (#114 P1 review). `totalProtein` is the whole MESSAGE — and this branch exists
+       * precisely because one message can be several separate meals. Four ~10g events sum to 40g
+       * and no plate among them was a protein meal, so the aggregate would have the card say
+       * "one proper protein down" about a meal that never happened.
+       *
+       * The claim is about ONE plate, so it is judged against one plate: the largest event here.
+       * The single-event path below is untouched, where the message and the event are the same
+       * thing and totalProtein is already the event's protein.
+       */
+      const cardEventProtein = splitIntoEvents
+        ? biggestEventProtein(eventBuckets.map(b => ({ protein: b.foods.reduce((t, f: any) => t + (f.adjustedProtein || 0), 0) })))
+        : Math.round(totalProtein);
       let committed!: Awaited<ReturnType<typeof commitFoodLog>>;
       if (splitIntoEvents) {
         const slotCtx = await getSlotContext(user.id);
@@ -1169,7 +1183,7 @@ export async function handleFoodContext(ctx: {
 
       // BRANDED MACRO CARD (2026-07-21): a macro-goal client gets the orange progress-bar image on the log (marker stripped + sent as media downstream). Wellness clients get "" — no card forced on them. Fail-open.
       const cardName = allAdjustedFoods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || mealLabel;
-      const macroCard = await macroCardMarker({ user, mealName: cardName, mealKcal: totalCals, forDate: scannerIsRetro ? scannerLoggedAt : undefined, achievementStreak: streakCelebration ? foodStreak : undefined });
+      const macroCard = await macroCardMarker({ user, mealName: cardName, mealProtein: cardEventProtein, forDate: scannerIsRetro ? scannerLoggedAt : undefined, achievementStreak: streakCelebration ? foodStreak : undefined });
       const streakLine = achievementCardShown(user, streakCelebration ? foodStreak : undefined, macroCard) ? shortStreakNote(foodStreak, user.name || "") : streakCelebration;
       const guardrail = await nutritionGuardrailNudge(user); // "too much of something" health-standard nudge
       const plannedNote = plannedSegs.length > 0
@@ -1245,7 +1259,7 @@ export async function handleFoodContext(ctx: {
           : "";
         const fbCardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
         const fbStreakNote = await getStreakNote(user.id, fbStreak, user.name || "");
-        const fbCard = await macroCardMarker({ user, mealName: fbCardName, mealKcal: gptFallbackResult.totalKcal, forDate: gptIsRetro ? gptLoggedAt : undefined, achievementStreak: fbStreakNote ? fbStreak : undefined });
+        const fbCard = await macroCardMarker({ user, mealName: fbCardName, mealProtein: Math.round(gptFallbackResult.totalProtein || 0), forDate: gptIsRetro ? gptLoggedAt : undefined, achievementStreak: fbStreakNote ? fbStreak : undefined });
         return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fbStreakNote}${fbGuiltNote}${protClarifyNote}${fbDroppedNote}${cardOrTotals(fbCard, gptFallbackResult.totalKcal, gptFallbackResult.totalProtein, user)}`;
       }
     }
@@ -1334,7 +1348,7 @@ export async function handleFoodContext(ctx: {
         : "";
       const fb2CardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
       const fb2StreakNote = await getStreakNote(user.id, fb2Streak, user.name || "");
-      const fb2Card = await macroCardMarker({ user, mealName: fb2CardName, mealKcal: gptFallbackResult.totalKcal, forDate: fb2IsRetro ? fb2LoggedAt : undefined, achievementStreak: fb2StreakNote ? fb2Streak : undefined });
+      const fb2Card = await macroCardMarker({ user, mealName: fb2CardName, mealProtein: Math.round(gptFallbackResult.totalProtein || 0), forDate: fb2IsRetro ? fb2LoggedAt : undefined, achievementStreak: fb2StreakNote ? fb2Streak : undefined });
       return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fb2StreakNote}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}${cardOrTotals(fb2Card, gptFallbackResult.totalKcal, gptFallbackResult.totalProtein, user)}`;
     }
     // GPT returned null / is_food=false. If the user clearly signalled food (strong trigger),

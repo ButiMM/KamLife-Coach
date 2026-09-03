@@ -157,7 +157,37 @@ function stripWrapQuotes(s: string): string {
 // so "Good start 👌" reached the founder as "Good start ☐" (2026-08-04 live, one hour after I
 // put them in). Emoji belong in the CHAT text, where WhatsApp renders them; on the card they
 // are a tofu box. His register survives without them — the words were always the voice.
-export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), isPastDay = false, foodDayClosed = false): string {
+/**
+ * `justAteProteinMeal` — the meal this card is confirming WAS itself a proper protein meal.
+ *
+ * Not a new fact and not a new threshold: it is the same 35g this function already treats as
+ * "a proper protein meal closes it" two branches down, applied to the plate that just landed
+ * instead of to the gap that remains. See PROPER_PROTEIN_G.
+ */
+/**
+ * What this product already calls a proper protein meal: the plate that closes the 35g band
+ * below. One number, named once, so the "did they just eat one" test and the "is one still
+ * owed" test cannot drift apart.
+ */
+export const PROPER_PROTEIN_G = 35;
+
+/**
+ * WHICH NUMBER ANSWERS "DID THEY JUST EAT A PROPER PROTEIN MEAL" (#114 P1 review).
+ *
+ * One message can be several separate eating events — "eggs this morning, pap at lunch" is two
+ * meals, and an album of four photos is four. Each commits its own row. The card's question is
+ * about ONE plate, so the aggregate across those events may never answer it: four ~10g events sum
+ * to 40g and no plate among them was a protein meal, which would have the card say "one proper
+ * protein down" about a meal that never happened.
+ *
+ * One owner for the rule, because both the text path and the photo path ask it and a second
+ * spelling would drift. A single-event message is the common case and returns its own protein.
+ */
+export function biggestEventProtein(events: Array<{ protein: number }>): number {
+  return events.reduce((max, e) => Math.max(max, Math.round(e?.protein || 0)), 0);
+}
+
+export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), isPastDay = false, foodDayClosed = false, justAteProteinMeal = false): string {
   const r = (label: string) => rows.find(x => x.label === label);
   if (isPastDay) return "Yesterday's log — today's plate is a separate day";
   const ratio = (x?: Row) => (x && x.target > 0 ? x.current / x.target : 0);
@@ -228,8 +258,39 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), is
   }
 
   // Protein is the one that actually moves the result, so it owns the instruction.
-  if (protLeft >= 60) return earlyDay ? "Chicken or eggs at lunch AND supper" : "Get a real protein into your next two meals";
-  if (protLeft >= 35) return earlyDay ? "Make lunch a proper protein — chicken, fish or eggs" : "Make your next meal a proper protein — chicken, fish or eggs";
+  //
+  // BUT NOT THE INSTRUCTION THEY JUST CARRIED OUT (#114 P1, 2026-09-03, founder). The card that
+  // confirms a meal prints `<meal> logged.` directly above this line, and on a client who had just
+  // sent "chicken breast and rice" — 61g of protein — the two lines read:
+  //
+  //     Kam: Chicken breast and Rice logged.
+  //     Make your next meal a proper protein — chicken, fish or eggs
+  //
+  // Both halves are true of the ledger (61 of 195), and the card still tells a man holding an
+  // empty plate to go and make the plate. This file already knows why that is wrong — the note
+  // above says it in the founder's own case: "A human coach never tells a man who just ate a meal
+  // to go and eat a meal." That reasoning was applied to the BULK eat-more branch and never to
+  // these two, which are the only other lines whose instruction can be the action just completed.
+  //
+  // The gap is unchanged and so is the lever; what changes is that the move goes FORWARD from what
+  // they did instead of restating it. The smaller rungs below are untouched: "add eggs or a shake"
+  // is a different, smaller action, not a repeat of the meal.
+  if (protLeft >= 60) {
+    return justAteProteinMeal ? "That's one proper protein down — same again at your next two meals"
+      : earlyDay ? "Chicken or eggs at lunch AND supper"
+      : "Get a real protein into your next two meals";
+  }
+  if (protLeft >= 35) {
+    // NO CLOSURE THIS BRANCH CANNOT PROVE (CTO adjudication on #148). The first wording was
+    // "one more like that today and you're there". `justAteProteinMeal` proves the plate that
+    // landed was >= PROPER_PROTEIN_G — it says nothing about whether one more of the same closes
+    // the gap, and this branch runs anywhere from 35g to 59g owed. At 59g owed another minimum
+    // qualifying meal still leaves 24g, so "you're there" was a promise the data does not carry.
+    // Acknowledge the protein, carry the lever forward, claim nothing about arriving.
+    return justAteProteinMeal ? "Good protein in — keep that going at your next meal"
+      : earlyDay ? "Make lunch a proper protein — chicken, fish or eggs"
+      : "Make your next meal a proper protein — chicken, fish or eggs";
+  }
   if (protLeft >= 18) return "Add eggs, tin fish or a shake today";
   if (protLeft > 0) return "One yoghurt or a boiled egg and you're done";
 
@@ -439,6 +500,9 @@ export function mealCard(opts: {
   isPastDay?: boolean;
   /** They said they are done eating today. The card's next move must agree with the decision's. */
   foodDayClosed?: boolean;
+  /** Protein in the meal this card is confirming. Absent on the on-demand "Today" card, which
+   *  is answering a question rather than acknowledging a plate. */
+  mealProtein?: number;
 }): AchievementCardData {
   const r = (label: string) => opts.rows.find(x => x.label === label);
   const prot = r("Protein");
@@ -458,7 +522,8 @@ export function mealCard(opts: {
     figure: opts.usesNumbers ? `${protSoFar}g` : verdict,
     unit: opts.usesNumbers ? (opts.isPastDay ? "protein yesterday" : "protein today") : (opts.isPastDay ? "yesterday" : "so far today"),
     line: `${opts.firstName ? opts.firstName + ": " : ""}${opts.mealName} logged.`,
-    sub: nextMoveLine(opts.rows, opts.isBulk, opts.hour, !!opts.isPastDay, !!opts.foodDayClosed),
+    sub: nextMoveLine(opts.rows, opts.isBulk, opts.hour, !!opts.isPastDay, !!opts.foodDayClosed,
+      !opts.isPastDay && (opts.mealProtein ?? 0) >= PROPER_PROTEIN_G),
   };
 }
 
@@ -476,7 +541,12 @@ async function dayClosedFor(user: any): Promise<boolean> {
   } catch { return false; }
 }
 
-export async function macroCardMarker(opts: { user: any; mealName: string; mealKcal: number; forDate?: Date; achievementStreak?: number }): Promise<string> {
+/**
+ * `mealProtein` replaces `mealKcal`, which every call site passed and nothing ever read. The card
+ * needs to know whether the plate it is confirming was itself a proper protein meal; it never
+ * needed that plate's calories. One live parameter in place of one dead one.
+ */
+export async function macroCardMarker(opts: { user: any; mealName: string; mealProtein: number; forDate?: Date; achievementStreak?: number }): Promise<string> {
   try {
     // A MILESTONE IS A MOMENT (2026-07-28, marketing review: "people don't share a receipt,
     // they share an achievement"). Seven days straight is about the person, and that is the
@@ -507,6 +577,7 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
       isBulk: today.isBulk,
       usesNumbers: getNumbersMode(opts.user) !== "low" && getGoalProfile(opts.user?.goalType).usesMacros,
       isPastDay,
+      mealProtein: opts.mealProtein,
     });
     noteCardSent(opts.user?.id);
     return cardMarker(base, renderAchievementCard(card));
