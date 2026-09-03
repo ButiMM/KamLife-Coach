@@ -996,6 +996,196 @@ const MUST_WRITE: [string, string][] = [
       }
 
       /**
+       * THE REVIEW PACKET — the founder stops being the transport layer (2026-09-03).
+       *
+       * A1 made the loop run unattended and A2 made it audited, but a NEW failure shape still
+       * reached engineering exactly one way: the founder scrolled their own WhatsApp and chose a
+       * screenshot. Every rule and invariant only sees shapes we already know, so the evidence for
+       * an unknown one is in the turns that came back CLEAN — and nothing was keeping any of them.
+       *
+       * Graded on the two things the stored snapshot has to carry: which builds served the window,
+       * and a deterministic spread of turns nothing objected to.
+       */
+      {
+        const { runCoachHealthSweep, COACH_HEALTH_STATE_KEY } = await import("../server/routes/admin-turns");
+        const { loadState } = await import("../server/scheduler/shared");
+        const readPacket = () => {
+          try { return JSON.parse(loadState()[COACH_HEALTH_STATE_KEY] || "null"); } catch { return null; }
+        };
+
+        // 24 clean turns across a day, oldest last (the ledger's own order), on two builds.
+        freshTurn();
+        const clean = Array.from({ length: 24 }, (_, i) => ({
+          id: `tl-clean-${String(i).padStart(2, "0")}`, userId: USER.id,
+          createdAt: new Date(Date.now() - i * 3_600_000),
+          inputText: "how is my weight going?",
+          reply: "Down 1.2kg over three weeks. Keep the weigh-ins to one morning a week.",
+          mutations: [], stateRead: {}, version: i < 12 ? "0683588" : "1c25ce3",
+          lifecycleStatus: null, failureCategory: null, fixRef: null,
+        }));
+        g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[schema.turnLedger, clean]]);
+        g.__KAMLIFE_STUB_WRITES = [];
+        await runCoachHealthSweep(1);
+
+        // ONE EVALUATION. The packet must be a by-product of the scan that already ran, and the
+        // audit row is how that is measured — the same signal P0 #115 established.
+        const audits = (g.__KAMLIFE_STUB_WRITES || []).filter((w: any) => w.table === schema.adminEvents);
+        if (audits.length !== 1) {
+          failures.push(`Building the review packet took ${audits.length} audited ledger evaluations — the packet must come out of the scan the sweep already does, not a second one`);
+        }
+
+        const packet = readPacket();
+        if (!packet?.unflagged || !Array.isArray(packet.unflagged.sample)) {
+          failures.push(`The automatic sweep stored no unflagged sample — a new failure shape still has no evidence waiting and the founder is still the transport layer`);
+        } else {
+          if (packet.unflagged.sample.length === 0) {
+            failures.push(`The stored packet's unflagged sample is empty on a window of 24 clean turns — there was evidence to keep and none was kept`);
+          }
+          if (packet.unflagged.clean !== 24) {
+            failures.push(`The packet reports ${packet.unflagged.clean} clean turns out of 24 — the denominator is what tells a reviewer whether 12 turns is a spot check or the whole window`);
+          }
+          const ex = packet.unflagged.sample[0];
+          if (!ex?.turnId || !ex?.version || !ex?.input) {
+            failures.push(`An unflagged sample entry carries no turn/build provenance or no input — it cannot be traced back to the turn it came from`);
+          }
+          // SPREAD, NOT THE HEAD. Ordered newest-first, so a naive slice would sample only the most
+          // recent hours and a failure at the far end of the window could never be in the packet.
+          // With 24 clean turns and a 12-turn sample the stride is 2, so the back half must appear.
+          const ids: string[] = packet.unflagged.sample.map((s: any) => String(s.turnId));
+          if (!ids.some(id => Number(id.slice(-2)) >= 12)) {
+            failures.push(`Every sampled turn came from the newest half of the window (${ids.join(", ")}) — the sample is the head of the list, so the older end of the day is invisible`);
+          }
+          // Deterministic: the same rows must produce the same sample, or two packets cannot be
+          // compared and no sampled turn can be re-derived from the ledger.
+          await runCoachHealthSweep(1);
+          const again: string[] = (readPacket()?.unflagged?.sample || []).map((s: any) => String(s.turnId));
+          if (again.join(",") !== ids.join(",")) {
+            failures.push(`The same 24 rows produced a different unflagged sample on the second sweep — the packet is not reproducible, so a reviewer comparing two runs is comparing dice rolls`);
+          }
+        }
+
+        // BUILD PROVENANCE. buildWarning already said "more than one build served this window"
+        // without ever saying WHICH, and a candidate is only attributable if you know what code
+        // answered the turn.
+        const builds: any[] = packet?.builds || [];
+        if (builds.length !== 2 || !builds.some(b => b.version === "0683588") || !builds.some(b => b.version === "1c25ce3")) {
+          failures.push(`The stored packet does not name the builds that served the window: ${JSON.stringify(builds)} — "a regression may be a turn that ran the old code" is unactionable without them`);
+        }
+
+        // CONTROL: a sample of turns "nothing flagged" must mean it. With every turn flagged there
+        // is nothing clean to keep, and a packet that still produced twelve entries would be
+        // sampling the window rather than the clean part of it.
+        freshTurn();
+        g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[schema.turnLedger, clean.map((r, i) => ({
+          ...r, id: `tl-allbad-${i}`, reply: "" ,
+        }))]]);
+        await runCoachHealthSweep(1);
+        const allBad = readPacket();
+        if ((allBad?.unflagged?.sample || []).length !== 0 || allBad?.unflagged?.clean !== 0) {
+          failures.push(`Every turn in the window failed an invariant and the packet still offered ${(allBad?.unflagged?.sample || []).length} of them as unflagged — "nothing objected to this" would be a false statement about the evidence`);
+        }
+        delete g.__KAMLIFE_STUB_ROWS;
+      }
+
+      /**
+       * #138 IN COACH HEALTH — THE HELD CONSTRAINT, ACROSS TURNS (2026-09-03, CTO hold on #144).
+       *
+       * The first version of this graded foodDayIsClosed on the SAME ledger row as the food offer,
+       * so it only caught a client who closed the day and was offered food in one exchange. #138 is
+       * not that. It is a HELD constraint spanning turns — "I'm done eating today" at 19:55, "what
+       * should I eat?" at 20:10, a meal suggestion — and the offending row's own input says nothing
+       * about food. The narrow detector would have reported that window as clean, which is the
+       * failure mode this whole feature exists to remove.
+       *
+       * GRADED THROUGH THE REAL EVALUATION, not by calling holds() with a hand-made context: the
+       * point at issue is whether the sweep assembles the cross-turn fact from the ledger, so a
+       * fixture that supplies it would be testing the fixture. Turn times are anchored to
+       * sastDayStart rather than to "now", so no case can pass or fail because of the wall clock.
+       */
+      {
+        const { buildCoachHealthBrief } = await import("../server/routes/admin-turns");
+        const { sastDayStart } = await import("../server/utils");
+        const day0 = sastDayStart().getTime();
+        const OTHER = "stub-other-client-0000000000000001";
+
+        const turn = (id: string, userId: string, at: number, inputText: string, reply: string) => ({
+          id, userId, createdAt: new Date(at), inputText, reply,
+          mutations: [], stateRead: {}, version: "08228aa",
+          lifecycleStatus: null, failureCategory: null, fixRef: null,
+        });
+        const CLOSED = "I am done eating today";
+        const OFFERED = "*🍽️ Next Meal Suggestion — Kam*\n\nYou need 1g more protein today. Have something to eat tonight.";
+        // The reply the merged #138 fix actually produces: it lands the day and points at tomorrow.
+        const LANDED = "You said you are done eating today, so I am leaving it there.\n\n"
+          + "You finished on *2100 kcal* and *188g protein*.\n\n"
+          + "You came up 1g short on protein — start tomorrow with it at breakfast rather than chasing it tonight.";
+
+        const caught = async (label: string, rows: any[], days = 2) => {
+          freshTurn();
+          g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[schema.turnLedger, rows]]);
+          const brief: any = await buildCoachHealthBrief(days);
+          const hit = (brief.candidates || []).some((c: any) => c.invariant === "closed-day-food-offer");
+          delete g.__KAMLIFE_STUB_ROWS;
+          return hit;
+        };
+
+        // THE RECURRENCE ITSELF. Three turns, one client, one SAST day. Nothing in the offending
+        // row says the day is closed — the constraint was stated two turns earlier.
+        if (!await caught("recurrence", [
+          turn("t-close", USER.id, day0 + 60_000, CLOSED, "Noted — that is the day closed."),
+          turn("t-mid", USER.id, day0 + 120_000, "cool", "👍"),
+          turn("t-offer", USER.id, day0 + 180_000, "what should I eat?", OFFERED),
+        ])) {
+          failures.push(`Coach Health did not catch the #138 recurrence: the client closed their food day in an earlier turn, a later turn was offered food today, and the window was reported clean`);
+        }
+
+        // CONTROL — CLIENT ISOLATION. One person's closed day must not convict everybody else's
+        // meal suggestions. Without this the detector could ignore userId entirely and still pass.
+        if (await caught("client isolation", [
+          turn("t-close-a", USER.id, day0 + 60_000, CLOSED, "Noted — that is the day closed."),
+          turn("t-offer-b", OTHER, day0 + 120_000, "what should I eat?", OFFERED),
+        ])) {
+          failures.push(`A closed food day for one client flagged ANOTHER client's meal suggestion — one person saying "I'm done eating" would silence the queue for everybody`);
+        }
+
+        // CONTROL — DAY ISOLATION. A constraint is a statement about a day. Closed yesterday,
+        // offered today, both inside the read window: the product's TODAY ONLY rule.
+        if (await caught("day isolation", [
+          turn("t-close-yday", USER.id, day0 - 6 * 3_600_000, CLOSED, "Noted — that is the day closed."),
+          turn("t-offer-today", USER.id, day0 + 60_000, "what should I eat?", OFFERED),
+        ])) {
+          failures.push(`Yesterday's closed food day flagged today's meal suggestion — a statement about one day became a standing preference`);
+        }
+
+        // CONTROL — ORDER OF EVENTS. A meal suggested BEFORE the client closed the day is not a
+        // violation of a constraint that did not exist yet.
+        if (await caught("ordering", [
+          turn("t-offer-am", USER.id, day0 + 60_000, "what should I eat?", OFFERED),
+          turn("t-close-pm", USER.id, day0 + 300_000, CLOSED, "Noted — that is the day closed."),
+        ])) {
+          failures.push(`A meal suggested BEFORE the client closed their food day was flagged — the detector is ignoring when the constraint was stated`);
+        }
+
+        // HEALTHY — the reply the merged fix produces, on a closed day, must not flag. Otherwise
+        // the detector is a permanent false positive against its own fix.
+        if (await caught("fixed reply", [
+          turn("t-close-fx", USER.id, day0 + 60_000, CLOSED, LANDED),
+          turn("t-after-fx", USER.id, day0 + 120_000, "ok", "👍"),
+        ])) {
+          failures.push(`Coach Health flags the FIXED closed-day reply as a failure — #138 would report a permanent regression against itself`);
+        }
+
+        // HEALTHY — the same food offer on an OPEN day is the product working. Without this the
+        // invariant could be "never recommend a meal" and pass everything above.
+        if (await caught("open day", [
+          turn("t-open-1", USER.id, day0 + 60_000, "what should I eat?", OFFERED),
+          turn("t-open-2", USER.id, day0 + 120_000, "thanks", "👍"),
+        ])) {
+          failures.push(`A legitimate meal suggestion on an open day was flagged as a closed-day violation — every meal recommendation would become a candidate`);
+        }
+      }
+
+      /**
        * P0 #115 — ONE PAGE OPEN, ONE AUDITED EVALUATION.
        *
        * Both Coach Health panels mounted together and each fetched its own endpoint, so opening

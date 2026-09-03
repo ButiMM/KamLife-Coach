@@ -12,6 +12,10 @@ import { isAskingNotReporting } from "../utils";
 // consults before it decides a turn owes a coaching move. Two answers to that would be the
 // defect this detector exists to find.
 import { durableDomains } from "../understanding/messy-intake";
+// AND the same for a closed food day (#138). held-constraints.ts owns both halves — asksForFoodToday
+// (does an outbound message ask for a meal) and foodCloseLookup (when did this client close their
+// food day, per client per SAST day). A regex here would be a third answer to a question with an owner.
+import { asksForFoodToday, foodCloseLookup } from "../held-constraints";
 
 /**
  * THE TURN TRIAGE SURFACE — a reader for the forensic record we were already keeping.
@@ -308,7 +312,15 @@ type Invariant = {
   layer: "Claim" | "State" | "Decision" | "Response" | "Coaching";
   /** What the coach was supposed to do. Shown next to every candidate. */
   expected: string;
-  holds: (t: { input: string; reply: string; mutations: string[]; state: any }) => boolean;
+  /**
+   * `heldFoodClose`: when this CLIENT closed their food day on the SAST day of this turn, or null —
+   * the one cross-turn fact an invariant may consult, because a held constraint outlives the
+   * message that stated it. Folded out of rows the brief already read; never a second query.
+   */
+  holds: (t: {
+    input: string; reply: string; mutations: string[]; state: any;
+    at: number; heldFoodClose: number | null;
+  }) => boolean;
 };
 
 const FALLBACK_REPLY = /didn'?t (?:quite )?catch that|say it another way|had a moment|try that again|i'?m not sure what you mean/i;
@@ -391,6 +403,27 @@ export const COACH_HEALTH_INVARIANTS: Invariant[] = [
     layer: "Response",
     expected: "every turn answers",
     holds: t => t.reply.trim().length > 0,
+  },
+  /**
+   * THE CLOSED FOOD DAY, GRADED ACROSS TURNS (#138, 2026-09-03; widened on CTO hold).
+   *
+   * The contradiction note above records that a food version of this was deleted on 2026-08-28 for
+   * having been reasoned about rather than observed. #138 is the observation — and MY FIRST VERSION
+   * read foodDayIsClosed on the same row as the offer, which would have missed it. #138 is a HELD
+   * constraint: "I'm done eating today" at 19:55, "what should I eat?" at 20:10, a meal suggestion
+   * — the offending row's own input says nothing about food. A detector needing the constraint and
+   * the violation in one message grades the easy half and calls the queue clean.
+   *
+   * So it is read as the product reads it: per client, per SAST day, applying to every later turn.
+   * The offer must come at or after the closure — a meal suggested at 10:00 by someone who closed
+   * the day at 19:00 is the order of events, not a violation.
+   */
+  {
+    id: "closed-day-food-offer",
+    label: "The client closed the food day and a later reply still asked for food",
+    layer: "Decision",
+    expected: "a closed food day is respected for the rest of that day",
+    holds: t => !(t.heldFoodClose !== null && t.at >= t.heldFoodClose && asksForFoodToday(t.reply)),
   },
 ];
 
@@ -481,7 +514,13 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
       reply: String(r.reply || ""),
       mutations: Array.isArray(r.mutations) ? (r.mutations as string[]).map(String) : [],
       state: r.stateRead,
+      at: new Date(r.createdAt as any).getTime(),
     }));
+
+    // HELD CONSTRAINTS OVER THE ROWS ALREADY IN HAND. Grading a constraint that outlives its own
+    // message needs more than the offending row — but NOT another query: every turn is already here
+    // with its client and timestamp, so held-constraints.ts folds it. One scan in, one scan out.
+    const heldFoodCloseFor = foodCloseLookup(shaped.map(t => ({ userId: t.row.userId, at: t.at, input: t.input })));
 
     // ── KNOWN REGRESSIONS: the V1 rules, post-fix only, so this half of the brief means what
     // it says. Reusing the same rules rather than restating them keeps one definition.
@@ -496,10 +535,18 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
 
     // ── CANDIDATES: an invariant that did not hold, clustered by the shape of the message.
     // NEVER called a defect. The queue is evidence, and adjudication stays with a person.
+    // WHICH TURNS THIS EVALUATION ACTUALLY FLAGGED, accumulated in the loops already running. It is
+    // what makes the "unflagged" sample below mean anything, and it costs one Set.
+    const flaggedTurnIds = new Set<string>();
+
     const clusters = new Map<string, { invariant: Invariant; signature: string; turns: typeof shaped }>();
     for (const t of shaped) {
       for (const inv of COACH_HEALTH_INVARIANTS) {
-        if (inv.holds({ input: t.input, reply: t.reply, mutations: t.mutations, state: t.state })) continue;
+        if (inv.holds({
+          input: t.input, reply: t.reply, mutations: t.mutations, state: t.state,
+          at: t.at, heldFoodClose: heldFoodCloseFor(t.row.userId, t.at),
+        })) continue;
+        flaggedTurnIds.add(String(t.row.id));
         const signature = candidateSignature(t.input);
         const key = `${inv.id}::${signature}`;
         const bucket = clusters.get(key) || { invariant: inv, signature, turns: [] };
@@ -598,6 +645,7 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
     // BEFORE THE FIX IS NOT A REGRESSION. A hit older than the merge is the failure behaving
     // exactly as it did when we found it — evidence the cut was real, not evidence it is
     // broken now. Only the after bucket may be called a regression, and the two are never summed.
+    for (const h of hits) flaggedTurnIds.add(String(h.id));
     const after = hits.filter(h => isRegression(rule, h.createdAt as any));
     const before = hits.filter(h => !isRegression(rule, h.createdAt as any));
     // THE DENOMINATOR MEANS DIFFERENT THINGS FOR THE TWO TRIGGERS, so it is not one number
@@ -645,6 +693,24 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
   // inferring it from what it is not.
   await auditRead(readBy, { days, turns: rows.length, scheduled: readBy === "coach_health_sweep" });
 
+  /**
+   * THE TURNS NOTHING FLAGGED — the half of the evidence the founder was supplying by hand.
+   *
+   * Every rule and invariant above only sees shapes we already know, so a NEW one is by definition
+   * in the turns that came back clean — and the only way one reached a human was somebody scrolling
+   * their own WhatsApp and picking a screenshot. That makes the founder the transport layer.
+   *
+   * DETERMINISTIC AND SPREAD, not "the newest twelve". `rows` is newest-first, so taking the head
+   * samples the last few minutes of a day-long window and a failure at 06:00 could never be in the
+   * packet. An even stride covers the window and the same rows always give the same sample, so two
+   * packets are comparable and any sampled turn can be re-derived from the ledger. Not a verdict
+   * either way: these are turns no detector objected to, which is the point of reading them.
+   */
+  const UNFLAGGED_SAMPLE = 12;
+  const cleanTurns = shaped.filter(t => !flaggedTurnIds.has(String(t.row.id)));
+  const stride = Math.max(1, Math.floor(cleanTurns.length / UNFLAGGED_SAMPLE));
+  const unflaggedSample = cleanTurns.filter((_, i) => i % stride === 0).slice(0, UNFLAGGED_SAMPLE);
+
   const byVersion = new Map<string, number>();
     for (const t of shaped) byVersion.set(String(t.row.version || "?"), (byVersion.get(String(t.row.version || "?")) || 0) + 1);
     const builds = [...byVersion.entries()].map(([version, turns]) => ({ version, turns }))
@@ -659,6 +725,18 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
       unexercised: known.filter(k => k.exercised === 0).map(k => k.fixRef),
       candidates,
       candidateTurns: candidates.reduce((s, c) => s + c.turns, 0),
+      // Evidence waiting for a failure shape nothing watches yet. `flagged` is the denominator that
+      // makes the sample readable: 12 of 900 clean turns is a spot check, 12 of 14 is the window.
+      unflagged: {
+        flagged: flaggedTurnIds.size,
+        clean: cleanTurns.length,
+        stride,
+        sample: unflaggedSample.map(t => ({
+          turnId: t.row.id, at: t.row.createdAt, version: t.row.version,
+          input: t.input.slice(0, 300),
+          reply: t.reply.replace(/\n/g, " ").slice(0, 300),
+        })),
+      },
       builds,
       buildWarning: builds.length > 1
         ? `${builds.length} builds served turns in this window — a regression may be a turn that ran the old code`
@@ -782,6 +860,22 @@ export async function runCoachHealthSweep(days = 1): Promise<{ known: number; ca
       firstSeen: c.firstSeen, lastSeen: c.lastSeen,
       examples: (c.examples || []).slice(0, 2),
     })),
+    /**
+     * THE REVIEW PACKET (2026-09-03). Everything above is what we already knew to look for; these
+     * two make the stored snapshot reviewable without a founder choosing what to show, and both
+     * come out of the evaluation that just ran — no second scan, no new table.
+     *
+     *   builds    which builds served this window, off turnLedger.version. buildWarning above says
+     *             "more than one" without ever saying which, and a candidate is only attributable
+     *             if you know what code answered.
+     *   unflagged a deterministic spread of turns NOTHING objected to, plus the flagged/clean
+     *             counts that make the sample readable.
+     *
+     * The sample is stored WHOLE, not re-sliced: it is already capped at twelve, and trimming a
+     * stride-spread sample would quietly drop the oldest end of the window it exists to cover.
+     */
+    builds: (brief.builds || []).slice(0, 10),
+    unflagged: brief.unflagged ?? null,
     // ref -> the newest turn we have counted for it. Replaces A1's flat seenRefs, which could say
     // "already announced" but never "already announced, and nothing has happened since".
     seen: Object.fromEntries(trimmed),
