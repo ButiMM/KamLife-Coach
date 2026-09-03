@@ -63,7 +63,8 @@ function agoMs(spec?: string): number | null {
 }
 
 const { scanForSAFoods } = await import("../server/handlers/food-scanner");
-const { adjustFoodsForSegment, extractMealLabel } = await import("../server/handlers/food-context");
+const { extractMealLabel } = await import("../server/handlers/food-context");
+const { adjustFoodsForSegment } = await import("../server/portion-memory");
 const { explicitMealSlot } = await import("../server/understanding/actions");
 const { parseMealDate, isRetroactiveMeal } = await import("../server/utils");
 const { classifyPortionUnit } = await import("../server/portion-memory");

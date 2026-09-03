@@ -463,7 +463,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 // order). The client's own median portion beats the table default — but ONLY in
 // silence: explicit amounts and size words always win, and no history changes nothing.
 {
-  const { medianPortions, personalPortionFor, normalizeFoodKey } = await import("../server/portion-memory");
+  const { medianPortions, personalPortionFor, normalizeFoodKey, adjustFoodsForSegment } = await import("../server/portion-memory");
   const mkMem = (kcals: number[]) => medianPortions(kcals.map(k => [{ name: "Eggs", kcal: k, protein: Math.round(k / 10) }]));
   test("portion memory: median needs 3+ logs; keys normalise variants together", () => {
     assert.equal(mkMem([200, 220]).size, 0, "2 logs = no memory");
@@ -478,10 +478,31 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   test("portion memory: personal median lands with macro shape preserved", () => {
     const r = personalPortionFor(mkMem([280, 280, 280]), "Eggs", 140, 12);
     assert.ok(r.personal && r.kcal === 280 && r.protein === 24, `2x kcal scales protein 2x: ${JSON.stringify(r)}`);
-    // The silence-only guard (explicit counts and size words beat memory) lives in
-    // adjustFoodsForSegment — source-guarded here, behaviour-verified in prod replies.
-    const src = readFileSync(join("server", "handlers", "food-context.ts"), "utf-8");
-    assert.ok(/!explicitQty && !vagueQty && sizeMultiplier === 1 && personal/.test(src), "memory must only fill silence — explicit, vague AND size words all beat it");
+  });
+  // MEMORY ONLY FILLS SILENCE. Was a regex over food-context.ts source — an assertion that
+  // passed on the presence of a line, not on what the line did, and it would have kept passing
+  // if the condition had been inverted. adjustFoodsForSegment now lives in this same module, so
+  // the rule is asserted where it is decided: three ways the client can SPEAK an amount, each of
+  // which must beat their history, against the one silent case where history is allowed to win.
+  test("portion memory: speech beats memory — explicit, vague and size words all win", () => {
+    const EGGS = {
+      name: "Eggs", aliases: ["eggs"], caloriesPer100g: 140, proteinPer100g: 12,
+      carbsPer100g: 1, fatPer100g: 10, typicalPortionDescription: "2 eggs",
+      typicalPortionGrams: 100, typicalPortionCalories: 140, typicalPortionProtein: 12,
+      category: "protein", budgetTier: 1, notes: "",
+    };
+    const mem = mkMem([280, 280, 280]);
+    const seg = (msg: string) => adjustFoodsForSegment([EGGS], msg, mem)[0] as any;
+
+    const silent = seg("eggs");
+    assert.equal(silent.portionSource, "personal", "silence: their own median is allowed to win");
+    assert.equal(silent.adjustedCalories, 280, "and it is the learned 280, not the table's 140");
+
+    for (const [msg, source] of [["3 eggs", "explicit"], ["some eggs", "vague"], ["big plate of eggs", "size"]] as const) {
+      const got = seg(msg);
+      assert.equal(got.portionSource, source, `"${msg}" is speech — provenance must be ${source}`);
+      assert.notEqual(got.adjustedCalories, 280, `"${msg}" must not be overridden by the 280 kcal memory`);
+    }
   });
 }
 

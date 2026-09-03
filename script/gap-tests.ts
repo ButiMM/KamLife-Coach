@@ -32,8 +32,8 @@ process.env.TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "test";
 process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+27000000000";
 
 // Dynamic imports — execute after env vars above, unlike static imports which are hoisted.
-const { extractMealLabel, adjustFoodsForSegment } = await import("../server/handlers/food-context");
-const { scalePortionDescription } = await import("../server/portion-memory");
+const { extractMealLabel } = await import("../server/handlers/food-context");
+const { scalePortionDescription, adjustFoodsForSegment } = await import("../server/portion-memory");
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
 const { explicitMealSlot } = await import("../server/understanding/actions");
@@ -3207,7 +3207,7 @@ test("portion units: the FOOD decides — a handful of peanuts is one portion of
 });
 
 test("portion units: END TO END — the hard South African cases", async () => {
-  const { adjustFoodsForSegment } = await import("../server/handlers/food-context");
+  const { adjustFoodsForSegment } = await import("../server/portion-memory");
   const { scanForSAFoods } = await import("../server/handlers/food-scanner");
 // These were written as CommonJS require() inside an ESM module, so every test below
 // that used them threw "require is not defined" — they had never executed. Bound once here.
@@ -3233,7 +3233,7 @@ const VERIF = await import("../server/brain/reply-verifier");
 });
 
 test("portion units: an estimated quantity is tagged ai even when the FOOD is db", async () => {
-  const { adjustFoodsForSegment } = await import("../server/handlers/food-context");
+  const { adjustFoodsForSegment } = await import("../server/portion-memory");
   const { scanForSAFoods } = await import("../server/handlers/food-scanner");
 // These were written as CommonJS require() inside an ESM module, so every test below
 // that used them threw "require is not defined" — they had never executed. Bound once here.
