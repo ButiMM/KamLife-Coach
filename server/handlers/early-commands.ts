@@ -22,7 +22,7 @@ import { replyWithButtons } from "../twilio-interactive";
 // exact label as a message, which the deterministic handlers already understand.
 const MENU_BUTTONS = ["Log food", "Today's workout", "My progress"];
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, nextDayDate, isMultiPartAsk , spaceName} from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, nextDayDate, isMultiPartAsk, looksLikeQuestion, spaceName} from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
@@ -1360,7 +1360,13 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     // target moved from 10,000 to 6,000; this branch called it confusion, promised "let me
     // put it simply", explained nothing, and told him to stand on a scale. Never answer a
     // real question with the day's action. Defer — the engine is ahead of this now.
-    if (ctx.isQuestion || /\?/.test(message)) return null;
+    // AND A QUESTION MARK IS NOT WHAT MAKES ONE (#114 P1, 2026-09-03). The rule above is right and
+    // the test was half of utils.looksLikeQuestion — its punctuation line, without its interrogative
+    // openers. So "what does that mean", asked with no "?" after the coach had just answered about
+    // weight, was read as confusion and answered with the day's action instead of the subject the
+    // client was asking about. The canonical owner decides it now; a second spelling of "is this a
+    // question" in a handler is what let this one through.
+    if (ctx.isQuestion || looksLikeQuestion(message)) return null;
     // And no preamble that promises a simplification the next line does not deliver.
     const lead = firstName ? `${firstName} — here's the one that matters:` : `Here's the one that matters:`;
     // Only fall back to the menu if the one action could not be built at all. A sitemap is a
