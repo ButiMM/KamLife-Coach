@@ -221,7 +221,29 @@ function checkOutboundMessage(body: string | null | undefined): OutboundCheck {
 }
 
 /** What a client hears when the floor refuses a reactive draft. Never an apology, never silence. */
-const REACTIVE_REPAIR = "Let me check that properly before I answer — give me one sec and ask me again.";
+export const REACTIVE_OUTBOUND_REPAIR = "Let me check that properly before I answer — give me one sec and ask me again.";
+
+/**
+ * A reactive preparation attempt is never allowed to fail open to its draft. Keeping this
+ * exception policy beside the canonical repair prevents either delivery door from inventing
+ * its own fallback. The callback shape also makes the throw path directly testable without I/O.
+ */
+export async function prepareReactiveOutbound(
+  recipientKey: string,
+  prepare: () => Promise<OutboundPrepared>,
+): Promise<OutboundPrepared> {
+  try {
+    return await prepare();
+  } catch (e: any) {
+    console.error(`[OUTBOUND_AUTHORITY] BLOCKED reactive send to ${recipientKey.slice(-8)} — preparation failed: ${e?.message || e}`);
+    const failure: OutboundPrepared = {
+      text: REACTIVE_OUTBOUND_REPAIR,
+      blocked: true,
+      detail: "preparation failed",
+    };
+    return failure;
+  }
+}
 
 export async function prepareOutbound(
   mode: "reactive" | "proactive",
@@ -246,7 +268,7 @@ export async function prepareOutbound(
     }
     console.error(`[OUTBOUND_AUTHORITY] BLOCKED reactive draft to ${recipientKey.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
     // Reactive: the client is waiting, so they get a safe sentence rather than nothing.
-    return { text: REACTIVE_REPAIR, blocked: true, reason: verdict.reason, detail: verdict.detail };
+    return { text: REACTIVE_OUTBOUND_REPAIR, blocked: true, reason: verdict.reason, detail: verdict.detail };
   }
 
   // Shaping stays in this order: a claim spanning a bubble split has to be checked before the
@@ -277,13 +299,13 @@ export async function prepareOutbound(
         + `to ${recipientKey.slice(-8)} — ${leak.reason}`);
       return mode === "proactive"
         ? { text: "", blocked: true, detail: leak.reason }
-        : { text: REACTIVE_REPAIR, blocked: true, detail: leak.reason };
+        : { text: REACTIVE_OUTBOUND_REPAIR, blocked: true, detail: leak.reason };
     }
     return { text: out, blocked: false };
   } catch (e: any) {
     console.error(`[OUTBOUND_AUTHORITY] BLOCKED ${mode} send to ${recipientKey.slice(-8)} — preparation failed: ${e?.message || e}`);
     return mode === "proactive"
       ? { text: "", blocked: true, detail: "preparation failed" }
-      : { text: REACTIVE_REPAIR, blocked: true, detail: "preparation failed" };
+      : { text: REACTIVE_OUTBOUND_REPAIR, blocked: true, detail: "preparation failed" };
   }
 }

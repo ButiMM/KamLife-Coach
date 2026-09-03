@@ -12,6 +12,7 @@ import { captureQualitySignal } from "../quality-signals";
 import { recordMediaJob, completeMediaJob } from "../media-jobs";
 import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply, stripInternalMarkers, isDuplicateOutbound } from "../reply-hygiene";
+import { prepareOutbound, prepareReactiveOutbound } from "../outbound-authority";
 
 // COMEBACK RECOGNITION (2026-07-13 retention P0): when a client messages after ≥3 days
 // of silence, their FIRST reply back opens with a warm welcome — the return must feel
@@ -57,26 +58,20 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   // prepareOutbound runs the floor, then the same provenance and hygiene in the same order. The
   // only reactive difference is the failure policy: a client is holding their phone, so a refused
   // draft becomes a safe sentence rather than silence. P0-C below still owns the empty case.
-  let out = text;
+  let userId: string | null = null;
+  let userRow: { id: string; profileNotes: string | null } | null = null;
   try {
-    const { prepareOutbound } = await import("../outbound-authority");
-    let userId: string | null = null;
-    let userRow: { id: string; profileNotes: string | null } | null = null;
-    try {
-      const rows = await db.select({ id: users.id, profileNotes: users.profileNotes })
-        .from(users).where(eq(users.phoneNumber, phone)).limit(1);
-      userRow = (rows[0] as any) ?? null;
-      userId = userRow?.id ?? null;
-    } catch (e: any) {
-      // The floor degrades honestly without a recipient: the turn-free checks still apply.
-      console.warn(`[SEND_FINAL] recipient lookup failed for ${phone.slice(-8)}: ${e?.message || e}`);
-    }
-    const prepared = await prepareOutbound("reactive", userId, phone, out, userRow);
-    out = prepared.text;
+    const rows = await db.select({ id: users.id, profileNotes: users.profileNotes })
+      .from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    userRow = (rows[0] as any) ?? null;
+    userId = userRow?.id ?? null;
   } catch (e: any) {
-    console.warn("[SEND_FINAL] preparation failed, sending raw:", e?.message || e);
-    out = text;
+    // The floor degrades honestly without a recipient: the turn-free checks still apply.
+    console.warn(`[SEND_FINAL] recipient lookup failed for ${phone.slice(-8)}: ${e?.message || e}`);
   }
+  const prepared = await prepareReactiveOutbound(phone,
+    () => prepareOutbound("reactive", userId, phone, text, userRow));
+  let out = prepared.text;
   // THE DOOR (2026-08-04). Provenance asked whether it is true. Hygiene asked whether it
   // is shaped like a person. These two ask the questions nobody owned: is this internal,
   // and have we already said exactly this?
