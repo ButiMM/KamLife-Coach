@@ -1864,6 +1864,58 @@ test("food scan: toast/stew combos don't double-count their bread/stew alternate
   assert.deepEqual(scanNames("big plate of pap and stew"), ["Pap and stew"], "vague 'stew' keeps the combo");
 });
 
+// A COMBO MAY NOT BORROW ITS WORDS FROM ANOTHER FOOD (#114 P0-1, 2026-09-03, founder's typed
+// message). "Pap and chicken livers" returned BOTH "Chicken livers" AND the combo "Chicken and
+// pap" — 858 kcal and 95g protein for one plate, and the client was told they had eaten chicken
+// they never had. The combo's alias "pap and chicken" (chars 0-14) overlaps "chicken livers"
+// (chars 8-21): the dish was assembled out of a word that belongs to the livers.
+//
+// Graded on the identity AND the charge, because either alone can pass while the other is wrong:
+// dropping the phantom without keeping the pap loses food the client ate, and keeping both entries
+// at half portions would double-count differently.
+test("food scan: 'Pap and chicken livers' is one plate, and there is no invented chicken", () => {
+  const names = scanNames("Pap and chicken livers");
+  assert.ok(names.includes("Chicken livers"), `the livers must survive: ${names.join(", ")}`);
+  assert.ok(names.some(n => /^pap/i.test(n)), `the pap the client ate must survive: ${names.join(", ")}`);
+  assert.ok(!names.includes("Chicken and pap"),
+    `the combo borrowed "chicken" from the livers and charged a second dish: ${names.join(", ")}`);
+  assert.ok(!names.some(n => n === "Chicken thigh" || n === "Chicken breast"),
+    `no independent chicken entity may be invented: ${names.join(", ")}`);
+  // CHARGED ONCE. The bug was visible as a number long before anyone read the entry list.
+  const kcal = adjustFoodsForSegment(scanForSAFoods("Pap and chicken livers") as any, "Pap and chicken livers")
+    .reduce((s: number, f: any) => s + f.adjustedCalories, 0);
+  assert.ok(kcal < 700, `one plate of pap and livers cannot be ${kcal} kcal — that is the double charge`);
+});
+
+test("food scan: a combo whose span is its own is untouched (both word orders)", () => {
+  // CONTROL. The rule must fire on BORROWED words only. Here the overlap between the combo and
+  // the standalone Pap is the combo bundling its own component, which is legitimate — without
+  // this, "drop a combo that overlaps anything" would delete every combo in the table.
+  assert.deepEqual(scanNames("pap and chicken"), ["Chicken and pap"], "combo survives, one dish");
+  assert.deepEqual(scanNames("chicken and pap"), ["Chicken and pap"], "and in the other word order");
+  // The two halves still work alone, so the fix did not simply suppress one of them.
+  assert.deepEqual(scanNames("chicken livers"), ["Chicken livers"], "livers alone unaffected");
+  assert.ok(scanNames("pap").some(n => /^pap/i.test(n)), "pap alone unaffected");
+});
+
+test("food scan: every combo in the table still resolves to itself", () => {
+  // CONTROL, deliberately exhaustive. The new pass sees every combo, so a rule that is subtly too
+  // greedy would show up here rather than in production. These are the phrases the combos exist for.
+  for (const [phrase, expected] of [
+    ["pap and wors", "Pap and wors"], ["fish and chips", "Fish and chips"],
+    ["eggs on toast", "Eggs on toast"], ["peanut butter on bread", "Peanut butter on bread"],
+    ["oats with milk", "Oats with milk"], ["cereal with milk", "Cereal with milk"],
+    ["mince and pap", "Mince and pap"], ["pap and stew", "Pap and stew"],
+    ["pap and spinach", "Pap and spinach"], ["pap and pilchards", "Pap and pilchards"],
+    ["chicken and rice", "Chicken and rice"], ["rice and chicken", "Chicken and rice"],
+  ] as const) {
+    assert.deepEqual(scanNames(phrase), [expected], `"${phrase}" must still be one dish`);
+  }
+  // And the regression the combo dedup was originally written for stays fixed.
+  const listed = scanNames("i had lentils, rice and chicken breast");
+  assert.ok(!listed.includes("Chicken and rice"), `no phantom combo when parts are listed: ${listed.join(", ")}`);
+});
+
 test("food scan: a specific sandwich suppresses the generic 'Sandwich' (no double bread)", () => {
   assert.deepEqual(scanNames("peanut butter sandwich"), ["Peanut butter on bread"], "PB sandwich = one item");
   // but a bare/filling sandwich with no specific match keeps 'Sandwich' for the bread
