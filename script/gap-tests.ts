@@ -186,6 +186,36 @@ test("unlogged: roast potatoes + mixed veggies is not an unpriced leftover after
       `the on-demand card has no just-logged plate and must be untouched: "${onDemand}"`);
   });
 
+  test("progress card: the carry-forward line may not promise a target it cannot prove", () => {
+    // CTO adjudication on #148. `justAteProteinMeal` proves the plate that landed was >= 35g. It
+    // proves NOTHING about whether one more like it closes the day, and the >=35 branch runs from
+    // 35g owed to 59g owed. The first wording — "one more like that today and you're there" —
+    // was false across most of its own band: at 59g owed, another minimum qualifying meal leaves
+    // 24g.
+    //
+    // Written as the proof obligation rather than as a banned phrase, so a future re-wording is
+    // held to the same standard: a line may claim arrival only where the arithmetic gets there.
+    const CLAIMS_ARRIVAL = /you'?re there|you'?re done|and you'?re set|that'?s it\b|closes? it|sorted|target (?:hit|met|reached|done)|you'?re home/i;
+    for (let protLeft = 35; protLeft <= 59; protLeft++) {
+      const rows = [
+        { label: "Calories", current: 2000, target: 2800 },
+        { label: "Protein", current: 195 - protLeft, target: 195 },
+        { label: "Fat", current: 60, target: 84 },
+      ];
+      const line = nextMoveLine(rows, false, 16, false, false, true);
+      if (CLAIMS_ARRIVAL.test(line)) {
+        // One more meal at the minimum that qualifies as "a proper protein meal" is the best case
+        // the card can assume. If that still leaves a gap, arrival was not the card's to promise.
+        assert.ok(protLeft - PROPER_PROTEIN_G <= 0,
+          `with ${protLeft}g owed the card claimed arrival — one more ${PROPER_PROTEIN_G}g meal `
+          + `leaves ${protLeft - PROPER_PROTEIN_G}g: "${line}"`);
+      }
+      // Whatever it says, it still may not re-order the meal that just landed.
+      assert.ok(!/\b(make|get)\b[^.]*\b(proper|real) protein\b/i.test(line),
+        `with ${protLeft}g owed the card re-ordered the meal it was confirming: "${line}"`);
+    }
+  });
+
   test("progress card: the 'just ate protein' test uses the band the card already owns", () => {
     // One number for both halves. If PROPER_PROTEIN_G drifts from the >= 35 band below it, the
     // card can call a plate a proper protein meal while still asking for one to close the gap.

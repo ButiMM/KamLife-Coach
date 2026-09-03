@@ -265,7 +265,13 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), is
       : "Get a real protein into your next two meals";
   }
   if (protLeft >= 35) {
-    return justAteProteinMeal ? "Good protein in — one more like that today and you're there"
+    // NO CLOSURE THIS BRANCH CANNOT PROVE (CTO adjudication on #148). The first wording was
+    // "one more like that today and you're there". `justAteProteinMeal` proves the plate that
+    // landed was >= PROPER_PROTEIN_G — it says nothing about whether one more of the same closes
+    // the gap, and this branch runs anywhere from 35g to 59g owed. At 59g owed another minimum
+    // qualifying meal still leaves 24g, so "you're there" was a promise the data does not carry.
+    // Acknowledge the protein, carry the lever forward, claim nothing about arriving.
+    return justAteProteinMeal ? "Good protein in — keep that going at your next meal"
       : earlyDay ? "Make lunch a proper protein — chicken, fish or eggs"
       : "Make your next meal a proper protein — chicken, fish or eggs";
   }
