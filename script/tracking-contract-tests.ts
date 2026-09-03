@@ -1088,44 +1088,100 @@ const MUST_WRITE: [string, string][] = [
       }
 
       /**
-       * #138 IN COACH HEALTH — the closed food day, watched (2026-09-03).
+       * #138 IN COACH HEALTH — THE HELD CONSTRAINT, ACROSS TURNS (2026-09-03, CTO hold on #144).
        *
-       * The contradiction invariant's own note records that a food version of this was deleted on
-       * 2026-08-28 for having been reasoned about rather than observed. #138 is the observation: a
-       * client said they were done eating and the meal door recommended food anyway to close a 1g
-       * protein gap. Graded on the real pre-fix and post-fix replies, and on the two ways the
-       * invariant could be too greedy.
+       * The first version of this graded foodDayIsClosed on the SAME ledger row as the food offer,
+       * so it only caught a client who closed the day and was offered food in one exchange. #138 is
+       * not that. It is a HELD constraint spanning turns — "I'm done eating today" at 19:55, "what
+       * should I eat?" at 20:10, a meal suggestion — and the offending row's own input says nothing
+       * about food. The narrow detector would have reported that window as clean, which is the
+       * failure mode this whole feature exists to remove.
+       *
+       * GRADED THROUGH THE REAL EVALUATION, not by calling holds() with a hand-made context: the
+       * point at issue is whether the sweep assembles the cross-turn fact from the ledger, so a
+       * fixture that supplies it would be testing the fixture. Turn times are anchored to
+       * sastDayStart rather than to "now", so no case can pass or fail because of the wall clock.
        */
       {
-        const { COACH_HEALTH_INVARIANTS } = await import("../server/routes/admin-turns");
-        const inv = COACH_HEALTH_INVARIANTS.find(i => i.id === "closed-day-food-offer");
-        if (!inv) {
-          failures.push(`Coach Health has no closed-day invariant — the #138 defect could ship again unwatched`);
-        } else {
-          const holds = (input: string, reply: string) =>
-            inv.holds({ input, reply, mutations: [], state: {} });
-          const CLOSED = "I am done eating today";
-          // The pre-fix reply, chasing the gap it should have left alone.
-          if (holds(CLOSED, "You came up 1g short on protein — get to 189g tonight.")) {
-            failures.push(`Coach Health would not have caught #138: the client closed the food day and the reply still sent them after 1g tonight`);
-          }
-          // The reply the merged fix actually produces. Flagging this would make the detector a
-          // permanent false positive on the fixed behaviour.
-          const landed = "You said you are done eating today, so I am leaving it there.\n\n"
-            + "You finished on *2100 kcal* and *188g protein*.\n\n"
-            + "You came up 1g short on protein — start tomorrow with it at breakfast rather than chasing it tonight.";
-          if (!holds(CLOSED, landed)) {
-            failures.push(`Coach Health flags the FIXED closed-day reply as a failure — the #138 fix would report a permanent regression against itself`);
-          }
-          // CONTROL 1: a closed day that gets no food ask is clean.
-          if (!holds(CLOSED, "Noted — that is the day closed. Weigh in tomorrow morning before you eat.")) {
-            failures.push(`A closed food day with no food ask was flagged — the invariant is watching the topic, not the ask`);
-          }
-          // CONTROL 2: the same food ask on an OPEN day is the product working. Without this, the
-          // invariant could be "never recommend a meal" and still pass everything above.
-          if (!holds("what should I eat?", "*Next Meal Suggestion*\n\nYou need 100g more protein today. Have something to eat tonight.")) {
-            failures.push(`A legitimate meal suggestion on an open day was flagged as a closed-day violation — every meal recommendation would become a candidate`);
-          }
+        const { buildCoachHealthBrief } = await import("../server/routes/admin-turns");
+        const { sastDayStart } = await import("../server/utils");
+        const day0 = sastDayStart().getTime();
+        const OTHER = "stub-other-client-0000000000000001";
+
+        const turn = (id: string, userId: string, at: number, inputText: string, reply: string) => ({
+          id, userId, createdAt: new Date(at), inputText, reply,
+          mutations: [], stateRead: {}, version: "08228aa",
+          lifecycleStatus: null, failureCategory: null, fixRef: null,
+        });
+        const CLOSED = "I am done eating today";
+        const OFFERED = "*🍽️ Next Meal Suggestion — Kam*\n\nYou need 1g more protein today. Have something to eat tonight.";
+        // The reply the merged #138 fix actually produces: it lands the day and points at tomorrow.
+        const LANDED = "You said you are done eating today, so I am leaving it there.\n\n"
+          + "You finished on *2100 kcal* and *188g protein*.\n\n"
+          + "You came up 1g short on protein — start tomorrow with it at breakfast rather than chasing it tonight.";
+
+        const caught = async (label: string, rows: any[], days = 2) => {
+          freshTurn();
+          g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[schema.turnLedger, rows]]);
+          const brief: any = await buildCoachHealthBrief(days);
+          const hit = (brief.candidates || []).some((c: any) => c.invariant === "closed-day-food-offer");
+          delete g.__KAMLIFE_STUB_ROWS;
+          return hit;
+        };
+
+        // THE RECURRENCE ITSELF. Three turns, one client, one SAST day. Nothing in the offending
+        // row says the day is closed — the constraint was stated two turns earlier.
+        if (!await caught("recurrence", [
+          turn("t-close", USER.id, day0 + 60_000, CLOSED, "Noted — that is the day closed."),
+          turn("t-mid", USER.id, day0 + 120_000, "cool", "👍"),
+          turn("t-offer", USER.id, day0 + 180_000, "what should I eat?", OFFERED),
+        ])) {
+          failures.push(`Coach Health did not catch the #138 recurrence: the client closed their food day in an earlier turn, a later turn was offered food today, and the window was reported clean`);
+        }
+
+        // CONTROL — CLIENT ISOLATION. One person's closed day must not convict everybody else's
+        // meal suggestions. Without this the detector could ignore userId entirely and still pass.
+        if (await caught("client isolation", [
+          turn("t-close-a", USER.id, day0 + 60_000, CLOSED, "Noted — that is the day closed."),
+          turn("t-offer-b", OTHER, day0 + 120_000, "what should I eat?", OFFERED),
+        ])) {
+          failures.push(`A closed food day for one client flagged ANOTHER client's meal suggestion — one person saying "I'm done eating" would silence the queue for everybody`);
+        }
+
+        // CONTROL — DAY ISOLATION. A constraint is a statement about a day. Closed yesterday,
+        // offered today, both inside the read window: the product's TODAY ONLY rule.
+        if (await caught("day isolation", [
+          turn("t-close-yday", USER.id, day0 - 6 * 3_600_000, CLOSED, "Noted — that is the day closed."),
+          turn("t-offer-today", USER.id, day0 + 60_000, "what should I eat?", OFFERED),
+        ])) {
+          failures.push(`Yesterday's closed food day flagged today's meal suggestion — a statement about one day became a standing preference`);
+        }
+
+        // CONTROL — ORDER OF EVENTS. A meal suggested BEFORE the client closed the day is not a
+        // violation of a constraint that did not exist yet.
+        if (await caught("ordering", [
+          turn("t-offer-am", USER.id, day0 + 60_000, "what should I eat?", OFFERED),
+          turn("t-close-pm", USER.id, day0 + 300_000, CLOSED, "Noted — that is the day closed."),
+        ])) {
+          failures.push(`A meal suggested BEFORE the client closed their food day was flagged — the detector is ignoring when the constraint was stated`);
+        }
+
+        // HEALTHY — the reply the merged fix produces, on a closed day, must not flag. Otherwise
+        // the detector is a permanent false positive against its own fix.
+        if (await caught("fixed reply", [
+          turn("t-close-fx", USER.id, day0 + 60_000, CLOSED, LANDED),
+          turn("t-after-fx", USER.id, day0 + 120_000, "ok", "👍"),
+        ])) {
+          failures.push(`Coach Health flags the FIXED closed-day reply as a failure — #138 would report a permanent regression against itself`);
+        }
+
+        // HEALTHY — the same food offer on an OPEN day is the product working. Without this the
+        // invariant could be "never recommend a meal" and pass everything above.
+        if (await caught("open day", [
+          turn("t-open-1", USER.id, day0 + 60_000, "what should I eat?", OFFERED),
+          turn("t-open-2", USER.id, day0 + 120_000, "thanks", "👍"),
+        ])) {
+          failures.push(`A legitimate meal suggestion on an open day was flagged as a closed-day violation — every meal recommendation would become a candidate`);
         }
       }
 

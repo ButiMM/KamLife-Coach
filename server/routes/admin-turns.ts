@@ -12,12 +12,10 @@ import { isAskingNotReporting } from "../utils";
 // consults before it decides a turn owes a coaching move. Two answers to that would be the
 // defect this detector exists to find.
 import { durableDomains } from "../understanding/messy-intake";
-// AND the same for a closed food day (#138, 2026-09-03). `foodDayIsClosed` already decides what a
-// client's own words settled and `asksForFoodToday` already decides whether an outbound message
-// asks for a meal — the two readers the merged fix consults. A regex here would be a third answer
-// to a question with two owners, and regexLiterals is at 449/449 besides.
-import { foodDayIsClosed } from "../one-action";
-import { asksForFoodToday } from "../held-constraints";
+// AND the same for a closed food day (#138). held-constraints.ts owns both halves — asksForFoodToday
+// (does an outbound message ask for a meal) and foodCloseLookup (when did this client close their
+// food day, per client per SAST day). A regex here would be a third answer to a question with an owner.
+import { asksForFoodToday, foodCloseLookup } from "../held-constraints";
 
 /**
  * THE TURN TRIAGE SURFACE — a reader for the forensic record we were already keeping.
@@ -314,7 +312,15 @@ type Invariant = {
   layer: "Claim" | "State" | "Decision" | "Response" | "Coaching";
   /** What the coach was supposed to do. Shown next to every candidate. */
   expected: string;
-  holds: (t: { input: string; reply: string; mutations: string[]; state: any }) => boolean;
+  /**
+   * `heldFoodClose`: when this CLIENT closed their food day on the SAST day of this turn, or null —
+   * the one cross-turn fact an invariant may consult, because a held constraint outlives the
+   * message that stated it. Folded out of rows the brief already read; never a second query.
+   */
+  holds: (t: {
+    input: string; reply: string; mutations: string[]; state: any;
+    at: number; heldFoodClose: number | null;
+  }) => boolean;
 };
 
 const FALLBACK_REPLY = /didn'?t (?:quite )?catch that|say it another way|had a moment|try that again|i'?m not sure what you mean/i;
@@ -399,25 +405,25 @@ export const COACH_HEALTH_INVARIANTS: Invariant[] = [
     holds: t => t.reply.trim().length > 0,
   },
   /**
-   * THE CLOSED FOOD DAY, NOW WITH THE INSTANCE IT WAS MISSING (#138, 2026-09-03).
+   * THE CLOSED FOOD DAY, GRADED ACROSS TURNS (#138, 2026-09-03; widened on CTO hold).
    *
-   * The contradiction note above records that a food version of this was deleted on 2026-08-28
-   * because it had been reasoned about rather than observed. #138 is the observation: a client said
-   * they were done eating and SMART NEXT MEAL recommended food anyway, chasing a 1g protein gap.
-   * That shipped as a fix, so this watches the shape rather than trusting it stays fixed.
+   * The contradiction note above records that a food version of this was deleted on 2026-08-28 for
+   * having been reasoned about rather than observed. #138 is the observation — and MY FIRST VERSION
+   * read foodDayIsClosed on the same row as the offer, which would have missed it. #138 is a HELD
+   * constraint: "I'm done eating today" at 19:55, "what should I eat?" at 20:10, a meal suggestion
+   * — the offending row's own input says nothing about food. A detector needing the constraint and
+   * the violation in one message grades the easy half and calls the queue clean.
    *
-   * ONE TURN, DELIBERATELY. readHeldConstraints spans today's messages; a ledger row is one
-   * exchange. Restricting the invariant to a turn whose OWN input closed the day is the exact
-   * defect shape and needs no cross-turn state to judge — and it cannot fire on a client who
-   * closed the day an hour ago, which would be a different (and much weaker) claim about evidence
-   * this row does not carry.
+   * So it is read as the product reads it: per client, per SAST day, applying to every later turn.
+   * The offer must come at or after the closure — a meal suggested at 10:00 by someone who closed
+   * the day at 19:00 is the order of events, not a violation.
    */
   {
     id: "closed-day-food-offer",
-    label: "The client closed the food day and the reply still asked for food",
+    label: "The client closed the food day and a later reply still asked for food",
     layer: "Decision",
-    expected: "a closed food day is respected for the rest of today",
-    holds: t => !(foodDayIsClosed(t.input) && asksForFoodToday(t.reply)),
+    expected: "a closed food day is respected for the rest of that day",
+    holds: t => !(t.heldFoodClose !== null && t.at >= t.heldFoodClose && asksForFoodToday(t.reply)),
   },
 ];
 
@@ -508,7 +514,13 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
       reply: String(r.reply || ""),
       mutations: Array.isArray(r.mutations) ? (r.mutations as string[]).map(String) : [],
       state: r.stateRead,
+      at: new Date(r.createdAt as any).getTime(),
     }));
+
+    // HELD CONSTRAINTS OVER THE ROWS ALREADY IN HAND. Grading a constraint that outlives its own
+    // message needs more than the offending row — but NOT another query: every turn is already here
+    // with its client and timestamp, so held-constraints.ts folds it. One scan in, one scan out.
+    const heldFoodCloseFor = foodCloseLookup(shaped.map(t => ({ userId: t.row.userId, at: t.at, input: t.input })));
 
     // ── KNOWN REGRESSIONS: the V1 rules, post-fix only, so this half of the brief means what
     // it says. Reusing the same rules rather than restating them keeps one definition.
@@ -523,15 +535,17 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
 
     // ── CANDIDATES: an invariant that did not hold, clustered by the shape of the message.
     // NEVER called a defect. The queue is evidence, and adjudication stays with a person.
-    // WHICH TURNS THIS EVALUATION ACTUALLY TOUCHED, accumulated in the loops that were already
-    // running. It is what makes an "unflagged" sample meaningful further down, and it costs one
-    // Set — not a second pass and not a second query.
+    // WHICH TURNS THIS EVALUATION ACTUALLY FLAGGED, accumulated in the loops already running. It is
+    // what makes the "unflagged" sample below mean anything, and it costs one Set.
     const flaggedTurnIds = new Set<string>();
 
     const clusters = new Map<string, { invariant: Invariant; signature: string; turns: typeof shaped }>();
     for (const t of shaped) {
       for (const inv of COACH_HEALTH_INVARIANTS) {
-        if (inv.holds({ input: t.input, reply: t.reply, mutations: t.mutations, state: t.state })) continue;
+        if (inv.holds({
+          input: t.input, reply: t.reply, mutations: t.mutations, state: t.state,
+          at: t.at, heldFoodClose: heldFoodCloseFor(t.row.userId, t.at),
+        })) continue;
         flaggedTurnIds.add(String(t.row.id));
         const signature = candidateSignature(t.input);
         const key = `${inv.id}::${signature}`;
@@ -682,28 +696,20 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
   /**
    * THE TURNS NOTHING FLAGGED — the half of the evidence the founder was supplying by hand.
    *
-   * Every rule and invariant above only sees failure shapes we already know. A NEW shape is, by
-   * definition, in the turns that came back clean, and until now the only way one reached a human
-   * was somebody scrolling their own WhatsApp and choosing a screenshot. That makes the founder the
-   * transport layer, and it selects for what they happened to notice.
+   * Every rule and invariant above only sees shapes we already know, so a NEW one is by definition
+   * in the turns that came back clean — and the only way one reached a human was somebody scrolling
+   * their own WhatsApp and picking a screenshot. That makes the founder the transport layer.
    *
-   * DETERMINISTIC AND SPREAD, not "the newest twelve". `rows` is ordered newest-first, so taking
-   * the head would sample the last few minutes of a day-long window and a failure at 06:00 would
-   * never be in the packet. An even stride over the clean turns covers the window, and the same
-   * rows always produce the same sample — a reviewer comparing two packets is comparing evidence,
-   * not comparing two dice rolls. No randomness, because a random sample cannot be re-derived from
-   * the ledger when somebody asks where a turn came from.
-   *
-   * NOT A VERDICT EITHER WAY. These are turns no detector objected to; that is the whole point of
-   * reading them.
+   * DETERMINISTIC AND SPREAD, not "the newest twelve". `rows` is newest-first, so taking the head
+   * samples the last few minutes of a day-long window and a failure at 06:00 could never be in the
+   * packet. An even stride covers the window and the same rows always give the same sample, so two
+   * packets are comparable and any sampled turn can be re-derived from the ledger. Not a verdict
+   * either way: these are turns no detector objected to, which is the point of reading them.
    */
   const UNFLAGGED_SAMPLE = 12;
   const cleanTurns = shaped.filter(t => !flaggedTurnIds.has(String(t.row.id)));
   const stride = Math.max(1, Math.floor(cleanTurns.length / UNFLAGGED_SAMPLE));
-  const unflaggedSample: typeof shaped = [];
-  for (let i = 0; i < cleanTurns.length && unflaggedSample.length < UNFLAGGED_SAMPLE; i += stride) {
-    unflaggedSample.push(cleanTurns[i]);
-  }
+  const unflaggedSample = cleanTurns.filter((_, i) => i % stride === 0).slice(0, UNFLAGGED_SAMPLE);
 
   const byVersion = new Map<string, number>();
     for (const t of shaped) byVersion.set(String(t.row.version || "?"), (byVersion.get(String(t.row.version || "?")) || 0) + 1);
@@ -856,20 +862,17 @@ export async function runCoachHealthSweep(days = 1): Promise<{ known: number; ca
     })),
     /**
      * THE REVIEW PACKET (2026-09-03). Everything above is what we already knew to look for; these
-     * two fields are what makes the stored snapshot reviewable without a founder choosing what to
-     * show, and both come out of the evaluation that just ran — no second scan, no new table.
+     * two make the stored snapshot reviewable without a founder choosing what to show, and both
+     * come out of the evaluation that just ran — no second scan, no new table.
      *
-     *   builds    which builds served the turns in this window, straight off turnLedger.version.
-     *             A candidate is only attributable if you know which code answered, and
-     *             buildWarning above says "more than one" without ever saying which.
-     *   unflagged a deterministic spread of turns NOTHING objected to, with the flagged/clean
+     *   builds    which builds served this window, off turnLedger.version. buildWarning above says
+     *             "more than one" without ever saying which, and a candidate is only attributable
+     *             if you know what code answered.
+     *   unflagged a deterministic spread of turns NOTHING objected to, plus the flagged/clean
      *             counts that make the sample readable.
      *
-     * Bounded on purpose: this is one scheduler_state value read whole by the sweep endpoint, so
-     * the head of each list is the standing answer and the dashboard recomputes the rest on demand.
-     * The unflagged sample is stored WHOLE rather than re-sliced — it is already capped at twelve,
-     * and trimming a stride-spread sample would quietly drop the oldest end of the window, which is
-     * the half it exists to cover.
+     * The sample is stored WHOLE, not re-sliced: it is already capped at twelve, and trimming a
+     * stride-spread sample would quietly drop the oldest end of the window it exists to cover.
      */
     builds: (brief.builds || []).slice(0, 10),
     unflagged: brief.unflagged ?? null,

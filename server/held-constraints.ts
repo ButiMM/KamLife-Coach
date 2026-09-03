@@ -28,7 +28,7 @@
 import { foodDayIsClosed, trainingDayIsDeclined } from "./one-action";
 import { recentClientMessagesStamped } from "./memory";
 import { readHealthState } from "./health-state";
-import { sastDaysBetween } from "./sast";
+import { sastDaysBetween, sastDayKey } from "./sast";
 
 export interface HeldConstraints {
   /** They said they are done eating for today. */
@@ -65,6 +65,34 @@ export async function readHeldConstraints(
     console.warn(`[HELD_CONSTRAINTS] unreadable for ${String(phone).slice(-8)}: ${e?.message || e}`);
     return { ...NO_CONSTRAINTS, sick };
   }
+}
+
+/**
+ * THE SAME CONSTRAINT, READ OVER A BATCH OF TURNS ALREADY IN MEMORY (#138 recurrence, 2026-09-03).
+ *
+ * readHeldConstraints above answers "what did THIS client settle today" and reaches the chat log to
+ * do it. Coach Health asks the same question about thousands of turns it has already read, so a
+ * per-turn reader would be thousands of queries for evidence it is holding. This is the same rule
+ * — foodDayIsClosed, today only — folded over rows the caller supplies.
+ *
+ * BOTH KEY PARTS ARE LOAD-BEARING. Drop the client and one person's "I'm done eating" silences
+ * everybody else; drop the day and Tuesday's closure convicts Wednesday, which is the TODAY ONLY
+ * rule this file opens with. sastDayKey owns the boundary; a hand-rolled midnight would be a
+ * second answer to it.
+ *
+ * Returns EARLIEST closure per client-day, and a lookup that answers null when there is none.
+ */
+export function foodCloseLookup(
+  turns: Array<{ userId: string | null; at: number; input: string }>,
+): (userId: string | null, at: number) => number | null {
+  const byClientDay = new Map<string, number>();
+  for (const t of turns) {
+    if (!foodDayIsClosed(t.input)) continue;
+    const key = `${t.userId}::${sastDayKey(t.at)}`;
+    const prev = byClientDay.get(key);
+    if (prev === undefined || t.at < prev) byClientDay.set(key, t.at);
+  }
+  return (userId, at) => byClientDay.get(`${userId}::${sastDayKey(at)}`) ?? null;
 }
 
 // ── WHAT AN OUTBOUND MESSAGE IS ASKING FOR ───────────────────────────────────────────────────
