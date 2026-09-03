@@ -12,6 +12,12 @@ import { isAskingNotReporting } from "../utils";
 // consults before it decides a turn owes a coaching move. Two answers to that would be the
 // defect this detector exists to find.
 import { durableDomains } from "../understanding/messy-intake";
+// AND the same for a closed food day (#138, 2026-09-03). `foodDayIsClosed` already decides what a
+// client's own words settled and `asksForFoodToday` already decides whether an outbound message
+// asks for a meal — the two readers the merged fix consults. A regex here would be a third answer
+// to a question with two owners, and regexLiterals is at 449/449 besides.
+import { foodDayIsClosed } from "../one-action";
+import { asksForFoodToday } from "../held-constraints";
 
 /**
  * THE TURN TRIAGE SURFACE — a reader for the forensic record we were already keeping.
@@ -392,6 +398,27 @@ export const COACH_HEALTH_INVARIANTS: Invariant[] = [
     expected: "every turn answers",
     holds: t => t.reply.trim().length > 0,
   },
+  /**
+   * THE CLOSED FOOD DAY, NOW WITH THE INSTANCE IT WAS MISSING (#138, 2026-09-03).
+   *
+   * The contradiction note above records that a food version of this was deleted on 2026-08-28
+   * because it had been reasoned about rather than observed. #138 is the observation: a client said
+   * they were done eating and SMART NEXT MEAL recommended food anyway, chasing a 1g protein gap.
+   * That shipped as a fix, so this watches the shape rather than trusting it stays fixed.
+   *
+   * ONE TURN, DELIBERATELY. readHeldConstraints spans today's messages; a ledger row is one
+   * exchange. Restricting the invariant to a turn whose OWN input closed the day is the exact
+   * defect shape and needs no cross-turn state to judge — and it cannot fire on a client who
+   * closed the day an hour ago, which would be a different (and much weaker) claim about evidence
+   * this row does not carry.
+   */
+  {
+    id: "closed-day-food-offer",
+    label: "The client closed the food day and the reply still asked for food",
+    layer: "Decision",
+    expected: "a closed food day is respected for the rest of today",
+    holds: t => !(foodDayIsClosed(t.input) && asksForFoodToday(t.reply)),
+  },
 ];
 
 /**
@@ -496,10 +523,16 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
 
     // ── CANDIDATES: an invariant that did not hold, clustered by the shape of the message.
     // NEVER called a defect. The queue is evidence, and adjudication stays with a person.
+    // WHICH TURNS THIS EVALUATION ACTUALLY TOUCHED, accumulated in the loops that were already
+    // running. It is what makes an "unflagged" sample meaningful further down, and it costs one
+    // Set — not a second pass and not a second query.
+    const flaggedTurnIds = new Set<string>();
+
     const clusters = new Map<string, { invariant: Invariant; signature: string; turns: typeof shaped }>();
     for (const t of shaped) {
       for (const inv of COACH_HEALTH_INVARIANTS) {
         if (inv.holds({ input: t.input, reply: t.reply, mutations: t.mutations, state: t.state })) continue;
+        flaggedTurnIds.add(String(t.row.id));
         const signature = candidateSignature(t.input);
         const key = `${inv.id}::${signature}`;
         const bucket = clusters.get(key) || { invariant: inv, signature, turns: [] };
@@ -598,6 +631,7 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
     // BEFORE THE FIX IS NOT A REGRESSION. A hit older than the merge is the failure behaving
     // exactly as it did when we found it — evidence the cut was real, not evidence it is
     // broken now. Only the after bucket may be called a regression, and the two are never summed.
+    for (const h of hits) flaggedTurnIds.add(String(h.id));
     const after = hits.filter(h => isRegression(rule, h.createdAt as any));
     const before = hits.filter(h => !isRegression(rule, h.createdAt as any));
     // THE DENOMINATOR MEANS DIFFERENT THINGS FOR THE TWO TRIGGERS, so it is not one number
@@ -645,6 +679,32 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
   // inferring it from what it is not.
   await auditRead(readBy, { days, turns: rows.length, scheduled: readBy === "coach_health_sweep" });
 
+  /**
+   * THE TURNS NOTHING FLAGGED — the half of the evidence the founder was supplying by hand.
+   *
+   * Every rule and invariant above only sees failure shapes we already know. A NEW shape is, by
+   * definition, in the turns that came back clean, and until now the only way one reached a human
+   * was somebody scrolling their own WhatsApp and choosing a screenshot. That makes the founder the
+   * transport layer, and it selects for what they happened to notice.
+   *
+   * DETERMINISTIC AND SPREAD, not "the newest twelve". `rows` is ordered newest-first, so taking
+   * the head would sample the last few minutes of a day-long window and a failure at 06:00 would
+   * never be in the packet. An even stride over the clean turns covers the window, and the same
+   * rows always produce the same sample — a reviewer comparing two packets is comparing evidence,
+   * not comparing two dice rolls. No randomness, because a random sample cannot be re-derived from
+   * the ledger when somebody asks where a turn came from.
+   *
+   * NOT A VERDICT EITHER WAY. These are turns no detector objected to; that is the whole point of
+   * reading them.
+   */
+  const UNFLAGGED_SAMPLE = 12;
+  const cleanTurns = shaped.filter(t => !flaggedTurnIds.has(String(t.row.id)));
+  const stride = Math.max(1, Math.floor(cleanTurns.length / UNFLAGGED_SAMPLE));
+  const unflaggedSample: typeof shaped = [];
+  for (let i = 0; i < cleanTurns.length && unflaggedSample.length < UNFLAGGED_SAMPLE; i += stride) {
+    unflaggedSample.push(cleanTurns[i]);
+  }
+
   const byVersion = new Map<string, number>();
     for (const t of shaped) byVersion.set(String(t.row.version || "?"), (byVersion.get(String(t.row.version || "?")) || 0) + 1);
     const builds = [...byVersion.entries()].map(([version, turns]) => ({ version, turns }))
@@ -659,6 +719,18 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
       unexercised: known.filter(k => k.exercised === 0).map(k => k.fixRef),
       candidates,
       candidateTurns: candidates.reduce((s, c) => s + c.turns, 0),
+      // Evidence waiting for a failure shape nothing watches yet. `flagged` is the denominator that
+      // makes the sample readable: 12 of 900 clean turns is a spot check, 12 of 14 is the window.
+      unflagged: {
+        flagged: flaggedTurnIds.size,
+        clean: cleanTurns.length,
+        stride,
+        sample: unflaggedSample.map(t => ({
+          turnId: t.row.id, at: t.row.createdAt, version: t.row.version,
+          input: t.input.slice(0, 300),
+          reply: t.reply.replace(/\n/g, " ").slice(0, 300),
+        })),
+      },
       builds,
       buildWarning: builds.length > 1
         ? `${builds.length} builds served turns in this window — a regression may be a turn that ran the old code`
@@ -782,6 +854,25 @@ export async function runCoachHealthSweep(days = 1): Promise<{ known: number; ca
       firstSeen: c.firstSeen, lastSeen: c.lastSeen,
       examples: (c.examples || []).slice(0, 2),
     })),
+    /**
+     * THE REVIEW PACKET (2026-09-03). Everything above is what we already knew to look for; these
+     * two fields are what makes the stored snapshot reviewable without a founder choosing what to
+     * show, and both come out of the evaluation that just ran — no second scan, no new table.
+     *
+     *   builds    which builds served the turns in this window, straight off turnLedger.version.
+     *             A candidate is only attributable if you know which code answered, and
+     *             buildWarning above says "more than one" without ever saying which.
+     *   unflagged a deterministic spread of turns NOTHING objected to, with the flagged/clean
+     *             counts that make the sample readable.
+     *
+     * Bounded on purpose: this is one scheduler_state value read whole by the sweep endpoint, so
+     * the head of each list is the standing answer and the dashboard recomputes the rest on demand.
+     * The unflagged sample is stored WHOLE rather than re-sliced — it is already capped at twelve,
+     * and trimming a stride-spread sample would quietly drop the oldest end of the window, which is
+     * the half it exists to cover.
+     */
+    builds: (brief.builds || []).slice(0, 10),
+    unflagged: brief.unflagged ?? null,
     // ref -> the newest turn we have counted for it. Replaces A1's flat seenRefs, which could say
     // "already announced" but never "already announced, and nothing has happened since".
     seen: Object.fromEntries(trimmed),
