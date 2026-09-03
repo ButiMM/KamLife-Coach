@@ -182,14 +182,25 @@ export async function handleWeightLog(
        *
        * The write and the record of the write are one fact. Worded UPDATE-with-was, matching the
        * steps owner, so a reader can tell a correction from a first weigh-in.
+       *
+       * ONLY WHEN THE DAY ACTUALLY MOVED. `mutations` is operational state — claimant stand-down
+       * and Coach Health both consume it — not logging, so a semantic no-op must not enter it. A
+       * client repeating today's 84kg has changed nothing about the day, and recording a durable
+       * write for it would stand claimants down and hand Coach Health a weigh-in that did not
+       * happen. The SQL is left alone: the row is still set to the same value, which is what it
+       * already held, and narrowing the write is a separate question from narrowing the record.
+       *
+       * A stored value that will not parse is the exception — then this update is a repair and
+       * genuinely changes the day, so it is recorded (without a "was" it cannot honestly state).
        */
       const wasKg = parseFloat(String(existingToday[0].weight ?? ""));
-      turnMutation(
-        Number.isFinite(wasKg) && wasKg !== newKg
-          ? `UPDATE weight=${newKg}kg (was ${wasKg}kg)`
-          : `UPDATE weight=${newKg}kg`,
-        "[WEIGHT_LOG]",
-      );
+      const unusable = !Number.isFinite(wasKg);
+      if (unusable || wasKg !== newKg) {
+        turnMutation(
+          unusable ? `UPDATE weight=${newKg}kg` : `UPDATE weight=${newKg}kg (was ${wasKg}kg)`,
+          "[WEIGHT_LOG]",
+        );
+      }
     } else {
       await tx.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
       turnMutation(`INSERT weight=${newKg}kg`, "[WEIGHT_LOG]");

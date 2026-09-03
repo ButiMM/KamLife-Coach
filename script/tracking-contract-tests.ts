@@ -396,13 +396,19 @@ const MUST_WRITE: [string, string][] = [
       }
     }
 
-    // 3 — AN EXACT REPEAT IS NOT A SECOND WEIGH-IN. Control: without this, "always insert" passes
-    //     case 2 by writing a duplicate row and the day would hold two conflicting weights.
+    // 3 — AN EXACT REPEAT IS NOT A SECOND WEIGH-IN, AND IS NOT A DURABLE WRITE EITHER.
+    //
+    //     This is the OVER-FIRE control, and it earns its place: the first version of the fix
+    //     recorded `UPDATE weight=84kg` for a client repeating today's number, which contradicts
+    //     this very case. `mutations` is operational state — claimant stand-down and Coach Health
+    //     both read it — so a semantic no-op entering it stands doors down for a turn that changed
+    //     nothing and hands Coach Health a weigh-in that never happened. Asserting ZERO weight
+    //     mutations, not merely zero INSERTs, is what catches that; the weaker form passed it.
     {
       const r = await weighIn(TODAY_84, "84kg");
       if (r.rowsAdded !== 0) failures.push(`Repeating today's weight added ${r.rowsAdded} rows — an unchanged repeat must stay deduped`);
-      if (r.weightMutations.some(m => /INSERT weight=/.test(m))) {
-        failures.push(`Repeating today's weight recorded an INSERT: ${JSON.stringify(r.weightMutations)} — the day gained a weigh-in that did not happen`);
+      if (r.weightMutations.length !== 0) {
+        failures.push(`Repeating today's weight recorded ${JSON.stringify(r.weightMutations)} as a durable write — nothing about the day changed, and claimant stand-down and Coach Health both read that record`);
       }
     }
   }
