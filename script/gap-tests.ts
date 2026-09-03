@@ -4132,6 +4132,26 @@ test("deploy identity does not depend on the app's own routing", () => {
   assert.equal(named.length, responses.length, "every one of them names the build");
 });
 
+test("deploy identity reports the effective engine and normalizer modes", async () => {
+  const { runningBuild } = await import("../server/routes/health");
+  const previousEngine = process.env.ENGINE_LIVE;
+  const previousNormalizer = process.env.NORMALIZER;
+  try {
+    process.env.ENGINE_LIVE = "on";
+    process.env.NORMALIZER = "off";
+    assert.deepEqual(runningBuild().runtime, { engineLive: "on", normalizer: "off" },
+      "the health snapshot must expose the effective killswitch states, not merely the build");
+
+    process.env.ENGINE_LIVE = "off";
+    delete process.env.NORMALIZER;
+    assert.deepEqual(runningBuild().runtime, { engineLive: "off", normalizer: "on" },
+      "the snapshot must report each owner's effective default state");
+  } finally {
+    if (previousEngine === undefined) delete process.env.ENGINE_LIVE; else process.env.ENGINE_LIVE = previousEngine;
+    if (previousNormalizer === undefined) delete process.env.NORMALIZER; else process.env.NORMALIZER = previousNormalizer;
+  }
+});
+
 test("the self-test does not trip its own gate", async () => {
   const V = await import("../server/brain/reply-verifier");
   const routes = readFileSync("server/routes.ts", "utf-8");

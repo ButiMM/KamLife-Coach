@@ -30,6 +30,7 @@ import { db } from "./db";
 import { schedulerState } from "../shared/schema";
 import { like, sql } from "drizzle-orm";
 import { provenanceMode } from "./verifiers/response-gate";
+import { normalizerLive } from "./normalizer-fidelity";
 
 // ── WHICH BRAIN ANSWERED? ────────────────────────────────────────────────────────────────────
 // (2026-07-30, reviewer: "why does an unconditional fallback exist at all? A system that cannot
@@ -248,7 +249,7 @@ export function capabilities(): Capability[] {
       impact: "Messy phrasing is no longer rewritten before routing, so more messages miss their handler.",
       severity: "degraded",
       fix: "NORMALIZER is set to off in Railway — unset it to resume.",
-      ok: () => (process.env.NORMALIZER || "").toLowerCase() !== "off",
+      ok: () => normalizerLive(),
     },
 
     // ── COSMETIC: it still works, it just looks worse. ──────────────────────────────────────
