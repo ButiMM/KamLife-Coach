@@ -11,7 +11,7 @@ import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide } from "./exercise-media";
 import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, getDayType } from "./programme";
-import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD, classifyIntent, type ClassifiedIntent, type IntentClassification } from "./gpt";
+import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, classifyIntent, type ClassifiedIntent, type IntentClassification } from "./gpt";
 import { calculateTargets, getDailyStepContext } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { saysNotWorking } from "./despair";
