@@ -825,6 +825,59 @@ test("explicitMealSlot: the J1 message keeps its breakfast, whatever the clock s
 });
 
 // ============================================================
+// "THIS MORNING" IS A SLOT CLAIM (#174 — first divergence found by the #170 Journey Lab)
+//
+// Through the real front door and real PostgreSQL, "This morning I had 3 eggs and 2 slices of
+// toast" was written with meal_label = 'snack': nothing recognised the phrase, so extractMealLabel
+// asked the send clock, which knows when the message arrived and nothing about when the food was
+// eaten. parseMealDate has read "this morning" as 8am SAST for months — the meaning existed and
+// simply never reached the slot.
+// ============================================================
+
+test("explicitMealSlot: the Journey Lab message — 'This morning' is breakfast", () => {
+  assert.equal(explicitMealSlot("This morning I had 3 eggs and 2 slices of toast"), "breakfast");
+});
+
+test("explicitMealSlot: a named day's morning is breakfast too, and says nothing about the date", () => {
+  assert.equal(explicitMealSlot("Yesterday morning I had eggs"), "breakfast");
+  assert.equal(explicitMealSlot("Monday morning I had oats"), "breakfast");
+  assert.equal(explicitMealSlot("I had a banana in the morning"), "breakfast");
+});
+
+// THE ORDER IN THAT FUNCTION IS LOAD-BEARING, and this is the control that proves the new branch
+// did not disturb it. An explicitly named other meal sits ABOVE the bare forms, so a message
+// carrying both a morning phrase and a named meal must still resolve to the named meal — exactly
+// as it did before, when the morning phrase was invisible.
+test("explicitMealSlot: a named meal still outranks a morning phrase in the same message", () => {
+  assert.equal(explicitMealSlot("This morning I had eggs, and for lunch I had rice"), "lunch");
+  assert.equal(explicitMealSlot("I skipped breakfast this morning and had a snack"), "snack");
+});
+
+// OVER-FIRE. The claim is about a phrase naming the morning PERIOD, not about the word appearing.
+test("explicitMealSlot: 'morning' with no temporal determiner is not a slot claim", () => {
+  assert.equal(explicitMealSlot("Morning coach, I had rice"), null);
+  assert.equal(explicitMealSlot("I had chicken and rice"), null);
+});
+
+// DELIBERATELY NOT WIDENED (#174 control 3). Afternoon spans lunch and the snack after it, so a
+// slot for it would be invented rather than surfaced. It still falls to clock inference.
+test("explicitMealSlot: 'this afternoon' is NOT mapped to lunch", () => {
+  assert.equal(explicitMealSlot("This afternoon I had a sandwich"), null);
+  assert.equal(explicitMealSlot("This evening I had rice"), null);
+});
+
+// THE SLOT AND THE DAY ARE DIFFERENT QUESTIONS WITH DIFFERENT OWNERS, and the new branch must not
+// blur them: parseMealDate keeps answering "which day", explicitMealSlot only "which meal".
+test("'yesterday morning' keeps yesterday's date while gaining the breakfast slot", async () => {
+  const { parseMealDate, sastDayKey } = await import("../server/sast");
+  const at = parseMealDate("Yesterday morning I had eggs");
+  assert.ok(at, "parseMealDate must still resolve a date for this phrase");
+  assert.notEqual(sastDayKey(at!), sastDayKey(new Date()), "it must not become today");
+  assert.equal(sastDayKey(at!), sastDayKey(new Date(Date.now() - 86_400_000)));
+  assert.equal(explicitMealSlot("Yesterday morning I had eggs"), "breakfast");
+});
+
+// ============================================================
 // THE REALITY HARNESS MUST NOT PAGE A HUMAN (Reality run, 2026-08-12)
 //
 // Journey 4 says "I missed gym on Monday because my back was sore". detectEscalation read
