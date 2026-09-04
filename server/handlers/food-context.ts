@@ -131,6 +131,29 @@ async function getStreakNote(userId: string, streak: number, name: string): Prom
 
 type HandleMessageFn = (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
 
+/**
+ * ADJUSTED FOODS -> THE DURABLE ROW'S ITEMS. One shape, one place (#160, 2026-09-04).
+ *
+ * This mapping was written out twice in this file — once for the single-meal row and once per
+ * eating event — and the multi-day row, which had the same adjusted foods in hand, wrote `items:
+ * []` instead. Three spellings of one rule, one of them empty. Naming it costs nothing and is the
+ * smaller change: no new owner, and the two existing copies collapse into it.
+ *
+ * Quantity is carried as `grams` because that is what the existing rows carry; kcal and protein
+ * are the ADJUSTED values, so an item's numbers always add up to the row total computed from the
+ * same objects.
+ */
+function itemsFromAdjusted(foods: any[]) {
+  return (foods || []).map((f: any) => ({
+    name: f.name,
+    grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
+    kcal: f.adjustedCalories,
+    protein: f.adjustedProtein,
+    category: f.category,
+    origin: f.origin || "db",
+  }));
+}
+
 export async function handleFoodContext(ctx: {
   phone: string;
   message: string;
@@ -774,7 +797,15 @@ export async function handleFoodContext(ctx: {
       for (const p of multiPlan) {
         const c = await commitFoodLog({
           userId: user.id, phone, rawMessage: p.raw, source: "text",
-          kcalInt: p.kcal, proteinInt: p.prot, carbsInt: 0, fatInt: 0, items: [],
+          // THE SENTENCE REMEMBERED WHAT THEY ATE AND THE LEDGER FORGOT IT (#160, 2026-09-04).
+          // p.foods is the SAME adjusted set that produced p.kcal/p.prot two lines up and names
+          // the foods in the reply below; only the durable row was handed `items: []`. So a
+          // multi-day catch-up left three correctly dated, correctly totalled rows with no
+          // per-item identity — on exactly the path a later "Tuesday wasn't rice" needs it.
+          // Nothing is reparsed here: the same objects, through the same mapping the single-meal
+          // and event-bucket rows already use.
+          kcalInt: p.kcal, proteinInt: p.prot, carbsInt: 0, fatInt: 0,
+          items: itemsFromAdjusted(p.foods),
           mealLabel: extractMealLabel(p.raw, p.date, { kcal: p.kcal, protein: p.prot }, user, slotCtxMulti),
           loggedAt: p.date, sourceMessageId: eventGroupId,
         });
@@ -1060,14 +1091,7 @@ export async function handleFoodContext(ctx: {
       const { carbs: totalCarbs, fat: totalFat } = carbsFatOf(allAdjustedFoods);
       const firstSegLabel = mealSegments.find(s => s.label)?.label
         || extractMealLabel(message, undefined, { kcal: totalCals, protein: Math.round(totalProtein) }, user, await getSlotContext(user.id));
-      const scannerItems = allAdjustedFoods.map(f => ({
-        name: f.name,
-        grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
-        kcal: f.adjustedCalories,
-        protein: f.adjustedProtein,
-        category: f.category,
-        origin: f.origin || "db",
-      }));
+      const scannerItems = itemsFromAdjusted(allAdjustedFoods);
       // ── ONE ROW PER EATING EVENT (2026-08-17, migration 0004) ───────────────────────────────
       // "eggs in the morning, pap at lunch" is TWO events, stored as one row with one date and one
       // label. Each event now gets its own row, date and label, linked by sourceMessageId so the
@@ -1106,12 +1130,7 @@ export async function handleFoodContext(ctx: {
             rawMessage: bucket.text.slice(0, 1000),
             source: "sa_scanner",
             kcalInt: kcal, proteinInt: prot, carbsInt: carbs, fatInt: fat,
-            items: bucket.foods.map((f: any) => ({
-              name: f.name,
-              grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
-              kcal: f.adjustedCalories, protein: f.adjustedProtein,
-              category: f.category, origin: f.origin || "db",
-            })),
+            items: itemsFromAdjusted(bucket.foods),
             mealLabel: bucket.label
               || extractMealLabel(bucket.text, ownDate, { kcal, protein: prot }, user, slotCtx),
             loggedAt: ownDate,

@@ -1454,6 +1454,67 @@ const MUST_WRITE: [string, string][] = [
       }
 
       /**
+       * #160 — A MULTI-DAY CATCH-UP MUST LEAVE ITEMS BEHIND, NOT JUST TOTALS.
+       *
+       * The multi-day path already had the correct per-day adjusted foods in hand: it used them to
+       * compute each row's kcal/protein and to name the foods in the reply. It then handed the
+       * durable row `items: []`. So three correctly dated, correctly totalled rows carried no
+       * per-item identity — on exactly the path a later "Tuesday wasn't rice" needs it.
+       *
+       * Graded on the rows the real turn writes, not on the reply, because the reply was already
+       * right and that is what made this invisible.
+       */
+      {
+        freshTurn();
+        g.__KAMLIFE_STUB_USER = { ...USER };
+        g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>();
+        g.__KAMLIFE_STUB_WRITES = [];
+        await handleMessage(USER.phoneNumber,
+          "Monday I had eggs and toast. Tuesday I had rice and chicken. Wednesday I had pap and livers.").catch(() => "");
+        const rows = (g.__KAMLIFE_STUB_WRITES || []).filter((w: any) => w.table === schema.mealLogs).map((w: any) => w.values);
+        delete g.__KAMLIFE_STUB_ROWS;
+
+        if (rows.length !== 3) {
+          failures.push(`A three-day catch-up wrote ${rows.length} food rows, expected one per named day`);
+        } else {
+          const groups = new Set(rows.map((r: any) => String(r.sourceMessageId || "")));
+          if (groups.size !== 1) failures.push(`The three days did not share one event group: ${JSON.stringify([...groups])}`);
+          const days = rows.map((r: any) => new Date(r.loggedAt).toDateString());
+          if (new Set(days).size !== 3) failures.push(`The three rows are not on three distinct days: ${JSON.stringify(days)}`);
+
+          for (const r of rows as any[]) {
+            const items = Array.isArray(r.items) ? r.items : [];
+            const day = new Date(r.loggedAt).toDateString();
+            if (items.length === 0) {
+              failures.push(`${day} was logged with no structured items — the reply names the foods and the ledger forgets them, so a later named correction has nothing to edit`);
+              continue;
+            }
+            // The item numbers must be the SAME adjusted objects the row total came from. If they
+            // ever disagree, the row and the reply were computed from different food sets.
+            const kcal = items.reduce((t: number, i: any) => t + (i.kcal || 0), 0);
+            const prot = items.reduce((t: number, i: any) => t + (i.protein || 0), 0);
+            if (kcal !== r.kcalInt || prot !== r.proteinInt) {
+              failures.push(`${day}: items sum to ${kcal} kcal / ${prot}g but the row says ${r.kcalInt} / ${r.proteinInt} — the durable items are not the foods that produced the total`);
+            }
+            if (items.some((i: any) => !i.name || i.grams === undefined || i.category === undefined)) {
+              failures.push(`${day}: an item is missing the shape the ordinary scanner rows carry: ${JSON.stringify(items[0])}`);
+            }
+          }
+
+          // NO CROSS-DAY BLEED. A food named on one day may not appear on another.
+          const named = (r: any) => (r.items || []).map((i: any) => String(i.name).toLowerCase()).join(" ");
+          const [mon, tue, wed] = rows.map(named);
+          if (/rice/.test(mon) || /rice/.test(wed)) {
+            failures.push(`Tuesday's rice bled into another day — Monday: "${mon}", Wednesday: "${wed}"`);
+          }
+          if (/liver/.test(mon) || /liver/.test(tue)) {
+            failures.push(`Wednesday's liver bled into another day — Monday: "${mon}", Tuesday: "${tue}"`);
+          }
+          if (!/rice/.test(tue)) failures.push(`Tuesday lost its own food: "${tue}"`);
+        }
+      }
+
+      /**
        * #152 — USER AND DAY ISOLATION, on the reader Coach Health uses.
        *
        * The reversal must be as narrowly scoped as the closure it cancels: one person changing
