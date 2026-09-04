@@ -93,31 +93,8 @@ await say("Monday wasn't toast, it was rice.");
 const afterAdj = await rows();
 const monAfter = day(afterAdj, "Mon")[0], wedAfter = day(afterAdj, "Wed")[0];
 chk(afterAdj.length === 3, `adjacent-day correction added no row (${afterAdj.length})`);
-/**
- * KNOWN, NOT FIXED HERE — a SECOND divergence, in a different owner.
- *
- * #164 asked for the first divergence only, and that one (the named-day search window in
- * applyIdentityCorrection) is fixed and proved above. This case is reported rather than asserted
- * so it cannot be lost, and so a red here does not hide the contract that IS proved.
- *
- * "Monday wasn't toast, it was rice." does not reach applyIdentityCorrection at all: a different
- * owner claims it first and logs
- *
- *     [MEAL_CORRECT] … removed=[] added=[rice] day=Wed Sep 02→Wednesday kcal=593→813
- *
- * so the correction lands on the NEWEST row rather than the day the client named, and it ADDS the
- * new food instead of replacing the denied one. Monday keeps its toast; Wednesday gains rice.
- */
-const monMoved = !!monAfter && monAfter.id === monBefore.id && monAfter.corrected === true;
-const wedIntact = snap(wedAfter) === wedBefore;
-if (!monMoved || !wedIntact) {
-  REAL(`\n  ⚠ KNOWN, NOT FIXED HERE — a named-day correction on an ADJACENT day is claimed by a`);
-  REAL(`    different owner ([MEAL_CORRECT]) which targets the newest row and ADDS rather than`);
-  REAL(`    replaces. "Monday wasn't toast, it was rice." left Monday untouched and gave Wednesday`);
-  REAL(`    the rice. That is the NEXT divergence, not this one — #164 scopes to the first.`);
-} else {
-  chk(true, `adjacent-day correction targets the named day`);
-}
+chk(!!monAfter && monAfter.id === monBefore.id && monAfter.corrected === true, `Monday's own row was the one updated`);
+chk(snap(wedAfter) === wedBefore, `Wednesday, which shares a food name, is untouched`);
 show("AFTER ADJACENT-DAY CORRECTION", afterAdj);
 
 REAL(`\npg-correction-acceptance: ${failed === 0 ? "GREEN — all checks passed" : `RED — ${failed} check(s) failed`}`);

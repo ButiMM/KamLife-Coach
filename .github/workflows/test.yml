@@ -111,7 +111,11 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Apply the project schema to the ephemeral database
-        run: npx drizzle-kit push --force
+      # COMMITTED MIGRATIONS, THE SAME ONES A DEPLOY APPLIES. check-schema-safety forbids the
+      # schema-sync shortcut in any workflow, for the reason it names: a bad sync corrupts the
+      # day-ledger and the only way back is the 6-hourly backup. It also scans this file as text,
+      # so the forbidden command is not written here even in a comment.
+      - name: Apply committed migrations to the ephemeral database
+        run: npm run db:migrate
       - name: Targeted multi-day food correction on real PostgreSQL
         run: npx tsx script/pg-correction-acceptance.ts

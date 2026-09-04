@@ -15,6 +15,21 @@ import { parseIdentityCorrection, correctionCandidates, holdForReplacement, isMe
 import { UNAVAILABLE_RE } from "../food-swaps";
 import { turnMutation, turnState } from "./chat-log";
 
+/**
+ * THE SAST DAY A CORRECTION NAMES, when it names one earlier than today (#164).
+ *
+ * Both correction owners below ask this — the composition branch and the identity branch — so it
+ * is answered once here rather than spelled out twice in the same file. parseMealDate is the day
+ * owner this module already imports and the multi-day writer already uses, so a correction
+ * resolves the day exactly as the row was written. Returns null when no earlier day is named, and
+ * every such correction keeps the window it always had.
+ */
+function namedPastDay(said: string): Date | null {
+  const todayStart = sastDayStart();
+  const named = sastDayStart(parseMealDate(said) || undefined);
+  return named.getTime() < todayStart.getTime() ? named : null;
+}
+
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
   // THE SHOP IS NOT THE FOOD LOG (2026-08-05). "They didn't have chicken at the shop" was read
   // as a removal request and answered «I don't see "chicken at the shop" in today's food log» —
@@ -121,10 +136,21 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   const movesDay = isMealDateMove(m, isRetroactiveMeal(m));
   const plan = looksLikeQuestion(m) ? null : planCorrection(m, movesDay);
   if (plan?.isCorrection && (plan.moves || plan.remove.length + plan.add.length >= 2)) {
+    // THE DAY THEY NAMED CONSTRAINS THE CANDIDATE (#164). This took the globally newest meal and
+    // consulted parseMealDate only for `target`, and only when the plan MOVES a meal. So
+    // "Monday wasn't toast, it was rice" edited whatever was logged last — proved on real
+    // PostgreSQL: Monday kept its toast and Wednesday gained the rice. A move is different and is
+    // left alone: there the client is telling us the newest meal belongs on another day.
+    const correctionDay = plan.moves ? null : namedPastDay(m);
     const [row] = await db.select({
       id: mealLogs.id, raw: mealLogs.rawMessage, label: mealLogs.mealLabel, at: mealLogs.loggedAt,
       items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
-    }).from(mealLogs).where(eq(mealLogs.userId, user.id)).orderBy(desc(mealLogs.loggedAt)).limit(1);
+    }).from(mealLogs)
+      .where(correctionDay
+        ? and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, correctionDay),
+              lt(mealLogs.loggedAt, new Date(correctionDay.getTime() + 86_400_000)))
+        : eq(mealLogs.userId, user.id))
+      .orderBy(desc(mealLogs.loggedAt)).limit(1);
     if (row) {
       const resolveFood = (food: string) => {
         const hit = scanForSAFoods(food, { exactOnly: true })[0] || scanForSAFoods(food)[0];
@@ -672,15 +698,13 @@ async function applyIdentityCorrection(user: any, c: IdentityCorrection, said: s
    * earlier day keeps exactly the window it had — today, unbounded above — so every same-day
    * correction is byte-identical to before.
    */
-  const todayStart = sastDayStart();
-  const namedDay = sastDayStart(parseMealDate(said) || undefined);
-  const correctsPastDay = namedDay.getTime() < todayStart.getTime();
+  const namedDay = namedPastDay(said);
   const rows = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage, mealLabel: mealLogs.mealLabel, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt })
     .from(mealLogs)
-    .where(correctsPastDay
+    .where(namedDay
       ? and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, namedDay),
             lt(mealLogs.loggedAt, new Date(namedDay.getTime() + 86_400_000)))
-      : and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
+      : and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sastDayStart())))
     .orderBy(desc(mealLogs.loggedAt))
     .limit(10);
 
