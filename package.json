@@ -39,7 +39,8 @@
     "check:names": "tsx script/check-names.ts",
     "check:arch": "tsx script/check-architecture.ts",
     "test:reality": "tsx script/reality-test.ts",
-    "test:acceptance": "tsx script/acceptance-hold.ts"
+    "test:acceptance": "tsx script/acceptance-hold.ts",
+    "test:journeys": "tsx script/journey-lab.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
