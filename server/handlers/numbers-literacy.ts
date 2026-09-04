@@ -152,7 +152,22 @@ export async function handleNumbersLiteracy(ctx: { message: string; m: string; u
   // ---- CALORIE CONFUSION — the client is already number-free by default; if they
   // somehow have figures on (opted in, then overwhelmed) turn them off, and either
   // way give the reassuring data-bundle explanation. Counting is OUR job, never theirs.
-  const isCalorieConfusion = /\b(what(?:'?s| is| are)?\s+(?:a |the )?calories?\b|don.?t (understand|get|know)( what)? (calories|kcal|this number|these numbers|the numbers)|calories?.*confus|confus.*calories?|too many numbers|what does (that|this|the number|kcal|calories?) mean|what(?:'?s| is)?\s+a?\s*kcal|explain (the )?calories?|i don.?t count calories|never counted calories)\b/i.test(m)
+  /**
+   * A BARE PRONOUN NAMES NO SUBJECT (#114 P1, 2026-09-03, founder).
+   *
+   * This alternation used to read `what does (that|this|the number|kcal|calories?) mean`, so
+   * "what does that mean" claimed the turn unconditionally — with no calorie word anywhere in it.
+   * A client who had just been told "7.0kg to go: 92kg now, 85kg the goal" and asked what that
+   * meant was answered: "you never have to understand calories or count anything." The active
+   * subject was weight; the coach delivered a lecture on a subject nobody had raised.
+   *
+   * "the number", "kcal" and "calories" say what they are about and still claim. "that" and
+   * "this" say nothing, so they are not this handler's to answer — a follow-up whose subject is
+   * whatever was just discussed belongs to the path that can see the conversation. The second
+   * clause below is unchanged and still catches a pronoun beside a real calorie word
+   * ("I'm confused, what does that mean about my calories").
+   */
+  const isCalorieConfusion = /\b(what(?:'?s| is| are)?\s+(?:a |the )?calories?\b|don.?t (understand|get|know)( what)? (calories|kcal|this number|these numbers|the numbers)|calories?.*confus|confus.*calories?|too many numbers|what does (the number|the numbers|kcal|calories?) mean|what(?:'?s| is)?\s+a?\s*kcal|explain (the )?calories?|i don.?t count calories|never counted calories)\b/i.test(m)
     || (/\bcalor|kcal\b/i.test(m) && /\b(confused|lost|don.?t understand|makes? no sense|too complicated|i.?m not good with numbers)\b/i.test(m));
   if (isCalorieConfusion) {
     if (isFull) {

@@ -598,8 +598,27 @@ const CASES: Case[] = [
     const SESSION_SERVE = /Reply \*DONE\* when finished|Next Session \(Day/i;
     const SESSION_LOGGED = /Session \d+ (?:logged|—|in)\b|First workout done|got it, logged to/i;
     const FOOD_LOGGED = /\*Food logged|Food logged ✅|Running total today|Meal total:/i;
+    const CALORIE_LECTURE = /you never have to understand calories or count anything/i;
+    const CONFUSION_LEAD = /here'?s the one that matters/i;
     const x = (name: string, msg: string, c: Partial<Case> = {}): Case => ({ name: `xintent: ${name}`, msg, ...c });
     return [
+      // A BARE PRONOUN NAMES NO SUBJECT (#114 P1, 2026-09-03, founder). "what does that mean"
+      // was claimed by the calorie explainer with no calorie word in it, so a client who had just
+      // been told "7.0kg to go: 92kg now, 85kg the goal" and asked what that meant was answered
+      // "you never have to understand calories or count anything" — a lecture on a subject nobody
+      // had raised. Without a "?" it was then read as CONFUSION and answered with the day's action.
+      // Two owners, one cause: a follow-up whose subject is whatever was just discussed belongs to
+      // the path that can see the conversation, not to a topic handler or to the daily ladder.
+      x("bare pronoun follow-up is not a calorie question", "what does that mean",
+        { reject: [CALORIE_LECTURE, CONFUSION_LEAD] }),
+      x("bare pronoun follow-up, with a question mark", "what does this mean?",
+        { reject: [CALORIE_LECTURE, CONFUSION_LEAD] }),
+      // OVER-FIRE CONTROLS. The explainer still owns a question that says what it is about —
+      // without these, "never claim" would pass the two cases above.
+      x("naming the number still reaches the explainer", "what does the number mean?",
+        { expect: [CALORIE_LECTURE] }),
+      x("a pronoun beside a real calorie word still reaches it",
+        "I am confused about calories, what does that mean", { expect: [CALORIE_LECTURE] }),
       // "flu" in the sentence, but nobody here is sick — template must stay holstered
       x("flu going around at work", "The flu is going around at work",
         { reject: [SICK_TPL] }),
