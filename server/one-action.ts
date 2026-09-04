@@ -434,11 +434,31 @@ export function foodDayIsClosed(text: string): boolean {
  * commitment shape cannot do that — a closure negates the verb, and `I'm not eating` never
  * matches `I'm` immediately followed by the act.
  *
+ * TWO WAYS THE COMMITMENT SHAPE ALONE STILL GOT IT WRONG (CTO hold on #155). Both are cases where
+ * the sentence carries the words of a decision to eat while saying the opposite of one about TODAY:
+ *
+ *     "I'm having dinner tomorrow"     a decision about ANOTHER DAY. readHeldConstraints filters by
+ *                                      WHEN a message was sent, never by which day it is about, so
+ *                                      tomorrow's plan would have reopened tonight. The guard is
+ *                                      the one asksForTrainingToday already uses for this exact
+ *                                      question: a named future day, with nothing anchoring it to
+ *                                      today, is not about today.
+ *     "I'm eating nothing else today"  a CLOSURE wearing the positive prefix. The act is followed
+ *                                      by a zero quantity, so the sentence commits to eating none —
+ *                                      reading it as a reopening would let the plainest restatement
+ *                                      of the constraint cancel the constraint.
+ *
  * Named without looksLike* for the same reason as its sibling: a DayState input, not a router.
  */
 export function foodDayIsReopened(text: string): boolean {
   const t = String(text || "");
   if (!t.trim()) return false;
+  // A decision about another day is not a decision about this one — unless the sentence also
+  // anchors itself to today, in which case the client is talking about both.
+  if (/\b(?:tomorrow|2moro|2morrow|next\s+week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(t)
+      && !/\b(?:today|tonight|now|this\s+(?:evening|afternoon|morning))\b/i.test(t)) return false;
+  // "eating nothing else today" is the constraint restated, not withdrawn.
+  if (/\b(?:eat|eating|hav(?:e|ing))\s+(?:absolutely\s+)?(?:no\s+more|nothing|no\s+food|zero)\b/i.test(t)) return false;
   return /\b(?:i'?m|i am|i'?ll|i will|i'?ve decided to|decided to)\s+(?:going\s+to\s+|gonna\s+)?(?:eat(?:ing)?\b|hav(?:e|ing)\s+(?:a\s+|some\s+|my\s+|the\s+)?(?:dinner|supper|lunch|breakfast|brunch|meal|food|something(?:\s+to\s+eat)?)\b)/i.test(t);
 }
 

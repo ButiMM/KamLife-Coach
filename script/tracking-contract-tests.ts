@@ -1359,6 +1359,27 @@ const MUST_WRITE: [string, string][] = [
         if (DAY_CLOSED.test(await askAfter(["did 9000 steps"]))) {
           failures.push(`A day the client never closed came back closed — the door is standing down on its own`);
         }
+        // 7 — A DECISION ABOUT ANOTHER DAY IS NOT A DECISION ABOUT THIS ONE (CTO hold on #155).
+        //     readHeldConstraints filters by WHEN a message was sent, never by which day the
+        //     sentence is about, so tomorrow's plan carried the full commitment shape and would
+        //     have reopened tonight.
+        if (!DAY_CLOSED.test(await askAfter(["I'm having dinner tomorrow", CLOSE]))) {
+          failures.push(`"I'm having dinner tomorrow" reopened TODAY's closed food day — a plan for another day cancelled a constraint about this one`);
+        }
+        if (!DAY_CLOSED.test(await askAfter(["I'll eat tomorrow", CLOSE]))) {
+          failures.push(`"I'll eat tomorrow" reopened today's closed food day — the same defect in its plainest form`);
+        }
+        // 8 — A ZERO-FOOD STATEMENT IS THE CONSTRAINT RESTATED, NOT WITHDRAWN. "I'm eating nothing
+        //     else today" carries the positive prefix "I'm eating", so the commitment shape alone
+        //     read the plainest restatement of the closure as its cancellation.
+        if (!DAY_CLOSED.test(await askAfter(["I'm eating nothing else today", CLOSE]))) {
+          failures.push(`"I'm eating nothing else today" reopened the closed food day — a commitment to eat NOTHING was read as a decision to eat`);
+        }
+        // 9 — AND THE GENUINE REVERSAL STILL WORKS. Without this, both guards could be "never
+        //     reopen" and cases 7 and 8 would pass while the feature was gone.
+        if (DAY_CLOSED.test(await askAfter(["I'm having dinner tonight after all", CLOSE]))) {
+          failures.push(`A genuine same-day reversal stopped working once the future-day and zero-food guards were added — the guards took the feature with them`);
+        }
       }
 
       /**
@@ -1391,6 +1412,22 @@ const MUST_WRITE: [string, string][] = [
         const sameDay = foodCloseLookup([closed(USER.id, d0 + 60_000), opened(USER.id, d0 + 120_000)]);
         if (sameDay(USER.id, d0 + 180_000) !== null) {
           failures.push(`A same-day reopening did not clear the closure in the reader Coach Health uses — the detector and the product would disagree about the same client`);
+        }
+
+        // COACH HEALTH MUST AGREE WITH THE PRODUCT ON THE TWO OVER-FIRES (CTO hold on #155). If it
+        // did not, a reply that the product correctly withheld would still be judged against an
+        // "open" day — or worse, a correct closed-day reply would be filed as a violation.
+        for (const [label, said] of [
+          ["a plan for tomorrow", "I'm having dinner tomorrow"],
+          ["a commitment to eat nothing", "I'm eating nothing else today"],
+        ] as const) {
+          const look = foodCloseLookup([
+            closed(USER.id, d0 + 60_000),
+            { userId: USER.id, at: d0 + 120_000, input: said },
+          ]);
+          if (look(USER.id, d0 + 180_000) === null) {
+            failures.push(`Coach Health treated ${label} ("${said}") as a reopening — the detector and the product now disagree about whether this client's day is closed`);
+          }
         }
       }
 
