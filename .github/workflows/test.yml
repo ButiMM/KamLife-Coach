@@ -58,7 +58,8 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-      - run: npm ci
+      - id: dependencies
+        run: npm ci
       - name: Type check
         run: npm run check
       - name: Test suite
@@ -75,5 +76,6 @@ jobs:
       # SLICE 5 DELETES the `continue-on-error` line. A fully green gauntlet is the gate on the
       # live flip; from that moment on, red is a broken build like anything else.
       - name: Gauntlet (reporting only until Slice 5)
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: npm run gauntlet
         continue-on-error: true
