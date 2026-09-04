@@ -119,3 +119,5 @@ jobs:
         run: npm run db:migrate
       - name: Targeted multi-day food correction on real PostgreSQL
         run: npx tsx script/pg-correction-acceptance.ts
+      - name: Safety early-return turn attribution on real PostgreSQL
+        run: npx tsx script/pg-safety-turn-acceptance.ts
