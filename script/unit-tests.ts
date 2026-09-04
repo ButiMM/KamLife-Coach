@@ -7859,6 +7859,44 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.equal(parseIdentityCorrection("not brown, it was white")?.right, "white");
   });
 
+  // THE CONTRACTION IS THE COMMON FORM (#158, 2026-09-04, recovered-contract replay). Every
+  // pattern in this owner, and its own guard, look for the WORD "not". "wasn't" does not contain
+  // it, so the plainest way a person says this returned null, the owner never claimed the turn,
+  // and the message fell through to the ordinary food logger — which logged BOTH the corrected
+  // food AND the one the client had just denied onto the named day. Reproduced through the real
+  // door on current main before the fix: a second INSERT on Tuesday carrying pap AND rice.
+  test("identity correction: a contraction is the same correction as the spelled-out form", () => {
+    for (const said of [
+      "Tuesday wasn't rice, it was pap",
+      "Tuesday was not rice, it was pap",
+    ]) {
+      const c = parseIdentityCorrection(said);
+      assert.ok(c, `must parse: "${said}"`);
+      assert.equal(c!.right, "pap", said);
+      assert.equal(c!.wrong, "rice", said);
+    }
+    assert.deepEqual(
+      parseIdentityCorrection("Tuesday wasn't rice, it was pap"),
+      parseIdentityCorrection("Tuesday was not rice, it was pap"),
+      "the two spellings are one correction — if they ever differ, the owner has two answers again",
+    );
+    assert.equal(parseIdentityCorrection("it wasn't tuna, it was pilchards")?.right, "pilchards");
+  });
+
+  test("identity correction: OVER-FIRE — a contraction is not automatically a food swap", () => {
+    // The guard that stops the expansion turning every negated sentence into a correction. These
+    // all contain an expanded "not" after the change and must still fall through.
+    for (const said of [
+      "I didn't train today",
+      "it wasn't that bad",
+      "I wasn't hungry",
+      "that isn't going to happen",
+      "I don't feel well",
+    ]) {
+      assert.equal(parseIdentityCorrection(said), null, `must not read as a food swap: "${said}"`);
+    }
+  });
+
   test("identity correction: NOT fired by ordinary 'not' sentences", () => {
     for (const msg of [
       "I'm not sure what to eat", "not today", "why not", "I'm not hungry",

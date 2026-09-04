@@ -53,7 +53,20 @@ function clean(s: string): string {
  * one — "I'm not sure", "not today", "I did not train" and quantity corrections all fall through.
  */
 export function parseIdentityCorrection(message: string): IdentityCorrection | null {
-  const s = (message || "").trim();
+  /**
+   * THE CONTRACTION IS THE COMMON FORM (#158, 2026-09-04). Every pattern below, and the guard
+   * on the next line, look for the WORD `not`. "wasn't" does not contain it, so
+   *
+   *     "Tuesday wasn't rice, it was pap"
+   *
+   * — the plainest way a person says this — returned null, this owner never claimed the turn, and
+   * the message fell through to the ordinary food logger, which logged BOTH pap and the rice the
+   * client had just denied onto Tuesday. Reproduced on current main before this change.
+   *
+   * Expanded once, here, rather than by teaching four regexes a second spelling: the shapes are
+   * unchanged and there is still one place that decides what a correction looks like.
+   */
+  const s = (message || "").trim().replace(/\b(was|were|is|are|does|did|do)n[''\u2019]t\b/gi, "$1 not");
   if (!s || !/\bnot\b/i.test(s)) return null;
   if (NOT_A_SWAP.test(s)) return null;
 
