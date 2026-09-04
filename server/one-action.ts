@@ -411,6 +411,57 @@ export function foodDayIsClosed(text: string): boolean {
   return false;
 }
 
+/**
+ * THE REVERSAL OF THAT CONSTRAINT — they have decided to eat after all (#152, 2026-09-03).
+ *
+ * A closure is held for the rest of the SAST day, which is right: "I'm done eating today" said at
+ * 19:55 must still silence a dinner suggestion at 20:10. But it had no way back, so a client who
+ * closed the day and then genuinely ate was refused for the rest of it, every time they asked.
+ *
+ * A STATED DECISION TO EAT, not a mention of food. The distinction is the whole of this function
+ * and it is the same one foodDayIsClosed makes above: the shape is (a first-person commitment) +
+ * (the act of eating or a meal to eat), so
+ *
+ *     "actually I changed my mind, I'm having dinner"   reopens   — a decision
+ *     "I'm eating"                                      reopens
+ *     "what should I eat?"                              does NOT  — a question, no commitment
+ *     "thinking about dinner"                           does NOT  — considering is not deciding
+ *     "I'm having a bad day"                            does NOT  — `having` needs a meal after it
+ *
+ * NO REVERSAL-MARKER FORM. "changed my mind" / "actually" beside any eating word was the obvious
+ * second clause and it is deliberately absent: "actually I'm not eating anymore" carries both the
+ * marker and the verb, so that clause would have read a plainer CLOSURE as a reopening. The
+ * commitment shape cannot do that — a closure negates the verb, and `I'm not eating` never
+ * matches `I'm` immediately followed by the act.
+ *
+ * TWO WAYS THE COMMITMENT SHAPE ALONE STILL GOT IT WRONG (CTO hold on #155). Both are cases where
+ * the sentence carries the words of a decision to eat while saying the opposite of one about TODAY:
+ *
+ *     "I'm having dinner tomorrow"     a decision about ANOTHER DAY. readHeldConstraints filters by
+ *                                      WHEN a message was sent, never by which day it is about, so
+ *                                      tomorrow's plan would have reopened tonight. The guard is
+ *                                      the one asksForTrainingToday already uses for this exact
+ *                                      question: a named future day, with nothing anchoring it to
+ *                                      today, is not about today.
+ *     "I'm eating nothing else today"  a CLOSURE wearing the positive prefix. The act is followed
+ *                                      by a zero quantity, so the sentence commits to eating none —
+ *                                      reading it as a reopening would let the plainest restatement
+ *                                      of the constraint cancel the constraint.
+ *
+ * Named without looksLike* for the same reason as its sibling: a DayState input, not a router.
+ */
+export function foodDayIsReopened(text: string): boolean {
+  const t = String(text || "");
+  if (!t.trim()) return false;
+  // A decision about another day is not a decision about this one — unless the sentence also
+  // anchors itself to today, in which case the client is talking about both.
+  if (/\b(?:tomorrow|2moro|2morrow|next\s+week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(t)
+      && !/\b(?:today|tonight|now|this\s+(?:evening|afternoon|morning))\b/i.test(t)) return false;
+  // "eating nothing else today" is the constraint restated, not withdrawn.
+  if (/\b(?:eat|eating|hav(?:e|ing))\s+(?:absolutely\s+)?(?:no\s+more|nothing|no\s+food|zero)\b/i.test(t)) return false;
+  return /\b(?:i'?m|i am|i'?ll|i will|i'?ve decided to|decided to)\s+(?:going\s+to\s+|gonna\s+)?(?:eat(?:ing)?\b|hav(?:e|ing)\s+(?:a\s+|some\s+|my\s+|the\s+)?(?:dinner|supper|lunch|breakfast|brunch|meal|food|something(?:\s+to\s+eat)?)\b)/i.test(t);
+}
+
 export function chooseAction(s: DayState): OneAction {
   const struggle = readStruggle(s.biggestStruggle);
   const isBulk = s.goal === "muscle_gain";

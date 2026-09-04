@@ -1275,6 +1275,231 @@ const MUST_WRITE: [string, string][] = [
         ])) {
           failures.push(`A legitimate meal suggestion on an open day was flagged as a closed-day violation — every meal recommendation would become a candidate`);
         }
+
+        // ── #152: A REOPENING ENDS THE CLOSURE, HERE TOO ────────────────────────────────────────
+        // readHeldConstraints lets the client's newest explicit decision stand, so this detector
+        // had to learn the same rule or it would file the very replies the reversal makes correct.
+        if (await caught("after a genuine reopening", [
+          turn("t-r-close", USER.id, day0 + 60_000, CLOSED, "Noted — that is the day closed."),
+          turn("t-r-open", USER.id, day0 + 120_000, "actually I changed my mind, I'm having dinner", "👍"),
+          turn("t-r-offer", USER.id, day0 + 180_000, "what should I eat?", OFFERED),
+        ])) {
+          failures.push(`Coach Health flagged a meal suggestion made AFTER the client reopened their food day — the detector would file every correct post-reversal reply as a closed-day violation`);
+        }
+        // ...and a closure that was never reversed still flags. Without this, "a reopening
+        // anywhere clears everything" would pass the case above and silence the real defect.
+        if (!await caught("reopened, then closed again", [
+          turn("t-r2-open", USER.id, day0 + 60_000, "actually I'm having dinner", "👍"),
+          turn("t-r2-close", USER.id, day0 + 120_000, CLOSED, "Noted — that is the day closed."),
+          turn("t-r2-offer", USER.id, day0 + 180_000, "what should I eat?", OFFERED),
+        ])) {
+          failures.push(`A food offer after the client closed the day AGAIN was not flagged — the newest decision must win in the detector as well as in the product`);
+        }
+      }
+
+      /**
+       * #152 — REOPENING A CLOSED FOOD DAY, THROUGH THE REAL DOOR.
+       *
+       * #138 and #144 fixed the opposite failure: offering food after a closure. The closure then
+       * had no way back, so a client who closed the day and genuinely ate was refused for the rest
+       * of it, every time they asked. Graded on what the client actually receives, because the
+       * whole defect was that the meal door kept standing down.
+       *
+       * History is supplied NEWEST FIRST, which is how the production query returns it
+       * (recentClientMessagesStamped: ORDER BY created_at DESC). Feeding it oldest-first would
+       * invert the ordering case and quietly grade the opposite of what production does.
+       */
+      {
+        const CLOSE = "I am done eating today";
+        const REOPEN = "actually I changed my mind, I'm having dinner";
+        const DAY_CLOSED = /leaving it there|done eating today/i;
+        const askAfter = async (historyNewestFirst: string[], ask = "what should I eat?") => {
+          freshTurn();
+          g.__KAMLIFE_STUB_USER = { ...USER };
+          g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[schema.mealLogs, [{
+            id: "ml-152", userId: USER.id, loggedAt: new Date(dayStart.getTime() + 60_000),
+            at: new Date(dayStart.getTime() + 60_000),
+            kcalInt: 2100, proteinInt: 188, carbsInt: 200, fatInt: 70,
+            kcal: 2100, protein: 188, carbs: 200, fat: 70, calories: 2100,
+            mealLabel: "dinner", label: "dinner", source: "text",
+            items: [{ name: "Chicken", kcal: 2100, protein: 188 }], rawMessage: "dinner", sourceMessageId: null,
+          }]]]);
+          g.__KAMLIFE_STUB_PGROWS = historyNewestFirst.map((text, i) => ({
+            message_in: text,
+            created_at: new Date(dayStart.getTime() + (historyNewestFirst.length - i) * 60_000),
+          }));
+          const reply = String(await handleMessage(USER.phoneNumber, ask).catch(() => ""));
+          delete g.__KAMLIFE_STUB_PGROWS;
+          delete g.__KAMLIFE_STUB_ROWS;
+          return reply;
+        };
+
+        // 1 — THE REVERSAL ITSELF.
+        if (DAY_CLOSED.test(await askAfter([REOPEN, CLOSE]))) {
+          failures.push(`A client who closed their food day and then said "${REOPEN}" was still refused a meal — an explicit change of mind has no way back and they are locked out until midnight`);
+        }
+        // 2 — AND THE CLOSURE STILL HOLDS WITHOUT ONE. This is #138, re-asserted here: the cut
+        //     must not have bought the reversal by weakening the constraint.
+        if (!DAY_CLOSED.test(await askAfter(["did 9000 steps", CLOSE]))) {
+          failures.push(`An unrelated message after a closure reopened the food day — the constraint no longer survives the turn that follows it`);
+        }
+        // 3 — OVER-FIRE: asking for a meal is not deciding to eat one.
+        if (!DAY_CLOSED.test(await askAfter([CLOSE]))) {
+          failures.push(`The meal request itself reopened the closed day — every "what should I eat?" would cancel the client's own decision`);
+        }
+        // 4 — AMBIGUITY: considering is not deciding.
+        if (!DAY_CLOSED.test(await askAfter(["thinking about dinner", CLOSE]))) {
+          failures.push(`"thinking about dinner" silently reopened a closed food day — a mention of food is not a decision to eat`);
+        }
+        // 5 — ORDERING: the newest explicit decision wins, in both directions.
+        if (!DAY_CLOSED.test(await askAfter([CLOSE, REOPEN, CLOSE]))) {
+          failures.push(`A client who reopened and then closed the day AGAIN was still treated as open — the newest decision must win, not the first or the loudest`);
+        }
+        // 6 — CONTROL: a day nobody closed is open, so none of the above passes by never closing.
+        if (DAY_CLOSED.test(await askAfter(["did 9000 steps"]))) {
+          failures.push(`A day the client never closed came back closed — the door is standing down on its own`);
+        }
+        // 7 — A DECISION ABOUT ANOTHER DAY IS NOT A DECISION ABOUT THIS ONE (CTO hold on #155).
+        //     readHeldConstraints filters by WHEN a message was sent, never by which day the
+        //     sentence is about, so tomorrow's plan carried the full commitment shape and would
+        //     have reopened tonight.
+        if (!DAY_CLOSED.test(await askAfter(["I'm having dinner tomorrow", CLOSE]))) {
+          failures.push(`"I'm having dinner tomorrow" reopened TODAY's closed food day — a plan for another day cancelled a constraint about this one`);
+        }
+        if (!DAY_CLOSED.test(await askAfter(["I'll eat tomorrow", CLOSE]))) {
+          failures.push(`"I'll eat tomorrow" reopened today's closed food day — the same defect in its plainest form`);
+        }
+        // 8 — A ZERO-FOOD STATEMENT IS THE CONSTRAINT RESTATED, NOT WITHDRAWN. "I'm eating nothing
+        //     else today" carries the positive prefix "I'm eating", so the commitment shape alone
+        //     read the plainest restatement of the closure as its cancellation.
+        if (!DAY_CLOSED.test(await askAfter(["I'm eating nothing else today", CLOSE]))) {
+          failures.push(`"I'm eating nothing else today" reopened the closed food day — a commitment to eat NOTHING was read as a decision to eat`);
+        }
+        // 9 — AND THE GENUINE REVERSAL STILL WORKS. Without this, both guards could be "never
+        //     reopen" and cases 7 and 8 would pass while the feature was gone.
+        if (DAY_CLOSED.test(await askAfter(["I'm having dinner tonight after all", CLOSE]))) {
+          failures.push(`A genuine same-day reversal stopped working once the future-day and zero-food guards were added — the guards took the feature with them`);
+        }
+
+        /**
+         * THE TURN'S OWN WORDS (#152, CTO re-adjudication). readHeldConstraints reads HISTORY, and
+         * the message being answered is not in it yet — so "I'm eating now, what should I eat?"
+         * carried its own reversal into a door that was looking everywhere except at it. live.ts
+         * folded the current message in for CLOSURE only, so the fold could tighten the constraint
+         * and never release it.
+         *
+         * Graded where each door can actually be reached. The SMART NEXT MEAL door is reachable
+         * for the CLOSURE direction — a current-message closure with no history at all must still
+         * close the day — and for the history direction (case 3 above). It is NOT reachable for the
+         * release direction: any message that states eating is claimed by the food clarifier first,
+         * on this branch and on main alike, so the reply is identical either way and would prove
+         * nothing. That direction is graded on the Meaning Engine's state below, which is the
+         * consumer that actually differed.
+         */
+        // Graded on the requirement, not on one door's wording: a client who closed the day in the
+        // same breath as the ask must not be SOLD A MEAL. Which owner answers is not this cut's
+        // business — several may legitimately claim an utterance that closes the day.
+        const SELLS_A_MEAL = /Next Meal Suggestion|Pick one:|Start with:/i;
+        const sameTurnClose = await askAfter([], "I am done eating today, what should I eat?");
+        if (SELLS_A_MEAL.test(sameTurnClose)) {
+          failures.push(`A closure stated in the SAME turn as the ask was ignored and the client was sold a meal they had just refused: "${sameTurnClose.split("\n").filter(Boolean)[0]}"`);
+        }
+        const bothInOne = await askAfter([], "I'm eating now but I am done eating today, what should I eat?");
+        if (SELLS_A_MEAL.test(bothInOne)) {
+          failures.push(`One utterance carrying BOTH a reversal and a closure was treated as open and sold a meal — the conservative tie-break must hold inside a single message: "${bothInOne.split("\n").filter(Boolean)[0]}"`);
+        }
+      }
+
+      /**
+       * #152 — THE CURRENT TURN'S OWN WORDS, AND BOTH DOORS READING THEM THE SAME WAY.
+       *
+       * The release direction cannot be graded on the SMART NEXT MEAL reply: any message that
+       * states eating is claimed by the food clarifier before the meal door, on this branch and on
+       * main alike, so the reply is byte-identical either way and would prove nothing. It IS
+       * graded here, on the seam owner and on the state the Meaning Engine actually computes —
+       * which is the consumer that differed, because live.ts folded the current message in for
+       * closure only and could therefore tighten the constraint but never release it.
+       */
+      {
+        const { foodDayClosedWith } = await import("../server/held-constraints");
+        const cases: Array<[string, boolean, boolean, string]> = [
+          // [current message, held-from-history, expected effective closed, why]
+          ["I'm eating now, what should I eat?", true, false, "the reversal is in the turn being answered"],
+          ["what should I eat?", true, true, "an ask is not a decision — history stands"],
+          ["I'm having dinner tomorrow, what should I eat?", true, true, "a plan for another day"],
+          ["I'm eating nothing else today, what should I eat?", true, true, "a commitment to eat nothing"],
+          ["I'm eating now but I am done eating today", true, true, "closure wins inside one utterance"],
+          ["I'm eating now, what should I eat?", false, false, "nothing was closed to begin with"],
+        ];
+        for (const [msg, held, expected, why] of cases) {
+          const got = foodDayClosedWith(held, msg);
+          if (got !== expected) {
+            failures.push(`The turn's own words were read wrongly — "${msg}" with held=${held} gave closed=${got}, expected ${expected} (${why})`);
+          }
+        }
+
+        // BOTH DOORS, ONE ANSWER. The Meaning Engine builds its DayState from this same owner, so
+        // the deterministic meal door and the coaching decision cannot disagree about one sentence.
+        // Graded on the engine's real state rather than on its wording.
+        const { canonicalDecision } = await import("../server/understanding/live");
+        freshTurn();
+        g.__KAMLIFE_STUB_USER = { ...USER };
+        g.__KAMLIFE_STUB_PGROWS = [{ message_in: "I am done eating today", created_at: new Date(dayStart.getTime() + 60_000) }];
+        const closedStill = await canonicalDecision({ ...USER }, "what should I eat?").catch(() => null);
+        const reopened = await canonicalDecision({ ...USER }, "I'm eating now, what should I eat?").catch(() => null);
+        delete g.__KAMLIFE_STUB_PGROWS;
+        if (closedStill && reopened && closedStill.todo === reopened.todo && /eat|protein|meal/i.test(String(reopened.todo))) {
+          failures.push(`The Meaning Engine reached the SAME food instruction whether or not the turn reopened the day ("${reopened.todo}") — the current message is not reaching its held state, so the engine and the meal door are deciding from different facts`);
+        }
+      }
+
+      /**
+       * #152 — USER AND DAY ISOLATION, on the reader Coach Health uses.
+       *
+       * The reversal must be as narrowly scoped as the closure it cancels: one person changing
+       * their mind cannot open somebody else's day, and yesterday's change of mind cannot open
+       * today. Graded on foodCloseLookup, which is where both facts are keyed.
+       */
+      {
+        const { foodCloseLookup } = await import("../server/held-constraints");
+        const d0 = dayStart.getTime();
+        const OTHER = "stub-other-client-0000000000000001";
+        const closed = (uid: string, at: number) => ({ userId: uid, at, input: "I am done eating today" });
+        const opened = (uid: string, at: number) => ({ userId: uid, at, input: "actually I'm having dinner" });
+
+        const crossUser = foodCloseLookup([closed(USER.id, d0 + 60_000), opened(OTHER, d0 + 120_000)]);
+        if (crossUser(USER.id, d0 + 180_000) === null) {
+          failures.push(`Another client's change of mind reopened this client's closed day — one person saying "I'm having dinner" would cancel everybody else's constraint`);
+        }
+        const crossDay = foodCloseLookup([
+          closed(USER.id, d0 + 60_000),
+          opened(USER.id, d0 - 6 * 3_600_000),   // yesterday, in SAST terms
+        ]);
+        if (crossDay(USER.id, d0 + 180_000) === null) {
+          failures.push(`Yesterday's change of mind reopened today's closed day — a decision about one day became a standing preference`);
+        }
+        // ...and within the day, the reversal does work. Without this the two checks above pass
+        // on a lookup that simply ignores reopenings.
+        const sameDay = foodCloseLookup([closed(USER.id, d0 + 60_000), opened(USER.id, d0 + 120_000)]);
+        if (sameDay(USER.id, d0 + 180_000) !== null) {
+          failures.push(`A same-day reopening did not clear the closure in the reader Coach Health uses — the detector and the product would disagree about the same client`);
+        }
+
+        // COACH HEALTH MUST AGREE WITH THE PRODUCT ON THE TWO OVER-FIRES (CTO hold on #155). If it
+        // did not, a reply that the product correctly withheld would still be judged against an
+        // "open" day — or worse, a correct closed-day reply would be filed as a violation.
+        for (const [label, said] of [
+          ["a plan for tomorrow", "I'm having dinner tomorrow"],
+          ["a commitment to eat nothing", "I'm eating nothing else today"],
+        ] as const) {
+          const look = foodCloseLookup([
+            closed(USER.id, d0 + 60_000),
+            { userId: USER.id, at: d0 + 120_000, input: said },
+          ]);
+          if (look(USER.id, d0 + 180_000) === null) {
+            failures.push(`Coach Health treated ${label} ("${said}") as a reopening — the detector and the product now disagree about whether this client's day is closed`);
+          }
+        }
       }
 
       /**

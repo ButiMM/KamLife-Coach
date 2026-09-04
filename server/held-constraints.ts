@@ -25,7 +25,7 @@
  * training today" said on Tuesday must not silence Wednesday. That is what `doNotMention` is for.
  */
 
-import { foodDayIsClosed, trainingDayIsDeclined } from "./one-action";
+import { foodDayIsClosed, foodDayIsReopened, trainingDayIsDeclined } from "./one-action";
 import { recentClientMessagesStamped } from "./memory";
 import { readHealthState } from "./health-state";
 import { sastDaysBetween, sastDayKey } from "./sast";
@@ -57,7 +57,7 @@ export async function readHeldConstraints(
     const stamped = await recentClientMessagesStamped(phone);
     const todays = stamped.filter(s => sastDaysBetween(s.at) === 0);
     return {
-      foodDayClosed: todays.some(s => foodDayIsClosed(s.text)),
+      foodDayClosed: foodDayClosedNow(todays),
       trainingDeclined: todays.some(s => trainingDayIsDeclined(s.text)),
       sick,
     };
@@ -80,19 +80,90 @@ export async function readHeldConstraints(
  * rule this file opens with. sastDayKey owns the boundary; a hand-rolled midnight would be a
  * second answer to it.
  *
- * Returns EARLIEST closure per client-day, and a lookup that answers null when there is none.
+ * AND A REOPENING ENDS IT (#152, 2026-09-03). readHeldConstraints now lets the client's newest
+ * explicit decision stand, so this had to learn the same thing or Coach Health would flag the very
+ * replies the reversal makes correct — a meal suggestion after "I'm having dinner" would be filed
+ * as a closed-day violation forever. Same two recognisers, same ordering rule: a closure is in
+ * force at a moment only when no reopening sits between it and that moment.
+ *
+ * Returns the closure IN FORCE at the asked-about time, or null.
  */
 export function foodCloseLookup(
   turns: Array<{ userId: string | null; at: number; input: string }>,
 ): (userId: string | null, at: number) => number | null {
-  const byClientDay = new Map<string, number>();
+  type Decision = { at: number; closed: boolean };
+  const byClientDay = new Map<string, Decision[]>();
   for (const t of turns) {
-    if (!foodDayIsClosed(t.input)) continue;
+    // A closure inside one utterance outranks a reopening inside it — the same tie-break
+    // foodDayClosedNow makes, so the two readers cannot disagree about one message.
+    const closed = foodDayIsClosed(t.input);
+    if (!closed && !foodDayIsReopened(t.input)) continue;
     const key = `${t.userId}::${sastDayKey(t.at)}`;
-    const prev = byClientDay.get(key);
-    if (prev === undefined || t.at < prev) byClientDay.set(key, t.at);
+    const list = byClientDay.get(key) || [];
+    list.push({ at: t.at, closed });
+    byClientDay.set(key, list);
   }
-  return (userId, at) => byClientDay.get(`${userId}::${sastDayKey(at)}`) ?? null;
+  for (const list of byClientDay.values()) list.sort((a, b) => a.at - b.at);
+  return (userId, at) => {
+    const list = byClientDay.get(`${userId}::${sastDayKey(at)}`);
+    if (!list) return null;
+    let inForce: number | null = null;
+    for (const d of list) {
+      if (d.at > at) break;              // said after the turn being judged — not yet true of it
+      inForce = d.closed ? d.at : null;  // the latest decision at or before `at` is the one that holds
+    }
+    return inForce;
+  };
+}
+
+/**
+ * THE NEWEST EXPLICIT DECISION WINS (#152, 2026-09-03).
+ *
+ * This was `todays.some(foodDayIsClosed)` — once anything today closed the day, nothing could
+ * open it, so a client who closed at 19:55 and then said "actually I changed my mind, I'm having
+ * dinner" was refused for the rest of the night, every time they asked.
+ *
+ * `some` also throws away the one thing that settles a contradiction: WHEN each was said. The
+ * statements are already newest-first, so the first one that is a decision about eating today is
+ * the decision that stands, and everything older is history. Nothing is stored; the effective
+ * state is derived from the client's own ordered words, which is what "held" has always meant here.
+ *
+ * A CLOSURE INSIDE A SINGLE MESSAGE OUTRANKS A REOPENING INSIDE IT. "I'll have dinner, then I'm
+ * done eating" is one utterance with both, and one turn cannot be ordered against itself — so the
+ * tie goes to the constraint, which is the direction that does not sell food to someone who may
+ * have just stopped.
+ */
+function foodDayClosedNow(todaysNewestFirst: Array<{ text: string }>): boolean {
+  for (const s of todaysNewestFirst) {
+    if (foodDayIsClosed(s.text)) return true;
+    if (foodDayIsReopened(s.text)) return false;
+  }
+  return false;
+}
+
+/**
+ * THE TURN'S OWN WORDS COUNT TOO (#152, CTO re-adjudication on #155).
+ *
+ * readHeldConstraints reads chat HISTORY, and the message being handled is not in it yet. So a
+ * client who closed the day earlier and then sent ONE turn carrying both the reversal and the ask
+ *
+ *     "I'm eating now, what should I eat?"
+ *
+ * was still refused: the reopening was sitting in the very message the door was answering, and the
+ * door was looking everywhere except at it. live.ts already folded the current message in — but for
+ * CLOSURE only (`held.foodDayClosed || foodDayIsClosed(message)`), so the fold could tighten the
+ * constraint and never release it.
+ *
+ * SAME TIE-BREAK AS foodDayClosedNow, deliberately: within one utterance a closure outranks a
+ * reopening, because a turn cannot be ordered against itself and the conservative direction is the
+ * one that does not sell food to someone who may have just stopped. This is that rule applied to a
+ * single newest statement, so the two readers cannot disagree about the same sentence — which is
+ * the whole reason it is a function here rather than a line spelled out at each door.
+ */
+export function foodDayClosedWith(heldFromHistory: boolean, currentMessage: string): boolean {
+  if (foodDayIsClosed(currentMessage)) return true;
+  if (foodDayIsReopened(currentMessage)) return false;
+  return heldFromHistory;
 }
 
 // ── WHAT AN OUTBOUND MESSAGE IS ASKING FOR ───────────────────────────────────────────────────
