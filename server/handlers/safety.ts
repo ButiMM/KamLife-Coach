@@ -1,11 +1,12 @@
 /**
  * Safety + data-management guards.
- * Run at the very top of handleMessage, before user lookup.
+ * Run at the very top of handleMessage, before ordinary user lookup/routing. A matched branch may
+ * bind the minimum identity needed for turn attribution, but it never waits on model reasoning.
  * Return a string to short-circuit, or null to fall through.
  */
 
 import twilio from "twilio";
-import { db, pool } from "../db";
+import { db, pool, getOrCreateUser } from "../db";
 import {
   users, chatHistory, stepLogs, workoutLogs, weightLogs,
   weeklyCheckins, clothingCheckins, bodyMeasurements,
@@ -20,7 +21,7 @@ import { markLifeQuiet } from "../life-quiet";
 import { isCrisisMessage, crisisReply, crisisAlertBody } from "../crisis-reply";
 import { asksForExport, formatExport } from "../data-export";
 import { sastDayKey } from "../sast";
-import { logChat } from "./chat-log";
+import { logChat, turnUser } from "./chat-log";
 
 // Send a Twilio message with exponential-backoff retries. On complete failure,
 // records a row in adminEvents so the coach can find missed alerts on reload.
@@ -76,6 +77,30 @@ const TERMINAL_PATTERNS = [
   /\bchmod\b|\bchown\b/i,
 ];
 
+/**
+ * Safety owns the early return; turn-context owns attribution. Bind the identity already resolved
+ * by a safety branch before that branch returns so handleMessage's one existing recordTurn call can
+ * write the same turn. This adds no second ledger and makes no routing decision.
+ */
+function bindKnownSafetyUser<T extends { id?: string | null } | undefined>(user: T): T {
+  if (user?.id) turnUser(user.id);
+  return user;
+}
+
+/**
+ * Crisis/acute/life replies must not depend on the identity store being healthy. The existing
+ * get-or-create owner gives known and first-contact clients one durable identity when available;
+ * failure leaves the safety branch free to return its existing safest reply.
+ */
+async function ensureSafetyTurnUser(phone: string): Promise<any | undefined> {
+  try {
+    return bindKnownSafetyUser(await getOrCreateUser(phone));
+  } catch (e: any) {
+    console.error("[SAFETY_TURN_IDENTITY] attribution unavailable; safety response continues:", e?.message || e);
+    return undefined;
+  }
+}
+
 export async function runSafetyGuards(
   phone: string,
   message: string,
@@ -89,7 +114,7 @@ export async function runSafetyGuards(
   if (looksLikeQuitMoment(message)) {
     const qu = await db.select({ id: users.id, name: users.name, createdAt: users.createdAt, totalWorkoutsCompleted: users.totalWorkoutsCompleted })
       .from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const u = qu[0];
+    const u = bindKnownSafetyUser(qu[0]);
     if (u) {
       const weeks = u.createdAt ? Math.max(1, Math.round((Date.now() - new Date(u.createdAt).getTime()) / (7 * 86_400_000))) : 1;
       const reply = quitSaveReply({
@@ -112,20 +137,20 @@ export async function runSafetyGuards(
   // server/life-context.ts for the compliance posture.
   const life = readLifeContext(message);
   if (life && !isCrisisMessage(m)) {
-    const lu = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const reply = lifeContextReply(life, (lu[0]?.name || "").split(" ")[0]);
+    const lifeUser = await ensureSafetyTurnUser(phone);
+    const reply = lifeContextReply(life, (lifeUser?.name || "").split(" ")[0]);
     // Comfort that isn't followed by silence is just a nice sentence — go quiet on nudges too.
-    if (lu[0]?.id) markLifeQuiet(lu[0].id, life).catch(() => {});
-    try { await logChat(lu[0]?.id || "unknown", message, reply, `LIFE_${life.context.toUpperCase()}`); } catch (e) { console.warn("[non-fatal]", e); }
+    if (lifeUser?.id) markLifeQuiet(lifeUser.id, life).catch(() => {});
+    try { await logChat(lifeUser?.id || "unknown", message, reply, `LIFE_${life.context.toUpperCase()}`); } catch (e) { console.warn("[non-fatal]", e); }
     return reply;
   }
 
   // ---- CRISIS ----
   if (isCrisisMessage(m)) {
-    const crisisUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const crisisName = crisisUser[0]?.name || "friend";
+    const crisisUser = await ensureSafetyTurnUser(phone);
+    const crisisName = crisisUser?.name || "friend";
     const reply = crisisReply(crisisName);
-    try { await logChat(crisisUser[0]?.id || "unknown", message, reply, "CRISIS"); } catch (e) { console.warn("[non-fatal]", e); }
+    try { await logChat(crisisUser?.id || "unknown", message, reply, "CRISIS"); } catch (e) { console.warn("[non-fatal]", e); }
     const coachAlertPhone = process.env.COACH_ALERT_PHONE;
     if (!coachAlertPhone) {
       console.error(`[CRISIS] ⚠️  COACH_ALERT_PHONE not configured — coach NOT notified! Client: ${crisisName} (${phone}). Message: "${message.slice(0, 150)}"`);
@@ -154,10 +179,10 @@ export async function runSafetyGuards(
   const benignStroke = /\bstroke of (?:luck|genius)\b|\b(?:breast|back|free|butterfly|side|swim(?:ming)?|paddle|broad|key)\s*-?\s*strokes?\b|\bbreaststroke\b|\bbackstroke\b/i.test(m);
   const strokeEmergency = /\bstrokes?\b/i.test(m) && !benignStroke;
   if (nonStrokeEmergency || strokeEmergency) {
-    const acuteUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const acuteName = acuteUser[0]?.name || "friend";
+    const acuteUser = await ensureSafetyTurnUser(phone);
+    const acuteName = acuteUser?.name || "friend";
     const acuteReply = `This sounds like it could be a medical emergency. Stop what you're doing and call *10177* (SA ambulance) or go to your nearest emergency room immediately. Do not wait. Health first — everything else can wait.`;
-    try { await logChat(acuteUser[0]?.id || "unknown", message, acuteReply, "ACUTE_MEDICAL"); } catch (e) { console.warn("[non-fatal]", e); }
+    try { await logChat(acuteUser?.id || "unknown", message, acuteReply, "ACUTE_MEDICAL"); } catch (e) { console.warn("[non-fatal]", e); }
     const coachAlertPhone = process.env.COACH_ALERT_PHONE;
     if (!coachAlertPhone) {
       console.error(`[ACUTE_MEDICAL] ⚠️  COACH_ALERT_PHONE not configured — coach NOT notified! Client: ${acuteName} (${phone}). Message: "${message.slice(0, 150)}"`);
@@ -212,7 +237,7 @@ export async function runSafetyGuards(
   if (asksForExport(m)) {
     const eu = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
     if (eu.length === 0) return "No account found for this number.";
-    const u = eu[0];
+    const u = bindKnownSafetyUser(eu[0]);
     const [ws, ml] = await Promise.all([
       db.select({ at: weightLogs.loggedAt, kg: weightLogs.weight }).from(weightLogs).where(eq(weightLogs.userId, u.id)).orderBy(desc(weightLogs.loggedAt)),
       db.select({ at: mealLogs.loggedAt, kcal: mealLogs.kcalInt, protein: mealLogs.proteinInt }).from(mealLogs).where(eq(mealLogs.userId, u.id)).orderBy(desc(mealLogs.loggedAt)),
@@ -256,7 +281,7 @@ export async function runSafetyGuards(
     // Unknown number: not this handler's business. Standing down rather than answering
     // keeps one owner for "no account found" — the branch below already says it.
     if (existing.length === 0) return null;
-    const uid = existing[0].id;
+    const uid = bindKnownSafetyUser(existing[0]).id;
     const had = await db.select({ id: progressPhotos.id }).from(progressPhotos).where(eq(progressPhotos.userId, uid));
     await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
     // The consent stamp goes with them — it recorded permission to hold photos we no longer hold.
@@ -274,7 +299,8 @@ export async function runSafetyGuards(
   if (/delete my data|forget me|remove my account|popia delete|delete me|erase my data/i.test(m)) {
     const existing = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
     if (existing.length === 0) return "No account found for this number.";
-    const name = existing[0].name || "there";
+    const boundDeleteUser = bindKnownSafetyUser(existing[0]);
+    const name = boundDeleteUser.name || "there";
     await db.update(users).set({ awaitingInputType: "delete_confirm" }).where(eq(users.phoneNumber, phone));
     return `${name}, this will permanently delete all your data — workouts, steps, food logs, measurements, weight history, and your profile. This cannot be undone.\n\nReply *DELETE* (in capitals) to confirm, or anything else to cancel.`;
   }
@@ -282,7 +308,7 @@ export async function runSafetyGuards(
   if (m === "delete") {
     const existing = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
     if (existing.length > 0 && existing[0].awaitingInputType === "delete_confirm") {
-      const uid = existing[0].id;
+      const uid = bindKnownSafetyUser(existing[0]).id;
       console.log(`[POPIA DELETE] User ${uid} (${phone}) requested data deletion at ${new Date().toISOString()}`);
       await db.transaction(async (tx) => {
         await tx.delete(chatHistory).where(eq(chatHistory.userId, uid));
@@ -334,7 +360,7 @@ export async function runSafetyGuards(
   // Two-step: bare "reset" asks for confirmation; "yes reset" actually wipes.
   if (m === "yes reset" || m === "yes, reset" || m === "confirm reset") {
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    await db.transaction(async (tx) => {
+    const resetUser = await db.transaction(async (tx) => {
       if (existing.length > 0) {
         const uid = existing[0].id;
         await tx.delete(gptCosts).where(eq(gptCosts.userId, uid));
@@ -360,7 +386,7 @@ export async function runSafetyGuards(
         // start-cancel-start loop through the POPIA path. Do not add it to this transaction.
         await tx.delete(users).where(eq(users.id, uid));
       }
-      await tx.insert(users).values({
+      const [created] = await tx.insert(users).values({
         phoneNumber: phone,
         subscriptionStatus: "inactive",
         onboardingState: "WELCOME",
@@ -371,8 +397,10 @@ export async function runSafetyGuards(
         stepsTarget: 8500,
         createdAt: new Date(),
         lastActiveAt: new Date(),
-      });
+      }).returning({ id: users.id });
+      return created;
     });
+    bindKnownSafetyUser(resetUser);
     await pool.query("DELETE FROM memories WHERE phone = $1", [phone]).catch((e: any) =>
       console.error("[RESET] memories delete failed (non-fatal):", e?.message)
     );
@@ -387,12 +415,13 @@ export async function runSafetyGuards(
       (existing[0].totalWorkoutsCompleted ?? 0) > 0
     );
     if (hasData) {
+      bindKnownSafetyUser(existing[0]);
       const sessions = existing[0].totalWorkoutsCompleted || 0;
       const sessionNote = sessions > 0 ? ` You have *${sessions} session${sessions === 1 ? "" : "s"}* logged.` : "";
       return `⚠️ This will permanently delete all your data — workouts, food logs, weight history, everything.${sessionNote}\n\nReply *yes reset* to confirm, or anything else to go back.`;
     }
     // No meaningful data yet — wipe immediately
-    await db.transaction(async (tx) => {
+    const resetUser = await db.transaction(async (tx) => {
       if (existing.length > 0) {
         const uid = existing[0].id;
         await tx.delete(gptCosts).where(eq(gptCosts.userId, uid));
@@ -418,7 +447,7 @@ export async function runSafetyGuards(
         // start-cancel-start loop through the POPIA path. Do not add it to this transaction.
         await tx.delete(users).where(eq(users.id, uid));
       }
-      await tx.insert(users).values({
+      const [created] = await tx.insert(users).values({
         phoneNumber: phone,
         subscriptionStatus: "inactive",
         onboardingState: "WELCOME",
@@ -429,8 +458,10 @@ export async function runSafetyGuards(
         stepsTarget: 8500,
         createdAt: new Date(),
         lastActiveAt: new Date(),
-      });
+      }).returning({ id: users.id });
+      return created;
     });
+    bindKnownSafetyUser(resetUser);
     await pool.query("DELETE FROM memories WHERE phone = $1", [phone]).catch((e: any) =>
       console.error("[RESET] memories delete failed (non-fatal):", e?.message)
     );
