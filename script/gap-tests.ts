@@ -48,7 +48,7 @@ const { explicitMealSlot } = await import("../server/understanding/actions");
 // TransformError and NOT ONE of its ~300 tests ran, reporting nothing rather than failing.
 // script/check-architecture.ts now parses every suite in the npm test chain so this cannot hide
 // again. Add new tests further down, beside their subject.
-const { selectModel } = await import("../server/gpt");
+const { selectModel, milestoneEmotion } = await import("../server/gpt");
 const { scanForSAFoods } = await import("../server/handlers/food-scanner");
 // These were written as CommonJS require() inside an ESM module, so every test below
 // that used them threw "require is not defined" — they had never executed. Bound once here.
@@ -4263,6 +4263,67 @@ test("PROBE: an async failure in this suite is actually observed", async () => {
 // EVERY ASYNC CASE MUST LAND BEFORE THE TALLY. Without this the counts below are printed while
 // most of the file is still running, which is what made the whole suite advisory.
 await Promise.all(pending);
+
+
+// MILESTONE REGISTER — "HAS THIS CLIENT BEEN AWAY?" HAS ONE OWNER (#156, 2026-09-04).
+//
+// The register used to read absence by regexing "(N days silent)" back out of the prose
+// buildPatternSummary had just generated. That number is 7 minus the DISTINCT DAYS THE CLIENT
+// SPOKE in a rolling week — logging density, not contact. Reproduced on current main before the
+// change: a client who messaged TODAY but checks in twice a week produced
+//
+//     "PATTERN CONTEXT: Kam has logged 2 of the last 7 days (5 days silent)."
+//     prose regex -> daysSilent=5 -> lapsed -> comeback
+//     contactState -> daysSinceLastContact=0, isReturning=false
+//
+// so a present client was told to their face that they had gone quiet.
+{
+  // milestoneEmotion comes from the gap-tests-wide gpt import above: unit-tests has no other
+  // reason to load server/gpt.ts, and adding one there left the process alive after the last
+  // assertion — 1055 green and then a hang to CI's timeout. This suite already loads it.
+  const { RETURNING_DAYS, contactState } = await import("../server/understanding/reentry");
+  const SPARSE = "PATTERN CONTEXT: Kam has logged 2 of the last 7 days (5 days silent). Protein target is 195g/day.";
+  const DENSE = "PATTERN CONTEXT: Kam has logged 6 of the last 7 days (1 day silent). Protein target is 195g/day.";
+
+  test("milestone register: a present client is not put in the comeback register by sparse logging", () => {
+    // The divergent shape. Everything else about this summary is neutral, so the only thing that
+    // could move the register is the absence signal.
+    assert.notEqual(milestoneEmotion(SPARSE, false), "comeback",
+      "a client who spoke today must not be told they went quiet because they log twice a week");
+  });
+
+  test("milestone register: a genuinely returning client is eligible for comeback, however dense their week was", () => {
+    assert.equal(milestoneEmotion(DENSE, true), "comeback",
+      "a client past the canonical re-entry threshold must reach the comeback register even after a dense week");
+    // ...and the threshold is the canonical one, not a second copy.
+    const away = new Date(Date.now() - RETURNING_DAYS * 86_400_000);
+    assert.ok(contactState(away).isReturning, "the fixture must actually be past RETURNING_DAYS");
+  });
+
+  test("milestone register: training inactivity still moves the register on its own", () => {
+    // Present client, dense week — only the training signal is in play.
+    assert.equal(milestoneEmotion(DENSE + " No training sessions logged this week.", false), "comeback",
+      "training inactivity is an independent signal and must survive the re-entry cut");
+    assert.equal(milestoneEmotion(DENSE + " Last training was 6 days ago.", false), "comeback",
+      "a stale last-session date is an independent signal too");
+  });
+
+  test("milestone register: struggling and thriving still set the tone independently of contact", () => {
+    assert.equal(milestoneEmotion(DENSE + " needs direct accountability", false), "comeback",
+      "a struggling pattern still outranks a calm week");
+    assert.equal(milestoneEmotion(DENSE + " Food logging is consistent, a solid habit.", false), "celebratory",
+      "a thriving pattern still earns the celebratory register");
+    assert.equal(milestoneEmotion(DENSE, false), "warm",
+      "and a neutral week is neither — the default must not have moved");
+  });
+
+  test("milestone register: absence is contact, not logging density", () => {
+    // The pair that isolates the fix: identical prose, opposite contact state, opposite register.
+    assert.notEqual(milestoneEmotion(SPARSE, false), milestoneEmotion(SPARSE, true),
+      "the same pattern summary must give different registers for a present and an absent client — otherwise the decision is still reading the prose");
+    assert.equal(milestoneEmotion(SPARSE, true), "comeback");
+  });
+}
 
 console.log(`\ngap-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {

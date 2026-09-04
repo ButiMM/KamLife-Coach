@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { contactState } from "./understanding/reentry";
 import { readHealthState } from "./health-state";
 import { db, recordedIntent } from "./db";
 import { users, chatHistory, weightLogs, stepLogs, workoutLogs, mealLogs, gptCosts } from "../shared/schema";
@@ -1193,6 +1194,33 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
 
 export type MilestoneType = "weight_loss" | "goal_reached_fat_loss" | "goal_reached_muscle" | "workout_sessions";
 
+/**
+ * THE MILESTONE REGISTER — and "has this client been away?" has an owner (#156, 2026-09-04).
+ *
+ * This read absence by regexing "(N days silent)" back out of the prose buildPatternSummary had
+ * just generated. That number is 7 minus the count of DISTINCT DAYS THE CLIENT SPOKE in a rolling
+ * week, which is not the same question: a client who messaged this morning but checks in twice a
+ * week scores 5 "silent" days and was put in the comeback register — told to their face that they
+ * went quiet — on the day they were present. Reproduced on current main before this change.
+ *
+ * `isReturning` comes from understanding/reentry, which owns the threshold (RETURNING_DAYS) and is
+ * the same answer every other consumer of re-entry uses. Absence is contact, not logging density.
+ *
+ * The other three signals are unchanged and stay independent: training inactivity, a struggling
+ * pattern and a thriving one each still move the register on their own. This cut is only about
+ * where absence comes from.
+ */
+export function milestoneEmotion(patternSummary: string, isReturning: boolean): VoiceEmotion {
+  const lastTrainMatch = patternSummary.match(/Last training was (\d+) days ago/i);
+  const daysSinceTraining = lastTrainMatch ? parseInt(lastTrainMatch[1], 10) : 0;
+  const trainingLapsed = daysSinceTraining >= 5 || /No training sessions logged this week/i.test(patternSummary);
+  const struggling = /too hard or wanting to quit|needs direct accountability|consistently under/i.test(patternSummary);
+  const thriving = /solid habit|at or above target|Food logging is consistent/i.test(patternSummary);
+  // Hitting a milestone after going quiet or struggling = a comeback: firm first,
+  // proud second — never a soft "how are you". Otherwise match their momentum.
+  return (isReturning || trainingLapsed || struggling) ? "comeback" : thriving ? "celebratory" : "warm";
+}
+
 export async function generateMilestoneVoiceScript(
   user: any,
   milestoneType: MilestoneType,
@@ -1231,18 +1259,7 @@ export async function generateMilestoneVoiceScript(
   // Pick the emotional register from the REAL pattern data, then let it drive both
   // the words (prompt below) and the voice delivery (returned to the caller).
   // buildPatternSummary already computed these signals — read them back out.
-  const silentMatch = patternSummary.match(/\((\d+)\s+days?\s+silent\)/i);
-  const daysSilent = silentMatch ? parseInt(silentMatch[1], 10) : 0;
-  const lastTrainMatch = patternSummary.match(/Last training was (\d+) days ago/i);
-  const daysSinceTraining = lastTrainMatch ? parseInt(lastTrainMatch[1], 10) : 0;
-  const lapsed = daysSilent >= 4 || daysSinceTraining >= 5
-    || /No training sessions logged this week/i.test(patternSummary);
-  const struggling = /too hard or wanting to quit|needs direct accountability|consistently under/i.test(patternSummary);
-  const thriving = /solid habit|at or above target|Food logging is consistent/i.test(patternSummary);
-
-  // Hitting a milestone after going quiet or struggling = a comeback: firm first,
-  // proud second — never a soft "how are you". Otherwise match their momentum.
-  const emotion: VoiceEmotion = (lapsed || struggling) ? "comeback" : thriving ? "celebratory" : "warm";
+  const emotion = milestoneEmotion(patternSummary, contactState(user.lastActiveAt).isReturning);
 
   const toneHint = emotion === "comeback"
     ? "They went quiet or had a rough stretch before hitting this. Do NOT open soft and do NOT ask how they are. In the first sentence, name the gap directly and firmly — they know they slipped. Then give real respect that they showed up and hit this number anyway. Firm first, proud second."
