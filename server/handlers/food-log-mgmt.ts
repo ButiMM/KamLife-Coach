@@ -5,7 +5,7 @@
 
 import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
-import { eq, and, gte, desc, asc } from "drizzle-orm";
+import { eq, and, gte, lt, desc, asc } from "drizzle-orm";
 import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection, isRetroactiveMeal, parseMealDate, mealDateLabel } from "../utils";
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
@@ -168,7 +168,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   if (!looksLikeQuestion(m) && !parseQuantityCorrection(m)) {
     const ic = parseIdentityCorrection(m);
     if (ic) {
-      const fixed = await applyIdentityCorrection(user, ic);
+      const fixed = await applyIdentityCorrection(user, ic, m);
       if (fixed) return fixed;
     }
   }
@@ -647,7 +647,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
  * message flows on, because a half-understood correction that silently rewrites someone's day
  * is worse than no correction at all.
  */
-async function applyIdentityCorrection(user: any, c: IdentityCorrection): Promise<string | null> {
+async function applyIdentityCorrection(user: any, c: IdentityCorrection, said: string): Promise<string | null> {
   const { rightNames, wrongNames } = correctionCandidates(c);
 
   // What they actually ate has to resolve to a real food — exactOnly, never a fuzzy guess.
@@ -658,9 +658,29 @@ async function applyIdentityCorrection(user: any, c: IdentityCorrection): Promis
   }
   if (!replacement) return null;
 
+  /**
+   * THE DAY THEY NAMED, NOT THE DAY IT IS (#164, 2026-09-04).
+   *
+   * This searched `loggedAt >= sastDayStart()` — today, always. So "Tuesday wasn't rice, it was
+   * pap" found no candidate on a Tuesday three days back, returned null, and the message fell
+   * through to the food scanner, which logged a SECOND Tuesday row containing pap while the
+   * original kept the rice the client had just denied. Proved on real PostgreSQL: 3 rows before,
+   * 4 after, the denied food still there.
+   *
+   * parseMealDate is the day owner this file already imports and the multi-day writer already
+   * uses, so the named day is resolved the same way it was written. A correction that names no
+   * earlier day keeps exactly the window it had — today, unbounded above — so every same-day
+   * correction is byte-identical to before.
+   */
+  const todayStart = sastDayStart();
+  const namedDay = sastDayStart(parseMealDate(said) || undefined);
+  const correctsPastDay = namedDay.getTime() < todayStart.getTime();
   const rows = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage, mealLabel: mealLogs.mealLabel, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt })
     .from(mealLogs)
-    .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sastDayStart())))
+    .where(correctsPastDay
+      ? and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, namedDay),
+            lt(mealLogs.loggedAt, new Date(namedDay.getTime() + 86_400_000)))
+      : and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
     .orderBy(desc(mealLogs.loggedAt))
     .limit(10);
 

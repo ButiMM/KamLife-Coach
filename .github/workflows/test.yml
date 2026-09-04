@@ -79,3 +79,39 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: npm run gauntlet
         continue-on-error: true
+
+  # ── REAL POSTGRESQL, FOR THE ONE CONTRACT THE FIXTURE CANNOT PROVE (#164) ──────────────────
+  #
+  # The deterministic stub ignores ORDER BY and does not reflect UPDATEs into reads, so it cannot
+  # say WHICH row a named-day food correction lands on. Two PRs correctly refused to infer that
+  # (#159, #161); this job is the answer rather than a smarter fake.
+  #
+  # SCOPED ON PURPOSE. One ephemeral service container, one focused script, its own job — every
+  # pure suite above still runs with no database and no network. Nothing here needs a secret:
+  # the credentials are the throwaway ones this container is created with, and no production or
+  # Railway data is reachable from it.
+  pg-acceptance:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kam
+          POSTGRES_PASSWORD: kam
+          POSTGRES_DB: kamlife
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://kam:kam@127.0.0.1:5432/kamlife
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Apply the project schema to the ephemeral database
+        run: npx drizzle-kit push --force
+      - name: Targeted multi-day food correction on real PostgreSQL
+        run: npx tsx script/pg-correction-acceptance.ts
