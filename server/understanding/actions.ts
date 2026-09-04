@@ -35,6 +35,31 @@ export function explicitMealSlot(msg: string): "breakfast" | "lunch" | "dinner" 
   if (/\blunch\b/i.test(lo)) return "lunch";
   if (/\b(?:dinner|supper)\b/i.test(lo)) return "dinner";
   if (/\bbreakfast\b/i.test(lo)) return "breakfast";
+  // SAYING WHEN YOU ATE IS SAYING WHICH MEAL IT WAS (#174, first Journey Lab divergence).
+  //
+  // "This morning I had 3 eggs and 2 slices of toast" was stored with meal_label = 'snack',
+  // because nothing here recognised the phrase and extractMealLabel then asked the SEND CLOCK —
+  // which knows when the message arrived and nothing about when the food was eaten. The client
+  // stated the meal period in the most ordinary way there is and the record disagreed with them.
+  //
+  // Not cosmetic, and not one row: the morning job looks for mealLabel === "breakfast", meal-repeat
+  // copies by label, and resolveInferredSlot demotes later meals by which slots are already used.
+  // A breakfast filed as a snack breaks all three, silently.
+  //
+  // THE PRODUCT ALREADY OWNS THIS MEANING — parseMealDate has read "this morning" as 8am SAST, and
+  // "<day> morning" as the same, since long before this. What was missing is that the answer never
+  // reached the SLOT. So this is the existing meaning taught to the existing owner, not a second
+  // slot parser: one line, in the function the executor and food-context already share.
+  //
+  // LAST, DELIBERATELY, beside bare "breakfast" rather than beside "for breakfast". The order in
+  // this function is load-bearing: an explicitly named other meal outranks a bare mention, so
+  // "This morning I had eggs, and for lunch I had rice" still resolves to lunch exactly as it did
+  // — the branches above are untouched and cannot be reached differently.
+  //
+  // MORNING ONLY. "this afternoon" is deliberately NOT here: afternoon spans lunch and the snack
+  // after it, so mapping it to a slot would be inventing a meaning rather than surfacing one, and
+  // an afternoon phrase still falls to clock inference exactly as before.
+  if (/\b(?:this|yesterday|early|in the|the|(?:mon|tues|wednes|thurs|fri|satur|sun)day)\s+morning\b/i.test(lo)) return "breakfast";
   return null;
 }
 
