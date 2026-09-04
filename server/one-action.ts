@@ -411,6 +411,37 @@ export function foodDayIsClosed(text: string): boolean {
   return false;
 }
 
+/**
+ * THE REVERSAL OF THAT CONSTRAINT — they have decided to eat after all (#152, 2026-09-03).
+ *
+ * A closure is held for the rest of the SAST day, which is right: "I'm done eating today" said at
+ * 19:55 must still silence a dinner suggestion at 20:10. But it had no way back, so a client who
+ * closed the day and then genuinely ate was refused for the rest of it, every time they asked.
+ *
+ * A STATED DECISION TO EAT, not a mention of food. The distinction is the whole of this function
+ * and it is the same one foodDayIsClosed makes above: the shape is (a first-person commitment) +
+ * (the act of eating or a meal to eat), so
+ *
+ *     "actually I changed my mind, I'm having dinner"   reopens   — a decision
+ *     "I'm eating"                                      reopens
+ *     "what should I eat?"                              does NOT  — a question, no commitment
+ *     "thinking about dinner"                           does NOT  — considering is not deciding
+ *     "I'm having a bad day"                            does NOT  — `having` needs a meal after it
+ *
+ * NO REVERSAL-MARKER FORM. "changed my mind" / "actually" beside any eating word was the obvious
+ * second clause and it is deliberately absent: "actually I'm not eating anymore" carries both the
+ * marker and the verb, so that clause would have read a plainer CLOSURE as a reopening. The
+ * commitment shape cannot do that — a closure negates the verb, and `I'm not eating` never
+ * matches `I'm` immediately followed by the act.
+ *
+ * Named without looksLike* for the same reason as its sibling: a DayState input, not a router.
+ */
+export function foodDayIsReopened(text: string): boolean {
+  const t = String(text || "");
+  if (!t.trim()) return false;
+  return /\b(?:i'?m|i am|i'?ll|i will|i'?ve decided to|decided to)\s+(?:going\s+to\s+|gonna\s+)?(?:eat(?:ing)?\b|hav(?:e|ing)\s+(?:a\s+|some\s+|my\s+|the\s+)?(?:dinner|supper|lunch|breakfast|brunch|meal|food|something(?:\s+to\s+eat)?)\b)/i.test(t);
+}
+
 export function chooseAction(s: DayState): OneAction {
   const struggle = readStruggle(s.biggestStruggle);
   const isBulk = s.goal === "muscle_gain";
