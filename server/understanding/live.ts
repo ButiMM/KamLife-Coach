@@ -74,8 +74,8 @@ export async function canonicalDecision(user: any, message?: string): Promise<{ 
     //
     // It now asks the decision owner, on canonical state, under the same policy contract every
     // other caller uses. theNextMove is deleted.
-    const { chooseAction, underPolicy, foodDayIsClosed, trainingDayIsDeclined, PROACTIVE_LOG_FLOOR } = await import("../one-action");
-    const { readHeldConstraints } = await import("../held-constraints");
+    const { chooseAction, underPolicy, trainingDayIsDeclined, PROACTIVE_LOG_FLOOR } = await import("../one-action");
+    const { readHeldConstraints, foodDayClosedWith } = await import("../held-constraints");
     const { getProgressTruth, sessionsThisCalendarWeek } = await import("../day-ledger");
     const { sastHour } = await import("../sast");
     const { getTodayWorkoutState } = await import("../workout-state");
@@ -113,7 +113,9 @@ export async function canonicalDecision(user: any, message?: string): Promise<{ 
       // of the turn that carried it. `held` is today's statements; the live message is folded in
       // because it has not reached chat_history yet. trainingDeclined is the twin, and until now
       // it had no field at all: routes.ts computed it into `_isWorkoutRefusal` and dropped it.
-      foodDayClosed: held.foodDayClosed || foodDayIsClosed(message || ""),
+      // The current turn can RELEASE the constraint as well as tighten it (#152) — one owner
+      // for that, so this door and the SMART NEXT MEAL door cannot read one sentence differently.
+      foodDayClosed: foodDayClosedWith(held.foodDayClosed, message || ""),
       trainingDeclined: held.trainingDeclined || trainingDayIsDeclined(message || ""),
     } as any), { foodSufficient: truth.window.daysLogged >= PROACTIVE_LOG_FLOOR,
          // WEIGHT EVIDENCE IS NOT COUNTED HERE, and that is a known gap rather than a

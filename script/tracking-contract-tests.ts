@@ -1313,7 +1313,7 @@ const MUST_WRITE: [string, string][] = [
         const CLOSE = "I am done eating today";
         const REOPEN = "actually I changed my mind, I'm having dinner";
         const DAY_CLOSED = /leaving it there|done eating today/i;
-        const askAfter = async (historyNewestFirst: string[]) => {
+        const askAfter = async (historyNewestFirst: string[], ask = "what should I eat?") => {
           freshTurn();
           g.__KAMLIFE_STUB_USER = { ...USER };
           g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[schema.mealLogs, [{
@@ -1328,7 +1328,7 @@ const MUST_WRITE: [string, string][] = [
             message_in: text,
             created_at: new Date(dayStart.getTime() + (historyNewestFirst.length - i) * 60_000),
           }));
-          const reply = String(await handleMessage(USER.phoneNumber, "what should I eat?").catch(() => ""));
+          const reply = String(await handleMessage(USER.phoneNumber, ask).catch(() => ""));
           delete g.__KAMLIFE_STUB_PGROWS;
           delete g.__KAMLIFE_STUB_ROWS;
           return reply;
@@ -1379,6 +1379,77 @@ const MUST_WRITE: [string, string][] = [
         //     reopen" and cases 7 and 8 would pass while the feature was gone.
         if (DAY_CLOSED.test(await askAfter(["I'm having dinner tonight after all", CLOSE]))) {
           failures.push(`A genuine same-day reversal stopped working once the future-day and zero-food guards were added — the guards took the feature with them`);
+        }
+
+        /**
+         * THE TURN'S OWN WORDS (#152, CTO re-adjudication). readHeldConstraints reads HISTORY, and
+         * the message being answered is not in it yet — so "I'm eating now, what should I eat?"
+         * carried its own reversal into a door that was looking everywhere except at it. live.ts
+         * folded the current message in for CLOSURE only, so the fold could tighten the constraint
+         * and never release it.
+         *
+         * Graded where each door can actually be reached. The SMART NEXT MEAL door is reachable
+         * for the CLOSURE direction — a current-message closure with no history at all must still
+         * close the day — and for the history direction (case 3 above). It is NOT reachable for the
+         * release direction: any message that states eating is claimed by the food clarifier first,
+         * on this branch and on main alike, so the reply is identical either way and would prove
+         * nothing. That direction is graded on the Meaning Engine's state below, which is the
+         * consumer that actually differed.
+         */
+        // Graded on the requirement, not on one door's wording: a client who closed the day in the
+        // same breath as the ask must not be SOLD A MEAL. Which owner answers is not this cut's
+        // business — several may legitimately claim an utterance that closes the day.
+        const SELLS_A_MEAL = /Next Meal Suggestion|Pick one:|Start with:/i;
+        const sameTurnClose = await askAfter([], "I am done eating today, what should I eat?");
+        if (SELLS_A_MEAL.test(sameTurnClose)) {
+          failures.push(`A closure stated in the SAME turn as the ask was ignored and the client was sold a meal they had just refused: "${sameTurnClose.split("\n").filter(Boolean)[0]}"`);
+        }
+        const bothInOne = await askAfter([], "I'm eating now but I am done eating today, what should I eat?");
+        if (SELLS_A_MEAL.test(bothInOne)) {
+          failures.push(`One utterance carrying BOTH a reversal and a closure was treated as open and sold a meal — the conservative tie-break must hold inside a single message: "${bothInOne.split("\n").filter(Boolean)[0]}"`);
+        }
+      }
+
+      /**
+       * #152 — THE CURRENT TURN'S OWN WORDS, AND BOTH DOORS READING THEM THE SAME WAY.
+       *
+       * The release direction cannot be graded on the SMART NEXT MEAL reply: any message that
+       * states eating is claimed by the food clarifier before the meal door, on this branch and on
+       * main alike, so the reply is byte-identical either way and would prove nothing. It IS
+       * graded here, on the seam owner and on the state the Meaning Engine actually computes —
+       * which is the consumer that differed, because live.ts folded the current message in for
+       * closure only and could therefore tighten the constraint but never release it.
+       */
+      {
+        const { foodDayClosedWith } = await import("../server/held-constraints");
+        const cases: Array<[string, boolean, boolean, string]> = [
+          // [current message, held-from-history, expected effective closed, why]
+          ["I'm eating now, what should I eat?", true, false, "the reversal is in the turn being answered"],
+          ["what should I eat?", true, true, "an ask is not a decision — history stands"],
+          ["I'm having dinner tomorrow, what should I eat?", true, true, "a plan for another day"],
+          ["I'm eating nothing else today, what should I eat?", true, true, "a commitment to eat nothing"],
+          ["I'm eating now but I am done eating today", true, true, "closure wins inside one utterance"],
+          ["I'm eating now, what should I eat?", false, false, "nothing was closed to begin with"],
+        ];
+        for (const [msg, held, expected, why] of cases) {
+          const got = foodDayClosedWith(held, msg);
+          if (got !== expected) {
+            failures.push(`The turn's own words were read wrongly — "${msg}" with held=${held} gave closed=${got}, expected ${expected} (${why})`);
+          }
+        }
+
+        // BOTH DOORS, ONE ANSWER. The Meaning Engine builds its DayState from this same owner, so
+        // the deterministic meal door and the coaching decision cannot disagree about one sentence.
+        // Graded on the engine's real state rather than on its wording.
+        const { canonicalDecision } = await import("../server/understanding/live");
+        freshTurn();
+        g.__KAMLIFE_STUB_USER = { ...USER };
+        g.__KAMLIFE_STUB_PGROWS = [{ message_in: "I am done eating today", created_at: new Date(dayStart.getTime() + 60_000) }];
+        const closedStill = await canonicalDecision({ ...USER }, "what should I eat?").catch(() => null);
+        const reopened = await canonicalDecision({ ...USER }, "I'm eating now, what should I eat?").catch(() => null);
+        delete g.__KAMLIFE_STUB_PGROWS;
+        if (closedStill && reopened && closedStill.todo === reopened.todo && /eat|protein|meal/i.test(String(reopened.todo))) {
+          failures.push(`The Meaning Engine reached the SAME food instruction whether or not the turn reopened the day ("${reopened.todo}") — the current message is not reaching its held state, so the engine and the meal door are deciding from different facts`);
         }
       }
 

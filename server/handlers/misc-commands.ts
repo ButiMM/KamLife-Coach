@@ -37,7 +37,7 @@ import { sastDayStart, looksLikeDirectionRequest, classifyPainReport , getDispla
 import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
 import { turnEvidence } from "./chat-log";
-import { readHeldConstraints } from "../held-constraints";
+import { readHeldConstraints, foodDayClosedWith } from "../held-constraints";
 import { getDayLedger, getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
@@ -342,7 +342,11 @@ export async function handleMiscCommands(ctx: {
     // because "suggesting more food contradicts the day's assessment". The difference is only
     // whose assessment it is: there the ledger's, here the client's own — and theirs outranks it.
     const held = await readHeldConstraints(phone, user);
-    if (held.foodDayClosed) {
+    // ...AND THIS TURN'S OWN WORDS (#152). readHeldConstraints reads history, and the message being
+    // answered is not in it yet, so "I'm eating now, what should I eat?" carried its own reversal
+    // and was still refused. Same owner as the Meaning Engine uses, so both doors read one sentence
+    // the same way; a closure inside the utterance still wins.
+    if (foodDayClosedWith(held.foodDayClosed, message)) {
       const landed = `You finished on *${todayCals} kcal* and *${todayProt}g protein*.`;
       // needsProtein is this branch's existing bar for "a gap worth acting on". A 1g shortfall is
       // not a reason to reopen a decision they made; a real one is worth naming for TOMORROW,

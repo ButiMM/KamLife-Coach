@@ -141,6 +141,31 @@ function foodDayClosedNow(todaysNewestFirst: Array<{ text: string }>): boolean {
   return false;
 }
 
+/**
+ * THE TURN'S OWN WORDS COUNT TOO (#152, CTO re-adjudication on #155).
+ *
+ * readHeldConstraints reads chat HISTORY, and the message being handled is not in it yet. So a
+ * client who closed the day earlier and then sent ONE turn carrying both the reversal and the ask
+ *
+ *     "I'm eating now, what should I eat?"
+ *
+ * was still refused: the reopening was sitting in the very message the door was answering, and the
+ * door was looking everywhere except at it. live.ts already folded the current message in — but for
+ * CLOSURE only (`held.foodDayClosed || foodDayIsClosed(message)`), so the fold could tighten the
+ * constraint and never release it.
+ *
+ * SAME TIE-BREAK AS foodDayClosedNow, deliberately: within one utterance a closure outranks a
+ * reopening, because a turn cannot be ordered against itself and the conservative direction is the
+ * one that does not sell food to someone who may have just stopped. This is that rule applied to a
+ * single newest statement, so the two readers cannot disagree about the same sentence — which is
+ * the whole reason it is a function here rather than a line spelled out at each door.
+ */
+export function foodDayClosedWith(heldFromHistory: boolean, currentMessage: string): boolean {
+  if (foodDayIsClosed(currentMessage)) return true;
+  if (foodDayIsReopened(currentMessage)) return false;
+  return heldFromHistory;
+}
+
 // ── WHAT AN OUTBOUND MESSAGE IS ASKING FOR ───────────────────────────────────────────────────
 //
 // Deliberately narrow, and deliberately about the ASK rather than the topic. "You ate well today"
