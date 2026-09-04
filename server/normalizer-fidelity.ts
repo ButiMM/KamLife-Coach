@@ -46,6 +46,11 @@ export interface Fidelity {
   reason: string;
 }
 
+/** The production front-door dial. Unset is live; only the explicit killswitch disables it. */
+export function normalizerLive(): boolean {
+  return process.env.NORMALIZER !== "off";
+}
+
 // "Did they tell us how they feel?" and "is this a question?" both already have owners —
 // carriesFeelingClause (shared with the unlogged-food notice) and looksLikeQuestion. This file
 // asks them rather than keeping a second copy of either, so a miss is fixed in one place. The
