@@ -34,11 +34,11 @@ import { join } from "node:path";
 const BUDGET = {
   modules: 239,
   handlerFiles: 29,
-  cronRegistrations: 27,
+  cronRegistrations: 26,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
-  messageDeciders: 31,
+  messageDeciders: 32,
   /** `looksLikeX` predicates: hand-written guesses at intent. */
-  looksLikePredicates: 20,
+  looksLikePredicates: 21,
   /**
    * Named regex literals across the server. The 333 the founder was shown.
    *
@@ -70,12 +70,12 @@ const BUDGET = {
    * attributeMultiDayReport, resolveRecentSituation, classifySituationMessage — is wired into the
    * live path. A guard that arrives already satisfied teaches nothing.
    *
-   * The remaining 59 are declared debt, not permission. The largest block is the 21 scheduler
+   * The remaining 42 are declared debt, not permission. The largest block is the scheduler
    * jobs that are exported and never registered; whether the product wants a Monday check-in or
    * a plateau nudge is a product decision, and this number is where that decision gets made
    * rather than forgotten. LOWER THIS as capabilities are wired or deleted. Never raise it.
    */
-  unreachableCapabilities: 59,
+  unreachableCapabilities: 42,
   /**
    * GUARD #14 — see unclassifiedSenders above. Six proactive senders still choose their own
    * behavioural instruction: monday's weigh-in reminder and diet-break restore, programme's weekly
@@ -148,7 +148,7 @@ const BUDGET = {
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
   authorshipPoints: 420,
-  twilioCallSites: 18,
+  twilioCallSites: 16,
 };
 
 
@@ -235,6 +235,39 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "messageDeciders", from: 31, to: 32, date: "2026-09-04",
+    why: "RELEASE CLOSURE, AFTER EXACT INVENTORY — the 31-file inventory at the last legitimate "
+      + "baseline (c9474132) and the current 32-file inventory differ by one file only: "
+      + "server/handlers/chat-log.ts. That file now makes live, distinct message decisions at the "
+      + "final turn/history boundary: whether a turn contains enough client information to audit a "
+      + "thin reply, and whether a delivery question can be resolved from stored media receipts. "
+      + "Both are reached from routes.ts; deleting either loses shipped reconciliation/receipt "
+      + "behaviour. TRIED FIRST, and rejected: moving the meaningful-turn question into "
+      + "reaction-guard.ts (that owner answers the narrower bare-reaction question and has none of "
+      + "the turn evidence), moving receipt resolution into handlers/media.ts (the evidence is chat "
+      + "history, not the current upload, and media.ts is already 1549/1550 lines), and renaming the "
+      + "local message variable so the matcher stopped seeing it. Those moves either create the "
+      + "wrong owner, exceed another governor, or game this one. All 32 current files were listed "
+      + "with the matcher and remain live; 32 is the smallest truthful present boundary. FROM HERE "
+      + "IT FALLS ONLY. Pay it back when final-turn meaning and receipt evidence can be supplied by "
+      + "an existing structured classification without deleting either behaviour.",
+  },
+  {
+    key: "looksLikePredicates", from: 20, to: 21, date: "2026-09-04",
+    why: "RELEASE CLOSURE, AFTER EXACT INVENTORY — against the original 20-predicate freeze, "
+      + "looksLikeSameMeal was removed while two distinct live boundaries arrived: "
+      + "looksLikeBulkIntake (onboarding.ts decides whether one long first message contains a whole "
+      + "profile) and looksLikeRecallQuestion (gpt-block.ts routes an explicit memory question to "
+      + "grounded stored evidence and never to GPT). Net: 20 - 1 + 2 = 21. Every one of the 21 "
+      + "declarations has a production caller; the exact caller inventory was recomputed before "
+      + "this entry. TRIED FIRST, and rejected: treating a first-contact profile blob as a messy "
+      + "meal/event (parseMessyIntake answers a different lifecycle question), treating recall as "
+      + "ordinary model classification/RAG (violates the quote-evidence-or-abstain trust boundary), "
+      + "or folding either into the other. Renaming either predicate was also rejected as counter "
+      + "evasion. The two questions and owners are irreducible without removing product behaviour, "
+      + "so 21 is the smallest truthful current baseline. FROM HERE IT FALLS ONLY.",
+  },
   {
     key: "regexLiterals", from: 318, to: 449, date: "2026-08-24",
     why: "NOT A RAISE — A CORRECTED MEASUREMENT, and the follow-up this budget's own comment "
@@ -562,6 +595,31 @@ const NOT_CLIENT_FACING: Array<[string, string]> = [
   ["server/data-export.ts", "POPIA export — a legal record, deliberately verbatim"],
 ];
 
+/**
+ * Exact returned literals that the prose-shaped matcher sees but that do not return prose.
+ *
+ * These are line-level rather than file-level exclusions: a future client-facing return in any
+ * of these files must still count. Each value has one traced machine consumer and cannot reach a
+ * delivery door as text.
+ */
+const NOT_CLIENT_FACING_RETURNS: Array<[string, RegExp, string]> = [
+  [
+    "server/index.ts",
+    /^\s*return \["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "ECONNRESET", "EHOSTUNREACH", "EAI_AGAIN"\]\.includes\(code\)/,
+    "isConnectionError returns a boolean to startup classification; the error-code literals are never returned",
+  ],
+  [
+    "server/health-state.ts",
+    /^\s*return `sick_since:\$\{sickSince\} \| sick_until:\$\{sickUntil\} \| paused_until:\$\{sickUntil\}`/,
+    "holdTokens is consumed only by openHold's profileNotes persistence write",
+  ],
+  [
+    "server/once-daily.ts",
+    /^\s*return `\$\{userId\}\|\$\{key\}\|\$\{day\}`/,
+    "cacheKey is consumed only by the private dedupe Set and database claim",
+  ],
+];
+
 /** A returned literal is a MOUTH when it is a sentence, not a token or an enum value. */
 function isProse(literal: string): boolean {
   const words = literal.split(/[\s${}]+/).filter(w => w.length > 1).length;
@@ -573,6 +631,7 @@ function countClientFacingMouths(files: string[]): number {
   for (const f of files) {
     if (NOT_CLIENT_FACING.some(([prefix]) => f.startsWith(prefix))) continue;
     for (const line of readFileSync(f, "utf-8").split("\n")) {
+      if (NOT_CLIENT_FACING_RETURNS.some(([file, returned]) => f === file && returned.test(line))) continue;
       const m = /^\s*return \[?[`"](.*)$/.exec(line);
       if (m && isProse(m[1])) n++;
     }
