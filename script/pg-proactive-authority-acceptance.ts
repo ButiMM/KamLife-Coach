@@ -37,7 +37,7 @@ console.log = console.warn = console.error = () => {};
 const { pool, db } = await import("../server/db");
 const schema = await import("../shared/schema");
 const { canonicalNextMove, PROACTIVE_SENDERS } = await import("../server/scheduler/proactive-decision");
-const { readHeldConstraints } = await import("../server/held-constraints");
+const { readHeldConstraints, recordDailyConstraint } = await import("../server/held-constraints");
 const { claimDailySlot } = await import("../server/scheduler/shared");
 
 let failed = 0;
@@ -65,14 +65,20 @@ async function seed(over: Record<string, any> = {}): Promise<any> {
   return u;
 }
 
-const said = (uid: string, text: string) => pool.query(
-  `INSERT INTO chat_history (user_id, message_in, message_out, intent, created_at)
-   VALUES ($1,$2,'ok','GENERAL', now())`, [uid, text]);
+// A turn, recorded the way the front door records one. The constraint is a durable row now
+// (#194) rather than a sentence re-derived from the last 24 messages, so saying it and storing it
+// are the same step here as they are in production.
+const said = async (u: any, text: string) => {
+  await pool.query(
+    `INSERT INTO chat_history (user_id, message_in, message_out, intent, created_at)
+     VALUES ($1,$2,'ok','GENERAL', now())`, [u.id, text]);
+  await recordDailyConstraint(u, text);
+};
 
 // ── §1 A CONSTRAINT THE CLIENT STATED BINDS THE PROACTIVE COACH ─────────────────────────────
 REAL("\n§1 'I am not training today' — the case that used to contradict");
 const a = await seed();
-await said(a.id, "I am not training today");
+await said(a, "I am not training today");
 const heldA = await readHeldConstraints(a.phoneNumber, a);
 chk(heldA.trainingDeclined === true, "the constraint is read from the client's own words",
   JSON.stringify(heldA));
@@ -130,7 +136,7 @@ chk(twice.held.trainingDeclined === moveA.held.trainingDeclined,
 // A FOOD CLOSURE BINDS IT TOO — the other half of held-constraints, on the same path.
 REAL("\n§3b a closed food day binds the proactive coach as well");
 const c = await seed();
-await said(c.id, "I'm not eating anything else today");
+await said(c, "I'm not eating anything else today");
 const heldC = await readHeldConstraints(c.phoneNumber, c);
 chk(heldC.foodDayClosed === true, "the closure is read", JSON.stringify(heldC));
 const moveC = await canonicalNextMove(c, { hour: 20 });

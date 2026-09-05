@@ -139,6 +139,10 @@ jobs:
       # today; whether the proactive decision reads them is only answerable against a database.
       - name: Proactive decision authority on real PostgreSQL
         run: npx tsx script/pg-proactive-authority-acceptance.ts
+      # A DAILY CONSTRAINT IS ABOUT WHAT SURVIVES (#194). The defect was a 24-message window, and
+      # a fixture that returns the same rows to every query cannot demonstrate a window.
+      - name: Daily constraint lifecycle on real PostgreSQL
+        run: npx tsx script/pg-daily-constraint-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot

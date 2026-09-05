@@ -26,9 +26,12 @@
  */
 
 import { foodDayIsClosed, foodDayIsReopened, trainingDayIsDeclined } from "./one-action";
-import { recentClientMessagesStamped } from "./memory";
+import { db } from "./db";
+import { dailyConstraints, workoutLogs, users } from "../shared/schema";
+import { and, eq, desc, gte } from "drizzle-orm";
 import { readHealthState } from "./health-state";
-import { sastDaysBetween, sastDayKey } from "./sast";
+import { parseMealDate, isFutureIntent, isAskingNotReporting } from "./utils";
+import { sastDayKey, sastDayStart } from "./sast";
 
 export interface HeldConstraints {
   /** They said they are done eating for today. */
@@ -54,16 +57,139 @@ export async function readHeldConstraints(
 ): Promise<HeldConstraints> {
   const sick = client ? !!readHealthState(client).isSick : false;
   try {
-    const stamped = await recentClientMessagesStamped(phone);
-    const todays = stamped.filter(s => sastDaysBetween(s.at) === 0);
-    return {
-      foodDayClosed: foodDayClosedNow(todays),
-      trainingDeclined: todays.some(s => trainingDayIsDeclined(s.text)),
-      sick,
-    };
+    const day = sastDayKey(new Date());
+    // NEWEST DECISION PER KIND, FOR TODAY ONLY. The rows are append-only, so "is the day closed"
+    // is the state of the latest row rather than the existence of any row — a reopening does not
+    // delete the closure, it outranks it.
+    // THE PHONE IS STILL A VALID KEY, and that is not a convenience. The outbound floor calls this
+    // with `recipientUser ?? null` — it has a phone and often no row — so a reader that needed a
+    // client object would have returned "no constraints" there and silently switched off the one
+    // gate standing between an unmigrated sender and a client who said they were done for the day.
+    // The id is used when the caller has one; otherwise the user is resolved by phone, exactly as
+    // this function did before it read a table.
+    const uid = (client as any)?.id
+      ?? (await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1))[0]?.id;
+    if (!uid) return { ...NO_CONSTRAINTS, sick };
+    const rows = await db.select().from(dailyConstraints)
+      .where(and(eq(dailyConstraints.userId, uid), eq(dailyConstraints.day, day)))
+      .orderBy(desc(dailyConstraints.saidAt), desc(dailyConstraints.id));
+    const newest = (kind: string) => rows.find(r => r.kind === kind);
+
+    // A SESSION LOGGED TODAY RESOLVES A DECLINE, and the workout ledger IS that evidence —
+    // append-only, durable, and already the thing every other surface trusts about training.
+    // Recording a second row to say what the first row already says would be a second answer.
+    let trainingDeclined = newest("training")?.state === "asserted";
+    if (trainingDeclined) {
+      const done = await db.select({ id: workoutLogs.id }).from(workoutLogs)
+        .where(and(eq(workoutLogs.userId, uid), gte(workoutLogs.loggedAt, sastDayStart())))
+        .limit(1);
+      if (done.length > 0) trainingDeclined = false;
+    }
+    return { foodDayClosed: newest("food")?.state === "asserted", trainingDeclined, sick };
   } catch (e: any) {
     console.warn(`[HELD_CONSTRAINTS] unreadable for ${String(phone).slice(-8)}: ${e?.message || e}`);
     return { ...NO_CONSTRAINTS, sick };
+  }
+}
+
+/**
+ * RECORD WHAT THEY JUST RULED OUT, WHEN THEY SAY IT (#194).
+ *
+ * The reader above used to rebuild today's constraints by replaying chat history, and that replay
+ * is `ORDER BY created_at DESC LIMIT 24`. Reproduced on real PostgreSQL: a client closed their
+ * food day and declined training, had twenty-six ordinary messages, and both constraints were
+ * gone — with the client having changed nothing. The engaged client is the one it failed for.
+ *
+ * NO SECOND PARSER. foodDayIsClosed, foodDayIsReopened and trainingDayIsDeclined are still the
+ * only things that read a message; this only decides where the answer is kept. The tie-break
+ * inside one utterance is foodDayClosedNow's, unchanged and shared, so the two cannot disagree
+ * about the same sentence.
+ *
+ * Fails soft. A constraint we could not record is the behaviour we had yesterday, and the turn
+ * itself must not die because bookkeeping did.
+ */
+/**
+ * WHAT THIS SENTENCE ASSERTS ABOUT TODAY — the whole rule, in one pure place.
+ *
+ * Exported so the writer below and the contract suite share ONE definition. A test that folds its
+ * own copy of this over a history grades a mirror, and a mirror is free to drift from the thing it
+ * claims to be about — which is precisely how a constraint suite could stay green while the
+ * product forgot the constraint.
+ *
+ * Returns [] for anything that is not a decision about TODAY. A closure inside one utterance still
+ * outranks a reopening inside it: a turn cannot be ordered against itself, and the conservative
+ * direction is the one that does not sell food to someone who may have just stopped.
+ */
+export function constraintsAssertedBy(message: string): Array<{ kind: string; state: string }> {
+  // A CONSTRAINT IS ABOUT TODAY, SO A SENTENCE ABOUT ANOTHER DAY ASSERTS NOTHING (#194).
+  //
+  // "yesterday I was not eating anything else" and "I was done eating last night" both satisfy
+  // foodDayIsClosed — the same words in the past tense. While the state was re-derived from a
+  // 24-message window that was survivable noise; recorded, it would close TODAY on the strength
+  // of a story about last night, permanently. parseMealDate is the temporal owner every food path
+  // already asks which day a sentence is about, and isFutureIntent is the shared floor for a plan.
+  //
+  // AND ASKING IS NOT DECIDING. "should I stop eating for today?" satisfies foodDayIsClosed — a
+  // real over-fire, and one that predates this change: the old reader would have closed the day on
+  // that question too, for as long as the window held it. isAskingNotReporting is the floor this
+  // codebase already shares for exactly that distinction, and its documented bias is the right one
+  // here — answering a report as a question is recoverable; silently closing someone's food day
+  // because they asked about it is not.
+  if (isAskingNotReporting(message)) return [];
+  // THE DAY AND FUTURE GUARDS APPLY TO THE ASSERTIONS, NOT THE RELEASE — and the asymmetry is the
+  // point, twice over.
+  //
+  // First, the safe directions differ: wrongly asserting a constraint SILENCES the coach for the
+  // rest of someone's day, while wrongly releasing one only lets it speak. Second, the release
+  // recogniser already owns these guards. foodDayIsReopened was built with its own future-day and
+  // zero-food tests (#155); parseMealDate is a MEAL-date resolver, not a general "which day is
+  // this sentence about" oracle, and it has heuristics of its own — asked before dawn it reads
+  // "I'm having dinner tonight after all" as YESTERDAY's dinner. Gating the release on it took the
+  // reversal away, which is the whole feature #152 exists to give back, and locked a client who
+  // changed their mind out until midnight again.
+  const asserts = (m: string) => {
+    const named = parseMealDate(m);
+    if (named && sastDayKey(named) !== sastDayKey(new Date())) return false;
+    return !isFutureIntent(m);
+  };
+  const rows: Array<{ kind: string; state: string }> = [];
+  if (asserts(message) && foodDayIsClosed(message)) rows.push({ kind: "food", state: "asserted" });
+  else if (foodDayIsReopened(message)) rows.push({ kind: "food", state: "released" });
+  if (asserts(message) && trainingDayIsDeclined(message)) rows.push({ kind: "training", state: "asserted" });
+  return rows;
+}
+
+export async function recordDailyConstraint(
+  client: { id: string } | null | undefined,
+  message: string,
+  sourceMessageId?: string,
+): Promise<void> {
+  if (!client?.id) return;
+  // A CONSTRAINT IS ABOUT TODAY, SO A SENTENCE ABOUT ANOTHER DAY ASSERTS NOTHING (#194).
+  //
+  // "yesterday I was not eating anything else" and "I was done eating last night" both satisfy
+  // foodDayIsClosed — they are the same words in the past tense. While the state was re-derived
+  // from a 24-message window that was survivable noise; recorded, it would close TODAY on the
+  // strength of a story about last night, permanently. parseMealDate is the temporal owner every
+  // food path already asks which day a sentence is about, and isFutureIntent is the shared floor
+  // for a plan. Neither is new, and neither reads the constraint — they only say whether this
+  // sentence is about today at all.
+  //
+  // AND ASKING IS NOT DECIDING. "should I stop eating for today?" satisfies foodDayIsClosed — a
+  // real over-fire, and one that predates this change: the old reader would have closed the day on
+  // that question too, for however long the window held it. isAskingNotReporting is the floor this
+  // codebase already shares for exactly this distinction, and its documented bias is the right one
+  // here — answering a report as a question is recoverable, silently closing someone's food day
+  // because they asked about it is not.
+  const rows = constraintsAssertedBy(message);
+  if (rows.length === 0) return;
+  const day = sastDayKey(new Date());
+  for (const r of rows) {
+    await db.insert(dailyConstraints)
+      .values({ userId: client.id, day, kind: r.kind, state: r.state, via: "said",
+        sourceMessageId: sourceMessageId || null })
+      .onConflictDoNothing()
+      .catch((e: any) => console.warn("[HELD_CONSTRAINTS] not recorded:", e?.message || e));
   }
 }
 
@@ -117,29 +243,14 @@ export function foodCloseLookup(
 }
 
 /**
- * THE NEWEST EXPLICIT DECISION WINS (#152, 2026-09-03).
- *
- * This was `todays.some(foodDayIsClosed)` — once anything today closed the day, nothing could
- * open it, so a client who closed at 19:55 and then said "actually I changed my mind, I'm having
- * dinner" was refused for the rest of the night, every time they asked.
- *
- * `some` also throws away the one thing that settles a contradiction: WHEN each was said. The
- * statements are already newest-first, so the first one that is a decision about eating today is
- * the decision that stands, and everything older is history. Nothing is stored; the effective
- * state is derived from the client's own ordered words, which is what "held" has always meant here.
- *
- * A CLOSURE INSIDE A SINGLE MESSAGE OUTRANKS A REOPENING INSIDE IT. "I'll have dinner, then I'm
- * done eating" is one utterance with both, and one turn cannot be ordered against itself — so the
- * tie goes to the constraint, which is the direction that does not sell food to someone who may
- * have just stopped.
+ * foodDayClosedNow IS GONE (#194). It folded the newest explicit decision out of today's chat
+ * history, and it was the last thing reading that window for this purpose: the decision is now
+ * recorded when it is made, so there is nothing left to re-derive. Its rule survives unchanged in
+ * recordDailyConstraint above — a closure inside one utterance still outranks a reopening inside
+ * it, because a turn cannot be ordered against itself and the conservative direction is the one
+ * that does not sell food to someone who may have just stopped. Same rule, one place, written
+ * down once rather than replayed.
  */
-function foodDayClosedNow(todaysNewestFirst: Array<{ text: string }>): boolean {
-  for (const s of todaysNewestFirst) {
-    if (foodDayIsClosed(s.text)) return true;
-    if (foodDayIsReopened(s.text)) return false;
-  }
-  return false;
-}
 
 /**
  * THE TURN'S OWN WORDS COUNT TOO (#152, CTO re-adjudication on #155).

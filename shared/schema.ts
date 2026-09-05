@@ -551,6 +551,42 @@ export const clientTruthCommits = pgTable("client_truth_commits", {
 
 export type ClientTruthCommit = typeof clientTruthCommits.$inferSelect;
 
+// === DAILY CONSTRAINTS — what the client ruled out today, recorded when they said it (#194) ===
+//
+// held-constraints.ts opens by naming the defect this table closes: "the constraint lived for
+// exactly one expression and then evaporated." Binding it to a reader fixed the first version of
+// that; the reader still RE-DERIVED it from the last 24 chat messages, so on a busy day the
+// declaration fell out of the window and the constraint evaporated again — proven on real
+// PostgreSQL: closed at 09:00, gone by message 25, with the client having changed nothing.
+//
+// APPEND-ONLY, AND THAT IS THE POINT. A reopening does not edit the closure; it is a second row.
+// The day's effective state is the newest decision, and the assertion that came before it is
+// still on the record — which is what lets anyone answer "was the coach allowed to say that at
+// 20:00" a week later. Nothing here decides anything: the recognisers in one-action.ts remain the
+// only things that read a message, and readHeldConstraints remains the only reader of the state.
+export const dailyConstraints = pgTable("daily_constraints", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** The SAST day this constraint is about — never a timestamp, because "today" is the whole rule. */
+  day: text("day").notNull(),
+  /** food | training */
+  kind: text("kind").notNull(),
+  /** asserted | released */
+  state: text("state").notNull(),
+  /** What resolved it: said | workout_logged. The client's words, or their actions. */
+  via: text("via").notNull(),
+  /** The provider message this came from, when there was one — makes a retry idempotent. */
+  sourceMessageId: text("source_message_id"),
+  saidAt: timestamp("said_at").defaultNow().notNull(),
+}, (table) => ({
+  userDayKindIdx: index("daily_constraints_user_day_kind_idx").on(table.userId, table.day, table.kind),
+  sourceIdempotency: uniqueIndex("daily_constraints_user_source_kind_uidx")
+    .on(table.userId, table.sourceMessageId, table.kind),
+}));
+
+export type DailyConstraint = typeof dailyConstraints.$inferSelect;
+
+
 // === SENT PROACTIVE — durable dedupe for scheduled messages ===
 // Each scheduled proactive send claims a row (userId, messageKey, dedupeWindow).
 // The unique index below guarantees the same (user, messageKey, window) can only
