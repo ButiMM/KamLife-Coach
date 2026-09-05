@@ -4094,6 +4094,81 @@ test("canonical truth: factual understanding always comes from the committed pro
     "a slow earlier turn cannot overwrite understanding from a newer fact revision");
 });
 
+// ── #128/1: ONE BUBBLE, TWO SPEECH ACTS — AND A FACT THE CLIENT CAN TAKE BACK ───────────────
+//
+// Graded end to end on STATE, not on source shape: the sentence a client actually sends, through
+// the detector and the projection that writes the column, into foodConstraints — the owner every
+// plate, grocery and swap mouth consults. If the chain works, the coach stops offering chicken to
+// someone who said they are vegan, and starts offering it again the day they say they are not.
+
+test("#128/1: a constraint stated in the same bubble as the question still reaches the coach", async () => {
+  const { detectFacts, projectClientFacts } = await import("../server/memory");
+  const { foodConstraints } = await import("../server/food-swaps");
+
+  // What a real client types. Before this, the "?" made looksLikeQuestion true for the WHOLE
+  // message and every gated fact was dropped — they stated a constraint and were sold chicken.
+  for (const said of ["I'm vegan now, what should I eat?", "I'm vegan now. What should I eat?"]) {
+    const { patch } = projectClientFacts({}, detectFacts(said));
+    const c = foodConstraints({ dietaryRestrictions: patch.dietaryRestrictions as string });
+    assert.ok(c.vegan, `"${said}" writes a restriction the food owners can read`);
+    assert.ok(!c.allows("chicken breast"), "…and chicken is off the menu on the same turn");
+  }
+
+  const dairy = projectClientFacts({}, detectFacts("I can't eat dairy, what can I eat?")).patch;
+  assert.ok(foodConstraints({ dietaryRestrictions: dairy.dietaryRestrictions as string }).noDairy,
+    "the allergy clause is read even with the question attached");
+  assert.equal(detectFacts("my knee is killing me, what should I train?").injuries, "knee",
+    "and so is the injury — the programme filters on this column");
+
+  // THE GUARD IS NOT GONE, IT IS ASKED ABOUT THE RIGHT CLAUSE. If these start committing, the
+  // clause split has become a licence to record hypotheticals as facts.
+  assert.equal(detectFacts("what happens if I hurt my knee?").injuries, undefined,
+    "a one-clause hypothetical is still not an injury");
+  assert.equal(detectFacts("do I have diabetes?").medicalConditions, undefined, "asking is still not having");
+  assert.equal(detectFacts("I'm going to hurt my shoulder doing that").injuries, undefined,
+    "a plan is still not a report");
+});
+
+test("#128/1: a client can take a restriction back", async () => {
+  const { detectFacts, projectClientFacts } = await import("../server/memory");
+  const { foodConstraints } = await import("../server/food-swaps");
+
+  // THE STATE BEFORE — this is what makes the assertion below mean something.
+  assert.ok(!foodConstraints({ dietaryRestrictions: "vegan" }).allows("chicken breast"),
+    "while the fact stands, chicken is refused");
+
+  const { patch, operations } = projectClientFacts({ dietaryRestrictions: "vegan" },
+    detectFacts("I'm not vegan anymore"));
+  assert.equal(patch.dietaryRestrictions, null, "the column is cleared, not appended to");
+  assert.equal(operations[0].operation, "retract", "and the evidence says what happened");
+  assert.ok(foodConstraints({ dietaryRestrictions: patch.dietaryRestrictions as any }).allows("chicken breast"),
+    "the coach may offer chicken again");
+
+  // The old behaviour wrote the sentence itself into the column, and every owner greps for the
+  // bare word — so the retraction BANNED more than the assertion ever did.
+  const asWritten = foodConstraints({ dietaryRestrictions: "not vegan anymore" });
+  assert.ok(asWritten.vegan && asWritten.noFish,
+    "storing the retraction verbatim would ban meat, dairy and fish — which is why it must not be stored");
+
+  // A retraction removes ONE fact. An unrelated restriction is not collateral.
+  const mixed = projectClientFacts({ dietaryRestrictions: "vegan, allergic to peanuts" },
+    detectFacts("I'm not vegan anymore"));
+  assert.equal(mixed.patch.dietaryRestrictions, "allergic to peanuts", "the peanut allergy survives");
+
+  // Same for the body: a knee that healed does not take the shoulder with it.
+  const injury = projectClientFacts({ injuries: "knee, shoulder" }, detectFacts("my knee doesn't hurt anymore"));
+  assert.equal(injury.patch.injuries, "shoulder", "the resolved joint is removed and the other stays");
+
+  // NEGATIVE CONTROL — a bare "not X" in a food log is not a retraction. If these clear the
+  // column, a real allergy disappears because the client described their plate.
+  for (const said of ["I had chicken, not fish", "I'm having chicken not fish", "chicken, no fish"]) {
+    const kept = projectClientFacts({ dietaryRestrictions: "allergic to fish" }, detectFacts(said));
+    assert.equal(kept.patch.dietaryRestrictions, undefined, `"${said}" leaves the allergy alone`);
+  }
+  assert.equal(projectClientFacts({}, detectFacts("I'm not eating dairy")).patch.dietaryRestrictions,
+    "not eating dairy", "a restriction stated in the negative is still a restriction");
+});
+
 // ── CUT 8: DON'T-MENTION IS BOUND TO THE MOUTH ──────────────────────────────────────────────
 
 test("cut8: the reply path honours do_not_mention, above the meaningful-message gate", () => {
