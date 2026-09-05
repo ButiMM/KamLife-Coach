@@ -121,3 +121,9 @@ jobs:
         run: npx tsx script/pg-correction-acceptance.ts
       - name: Safety early-return turn attribution on real PostgreSQL
         run: npx tsx script/pg-safety-turn-acceptance.ts
+      # THE PROVENANCE OWNER IS A DATABASE FUNCTION (#184), so PostgreSQL is the only thing that
+      # can say whether its regular expressions compile. The broken version threw inside an
+      # AFTER INSERT trigger the application never awaits — a green suite, a normal reply, and
+      # every client-stated step count silently left untrusted.
+      - name: Step provenance bridge on real PostgreSQL
+        run: npx tsx script/pg-step-provenance-acceptance.ts
