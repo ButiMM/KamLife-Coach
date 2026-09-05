@@ -859,6 +859,38 @@ test("explicitMealSlot: 'morning' with no temporal determiner is not a slot clai
   assert.equal(explicitMealSlot("I had chicken and rice"), null);
 });
 
+// ============================================================
+// AND THE MORNING MUST BE WHEN THEY ATE (#182 — over-fire found in the merged #174 fix)
+//
+// The first cut tested the WHOLE message, so "I train in the morning; I just had rice" relabelled
+// the rice as breakfast at an evening send time: the word belonged to the training clause and the
+// slot was taken from it anyway. Same class of error as the one the branch exists to fix, pointing
+// the other way — a time attached to the wrong event still contradicts the client's own record.
+// ============================================================
+
+test("explicitMealSlot: a morning phrase in ANOTHER clause does not label the food (#182)", () => {
+  assert.equal(explicitMealSlot("I train in the morning; I just had rice"), null);
+  assert.equal(explicitMealSlot("I go to gym in the morning; I just ate pap"), null);
+});
+
+test("explicitMealSlot: a coordinating conjunction separates the events too (#182)", () => {
+  assert.equal(explicitMealSlot("I walk in the morning and had rice"), null);
+  assert.equal(explicitMealSlot("This morning I trained and then had rice"), null);
+});
+
+// …AND A NAMED MEAL IN THE SECOND CLAUSE KEEPS ITS OWN SLOT, which is the control that proves the
+// scoping did not simply switch the branch off: the message still resolves, just not to breakfast.
+test("explicitMealSlot: 'I walk in the morning and had dinner at 7pm' stays dinner (#182)", () => {
+  assert.equal(explicitMealSlot("I walk in the morning and had dinner at 7pm"), "dinner");
+  assert.equal(explicitMealSlot("This morning I trained and then had breakfast"), "breakfast");
+});
+
+// BOTH WORD ORDERS ARE THE SAME CLAIM. People put the time on either side of the verb.
+test("explicitMealSlot: the time may sit before or after the eating verb (#182)", () => {
+  assert.equal(explicitMealSlot("Had eggs this morning"), "breakfast");
+  assert.equal(explicitMealSlot("this morning, I had eggs"), "breakfast");
+});
+
 // DELIBERATELY NOT WIDENED (#174 control 3). Afternoon spans lunch and the snack after it, so a
 // slot for it would be invented rather than surfaced. It still falls to clock inference.
 test("explicitMealSlot: 'this afternoon' is NOT mapped to lunch", () => {
