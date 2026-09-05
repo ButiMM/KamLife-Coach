@@ -100,6 +100,10 @@ check(crisisTurn.reply === crisisResponse, "crisis ledger holds the final client
 check(crisisTurn.version === "issue-175-safety", "crisis turn exposes exact build provenance to Coach Health");
 const crisisUsers = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.phoneNumber, phones.crisis));
 check(crisisUsers.length === 1, "first-contact crisis identity binding creates exactly one user");
+const crisisTruth = await db.select().from(schema.clientTruthCommits)
+  .where(eq(schema.clientTruthCommits.userId, crisisUser.id));
+check(crisisTruth.length === 1 && crisisTruth[0].revision === 1,
+  "first-contact crisis receives exactly one canonical truth revision before returning");
 const crisisChats = await db.select({ id: schema.chatHistory.id }).from(schema.chatHistory).where(and(
   eq(schema.chatHistory.userId, crisisUser.id), eq(schema.chatHistory.intent, "CRISIS"),
 ));

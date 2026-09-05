@@ -3980,17 +3980,53 @@ test("verifier: it still catches the thing it was built to catch", () => {
 
 // ── CUT 7: MEMORY IS FIELDS, NOT SEARCH ─────────────────────────────────────────────────────
 
-test("cut7: durable facts are learned at the front door, not inside the GPT handler", () => {
+test("cut7: durable facts commit at the front door before coaching reads the user", () => {
   const strip = (x: string) => x.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
   const routes = strip(readFileSync("server/routes.ts", "utf-8"));
   const gptBlock = strip(readFileSync("server/handlers/gpt-block.ts", "utf-8"));
   // THE DEFECT: the detectors sat last in the pipeline, so "my knee is killing me, had chicken
   // and pap" routed to the food handler and the injury was never recorded — while programme.ts
   // kept building sessions from users.injuries, which stayed NULL.
-  assert.ok(/recordClientFacts\(user, message\)/.test(routes), "every message is heard, not just GPT ones");
+  assert.ok(/await bindClientTruth\(phone, message, sourceMessageId\)/.test(routes),
+    "every message is committed at the door, and the same turn receives the refreshed projection");
   assert.ok(!/storeMemory\(phone, `Client reported injury/.test(gptBlock),
     "the prose detectors in the GPT handler are gone");
   assert.ok(!/storeMemory\(phone, `Life situation update/.test(gptBlock), "…both blocks of them");
+});
+
+// A SAFETY TURN IS STILL AN ACCEPTED TURN, AND ACCEPTED TURNS GET EXACTLY ONE REVISION.
+//
+// This replaces two string searches: the literal `recordClientFacts(user, message,
+// sourceMessageId)` had to appear in routes.ts ABOVE the literal `runSafetyGuards`. They passed
+// for the right reason once and then failed for the wrong one — the commit moved into
+// bindClientTruth, its owner in memory.ts, and the behaviour did not change at all. A test that
+// fails when correct code is reorganised is measuring the file, not the product.
+//
+// WHAT THIS ASSERTS, AND ONLY THIS: a crisis message returns from the safety guard before any
+// other handler runs, and that turn still lands EXACTLY ONE truth commit — never zero (the turn
+// was accepted, so it is attributable) and never two (the door and the guard must not both
+// commit it). Whether the commit precedes the guard is a durable-ordering property and is graded
+// where it can be graded honestly: pg-client-truth-acceptance and pg-safety-turn-acceptance, on
+// real PostgreSQL, against the revision numbers themselves.
+test("cut7: a crisis early-return lands exactly one truth commit — not zero, not two", async () => {
+  const g = globalThis as any;
+  const schema = await import("../shared/schema");
+  const { handleMessage } = await import("../server/routes");
+  const priorUser = g.__KAMLIFE_STUB_USER, priorWrites = g.__KAMLIFE_STUB_WRITES;
+  try {
+    g.__KAMLIFE_STUB_USER = {
+      id: "u-truth-order", phoneNumber: "whatsapp:+27000000191", name: "Kam",
+      onboardingState: "COMPLETE", subscriptionStatus: "active", popiConsent: true,
+      goalType: "fat_loss", calorieTarget: 2800, proteinTarget: 195, truthRevision: 0,
+    };
+    g.__KAMLIFE_STUB_WRITES = [];
+    const reply = String(await handleMessage("whatsapp:+27000000191", "I want to kill myself") ?? "");
+    const commits = (g.__KAMLIFE_STUB_WRITES || []).filter((w: any) => w.table === schema.clientTruthCommits);
+    assert.ok(/SADAG|0800 567 567/i.test(reply), "the turn really did take the crisis early-return");
+    assert.equal(commits.length, 1, "…and it is attributable: one revision, and only one");
+  } finally {
+    g.__KAMLIFE_STUB_USER = priorUser; g.__KAMLIFE_STUB_WRITES = priorWrites;
+  }
 });
 
 test("cut7: an injury reaches the column the programme actually reads", async () => {
@@ -4027,6 +4063,35 @@ test("cut7: one owner for the injury append", () => {
     assert.ok(!/const existingInj = \(user\.injuries \|\| ""\)\.toLowerCase\(\)/.test(src),
       `${f} no longer carries its own copy`);
   }
+});
+
+test("canonical truth: projection is built from the latest row and preserves independent facts", async () => {
+  const { projectClientFacts } = await import("../server/memory");
+  const first = projectClientFacts(
+    { injuries: "knee", doNotMention: "weight" },
+    { injuries: "shoulder", doNotMention: "my ex" },
+  );
+  assert.equal(first.patch.injuries, "knee, shoulder", "a concurrent injury is appended to the locked row");
+  assert.equal(first.patch.doNotMention, "weight, my ex", "one new boundary cannot erase another");
+  assert.deepEqual(first.operations.map((o: any) => o.fact), ["injuries", "doNotMention"]);
+  assert.equal(first.operations[0].previousValue, "knee", "lineage retains the replaced projection");
+});
+
+test("canonical truth: factual understanding always comes from the committed projection", async () => {
+  const { seedUnderstanding } = await import("../server/understanding/seed");
+  const seeded = seedUnderstanding({
+    name: "Thandi", dietaryRestrictions: "vegan", doNotMention: "weight",
+    lifeContext: "new baby", workSchedule: "night_shift",
+  } as any);
+  assert.ok(seeded.profile.keyFacts.includes("dietary restriction: vegan"));
+  assert.ok(seeded.profile.keyFacts.includes("do not mention: weight"));
+  assert.ok(seeded.profile.keyFacts.includes("life right now: new baby"));
+  assert.ok(seeded.profile.keyFacts.includes("work pattern: night shift"));
+
+  const store = readFileSync("server/understanding/store.ts", "utf-8");
+  assert.ok(/keyFacts: seed\.profile\.keyFacts/.test(store), "stored narrative cannot replace factual slots");
+  assert.ok(/setWhere: lte\(clientUnderstanding\.sourceRevision, sourceRevision\)/.test(store),
+    "a slow earlier turn cannot overwrite understanding from a newer fact revision");
 });
 
 // ── CUT 8: DON'T-MENTION IS BOUND TO THE MOUTH ──────────────────────────────────────────────

@@ -17,7 +17,7 @@ import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboardi
 import { saysNotWorking } from "./despair";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
-import { recordClientFacts } from "./memory";
+import { recordClientFacts, bindClientTruth } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { sendWhatsApp } from "./scheduler";
 import { recordConversion } from "./ab";
@@ -118,12 +118,22 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   try {
   recordMessageSeen();  let m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
 
+  // The turn's factual context is committed before ANY routing decision — bindClientTruth in
+  // memory.ts owns the lookup, the commit and the fail-open. It never creates an account, so
+  // "delete my data" from an unknown number still answers "no account found"; ordinary first
+  // contact is created below, once the guards have stood down.
+  let user: any | undefined = await bindClientTruth(phone, message, sourceMessageId);
+  if (user) turnUser(user.id);
+
   // ---- SAFETY + DATA GUARDS (crisis, medical, terminal, delete, reset) ----
-  const safetyResult = await runSafetyGuards(phone, message, m);
+  const safetyResult = await runSafetyGuards(phone, message, m, { sourceMessageId, boundUser: user });
   if (safetyResult !== null) return safetyResult;
 
-  const user = await getOrCreateUser(phone);
-  turnUser(user.id);
+  if (!user) {
+    user = await getOrCreateUser(phone);
+    turnUser(user.id);
+    user = await recordClientFacts(user, message, sourceMessageId);
+  }
 
   // QR ACQUISITION SOURCE — a scanned join-QR prefills "(ref: gymA)"; capture once, then strip.
   if (!user.signupSource && !mediaUrl && message && (await captureSignupSource(user, phone, message))) {
@@ -500,12 +510,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // capitalisation intact — `m` is already lower-cased and whitespace-collapsed, which is fine for
   // matching but is not their message.
   const originalMessageForFidelity = message;
-
-  // CUT 7 — durable facts are learned at the FRONT DOOR, on the raw text, for the same reason the
-  // turn facts are. The old detectors sat inside the GPT handler, last in the pipeline, so "my
-  // knee is killing me, had chicken and pap" routed to food and the injury was never recorded —
-  // and programme.ts, which trains around users.injuries, never heard about the knee.
-  void recordClientFacts(user, message);
 
   // CUT 2 — the facts are counted on the client's RAW text, here, before the rewriter below can
   // replace it. Cut 1 counted them after, so a two-fact note rewritten down to one fact reached

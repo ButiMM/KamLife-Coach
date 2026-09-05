@@ -178,8 +178,10 @@ const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT 
   // independent authorities on "a new eating event happened". Both now hand rows to
   // commitFoodLog and write nothing themselves, which is the whole point of the cut: this list
   // shrinking is what convergence looks like from the governor's side.
-  // food-context.ts was here until commitFoodLog — the write door — moved to server/day-ledger.ts.
-  // It now parses and decides and hands rows to that one owner; it writes nothing itself.
+  // New-meal writes moved from food-context.ts to commitFoodLog in day-ledger.ts. The correction
+  // path still transactionally relabels/removes the previously resolved row, so it remains an
+  // action file and is guarded by its explicit correction/reference predicates.
+  "server/handlers/food-context.ts": "guarded",
   "server/handlers/food-log-mgmt.ts": "guarded",
   "server/handlers/media.ts": "guarded",
   "server/handlers/workout.ts": "guarded",
@@ -889,7 +891,10 @@ for (const [key, frozen] of Object.entries(FROZEN) as Array<[keyof typeof BUDGET
 // Every action file is declared, and the AT RISK list may only shrink.
 const actionFiles = files.filter(f => {
   const src = read(f);
-  return /db\s*\.\s*(insert|update)\s*\(/.test(src) && /\.test\((?:m|message|lower)\b/.test(src);
+  // A transaction-scoped write is still a write. Restricting this detector to the global `db`
+  // identifier made an action owner disappear from the governor the moment its write was made
+  // correctly atomic through `tx`.
+  return /(?:db|tx)\s*\.\s*(insert|update)\s*\(/.test(src) && /\.test\((?:m|message|lower)\b/.test(src);
 });
 for (const f of actionFiles) {
   if (!(f in ACTION_FILES)) {

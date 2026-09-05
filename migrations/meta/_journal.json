@@ -64,6 +64,13 @@
       "when": 1787400000000,
       "tag": "0008_step_provenance_regex_repair",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787500000000,
+      "tag": "0009_canonical_client_truth",
+      "breakpoints": true
     }
   ]
 }

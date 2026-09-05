@@ -70,6 +70,10 @@ export const users = pgTable(
     dietaryRestrictions: text("dietary_restrictions"), // comma-separated, like medical_conditions
     lifeContext: text("life_context"),                 // night shifts, new baby, retrenched, moved
     doNotMention: text("do_not_mention"),              // topics the client asked us to drop
+    // Monotonic version of accepted client context. Every turn increments this while holding
+    // the user row lock, whether or not it changes a durable profile fact. Derived/model memory
+    // is stamped with this revision so a slow older turn cannot overwrite newer truth.
+    truthRevision: integer("truth_revision").notNull().default(0),
     programmePhase: integer("programme_phase").default(1),
     programmeWeek: integer("programme_week").default(1),
     programmeDayInWeek: integer("programme_day_in_week").default(1),
@@ -520,10 +524,32 @@ export const clientUnderstanding = pgTable("client_understanding", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   profile: jsonb("profile"),           // { name, lifeStory, keyFacts[], preferences }
   observations: jsonb("observations"), // { confidenceTrend, frustrationLevel, readinessToPush, trustLevel }
+  sourceRevision: integer("source_revision").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export type ClientUnderstanding = typeof clientUnderstanding.$inferSelect;
+
+// === CLIENT TRUTH COMMITS — ordered evidence behind the current user projection ===
+// The users row remains the fast current-state projection. This append-only row records which
+// client message was accepted, any factual operations it caused, and the revision coaching saw.
+// A nullable sourceMessageId deliberately permits internal/admin turns; PostgreSQL unique indexes
+// allow multiple NULLs while making a real Twilio MessageSid idempotent per client.
+export const clientTruthCommits = pgTable("client_truth_commits", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sourceMessageId: text("source_message_id"),
+  revision: integer("revision").notNull(),
+  operations: jsonb("operations").notNull(),
+  receivedAt: timestamp("received_at").defaultNow().notNull(),
+}, (table) => ({
+  sourceIdempotency: uniqueIndex("client_truth_commits_user_source_uidx")
+    .on(table.userId, table.sourceMessageId),
+  userRevisionIdx: uniqueIndex("client_truth_commits_user_revision_uidx")
+    .on(table.userId, table.revision),
+}));
+
+export type ClientTruthCommit = typeof clientTruthCommits.$inferSelect;
 
 // === SENT PROACTIVE — durable dedupe for scheduled messages ===
 // Each scheduled proactive send claims a row (userId, messageKey, dedupeWindow).
