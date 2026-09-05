@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 65354)
-Total output lines: 4406
-
 /**
  * Gap-closing tests — covers the highest-risk untested functions identified in the
  * June 2026 gap audit. All pure functions; no DB, no network.
@@ -2012,7 +2009,999 @@ test("sick gate: third-person / idiom / prevention / regret do NOT fire", () => 
     "Ate so much at the party last night, I feel sick",
     "That workout made me feel sick, was it too intense?",
     "I'm feeling better now, over the flu",
-  ]) assert.ok(!looksSickMention(msg), `…15354 tokens truncated…
+  ]) assert.ok(!looksSickMention(msg), `should NOT fire: ${msg}`);
+});
+
+test("sick gate: third-person context with a first-person report still fires", () => {
+  assert.ok(looksSickMention("Everyone at work has flu and now I'm sick too"), "first-person assertion overrides third-party context");
+});
+
+// SICK FLOW — a substantive message while already sick must NOT get the holding template
+// (2026-07-15 screenshot: a restlessness/identity share got the EXACT same words as a
+// bare "still sick", verbatim 60s apart). Bare check-ins still get a (varied) template;
+// anything carrying real content falls through to the sick-aware brain.
+const { handleSickFlow } = await import("../server/handlers/sick-flow");
+const sickUser = { id: "sick-user", goalType: "fat_loss", trainingMode: "gym", profileNotes: "sick_until:2099-01-01 | paused_until:2099-01-01" };
+const sickCtx = (raw: string) => ({ message: raw, m: raw.toLowerCase(), user: sickUser, capName: "Kam" });
+
+test("sick flow: bare 'still sick' check-in gets a holding template", async () => {
+  const r = await handleSickFlow(sickCtx("I'm still sick today"));
+  assert.ok(r !== null, "bare check-in should return a template");
+  assert.ok(/rest|holding|paused|fluids|soup/i.test(r!), "template holds the rest line");
+});
+
+test("sick flow: a substantive share while sick FALLS THROUGH to the brain (no template)", async () => {
+  for (const msg of [
+    "I feel like I should be walking or doing something, I'm not used to just sitting around but I'm also not well, I can feel it",
+    "the flu is killing me and I feel so alone",
+    "I still have the flu and honestly I'm scared I'm losing all my progress",
+  ]) {
+    const r = await handleSickFlow(sickCtx(msg));
+    assert.strictEqual(r, null, `substantive sick message must fall through, not template: "${msg.slice(0, 40)}"`);
+  }
+});
+
+test("brain: eating-out playbook — permission + strategy, never guilt (Kam's manual pattern)", () => {
+  assert.ok(/EATING OUT/i.test(BRAIN_SYS), "must handle going-out announcements");
+  assert.ok(/lean protein/i.test(BRAIN_SYS) && /skip the alcohol/i.test(BRAIN_SYS), "3-part strategy present");
+  assert.ok(/photo your plate/i.test(BRAIN_SYS), "must ask for the plate photo to log");
+});
+
+test("brain: playbook leads with concern on a health event (asks if serious)", () => {
+  assert.ok(/health event/i.test(BRAIN_SYS), "must name 'any health event'");
+  assert.ok(/concern/i.test(BRAIN_SYS) && /serious/i.test(BRAIN_SYS), "must instruct concern-first + ask if serious");
+});
+
+// LAGGING BODY PART (2026-07-09) — a real test: "my chest is lagging, add an 8th
+// exercise?" The bot wrongly called it "muscle confusion" and refused. Bringing up a
+// weak point is legitimate targeted volume, and the bot must never echo the myth.
+test("brain: lagging body part → targeted volume, never 'muscle confusion'", () => {
+  assert.ok(/LAGGING BODY PART/i.test(BRAIN_SYS), "must handle lagging body parts explicitly");
+  assert.ok(/muscle confusion is a MYTH/i.test(BRAIN_SYS), "must call muscle confusion a myth, not prescribe it");
+  assert.ok(/NEVER refuse it/i.test(BRAIN_SYS), "must not refuse a legitimate lagging-part request");
+  assert.ok(/glutes\/hamstrings|glutes/i.test(BRAIN_SYS) && /chest\/back|chest/i.test(BRAIN_SYS), "gender-aware body-part priorities present");
+});
+
+test("workout viewer: rendered page slides and escapes exercise names", () => {
+  const html = renderWorkoutViewerHtml(
+    { label: "Upper A", week: 2, cards: [{ name: "Chest <Fly>", sets: "4 × 8", gifUrl: null, videoUrl: "https://youtube.com/x", alt: "Dumbbell press" }] },
+    "Kam",
+  );
+  assert.ok(/scroll-snap-type:\s*x/i.test(html), "must be a horizontal slider");
+  assert.ok(html.includes("Chest &lt;Fly&gt;"), "must HTML-escape exercise names");
+  assert.ok(html.includes("Watch the move"), "video card shows a watch action");
+});
+
+// ============================================================
+// MISC-COMMANDS.TS CHARACTERISATION TESTS
+// ============================================================
+
+const { handleMiscCommands } = await import("../server/handlers/misc-commands");
+
+function mc(message: string, overrides: Partial<typeof LC_USER> = {}) {
+  const user = { ...LC_USER, ...overrides };
+  return { phone: user.phoneNumber, message, m: message.toLowerCase().trim(), user };
+}
+
+test("misc-commands: 'creatine' → supplement guide returned", async () => {
+  const r = await handleMiscCommands(mc("creatine"));
+  assert.ok(r !== null, "should handle creatine query");
+  assert.ok(r!.toLowerCase().includes("creatine"), `should mention creatine: ${r?.slice(0, 100)}`);
+});
+
+test("misc-commands: 'should I take protein powder' → supplement guide", async () => {
+  const r = await handleMiscCommands(mc("should I take protein powder"));
+  assert.ok(r !== null, "should handle protein powder query");
+});
+
+test("misc-commands: week9_choice '1' → maintenance phase response", async () => {
+  const r = await handleMiscCommands(mc("1", { awaitingInputType: "week9_choice" }));
+  assert.ok(r !== null, "should handle week9_choice '1'");
+  assert.ok(r!.toLowerCase().includes("maintenance") || r!.toLowerCase().includes("3"), `should be maintenance path: ${r?.slice(0, 100)}`);
+});
+
+test("misc-commands: week9_choice '2' → advanced phase response", async () => {
+  const r = await handleMiscCommands(mc("2", { awaitingInputType: "week9_choice" }));
+  assert.ok(r !== null, "should handle week9_choice '2'");
+  assert.ok(r!.toLowerCase().includes("advanced") || r!.toLowerCase().includes("5"), `should be advanced path: ${r?.slice(0, 100)}`);
+});
+
+test("misc-commands: week9_choice 'irrelevant text' → falls through (null)", async () => {
+  const r = await handleMiscCommands(mc("what is the weather", { awaitingInputType: "week9_choice" }));
+  // Non-matching input during week9_choice should fall through
+  assert.ok(r === null || typeof r === "string", "should be null or string");
+});
+
+// ============================================================
+// MEDIA.TS CHARACTERISATION TESTS
+// Tests pure helpers and early-return paths that don't require
+// external API calls (OpenAI Vision / Whisper / image download).
+// ============================================================
+
+const { bumpVoiceFailure, clearVoiceFailure, handleMediaMessage } = await import("../server/handlers/media");
+const { default: OpenAI } = await import("openai");
+
+const testOpenAi = new OpenAI({ apiKey: "sk-test-offline" });
+
+// ---- VOICE FAILURE TRACKER ----
+test("media: bumpVoiceFailure — first call returns 1", () => {
+  const count = bumpVoiceFailure("media-test-uid-1");
+  assert.equal(count, 1);
+  clearVoiceFailure("media-test-uid-1"); // cleanup
+});
+
+test("media: bumpVoiceFailure — second call within window returns 2", () => {
+  const uid = "media-test-uid-2";
+  bumpVoiceFailure(uid);
+  const count = bumpVoiceFailure(uid);
+  assert.equal(count, 2);
+  clearVoiceFailure(uid);
+});
+
+test("media: clearVoiceFailure — resets counter to 0 (next bump returns 1)", () => {
+  const uid = "media-test-uid-3";
+  bumpVoiceFailure(uid);
+  bumpVoiceFailure(uid);
+  clearVoiceFailure(uid);
+  const count = bumpVoiceFailure(uid);
+  assert.equal(count, 1, "after clear, bump should return 1");
+  clearVoiceFailure(uid);
+});
+
+// ---- STICKER DETECTION ----
+test("media: sticker (image/webp, no caption) → sticker detection message, no API call", async () => {
+  const r = await handleMediaMessage({
+    phone: "whatsapp:+27821234567",
+    message: "",
+    mediaUrl: "https://media.twilio.com/sticker.webp",
+    mediaContentType: "image/webp",
+    allMediaUrls: [],
+    user: { ...LC_USER },
+    isCoach: false,
+    openai: testOpenAi,
+    handleMessage: async () => "",
+  });
+  assert.ok(r.includes("sticker"), `should mention sticker: ${r.slice(0, 100)}`);
+});
+
+// ============================================================
+
+
+
+// ============================================================
+// FOOD SCANNER PRECISION (2026-07-12, Kam: "go deep" on calorie precision). The scanner
+// must identify every food in a multi-item log AND never double-count a protein when a
+// specific dish and a generic component both light up. Locks two real double-count bugs
+// found by probe: restaurant chicken + phantom "Chicken thigh", and a curry combo +
+// standalone curry.
+// ============================================================
+function scanNames(msg: string): string[] {
+  return scanForSAFoods(msg).map((f: any) => f.name);
+}
+
+test("food scan: multi-item logs identify every component", () => {
+  const eggsPap = scanNames("2 eggs and pap");
+  assert.ok(eggsPap.includes("Eggs") && eggsPap.some(n => /pap/i.test(n)), "eggs + pap both found");
+  const chkVeg = scanNames("grilled chicken breast and sweet potato");
+  assert.ok(chkVeg.includes("Chicken breast") && chkVeg.includes("Sweet potato"), "breast + sweet potato");
+});
+
+test("food scan: no chicken double-count when a specific dish + bare 'chicken' collide", () => {
+  const nandos = scanNames("nandos quarter chicken and chips");
+  assert.ok(nandos.includes("Nando's quarter chicken"), "keeps the real dish");
+  assert.ok(!nandos.includes("Chicken thigh") && !nandos.includes("Chicken breast"), "drops phantom generic cut");
+  const rot = scanNames("rotisserie chicken and veg");
+  assert.ok(!rot.includes("Chicken thigh") && !rot.includes("Chicken breast"), "rotisserie doesn't add a phantom cut");
+});
+
+test("food scan: a typed cut word keeps the generic cut (not a phantom)", () => {
+  assert.ok(scanNames("chicken thigh and rice").includes("Chicken thigh"), "typed 'thigh' kept");
+  assert.ok(scanNames("chicken breast and rice").includes("Chicken breast"), "typed 'breast' kept");
+  assert.deepEqual(scanNames("chicken"), ["Chicken thigh"], "bare 'chicken' still logs a cut");
+});
+
+test("food scan: curry combo doesn't double-count the standalone curry", () => {
+  assert.deepEqual(scanNames("chicken curry and rice"), ["Chicken curry and rice"], "combo only, no extra curry");
+  assert.deepEqual(scanNames("chicken curry"), ["Curry (chicken)"], "standalone curry still works alone");
+});
+
+test("food scan: toast/stew combos don't double-count their bread/stew alternates", () => {
+  // "Toast" alongside an "...on toast" combo was double-counting the bread.
+  assert.deepEqual(scanNames("two boiled eggs and toast"), ["Eggs on toast"], "no extra Toast on top of the combo");
+  assert.deepEqual(scanNames("pilchards on toast"), ["Pilchards on toast"], "no extra Toast");
+  assert.ok(scanNames("toast with jam").includes("Toast"), "standalone Toast still logs");
+  // "Beef stew" alongside "Pap and stew" was double-counting the stew.
+  const stew = scanNames("beef stew and pap");
+  assert.ok(stew.includes("Beef stew") && stew.some(n => /pap/i.test(n)), "beef stew + pap, both kept");
+  assert.ok(!stew.includes("Pap and stew"), "no phantom combo double-counting the stew");
+  assert.deepEqual(scanNames("big plate of pap and stew"), ["Pap and stew"], "vague 'stew' keeps the combo");
+});
+
+// A COMBO MAY NOT BORROW ITS WORDS FROM ANOTHER FOOD (#114 P0-1, 2026-09-03, founder's typed
+// message). "Pap and chicken livers" returned BOTH "Chicken livers" AND the combo "Chicken and
+// pap" — 858 kcal and 95g protein for one plate, and the client was told they had eaten chicken
+// they never had. The combo's alias "pap and chicken" (chars 0-14) overlaps "chicken livers"
+// (chars 8-21): the dish was assembled out of a word that belongs to the livers.
+//
+// Graded on the identity AND the charge, because either alone can pass while the other is wrong:
+// dropping the phantom without keeping the pap loses food the client ate, and keeping both entries
+// at half portions would double-count differently.
+test("food scan: 'Pap and chicken livers' is one plate, and there is no invented chicken", () => {
+  const names = scanNames("Pap and chicken livers");
+  assert.ok(names.includes("Chicken livers"), `the livers must survive: ${names.join(", ")}`);
+  assert.ok(names.some(n => /^pap/i.test(n)), `the pap the client ate must survive: ${names.join(", ")}`);
+  assert.ok(!names.includes("Chicken and pap"),
+    `the combo borrowed "chicken" from the livers and charged a second dish: ${names.join(", ")}`);
+  assert.ok(!names.some(n => n === "Chicken thigh" || n === "Chicken breast"),
+    `no independent chicken entity may be invented: ${names.join(", ")}`);
+  // CHARGED ONCE. The bug was visible as a number long before anyone read the entry list.
+  const kcal = adjustFoodsForSegment(scanForSAFoods("Pap and chicken livers") as any, "Pap and chicken livers")
+    .reduce((s: number, f: any) => s + f.adjustedCalories, 0);
+  assert.ok(kcal < 700, `one plate of pap and livers cannot be ${kcal} kcal — that is the double charge`);
+});
+
+test("food scan: a combo whose span is its own is untouched (both word orders)", () => {
+  // CONTROL. The rule must fire on BORROWED words only. Here the overlap between the combo and
+  // the standalone Pap is the combo bundling its own component, which is legitimate — without
+  // this, "drop a combo that overlaps anything" would delete every combo in the table.
+  assert.deepEqual(scanNames("pap and chicken"), ["Chicken and pap"], "combo survives, one dish");
+  assert.deepEqual(scanNames("chicken and pap"), ["Chicken and pap"], "and in the other word order");
+  // The two halves still work alone, so the fix did not simply suppress one of them.
+  assert.deepEqual(scanNames("chicken livers"), ["Chicken livers"], "livers alone unaffected");
+  assert.ok(scanNames("pap").some(n => /^pap/i.test(n)), "pap alone unaffected");
+});
+
+test("food scan: every combo in the table still resolves to itself", () => {
+  // CONTROL, deliberately exhaustive. The new pass sees every combo, so a rule that is subtly too
+  // greedy would show up here rather than in production. These are the phrases the combos exist for.
+  for (const [phrase, expected] of [
+    ["pap and wors", "Pap and wors"], ["fish and chips", "Fish and chips"],
+    ["eggs on toast", "Eggs on toast"], ["peanut butter on bread", "Peanut butter on bread"],
+    ["oats with milk", "Oats with milk"], ["cereal with milk", "Cereal with milk"],
+    ["mince and pap", "Mince and pap"], ["pap and stew", "Pap and stew"],
+    ["pap and spinach", "Pap and spinach"], ["pap and pilchards", "Pap and pilchards"],
+    ["chicken and rice", "Chicken and rice"], ["rice and chicken", "Chicken and rice"],
+  ] as const) {
+    assert.deepEqual(scanNames(phrase), [expected], `"${phrase}" must still be one dish`);
+  }
+  // And the regression the combo dedup was originally written for stays fixed.
+  const listed = scanNames("i had lentils, rice and chicken breast");
+  assert.ok(!listed.includes("Chicken and rice"), `no phantom combo when parts are listed: ${listed.join(", ")}`);
+});
+
+test("food scan: a specific sandwich suppresses the generic 'Sandwich' (no double bread)", () => {
+  assert.deepEqual(scanNames("peanut butter sandwich"), ["Peanut butter on bread"], "PB sandwich = one item");
+  // but a bare/filling sandwich with no specific match keeps 'Sandwich' for the bread
+  assert.ok(scanNames("cheese and tomato sandwich").includes("Sandwich"), "generic sandwich kept for bread");
+  assert.deepEqual(scanNames("sandwich"), ["Sandwich"], "bare sandwich still logs");
+});
+
+// QUANTITY PRECISION — the calories a text log produces must scale with the count.
+// "6 eggs" is 3× "2 eggs", not the same. This is where the deficit actually lives.
+function eggKcal(msg: string): number {
+  const adj = adjustFoodsForSegment(scanForSAFoods(msg), msg) as any[];
+  const egg = adj.find(f => f.name === "Eggs");
+  return egg ? egg.adjustedCalories : -1;
+}
+test("food quantity: egg calories scale with the count (default portion is 2 eggs)", () => {
+  const two = eggKcal("2 eggs");
+  assert.ok(two > 150 && two < 220, `2 eggs ~186 kcal, got ${two}`);
+  assert.equal(eggKcal("6 eggs"), two * 3, "6 eggs = 3× the 2-egg portion");
+  assert.equal(eggKcal("3 eggs"), Math.round(two * 1.5), "3 eggs = 1.5×");
+  assert.equal(eggKcal("1 egg"), Math.round(two * 0.5), "1 egg = 0.5×");
+});
+test("food quantity: size words scale the whole portion", () => {
+  const adjBig = adjustFoodsForSegment(scanForSAFoods("big plate of pap"), "big plate of pap") as any[];
+  const adjNorm = adjustFoodsForSegment(scanForSAFoods("pap"), "pap") as any[];
+  const big = adjBig.find(f => /pap/i.test(f.name)), norm = adjNorm.find(f => /pap/i.test(f.name));
+  assert.ok(big && norm && big.adjustedCalories > norm.adjustedCalories, "big plate > normal plate");
+});
+
+// VAGUE QUANTITY (2026-07-23 live: "I said half a Vienna" → the bot logged the 2-vienna
+// default and the client had to argue the log DOWN). Vague amounts lean LOW, and a vague
+// amount is speech — portion memory must not override it.
+function viennaAdj(msg: string): any {
+  const adj = adjustFoodsForSegment(scanForSAFoods(msg), msg) as any[];
+  return adj.find(f => /vienna/i.test(f.name));
+}
+test("vague quantity: 'half a vienna' is a fraction of ONE vienna, never the 2-vienna default", () => {
+  const half = viennaAdj("half a vienna with my eggs");
+  const dflt = viennaAdj("viennas with my eggs");
+  assert.ok(half && dflt, "both scans find viennas");
+  assert.ok(half.adjustedCalories < dflt.adjustedCalories / 2 + 10, `half a vienna (${half.adjustedCalories}) must be way under the default (${dflt.adjustedCalories})`);
+  // "half" normalises to 0.5 and rides the explicit path (0.5 of ONE vienna against the
+  // 2-vienna default = 0.25×); the per-food vague matcher is the backstop. Either source
+  // is fine — the NUMBER is the contract.
+  assert.ok(["vague", "explicit"].includes(half.portionSource), `source: ${half.portionSource}`);
+  assert.ok(Math.abs(half.quantity - 0.25) < 0.01, `0.5 vienna of a 2-vienna portion = 0.25× (got ${half.quantity})`);
+});
+test("vague quantity: 'some viennas' leans LOW — half the table default", () => {
+  const some = viennaAdj("some viennas on the side");
+  const dflt = viennaAdj("viennas on the side");
+  assert.ok(some && dflt, "both scans find viennas");
+  assert.equal(some.adjustedCalories, Math.round(dflt.adjustedCalories * 0.5), "some = 0.5× default");
+  assert.equal(some.portionSource, "vague");
+});
+test("vague quantity: an explicit count still wins — '3 viennas' is not vague", () => {
+  const three = viennaAdj("3 viennas");
+  assert.equal(three.portionSource, "explicit");
+});
+test("vague quantity: global 'half the rice' does not double-halve per-food", () => {
+  const adj = adjustFoodsForSegment(scanForSAFoods("half the rice"), "half the rice") as any[];
+  const rice = adj.find(f => /rice/i.test(f.name));
+  assert.ok(rice, "rice found");
+  assert.ok(rice.quantity >= 0.45, `0.5 once, not 0.25 (got ${rice.quantity})`);
+});
+
+// ============================================================
+// Results
+// ============================================================
+
+// ============================================================
+// SYMPTOM PERSISTENCE (2026-08-12) — step 2 of the hunger doctrine.
+// "I'm hungry" and "I've been hungry every afternoon for six days" are not the same state, and
+// until now the product could not tell them apart. These cover the two ways this could go wrong:
+// capturing the wrong messages, and corrupting the friction system it borrows its pattern from.
+// ============================================================
+
+const { SYMPTOM_SIGNAL_KINDS, NOT_A_BOT_FUMBLE, symptomSignalKind } =
+  await import("../server/quality-signals");
+const { reportsHunger } = await import("../server/unlogged-notice");
+const { FRICTION_SIGNAL_KINDS } = await import("../server/friction");
+
+test("symptom: a present-tense hunger report is captured", () => {
+  for (const m of [
+    "I'm hungry", "im so hungry all the time", "I am always hungry",
+    "still hungry after lunch", "I'm starving", "constantly hungry",
+    "I can't stop eating", "my cravings are out of control",
+  ]) assert.equal(reportsHunger(m), true, `should capture: "${m}"`);
+});
+
+test("symptom: it must NOT capture a past explanation, advice, or an unrelated message", () => {
+  // Over-capturing would manufacture the very persistence the doctrine exists to detect.
+  for (const m of [
+    "I ate the bread because I was hungry",   // past explanation, not a current report
+    "I was so hungry yesterday",              // past
+    "that will keep you full for hours",      // advice about hunger
+    "i had chicken and rice for lunch",       // a food log
+    "how many calories do I have left?",      // a question
+    "how do I stop being hungry",             // asking, not reporting — the coach answers this
+  ]) assert.equal(reportsHunger(m), false, `must NOT capture: "${m}"`);
+});
+
+test("symptom: hunger is NOT a friction kind — the operator queue stays uncorrupted", () => {
+  // Friction means the client is FIGHTING THE BOT; its red flag reads "the bot is failing them".
+  // A hungry client is not a bot failure. If these namespaces ever overlap, reporting a symptom
+  // would rank a client as a churn risk for telling us what we asked them to tell us.
+  assert.equal(symptomSignalKind("hunger"), "symptom_hunger");
+  for (const k of SYMPTOM_SIGNAL_KINDS) {
+    assert.ok(!FRICTION_SIGNAL_KINDS.includes(k), `${k} must never be counted as friction`);
+  }
+  for (const k of FRICTION_SIGNAL_KINDS) {
+    assert.ok(!SYMPTOM_SIGNAL_KINDS.includes(k), `${k} must never be counted as a symptom`);
+  }
+});
+
+test("symptom: a client-state observation is never presented as a bot fumble", () => {
+  // The admin review queue labels every row "a moment the bot fumbled".
+  for (const k of SYMPTOM_SIGNAL_KINDS) {
+    assert.ok(NOT_A_BOT_FUMBLE.includes(k), `${k} must be excluded from the fumble queue`);
+  }
+  const admin = readFileSync("server/routes/admin.ts", "utf-8");
+  assert.ok(/notInArray\(qualitySignals\.kind, NOT_A_BOT_FUMBLE\)/.test(admin),
+    "the exclusion must actually be applied to the query, not merely declared");
+});
+
+test("symptom: persistence records evidence and never diagnoses", () => {
+  // The layer must expose counts and dates only. A cause belongs downstream, with Coach K.
+  const src = readFileSync("server/quality-signals.ts", "utf-8");
+  const fn = src.slice(src.indexOf("export interface SymptomPersistence"));
+  assert.ok(/distinctDays/.test(fn), "distinct DAYS is the load-bearing number, not raw occurrences");
+  assert.ok(!/protein|cause|because|recommend|should eat/i.test(fn.slice(0, 1200)),
+    "the persistence layer must not carry a diagnosis or advice");
+});
+
+// ============================================================
+// HUNGER EVIDENCE (2026-08-12) — step 3. Joins the nutrition picture to the symptom history.
+// The evidenceState machine is where a mistake would be invisible in production, so every
+// transition is covered — including the two that must NOT fire.
+// ============================================================
+
+const { assembleHungerEvidence, PERSISTENT_HUNGER_DAYS, ADEQUATE_PROTEIN_RATIO } =
+  await import("../server/hunger-evidence");
+const { computeProgressScore } = await import("../server/progress-score");
+
+const scoreWith = (over: Partial<any> = {}) => computeProgressScore({
+  completedSessions: 2, plannedSessions: 3,
+  avgDailyProtein: 71, proteinTarget: 120,
+  avgSteps: 6200, stepsTarget: 8500,
+  foodLogDays: 6, weightLogCount: 2, weightChangeKg: -0.4,
+  goalType: "fat_loss", ...over,
+});
+const hungerFor = (distinctDays: number) => ({
+  kind: "hunger" as const, occurrences: distinctDays * 2, distinctDays,
+  firstAt: null, lastAt: null, windowDays: 7,
+});
+const inputsWith = (over: Partial<any> = {}) => ({
+  avgDailyProtein: 71, proteinTarget: 120, avgSteps: 6200, weightChangeKg: -0.4, foodLogDays: 6, ...over,
+});
+
+test("hunger evidence: persistent hunger with short protein puts protein IN SCOPE", () => {
+  const e = assembleHungerEvidence(scoreWith(), hungerFor(6), inputsWith());
+  assert.equal(e.evidenceState, "persistent_hunger");
+  assert.equal(e.hunger.persistent, true);
+  assert.ok(e.progress.proteinRatio! < ADEQUATE_PROTEIN_RATIO);
+  assert.equal(e.confidence, "usable");
+});
+
+test("hunger evidence: ADEQUATE protein with persistent hunger is a distinct state", () => {
+  // The case a one-line rule gets confidently wrong, for exactly the clients who complied.
+  const e = assembleHungerEvidence(
+    scoreWith({ avgDailyProtein: 118 }), hungerFor(5), inputsWith({ avgDailyProtein: 118 }));
+  assert.equal(e.evidenceState, "adequate_protein_persistent_hunger");
+  assert.ok(e.progress.proteinRatio! >= ADEQUATE_PROTEIN_RATIO);
+});
+
+test("hunger evidence: one bad day is NOT persistence", () => {
+  const e = assembleHungerEvidence(scoreWith(), hungerFor(1), inputsWith());
+  assert.equal(e.evidenceState, "single_signal");
+  assert.equal(e.hunger.persistent, false);
+});
+
+test("hunger evidence: six complaints in ONE day is still one day", () => {
+  // occurrences 12, distinctDays 1 — the whole reason distinctDays is the primitive.
+  const e = assembleHungerEvidence(scoreWith(), { ...hungerFor(1), occurrences: 12 }, inputsWith());
+  assert.equal(e.evidenceState, "single_signal", "message volume must never manufacture persistence");
+});
+
+test("hunger evidence: thin logs beat every other signal — no claim about protein at all", () => {
+  // Confidence is checked FIRST. Two logged days cannot support "your protein is low",
+  // however bad the average looks or however many days hunger was reported.
+  const e = assembleHungerEvidence(
+    scoreWith({ foodLogDays: 2, avgDailyProtein: 30 }), hungerFor(6), inputsWith({ foodLogDays: 2, avgDailyProtein: 30 }));
+  assert.equal(e.confidence, "weak");
+  assert.equal(e.evidenceState, "insufficient_data",
+    "persistent hunger must NOT license a protein claim on two logged days");
+});
+
+test("hunger evidence: no symptom reported means nothing is volunteered", () => {
+  const e = assembleHungerEvidence(scoreWith(), hungerFor(0), inputsWith());
+  assert.equal(e.evidenceState, "no_persistent_symptom");
+});
+
+test("hunger evidence: the persistence threshold is days, and it is the stated one", () => {
+  assert.equal(PERSISTENT_HUNGER_DAYS, 3);
+  assert.equal(assembleHungerEvidence(scoreWith(), hungerFor(PERSISTENT_HUNGER_DAYS - 1), inputsWith()).hunger.persistent, false);
+  assert.equal(assembleHungerEvidence(scoreWith(), hungerFor(PERSISTENT_HUNGER_DAYS), inputsWith()).hunger.persistent, true);
+});
+
+test("hunger evidence: it carries evidence and NEVER an intervention", () => {
+  const e = assembleHungerEvidence(scoreWith(), hungerFor(6), inputsWith());
+  const keys = JSON.stringify(e);
+  for (const banned of ["recommend", "intervention", "eatMore", "reduceCalories", "advice", "shouldEat"]) {
+    assert.ok(!keys.includes(banned), `the evidence object must not carry "${banned}"`);
+  }
+  // No prose in the ASSEMBLER. renderHungerEvidence below it legitimately writes text — but for
+  // the PROMPT, read by the model, never sent to a client. That distinction is the point: the
+  // calculator stays wordless, and the one place with words says only what the evidence IS.
+  const src = readFileSync("server/hunger-evidence.ts", "utf-8");
+  const assembler = src.slice(0, src.indexOf("export function renderHungerEvidence"));
+  const code = assembler.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.ok(!/["'`][A-Z][a-z]+ [a-z]+ [a-z]+/.test(code),
+    "no sentences may appear in the evidence assembler — it returns values, not words");
+});
+
+
+// ============================================================
+// LAW 26 — the hunger reasoning protocol (step 4, 2026-08-12).
+// The doctrine lives in the engine's CONSTITUTION, which is delivered IN FULL on every call —
+// not in the COACH_K_SYSTEM tail, where "restoring" it would have meant writing it at character
+// 20,001 and congratulating ourselves. These assert the three cases the founder named, at the
+// level a deterministic test can reach: what the delivered doctrine INSTRUCTS. Whether the model
+// obeys it is a Reality question, and that run comes next.
+// ============================================================
+
+const constitutionText = (() => {
+  const src = readFileSync("server/understanding/meaning-engine.ts", "utf-8");
+  const i = src.indexOf("const CONSTITUTION = `");
+  const a = src.indexOf("`", i) + 1;
+  return src.slice(a, src.indexOf("`;", a));
+})();
+// Whitespace-normalised: the CONSTITUTION is hard-wrapped, so "already at target" is really
+// "already at\ntarget". A phrase assertion that ignores that tests the line breaks, not the rule.
+const law26 = constitutionText.slice(constitutionText.indexOf("26. PERSISTENT HUNGER")).replace(/\s+/g, " ");
+
+test("law 26: it reaches the model — CONSTITUTION is sent in full, unlike the sliced prompt", () => {
+  assert.ok(constitutionText.includes("PERSISTENT HUNGER IS A SIGNAL TO INVESTIGATE"),
+    "the doctrine must live in the DELIVERED layer, not the amputated COACH_K_SYSTEM tail");
+  const engine = readFileSync("server/understanding/meaning-engine.ts", "utf-8");
+  assert.ok(/systemParts\s*=\s*\[\s*\n?\s*CONSTITUTION/.test(engine),
+    "CONSTITUTION must be the first thing in the engine's system message");
+  assert.ok(!/CONSTITUTION\.slice\(/.test(engine), "the CONSTITUTION must never be sliced");
+});
+
+test("law 26 / case 1: adequate protein + persistent hunger must NOT be a protein diagnosis", () => {
+  assert.ok(/already at target/i.test(law26) && /not the answer/i.test(law26),
+    "the doctrine must state plainly that at-target protein is NOT the answer");
+  assert.ok(/lose someone who was doing the work/i.test(law26),
+    "and say why it matters — this is the case that loses a complying client");
+});
+
+test("law 26 / case 2: insufficient evidence must NOT produce a cause", () => {
+  assert.ok(/enough evidence|enough logged/i.test(law26), "evidence sufficiency is checked FIRST");
+  assert.ok(/say so/i.test(law26) && /ask for/i.test(law26),
+    "it must instruct the coach to SAY it does not know and ask for what it needs");
+  assert.ok(/never diagnose from two days/i.test(law26),
+    "the floor must be explicit, not left to judgement");
+});
+
+test("law 26 / case 3: good evidence still is not a verdict", () => {
+  // The subtlest of the three: even with real numbers, naming a cause claims more than we know.
+  assert.ok(/correlation is not diagnosis/i.test(law26), "the doctrine must say this outright");
+  assert.ok(/plausible cause to investigate/i.test(law26),
+    "it must frame the finding as the thing to INVESTIGATE, not the answer");
+  assert.ok(/claims more than you know/i.test(law26),
+    "and must give the counter-example of a sentence that overclaims");
+});
+
+test("law 26: it forbids moralising and does not collapse to a one-line rule", () => {
+  assert.ok(/willpower/i.test(law26) && /forbidden/i.test(law26),
+    "willpower/discipline language must be explicitly banned, not merely discouraged");
+  // The doctrine must name causes BEYOND protein, or it is the brittle rule wearing a longer coat.
+  for (const cause of ["volume", "sleep", "adherence", "calories"]) {
+    assert.ok(new RegExp(cause, "i").test(law26), `law 26 must consider ${cause}, not protein alone`);
+  }
+  assert.ok(/one lever/i.test(law26), "protein must be framed as ONE lever among several");
+});
+
+test("law 26: the integrity guard protects it, in the same change", () => {
+  const guard = readFileSync("script/check-prompt-integrity.ts", "utf-8");
+  assert.ok(/PERSISTENT HUNGER IS A SIGNAL TO INVESTIGATE/.test(guard),
+    "a doctrine with no guard is a doctrine that can vanish silently — the exact failure being fixed");
+  assert.ok(/correlation is not diagnosis/i.test(guard),
+    "the guard must assert the BODY teaches the sequence, not merely that a heading exists");
+});
+
+
+// ============================================================
+// STEP 3.5 — delivering the evidence (2026-08-12). Law 26 tells Coach K to check the evidence;
+// until this wiring the evidence never reached the prompt, so the coach was being asked to
+// reason over numbers it was never given. These cover the gate, the block, and the layer rule.
+// ============================================================
+
+const { hasRelevantHungerEvidence, renderHungerEvidence } = await import("../server/hunger-evidence");
+
+const persistenceOf = (distinctDays: number) => ({
+  kind: "hunger" as const, occurrences: distinctDays, distinctDays,
+  firstAt: null, lastAt: null, windowDays: 7,
+});
+
+test("3.5 gate: a standing hunger state counts even when today's message never says 'hungry'", () => {
+  // Yesterday "I'm hungry every afternoon", today "my weight hasn't moved" — the coach still
+  // needs the numbers. Gating on today's wording would deliver them only when least needed.
+  assert.equal(hasRelevantHungerEvidence(persistenceOf(5), false), true);
+  assert.equal(hasRelevantHungerEvidence(persistenceOf(1), false), true);
+});
+
+test("3.5 gate: today's report counts even with no history", () => {
+  assert.equal(hasRelevantHungerEvidence(persistenceOf(0), true), true);
+});
+
+test("3.5 gate: no signal at all injects NOTHING", () => {
+  // The prompt cost matters: on a tool turn the engine system message is sent twice, so a
+  // permanent hunger subsystem would be paid for on every message to serve a small fraction.
+  assert.equal(hasRelevantHungerEvidence(persistenceOf(0), false), false);
+});
+
+test("3.5 block: it reports evidence and states its own boundary — no diagnosis", () => {
+  const e = assembleHungerEvidence(
+    computeProgressScore({ completedSessions: 2, plannedSessions: 3, avgDailyProtein: 74,
+      proteinTarget: 120, avgSteps: 6000, stepsTarget: 8500, foodLogDays: 2,
+      weightLogCount: 0, weightChangeKg: null, goalType: "fat_loss" }),
+    persistenceOf(1),
+    { avgDailyProtein: 74, proteinTarget: 120, avgSteps: 6000, weightChangeKg: null, foodLogDays: 2 });
+  const block = renderHungerEvidence(e);
+  assert.ok(block.includes("Evidence state: insufficient_data"), "the state must be stated plainly");
+  assert.ok(block.includes("120g/day") && block.includes("74g/day"), "the real numbers must appear");
+  assert.ok(/Protein adequacy: 62%/.test(block), "the ratio must be given, not left to be computed");
+  assert.ok(/EVIDENCE, not a diagnosis and not a recommendation/.test(block),
+    "the block must state what it IS, so the model does not read it as a verdict");
+  // It must never tell the coach what to CONCLUDE or DO. Note the disclaimer legitimately
+  // contains the word "recommendation" — banning that substring would fail the very sentence
+  // that establishes the boundary, so these match advice-shaped statements, not vocabulary.
+  for (const banned of ["you should", "eat more", "increase (your |the )?protein", "try eating",
+                        "the cause is", "because (your|their)"]) {
+    assert.ok(!new RegExp(banned, "i").test(block), `the evidence block must not advise: "${banned}"`);
+  }
+  assert.ok(/not a diagnosis/.test(block), "and it must say outright that it is not one");
+});
+
+test("3.5 block: insufficient_data is DELIVERED, not withheld", () => {
+  // Knowing what it does not know is the difference between "I can't tell you why yet" and a guess.
+  const e = assembleHungerEvidence(
+    computeProgressScore({ completedSessions: 0, plannedSessions: 3, avgDailyProtein: 40,
+      proteinTarget: 120, avgSteps: 0, stepsTarget: 8500, foodLogDays: 1,
+      weightLogCount: 0, weightChangeKg: null, goalType: "fat_loss" }),
+    persistenceOf(2),
+    { avgDailyProtein: 40, proteinTarget: 120, avgSteps: 0, weightChangeKg: null, foodLogDays: 1 });
+  assert.equal(e.evidenceState, "insufficient_data");
+  assert.ok(renderHungerEvidence(e).includes("Confidence: weak"), "the coach must be told how thin it is");
+});
+
+test("3.5 layering: the engine SERIALISES the evidence, it does not compute it", () => {
+  const engine = readFileSync("server/understanding/meaning-engine.ts", "utf-8");
+  assert.ok(/input\.hungerEvidence \? renderHungerEvidence\(input\.hungerEvidence\) : ""/.test(engine),
+    "the engine must pass the assembled object straight to the renderer");
+  // The chain is storage -> calculation -> evidence object -> prompt -> reasoning. If the engine
+  // starts assembling or thresholding, the layers have blurred and the calculator has moved.
+  for (const leak of ["assembleHungerEvidence", "PERSISTENT_HUNGER_DAYS", "ADEQUATE_PROTEIN_RATIO", "symptomPersistence"]) {
+    assert.ok(!engine.includes(leak), `meaning-engine must not reference ${leak} — it serialises only`);
+  }
+});
+
+test("3.5 layering: the composer sits where the DB reads already live", () => {
+  const live = readFileSync("server/understanding/live.ts", "utf-8");
+  assert.ok(/hasRelevantHungerEvidence\(hunger, reportsHunger\(message\)\)/.test(live),
+    "the gate must combine the standing state with today's message");
+  assert.ok(/hungerEvidence,/.test(live), "the assembled object must be handed to the engine");
+  // Fail-open: a telemetry or aggregate miss must never cost the client their reply.
+  const blockSrc = live.slice(live.indexOf("let hungerEvidence"), live.indexOf("const strategyTurn"));
+  assert.ok(/catch/.test(blockSrc) && /prompt proceeds without it/.test(blockSrc),
+    "assembly must fail open — no evidence is an honest prompt, an exception is not");
+});
+
+
+// ============================================================
+// THE FLAG THAT SILENCED THE MODEL (2026-08-12). KAMLIFE_DB_STUB=1 implied AI_OFFLINE, so the
+// hunger gauntlet — which sets the stub because it needs no database — disabled the model on the
+// one script whose whole purpose is calling it. The engine failed open to null, every case scored
+// an empty reply, and 14 prohibition-shaped checks passed because an empty string cannot violate
+// a prohibition. These lock the precedence and the guard that makes it un-repeatable.
+// ============================================================
+
+test("ai-offline: the stub still implies offline — every offline suite depends on it", async () => {
+  // gap-tests itself runs under KAMLIFE_DB_STUB=1, so this is the live value, not a source read.
+  const { AI_OFFLINE } = await import("../server/ai-offline");
+  assert.equal(AI_OFFLINE, true, "the offline suites must never start calling the network");
+});
+
+test("ai-offline: an EXPLICIT OFFLINE_AI=0 beats the stub, and nothing else changes", () => {
+  const src = readFileSync("server/ai-offline.ts", "utf-8");
+  assert.ok(/process\.env\.OFFLINE_AI === "0"\s*\n?\s*\? false/.test(src),
+    "an explicit opt-in must override the stub's implication");
+  assert.ok(/OFFLINE_AI === "1" \|\| process\.env\.KAMLIFE_DB_STUB === "1"/.test(src),
+    "the original rule must survive as the fallback — production sets neither and is unaffected");
+});
+
+test("hunger gauntlet: a live run can never score an EMPTY reply", () => {
+  const src = readFileSync("script/hunger-gauntlet.ts", "utf-8");
+  assert.ok(/if \(!reply\)/.test(src), "an empty reply must be caught before any check runs");
+  assert.ok(/LIVE MODEL REQUIRED/.test(src), "and it must say so unmistakably");
+  // The guard must sit BEFORE the checks, or the vacuous passes happen anyway.
+  assert.ok(src.indexOf("if (!reply)") < src.indexOf("for (const chk of c.checks)"),
+    "the empty-reply guard must precede the mechanical checks");
+  assert.ok(/HUNGER_LLM === "1";\s*\nif \(LIVE\) process\.env\.OFFLINE_AI = "0"/.test(src),
+    "asking for the model must actually enable it");
+});
+
+// ── Credential precedence ───────────────────────────────────────────────────────────────────
+// The gauntlet read only OPENAI_API_KEY and then invented "sk-test-offline" when it was absent,
+// so a live run authenticated with a key nobody set. The app reads AI_INTEGRATIONS_OPENAI_API_KEY
+// first (server/gpt.ts:64 + 9 others) and that is the name Railway carries. These lock the chain
+// and the rule that a live run must never manufacture a credential.
+
+test("hunger gauntlet: reads the app's credential chain, AI_INTEGRATIONS first", () => {
+  const src = readFileSync("script/hunger-gauntlet.ts", "utf-8");
+  assert.ok(/const OPENAI_KEY = process\.env\.AI_INTEGRATIONS_OPENAI_API_KEY \|\| process\.env\.OPENAI_API_KEY \|\| ""/.test(src),
+    "the gauntlet must resolve the key exactly as the application does");
+  // And the resolved key — not the raw env var — must be what the client authenticates with.
+  assert.ok(/new OpenAI\(\{ apiKey: OPENAI_KEY \}\)/.test(src),
+    "the client must use the resolved credential, not process.env.OPENAI_API_KEY");
+});
+
+test("hunger gauntlet: live mode never manufactures a key; offline still may", () => {
+  const src = readFileSync("script/hunger-gauntlet.ts", "utf-8");
+  // The placeholder survives ONLY as the offline branch of the resolved key.
+  assert.ok(/process\.env\.OPENAI_API_KEY = OPENAI_KEY \|\| "sk-test-offline"/.test(src),
+    "offline imports still need a placeholder so module-scope clients construct");
+  // In live mode the placeholder is unreachable: the missing-credential exit precedes it.
+  assert.ok(src.indexOf("if (LIVE && !OPENAI_KEY)") < src.indexOf(`OPENAI_KEY || "sk-test-offline"`),
+    "the live-mode credential guard must precede the offline placeholder");
+  assert.ok(/if \(LIVE && !OPENAI_KEY\) \{[\s\S]{0,400}?process\.exit\(2\)/.test(src),
+    "a live run with no credential must stop, not proceed with a fake one");
+});
+
+// ── The A4 gate itself ──────────────────────────────────────────────────────────────────────
+// A4 is the trust case: a client at 118g against a 120g target, still hungry. The gate that says
+// "must NOT point at protein" was matching only the verb-then-noun word order, so 13 of 20 natural
+// coaching phrasings walked straight through it. A checker nothing checks stops checking quietly.
+
+const MUST_CATCH = [
+  "boost protein", "boost your protein a little", "eat more protein", "increase your protein",
+  "add more protein to your afternoon", "let's get your protein up", "push your protein a bit higher",
+  "bump your protein up", "top up your protein at lunch", "try a protein shake in the afternoon",
+  "add a protein source to your afternoon snack", "prioritise protein at lunch",
+  "focus on protein earlier in the day", "aim for 130g of protein",
+  "your protein could come up slightly", "include some protein with that",
+  "make sure there's protein in every meal", "have some protein with your afternoon snack",
+  "lift your protein a touch", "getting a bit more protein in would help",
+  // THE OBSERVED LIVE FAILURE, 2026-08-13. It escaped the original gate AND the first fix:
+  // the noun and the verb never touch, the verb acts on a pronoun. This row is the whole
+  // reason the transcript mattered more than the theory.
+  "Your protein is almost on target, but let's boost it a bit\u2026",
+  "Your protein's basically there — let's just nudge it up.",
+];
+// The reply we WANT on A4 quotes protein and rules it out. If the gate fires on these it will
+// fail a correct answer, and we would go chasing a defect that is not there.
+const MUST_PASS = [
+  "Your protein's at 118g against a 120g target, so that's not what's driving this.",
+  "Protein isn't the issue here — you're at 98% of target.",
+  "Everything's on target, including protein. Let's look at your afternoon gap.",
+  "Your protein is fine. Tell me what time you eat lunch.",
+  "At 118g against 120g your protein is where it should be; let's look at meal volume.",
+  "You're hitting your numbers, so I'd look at when you're eating rather than what.",
+  "I'd add more volume to your lunch — more vegetables and a bigger portion.",
+  "That's not a protein problem. What time was your last meal?",
+  "More food, not more protein — your afternoon gap is too long.",
+];
+
+test("A4 gate: catches every natural way of prescribing protein", () => {
+  const missed = MUST_CATCH.filter(p => !prescribesProtein(p));
+  assert.deepEqual(missed, [], `these prescribe protein and escaped the A4 gate:\n  ${missed.join("\n  ")}`);
+});
+
+test("A4 gate: does NOT fire on a correct reply that rules protein out", () => {
+  const wrong = MUST_PASS.filter(p => prescribesProtein(p)).map(p => `${p}  →  ${prescribesProtein(p)}`);
+  assert.deepEqual(wrong, [], `the gate would fail a CORRECT A4 answer:\n  ${wrong.join("\n  ")}`);
+});
+
+test("A4 gate: the gauntlet uses the shared checker, not a local regex", () => {
+  const src = readFileSync("script/hunger-gauntlet.ts", "utf-8");
+  assert.ok(/prescribesProtein\(r\)/.test(src), "mustNotBlameProtein must call the tested predicate");
+  assert.ok(!/more\|increase\|up your\|raise your/.test(src), "the old inline regex must be gone");
+});
+
+// ── UNIT ECONOMICS: one WhatsApp cost rule, and it counts MESSAGES ──────────────────────────
+// finance.ts assumed a flat R8/user/month (Twilio's old per-CONVERSATION bundles) while
+// cost-tracking.ts billed per message. Two owners, two answers about the same client — and from
+// 1 Oct 2026 per-message is the real shape, so the per-user figure was the wrong unit, not just
+// imprecise. cost-tracking.ts also counted chat_history ROWS, but a row is an EXCHANGE holding
+// both messageIn and messageOut, so the count was roughly half of what Twilio bills.
+
+test("economics: a chat row is an exchange — both directions are billable", async () => {
+  const { billableMessages } = await import("../server/cost-tracking");
+  assert.equal(billableMessages("did 9000 steps", "Nice, 9,000 logged."), 2,
+    "COUNT(*) on chat_history halved the real message count");
+  assert.equal(billableMessages("hi", null), 1, "an inbound with no reply yet is one message");
+  assert.equal(billableMessages(null, null), 0);
+});
+
+test("economics: a multi-bubble reply is several billed messages", async () => {
+  const { billableMessages } = await import("../server/cost-tracking");
+  // `\n\n---\n\n` is what splits a reply into separate WhatsApp sends — a programme is 3 bubbles,
+  // a meal plan 4, and Twilio bills each one.
+  assert.equal(billableMessages("programme", "Week 1\n\n---\n\nWeek 2\n\n---\n\nWeek 3"), 4,
+    "1 inbound + 3 outbound bubbles");
+  assert.equal(billableMessages(null, "a\n\n---\n\nb"), 2);
+});
+
+test("economics: undercounting is the dangerous direction — it hides whales", async () => {
+  const { memberCostRow, WHALE_THRESHOLD_ZAR, WHATSAPP_ZAR_PER_MSG } = await import("../server/cost-tracking");
+  // 400 exchanges in a month. Counting rows says 400 messages; the truth is at least 800.
+  const undercounted = memberCostRow("u", 0, 400);
+  const real = memberCostRow("u", 0, 800);
+  assert.ok(real.whatsappZar > undercounted.whatsappZar);
+  assert.equal(real.whatsappZar, Math.round(800 * WHATSAPP_ZAR_PER_MSG * 100) / 100);
+  // A member who reads as safe on halved volume must be flagged on true volume.
+  const heavy = memberCostRow("u", 0, Math.ceil((WHALE_THRESHOLD_ZAR / WHATSAPP_ZAR_PER_MSG) + 1));
+  assert.equal(heavy.whale, true, "the flag exists to catch exactly this client");
+});
+
+test("economics: finance and cost-tracking share ONE rate and one counting rule", () => {
+  const fin = readFileSync("server/routes/finance.ts", "utf-8");
+  assert.ok(/WHATSAPP_ZAR_PER_MSG, BILLABLE_MSGS_SQL \} from "\.\.\/cost-tracking"/.test(fin),
+    "finance must import the shared rate and the shared count, not redefine either");
+  assert.ok(!/const WHATSAPP_ZAR_PER_USER/.test(fin), "the per-conversation constant must be gone");
+  assert.ok(/FINANCE_WHATSAPP_ZAR_PER_USER/.test(fin) && /retired and ignored/.test(fin),
+    "a still-set Railway variable must warn, not be silently ignored");
+  // And the break-even must use the same basis as the cost line above it.
+  assert.ok(/waPerActive = activeAll > 0 \? whatsappZar \/ activeAll : 0/.test(fin),
+    "contribution per user must derive from the measured volume");
+});
+
+// ── CLIENT TRUTH: one day boundary, not two ─────────────────────────────────────────────────
+// client-snapshot.ts grouped the protein average by UTC and the 7-day story by SAST — two day
+// boundaries inside ONE snapshot. A meal logged at 00:30 SAST landed on yesterday in the numbers
+// and today in the story, so the coach could say "you ate that today" while the totals disagreed.
+// sast.ts already owned this; the local copy 45 lines below the bug was the second owner.
+
+test("client truth: the snapshot uses the canonical SAST day key, never its own", () => {
+  const src = readFileSync("server/brain/client-snapshot.ts", "utf-8");
+  assert.ok(/import \{ sastDayKey \} from "\.\.\/sast"/.test(src), "it must use the one owner");
+  assert.ok(!/const sastKey =/.test(src), "and must not re-implement it locally");
+  // The raw UTC form is the actual defect — any reappearance is the same bug returning.
+  assert.ok(!/new Date\(row\.loggedAt \|\| now\)\.toISOString\(\)\.slice\(0, 10\)/.test(src),
+    "grouping a logged_at by UTC puts small-hours meals on the wrong day");
+});
+
+test("client truth: the small hours are the case that exposed it", async () => {
+  const { sastDayKey } = await import("../server/sast");
+  // 00:30 SAST on the 14th is 22:30 UTC on the 13th. UTC keying calls that yesterday.
+  const smallHours = new Date("2026-08-13T22:30:00Z");
+  assert.equal(sastDayKey(smallHours), "2026-08-14", "SAST is UTC+2, year-round");
+  assert.notEqual(smallHours.toISOString().slice(0, 10), sastDayKey(smallHours),
+    "the two keys genuinely disagree here — that disagreement WAS the defect");
+  // And the boundary itself holds from both sides.
+  assert.equal(sastDayKey(new Date("2026-08-13T21:59:59Z")), "2026-08-13");
+  assert.equal(sastDayKey(new Date("2026-08-13T22:00:00Z")), "2026-08-14");
+});
+
+// ── ADAPTIVE BASELINE: adaptation must not compound on itself ───────────────────────────────
+// Measured 2026-08-18 (script/trace-proactive.ts): an 80kg stalled client eating 1,980 against a
+// 2,000 target — compliant, unchanged — was walked 2000 → 1860 → 1760 in three mornings because
+// the job fed users.calorie_target back in as baseCalories. Then, the target having passed under
+// their unchanged intake, it began telling them the target "hasn't been tested yet". The system
+// moved the goalposts and blamed the client. Migration 0005.
+
+test("adaptive baseline: four mornings from one baseline do not walk the target down", async () => {
+  const { adaptTargets } = await import("../server/adaptive-targets");
+  const BASE = 2000;
+  const run = (base: number) => adaptTargets({
+    baseCalories: base, baseProtein: 150, baseSteps: 8000, goalType: "fat_loss",
+    weightKg: 80, sick: false, stalledWeeks: 3, loggedDays7d: 7, avgKcal7d: 1980,
+  });
+  // From a STABLE baseline, every morning reaches the same answer.
+  const days = [1, 2, 3, 4].map(() => run(BASE).calorieTarget);
+  assert.deepEqual(days, [1860, 1860, 1860, 1860], "a stable baseline gives a stable decision");
+  // And the reason must stay `stalled` — never the manufactured over-target accusation.
+  assert.deepEqual([...new Set([1, 2, 3, 4].map(() => run(BASE).reason))], ["stalled"]);
+
+  // THE OLD RECURSION, pinned so it cannot come back: feeding the output in as tomorrow's base.
+  let recursive = BASE; const walk: number[] = [];
+  for (let d = 0; d < 3; d++) { recursive = run(recursive).calorieTarget; walk.push(recursive); }
+  assert.deepEqual(walk, [1860, 1760, 1760], "this is what the job used to do");
+  assert.ok(walk[2] < BASE * 0.9, "12% down in three days, on a client who changed nothing");
+  // And it invents the accusation, which is the part that reaches the client.
+  assert.equal(run(1760).reason, "stalled_over_target",
+    "once the target passes under their unchanged intake, they are told they never tested it");
+});
+
+test("adaptive baseline: the job reads baseline and never writes it", async () => {
+  // The subject MOVED (2026-08-18, Issue #49 step 2): the job no longer assembles the engine's
+  // input, loadProactiveState + adaptiveInputFrom do. Repointed at the new owners and made
+  // behavioural where it used to be a grep — the check below now fails if the projection prefers
+  // the wrong number, not merely if a line was reworded.
+  const { adaptiveInputFrom } = await import("../server/adaptive-targets");
+
+  // A client mid-adaptation: baseline 2000 (profile), current 1860 (what the job wrote yesterday).
+  // The engine must reason from 2000. Reasoning from 1860 IS the ratchet.
+  const projected = adaptiveInputFrom({
+    goalType: "fat_loss", weightKg: 80,
+    baseline: { calories: 2000, protein: 150, steps: 8000 },
+    health: { sick: false, recovering: false, daysSick: 0 },
+    food: { avgKcal7d: 1980, loggedDays7d: 7 },
+    steps: { avg7d: 8200 },
+    weight: { weeklyKgChange: 0, stalledWeeks: 3 },
+  });
+  assert.equal(projected.baseCalories, 2000, "the engine reasons from the PROFILE baseline");
+  assert.equal(projected.baseProtein, 150);
+  assert.equal(projected.baseSteps, 8000);
+
+  // COULD NOT READ must arrive as undefined ("cannot tell", holds the target) and never as 0,
+  // which the engine would act on as "logged nothing".
+  const unread = adaptiveInputFrom({
+    goalType: "fat_loss", weightKg: 80,
+    baseline: { calories: 2000, protein: 150, steps: 8000 },
+    health: { sick: false, recovering: false, daysSick: 0 },
+    food: { avgKcal7d: null, loggedDays7d: null },
+    steps: { avg7d: null },
+    weight: { weeklyKgChange: null, stalledWeeks: 0 },
+  });
+  assert.equal(unread.loggedDays7d, undefined, "an unread ledger is unknown, never zero");
+  assert.equal(unread.avgKcal7d, undefined);
+  assert.equal(unread.weeklyKgChange, undefined);
+
+  const job = readFileSync("server/scheduler/jobs/adaptive.ts", "utf-8");
+  assert.ok(/adaptiveInputFrom\(/.test(job), "the job uses the one projection, it does not rebuild it");
+  assert.ok(!/baselineCalorieTarget:/.test(job), "this job must never WRITE a baseline");
+  // The unchanged-guard compares against what the client HOLDS, not the baseline reasoned from —
+  // those diverge now, and comparing the wrong one sends the same message every morning.
+  assert.ok(/out\.calorieTarget === s\.current\.calories/.test(job),
+    "silence is decided against the stored overlay");
+  const shared = readFileSync("server/scheduler/shared.ts", "utf-8");
+  assert.ok(/calories: Number\(client\.baselineCalorieTarget \?\? client\.calorieTarget\)/.test(shared),
+    "the snapshot reads the baseline column, falling back only for the window before 0005 runs");
+  const schema = readFileSync("shared/schema.ts", "utf-8");
+  for (const col of ["baseline_calorie_target", "baseline_protein_target", "baseline_steps_target"]) {
+    assert.ok(schema.includes(col), `${col} must exist`);
+  }
+});
+
+// ── CANONICAL PROACTIVE STATE: two jobs, one picture of the client ──────────────────────────
+// Issue #49 step 2. Reactive turns got authoritative state, a decision owner and outbound gates.
+// Proactive got none of it: adaptive assembled its own view at 05:45 and morning assembled a
+// different one at 06:00, so the same client could be sick for one job and well for the other in
+// the same quarter hour. Both now read loadProactiveState.
+
+test("proactive state: both scheduled jobs read the one snapshot", () => {
+  const adaptive = readFileSync("server/scheduler/jobs/adaptive.ts", "utf-8");
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  assert.ok(/loadProactiveState\(/.test(adaptive), "adaptive reads the shared snapshot");
+  assert.ok(/loadProactiveState\(/.test(morning), "morning reads the shared snapshot");
+  // Neither may go back to reading the weight/step/intake ledgers for itself — that divergence
+  // is the whole defect. adaptive.ts used to run its own weightLogs and stepLogs queries.
+  assert.ok(!/from\(weightLogs\)/.test(adaptive), "adaptive must not re-read the weight ledger");
+  assert.ok(!/from\(stepLogs\)/.test(adaptive), "adaptive must not re-read the step ledger");
+});
+
+test("proactive state: morning's health is durable, never a keyword scan", () => {
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  const code = morning.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  // The scan could only ever be WRONG here: sick-flow writes paused_until beside sick_until, and
+  // morning returns on isPaused() long before the sick branch — so a genuinely ill client never
+  // reached it. Only SICK_PATTERNS' non-illness matches did: "rest day", "skip gym", someone
+  // else being ill.
+  assert.ok(!/wasSickOrInjured\(/.test(code), "morning decides health from durable state only");
+  assert.ok(/state\.health\.sickYesterday/.test(code), "…and asks the snapshot for it");
+  // The tokens are written by health-state.holdTokens now (2026-08-21) — one writer, one format.
+  // The assertion is unchanged in substance: the pause is still written beside the illness.
+  const owner = readFileSync("server/health-state.ts", "utf-8");
+  assert.ok(/sick_until:\$\{sickUntil\}/.test(owner) && /paused_until:\$\{sickUntil\}/.test(owner),
+    "the durable token and the pause are written together — that is why the scan was unreachable");
+});
+
+test("proactive state: sickYesterday needs the illness to have covered yesterday", async () => {
+  // An illness that started THIS MORNING did not cause yesterday's missing logs, and a window
+  // that closed before yesterday did not either. Both would send "hope you're feeling better" to
+  // someone who simply did not log.
+  // Re-pointed at the health-state owner (2026-08-21). The rule is unchanged; the file that
+  // owns it is. Deleting these assertions along with the old function would have dropped the
+  // coverage that keeps the rule honest.
+  const { readHealthState } = await import("../server/health-state");
+  const day = (o: number) => new Date(Date.now() + o * 86_400_000).toISOString().slice(0, 10);
+  const covered = (since: string | undefined, until: string | undefined) =>
+    readHealthState({ profileNotes: notes(since, until) }, day(0)).wasSickYesterday;
+  assert.equal(covered(day(-3), day(1)), true, "ill across yesterday");
+  assert.equal(covered(day(0), day(2)), false, "started today — yesterday was not illness");
+  assert.equal(covered(day(-9), day(-4)), false, "window closed before yesterday");
+  assert.equal(covered(undefined, day(-1)), true, "no start recorded, window reaches yesterday");
+  assert.equal(covered(undefined, undefined), false, "no illness on record is not illness");
+});
+
+test("proactive budget: adaptive does not speak, and its line is not lost", () => {
+  const adaptive = readFileSync("server/scheduler/jobs/adaptive.ts", "utf-8");
+  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
+  const code = (s: string) => s.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+
+  // 05:45 sent up to two messages, neither through claimDailySlot; 06:00 sent another, through it.
+  // The daily cap counted one of the two, so "one proactive message a day" was never true for a
+  // client whose targets moved.
+  assert.ok(!/sendWhatsApp/.test(code(adaptive)), "the adaptive job must not send");
+
+  // But the words are HANDED OVER, not deleted — the standing rule is that no send is removed
+  // until its behaviour is accounted for by the new owner.
+  assert.ok(/adapt_note:\$\{today\}/.test(adaptive), "adaptive marks the day it produced a line");
+  assert.ok(/adapt_note:\(/.test(morning), "morning looks for that marker");
+  assert.ok(/adaptTargets\(adaptiveInputFrom\(state\)\)\.note/.test(morning),
+    "morning asks the SAME pure engine for the line — no second copy of the words to drift");
+  assert.ok(/marked === todaySAST\(\)/.test(morning), "a marker from another day is stale");
+
+  // It must reach the stalled_unlogged client, who is stalled BECAUSE they barely log — so their
+  // yesterday is usually empty. This used to need a per-branch check because the empty-yesterday
+  // client travelled a parallel path; since step 5 there is one path, so passing adaptLine to the
+  // single composer is the whole guarantee.
+  assert.ok(/adaptLine,/.test(morning), "the composer receives the line");
+  assert.ok(!/withAdapt\(/.test(morning), "…and no per-branch wrapper decides who gets it");
+
+  // One bubble. `\n\n---\n\n` splits into a second WhatsApp message, separately billed — that is
+  // the two-messages-before-six problem again under a different job's name. Asserted against the
+  // composer's real output in the morning-composer tests below.
+  const composer = readFileSync("server/morning-message.ts", "utf-8");
+  assert.ok(!/---/.test(composer.split("export function composeMorning")[1] || ""),
+    "the composer never emits the Twilio message splitter");
+});
+
+// ── ONE PROACTIVE DECISION OWNER ────────────────────────────────────────────────────────────
 // Issue #49 step 4. chooseAction was already the ordered decision, reached from a command almost
 // nobody types and from one line inside a 474-line morning job that made every other decision
 // itself. decideProactive makes it reachable from the canonical snapshot and pairs it with the
