@@ -104,6 +104,11 @@ const MUST_NOT_WRITE: [string, string][] = [
   ["weight", "Is 92kg good?"],
   ["weight", "I want to weigh 85kg"],
   ["weight", "my target weight is 85kg"],
+  // …AND WITHOUT A VERB, A NAKED NUMBER IS STILL NOT A BODY WEIGHT (#176). This is the control on
+  // the loosening above: nothing licenses reading a bare number as a weigh-in, and the failure
+  // mode of guessing is a false point on the client's own trend line.
+  ["weight", "83.9"],
+  ["weight", "I used to weigh 90"],
   ["workout", "Is my workout done?"],
   ["workout", "Have I trained today?"],
   ["workout", "did my workout?"],
@@ -156,6 +161,11 @@ const MUST_WRITE: [string, string][] = [
   ["weight", "weighed 84kg this morning"],
   ["weight", "my weight is 84kg today"],
   ["weight", "I'm trying to lose weight, weighed 84kg this morning"],
+  // NO UNIT, BUT A VERB (#176). The Journey Lab found this reaching the not-understood fallback
+  // with zero weight_logs rows: the door demanded a literal "kg" even after an explicit weigh
+  // verb, so the client stated their weight and the record said they had not.
+  ["weight", "I weighed 83.9 this morning"],
+  ["weight", "my weight is 84"],
   ["workout", "workout done"],
   ["workout", "I trained chest today"],
   ["workout", "gym done"],

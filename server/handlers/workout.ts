@@ -27,7 +27,7 @@ import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat, turnMutation, turnAlreadyWrote } from "./chat-log";
 import { sastDayKey } from "../sast";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
-import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, reportedInSomeClause, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen, getDisplayName } from "../utils";
+import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, reportedInSomeClause, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen, getDisplayName, WEIGHED_NUMBER_RE } from "../utils";
 import { applyRetroSessionState } from "../day-ledger";
 import { readTrainingDay } from "../one-action";
 import { invalidatePatternCache } from "../cache";
@@ -144,12 +144,19 @@ export async function handleWorkoutCommands(ctx: {
   // Only fires if message is clearly about body weight, not exercise weight
   // ONE WEIGH-IN SHAPE, APPLIED TO WHATEVER TEXT IT IS GIVEN. Factored out of the two inline
   // tests below so the same recogniser can read a single clause — no second weight recogniser.
+  // THE VERB IS EVIDENCE TOO (#176, Journey Lab divergence). Every alternative below demanded a
+  // literal `kg`, so "I weighed 83.9 this morning" was not a weigh-in to this door at all: the
+  // client got "I didn't quite catch that" and ZERO weight_logs rows, targets were not
+  // recalculated, and the trend gained a hole they cannot see. WEIGHED_NUMBER_RE is the one
+  // shape where the unit is optional, and it is optional precisely because the VERB already says
+  // what the number measures. A bare "83.9" is still not a weigh-in — nothing licenses reading a
+  // naked number as a body weight, and a wrong guess writes a false point on their own trend.
   const weighInShape = (t: string) => /^(\d{2,3}(?:\.\d+)?)\s*kg[.!]?$/i.test(t)
-    || /\b(?:weigh(?:ed|s|ing)?|morning weight|body weight|on the scale|scale said|scale reads|weighed in|my weight)\b.*\b(\d{2,3}(?:\.\d+)?)\s*kg\b/i.test(t)
+    || WEIGHED_NUMBER_RE.test(t)
     || /\b(\d{2,3}(?:\.\d+)?)\s*kg\b.*\b(?:today|this morning|just weighed)\b/i.test(t);
   const isStandaloneWeight = /^(\d{2,3}(?:\.\d+)?)\s*kg[.!]?$/i.test(m);
   const isWeightCheckIn = (
-    /\b(?:weigh(?:ed|s|ing)?|morning weight|body weight|on the scale|scale said|scale reads|weighed in|my weight)\b.*\b(\d{2,3}(?:\.\d+)?)\s*kg\b/i.test(m)
+    WEIGHED_NUMBER_RE.test(m)
     || /\b(\d{2,3}(?:\.\d+)?)\s*kg\b.*\b(?:today|this morning|just weighed)\b/i.test(m)
   );
   // A QUESTION IN ONE CLAUSE DOES NOT ERASE A REPORT IN ANOTHER (2026-08-26, issue #63). The two
@@ -178,7 +185,11 @@ export async function handleWorkoutCommands(ctx: {
   if ((isStandaloneWeight || isWeightCheckIn || !!weightClause)
       && !isRetrospectiveWeight && !isFutureIntent(weightText)
       && !looksLikeQuestion(weightText) && !EXERCISE_PATTERN.test(weightText)) {
-    const kgMatch = weightText.match(/(\d{2,3}(?:\.\d+)?)\s*kg/i);
+    // The unit form first, so a message carrying both a unit and a verb still reads the unit's
+    // number. Only when there is no unit at all does the verb-anchored shape supply it — the same
+    // precedence the recogniser above uses, so what gets WRITTEN cannot disagree with what got
+    // RECOGNISED (#176).
+    const kgMatch = weightText.match(/(\d{2,3}(?:\.\d+)?)\s*kg/i) || weightText.match(WEIGHED_NUMBER_RE);
     if (kgMatch) {
       const kg = parseFloat(kgMatch[1]);
       if (Number.isFinite(kg) && kg >= 30 && kg <= 250) {

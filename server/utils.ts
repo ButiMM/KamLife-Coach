@@ -945,8 +945,52 @@ export function looksLikeWaterReport(raw: string): boolean {
         && !/\b(?:enough|too much|too little|target|goal|supposed to|meant to)\b/i.test(m));
 }
 
+/**
+ * THE UNIT IS EVIDENCE, NOT THE ONLY EVIDENCE (#176, Journey Lab divergence).
+ *
+ * This required a literal `kg`, so "I weighed 83.9 this morning" matched nothing, statedWeight()
+ * never saw the turn, and the client was answered with "I didn't quite catch that" while ZERO
+ * weight_logs rows were written. Targets were not recalculated and the trend gained a hole they
+ * cannot see: they told us, and the record says they did not.
+ *
+ * TWO SHAPES, AND THE DIFFERENCE IS THE WHOLE RULE. With a unit ("83.9kg") the unit says what the
+ * number is, so no verb is needed — unchanged. Without one, the VERB has to say it, so an explicit
+ * weigh/weight prefix becomes REQUIRED. A bare "83.9" is therefore still not a weigh-in, and
+ * neither is a price, a portion or a step count: nothing licenses reading a naked number as a body
+ * weight, and guessing writes a false point on the client's own trend line.
+ *
+ * PLAUSIBILITY STAYS WITH handleWeightLog, which already answers an impossible number with "that
+ * doesn't look right". A second opinion here would be a second owner of the same question.
+ */
+const WEIGH_SAYS_SO = String.raw`(?:i\s+)?(?:weigh(?:ed)?(?:\s+in)?(?:\s+at)?\s*|my\s+weight\s*(?:is|:)?\s*|weight\s*(?:is|:)?\s*)`;
+/** The write door's wider weigh vocabulary — scale phrasings included. Declared once, read twice. */
+const WEIGH_SAYS_SO_WORDS = String.raw`weigh(?:ed|s|ing)?|morning weight|body weight|on the scale|scale said|scale reads|weighed in|my weight`;
+const BODY_NUMBER = String.raw`\d{2,3}(?:[.,]\d{1,2})?`;
+const WEIGH_TAIL = String.raw`\s*(?:today|this morning)?\s*[.!]?\s*$`;
+const WEIGHT_REPORT_RE = new RegExp(
+  `^\\s*(?:${WEIGH_SAYS_SO})?${BODY_NUMBER}\\s*kgs?${WEIGH_TAIL}`
+  + `|^\\s*${WEIGH_SAYS_SO}${BODY_NUMBER}${WEIGH_TAIL}`, "i");
+
+/**
+ * THE SAME RULE, FOR THE DOOR THAT ACTUALLY WRITES (#176).
+ *
+ * looksLikeWeightReport decides whether a turn is a weigh-in for the brain-skip and the
+ * fact-preservation floor; the WRITE happens in handlers/workout.ts, which has always carried its
+ * own recogniser and its own copy of the weigh vocabulary. Two answers to one question — "did the
+ * client state a body weight" — which is why #176 had to be fixed twice: the gate was widened and
+ * the client still got "I didn't quite catch that", because the door had never heard of it.
+ *
+ * Not merged, because they genuinely differ — this one is unanchored and its vocabulary is wider.
+ * But it lives HERE, beside its sibling, so the next person to widen one can see the other.
+ * Capture group 1 is the number, so what RECOGNISES the weigh-in also supplies what gets written
+ * and the two cannot disagree. The unit is optional here and only here: the verb has already said
+ * what the number measures, and a bare "83.9" still matches nothing.
+ */
+export const WEIGHED_NUMBER_RE = new RegExp(
+  String.raw`\b(?:${WEIGH_SAYS_SO_WORDS})\b.*?\b(\d{2,3}(?:\.\d+)?)\s*(?:kgs?\b)?`, "i");
+
 export function looksLikeWeightReport(m: string): boolean {
-  return /^\s*(?:i\s+)?(?:weigh(?:ed)?(?:\s+in)?(?:\s+at)?\s*|my\s+weight\s*(?:is|:)?\s*|weight\s*(?:is|:)?\s*)?\d{2,3}(?:[.,]\d{1,2})?\s*kgs?\s*(?:today|this morning)?\s*[.!]?\s*$/i.test(m);
+  return WEIGHT_REPORT_RE.test(m);
 }
 
 // ONE shared answer to "is this message ASKING, or REPORTING?" — the systemic
