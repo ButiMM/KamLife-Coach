@@ -370,7 +370,7 @@ const JOB_CONFIRMS: Record<FoodJob, string> = {
   fat: "same fat job",
 };
 
-export function answerLocalListChange(message: string): string | null {
+export function answerLocalListChange(message: string, c: FoodConstraints = NO_CONSTRAINTS): string | null {
   const m = (message || "");
   // An explicit request for the whole list is NOT a local change — let the list handlers run.
   if (/\b(?:full|whole|updated|new|revised|complete)\s+(?:grocery\s+|shopping\s+)?list\b|\b(?:send|show|give)\s+(?:me\s+)?(?:the\s+|my\s+)?(?:updated|full|new|whole)\b/i.test(m)) return null;
@@ -378,11 +378,30 @@ export function answerLocalListChange(message: string): string | null {
   const row = (food: string) => SUBSTITUTES.find(r => r.match.test(food));
 
   // THEY PROPOSED A FOOD — "can I use eggs instead", "use eggs instead", "eggs instead?"
-  const proposed = m.match(/\b(?:use|swap in|go with|do|have|take|try|buy|get)\s+(?:some |a |an |the )?([a-z][a-z' \-]{1,30}?)\s+instead\b|^\s*([a-z][a-z' \-]{1,30}?)\s+instead\b/i);
+  // THE VERB FORM IS TRIED FIRST, DELIBERATELY. As one alternation the anchored bare form won at
+  // position 0 and swallowed the lead-in: "can I use eggs instead?" captured "can I use eggs" as
+  // the food. Harmless while the food was only matched against a table, and not harmless once the
+  // answer says it back to the client (#177). Two patterns, most specific first.
+  const proposed = m.match(/\b(?:use|swap in|go with|do|have|take|try|buy|get)\s+(?:some |a |an |the )?([a-z][a-z' \-]{1,30}?)\s+instead\b/i)
+    || m.match(/^\s*([a-z][a-z' \-]{1,30}?)\s+instead\b/i);
   if (proposed) {
-    const food = (proposed[1] || proposed[2] || "").trim();
+    const food = (proposed[1] || "").trim();
     const hit = row(food);
-    if (hit) return `Yes — ${food} works 👌 ${JOB_CONFIRMS[hit.job].charAt(0).toUpperCase()}${JOB_CONFIRMS[hit.job].slice(1)}. Everything else on the list stays as it is.`;
+    // "YES, THAT WORKS" IS AN INSTRUCTION TO BUY IT (#177), so it is bound by what they told us
+    // they do not eat. Answering rather than standing down: silence here means no door claims the
+    // turn and the client gets "I didn't quite catch that" — told us their restriction, asked one
+    // question about it, and got nothing. The same table that knows the JOB supplies what else
+    // does it, so this is the existing answer with the disallowed option removed, not a new mouth.
+    if (!hit) return null;
+    // ONE SENTENCE, TWO LEADS. The door already said "Yes — X works 👌 <job>. Everything else on
+    // the list stays as it is."; a client who excluded X needs the same sentence with a different
+    // opening, not a second mouth saying most of the same words. Standing down instead would mean
+    // no door claims the turn and they get "I didn't quite catch that" — told us their
+    // restriction, asked one question about it, and got nothing.
+    const swapIn = c.allows(food) ? null : allowedAlternatives(hit.sub.alt, c);
+    if (!c.allows(food) && !swapIn) return null;   // nothing honest left to offer for this job
+    const lead = swapIn ? `You told me no ${food} — so *${swapIn}* instead.` : `Yes — ${food} works 👌`;
+    if (hit) return `${lead} ${JOB_CONFIRMS[hit.job].charAt(0).toUpperCase()}${JOB_CONFIRMS[hit.job].slice(1)}. Everything else on the list stays as it is.`;
     return null;
   }
 
@@ -404,16 +423,42 @@ export function answerLocalListChange(message: string): string | null {
  * including a plain "what should I eat instead of chips" — belongs to the goal-swap table
  * above, which answers a different question and is checked first by the caller.
  */
-export function answerUnavailable(message: string): string | null {
+export function answerUnavailable(message: string, c: FoodConstraints = NO_CONSTRAINTS): string | null {
   const m = (message || "");
   if (!UNAVAILABLE_RE.test(m)) return null;
   for (const row of SUBSTITUTES) {
     const hit = m.match(row.match);
     if (hit) {
-      return `No stress — *${row.sub.alt}* instead. ${row.sub.note.charAt(0).toUpperCase()}${row.sub.note.slice(1)}. 👌`;
+      const alt = allowedAlternatives(row.sub.alt, c);
+      // NOTHING HONEST LEFT TO OFFER (#177). Every alternative for this job is something they
+      // told us they do not eat, so the deterministic answer stands down rather than naming one:
+      // a substitution IS an instruction to buy, and it is bound by the same constraint the
+      // grocery list obeys. Coach K takes the turn, with the constraint already in its context.
+      if (!alt) return null;
+      return `No stress — *${alt}* instead. ${row.sub.note.charAt(0).toUpperCase()}${row.sub.note.slice(1)}. 👌`;
     }
   }
   return null;
+}
+
+/**
+ * THE ALTERNATIVES THIS CLIENT MAY ACTUALLY BUY (#177).
+ *
+ * The substitution table stores a human phrase — "lean mince, tinned pilchards, or eggs" — because
+ * that is what reads well in a Shoprite aisle. A client who declared "no eggs" was still offered
+ * eggs by it: the table knew the JOB and nothing about the person. Splitting on the same commas
+ * and "or" the phrase is written with lets the declared constraint remove parts of it without a
+ * second table, and re-joins what is left in the same voice.
+ *
+ * Returns null when nothing survives — an empty suggestion is worse than no suggestion.
+ */
+function allowedAlternatives(alt: string, c: FoodConstraints): string | null {
+  const parts = String(alt || "").split(/\s*,\s*(?:or\s+)?|\s+or\s+/).map(s => s.trim()).filter(Boolean);
+  const kept = parts.filter(p => c.allows(p));
+  if (kept.length === 0) return null;
+  if (kept.length === 1) return kept[0];
+  if (kept.length === 2) return `${kept[0]} or ${kept[1]}`;
+  return `${kept.slice(0, -1).join(", ")}, or ${kept[kept.length - 1]}`;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

@@ -618,6 +618,13 @@ const NOT_CLIENT_FACING_RETURNS: Array<[string, RegExp, string]> = [
     /^\s*return `\$\{userId\}\|\$\{key\}\|\$\{day\}`/,
     "cacheKey is consumed only by the private dedupe Set and database claim",
   ],
+  [
+    "server/food-swaps.ts",
+    /^\s*return `\$\{kept\.slice\(0, -1\)\.join\(", "\)\}, or \$\{kept\[kept\.length - 1\]\}`/,
+    "allowedAlternatives joins a list of food names into a NOUN PHRASE that its two callers embed "
+      + "in their own sentence; the ', or ' reads as prose to isProse but this function never "
+      + "addresses the client and returns no sentence of its own (#177)",
+  ],
 ];
 
 /** A returned literal is a MOUTH when it is a sentence, not a token or an enum value. */

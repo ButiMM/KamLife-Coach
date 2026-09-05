@@ -8,6 +8,7 @@ import {
 import { getShoppingList, formatShoppingList } from "../../shopping-lists";
 import { getGoalProfile } from "../../goal-profiles";
 import { getGroceryPersonalization } from "../../grocery-personalize";
+import { foodConstraints } from "../../food-swaps";
 import { suggestStepTargetAdjustment } from "../../targets";
 import { getTrajectoryForUser } from "../../trajectory-report";
 import { runWeeklyRecaps } from "../../weekly-recap";
@@ -254,13 +255,14 @@ export async function runSundayWeeklyReport(): Promise<void> {
       await sendWhatsApp(client.phoneNumber, lines.join("\n"));
 
       try {
-        const list = getShoppingList(budgetTierWeekly, weekNum + 1, clientGoalWeekly);
+        const list = getShoppingList(budgetTierWeekly, weekNum + 1, clientGoalWeekly, foodConstraints(client as any));
         const personalization = await getGroceryPersonalization(client.id, clientGoalWeekly, (client as any).foodDislikes, (client as any).dietaryRestrictions);
         const shoppingMsg = formatShoppingList(list, name, clientGoalWeekly, {
           calorieTarget: client.calorieTarget || undefined,
           proteinTarget: client.proteinTarget || undefined,
           budgetTier: budgetTierWeekly,
           personalization,
+          constraints: foodConstraints(client as any),
         });
         await sendWhatsApp(client.phoneNumber, shoppingMsg);
       } catch (shopErr) { console.warn(`[SCHEDULER] Shopping list error — ${client.phoneNumber}:`, shopErr); }
