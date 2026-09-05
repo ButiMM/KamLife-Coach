@@ -489,7 +489,15 @@ const MUST_WRITE: [string, string][] = [
         const t = marker.match(/\/card\/([^.]+)\.png/);
         return t ? getCard(t[1]) : null;
       };
-      const closure = () => [{ message_in: "I'm done eating for the day", created_at: new Date(FROZEN - 600_000) }];
+      // THE CLOSURE IS NOW A ROW, NOT A REPLAYED SENTENCE (#194). This used to seed a chat message
+      // and let readHeldConstraints re-derive the closure from the last 24 of them — which is the
+      // window that let a real client's closed day silently reopen after a busy afternoon. The
+      // CONTRACT below is unchanged and none of it is relaxed; only the way this fixture puts the
+      // client into a closed day changed, to the way the product now records it.
+      const { sastDayKey } = await import("../server/sast");
+      const closure = () => new Map<any, any[]>([[schema.dailyConstraints, [
+        { userId: USER.id, day: sastDayKey(new Date()), kind: "food", state: "asserted", via: "said" },
+      ]]]);
 
       const today = await todayRows(USER, false);
       const cardFor = (mealName: string, foodDayClosed: boolean) => mealCard({
@@ -510,15 +518,15 @@ const MUST_WRITE: [string, string][] = [
         ["the meal-log card", "Chicken and rice", () => macroCardMarker({ user: USER, mealName: "Chicken and rice", mealKcal: 600 })],
       ];
       for (const [what, mealName, emit] of MARKERS) {
-        delete g.__KAMLIFE_STUB_PGROWS;
+        delete g.__KAMLIFE_STUB_ROWS;
         resetDump();                       // the dump window collapses repeat cards to one
         const openA = pngOf(await emit());
         resetDump();
         const openB = pngOf(await emit());
-        g.__KAMLIFE_STUB_PGROWS = closure();
+        g.__KAMLIFE_STUB_ROWS = closure();
         resetDump();
         const closed = pngOf(await emit());
-        delete g.__KAMLIFE_STUB_PGROWS;
+        delete g.__KAMLIFE_STUB_ROWS;
 
         if (!openA || !openB || !closed) {
           failures.push(`${what} produced no image, so its closed-day wiring is ungraded — this proves nothing`);
@@ -542,9 +550,9 @@ const MUST_WRITE: [string, string][] = [
           failures.push(`${what} did not emit the open-day card — expected "${cardFor(mealName, false).sub}"`);
         }
       }
-      g.__KAMLIFE_STUB_PGROWS = closure();
+      g.__KAMLIFE_STUB_ROWS = closure();
       const held = await readHeldConstraints(USER.phoneNumber, USER as any).catch(() => ({ foodDayClosed: false } as any));
-      delete g.__KAMLIFE_STUB_PGROWS;
+      delete g.__KAMLIFE_STUB_ROWS;
 
       // THE CUSTOMER OUTCOME, on the card the production path actually emitted.
       if (sells(closedCard.sub)) {
@@ -561,7 +569,7 @@ const MUST_WRITE: [string, string][] = [
       }
     } finally {
       Date.now = realNow;
-      delete g.__KAMLIFE_STUB_PGROWS;
+      delete g.__KAMLIFE_STUB_ROWS;
       if (priorRows === undefined) delete g.__KAMLIFE_STUB_ROWS; else g.__KAMLIFE_STUB_ROWS = priorRows;
     }
   }
@@ -1320,6 +1328,8 @@ const MUST_WRITE: [string, string][] = [
        * invert the ordering case and quietly grade the opposite of what production does.
        */
       {
+        const { constraintsAssertedBy } = await import("../server/held-constraints");
+        const { sastDayKey: dayKeyOf } = await import("../server/sast");
         const CLOSE = "I am done eating today";
         const REOPEN = "actually I changed my mind, I'm having dinner";
         const DAY_CLOSED = /leaving it there|done eating today/i;
@@ -1334,12 +1344,23 @@ const MUST_WRITE: [string, string][] = [
             mealLabel: "dinner", label: "dinner", source: "text",
             items: [{ name: "Chicken", kcal: 2100, protein: 188 }], rawMessage: "dinner", sourceMessageId: null,
           }]]]);
-          g.__KAMLIFE_STUB_PGROWS = historyNewestFirst.map((text, i) => ({
-            message_in: text,
-            created_at: new Date(dayStart.getTime() + (historyNewestFirst.length - i) * 60_000),
-          }));
+          // THE HISTORY IS RECORDED THE WAY THE PRODUCT RECORDS IT (#194) — folded oldest-first
+          // through constraintsAssertedBy, the SAME pure rule the front-door writer uses. Not a
+          // copy of it: a mirror is free to drift from the thing it claims to be about, which is
+          // how a constraint suite stays green while the product forgets the constraint. Every
+          // assertion below is unchanged; only the mechanism that puts the client into that state
+          // moved from a replayed window to the durable row the product now writes.
+          const oldestFirst = [...historyNewestFirst].reverse();
+          const constraintRows: any[] = [];
+          for (const text of oldestFirst) {
+            for (const r of constraintsAssertedBy(text)) {
+              constraintRows.push({ userId: USER.id, day: dayKeyOf(new Date()), kind: r.kind, state: r.state, via: "said" });
+            }
+          }
+          // Newest last in insertion order; readHeldConstraints takes the newest per kind.
+          (g.__KAMLIFE_STUB_ROWS as Map<any, any[]>).set(schema.dailyConstraints, constraintRows.reverse());
           const reply = String(await handleMessage(USER.phoneNumber, ask).catch(() => ""));
-          delete g.__KAMLIFE_STUB_PGROWS;
+          delete g.__KAMLIFE_STUB_ROWS;
           delete g.__KAMLIFE_STUB_ROWS;
           return reply;
         };
@@ -1457,7 +1478,7 @@ const MUST_WRITE: [string, string][] = [
         g.__KAMLIFE_STUB_PGROWS = [{ message_in: "I am done eating today", created_at: new Date(dayStart.getTime() + 60_000) }];
         const closedStill = await canonicalDecision({ ...USER }, "what should I eat?").catch(() => null);
         const reopened = await canonicalDecision({ ...USER }, "I'm eating now, what should I eat?").catch(() => null);
-        delete g.__KAMLIFE_STUB_PGROWS;
+        delete g.__KAMLIFE_STUB_ROWS;
         if (closedStill && reopened && closedStill.todo === reopened.todo && /eat|protein|meal/i.test(String(reopened.todo))) {
           failures.push(`The Meaning Engine reached the SAME food instruction whether or not the turn reopened the day ("${reopened.todo}") — the current message is not reaching its held state, so the engine and the meal door are deciding from different facts`);
         }
@@ -2081,13 +2102,16 @@ const MUST_WRITE: [string, string][] = [
               kcalInt: o.kcal, proteinInt: o.protein, kcal: o.kcal, protein: o.protein, carbs: 0, fat: 0,
             }]],
             [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
+            // THE CLOSURE IS A ROW NOW (#194), not a sentence replayed out of the last 24 messages.
+            // Every assertion in this block is unchanged — including the ones that matter most,
+            // that an unrelated message must not reopen the day and that the newest decision wins.
+            [schema.dailyConstraints, o.closed
+              ? [{ userId: USER.id, day: sastToday(), kind: "food", state: "asserted", via: "said" }]
+              : []],
           ]);
           g.__KAMLIFE_STUB_WRITES = [];
-          g.__KAMLIFE_STUB_PGROWS = o.closed
-            ? [{ message_in: "I'm done eating for the day", created_at: new Date(Date.now() - 3_600_000) }]
-            : [];
           const out = String(await handleMessage(USER.phoneNumber, "what should I eat next?").catch(() => ""));
-          delete g.__KAMLIFE_STUB_PGROWS;
+          delete g.__KAMLIFE_STUB_ROWS;
           return out;
         };
         const offersFood = (r: string) => /Balanced option|Light option|Pick one:|\(~\d+ kcal/i.test(r);

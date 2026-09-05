@@ -56,7 +56,7 @@ import { mustStayDeterministic } from "./understanding/action-router";
 import { attributeMultiDayReport } from "./understanding/day-relative-situation";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity, normalizerLive } from "./normalizer-fidelity";
-import { carriesFeelingClause } from "./unlogged-notice";import { looksLikeDirectionRequest } from "./daily-direction";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, reportedInSomeClause, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
+import { carriesFeelingClause } from "./unlogged-notice";import { recordDailyConstraint } from "./held-constraints";import { looksLikeDirectionRequest } from "./daily-direction";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, reportedInSomeClause, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { conditionWelcome, mentionsConditionOrMedication } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
@@ -124,6 +124,8 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // contact is created below, once the guards have stood down.
   let user: any | undefined = await bindClientTruth(phone, message, sourceMessageId);
   if (user) turnUser(user.id);
+  // …and what they just ruled out for today is RECORDED, not rediscovered later (#194).
+  await recordDailyConstraint(user, message, sourceMessageId);
 
   // ---- SAFETY + DATA GUARDS (crisis, medical, terminal, delete, reset) ----
   const safetyResult = await runSafetyGuards(phone, message, m, { sourceMessageId, boundUser: user });

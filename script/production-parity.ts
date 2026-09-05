@@ -2529,8 +2529,10 @@ async function main() {
     ledger: { proteinTarget?: number; who: string },
   ): Promise<string[]> {
     const { runEveningAccountability } = await import("../server/scheduler/jobs/evening");
-    const { shadowReplies, sentProactive, mealLogs, workoutLogs, weightLogs, stepLogs, chatHistory } =
+    const { shadowReplies, sentProactive, mealLogs, workoutLogs, weightLogs, stepLogs, chatHistory, dailyConstraints } =
       await import("../shared/schema");
+    const { constraintsAssertedBy } = await import("../server/held-constraints");
+    const { sastDayKey } = await import("../server/sast");
     const g = globalThis as any;
     const today = new Date();
 
@@ -2577,6 +2579,17 @@ async function main() {
           { id: 1, weight: "83.4", w: "83.4", at: new Date(NOW - 20 * 86_400_000), loggedAt: new Date(NOW - 20 * 86_400_000) },
         ]],
         [stepLogs, [{ avg: 9000, steps: 9000, at: today, loggedAt: today }]],
+        // WHAT THEY RULED OUT TODAY IS A ROW NOW (#194), not a sentence re-derived from the last
+        // 24 chat messages — that window is what let a real client's closed day silently reopen
+        // after a busy afternoon. saidToday is still the fixture; it is folded through
+        // constraintsAssertedBy, the SAME pure rule the front door writes with, so this harness
+        // cannot drift from the product's own definition of what a sentence asserts. Every
+        // assertion in the four cases below is unchanged, prohibitions and controls alike.
+        [dailyConstraints, saidToday.flatMap(r =>
+          constraintsAssertedBy(String(r.message_in || "")).map(c => ({
+            userId: `parity-${ledger.who}`, day: sastDayKey(new Date()),
+            kind: c.kind, state: c.state, via: "said",
+          })))],
       ]);
       const writes: Array<{ table: any; values: any }> = [];
       g.__KAMLIFE_STUB_WRITES = writes;
@@ -2675,18 +2688,22 @@ async function main() {
   // has migrated still cannot say it. Without this the migration protects only what it touched.
   check("P0-4b . the outbound floor blocks a contradiction from an unmigrated sender", async () => {
     const { enforceOutboundTruth } = await import("../server/outbound-authority");
+    const { dailyConstraints } = await import("../shared/schema");
+    const { sastDayKey } = await import("../server/sast");
     const g = globalThis as any;
     const out = await serialise(async () => {
-      g.__KAMLIFE_STUB_PGROWS = (sql: string) => (/chat_history/i.test(String(sql))
-        ? [{ message_in: "I'm not training today", created_at: new Date() },
-           { message_in: "I'm done eating for today", created_at: new Date() }]
-        : []);
+      // The two constraints are rows now (#194) rather than sentences replayed from chat history.
+      // The floor's job is unchanged and so are all three assertions below, control included.
+      g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([[dailyConstraints, [
+        { userId: USER.id, day: sastDayKey(new Date()), kind: "training", state: "asserted", via: "said" },
+        { userId: USER.id, day: sastDayKey(new Date()), kind: "food", state: "asserted", via: "said" },
+      ]]]);
       const r = {
         train: await enforceOutboundTruth(USER.id, "whatsapp:+27000000301", "Kam, get today's session done before bed."),
         eat: await enforceOutboundTruth(USER.id, "whatsapp:+27000000302", "Kam, get to 140g protein tonight."),
         recognition: await enforceOutboundTruth(USER.id, "whatsapp:+27000000303", "Kam, 9,000 steps today. Strong."),
       };
-      delete g.__KAMLIFE_STUB_PGROWS;
+      delete g.__KAMLIFE_STUB_ROWS;
       return r;
     });
     assert.ok(!out.train.ok && out.train.reason === "contradicts_held_constraint",
