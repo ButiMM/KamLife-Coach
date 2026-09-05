@@ -609,11 +609,6 @@ export function looksLikeStepsTargetChange(m: string): boolean {
 // dumped Upper Body A and a voice "what should I be doing today" (brain) dumped Upper
 // Body B — three contradicting answers in two minutes. ONE source of truth: code.
 // Single definition shared by routes.ts (brain gate) and misc-commands (the handler).
-export function looksLikeDirectionRequest(m: string): boolean {
-  const s = (m || "").replace(/^[.!?,;:'"\s]+|[.!?,;:'"\s]+$/g, "");
-  return /\b(give me (a )?direction|direction for (the|this|today|my)|what (do|should) i (do|be doing|need to do)( today| this week| for the week| now| next)|what.?s my (plan|week|day)|my (overall |whole )?plan\b|overall plan|plan for (the|this) (week|day|month)|where do i (start|begin))\b/i.test(s)
-    && !/\b(workout|exercise|meal plan|recipe|shopping|supplement|pay|cancel|refund|price|cost)\b/i.test(s);
-}
 
 // LOW MOBILITY — a client who physically can't walk much (bad knees, a wheelchair, a
 // heart condition, arthritis, an amputation, chronic pain). 2026-07-12, Kam (twice):

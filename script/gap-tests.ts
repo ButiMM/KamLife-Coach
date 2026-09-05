@@ -860,6 +860,48 @@ test("explicitMealSlot: 'morning' with no temporal determiner is not a slot clai
 });
 
 // ============================================================
+// ASKING FOR HELP TO START IS ASKING WHAT TO DO (#178 — Journey Lab divergence)
+//
+// A genuinely returning client said "I need help getting going again" and reached no owner at
+// all: every branch of looksLikeDirectionRequest wants "plan", "direction" or "what should I do",
+// and someone coming back after two weeks does not phrase it that way — they ask for help. The
+// coach answered them with "Sorry Kam, I didn't quite catch that", and Coach Health independently
+// filed the same turn as a candidate.
+// ============================================================
+
+test("a request for help getting going reaches the direction owner (#178)", async () => {
+  const { looksLikeDirectionRequest } = await import("../server/daily-direction");
+  assert.ok(looksLikeDirectionRequest("I need help getting going again"), "the Journey Lab message");
+  assert.ok(looksLikeDirectionRequest("help me get started"));
+  assert.ok(looksLikeDirectionRequest("I could use some help getting going"));
+  assert.ok(looksLikeDirectionRequest("I want help restarting"));
+});
+
+// NARROW ON PURPOSE. Bare "help" keeps its own owner, and help with a NAMED domain belongs to that
+// domain — the guard that has always sent workout/food/billing asks elsewhere is untouched.
+test("a generic or domain-specific help ask is NOT a direction request (#178)", async () => {
+  const { looksLikeDirectionRequest } = await import("../server/daily-direction");
+  assert.ok(!looksLikeDirectionRequest("help"));
+  assert.ok(!looksLikeDirectionRequest("I need help"));
+  assert.ok(!looksLikeDirectionRequest("help me with my workout"));
+  assert.ok(!looksLikeDirectionRequest("I need help getting a refund"));
+  assert.ok(!looksLikeDirectionRequest("help me get my meal plan"));
+});
+
+// THE OWNER SAYS NOTHING ABOUT ABSENCE, which is what makes it safe for the present-but-sparse
+// client saying the same words: they get today's direction too, framed by their own state rather
+// than by a claim that they disappeared. Graded as a property of the recogniser — it reads the
+// message and nothing else, so it cannot tell two clients different stories about silence.
+test("the direction recogniser reads the message only, never contact state (#178)", async () => {
+  const { looksLikeDirectionRequest } = await import("../server/daily-direction");
+  assert.equal(looksLikeDirectionRequest.length, 1, "one argument: the message");
+  assert.equal(
+    looksLikeDirectionRequest("I need help getting going again"),
+    looksLikeDirectionRequest("I need help getting going again"),
+    "the same words give the same answer, whoever sent them");
+});
+
+// ============================================================
 // DECLARED CONSTRAINTS MUST GOVERN WHAT WE OFFER, NOT JUST WHAT WE ANNOUNCE (#177)
 //
 // The Journey Lab found the grocery reply saying "🚫 Left off — you told me: no pork, eggs, pork"
