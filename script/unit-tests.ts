@@ -4324,6 +4324,38 @@ test("weight reports detected; lift logs are not", () => {
 });
 
 // ============================================================
+// THE VERB IS EVIDENCE TOO (#176 — Journey Lab divergence)
+//
+// This gate required a literal "kg", so "I weighed 83.9 this morning" matched nothing,
+// statedWeight() never saw the turn, and the client got "I didn't quite catch that" with ZERO
+// weight_logs rows. Targets were not recalculated and the trend gained a hole they cannot see.
+// ============================================================
+
+test("a weigh verb licenses the number without a unit (#176)", () => {
+  assert.ok(looksLikeWeightReport("I weighed 83.9 this morning"), "the Journey Lab message");
+  assert.ok(looksLikeWeightReport("I weighed 83.9"));
+  assert.ok(looksLikeWeightReport("weighed in at 82.9 this morning"));
+  assert.ok(looksLikeWeightReport("my weight is 84"));
+});
+
+// AND WITHOUT THE VERB, A NAKED NUMBER IS STILL NOT A BODY WEIGHT. Nothing licenses reading one,
+// and the failure mode of guessing is a false entry on the client's own trend line.
+test("a bare number is not a weigh-in, with or without context (#176)", () => {
+  assert.ok(!looksLikeWeightReport("83.9"), "a naked number says nothing about what it measures");
+  assert.ok(!looksLikeWeightReport("84"));
+  assert.ok(!looksLikeWeightReport("I had 83.9g of rice"));
+  assert.ok(!looksLikeWeightReport("I paid 200 for the gym"));
+  assert.ok(!looksLikeWeightReport("8000 steps"));
+  assert.ok(!looksLikeWeightReport("I had 200g rice and 150g chicken"));
+});
+
+// THE HISTORICAL AND ASPIRATIONAL FORMS STAY OUT — both name a weight that is not today's.
+test("past and goal weights are still not weigh-ins (#176)", () => {
+  assert.ok(!looksLikeWeightReport("I used to weigh 90"));
+  assert.ok(!looksLikeWeightReport("my goal weight is 80"));
+});
+
+// ============================================================
 // verifyBrainReply — the self-correcting loop's checks (pure)
 // ============================================================
 
