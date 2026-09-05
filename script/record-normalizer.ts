@@ -13,7 +13,7 @@
  *
  * So: record once against the real model, replay deterministically.
  *
- *   OPENAI_API_KEY=sk-… npx tsx script/record-normalizer.ts
+ *   AI_INTEGRATIONS_OPENAI_API_KEY=sk-… npx tsx script/record-normalizer.ts
  *
  * THE FIXTURES ARE NOT HAND-WRITTEN, AND MUST NEVER BE. Inventing what the model "would" return
  * produces a fixture that agrees with the test author instead of with production — a suite that
@@ -71,9 +71,22 @@ export function recordingFingerprint(gptSource: string): { model: string; prompt
   return { model, promptHash: createHash("sha256").update(prompt).digest("hex").slice(0, 16) };
 }
 
+export function recorderCredential(env: NodeJS.ProcessEnv = process.env): string | null {
+  const credential = env.AI_INTEGRATIONS_OPENAI_API_KEY || env.OPENAI_API_KEY;
+  if (!credential || /^(?:sk-)?(?:test-offline|missing-key|placeholder)$/i.test(credential.trim())) return null;
+  return credential;
+}
+
+export function isModelErrorFallback(out: { intent: string; confidence: number; canonical?: string }): boolean {
+  return out.intent === "OTHER" && out.confidence === 0 && !out.canonical;
+}
+
 async function main() {
-  if (!process.env.OPENAI_API_KEY || /test|offline/i.test(process.env.OPENAI_API_KEY)) {
-    console.error("Refusing to record without a real OPENAI_API_KEY — a recording made against the\n"
+  // Keep credential precedence identical to the production OpenAI client in server/gpt.ts.
+  // The recorder never prints or writes this value; it only proves that the production owner can
+  // authenticate from the environment in which the recording is made.
+  if (!recorderCredential()) {
+    console.error("Refusing to record without a real AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY — a recording made against the\n"
       + "offline shim would be a fixture full of OTHER/no-canonical, which is worse than none.");
     process.exit(1);
   }
@@ -83,15 +96,31 @@ async function main() {
 
   for (const { input, why } of CORPUS) {
     const out = await classifyIntent(input);
+    // classifyIntent deliberately fails soft so a production turn can continue on raw input. That
+    // is correct at runtime and poisonous in a recorder: auth, transport, timeout, and parse errors
+    // all collapse to this sentinel. Persisting it would turn a failed model call into ten rows of
+    // apparently genuine evidence.
+    if (isModelErrorFallback(out)) {
+      throw new Error(`Normalizer recording aborted: model-error fallback sentinel for ${JSON.stringify(input)}. No corpus was written.`);
+    }
     entries[input.toLowerCase()] = { ...out, _input: input, _why: why };
     console.log(`${out.intent.padEnd(13)} ${out.canonical ? `→ ${out.canonical}` : "(no rewrite)"}`);
   }
 
   mkdirSync(dirname(CORPUS_PATH), { recursive: true });
-  writeFileSync(CORPUS_PATH, JSON.stringify({
+  const artifact = JSON.stringify({
     recordedAt: new Date().toISOString(), ...fp, entries,
-  }, null, 2) + "\n");
+  }, null, 2) + "\n";
+  writeFileSync(CORPUS_PATH, artifact);
   console.log(`\nRecorded ${CORPUS.length} normalizations to ${CORPUS_PATH} (model ${fp.model}, prompt ${fp.promptHash}).`);
+  // Railway has the production credential but a one-off container has no durable checkout to pull
+  // from. This opt-in emits only the non-secret artifact between exact markers so the evidence can
+  // be brought back to the repository without moving the credential out of Railway.
+  if (process.argv.includes("--stdout")) {
+    console.log("NORMALIZER_CORPUS_BEGIN");
+    process.stdout.write(artifact);
+    console.log("NORMALIZER_CORPUS_END");
+  }
 }
 
 if (process.argv[1]?.endsWith("record-normalizer.ts")) {
