@@ -118,20 +118,24 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   try {
   recordMessageSeen();  let m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
 
-  // Bind and commit the turn's factual context before ANY routing decision, including safety and
-  // life-context early returns. Persistence is attempted, never required for a safe response: a
-  // database outage must not prevent crisis guidance from reaching the client.
+  // Bind an EXISTING identity and commit the turn's factual context before any routing decision.
+  // Do not create an unknown account here: "delete my data" from an unknown number must remain
+  // "no account found". First-contact safety/life branches create+commit through their own
+  // fail-open identity helper, while ordinary first-contact turns create below after guards stand down.
   let user: any | undefined;
   try {
-    user = await getOrCreateUser(phone);
-    turnUser(user.id);
-    user = await recordClientFacts(user, message, sourceMessageId);
+    const existing = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    user = existing[0];
+    if (user) {
+      turnUser(user.id);
+      user = await recordClientFacts(user, message, sourceMessageId);
+    }
   } catch (e: any) {
     console.error("[TRUTH_COMMIT] unavailable before routing; safety remains live:", e?.message || e);
   }
 
   // ---- SAFETY + DATA GUARDS (crisis, medical, terminal, delete, reset) ----
-  const safetyResult = await runSafetyGuards(phone, message, m);
+  const safetyResult = await runSafetyGuards(phone, message, m, { sourceMessageId, boundUser: user });
   if (safetyResult !== null) return safetyResult;
 
   if (!user) {

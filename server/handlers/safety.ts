@@ -22,6 +22,7 @@ import { isCrisisMessage, crisisReply, crisisAlertBody } from "../crisis-reply";
 import { asksForExport, formatExport } from "../data-export";
 import { sastDayKey } from "../sast";
 import { logChat, turnUser } from "./chat-log";
+import { recordClientFacts } from "../memory";
 
 // Send a Twilio message with exponential-backoff retries. On complete failure,
 // records a row in adminEvents so the coach can find missed alerts on reload.
@@ -92,9 +93,19 @@ function bindKnownSafetyUser<T extends { id?: string | null } | undefined>(user:
  * get-or-create owner gives known and first-contact clients one durable identity when available;
  * failure leaves the safety branch free to return its existing safest reply.
  */
-async function ensureSafetyTurnUser(phone: string): Promise<any | undefined> {
+async function ensureSafetyTurnUser(
+  phone: string,
+  message: string,
+  sourceMessageId?: string,
+  boundUser?: any,
+): Promise<any | undefined> {
   try {
-    return bindKnownSafetyUser(await getOrCreateUser(phone));
+    // A known user was already committed at the route boundary. A first-contact safety user must
+    // be created here so the safety response remains independent of ordinary routing, then their
+    // accepted turn receives the same canonical truth revision as every other turn.
+    if (boundUser) return bindKnownSafetyUser(boundUser);
+    const created = await getOrCreateUser(phone);
+    return bindKnownSafetyUser(await recordClientFacts(created, message, sourceMessageId));
   } catch (e: any) {
     console.error("[SAFETY_TURN_IDENTITY] attribution unavailable; safety response continues:", e?.message || e);
     return undefined;
@@ -105,6 +116,7 @@ export async function runSafetyGuards(
   phone: string,
   message: string,
   m: string,
+  context: { sourceMessageId?: string; boundUser?: any } = {},
 ): Promise<string | null> {
 
   // ---- THE QUIT MOMENT — "I don't know how I will do this anymore" ----
@@ -137,7 +149,7 @@ export async function runSafetyGuards(
   // server/life-context.ts for the compliance posture.
   const life = readLifeContext(message);
   if (life && !isCrisisMessage(m)) {
-    const lifeUser = await ensureSafetyTurnUser(phone);
+    const lifeUser = await ensureSafetyTurnUser(phone, message, context.sourceMessageId, context.boundUser);
     const reply = lifeContextReply(life, (lifeUser?.name || "").split(" ")[0]);
     // Comfort that isn't followed by silence is just a nice sentence — go quiet on nudges too.
     if (lifeUser?.id) markLifeQuiet(lifeUser.id, life).catch(() => {});
@@ -147,7 +159,7 @@ export async function runSafetyGuards(
 
   // ---- CRISIS ----
   if (isCrisisMessage(m)) {
-    const crisisUser = await ensureSafetyTurnUser(phone);
+    const crisisUser = await ensureSafetyTurnUser(phone, message, context.sourceMessageId, context.boundUser);
     const crisisName = crisisUser?.name || "friend";
     const reply = crisisReply(crisisName);
     try { await logChat(crisisUser?.id || "unknown", message, reply, "CRISIS"); } catch (e) { console.warn("[non-fatal]", e); }
@@ -179,7 +191,7 @@ export async function runSafetyGuards(
   const benignStroke = /\bstroke of (?:luck|genius)\b|\b(?:breast|back|free|butterfly|side|swim(?:ming)?|paddle|broad|key)\s*-?\s*strokes?\b|\bbreaststroke\b|\bbackstroke\b/i.test(m);
   const strokeEmergency = /\bstrokes?\b/i.test(m) && !benignStroke;
   if (nonStrokeEmergency || strokeEmergency) {
-    const acuteUser = await ensureSafetyTurnUser(phone);
+    const acuteUser = await ensureSafetyTurnUser(phone, message, context.sourceMessageId, context.boundUser);
     const acuteName = acuteUser?.name || "friend";
     const acuteReply = `This sounds like it could be a medical emergency. Stop what you're doing and call *10177* (SA ambulance) or go to your nearest emergency room immediately. Do not wait. Health first — everything else can wait.`;
     try { await logChat(acuteUser?.id || "unknown", message, acuteReply, "ACUTE_MEDICAL"); } catch (e) { console.warn("[non-fatal]", e); }
