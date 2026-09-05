@@ -39,6 +39,16 @@ function keyFactsFromUser(user: any): string[] {
   const facts: string[] = [];
   const inj = (user?.injuries || "").trim();
   if (inj && inj.toLowerCase() !== "none") facts.push(`injury/limitation: ${inj}`);
+  // Constraints and boundaries outrank descriptive profile colour. These are factual slots from
+  // the committed users projection; a persisted model narrative must never be their second owner.
+  const restrictions = (user?.dietaryRestrictions || "").trim();
+  if (restrictions && restrictions.toLowerCase() !== "none") facts.push(`dietary restriction: ${restrictions.slice(0, 120)}`);
+  const boundary = (user?.doNotMention || "").trim();
+  if (boundary && boundary.toLowerCase() !== "none") facts.push(`do not mention: ${boundary.slice(0, 120)}`);
+  const lifeContext = (user?.lifeContext || "").trim();
+  if (lifeContext && lifeContext.toLowerCase() !== "none") facts.push(`life right now: ${lifeContext.slice(0, 120)}`);
+  const workSchedule = (user?.workSchedule || "").trim();
+  if (workSchedule && workSchedule !== "standard") facts.push(`work pattern: ${workSchedule.replace(/_/g, " ")}`);
   const goal = user?.goalType;
   if (goal) facts.push(`goal: ${String(goal).replace(/_/g, " ")}`);
   const job = (user?.jobType || user?.lifeSituation || "").trim();
@@ -54,7 +64,7 @@ function keyFactsFromUser(user: any): string[] {
   const med = (user?.medicalConditions || "").trim();
   if (med && med.toLowerCase() !== "none") facts.push(`medical: ${med.slice(0, 60)}`);
   if (user?.trainingMode) facts.push(`trains: ${String(user.trainingMode).replace(/_/g, " ")}${user?.homeEquipment ? ` (${user.homeEquipment})` : ""}, ${user?.trainingDaysPerWeek || "?"} days/week`);
-  return facts.slice(0, 10);
+  return facts.slice(0, 12);
 }
 
 export function seedUnderstanding(user: any, snapshot?: string): UnderstandingState {

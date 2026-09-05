@@ -229,8 +229,8 @@ export async function retrieveMemories(phone: string, query: string): Promise<st
 // So: one detector set, one writer, typed columns, read by the decision and by the programme.
 
 import { db } from "./db";
-import { users } from "../shared/schema";
-import { eq } from "drizzle-orm";
+import { clientTruthCommits, users } from "../shared/schema";
+import { and, eq, sql } from "drizzle-orm";
 import { looksLikeQuestion, isFutureIntent } from "./utils";
 import { foodConstraints } from "./food-swaps";
 
@@ -344,37 +344,105 @@ export function addFact(existing: string | null | undefined, item: string): stri
   return `${cur}, ${clean}`;
 }
 
+export interface ClientFactOperation {
+  fact: keyof DurableFacts;
+  operation: "assert";
+  previousValue: string | null;
+  value: string;
+  provenance: "client_explicit";
+}
+
 /**
- * Write what this message told us, if anything. Fire-and-forget: never blocks or fails a reply.
+ * Build the users-row projection and its evidence operations from the latest locked row.
+ * This function is pure so the precedence rule is testable without pretending the DB stub can
+ * model PostgreSQL row locks. Durable list facts append; a new boundary never erases an unrelated
+ * boundary. Work schedule is a single current slot and therefore replaces its earlier value.
+ */
+export function projectClientFacts(
+  current: any,
+  facts: DurableFacts,
+): { patch: Record<string, string>; operations: ClientFactOperation[] } {
+  const patch: Record<string, string> = {};
+  const operations: ClientFactOperation[] = [];
+  const appendFacts: Array<keyof Pick<DurableFacts,
+    "injuries" | "medicalConditions" | "dietaryRestrictions" | "lifeContext" | "doNotMention"
+  >> = ["injuries", "medicalConditions", "dietaryRestrictions", "lifeContext", "doNotMention"];
+
+  for (const fact of appendFacts) {
+    const asserted = facts[fact];
+    if (!asserted) continue;
+    const previous = current?.[fact] == null ? null : String(current[fact]);
+    const next = addFact(previous, asserted);
+    if (!next || next === previous) continue;
+    patch[fact] = next;
+    operations.push({ fact, operation: "assert", previousValue: previous, value: next, provenance: "client_explicit" });
+  }
+
+  if (facts.workSchedule && facts.workSchedule !== current?.workSchedule) {
+    const previous = current?.workSchedule == null ? null : String(current.workSchedule);
+    patch.workSchedule = facts.workSchedule;
+    operations.push({
+      fact: "workSchedule", operation: "assert", previousValue: previous,
+      value: facts.workSchedule, provenance: "client_explicit",
+    });
+  }
+  return { patch, operations };
+}
+
+/**
+ * Commit what this message told us before the turn is coached.
  *
  * Called from the FRONT DOOR, not from the GPT handler, which is the whole point — the old
  * detectors sat last in the pipeline, so an injury mentioned alongside a meal was routed to the
- * food handler and never recorded at all.
+ * food handler and never recorded at all. The user row is locked and re-read inside the transaction:
+ * building a patch from the request's stale user object would lose simultaneous facts.
+ *
+ * The returned row is the immutable factual context for the rest of this turn. A Twilio source ID
+ * makes delivery retries idempotent; separate identical utterances without the same source remain
+ * separate turns. Errors fail open for availability but never masquerade as a successful commit.
  */
-export async function recordClientFacts(user: any, message: string): Promise<void> {
+export async function recordClientFacts(user: any, message: string, sourceMessageId?: string): Promise<any> {
+  const facts = detectFacts(message);
   try {
-    const f = detectFacts(message);
-    if (Object.keys(f).length === 0) return;
+    const committed = await db.transaction(async (tx) => {
+      // Drizzle transactions use one checked-out connection. Lock first, then re-read from that
+      // same connection so two messages cannot both derive a replacement from the same old row.
+      await tx.execute(sql`SELECT id FROM users WHERE id = ${user.id} FOR UPDATE`);
+      const rows = await tx.select().from(users).where(eq(users.id, user.id)).limit(1);
+      const current = rows[0] || user;
 
-    const patch: Record<string, string> = {};
-    const inj = f.injuries ? addFact(user.injuries, f.injuries) : null;
-    if (inj && inj !== user.injuries) patch.injuries = inj;
-    const cond = f.medicalConditions ? addFact(user.medicalConditions, f.medicalConditions) : null;
-    if (cond && cond !== user.medicalConditions) patch.medicalConditions = cond;
-    const diet = f.dietaryRestrictions ? addFact(user.dietaryRestrictions, f.dietaryRestrictions) : null;
-    if (diet && diet !== user.dietaryRestrictions) patch.dietaryRestrictions = diet;
-    const life = f.lifeContext ? addFact(user.lifeContext, f.lifeContext) : null;
-    if (life && life !== user.lifeContext) patch.lifeContext = life;
-    // NOT appended — a new request replaces the old one. "Don't mention my weight" then later
-    // "don't mention my ex" should not leave us avoiding a growing list forever.
-    if (f.doNotMention && f.doNotMention !== user.doNotMention) patch.doNotMention = f.doNotMention;
-    if (f.workSchedule && f.workSchedule !== user.workSchedule) patch.workSchedule = f.workSchedule;
+      const source = String(sourceMessageId || "").trim() || null;
+      if (source) {
+        const prior = await tx.select({ id: clientTruthCommits.id })
+          .from(clientTruthCommits)
+          .where(and(eq(clientTruthCommits.userId, user.id), eq(clientTruthCommits.sourceMessageId, source)))
+          .limit(1);
+        if (prior.length) return current;
+      }
 
-    if (Object.keys(patch).length === 0) return;
-    await db.update(users).set(patch).where(eq(users.id, user.id));
-    console.log(`[FACTS] ...${String(user.id).slice(-6)} learned ${Object.keys(patch).join(", ")}`);
+      const { patch, operations } = projectClientFacts(current, facts);
+      // Every accepted source advances the context clock, even when it carries no durable profile
+      // mutation. Otherwise two ordinary model turns share a revision and a slow older save can
+      // still overwrite the newer understanding.
+      const revision = Math.max(0, Number(current.truthRevision) || 0) + 1;
+
+      await tx.update(users).set({ ...patch, truthRevision: revision }).where(eq(users.id, user.id));
+      await tx.insert(clientTruthCommits).values({
+        userId: user.id,
+        sourceMessageId: source,
+        revision,
+        operations: operations as any,
+        receivedAt: new Date(),
+      });
+      return { ...current, ...patch, truthRevision: revision };
+    });
+    if ((committed?.truthRevision || 0) !== (user?.truthRevision || 0)) {
+      console.log(`[FACTS] ...${String(user.id).slice(-6)} committed truth revision ${committed.truthRevision}`);
+    }
+    return committed;
   } catch (e) {
     console.warn("[FACTS] non-fatal:", (e as any)?.message || e);
+    return { ...user, __factCommitFailed: true };
   }
 }
 
@@ -615,5 +683,3 @@ export async function answerRecall(user: any, message: string): Promise<string> 
     currentWeightKg: user?.currentWeight,
   });
 }
-
-

@@ -127,6 +127,8 @@ jobs:
       # every client-stated step count silently left untrusted.
       - name: Step provenance bridge on real PostgreSQL
         run: npx tsx script/pg-step-provenance-acceptance.ts
+      - name: Canonical client truth ordering on real PostgreSQL
+        run: npx tsx script/pg-client-truth-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot

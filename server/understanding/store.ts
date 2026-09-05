@@ -13,7 +13,7 @@
  * seed. The table (client_understanding) is created by `npm run db:push`.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, lte } from "drizzle-orm";
 import { db } from "../db";
 import { clientUnderstanding } from "../../shared/schema";
 import {
@@ -42,7 +42,9 @@ export async function loadUnderstanding(userId: string, seed: UnderstandingState
       profile: {
         name: seed.profile.name || stored.profile.name,
         lifeStory: stored.profile.lifeStory || seed.profile.lifeStory,
-        keyFacts: stored.profile.keyFacts.length ? stored.profile.keyFacts : seed.profile.keyFacts,
+        // Factual slots are rebuilt from the committed users projection every turn. Stored
+        // understanding is model-derived narrative/observation and may never overrule them.
+        keyFacts: seed.profile.keyFacts,
         preferences: seed.profile.preferences,
       },
       observations: stored.observations,
@@ -56,14 +58,17 @@ export async function loadUnderstanding(userId: string, seed: UnderstandingState
   }
 }
 
-export async function saveUnderstanding(userId: string, state: UnderstandingState): Promise<void> {
+export async function saveUnderstanding(userId: string, state: UnderstandingState, sourceRevision = 0): Promise<void> {
   try {
     const durable = persistableUnderstanding(state);
     await db.insert(clientUnderstanding)
-      .values({ userId, profile: durable.profile as any, observations: durable.observations as any, updatedAt: new Date() })
+      .values({ userId, profile: durable.profile as any, observations: durable.observations as any, sourceRevision, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: clientUnderstanding.userId,
-        set: { profile: durable.profile as any, observations: durable.observations as any, updatedAt: new Date() },
+        set: { profile: durable.profile as any, observations: durable.observations as any, sourceRevision, updatedAt: new Date() },
+        // A slow earlier turn may finish its model call after a newer fact commit. Reject it rather
+        // than allowing its whole JSON blob to erase the newer turn's understanding.
+        setWhere: lte(clientUnderstanding.sourceRevision, sourceRevision),
       });
   } catch (e) {
     console.warn("[UNDERSTANDING_STORE] save failed (non-fatal):", (e as any)?.message || e);

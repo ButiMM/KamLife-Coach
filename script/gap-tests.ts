@@ -3980,14 +3980,17 @@ test("verifier: it still catches the thing it was built to catch", () => {
 
 // ── CUT 7: MEMORY IS FIELDS, NOT SEARCH ─────────────────────────────────────────────────────
 
-test("cut7: durable facts are learned at the front door, not inside the GPT handler", () => {
+test("cut7: durable facts commit at the front door before coaching reads the user", () => {
   const strip = (x: string) => x.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
   const routes = strip(readFileSync("server/routes.ts", "utf-8"));
   const gptBlock = strip(readFileSync("server/handlers/gpt-block.ts", "utf-8"));
   // THE DEFECT: the detectors sat last in the pipeline, so "my knee is killing me, had chicken
   // and pap" routed to the food handler and the injury was never recorded — while programme.ts
   // kept building sessions from users.injuries, which stayed NULL.
-  assert.ok(/recordClientFacts\(user, message\)/.test(routes), "every message is heard, not just GPT ones");
+  assert.ok(/user = await recordClientFacts\(user, message, sourceMessageId\)/.test(routes),
+    "every message is committed and the same turn receives the refreshed projection");
+  assert.ok(routes.indexOf("user = await recordClientFacts") < routes.indexOf("let normalizedQuestion"),
+    "truth commits before routing/normalization consumers");
   assert.ok(!/storeMemory\(phone, `Client reported injury/.test(gptBlock),
     "the prose detectors in the GPT handler are gone");
   assert.ok(!/storeMemory\(phone, `Life situation update/.test(gptBlock), "…both blocks of them");
@@ -4027,6 +4030,35 @@ test("cut7: one owner for the injury append", () => {
     assert.ok(!/const existingInj = \(user\.injuries \|\| ""\)\.toLowerCase\(\)/.test(src),
       `${f} no longer carries its own copy`);
   }
+});
+
+test("canonical truth: projection is built from the latest row and preserves independent facts", async () => {
+  const { projectClientFacts } = await import("../server/memory");
+  const first = projectClientFacts(
+    { injuries: "knee", doNotMention: "weight" },
+    { injuries: "shoulder", doNotMention: "my ex" },
+  );
+  assert.equal(first.patch.injuries, "knee, shoulder", "a concurrent injury is appended to the locked row");
+  assert.equal(first.patch.doNotMention, "weight, my ex", "one new boundary cannot erase another");
+  assert.deepEqual(first.operations.map((o: any) => o.fact), ["injuries", "doNotMention"]);
+  assert.equal(first.operations[0].previousValue, "knee", "lineage retains the replaced projection");
+});
+
+test("canonical truth: factual understanding always comes from the committed projection", async () => {
+  const { seedUnderstanding } = await import("../server/understanding/seed");
+  const seeded = seedUnderstanding({
+    name: "Thandi", dietaryRestrictions: "vegan", doNotMention: "weight",
+    lifeContext: "new baby", workSchedule: "night_shift",
+  } as any);
+  assert.ok(seeded.profile.keyFacts.includes("dietary restriction: vegan"));
+  assert.ok(seeded.profile.keyFacts.includes("do not mention: weight"));
+  assert.ok(seeded.profile.keyFacts.includes("life right now: new baby"));
+  assert.ok(seeded.profile.keyFacts.includes("work pattern: night shift"));
+
+  const store = readFileSync("server/understanding/store.ts", "utf-8");
+  assert.ok(/keyFacts: seed\.profile\.keyFacts/.test(store), "stored narrative cannot replace factual slots");
+  assert.ok(/setWhere: lte\(clientUnderstanding\.sourceRevision, sourceRevision\)/.test(store),
+    "a slow earlier turn cannot overwrite understanding from a newer fact revision");
 });
 
 // ── CUT 8: DON'T-MENTION IS BOUND TO THE MOUTH ──────────────────────────────────────────────

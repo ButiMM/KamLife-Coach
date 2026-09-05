@@ -122,7 +122,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   const safetyResult = await runSafetyGuards(phone, message, m);
   if (safetyResult !== null) return safetyResult;
 
-  const user = await getOrCreateUser(phone);
+  let user = await getOrCreateUser(phone);
   turnUser(user.id);
 
   // QR ACQUISITION SOURCE — a scanned join-QR prefills "(ref: gymA)"; capture once, then strip.
@@ -130,6 +130,12 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
     message = stripSignupSource(message);
     m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
   }
+
+  // Durable client truth is part of accepting the turn, not background telemetry. Commit it from
+  // the raw client words before any coaching path reads the user. recordClientFacts locks and
+  // re-reads the latest row, then returns the exact projection/revision every consumer in this
+  // turn must share. A webhook retry reuses sourceMessageId and therefore cannot apply twice.
+  user = await recordClientFacts(user, message, sourceMessageId);
 
   // Page coach on crisis/injury signals immediately — fires even if onboarding/POPIA returns early
   if (message && message.length > 2) checkEscalation(user.id, message).catch(e => console.error("[ESCALATION_CHECK]", e?.message || e));
@@ -500,12 +506,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // capitalisation intact — `m` is already lower-cased and whitespace-collapsed, which is fine for
   // matching but is not their message.
   const originalMessageForFidelity = message;
-
-  // CUT 7 — durable facts are learned at the FRONT DOOR, on the raw text, for the same reason the
-  // turn facts are. The old detectors sat inside the GPT handler, last in the pipeline, so "my
-  // knee is killing me, had chicken and pap" routed to food and the injury was never recorded —
-  // and programme.ts, which trains around users.injuries, never heard about the knee.
-  void recordClientFacts(user, message);
 
   // CUT 2 — the facts are counted on the client's RAW text, here, before the rewriter below can
   // replace it. Cut 1 counted them after, so a two-fact note rewritten down to one fact reached

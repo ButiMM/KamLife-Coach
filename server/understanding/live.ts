@@ -433,7 +433,7 @@ export async function runMeaningEngineLive(ctx: {
     if (!result) return null; // fail-open → existing pipeline runs
 
     // Grow the client's durable memory (fail-open — a save miss never blocks the reply).
-    if (user?.id) saveUnderstanding(user.id, result.state).catch(() => {});
+    if (user?.id) saveUnderstanding(user.id, result.state, Math.max(0, Number(user.truthRevision) || 0)).catch(() => {});
 
     // THE INVERSION — Coach K decided on an action. Validate happened in the engine;
     // here we execute it (dry-run in shadow) and, in `on` mode, let the deterministic
