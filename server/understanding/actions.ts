@@ -59,9 +59,41 @@ export function explicitMealSlot(msg: string): "breakfast" | "lunch" | "dinner" 
   // MORNING ONLY. "this afternoon" is deliberately NOT here: afternoon spans lunch and the snack
   // after it, so mapping it to a slot would be inventing a meaning rather than surfacing one, and
   // an afternoon phrase still falls to clock inference exactly as before.
-  if (/\b(?:this|yesterday|early|in the|the|(?:mon|tues|wednes|thurs|fri|satur|sun)day)\s+morning\b/i.test(lo)) return "breakfast";
+  //
+  // AND IT MUST BE THE EATING THAT HAPPENED IN THE MORNING (#182). The first cut of this tested
+  // the WHOLE message, so "I train in the morning; I just had rice" relabelled the rice as
+  // breakfast at 8pm: the word belonged to the training clause and the slot was taken from it
+  // anyway. Same class of error as the one this branch exists to fix, pointing the other way —
+  // a time attached to the wrong event is still a record that contradicts the client.
+  if (MORNING_MEAL_RE.test(lo)) return "breakfast";
   return null;
 }
+
+/**
+ * "THIS MORNING" ATTACHED TO THE EATING, NOT TO WHATEVER ELSE THE MESSAGE MENTIONS (#182).
+ *
+ * People put the time on either side of the verb — "this morning I had eggs" and "I had a banana
+ * in the morning" are the same claim — so both orders are here, and nothing else is.
+ *
+ * WHAT THE GAP MAY NOT CONTAIN IS THE WHOLE RULE. A clause boundary (. ! ? ; newline) or a
+ * coordinating conjunction (and, then, but, so, before, after, plus) means the morning phrase and
+ * the eating verb belong to DIFFERENT events, and a time from one event may not label the other:
+ *
+ *   "I train in the morning; I just had rice"      → the ; blocks it   → falls to the clock
+ *   "I walk in the morning and had rice"           → the and blocks it → falls to the clock
+ *   "this morning, I had eggs"                     → a comma is not a new event → breakfast
+ *
+ * Deliberately NOT clausesOf(): that splitter ends clauses at sentence terminators only, so the
+ * semicolon case above is one clause to it and the over-fire would survive. This is the same
+ * bounded-window shape the food and constraint matchers in this codebase already use, tightened
+ * with the conjunctions, and it stays inside the one slot owner rather than beside it.
+ */
+const MORNING = String.raw`(?:this|yesterday|early|the|(?:mon|tues|wednes|thurs|fri|satur|sun)day)\s+morning`;
+const ATE = String.raw`(?:had|ate|eaten|eating|having)`;
+const GAP = String.raw`(?:(?!\b(?:and|then|but|so|before|after|plus)\b)[^.!?;\n])`;
+const MORNING_MEAL_RE = new RegExp(
+  `\\b${MORNING}\\b${GAP}{0,25}?\\b(?:i\\s+)?(?:just\\s+)?${ATE}\\b`
+  + `|\\b${ATE}\\b${GAP}{0,40}?\\b${MORNING}\\b`, "i");
 
 export type CoachAction =
   // Pure conversation — the default and the safe fallback. Coach K just talks.
