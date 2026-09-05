@@ -12,7 +12,7 @@ import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
 import { verifyBrainReply } from "./brain/reply-verifier";
 import { weightInContextLine } from "./weight-context";
-import { getWeightTruth, sastDayBucketSql } from "./day-ledger";
+import { getWeightTruth, sastDayBucketSql, readTrustedStepDays } from "./day-ledger";
 import { captureQualitySignal } from "./quality-signals";
 import { verifyMealEstimate } from "./verifiers/meal-verifier";
 import { assertAiOnline, isAiOfflineError } from "./ai-offline";
@@ -337,10 +337,10 @@ export async function buildPatternSummary(user: any): Promise<string> {
       // getWeightTruth; withheld yields no points, so the block below says "No weight data".
       getWeightTruth(user, { windowDays: 7 }).catch(() => null),
       getWeightTruth(user, { windowDays: 28 }).catch(() => null),
-      db.select().from(stepLogs)
-        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)))
-        .orderBy(desc(stepLogs.loggedAt))
-        .limit(7),
+      // STEPS FROM THEIR OWNER TOO (#179). This selected step_logs by logged_at and filtered
+      // nothing: on one client the snapshot read "no verified client-reported step logs" while
+      // this read "avg 14,000/day (3/3 days hit target)". Same gate now, defined in day-ledger.ts.
+      readTrustedStepDays(user.id, sevenDaysAgo),
       // 28-day session count for trajectory scoring
       db.select({ count: sql<number>`COUNT(*)::int` })
         .from(workoutLogs)
@@ -395,13 +395,23 @@ export async function buildPatternSummary(user: any): Promise<string> {
     const mentionedPain = PAIN_WORDS.some(w => allIn.includes(w));
     const mentionedStress = STRESS_WORDS.some(w => allIn.includes(w));
 
-    const DONE_PATTERN = /^(done|workout done|finished|completed)$/;
-    const trainingLogs = recentChats.filter(c =>
-      DONE_PATTERN.test((c.messageIn || "").toLowerCase().trim()) || c.intent === "WORKOUT_LOG"
-    );
-    const lastTraining = trainingLogs[0];
-    const daysSinceTraining = lastTraining?.createdAt
-      ? Math.floor((Date.now() - new Date(lastTraining.createdAt).getTime()) / 86_400_000)
+    // TRAINING IS WHAT THE WORKOUT LEDGER SAYS, NOT WHAT THE CHAT LOG SOUNDS LIKE (#179).
+    //
+    // This counted chat rows whose text was "done" or whose intent was tagged WORKOUT_LOG, so a
+    // client with ZERO rows in workout_logs read as "1 training session logged this week" while
+    // every canonical surface knew they had never trained. An intent tag records how a message was
+    // ROUTED, not that a session happened: a handler that tags and then declines to write leaves
+    // the tag behind either way. workoutLogs is the durable owner, and this function already
+    // queries it for the 28-day count — the weekly signal now comes from the same table.
+    const weekWorkouts = await db.select({ loggedAt: workoutLogs.loggedAt })
+      .from(workoutLogs)
+      .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo)))
+      .orderBy(desc(workoutLogs.loggedAt))
+      .catch(() => [] as { loggedAt: Date | null }[]);
+    const trainingLogs = weekWorkouts;
+    const lastTrainedAt = weekWorkouts[0]?.loggedAt;
+    const daysSinceTraining = lastTrainedAt
+      ? Math.floor((Date.now() - new Date(lastTrainedAt).getTime()) / 86_400_000)
       : null;
 
     // WEIGHT IN CONTEXT (2026-07-22): bare "up 1.3kg this week" was the intelligence gap —
@@ -454,7 +464,7 @@ export async function buildPatternSummary(user: any): Promise<string> {
     const stepsTarget = user.stepsTarget || 8500;
     if (recentSteps.length > 0) {
       const avgSteps = Math.round(recentSteps.reduce((sum, s) => sum + s.steps, 0) / recentSteps.length);
-      const hitTarget = recentSteps.filter(s => s.steps >= stepsTarget).length;
+      const hitTarget = recentSteps.filter((s: { steps: number }) => s.steps >= stepsTarget).length;
       parts.push(`Steps: avg ${avgSteps.toLocaleString()}/day (${hitTarget}/${recentSteps.length} days hit ${stepsTarget.toLocaleString()} target).`);
       if (avgSteps < stepsTarget * 0.6) {
         parts.push("Walking is significantly below target — needs direct accountability.");

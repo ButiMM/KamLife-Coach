@@ -477,6 +477,54 @@ export interface ProgressWeight {
  * weight, body check — are exactly that case, and they now say so by passing the message rather
  * than by not having asked.
  */
+/** One SAST day of step evidence the client is on record as having reported. */
+export type TrustedStepDay = { day: string; steps: number };
+
+/**
+ * THE STEP EVIDENCE A CLIENT IS ON RECORD AS HAVING REPORTED (#179).
+ *
+ * Steps had two readers with two different ideas of what counts. The canonical snapshot filtered
+ * to provenance = 'client_report' with a resolved SAST day — the P1 gate that stops legacy or
+ * unattributed rows becoming current-day coaching truth. buildPatternSummary, which feeds the GPT
+ * fallback, selected step_logs by logged_at and filtered nothing. On the same seeded client:
+ *
+ *   canonical   "Steps TODAY: none logged yet. No other verified client-reported step logs."
+ *   fallback    "Steps: avg 14,000/day (3/3 days hit 8,500 target)."
+ *
+ * Those are not two phrasings of one fact; they are two answers, and the fallback's is built from
+ * rows the product has already decided it cannot vouch for — including, exactly, the ones #184's
+ * throwing trigger left behind. The outbound floor can stop a forbidden sentence, but it cannot
+ * undo a decision steered by evidence that was never trusted.
+ *
+ * So the filter lives here, once, beside getWeightTruth — the same move, for the same reason, on
+ * the other half of the same snapshot. Both readers call this; neither owns the rule.
+ *
+ * PER SAST DAY, because resolved_day is what "resolved" means and because both callers describe
+ * the result in days. Two logs on one day are one day, and the day's figure is the highest
+ * reading: step counts accumulate through a day, so a later smaller number is a re-read of a
+ * device, never a second walk.
+ */
+export async function readTrustedStepDays(userId: string, since: Date): Promise<TrustedStepDay[]> {
+  try {
+    const result: any = await db.execute(sql`
+      SELECT resolved_day AS day, MAX(steps)::int AS steps
+        FROM step_logs
+       WHERE user_id = ${userId}
+         AND logged_at >= ${since}
+         AND COALESCE(provenance, 'unverified') = 'client_report'
+         AND resolved_day IS NOT NULL
+       GROUP BY resolved_day
+       ORDER BY resolved_day ASC
+    `);
+    return ((result?.rows ?? []) as any[]).map(r => ({ day: String(r.day), steps: Number(r.steps) || 0 }));
+  } catch (e: any) {
+    // Fails CLOSED, and that is the safe direction here: unknown step evidence must not become
+    // coaching truth, so an unreadable table reads as "nothing verified" rather than as a number.
+    console.warn("[TRUSTED_STEPS] unreadable:", e?.message || e);
+    return [];
+  }
+}
+
 export async function getWeightTruth(
   user: any,
   opts?: { clientMessage?: string | null; windowDays?: number },

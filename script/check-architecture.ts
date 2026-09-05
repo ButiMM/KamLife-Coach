@@ -62,7 +62,7 @@ const BUDGET = {
    * to the true figure in one deliberate commit. Until then this red line is the marker, and it is
    * the ONLY thing in this guard that is red — one red line means something, four never did.
    */
-  regexLiterals: 449,
+  regexLiterals: 448,
   /**
    * GUARD #13 — see unreachableExports above. Sixty-two capabilities cannot be reached by a
    * client message today. This budget is deliberately set THREE BELOW that, so this guard is RED
@@ -271,7 +271,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "so 21 is the smallest truthful current baseline. FROM HERE IT FALLS ONLY.",
   },
   {
-    key: "regexLiterals", from: 318, to: 449, date: "2026-08-24",
+    key: "regexLiterals", from: 318, to: 448, date: "2026-08-24 (fell to 448 on 2026-09-05)",
     why: "NOT A RAISE — A CORRECTED MEASUREMENT, and the follow-up this budget's own comment "
       + "declared owed on 2026-08-17: \"repair the matcher to see multi-line assignments and "
       + "re-baseline to the true figure in one deliberate commit.\" This is that commit. The "
@@ -290,7 +290,14 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "modules from 243 to 239 — GREEN, unraised — and two unreachable functions removed, "
       + "food-naming.assumptionNote (a client-facing mouth nothing called) and "
       + "food-swaps.substituteFor. FROM HERE IT FALLS ONLY. Every pattern this now sees is a real "
-      + "pattern, and the honest count is the one worth arguing about.",
+      + "pattern, and the honest count is the one worth arguing about. "
+      + "AND IT FELL: 449 → 448 on 2026-09-05 (#179). Recorded on this entry rather than as a new "
+      + "one because the guard resolves a budget by the highest logged `to`, so a reduction has "
+      + "nowhere else to live. DONE_PATTERN — the /^(done|workout done|finished|completed)$/ that "
+      + "let buildPatternSummary infer training from chat wording — is deleted; the weekly training "
+      + "signal now reads workout_logs, the durable owner that same function already queried for "
+      + "its 28-day count. One pattern fewer because a SECOND ANSWER to \"did they train\" was "
+      + "removed, not because anything unrelated was compressed to make room.",
   },
   {
     key: "modules", from: 237, to: 239, date: "2026-08-17",

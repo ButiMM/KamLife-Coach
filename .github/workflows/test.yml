@@ -129,6 +129,12 @@ jobs:
         run: npx tsx script/pg-step-provenance-acceptance.ts
       - name: Canonical client truth ordering on real PostgreSQL
         run: npx tsx script/pg-client-truth-acceptance.ts
+      # TWO READERS, ONE SET OF FACTS (#179). Provenance, resolved_day and the workout ledger are
+      # COLUMNS, so only a real database can show that the canonical snapshot and the GPT
+      # fallback's context are reading the same rows — a fixture that answers every query the
+      # same way cannot tell two readers apart, which is how the divergence survived.
+      - name: Fallback reads canonical truth on real PostgreSQL
+        run: npx tsx script/pg-fallback-truth-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot

@@ -13,7 +13,7 @@
 
 import { db } from "../db";
 import { workoutLogs, mealLogs, stepLogs, chatHistory } from "../../shared/schema";
-import { getWeightTruth } from "../day-ledger";
+import { getWeightTruth, readTrustedStepDays } from "../day-ledger";
 import { eq, gte, desc, asc, and, sql } from "drizzle-orm";
 import { weeklyTrendSlopeKg } from "../handlers/weight";
 import { getPhaseNames } from "../programme";
@@ -30,7 +30,6 @@ import { getGoalProfile } from "../goal-profiles";
 
 const DAY = 86_400_000;
 
-type TrustedStepRow = { steps: number; loggedAt: Date | null; provenance: string; resolvedDay: string | null };
 
 export async function buildClientSnapshot(user: any): Promise<string> {
   const now = Date.now();
@@ -183,21 +182,14 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     }
 
     // P1 provenance gate: legacy/unattributed rows must never become current-day coaching truth.
-    const stepRowsResult = await db.execute(sql`
-      SELECT steps,
-             logged_at AS "loggedAt",
-             COALESCE(provenance, 'unverified') AS provenance,
-             resolved_day AS "resolvedDay"
-      FROM step_logs
-      WHERE user_id = ${user.id}
-        AND logged_at >= ${since(7)}
-    `).catch(() => ({ rows: [] as TrustedStepRow[] }));
-    const stepRows = ((stepRowsResult as any).rows as TrustedStepRow[]).filter((r) => r.provenance === "client_report" && !!r.resolvedDay);
+    // The gate itself is readTrustedStepDays in day-ledger.ts (#179) — it used to be spelled out
+    // here, which is how the GPT fallback ended up with its own unfiltered step query and its own
+    // answer. One owner now, beside getWeightTruth; this file consumes it like every other reader.
+    const stepDays = await readTrustedStepDays(user.id, since(7));
     const stepTarget = user.stepsTarget || 8500;
     const todaySastKey = sastToday();
-    const todayStepRows = stepRows.filter(r => r.resolvedDay === todaySastKey);
-    const todaySteps = todayStepRows.length > 0 ? Math.max(...todayStepRows.map(r => Number(r.steps) || 0)) : null;
-    const pastRows = stepRows.filter(r => !!r.resolvedDay && r.resolvedDay < todaySastKey);
+    const todaySteps = stepDays.find(d => d.day === todaySastKey)?.steps ?? null;
+    const pastRows = stepDays.filter(d => d.day < todaySastKey);
     const stepsTodayLine = todaySteps !== null ? `Steps TODAY so far: ${todaySteps.toLocaleString()} (day still in progress).` : `Steps TODAY: none logged yet.`;
     if (pastRows.length > 0) {
       const avg = Math.round(pastRows.reduce((s, r) => s + (Number(r.steps) || 0), 0) / pastRows.length);
@@ -222,7 +214,7 @@ export async function buildClientSnapshot(user: any): Promise<string> {
       const names: string[] = Array.isArray(r.items) ? r.items.map((i: any) => String(i?.name || "").trim()).filter(Boolean) : r.rawMessage && r.rawMessage !== "[Photo]" ? [String(r.rawMessage).slice(0, 30)] : [];
       if (names.length) e.ate.push(`${r.mealLabel ? `${r.mealLabel} — ` : ""}${names.slice(0, 3).join(", ")}`);
     }
-    for (const r of stepRows) { const e = slot(r.resolvedDay!); e.steps = Math.max(e.steps, Number(r.steps) || 0); }
+    for (const d of stepDays) { slot(d.day).steps = Math.max(slot(d.day).steps, d.steps); }
     for (const w of wLogs) if (w.loggedAt && new Date(w.loggedAt).getTime() >= now - 7 * DAY) slot(sastDayKey(w.loggedAt ?? now)).trained = true;
     // The seven-day story carries a per-day kg too, and it was reading the same raw rows. Withheld
     // means `points` is empty, so the days simply carry no scale figure — the story still runs.
