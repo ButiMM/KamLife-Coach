@@ -57,6 +57,7 @@ const UNLOGGED = await import("../server/unlogged-notice");
 const UTILS = await import("../server/utils");
 const FOODID = await import("../server/food-identity-correction");
 const FIDELITY = await import("../server/normalizer-fidelity");
+const RECORDER = await import("./record-normalizer");
 const CARD = await import("../server/macro-card-attach");
 const NUTRI = await import("../server/nutrition-guardrails");
 const VERIF = await import("../server/brain/reply-verifier");
@@ -686,6 +687,23 @@ test("fidelity: FOOD_LOG canonical cannot drop 8000 steps", () => {
     "i had pap and chicken yesterday",
   );
   assert.equal(r.ok, false, r.reason);
+});
+
+test("normalizer recorder: production credential precedence is shared and placeholders are refused", () => {
+  assert.equal(RECORDER.recorderCredential({
+    AI_INTEGRATIONS_OPENAI_API_KEY: "integration-key",
+    OPENAI_API_KEY: "fallback-key",
+  }), "integration-key");
+  assert.equal(RECORDER.recorderCredential({ OPENAI_API_KEY: "fallback-key" }), "fallback-key");
+  assert.equal(RECORDER.recorderCredential({ OPENAI_API_KEY: "sk-test-offline" }), null);
+});
+
+test("normalizer recorder: fail-soft model errors cannot become recordings", () => {
+  assert.equal(RECORDER.isModelErrorFallback({ intent: "OTHER", confidence: 0 }), true);
+  assert.equal(RECORDER.isModelErrorFallback({ intent: "OTHER", confidence: 0.95 }), false,
+    "a genuine high-confidence OTHER classification remains recordable");
+  assert.equal(RECORDER.isModelErrorFallback({ intent: "FOOD_LOG", confidence: 0, canonical: "i had pap" }), false,
+    "the guard is the exact fail-soft sentinel, not every low-confidence model answer");
 });
 
 // ============================================================
