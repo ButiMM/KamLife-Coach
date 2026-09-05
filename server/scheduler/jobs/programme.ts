@@ -7,6 +7,8 @@ import {
 } from "../shared";
 import { getGoalProfile } from "../../goal-profiles";
 import { getWeightTruth } from "../../day-ledger";
+import { canonicalNextMove } from "../proactive-decision";
+import { sastHour } from "../../sast";
 
 export async function runPhaseAdvancement(): Promise<void> {
   console.log("[SCHEDULER] JOB: Phase advancement check");
@@ -85,27 +87,30 @@ export async function runWeeklyMondayCheckin(): Promise<void> {
       const goal = client.goalType || "fat_loss";
       const streak = client.workoutStreak || 0;
       let msg = "";
-      if (week === 1) msg = `${name}, Week 1. This week is about building the habit, not the body — the physical changes come later.\n\nExpect: some soreness, hunger changes, maybe lower energy by day 3. All normal. Your only job this week: complete ${planned} sessions and log every meal. Nothing else.\n\nSend me your first meal of the day.`;
-      else if (week === 2) msg = `${name}, Week 2. The soreness from last week means your muscles responded. ${sessions} sessions banked.\n\nExpect: energy starts stabilising. Scale might go up slightly (water and glycogen) — ignore it, it normalises by week 3. Focus: hit your step target of ${(client.stepsTarget || 8500).toLocaleString()} every day this week.`;
-      else if (week === 3) msg = `${name}, Week 3 — this is the hardest week. Not because it got heavier, but because the mirror has not changed yet and motivation is low.\n\nThis is normal. The physical changes are happening inside — metabolism adapting, muscle fibres rebuilding. Visible results show at week 4–6 for most people. You are 7 days away from seeing the shift.\n\nComplete ${planned} sessions. That is all.`;
-      else if (week === 4) msg = `${name}, Week 4 — one full month in. ${sessions} sessions. This is where it starts to show.\n\nExpect: clothes fitting slightly differently, energy more consistent, strength up on at least one exercise. This week: push harder — more reps or more weight on every exercise. You built the foundation. Now use it.`;
-      else if (week <= 8) msg = `${name}, Week ${week} — ${sessions} sessions in the bank. Target for this week: ${planned} sessions and ${sessions + planned} total. ${streak >= 3 ? `You are on a ${streak}-session streak — do not break it.` : "Get the streak going."}`;
+      if (week === 1) msg = `${name}, Week 1. This week is about building the habit, not the body — the physical changes come later.\n\nExpect: some soreness, hunger changes, maybe lower energy by day 3. All normal. The habit is the whole job this week.`;
+      else if (week === 2) msg = `${name}, Week 2. The soreness from last week means your muscles responded. ${sessions} sessions banked.\n\nExpect: energy starts stabilising. Scale might go up slightly (water and glycogen) — ignore it, it normalises by week 3. Your step target is ${(client.stepsTarget || 8500).toLocaleString()}/day.`;
+      else if (week === 3) msg = `${name}, Week 3 — this is the hardest week. Not because it got heavier, but because the mirror has not changed yet and motivation is low.\n\nThis is normal. The physical changes are happening inside — metabolism adapting, muscle fibres rebuilding. Visible results show at week 4–6 for most people. You are 7 days away from seeing the shift.`;
+      else if (week === 4) msg = `${name}, Week 4 — one full month in. ${sessions} sessions. This is where it starts to show.\n\nExpect: clothes fitting slightly differently, energy more consistent, strength up on at least one exercise. You built the foundation.`;
+      else if (week <= 8) msg = `${name}, Week ${week} — ${sessions} sessions in the bank. ${streak >= 3 ? `You are on a ${streak}-session streak.` : ""}`;
       else if (week <= 12) {
         const goalMsg = goal === "fat_loss" ? "Fat loss compounds from here — the early weeks built the foundation." : goal === "muscle_gain" ? "Muscle building accelerates after week 8 — progressive overload is everything now." : !getGoalProfile(goal).weightIsGoal ? "This is where the habit becomes who you are — steadier energy, better sleep, movement that just happens. Keep showing up." : "Your body is recomposing — fat down, muscle up. The scale may not move much but the mirror will.";
-        msg = `${name}, Week ${week} — ${sessions} total sessions. ${goalMsg} One focus this week: log your lifts and add weight or reps to every exercise.`;
+        msg = `${name}, Week ${week} — ${sessions} total sessions. ${goalMsg}`;
       } else {
         msg = `${name}, Week ${week} — ${sessions} sessions. You are in the top 5% of people who stick with a programme this long. What is your goal for this week? One specific thing.`;
       }
-      // MONDAY SCALE ACCOUNTABILITY (2026-07-17 founder: "extremely held accountable
-      // ... somebody is there doing it with them"): if the morning weigh-in prompt
-      // went unanswered, the evening check-in leads with the scale — one combined
-      // message, never a separate nag on an already-busy Monday.
-      const sastMidnight = new Date(new Date(Date.now() + 2 * 3_600_000).setUTCHours(0, 0, 0, 0) - 2 * 3_600_000);
-      const weighedToday = await db.select({ id: weightLogs.id }).from(weightLogs)
-        .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, sastMidnight))).limit(1);
-      if (weighedToday.length === 0) {
-        msg = `⚖️ First things first — what did the scale say this morning? Send me the number (e.g. *82.4kg*). Even if it's up, send it: the number is data, not judgment, and Monday's weigh-in is how we steer your whole week.\n\n${msg}`;
-      }
+      // MONDAY SCALE ACCOUNTABILITY, NOW THROUGH THE ONE DECISION OWNER (#180). This read
+      // weight_logs itself and prepended its own weigh-in demand — a third opinion on the same
+      // question, beside runWeightReminder's Monday ritual and chooseAction's `weigh` rung, each
+      // with its own staleness rule. The founder's ask ("extremely held accountable ... somebody
+      // is there doing it with them") is unchanged: canonicalNextMove chooses `weigh` when the
+      // scale is genuinely stale, and it is the only thing here that may now instruct.
+      //
+      // THE FACTS STAY LOCAL, THE INSTRUCTION DOES NOT — the same migration runEvening-
+      // Accountability and runSundayWeeklyReport already made. What each week feels like, and
+      // what to expect from it, is real phase-specific knowledge no daily decision can produce;
+      // "Complete ${planned} sessions" is a next-move choice, and it was being made twice.
+      const move = await canonicalNextMove(client, { hour: sastHour() });
+      if (move.line) msg = `${msg}\n\n${move.line}`;
       // Daily-slot claim before send (preserves daily-cap reach; DB-backed, restart-safe).
       if (await claimDailySlot(client.id, "weekly_checkin")) { await sendWhatsApp(client.phoneNumber, msg); }
     } catch (err) { console.error(`[SCHEDULER] Weekly check-in error — ${client.phoneNumber}:`, err); }

@@ -135,6 +135,10 @@ jobs:
       # same way cannot tell two readers apart, which is how the divergence survived.
       - name: Fallback reads canonical truth on real PostgreSQL
         run: npx tsx script/pg-fallback-truth-acceptance.ts
+      # ONE COACH, PROACTIVELY AND REACTIVELY (#180). Held constraints are rows the client wrote
+      # today; whether the proactive decision reads them is only answerable against a database.
+      - name: Proactive decision authority on real PostgreSQL
+        run: npx tsx script/pg-proactive-authority-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot

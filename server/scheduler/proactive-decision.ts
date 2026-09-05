@@ -219,10 +219,10 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
     because: "A progress report against the record." },
   { job: "runMondayGroceries", file: "monday", cls: "RESOURCE",
     because: "Delivers the shopping list artefact." },
-  { job: "runWeightReminder", file: "monday", cls: "LEGACY_LOCAL",
-    because: "Asks for a weigh-in on its own schedule; chooseAction owns the `weigh` rung and its staleness rule. Not yet migrated." },
-  { job: "runDietBreakCheck", file: "monday", cls: "LEGACY_LOCAL",
-    because: "Restores targets (operational) and then instructs — 'Log your food today'. The instruction half is not yet canonical." },
+  { job: "runWeightReminder", file: "monday", cls: "RESOURCE",
+    because: "Adjudicated 2026-09-05 (#180). A measurement prompt on a fixed weekly ritual — the class this doctrine already names, and the same reading as runMonthlyMeasurements. It reads no client state to pick WHAT to say, honours do_not_mention by standing down entirely, and asks for the number the scale gives. It duplicates chooseAction's `weigh` rung in the sense that both may ask; it cannot contradict it, because neither can tell the client to do anything else." },
+  { job: "runDietBreakCheck", file: "monday", cls: "OPERATIONAL",
+    because: "Adjudicated 2026-09-05 (#180). 'Log your food today' — the one locally-chosen instruction — is deleted. What remains announces a target change the adaptive-targets owner made, which is runAutoCalAdjust's reading exactly: the change is the message." },
 
   // ── programme.ts ──────────────────────────────────────────────────────────────────────────
   { job: "runPhaseAdvancement", file: "programme", cls: "RESOURCE",
@@ -231,10 +231,10 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
     because: "Checkpoint questions about the goal, plus a Week 9 choice. It asks." },
   { job: "runInjuryFollowup", file: "programme", cls: "RECOGNITION",
     because: "Asks how the injury is; adjusts only on the answer." },
-  { job: "runWeeklyMondayCheckin", file: "programme", cls: "LEGACY_LOCAL",
-    because: "A per-week script that instructs — 'Complete N sessions', 'hit your step target', 'add weight or reps'. Twelve local branches. Not yet migrated." },
+  { job: "runWeeklyMondayCheckin", file: "programme", cls: "CANONICAL",
+    because: "Migrated 2026-09-05 (#180). What each programme week FEELS like is real phase knowledge no daily decision can produce, and it stays. Every instruction that followed it is gone — including the weigh-in demand it prepended off its own weight_logs read, a third opinion beside runWeightReminder and chooseAction's `weigh` rung. The move now comes from canonicalNextMove." },
   { job: "runPlateauDetection", file: "programme", cls: "LEGACY_LOCAL",
-    because: "Its own three-rung intervention ladder (cut carbs → add 2,000 steps → hold). A real pace owner is P0-7; until then it is named, not blessed." },
+    because: "Adjudicated 2026-09-05 (#180) and DELIBERATELY LEFT. It is the one of the six that is not a daily next-move decision wearing a schedule: it is a multi-week experiment — change one lever, stamp a baseline, verify against a weigh-in seven days later, iterate or stop. canonicalNextMove answers 'what is the one thing today', which cannot express 'we changed carbs last week, so this week we change steps instead'. Converging it would delete a capability, not remove a duplicate authority. It waits on the pace owner (P0-7), and it is the LAST one." },
 
   // ── business.ts ───────────────────────────────────────────────────────────────────────────
   { job: "runSubscriptionExpiryCheck", file: "business", cls: "OPERATIONAL", because: "Billing." },
@@ -251,8 +251,8 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
     because: "A costed shopping plan for the month-end squeeze. The list is the message." },
   { job: "runPaydayShoppingNudge", file: "business", cls: "RESOURCE",
     because: "A costed buy-list keyed to the pay cycle, pointing at the shopping-list owner." },
-  { job: "runSupplementReminder", file: "business", cls: "LEGACY_LOCAL",
-    because: "Instructs on a supplement the client logged before. Harmless today, but it is an instruction chosen locally." },
+  { job: "runSupplementReminder", file: "business", cls: "RECOGNITION",
+    because: "Adjudicated 2026-09-05 (#180). It asks — 'creatine taken yet?' — about a supplement the CLIENT chose and logged. It decides nothing from their day and prescribes nothing; a question about their own routine is the class this doctrine calls recognition." },
 
   // ── onboarding.ts ─────────────────────────────────────────────────────────────────────────
   { job: "runEarlyOnboarding", file: "onboarding", cls: "RESOURCE",
@@ -261,8 +261,8 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
   { job: "runReferralNudge", file: "onboarding", cls: "OPERATIONAL", because: "Growth ask." },
   { job: "runGoalReassessment", file: "onboarding", cls: "RECOGNITION",
     because: "Asks whether the stated goal still matches what they are chasing." },
-  { job: "runStepSyncCatchup", file: "onboarding", cls: "LEGACY_LOCAL",
-    because: "Asks for a step figure on its own trigger; `walk` and `log` are chooseAction's rungs. Not yet migrated." },
+  { job: "runStepSyncCatchup", file: "onboarding", cls: "RESOURCE",
+    because: "Adjudicated 2026-09-05 (#180). Read the message rather than the job name: it lists the three ways to get steps into the product — type a number, send a screenshot, reply 'connect steps'. It teaches the product's surface, which is runEarlyOnboarding's reading, and never tells anyone to walk." },
 
   // ── trial.ts / reminders.ts / narrative.ts / media-recovery.ts / spend-watchdog.ts ─────────
   { job: "runTrialCountdown", file: "trial", cls: "OPERATIONAL", because: "Trial expiry and conversion." },

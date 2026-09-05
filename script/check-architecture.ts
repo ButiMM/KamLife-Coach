@@ -81,13 +81,15 @@ const BUDGET = {
    * behavioural instruction: monday's weigh-in reminder and diet-break restore, programme's weekly
    * check-in and plateau ladder, business's supplement nudge, onboarding's step-sync catch-up.
    *
-   * Set to the measured figure, and it may only FALL. Two of the six are waiting on P0-7 (one pace
-   * owner) rather than on wiring — naming that here is what stops it being rediscovered in a
-   * transcript. The senders classified RECOGNITION, RESOURCE and OPERATIONAL are not in this
+   * Set to the measured figure, and it may only FALL. 6 → 1 on 2026-09-05 (#180): four were
+   * adjudicated as measurement prompts, product-surface teaching, a question about the client's
+   * own routine, and a target-change announcement — none of them a next-move decision — and
+   * runWeeklyMondayCheckin was migrated. The ONE that remains, runPlateauDetection, is a
+   * multi-week experiment rather than a daily decision wearing a schedule, and waits on P0-7. The senders classified RECOGNITION, RESOURCE and OPERATIONAL are not in this
    * number because they carry no next-move instruction at all; that is a decision recorded per
    * job in the register, not an exemption anyone can take silently.
    */
-  localDecisionSenders: 6,
+  localDecisionSenders: 1,
   /**
    * GUARD #15 — see directLedgerReads above. Client-facing reads of weight_logs that do not go
    * through getWeightTruth, and therefore cannot honour do_not_mention.
@@ -112,7 +114,7 @@ const BUDGET = {
    *
    * LOWER THIS as each of those lands. Never raise it.
    */
-  directWeightReads: 15,
+  directWeightReads: 14,
   /**
    * GUARD #16 — see handRolledDayBuckets above. SQL that decides which SAST day a ledger row
    * belongs to, written somewhere other than the owner.
