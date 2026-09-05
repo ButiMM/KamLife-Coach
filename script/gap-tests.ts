@@ -3987,13 +3987,46 @@ test("cut7: durable facts commit at the front door before coaching reads the use
   // THE DEFECT: the detectors sat last in the pipeline, so "my knee is killing me, had chicken
   // and pap" routed to the food handler and the injury was never recorded — while programme.ts
   // kept building sessions from users.injuries, which stayed NULL.
-  assert.ok(/user = await recordClientFacts\(user, message, sourceMessageId\)/.test(routes),
-    "every message is committed and the same turn receives the refreshed projection");
-  assert.ok(routes.indexOf("user = await recordClientFacts") < routes.indexOf("const safetyResult = await runSafetyGuards"),
-    "truth commits before safety and every later routing/normalization consumer");
+  assert.ok(/await bindClientTruth\(phone, message, sourceMessageId\)/.test(routes),
+    "every message is committed at the door, and the same turn receives the refreshed projection");
   assert.ok(!/storeMemory\(phone, `Client reported injury/.test(gptBlock),
     "the prose detectors in the GPT handler are gone");
   assert.ok(!/storeMemory\(phone, `Life situation update/.test(gptBlock), "…both blocks of them");
+});
+
+// A SAFETY TURN IS STILL AN ACCEPTED TURN, AND ACCEPTED TURNS GET EXACTLY ONE REVISION.
+//
+// This replaces two string searches: the literal `recordClientFacts(user, message,
+// sourceMessageId)` had to appear in routes.ts ABOVE the literal `runSafetyGuards`. They passed
+// for the right reason once and then failed for the wrong one — the commit moved into
+// bindClientTruth, its owner in memory.ts, and the behaviour did not change at all. A test that
+// fails when correct code is reorganised is measuring the file, not the product.
+//
+// WHAT THIS ASSERTS, AND ONLY THIS: a crisis message returns from the safety guard before any
+// other handler runs, and that turn still lands EXACTLY ONE truth commit — never zero (the turn
+// was accepted, so it is attributable) and never two (the door and the guard must not both
+// commit it). Whether the commit precedes the guard is a durable-ordering property and is graded
+// where it can be graded honestly: pg-client-truth-acceptance and pg-safety-turn-acceptance, on
+// real PostgreSQL, against the revision numbers themselves.
+test("cut7: a crisis early-return lands exactly one truth commit — not zero, not two", async () => {
+  const g = globalThis as any;
+  const schema = await import("../shared/schema");
+  const { handleMessage } = await import("../server/routes");
+  const priorUser = g.__KAMLIFE_STUB_USER, priorWrites = g.__KAMLIFE_STUB_WRITES;
+  try {
+    g.__KAMLIFE_STUB_USER = {
+      id: "u-truth-order", phoneNumber: "whatsapp:+27000000191", name: "Kam",
+      onboardingState: "COMPLETE", subscriptionStatus: "active", popiConsent: true,
+      goalType: "fat_loss", calorieTarget: 2800, proteinTarget: 195, truthRevision: 0,
+    };
+    g.__KAMLIFE_STUB_WRITES = [];
+    const reply = String(await handleMessage("whatsapp:+27000000191", "I want to kill myself") ?? "");
+    const commits = (g.__KAMLIFE_STUB_WRITES || []).filter((w: any) => w.table === schema.clientTruthCommits);
+    assert.ok(/SADAG|0800 567 567/i.test(reply), "the turn really did take the crisis early-return");
+    assert.equal(commits.length, 1, "…and it is attributable: one revision, and only one");
+  } finally {
+    g.__KAMLIFE_STUB_USER = priorUser; g.__KAMLIFE_STUB_WRITES = priorWrites;
+  }
 });
 
 test("cut7: an injury reaches the column the programme actually reads", async () => {

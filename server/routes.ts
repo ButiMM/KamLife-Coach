@@ -17,7 +17,7 @@ import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboardi
 import { saysNotWorking } from "./despair";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
-import { recordClientFacts } from "./memory";
+import { recordClientFacts, bindClientTruth } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { sendWhatsApp } from "./scheduler";
 import { recordConversion } from "./ab";
@@ -118,21 +118,12 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   try {
   recordMessageSeen();  let m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
 
-  // Bind an EXISTING identity and commit the turn's factual context before any routing decision.
-  // Do not create an unknown account here: "delete my data" from an unknown number must remain
-  // "no account found". First-contact safety/life branches create+commit through their own
-  // fail-open identity helper, while ordinary first-contact turns create below after guards stand down.
-  let user: any | undefined;
-  try {
-    const existing = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    user = existing[0];
-    if (user) {
-      turnUser(user.id);
-      user = await recordClientFacts(user, message, sourceMessageId);
-    }
-  } catch (e: any) {
-    console.error("[TRUTH_COMMIT] unavailable before routing; safety remains live:", e?.message || e);
-  }
+  // The turn's factual context is committed before ANY routing decision — bindClientTruth in
+  // memory.ts owns the lookup, the commit and the fail-open. It never creates an account, so
+  // "delete my data" from an unknown number still answers "no account found"; ordinary first
+  // contact is created below, once the guards have stood down.
+  let user: any | undefined = await bindClientTruth(phone, message, sourceMessageId);
+  if (user) turnUser(user.id);
 
   // ---- SAFETY + DATA GUARDS (crisis, medical, terminal, delete, reset) ----
   const safetyResult = await runSafetyGuards(phone, message, m, { sourceMessageId, boundUser: user });

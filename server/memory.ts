@@ -446,6 +446,33 @@ export async function recordClientFacts(user: any, message: string, sourceMessag
   }
 }
 
+/**
+ * WHO IS THIS, AND WHAT DID THEY JUST TELL US — bound and committed before anything routes.
+ *
+ * Lives here, with recordClientFacts, rather than inline at the door: the door's job is to decide
+ * where a turn goes, and it cannot do that honestly until this has already happened. Keeping the
+ * lookup and the commit as one named step is also what stops the two drifting apart — the commit
+ * must read the row this returns, not a staler one fetched somewhere else.
+ *
+ * BINDING AN EXISTING IDENTITY MUST NEVER CREATE ONE. "delete my data" from a number we have
+ * never seen has to keep answering "no account found", so this returns undefined for an unknown
+ * caller and the door creates only after the guards have stood down.
+ *
+ * FAILS OPEN, DELIBERATELY. If the database is unreachable the turn still runs: a client in
+ * crisis must reach the safety guards whether or not we could record what they said. The
+ * alternative — refusing the turn because bookkeeping failed — is the one outcome that cannot be
+ * allowed to happen here.
+ */
+export async function bindClientTruth(phone: string, message: string, sourceMessageId?: string): Promise<any | undefined> {
+  try {
+    const existing = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    return existing[0] ? await recordClientFacts(existing[0], message, sourceMessageId) : undefined;
+  } catch (e: any) {
+    console.error("[TRUTH_COMMIT] unavailable before routing; safety remains live:", e?.message || e);
+    return undefined;
+  }
+}
+
 /** The six facts as one context line for the coach. Replaces the embedded prose. */
 export async function factsLine(phone: string): Promise<string> {
   try {
