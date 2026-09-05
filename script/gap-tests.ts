@@ -860,6 +860,58 @@ test("explicitMealSlot: 'morning' with no temporal determiner is not a slot clai
 });
 
 // ============================================================
+// DECLARED CONSTRAINTS MUST GOVERN WHAT WE OFFER, NOT JUST WHAT WE ANNOUNCE (#177)
+//
+// The Journey Lab found the grocery reply saying "🚫 Left off — you told me: no pork, eggs, pork"
+// and then offering "• Eggs (18 pack)" plus four egg-based meals. The coach named the exclusion
+// and broke it in the same message, which is worse than never having asked — it is proof we were
+// told and did not listen. Every control below is paired with an UNRESTRICTED control, because
+// "the list has no eggs" is equally true of a list that never had any.
+// ============================================================
+
+test("the grocery list offers eggs to a client with no restrictions, and not to one who excluded them (#177)", async () => {
+  const { getShoppingList } = await import("../server/shopping-lists");
+  const { foodConstraints } = await import("../server/food-swaps");
+  const free = getShoppingList("100_300", 1, "fat_loss");
+  const cons = getShoppingList("100_300", 1, "fat_loss", foodConstraints({ dietaryRestrictions: "no eggs, no pork" }));
+  const eggy = (l: any) => l.items.filter((i: any) => /\begg/i.test(i.item)).length;
+  assert.ok(eggy(free) > 0, "CONTROL: the unrestricted list must contain eggs, or this proves nothing");
+  assert.equal(eggy(cons), 0, "the restricted list offers no eggs");
+  assert.ok(cons.items.length > 0, "…and is still a real list, not an empty one");
+  assert.ok(cons.items.length >= free.items.length - 4, "only the restricted items were removed");
+});
+
+test("a shop-was-out substitution never names a restricted food (#177)", async () => {
+  const { answerUnavailable, foodConstraints } = await import("../server/food-swaps");
+  const c = foodConstraints({ dietaryRestrictions: "no eggs" });
+  const free = answerUnavailable("they didn't have chicken") || "";
+  const cons = answerUnavailable("they didn't have chicken", c) || "";
+  assert.match(free, /egg/i, "CONTROL: the unrestricted answer offers eggs");
+  assert.ok(cons.length > 0, "the restricted client still gets an answer");
+  assert.doesNotMatch(cons, /egg/i, "…without the food they excluded");
+});
+
+test("a proposed restricted food is answered, not silently dropped (#177)", async () => {
+  const { answerLocalListChange, foodConstraints } = await import("../server/food-swaps");
+  const c = foodConstraints({ dietaryRestrictions: "no eggs" });
+  const free = answerLocalListChange("can I use eggs instead?") || "";
+  const cons = answerLocalListChange("can I use eggs instead?", c) || "";
+  assert.match(free, /^Yes — eggs works/, "CONTROL: unrestricted, it confirms — and names the food correctly");
+  assert.ok(cons.length > 0, "silence here would hand the client the not-understood fallback");
+  assert.doesNotMatch(cons, /\bYes\b/, "it does not confirm a food they excluded");
+  assert.match(cons, /pilchards|chicken|beans/i, "it offers what does the same job instead");
+});
+
+// ISOLATION. A restriction is a fact about ONE client; a shared table must not learn it.
+test("one client's restriction does not bleed into another's list (#177)", async () => {
+  const { getShoppingList } = await import("../server/shopping-lists");
+  const { foodConstraints } = await import("../server/food-swaps");
+  getShoppingList("100_300", 1, "fat_loss", foodConstraints({ dietaryRestrictions: "no eggs, no pork" }));
+  const after = getShoppingList("100_300", 1, "fat_loss");
+  assert.ok(after.items.some((i: any) => /\begg/i.test(i.item)), "the next client still gets eggs");
+});
+
+// ============================================================
 // AND THE MORNING MUST BE WHEN THEY ATE (#182 — over-fire found in the merged #174 fix)
 //
 // The first cut tested the WHOLE message, so "I train in the morning; I just had rice" relabelled

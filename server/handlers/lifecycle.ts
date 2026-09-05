@@ -28,6 +28,7 @@ import { calculateTargets, waterTargetLitres } from "../targets";
 import { getSleepResponse } from "./sleep";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { getGroceryPersonalization } from "../grocery-personalize";
+import { foodConstraints } from "../food-swaps";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
 import { sendCriticalAlert } from "../scheduler/shared";
@@ -1072,13 +1073,14 @@ export async function handleLifecycle(ctx: {
     const budget = user.weeklyFoodBudget || "100_300";
     const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
-    const list = getShoppingList(budget, weekNum, goal);
+    const list = getShoppingList(budget, weekNum, goal, foodConstraints(user as any));
     const personalization = await getGroceryPersonalization(user.id, goal, (user as any).foodDislikes, (user as any).dietaryRestrictions);
     const shoppingReply = formatShoppingList(list, user.name || undefined, goal, {
       calorieTarget: user.calorieTarget || undefined,
       proteinTarget: user.proteinTarget || undefined,
       budgetTier: budget,
       personalization,
+      constraints: foodConstraints(user as any),
     });
     await logChat(user.id, message, shoppingReply, "SHOPPING_LIST");
     return shoppingReply;

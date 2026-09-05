@@ -7,6 +7,7 @@
 // PRICE_ESTIMATE_NOTE is the ONE owner of how a rand estimate is qualified to a client — the
 // same sentence the GPT-generated rebuild now carries, so the two paths cannot drift apart.
 import { PRICE_ESTIMATE_NOTE } from "./reply-contract";
+import { type FoodConstraints, NO_CONSTRAINTS } from "./food-swaps";
 
 export type ShoppingItem = {
   item: string;
@@ -391,11 +392,31 @@ const ALL_LISTS: Record<string, ShoppingList[]> = {
   "500_plus":[TIER_4_WEEK_A, TIER_4_WEEK_B],   // DB stores this from onboarding
 };
 
-export function getShoppingList(budgetTier: string, weekNumber: number, goalType?: string): ShoppingList {
+/**
+ * THE LIST THIS CLIENT MAY ACTUALLY BUY (#177).
+ *
+ * The constraint used to reach the reply and stop at the disclosure: getGroceryPersonalization
+ * computed foodConstraints, rendered "🚫 Left off — you told me: no pork, eggs, pork", and then
+ * the body underneath it offered "• Eggs (18 pack) — ~R40" and four egg-based meals. The coach
+ * named the exclusion and broke it in the same message, which is worse than never having asked —
+ * it is proof we were told and did not listen.
+ *
+ * SAME `allows` EVERY OTHER RECOMMENDER USES. Not a second restriction parser and not a second
+ * list: one filter, applied after the goal modifications, over the items AND the meal ideas —
+ * a meal idea is an instruction to eat something just as much as a line on the list is.
+ */
+export function getShoppingList(budgetTier: string, weekNumber: number, goalType?: string,
+                                c: FoodConstraints = NO_CONSTRAINTS): ShoppingList {
   const lists = ALL_LISTS[budgetTier] || ALL_LISTS["100_300"];
   const idx = (weekNumber - 1) % lists.length;
   const base = lists[idx];
-  return goalType ? applyGoalModifications(base, goalType) : base;
+  const shaped = goalType ? applyGoalModifications(base, goalType) : base;
+  if (!c.terms.length) return shaped;
+  return {
+    ...shaped,
+    items: shaped.items.filter(i => c.allows(i.item)),
+    mealIdeas: shaped.mealIdeas.filter(idea => c.allows(idea)),
+  };
 }
 
 export interface ShoppingListTargets {
@@ -406,6 +427,11 @@ export interface ShoppingListTargets {
   // present it's prepended after the intro so the prescriptive list feels personal.
   // Absent for brand-new clients (cold start) — the template leads alone.
   personalization?: string | null;
+  // WHAT THEY TOLD US THEY DO NOT EAT (#177). getShoppingList already filters the ITEMS, but the
+  // daily structure below is a hardcoded template inside this renderer rather than list data — so
+  // a client who excluded eggs still read "Breakfast: 3 eggs + oats" under a line saying eggs were
+  // left off. The same `allows` filters both, because both are instructions to eat something.
+  constraints?: FoodConstraints;
 }
 
 export function formatShoppingList(list: ShoppingList, userName?: string, goalType?: string, targets?: ShoppingListTargets): string {
@@ -489,7 +515,17 @@ export function formatShoppingList(list: ShoppingList, userName?: string, goalTy
 • Dinner: 150g protein + sweet potato + big veg portion = ~450 kcal | ~35g protein
 • Snack: Greek yoghurt or 2 eggs = ~180 kcal | ~18g protein`,
   };
-  const dailyStructure = dailyStructures[goal] || dailyStructures["fat_loss"];
+  // ONE FILTER, OVER EVERY LINE THAT TELLS THEM TO EAT SOMETHING. A bullet naming a food they do
+  // not eat is dropped rather than rewritten: substituting would mean inventing the kcal and
+  // protein figures on that line, and this codebase does not invent numbers. The heading survives
+  // only if at least one meal under it did.
+  const c = targets?.constraints;
+  const keep = (line: string) => !c || !/^\s*[•\-]/.test(line) || c.allows(line);
+  const filterBullets = (block: string) => {
+    const kept = block.split("\n").filter(keep);
+    return kept.some(l => /^\s*[•\-]/.test(l)) ? kept.join("\n") : "";
+  };
+  const dailyStructure = filterBullets(dailyStructures[goal] || dailyStructures["fat_loss"]);
 
   const ideas = list.mealIdeas.map(m => `• ${m}`).join("\n");
 

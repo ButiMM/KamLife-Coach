@@ -32,7 +32,7 @@ import { handleSickFlow, looksSickMention } from "./sick-flow";
 import { isBareGreeting } from "../constants";
 import { readHealthState } from "../health-state";
 import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion, handleVoiceReplyPreference } from "./numbers-literacy";
-import { answerSwapAsk, answerUnavailable, answerLocalListChange } from "../food-swaps";
+import { answerSwapAsk, answerUnavailable, answerLocalListChange, foodConstraints } from "../food-swaps";
 import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
 import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from "../street-food";
 import { handleAdviceCommands } from "./advice-commands";
@@ -109,7 +109,7 @@ export async function handleEarlyCommands(ctx: {
   if (surplusReply !== null) return surplusReply;
 
   // ---- SWAP ASKS ("instead of mayo?") — the swap table answers; before the totals card ----
-  const swapAnswer = answerSwapAsk(m, user.goalType);
+  const swapAnswer = answerSwapAsk(m, user.goalType, foodConstraints(user as any));
   if (swapAnswer !== null) { await logChat(user.id, message, swapAnswer, "SWAP_ASK"); return swapAnswer; }
 
   // ---- "THE SHOP DIDN'T HAVE IT" — a different question from the swap above (2026-08-05).
@@ -118,7 +118,7 @@ export async function handleEarlyCommands(ctx: {
   // Shoprite aisle, needing an answer in one second. Deterministic: substitution is a lookup,
   // not a judgement, and it costs nothing. Checked AFTER the goal swap so an ordinary
   // "instead of X" still gets the health answer it always did.
-  const subAnswer = answerUnavailable(message);
+  const subAnswer = answerUnavailable(message, foodConstraints(user as any));
   if (subAnswer !== null) { await logChat(user.id, message, subAnswer, "SUBSTITUTION"); return subAnswer; }
 
   // ---- A LOCAL CHANGE TO A LIST WE ALREADY SENT (Work Order B, 2026-08-12) ----
@@ -128,7 +128,7 @@ export async function handleEarlyCommands(ctx: {
   // here) and the availability answer needs a shop/price complaint. So it fell to the model,
   // which had the list in its history and rebuilt all twenty items to answer a question about
   // one. Deterministic and local — and it stands down on an explicit "send the full list".
-  const localChange = answerLocalListChange(message);
+  const localChange = answerLocalListChange(message, foodConstraints(user as any));
   if (localChange !== null) { await logChat(user.id, message, localChange, "LOCAL_LIST_CHANGE"); return localChange; }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
@@ -816,13 +816,14 @@ export async function handleEarlyCommands(ctx: {
     const budget = user.weeklyFoodBudget || "100_300";
     const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
-    const list = getShoppingList(budget, weekNum, goal);
+    const list = getShoppingList(budget, weekNum, goal, foodConstraints(user as any));
     const personalization = await getGroceryPersonalization(user.id, goal, (user as any).foodDislikes, (user as any).dietaryRestrictions);
     const reply = formatShoppingList(list, user.name || undefined, goal, {
       calorieTarget: user.calorieTarget || undefined,
       proteinTarget: user.proteinTarget || undefined,
       budgetTier: budget,
       personalization,
+      constraints: foodConstraints(user as any),
     });
     await logChat(user.id, message, reply, "SHOPPING_LIST");
     return reply;
@@ -1027,13 +1028,14 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
     const firstName = user.name?.split(" ")[0] || "there";
-    const list = getShoppingList(budget, weekNum, goal);
+    const list = getShoppingList(budget, weekNum, goal, foodConstraints(user as any));
     const personalization = await getGroceryPersonalization(user.id, goal, (user as any).foodDislikes, (user as any).dietaryRestrictions);
     const listText = formatShoppingList(list, firstName, goal, {
       calorieTarget: user.calorieTarget || undefined,
       proteinTarget: user.proteinTarget || undefined,
       budgetTier: budget,
       personalization,
+      constraints: foodConstraints(user as any),
     });
     const intro = goal === "muscle_gain"
       ? `${firstName}, a diet plan tells you what to eat — and most people stop following it by Wednesday. A shopping list builds the habit. Buy the right things and the eating takes care of itself.\n\n`
