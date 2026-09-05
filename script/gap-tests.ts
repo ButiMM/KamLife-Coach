@@ -3989,8 +3989,8 @@ test("cut7: durable facts commit at the front door before coaching reads the use
   // kept building sessions from users.injuries, which stayed NULL.
   assert.ok(/user = await recordClientFacts\(user, message, sourceMessageId\)/.test(routes),
     "every message is committed and the same turn receives the refreshed projection");
-  assert.ok(routes.indexOf("user = await recordClientFacts") < routes.indexOf("let normalizedQuestion"),
-    "truth commits before routing/normalization consumers");
+  assert.ok(routes.indexOf("user = await recordClientFacts") < routes.indexOf("const safetyResult = await runSafetyGuards"),
+    "truth commits before safety and every later routing/normalization consumer");
   assert.ok(!/storeMemory\(phone, `Client reported injury/.test(gptBlock),
     "the prose detectors in the GPT handler are gone");
   assert.ok(!/storeMemory\(phone, `Life situation update/.test(gptBlock), "…both blocks of them");

@@ -118,24 +118,33 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   try {
   recordMessageSeen();  let m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
 
+  // Bind and commit the turn's factual context before ANY routing decision, including safety and
+  // life-context early returns. Persistence is attempted, never required for a safe response: a
+  // database outage must not prevent crisis guidance from reaching the client.
+  let user: any | undefined;
+  try {
+    user = await getOrCreateUser(phone);
+    turnUser(user.id);
+    user = await recordClientFacts(user, message, sourceMessageId);
+  } catch (e: any) {
+    console.error("[TRUTH_COMMIT] unavailable before routing; safety remains live:", e?.message || e);
+  }
+
   // ---- SAFETY + DATA GUARDS (crisis, medical, terminal, delete, reset) ----
   const safetyResult = await runSafetyGuards(phone, message, m);
   if (safetyResult !== null) return safetyResult;
 
-  let user = await getOrCreateUser(phone);
-  turnUser(user.id);
+  if (!user) {
+    user = await getOrCreateUser(phone);
+    turnUser(user.id);
+    user = await recordClientFacts(user, message, sourceMessageId);
+  }
 
   // QR ACQUISITION SOURCE — a scanned join-QR prefills "(ref: gymA)"; capture once, then strip.
   if (!user.signupSource && !mediaUrl && message && (await captureSignupSource(user, phone, message))) {
     message = stripSignupSource(message);
     m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
   }
-
-  // Durable client truth is part of accepting the turn, not background telemetry. Commit it from
-  // the raw client words before any coaching path reads the user. recordClientFacts locks and
-  // re-reads the latest row, then returns the exact projection/revision every consumer in this
-  // turn must share. A webhook retry reuses sourceMessageId and therefore cannot apply twice.
-  user = await recordClientFacts(user, message, sourceMessageId);
 
   // Page coach on crisis/injury signals immediately — fires even if onboarding/POPIA returns early
   if (message && message.length > 2) checkEscalation(user.id, message).catch(e => console.error("[ESCALATION_CHECK]", e?.message || e));
