@@ -323,7 +323,8 @@ type Invariant = {
   }) => boolean;
 };
 
-const FALLBACK_REPLY = /didn'?t (?:quite )?catch that|say it another way|had a moment|try that again|i'?m not sure what you mean/i;
+// THE SHAPE OF "NO DOOR CLAIMED THIS". Exported (#170) so the journey lab grades the SAME sentence this invariant grades — a second copy in a test is free to drift from the rule it claims to prove.
+export const FALLBACK_REPLY = /didn'?t (?:quite )?catch that|say it another way|had a moment|try that again|i'?m not sure what you mean/i;
 
 /**
  * ONE REPLY, TWO POSITIONS — restored 2026-08-31, this time with a production instance.
