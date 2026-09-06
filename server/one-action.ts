@@ -984,9 +984,15 @@ export function decideProactive(
   // Law 22 exists to prevent. Caught by re-running the trace on the sparse-log client, whose
   // fixture logs today.
   // ONE LADDER, BOTH PATHS (#203). This block was the downgrade; it is now a call to it, so the
-  // reactive gate cannot hold where this one investigates. The rules and their reasons moved with
-  // it to investigateInstead — nothing about this path's behaviour changed.
-  if (PRESCRIPTIVE.has(action.kind) && evidence === "insufficient") {
+  // reactive gate cannot hold where this one investigates.
+  //
+  // …AND THE HOLD BRANCH HAS TO BE ON BOTH SIDES OF THAT SENTENCE. The first cut of #203 widened
+  // only the reactive gate to cover an insufficient-evidence `hold`, which converged the
+  // prescription case and opened a fresh divergence in the opposite direction: the same sparse
+  // rows produced an investigative ask when the client messaged us and CONTINUE/silence when we
+  // messaged them. Convergence that only runs one way is not convergence. A hold under SUFFICIENT
+  // evidence is still an earned verdict here, exactly as it is there.
+  if ((PRESCRIPTIVE.has(action.kind) || action.kind === "hold") && evidence === "insufficient") {
     action = investigateInstead({
       foodSufficient: s.evidence.foodSufficient, weightSufficient: s.evidence.weightSufficient,
       loggedToday: s.today.logged, daysSinceWeighIn: s.weight.daysSinceWeighIn,

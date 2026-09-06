@@ -51,6 +51,7 @@ const { eq } = await import("drizzle-orm");
 const { handleMessage } = await import("../server/routes");
 const { canonicalDecision } = await import("../server/understanding/live");
 const { canonicalNextMove } = await import("../server/scheduler/proactive-decision");
+const { getProgressTruth } = await import("../server/day-ledger");
 const { sastHour } = await import("../server/sast");
 
 let failed = 0;
@@ -188,7 +189,58 @@ REAL("\n=== CONTROLS ===");
   chk(asks <= 1, `the question appears at most once — found ${asks}`, reply.slice(0, 220));
 }
 
-// ── §4 ONE POLICY, BOTH SCHEDULES ───────────────────────────────────────────────────────────
+// ── §4 WEIGH-IN RECENCY IS A REAL FIGURE, NOT `known` ───────────────────────────────────────
+//
+// The gate decides whether to ask a client to stand on a scale, so the number it reads has to be
+// how long since they last did. `ProgressWeight.known` answers a different question — "can a CHANGE
+// be computed", which needs two readings at different values — and it was being passed as
+// `known ? 0 : null`. Both directions were wrong, and both are asserted here.
+REAL("\n=== WEIGH-IN RECENCY ===");
+
+// (1) ONE READING, TODAY. `known` is false for this client — a change needs two points — so the
+// old approximation called them never-weighed and the scale ask was on the table for someone who
+// had just stood on one.
+{
+  const c = await client({}, { meals: [3], weights: [0] });
+  const reply = await say(c.phone, "I walked 8000 steps today");
+  chk(!/stand on a scale/i.test(reply),
+    "a client who weighed TODAY, once, is not asked to weigh again", JSON.stringify(reply.slice(0, 200)));
+  chk(/tell me what you ate today/i.test(reply),
+    "…and the food question is asked instead — the honest gap", JSON.stringify(reply.slice(0, 200)));
+}
+
+// (2) ONE READING, GENUINELY STALE. The same shape, nine days old: the ask is now the right one.
+{
+  const c = await client({}, { meals: [3], weights: [9] });
+  const reply = await say(c.phone, "I had pap and chicken");
+  chk(/stand on a scale/i.test(reply),
+    "a single stale weigh-in leaves the scale ask available", JSON.stringify(reply.slice(0, 200)));
+}
+
+// (3) TWO STALE READINGS. `known` is true here, so the old approximation reported 0 days — stale
+// scale evidence wearing today's clothes — and the client was never asked.
+{
+  const c = await client({}, { meals: [3], weights: [11, 16] });
+  const reply = await say(c.phone, "I had pap and chicken");
+  chk(/stand on a scale/i.test(reply),
+    "two stale weigh-ins do not masquerade as weighed-today", JSON.stringify(reply.slice(0, 200)));
+  const [u] = await db.select().from(schema.users).where(eq(schema.users.id, c.id)).limit(1);
+  const truth = await getProgressTruth(u, { days: 7 });
+  chk(truth.weight.known === true && (truth.weight.daysSinceWeighIn ?? 0) >= 10,
+    "…and the owner reports the real figure, not the `known` flag",
+    `known=${truth.weight.known} daysSinceWeighIn=${truth.weight.daysSinceWeighIn}`);
+}
+
+// (4) AND THE BOUNDARY STILL WINS over a genuinely stale scale.
+{
+  const c = await client({ doNotMention: "weight" }, { meals: [3], weights: [11, 16] });
+  const reply = await say(c.phone, "I had pap and chicken");
+  chk(!/stand on a scale/i.test(reply),
+    "a stale scale is still never raised with a client who ruled it out",
+    JSON.stringify(reply.slice(0, 200)));
+}
+
+// ── §5 ONE POLICY, BOTH SCHEDULES ───────────────────────────────────────────────────────────
 //
 // The whole point of converging through the existing owner: a client must not be told one thing
 // when they message and another when the coach messages them, from the same rows.
@@ -201,9 +253,80 @@ REAL("\n=== REACTIVE AND PROACTIVE AGREE ===");
   const proactive = await canonicalNextMove(u, { hour: sastHour() });
   chk(reactive.kind === "log" || reactive.kind === "weigh",
     "the reactive gate investigates rather than holding", `kind=${reactive.kind}`);
+  // BOTH INVESTIGATE — and that, not an identical `kind`, is the contract.
+  //
+  // Asserting kind equality here failed on `reactive=log proactive=come_back`, and chasing it
+  // would have broken something correct. `atKeyboard` skips the come-back rung for a client who is
+  // typing to us right now, because asking someone to come back mid-conversation reads as not
+  // registering that they spoke — a documented 2026-07-29 fix. Proactively they genuinely are
+  // absent, so `come_back` is the true rung and its ask is "Log one meal today. Any meal."
+  //
+  // The two paths are therefore answering one question under two genuinely different facts, and
+  // both reach for the SAME missing measurement. What #203 forbids is one path investigating while
+  // the other holds, and that is what is asserted.
   chk(proactive.action.kind !== "hold",
-    "…and the proactive path, on the same rows, does not hold either",
-    `proactive=${proactive.action.kind}`);
+    "…and the proactive path investigates too, rather than holding on the same rows",
+    `reactive=${reactive.kind} proactive=${proactive.action.kind}`);
+  chk(/log|eat|meal/i.test(proactive.action.todo || ""),
+    "…reaching for the same missing measurement the reactive path asked for",
+    `proactive todo="${proactive.action.todo}"`);
+}
+
+// THE PROACTIVE LADDER'S OWN HOLD, which is the branch blocker 2 is about.
+//
+// Reaching it takes care: proactively `atKeyboard` is false, so `come_back` fires on three days of
+// silence and hides the hold behind a real rung — the first version of this control was green with
+// the mechanism removed for exactly that reason. This client logged YESTERDAY (so no come-back),
+// nothing today, walked their steps, finished the week's sessions and weighed this morning. Every
+// rung stands down, the evidence is one day in seven, and the honest move is the food question.
+{
+  const c = await client({}, { meals: [1], weights: [0, 4] });
+  await pool.query(
+    `INSERT INTO step_logs (user_id, logged_at, steps, provenance, resolved_day)
+     VALUES ($1, now(), 12000, 'client_report', to_char(now() AT TIME ZONE 'Africa/Johannesburg','YYYY-MM-DD'))`,
+    [c.id]);
+  await pool.query(
+    `INSERT INTO workout_logs (user_id, logged_at, workout_completed)
+     SELECT $1, now() - (d || ' days')::interval, true FROM generate_series(0, 2) AS d`, [c.id]);
+  const [u] = await db.select().from(schema.users).where(eq(schema.users.id, c.id)).limit(1);
+  const proactive = await canonicalNextMove(u, { hour: 9 });
+  chk(proactive.action.kind !== "hold",
+    "a proactive hold under insufficient evidence becomes the question instead of silence",
+    `kind=${proactive.action.kind} todo="${proactive.action.todo}"`);
+  chk(proactive.action.kind === "log",
+    "…and it is the food question, because that is the measurement actually missing",
+    `kind=${proactive.action.kind} todo="${proactive.action.todo}"`);
+  chk(String(proactive.line || "").trim().length > 0,
+    "…and it becomes a real line rather than an empty proactive send", JSON.stringify(proactive.line));
+}
+
+// SUFFICIENT EVIDENCE STILL EARNS A HOLD, ON BOTH PATHS. Without this the widening above reads as
+// "never hold again", which is the nagging app the doctrine names — CONTINUE is a legitimate and
+// common verdict, and it must survive on the proactive side too.
+{
+  const c = await client({}, { meals: [0, 1, 2, 3, 4, 5], weights: WEIGHED, ...{} });
+  // Everything met: protein and calories at target, steps in, week's sessions done. The ladder has
+  // nothing to prescribe AND the evidence is sufficient, so the honest answer is "change nothing".
+  await pool.query(
+    `INSERT INTO step_logs (user_id, logged_at, steps, provenance, resolved_day)
+     VALUES ($1, now(), 12000, 'client_report', to_char(now() AT TIME ZONE 'Africa/Johannesburg','YYYY-MM-DD'))`,
+    [c.id]);
+  await pool.query(
+    `INSERT INTO workout_logs (user_id, logged_at, workout_completed)
+     SELECT $1, now() - (d || ' days')::interval, true FROM generate_series(0, 3) AS d`, [c.id]);
+  await pool.query(
+    `INSERT INTO meal_logs (user_id, logged_at, meal_label, kcal_int, protein_int, items, raw_message, source)
+     VALUES ($1, now(), 'dinner', 2200, 160, $2, 'seed', 'sa_scanner')`,
+    [c.id, JSON.stringify([{ name: "chicken", grams: 300 }])]);
+  const [u] = await db.select().from(schema.users).where(eq(schema.users.id, c.id)).limit(1);
+  const reactive = await canonicalDecision(u, "how am I doing");
+  const proactive = await canonicalNextMove(u, { hour: sastHour() });
+  chk(reactive.kind === "hold" || reactive.kind === "protein" || reactive.kind === "weigh",
+    "an evidenced client is never pushed into an investigative ask by the widening",
+    `reactive=${reactive.kind}`);
+  chk(reactive.kind !== "log" && proactive.action.kind !== "log",
+    "…and neither path asks an evidenced client to log",
+    `reactive=${reactive.kind} proactive=${proactive.action.kind}`);
 }
 
 await pool.query("DELETE FROM users WHERE id = ANY($1)", [ids]);
