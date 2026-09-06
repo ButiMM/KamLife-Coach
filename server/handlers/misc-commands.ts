@@ -39,6 +39,7 @@ import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
 import { turnEvidence } from "./chat-log";
 import { readHeldConstraints, foodDayClosedWith } from "../held-constraints";
+import { foodConstraints, allowedAlternatives } from "../food-swaps";
 import { getDayLedger, getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
@@ -317,6 +318,17 @@ export async function handleMiscCommands(ctx: {
     const budget = user.weeklyFoodBudget || "100_300";
     const name = user.name?.split(" ")[0] || "";
     const goal = user.goalType || "fat_loss";
+    // WHAT THIS PERSON EATS (#128). This is the door for "what should I eat?", and it was the one
+    // food surface with ZERO calls to the constraint owner: the grocery list, the meal plan and
+    // the permission-ask all consult foodConstraints, and this menu was hand-written animal
+    // protein from top to bottom. A client whose column says "vegan" was handed five plates of
+    // chicken, beef, pilchards and eggs — with "Does not eat: vegan" sitting in the same profile.
+    //
+    // No new recommender. The option sets stay hand-authored in exactly the style they were, with
+    // the alternatives a constrained client can actually eat added beside them; `allows` — the
+    // same predicate the shopping list and the swap engine use — decides which survive.
+    const constraints = foodConstraints(user);
+    const firstAllowed = (options: string[]): string | undefined => options.find(o => constraints.allows(o));
 
     // Determine what's needed
     const needsProtein = protLeft > 20;
@@ -362,8 +374,9 @@ export async function handleMiscCommands(ctx: {
 
     // Calorie target already hit — suggesting more food contradicts the day's assessment
     if (todayCals > 0 && calLeftRaw <= 0) {
+      const snacks = allowedAlternatives("eggs, yoghurt, biltong, hummus, roasted chickpeas", constraints);
       const protNote = protLeft > 20
-        ? `You're about ${protLeft}g short on protein — a small protein snack (eggs, yoghurt, biltong) is a good shout if you're hungry.`
+        ? `You're about ${protLeft}g short on protein — a small protein snack${snacks ? ` (${snacks})` : ""} is a good shout if you're hungry.`
         : "Protein's on track. ✅";
       suggestion += `You've hit your calories for today. ${protNote}\n\nIf you're genuinely hungry, keep it light and protein-first — no need to force more food.`;
       await logChat(user.id, message, suggestion, "MEAL_SUGGESTION");
@@ -372,24 +385,46 @@ export async function handleMiscCommands(ctx: {
 
     if (todayCals === 0) {
       suggestion += `No food logged yet today.\n\n`;
-      if (budget === "under_100") {
-        suggestion += goal === "muscle_gain"
-          ? `Start with: *3 eggs + pap + spinach* (~420 kcal, 24g protein)\nCheap, filling, high protein to start the day.`
-          : `Start with: *2 eggs + oats with water* (~350 kcal, 18g protein)\nLow calorie, high protein start.`;
-      } else {
-        suggestion += goal === "muscle_gain"
-          ? `Start with: *3 eggs + 2 toast + banana* (~550 kcal, 25g protein)\nCarbs + protein for energy and muscle.`
-          : `Start with: *2 eggs + oats + coffee* (~380 kcal, 20g protein)\nBalanced, keeps you full until lunch.`;
-      }
+      const starts = budget === "under_100"
+        ? (goal === "muscle_gain"
+            ? [`*3 eggs + pap + spinach* (~420 kcal, 24g protein)\nCheap, filling, high protein to start the day.`,
+               `*Sugar beans + pap + spinach* (~450 kcal, 22g protein)\nCheap, filling, high protein to start the day.`]
+            : [`*2 eggs + oats with water* (~350 kcal, 18g protein)\nLow calorie, high protein start.`,
+               `*Oats with water + a handful of nuts* (~340 kcal, 12g protein)\nLow calorie, slow-release start.`])
+        : (goal === "muscle_gain"
+            ? [`*3 eggs + 2 toast + banana* (~550 kcal, 25g protein)\nCarbs + protein for energy and muscle.`,
+               `*Soya mince on toast + banana* (~560 kcal, 28g protein)\nCarbs + protein for energy and muscle.`,
+               `*Oats + soya milk + peanuts + banana* (~540 kcal, 22g protein)\nCarbs + protein for energy and muscle.`]
+            : [`*2 eggs + oats + coffee* (~380 kcal, 20g protein)\nBalanced, keeps you full until lunch.`,
+               `*Oats + soya milk + a handful of nuts* (~370 kcal, 14g protein)\nBalanced, keeps you full until lunch.`]);
+      // A CONSTRAINED CLIENT IS NOT LEFT WITH NOTHING. If every plate here is off their list, the
+      // honest answer is the principle rather than a plate we cannot name.
+      suggestion += firstAllowed(starts)
+        ? `Start with: ${firstAllowed(starts)}`
+        : `Start with something you actually eat, protein first — a bean or lentil base with your starch and veg will do the job.`;
     } else if (lowCalBudget && needsProtein) {
       suggestion += `You have ${calLeft} kcal and ${protLeft}g protein left.\n\n`;
       // Pick a suggestion that actually fits within remaining calories
       if (calLeft < 150) {
-        suggestion += `*High-protein, low-cal finish:* 2 boiled eggs (~140 kcal, 12g protein)\nOr: 50g biltong (~130 kcal, 20g protein) — fits your budget.`;
+        const tiny = firstAllowed([
+          "2 boiled eggs (~140 kcal, 12g protein)",
+          "50g biltong (~130 kcal, 20g protein)",
+          "Small tub of plain yoghurt (~120 kcal, 12g protein)",
+          "Half a cup of sugar beans (~120 kcal, 8g protein)",
+        ]);
+        suggestion += tiny
+          ? `*High-protein, low-cal finish:* ${tiny} — fits your budget.`
+          : `*High-protein, low-cal finish:* keep it to a small protein-first portion of something you eat — that is all the room you have left.`;
       } else if (calLeft < 220) {
-        suggestion += `*Best fit:* ${budget === "under_100" ? "2 eggs + spinach (~160 kcal, 14g protein)" : "Tuna salad, no dressing (~190 kcal, 25g protein)"}\nProtein first — just fits your remaining calories.`;
+        const fit = firstAllowed(budget === "under_100"
+          ? ["2 eggs + spinach (~160 kcal, 14g protein)", "Sugar beans + spinach (~180 kcal, 11g protein)"]
+          : ["Tuna salad, no dressing (~190 kcal, 25g protein)", "Chickpea salad, no dressing (~200 kcal, 11g protein)"]);
+        suggestion += `*Best fit:* ${fit || "a small protein-first plate of something you eat"}\nProtein first — just fits your remaining calories.`;
       } else {
-        suggestion += `*Best option:* ${budget === "under_100" ? "Tin of tuna with lemon (~180 kcal, 22g protein)" : "Grilled chicken breast + salad (~250 kcal, 30g protein)"}\nHigh protein, low calories — exactly what you need to finish the day.`;
+        const best = firstAllowed(budget === "under_100"
+          ? ["Tin of tuna with lemon (~180 kcal, 22g protein)", "Sugar beans + tomato and onion (~230 kcal, 13g protein)"]
+          : ["Grilled chicken breast + salad (~250 kcal, 30g protein)", "Tofu + salad (~250 kcal, 20g protein)", "Lentils + salad (~240 kcal, 14g protein)"]);
+        suggestion += `*Best option:* ${best || "a protein-first plate of something you eat"}\nHigh protein, low calories — exactly what you need to finish the day.`;
       }
     } else if (lowCalBudget && !needsProtein) {
       suggestion += `You have ${calLeft} kcal left and protein is sorted.\n\n`;
@@ -420,20 +455,32 @@ export async function handleMiscCommands(ctx: {
       // So the correction is to the option set and the ordering, not to the architecture: fuller
       // plates in the same hand-authored style as the entries already here, and a choice rule that
       // fits the plate to the need.
-      const meals: Array<{ text: string; protein: number; kcal: number }> = budget === "under_100"
+      //
+      // EVERY ENTRY BELOW WAS ANIMAL PROTEIN (#128). The plates a constrained client can eat are
+      // added here in the same style and at the same price point, and `allows` — not a second menu
+      // and not a different door — decides which of them this person is shown.
+      const allMeals: Array<{ text: string; protein: number; kcal: number }> = budget === "under_100"
         ? [
             { text: "Tin of pilchards + 2 eggs + pap (~600 kcal, 42g protein)", protein: 42, kcal: 600 },
             { text: "Sugar beans + 2 eggs + pap + spinach (~620 kcal, 30g protein)", protein: 30, kcal: 620 },
+            { text: "Soya mince + pap + spinach (~600 kcal, 40g protein)", protein: 40, kcal: 600 },
+            { text: "Sugar beans + lentils + pap + spinach (~610 kcal, 26g protein)", protein: 26, kcal: 610 },
             { text: "Tin of pilchards + pap (~350 kcal, 24g protein)", protein: 24, kcal: 350 },
             { text: "2 eggs + pap (~300 kcal, 18g protein)", protein: 18, kcal: 300 },
+            { text: "Sugar beans + pap (~340 kcal, 14g protein)", protein: 14, kcal: 340 },
           ]
         : [
             { text: "2 chicken thighs + rice + mixed veg (~680 kcal, 55g protein)", protein: 55, kcal: 680 },
+            { text: "Soya mince + rice + mixed veg (~620 kcal, 45g protein)", protein: 45, kcal: 620 },
             { text: "Beef mince + pap + spinach (~640 kcal, 40g protein)", protein: 40, kcal: 640 },
             { text: "Chicken breast + rice + spinach (~450 kcal, 35g protein)", protein: 35, kcal: 450 },
+            { text: "Tofu stir-fry + rice (~550 kcal, 30g protein)", protein: 30, kcal: 550 },
+            { text: "Lentil and chickpea curry + rice (~600 kcal, 26g protein)", protein: 26, kcal: 600 },
             { text: "Tin of pilchards + sweet potato (~380 kcal, 24g protein)", protein: 24, kcal: 380 },
             { text: "3 eggs + brown bread + tomato (~400 kcal, 24g protein)", protein: 24, kcal: 400 },
+            { text: "Sugar beans + sweet potato + spinach (~420 kcal, 16g protein)", protein: 16, kcal: 420 },
           ];
+      const meals = allMeals.filter(mm => constraints.allows(mm.text));
       // FIT THE PLATE TO THE NEED, and it takes no arithmetic beyond a comparison.
       //
       // "Biggest protein first" was right while every option was small and becomes wrong the
@@ -446,9 +493,15 @@ export async function handleMiscCommands(ctx: {
       const affordable = meals.filter(mm => mm.kcal <= calLeft);
       const covers = affordable.filter(mm => mm.protein >= protLeft).sort((a, b) => a.kcal - b.kcal);
       const dents = affordable.filter(mm => mm.protein < protLeft).sort((a, b) => b.protein - a.protein);
-      const ordered = [...covers, ...dents];
+      // FIVE, AS BEFORE. Widening the option set so a constrained client has a real menu must not
+      // hand an unconstrained one a wall of nine plates to choose between; the ranking above
+      // already puts the right ones at the top, so the tail is what gets dropped.
+      const ordered = [...covers, ...dents].slice(0, 5);
       if (ordered.length === 0) {
-        suggestion += `You do not have the calories left for a full meal — go protein-only: eggs, biltong, tuna or plain yoghurt, and leave the starch off the plate.`;
+        const only = allowedAlternatives("eggs, biltong, tuna, plain yoghurt, sugar beans, lentils", constraints);
+        suggestion += only
+          ? `You do not have the calories left for a full meal — go protein-only: ${only}, and leave the starch off the plate.`
+          : `You do not have the calories left for a full meal — go protein-only from what you do eat, and leave the starch off the plate.`;
       } else {
         suggestion += `Pick one:\n${ordered.map((mm, i) => `${i + 1}. ${mm.text}`).join("\n")}`;
         if (ordered[0].protein < protLeft) {
@@ -460,11 +513,23 @@ export async function handleMiscCommands(ctx: {
       }
     } else {
       suggestion += `${calLeft} kcal and ${protLeft}g protein to go.\n\n`;
-      if (budget === "under_100") {
-        suggestion += `*Balanced option:* Pap + beans + cabbage (~400 kcal, 14g protein)\n*Protein push:* 2 eggs + pilchards + pap (~500 kcal, 28g protein)`;
-      } else {
-        suggestion += `*Balanced option:* Chicken + sweet potato + vegetables (~500 kcal, 30g protein)\n*Light option:* Greek yoghurt + banana + oats (~350 kcal, 18g protein)`;
-      }
+      const balanced = firstAllowed(budget === "under_100"
+        ? ["Pap + beans + cabbage (~400 kcal, 14g protein)"]
+        : ["Chicken + sweet potato + vegetables (~500 kcal, 30g protein)",
+           "Tofu + sweet potato + vegetables (~480 kcal, 22g protein)",
+           "Lentils + sweet potato + vegetables (~470 kcal, 18g protein)"]);
+      const second = firstAllowed(budget === "under_100"
+        ? ["2 eggs + pilchards + pap (~500 kcal, 28g protein)",
+           "Soya mince + pap + cabbage (~480 kcal, 32g protein)"]
+        : ["Greek yoghurt + banana + oats (~350 kcal, 18g protein)",
+           "Oats + soya milk + peanuts + banana (~360 kcal, 14g protein)"]);
+      const secondLabel = budget === "under_100" ? "Protein push" : "Light option";
+      const twoOptions = [
+        balanced ? `*Balanced option:* ${balanced}` : "",
+        second ? `*${secondLabel}:* ${second}` : "",
+      ].filter(Boolean).join("\n");
+      suggestion += twoOptions
+        || `Build it from what you actually eat: protein first, then your starch, then something green. That is the whole rule with this much room left.`;
     }
 
     await logChat(user.id, message, suggestion, "MEAL_SUGGESTION");

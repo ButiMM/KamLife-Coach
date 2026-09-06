@@ -3,7 +3,7 @@
 import crypto from "crypto";
 import { turnMutation } from "./chat-log";
 import { sttVocabularyPrompt } from "../foods";
-import { verdictFromLabelLine } from "../food-swaps";
+import { verdictFromLabelLine, foodConstraints } from "../food-swaps";
 import { tmpdir } from "os";
 import { writeFile, unlink } from "fs/promises";
 import { createReadStream } from "fs";
@@ -907,7 +907,7 @@ export async function handleMediaMessage(ctx: {
 Client goal: ${goal.replace("_", " ")}
 Weekly budget: ${budgetLabel[budget] || "R100–R300/week"}
 Daily targets: ${cTarget} kcal, ${pTarget}g protein
-Medical/allergies: ${medicalNotes}
+Medical/allergies: ${medicalNotes}${foodConstraints(user).line ? `\n${foodConstraints(user).line}` : ""}
 
 RULES: Keep items that fit their goal. Replace what doesn't. Add missing essentials. SA products only with rand prices and weekly quantities. Max 20 items.
 

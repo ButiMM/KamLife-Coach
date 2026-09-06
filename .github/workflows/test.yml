@@ -143,6 +143,12 @@ jobs:
       # a fixture that returns the same rows to every query cannot demonstrate a window.
       - name: Daily constraint lifecycle on real PostgreSQL
         run: npx tsx script/pg-daily-constraint-acceptance.ts
+      # THE CONSTRAINT REACHES EVERY MOUTH THAT NAMES A FOOD (#128). Which branch of the Next Meal
+      # menu a client reaches is composed from the day ledger — what is logged, what is left — so
+      # a fixture that answers every query the same way puts every client on one branch. That is
+      # how a menu with zero calls to the constraint owner looked fine.
+      - name: Food constraints reach the plate and grocery mouths on real PostgreSQL
+        run: npx tsx script/pg-food-constraint-mouths-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot
