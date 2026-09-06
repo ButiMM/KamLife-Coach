@@ -7,7 +7,7 @@ import { db } from "../db";
 import { users } from "../../shared/schema";
 import { neverSilentLine } from "../reply-hygiene";
 import { eq, sql } from "drizzle-orm";
-import { logChat, turnMutation } from "./chat-log";
+import { logChat, turnMutation, turnEvidence } from "./chat-log";
 import { sastToday, mentionsNotDone, reportedInSomeClause, digitizeSpokenAmounts } from "../utils";
 import { waterTargetLitres } from "../targets";
 import { scanForSAFoods } from "./food-scanner";
@@ -143,7 +143,10 @@ export async function tryLogWater(ctx: {
     // client actually saw most were the running totals: "2L added. Running total: 0L / 2.7L
     // target. 2.7L left." Three numbers, two of them targets the client never asked about, on
     // the day they drank some water. The coach writes the sentence now; this is the net.
-    const waterReply = neverSilentLine("water", { amount: `${litres}L` });
+    const waterAmount = `${litres}L`;
+    const waterReply = neverSilentLine("water", { amount: waterAmount });
+    // The receipt, recorded for the durable-log close (#207) — see steps.ts.
+    turnEvidence({ receipt: { line: waterReply, kind: "water", amount: waterAmount } });
     await logChat(user.id, message, waterReply, "WATER_LOG");
     return `${waterReply}`;
   }

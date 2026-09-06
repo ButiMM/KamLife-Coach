@@ -395,22 +395,84 @@ export function firstSentence(text: string): string {
 export type LoggedKind = "steps" | "water" | "weight" | "meal" | "workout" | "sleep";
 
 /**
+ * WHAT THE TURN ALREADY KNOWS (#207) — supplied BY THE CALLER. This module still reads nothing:
+ * no database, no ledger reconstruction, no history interpretation. Every field below is a value
+ * an existing owner produced earlier in the same turn and simply did not pass on.
+ *
+ * It exists because a durable log turn used to be authored twice: this function wrote an
+ * acknowledgement knowing only the client's own words, withNextMove stapled on a move chosen
+ * from day state, and neither half could see the other. The customer read two subsystems.
+ * Traced on real PostgreSQL — script/pg-log-turn-day.ts — one client, one day:
+ *
+ *     "two eggs and toast for breakfast"  ->  "Start tomorrow with protein — eggs … at breakfast."
+ *     "walked 9000 steps"                 ->  the same sentence again
+ *     "87.4kg this morning"               ->  the same sentence a third time
+ *
+ * NONE OF THIS CHOOSES ANYTHING. `move` arrives already decided by chooseAction; this phrases it
+ * beside the event instead of after a blank line. There is no ladder here and no second policy.
+ */
+export interface DurableTurnContext {
+  /** The move chooseAction/canonicalNextMove already selected. Phrased here, NEVER chosen here. */
+  move?: string | null;
+  /** That action's canonical kind, so the acknowledgement can name the fact the move turns on. */
+  moveKind?: string | null;
+  /** Protein this turn's own write recorded, off the turn's mutation record. Not re-derived. */
+  wroteProtein?: number | null;
+  /** Canonical day totals THIS TURN already read, from getProgressTruth. Never re-queried. */
+  day?: { kcal: number; kcalTarget: number } | null;
+  /** The same turn's own meal evaluation already told the client to change this plate. */
+  plateNeedsChange?: boolean;
+}
+
+/**
  * @param label the client's OWN words for the thing, when there are any ("pap and chicken").
  *        Never a database name, never a portion in brackets — that is voice rule 18.
  * @param amount the figure THEY gave, already formatted. Never recomputed, never rounded.
+ *
+ * With NO DurableTurnContext this returns exactly what it has always returned, byte for byte —
+ * every existing caller is unaffected, and the never-silent net still works when nothing else in
+ * the turn has anything to add.
  */
-export function neverSilentLine(kind: LoggedKind, opts: { label?: string; amount?: string; carryingShame?: boolean } = {}): string {
+export function neverSilentLine(
+  kind: LoggedKind,
+  opts: { label?: string; amount?: string; carryingShame?: boolean } & DurableTurnContext = {},
+): string {
   const label = (opts.label || "").trim().slice(0, 60);
   const amount = (opts.amount || "").trim();
+  const move = (opts.move || "").trim().replace(/[.\s]*$/, "");
+  // OVER THE DAY'S CALORIES, ON CANONICAL TOTALS THE CALLER ALREADY HELD. A 2 445 kcal plate
+  // against a 1 200 kcal target used to read "Got it — Chips, Pap and Beef stew. 👌", because
+  // this function was starved of the one fact that made the plate adverse. Stated plainly, and
+  // no figure is printed: the comparison is canonical, the number would be a second claim.
+  const overForTheDay = !!opts.day && opts.day.kcalTarget > 0 && opts.day.kcal > opts.day.kcalTarget;
+
   // CHEAT, NO SHAME (voice rule 9) — and deterministic on purpose. Someone who writes "I feel
   // like I ruined everything" needs the second half of this sentence whether or not the model
   // answered that turn, and the model is exactly what is missing when this function runs. The
   // words already existed in food-context as a guilt note and never reached the log path.
-  if (kind === "meal" && opts.carryingShame) {
-    return label
-      ? `Got it — ${label}. One meal doesn't break a week. 👌`
-      : `Got it. One meal doesn't break a week. 👌`;
-  }
+  // It outranks the over-target sentence: a person already carrying shame does not need both.
+  const head = (kind === "meal" && opts.carryingShame)
+    ? (label ? `Got it — ${label}. One meal doesn't break a week. 👌` : `Got it. One meal doesn't break a week. 👌`)
+    : kind === "meal" && overForTheDay
+      // No 👌 — that emoji is the whole "blind celebration" the trace caught.
+      ? (label ? `Got it — ${label}. That puts you over your calories for today.`
+               : `Got it. That puts you over your calories for today.`)
+    : kind === "meal" && label && opts.moveKind === "protein" && (opts.wroteProtein ?? 0) > 0
+      // THE FACT THE MOVE TURNS ON, NAMED IN THE SAME BREATH. Logging eggs at breakfast and being
+      // told "start tomorrow with protein at breakfast" reads as a coach who did not look at the
+      // plate. The gram figure is this turn's own write — not a total, not an average, not a
+      // target — so the instruction arrives with its reason attached.
+      //
+      // THE 👌 STAYS. Naming the number is not a reason to go cold: an in-budget plate must still
+      // read as an ordinary, warm acknowledgement, and dropping the emoji here made the adverse
+      // case above indistinguishable from the normal one. The acceptance control caught it.
+      ? `Got it — ${label}: ${opts.wroteProtein}g protein. 👌`
+    : kindLine(kind, label, amount);
+
+  return move ? `${head} ${move}.` : head;
+}
+
+function kindLine(kind: LoggedKind, label: string, amount: string): string {
   switch (kind) {
     case "steps":   return amount ? `${amount} steps — nice one. 👌` : `Steps logged. 👌`;
     case "water":   return amount ? `${amount} of water — good. 👌` : `Water logged. 👌`;

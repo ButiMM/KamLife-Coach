@@ -161,6 +161,12 @@ jobs:
       # fixture that answers every query the same way.
       - name: Thin-evidence coaching on real PostgreSQL
         run: npx tsx script/pg-thin-evidence-acceptance.ts
+      # ONE COACH SPEAKING (#207). The repetition defect this closes is invisible to a fixture
+      # that sends one message per client: it only appears across CONSECUTIVE durable writes by
+      # the same person, where the decision is recomputed from day state that the new event did
+      # not move. Real rows, real front door, several turns.
+      - name: Durable log turns are one coaching turn on real PostgreSQL
+        run: npx tsx script/pg-log-turn-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { turnMutation } from "./chat-log";
+import { turnMutation, turnEvidence } from "./chat-log";
 import { users, weightLogs, escalations } from "../../shared/schema";
 import { neverSilentLine } from "../reply-hygiene";
 import { trendCalorieAdjust } from "../adaptive-targets";
@@ -519,5 +519,11 @@ export async function handleWeightLog(
   // it must reach the person whether or not the engine wrote anything. Everything else that
   // used to be concatenated here is now the coach's job, or the card's.
   void changeNote; void trendLine; void targetsLine; void weightAddOn;
-  return `${neverSilentLine("weight", { amount: `${newKg}kg` })}${underweightFlipNote}`;
+  // THE RECEIPT, RECORDED FOR THE DURABLE-LOG CLOSE (#207) — see steps.ts. The safety note is
+  // deliberately NOT part of it: a turn carrying duty-of-care prose is not a bare receipt, so the
+  // string will not match and the existing append path runs, exactly as it does today.
+  const amount = `${newKg}kg`;
+  const line = neverSilentLine("weight", { amount });
+  turnEvidence({ receipt: { line, kind: "weight", amount } });
+  return `${line}${underweightFlipNote}`;
 }

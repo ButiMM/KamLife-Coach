@@ -774,6 +774,28 @@ const INVESTIGATIVE: ReadonlySet<ActionKind> = new Set<ActionKind>(["come_back",
 const PRESCRIPTIVE: ReadonlySet<ActionKind> = new Set<ActionKind>(["protein", "walk", "train", "eat_more", "rest"]);
 
 /**
+ * WHICH TRACKED FACT EACH ACTION IS ABOUT (#207) — the domain names durableDomains already uses.
+ *
+ * closeCoachingTurn refuses to re-issue an instruction the client was given moments ago, and the
+ * first version of that decided "moments ago" from the instruction's TEXT alone. That inference is
+ * wrong, and an existing acceptance control caught it: chooseAction can emit the same sentence
+ * from genuinely different state. A client who logged a banana, was told to make their next meal
+ * a protein one, and then logged rice and spinach has EATEN AGAIN — they earned that instruction
+ * a second time, and swallowing it leaves them coached for one meal out of two.
+ *
+ * So the question is not "did we say this" but "did this event move the ground the move stands
+ * on". A meal re-earns a food instruction; a step report does not. Kinds with no domain
+ * (`come_back`, `rest`, `hold`) turn on no single tracked fact and are never re-earned this way.
+ *
+ * It lives beside the kinds because it is a fact ABOUT the kinds, and putting it at the call site
+ * is how a second, drifting copy of this table gets written.
+ */
+export const ACTION_DOMAIN: Readonly<Partial<Record<ActionKind, string>>> = {
+  protein: "food", eat_more: "food", log: "food",
+  weigh: "weight", walk: "steps", train: "workout",
+};
+
+/**
  * THE POLICY BOUNDARY, EXPORTED (2026-08-21).
  *
  * `chooseAction` is the one decision function, but a single function name does not make a single

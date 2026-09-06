@@ -198,10 +198,23 @@ const MUST_WRITE: [string, string][] = [
   const { invalidatePatternCache } = await import("../server/cache");
   const { checkGptRateLimit } = await import("../server/utils");
   const { _resetDumpWindow } = await import("../server/card-policy");
+  // THE OUTBOUND DEDUPE IS PROCESS STATE TOO (#207) — the same class as the ledger note below and
+  // reset here for the same reason. closeCoachingTurn now consults isDuplicateOutbound before
+  // reissuing a next move, so the coach cannot staple the identical instruction onto three
+  // durable events in a row. Every graded turn in this file is a SEPARATE conversation, not the
+  // same client ninety seconds later; without this reset one scenario inherits the previous
+  // scenario's delivered move and Law 4 grades a suppression production would never perform.
+  //
+  // THE SUPPRESSION ITSELF IS STILL GRADED, deliberately, on consecutive turns of ONE
+  // conversation — see "the same next move is not stapled onto every durable event" below.
+  // _resetOutboundDedupe is this module's own existing test/ops hook, so no production code
+  // exists solely to be testable.
+  const { _resetOutboundDedupe } = await import("../server/reply-hygiene");
   const freshTurn = () => {
     invalidatePatternCache(USER.id);
     checkGptRateLimit(USER.id, 1_000_000, 0);
     _resetDumpWindow();
+    _resetOutboundDedupe();
   };
   const NAME = new Map<any, string>([
     [schema.stepLogs, "steps"], [schema.weightLogs, "weight"],
@@ -2386,15 +2399,43 @@ const MUST_WRITE: [string, string][] = [
     // The decision reads state that INCLUDES this turn's write — the production ordering.
     if (opts?.seeWrites !== false) g.__KAMLIFE_STUB_REFLECT_WRITES = 1;
     g.__KAMLIFE_STUB_WRITES = [];
-    const reply = String(await handleMessage(USER.phoneNumber, message).catch(() => ""));
+    // WHAT THE CLOSE ACTUALLY DELIVERED, captured from its own marker (#207). See closingMove.
+    const said: string[] = [];
+    const realLog = console.log;
+    console.log = (...a: any[]) => { said.push(a.map(x => typeof x === "string" ? x : String(x)).join(" ")); realLog(...a); };
+    let reply = "";
+    try {
+      reply = String(await handleMessage(USER.phoneNumber, message).catch(() => ""));
+    } finally { console.log = realLog; }
     delete g.__KAMLIFE_STUB_REFLECT_WRITES;
+    const marker = said.filter(l => l.includes("[COACH_TURN] MOVE=")).pop() || "";
+    LAST_MOVE = marker ? (marker.split("[COACH_TURN] MOVE=")[1] || "").replace(/\s*\([^)]*\)\s*$/, "").trim() : "";
     return reply;
   }
-  /** A move is a separate closing block that is not a question — what withNextMove appends. */
+  /**
+   * THE MOVE THIS TURN DELIVERED — regraded on behaviour (#207), not restored.
+   *
+   * This used to be "the last blank-line-separated block", because withNextMove appended the move
+   * across a blank line and that LAYOUT was the move. #207 composes the durable-log turn through
+   * one author, so the instruction now arrives in the same paragraph as the acknowledgement: the
+   * shape reader saw no move at all on replies that plainly carry one, and Law 4 went red for a
+   * reply that is strictly better than the one it was written against.
+   *
+   * Putting the block-splitter back would preserve a layout rather than the promise. Law 4
+   * promises that a durable write DELIVERS the canonical next move, so that is what is read —
+   * off the close's own marker, which names the move it issued and is empty when it issued none.
+   * Strictly stronger than the splitter, which accepted any trailing block regardless of whether
+   * the decision owner had chosen anything; and it reads the same fact on both shapes, so the
+   * appended path this cut deliberately leaves alone is graded exactly as before.
+   *
+   * Cross-checked against the customer-visible string: a move the close claims to have delivered
+   * must actually appear in the reply, so a marker that lies cannot pass this.
+   */
+  let LAST_MOVE = "";
   const closingMove = (reply: string) => {
-    const blocks = reply.trim().split(/\n\s*\n/);
-    const last = (blocks[blocks.length - 1] || "").trim();
-    return blocks.length > 1 && !last.includes("?") && !/\[(?:BUTTONS|MEDIA)/i.test(last) ? last : "";
+    const move = LAST_MOVE.trim().replace(/[.\s]*$/, "");
+    if (!move) return "";
+    return reply.includes(move) ? move : "";
   };
 
   // A bare receipt must gain exactly one move — on EVERY tracked fact that writes durably.
@@ -2418,6 +2459,71 @@ const MUST_WRITE: [string, string][] = [
     // …and the move must have read the write. Telling a client who just logged 8 000 steps to
     // walk is the defect this ordering exists to prevent.
     if (/\bwalk\b/i.test(move)) failures.push(`The move ignored the row this turn wrote — 8 000 steps logged, and the coach said: "${move}"`);
+  }
+
+  /**
+   * THE SAME NEXT MOVE IS NOT STAPLED ONTO EVERY DURABLE EVENT (#207).
+   *
+   * Traced through the real front door on real PostgreSQL — script/pg-log-turn-day.ts — one
+   * client, one ordinary day:
+   *
+   *     "two eggs and toast for breakfast"  ->  "Start tomorrow with protein — eggs … at breakfast."
+   *     "walked 9000 steps"                 ->  the same sentence again
+   *     "87.4kg this morning"               ->  the same sentence a third time
+   *
+   * chooseAction is a pure function of day state, and a step report moves none of the state the
+   * protein rung reads — so the identical instruction was re-issued for no reason but the arrival
+   * of a new event. That is the nagging app this product defines itself against, and it is the
+   * rule reply-hygiene already states for whole replies: "saying the same words twice in ten
+   * minutes is never the right outcome". The stapled move escaped that rule only because the
+   * acknowledgement wrapped around it differed.
+   *
+   * GRADED ON CONSECUTIVE TURNS OF ONE CONVERSATION, which is the only place the defect exists —
+   * freshTurn() clears the window between unrelated scenarios precisely so this one can own it.
+   */
+  {
+    freshTurn();
+    const first = await coachingTurn("walked 8000 steps today");
+    const firstMove = closingMove(first);
+    // The window is NOT reset between these two: this is the same client, seconds apart.
+    const second = String(await handleMessage(USER.phoneNumber, "2 litres of water").catch(() => ""));
+    if (!firstMove) {
+      failures.push(`The repeat control is vacuous: the first durable event carried no move to repeat`);
+    } else if (second.includes(firstMove)) {
+      failures.push(`The same next move was stapled onto a second durable event seconds later: "${second.replace(/\n/g, " ⏎ ")}"`);
+    }
+    // POSITIVE CONTROL — the suppression must be about the MOVE, not about the second event.
+    // The identical water turn, in a fresh window, still earns its instruction; without this a
+    // build that simply stopped coaching the second event of any conversation would pass.
+    freshTurn();
+    const alone = await coachingTurn("2 litres of water");
+    if (!closingMove(alone)) {
+      failures.push(`The suppression is not about repetition: the same water turn earned no move even in a fresh window: "${alone.replace(/\n/g, " ⏎ ")}"`);
+    }
+  }
+
+  /**
+   * A DURABLE LOG TURN IS SPOKEN BY ONE COACH, NOT TWO (#207).
+   *
+   * The acknowledgement was written by a handler that knew the client's words and nothing else,
+   * and the move was appended across a blank line by a ladder that knew day state and nothing
+   * about the event. The customer read two subsystems. When the reply is nothing but the bare
+   * receipt, the same author now composes both halves — so the move must arrive INSIDE the
+   * acknowledgement's paragraph, not as a separate block after it.
+   *
+   * This grades the shape ONLY where the cut claims it: a bare receipt. Every richer reply keeps
+   * the appended path, and the assertions above still grade those.
+   */
+  {
+    freshTurn();
+    const reply = await coachingTurn("walked 8000 steps today");
+    const move = closingMove(reply);
+    const blocks = reply.trim().split(/\n\s*\n/);
+    if (!move) {
+      failures.push(`The one-author control is vacuous: the bare step receipt carried no move`);
+    } else if (blocks.length > 1 && (blocks[blocks.length - 1] || "").trim().startsWith(move)) {
+      failures.push(`A bare receipt still had its move stapled on as a separate block: "${reply.replace(/\n/g, " ⏎ ")}"`);
+    }
   }
 
   /**

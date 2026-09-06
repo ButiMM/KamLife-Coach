@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { turnMutation } from "./chat-log";
+import { turnMutation, turnEvidence } from "./chat-log";
 import { users, stepLogs } from "../../shared/schema";
 import { eq, desc, and, gte, lt } from "drizzle-orm";
 import { neverSilentLine } from "../reply-hygiene";
@@ -150,7 +150,13 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
   // not answer — one line, their number, nothing else. The parameters stay because callers pass
   // them and the signature is not the point; the VOICE was the point, and it has one owner.
   void target; void weightKg; void streak; void weeklyAvg; void user; void isWorkoutDay;
-  return neverSilentLine("steps", { amount: steps.toLocaleString("en-ZA") });
+  // THE RECEIPT, RECORDED SO THE TURN CAN CLOSE AS ONE COACH (#207). closeCoachingTurn compares
+  // the reply it holds against this exact string: if nothing richer was written, the same author
+  // is asked again with the canonical decision in hand and composes one line instead of two.
+  const amount = steps.toLocaleString("en-ZA");
+  const line = neverSilentLine("steps", { amount });
+  turnEvidence({ receipt: { line, kind: "steps", amount } });
+  return line;
 }
 
 

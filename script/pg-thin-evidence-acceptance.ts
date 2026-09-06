@@ -53,6 +53,7 @@ const { canonicalDecision } = await import("../server/understanding/live");
 const { canonicalNextMove } = await import("../server/scheduler/proactive-decision");
 const { getProgressTruth } = await import("../server/day-ledger");
 const { sastHour } = await import("../server/sast");
+const { _resetOutboundDedupe } = await import("../server/reply-hygiene");
 
 let failed = 0;
 const chk = (ok: boolean, msg: string, evidence = "") => {
@@ -118,13 +119,36 @@ for (const [said, what] of [
 
 // A SECOND WEIGH-IN ON THE SAME DAY IS THE SAME EVENT. It UPDATEs rather than inserts, and that
 // verb is the only difference — the client cannot see it and must not be coached differently for it.
+//
+// REGRADED BY #207, NOT WEAKENED. This used to assert that both weigh-ins carry the ask, back to
+// back. That is now two claims tangled together: the verb-blindness this cut proved, and the
+// separate rule #207 added — the identical instruction is not re-issued to the same client
+// seconds later, whatever event arrives. Asserting the tangle would have made this suite demand
+// the very repetition the founder complained about. Each half is asserted directly instead, which
+// is strictly more than the original: the first check proves the verb changes nothing, and the
+// second proves the UPDATE still reaches the decision owner rather than standing down silently.
 {
   const c = await client({}, { meals: [3], weights: WEIGHED });
   const first = await say(c.phone, "88.1kg this morning");
-  const second = await say(c.phone, "87.4kg this morning");
-  chk(ASKS.test(first) && ASKS.test(second),
+  // THE VERB, ISOLATED. A fresh window is exactly the state the first weigh-in met, so anything
+  // the second is denied is denied by the UPDATE and by nothing else.
+  _resetOutboundDedupe();
+  const secondFresh = await say(c.phone, "87.4kg this morning");
+  chk(ASKS.test(first) && ASKS.test(secondFresh),
     "the second weigh-in of a day is coached exactly like the first",
-    `first=${JSON.stringify(first.slice(0, 90))} second=${JSON.stringify(second.slice(0, 90))}`);
+    `first=${JSON.stringify(first.slice(0, 90))} second=${JSON.stringify(secondFresh.slice(0, 90))}`);
+
+  // AND BACK TO BACK, the UPDATE is still recognised as a durable write — the turn is answered
+  // with the client's own figure — while the question they were asked seconds ago is not repeated.
+  const c2 = await client({}, { meals: [3], weights: WEIGHED });
+  const a = await say(c2.phone, "88.1kg this morning");
+  const b = await say(c2.phone, "87.4kg this morning");
+  chk(ASKS.test(a) && /87\.4/.test(b),
+    "…and back to back the second is still answered with their figure",
+    `first=${JSON.stringify(a.slice(0, 90))} second=${JSON.stringify(b.slice(0, 90))}`);
+  chk(!ASKS.test(b),
+    "…without asking them the identical question twice in a row (#207)",
+    JSON.stringify(b.slice(0, 140)));
 }
 
 // ── §2 THE CATCH-UP MESSAGE ─────────────────────────────────────────────────────────────────
