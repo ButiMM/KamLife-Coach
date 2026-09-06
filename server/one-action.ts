@@ -837,32 +837,98 @@ export function composeDecisionTurn(situationFrame: string, actionLine: string):
  * So the gate stops taking a verdict and takes the EVIDENCE, then reaches the verdict through the
  * same two functions decideProactive uses. Neither path can hold an opinion the other does not.
  *
- * FOUND, NOT FIXED — SPARSE EVIDENCE ACTION DIVERGENCE (parked 2026-08-28 by CTO decision).
+ * CLOSED — SPARSE EVIDENCE ACTION DIVERGENCE (#203, 2026-09-06).
  *
- * One evidence -> one policy is what this cut establishes. One policy -> one ACTION is NOT
- * established, and on the insufficient branch the two paths still differ:
+ * The note that stood here said one evidence -> one policy was established but one policy -> one
+ * ACTION was not, and that the reactive gate held where decideProactive investigated:
  *
  *     sparse but healthy   decideProactive -> weigh  "Stand on a scale this morning."
  *                          underPolicy     -> hold   "Nothing new today."
  *
- * decideProactive downgrades to the measurement that would justify a prescription; this gate
- * holds. There is a plausible product reason — proactively the ask IS the whole message, so
- * silence wastes the contact, while reactively the client has already been answered and this line
- * is supplementary — but that reason is UNPROVEN. No client has been traced to establish it.
+ * It also said exactly what closing it would take — "this gate also performing the
+ * askToLog/askToWeigh downgrade, which needs today.logged, daysSinceWeighIn and doNotMention at
+ * the reactive call sites" — and parked it because the product question was UNPROVEN.
  *
- * It is therefore a product-policy question, not a defect to patch: decide the desired reactive
- * behaviour from production evidence BEFORE changing it. Closing it would mean this gate also
- * performing the askToLog/askToWeigh downgrade, which needs today.logged, daysSinceWeighIn and
- * doNotMention at the reactive call sites.
+ * BOTH HALVES ARE NOW SETTLED. #203 answers the product question from the founder rule: daily
+ * reporting is not a prerequisite for coaching, and insufficient evidence must not become a
+ * receipt-only dead end. And the three facts were never missing — every call site already computes
+ * loggedToday, daysSinceWeighIn and doNotMention into the DayState it hands to chooseAction. They
+ * simply were not passed on to the gate.
+ *
+ * TRACED THROUGH THE REAL FRONT DOOR ON REAL POSTGRESQL BEFORE ANYTHING CHANGED. Clients weighed
+ * recently, so the `weigh` rung stands down and this gate is the thing that decides:
+ *
+ *     "I walked 8000 steps today"    train -> hold  ->  "8 000 steps — nice one. 👌"
+ *     "87.4kg this morning"          walk  -> hold  ->  "87.4kg — noted. 👌"
+ *     three days in one message      walk  -> hold  ->  the receipt, and nothing else
+ *
+ * A truthful receipt and no coaching, from a product whose whole claim is the next action.
+ *
+ * THE DEFAULTS PRESERVE THE OLD BEHAVIOUR, DELIBERATELY. A caller that passes no context reads as
+ * "logged today, weighed today" and therefore still holds. Inventing `loggedToday: false` for a
+ * caller that does not know would ask a client who logged an hour ago to log — the Law 22 failure
+ * the downgrade's own history describes.
  */
 export function underPolicy(
   action: OneAction,
-  opts: { foodSufficient: boolean; weightSufficient: boolean; dreamGoal?: string | null },
+  opts: {
+    foodSufficient: boolean; weightSufficient: boolean; dreamGoal?: string | null;
+    /** From the same DayState the caller just built. Omitted = there is nothing worth asking. */
+    loggedToday?: boolean; daysSinceWeighIn?: number | null; doNotMention?: string | null;
+  },
 ): OneAction {
   const verdict = evidenceFromKind(action.kind)
     ?? evidenceFromLedger(opts.foodSufficient, opts.weightSufficient);
-  if (!PRESCRIPTIVE.has(action.kind) || verdict === "sufficient") return action;
-  return holdAction(opts.dreamGoal);
+  if (verdict === "sufficient") return action;
+  // AND `hold` IS THE OTHER WAY INTO THE SAME DEAD END (#203). The trace found the first
+  // divergence one rung earlier than the issue predicted: for a sparse client the LADDER itself
+  // holds, before this gate is reached, so guarding only PRESCRIPTIVE kinds left the commonest
+  // case untouched. One client, real front door, real PostgreSQL:
+  //
+  //     "I walked 8000 steps today"   steps met, rest day, weighed today, 1/7 days logged
+  //     chooseAction -> hold          every rung stands down, each of them correctly
+  //     reply        -> "8 000 steps — nice one. 👌"      and nothing else
+  //
+  // A HOLD UNDER SUFFICIENT EVIDENCE IS AN EARNED VERDICT — "the most common correct decision may
+  // be CONTINUE", and it is left exactly as it is. A hold under INSUFFICIENT evidence is a
+  // different sentence wearing the same word: not "nothing needs changing" but "we cannot tell,
+  // and we did not ask". That is the receipt-only dead end, and the ladder below already knows
+  // what to ask; it was simply never consulted from here.
+  if (!PRESCRIPTIVE.has(action.kind) && action.kind !== "hold") return action;
+  return investigateInstead({
+    foodSufficient: opts.foodSufficient, weightSufficient: opts.weightSufficient,
+    loggedToday: opts.loggedToday ?? true,
+    daysSinceWeighIn: opts.daysSinceWeighIn === undefined ? 0 : opts.daysSinceWeighIn,
+    doNotMention: opts.doNotMention, dreamGoal: opts.dreamGoal,
+  });
+}
+
+/**
+ * AN UNEVIDENCED PRESCRIPTION BECOMES THE MEASUREMENT THAT WOULD JUSTIFY ONE — or nothing.
+ *
+ * Lifted out of decideProactive unchanged (#203) so the reactive gate applies the same ladder
+ * rather than a second one beside it. Its rules, and why they are the rules:
+ *
+ *   • ASK FOR WHAT IS ACTUALLY MISSING. A client who logged TODAY is not asked to log — their
+ *     seven-day record is thin, not their morning, and handing that back for something they have
+ *     just done is the failure the first version of this downgrade shipped.
+ *   • Weighing again the day after they weighed tells a trend nothing. Never weighed, or three
+ *     days stale, is a real gap worth one ask.
+ *   • …and not if they asked us to leave the scale alone. When the measurement is off limits the
+ *     honest outcome is the one this already reaches when there is nothing useful to ask.
+ *   • Silence stays a legitimate answer — least intervention, not a gap to fill.
+ */
+function investigateInstead(ctx: {
+  foodSufficient: boolean; weightSufficient: boolean; loggedToday: boolean;
+  daysSinceWeighIn: number | null; doNotMention?: string | null; dreamGoal?: string | null;
+}): OneAction {
+  const canAskForFood = !ctx.foodSufficient && !ctx.loggedToday;
+  const staleWeight = ctx.daysSinceWeighIn === null || ctx.daysSinceWeighIn >= 3;
+  const canAskForWeight = !ctx.weightSufficient && staleWeight
+    && !mentionsForbidden("weight scale weigh", ctx.doNotMention);
+  return canAskForFood ? askToLog(ctx.dreamGoal)
+    : canAskForWeight ? askToWeigh(ctx.dreamGoal, ctx.daysSinceWeighIn === null)
+    : holdAction(ctx.dreamGoal);
 }
 
 /**
@@ -917,21 +983,21 @@ export function decideProactive(
   // morning — which is handing the work back for something they had just done, the exact failure
   // Law 22 exists to prevent. Caught by re-running the trace on the sparse-log client, whose
   // fixture logs today.
-  if (PRESCRIPTIVE.has(action.kind) && evidence === "insufficient") {
-    const canAskForFood = !s.evidence.foodSufficient && !s.today.logged;
-    // Weighing again the day after they weighed tells us nothing a trend needs. Never weighed, or
-    // three days stale, is a real gap worth one ask.
-    const staleWeight = s.weight.daysSinceWeighIn === null || s.weight.daysSinceWeighIn >= 3;
-    // …and not if they asked us to leave the scale alone. The downgrade exists to ask for the
-    // measurement that would justify a prescription; when that measurement is off limits, the
-    // honest outcome is the same one it already reaches when there is nothing useful to ask.
-    const canAskForWeight = !s.evidence.weightSufficient && staleWeight
-      && !mentionsForbidden("weight scale weigh", p.doNotMention);
-    action = canAskForFood ? askToLog(p.dreamGoal)
-      : canAskForWeight ? askToWeigh(p.dreamGoal, s.weight.daysSinceWeighIn === null)
-      // Nothing useful to ask and nothing we can justify prescribing. Silence is the honest
-      // outcome, and it is a legitimate one — least intervention, not a gap to fill.
-      : holdAction(p.dreamGoal);
+  // ONE LADDER, BOTH PATHS (#203). This block was the downgrade; it is now a call to it, so the
+  // reactive gate cannot hold where this one investigates.
+  //
+  // …AND THE HOLD BRANCH HAS TO BE ON BOTH SIDES OF THAT SENTENCE. The first cut of #203 widened
+  // only the reactive gate to cover an insufficient-evidence `hold`, which converged the
+  // prescription case and opened a fresh divergence in the opposite direction: the same sparse
+  // rows produced an investigative ask when the client messaged us and CONTINUE/silence when we
+  // messaged them. Convergence that only runs one way is not convergence. A hold under SUFFICIENT
+  // evidence is still an earned verdict here, exactly as it is there.
+  if ((PRESCRIPTIVE.has(action.kind) || action.kind === "hold") && evidence === "insufficient") {
+    action = investigateInstead({
+      foodSufficient: s.evidence.foodSufficient, weightSufficient: s.evidence.weightSufficient,
+      loggedToday: s.today.logged, daysSinceWeighIn: s.weight.daysSinceWeighIn,
+      doNotMention: p.doNotMention, dreamGoal: p.dreamGoal,
+    });
     evidence = evidenceFor(s, action.kind);
   }
 

@@ -475,7 +475,20 @@ const DURABLE_WRITE: Array<[string, RegExp]> = [
   // RAISE is as durable as the first report and owes the same next move (2026-08-27). Same anchor
   // discipline as water below: the verb is what keeps "TURN committed steps" out of this.
   ["steps", /(?:INSERT|UPDATE) steps/i],
-  ["workout", /INSERT workout/i], ["weight", /INSERT weight/i],
+  ["workout", /INSERT workout/i],
+  // WEIGHT IS AN UPDATE ON THE SECOND READING OF THE DAY (#203). #147 made the weigh-in write
+  // UPDATE the existing row rather than append when a client re-weighs on the same SAST day, and
+  // this pattern was never widened with it — so `UPDATE weight=87.4kg (was 88kg)` matched nothing,
+  // the turn read as "no durable write", and closeCoachingTurn returned before the decision owner.
+  // Traced on real PostgreSQL, one client, the same sentence twice:
+  //
+  //     first weigh-in of the day   INSERT weight=87.4kg  ->  "87.4kg — noted. 👌
+  //                                                            Tell me what you ate today…"
+  //     second, same day            UPDATE weight=87.4kg  ->  "87.4kg — noted. 👌"
+  //
+  // Same client, same words, same truth written, and coaching on only one of them. Same shape and
+  // same remedy as steps above and water below, which already carry their UPDATE verb.
+  ["weight", /(?:INSERT|UPDATE) weight/i],
   // Water is an UPDATE, not an INSERT — the day carries one running total rather than a row per
   // sip — so it needs its own pattern rather than sharing the INSERT shape (2026-08-26, #63).
   // Note the anchor: "TURN committed water", which this very function's caller writes back onto

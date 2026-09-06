@@ -117,6 +117,8 @@ export async function canonicalNextMove(
       hour: opts?.hour ?? 12,
       foodDayClosed: held.foodDayClosed,
       trainingDeclined: held.trainingDeclined,
+      // Same as morning's degraded branch (#203): the zeros above are placeholders for state this
+      // path could not build, so no investigation context is passed and the gate holds.
     }), { foodSufficient: false, weightSufficient: false, dreamGoal: client.dreamGoal });
     return {
       line: action.kind === "hold" ? "" : formatOneAction(action, firstName),

@@ -96,7 +96,7 @@ export async function canonicalDecision(user: any, message?: string, opts?: { ju
       lifeContext: user.lifeContext, doNotMention: user.doNotMention,
       weeksOnProgramme: Math.max(0, (user.programmeWeek || 1) - 1),
       daysSinceAnyLog: truth.today.kcal > 0 ? 0 : (truth.window.daysLogged > 0 ? 1 : 7),
-      daysSinceWeighIn: truth.weight.known ? 0 : null,
+      daysSinceWeighIn: truth.weight.daysSinceWeighIn,
       loggedToday: truth.today.kcal > 0,
       proteinPct: protTarget > 0 ? truth.today.protein / protTarget : 1,
       caloriePct: calTarget > 0 ? truth.today.kcal / calTarget : 1,
@@ -127,7 +127,13 @@ export async function canonicalDecision(user: any, message?: string, opts?: { ju
          // decision: the proactive side reads a stall verdict this path never computes, so
          // passing anything but false would be inventing evidence. It means a client with a
          // usable weight trend and a thin food log is still held on this path.
-         weightSufficient: false, dreamGoal: user.dreamGoal });
+         weightSufficient: false, dreamGoal: user.dreamGoal,
+         // …AND WHAT THE GATE NEEDS TO ASK INSTEAD OF HOLDING (#203). Three facts this call site
+         // already computed for the DayState above; without them a sparse client's prescription
+         // collapsed to a receipt with no next move at all.
+         loggedToday: truth.today.kcal > 0,
+         daysSinceWeighIn: truth.weight.daysSinceWeighIn,
+         doNotMention: user.doNotMention });
 
     // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,
     // so it can tell a model reply that CARRIES the decision from one that invented its own.

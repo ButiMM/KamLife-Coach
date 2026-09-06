@@ -4361,12 +4361,42 @@ test("cut8: the decision stands down before the mouth ever has to", () => {
   assert.ok(/const scaleIsOffLimits = mentionsForbidden\("weight scale weigh", s\.doNotMention\)/.test(code),
     "the weigh ask is never chosen");
   assert.ok(/!scaleIsOffLimits && \(\(neverWeighed/.test(code), "…in the ordering itself");
-  assert.ok(/&& !mentionsForbidden\("weight scale weigh", p\.doNotMention\)/.test(code),
-    "…and in the verdict downgrade, which reaches askToWeigh by a second route");
+  // …AND IN THE VERDICT DOWNGRADE, WHICH REACHES askToWeigh BY A SECOND ROUTE.
+  //
+  // This used to grep for `mentionsForbidden("weight scale weigh", p.doNotMention)` in this file.
+  // #203 lifted that downgrade out of decideProactive into one ladder both paths call, so the
+  // guard now reads `ctx.doNotMention` — same guard, same rule, a different local name. Restoring
+  // the old string would preserve a stale shape instead of the promise, so the OUTCOME is asserted
+  // in its own test below: it survives the move, and it would also catch a guard deleted rather
+  // than renamed, which the grep never could.
+  assert.ok(/mentionsForbidden\("weight scale weigh"/.test(code), "the downgrade consults the boundary");
   // And the fact has to actually arrive: morning carries it into the profile it decides from.
   const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
   assert.equal((morning.match(/doNotMention: client\.doNotMention/g) || []).length, 3,
     "all three decision call sites in morning carry it");
+});
+
+test("cut8: the verdict downgrade never asks for a scale the client ruled out", async () => {
+  const { chooseAction, underPolicy } = await import("../server/one-action");
+  // Sparse, and never weighed: exactly the conditions under which the downgrade reaches the scale.
+  const state: any = {
+    goal: "fat_loss", weeksOnProgramme: 5, daysSinceAnyLog: 1, daysSinceWeighIn: null,
+    loggedToday: true, proteinPct: 1, caloriePct: 1, sessionsThisWeek: 0, sessionsTarget: 3,
+    stepsToday: 8000, stepsTarget: 8000, hour: 14, atKeyboard: true,
+  };
+  const thin = {
+    foodSufficient: false, weightSufficient: false, dreamGoal: null,
+    loggedToday: true, daysSinceWeighIn: null as number | null,
+  };
+  const raw = chooseAction({ ...state, doNotMention: null });
+  // THE CONTROL FIRST. Without the boundary this state DOES reach the scale, so the refusal below
+  // is a refusal rather than an accident of the fixture.
+  assert.equal(underPolicy(raw, { ...thin, doNotMention: null }).kind, "weigh",
+    "the downgrade should reach the scale for a never-weighed sparse client");
+  const banned = underPolicy(chooseAction({ ...state, doNotMention: "weight" }),
+    { ...thin, doNotMention: "weight" });
+  assert.notEqual(banned.kind, "weigh",
+    `the downgrade asked a client who ruled out the scale to weigh: "${banned.todo}"`);
 });
 
 // ── CUT 9: ONE FOOD-CONSTRAINT OWNER, AND THE WEIGHT REPORTS HONOUR THE COLUMN ──────────────

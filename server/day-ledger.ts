@@ -16,7 +16,7 @@ import { mealLogs, stepLogs, users, workoutLogs, weightLogs } from "../shared/sc
 import { and, eq, gte, lt, desc, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { sastDayStart, sastToday } from "./utils";
-import { sastDayKey } from "./sast";
+import { sastDayKey, sastDaysBetween } from "./sast";
 import { foldLedgerRows, freshTodayWater, foldWindowRows, weightChangeKg, summariseProvenance,
   type DayLedger, type LedgerRow, type WindowTotals, type FoodProvenance, daysOnProgramme } from "./day-ledger-core";
 import { estimateCarbsFat } from "./macro-estimate";
@@ -435,6 +435,20 @@ export interface ProgressWeight {
   toGoalKg: number | null;
   /** Days between the first and last weigh-in. 0 when there are fewer than two. */
   spanDays: number;
+  /**
+   * WHOLE SAST DAYS SINCE THE LATEST WEIGH-IN. null when this client has never weighed, when the
+   * scale is withheld, or when the newest row carries no usable instant — all three mean "we hold
+   * no recent reading", which is what a caller must fail closed on.
+   *
+   * IT IS HERE BECAUSE `known` WAS BEING READ AS RECENCY (#203). `known` answers "can a CHANGE be
+   * computed" — two points at different values — and callers were passing
+   * `known ? 0 : null` as days-since-weigh-in. Both directions were wrong: a client who weighed
+   * this morning for the first time read as never-weighed, and two readings from a fortnight ago
+   * read as weighed today. That was survivable while it only tinted a sentence; #203 turned it
+   * into customer-facing investigation policy — whether we ask someone to stand on a scale — so
+   * the real figure is computed once, here, from the rows this function has already read.
+   */
+  daysSinceWeighIn: number | null;
   /** Every weigh-in in the window, oldest first. Empty when withheld. For a chart or a trend. */
   points: Array<{ kg: number; at: Date }>;
 }
@@ -539,7 +553,7 @@ export async function getWeightTruth(
   // still leave the rows one careless destructure away from a caller; not asking is the honest
   // shape of standing down, and it is cheaper.
   if (withheld) {
-    return { known: false, currentKg: null, changeKg: null, withheld: true, startKg: null, toGoalKg: null, spanDays: 0, points: [] };
+    return { known: false, currentKg: null, changeKg: null, withheld: true, startKg: null, toGoalKg: null, spanDays: 0, daysSinceWeighIn: null, points: [] };
   }
 
   const rows = await db.select({ weight: weightLogs.weight, at: weightLogs.loggedAt })
@@ -553,6 +567,13 @@ export async function getWeightTruth(
 
   const change = weightChangeKg(rows as Array<{ weight: unknown }>);
   const latest = points.length ? points[points.length - 1].kg : NaN;
+  // A ROW CAN CARRY A WEIGHT AND NO USABLE INSTANT. `points` only ever filtered on the kg, so a
+  // missing or unparseable `loggedAt` survives as an Invalid Date — harmless while nothing read
+  // it, fatal the moment a SAST helper does (`toISOString` throws RangeError). Recency below is
+  // graded on this, not on `points.length`, so an unusable timestamp reads as "I do not know when"
+  // rather than taking the whole progress read down with it.
+  const latestAt = points.length ? points[points.length - 1].at : null;
+  const latestAtUsable = latestAt !== null && Number.isFinite(latestAt.getTime());
   const spanDays = points.length >= 2
     ? Math.max(1, Math.round((points[points.length - 1].at.getTime() - points[0].at.getTime()) / 86_400_000))
     : 0;
@@ -572,6 +593,9 @@ export async function getWeightTruth(
 
   return {
     known: change !== null,
+    // The newest row this read returned, in whole SAST days — the same day boundary every other
+    // temporal fact in this product uses.
+    daysSinceWeighIn: latestAtUsable ? sastDaysBetween(latestAt as Date) : null,
     currentKg: Number.isFinite(latest) ? latest : null,
     changeKg: change,
     withheld: false,

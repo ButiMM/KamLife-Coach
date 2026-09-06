@@ -155,6 +155,12 @@ jobs:
       # shadow door. Neither is expressible on a fixture that answers every query the same way.
       - name: One weight-direction authority on real PostgreSQL
         run: npx tsx script/pg-weight-authority-acceptance.ts
+      # A SPARSE CLIENT IS COACHED, NOT JUST RECEIPTED (#203). Every decision here is computed
+      # from rows — how many days carry a meal, whether one carries TODAY, how stale the weigh-in
+      # is, and whether a same-day re-weigh updates or inserts. None of that is expressible on a
+      # fixture that answers every query the same way.
+      - name: Thin-evidence coaching on real PostgreSQL
+        run: npx tsx script/pg-thin-evidence-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot

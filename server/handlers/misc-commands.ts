@@ -882,7 +882,7 @@ export async function handleMiscCommands(ctx: {
           dreamGoal: user.dreamGoal, biggestStruggle: user.biggestStruggle, lifeContext: user.lifeContext,
           doNotMention: user.doNotMention,
           daysSinceAnyLog: truth.today.kcal > 0 ? 0 : (truth.window.daysLogged > 0 ? 1 : 7),
-          daysSinceWeighIn: truth.weight.known ? 0 : null, loggedToday: truth.today.kcal > 0,
+          daysSinceWeighIn: truth.weight.daysSinceWeighIn, loggedToday: truth.today.kcal > 0,
           proteinPct: protTarget > 0 ? truth.today.protein / protTarget : 1,
           caloriePct: calTarget > 0 ? truth.today.kcal / calTarget : 1,
           sessionsThisWeek: truth.sessions, sessionsTarget: Number(user.trainingDaysPerWeek) || 3,
@@ -893,7 +893,11 @@ export async function handleMiscCommands(ctx: {
          // decision: the proactive side reads a stall verdict this path never computes, so
          // passing anything but false would be inventing evidence. It means a client with a
          // usable weight trend and a thin food log is still held on this path.
-         weightSufficient: false, dreamGoal: user.dreamGoal });
+         weightSufficient: false, dreamGoal: user.dreamGoal,
+         // The same three facts this call site already computed above (#203).
+         loggedToday: truth.today.kcal > 0,
+         daysSinceWeighIn: truth.weight.daysSinceWeighIn,
+         doNotMention: user.doNotMention });
         return `*${name} — last 7 days*\n\n💪 Sessions: *${truth.sessions}*\n📋 Days logged: *${truth.window.daysLogged}/7*\n🔥 Avg: *${truth.window.avgKcal} kcal* · *${truth.window.avgProtein}g* protein\n👟 Avg steps: *${truth.avgSteps.toLocaleString()}*${weightLine}\n\n*${act.todo}*`;
       }
       const todayLine = truth.today.kcal > 0
