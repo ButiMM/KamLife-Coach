@@ -63,7 +63,9 @@ import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable,
  *
  * rather than the model deciding in prose and a verifier trying to work out what it decided.
  */
-export async function canonicalDecision(user: any, message?: string, opts?: { justAteProteinMeal?: boolean }): Promise<{ todo: string; kind: string; reply: string }> {
+export async function canonicalDecision(
+  user: any, message?: string, opts?: { justAteProteinMeal?: boolean },
+): Promise<{ todo: string; kind: string; reply: string; day: { kcal: number; kcalTarget: number } | null }> {
   try {
     // ONE CONSTITUTION (2026-08-21). This called theNextMove(), a SECOND ranked ladder —
     // training → protein → calories → steps → scale — that produced "the one thing to do" from
@@ -153,8 +155,17 @@ export async function canonicalDecision(user: any, message?: string, opts?: { ju
 
     // "hold" means the honest answer is that nothing needs changing. An empty todo is what
     // tellDontAsk expects in that case, and it is what the old ladder returned too.
-    return { todo: act.kind === "hold" ? "" : act.todo, kind: act.kind, reply: rendered };
-  } catch { return { todo: "", kind: "hold", reply: "" }; }
+    //
+    // `day` CARRIES OUT WHAT THIS FUNCTION ALREADY READ (#207) and used to throw away. The
+    // durable-turn author needs to know whether the plate it is acknowledging put the client over
+    // for the day — a 2 445 kcal dinner against a 1 200 kcal target read "Got it 👌" purely
+    // because that fact stopped at this boundary. No extra query: these are the same two numbers
+    // the caloriePct above is computed from.
+    return {
+      todo: act.kind === "hold" ? "" : act.todo, kind: act.kind, reply: rendered,
+      day: { kcal: truth.today.kcal, kcalTarget: calTarget },
+    };
+  } catch { return { todo: "", kind: "hold", reply: "", day: null }; }
 }
 
 /** The string form, for the callers that only append it. */
@@ -623,35 +634,108 @@ export async function runMeaningEngineLive(ctx: {
 }
 
 /**
- * CLOSE A COACHING TURN: a durable write is followed by ONE next move (2026-08-26, issue #63).
+ * CLOSE A COACHING TURN: a durable write becomes ONE coaching turn (2026-08-26 #63; #207).
  *
  * Lives here, beside canonicalDecision, because it is the decision owner's own last step — the
  * decision APPLIED to a turn that just wrote. routes.ts keeps a one-line closure over it so every
  * exit calls the same thing; the router is not where this reasoning belongs.
  *
  * Only a turn that DURABLY WROTE earns a move, and the turn's own mutation record answers that —
- * not what was composed. A question or a chat turn is not a coaching moment. Whether the reply
- * already owns the client's next action is asked ONCE, inside withNextMove, which is the policy
- * owner; asking it here too would cost what this repo keeps paying for, two copies of one rule.
+ * not what was composed. A question or a chat turn is not a coaching moment.
  *
- * Rationale, measurements and both-ways grading: script/tracking-contract-tests.ts, LAW 4.
+ * WHAT #207 CHANGED, AND WHY. This used to do exactly one thing: hand the reply and the todo to
+ * withNextMove, which concatenated them across a blank line. That is two authors — a handler that
+ * knows the client's words and nothing else, and a ladder that knows day state and nothing about
+ * the event — and the customer read both. Traced on real PostgreSQL, one client, one day:
+ *
+ *     "two eggs and toast for breakfast"  ->  "Got it — Eggs toast. 👌"
+ *                                             "Start tomorrow with protein — eggs … at breakfast."
+ *     "walked 9000 steps"                 ->  the same instruction, stapled to a step count
+ *     "87.4kg this morning"               ->  the same instruction, a third time
+ *
+ * Three fixes, all through owners that already exist:
+ *
+ *   1. THE SAME MOVE IS NOT REISSUED. isDuplicateOutbound is this product's stated rule that
+ *      "saying the same words twice in ten minutes is never the right outcome". The stapled move
+ *      escaped it only because the acknowledgement around it differed, so it is consulted here on
+ *      the move itself, in the same window, through the same map. No second history engine.
+ *   2. THE TURN HAS ONE AUTHOR. When the reply in hand is nothing but the bare receipt this
+ *      turn's own author wrote — compared as an exact string, recorded by the handler that wrote
+ *      it — that author is asked again, this time holding the decision and the canonical day
+ *      facts, and composes ONE line. Anything richer keeps the existing append path untouched.
+ *   3. A PLATE WE JUST TOLD THEM TO CHANGE IS NOT A WIN. justAteProteinMeal is grams alone, and a
+ *      bunny chow clears the bar, so one message said "go bean or chicken over mutton — leaner"
+ *      and then "that's one proper protein down — start tomorrow the same way".
+ *
+ * chooseAction remains the sole owner of WHAT the client should do. Nothing here selects, ranks
+ * or invents an action; the move arrives decided and is phrased beside the event.
+ *
+ * Rationale, measurements and both-ways grading: script/tracking-contract-tests.ts, LAW 4, and
+ * script/pg-log-turn-acceptance.ts.
  */
 export async function closeCoachingTurn(user: any, message: string, reply: string | null): Promise<string> {
   const out = String(reply ?? "");
-  const { turnMutations } = await import("../handlers/chat-log");
+  const { turnMutations, turnReceipt, turnPlateNeedsChange } = await import("../handlers/chat-log");
   const { durableDomains, proteinWrittenIn } = await import("./messy-intake");
-  const { withNextMove } = await import("../reply-hygiene");
+  const { withNextMove, ownsNextAction, neverSilentLine, isDuplicateOutbound } = await import("../reply-hygiene");
   const { PROPER_PROTEIN_G } = await import("../macro-card-attach");
   const mutations = turnMutations();
   const wrote = durableDomains(mutations);
   if (!out || wrote.length === 0) return out;
   // THE PLATE THIS TURN JUST WROTE, off the same record `wrote` was read from. PROPER_PROTEIN_G
   // is the card's number, named once, so "did they just eat a proper protein meal" cannot mean
-  // one thing on the picture and another in the text.
+  // one thing on the picture and another in the text — AND NOT A PLATE THIS TURN ALREADY TOLD
+  // THEM TO CHANGE (#207), which is the existing street-dish verdict, not a new nutrition rule.
+  const protein = proteinWrittenIn(mutations);
+  const plateNeedsChange = turnPlateNeedsChange();
   const decided = await canonicalDecision(user, message, {
-    justAteProteinMeal: proteinWrittenIn(mutations) >= PROPER_PROTEIN_G,
+    justAteProteinMeal: protein >= PROPER_PROTEIN_G && !plateNeedsChange,
   }).catch(() => ({ todo: "" } as any));
-  const next = withNextMove(out, String(decided?.todo || ""));
-  if (next !== out) console.log(`[COACH_TURN] appended one next move after ${wrote.join("+")}`);
+
+  const move = String(decided?.todo || "").trim();
+  // ASKED ONLY WHEN IT WOULD ACTUALLY GO OUT, so a move the reply already owns is never recorded
+  // as delivered. The key is namespaced off the client's id AND the move: the same map, the same
+  // ten minutes, a slot per instruction. Keying on the client alone holds only the LAST thing
+  // said, which the day trace caught — breakfast got the protein instruction, lunch replaced it
+  // with a different one, and the weigh-in two minutes later reissued the first verbatim.
+  //
+  // AND AN EVENT IN THE MOVE'S OWN DOMAIN RE-EARNS IT. Suppressing on the text alone was wrong:
+  // a client told to make their next meal a protein one, who then logs a second low-protein meal,
+  // has eaten again and needs telling again. `wrote` is this turn's durable domains and
+  // ACTION_DOMAIN says which one the move turns on — a meal re-earns a food move, a step count
+  // does not. An existing acceptance control caught this; it is not a hypothetical.
+  const { ACTION_DOMAIN } = await import("../one-action");
+  const movesGround = ACTION_DOMAIN[decided?.kind as keyof typeof ACTION_DOMAIN];
+  const reEarned = !!movesGround && wrote.includes(movesGround);
+  const wouldDeliver = !!move && !ownsNextAction(out.trim());
+  // THE SLOT IS ALWAYS CONSULTED, and the verdict is ignored only when the move was re-earned.
+  // Short-circuiting on `reEarned` instead looks equivalent and is not: isDuplicateOutbound
+  // records on a MISS, so skipping the call on the very first delivery left the slot empty and
+  // the next event re-issued the instruction anyway. The acceptance caught that too.
+  //
+  // It records on a miss and does not refresh on a hit, so the window runs from the first
+  // delivery rather than the latest — an instruction re-earned three times becomes sayable again
+  // ten minutes after it was first given, which is the behaviour that module already documents.
+  const seenInWindow = wouldDeliver && isDuplicateOutbound(`${user?.id}::next::${move}`, move);
+  const alreadyDelivered = seenInWindow && !reEarned;
+  const moveToUse = alreadyDelivered ? "" : move;
+  if (alreadyDelivered) console.log(`[COACH_TURN] MOVE=  (already delivered this window, not reissued after ${wrote.join("+")})`);
+
+  const receipt = turnReceipt();
+  if (receipt && out.trim() === String(receipt.line || "").trim()) {
+    const one = neverSilentLine(receipt.kind as any, {
+      label: receipt.label, amount: receipt.amount, carryingShame: receipt.carryingShame,
+      move: moveToUse || null, moveKind: decided?.kind || null,
+      wroteProtein: protein || null, day: decided?.day ?? null, plateNeedsChange,
+    });
+    // The move is NAMED in the marker, not merely counted. One author now composes the whole
+    // turn, so "did this reply carry an instruction" can no longer be answered by looking for a
+    // trailing block — in the log, or in a test. What we told them is the fact worth recording.
+    console.log(`[COACH_TURN] MOVE=${moveToUse} (one author closed ${wrote.join("+")})`);
+    return one;
+  }
+
+  const next = withNextMove(out, moveToUse);
+  console.log(`[COACH_TURN] MOVE=${next !== out ? moveToUse : ""} (appended after ${wrote.join("+")})`);
   return next;
 }

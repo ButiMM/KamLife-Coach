@@ -78,19 +78,16 @@ async function trace(label: string, phone: string, text: string) {
   const reply = String(await handleMessage(
     phone, text, undefined, undefined, undefined, `SM-${Math.random().toString(36).slice(2, 9)}`) || "");
   const writes = captured.filter(l => MUT.test(l)).map(l => l.trim());
-  const appended = captured.find(l => l.includes("[COACH_TURN]")) || "";
-  // The append shape is a constant in reply-hygiene: `${prose}\n\n${move}.`
-  const stapled = appended ? reply.split("\n\n").slice(-1)[0] : "";
-  const prose = appended ? reply.split("\n\n").slice(0, -1).join("\n\n") : reply;
+  // The close states which shape it used, so this reports what happened rather than inferring it
+  // from a blank line the composed turn no longer contains.
+  const closed = captured.find(l => l.includes("[COACH_TURN]")) || "";
 
   REAL(`\n${"─".repeat(94)}\n${label}`);
   REAL(`  client words     ${JSON.stringify(text)}`);
   REAL(`  durable writes   ${writes.length ? writes.join("\n                   ") : "(none)"}`);
-  REAL(`  coach-turn       ${appended ? appended.trim() : "(withNextMove changed nothing — no append)"}`);
-  REAL(`  handler prose    ${JSON.stringify(prose)}`);
-  REAL(`  stapled move     ${stapled ? JSON.stringify(stapled) : "(none)"}`);
+  REAL(`  close            ${closed ? closed.replace(/^\s*\[COACH_TURN\]\s*/, "").trim() : "(no close — nothing durable, or the reply already owns NEXT)"}`);
   REAL(`  FINAL REPLY      ${JSON.stringify(reply)}`);
-  return { reply, prose, stapled, writes, appended };
+  return { reply, writes, closed };
 }
 
 REAL("=".repeat(94));

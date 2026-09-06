@@ -145,6 +145,24 @@ interface TurnScope {
     /** The CoachAction the meaning engine emitted this turn, when it emitted one. Structured
      *  provenance — checked BEFORE the prose backstop. */
     structuredAction?: string | null;
+    /**
+     * THE BARE RECEIPT THIS TURN'S OWN AUTHOR WROTE (#207), and the facts it wrote it from.
+     *
+     * closeCoachingTurn needs one thing that is otherwise unknowable at the end of a turn: is the
+     * reply in hand nothing but neverSilentLine's fallback line? If it is, the same author can be
+     * asked again — this time holding the canonical decision — and compose ONE coherent turn
+     * instead of having a move stapled after a blank line. If the handler wrote anything richer
+     * (a workout card, street-food advice) the string will not match and the existing append path
+     * runs untouched. `line` is COMPARED, never re-parsed.
+     */
+    receipt?: { line: string; kind: string; label?: string; amount?: string; carryingShame?: boolean } | null;
+    /**
+     * THIS TURN ALREADY TOLD THE CLIENT TO CHANGE THE PLATE (#207). Set by the existing street-dish
+     * evaluation when its verdict is anything but a clean win. Without it one message could say
+     * "go bean or chicken bunny over mutton — leaner" and, four blocks later, "that's one proper
+     * protein down — start tomorrow the same way": change this, and repeat this.
+     */
+    plateNeedsChange?: boolean;
   };
 }
 
@@ -575,6 +593,14 @@ export function turnEvidence(facts: NonNullable<TurnScope["evidence"]>): void {
   const t = turnStore.getStore();
   if (!t) return;
   t.evidence = { ...(t.evidence || {}), ...facts };
+}
+
+/** WHAT THIS TURN RECORDED FOR THE DURABLE-LOG CLOSE (#207). Read once, by closeCoachingTurn. */
+export function turnReceipt(): NonNullable<TurnScope["evidence"]>["receipt"] {
+  return turnStore.getStore()?.evidence?.receipt ?? null;
+}
+export function turnPlateNeedsChange(): boolean {
+  return !!turnStore.getStore()?.evidence?.plateNeedsChange;
 }
 
 export async function recordTurn(reply: string): Promise<void> {

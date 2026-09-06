@@ -17,7 +17,7 @@ import { db } from "../db";
 import { mealLogs, chatHistory, users } from "../../shared/schema";
 import { eq, and, gte, sql, desc, inArray, isNotNull } from "drizzle-orm";
 import { sastDayStart, sastToday } from "../utils";
-import { turnMutation } from "./chat-log";
+import { turnMutation, turnEvidence } from "./chat-log";
 import { isBareReaction, isDiagnosticQuestion, bareReactionFallback } from "../reaction-guard";
 
 // ── Per-user in-memory cache for recomputeTodayFoodTotals ──────────────────
@@ -1009,7 +1009,12 @@ export async function buildFoodLogReply(p: {
     ? `${bareNames.slice(0, -1).join(", ")} and ${bareNames[bareNames.length - 1]}`
     : bareNames[0] || "";
   const label = hidden > 0 ? `${bareNames.join(", ")} and ${hidden} more` : joined;
-  const line = neverSilentLine("meal", { label, carryingShame: carriesFeelingClause(p.userMessage || "") });
+  const carryingShame = carriesFeelingClause(p.userMessage || "");
+  const line = neverSilentLine("meal", { label, carryingShame });
+  // The receipt, recorded for the durable-log close (#207) — see steps.ts. Recorded BEFORE the
+  // retro clause below, because a reply carrying "logged for yesterday" is no longer the bare
+  // line and must keep the existing append path rather than being recomposed.
+  turnEvidence({ receipt: { line, kind: "meal", label, carryingShame } });
   // The retro day is a FACT the client needs — logging to the wrong day is the one error they
   // cannot see. It rides as a clause, not as a second sentence.
   return p.isRetro ? line.replace(/\.\s*👌$/, " — logged for yesterday. 👌") : line;

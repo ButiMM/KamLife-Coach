@@ -68,14 +68,14 @@ async function turn(phone: string, text: string) {
   const reply = String(await handleMessage(
     phone, text, undefined, undefined, undefined, `SM-${Math.random().toString(36).slice(2, 9)}`) || "");
   const writes = captured.filter(l => MUT.test(l)).map(l => l.trim().replace(/user=\S+ /, ""));
-  const appended = captured.some(l => l.includes("[COACH_TURN]"));
-  const move = appended ? reply.split("\n\n").slice(-1)[0] : "";
-  const prose = appended ? reply.split("\n\n").slice(0, -1).join("\n\n") : reply;
+  // The close now leaves its own marker saying WHICH shape it used, so this reports what happened
+  // rather than inferring it from a blank line the composed turn no longer contains.
+  const marker = captured.find(l => l.includes("[COACH_TURN]")) || "(no close)";
   REAL(`\n  ▸ ${JSON.stringify(text)}`);
   REAL(`      wrote  ${writes.join(" ; ") || "(nothing durable)"}`);
-  REAL(`      ack    ${JSON.stringify(prose)}`);
-  REAL(`      move   ${move ? JSON.stringify(move) : "(no append)"}`);
-  return move;
+  REAL(`      close  ${marker.replace(/^\s*\[COACH_TURN\]\s*/, "").trim()}`);
+  REAL(`      REPLY  ${JSON.stringify(reply)}`);
+  return reply;
 }
 
 REAL("=".repeat(94));
@@ -95,7 +95,7 @@ moves.push(await turn(a.phone, "pap and beef stew for dinner"));
 
 const nonEmpty = moves.filter(Boolean);
 const distinct = new Set(nonEmpty);
-REAL(`\n  moves appended: ${nonEmpty.length}   distinct: ${distinct.size}`);
+REAL(`\n  replies: ${nonEmpty.length}   distinct: ${distinct.size}`);
 for (const m of distinct) REAL(`    ${nonEmpty.filter(x => x === m).length}× ${JSON.stringify(m)}`);
 
 REAL("\n" + "─".repeat(94));
@@ -106,7 +106,7 @@ bm.push(await turn(b.phone, "walked 8000 steps today"));
 bm.push(await turn(b.phone, "87.4kg this morning"));
 bm.push(await turn(b.phone, "did my workout"));
 const bne = bm.filter(Boolean);
-REAL(`\n  moves appended: ${bne.length}   distinct: ${new Set(bne).size}`);
+REAL(`\n  replies: ${bne.length}   distinct: ${new Set(bne).size}`);
 for (const m of new Set(bne)) REAL(`    ${bne.filter(x => x === m).length}× ${JSON.stringify(m)}`);
 
 REAL(`\n${"=".repeat(94)}`);

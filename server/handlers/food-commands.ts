@@ -15,7 +15,7 @@ import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { getGroceryPersonalization } from "../grocery-personalize";
 import { scanForSAFoods } from "./food-scanner";
-import { logChat, withTimeout } from "./chat-log";
+import { logChat, withTimeout, turnEvidence } from "./chat-log";
 import { tryLogWater } from "./water";
 import { generateMealPlan } from "../meal-plan";
 import { answerSwapAsk } from "../food-swaps";
@@ -67,6 +67,12 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
     const streetHit = matchStreetDish(m);
     const g = streetHit ? formatStreetDish(streetHit, user.goalType || "fat_loss")
       : isStreetContext(m) ? streetGuide(user.goalType || "fat_loss") : null;
+    // WE JUST TOLD THEM TO ORDER IT DIFFERENTLY (#207). The dish's own verdict is the existing
+    // authoritative evaluation; anything short of a clean win means this turn's advice was
+    // "change it". Recorded so the decision owner cannot, later in the same message, celebrate
+    // the same plate as one proper protein down and tell them to repeat it tomorrow. This is a
+    // fact about what we SAID, not a new nutrition rule — the verdict is unchanged.
+    if (g && streetHit && streetHit.verdict !== "win") turnEvidence({ plateNeedsChange: true });
     if (g) { await logChat(user.id, message, g, "STREET_FOOD_GUIDE"); return g; }
   }
 
