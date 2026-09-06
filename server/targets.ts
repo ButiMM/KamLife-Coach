@@ -384,6 +384,34 @@ export function waterTargetLitres(weightKg?: number | string | null): number {
 }
 
 // ============================================================
+// BMI — computed from the weight they are, not the weight they were (#128, 2026-09-06).
+//
+// users.bmi is written at ONBOARDING and never again. handleWeightLog derives a BMI on every
+// weigh-in for the underweight safety gate and does not write it back, so the column freezes on
+// day one. Reproduced on a client who signed up at 102kg and has since lost 14kg:
+//
+//   stored  users.bmi = 32.2   →  "Your BMI is 32.2 — obese range."
+//                                 "Meaningful progress is possible. Stay on the programme."
+//   actual  88.0kg / 1.78m     =  27.8, overweight range
+//
+// Four and a half points, a whole category, and a sentence urging them towards progress they have
+// already made. grocery-refine.ts had it right all along — it computes from currentWeight and
+// height — which made two readers of one fact, one live and one frozen, and the client could meet
+// both. This is that computation, named once, and it is what every surface now asks.
+//
+// Pure. Returns null rather than a guess when the height or the weight is missing: a BMI invented
+// off a default 1.70m is a clinical-sounding number about somebody else.
+// ============================================================
+export function bmiOf(u: { currentWeight?: string | number | null; heightCm?: number | null } | null | undefined): number | null {
+  const kg = typeof u?.currentWeight === "string" ? parseFloat(u.currentWeight) : u?.currentWeight;
+  const cm = Number(u?.heightCm);
+  if (!Number.isFinite(kg as number) || (kg as number) <= 0) return null;
+  if (!Number.isFinite(cm) || cm <= 0) return null;
+  const m = cm / 100;
+  return Math.round(((kg as number) / (m * m)) * 10) / 10;
+}
+
+// ============================================================
 // STEP BURN — the ONE canonical walking-energy formula (2026-07-12, Kam: "we need to
 // be exactly precise… steps incorporated into [the deficit]"). Three call sites used to
 // disagree: the step logger and the "how much did I burn" answer scaled by body weight

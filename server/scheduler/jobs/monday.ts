@@ -76,7 +76,16 @@ export async function runMondayProgress(): Promise<void> {
       else if (foodLogs > 0) lines.push(`🍽️ ${foodLogs} meals logged. More logging = better coaching from me.`);
       if (stepDays >= 4) lines.push(`🚶 Steps logged ${stepDays} days — keep the movement up.`);
 
-      if (weights.length >= 2) {
+      // THE PROACTIVE MOUTH ASKS TOO (#128). Three surfaces consulted weightDirectionSpeakable
+      // and this one asserted "Down 1.2kg this week. Moving in the right direction." off two rows
+      // with no gate at all — sent unprompted, on a Monday, to a client the reactive doors would
+      // have refused. A client ill last week is exactly the one this reaches: they are not here to
+      // ask, so nothing else stands between the claim and their phone.
+      const { weightDirectionSpeakable } = await import("../../adaptive-targets");
+      const weekSpeech = await weightDirectionSpeakable(
+        [...weights].reverse().map(w => ({ at: new Date(w.loggedAt as any) })), client,
+      ).catch(() => ({ speakable: false }));
+      if (weights.length >= 2 && weekSpeech.speakable) {
         const diff = Number(weights[0].weight) - Number(weights[1].weight);
         const goal = client.goalType || "fat_loss";
         const mostRecentKg = Number(weights[0].weight);

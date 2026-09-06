@@ -7,7 +7,7 @@ import { TRIAL_DAYS, TRIALS_ENABLED, hasTrialedBefore, recordTrialGranted, flagS
 import { buildActivationBrief } from "./activation";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { buildFullProgramme, getKamlifeProgramme } from "./programme";
-import { calculateTargets, calculateStepsTarget } from "./targets";
+import { calculateTargets, calculateStepsTarget, bmiOf } from "./targets";
 import { looksLikeGoalAnswer, classifyGoalFromText } from "./goal-profiles";
 import { replyWithButtons } from "./twilio-interactive";
 import { askCoachK } from "./gpt";
@@ -321,7 +321,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
 
   const weightDisplay = u.currentWeight != null ? `\n*Weight:* ${actualWeight}kg` : "";
   const heightDisplay = u.heightCm != null ? ` · ${heightCm}cm` : "";
-  const bmiDisplay = u.bmi ? ` · BMI ${u.bmi}` : "";
+  const bmiDisplay = bmiOf(u) ? ` · BMI ${bmiOf(u)!.toFixed(1)}` : "";
 
   const refCodeLine = referralCode ? `\n\n🎁 *Your referral code: ${referralCode}* — share it. When a friend joins with it, *you get a free month.* They join at the normal R${PRICING.monthlyPriceZAR}, with the same ${GUARANTEE_PHRASE} — zero risk.` : "";
 

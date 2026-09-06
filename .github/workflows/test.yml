@@ -149,6 +149,12 @@ jobs:
       # how a menu with zero calls to the constraint owner looked fine.
       - name: Food constraints reach the plate and grocery mouths on real PostgreSQL
         run: npx tsx script/pg-food-constraint-mouths-acceptance.ts
+      # ONE ANSWER TO "WHICH WAY IS THE SCALE GOING" (#128). The verdict is computed from weigh-in
+      # ROWS — how many, how far apart, how recent — against an illness window in profile_notes,
+      # and the proactive half is graded on the message it actually sends, captured through the
+      # shadow door. Neither is expressible on a fixture that answers every query the same way.
+      - name: One weight-direction authority on real PostgreSQL
+        run: npx tsx script/pg-weight-authority-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot
