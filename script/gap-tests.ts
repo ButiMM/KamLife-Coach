@@ -2251,6 +2251,62 @@ test("food scan: a combo whose span is its own is untouched (both word orders)",
   assert.ok(scanNames("pap").some(n => /^pap/i.test(n)), "pap alone unaffected");
 });
 
+// THE SIBLING THE FIRST FIX WAS NEVER GRADED ON (#128). The pap case was pinned; the same shape
+// with RICE was not, and "Rice and chicken (home cooked)" carries the alias "rice and chicken",
+// which overlaps "chicken livers" exactly as "pap and chicken" did. Verified correct on current
+// main before this was written — this pins it so it stays that way rather than claiming a fix.
+test("food scan: 'rice and chicken livers' is the same borrowed-word case, in both orders", () => {
+  for (const said of ["rice and chicken livers", "chicken livers and rice"]) {
+    const names = scanNames(said);
+    assert.ok(names.includes("Chicken livers"), `the livers must survive "${said}": ${names.join(", ")}`);
+    assert.ok(names.some(n => /rice/i.test(n)), `the rice must survive "${said}": ${names.join(", ")}`);
+    assert.ok(!names.some(n => /^(?:rice and chicken|chicken and rice)/i.test(n)),
+      `a dish was assembled out of the livers' own word in "${said}": ${names.join(", ")}`);
+    const kcal = adjustFoodsForSegment(scanForSAFoods(said) as any, said)
+      .reduce((s: number, f: any) => s + f.adjustedCalories, 0);
+    assert.ok(kcal < 700, `one plate of rice and livers cannot be ${kcal} kcal — that is the double charge`);
+  }
+  // AND THE CONTROL, which is what stops the rule above being "delete the rice combo": with no
+  // third food borrowing its words, the dish is still the dish.
+  assert.deepEqual(scanNames("rice and chicken"), ["Chicken and rice"]);
+});
+
+// ── #128: THE PORTION THE CLIENT SAID ───────────────────────────────────────────────────────
+//
+// "half a gatsby" is how anyone says it, and the alias was matched as a literal — so the size word
+// was dropped, the generic entry won, and a client who ate HALF was logged the QUARTER portion at
+// 700 kcal instead of 910, under a name they did not say.
+test("food scan: a size the client stated survives the article after it", () => {
+  const portionOf = (said: string) => {
+    const hit = (scanForSAFoods(said) as any[])[0];
+    return hit ? { name: hit.name, kcal: hit.typicalPortionCalories } : null;
+  };
+  const spaced = portionOf("half gatsby");
+  const spoken = portionOf("half a gatsby");
+  assert.ok(spaced && /half/i.test(spaced.name), `"half gatsby" resolves to the half: ${spaced?.name}`);
+  assert.deepEqual(spoken, spaced, `"half a gatsby" must be the same food as "half gatsby"`);
+  assert.deepEqual(portionOf("the full gatsby"), portionOf("full gatsby"), "and the same for a full one");
+
+  // THE CONTROL, and it is the whole risk of this change: an article may be skipped, a JOIN may
+  // never be. If "and"/"with"/"of" were skippable, two foods would start reading as one dish.
+  assert.deepEqual(scanNames("rice and chicken"), ["Chicken and rice"], "a real join still joins");
+  const separate = scanNames("chicken with rice and spinach");
+  assert.ok(separate.length >= 2, `separate foods stay separate: ${separate.join(", ")}`);
+  // A bare mention is unchanged — this adds no new match, it only stops one being lost.
+  assert.deepEqual(portionOf("gatsby"), portionOf("a gatsby"), "an article before the dish changes nothing");
+});
+
+test("food scan: aliasPattern skips an article and nothing else", async () => {
+  const { aliasPattern } = await import("../server/handlers/food-scanner");
+  const re = (alias: string) => new RegExp(`\\b${aliasPattern(alias)}\\b`, "i");
+  assert.ok(re("half gatsby").test("i had half a gatsby"), "the article is skipped");
+  assert.ok(re("half gatsby").test("half gatsby"), "…and its absence still matches");
+  assert.ok(!re("half gatsby").test("half of a gatsby"), "'of' is not an article");
+  assert.ok(!re("pap and chicken").test("pap and the fried chicken"),
+    "a word that is not an article still blocks the match");
+  assert.ok(re("peanut butter on bread").test("peanut butter on the bread"), "works at any position");
+});
+
 test("food scan: every combo in the table still resolves to itself", () => {
   // CONTROL, deliberately exhaustive. The new pass sees every combo, so a rule that is subtly too
   // greedy would show up here rather than in production. These are the phrases the combos exist for.

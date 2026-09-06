@@ -112,6 +112,28 @@ export function escapeRegex(s: string): string {
 }
 
 /**
+ * AN ARTICLE IS NOT A DIFFERENT FOOD (#128).
+ *
+ * Aliases were matched as literals, so one small English word between the size and the dish threw
+ * the client's own portion away:
+ *
+ *   "half gatsby"    → Gatsby (half)   910 kcal, 42g protein
+ *   "half a gatsby"  → Gatsby          700 kcal, 30g protein   ← a QUARTER gatsby
+ *
+ * The second is how anyone actually says it. The entry that matched is the generic one, whose own
+ * portion description reads "quarter gatsby (250g)" — so a client who told us they ate half was
+ * logged a quarter, 210 kcal light, under the name of a portion they did not have. The same shape
+ * waits behind every multi-word alias in the seed; this is the matcher, so this is where it is
+ * fixed rather than in one dish's alias list.
+ *
+ * DELIBERATELY ONLY ARTICLES. "of", "with" and "and" are joins between FOODS — letting an alias
+ * skip those is how a scanner starts reading two dishes as one.
+ */
+export function aliasPattern(alias: string): string {
+  return alias.split(/\s+/).filter(Boolean).map(escapeRegex).join(String.raw`\s+(?:(?:a|an|the)\s+)?`);
+}
+
+/**
  * The serving COUNT implied by a portion description's leading number — used as
  * the divisor when a client states their own count ("3 eggs" → 3/2 portions).
  * Returns 1 when the leading number is a weight/volume, NOT a count: "150g
@@ -285,7 +307,7 @@ function finalizeMatches(matched: SAFood[], lower: string, aliases?: Map<string,
     const spanOf = (name: string): [number, number] | null => {
       const alias = aliases.get(name);
       if (!alias) return null;
-      const m = new RegExp(`\\b(?:na|ne|no|nga|nge|ka|le|ku|se|di|ma)?${escapeRegex(alias)}(?:es|s)?\\b`, "i").exec(lower);
+      const m = new RegExp(`\\b(?:na|ne|no|nga|nge|ka|le|ku|se|di|ma)?${aliasPattern(alias)}(?:es|s)?\\b`, "i").exec(lower);
       return m ? [m.index, m.index + m[0].length] : null;
     };
     const phantomCombos = new Set<string>();
@@ -407,7 +429,7 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
       // PLURAL-TOLERANT ("burgers") and PREFIX-TOLERANT: Nguni/Sotho fuse the linking
       // particle onto the noun, so "inkukhu NEPAPA" (chicken AND PAP) used to drop the pap.
       // The leading \b anchors it — an English word can't split into prefix + alias.
-      const re = new RegExp(`\\b(?:na|ne|no|nga|nge|ka|le|ku|se|di|ma)?${escapeRegex(alias)}(?:es|s)?\\b`, "i");
+      const re = new RegExp(`\\b(?:na|ne|no|nga|nge|ka|le|ku|se|di|ma)?${aliasPattern(alias)}(?:es|s)?\\b`, "i");
       if (re.test(lower) && alias.length > longestHit.length) {
         longestHit = alias;
       }
