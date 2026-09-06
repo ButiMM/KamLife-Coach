@@ -132,6 +132,50 @@ check(!loaded.profile.keyFacts.some(x => /invented|stale model/.test(x)), "store
 check(stored?.profile && (stored.profile as any).lifeStory === "newer narrative",
   "a slow revision-5 save cannot overwrite revision-6 understanding", JSON.stringify(stored?.profile));
 
+// §6 ONE BUBBLE, TWO SPEECH ACTS — AND THE FACT THE CLIENT TAKES BACK (#128/1).
+//
+// Graded on the durable column and on the line the coach is actually given, through the real front
+// door, because that is where both defects lived: a constraint stated alongside a question never
+// reached the column at all, and a retraction reached it as a BAN. The stub cannot say either —
+// only a real row can be read back after the turn.
+REAL("\n=== A CONSTRAINT, A QUESTION, AND A RETRACTION ===");
+const { factsLine } = await import("../server/memory");
+
+const phone2 = `whatsapp:+2797${String(Math.floor(Math.random() * 900000) + 100000)}`;
+await pool.query("DELETE FROM users WHERE phone_number = $1", [phone2]);
+const [client2] = await db.insert(schema.users).values({
+  phoneNumber: phone2, name: "Constraint Client", onboardingState: "COMPLETE",
+  subscriptionStatus: "active", popiConsent: true, popiConsentAt: new Date(),
+  goalType: "fat_loss", calorieTarget: 2200, proteinTarget: 140, stepsTarget: 8000,
+  trainingMode: "gym", trainingDaysPerWeek: 3, createdAt: new Date(), lastActiveAt: new Date(),
+} as any).returning();
+const read2 = async () => (await db.select().from(schema.users).where(eq(schema.users.id, client2.id)).limit(1))[0];
+
+await handleMessage(phone2, "I'm vegan now, what should I eat?", undefined, undefined, undefined, "SM-VEG-1");
+let c2 = await read2();
+check(/vegan/i.test(String(c2.dietaryRestrictions || "")),
+  "a constraint stated in the same bubble as the question is committed", String(c2.dietaryRestrictions));
+const bannedLine = await factsLine(phone2);
+check(/Does not eat[^\n]*vegan/i.test(bannedLine),
+  "…and the coach is told about it on the very next read", bannedLine.replace(/\n/g, " | "));
+
+await handleMessage(phone2, "I'm not vegan anymore", undefined, undefined, undefined, "SM-VEG-2");
+c2 = await read2();
+check(c2.dietaryRestrictions == null,
+  "the retraction clears the column instead of appending to it", String(c2.dietaryRestrictions));
+const afterLine = await factsLine(phone2);
+check(!/Does not eat/i.test(afterLine),
+  "…and the coach stops being told this person cannot eat meat", afterLine.replace(/\n/g, " | "));
+check(Number(c2.truthRevision) === 2, "both turns are ordered evidence", String(c2.truthRevision));
+
+// NEGATIVE CONTROL, on the same door: describing a plate is not withdrawing an allergy.
+await pool.query(`UPDATE users SET dietary_restrictions = 'allergic to fish' WHERE id = $1`, [client2.id]);
+await handleMessage(phone2, "I had chicken, not fish", undefined, undefined, undefined, "SM-VEG-3");
+c2 = await read2();
+check(String(c2.dietaryRestrictions || "") === "allergic to fish",
+  "a bare 'not fish' in a food log leaves the real allergy standing", String(c2.dietaryRestrictions));
+
+await pool.query("DELETE FROM users WHERE id = $1", [client2.id]);
 await pool.query("DELETE FROM users WHERE id = $1", [user.id]);
 REAL(`\npg-client-truth-acceptance: ${failed === 0 ? "GREEN — all checks passed" : `RED — ${failed} check(s) failed`}`);
 await pool.end();

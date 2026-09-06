@@ -234,6 +234,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { looksLikeQuestion, isFutureIntent } from "./utils";
 import { foodConstraints } from "./food-swaps";
 
+export type DurableFactField =
+  "injuries" | "medicalConditions" | "dietaryRestrictions" | "lifeContext" | "doNotMention" | "workSchedule";
+
 export interface DurableFacts {
   injuries?: string;
   medicalConditions?: string;
@@ -241,10 +244,70 @@ export interface DurableFacts {
   lifeContext?: string;
   doNotMention?: string;
   workSchedule?: string;
+  /**
+   * WHAT THE CLIENT JUST TOOK BACK — a value to REMOVE from the column, not one to store.
+   *
+   * Without this the detector only had one verb. "I'm not vegan anymore" was written into
+   * dietary_restrictions verbatim, and every food owner greps the column for the bare word:
+   * foodConstraints turned "not vegan anymore" into vegan + vegetarian + no dairy + no fish and
+   * said "Does not eat: vegan, vegan anymore" back to a client who had just told us the ban was
+   * over. Suppressing the assert is not enough either, because the column may already hold the
+   * fact from the day they adopted it — the sentence has to be able to undo it.
+   */
+  retract?: Partial<Record<DurableFactField, string>>;
 }
 
 /** Body parts we can actually train around — the vocabulary programme.ts already filters on. */
 const BODY_PART = /\b(knee|back|shoulder|hip|ankle|wrist|elbow|neck|groin|hamstring|calf|foot|heel)\b/i;
+
+/**
+ * THE RESTRICTION VOCABULARY, ONCE. The assert branch below already whitelists these words; the
+ * retraction has to speak the same language or it can only undo half of what it can create.
+ * Written as source strings rather than regex literals so the two readings stay one list.
+ */
+const RESTRICTION_WORD = String.raw`lactose intolerant|gluten.?free|dairy.?free|vegan|vegetarian`
+  + String.raw`|pescatarian|halaal|halal|kosher|lactose|gluten|dairy|peanuts?|nuts?|shellfish`
+  + String.raw`|seafood|eggs?|pork|beef|fish`;
+
+/**
+ * A RESTRICTION THE CLIENT IS TAKING BACK.
+ *
+ * Anchored on a first-person identity or an explicit undoing verb, never on a bare "not X" —
+ * "I had chicken, not fish" and "I'm having chicken not fish" must not wipe a real fish allergy,
+ * so the negation has to attach to the copula ("I'm not …"), to a past self ("I used to be …"),
+ * to a stopping verb, or carry "anymore" itself. "I'm not eating dairy" is deliberately NOT here:
+ * that is the restriction, stated in the negative, and belongs to the assert branch.
+ */
+const RESTRICTION_RETRACTED_RE = new RegExp(
+  String.raw`\b(?:i'?m|i\s+am|im)\s+(?:not|no\s+longer)\s+(?:really\s+|strictly\s+|a\s+)*`
+  + String.raw`(?:allergic\s+to\s+|intolerant\s+(?:to|of)\s+)?(${RESTRICTION_WORD})\b`
+  + String.raw`|\bi\s+(?:used\s+to\s+be|was)\s+(?:a\s+)?(${RESTRICTION_WORD})\b`
+  + String.raw`|\bi\s+(?:stopped|quit|gave\s+up)\s+(?:being\s+)?(?:a\s+)?(${RESTRICTION_WORD})\b`
+  + String.raw`|\bi\s+can\s+eat\s+(${RESTRICTION_WORD})\s+(?:again|now)\b`
+  + String.raw`|\b(?:not|no\s+longer)\s+(?:a\s+)?(${RESTRICTION_WORD})\s*(?:any\s?more)\b`,
+  "i");
+
+/**
+ * ONE BUBBLE IS NOT ONE SPEECH ACT.
+ *
+ * The guards below are right — a question or a plan must not rewrite a programme — but they were
+ * asked about the WHOLE message, and looksLikeQuestion is true if a "?" appears anywhere. So the
+ * most natural thing a client does on WhatsApp, state a constraint and ask the one useful question
+ * in the same breath, committed nothing at all:
+ *
+ *   "I'm vegan now, what should I eat?"        → {}
+ *   "I can't eat dairy, what can I eat?"       → {}
+ *   "my knee is killing me, what should I train?" → {}
+ *
+ * Drop the "?" and each one commits. The fix is not to weaken the guard, it is to ask it about the
+ * clause it belongs to: the question guard now judges the clause that is a question, and the
+ * report in front of it is still a report. Terminators are kept with their clause because the "?"
+ * IS the evidence.
+ */
+function clausesOf(raw: string): string[] {
+  const parts = (raw.match(/[^,.!?;\n]+[.!?;]?/g) || []).map(s => s.trim()).filter(Boolean);
+  return parts.length ? parts : [raw];
+}
 
 /**
  * WHAT THE CLIENT JUST TOLD US ABOUT THEMSELVES, AS FIELDS. Pure — no database, no model.
@@ -252,8 +315,32 @@ const BODY_PART = /\b(knee|back|shoulder|hip|ankle|wrist|elbow|neck|groin|hamstr
  * Deliberately narrow. Every one of these is written into a column the coach ACTS on, so a false
  * positive is not noise, it is a programme built around an injury the client does not have. The
  * old prose detectors could afford to be loose because nothing read them.
+ *
+ * Each clause is read on its own terms and the first clause to answer a field owns it; a
+ * retraction anywhere in the bubble wins over an assertion of the same field, because the client
+ * saying "not anymore" is the newer statement about themselves.
  */
 export function detectFacts(message: string): DurableFacts {
+  const whole = (message || "").trim();
+  if (!whole) return {};
+  const merged: DurableFacts = {};
+  const retract: Partial<Record<DurableFactField, string>> = {};
+  for (const clause of clausesOf(whole)) {
+    const found = detectInClause(clause);
+    for (const [k, v] of Object.entries(found)) {
+      if (k === "retract") continue;
+      if (v && merged[k as DurableFactField] === undefined) merged[k as DurableFactField] = v as string;
+    }
+    for (const [k, v] of Object.entries(found.retract || {})) {
+      if (v && retract[k as DurableFactField] === undefined) retract[k as DurableFactField] = v as string;
+    }
+  }
+  for (const field of Object.keys(retract) as DurableFactField[]) delete merged[field];
+  if (Object.keys(retract).length) merged.retract = retract;
+  return merged;
+}
+
+function detectInClause(message: string): DurableFacts {
   const raw = (message || "").trim();
   const m = raw.toLowerCase();
   const facts: DurableFacts = {};
@@ -284,6 +371,9 @@ export function detectFacts(message: string): DurableFacts {
   // OVER. Recording it here would train around a knee that is fine, permanently.
   const resolved = /\b(?:no longer|not\s+(?:really\s+)?(?:sore|hurting|painful)|doesn'?t\s+hurt|don'?t\s+hurt|healed|all\s+better|fine\s+now|better\s+now|sorted\s+now)\b|\banymore\b/i.test(m);
   const part = m.match(BODY_PART)?.[0]?.toLowerCase();
+  // AND SAY SO TO THE COLUMN. Suppressing the write left a knee that healed in March still
+  // steering every leg day, because nothing else ever removes it.
+  if (part && resolved) facts.retract = { ...facts.retract, injuries: part };
   if (part && reporting && !resolved) {
     // An INJURY VERB naming a body part is enough on its own — "I hurt my lower back at work" is
     // a report, not a complaint about a hard session.
@@ -304,11 +394,22 @@ export function detectFacts(message: string): DurableFacts {
   // DIETARY RESTRICTION — what they cannot or will not eat. Separate from a preference: this one
   // constrains every meal suggestion we make from now on.
   // Question and future only — see the note above on why mentionsNotDone must not run here.
-  const allergy = !reporting ? undefined : m.match(/\b(?:allergic to|intolerant to|can'?t eat|cannot eat|don'?t eat|i'?m|i am)\s+([a-z ]{3,20}?)\b(?:\.|,|$| and | but )/)?.[1]?.trim();
-  if (allergy && /\b(lactose|gluten|dairy|nuts?|peanuts?|shellfish|eggs?|pork|beef|halaal|halal|vegan|vegetarian|seafood|fish)\b/i.test(allergy)) {
-    facts.dietaryRestrictions = allergy;
-  } else if (reporting && /\b(lactose intolerant|gluten free|dairy free|vegan|vegetarian|halaal|halal|kosher)\b/i.test(m) && /\bi'?m|i am\b/i.test(m)) {
-    facts.dietaryRestrictions = m.match(/\b(lactose intolerant|gluten free|dairy free|vegan|vegetarian|halaal|halal|kosher)\b/i)![0];
+  //
+  // THE RETRACTION IS CHECKED FIRST, and it is not gated on `reporting`: "am I still vegan?" is a
+  // question, but "I'm not vegan anymore, what should I eat?" is a client correcting their own
+  // record. The asymmetry that justifies the loose guard here is the mirror of the one above —
+  // wrongly REMOVING a restriction costs one suggestion the client can decline, wrongly KEEPING
+  // one starves them of every food we would otherwise offer.
+  const retracted = RESTRICTION_RETRACTED_RE.exec(m);
+  if (retracted) {
+    facts.retract = { ...facts.retract, dietaryRestrictions: (retracted.slice(1).find(Boolean) || "").toLowerCase() };
+  } else {
+    const allergy = !reporting ? undefined : m.match(/\b(?:allergic to|intolerant to|can'?t eat|cannot eat|don'?t eat|i'?m|i am)\s+([a-z ]{3,20}?)\b(?:\.|,|$| and | but )/)?.[1]?.trim();
+    if (allergy && /\b(lactose|gluten|dairy|nuts?|peanuts?|shellfish|eggs?|pork|beef|halaal|halal|vegan|vegetarian|seafood|fish)\b/i.test(allergy)) {
+      facts.dietaryRestrictions = allergy;
+    } else if (reporting && /\b(lactose intolerant|gluten free|dairy free|vegan|vegetarian|halaal|halal|kosher)\b/i.test(m) && /\bi'?m|i am\b/i.test(m)) {
+      facts.dietaryRestrictions = m.match(/\b(lactose intolerant|gluten free|dairy free|vegan|vegetarian|halaal|halal|kosher)\b/i)![0];
+    }
   }
 
   // LIFE CONTEXT — the thing that makes a month-gone "just say hi" land as a coach. This is the
@@ -344,11 +445,28 @@ export function addFact(existing: string | null | undefined, item: string): stri
   return `${cur}, ${clean}`;
 }
 
+/**
+ * Take one item back out of a comma-separated column.
+ *
+ * MATCHES ON CONTAINMENT, because the column holds what the client said and not a normalised
+ * token — a "vegan" retraction has to clear an entry stored as "vegan now" or "i'm vegan", which
+ * is exactly how the assert branch writes them. Emptying the column returns null, not "", so the
+ * readers' `usable()` and foodConstraints see an absent fact rather than a blank one.
+ */
+export function removeFact(existing: string | null | undefined, item: string): string | null {
+  const clean = (item || "").trim().toLowerCase();
+  const cur = (existing || "").trim();
+  if (!clean || !cur) return existing ?? null;
+  const kept = cur.split(",").map(s => s.trim()).filter(Boolean)
+    .filter(part => !part.toLowerCase().includes(clean));
+  return kept.length ? kept.join(", ") : null;
+}
+
 export interface ClientFactOperation {
-  fact: keyof DurableFacts;
-  operation: "assert";
+  fact: DurableFactField;
+  operation: "assert" | "retract";
   previousValue: string | null;
-  value: string;
+  value: string | null;
   provenance: "client_explicit";
 }
 
@@ -361,12 +479,23 @@ export interface ClientFactOperation {
 export function projectClientFacts(
   current: any,
   facts: DurableFacts,
-): { patch: Record<string, string>; operations: ClientFactOperation[] } {
-  const patch: Record<string, string> = {};
+): { patch: Record<string, string | null>; operations: ClientFactOperation[] } {
+  const patch: Record<string, string | null> = {};
   const operations: ClientFactOperation[] = [];
-  const appendFacts: Array<keyof Pick<DurableFacts,
-    "injuries" | "medicalConditions" | "dietaryRestrictions" | "lifeContext" | "doNotMention"
-  >> = ["injuries", "medicalConditions", "dietaryRestrictions", "lifeContext", "doNotMention"];
+  const appendFacts: DurableFactField[] =
+    ["injuries", "medicalConditions", "dietaryRestrictions", "lifeContext", "doNotMention"];
+
+  // RETRACTIONS FIRST, and they are the only writer that may lower a column. A retraction in the
+  // same message as an assertion of the same fact already won inside detectFacts, so these cannot
+  // race each other here.
+  for (const [field, item] of Object.entries(facts.retract || {}) as Array<[DurableFactField, string]>) {
+    const previous = current?.[field] == null ? null : String(current[field]);
+    if (!previous) continue;
+    const next = removeFact(previous, item);
+    if (next === previous) continue;
+    patch[field] = next;
+    operations.push({ fact: field, operation: "retract", previousValue: previous, value: next, provenance: "client_explicit" });
+  }
 
   for (const fact of appendFacts) {
     const asserted = facts[fact];
