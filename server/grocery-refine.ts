@@ -13,6 +13,7 @@
 
 import OpenAI from "openai";
 import { assertAiOnline } from "./ai-offline";
+import { bmiOf } from "./targets";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -26,13 +27,17 @@ const BUDGET_LABELS: Record<string, string> = {
   "600_plus": "premium budget — Woolworths/quality cuts",
 };
 
+/**
+ * ONE OWNER (#128), AND IT WAS READING A COLUMN THAT DOES NOT EXIST. `user.height` is undefined on
+ * every client — the column is `height_cm` — so this returned {bmi: null, isObese: false} for
+ * everybody and the BMI context on the grocery-refine path has been silently off since it was
+ * written. The arithmetic here was the RIGHT arithmetic, and the stored users.bmi the rest of the
+ * product read was the frozen one; now there is one function and neither problem has two homes.
+ */
 function getBmiContext(user: any): { bmi: number | null; isObese: boolean; isOverweight: boolean } {
-  const weight = parseFloat(user.currentWeight || "0");
-  const height = parseFloat(user.height || "0"); // stored in cm
-  if (!weight || !height) return { bmi: null, isObese: false, isOverweight: false };
-  const heightM = height / 100;
-  const bmi = weight / (heightM * heightM);
-  return { bmi: Math.round(bmi * 10) / 10, isObese: bmi >= 30, isOverweight: bmi >= 25 };
+  const bmi = bmiOf(user);
+  if (bmi === null) return { bmi: null, isObese: false, isOverweight: false };
+  return { bmi, isObese: bmi >= 30, isOverweight: bmi >= 25 };
 }
 
 export async function refineGroceryList(items: string[], user: any): Promise<string> {

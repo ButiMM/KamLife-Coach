@@ -27,7 +27,7 @@ import { getTodayWorkoutState } from "../workout-state";
 import { getOnboardingMealPlan } from "../onboarding";
 import { askCoachK } from "../gpt";
 import { withTimeout, logChat } from "./chat-log";
-import { calculateTargets, waterTargetLitres } from "../targets";
+import { calculateTargets, waterTargetLitres, bmiOf } from "../targets";
 import { JUNK_WORDS } from "./checks";
 import { getStepStreak } from "./steps";
 import { scanForSAFoods } from "./food-scanner";
@@ -800,7 +800,9 @@ export async function handleMiscCommands(ctx: {
   }
   if (["weight", "my weight", "current weight"].includes(m)) {
     const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged yet";
-    const bmiText = user.bmi ? ` BMI: ${parseFloat(String(user.bmi)).toFixed(1)}.` : "";
+    // FROM THE WEIGHT THEY ARE (#128) — users.bmi is the onboarding snapshot and never moves.
+    const bmiLive = bmiOf(user);
+    const bmiText = bmiLive ? ` BMI: ${bmiLive.toFixed(1)}.` : "";
     return `*Your Weight*\n\n⚖️ Last logged: *${w}*${bmiText}\n\nWeigh yourself every morning — same time, same conditions, after bathroom, before food. Send me the number like this: *84kg*. Weekly trends matter more than daily changes.`;
   }
   if (["programme", "program", "my programme", "my program"].includes(m)) {
@@ -1008,10 +1010,12 @@ export async function handleMiscCommands(ctx: {
 
   // ---- NEW: BMI ----
   if (["bmi", "my bmi", "what is my bmi", "what's my bmi", "check bmi"].includes(m)) {
-    if (!user.bmi) {
+    // THE STORED COLUMN IS THE DAY THEY SIGNED UP. A client who has lost 14kg asked this and was
+    // told the category they left months ago, with "Meaningful progress is possible" underneath.
+    const bmiVal = bmiOf(user);
+    if (bmiVal === null) {
       return `Your BMI has not been calculated yet. Send me your weight and height — for example: "I am 75kg and 1.72m tall" — and I will calculate it.`;
     }
-    const bmiVal = parseFloat(String(user.bmi));
     const cat = bmiVal < 18.5 ? "underweight" : bmiVal < 25 ? "healthy weight range" : bmiVal < 30 ? "overweight range" : "obese range";
     const bmiNote = bmiVal < 18.5
       ? "Focus on eating enough — caloric surplus, high protein, strength training."
@@ -1238,17 +1242,35 @@ export async function handleMiscCommands(ctx: {
       let report = `*🏋️ Body Composition Check — ${name}*\n_${daysOn} days on programme_\n\n`;
 
       // Weight trend
+      //
+      // THE THIRD MOUTH (#128). #126 wired the chart and the history command to the owner of "may
+      // a direction be spoken", and this one — the client asking about their own BODY — still
+      // computed `last − first` and asserted an arrow, a monthly pace and a verdict over it. Three
+      // surfaces answering one question, two of them asking permission. On a window that spans an
+      // illness the client could read "I'm not calling a direction off these" from the chart and
+      // "⬇️ Down 3.1kg · 2.4kg/month ✅ healthy pace" from "body check", in the same hour.
+      //
+      // The pace and the verdict are strictly MORE than the arrow, so they are gated by the same
+      // answer rather than by rules of their own.
+      const { weightDirectionSpeakable } = await import("../adaptive-targets");
+      const bodySpeech = await weightDirectionSpeakable(
+        weights.map(w => ({ at: new Date(w.date as any) })), user);
       if (weights.length >= 2) {
         const first = parseFloat(String(weights[0].weight));
         const last = parseFloat(String(weights[weights.length - 1].weight));
         const diff = last - first;
         const trend = diff < -0.5 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg` : diff > 0.5 ? `⬆️ Up ${diff.toFixed(1)}kg` : "➡️ Stable";
-        report += `*Weight:* ${last.toFixed(1)}kg (${trend} from ${first.toFixed(1)}kg start)\n`;
+        // THE NUMBERS ARE NOT THE CLAIM — the same shape the chart and the history command use.
+        // They asked about their body and still get their weigh-ins; what is withheld is the
+        // word that reads as a direction.
+        report += bodySpeech.speakable
+          ? `*Weight:* ${last.toFixed(1)}kg (${trend} from ${first.toFixed(1)}kg start)\n`
+          : `*Weight:* start ${first.toFixed(1)}kg · now ${last.toFixed(1)}kg — not enough clear weigh-ins to call a direction\n`;
 
         // Monthly rate
         const monthsOn = Math.max(1, daysOn / 30);
         const monthlyRate = Math.abs(diff) / monthsOn;
-        if (user.goalType === "fat_loss" && diff < 0) {
+        if (bodySpeech.speakable && user.goalType === "fat_loss" && diff < 0) {
           report += `Rate: ${monthlyRate.toFixed(1)}kg/month ${monthlyRate >= 2 && monthlyRate <= 4 ? "✅ healthy pace" : monthlyRate > 4 ? "⚠️ fast — ensure you are eating enough" : "— could push harder"}\n`;
         }
       } else {
@@ -1280,8 +1302,13 @@ export async function handleMiscCommands(ctx: {
       report += `\n*Training:* ${workouts.length} total sessions | Streak: ${user.workoutStreak || 0}\n`;
 
       // Verdict
+      // A VERDICT IS A DIRECTION WITH A CONCLUSION ATTACHED. "Losing fat while training
+      // consistently" carries the claim without using a direction word, which is exactly what the
+      // sentence-by-sentence outbound gate cannot catch — the same trap #126 documented on the
+      // chart. So it asks the same owner, and when the answer is no it says what it can honestly
+      // say: keep logging.
       const totalWorkoutsN = workouts.length;
-      if (weights.length >= 2 && totalWorkoutsN >= 5) {
+      if (weights.length >= 2 && totalWorkoutsN >= 5 && bodySpeech.speakable) {
         const wDiff = parseFloat(String(weights[weights.length - 1].weight)) - parseFloat(String(weights[0].weight));
         if (wDiff < -1 && totalWorkoutsN >= 10) {
           report += `\n✅ *Verdict:* Losing fat while training consistently. Body recomposition in progress. Stay the course.`;
