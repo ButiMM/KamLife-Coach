@@ -20,7 +20,7 @@
  */
 
 import { suggestSwap } from "./food-swaps";
-import { foodConstraints } from "./food-swaps";
+import { foodConstraints, NO_CONSTRAINTS, type FoodConstraints } from "./food-swaps";
 
 export type FoodProfileItem = { name: string; count: number };
 export type FoodProfile = { topFoods: FoodProfileItem[]; distinctCount: number };
@@ -87,7 +87,11 @@ const OWN_LIST_AWARENESS = `📸 _Already have a list, or food in the fridge? Se
  *   • established  → confident "I know your kitchen now" + full adaptation
  * Pure and unit-tested. Kept short on purpose — calm, not a wall of text.
  */
-export function buildGroceryPersonalization(profile: FoodProfile, goalType?: string | null): string {
+export function buildGroceryPersonalization(
+  profile: FoodProfile,
+  goalType?: string | null,
+  c: FoodConstraints = NO_CONSTRAINTS,
+): string {
   const type = loggerType(profile?.distinctCount ?? 0);
 
   // NEW / cold start — no real data yet. Reassure, don't fake knowing them.
@@ -102,8 +106,12 @@ export function buildGroceryPersonalization(profile: FoodProfile, goalType?: str
 
   // 1. Name the GOOD foods they actually eat — proof we watched, and it keeps their
   //    real diet in the plan instead of overriding it with a generic template.
+  // WHAT THEY EAT, MINUS WHAT THEY TOLD US THEY DO NOT (#128). A client's own log is history, not
+  // a standing preference: someone who ate chicken for a year and then told us they are vegan must
+  // not be shown "you already eat chicken, so I built the list around it" above "Left off — vegan".
   const goodFaves = foods
     .filter(f => (["protein", "veg", "wholecarb"] as LoggedFoodClass[]).includes(classOf(f)))
+    .filter(f => c.allows(f.name))
     .slice(0, 3)
     .map(f => f.name);
   if (goodFaves.length) {
@@ -112,7 +120,9 @@ export function buildGroceryPersonalization(profile: FoodProfile, goalType?: str
 
   // 2. First junk we can genuinely swap (reuses the deterministic SA shelf-swap engine).
   for (const f of foods) {
-    const s = suggestSwap(f.name, goalType);
+    // suggestSwap has taken constraints since Cut 9 — "telling a vegan to swap their mayo for
+    // eggs is worse than saying nothing". This caller was simply never passing them.
+    const s = suggestSwap(f.name, goalType, c);
     if (s) {
       lines.push(`🔁 *One swap* — you keep logging ${pretty(f.name)}; grab ${s.swap} instead (${s.reason}).`);
       break;
@@ -124,7 +134,16 @@ export function buildGroceryPersonalization(profile: FoodProfile, goalType?: str
   if (!classesSeen.has("veg")) {
     lines.push(`🥦 *Add veg* — I don't see it in your meals. Spinach, morogo or cabbage: cheap, filling, and it's what's missing.`);
   } else if (!classesSeen.has("protein")) {
-    lines.push(`🥩 *Add protein* — your meals are light on it. Eggs and a tin of pilchards are the cheapest fix in SA.`);
+    // THE HEADER USED TO CONTRADICT THE FOOTER. "Eggs and a tin of pilchards" was hardcoded, so a
+    // client could be told to grab eggs three lines above "🚫 Left off — you told me: eggs".
+    const cheapest = [
+      { text: "Eggs and a tin of pilchards", match: "eggs and pilchards" },
+      { text: "Eggs and sugar beans", match: "eggs and sugar beans" },
+      { text: "Sugar beans and lentils", match: "sugar beans and lentils" },
+    ].find(o => c.allows(o.match));
+    lines.push(cheapest
+      ? `🥩 *Add protein* — your meals are light on it. ${cheapest.text} are the cheapest fix in SA.`
+      : `🥩 *Add protein* — your meals are light on it. Build every plate around a protein you actually eat, before the starch.`);
   }
 
   // Header + footer tuned to how well we know them. Established loggers get quiet
@@ -174,14 +193,14 @@ export async function getGroceryPersonalization(
 ): Promise<string | null> {
   try {
     const profile = await getRecentFoodProfile(userId);
-    const block = buildGroceryPersonalization(profile, goalType);
+    const constraints = foodConstraints({ foodDislikes, dietaryRestrictions });
+    const block = buildGroceryPersonalization(profile, goalType, constraints);
     // ONE OWNER (Cut 9). This read food_dislikes alone, so a client who told us in conversation
     // that they are lactose intolerant — recorded in dietary_restrictions — still got amasi on
     // their shopping list. Which column their constraint landed in depended only on WHEN they
     // said it, and the list honoured one of the two.
-    const c = foodConstraints({ foodDislikes, dietaryRestrictions });
-    if (c.terms.length > 0) {
-      return `${block}\n🚫 *Left off* — you told me: ${c.terms.join(", ")}. Say the word if you want a swap for anything else.`;
+    if (constraints.terms.length > 0) {
+      return `${block}\n🚫 *Left off* — you told me: ${constraints.terms.join(", ")}. Say the word if you want a swap for anything else.`;
     }
     return block;
   } catch (e: any) {

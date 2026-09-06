@@ -452,7 +452,7 @@ export function answerUnavailable(message: string, c: FoodConstraints = NO_CONST
  *
  * Returns null when nothing survives — an empty suggestion is worse than no suggestion.
  */
-function allowedAlternatives(alt: string, c: FoodConstraints): string | null {
+export function allowedAlternatives(alt: string, c: FoodConstraints): string | null {
   const parts = String(alt || "").split(/\s*,\s*(?:or\s+)?|\s+or\s+/).map(s => s.trim()).filter(Boolean);
   const kept = parts.filter(p => c.allows(p));
   if (kept.length === 0) return null;
