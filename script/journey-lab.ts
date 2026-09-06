@@ -30,7 +30,7 @@ console.log = console.warn = console.error = (...a: any[]) => { LOG.push(a.map(S
 
 const { pool } = await import("../server/db");
 const { handleMessage } = await import("../server/routes");
-const { sastDayKey } = await import("../server/sast");
+const { sastDayKey, effectiveMealLoggedAt } = await import("../server/sast");
 // The instrument's own definition of "no door claimed this", not a copy of it. See admin-turns.ts.
 const { FALLBACK_REPLY, buildCoachHealthBrief } = await import("../server/routes/admin-turns");
 
@@ -362,10 +362,24 @@ await journey("3 · COMEBACK — genuine absence vs present-but-sparse, on ident
 
   // ABSENCE MUST NOT BREAK THE ORDINARY WORK. The next three turns are the reason someone comes
   // back at all — if the return path swallows a food log, the comeback cost them their day.
-  const a2 = await say(absent.id, absent.phone, "I had chicken and rice for lunch");
+  const FOOD = "I had chicken and rice for lunch";
+  const a2 = await say(absent.id, absent.phone, FOOD);
   const am = await meals(absent.id);
   ok(am.length === 1, `the returning client's food log landed (${am.length} rows)`);
-  ok(!!am[0] && dayOf(am[0]) === sastDayKey(new Date()), `it landed on today`);
+  // THE DAY THE PRODUCT RESOLVES, NOT THE DAY THE WALL CLOCK SHOWS.
+  //
+  // This asserted `today` outright and was red every night between 00:00 and 04:59 SAST —
+  // including 04:00, which is when the nightly CI cron runs. Nothing was broken: sast.ts says in
+  // as many words that "only 00:00–04:59 is ambiguous", and at 03:17 a client saying they had
+  // LUNCH is telling us about the day that just ended. The product was right and the check was
+  // asserting the wrong thing four hours out of every twenty-four.
+  //
+  // Asked through effectiveMealLoggedAt, the same owner the write door uses, so the harness cannot
+  // hold a second opinion about which day a meal belongs to. It still fails if the comeback path
+  // files this log on any other day, on no day, or not at all.
+  const expectedDay = sastDayKey(effectiveMealLoggedAt(new Date(), FOOD, "lunch"));
+  ok(!!am[0] && dayOf(am[0]) === expectedDay, `it landed on the day the words resolve to`,
+     `row ${am[0] && dayOf(am[0])} vs ${expectedDay}`);
   ok(!!am[0] && String(am[0].meal_label || "").toLowerCase() === "lunch",
      `the stated slot was honoured`, `label=${am[0]?.meal_label}`);
   ok(mutated(a2, /INSERT meal/i), `the turn ledger carries the returning client's write`, mutationsOf(a2));
