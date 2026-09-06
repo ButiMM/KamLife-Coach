@@ -18,6 +18,7 @@ import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
 import { chooseAction, decideProactive, formatOneAction, underPolicy } from "../../one-action";
 import { loadSituationFrame } from "../../memory";
 import { readHeldConstraints } from "../../held-constraints";
+import { foodConstraints } from "../../food-swaps";
 
 /**
  * WHAT WE SAY TO SOMEONE WHO HAS GONE — decided by the ladder, not written here.
@@ -39,6 +40,7 @@ async function silenceAsk(client: any, daysSilent: number): Promise<string> {
     biggestStruggle: client.biggestStruggle,
     lifeContext: client.lifeContext,
     doNotMention: client.doNotMention,
+    constraints: foodConstraints(client || {}),
     weeksOnProgramme: Math.max(0, (client.programmeWeek || 1) - 1),
     sessionsTarget: Number(client.trainingDaysPerWeek) || 3,
     calorieTarget: Number(client.calorieTarget) || 0,
@@ -487,6 +489,7 @@ export async function runMorningCheckin(): Promise<void> {
             biggestStruggle: client.biggestStruggle,
             lifeContext: client.lifeContext,
             doNotMention: client.doNotMention,
+            constraints: foodConstraints(client || {}),
             weeksOnProgramme: Math.floor(progDays / 7),
             sessionsTarget: isTodayTrainingDay ? (Number(client.trainingDaysPerWeek) || 3) : 0,
             calorieTarget: Number(client.calorieTarget) || 0,

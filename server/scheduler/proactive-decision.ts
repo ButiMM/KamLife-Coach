@@ -37,6 +37,7 @@
 import { chooseAction, decideProactive, formatOneAction, underPolicy, type OneAction } from "../one-action";
 import { readHeldConstraints, NO_CONSTRAINTS, type HeldConstraints } from "../held-constraints";
 import { loadProactiveState } from "./shared";
+import { foodConstraints } from "../food-swaps";
 
 export interface CanonicalMove {
   /** Ready to place in a message. "" when the decision is `hold` — nothing to add is an answer. */
@@ -55,6 +56,7 @@ function profileOf(client: any) {
     biggestStruggle: client.biggestStruggle,
     lifeContext: client.lifeContext,
     doNotMention: client.doNotMention,
+    constraints: foodConstraints(client || {}),
     weeksOnProgramme: Math.max(0, (client.programmeWeek || 1) - 1),
     sessionsTarget: Number(client.trainingDaysPerWeek) || 3,
     calorieTarget: Number(client.calorieTarget) || 0,
@@ -105,6 +107,7 @@ export async function canonicalNextMove(
       biggestStruggle: client.biggestStruggle,
       lifeContext: client.lifeContext,
       doNotMention: client.doNotMention,
+      constraints: foodConstraints(client || {}),
       weeksOnProgramme: profile.weeksOnProgramme,
       daysSinceAnyLog: 0, daysSinceWeighIn: 0, loggedToday: false,
       proteinPct: 1, caloriePct: 1,

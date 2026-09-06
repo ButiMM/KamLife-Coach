@@ -21,6 +21,7 @@ import { waterTargetLitres } from "./targets";
 import { getNumbersMode, stripNumbersFromProse } from "./numbers-mode";
 import { cardWillAttach, cardSuppressedByDump, noteCardSent } from "./card-policy";
 import { sastHour } from "./sast";
+import { foodConstraints, allowedAlternatives, NO_CONSTRAINTS, type FoodConstraints } from "./food-swaps";
 
 // Shared: the public base URL (forced to https:// — see below) or "" when a card can't be
 // served. APP_URL was stored WITHOUT a scheme, so the first live marker leaked as a text link
@@ -187,8 +188,23 @@ export function biggestEventProtein(events: Array<{ protein: number }>): number 
   return events.reduce((max, e) => Math.max(max, Math.round(e?.protein || 0)), 0);
 }
 
-export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), isPastDay = false, foodDayClosed = false, justAteProteinMeal = false): string {
+export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), isPastDay = false, foodDayClosed = false, justAteProteinMeal = false, c: FoodConstraints = NO_CONSTRAINTS): string {
   const r = (label: string) => rows.find(x => x.label === label);
+  // THE CARD NAMES FOOD, SO IT HAS TO ASK WHAT THIS PERSON EATS (#128). Four of the lines below
+  // are shopping lists in miniature — "chicken, fish or eggs", "eggs, tin fish or a shake" — and
+  // none of them consulted the constraint owner, so a vegan client photographing their lunch got
+  // a picture telling them to eat chicken. `allowedAlternatives` is the same filter #177 gave the
+  // shopping list and the swap engine; when it can keep nothing, the instruction stands without
+  // the menu rather than naming a food they refuse or saying nothing at all.
+  //
+  // TWO TIERS, SO NOBODY'S WORDING CHANGES WHO DID NOT ASK FOR IT. The founder's list is tried
+  // first and comes back untouched for a client who declared nothing — the line they read today
+  // is the line they read tomorrow. The plant tier is consulted ONLY when the first list has
+  // nothing left in it, which is exactly the client this is for.
+  const eat = (primary: string, ifNoneOfThose: string, withNames: (kept: string) => string, unnamed: string): string => {
+    const kept = allowedAlternatives(primary, c) || allowedAlternatives(ifNoneOfThose, c);
+    return kept ? withNames(kept) : unnamed;
+  };
   if (isPastDay) return "Yesterday's log — today's plate is a separate day";
   const ratio = (x?: Row) => (x && x.target > 0 ? x.current / x.target : 0);
   const cal = r("Calories"), prot = r("Protein"), fat = r("Fat");
@@ -277,7 +293,9 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), is
   // is a different, smaller action, not a repeat of the meal.
   if (protLeft >= 60) {
     return justAteProteinMeal ? "That's one proper protein down — same again at your next two meals"
-      : earlyDay ? "Chicken or eggs at lunch AND supper"
+      : earlyDay ? eat("chicken, eggs", "sugar beans, lentils",
+          kept => `${kept[0].toUpperCase()}${kept.slice(1)} at lunch AND supper`,
+          "A real protein at lunch AND supper")
       : "Get a real protein into your next two meals";
   }
   if (protLeft >= 35) {
@@ -287,12 +305,21 @@ export function nextMoveLine(rows: Row[], isBulk: boolean, hour = sastHour(), is
     // the gap, and this branch runs anywhere from 35g to 59g owed. At 59g owed another minimum
     // qualifying meal still leaves 24g, so "you're there" was a promise the data does not carry.
     // Acknowledge the protein, carry the lever forward, claim nothing about arriving.
+    const meal = earlyDay ? "lunch" : "your next meal";
     return justAteProteinMeal ? "Good protein in — keep that going at your next meal"
-      : earlyDay ? "Make lunch a proper protein — chicken, fish or eggs"
-      : "Make your next meal a proper protein — chicken, fish or eggs";
+      : eat("chicken, fish, eggs", "sugar beans, lentils",
+          kept => `Make ${meal} a proper protein — ${kept}`,
+          `Make ${meal} a proper protein`);
   }
-  if (protLeft >= 18) return "Add eggs, tin fish or a shake today";
-  if (protLeft > 0) return "One yoghurt or a boiled egg and you're done";
+  if (protLeft >= 18) {
+    return eat("eggs, tin fish, a shake", "sugar beans, lentils",
+      kept => `Add ${kept} today`, "Add a protein-first portion today");
+  }
+  if (protLeft > 0) {
+    return eat("one yoghurt, a boiled egg", "a handful of nuts, some hummus",
+      kept => `${kept[0].toUpperCase()}${kept.slice(1)} and you're done`,
+      "One protein-first portion and you're done");
+  }
 
   if (calLeft > 400) return "Eat a proper meal — you're short on food today";
   return "Nothing left to do — today is done properly";
@@ -500,6 +527,8 @@ export function mealCard(opts: {
   isPastDay?: boolean;
   /** They said they are done eating today. The card's next move must agree with the decision's. */
   foodDayClosed?: boolean;
+  /** What this client does not eat. The card names foods, so it has to know (#128). */
+  constraints?: FoodConstraints;
   /** Protein in the meal this card is confirming. Absent on the on-demand "Today" card, which
    *  is answering a question rather than acknowledging a plate. */
   mealProtein?: number;
@@ -523,7 +552,8 @@ export function mealCard(opts: {
     unit: opts.usesNumbers ? (opts.isPastDay ? "protein yesterday" : "protein today") : (opts.isPastDay ? "yesterday" : "so far today"),
     line: `${opts.firstName ? opts.firstName + ": " : ""}${opts.mealName} logged.`,
     sub: nextMoveLine(opts.rows, opts.isBulk, opts.hour, !!opts.isPastDay, !!opts.foodDayClosed,
-      !opts.isPastDay && (opts.mealProtein ?? 0) >= PROPER_PROTEIN_G),
+      !opts.isPastDay && (opts.mealProtein ?? 0) >= PROPER_PROTEIN_G,
+      opts.constraints ?? NO_CONSTRAINTS),
   };
 }
 
@@ -574,6 +604,7 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealP
       mealName: opts.mealName || "Meal",
       rows: today.rows,
       foodDayClosed: isPastDay ? false : await dayClosedFor(opts.user),
+      constraints: foodConstraints(opts.user || {}),
       isBulk: today.isBulk,
       usesNumbers: getNumbersMode(opts.user) !== "low" && getGoalProfile(opts.user?.goalType).usesMacros,
       isPastDay,
@@ -615,6 +646,7 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
       mealName: "Today",
       rows: today.rows,
       foodDayClosed: await dayClosedFor(user),
+      constraints: foodConstraints(user || {}),
       isBulk: today.isBulk,
       usesNumbers: getNumbersMode(user) !== "low" && getGoalProfile(user?.goalType).usesMacros,
     });

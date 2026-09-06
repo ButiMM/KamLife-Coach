@@ -488,6 +488,26 @@ export function durableDomains(writes: string[]): string[] {
   return DURABLE_WRITE.filter(([, re]) => re.test(all)).map(([d]) => d);
 }
 
+/**
+ * HOW MUCH PROTEIN THIS TURN ACTUALLY WROTE — read off the same record durableDomains reads.
+ *
+ * The card knows the plate it is confirming and stands its instruction down accordingly; the
+ * action ladder did not, so after a 61g meal against a 195g target the client read "That's one
+ * proper protein down" on the picture and "Make your next meal a proper protein meal" in the
+ * text of the SAME turn. The fact was already stamped — the write door records
+ * `INSERT meal kcal=… prot=…` — so this is a read of an existing record, not a second ledger
+ * query and not a new fact. The BIGGEST single write, because two logs in one bubble are two
+ * plates and neither is the sum.
+ */
+export function proteinWrittenIn(writes: string[]): number {
+  let most = 0;
+  for (const w of writes || []) {
+    const m = String(w).match(/INSERT meal\b[^|]*?\bprot=(\d+)/i);
+    if (m) most = Math.max(most, Number(m[1]) || 0);
+  }
+  return most;
+}
+
 export function resolveTurn(
   ledger: TurnLedger,
   opts: { hasFeeling: boolean; alsoAsksCoach: boolean; durableWrites?: string[] },

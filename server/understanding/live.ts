@@ -28,7 +28,7 @@ import { runMeaningEngine, writeReplyAfterTools } from "./meaning-engine";
 import { planCorrection, isMealDateMove } from "../food-identity-correction";
 import { isRetroactiveMeal } from "../utils";
 import { tellDontAsk } from "../reply-hygiene";
-import { localiseSuggestion } from "../food-swaps";
+import { localiseSuggestion, foodConstraints } from "../food-swaps";
 import { matchRestaurant } from "../restaurants";
 import { symptomPersistence } from "../quality-signals";
 import { reportsHunger, asksAboutWeightProgress } from "../unlogged-notice";
@@ -63,7 +63,7 @@ import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable,
  *
  * rather than the model deciding in prose and a verifier trying to work out what it decided.
  */
-export async function canonicalDecision(user: any, message?: string): Promise<{ todo: string; kind: string; reply: string }> {
+export async function canonicalDecision(user: any, message?: string, opts?: { justAteProteinMeal?: boolean }): Promise<{ todo: string; kind: string; reply: string }> {
   try {
     // ONE CONSTITUTION (2026-08-21). This called theNextMove(), a SECOND ranked ladder —
     // training → protein → calories → steps → scale — that produced "the one thing to do" from
@@ -117,6 +117,11 @@ export async function canonicalDecision(user: any, message?: string): Promise<{ 
       // for that, so this door and the SMART NEXT MEAL door cannot read one sentence differently.
       foodDayClosed: foodDayClosedWith(held.foodDayClosed, message || ""),
       trainingDeclined: held.trainingDeclined || trainingDayIsDeclined(message || ""),
+      // WHAT THIS CLIENT DOES NOT EAT, and WHETHER THEY JUST ATE A PROPER PROTEIN MEAL (#128).
+      // The protein rung names foods and re-issued the instruction the plate had just carried
+      // out; both facts already exist, and neither reached the ladder.
+      constraints: foodConstraints(user || {}),
+      justAteProteinMeal: !!opts?.justAteProteinMeal,
     } as any), { foodSufficient: truth.window.daysLogged >= PROACTIVE_LOG_FLOOR,
          // WEIGHT EVIDENCE IS NOT COUNTED HERE, and that is a known gap rather than a
          // decision: the proactive side reads a stall verdict this path never computes, so
@@ -628,11 +633,18 @@ export async function runMeaningEngineLive(ctx: {
 export async function closeCoachingTurn(user: any, message: string, reply: string | null): Promise<string> {
   const out = String(reply ?? "");
   const { turnMutations } = await import("../handlers/chat-log");
-  const { durableDomains } = await import("./messy-intake");
+  const { durableDomains, proteinWrittenIn } = await import("./messy-intake");
   const { withNextMove } = await import("../reply-hygiene");
-  const wrote = durableDomains(turnMutations());
+  const { PROPER_PROTEIN_G } = await import("../macro-card-attach");
+  const mutations = turnMutations();
+  const wrote = durableDomains(mutations);
   if (!out || wrote.length === 0) return out;
-  const decided = await canonicalDecision(user, message).catch(() => ({ todo: "" } as any));
+  // THE PLATE THIS TURN JUST WROTE, off the same record `wrote` was read from. PROPER_PROTEIN_G
+  // is the card's number, named once, so "did they just eat a proper protein meal" cannot mean
+  // one thing on the picture and another in the text.
+  const decided = await canonicalDecision(user, message, {
+    justAteProteinMeal: proteinWrittenIn(mutations) >= PROPER_PROTEIN_G,
+  }).catch(() => ({ todo: "" } as any));
   const next = withNextMove(out, String(decided?.todo || ""));
   if (next !== out) console.log(`[COACH_TURN] appended one next move after ${wrote.join("+")}`);
   return next;
