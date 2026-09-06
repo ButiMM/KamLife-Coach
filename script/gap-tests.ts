@@ -4187,6 +4187,91 @@ test("#128/1: a client can take a restriction back", async () => {
     "not eating dairy", "a restriction stated in the negative is still a restriction");
 });
 
+// ── #128/4: THE PROTEIN CLOSER ──────────────────────────────────────────────────────────────
+//
+// Both owners of "the next move" name foods. Graded on the sentence each one returns, with an
+// unconstrained twin beside every claim: a coach that stopped naming food altogether would
+// satisfy the prohibition and fail the client.
+
+test("#128/4: the card's protein line asks what this person eats", async () => {
+  const { nextMoveLine } = await import("../server/macro-card-attach");
+  const { foodConstraints, NO_CONSTRAINTS } = await import("../server/food-swaps");
+  const ANIMAL = /\b(chicken|fish|eggs?|yoghurt|amasi|biltong|mince|beef)\b/i;
+  const rows = (prot: number) => [
+    { label: "Calories", current: 900, target: 2800, unit: "" },
+    { label: "Protein", current: prot, target: 195, unit: "g" },
+    { label: "Fat", current: 40, target: 80, unit: "g" },
+  ];
+  const vegan = foodConstraints({ dietaryRestrictions: "vegan" });
+
+  // Each protein band that names a food, at an hour that is neither early nor a close-out.
+  for (const prot of [160, 175, 188]) {
+    const open = nextMoveLine(rows(prot), false, 14, false, false, false, NO_CONSTRAINTS);
+    const bound = nextMoveLine(rows(prot), false, 14, false, false, false, vegan);
+    assert.ok(!ANIMAL.test(bound), `${195 - prot}g owed: the vegan card names no animal food — "${bound}"`);
+    assert.ok(bound.trim().length > 10, `${195 - prot}g owed: …and still gives an instruction — "${bound}"`);
+    // THE CONTROL. Without it, "names no animal food" is equally true of a card that says nothing.
+    assert.ok(ANIMAL.test(open), `${195 - prot}g owed: the unconstrained card still names one — "${open}"`);
+  }
+  // A CLIENT WHO DECLARED NOTHING READS THE LINE THEY HAVE ALWAYS READ. The founder's list is
+  // tried first, so this wording is untouched by the change.
+  assert.equal(nextMoveLine(rows(160), false, 14, false, false, false, NO_CONSTRAINTS),
+    "Make your next meal a proper protein — chicken, fish, or eggs");
+  // A partial exclusion takes one food, not the sentence.
+  const noEggs = nextMoveLine(rows(160), false, 14, false, false, false, foodConstraints({ foodDislikes: "eggs" }));
+  assert.ok(/chicken/.test(noEggs) && !/\beggs?\b/i.test(noEggs), `no-eggs client keeps chicken — "${noEggs}"`);
+});
+
+test("#128/4: the action ladder's protein rung asks too, and does not re-issue the plate", async () => {
+  const { chooseAction } = await import("../server/one-action");
+  const { foodConstraints } = await import("../server/food-swaps");
+  const ANIMAL = /\b(chicken|fish|eggs?|yoghurt|amasi|biltong|mince|beef|pilchards?)\b/i;
+  const base: any = {
+    goal: "fat_loss", weeksOnProgramme: 3, daysSinceAnyLog: 0, daysSinceWeighIn: 1,
+    loggedToday: true, proteinPct: 0.31, caloriePct: 0.4, sessionsThisWeek: 2, sessionsTarget: 3,
+    stepsToday: 9000, stepsTarget: 8000, hour: 14, atKeyboard: true,
+  };
+  const vegan = foodConstraints({ dietaryRestrictions: "vegan" });
+
+  // Every phrasing this rung has — the three struggles and the after-20:00 close-out.
+  for (const s of [{ biggestStruggle: "no time" }, { biggestStruggle: "no money" }, { hour: 21 }]) {
+    const open = chooseAction({ ...base, ...s });
+    const bound = chooseAction({ ...base, ...s, constraints: vegan });
+    assert.equal(bound.kind, "protein", "the lever is unchanged — this is not a stand-down");
+    assert.ok(!ANIMAL.test(bound.todo), `the vegan instruction names no animal food — "${bound.todo}"`);
+    assert.ok(ANIMAL.test(open.todo), `…and the unconstrained one still does — "${open.todo}"`);
+  }
+
+  // THE PLATE THEY JUST ATE IS NOT THE PLATE THEY MUST GO AND MAKE. 61g against 195g leaves the
+  // day under 60%, so the rung still fires; what it says has to move forward from the meal.
+  const after = chooseAction({ ...base, justAteProteinMeal: true });
+  assert.equal(after.kind, "protein", "protein is still the lever");
+  assert.ok(!/make (?:your next meal|lunch) a (?:proper )?protein/i.test(after.todo),
+    `it must not re-issue the instruction just carried out — "${after.todo}"`);
+  assert.match(after.todo, /one proper protein down/i, "it acknowledges the plate that landed");
+  // CONTROL: the same client who did NOT just eat one still gets the instruction.
+  assert.match(chooseAction({ ...base }).todo, /protein/i);
+  assert.ok(/make your next meal a proper protein meal/i.test(chooseAction({ ...base }).todo),
+    "the unchanged case is unchanged");
+});
+
+test("#128/4: one number answers 'did they just eat a proper protein meal', on both owners", async () => {
+  const { proteinWrittenIn } = await import("../server/understanding/messy-intake");
+  const { PROPER_PROTEIN_G } = await import("../server/macro-card-attach");
+  // The write door's own stamp, read rather than re-derived.
+  assert.equal(proteinWrittenIn(["INSERT meal kcal=610 prot=61 label=lunch at=2026-09-06"]), 61);
+  assert.equal(proteinWrittenIn(["INSERT steps 9000", "INSERT meal kcal=200 prot=12 label=snack"]), 12);
+  assert.equal(proteinWrittenIn(["INSERT workout push"]), 0, "no meal written is no protein written");
+  // TWO PLATES IN ONE BUBBLE ARE TWO PLATES. The biggest decides, never the sum — otherwise two
+  // small snacks would read as a proper protein meal that nobody ate.
+  assert.equal(proteinWrittenIn([
+    "INSERT meal kcal=200 prot=20 label=snack", "INSERT meal kcal=610 prot=61 label=lunch",
+  ]), 61);
+  assert.ok(20 + 20 >= PROPER_PROTEIN_G && proteinWrittenIn([
+    "INSERT meal kcal=200 prot=20 label=snack", "INSERT meal kcal=200 prot=20 label=snack",
+  ]) < PROPER_PROTEIN_G, "two 20g snacks are not one 40g meal");
+});
+
 // ── CUT 8: DON'T-MENTION IS BOUND TO THE MOUTH ──────────────────────────────────────────────
 
 test("cut8: the reply path honours do_not_mention, above the meaningful-message gate", () => {

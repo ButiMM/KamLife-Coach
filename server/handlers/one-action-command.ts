@@ -19,6 +19,7 @@ import { sql } from "drizzle-orm";
 import { getDayLedger } from "../day-ledger";
 import { sastDayStart, sastDaysBetween, sastHour, sastWeekStart } from "../sast";
 import { readHealthState } from "../health-state";
+import { foodConstraints } from "../food-swaps";
 
 /** Is this client inside a declared sick window? Asked of the state owner, not of the text. */
 const isSick = (user: any): boolean => readHealthState(user).isSick;
@@ -88,6 +89,9 @@ async function buildDecisionInputs(user: any): Promise<{ state: ProactiveStateFo
       },
     },
     profile: {
+      // WHAT THIS CLIENT DOES NOT EAT (#128) — through the constraint owner, from the same two
+      // columns every other food surface merges.
+      constraints: foodConstraints(user || {}),
       dreamGoal: user?.dreamGoal,
       biggestStruggle: user?.biggestStruggle,
       weeksOnProgramme: user?.createdAt ? Math.floor(sastDaysBetween(new Date(user.createdAt)) / 7) : 0,

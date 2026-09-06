@@ -32,6 +32,9 @@ import { selectDecisionState, type DecisionEvidence } from "./understanding/stat
 // Pure, and it has to be: the verifier owns "may this reach a client" and carries no database or
 // model, so the decision can ask it what the client asked us not to say (Cut 8).
 import { mentionsForbidden } from "./brain/reply-verifier";
+// Pure as well, and already the owner of "what may this client be offered" for every plate,
+// grocery list and swap in the product (Cut 9, #177, #128).
+import { allowedAlternatives, NO_CONSTRAINTS, type FoodConstraints } from "./food-swaps";
 
 export interface DayState {
   firstName?: string;
@@ -106,6 +109,29 @@ export interface DayState {
    * this suppresses one instruction for one day, it does not rewrite the record.
    */
   trainingDeclined?: boolean;
+  /**
+   * What this client does not eat — the same owner every food surface consults (#128).
+   *
+   * The protein and eat_more rungs NAME FOODS: "eggs, amasi or tin fish", "eggs, bread and peanut
+   * butter". A vegan client behind on protein was told to eat eggs by the one line the coach
+   * calls its highest-leverage action, and the outbound floor cannot save it — this line goes out
+   * in a proactive brief that never passes the reactive mouth gate. Same reasoning as
+   * `doNotMention` above: a fact the decision holds, so the decision can choose differently
+   * rather than have its sentence filtered afterwards.
+   */
+  constraints?: FoodConstraints;
+  /**
+   * The plate that just landed WAS a proper protein meal — the card's own `PROPER_PROTEIN_G`
+   * test, on the ladder that had no answer to it.
+   *
+   * macro-card-attach already refuses to tell a man holding an empty plate to go and make the
+   * plate. This ladder did not: after a 61g meal against a 195g target the day is still under
+   * 60%, so rung 5 fired and said "Make your next meal a proper protein meal" in the same turn
+   * the card said "That's one proper protein down". Two owners of the next move, one of which
+   * had read the meal. The rung does not stand down — protein is still the lever — it moves
+   * FORWARD from what they did, exactly as the card does.
+   */
+  justAteProteinMeal?: boolean;
 }
 
 export type ActionKind =
@@ -522,11 +548,25 @@ export function chooseAction(s: DayState): OneAction {
 
   // 4. UNDER-FUELLED ON A BULK. Nothing else works if they aren't eating.
   // Closed food day wins: they told us the next meal is not happening.
+  // WHAT THEY MAY BE OFFERED, ASKED ONCE FOR THE WHOLE LADDER (#128). Two tiers, so a client who
+  // declared nothing reads the line they have always read: the founder's own list is tried first
+  // and comes back untouched, and the plant tier is consulted only when nothing in it survives.
+  // When even that is empty the instruction stands WITHOUT the menu — never a food they refuse,
+  // and never silence, because the action is the point and the examples are the garnish.
+  const c = s.constraints ?? NO_CONSTRAINTS;
+  const eat = (primary: string, ifNoneOfThose: string, withNames: (kept: string) => string, unnamed: string): string => {
+    const kept = allowedAlternatives(primary, c) || allowedAlternatives(ifNoneOfThose, c);
+    return kept ? withNames(kept) : unnamed;
+  };
+
   if (isBulk && s.loggedToday && s.caloriePct < 0.6 && s.hour >= LATE && !s.foodDayClosed) {
     return {
       kind: "eat_more",
+      // A RECIPE, NOT A LIST OF ALTERNATIVES, so it is kept or dropped whole rather than filtered
+      // into "beans does it".
       todo: struggle === "money"
-        ? "Add one more proper meal today — eggs, bread and peanut butter does it."
+        ? (plate => plate ? `Add one more proper meal today — ${plate} does it.` : "Add one more proper meal today.")(
+            ["eggs, bread and peanut butter", "beans, bread and peanuts"].find(x => c.allows(x)))
         : "Add one more proper meal today.",
       why: why("You can't build on food you didn't eat.", s.dreamGoal),
     };
@@ -541,14 +581,27 @@ export function chooseAction(s: DayState): OneAction {
     // one must not lose what the deleted one knew — "make your next meal a protein one" sent at
     // nine at night is an instruction nobody can act on.
     const closingTheDay = s.hour >= 20;
+    // …AND IT DOES NOT RE-ISSUE THE INSTRUCTION THEY HAVE JUST CARRIED OUT. The card's wording,
+    // because it is the card's finding: the plate that landed cleared PROPER_PROTEIN_G, the day
+    // is still short, so the move goes forward from what they did.
     return {
       kind: "protein",
-      todo: closingTheDay
-        ? "Start tomorrow with protein — eggs, amasi or tin fish at breakfast."
+      todo: s.justAteProteinMeal
+        ? (closingTheDay
+            ? "That's one proper protein down — start tomorrow the same way."
+            : "That's one proper protein down — same again at your next meal.")
+        : closingTheDay
+        ? eat("eggs, amasi or tin fish", "sugar beans, lentils or peanuts",
+            kept => `Start tomorrow with protein — ${kept} at breakfast.`,
+            "Start tomorrow with protein at breakfast.")
         : struggle === "time"
-        ? "Make your next meal a protein one — tin fish, eggs or amasi. Two minutes."
+        ? eat("tin fish, eggs or amasi", "tinned beans, lentils or peanuts",
+            kept => `Make your next meal a protein one — ${kept}. Two minutes.`,
+            "Make your next meal a protein one. Two minutes.")
         : struggle === "money"
-        ? "Get protein into your next meal — eggs, pilchards or sugar beans."
+        ? eat("eggs, pilchards or sugar beans", "sugar beans, lentils or peanuts",
+            kept => `Get protein into your next meal — ${kept}.`,
+            "Get protein into your next meal.")
         : "Make your next meal a proper protein meal.",
       why: why(
         isBulk ? "Protein is the part your body actually builds with."
@@ -628,6 +681,14 @@ export interface ProactiveProfile {
   doNotMention?: string | null;
   /** users.life_context — a durable fact (Cut 7), carried so the come_back rungs can name it. */
   lifeContext?: string | null;
+  /**
+   * What this client does not eat (#128). REQUIRED, deliberately: the protein and eat_more rungs
+   * name foods, and a profile that forgets to carry this produces a coach that offers a vegan
+   * client eggs — silently, in a proactive brief that never passes the reactive mouth gate. An
+   * optional field would have made the omission invisible; a required one makes the compiler
+   * enumerate every assembly site. Pass NO_CONSTRAINTS where a client genuinely has none.
+   */
+  constraints: FoodConstraints;
   weeksOnProgramme: number;
   sessionsTarget: number;
   calorieTarget: number;
@@ -644,7 +705,7 @@ export interface ProactiveProfile {
  */
 export function dayStateFrom(
   s: ProactiveStateForDecision, p: ProactiveProfile,
-  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean },
+  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; justAteProteinMeal?: boolean },
 ): DayState {
   return {
     firstName: s.name,
@@ -666,10 +727,12 @@ export function dayStateFrom(
     sick: s.health.sick,
     lifeContext: p.lifeContext,
     doNotMention: p.doNotMention,
+    constraints: p.constraints ?? NO_CONSTRAINTS,
     hour: opts?.hour ?? s.today.hour,
     atKeyboard: opts?.atKeyboard,
     foodDayClosed: opts?.foodDayClosed,
     trainingDeclined: opts?.trainingDeclined,
+    justAteProteinMeal: opts?.justAteProteinMeal,
   };
 }
 
@@ -832,7 +895,7 @@ function evidenceFor(s: ProactiveStateForDecision, kind: ActionKind): DecisionEv
 
 export function decideProactive(
   s: ProactiveStateForDecision, p: ProactiveProfile,
-  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean },
+  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; justAteProteinMeal?: boolean },
 ): ProactiveDecision {
   let action = chooseAction(dayStateFrom(s, p, opts));
   let evidence = evidenceFor(s, action.kind);
