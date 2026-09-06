@@ -70,6 +70,9 @@ async function silenceAsk(client: any, daysSilent: number): Promise<string> {
       daysSinceAnyLog: daysSilent, daysSinceWeighIn: 0, loggedToday: false,
       proteinPct: 1, caloriePct: 1, sessionsThisWeek: 0, sessionsTarget: 0,
       stepsToday: 0, stepsTarget: 0, hour: 7,
+      // NO INVESTIGATION CONTEXT ON PURPOSE (#203). `loggedToday` and `daysSinceWeighIn` above are
+      // placeholders for a ledger read that just FAILED, not facts. Handing them to the downgrade
+      // would ask a client to log off a value we invented, so this keeps the gate's default: hold.
     }), { foodSufficient: false, weightSufficient: false, dreamGoal: client.dreamGoal }), firstName);
   }
 }
