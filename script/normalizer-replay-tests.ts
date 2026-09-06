@@ -34,6 +34,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { CORPUS, CORPUS_PATH, recordingFingerprint } from "./record-normalizer";
 
+/** Captured before anything can override it — see turn() below. */
+const REAL_LOG = console.log.bind(console);
+
 let passed = 0;
 const failures: string[] = [];
 async function check(name: string, fn: () => Promise<void> | void) {
@@ -68,24 +71,6 @@ async function main() {
       `${missing.length} corpus inputs were never recorded: ${missing.map(m => m.input.slice(0, 40)).join(" | ")}`);
   });
 
-  // ── THE INVARIANT THAT MATTERS: a rewrite may not destroy what a downstream owner needs ──────
-  //
-  // #63 established the mechanism: a multi-day note is a SINGLE-DOMAIN note, so `multiFact` is
-  // false and the brake that stops the normalizer speaking for a multi-fact message never engages.
-  // The batch logger itself is correct — it answers "Logged 3 days ✅" on the raw text. The risk is
-  // entirely that the raw text never reaches it.
-  await check("a multi-day batch keeps its days through the front door", () => {
-    const batch = CORPUS.find(c => /Monday I had pap/i.test(c.input))!;
-    const rec: any = recorded.entries[batch.input.toLowerCase()];
-    if (!rec) return;                       // already reported by the coverage check above
-    const canon = String(rec.canonical || "");
-    if (!canon) return;                     // no rewrite is the safe outcome — nothing destroyed
-    const days = ["monday", "tuesday", "wednesday"].filter(d => canon.toLowerCase().includes(d));
-    assert.equal(days.length, 3,
-      `the rewrite kept ${days.length}/3 named days — a multi-day note collapsed at the front door, `
-      + `which is how three days of meals land on one: ${canon}`);
-  });
-
   await check("a correction keeps the day it names", () => {
     const rec: any = recorded.entries["you missed the black coffee yesterday"];
     if (!rec?.canonical) return;
@@ -93,19 +78,6 @@ async function main() {
       `the rewrite dropped the day being corrected: ${rec.canonical}`);
   });
 
-  // ── AND THE NUMBERS BRAKE, ASSERTED ON REAL RECORDINGS ──────────────────────────────────────
-  // routes.ts refuses a canonical whose numbers are not in the original. That guard is only as
-  // good as the rewrites it actually sees.
-  await check("no rewrite invents a number the client did not write", () => {
-    for (const [key, rec] of Object.entries<any>(recorded.entries)) {
-      const canon = String(rec.canonical || "");
-      if (!canon) continue;
-      for (const n of canon.match(/\d+/g) || []) {
-        assert.ok(key.includes(n) || /^(1|2)$/.test(n),
-          `the rewrite of "${key.slice(0, 50)}" invented the number ${n}: ${canon}`);
-      }
-    }
-  });
 
   // ── AND THROUGH THE PRODUCTION PATH, WHICH IS THE WHOLE POINT ────────────────────────────────
   //
@@ -139,6 +111,102 @@ async function main() {
         `the pipeline crashed with the normalizer on — this path is only reachable here:\n      ${reply.slice(0, 160)}`);
     });
   }
+
+  // ── THE INVARIANT THAT MATTERS, GRADED ON THE PRODUCT AND NOT ON THE MODEL'S STRING ─────────
+  //
+  // The first real recording (2026-09-06, Railway) settled a question the string form of these two
+  // checks could not even ask. gpt-4o-mini DOES collapse the three-day batch — it returned
+  // "…for breakfast and rice with beef stew for dinner yesterday", losing Tuesday and Wednesday and
+  // renaming Monday. Graded as a string that is a failure. Graded through the front door it is not
+  // a failure at all, because routes.ts refuses the rewrite before any handler sees it:
+  //
+  //   [NORMALIZER] multi-DAY note is never rewritten; raw text proceeds
+  //   [MEAL_LOG] INSERT meal … at=Mon Aug 31
+  //   [MEAL_LOG] INSERT meal … at=Tue Sep 01
+  //   [MEAL_LOG] INSERT meal … at=Wed Sep 02
+  //
+  // Three days in, three days written. The old assertion demanded that the MODEL behave, which is
+  // neither something this product controls nor what #63 was ever about: #63 is that the raw text
+  // must reach the batch logger. So these now drive the real turn and read the durable writes and
+  // the front door's own instrumentation. That is strictly stronger — a model that happened to
+  // echo the three day names would satisfy the old check while the brake was broken — and it is
+  // the same discipline the rest of this repo applies: static shape produces candidates, the
+  // runtime trace decides.
+  const { mealLogs } = await import("../shared/schema");
+  const { sastDayKey } = await import("../server/sast");
+
+  /** Run one real turn and capture what it wrote and whether the front door applied a rewrite. */
+  async function turn(input: string): Promise<{ days: string[]; appliedRewrite: boolean }> {
+    const g = globalThis as any;
+    g.__KAMLIFE_STUB_USER = { ...USER };
+    g.__KAMLIFE_STUB_WRITES = [];
+    // The applied-rewrite line is only printed when the canonical SURVIVES every brake
+    // (routes.ts:709). Every refusal prints a differently-shaped line, so this reads the product's
+    // own instrumentation rather than re-deriving the decision.
+    // ONE TURN AT A TIME, AND THE RESTORE TARGET IS CAPTURED ONCE. The first cut ran these
+    // concurrently through Promise.all: the overrides nested, the last restore put back another
+    // OVERRIDE rather than the real function, and the suite's own summary vanished into it.
+    // Concurrent turns would also share __KAMLIFE_STUB_WRITES and the stub user, so sequential is
+    // the only honest shape here regardless of the logging.
+    const APPLIED = /^\[NORMALIZER\] [A-Z_]+\(\d+%\)/;
+    let applied = false;
+    console.log = (...a: unknown[]) => { if (APPLIED.test(String(a[0] ?? ""))) applied = true; };
+    try { await handleMessage(USER.phoneNumber, input); }
+    finally { console.log = REAL_LOG; }
+    const days = (g.__KAMLIFE_STUB_WRITES as Array<{ table: unknown; values: any }>)
+      .filter(w => w.table === mealLogs && w.values?.loggedAt)
+      .map(w => sastDayKey(new Date(w.values.loggedAt)));
+    delete g.__KAMLIFE_STUB_WRITES;
+    return { days: [...new Set(days)], appliedRewrite: applied };
+  }
+
+  await check("a multi-day batch still lands on three days through the front door", async () => {
+    const batch = CORPUS.find(c => /Monday I had pap/i.test(c.input))!;
+    if (!(batch.input.toLowerCase() in recorded.entries)) return;   // reported by the coverage check
+    const { days, appliedRewrite } = await turn(batch.input);
+    assert.equal(days.length, 3,
+      `three days of meals landed on ${days.length} day(s): ${days.join(", ")} — this is the ~7,700 `
+      + `kcal-on-one-day failure from #63, and it means the raw text never reached the batch logger`);
+    assert.equal(appliedRewrite, false,
+      "the front door applied a rewrite to a multi-day note — the brake that protects the batch "
+      + "logger is not firing, whatever the model happened to return this time");
+  });
+
+  // ── AND THE NUMBERS BRAKE, GRADED ON WHETHER IT FIRED ───────────────────────────────────────
+  //
+  // routes.ts refuses any canonical carrying a digit the client did not write. The first real
+  // recording produced one: "my steps are 10k today" → "10000 steps today". That expansion is
+  // reasonable and the brake still refuses it, because a brake that reasons about which inventions
+  // are benign is not a brake. The old check called that a failure of the MODEL; what matters is
+  // that the GUARD held and the deterministic step parser read "10k" off the raw text anyway.
+  await check("a canonical carrying an unwritten number never reaches a handler", async () => {
+    // The brake's own test, in the brake's own terms (routes.ts): separators stripped, digit-for-
+    // digit containment. Word-number compounds are the brake's other allowance and none of the
+    // recorded inputs use one, so this is deliberately the narrow form.
+    const inventing = Object.entries<any>(recorded.entries).filter(([key, rec]) => {
+      const stripped = key.replace(/[.,\s]/g, "");
+      return String(rec.canonical || "").match(/\d+/g)?.some(d => !stripped.includes(d));
+    });
+    for (const [key] of inventing) {
+      const rec: any = recorded.entries[key];
+      const { appliedRewrite } = await turn(String(rec._input || key));
+      assert.equal(appliedRewrite, false,
+        `the front door applied "${rec.canonical}" to "${key.slice(0, 46)}" — it carries a number `
+        + `the client never wrote, and the hallucination brake let it through`);
+    }
+    // NOT VACUOUS. If nothing in the corpus invents a number the loop above asserts nothing, and a
+    // brake that refused EVERY rewrite would also pass it. Both are ruled out here.
+    assert.ok(inventing.length > 0,
+      "no recorded canonical carries an unwritten number, so this check graded nothing — re-record, "
+      + "or retire it deliberately rather than letting it pass empty");
+    let anyApplied = false;
+    for (const c of CORPUS.filter(c => recorded.entries[c.input.toLowerCase()]?.canonical)) {
+      if ((await turn(c.input)).appliedRewrite) { anyApplied = true; break; }
+    }
+    assert.ok(anyApplied,
+      "the front door applied NO rewrite from the whole corpus — the brakes cannot be graded "
+      + "against a normalizer that is off");
+  });
 
   console.log(`\nnormalizer-replay: ${passed}/${passed + failures.length} passed `
     + `(${Object.keys(recorded.entries).length} recorded normalizations)`);

@@ -1,0 +1,77 @@
+{
+  "recordedAt": "2026-09-06T06:50:34.223Z",
+  "model": "gpt-4o-mini",
+  "promptHash": "a0a5590e7768c4a1",
+  "entries": {
+    "no i moved yesterdays workout to today": {
+      "intent": "OTHER",
+      "confidence": 0.95,
+      "canonical": "",
+      "_input": "No I moved yesterdays workout to today",
+      "_why": "#63: comprehension is correct (moved_to_today) and nothing consumes it — the reply is a food prompt"
+    },
+    "my dinner is the same as the last meal": {
+      "intent": "MEAL_COPY",
+      "confidence": 0.9,
+      "canonical": "dinner same as lunch",
+      "_input": "My dinner is the same as the last meal",
+      "_why": "#63: reported as logged from yesterday; a back-reference whose day resolution is the risk"
+    },
+    "no i'm just fine with this meal": {
+      "intent": "OTHER",
+      "confidence": 0.95,
+      "canonical": "",
+      "_input": "No I'm just fine with this meal",
+      "_why": "#63: a plain decline answered with 'I didn't catch that one' — reproduces offline"
+    },
+    "my steps are 10k today": {
+      "intent": "STEPS",
+      "confidence": 0.9,
+      "canonical": "10000 steps today",
+      "_input": "My steps are 10k today",
+      "_why": "#63: evidence stated, action contradicted it ('get a 20-minute walk in')"
+    },
+    "monday i had pap and chicken, eggs and bread for breakfast, and rice with beef stew for dinner. tuesday was oats, a chicken salad, and pasta with mince. wednesday i had eggs and bacon, a burger and chips, and lamb chops with rice.": {
+      "intent": "FOOD_LOG",
+      "confidence": 0.95,
+      "canonical": "i had pap and chicken, eggs and bread for breakfast and rice with beef stew for dinner yesterday",
+      "_input": "Monday I had pap and chicken, eggs and bread for breakfast, and rice with beef stew for dinner. Tuesday was oats, a chicken salad, and pasta with mince. Wednesday I had eggs and bacon, a burger and chips, and lamb chops with rice.",
+      "_why": "#63 (Bonolo): three days in one batch. multiFact is false for a single-domain note, so the rewrite brake does not engage — this is the input that must not collapse into one day"
+    },
+    "i had a burger and chips last night, i feel like i ruined everything": {
+      "intent": "RANT",
+      "confidence": 0.9,
+      "canonical": "",
+      "_input": "I had a burger and chips last night, I feel like I ruined everything",
+      "_why": "gauntlet: mouth-layer failure, 5 sentences where 3 are the rule"
+    },
+    "work is stressing me out and i ate takeaways again tonight": {
+      "intent": "FOOD_LOG",
+      "confidence": 0.9,
+      "canonical": "i had takeaways for dinner",
+      "_input": "Work is stressing me out and I ate takeaways again tonight",
+      "_why": "gauntlet: 6 sentences where 3 are the rule, and the stress is never acknowledged"
+    },
+    "is today a rest day": {
+      "intent": "QUESTION",
+      "confidence": 0.95,
+      "canonical": "",
+      "_input": "is today a rest day",
+      "_why": "gauntlet: 3 sentences where 2 are the rule"
+    },
+    "i'm doing yesterday's session today": {
+      "intent": "OTHER",
+      "confidence": 0.95,
+      "canonical": "",
+      "_input": "I'm doing yesterday's session today",
+      "_why": "the adjacent shape of moved_to_today — a rewrite must not turn this into a refusal"
+    },
+    "you missed the black coffee yesterday": {
+      "intent": "FOOD_LOG",
+      "confidence": 0.9,
+      "canonical": "i had black coffee for breakfast yesterday",
+      "_input": "you missed the black coffee yesterday",
+      "_why": "a correction naming a past day; the day must survive the rewrite"
+    }
+  }
+}
