@@ -82,13 +82,24 @@ function serialise<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 const sastDayKeyOf = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
-/** Midday on the most recent past Saturday — for fixtures that correct a named weekday. */
-function lastSaturday(): Date {
+/**
+ * Midday on a past weekday the client can NAME — for fixtures that correct a named day.
+ *
+ * WHY NOT "LAST SATURDAY". The Saturday version was already computed rather than hard-coded, so
+ * that the fixture would not depend on which weekday the suite runs. It still did: on a SUNDAY the
+ * most recent past Saturday IS yesterday, the coach correctly answers "yesterday's breakfast"
+ * because that is the truer thing to call it, and the check demanding the word "Saturday" went red
+ * once a week on the calendar rather than on the code.
+ *
+ * Three days back is never today and never yesterday, on any day of the week, so the day has a
+ * name the coach must use. The name is returned with the date so the assertion asks for the day
+ * this fixture actually seeded.
+ */
+function namedPastDay(): { at: Date; name: string } {
   const d = new Date();
   d.setHours(12, 0, 0, 0);
-  const back = (d.getDay() - 6 + 7) % 7 || 7;   // never today: "from Saturday" means a past one
-  d.setDate(d.getDate() - back);
-  return d;
+  d.setDate(d.getDate() - 3);
+  return { at: d, name: new Intl.DateTimeFormat("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" }).format(d) };
 }
 const NOW = Date.now();
 const USER = {
@@ -2037,6 +2048,7 @@ async function main() {
     const { mealLogs } = await import("../shared/schema");
     const { sastDayStart } = await import("../server/utils");
     const g = globalThis as any;
+    const named = namedPastDay();
     const replies = await serialise(async () => {
       // One row per day the check corrects — see 2b. A single yesterday row made the today case
       // vacuous under a stub that could not filter.
@@ -2047,15 +2059,15 @@ async function main() {
         id: "parity-day-row-2-today", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
         carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 3600_000),
       }, {
-        // …and the named day the check corrects. Computed, not hard-coded, so the fixture does not
-        // depend on which weekday the suite happens to run.
-        id: "parity-day-row-2-sat", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
-        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: lastSaturday(),
+        // …and the named day the check corrects — three days back, so it is never today and never
+        // yesterday, whichever day of the week the suite runs on. See namedPastDay.
+        id: "parity-day-row-2-named", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: named.at,
       }]]]);
       const out = {
         today: await say("You missed the black coffee"),
         yesterday: await say("You missed the black coffee yesterday"),
-        saturday: await say("You missed the black coffee from Saturday"),
+        named: await say(`You missed the black coffee from ${named.name}`),
         span: await say("you missed the black coffee last week"),
       };
       delete g.__KAMLIFE_STUB_ROWS;
@@ -2065,8 +2077,8 @@ async function main() {
     assert.match(replies.yesterday, /yesterday'?s breakfast/i,
       `a past-day correction did not name the day: ${replies.yesterday}`);
     assert.ok(!/_Today:/.test(replies.yesterday), "a past-day correction quoted today's total");
-    assert.match(replies.saturday, /saturday'?s breakfast/i,
-      `a named-day correction did not name the day: ${replies.saturday}`);
+    assert.match(replies.named, new RegExp(`${named.name}'?s breakfast`, "i"),
+      `a named-day correction did not name the day: ${replies.named}`);
     // …AND THE MEAL THEY NAMED. With dinner logged after breakfast, "at breakfast" must not
     // attach to dinner — the date defect one axis over, found reviewing this cut.
     const slotted = await serialise(async () => {
@@ -3447,21 +3459,41 @@ async function main() {
   // alone would pass even if no caller used it. This is the string on the handset.
   check("header outcome . the workout the client is sent does not contradict itself", async () => {
     const g = globalThis as any;
-    // The parity user trains 3x/week, so "today" is a rest day on most calendar days and the
-    // session is never composed. Six days puts today inside the programme whenever this runs.
-    const reply = await serialise(async () => {
+    // TWO CALLERS, AND NEITHER OF THEM IS THE CALENDAR.
+    //
+    // This asked for "workout" with trainingDaysPerWeek raised to 6, on the reasoning that six
+    // days puts today inside the programme whenever the suite runs. It does not: SCHEDULE_MAP
+    // tops out at Mon–Sat, so NOBODY trains on a Sunday, and every Sunday this check received
+    // "*Sunday — Rest Day.*", found no header, and went red on the day of the week rather than on
+    // the code. A suite that is green six days in seven is not a gate, and its redness on the
+    // seventh teaches everyone to ignore it.
+    //
+    // renderSession has exactly two callers — the `workout` command and the moved-into-today
+    // path — and programme.ts says in as many words that having both end at one function is the
+    // property worth having. The moved path composes on a rest day BY DESIGN ("a client saying
+    // they moved a session into today has already decided they are training"), so asking both
+    // reaches a composed session on any day of the week, and grades both mouths instead of one.
+    const replies = await serialise(async () => {
       g.__KAMLIFE_STUB_USER = { ...USER, trainingDaysPerWeek: 6 };
-      try { return String(await handleMessage(USER.phoneNumber, "workout") ?? ""); }
-      catch (e: any) { return `__THREW__ ${e?.message || e}`; }
+      const ask = async (text: string) => {
+        try { return String(await handleMessage(USER.phoneNumber, text) ?? ""); }
+        catch (e: any) { return `__THREW__ ${e?.message || e}`; }
+      };
+      try { return [await ask("workout"), await ask("no I moved yesterdays workout to today")]; }
       finally { g.__KAMLIFE_STUB_USER = { ...USER }; }
     });
-    const header = reply.split("\n").find(l => /\*Week \d/.test(l)) || "";
-    assert.ok(header, `no week header in the workout reply: ${reply.slice(0, 200)}`);
-    assert.ok(!/— Session \d+\*\s*$/.test(header.trim()),
-      `Week and Session are still printed as one clock: ${header}`);
-    if (/Session/.test(header)) {
-      assert.match(header, /Session \d+ overall/,
-        `a session number without its clock named: ${header}`);
+    const headers = replies.flatMap(r => r.split("\n").filter(l => /\*Week \d/.test(l)));
+    // NOT VACUOUS: at least one of the two must have actually composed a session, so a build that
+    // stops delivering sessions altogether fails here rather than passing with an empty list.
+    assert.ok(headers.length, `neither the workout command nor a moved session composed a week `
+      + `header: ${replies.map(r => r.slice(0, 120)).join(" || ")}`);
+    for (const header of headers) {
+      assert.ok(!/— Session \d+\*\s*$/.test(header.trim()),
+        `Week and Session are still printed as one clock: ${header}`);
+      if (/Session \d/.test(header)) {
+        assert.match(header, /Session \d+ overall/,
+          `a session number without its clock named: ${header}`);
+      }
     }
   });
 
