@@ -1,13 +1,84 @@
 import { pool } from "./db";
 import OpenAI from "openai";
 import { assertAiOnline, isAiOfflineError } from "./ai-offline";
-import { sastDaysBetween } from "./sast";
+import { sastDayKey, sastDaysBetween } from "./sast";
+import { looksLikeQuestion } from "./utils";
 import {
   createOpenTrainingLoop,
   isOpenTrainingLoopMarker,
   readOpenTrainingLoop,
   type OpenTrainingLoop,
 } from "./workout-feedback";
+
+type WeekendAnswer = "untracked" | "usual" | "reported";
+type WeekendInvestigation = { state: "open" | "answered"; day: string; outcome?: WeekendAnswer };
+const WEEKEND_ANSWER = { UNTRACKED: "untracked", USUAL: "usual", REPORTED: "reported" } as const;
+const WEEKEND_INVESTIGATION_DB_RE = "\\s*\\|?\\s*investigate_weekend_food_(open|answered):[0-9]{4}-[0-9]{2}-[0-9]{2}(:((untracked|usual|reported)))?";
+
+function readWeekendInvestigation(user: any, now = Date.now()): WeekendInvestigation | null {
+  for (const token of String(user?.profileNotes || "").split("|").map(part => part.trim())) {
+    const state = token.startsWith("investigate_weekend_food_open:") ? "open"
+      : token.startsWith("investigate_weekend_food_answered:") ? "answered" : null;
+    if (!state) continue;
+    const [day, outcome] = token.slice(`investigate_weekend_food_${state}:`.length).split(":");
+    if (day.length !== 10 || !Number.isFinite(new Date(`${day}T12:00:00+02:00`).getTime())) continue;
+    const age = sastDaysBetween(new Date(`${day}T12:00:00+02:00`), now);
+    if (age >= 0 && age <= 7) return { state, day, outcome: outcome as WeekendAnswer | undefined };
+  }
+  return null;
+}
+
+/** The weekend unknown has already been answered for this decision window, even without meal rows. */
+export function weekendInvestigationAnswered(user: any, now = Date.now()): boolean {
+  return readWeekendInvestigation(user, now)?.state === "answered";
+}
+
+/** Persist the question only at an outbound handoff boundary. profileNotes is the existing fact owner. */
+export async function ensureOpenWeekendInvestigation(user: any, now = Date.now()): Promise<boolean> {
+  const current = readWeekendInvestigation(user, now);
+  if (current) return current.state === "open";
+  const token = `investigate_weekend_food_open:${sastDayKey(now)}`;
+  const updated = await pool.query(
+    `UPDATE users
+        SET profile_notes = concat_ws(' | ', NULLIF(btrim(regexp_replace(COALESCE(profile_notes, ''), $1, '', 'gi'), ' |'), ''), $2::text)
+      WHERE id = $3
+      RETURNING profile_notes`,
+    [WEEKEND_INVESTIGATION_DB_RE, token, user.id],
+  ).catch(() => ({ rows: [] }));
+  if (!updated.rows.length) return false;
+  user.profileNotes = updated.rows[0].profile_notes;
+  return true;
+}
+
+function weekendAnswerFrom(message: string): WeekendAnswer | null {
+  const text = String(message || "").trim();
+  if (!text || looksLikeQuestion(text)) return null;
+  const words = text.toLowerCase().replaceAll("’", "'");
+  if (["travel", "didn't track", "did not track", "didn't log", "did not log", "not tracked", "not logged", "can't remember", "cannot remember"]
+    .some(signal => words.includes(signal))) return WEEKEND_ANSWER.UNTRACKED;
+  if (["normal", "usual", "same as usual", "nothing different", "nothing unusual"]
+    .some(signal => words.includes(signal))) return WEEKEND_ANSWER.USUAL;
+  return ["weekend", "saturday", "sunday"].some(signal => words.includes(signal)) ? WEEKEND_ANSWER.REPORTED : null;
+}
+
+/** Close the open question with a bounded durable answer; an answer need not invent meal rows. */
+export async function resumeOpenWeekendInvestigation(user: any, message: string, now = Date.now()): Promise<boolean> {
+  const current = readWeekendInvestigation(user, now);
+  const outcome = weekendAnswerFrom(message);
+  if (current?.state !== "open" || !outcome) return false;
+  const openToken = `investigate_weekend_food_open:${current.day}`;
+  const answeredToken = `investigate_weekend_food_answered:${current.day}:${outcome}`;
+  const updated = await pool.query(
+    `UPDATE users
+        SET profile_notes = concat_ws(' | ', NULLIF(btrim(regexp_replace(COALESCE(profile_notes, ''), $1, '', 'gi'), ' |'), ''), $2::text)
+      WHERE id = $3 AND position($4 in COALESCE(profile_notes, '')) > 0
+      RETURNING profile_notes`,
+    [WEEKEND_INVESTIGATION_DB_RE, answeredToken, user.id, openToken],
+  ).catch(() => ({ rows: [] }));
+  if (!updated.rows.length) return false;
+  user.profileNotes = updated.rows[0].profile_notes;
+  return true;
+}
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -295,7 +366,7 @@ export async function retrieveMemories(phone: string, query: string): Promise<st
 import { db } from "./db";
 import { clientTruthCommits, users } from "../shared/schema";
 import { and, eq, sql } from "drizzle-orm";
-import { looksLikeQuestion, isFutureIntent } from "./utils";
+import { isFutureIntent } from "./utils";
 import { foodConstraints } from "./food-swaps";
 
 export type DurableFactField =

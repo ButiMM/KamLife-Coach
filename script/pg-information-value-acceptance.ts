@@ -25,10 +25,11 @@ const schema = await import("../shared/schema");
 const { eq } = await import("drizzle-orm");
 const { handleMessage } = await import("../server/routes");
 const { canonicalDecision } = await import("../server/understanding/live");
-const { canonicalNextMove } = await import("../server/scheduler/proactive-decision");
+const { canonicalNextMove, recordCanonicalMoveOutbound } = await import("../server/scheduler/proactive-decision");
+const { loadProactiveState } = await import("../server/scheduler/shared");
 const { getProgressTruth } = await import("../server/day-ledger");
 const { weekendLoggedDays } = await import("../server/day-ledger-core");
-const { ensureOpenTrainingLoop } = await import("../server/memory");
+const { ensureOpenTrainingLoop, weekendInvestigationAnswered } = await import("../server/memory");
 const { sastDayKey } = await import("../server/sast");
 const { _resetOutboundDedupe } = await import("../server/reply-hygiene");
 
@@ -116,6 +117,23 @@ const liveReply = await say(a.phoneNumber, "Dinner is rice, mince and mixed vegg
 check(/what did eating look like over the weekend\?/i.test(liveReply),
   "the real customer front door delivers the authorized weekend question",
   JSON.stringify(liveReply.slice(-220)));
+const openedA = await reload(a.id);
+check(/investigate_weekend_food_open:/i.test(String(openedA.profileNotes || "")),
+  "the reactive question becomes durable only after it is included in the handed-off reply",
+  JSON.stringify(openedA.profileNotes));
+
+const nonMealCount = Number((await pool.query("SELECT COUNT(*)::int AS n FROM meal_logs WHERE user_id=$1", [a.id])).rows[0].n);
+await say(a.phoneNumber, "I was travelling and didn't track");
+const nonMealAnswered = await reload(a.id);
+const nonMealAfterCount = Number((await pool.query("SELECT COUNT(*)::int AS n FROM meal_logs WHERE user_id=$1", [a.id])).rows[0].n);
+const afterNonMealAnswer = await canonicalDecision(nonMealAnswered, "how am I doing now?");
+check(nonMealAfterCount === nonMealCount,
+  "a truthful no-tracking answer closes the unknown without inventing database-shaped backfill");
+check(weekendInvestigationAnswered(nonMealAnswered)
+    && /investigate_weekend_food_answered:\d{4}-\d{2}-\d{2}:untracked/i.test(String(nonMealAnswered.profileNotes || ""))
+    && afterNonMealAnswer.investigation?.missingFact !== "weekend_food",
+  "'I was travelling and didn't track' durably closes the open question",
+  `notes=${JSON.stringify(nonMealAnswered.profileNotes)} next=${JSON.stringify(afterNonMealAnswer.todo)}`);
 
 _resetOutboundDedupe();
 const answerReply = await say(a.phoneNumber, "Saturday I had pap and chicken. Sunday I had eggs and toast.");
@@ -127,6 +145,29 @@ const afterAnswer = await canonicalDecision(await reload(a.id), "how am I doing 
 check(!/weekend/i.test(answerReply) && afterAnswer.todo !== silentDecision.todo,
   "the answered fact is not asked again and the next decision changes or reconfirms",
   `reply=${JSON.stringify(answerReply.slice(-180))} next=${JSON.stringify(afterAnswer.todo)}`);
+
+const normal = await freshUser();
+await seedMeals(normal.id, weekdayOffsets);
+await seedWeights(normal.id, stalled);
+_resetOutboundDedupe();
+await say(normal.phoneNumber, "Dinner is rice, mince and mixed veggies");
+await say(normal.phoneNumber, "It was normal");
+const normalAnswered = await reload(normal.id);
+check(weekendInvestigationAnswered(normalAnswered)
+    && /investigate_weekend_food_answered:\d{4}-\d{2}-\d{2}:usual/i.test(String(normalAnswered.profileNotes || "")),
+  "'it was normal' is accepted as the bounded answer to the question actually open",
+  JSON.stringify(normalAnswered.profileNotes));
+
+const handoff = await freshUser();
+await seedMeals(handoff.id, weekdayOffsets);
+await seedWeights(handoff.id, stalled);
+const handoffMove = await canonicalNextMove(handoff, { hour: 14 });
+await recordCanonicalMoveOutbound(handoff, handoffMove, "dropped");
+check(!/investigate_weekend_food_open:/i.test(String((await reload(handoff.id)).profileNotes || "")),
+  "selecting or dropping a proactive question creates no phantom open investigation");
+await recordCanonicalMoveOutbound(handoff, handoffMove, "sent");
+check(/investigate_weekend_food_open:/i.test(String((await reload(handoff.id)).profileNotes || "")),
+  "an accepted proactive handoff opens the same durable investigation");
 
 REAL("\n=== B — AN OPEN COACHING LOOP OUTRANKS A NEW QUESTION ===");
 const b = await freshUser();
@@ -163,6 +204,44 @@ const safe = await canonicalNextMove(e, { hour: 14 });
 check(safe.action.investigation?.missingFact !== "weekend_food",
   "without a stall, a merely available question is not asked",
   JSON.stringify(safe.action));
+
+const frequent = await freshUser();
+await seedMeals(frequent.id, weekdayOffsets);
+await seedWeights(frequent.id, [
+  { days: 0, kg: 88.0 }, { days: 2, kg: 88.1 }, { days: 5, kg: 88.0 },
+]);
+const frequentState = await loadProactiveState(frequent);
+const frequentReactive = await canonicalDecision(frequent, "how am I doing?");
+const frequentProactive = await canonicalNextMove(frequent, { hour: 14 });
+check(frequentState.weight.stalledWeeks === 0
+    && frequentReactive.investigation?.missingFact !== "weekend_food"
+    && frequentProactive.action.investigation?.missingFact !== "weekend_food",
+  "0/2/5-day flat readings are zero elapsed stalled weeks through both decision doors",
+  `weeks=${frequentState.weight.stalledWeeks} reactive=${JSON.stringify(frequentReactive.todo)} proactive=${JSON.stringify(frequentProactive.action.todo)}`);
+
+const oneWindow = await freshUser({
+  profileNotes: `sick_since:${sastDayKey(ago(40))} | sick_until:${sastDayKey(ago(35))}`,
+});
+await seedMeals(oneWindow.id, weekdayOffsets);
+await seedWeights(oneWindow.id, [
+  { days: 0, kg: 88.0 }, { days: 8, kg: 88.1 }, { days: 16, kg: 88.0 }, { days: 40, kg: 88.1 },
+]);
+const windowReactive = await canonicalDecision(oneWindow, "how am I doing?");
+const windowProactive = await canonicalNextMove(oneWindow, { hour: 14 });
+check(windowReactive.investigation?.missingFact === "weekend_food"
+    && windowProactive.action.investigation?.missingFact === "weekend_food",
+  "reactive and proactive decisions share the canonical 28-day weight window",
+  `reactive=${JSON.stringify(windowReactive.todo)} proactive=${JSON.stringify(windowProactive.action.todo)}`);
+
+const wellness = await freshUser({ goalType: "general" });
+await seedMeals(wellness.id, weekdayOffsets);
+await seedWeights(wellness.id, stalled);
+const wellnessReactive = await canonicalDecision(wellness, "how am I doing?");
+const wellnessProactive = await canonicalNextMove(wellness, { hour: 14 });
+check(wellnessReactive.investigation?.missingFact !== "weekend_food"
+    && wellnessProactive.action.investigation?.missingFact !== "weekend_food",
+  "a non-weight goal cannot trigger weekend-stall investigation through either door",
+  `reactive=${JSON.stringify(wellnessReactive.todo)} proactive=${JSON.stringify(wellnessProactive.action.todo)}`);
 
 const forbidden = await freshUser({ doNotMention: "food and meals" });
 await seedMeals(forbidden.id, weekdayOffsets);

@@ -27,7 +27,7 @@
  * Pure — no DB, no model. Unit-tested.
  */
 
-import type { GoalKey } from "./goal-profiles";
+import { getGoalProfile, type GoalKey } from "./goal-profiles";
 import { selectDecisionState, type DecisionEvidence } from "./understanding/state";
 // Pure, and it has to be: the verifier owns "may this reach a client" and carries no database or
 // model, so the decision can ask it what the client asked us not to say (Cut 8).
@@ -738,7 +738,7 @@ export interface ProactiveProfile {
  */
 export function dayStateFrom(
   s: ProactiveStateForDecision, p: ProactiveProfile,
-  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; trainingAwaitingOutcome?: boolean; justAteProteinMeal?: boolean },
+  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; trainingAwaitingOutcome?: boolean; weekendInvestigationAnswered?: boolean; justAteProteinMeal?: boolean },
 ): DayState {
   return {
     firstName: s.name,
@@ -933,12 +933,14 @@ export function underPolicy(
     loggedToday?: boolean; daysSinceWeighIn?: number | null; doNotMention?: string | null;
     hour?: number; loggedDays7d?: number | null; weekendLoggedDays7d?: number | null;
     stalledWeeks?: number; trainingAwaitingOutcome?: boolean;
-    foodDayClosed?: boolean; trainingDeclined?: boolean;
+    foodDayClosed?: boolean; trainingDeclined?: boolean; weekendInvestigationAnswered?: boolean;
+    weightIsGoal?: boolean;
   },
 ): OneAction {
   const asksUsefulWeekendFact = action.kind !== "rest" && action.kind !== "weigh"
     && action.kind !== "come_back" && !opts.trainingAwaitingOutcome
     && !opts.foodDayClosed && !opts.trainingDeclined
+    && opts.weightIsGoal === true && !opts.weekendInvestigationAnswered
     && opts.weightSufficient && (opts.stalledWeeks ?? 0) >= 2
     && !opts.foodSufficient && (opts.loggedDays7d ?? 0) >= 2
     && opts.weekendLoggedDays7d === 0
@@ -1032,7 +1034,7 @@ function evidenceFor(s: ProactiveStateForDecision, kind: ActionKind): DecisionEv
 
 export function decideProactive(
   s: ProactiveStateForDecision, p: ProactiveProfile,
-  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; trainingAwaitingOutcome?: boolean; justAteProteinMeal?: boolean },
+  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; trainingAwaitingOutcome?: boolean; weekendInvestigationAnswered?: boolean; justAteProteinMeal?: boolean },
 ): ProactiveDecision {
   let action = chooseAction(dayStateFrom(s, p, opts));
   let evidence = evidenceFor(s, action.kind);
@@ -1073,6 +1075,8 @@ export function decideProactive(
     trainingAwaitingOutcome: opts?.trainingAwaitingOutcome,
     foodDayClosed: opts?.foodDayClosed,
     trainingDeclined: opts?.trainingDeclined,
+    weekendInvestigationAnswered: opts?.weekendInvestigationAnswered,
+    weightIsGoal: getGoalProfile(s.goalType).weightIsGoal,
   });
   evidence = evidenceFor(s, action.kind);
 

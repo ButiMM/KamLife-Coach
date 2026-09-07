@@ -2586,9 +2586,11 @@ async function main() {
         [chatHistory, [{ id: 1, createdAt: today, intent: "FOOD_LOG", messageIn: "chicken and rice" }]],
         [mealLogs, [meal]],
         [workoutLogs, []],                                  // zero sessions this week
+        // getWeightTruth is the shared owner and orders oldest -> newest; the stub does not apply
+        // orderBy, so its seeded rows must have the chronology the real PostgreSQL query returns.
         [weightLogs, [
-          { id: 2, weight: "82.0", w: "82.0", at: new Date(NOW - 86_400_000), loggedAt: new Date(NOW - 86_400_000) },
           { id: 1, weight: "83.4", w: "83.4", at: new Date(NOW - 20 * 86_400_000), loggedAt: new Date(NOW - 20 * 86_400_000) },
+          { id: 2, weight: "82.0", w: "82.0", at: new Date(NOW - 86_400_000), loggedAt: new Date(NOW - 86_400_000) },
         ]],
         [stepLogs, [{ avg: 9000, steps: 9000, at: today, loggedAt: today }]],
         // WHAT THEY RULED OUT TODAY IS A ROW NOW (#194), not a sentence re-derived from the last

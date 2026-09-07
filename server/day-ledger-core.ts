@@ -137,16 +137,22 @@ export function weightChangeKg(weighIns: Array<{ weight: unknown }>): number | n
   return Math.round((kgs[kgs.length - 1] - kgs[0]) * 10) / 10;
 }
 
-/** Weeks of no meaningful movement (<0.3kg), with readings ordered newest first. */
-export function stalledWeeksFrom(weights: number[]): number {
-  if (weights.length < 3) return 0;
-  const newest = weights[0];
-  let weeks = 0;
-  for (const weight of weights.slice(1)) {
-    if (Math.abs(newest - weight) >= 0.3) break;
-    weeks++;
+/**
+ * Whole elapsed weeks with no meaningful movement (<0.3kg), over canonical chronological points.
+ * A reading is not a week: three flat readings in five days are still zero stalled weeks.
+ */
+export function stalledWeeksFrom(points: Array<{ kg: number; at: Date }>): number {
+  const ordered = points
+    .filter(p => Number.isFinite(p.kg) && Number.isFinite(p.at?.getTime()))
+    .slice().sort((a, b) => a.at.getTime() - b.at.getTime());
+  if (ordered.length < 2) return 0;
+  const newest = ordered[ordered.length - 1];
+  let earliest = newest;
+  for (let i = ordered.length - 2; i >= 0; i--) {
+    if (Math.abs(newest.kg - ordered[i].kg) >= 0.3) break;
+    earliest = ordered[i];
   }
-  return weeks;
+  return Math.floor((newest.at.getTime() - earliest.at.getTime()) / (7 * 86_400_000));
 }
 
 /** Logged weekend days in an already-canonical SAST window. */

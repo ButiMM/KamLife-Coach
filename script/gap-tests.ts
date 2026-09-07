@@ -3478,6 +3478,32 @@ test("information value: a known stall asks for the missing weekend before chang
     "canonical weekend evidence closes this missing fact; silence never fabricates an answer");
 });
 
+test("information value: stall duration is elapsed time, not a count of scale readings", async () => {
+  const { stalledWeeksFrom } = await import("../server/day-ledger-core");
+  const at = (days: number) => new Date(Date.UTC(2026, 8, 7) - days * 86_400_000);
+  assert.equal(stalledWeeksFrom([
+    { kg: 88.0, at: at(5) }, { kg: 88.1, at: at(2) }, { kg: 88.0, at: at(0) },
+  ]), 0, "three readings across five days cannot manufacture a two-week stall");
+  assert.equal(stalledWeeksFrom([
+    { kg: 88.0, at: at(21) }, { kg: 88.1, at: at(14) },
+    { kg: 88.0, at: at(7) }, { kg: 88.1, at: at(0) },
+  ]), 3, "weekly chronology establishes three elapsed stalled weeks");
+});
+
+test("information value: weekend-stall investigation exists only for a weight goal", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  const stalled = decisionState({
+    goalType: "general",
+    food: { loggedDays7d: 3, weekendLoggedDays7d: 0, daysSinceAnyLog: 0 },
+    weight: { daysSinceWeighIn: 1, trendUsable: true, stalledWeeks: 3 },
+    today: { kcal: 900, protein: 35, steps: 9000, logged: true, hour: 14 },
+    evidence: { foodSufficient: false, weightSufficient: true },
+  });
+  const move = decideProactive(stalled, decisionProfile as any, { hour: 14 });
+  assert.notEqual(move.action.investigation?.missingFact, "weekend_food",
+    "a general-wellness client is not interrogated to explain a scale outcome they are not pursuing");
+});
+
 test("information value: open loop, holds and do-not-mention retain precedence", async () => {
   const { decideProactive } = await import("../server/one-action");
   const stalled = decisionState({
@@ -3513,7 +3539,7 @@ test("information value: reactive and proactive doors use the same missing-fact 
   const opts = {
     foodSufficient: false, weightSufficient: true, loggedToday: true,
     daysSinceWeighIn: 1, hour: 14, loggedDays7d: 3, weekendLoggedDays7d: 0,
-    stalledWeeks: 3,
+    stalledWeeks: 3, weightIsGoal: true,
   };
   const proactive = decideProactive(state, decisionProfile as any, { hour: 14 }).action;
   const reactive = underPolicy(chooseAction(dayStateFrom(state, decisionProfile as any, { hour: 14 })), opts);
