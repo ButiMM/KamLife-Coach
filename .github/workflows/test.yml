@@ -182,6 +182,11 @@ jobs:
       # cannot show that the row reaching meal_logs carries the right food at the right grams.
       - name: Food identity and stated portion on real PostgreSQL
         run: npx tsx script/pg-food-identity-acceptance.ts
+      # ONE WEIGHT AUTHORITY, ONE SPEAKABILITY VERDICT (#216). Illness contamination, window width
+      # and chronology are all properties of stored rows against stored dates, and the Monday
+      # claims only exist as a sent message — SHADOW=on captures them.
+      - name: Weight authority and speakability on real PostgreSQL
+        run: npx tsx script/pg-weight-speakability-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot

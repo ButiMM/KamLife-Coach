@@ -6,6 +6,7 @@ import {
   todaySAST, thisWeekUTC, isProactivePaused,
 } from "../shared";
 import { getGoalProfile } from "../../goal-profiles";
+import { getProgressTruth } from "../../day-ledger";
 import { mentionsForbidden } from "../../brain/reply-verifier";
 
 export async function runWeightReminder(): Promise<void> {
@@ -64,7 +65,21 @@ export async function runMondayProgress(): Promise<void> {
       const workouts = wk.c || 0;
       const foodLogs = fl.c || 0;
       const stepDays = sl.c || 0;
-      const weights = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(desc(weightLogs.loggedAt)).limit(2);
+      // THE CANONICAL WEIGHT OWNER, NOT A SECOND READER (#216). This queried weight_logs directly
+      // and took the newest TWO rows, which made this surface disagree with every other one in
+      // three separate ways: it could not see an adequate week (two rows a day apart read as
+      // `too_short` while a real 17-day trend sat one row further back), it never asked
+      // getProgressTruth and so never honoured `doNotMention` — a client who asked us to drop the
+      // scale was sent "⚖️ Down 1.5kg this week" unprompted, on a Monday — and the pace projection
+      // below ran off the same raw rows with no verdict at all.
+      //
+      // A fourteen-day read, because the verdict owner already enforces what counts: at least
+      // MIN_TREND_SPAN_DAYS of span and a newest reading no older than MAX_TREND_AGE_DAYS. Handing
+      // it the window and letting it judge is the point; a row limit chosen here is this job
+      // deciding what a trend is, which is exactly the second opinion #216 forbids.
+      const weightTruth = await getProgressTruth(client, { days: 14 });
+      const weights = [...weightTruth.weight.points].reverse()
+        .map((pt: { kg: number; at: Date }) => ({ weight: pt.kg, loggedAt: pt.at }));
       const firstWeightLog = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(asc(weightLogs.loggedAt)).limit(1);
 
       if (workouts === 0 && foodLogs === 0 && stepDays === 0) continue;
@@ -83,7 +98,7 @@ export async function runMondayProgress(): Promise<void> {
       // ask, so nothing else stands between the claim and their phone.
       const { weightDirectionSpeakable } = await import("../../adaptive-targets");
       const weekSpeech = await weightDirectionSpeakable(
-        [...weights].reverse().map(w => ({ at: new Date(w.loggedAt as any) })), client,
+        weightTruth.weight.points.map((pt: { at: Date }) => ({ at: pt.at })), client,
       ).catch(() => ({ speakable: false }));
       if (weights.length >= 2 && weekSpeech.speakable) {
         const diff = Number(weights[0].weight) - Number(weights[1].weight);
@@ -101,9 +116,18 @@ export async function runMondayProgress(): Promise<void> {
         }
       }
 
-      // Goal arrival estimate — project when target weight will be hit at current pace
+      // GOAL ARRIVAL SPEAKS UNDER THE SAME VERDICT AS THE LINE ABOVE IT (#216).
+      //
+      // "At this pace" is a weight-derived conclusion like any other, and it sat OUTSIDE the gate:
+      // a client whose weekly direction was refused for illness still read
+      //
+      //     🎯 At this pace: *78kg in ~5 weeks* — around *October 2026*.
+      //
+      // in the same message the ⚖️ line had just been withheld from. One surface, two verdicts,
+      // and the louder one was the projection. It is also the claim that most deserves the gate:
+      // a pace computed across an illness is the least trustworthy number this job can produce.
       const targetKg = client.targetWeightKg ? Number(client.targetWeightKg) : null;
-      if (targetKg && firstWeightLog.length > 0 && weights.length >= 1) {
+      if (targetKg && weekSpeech.speakable && firstWeightLog.length > 0 && weights.length >= 1) {
         const currentKg = Number(weights[0].weight);
         const startKg = Number(firstWeightLog[0].weight);
         const startDate = firstWeightLog[0].loggedAt;

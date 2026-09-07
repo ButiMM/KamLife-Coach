@@ -374,6 +374,26 @@ export async function weightDirectionSpeakable(
   return verdict.usable ? { speakable: true, why: "" } : { speakable: false, why: verdict.why };
 }
 
+/**
+ * WHY THE SCALE IS NOT SPEAKING, SAID ONCE (#216).
+ *
+ * The verdict already knows why it refused. Two mouths then said it in their own words and a
+ * third made it up: the weight-history command distinguished illness from everything else, the
+ * body check did not and answered an illness refusal with "not enough clear weigh-ins to call a
+ * direction" — to a client with four clean weigh-ins across seventeen days. That is not a softer
+ * phrasing of the same thing, it is a different and false claim: they hear that they have not
+ * weighed enough, so they weigh more, and nothing changes because the readings were never the
+ * problem.
+ *
+ * One owner for the sentence, because a reason phrased at each mouth is how they drifted apart.
+ * It STATES a refusal the verdict already made; it never decides one.
+ */
+export function trendRefusalReason(why: string | undefined): string {
+  return why === "illness"
+    ? "I'm not calling a direction off these — they sit around the time you were ill, and weight moves on fluid and appetite then. Weigh in a few clear mornings and I'll read it properly."
+    : "I'm not calling a direction off these yet. Weigh in a few more mornings and I'll give you a straight read.";
+}
+
 export function weightTrendUsable(w: TrendWindow): TrendVerdict {
   if (w.count < 2) return { usable: false, why: "too_few" };
   if ((w.newestAt - w.oldestAt) / 86_400_000 < MIN_TREND_SPAN_DAYS) return { usable: false, why: "too_short" };
