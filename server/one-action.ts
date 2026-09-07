@@ -109,6 +109,8 @@ export interface DayState {
    * this suppresses one instruction for one day, it does not rewrite the record.
    */
   trainingDeclined?: boolean;
+  /** Coach K already asked for this training session and is waiting for its outcome. */
+  trainingAwaitingOutcome?: boolean;
   /**
    * What this client does not eat — the same owner every food surface consults (#128).
    *
@@ -628,7 +630,8 @@ export function chooseAction(s: DayState): OneAction {
   }
 
   // 8. TRAINING, behind for the week — unless they already ruled today out.
-  if (s.sessionsTarget > 0 && s.sessionsThisWeek < s.sessionsTarget && !s.trainingDeclined) {
+  if (s.sessionsTarget > 0 && s.sessionsThisWeek < s.sessionsTarget
+      && !s.trainingDeclined && !s.trainingAwaitingOutcome) {
     const left = s.sessionsTarget - s.sessionsThisWeek;
     return {
       kind: "train",
@@ -705,7 +708,7 @@ export interface ProactiveProfile {
  */
 export function dayStateFrom(
   s: ProactiveStateForDecision, p: ProactiveProfile,
-  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; justAteProteinMeal?: boolean },
+  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; trainingAwaitingOutcome?: boolean; justAteProteinMeal?: boolean },
 ): DayState {
   return {
     firstName: s.name,
@@ -732,6 +735,7 @@ export function dayStateFrom(
     atKeyboard: opts?.atKeyboard,
     foodDayClosed: opts?.foodDayClosed,
     trainingDeclined: opts?.trainingDeclined,
+    trainingAwaitingOutcome: opts?.trainingAwaitingOutcome,
     justAteProteinMeal: opts?.justAteProteinMeal,
   };
 }
@@ -983,7 +987,7 @@ function evidenceFor(s: ProactiveStateForDecision, kind: ActionKind): DecisionEv
 
 export function decideProactive(
   s: ProactiveStateForDecision, p: ProactiveProfile,
-  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; justAteProteinMeal?: boolean },
+  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; trainingAwaitingOutcome?: boolean; justAteProteinMeal?: boolean },
 ): ProactiveDecision {
   let action = chooseAction(dayStateFrom(s, p, opts));
   let evidence = evidenceFor(s, action.kind);

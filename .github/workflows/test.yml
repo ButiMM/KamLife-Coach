@@ -167,6 +167,10 @@ jobs:
       # not move. Real rows, real front door, several turns.
       - name: Durable log turns are one coaching turn on real PostgreSQL
         run: npx tsx script/pg-log-turn-acceptance.ts
+      # ONE OPEN COACHING LOOP (#208). Restart durability, user isolation and exact SAST
+      # attribution require the real database; a fixture cannot prove compare-and-set closure.
+      - name: Open training move survives and resolves across turns
+        run: npx tsx script/pg-open-coaching-loop-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot

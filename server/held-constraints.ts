@@ -194,6 +194,23 @@ export async function recordDailyConstraint(
 }
 
 /**
+ * Record the negative outcome of an already-open training move. The open move supplies the
+ * missing referent in "I couldn't do it"; this function does not classify language or create a
+ * second training policy. It writes through the same append-only owner as an explicit same-day
+ * training decline, on the SAST day the original move named.
+ */
+export async function recordOpenTrainingFailure(
+  client: { id: string },
+  targetDay: string,
+  sourceMessageId?: string,
+): Promise<void> {
+  await db.insert(dailyConstraints)
+    .values({ userId: client.id, day: targetDay, kind: "training", state: "asserted", via: "said",
+      sourceMessageId: sourceMessageId || null })
+    .onConflictDoNothing();
+}
+
+/**
  * THE SAME CONSTRAINT, READ OVER A BATCH OF TURNS ALREADY IN MEMORY (#138 recurrence, 2026-09-03).
  *
  * readHeldConstraints above answers "what did THIS client settle today" and reaches the chat log to

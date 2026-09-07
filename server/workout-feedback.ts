@@ -12,6 +12,8 @@
 
 export type WorkoutFeedbackKind = "too_easy" | "just_right" | "too_hard";
 
+import { randomUUID } from "node:crypto";
+
 // The post-session question has one existing durable home: users.awaitingInputType. Other
 // pending-answer flows already use that single slot, including timestamped, payload-carrying
 // holds. Keep this deliberately workout-scoped rather than creating a second conversation state
@@ -20,6 +22,74 @@ const EXPECTATION_OWNER = "workout_feedback";
 const EXPECTATION_TYPE = "session_feel";
 const EXPECTATION_SOURCE = "post_session_checkin";
 export const WORKOUT_FEEDBACK_EXPECTATION_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+// The same durable continuation slot also owns the narrower pre-session loop introduced by
+// #208. This is not another memory store: users.awaiting_input_type already answers "what reply
+// is Coach K waiting for?" across restarts. The marker carries only the originating canonical
+// move, its SAST target day and a correlation id; workout_logs remains the completion truth.
+const TRAINING_LOOP_OWNER = "coaching_loop";
+const TRAINING_LOOP_TYPE = "train";
+export const TRAINING_LOOP_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+export interface OpenTrainingLoop {
+  owner: typeof TRAINING_LOOP_OWNER;
+  type: typeof TRAINING_LOOP_TYPE;
+  targetDay: string;
+  createdAt: number;
+  ref: string;
+  source: "reactive" | "proactive";
+  marker: string;
+}
+
+export function createOpenTrainingLoop(
+  targetDay: string,
+  source: OpenTrainingLoop["source"],
+  now = Date.now(),
+  ref = randomUUID(),
+): string {
+  return [TRAINING_LOOP_OWNER, TRAINING_LOOP_TYPE, targetDay, now, ref, source].join(":");
+}
+
+export function isOpenTrainingLoopMarker(marker: string | null | undefined): boolean {
+  return String(marker || "").startsWith(`${TRAINING_LOOP_OWNER}:${TRAINING_LOOP_TYPE}:`);
+}
+
+export function readOpenTrainingLoop(
+  marker: string | null | undefined,
+  now = Date.now(),
+): OpenTrainingLoop | null {
+  const raw = String(marker || "");
+  const parts = raw.split(":");
+  if (
+    parts.length !== 6
+    || parts[0] !== TRAINING_LOOP_OWNER
+    || parts[1] !== TRAINING_LOOP_TYPE
+    || parts[2].length !== 10
+    || Number.isNaN(Date.parse(parts[2] + "T00:00:00+02:00"))
+    || parts[4].length !== 36
+    || parts[4].split("-").length !== 5
+    || !["reactive", "proactive"].includes(parts[5])
+  ) return null;
+  const createdAt = Number(parts[3]);
+  const age = now - createdAt;
+  if (!Number.isFinite(createdAt) || createdAt <= 0 || age < -60_000 || age > TRAINING_LOOP_WINDOW_MS) return null;
+  return {
+    owner: TRAINING_LOOP_OWNER,
+    type: TRAINING_LOOP_TYPE,
+    targetDay: parts[2],
+    createdAt,
+    ref: parts[4],
+    source: parts[5] as OpenTrainingLoop["source"],
+    marker: raw,
+  };
+}
+
+/** The unambiguous negative answer becomes meaningful only while the training move is open. */
+export function reportsOpenTrainingMoveFailed(message: string): boolean {
+  const text = String(message || "").toLowerCase().replaceAll("’", "'");
+  return ["couldn't do it", "could not do it", "couldn't make it", "could not make it",
+    "didn't manage to do it", "wasn't able to do it"].some(shape => text.includes(shape));
+}
 
 export interface WorkoutFeedbackExpectation {
   owner: typeof EXPECTATION_OWNER;

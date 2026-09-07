@@ -38,6 +38,8 @@ import { chooseAction, decideProactive, formatOneAction, underPolicy, type OneAc
 import { readHeldConstraints, NO_CONSTRAINTS, type HeldConstraints } from "../held-constraints";
 import { loadProactiveState } from "./shared";
 import { foodConstraints } from "../food-swaps";
+import { sastDayKey } from "../sast";
+import { ensureOpenTrainingLoop, loadOpenTrainingLoop } from "../memory";
 
 export interface CanonicalMove {
   /** Ready to place in a message. "" when the decision is `hold` — nothing to add is an answer. */
@@ -48,6 +50,13 @@ export interface CanonicalMove {
   held: HeldConstraints;
   /** True when the ledger read failed and the degraded contract was applied instead. */
   degraded: boolean;
+}
+
+/** Persist only a training move that a proactive sender has actually handed to its outbound door. */
+export async function recordCanonicalMoveOutbound(client: any, move: CanonicalMove) {
+  return move.action.kind === "train"
+    ? ensureOpenTrainingLoop(client, sastDayKey(), "proactive")
+    : null;
 }
 
 function profileOf(client: any) {
@@ -80,6 +89,7 @@ export async function canonicalNextMove(
   const firstName = String(client.name || "").split(" ")[0] || undefined;
   const profile = profileOf(client);
   const held = await readHeldConstraints(client.phoneNumber, client).catch(() => NO_CONSTRAINTS);
+  const openTraining = await loadOpenTrainingLoop(client);
 
   try {
     const state = await loadProactiveState(client);
@@ -87,6 +97,7 @@ export async function canonicalNextMove(
       hour: opts?.hour,
       foodDayClosed: held.foodDayClosed,
       trainingDeclined: held.trainingDeclined,
+      trainingAwaitingOutcome: !!openTraining,
     });
     console.log(`[PROACTIVE_DECISION] ${String(client.id || "").slice(-6)} decision=${decision.state} action=${decision.action.kind} foodClosed=${held.foodDayClosed} trainingDeclined=${held.trainingDeclined}`);
     return {
@@ -117,6 +128,7 @@ export async function canonicalNextMove(
       hour: opts?.hour ?? 12,
       foodDayClosed: held.foodDayClosed,
       trainingDeclined: held.trainingDeclined,
+      trainingAwaitingOutcome: !!openTraining,
       // Same as morning's degraded branch (#203): the zeros above are placeholders for state this
       // path could not build, so no investigation context is passed and the gate holds.
     }), { foodSufficient: false, weightSufficient: false, dreamGoal: client.dreamGoal });

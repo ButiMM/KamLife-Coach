@@ -22,9 +22,14 @@ const { resumeWorkoutFeedbackExpectation } = await import("../server/handlers/wo
 const { users, workoutLogs, chatHistory, mealLogs } = await import("../shared/schema");
 const {
   createWorkoutFeedbackExpectation,
+  createOpenTrainingLoop,
+  readOpenTrainingLoop,
+  reportsOpenTrainingMoveFailed,
+  TRAINING_LOOP_WINDOW_MS,
   readWorkoutFeedbackExpectation,
   WORKOUT_FEEDBACK_EXPECTATION_WINDOW_MS,
 } = await import("../server/workout-feedback");
+const { chooseAction } = await import("../server/one-action");
 
 const PHONE = "whatsapp:+27000000901";
 const NOW = Date.now();
@@ -141,10 +146,37 @@ async function replacementAndSubjectChange(): Promise<void> {
     "an explicit subject change must release the workout expectation");
 }
 
+function openTrainingContract(): void {
+  const target = "2026-09-05";
+  const marker = createOpenTrainingLoop(target, "reactive", NOW, "11111111-1111-4111-8111-111111111111");
+  const open = readOpenTrainingLoop(marker, NOW + 1_000);
+  assert.deepEqual(
+    { targetDay: open?.targetDay, ref: open?.ref, source: open?.source },
+    { targetDay: target, ref: "11111111-1111-4111-8111-111111111111", source: "reactive" },
+    "the durable marker must preserve the originating move's SAST day and correlation id",
+  );
+  assert.equal(readOpenTrainingLoop(marker, NOW + TRAINING_LOOP_WINDOW_MS + 1), null,
+    "a stale move must not capture a later outcome");
+  assert.equal(reportsOpenTrainingMoveFailed("I couldn't do it, work was chaos"), true,
+    "the open move supplies the referent for an explicit negative outcome");
+  assert.equal(reportsOpenTrainingMoveFailed("I might train later"), false,
+    "an intention is not a failed outcome");
+
+  const day = {
+    goal: "fat_loss", weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 0,
+    loggedToday: true, proteinPct: 1, caloriePct: 1, sessionsThisWeek: 0,
+    sessionsTarget: 1, stepsToday: 0, stepsTarget: 0, hour: 18,
+  } as const;
+  assert.equal(chooseAction(day as any).kind, "train");
+  assert.notEqual(chooseAction({ ...day, trainingAwaitingOutcome: true } as any).kind, "train",
+    "the canonical owner must not re-issue a move whose outcome is still pending");
+}
+
 await observedJourney();
 await restartAndExpiry();
 await mixedFactJourney();
 await replacementAndSubjectChange();
+openTrainingContract();
 
 console.log("[expectation-continuity] PASS — durable session-feel expectation is recoverable, single-consumed and bounded");
 process.exit(0); // route imports leave background handles; the completed focused harness must not hang CI.

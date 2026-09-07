@@ -7,7 +7,7 @@ import {
 } from "../shared";
 import { readHealthState } from "../../health-state";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
-import { canonicalNextMove } from "../proactive-decision";
+import { canonicalNextMove, recordCanonicalMoveOutbound } from "../proactive-decision";
 import { sastHour } from "../../sast";
 
 /**
@@ -75,6 +75,7 @@ export async function runEveningAccountability(): Promise<void> {
         const empty = await canonicalNextMove(client, { hour: sastHour() });
         if (empty.line && await claimDailySlot(client.id, "evening")) {
           await sendWhatsApp(phone, `${name}, haven't heard from you today — no stress.\n\n${empty.line}`);
+          await recordCanonicalMoveOutbound(client, empty);
         }
         continue;
       }
@@ -152,12 +153,16 @@ export async function runEveningAccountability(): Promise<void> {
             "Swap to tomorrow",
             "Rest day today",
           ]);
+          await recordCanonicalMoveOutbound(client, move);
         }
         continue;
       }
 
       const msg = [recap, move.line].filter(Boolean).join("\n\n");
-      if (msg && await claimDailySlot(client.id, "evening")) { await sendWhatsApp(phone, msg); }
+      if (msg && await claimDailySlot(client.id, "evening")) {
+        await sendWhatsApp(phone, msg);
+        await recordCanonicalMoveOutbound(client, move);
+      }
     } catch (err) {
       console.error(`[SCHEDULER] Evening accountability error — ${client.phoneNumber}:`, err);
     }
