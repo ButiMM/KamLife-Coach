@@ -187,6 +187,12 @@ jobs:
       # claims only exist as a sent message — SHADOW=on captures them.
       - name: Weight authority and speakability on real PostgreSQL
         run: npx tsx script/pg-weight-speakability-acceptance.ts
+      # ONE RESTRICTION, EVERY SURFACE (#220). Consistency is a claim about what a CLIENT receives
+      # across surfaces reached by different handlers, different scheduler jobs and different cron
+      # minutes — a unit test on `allows` proves the predicate and nothing about who asked it.
+      # SHADOW=on captures the Sunday sends, so proactive food coaching is graded on the message.
+      - name: One restriction across every food surface on real PostgreSQL
+        run: npx tsx script/pg-restriction-consistency-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot

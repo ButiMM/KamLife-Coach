@@ -27,6 +27,7 @@ import { sastDayKey } from "../sast";
 import { readHealthState } from "../health-state";
 import { liftsForLaggingAreas } from "../physique-analysis";
 import { getGoalProfile } from "../goal-profiles";
+import { foodConstraints } from "../food-swaps";
 
 const DAY = 86_400_000;
 
@@ -75,7 +76,15 @@ export async function buildClientSnapshot(user: any): Promise<string> {
 
     if (user.dreamGoal) lines.push(`Their 3-month dream, in their words: "${String(user.dreamGoal).slice(0, 160)}". Reference this to motivate — it's their why.`);
     if (user.biggestStruggle) lines.push(`Their biggest struggle: "${String(user.biggestStruggle).slice(0, 140)}". Coach around THIS — it's where they need the most support.`);
-    if (user.foodDislikes) lines.push(`Foods they DISLIKE — never suggest these, always offer an alternative: ${String(user.foodDislikes).slice(0, 120)}.`);
+    // WHAT THEY DO NOT EAT, FROM THE ONE OWNER (#220). This read users.food_dislikes raw and
+    // nothing else — so a client who told the coach "I'm vegan", which recordClientFacts writes
+    // to users.dietary_restrictions, handed the model a snapshot with no mention of vegan
+    // anywhere in it. Every deterministic food mouth obeyed the restriction while the model,
+    // which writes the free coaching around them, was never told. Same sentence media.ts already
+    // puts in front of the vision model — not a second phrasing of the rule, the same one, and
+    // it merges both columns so nothing food_dislikes carried is lost.
+    const constraintLine = foodConstraints(user).line;
+    if (constraintLine) lines.push(constraintLine);
     if (user.foodLikes) lines.push(`Foods they LOVE — build meals around these: ${String(user.foodLikes).slice(0, 120)}.`);
 
     if (user.laggingAreas) {

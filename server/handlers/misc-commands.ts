@@ -39,7 +39,7 @@ import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
 import { turnEvidence } from "./chat-log";
 import { readHeldConstraints, foodDayClosedWith } from "../held-constraints";
-import { foodConstraints, allowedAlternatives } from "../food-swaps";
+import { foodConstraints, allowedAlternatives, allowedProteinStaples } from "../food-swaps";
 import { getDayLedger, getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
@@ -809,7 +809,15 @@ export async function handleMiscCommands(ctx: {
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
     const p = user.proteinTarget || 140;
     const perMeal = Math.round(p / 4);
-    return `*Your Daily Protein Target*\n\n💪 ${p}g protein per day.\n\nSpread across 4 meals — roughly ${perMeal}g each. Best SA sources: eggs (6g each), pilchards (20g per tin), chicken breast (30g per 100g), tinned tuna (25g per tin). This drives everything — muscle, fat loss, fullness.`;
+    // NAMED FOODS ARE AN INSTRUCTION TO EAT THEM (#220). This sentence was fixed prose —
+    // "eggs, pilchards, chicken breast, tinned tuna" — and consulted no constraint at all, so
+    // a client who had told us they are vegan asked for their own protein target and was sent
+    // to buy chicken. Same canonical owner the grocery list and the swaps obey; the staple
+    // table carries plant sources too, so the answer is shorter, never empty, never a lecture.
+    const sources = allowedProteinStaples(foodConstraints(user as any)).slice(0, 4)
+      .map(s => `${s.name} (${s.protein}g ${s.per})`);
+    const sourceLine = sources.length ? ` Best SA sources: ${sources.join(", ")}.` : "";
+    return `*Your Daily Protein Target*\n\n💪 ${p}g protein per day.\n\nSpread across 4 meals — roughly ${perMeal}g each.${sourceLine} This drives everything — muscle, fat loss, fullness.`;
   }
   if (["weight", "my weight", "current weight", "how much do i weigh", "what do i weigh"].includes(mq)) {
     const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged yet";

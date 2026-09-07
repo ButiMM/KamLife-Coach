@@ -455,10 +455,93 @@ export function answerUnavailable(message: string, c: FoodConstraints = NO_CONST
 export function allowedAlternatives(alt: string, c: FoodConstraints): string | null {
   const parts = String(alt || "").split(/\s*,\s*(?:or\s+)?|\s+or\s+/).map(s => s.trim()).filter(Boolean);
   const kept = parts.filter(p => c.allows(p));
-  if (kept.length === 0) return null;
-  if (kept.length === 1) return kept[0];
-  if (kept.length === 2) return `${kept[0]} or ${kept[1]}`;
-  return `${kept.slice(0, -1).join(", ")}, or ${kept[kept.length - 1]}`;
+  return kept.length ? joinFoods(kept, "or") : null;
+}
+
+/**
+ * ONE OWNER FOR JOINING FOOD NAMES INTO ENGLISH (#220). This was written twice — here, with
+ * "or", for a list of options a client may choose between, and again in grocery-personalize.ts
+ * as `prettyList`, with "and", for a list of foods they already eat. Two functions, one job,
+ * and the Oxford comma placed differently in each, which is how a coach ends up sounding like
+ * two people in one message. The conjunction is the only thing that ever differed, so it is
+ * the parameter.
+ */
+export function joinFoods(names: string[], conj: "or" | "and"): string {
+  const p = names.map(s => String(s || "").trim()).filter(Boolean);
+  if (p.length <= 1) return p.join("");
+  if (p.length === 2) return `${p[0]} ${conj} ${p[1]}`;
+  return `${p.slice(0, -1).join(", ")}, ${conj} ${p[p.length - 1]}`;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE PROTEIN THIS CLIENT MAY ACTUALLY EAT (#220).
+ *
+ * `allows` answers "may they have this?". Four surfaces needed the other half — "then name
+ * something they CAN have" — and each answered it privately, with its own hardcoded list of
+ * eggs / pilchards / chicken / tuna:
+ *
+ *   handlers/misc-commands.ts  "Best SA sources: eggs (6g each), pilchards (20g per tin), …"
+ *                              — a fixed sentence, no constraint consulted at all, so a vegan
+ *                                asking their own protein target was told to eat chicken.
+ *   meal-plan-scale.ts         PROTEIN_UNITS — appended to every day AFTER the plan's own
+ *                                dietary filter had run, so it put pilchards back on a vegan's
+ *                                plate one line under a header reading "· Vegan".
+ *   meal-plan.ts               a pool that, filtered to nothing for a vegan, fell back to the
+ *                                UNFILTERED pool rather than admitting it had nothing.
+ *   shopping-lists.ts          a tier list that, filtered for a vegan, lost its entire protein
+ *                                category and shipped an empty section under a promise of 150g.
+ *
+ * ONE TABLE, PLANT AND ANIMAL TOGETHER, so the filter always leaves something honest and no
+ * surface ever has to choose between breaking the restriction and going silent. Cheapest-first,
+ * because month-end is the constraint every SA client shares. Per-unit numbers so a caller can
+ * price a portion; the `per` phrase is how a client would say it in a shop.
+ */
+export interface ProteinStaple {
+  /** The food, as a client would name it. */
+  name: string;
+  /** How much of it the numbers describe — "per tin", "each", "per 100g". */
+  per: string;
+  kcal: number;
+  protein: number;
+}
+
+const PROTEIN_STAPLES: ProteinStaple[] = [
+  { name: "eggs", per: "each", kcal: 78, protein: 6 },
+  { name: "sugar beans", per: "per cup cooked", kcal: 230, protein: 15 },
+  { name: "lentils", per: "per cup cooked", kcal: 230, protein: 18 },
+  { name: "pilchards", per: "per tin", kcal: 190, protein: 20 },
+  { name: "soya mince", per: "per 100g dry", kcal: 340, protein: 50 },
+  { name: "chicken breast", per: "per 100g", kcal: 165, protein: 30 },
+  { name: "tinned tuna", per: "per tin", kcal: 130, protein: 25 },
+  { name: "peanut butter", per: "per 2 tbsp", kcal: 190, protein: 8 },
+  { name: "amasi", per: "per 250ml", kcal: 130, protein: 9 },
+  { name: "firm tofu", per: "per 100g", kcal: 145, protein: 16 },
+];
+
+/**
+ * The staples above, minus everything this client told us they do not eat. Never empty for any
+ * constraint this codebase can express — lentils and sugar beans survive vegan, halaal, dairy,
+ * gluten, fish and peanut alike — but callers must still handle `[]`, because a client is free
+ * to name foods one at a time until nothing is left.
+ */
+export function allowedProteinStaples(c: FoodConstraints): ProteinStaple[] {
+  return PROTEIN_STAPLES.filter(s => c.allows(s.name));
+}
+
+/**
+ * WHAT WE SAY WHEN A PLAN CANNOT BE BUILT INSIDE THIS CLIENT'S RESTRICTION (#220).
+ *
+ * ONE OWNER, because there are two plan builders and they must not disagree about the one thing
+ * neither of them can do. generateMealPlan reaches this when its pools filter to nothing;
+ * getOnboardingMealPlan reaches it when its fixed template — which has no substitutes to swap in —
+ * would name a food the client told us they do not eat. Both are the same moment: we would have
+ * to break their word to answer, so we do not answer, and we ask for the one thing that unblocks
+ * it. Saying the restriction back in their own terms is the point; a plan we cannot build is not
+ * a reason to be vague about why.
+ */
+export function noPlanWithin(c: FoodConstraints): string {
+  const said = c.terms.length ? joinFoods(c.terms, "and") : "what you don't eat";
+  return `*Your Meal Plan*\n\nI can't build you a plan that respects ${said} out of the food I've got templates for — and I'd rather tell you that than send you one that breaks your word.\n\nTell me two or three proteins you DO eat and I'll build the week around them.`;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -689,6 +772,13 @@ export interface FoodConstraints {
   noPeanuts: boolean;
   /** Diabetes / PCOS — an EMPHASIS, not a ban. Preserved from meal-plan's own derivation. */
   lowGI: boolean;
+  /**
+   * "halaal" / "halal" / "kosher" IN THEIR OWN WORD, or "" (#220). Already computed here for
+   * `terms`; exposed because onboarding-meal-plan.ts derived it a second time out of a second
+   * store, and a surface that must say "buy halal-certified chicken" needs the label itself,
+   * not the `noPork` consequence.
+   */
+  declaredLabel: string;
 }
 
 /** What a declared diet actually rules out on a South African plate. */
@@ -697,9 +787,22 @@ export interface FoodConstraints {
 // stem must not be closed at both ends — and it cost three failing gates before this comment
 // existed. `s?` rather than an open stem, deliberately: an open `\bham` would ban a beef
 // hamburger for a halaal client, which is the same class of bug pointing the other way.
-const DAIRY = /\b(milk|amasi|maas|cheese|yoghurts?|yogurts?|cream|butter|custard|ice ?cream|condensed milk)\b/i;
-const MEAT = /\b(chicken|beef|steaks?|mince|lamb|mutton|pork|bacon|ham|polony|russians?|vienna|wors|boerewors|biltong|livers?|tripe|offal|walkie|gammon|sausages?|meat|nyama|shisa ?nyama)\b/i;
-const FISH = /\b(fish|pilchards?|tuna|hake|snoek|sardines?|anchov(?:y|ies)|prawns?|shrimps?|calamari|mussels?|seafood)\b/i;
+// PEANUT BUTTER IS NOT DAIRY (#220). `\bbutter\b` matched it, so a lactose-intolerant client was
+// refused peanut butter — and, worse, the vegan breakfast built out of it was filtered off a
+// vegan's own meal plan, which is how the plan ran out of compliant food in the first place.
+// Same shape for soya/almond/oat milk: a vegan alternative named after the thing it replaces.
+const DAIRY = /\b(?<!soya |soy |almond |oat |coconut |rice )(milk|amasi|maas|cheese|yoghurts?|yogurts?|cream|custard|ice ?cream|condensed milk)\b|(?<!peanut |nut |almond |cashew |seed )\bbutter\b/i;
+// SOYA MINCE IS NOT MINCE (#220), for the same reason peanut butter is not dairy: it is the
+// plant substitute NAMED AFTER the thing it replaces, and `\bmince\b` banned it from the one
+// client group it exists for. The substitution table already offers "soya mince" to a client
+// avoiding beef; `allows` used to refuse the swap the table had just made.
+const MEAT = /(?<!soya |soy |veggie |vegan |plant )\b(chicken|beef|steaks?|mince|lamb|mutton|pork|bacon|ham|polony|russians?|vienna|wors|boerewors|biltong|livers?|tripe|offal|walkie|gammon|sausages?|meat|nyama|shisa ?nyama)\b/i;
+// SALMON WAS NOT IN THE FISH CLUSTER (#220). Found by running the fix over the premium tier: a
+// client whose declared allergy is fish had "Salmon 400g (×2) — R160" on their shopping list and
+// "Salmon goes on special at Shoprite most Fridays — buy two packs" as their pro tip, because
+// `allows` did not know salmon is a fish. Mackerel and kingklip are the other two a South
+// African shelf carries that this pattern could not see.
+const FISH = /\b(fish|pilchards?|tuna|hake|snoek|salmon|mackerel|kingklip|sardines?|anchov(?:y|ies)|prawns?|shrimps?|calamari|mussels?|seafood)\b/i;
 const EGG = /\b(eggs?|omelettes?)\b/i;
 const PORK = /\b(pork|bacon|ham|gammon|pig)\b/i;
 const GLUTEN = /\b(bread|rolls?|buns?|kota|vetkoek|pasta|macaroni|spaghetti|noodles?|wheat|flour|cereal|weetbix|rusks?)\b/i;
@@ -723,8 +826,14 @@ export function foodConstraints(u: {
   const noDairy = vegan || has(/\bdairy\b|\blactose\b|\bmilk\b/);
   const noPork = has(/\bpork\b|\bhalaal\b|\bhalal\b|\bkosher\b|\bbacon\b/);
   const noGluten = has(/\bgluten\b|\bceliac\b|\bcoeliac\b|\bwheat\b/);
-  const noFish = vegetarian || has(/\bfish\b|\bpilchard\b|\btuna\b|\bseafood\b|\bshellfish\b/);
-  const noPeanuts = has(/\bpeanut\b|\bgroundnut\b/);
+  // PLURALS ARE THE WHOLE GAME HERE TOO (#220). `\bpeanut\b` does not match "peanuts", so a
+  // client whose dietary_restrictions column read exactly "peanuts" had noPeanuts === false and
+  // the allergy was carried only by the literal-term fallback below — which meant the peanut
+  // CLUSTER (peanut butter, groundnuts) never fired for the plainest way of saying it. Same hole
+  // in `\bpilchard\b`. The DAIRY/MEAT comment above already records this lesson for the food
+  // regexes; the cluster triggers were missed.
+  const noFish = vegetarian || has(/\bfish\b|\bpilchards?\b|\btunas?\b|\bseafood\b|\bshellfish\b/);
+  const noPeanuts = has(/\bpeanuts?\b|\bgroundnuts?\b/);
 
   // The literal foods they named, beyond the diet labels — "I don't eat liver" is a constraint
   // even though no cluster covers it.
@@ -733,7 +842,12 @@ export function foodConstraints(u: {
     .split(/[,;]+|\band\b/)
     .map(s => s.trim().replace(/^(no|not|never|hate|dislike|avoid|i don'?t eat|can'?t eat)\s+/, "").trim())
     .filter(s => s.length >= 3 && s.length <= 24 && /^[a-z' -]+$/.test(s)
-      && !/^(vegan|vegetarian|halaal|halal|kosher|gluten free|dairy free|lactose intolerant)$/.test(s));
+      && !/^(vegan|vegetarian|halaal|halal|kosher|gluten free|dairy free|lactose intolerant)$/.test(s)
+      // ALREADY SAID ONCE, BY THE CLUSTER (#220). A client whose dietary_restrictions column is
+      // the single word "dairy" read back "you told me: no dairy, dairy" — the derived label and
+      // the raw word, both in the disclosure. A literal that IS a cluster's own trigger adds
+      // nothing the cluster has not already said in better English.
+      && !/^(dairy|lactose|gluten|celiac|coeliac|peanut|peanuts|groundnut|groundnuts|seafood|shellfish)$/.test(s));
 
   // Both forms of every literal term, for the same reason — a client who typed "liver" means
   // "chicken livers" on a menu, and one who typed "eggs" means an egg.
@@ -779,6 +893,7 @@ export function foodConstraints(u: {
     allows,
     vegan, vegetarian, noDairy, noPork, noGluten, noFish, noPeanuts,
     lowGI: /\bdiabet|pcos\b/.test(conditions) || /\bdiabet|pcos\b/.test(declared),
+    declaredLabel: declaredLabel || "",
   };
 }
 

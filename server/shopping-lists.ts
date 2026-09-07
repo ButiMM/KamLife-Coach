@@ -7,7 +7,7 @@
 // PRICE_ESTIMATE_NOTE is the ONE owner of how a rand estimate is qualified to a client — the
 // same sentence the GPT-generated rebuild now carries, so the two paths cannot drift apart.
 import { PRICE_ESTIMATE_NOTE } from "./reply-contract";
-import { type FoodConstraints, NO_CONSTRAINTS } from "./food-swaps";
+import { type FoodConstraints, NO_CONSTRAINTS, allowedAlternatives } from "./food-swaps";
 
 export type ShoppingItem = {
   item: string;
@@ -405,6 +405,34 @@ const ALL_LISTS: Record<string, ShoppingList[]> = {
  * list: one filter, applied after the goal modifications, over the items AND the meal ideas —
  * a meal idea is an instruction to eat something just as much as a line on the list is.
  */
+/**
+ * WHAT TO PUT BACK WHEN THE FILTER TAKES EVERYTHING (#220).
+ *
+ * Traced on main@2cb48c1: a vegan asked for their grocery list and got potatoes, oats, pasta,
+ * bread, cabbage, butternut, green beans, avo, tomatoes, oranges, apples and olive oil — every
+ * one of the eight tier lists is omnivore-only in its protein category, so `allows` correctly
+ * removed the whole section. The message still opened "This is a solid, quality base for your
+ * goal", still promised "150g protein", still printed an empty *Meal ideas to mix it up:*
+ * heading, and offered no protein at all. Honouring a restriction by deletion is not honouring
+ * it; it is the same failure as breaking it, pointed the other way.
+ *
+ * These are the plant staples every SA shop carries, at real shelf prices, and they are added
+ * ONLY when the client's own constraint emptied the category — never on top of a list that
+ * already works. Cheapest first, because month-end is the constraint every client shares.
+ */
+const CONSTRAINT_SAFE_PROTEIN: ShoppingItem[] = [
+  { item: "Sugar beans (500g dry)", qty: "500g", price: "R20", category: "protein" },
+  { item: "Lentils (500g dry)", qty: "500g", price: "R18", category: "protein" },
+  { item: "Soya mince (250g dry)", qty: "250g", price: "R22", category: "protein" },
+  { item: "Peanut butter (400g)", qty: "400g", price: "R30", category: "protein" },
+  { item: "Firm tofu (400g)", qty: "400g", price: "R35", category: "protein" },
+];
+const CONSTRAINT_SAFE_IDEAS = [
+  "Breakfast: Oats + peanut butter + banana — R8",
+  "Lunch: Sugar beans + pap + spinach + tomato — R14",
+  "Dinner: Lentils + rice + cabbage + onion — R14",
+];
+
 export function getShoppingList(budgetTier: string, weekNumber: number, goalType?: string,
                                 c: FoodConstraints = NO_CONSTRAINTS): ShoppingList {
   const lists = ALL_LISTS[budgetTier] || ALL_LISTS["100_300"];
@@ -412,10 +440,13 @@ export function getShoppingList(budgetTier: string, weekNumber: number, goalType
   const base = lists[idx];
   const shaped = goalType ? applyGoalModifications(base, goalType) : base;
   if (!c.terms.length) return shaped;
+  const items = shaped.items.filter(i => c.allows(i.item));
+  const mealIdeas = shaped.mealIdeas.filter(idea => c.allows(idea));
+  const refill = items.some(i => i.category === "protein") ? [] : CONSTRAINT_SAFE_PROTEIN.filter(i => c.allows(i.item));
   return {
     ...shaped,
-    items: shaped.items.filter(i => c.allows(i.item)),
-    mealIdeas: shaped.mealIdeas.filter(idea => c.allows(idea)),
+    items: [...items, ...refill],
+    mealIdeas: mealIdeas.length ? mealIdeas : CONSTRAINT_SAFE_IDEAS.filter(i => c.allows(i)),
   };
 }
 
@@ -454,8 +485,8 @@ export function formatShoppingList(list: ShoppingList, userName?: string, goalTy
   // Store advice by budget tier
   const budgetTier = targets?.budgetTier || "100_300";
   const storeAdvice: Record<string, string> = {
-    under_100:  `*Quality on any budget.* Eggs, pilchards, chicken livers, morogo, maas, beans — this is real, nutrient-dense food, not settling. Shoprite or Boxer are cheapest; buy the dry beans/lentils/samp in bulk and they last weeks.`,
-    "50_100":   `*Quality on any budget.* Eggs, pilchards, chicken livers, morogo, maas, beans — this is real, nutrient-dense food, not settling. Shoprite or Boxer are cheapest; buy the dry beans/lentils/samp in bulk and they last weeks.`,
+    under_100:  `*Quality on any budget.* ${allowedAlternatives("Eggs, pilchards, chicken livers, morogo, maas, beans, lentils", targets?.constraints || NO_CONSTRAINTS) || "Beans, lentils, samp, morogo"} — this is real, nutrient-dense food, not settling. Shoprite or Boxer are cheapest; buy the dry beans/lentils/samp in bulk and they last weeks.`,
+    "50_100":   `*Quality on any budget.* ${allowedAlternatives("Eggs, pilchards, chicken livers, morogo, maas, beans, lentils", targets?.constraints || NO_CONSTRAINTS) || "Beans, lentils, samp, morogo"} — this is real, nutrient-dense food, not settling. Shoprite or Boxer are cheapest; buy the dry beans/lentils/samp in bulk and they last weeks.`,
     "100_300":  `*Where to shop:* Pick n Pay or Checkers for the weekly run. Boxer/Shoprite for bulk items (oats, rice, eggs). Saves R80-150/week.`,
     "300_600":  `*Where to shop:* Checkers or Spar for convenience. Pick n Pay for bulk proteins. Woolworths for fresh veg if budget allows.`,
     over_600:   `*Where to shop:* Woolworths for quality cuts and fresh produce. Checkers for staples. Order online for bulk pantry items.`,
@@ -527,11 +558,22 @@ export function formatShoppingList(list: ShoppingList, userName?: string, goalTy
   };
   const dailyStructure = filterBullets(dailyStructures[goal] || dailyStructures["fat_loss"]);
 
+  // A HEADING WITH NOTHING UNDER IT (#220). `list.mealIdeas` arrives already filtered, and for a
+  // vegan every idea on every tier list named meat — so this printed "*Meal ideas to mix it up:*"
+  // followed by a blank line. Same for the daily structure, which filterBullets correctly
+  // reduces to "". A section with no content does not get a heading.
   const ideas = list.mealIdeas.map(m => `• ${m}`).join("\n");
+  const ideasSection = ideas ? `\n\n*Meal ideas to mix it up:*\n${ideas}` : "";
+  const structureSection = dailyStructure ? `\n${dailyStructure}` : "";
 
+  // THE AVOID LIST TELLS THEM WHAT TO BUY TOO. "Flavoured yoghurt — … plain or Greek only" is an
+  // instruction to buy plain or Greek yoghurt, and it reached a client who had just been told at
+  // the top of this same message that dairy was left off for them. Same `allows`, same reason as
+  // the meal ideas: any bullet that names a food they do not eat comes out.
   const avoidSection = (goal === "fat_loss" || goal === "recomposition")
-    ? `\n\n*🚫 Leave these on the shelf:*\n• Sugary drinks (Coke, Oros, juice, flavoured water) — liquid calories you don't feel\n• Honey, syrup, white sugar — same impact as sweets; fruit handles your sweetness\n• Flavoured yoghurt — most have 15-25g added sugar; plain or Greek only\n• Breakfast cereals and instant oats with flavouring — mostly sugar in a box\n• Polony, Russians, Viennas — high sodium, minimal real protein\n• White bread if you can avoid it — brown bread only`
+    ? (block => block ? `\n\n*🚫 Leave these on the shelf:*\n${block}` : "")(
+        filterBullets(`• Sugary drinks (Coke, Oros, juice, flavoured water) — liquid calories you don't feel\n• Honey, syrup, white sugar — same impact as sweets; fruit handles your sweetness\n• Flavoured yoghurt — most have 15-25g added sugar; plain or Greek only\n• Breakfast cereals and instant oats with flavouring — mostly sugar in a box\n• Polony, Russians, Viennas — high sodium, minimal real protein\n• White bread if you can avoid it — brown bread only`))
     : "";
 
-  return `${fn ? fn + ", this" : "This"} is your full week.\n\n${intro}${personalBlock}\n\n${store}\n\n*What to buy (${list.estimatedTotal} est. — ${list.coversDays} days):*\n${PRICE_ESTIMATE_NOTE}${body}\n${dailyStructure}\n\n*Meal ideas to mix it up:*\n${ideas}${avoidSection}\n\n_Screenshot this. Tick off as you shop. Send me what you eat each day — photo or words — and I track the numbers.\n\nTo adjust: tell me what you don't eat, what you want to swap, or what you already have at home._`;
+  return `${fn ? fn + ", this" : "This"} is your full week.\n\n${intro}${personalBlock}\n\n${store}\n\n*What to buy (${list.estimatedTotal} est. — ${list.coversDays} days):*\n${PRICE_ESTIMATE_NOTE}${body}${structureSection}${ideasSection}${avoidSection}\n\n_Screenshot this. Tick off as you shop. Send me what you eat each day — photo or words — and I track the numbers.\n\nTo adjust: tell me what you don't eat, what you want to swap, or what you already have at home._`;
 }

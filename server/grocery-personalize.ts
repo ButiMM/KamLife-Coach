@@ -20,7 +20,7 @@
  */
 
 import { suggestSwap } from "./food-swaps";
-import { foodConstraints, NO_CONSTRAINTS, type FoodConstraints } from "./food-swaps";
+import { foodConstraints, NO_CONSTRAINTS, joinFoods, type FoodConstraints } from "./food-swaps";
 
 export type FoodProfileItem = { name: string; count: number };
 export type FoodProfile = { topFoods: FoodProfileItem[]; distinctCount: number };
@@ -66,12 +66,10 @@ function pretty(name: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-function prettyList(names: string[]): string {
-  const p = names.map(pretty);
-  if (p.length <= 1) return p.join("");
-  if (p.length === 2) return `${p[0]} and ${p[1]}`;
-  return `${p.slice(0, -1).join(", ")} and ${p[p.length - 1]}`;
-}
+// ONE OWNER (#220) — joinFoods in food-swaps.ts. This was the second implementation of "join
+// food names into English"; the only thing it ever did differently was the conjunction, and it
+// placed the Oxford comma differently too, so one coach sounded like two across a single message.
+const prettyList = (names: string[]): string => joinFoods(names.map(pretty), "and");
 
 // The calm awareness line every not-yet-established client sees — it tells them, with
 // zero prompting, that they can send their OWN list or use what's already at home. This

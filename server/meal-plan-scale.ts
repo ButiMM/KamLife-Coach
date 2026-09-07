@@ -17,15 +17,24 @@ export interface TopUp { label: string; kcal: number; protein: number }
 
 // Per-unit building blocks, protein-dense first. Budget-friendly staples on purpose: these
 // are what the target market actually buys (eggs, pilchards, amasi, peanut butter, pap).
+//
+// PLANT UNITS ARE NOT DECORATION (#220). This list was animal-only above the peanut butter, and
+// these units are appended AFTER meal-plan.ts has finished filtering its pools — so on a vegan's
+// plan they put "1 tin pilchards + 3 boiled eggs" back on the plate, one line under a header
+// reading "· Vegan". Filtering alone would have left a vegan with no top-up at all and a day
+// hundreds of kcal under target, so the answer is both: units they can eat, and a filter.
 const PROTEIN_UNITS: Array<{ name: string; kcal: number; protein: number; max: number }> = [
   { name: "1 tin pilchards", kcal: 190, protein: 26, max: 2 },
   { name: "3 boiled eggs", kcal: 234, protein: 21, max: 2 },
+  { name: "1 cup cooked lentils", kcal: 230, protein: 18, max: 2 },
+  { name: "1 cup cooked sugar beans", kcal: 230, protein: 15, max: 2 },
   { name: "250ml amasi", kcal: 130, protein: 9, max: 2 },
   { name: "2 tbsp peanut butter", kcal: 190, protein: 8, max: 2 },
 ];
 const STARCH_UNITS: Array<{ name: string; kcal: number; protein: number; max: number }> = [
   { name: "1 cup cooked pap", kcal: 290, protein: 6, max: 3 },
   { name: "2 slices brown bread", kcal: 180, protein: 8, max: 2 },
+  { name: "1 cup cooked rice", kcal: 205, protein: 4, max: 2 },
   { name: "1 banana", kcal: 105, protein: 1, max: 2 },
 ];
 
@@ -33,15 +42,20 @@ const STARCH_UNITS: Array<{ name: string; kcal: number; protein: number; max: nu
  * Top-ups to append to ONE day so it lands near the calorie + protein target.
  * `dayKcal`/`dayProtein` are the day's built totals. Never returns a negative adjustment —
  * an over-target plan is handled by the caller trimming, not by this function.
+ *
+ * `allows` is the caller's canonical constraint predicate (foodConstraints().allows). It is
+ * required rather than optional on purpose: this function's whole job is to ADD food to a
+ * client's plate, and every caller of it already holds the constraint.
  */
-export function topUpsForDay(dayKcal: number, dayProtein: number, calorieTarget: number, proteinTarget: number): TopUp[] {
+export function topUpsForDay(dayKcal: number, dayProtein: number, calorieTarget: number, proteinTarget: number,
+                             allows: (food: string) => boolean): TopUp[] {
   const out: TopUp[] = [];
   let kcalGap = Math.max(0, Math.round(calorieTarget - dayKcal));
   let protGap = Math.max(0, Math.round(proteinTarget - dayProtein));
   if (kcalGap < 150 && protGap < 15) return out; // already close enough
 
   // 1. PROTEIN first — it's the macro the pools under-deliver and the one that protects muscle.
-  for (const u of PROTEIN_UNITS) {
+  for (const u of PROTEIN_UNITS.filter(u2 => allows(u2.name))) {
     let n = 0;
     while (n < u.max && protGap > 8 && kcalGap >= u.kcal * 0.6) {
       n++; protGap -= u.protein; kcalGap -= u.kcal;
@@ -49,7 +63,7 @@ export function topUpsForDay(dayKcal: number, dayProtein: number, calorieTarget:
     if (n > 0) out.push({ label: n === 1 ? u.name : `${n}× ${u.name}`, kcal: u.kcal * n, protein: u.protein * n });
   }
   // 2. STARCH for whatever energy is still missing.
-  for (const u of STARCH_UNITS) {
+  for (const u of STARCH_UNITS.filter(u2 => allows(u2.name))) {
     let n = 0;
     while (n < u.max && kcalGap >= u.kcal * 0.7) { n++; kcalGap -= u.kcal; protGap -= u.protein; }
     if (n > 0) out.push({ label: n === 1 ? u.name : `${n}× ${u.name}`, kcal: u.kcal * n, protein: u.protein * n });
