@@ -11,6 +11,8 @@
  * Deterministic, zero-cost, never throws.
  */
 
+import { allowedAlternatives, type FoodConstraints } from "../food-swaps";
+
 export interface DayTotals {
   day: string;
   kcal: number;
@@ -34,12 +36,18 @@ export function validateMealPlan(opts: {
   calorieTarget: number;
   proteinTarget: number;
   allItemsText: string; // all meal descriptions concatenated, lowercase
-  isVegetarian: boolean;
-  isVegan: boolean;
-  noFish: boolean;
-  noDairy: boolean;
-  noPeanuts: boolean;
+  /**
+   * THE CANONICAL CONSTRAINT, NOT A COPY OF ITS ANSWERS (#220). This took five booleans —
+   * isVegetarian / isVegan / noFish / noDairy / noPeanuts — unpacked by the caller from the very
+   * object this file now receives whole. Five flags is five chances to pass one of them wrong,
+   * and it left this file unable to answer the question it most needed: WHAT MAY THIS CLIENT EAT?
+   * That is why the shortfall note below told a vegan to add "1 tin pilchards, 3 eggs, or 200g
+   * Greek yoghurt" — the checker that had just written "CRITICAL: vegan plan contains animal
+   * products" then recommended three of them, in the client-facing sentence, in the same pass.
+   */
+  constraints: FoodConstraints;
 }): MealPlanValidation {
+    const { vegan: isVegan, vegetarian: isVegetarian, noFish, noDairy, noPeanuts } = opts.constraints;
   try {
     const issues: string[] = [];
     const { dayTotals, calorieTarget, proteinTarget, allItemsText } = opts;
@@ -47,22 +55,22 @@ export function validateMealPlan(opts: {
     // ── Dietary safety re-scan (independent of the generator's filters) ────────
     // These are critical: a vegan getting chicken, or an allergy violation, is a
     // trust-and-safety failure, not a portion quibble.
-    if (opts.isVegan) {
+    if (isVegan) {
       const found = ANIMAL_WORDS.filter(w => allItemsText.includes(w));
       if (found.length) issues.push(`CRITICAL: vegan plan contains animal products: ${found.join(", ")}`);
-    } else if (opts.isVegetarian) {
+    } else if (isVegetarian) {
       const found = MEAT_WORDS.filter(w => allItemsText.includes(w));
       if (found.length) issues.push(`CRITICAL: vegetarian plan contains meat/fish: ${found.join(", ")}`);
     }
-    if (opts.noFish) {
+    if (noFish) {
       const found = FISH_WORDS.filter(w => allItemsText.includes(w));
       if (found.length) issues.push(`CRITICAL: fish-free plan contains fish: ${found.join(", ")}`);
     }
-    if (opts.noDairy) {
+    if (noDairy) {
       const found = DAIRY_WORDS.filter(w => allItemsText.includes(w));
       if (found.length) issues.push(`CRITICAL: dairy-free plan contains dairy: ${found.join(", ")}`);
     }
-    if (opts.noPeanuts && allItemsText.includes("peanut")) {
+    if (noPeanuts && allItemsText.includes("peanut")) {
       issues.push("CRITICAL: peanut-allergy plan contains peanut");
     }
 
@@ -94,8 +102,15 @@ export function validateMealPlan(opts: {
       if (avgProt < proteinTarget * 0.85) {
         const gap = proteinTarget - avgProt;
         issues.push(`plan averages ${avgProt}g protein vs ${proteinTarget}g target (${gap}g short)`);
+        // THE NOTE IS A RECOMMENDATION (#220) — three named foods and a "add a protein source"
+        // instruction. Same `allowedAlternatives` every other recommender obeys; when nothing
+        // this client eats survives, the sentence keeps the gap and drops the examples rather
+        // than naming food they told us they do not eat.
+        const sources = allowedAlternatives(
+          "1 tin pilchards (26g), 3 eggs (21g), 200g Greek yoghurt (20g), 1 cup cooked lentils (18g), 1 cup cooked sugar beans (15g)",
+          opts.constraints);
         noteParts.push(
-          `Protein averages ~${avgProt}g/day vs your ${proteinTarget}g target. Add a protein source — 1 tin pilchards (26g), 3 eggs (21g), or 200g Greek yoghurt (20g) — to close the ${gap}g gap.`
+          `Protein averages ~${avgProt}g/day vs your ${proteinTarget}g target. Add a protein source${sources ? ` — ${sources} —` : ""} to close the ${gap}g gap.`
         );
       }
     }

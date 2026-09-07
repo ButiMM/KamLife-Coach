@@ -7224,23 +7224,41 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
 // ============================================================
 {
   const { topUpsForDay, topUpLine } = await import("../server/meal-plan-scale");
+  const { foodConstraints } = await import("../server/food-swaps");
+  const anything = foodConstraints({}).allows;
   test("meal-plan scale: a 1450 kcal day against a 2862 target is topped up to target", () => {
-    const tops = topUpsForDay(1450, 78, 2862, 185);
+    const tops = topUpsForDay(1450, 78, 2862, 185, anything);
     const kcal = 1450 + tops.reduce((s, t) => s + t.kcal, 0);
     const prot = 78 + tops.reduce((s, t) => s + t.protein, 0);
     assert.ok(kcal >= 2862 * 0.9, `must reach ~target, got ${kcal}`);
     assert.ok(prot >= 185 * 0.9, `protein must reach ~target, got ${prot}`);
   });
   test("meal-plan scale: a day already on target gets NO top-ups", () => {
-    assert.deepEqual(topUpsForDay(2850, 190, 2862, 185), []);
+    assert.deepEqual(topUpsForDay(2850, 190, 2862, 185, anything), []);
     assert.equal(topUpLine([]), "");
   });
   test("meal-plan scale: protein comes first — the macro the pools under-deliver", () => {
-    const tops = topUpsForDay(1450, 78, 2862, 185);
+    const tops = topUpsForDay(1450, 78, 2862, 185, anything);
     assert.ok(tops.length > 0 && tops[0].protein >= 8, `protein-dense first: ${JSON.stringify(tops[0])}`);
   });
   test("meal-plan scale: an OVER-target day is never given more food", () => {
-    assert.deepEqual(topUpsForDay(3200, 200, 2862, 185), []);
+    assert.deepEqual(topUpsForDay(3200, 200, 2862, 185, anything), []);
+  });
+  // #220 — THE TOP-UP IS APPENDED AFTER THE PLAN'S OWN FILTER HAS RUN, so it is the last place
+  // a forbidden food can get onto a compliant plate. It put "1 tin pilchards + 3 boiled eggs"
+  // on a vegan's plan, one line under a header reading "· Vegan".
+  test("meal-plan scale: a vegan's top-up names no animal food, and still reaches target", () => {
+    const vegan = foodConstraints({ dietaryRestrictions: "vegan" });
+    const tops = topUpsForDay(1450, 78, 2862, 185, vegan.allows);
+    const named = tops.map(t => t.label).join(" | ");
+    assert.ok(!/pilchard|egg|amasi|chicken|mince|tuna/i.test(named), `animal food in a vegan top-up: ${named}`);
+    const kcal = 1450 + tops.reduce((s, t) => s + t.kcal, 0);
+    assert.ok(kcal >= 2862 * 0.85, `a filtered top-up must still close the gap, got ${kcal}`);
+  });
+  // THE CONTROL, both ways: filtering must not fire for a client who declared nothing.
+  test("meal-plan scale: an unrestricted client still gets the cheapest protein-dense units", () => {
+    const named = topUpsForDay(1450, 78, 2862, 185, anything).map(t => t.label).join(" | ");
+    assert.ok(/pilchard|egg/i.test(named), `plant-only for a client with no restriction: ${named}`);
   });
 }
 

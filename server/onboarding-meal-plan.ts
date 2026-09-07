@@ -5,6 +5,8 @@
 // opened by addressing people the way a bank does.
 
 import { getDisplayName } from "./utils";
+// ONE OWNER FOR WHAT THIS CLIENT MAY EAT (#220). See the block inside the function.
+import { foodConstraints } from "./food-swaps";
 
 export function getOnboardingMealPlan(user: any): string {
   const budget = user.weeklyFoodBudget || "100_300";
@@ -16,7 +18,6 @@ export function getOnboardingMealPlan(user: any): string {
   const name = getDisplayName(user) || "there";
   const cal = user.calorieTarget || 1800;
   const prot = user.proteinTarget || 140;
-  const otherNotes = (user.otherMedicalNotes || "").toLowerCase();
 
   // Medical flags
   const isDiabetic = medicals.includes("diabetes");
@@ -29,20 +30,31 @@ export function getOnboardingMealPlan(user: any): string {
   const isUnemployed = situation === "unemployed";
   const isPhysicalJob = situation === "retail_physical";
 
-  // Allergy detection from free-text notes
-  const noPeanuts = otherNotes.includes("peanut");
-  const noFish = otherNotes.includes("fish") || otherNotes.includes("pilchard") || otherNotes.includes("sardine") || otherNotes.includes("tuna");
-  const noDairy = otherNotes.includes("dairy") || otherNotes.includes("milk") || otherNotes.includes("lactose");
-  const noGluten = otherNotes.includes("gluten") || otherNotes.includes("coeliac") || otherNotes.includes("wheat") || otherNotes.includes("celiac");
-
-  // Dietary preference flags — stored in profileNotes as diet:halal / diet:vegetarian / diet:vegan
-  const profileNotesLower = (user.profileNotes || "").toLowerCase();
-  const isHalal = profileNotesLower.includes("diet:halal");
-  const isVegetarian = profileNotesLower.includes("diet:vegetarian") || profileNotesLower.includes("diet:vegan");
-  const isVegan = profileNotesLower.includes("diet:vegan");
+  // ── WHAT THIS CLIENT MAY EAT — ASKED OF THE ONE OWNER (#220) ───────────────────────────────
+  //
+  // Traced on main@2cb48c1 through the real front door: a client whose vegan fact was recorded
+  // in users.dietary_restrictions — the canonical column, the one recordClientFacts writes and
+  // the one every grocery, swap and plate mouth reads — typed "7 day meals" and got chicken
+  // thigh, boiled eggs, pilchards, low fat yoghurt and beef mince, with no vegan line anywhere
+  // in the header. Not because the plan lacks vegan content: it has a full plant-based week,
+  // and it never ran, because this file asked a DIFFERENT store whether they were vegan.
+  //
+  // Two private answers lived here. `diet:` flags parsed out of profileNotes — the second
+  // dietary store #211 removed from the fact pipeline, still being read here — and a substring
+  // scan of otherMedicalNotes for the allergies, which never saw dietary_restrictions or
+  // food_dislikes either. Both are deleted. foodConstraints already merges all three columns
+  // and is what every other food surface obeys, so this file now cannot disagree with them.
+  const c = foodConstraints(user);
+  const noPeanuts = c.noPeanuts;
+  const noFish = c.noFish && !c.vegetarian;  // the vegetarian case is carried by noFishEff below
+  const noDairy = c.noDairy && !c.vegan;     // …and the vegan case by noDairyEff
+  const noGluten = c.noGluten;
+  const isHalal = !!c.declaredLabel;
+  const isVegetarian = c.vegetarian;
+  const isVegan = c.vegan;
   // Effective restriction flags extend allergy flags with dietary preferences
-  const noFishEff = noFish || isVegetarian; // vegetarians/vegans don't eat fish or meat
-  const noDairyEff = noDairy || isVegan;    // vegans don't consume dairy
+  const noFishEff = c.noFish;   // vegetarians/vegans don't eat fish or meat
+  const noDairyEff = c.noDairy; // vegans don't consume dairy
 
   // Calorie/protein adjustments
   const adjustedCal = isPhysicalJob ? cal + 300 : isHIV ? cal + 200 : cal;

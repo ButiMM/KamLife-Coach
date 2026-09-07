@@ -56,7 +56,15 @@ const chk = (ok: boolean, msg: string, evidence = "") => {
 
 // THE TEST'S OWN VOCABULARY, not the product's. Asserting with `constraints.allows` would grade
 // the filter against itself and pass for any client on any reply.
-const ANIMAL = /\b(chicken|beef|mince|steak|lamb|mutton|biltong|pilchards?|tuna|fish|hake|eggs?|yoghurt|amasi|milk|cheese)\b/i;
+//
+// SOYA MINCE IS NOT MINCE (#220). This pattern read `\bmince\b`, so it called the vegan option
+// "Soya mince + rice + mixed veg" an animal food. That was harmless only while `allows` made the
+// same mistake and filtered the option out — the check and the defect agreed, and this suite went
+// green on a vegan being denied the best plant protein in the pool and handed the 30g tofu plate
+// instead of the 45g one. `allows` was corrected; this detector is corrected with it, or the
+// suite would fail on the improvement. Same for the milk and yoghurt substitutes that are named
+// after the thing they replace.
+const ANIMAL = /(?<!soya |soy |veggie |vegan |plant |almond |oat |coconut )\b(chicken|beef|mince|steak|lamb|mutton|biltong|pilchards?|tuna|fish|hake|eggs?|yoghurt|amasi|milk|cheese)\b/i;
 const PORK = /\b(pork|bacon|ham|gammon)\b/i;
 
 async function seed(over: Record<string, any>): Promise<{ id: string; phone: string }> {

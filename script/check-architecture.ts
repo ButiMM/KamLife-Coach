@@ -631,10 +631,16 @@ const NOT_CLIENT_FACING_RETURNS: Array<[string, RegExp, string]> = [
   ],
   [
     "server/food-swaps.ts",
-    /^\s*return `\$\{kept\.slice\(0, -1\)\.join\(", "\)\}, or \$\{kept\[kept\.length - 1\]\}`/,
-    "allowedAlternatives joins a list of food names into a NOUN PHRASE that its two callers embed "
-      + "in their own sentence; the ', or ' reads as prose to isProse but this function never "
-      + "addresses the client and returns no sentence of its own (#177)",
+    /^\s*return `\$\{p\.slice\(0, -1\)\.join\(", "\)\}, \$\{conj\} \$\{p\[p\.length - 1\]\}`/,
+    "joinFoods joins a list of food names into a NOUN PHRASE that its callers embed in their own "
+      + "sentence; the ', or ' reads as prose to isProse but this function never addresses the "
+      + "client and returns no sentence of its own (#177). THE EXEMPTION MOVED, IT DID NOT GROW "
+      + "(#220): it was written for allowedAlternatives' own join line, and grocery-personalize's "
+      + "prettyList was a second, unexempted copy of the same helper doing the same job with a "
+      + "different conjunction and the Oxford comma in a different place. Both now call this one "
+      + "function, so the repo carries ONE exempted join where it used to carry one exempted and "
+      + "one counted — the counter falls by one because a duplicate went away, not because a "
+      + "ceiling moved.",
   ],
 ];
 
