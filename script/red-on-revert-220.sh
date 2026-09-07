@@ -142,6 +142,7 @@ PY
 cat > /tmp/220p/10.py <<'PY2'
 p = "server/onboarding-meal-plan.ts"; s = open(p).read()
 s = s.replace("const isHalal = !!c.declaredLabel && !isKosher;", "const isHalal = !!c.declaredLabel;")
+s = s.replace("  if (isKosher) return noPlanWithin(c);", "")
 assert s != open(p).read(), "revert patch matched nothing"
 open(p, "w").write(s)
 PY2
@@ -150,6 +151,22 @@ PY2
 cat > /tmp/220p/11.py <<'PY2'
 p = "server/onboarding-meal-plan.ts"; s = open(p).read()
 s = s.replace("  if (prescribed(planBlock).some((food: string) => !c.allows(food))) return noPlanWithin(c);", "")
+assert s != open(p).read(), "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 11b · the slot stops rotating over what the client may eat (it refuses instead) ───────────
+cat > /tmp/220p/11b.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+for a, b in [("safeBf[i % safeBf.length]", "bfProteins[i]"),
+             ("safeBfCarbs[i % safeBfCarbs.length]", "bfCarbs[i]"),
+             ("safeLunch[i % safeLunch.length]", "lunchProteins[i]"),
+             ("safeLunchCarbs[i % safeLunchCarbs.length]", "lunchCarbs[i]"),
+             ("safeDinner[i % safeDinner.length]", "dinnerProteins[i]"),
+             ("safeDinnerCarbs[i % safeDinnerCarbs.length]", "dinnerCarbs[i]"),
+             ("safePre[i % safePre.length]", "preOptions[i % preOptions.length]"),
+             ("safePost[i % safePost.length]", "postOptions[i % postOptions.length]")]:
+    s = s.replace(a, b)
 assert s != open(p).read(), "revert patch matched nothing"
 open(p, "w").write(s)
 PY2
@@ -183,5 +200,6 @@ run_case "noPeanuts goes back to its singular-only trigger"                     
 run_case "the plan-check note names food without asking the constraint"                        /tmp/220p/9.py
 run_case "kosher takes the halal path again (the PR #222 regression)"                          /tmp/220p/10.py
 run_case "the fixed 7-day template stops asking the predicate about its own meals"             /tmp/220p/11.py
+run_case "11b · the slot stops rotating over what the client may eat"                          /tmp/220p/11b.py
 run_case "salmon leaves the fish cluster"                                                      /tmp/220p/12.py
 echo "=============================================================================="

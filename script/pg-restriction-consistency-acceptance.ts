@@ -367,23 +367,60 @@ REAL("\n=== I · NEGATIVE CONTROL: A PREFERENCE IS NOT A DIET ===");
 }
 
 REAL("\n=== J · THE LITERAL FOODS THEY NAMED, ON THE FIXED TEMPLATE ===");
-REAL("    (both P1 findings from the Codex review of PR #222, reproduced and closed.)");
+REAL("    (CTO GATE P1-1 and P1-2 on PR #222, and their mandatory controls.)");
 {
   // A CLUSTER BOOLEAN IS NOT THE WHOLE CONSTRAINT. foodConstraints also records the literal foods
-  // a client named, `allows` rejects them, and every other surface obeys — the 3-day plan came
-  // back clean for this exact client while the 7-day template recommended boiled eggs on six
-  // separate mornings, because it copied the booleans and never asked the predicate.
+  // a client named, `c.allows` rejects them, and every other surface obeys — the 3-day plan came
+  // back clean for these clients while the 7-day template recommended eggs on six mornings and
+  // lentils in eight lines, because it copied the booleans and never asked the predicate.
+  //
+  // THE SLOT ROTATES BEFORE IT REFUSES. Each meal is chosen from a seven-candidate array whose
+  // line carries a FIXED protein figure, so swapping candidates inside one array changes no number
+  // and invents no food. Refusing while a compliant option sits one index away would be honouring
+  // the constraint by giving up, which is the same failure as the hollow grocery list.
+
+  // P1-1 control 1 — the ordinary client is untouched.
+  const plain = await client("Sipho");
+  const plainPlan = await ask(plain.phone, "7 day meals");
+  chk(!/can't build/i.test(plainPlan) && /Monday/.test(plainPlan) && /Sunday/.test(plainPlan),
+    "CONTROL: an unrestricted client still receives the ordinary 7-day plan",
+    JSON.stringify(plainPlan.slice(0, 160)));
+
+  // P1-1 control 2 — a literal `eggs` exclusion. Every breakfast candidate in this template is an
+  // egg, so no rotation can save it and the honest refusal is the answer.
   const eggs = await client("Naledi", { foodDislikes: "eggs" });
   const seven = await ask(eggs.phone, "7 day meals");
-  chk(!/\begg/i.test(body(seven)), "a literal `eggs` exclusion is honoured by the fixed 7-day template",
+  chk(!/\begg/i.test(body(seven)), "a literal `eggs` exclusion reaches the fixed 7-day template",
     JSON.stringify((body(seven).match(/[^\n]*egg[^\n]*/i) || [""])[0]));
   chk(/can't build/i.test(seven),
-    "…by refusing, because a fixed template has nothing to substitute and its totals would lie",
+    "…and with no egg-free breakfast candidate to rotate to, it refuses rather than prescribing one",
     JSON.stringify(seven.slice(0, 200)));
-  // THE CONTROL, and it is the one that matters: refusing is easy, refusing ONLY when the template
-  // actually collides is the claim. A dislike the plan never names must cost the client nothing.
-    // The fixture NAME must not carry a food word: the plan header interpolates it, and a client
-  // called "DislikesBroccoli" fails a broccoli detector on the greeting line alone.
+
+  // P1-1 control 3 — THE ONE THAT DISTINGUISHES ROTATION FROM GIVING UP. Vegan AND no lentils: the
+  // same arrays carry tofu, soya mince and sugar beans, so a plan must still come out.
+  const noLentils = await client("Zanele", { dietaryRestrictions: "vegan, lentils" });
+  const vPlan = await ask(noLentils.phone, "7 day meals");
+  chk(!/lentil/i.test(body(vPlan)), "vegan + `lentils` excluded: no lentil is recommended anywhere",
+    JSON.stringify((body(vPlan).match(/[^\n]*lentil[^\n]*/i) || [""])[0]));
+  chk(!/can't build/i.test(vPlan) && /Sunday/.test(vPlan),
+    "…and the plant-based alternative survives — they still get the whole week",
+    JSON.stringify(vPlan.slice(0, 200)));
+  chk(/tofu|soya|sugar beans/i.test(vPlan), "…built on the compliant plant proteins the arrays already carry",
+    JSON.stringify((vPlan.match(/[^\n]*(tofu|soya|sugar beans)[^\n]*/i) || ["(none)"])[0]));
+  chk(!ANIMAL.test(body(vPlan)), "…and it is still vegan", (body(vPlan).match(new RegExp(ANIMAL.source, "gi")) || []).join(", "));
+
+  // The same rotation is what keeps a coeliac covered: every gluten carb has a non-gluten
+  // candidate in its own array, so the plan changes rather than disappearing.
+  const coeliac = await client("Lerato", { dietaryRestrictions: "gluten" });
+  const gPlan = await ask(coeliac.phone, "7 day meals");
+  chk(!/bread|pasta|wheat/i.test(body(gPlan)), "a gluten-free client is recommended no bread, pasta or wheat",
+    JSON.stringify((body(gPlan).match(/[^\n]*(bread|pasta|wheat)[^\n]*/i) || [""])[0]));
+  chk(!/can't build/i.test(gPlan) && /Sunday/.test(gPlan), "…and still gets the whole week",
+    JSON.stringify(gPlan.slice(0, 160)));
+
+  // The control on the control: a dislike the plan never names must cost the client nothing.
+  // The fixture NAME must not carry a food word — the header interpolates it, and a client called
+  // "DislikesBroccoli" fails a broccoli detector on the greeting line alone.
   const broc = await client("Thabo", { foodDislikes: "broccoli" });
   const ok = await ask(broc.phone, "7 day meals");
   chk(!/can't build/i.test(ok) && /Monday/.test(ok) && /Sunday/.test(ok),
@@ -392,24 +429,32 @@ REAL("    (both P1 findings from the Codex review of PR #222, reproduced and clo
   chk(!/broccoli/i.test(body(ok)), "…with the disliked food itself absent from it",
     JSON.stringify((body(ok).match(/[^\n]*broccoli[^\n]*/i) || [""])[0]));
 
-  // KOSHER IS NOT HALAAL. `declaredLabel` covers both, so testing it truthy sent a client who
-  // declared kosher down the halal path — "buy halal-certified chicken and beef" — on a template
-  // that does not separate meat from dairy and cannot vouch for a hechsher.
-  const kosher = await client("Kosher", { dietaryRestrictions: "kosher" });
+  // ── P1-2 · KOSHER IS NOT HALAAL, AND IT FAILS CLOSED ───────────────────────────────────────
+  //
+  // `declaredLabel` covers both, so testing it truthy sent a kosher client down the halal path —
+  // "buy halal-certified chicken and beef". The first fix gave them the plan with a "check the
+  // hechsher yourself" caveat, which is a kosher rule invented at the mouth: these templates put
+  // chicken and yoghurt in the same day, so they break kashrut on what may be eaten TOGETHER, and
+  // nothing in this product owns that rule. Until a kosher-safe owner exists, it fails closed.
+  const kosher = await client("Yosef", { dietaryRestrictions: "kosher" });
   const kPlan = await ask(kosher.phone, "7 day meals");
-  chk(!/halal|halaal/i.test(kPlan), "a kosher client is never prescribed halal certification",
+  chk(!/halal|halaal/i.test(kPlan), "a kosher client is never labelled halal",
     JSON.stringify((kPlan.match(/[^\n]*hal[a]?al[^\n]*/i) || [""])[0]));
-  chk(/kosher/i.test(kPlan) && /can't certify|cannot certify/i.test(kPlan),
-    "…and is told plainly what this plan does and does not guarantee",
-    JSON.stringify((kPlan.match(/[^\n]*Kosher[^\n]*/i) || ["(absent)"])[0]));
-  // THE CONTROL: the halal path itself must still work for someone who actually declared it.
-  const halaal = await client("Halaal", { dietaryRestrictions: "halaal" });
+  chk(/can't build/i.test(kPlan), "…and an unsupported kosher plan fails honestly rather than being caveated",
+    JSON.stringify(kPlan.slice(0, 220)));
+  chk(!/chicken|beef|yoghurt|milk|cheese/i.test(body(kPlan)),
+    "…prescribing no food at all rather than food we cannot vouch for",
+    (body(kPlan).match(/chicken|beef|yoghurt|milk|cheese/gi) || []).join(", "));
+  // P1-2 control 1 — the halal path itself must be untouched for someone who declared it.
+  const halaal = await client("Aisha", { dietaryRestrictions: "halaal" });
   const hPlan = await ask(halaal.phone, "7 day meals");
-  chk(/halal-certified/i.test(hPlan), "CONTROL: a client who declared halaal still gets the halal guidance",
+  chk(/halal-certified/i.test(hPlan), "CONTROL: a client who declared halaal still gets the halal-safe path",
     JSON.stringify((hPlan.match(/[^\n]*halal[^\n]*/i) || ["(absent)"])[0]));
+  chk(!/can't build/i.test(hPlan) && /Sunday/.test(hPlan), "CONTROL: …and their whole week",
+    JSON.stringify(hPlan.slice(0, 160)));
 
   // SALMON WAS NOT IN THE FISH CLUSTER, found by running the fix over the premium tier.
-  const fish = await client("FishAllergy", { dietaryRestrictions: "fish", weeklyFoodBudget: "over_600" });
+  const fish = await client("Bongani", { dietaryRestrictions: "fish", weeklyFoodBudget: "over_600" });
   const fPlan = await ask(fish.phone, "7 day meals");
   chk(!/salmon|mackerel|kingklip/i.test(body(fPlan)),
     "a declared fish allergy covers salmon on the shopping list and in the pro tip",

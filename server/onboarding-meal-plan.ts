@@ -60,6 +60,14 @@ export function getOnboardingMealPlan(user: any): string {
   // to stay in step with the owner that produced it.
   const isKosher = c.declaredLabel === "kosher";
   const isHalal = !!c.declaredLabel && !isKosher;
+  // AND KOSHER FAILS CLOSED. A caveat does not make a plan kosher: these templates put chicken and
+  // yoghurt in the same day, so they break kashrut at the level of what may be eaten TOGETHER, and
+  // nothing in this product owns that rule. The first draft of this fix shipped the plan with a
+  // "check the hechsher yourself" line, which is a rule invented at the mouth — the same class of
+  // mistake as reinterpreting kosher as halal, just quieter. Until a kosher-safe owner exists, the
+  // honest answer is the one generateMealPlan already gives when it cannot build inside a
+  // constraint, and the client is asked for what would let us build it.
+  if (isKosher) return noPlanWithin(c);
   const isVegetarian = c.vegetarian;
   const isVegan = c.vegan;
   // Effective restriction flags extend allergy flags with dietary preferences
@@ -89,10 +97,6 @@ export function getOnboardingMealPlan(user: any): string {
   if (noDairy) medFlags.push("Dairy free");
   if (noGluten) medFlags.push("Gluten free");
   if (isHalal) medFlags.push("Halal — no pork, alcohol-free. Buy halal-certified chicken and beef.");
-  // ONLY WHAT WE ACTUALLY ENFORCE. These templates keep pork and shellfish out, and that is the
-  // whole of what this plan can promise a kosher client: it does not separate meat from dairy and
-  // it cannot vouch for a hechsher. Saying so is honest; borrowing the halal sentence was not.
-  if (isKosher) medFlags.push("Kosher — no pork or shellfish in this plan. I can't certify kashrut, so check the hechsher yourself and tell me if a meal needs changing.");
   if (isVegetarian && !isVegan) medFlags.push("Vegetarian — no meat or fish");
   if (isVegan) medFlags.push("Vegan — plant-based only, no animal products");
 
@@ -270,20 +274,49 @@ export function getOnboardingMealPlan(user: any): string {
   const lunchCal = Math.round(adjustedCal * 0.35);
   const dinnerCal = Math.round(adjustedCal * 0.28);
 
+  // ── THE SLOT ROTATES OVER WHAT THIS CLIENT MAY EAT (#220, CTO GATE P1-1) ────────────────────
+  //
+  // The arrays above are seven candidate proteins per slot, and the line they land in carries a
+  // FIXED protein figure ("— 25g protein") that does not depend on which candidate is chosen. So
+  // swapping one candidate for another inside the same array changes no number and invents no
+  // food: it picks a different day's option from the same vocabulary the plan already owns.
+  //
+  // That is what makes the honest answer for a vegan who also excludes lentils a PLAN rather than
+  // a refusal — the same array carries tofu, soya mince and sugar beans, and refusing while a
+  // compliant option sits one index away would be honouring the constraint by giving up. The
+  // refusal below is for the case where a slot genuinely has nothing left, which is where the
+  // fixed template really cannot answer.
+  const survives = (pool: string[]) => pool.filter(x => c.allows(x));
+  const safeBf = survives(bfProteins);
+  const safeLunch = survives(lunchProteins);
+  const safeDinner = survives(dinnerProteins);
+  const safeBfCarbs = survives(bfCarbs);
+  const safeLunchCarbs = survives(lunchCarbs);
+  const safeDinnerCarbs = survives(dinnerCarbs);
+  const safeVeg = survives(vegOptions);
+  // The pre/post-workout lines are candidate arrays too, and each carries its OWN calories and
+  // protein inside the string — so rotating within one of them is self-consistent in exactly the
+  // way the protein slots are. This is where a vegan's lentils actually came from: postOptions[0]
+  // and [3] are lentil lines the protein arrays never touch.
+  const safePre = survives(preOptions);
+  const safePost = survives(postOptions);
+  if ([safeBf, safeLunch, safeDinner, safeBfCarbs, safeLunchCarbs, safeDinnerCarbs, safeVeg, safePre, safePost]
+        .some(pool => pool.length === 0)) return noPlanWithin(c);
+
   // Build 7-day plan
   let plan = "";
   allDays.forEach((day, i) => {
     const isTraining = trainingSet.has(day);
-    const bfProt = bfProteins[i];
-    const bfCarb = bfCarbs[i];
-    const lp = lunchProteins[i];
-    const lc = lunchCarbs[i];
-    const dp = dinnerProteins[i];
-    const dc = dinnerCarbs[i];
-    const v = vegOptions[i % vegOptions.length];
-    const v2 = vegOptions[(i + 3) % vegOptions.length];
-    const pre = preOptions[i % preOptions.length];
-    const post = postOptions[i % postOptions.length];
+    const bfProt = safeBf[i % safeBf.length];
+    const bfCarb = safeBfCarbs[i % safeBfCarbs.length];
+    const lp = safeLunch[i % safeLunch.length];
+    const lc = safeLunchCarbs[i % safeLunchCarbs.length];
+    const dp = safeDinner[i % safeDinner.length];
+    const dc = safeDinnerCarbs[i % safeDinnerCarbs.length];
+    const v = safeVeg[i % safeVeg.length];
+    const v2 = safeVeg[(i + 3) % safeVeg.length];
+    const pre = safePre[i % safePre.length];
+    const post = safePost[i % safePost.length];
 
     // ---- BREAKFAST ----
     let bf: string;
