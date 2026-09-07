@@ -179,6 +179,22 @@ REAL("\n=== RETRACTION AND REPLACEMENT ARE EXACT ===");
   chk(/peanuts/.test(col), "F · retracting `nuts` leaves the unrelated PEANUT restriction intact",
     `column=${JSON.stringify(col)}`);
   chk(!/(^|,\s*)nuts(\s*,|$)/.test(col), "…and `nuts` itself is gone", `column=${JSON.stringify(col)}`);
+  // …AND THE SAME BUBBLE, WHERE THE BOUNDARY NEVER USED TO GET A CHANCE TO RUN (CTO gate).
+  //
+  // The same-bubble merge decided "is this the same item" with substring containment, one layer
+  // ABOVE removeFact — so a replacement was deleted before projection and the boundary fix could
+  // not save it. The client declared a peanut allergy in the same breath and was left with NO
+  // restriction at all.
+  const swap = await client({ dietaryRestrictions: "nuts" });
+  await say(swap.phone, "I'm not allergic to nuts, I'm allergic to peanuts");
+  const swapped = String((await rowOf(swap.id)).dietaryRestrictions || "").toLowerCase();
+  chk(/peanuts/.test(swapped),
+    "F · a same-message `nuts` → `peanuts` replacement keeps the PEANUT allergy",
+    `column=${JSON.stringify(swapped)}`);
+  chk(swapped.split(",").map(x => x.trim()).every(x => x !== "nuts"),
+    "…and the broader `nuts` restriction is the one that went",
+    `column=${JSON.stringify(swapped)}`);
+
   // CONTROL — removal must still WORK, and must still clear a legacy span-form row. Without this
   // the boundary match reads as "retractions stopped removing anything".
   const legacy = await client({ dietaryRestrictions: "vegan now" });
@@ -215,6 +231,47 @@ REAL("\n=== RETRACTION AND REPLACEMENT ARE EXACT ===");
     "CONTROL: a genuine resolution still clears the joint", `column=${JSON.stringify(h.injuries)}`);
   chk(/shoulder/i.test(String(h.injuries || "")),
     "CONTROL: …and takes only that joint with it", `column=${JSON.stringify(h.injuries)}`);
+}
+
+REAL("\n=== DERIVED STATE FOLLOWS THE CANONICAL COLUMN ===");
+
+// ── A PARTIAL RETRACTION MUST NOT LEAVE A LIVE MOUTH ON THE OLD DIET (CTO gate) ─────────────
+//
+// profileNotes carries the `diet:` flag that utils._getPool reads to choose the protein pool a
+// client is OFFERED. Only the announcer ever wrote it, and only when the column emptied — so a
+// retraction that left ANOTHER diet standing kept the old flag alive, and the canonical column
+// said vegetarian while the suggestion mouth still served the vegan pool.
+{
+  const { proteinOptions } = await import("../server/utils");
+  const c = await client({ dietaryRestrictions: "vegan, vegetarian", profileNotes: "diet:vegan" });
+  await say(c.phone, "I'm not vegan anymore");
+  const row = await rowOf(c.id);
+  const col = String(row.dietaryRestrictions || "").toLowerCase();
+  chk(/vegetarian/.test(col) && !/\bvegan\b/.test(col.replace(/vegetarian/g, "")),
+    "a partial retraction leaves the OTHER diet as canonical truth", `column=${JSON.stringify(col)}`);
+  chk(!/diet:vegan\b/i.test(String(row.profileNotes || "")),
+    "…and the derived diet flag no longer says vegan", `notes=${JSON.stringify(row.profileNotes)}`);
+  chk(/diet:vegetarian/i.test(String(row.profileNotes || "")),
+    "…it says what the column says", `notes=${JSON.stringify(row.profileNotes)}`);
+  // THE LIVE MOUTH, not just the flag: the pool a client is actually offered.
+  const pool = proteinOptions(row as any);
+  chk(!/tofu|soya|lentil/i.test(pool) || /egg|cottage cheese/i.test(pool),
+    "…and the protein pool they are offered is no longer the vegan one", `pool=${JSON.stringify(pool)}`);
+
+  // CONTROL — a client who IS still vegan keeps the vegan flag and the vegan pool, so the
+  // reconciliation is convergence and not "the flag is always cleared".
+  const stays = await client({ dietaryRestrictions: "vegan, peanuts", profileNotes: "diet:vegan" });
+  await say(stays.phone, "I can eat peanuts again");
+  const sr = await rowOf(stays.id);
+  chk(/diet:vegan/i.test(String(sr.profileNotes || "")),
+    "CONTROL: an unrelated retraction leaves a still-true vegan flag alone",
+    `notes=${JSON.stringify(sr.profileNotes)} column=${JSON.stringify(sr.dietaryRestrictions)}`);
+  // CONTROL — notes that are not the diet flag are not collateral.
+  const keepsNotes = await client({ dietaryRestrictions: "vegan", profileNotes: "fish allergy diet:vegan" });
+  await say(keepsNotes.phone, "I'm not vegan anymore");
+  chk(/fish allergy/i.test(String((await rowOf(keepsNotes.id)).profileNotes || "")),
+    "CONTROL: an unrelated profile note survives the diet-flag reconciliation",
+    `notes=${JSON.stringify((await rowOf(keepsNotes.id)).profileNotes)}`);
 }
 
 REAL("\n=== ISOLATION, SEPARATORS, AND UNRELATED FACTS ===");

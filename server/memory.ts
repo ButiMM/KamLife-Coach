@@ -421,7 +421,9 @@ export function detectFacts(message: string): DurableFacts {
     const asserted = merged[field] == null ? "" : String(merged[field]).toLowerCase();
     const taken = String(retract[field] || "").toLowerCase();
     if (!asserted) continue;
-    if (!taken || asserted === taken || asserted.includes(taken) || taken.includes(asserted)) {
+    // SAMENESS IS DECIDED BY THE ONE PREDICATE, not by substring containment. `namesFact` is what
+    // removeFact uses, so "peanuts" and "nuts" are different items in both places.
+    if (!taken || asserted === taken || namesFact(asserted, taken) || namesFact(taken, asserted)) {
       delete merged[field];
     }
   }
@@ -581,10 +583,30 @@ export function removeFact(existing: string | null | undefined, item: string): s
   const clean = (item || "").trim().toLowerCase();
   const cur = (existing || "").trim();
   if (!clean || !cur) return existing ?? null;
-  const whole = new RegExp(String.raw`\b${clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\b`, "i");
   const kept = cur.split(",").map(s => s.trim()).filter(Boolean)
-    .filter(part => !whole.test(part));
+    .filter(part => !namesFact(part, clean));
   return kept.length ? kept.join(", ") : null;
+}
+
+/**
+ * DOES `text` NAME `item`, AS A WHOLE WORD?
+ *
+ * THE ONE ANSWER, because two places ask it and they must not disagree. removeFact asks it of a
+ * stored column; the same-bubble merge in detectFacts asks it of an assertion and a retraction
+ * standing side by side. The merge originally decided sameness with `a.includes(b)`, which
+ * recreated the exact defect the boundary here exists to prevent — one layer earlier, where the
+ * boundary never got a chance to run:
+ *
+ *     "I'm not allergic to nuts, I'm allergic to peanuts"
+ *       retract nuts, assert peanuts  ->  "peanuts".includes("nuts")  ->  assertion deleted
+ *       result: the column emptied, and a client who had just declared a PEANUT allergy was
+ *       left with no restriction at all.
+ */
+export function namesFact(text: string | null | undefined, item: string): boolean {
+  const clean = (item || "").trim().toLowerCase();
+  const t = String(text || "").trim();
+  if (!clean || !t) return false;
+  return new RegExp(String.raw`\b${clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\b`, "i").test(t);
 }
 
 export interface ClientFactOperation {
@@ -643,6 +665,34 @@ export function projectClientFacts(
     if (!next || next === previous) continue;
     patch[fact] = next;
     operations.push({ fact, operation: "assert", previousValue: previous, value: next, provenance: "client_explicit" });
+  }
+
+  // THE DERIVED DIET FLAG FOLLOWS THE CANONICAL COLUMN (#211 gate).
+  //
+  // profileNotes carries `diet:vegan` / `diet:vegetarian` / `diet:halal`, and utils._getPool reads
+  // it to choose the protein pool a client is OFFERED. Nothing but the announcer ever wrote it, so
+  // a retraction that left another diet standing kept the old flag alive:
+  //
+  //     column "vegan, vegetarian" + "I'm not vegan anymore"
+  //       canonical -> "vegetarian"
+  //       profileNotes still "diet:vegan"  ->  the suggestion mouth still offers the VEGAN pool
+  //
+  // A successful canonical retraction leaving a live customer-facing mouth on the old diet is the
+  // whole reason derived state has to be reconciled where the canonical value changes, rather than
+  // in the one handler that happened to write it. This is a PROJECTION of the column, not a second
+  // opinion about it: it is computed from the value this same patch just produced, and it never
+  // decides anything the column does not already say.
+  if (Object.prototype.hasOwnProperty.call(patch, "dietaryRestrictions")) {
+    const next = String(patch.dietaryRestrictions || "").toLowerCase();
+    const flag = /\bvegan\b/.test(next) ? "diet:vegan"
+      : /\b(vegetarian|veggie)\b/.test(next) ? "diet:vegetarian"
+      : /\bhalaal?\b/.test(next) ? "diet:halal" : "";
+    const notes = current?.profileNotes == null ? "" : String(current.profileNotes);
+    if (/\bdiet:\w+\b/i.test(notes) || flag) {
+      const rebuilt = [notes.replace(/\bdiet:\w+\b/gi, "").replace(/\s+/g, " ").trim(), flag]
+        .filter(Boolean).join(" ").trim();
+      if (rebuilt !== notes.trim()) patch.profileNotes = rebuilt || null;
+    }
   }
 
   if (facts.workSchedule && facts.workSchedule !== current?.workSchedule) {
