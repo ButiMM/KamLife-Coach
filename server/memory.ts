@@ -342,6 +342,10 @@ const RESTRICTION_WORD = String.raw`lactose intolerant|gluten.?free|dairy.?free|
  * to a stopping verb, or carry "anymore" itself. "I'm not eating dairy" is deliberately NOT here:
  * that is the restriction, stated in the negative, and belongs to the assert branch.
  */
+/** The restriction word itself, off the one list above — what a column should store. */
+const RESTRICTION_TOKEN_RE = new RegExp(String.raw`\b(?:${RESTRICTION_WORD})\b`, "i");
+
+
 const RESTRICTION_RETRACTED_RE = new RegExp(
   String.raw`\b(?:i'?m|i\s+am|im)\s+(?:not|no\s+longer)\s+(?:really\s+|strictly\s+|a\s+)*`
   + String.raw`(?:allergic\s+to\s+|intolerant\s+(?:to|of)\s+)?(${RESTRICTION_WORD})\b`
@@ -399,7 +403,28 @@ export function detectFacts(message: string): DurableFacts {
       if (v && retract[k as DurableFactField] === undefined) retract[k as DurableFactField] = v as string;
     }
   }
-  for (const field of Object.keys(retract) as DurableFactField[]) delete merged[field];
+  // A RETRACTION BEATS AN ASSERTION OF THE SAME ITEM — NOT OF THE WHOLE FIELD (#211).
+  //
+  // This deleted any assertion of a field that carried a retraction anywhere in the bubble, which
+  // is right when the client says the same thing twice and wrong for the commonest correction
+  // there is:
+  //
+  //     "I'm not vegan, I'm vegetarian"
+  //       clause 1  retract dietaryRestrictions:vegan
+  //       clause 2  assert  dietaryRestrictions:vegetarian   <- deleted here
+  //       result    no dietary truth at all
+  //
+  // The client corrected their own record and came out with less truth than either half of the
+  // sentence contained. A retraction and an assertion naming DIFFERENT items of one field is a
+  // replacement, and both halves are what they said.
+  for (const field of Object.keys(retract) as DurableFactField[]) {
+    const asserted = merged[field] == null ? "" : String(merged[field]).toLowerCase();
+    const taken = String(retract[field] || "").toLowerCase();
+    if (!asserted) continue;
+    if (!taken || asserted === taken || asserted.includes(taken) || taken.includes(asserted)) {
+      delete merged[field];
+    }
+  }
   if (Object.keys(retract).length) merged.retract = retract;
   return merged;
 }
@@ -433,11 +458,31 @@ function detectInClause(message: string): DurableFacts {
   // "that workout hurt" does not, and must not amputate their leg day.
   // "my knee doesn't hurt anymore", "the back is healed" — the client is telling us the injury is
   // OVER. Recording it here would train around a knee that is fine, permanently.
-  const resolved = /\b(?:no longer|not\s+(?:really\s+)?(?:sore|hurting|painful)|doesn'?t\s+hurt|don'?t\s+hurt|healed|all\s+better|fine\s+now|better\s+now|sorted\s+now)\b|\banymore\b/i.test(m);
+  // "anymore" IS A TIME MARKER, NOT A RESOLUTION CLAIM (#211). A bare `\banymore\b` alternative
+  // stood here, so ANY sentence naming a body part and containing that word amputated the injury:
+  //
+  //     "my knee doesn't hurt as much anymore, should I still avoid squats?"
+  //       -> retract injuries:knee, and the client is asking how to train around it
+  //
+  // It now has to attach to a phrase that actually claims the injury is over. And a HEDGED
+  // improvement is not resolution: "doesn't hurt as much" / "a bit less sore" is a knee getting
+  // better, which is the state in which training around it still matters most.
+  const HEDGE = String.raw`(?:as\s+much|as\s+bad|much|a\s+bit|a\s+little|so\s+much|quite\s+so|less)`;
+  const resolved = new RegExp(
+    String.raw`\b(?:no longer|not\s+(?:really\s+)?(?:sore|hurting|painful)|doesn'?t\s+hurt|don'?t\s+hurt`
+    + String.raw`|healed|all\s+better|fine\s+now|better\s+now|sorted\s+now)\b(?!\s+${HEDGE}\b)`
+    + String.raw`|\b(?:gone|over|better|healed|sorted|fine)\s+(?:now\s+)?any\s?more\b`
+    + String.raw`|\bno\s+(?:more\s+)?(?:pain|niggle)\b`, "i").test(m);
   const part = m.match(BODY_PART)?.[0]?.toLowerCase();
   // AND SAY SO TO THE COLUMN. Suppressing the write left a knee that healed in March still
   // steering every leg day, because nothing else ever removes it.
-  if (part && resolved) facts.retract = { ...facts.retract, injuries: part };
+  //
+  // THE SAME `reporting` GATE THE ASSERT BRANCH BELOW ALREADY USES (#211). Only the assert side
+  // carried it, so a QUESTION could not add an injury but could delete one — the asymmetry ran in
+  // the unsafe direction. For food the module argues the opposite way on purpose, and says why:
+  // wrongly keeping a restriction starves the client. For an injury the costs are reversed —
+  // wrongly keeping one costs a conservative session, wrongly clearing one trains a hurt joint.
+  if (part && resolved && reporting) facts.retract = { ...facts.retract, injuries: part };
   if (part && reporting && !resolved) {
     // An INJURY VERB naming a body part is enough on its own — "I hurt my lower back at work" is
     // a report, not a complaint about a hard session.
@@ -470,7 +515,12 @@ function detectInClause(message: string): DurableFacts {
   } else {
     const allergy = !reporting ? undefined : m.match(/\b(?:allergic to|intolerant to|can'?t eat|cannot eat|don'?t eat|i'?m|i am)\s+([a-z ]{3,20}?)\b(?:\.|,|$| and | but )/)?.[1]?.trim();
     if (allergy && /\b(lactose|gluten|dairy|nuts?|peanuts?|shellfish|eggs?|pork|beef|halaal|halal|vegan|vegetarian|seafood|fish)\b/i.test(allergy)) {
-      facts.dietaryRestrictions = allergy;
+      // THE TOKEN, NOT THE SPAN THE CAPTURE HAPPENED TO REACH (#211). The lazy group above runs to
+      // the next comma, so "I'm vegan now, what should I eat?" stored the restriction as
+      // "vegan now" — which then read out through foodConstraints as TWO terms, "vegan" and
+      // "vegan now", and left a retraction matching on a string the client never said. Narrowed to
+      // the restriction word itself, from the one list this module already keeps.
+      facts.dietaryRestrictions = allergy.match(RESTRICTION_TOKEN_RE)?.[0].toLowerCase() || allergy;
     } else if (reporting && /\b(lactose intolerant|gluten free|dairy free|vegan|vegetarian|halaal|halal|kosher)\b/i.test(m) && /\bi'?m|i am\b/i.test(m)) {
       facts.dietaryRestrictions = m.match(/\b(lactose intolerant|gluten free|dairy free|vegan|vegetarian|halaal|halal|kosher)\b/i)![0];
     }
@@ -512,17 +562,28 @@ export function addFact(existing: string | null | undefined, item: string): stri
 /**
  * Take one item back out of a comma-separated column.
  *
- * MATCHES ON CONTAINMENT, because the column holds what the client said and not a normalised
- * token — a "vegan" retraction has to clear an entry stored as "vegan now" or "i'm vegan", which
- * is exactly how the assert branch writes them. Emptying the column returns null, not "", so the
- * readers' `usable()` and foodConstraints see an absent fact rather than a blank one.
+ * MATCHES ON A WHOLE WORD (#211). This matched on CONTAINMENT, for a stated reason — the column
+ * holds what the client said rather than a normalised token, so a "vegan" retraction had to clear
+ * an entry the assert branch had written as "vegan now". The cost of that was exact removal, and
+ * it was not hypothetical: a client restricted on "peanuts, nuts" who said "I can eat nuts again"
+ * had BOTH cleared, because "peanuts".includes("nuts"). A peanut allergy silently deleted by an
+ * unrelated sentence is the most dangerous write in this module.
+ *
+ * A word boundary keeps the reason and drops the cost. "vegan now" still contains the WORD
+ * "vegan", so the entry the comment was written for is still cleared; "peanuts" does not contain
+ * the word "nuts", so it survives. The assert branch now stores the token anyway (see below), but
+ * this stays boundary-matched for rows written before that.
+ *
+ * Emptying the column returns null, not "", so the readers' `usable()` and foodConstraints see an
+ * absent fact rather than a blank one.
  */
 export function removeFact(existing: string | null | undefined, item: string): string | null {
   const clean = (item || "").trim().toLowerCase();
   const cur = (existing || "").trim();
   if (!clean || !cur) return existing ?? null;
+  const whole = new RegExp(String.raw`\b${clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\b`, "i");
   const kept = cur.split(",").map(s => s.trim()).filter(Boolean)
-    .filter(part => !part.toLowerCase().includes(clean));
+    .filter(part => !whole.test(part));
   return kept.length ? kept.join(", ") : null;
 }
 
@@ -564,7 +625,20 @@ export function projectClientFacts(
   for (const fact of appendFacts) {
     const asserted = facts[fact];
     if (!asserted) continue;
-    const previous = current?.[fact] == null ? null : String(current[fact]);
+    // BUILD ON WHAT THE RETRACTION ABOVE JUST PRODUCED, NOT ON THE ROW IT STARTED FROM (#211).
+    //
+    // Retractions run first, deliberately — but the append then re-read `current`, so a
+    // replacement put the retracted item straight back and the retraction patch was overwritten
+    // by the wider one:
+    //
+    //     "I'm not vegan, I'm vegetarian"   column "vegan"
+    //       retract -> patch "vegan" => null
+    //       assert  -> addFact(current "vegan", "vegetarian") => "vegan, vegetarian"
+    //
+    // The client is left MORE restricted than before they corrected us. `patch` is this
+    // transaction's own newer truth and is what the next operation must see.
+    const base = Object.prototype.hasOwnProperty.call(patch, fact) ? patch[fact] : current?.[fact];
+    const previous = base == null ? null : String(base);
     const next = addFact(previous, asserted);
     if (!next || next === previous) continue;
     patch[fact] = next;
