@@ -87,8 +87,9 @@ export function readOpenTrainingLoop(
 /** The unambiguous negative answer becomes meaningful only while the training move is open. */
 export function reportsOpenTrainingMoveFailed(message: string): boolean {
   const text = String(message || "").toLowerCase().replaceAll("’", "'");
-  return ["couldn't do it", "could not do it", "couldn't make it", "could not make it",
-    "didn't manage to do it", "wasn't able to do it"].some(shape => text.includes(shape));
+  const explicitFailures = ["couldn't do it", "could not do it", "couldn't make it",
+    "could not make it", "didn't manage to do it", "wasn't able to do it"];
+  return explicitFailures.some(shape => text.includes(shape));
 }
 
 export interface WorkoutFeedbackExpectation {
