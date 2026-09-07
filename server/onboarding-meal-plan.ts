@@ -6,7 +6,7 @@
 
 import { getDisplayName } from "./utils";
 // ONE OWNER FOR WHAT THIS CLIENT MAY EAT (#220). See the block inside the function.
-import { foodConstraints } from "./food-swaps";
+import { foodConstraints, noPlanWithin } from "./food-swaps";
 
 export function getOnboardingMealPlan(user: any): string {
   const budget = user.weeklyFoodBudget || "100_300";
@@ -49,7 +49,17 @@ export function getOnboardingMealPlan(user: any): string {
   const noFish = c.noFish && !c.vegetarian;  // the vegetarian case is carried by noFishEff below
   const noDairy = c.noDairy && !c.vegan;     // …and the vegan case by noDairyEff
   const noGluten = c.noGluten;
-  const isHalal = !!c.declaredLabel;
+  // KOSHER IS NOT HALAAL (#220, Codex P1 on PR #222 — my regression, caught before merge).
+  // `declaredLabel` covers halaal, halal AND kosher, so testing it truthy sent a client who
+  // declared kosher down the halal path and told them to "buy halal-certified chicken and beef".
+  // Halal certification is not kashrut, this template does not separate meat from dairy, and
+  // prescribing one observance to someone who named the other is worse than saying nothing.
+  // So the label is tested, and kosher gets a flag that claims only what we actually enforce.
+  // Tested by equality, not a pattern: `declaredLabel` is a closed set — "halaal", "halal",
+  // "kosher" or "" — so the word IS the answer, and a regex here would be a fifth thing that has
+  // to stay in step with the owner that produced it.
+  const isKosher = c.declaredLabel === "kosher";
+  const isHalal = !!c.declaredLabel && !isKosher;
   const isVegetarian = c.vegetarian;
   const isVegan = c.vegan;
   // Effective restriction flags extend allergy flags with dietary preferences
@@ -79,6 +89,10 @@ export function getOnboardingMealPlan(user: any): string {
   if (noDairy) medFlags.push("Dairy free");
   if (noGluten) medFlags.push("Gluten free");
   if (isHalal) medFlags.push("Halal — no pork, alcohol-free. Buy halal-certified chicken and beef.");
+  // ONLY WHAT WE ACTUALLY ENFORCE. These templates keep pork and shellfish out, and that is the
+  // whole of what this plan can promise a kosher client: it does not separate meat from dairy and
+  // it cannot vouch for a hechsher. Saying so is honest; borrowing the halal sentence was not.
+  if (isKosher) medFlags.push("Kosher — no pork or shellfish in this plan. I can't certify kashrut, so check the hechsher yourself and tell me if a meal needs changing.");
   if (isVegetarian && !isVegan) medFlags.push("Vegetarian — no meat or fish");
   if (isVegan) medFlags.push("Vegan — plant-based only, no animal products");
 
@@ -402,8 +416,34 @@ export function getOnboardingMealPlan(user: any): string {
   const header = `*Your Personalised 7 Day Meal Plan*\n${name} | Goal: ${goalLabels[goal] || goal} | ${adjustedCal} cal/day | ${adjustedProt}g protein/day\nBudget: ${budgetLabels[budget]} per week | Shop at Shoprite or Boxer${medFlags.length > 0 ? `\n⚠️ Medical: ${medFlags.join(" · ")}` : ""}`;
   const trainingLine = `\n*Training Days:* ${trainingDaysStr} (${daysPerWeek} day${daysPerWeek > 1 ? "s" : ""}/week)`;
 
-  const headerBlock = `${header}${trainingLine}${goalNote}${nightNote}${hivNote}${domesticNote}${studentNote}${unemployedNote}${postpartumNote}`;
+  // ── EVERY LINE THAT TELLS THEM TO EAT SOMETHING, AGAINST THE ONE PREDICATE (#220) ───────────
+  //
+  // Reading the booleans off `c` was only half the job, and Codex was right to call it on PR #222:
+  // the clusters say vegan / dairy / fish / peanut, and say nothing about the LITERAL foods a
+  // client named. foodConstraints records those too — `foodDislikes: "eggs"` — and `c.allows`
+  // rejects them, and every other food surface already obeys it: the 3-day plan came back clean
+  // for that same client while this one recommended boiled eggs on six separate mornings.
+  //
+  // VERIFIED, NOT FILTERED, for the meals. This template is fixed prose with the calories and
+  // protein baked into each line, so there is nothing to substitute and dropping a meal would
+  // leave the day's stated total lying about what is under it. A plan that breaks their word does
+  // not go out; they get the same sentence generateMealPlan gives when its pools cannot be filled.
+  //
+  // The shopping list and the pro tip ARE filtered, because they can lose a line honestly — an
+  // item nothing in the plan uses is just an item, and a tip is garnish. That distinction is why
+  // a fish-allergic client on the premium tier keeps their whole plan and simply stops being told
+  // that salmon goes on special.
+  const prescribed = (block: string) => block.split("\n")
+    .map((l: string) => (l.match(/^[^:]{1,40}:\s*(.+?)\s+—/) || [])[1] || "")
+    .filter(Boolean);
+  const shopLines = shopList.split("\n");
+  shopList = [shopLines[0], ...shopLines.slice(1).filter(l => c.allows(l.split("—")[0]))].join("\n");
+  const safeTip = c.allows(proTip) ? `\n🛒 ${proTip}` : "";
+  const goalNoteSafe = goalNote.split(/(?<=\.)\s+/).filter(sn => c.allows(sn)).join(" ");
+
+  const headerBlock = `${header}${trainingLine}${goalNoteSafe}${nightNote}${hivNote}${domesticNote}${studentNote}${unemployedNote}${postpartumNote}`;
   const planBlock = plan.trim();
-  const shopBlock = `${shopList}\nEstimated total: R${shopTotal}\n🛒 ${proTip}`;
+  if (prescribed(planBlock).some((food: string) => !c.allows(food))) return noPlanWithin(c);
+  const shopBlock = `${shopList}\nEstimated total: R${shopTotal}${safeTip}`;
   return `${headerBlock}\n\n---\n\n${planBlock}\n\n---\n\n${shopBlock}\n\n_Reply SWAP [day] to swap a day. Reply SHOPPING LIST for just the shopping list._`;
 }

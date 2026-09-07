@@ -366,6 +366,59 @@ REAL("\n=== I · NEGATIVE CONTROL: A PREFERENCE IS NOT A DIET ===");
     JSON.stringify((snap.match(/[^\n]*veg[ae]/i) || [""])[0]));
 }
 
+REAL("\n=== J · THE LITERAL FOODS THEY NAMED, ON THE FIXED TEMPLATE ===");
+REAL("    (both P1 findings from the Codex review of PR #222, reproduced and closed.)");
+{
+  // A CLUSTER BOOLEAN IS NOT THE WHOLE CONSTRAINT. foodConstraints also records the literal foods
+  // a client named, `allows` rejects them, and every other surface obeys — the 3-day plan came
+  // back clean for this exact client while the 7-day template recommended boiled eggs on six
+  // separate mornings, because it copied the booleans and never asked the predicate.
+  const eggs = await client("Naledi", { foodDislikes: "eggs" });
+  const seven = await ask(eggs.phone, "7 day meals");
+  chk(!/\begg/i.test(body(seven)), "a literal `eggs` exclusion is honoured by the fixed 7-day template",
+    JSON.stringify((body(seven).match(/[^\n]*egg[^\n]*/i) || [""])[0]));
+  chk(/can't build/i.test(seven),
+    "…by refusing, because a fixed template has nothing to substitute and its totals would lie",
+    JSON.stringify(seven.slice(0, 200)));
+  // THE CONTROL, and it is the one that matters: refusing is easy, refusing ONLY when the template
+  // actually collides is the claim. A dislike the plan never names must cost the client nothing.
+    // The fixture NAME must not carry a food word: the plan header interpolates it, and a client
+  // called "DislikesBroccoli" fails a broccoli detector on the greeting line alone.
+  const broc = await client("Thabo", { foodDislikes: "broccoli" });
+  const ok = await ask(broc.phone, "7 day meals");
+  chk(!/can't build/i.test(ok) && /Monday/.test(ok) && /Sunday/.test(ok),
+    "CONTROL: a dislike the template never names still gets the whole week",
+    JSON.stringify(ok.slice(0, 200)));
+  chk(!/broccoli/i.test(body(ok)), "…with the disliked food itself absent from it",
+    JSON.stringify((body(ok).match(/[^\n]*broccoli[^\n]*/i) || [""])[0]));
+
+  // KOSHER IS NOT HALAAL. `declaredLabel` covers both, so testing it truthy sent a client who
+  // declared kosher down the halal path — "buy halal-certified chicken and beef" — on a template
+  // that does not separate meat from dairy and cannot vouch for a hechsher.
+  const kosher = await client("Kosher", { dietaryRestrictions: "kosher" });
+  const kPlan = await ask(kosher.phone, "7 day meals");
+  chk(!/halal|halaal/i.test(kPlan), "a kosher client is never prescribed halal certification",
+    JSON.stringify((kPlan.match(/[^\n]*hal[a]?al[^\n]*/i) || [""])[0]));
+  chk(/kosher/i.test(kPlan) && /can't certify|cannot certify/i.test(kPlan),
+    "…and is told plainly what this plan does and does not guarantee",
+    JSON.stringify((kPlan.match(/[^\n]*Kosher[^\n]*/i) || ["(absent)"])[0]));
+  // THE CONTROL: the halal path itself must still work for someone who actually declared it.
+  const halaal = await client("Halaal", { dietaryRestrictions: "halaal" });
+  const hPlan = await ask(halaal.phone, "7 day meals");
+  chk(/halal-certified/i.test(hPlan), "CONTROL: a client who declared halaal still gets the halal guidance",
+    JSON.stringify((hPlan.match(/[^\n]*halal[^\n]*/i) || ["(absent)"])[0]));
+
+  // SALMON WAS NOT IN THE FISH CLUSTER, found by running the fix over the premium tier.
+  const fish = await client("FishAllergy", { dietaryRestrictions: "fish", weeklyFoodBudget: "over_600" });
+  const fPlan = await ask(fish.phone, "7 day meals");
+  chk(!/salmon|mackerel|kingklip/i.test(body(fPlan)),
+    "a declared fish allergy covers salmon on the shopping list and in the pro tip",
+    JSON.stringify((body(fPlan).match(/[^\n]*salmon[^\n]*/i) || [""])[0]));
+  chk(!/can't build/i.test(fPlan) && /Sunday/.test(fPlan),
+    "CONTROL: …and they still get the whole week — a dropped line is not a dropped plan",
+    JSON.stringify(fPlan.slice(0, 160)));
+}
+
 REAL(`\n${failed === 0
   ? "pg-restriction-consistency-acceptance: GREEN — all checks passed"
   : `pg-restriction-consistency-acceptance: RED — ${failed} check(s) failed`}`);

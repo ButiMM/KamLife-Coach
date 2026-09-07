@@ -14,7 +14,7 @@
 import { validateMealPlan, type DayTotals } from "./verifiers/meal-plan-validator";
 import { topUpsForDay, topUpLine } from "./meal-plan-scale";
 import { enforceMessageBudget, MESSAGE_BUDGET } from "./reply-contract";
-import { foodConstraints, allowedAlternatives } from "./food-swaps";
+import { foodConstraints, allowedAlternatives, noPlanWithin } from "./food-swaps";
 
 export type MealPlanOptions = {
   calorieTarget: number;
@@ -458,10 +458,9 @@ export function generateMealPlan(opts: MealPlanOptions): string {
   // exclusions emptied the protein pool: no days were built, and three empty day-blocks under a
   // header promising 150g of protein is the hollow-list failure wearing a different hat.
   const criticals = validation.issues.filter(i => i.startsWith("CRITICAL:"));
-  if (days.length === 0 || criticals.length > 0) {
-    const said = constraints.terms.length ? constraints.terms.join(", ") : "what you don't eat";
-    return `*Your Meal Plan*\n\nI can't build you a plan that respects ${said} out of the food I've got templates for — and I'd rather tell you that than send you one that breaks your word.\n\nTell me two or three proteins you DO eat and I'll build the week around them.`;
-  }
+  // ONE OWNER for the sentence itself — getOnboardingMealPlan reaches the same moment from its
+  // own template and must not say it differently.
+  if (days.length === 0 || criticals.length > 0) return noPlanWithin(constraints);
 
   // Join with ---  so Twilio splits into separate WA messages, then hold it to the stated
   // 4-message cap (measured at 5 before this). Re-packs sections; never trims a day.

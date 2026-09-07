@@ -138,6 +138,30 @@ assert s != open(p).read(), "revert patch matched nothing"
 open(p, "w").write(s)
 PY
 
+# ── 10 · kosher takes the halal path again (the PR #222 regression) ──────────────────────────
+cat > /tmp/220p/10.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+s = s.replace("const isHalal = !!c.declaredLabel && !isKosher;", "const isHalal = !!c.declaredLabel;")
+assert s != open(p).read(), "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 11 · the fixed template stops asking the predicate about its own meals ────────────────────
+cat > /tmp/220p/11.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+s = s.replace("  if (prescribed(planBlock).some((food: string) => !c.allows(food))) return noPlanWithin(c);", "")
+assert s != open(p).read(), "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 12 · salmon leaves the fish cluster ───────────────────────────────────────────────────────
+cat > /tmp/220p/12.py <<'PY2'
+p = "server/food-swaps.ts"; s = open(p).read()
+s = s.replace("|snoek|salmon|mackerel|kingklip|sardines?|", "|snoek|sardines?|")
+assert s != open(p).read(), "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
 echo "=============================================================================="
 echo "#220 — RED ON REVERT, one mechanism at a time"
 echo "=============================================================================="
@@ -157,4 +181,7 @@ run_case "the grocery list is honoured by deletion (no refill, empty headings)" 
 run_case "the shelf block stops obeying the constraint"                                        /tmp/220p/7.py
 run_case "noPeanuts goes back to its singular-only trigger"                                    /tmp/220p/8.py
 run_case "the plan-check note names food without asking the constraint"                        /tmp/220p/9.py
+run_case "kosher takes the halal path again (the PR #222 regression)"                          /tmp/220p/10.py
+run_case "the fixed 7-day template stops asking the predicate about its own meals"             /tmp/220p/11.py
+run_case "salmon leaves the fish cluster"                                                      /tmp/220p/12.py
 echo "=============================================================================="

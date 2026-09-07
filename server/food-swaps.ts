@@ -528,6 +528,22 @@ export function allowedProteinStaples(c: FoodConstraints): ProteinStaple[] {
   return PROTEIN_STAPLES.filter(s => c.allows(s.name));
 }
 
+/**
+ * WHAT WE SAY WHEN A PLAN CANNOT BE BUILT INSIDE THIS CLIENT'S RESTRICTION (#220).
+ *
+ * ONE OWNER, because there are two plan builders and they must not disagree about the one thing
+ * neither of them can do. generateMealPlan reaches this when its pools filter to nothing;
+ * getOnboardingMealPlan reaches it when its fixed template — which has no substitutes to swap in —
+ * would name a food the client told us they do not eat. Both are the same moment: we would have
+ * to break their word to answer, so we do not answer, and we ask for the one thing that unblocks
+ * it. Saying the restriction back in their own terms is the point; a plan we cannot build is not
+ * a reason to be vague about why.
+ */
+export function noPlanWithin(c: FoodConstraints): string {
+  const said = c.terms.length ? joinFoods(c.terms, "and") : "what you don't eat";
+  return `*Your Meal Plan*\n\nI can't build you a plan that respects ${said} out of the food I've got templates for — and I'd rather tell you that than send you one that breaks your word.\n\nTell me two or three proteins you DO eat and I'll build the week around them.`;
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
  * "CAN I EAT THIS?" — a grounded verdict on a packaged product (2026-08-05).
  *
@@ -781,7 +797,12 @@ const DAIRY = /\b(?<!soya |soy |almond |oat |coconut |rice )(milk|amasi|maas|che
 // client group it exists for. The substitution table already offers "soya mince" to a client
 // avoiding beef; `allows` used to refuse the swap the table had just made.
 const MEAT = /(?<!soya |soy |veggie |vegan |plant )\b(chicken|beef|steaks?|mince|lamb|mutton|pork|bacon|ham|polony|russians?|vienna|wors|boerewors|biltong|livers?|tripe|offal|walkie|gammon|sausages?|meat|nyama|shisa ?nyama)\b/i;
-const FISH = /\b(fish|pilchards?|tuna|hake|snoek|sardines?|anchov(?:y|ies)|prawns?|shrimps?|calamari|mussels?|seafood)\b/i;
+// SALMON WAS NOT IN THE FISH CLUSTER (#220). Found by running the fix over the premium tier: a
+// client whose declared allergy is fish had "Salmon 400g (×2) — R160" on their shopping list and
+// "Salmon goes on special at Shoprite most Fridays — buy two packs" as their pro tip, because
+// `allows` did not know salmon is a fish. Mackerel and kingklip are the other two a South
+// African shelf carries that this pattern could not see.
+const FISH = /\b(fish|pilchards?|tuna|hake|snoek|salmon|mackerel|kingklip|sardines?|anchov(?:y|ies)|prawns?|shrimps?|calamari|mussels?|seafood)\b/i;
 const EGG = /\b(eggs?|omelettes?)\b/i;
 const PORK = /\b(pork|bacon|ham|gammon|pig)\b/i;
 const GLUTEN = /\b(bread|rolls?|buns?|kota|vetkoek|pasta|macaroni|spaghetti|noodles?|wheat|flour|cereal|weetbix|rusks?)\b/i;
