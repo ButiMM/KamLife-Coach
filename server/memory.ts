@@ -13,6 +13,7 @@ import {
 type WeekendAnswer = "untracked" | "usual" | "reported";
 type WeekendInvestigation = { state: "open" | "answered"; day: string; outcome?: WeekendAnswer };
 const WEEKEND_ANSWER = { UNTRACKED: "untracked", USUAL: "usual", REPORTED: "reported" } as const;
+const WEEKEND_ANSWER_TERMS = ["weekend", "saturday", "sunday"] as const;
 const WEEKEND_INVESTIGATION_DB_RE = "\\s*\\|?\\s*investigate_weekend_food_(open|answered):[0-9]{4}-[0-9]{2}-[0-9]{2}(:((untracked|usual|reported)))?";
 
 function readWeekendInvestigation(user: any, now = Date.now()): WeekendInvestigation | null {
@@ -58,7 +59,7 @@ function weekendAnswerFrom(message: string): WeekendAnswer | null {
     .some(signal => words.includes(signal))) return WEEKEND_ANSWER.UNTRACKED;
   if (["normal", "usual", "same as usual", "nothing different", "nothing unusual"]
     .some(signal => words.includes(signal))) return WEEKEND_ANSWER.USUAL;
-  return ["weekend", "saturday", "sunday"].some(signal => words.includes(signal)) ? WEEKEND_ANSWER.REPORTED : null;
+  return WEEKEND_ANSWER_TERMS.some(signal => words.includes(signal)) ? WEEKEND_ANSWER.REPORTED : null;
 }
 
 /** Close the open question with a bounded durable answer; an answer need not invent meal rows. */
