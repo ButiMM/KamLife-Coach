@@ -166,6 +166,37 @@ REAL("\n=== MONDAY SPEAKS UNDER ONE VERDICT ===");
   chk(/your week/i.test(msg), "…and still gets their Monday summary", JSON.stringify(msg.slice(0, 100)));
 }
 
+// ── THE MONDAY WEIGHT WINDOW IS BOUNDED IN TIME ─────────────────────────────────────────────
+//
+// getProgressTruth scopes activity and food by `days`, but the weight read is bounded ONLY by
+// `weightWindowDays` — omit it and getWeightTruth has no `since` and returns LIFETIME history.
+// Both of these clients have a perfectly ordinary recent fortnight and one very old row; whether
+// that old row is allowed to speak is the whole question, and it is invisible to any fixture
+// whose readings all sit inside the window.
+{
+  // 1 · AN OLD ILLNESS AND AN OLD READING MUST NOT SUPPRESS A CURRENT VERDICT. Unbounded, the
+  // span reaches back to the reading from ~200 days ago, the illness from then overlaps it, and
+  // the client's clean recent fortnight is refused for an illness they had six months ago.
+  const ancient = await client("AncientIllness", {
+    profileNotes: `sick_since:${dayKey(200)} | sick_until:${dayKey(195)}`,
+  }, [[200, 90.0], [12, 86.4], [6, 85.5], [1, 84.0]]);
+  const msg = await monday(ancient.id);
+  chk(/⚖️/.test(msg) && /this week/i.test(msg),
+    "an illness far outside the Monday weight window does not suppress the current verdict",
+    JSON.stringify(msg));
+
+  // 2 · A LONE RECENT READING MUST NOT MANUFACTURE A WEEK. Unbounded, one reading from ~300 days
+  // ago and one from yesterday are two points spanning ten months — span and staleness both pass,
+  // and Monday announces a weekly direction and a pace built across most of a year.
+  const lonely = await client("Lonely", {}, [[300, 95.0], [1, 84.0]]);
+  const lonelyMsg = await monday(lonely.id);
+  chk(!/⚖️/.test(lonelyMsg),
+    "a lone recent reading beside an ancient one does not manufacture a weekly direction",
+    JSON.stringify(lonelyMsg));
+  chk(!/at this pace/i.test(lonelyMsg),
+    "…nor a goal-arrival pace built across the gap", JSON.stringify(lonelyMsg));
+}
+
 REAL("\n=== THE REACTIVE SURFACES AGREE WITH IT, AND WITH EACH OTHER ===");
 
 // ── 4 + 7 — the stated reason, and one verdict across surfaces ──────────────────────────────

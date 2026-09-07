@@ -77,7 +77,7 @@ export async function runMondayProgress(): Promise<void> {
       // MIN_TREND_SPAN_DAYS of span and a newest reading no older than MAX_TREND_AGE_DAYS. Handing
       // it the window and letting it judge is the point; a row limit chosen here is this job
       // deciding what a trend is, which is exactly the second opinion #216 forbids.
-      const weightTruth = await getProgressTruth(client, { days: 14 });
+      const weightTruth = await getProgressTruth(client, { days: 14, weightWindowDays: 14 });
       const weights = [...weightTruth.weight.points].reverse()
         .map((pt: { kg: number; at: Date }) => ({ weight: pt.kg, loggedAt: pt.at }));
       const firstWeightLog = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(asc(weightLogs.loggedAt)).limit(1);
