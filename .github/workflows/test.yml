@@ -177,6 +177,11 @@ jobs:
       # show any of them, which is how a retracted diet came back inside its own write.
       - name: Facts, retractions and same-turn propagation on real PostgreSQL
         run: npx tsx script/pg-facts-acceptance.ts
+      # FOOD IDENTITY AND STATED PORTION (#206). Identity and portion are what get WRITTEN, and
+      # the invented-combo defects were visible only as kcal in the ledger — a matcher unit test
+      # cannot show that the row reaching meal_logs carries the right food at the right grams.
+      - name: Food identity and stated portion on real PostgreSQL
+        run: npx tsx script/pg-food-identity-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot

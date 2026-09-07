@@ -250,6 +250,24 @@ const COMBO_OVERRIDES: Record<string, string[]> = {
   "Oats with milk": ["Oats (Jungle Oats)", "Full cream milk"],
   "Vetkoek with mince": ["Vetkoek", "Beef mince"],
   "Cereal with milk": ["Corn Flakes", "Full cream milk"],
+  // TWO REAL COMBINED DISHES THAT WERE NEVER REGISTERED (#206). Both anti-collision passes are
+  // gated on this table — PASS 2b needs `bundled` to test whether a combo borrowed its words, and
+  // PASS 3 needs the component list to tell "the client named the dish" from "the client listed
+  // the parts". A combined dish missing from here is not merely undeduped, it is UNCHALLENGED:
+  // nothing can question it even when its own alias reaches across into the next food's words.
+  //
+  //   "I had pap and a beef stew"          alias "pap and beef" -> Pap en vleis, AND Beef stew
+  //                                        1 180 kcal for a plate of pap and stew
+  //   "I had toast and a butter chicken curry"
+  //                                        alias "toast and butter" -> Toast with butter, AND
+  //                                        Butter chicken — buttered toast the client never had
+  //
+  // aliasPattern admits an article between any two alias words ("pap and A beef"), which is right
+  // for "pap and the chicken" and is exactly what lets a compound alias straddle a boundary. The
+  // guard for that already exists; these two dishes were simply outside its reach.
+  "Pap en vleis (pap and meat)": ["Pap (stiff maize porridge)", "Beef stew", "Stewing beef", "Beef mince", "Chicken breast", "Chicken thigh"],
+  "Pap en vleis (full plate)": ["Pap (stiff maize porridge)", "Beef stew", "Stewing beef", "Beef mince", "Chicken breast", "Chicken thigh"],
+  "Toast with butter": ["Toast", "Brown bread", "White bread"],
 };
 
 const COMBO_NAMES = new Set(Object.keys(COMBO_OVERRIDES));
@@ -980,6 +998,20 @@ export async function buildFoodLogReply(p: {
   // the words they used survive. A name with no overlap at all (a photo, where they typed
   // nothing) is dropped rather than guessed at — "Got it. 👌" is a complete reply and it cannot
   // put a word in their mouth.
+  //
+  // THE INTERSECTION IS ONLY EVER AS GOOD AS THE NAME IT IS GIVEN (#206). It keeps the entry's
+  // words that the client also typed, so a client word the ENTRY lacks is discarded — and the
+  // label becomes a fragment:
+  //
+  //     "Dinner is rice / Mince / Mixed veggies"      (founder, live, 7 Sep 13:39 SAST)
+  //       scanner  Rice | Beef mince | Mixed frozen vegetables   <- correct, and stored correctly
+  //       label    "Mixed frozen vegetables" ∩ said  ->  "Mixed"
+  //
+  // "Mixed" is not a food. The fix is NOT here: it is that `frozen` is an invented qualifier and
+  // food-naming.displayFoodName — the declared owner of what to call a matched food — never knew
+  // it. With the entry renamed to the client's own words first, this intersection keeps both of
+  // them and the name arrives whole.
+
   // ── NEVER REPORT A SUBSET AS IF IT WERE THE WHOLE (2026-08-25) ──────────────────────────────
   //
   // THE HANDSET FAILURE. Voice note: "three eggs, three slices of bread, some chakalaka and a
@@ -999,8 +1031,16 @@ export async function buildFoodLogReply(p: {
   const said = String(p.userMessage || "").toLowerCase();
   const allNames = String(p.foodLines || "")
     .split("\n")
-    .map(l => l.replace(/^[•\-\s]+/, "").split(/[:(]/)[0].trim())
-    .map(name => name.split(/\s+/).filter(w => w.length > 2 && said.includes(w.toLowerCase())).join(" ").trim())
+    .map(l => l.replace(/^[•\-\s]+/, "").split(/:/)[0].trim())
+    // A PARENTHETICAL THAT STATES THE PORTION IS THE CLIENT'S OWN (#206). Splitting on "(" was
+    // written for the scanner's vocabulary — "(stiff maize porridge)", "(1 cup cooked)" — and it
+    // took the portion with it: "half a gatsby" was matched, priced and stored as Gatsby (half)
+    // and came back as "Got it — Gatsby. 👌", the one detail the client had bothered to state.
+    .map(name => /\((?:half|full|small|large|double|single)\b/i.test(name)
+      ? name.trim()
+      : name.split("(")[0].trim())
+    .map(name => name.split(/\s+/).filter(w => w.replace(/[^a-z0-9]/gi, "").length > 2
+      && said.includes(w.toLowerCase().replace(/[^a-z0-9]/g, ""))).join(" ").trim())
     .filter(Boolean);
   const NAMED = 4;
   const bareNames = allNames.slice(0, NAMED);
