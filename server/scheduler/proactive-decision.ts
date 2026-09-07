@@ -39,7 +39,7 @@ import { readHeldConstraints, NO_CONSTRAINTS, type HeldConstraints } from "../he
 import { loadProactiveState } from "./shared";
 import { foodConstraints } from "../food-swaps";
 import { sastDayKey } from "../sast";
-import { ensureOpenTrainingLoop, loadOpenTrainingLoop } from "../memory";
+import { ensureOpenTrainingLoop, ensureOpenWeekendInvestigation, loadOpenTrainingLoop, weekendInvestigationAnswered } from "../memory";
 import { deliveryAccepted, type DeliveryResult } from "../outbound-delivery";
 
 export interface CanonicalMove {
@@ -53,11 +53,14 @@ export interface CanonicalMove {
   degraded: boolean;
 }
 
-/** Persist only a training move that a proactive sender has actually handed to its outbound door. */
+/** Persist a follow-up only after a proactive sender has actually handed its move to outbound. */
 export async function recordCanonicalMoveOutbound(client: any, move: CanonicalMove, delivery: DeliveryResult) {
-  return move.action.kind === "train" && deliveryAccepted(delivery)
-    ? ensureOpenTrainingLoop(client, sastDayKey(), "proactive")
-    : null;
+  if (!deliveryAccepted(delivery)) return null;
+  if (move.action.kind === "train") return ensureOpenTrainingLoop(client, sastDayKey(), "proactive");
+  if (move.action.investigation?.missingFact === "weekend_food") {
+    return ensureOpenWeekendInvestigation(client);
+  }
+  return null;
 }
 
 function profileOf(client: any) {
@@ -99,6 +102,7 @@ export async function canonicalNextMove(
       foodDayClosed: held.foodDayClosed,
       trainingDeclined: held.trainingDeclined,
       trainingAwaitingOutcome: !!openTraining,
+      weekendInvestigationAnswered: weekendInvestigationAnswered(client),
     });
     console.log(`[PROACTIVE_DECISION] ${String(client.id || "").slice(-6)} decision=${decision.state} action=${decision.action.kind} foodClosed=${held.foodDayClosed} trainingDeclined=${held.trainingDeclined}`);
     return {

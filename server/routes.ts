@@ -17,7 +17,7 @@ import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboardi
 import { saysNotWorking } from "./despair";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
-import { recordClientFacts, bindClientTruth } from "./memory";
+import { recordClientFacts, bindClientTruth, resumeOpenWeekendInvestigation } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { sendWhatsApp } from "./scheduler";
 import { recordConversion } from "./ab";
@@ -593,7 +593,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
   /** Every exit for a durable-write turn closes through the decision owner — see
    *  understanding/live.closeCoachingTurn and tracking-contract-tests LAW 4. */
-  const closeCoachingTurn = (reply: string | null) => closeCoachingTurnFor(user, message, reply); const trainingLoopOutcome = await resumeOpenTrainingLoopOutcome({ message, m, user, sourceMessageId });
+  const closeCoachingTurn = (reply: string | null) => closeCoachingTurnFor(user, message, reply); const trainingLoopOutcome = await resumeOpenTrainingLoopOutcome({ message, m, user, sourceMessageId }); await resumeOpenWeekendInvestigation(user, message);
   if (trainingLoopOutcome !== null) turnEvidence({ conversationalOnly: true });
   const feedbackReply = await resumeWorkoutFeedbackExpectation({ phone, message, m, user }); if (feedbackReply !== null) turnEvidence({ conversationalOnly: true });
   if (feedbackReply !== null && mayEndTurn("workout-feedback")) return closeCoachingTurn(feedbackReply); if (feedbackReply !== null) commitFact(turn, "workout", feedbackReply); if (normalizerLive() && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {

@@ -870,13 +870,14 @@ export interface ProactiveState {
   /** null everywhere means COULD NOT READ, never zero. A client who logged nothing and a ledger
    *  that failed to answer are different facts and the engine acts differently on each. */
   food: { avgKcal7d: number | null; avgProtein7d: number | null; loggedDays7d: number | null;
+    /** Weekend days represented in the canonical SAST window; null means the read failed. */
+    weekendLoggedDays7d: number | null;
     /** Days since ANY food log. null = never logged, which is not the same as "logged long ago". */
     daysSinceAnyLog: number | null };
   workout: { sessionsLast7d: number; sessionsThisWeek: number; daysSinceLastSession: number | null };
   steps: { avg7d: number | null };
   weight: { weeklyKgChange: number | null; trendUsable: boolean; stalledWeeks: number;
-    /** Unbounded, unlike weeklyKgChange's 28-day window — "never weighed" and "weighed in March"
-     *  are different clients and the decision owner treats them differently. */
+    /** From the same canonical 28-day weight truth as direction and stall. */
     daysSinceWeighIn: number | null };
   /** TODAY, not the 7-day picture. The one-action decision turns on these. */
   today: { kcal: number; protein: number; steps: number; logged: boolean; hour: number };
@@ -892,29 +893,16 @@ export interface ProactiveState {
 import { PROACTIVE_LOG_FLOOR } from "../one-action";
 export { PROACTIVE_LOG_FLOOR };
 
-/** Weeks of no meaningful weight movement (<0.3kg swing) from a series, newest first.
- *  Moved here from adaptive.ts so the stall a message TALKS about and the stall the engine ACTS
- *  on are one number. */
-function stalledWeeksFrom(weights: number[]): number {
-  if (weights.length < 3) return 0;
-  const newest = weights[0];
-  let weeks = 0;
-  for (const w of weights.slice(1)) {
-    if (Math.abs(newest - w) < 0.3) weeks++;
-    else break;
-  }
-  return weeks;
-}
-
 /**
  * Assemble one client's proactive state from authoritative ledgers. Read-only, and fail-soft per
  * field: a ledger that cannot be read yields null and lowers the matching evidence flag rather
  * than throwing — a scheduled job must not die for one client's missing row.
  */
 export async function loadProactiveState(client: any): Promise<ProactiveState> {
-  const { weightTrendUsable } = await import("../adaptive-targets");
+  const { weightDirectionSpeakable } = await import("../adaptive-targets");
   const { contactState } = await import("../understanding/reentry");
-  const { gatherReportData } = await import("../report-card");
+  const { getProgressTruth } = await import("../day-ledger");
+  const { stalledWeeksFrom, weekendLoggedDays } = await import("../day-ledger-core");
   const since = (d: number) => new Date(Date.now() - d * 86_400_000);
 
   // ONE READ. This block used to derive sick / recovering / sickYesterday three different ways
@@ -926,15 +914,11 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
   const recovering = health.isRecovering;
   const sickYesterday = health.wasSickYesterday;
 
-  const { getDayLedger } = await import("../day-ledger");
   const { sastDayStart, sastDaysBetween, sastHour, sastWeekStart } = await import("../sast");
   const dayStart0 = sastDayStart();
 
-  const [intake, wRows, stepAgg, workoutRows, lastMeal, lastWeigh, todaySteps, ledger] = await Promise.all([
-    gatherReportData(client, "week").catch(() => null),
-    db.select({ w: weightLogs.weight, at: weightLogs.loggedAt }).from(weightLogs)
-      .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, since(28))))
-      .orderBy(desc(weightLogs.loggedAt)).limit(12).catch(() => [] as any[]),
+  const [progress, stepAgg, workoutRows, lastMeal, todaySteps] = await Promise.all([
+    getProgressTruth(client, { days: 7, weightWindowDays: 28 }).catch(() => null),
     db.select({ avg: sql<number>`COALESCE(AVG(${stepLogs.steps}),0)::int` }).from(stepLogs)
       .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, since(7)))).catch(() => [] as any[]),
     // THE WORKOUT LEDGER, not chat_history saying "done". A client typing the word is not a
@@ -942,45 +926,32 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
     db.select({ at: workoutLogs.loggedAt }).from(workoutLogs)
       .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, since(7))))
       .orderBy(desc(workoutLogs.loggedAt)).catch(() => [] as any[]),
-    // UNBOUNDED, deliberately. The 28-day windows above answer "what is happening now"; these two
-    // answer "has this ever happened", and a client who last weighed in March is a different
-    // person from one who never has. Bounding them would collapse both into null.
+    // UNBOUNDED, deliberately. The windows above answer "what is happening now"; this answers
+    // whether food logging has ever happened, so never and long ago do not collapse together.
     db.select({ at: mealLogs.loggedAt }).from(mealLogs)
       .where(eq(mealLogs.userId, client.id)).orderBy(desc(mealLogs.loggedAt)).limit(1)
-      .catch(() => [] as any[]),
-    db.select({ at: weightLogs.loggedAt }).from(weightLogs)
-      .where(eq(weightLogs.userId, client.id)).orderBy(desc(weightLogs.loggedAt)).limit(1)
       .catch(() => [] as any[]),
     db.select({ steps: stepLogs.steps }).from(stepLogs)
       .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, dayStart0)))
       .orderBy(desc(stepLogs.loggedAt)).limit(1).catch(() => [] as any[]),
-    getDayLedger(client.id, { user: client }).catch(() => null),
   ]);
 
-  const weights = (wRows as any[]).map(r => parseFloat(String(r.w))).filter(n => Number.isFinite(n));
+  const weightPoints = progress?.weight.points ?? [];
   let weeklyKgChange: number | null = null;
   let trendUsable = false;
-  if (weights.length >= 2) {
-    const newestAt = new Date((wRows as any[])[0].at as Date).getTime();
-    const oldestAt = new Date((wRows as any[])[wRows.length - 1].at as Date).getTime();
-    const verdict = weightTrendUsable({
-      count: weights.length, newestAt, oldestAt, now: Date.now(),
-      sickSince: sickSince ? new Date(sickSince).getTime() : undefined,
-      sickUntil: sickUntil ? new Date(sickUntil).getTime() : undefined,
-    });
-    trendUsable = verdict.usable;
-    if (verdict.usable) {
-      const spanDays = Math.max(1, (newestAt - oldestAt) / 86_400_000);
-      weeklyKgChange = ((weights[0] - weights[weights.length - 1]) / spanDays) * 7;
+  if (progress) {
+    const verdict = await weightDirectionSpeakable(weightPoints, client);
+    trendUsable = verdict.speakable;
+    if (verdict.speakable && progress.weight.changeKg !== null) {
+      weeklyKgChange = (progress.weight.changeKg / Math.max(1, progress.weight.spanDays)) * 7;
     }
   }
 
   const lastSession = (workoutRows as any[])[0]?.at;
   const weekStart = sastWeekStart();
   const sessionsThisWeek = (workoutRows as any[]).filter((r: any) => r.at && new Date(r.at).getTime() >= weekStart.getTime()).length;
-  const loggedDays7d = intake ? intake.distinctDaysLogged : null;
+  const loggedDays7d = progress ? progress.window.daysLogged : null;
   const lastMealAt = (lastMeal as any[])[0]?.at ? new Date((lastMeal as any[])[0].at) : null;
-  const lastWeighAt = (lastWeigh as any[])[0]?.at ? new Date((lastWeigh as any[])[0].at) : null;
 
   return {
     userId: client.id,
@@ -1004,9 +975,10 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
       sickUntil, sickSince,
     },
     food: {
-      avgKcal7d: intake ? intake.avgKcal : null,
-      avgProtein7d: intake ? intake.avgProtein : null,
+      avgKcal7d: progress ? progress.window.avgKcal : null,
+      avgProtein7d: progress ? progress.window.avgProtein : null,
       loggedDays7d,
+      weekendLoggedDays7d: progress ? weekendLoggedDays(progress.window.perDay) : null,
       daysSinceAnyLog: lastMealAt ? sastDaysBetween(lastMealAt) : null,
     },
     workout: {
@@ -1017,12 +989,12 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
     },
     steps: { avg7d: Number((stepAgg as any[])[0]?.avg || 0) || null },
     weight: {
-      weeklyKgChange, trendUsable, stalledWeeks: stalledWeeksFrom(weights),
-      daysSinceWeighIn: lastWeighAt ? sastDaysBetween(lastWeighAt) : null,
+      weeklyKgChange, trendUsable, stalledWeeks: stalledWeeksFrom(weightPoints),
+      daysSinceWeighIn: progress?.weight.daysSinceWeighIn ?? null,
     },
     today: {
-      kcal: ledger?.kcal ?? 0,
-      protein: ledger?.protein ?? 0,
+      kcal: progress?.today.kcal ?? 0,
+      protein: progress?.today.protein ?? 0,
       steps: Number((todaySteps as any[])[0]?.steps || 0),
       logged: !!lastMealAt && sastDaysBetween(lastMealAt) === 0,
       hour: sastHour(),

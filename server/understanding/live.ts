@@ -65,7 +65,7 @@ import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable,
  */
 export async function canonicalDecision(
   user: any, message?: string, opts?: { justAteProteinMeal?: boolean },
-): Promise<{ todo: string; kind: string; reply: string; day: { kcal: number; kcalTarget: number } | null }> {
+): Promise<{ todo: string; kind: string; reply: string; day: { kcal: number; kcalTarget: number } | null; investigation?: { missingFact: string; whyItMatters: string } }> {
   try {
     // ONE CONSTITUTION (2026-08-21). This called theNextMove(), a SECOND ranked ladder —
     // training → protein → calories → steps → scale — that produced "the one thing to do" from
@@ -79,13 +79,17 @@ export async function canonicalDecision(
     const { chooseAction, underPolicy, trainingDayIsDeclined, PROACTIVE_LOG_FLOOR } = await import("../one-action");
     const { readHeldConstraints, foodDayClosedWith } = await import("../held-constraints");
     const { getProgressTruth, sessionsThisCalendarWeek } = await import("../day-ledger");
+    const { stalledWeeksFrom, weekendLoggedDays } = await import("../day-ledger-core");
+    const { weightDirectionSpeakable } = await import("../adaptive-targets");
     const { sastDayKey, sastHour } = await import("../sast");
     const { getTodayWorkoutState } = await import("../workout-state");
     const { readHealthState } = await import("../health-state");
     const { getDisplayName } = await import("../utils");
-    const { ensureOpenTrainingLoop, loadOpenTrainingLoop } = await import("../memory");
+    const { ensureOpenTrainingLoop, loadOpenTrainingLoop, weekendInvestigationAnswered } = await import("../memory");
+    const { getGoalProfile } = await import("../goal-profiles");
 
-    const truth = await getProgressTruth(user, { days: 7 });
+    const truth = await getProgressTruth(user, { days: 7, weightWindowDays: 28 });
+    const weightVerdict = await weightDirectionSpeakable(truth.weight.points, user);
     const openTraining = await loadOpenTrainingLoop(user);
     const held = await readHeldConstraints(user.phoneNumber, user).catch(() => ({ foodDayClosed: false, trainingDeclined: false, sick: false }));
     const weekSessions = await sessionsThisCalendarWeek(user.id).catch(() => 0);
@@ -130,17 +134,22 @@ export async function canonicalDecision(
       constraints: foodConstraints(user || {}),
       justAteProteinMeal: !!opts?.justAteProteinMeal,
     } as any), { foodSufficient: truth.window.daysLogged >= PROACTIVE_LOG_FLOOR,
-         // WEIGHT EVIDENCE IS NOT COUNTED HERE, and that is a known gap rather than a
-         // decision: the proactive side reads a stall verdict this path never computes, so
-         // passing anything but false would be inventing evidence. It means a client with a
-         // usable weight trend and a thin food log is still held on this path.
-         weightSufficient: false, dreamGoal: user.dreamGoal,
+         weightSufficient: weightVerdict.speakable, dreamGoal: user.dreamGoal,
          // …AND WHAT THE GATE NEEDS TO ASK INSTEAD OF HOLDING (#203). Three facts this call site
          // already computed for the DayState above; without them a sparse client's prescription
          // collapsed to a receipt with no next move at all.
          loggedToday: truth.today.kcal > 0,
          daysSinceWeighIn: truth.weight.daysSinceWeighIn,
-         doNotMention: user.doNotMention });
+         doNotMention: user.doNotMention,
+         hour: sastHour(),
+         loggedDays7d: truth.window.daysLogged,
+         weekendLoggedDays7d: weekendLoggedDays(truth.window.perDay),
+         stalledWeeks: stalledWeeksFrom(truth.weight.points),
+         trainingAwaitingOutcome: !!openTraining,
+         foodDayClosed: foodDayClosedWith(held.foodDayClosed, message || ""),
+         trainingDeclined: held.trainingDeclined || trainingDayIsDeclined(message || ""),
+         weightIsGoal: getGoalProfile(user.goalType).weightIsGoal,
+         weekendInvestigationAnswered: weekendInvestigationAnswered(user) });
 
     // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,
     // so it can tell a model reply that CARRIES the decision from one that invented its own.
@@ -175,6 +184,7 @@ export async function canonicalDecision(
     return {
       todo: act.kind === "hold" ? "" : act.todo, kind: act.kind, reply: rendered,
       day: { kcal: truth.today.kcal, kcalTarget: calTarget },
+      investigation: act.investigation,
     };
   } catch { return { todo: "", kind: "hold", reply: "", day: null }; }
 }
@@ -743,10 +753,18 @@ export async function closeCoachingTurn(user: any, message: string, reply: strin
     // turn, so "did this reply carry an instruction" can no longer be answered by looking for a
     // trailing block — in the log, or in a test. What we told them is the fact worth recording.
     console.log(`[COACH_TURN] MOVE=${moveToUse} (one author closed ${wrote.join("+")})`);
+    if (moveToUse && decided?.investigation?.missingFact === "weekend_food") {
+      const { ensureOpenWeekendInvestigation } = await import("../memory");
+      await ensureOpenWeekendInvestigation(user);
+    }
     return one;
   }
 
   const next = withNextMove(out, moveToUse);
+  if (next !== out && decided?.investigation?.missingFact === "weekend_food") {
+    const { ensureOpenWeekendInvestigation } = await import("../memory");
+    await ensureOpenWeekendInvestigation(user);
+  }
   console.log(`[COACH_TURN] MOVE=${next !== out ? moveToUse : ""} (appended after ${wrote.join("+")})`);
   return next;
 }

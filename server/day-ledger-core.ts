@@ -137,6 +137,32 @@ export function weightChangeKg(weighIns: Array<{ weight: unknown }>): number | n
   return Math.round((kgs[kgs.length - 1] - kgs[0]) * 10) / 10;
 }
 
+/**
+ * Whole elapsed weeks with no meaningful movement (<0.3kg), over canonical chronological points.
+ * A reading is not a week: three flat readings in five days are still zero stalled weeks.
+ */
+export function stalledWeeksFrom(points: Array<{ kg: number; at: Date }>): number {
+  const ordered = points
+    .filter(p => Number.isFinite(p.kg) && Number.isFinite(p.at?.getTime()))
+    .slice().sort((a, b) => a.at.getTime() - b.at.getTime());
+  if (ordered.length < 2) return 0;
+  const newest = ordered[ordered.length - 1];
+  let earliest = newest;
+  for (let i = ordered.length - 2; i >= 0; i--) {
+    if (Math.abs(newest.kg - ordered[i].kg) >= 0.3) break;
+    earliest = ordered[i];
+  }
+  return Math.floor((newest.at.getTime() - earliest.at.getTime()) / (7 * 86_400_000));
+}
+
+/** Logged weekend days in an already-canonical SAST window. */
+export function weekendLoggedDays(perDay: Array<{ day: string }>): number {
+  return perDay.filter(({ day }) => {
+    const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
+    return weekday === 0 || weekday === 6;
+  }).length;
+}
+
 // ── FOOD PROVENANCE — how much of this window do we actually KNOW? ──────────────────────────
 // Moved here from report-card.ts in Cut 11: pure derivation over ledger rows, which is what
 // this module is for, and the canonical progress object is now its main consumer. Known /
