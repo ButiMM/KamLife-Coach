@@ -19,6 +19,7 @@ import { chooseAction, decideProactive, formatOneAction, underPolicy } from "../
 import { ensureOpenTrainingLoop, loadOpenTrainingLoop, loadSituationFrame } from "../../memory";
 import { readHeldConstraints } from "../../held-constraints";
 import { foodConstraints } from "../../food-swaps";
+import { deliveryAccepted } from "../../outbound-delivery";
 
 /**
  * WHAT WE SAY TO SOMEONE WHO HAS GONE — decided by the ladder, not written here.
@@ -514,7 +515,7 @@ export async function runMorningCheckin(): Promise<void> {
         }
         // ONE COMPOSER. Every part above is now an INPUT, not a branch that assembles its own
         // slice of the message. The order of the message is decided in one place.
-        await sendWhatsApp(phone, composeMorning({
+        const delivery = await sendWhatsApp(phone, composeMorning({
           firstName: name,
           targetFixLine,
           identityLine,
@@ -529,7 +530,9 @@ export async function runMorningCheckin(): Promise<void> {
           situationLine: await loadSituationFrame(phone).catch(() => ""),
           sickYesterday: state.health.sickYesterday,
         }));
-        if (selectedTrainingMove) await ensureOpenTrainingLoop(client, todaySAST(), "proactive");
+        if (selectedTrainingMove && deliveryAccepted(delivery)) {
+          await ensureOpenTrainingLoop(client, todaySAST(), "proactive");
+        }
       }
     } catch (err) {
       console.error(`[SCHEDULER] Morning check-in error — ${client.phoneNumber}:`, err);

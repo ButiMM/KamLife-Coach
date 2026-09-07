@@ -27,6 +27,7 @@ const schema = await import("../shared/schema");
 const { and, desc, eq } = await import("drizzle-orm");
 const { handleMessage } = await import("../server/routes");
 const { canonicalNextMove, recordCanonicalMoveOutbound } = await import("../server/scheduler/proactive-decision");
+const { sendWhatsApp } = await import("../server/scheduler/shared");
 const { consumeOpenTrainingLoop, ensureOpenTrainingLoop } = await import("../server/memory");
 const { createOpenTrainingLoop, isOpenTrainingLoopMarker, readOpenTrainingLoop, TRAINING_LOOP_WINDOW_MS } = await import("../server/workout-feedback");
 const { sastDayKey, sastDayKeyBefore, sastDayStart } = await import("../server/sast");
@@ -101,7 +102,17 @@ const origin = await freshUser();
 const firstMove = await canonicalNextMove(origin);
 check((await reload(origin)).awaitingInputType === null,
   "selecting a proactive move without handing it to outbound creates no phantom ask");
-await recordCanonicalMoveOutbound(origin, firstMove);
+process.env.SHADOW = "on";
+let shadowDelivery: "sent" | "dropped" | "fallback" = "sent";
+try {
+  shadowDelivery = await sendWhatsApp(origin.phoneNumber, firstMove.line);
+} finally {
+  delete process.env.SHADOW;
+}
+await recordCanonicalMoveOutbound(origin, firstMove, shadowDelivery);
+check(shadowDelivery === "dropped" && (await reload(origin)).awaitingInputType === null,
+  "a shadowed or dropped outbound message cannot create an unresolved ask", shadowDelivery);
+await recordCanonicalMoveOutbound(origin, firstMove, "sent");
 const originStored = await reload(origin);
 const originOpen = readOpenTrainingLoop(originStored.awaitingInputType);
 check(firstMove.action.kind === "train", "the canonical decision selects the training move", firstMove.action.kind);
@@ -149,6 +160,16 @@ check(/logged|session/i.test(aReply), "the customer-visible reply confirms the s
 check(JSON.stringify(aTurn?.mutations || []).includes(aOpen?.ref || "missing-ref"),
   "the later turn ledger attributes resolution to the originating ref");
 
+const explicitToday = await freshUser();
+const explicitOpen = await openOn(explicitToday, sastDayKeyBefore(1), 24 * 3_600_000);
+await handleMessage(explicitToday.phoneNumber, "I got the workout done this morning", undefined, undefined, undefined, "SM-loop-explicit");
+const explicitDays = await workoutDays(explicitToday.id);
+const explicitAfter = await reload(explicitToday);
+check(explicitDays.length === 1 && explicitDays[0] === sastDayKey(),
+  "an explicit current-day phrase outranks the older open-loop target", explicitDays.join(","));
+check(readOpenTrainingLoop(explicitAfter.awaitingInputType)?.ref === explicitOpen?.ref,
+  "the older loop is not falsely resolved by a different explicitly dated session");
+
 REAL("\n=== B — FAILED OUTCOME ===");
 const b = await freshUser();
 await openOn(b, sastDayKey());
@@ -163,6 +184,19 @@ check(bAfter.awaitingInputType === null, "the failed move closes exactly once");
 check(bConstraints.some((row: any) => row.kind === "training" && row.state === "asserted"), "the existing constraint owner records the supported failure");
 check(bNext.action.kind !== "train", "the same-day next decision does not nag after failure", bNext.action.kind);
 check(!/session done|workout logged/i.test(bReply), "the reply makes no false completion claim", bReply);
+
+const bQuestion = await freshUser();
+await openOn(bQuestion, sastDayKey());
+const bQuestionReply = await handleMessage(bQuestion.phoneNumber, "I couldn't do it; what should I do now?", undefined, undefined, undefined, "SM-loop-bq");
+const bQuestionAfter = await reload(bQuestion);
+const bQuestionConstraints = await db.select().from(schema.dailyConstraints)
+  .where(and(eq(schema.dailyConstraints.userId, bQuestion.id), eq(schema.dailyConstraints.day, sastDayKey())));
+check(bQuestionAfter.awaitingInputType === null,
+  "an explicit failure closes before the question in the same turn is answered");
+check(bQuestionConstraints.some((row: any) => row.kind === "training" && row.state === "asserted"),
+  "failure plus a question records the supported constraint first");
+check(!/Get today's session done/i.test(bQuestionReply),
+  "the answer after a reported failure does not immediately reissue training", bQuestionReply);
 
 REAL("\n=== C — INTENTION IS NOT AN OUTCOME ===");
 const c = await freshUser();
@@ -201,6 +235,18 @@ const gotAfter = await reload(got);
 check((await workoutDays(got.id)).includes(sastDayKey()), "the natural session-done phrase writes completion");
 check(readOpenTrainingLoop(gotAfter.awaitingInputType)?.ref !== gotOpen?.ref,
   "the natural session-done phrase resolves its originating ref");
+
+REAL("\n=== EVERY LIVE DECISION SURFACE SHARES THE LOOP ===");
+const surfaces = await freshUser();
+const surfacesOpen = await openOn(surfaces, sastDayKey());
+const oneActionReply = await handleMessage(surfaces.phoneNumber, "what should I do?", undefined, undefined, undefined, "SM-loop-one-action");
+const weeklyReply = await handleMessage(surfaces.phoneNumber, "this week", undefined, undefined, undefined, "SM-loop-weekly");
+check(!/Get today's session done/i.test(oneActionReply),
+  "the explicit one-action customer path does not reissue an unresolved training move", oneActionReply);
+check(!/Get today's session done/i.test(weeklyReply),
+  "the weekly progress customer path does not reissue an unresolved training move", weeklyReply);
+check(readOpenTrainingLoop((await reload(surfaces)).awaitingInputType)?.ref === surfacesOpen?.ref,
+  "consulting either decision surface leaves the same unresolved loop intact");
 
 REAL("\n=== CONTROLS ===");
 const q = await freshUser();

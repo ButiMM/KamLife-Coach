@@ -14,6 +14,7 @@
 
 import twilio from "twilio";
 import { shadowDoor } from "./verifiers/response-gate";
+import type { DeliveryResult } from "./outbound-delivery";
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
 const AUTH_TOKEN  = process.env.TWILIO_AUTH_TOKEN  || "";
@@ -75,13 +76,13 @@ export async function sendWhatsAppButtons(
   to: string,
   body: string,
   buttons: string[]
-): Promise<void> {
-  if (!FROM_NUMBER) return;
+): Promise<DeliveryResult> {
+  if (!FROM_NUMBER) return "dropped";
 
   // SHADOW (2026-08-04) — the third client-facing door. A button set is a message; if it
   // could reach a phone while the build is in staging, the mode is a lie.
   if (await shadowDoor(to, buttons.length > 0 ? `${body}\n\n[BUTTONS:${buttons.slice(0, 3).join("|")}]` : body,
-                       "buttons", "server/twilio-interactive.ts")) return;
+                       "buttons", "server/twilio-interactive.ts")) return "dropped";
 
   if (buttons.length > 0) {
     const contentSid = await _getOrCreateTemplate(buttons.slice(0, 3));
@@ -93,7 +94,7 @@ export async function sendWhatsAppButtons(
           contentSid,
           contentVariables: JSON.stringify({ "1": body }),
         });
-        return;
+        return "sent";
       } catch (err: unknown) {
         console.warn("[BUTTONS] ContentSid send failed, using text fallback:", (err as Error)?.message);
       }
@@ -104,6 +105,7 @@ export async function sendWhatsAppButtons(
   const opts = buttons.map((b, i) => `*${i + 1}.* ${b}`).join("\n");
   const fullBody = buttons.length > 0 ? `${body}\n\n${opts}` : body;
   await twilioClient.messages.create({ from: FROM_NUMBER, to, body: fullBody } as any);
+  return "sent";
 }
 
 /**
@@ -114,7 +116,7 @@ export async function sendWhatsAppYesNo(
   body: string,
   yesLabel = "Yes, done ✅",
   noLabel = "Not yet"
-): Promise<void> {
+): Promise<DeliveryResult> {
   return sendWhatsAppButtons(to, body, [yesLabel, noLabel]);
 }
 

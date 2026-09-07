@@ -113,8 +113,8 @@ export async function runWeeklyMondayCheckin(): Promise<void> {
       if (move.line) msg = `${msg}\n\n${move.line}`;
       // Daily-slot claim before send (preserves daily-cap reach; DB-backed, restart-safe).
       if (await claimDailySlot(client.id, "weekly_checkin")) {
-        await sendWhatsApp(client.phoneNumber, msg);
-        await recordCanonicalMoveOutbound(client, move);
+        const delivery = await sendWhatsApp(client.phoneNumber, msg);
+        await recordCanonicalMoveOutbound(client, move, delivery);
       }
     } catch (err) { console.error(`[SCHEDULER] Weekly check-in error — ${client.phoneNumber}:`, err); }
   }

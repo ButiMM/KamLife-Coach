@@ -40,6 +40,7 @@ import { loadProactiveState } from "./shared";
 import { foodConstraints } from "../food-swaps";
 import { sastDayKey } from "../sast";
 import { ensureOpenTrainingLoop, loadOpenTrainingLoop } from "../memory";
+import { deliveryAccepted, type DeliveryResult } from "../outbound-delivery";
 
 export interface CanonicalMove {
   /** Ready to place in a message. "" when the decision is `hold` — nothing to add is an answer. */
@@ -53,8 +54,8 @@ export interface CanonicalMove {
 }
 
 /** Persist only a training move that a proactive sender has actually handed to its outbound door. */
-export async function recordCanonicalMoveOutbound(client: any, move: CanonicalMove) {
-  return move.action.kind === "train"
+export async function recordCanonicalMoveOutbound(client: any, move: CanonicalMove, delivery: DeliveryResult) {
+  return move.action.kind === "train" && deliveryAccepted(delivery)
     ? ensureOpenTrainingLoop(client, sastDayKey(), "proactive")
     : null;
 }

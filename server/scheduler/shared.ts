@@ -17,7 +17,7 @@ import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply } from "../reply-hygiene";
 import { enforceOutboundTruth, prepareOutbound } from "../outbound-authority";
 import { templateSid, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
-import { whatsappFrom } from "../outbound-delivery";
+import { whatsappFrom, type DeliveryResult } from "../outbound-delivery";
 
 export { db, pool };
 export { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles };
@@ -513,7 +513,7 @@ async function logOutboundToHistory(to: string, body: string): Promise<void> {
   }
 }
 
-export async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
+export async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<DeliveryResult> {
   // PROVENANCE FIRST (2026-07-30). Every outbound message — reactive reply, morning check-in,
   // weekly review — crosses this function, which makes it the only place a claim can be checked
   // for ALL of them. The gate had to go here rather than on the reply paths because the worst
@@ -545,7 +545,7 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   // once. Proactive keeps its own failure policy: nobody is waiting, so a refused message is
   // blocked and recorded rather than repaired.
   const prepared = await prepareOutbound("proactive", recipientId, to, body, recipientRow);
-  if (prepared.blocked) return;
+  if (prepared.blocked) return "dropped";
   const shaped0 = prepared.text;
   // VOICE, ENFORCED (2026-07-30). humanizeReply — the numbered-list reshape, the platitude strip,
   // the wall-of-text break — existed since 22 July and was wired into exactly ONE caller
@@ -559,15 +559,16 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   const shaped = shaped0;
   // SHADOW (2026-08-04) — the proactive half of the door. Captured whole, before the bubble
   // split, so a shadow row holds the message as the client would have read it.
-  if (await shadowDoor(to, shaped, "proactive", "server/scheduler/shared.ts", mediaUrl)) return;
+  if (await shadowDoor(to, shaped, "proactive", "server/scheduler/shared.ts", mediaUrl)) return "dropped";
   const parts = splitWhatsAppBody(shaped);
   for (let i = 0; i < parts.length; i++) {
     const remainingText = parts.slice(i).join("\n\n");
     const outcome = await sendOneWhatsApp(to, parts[i], i === parts.length - 1 ? mediaUrl : undefined, remainingText);
     // "fallback" = SMS/template already carried remainingText; "dropped" = channel/gate
     // is down for this recipient right now. Either way the rest must not double-send.
-    if (outcome !== "sent") return;
+    if (outcome !== "sent") return outcome;
   }
+  return "sent";
 }
 
 async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | undefined, smsFallbackText: string): Promise<"sent" | "dropped" | "fallback"> {
@@ -618,8 +619,8 @@ async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | unde
       if (e.code === 63016 && reengageTemplateSid()) {
         console.warn(`[WA:WINDOW] outside 24h window for ${to.slice(-8)} — sending re-engagement template`);
         try {
-          await sendWhatsAppTemplate(to, reengageTemplateSid(), undefined, { fallbackText: smsFallbackText });
-          return "fallback"; // template path logs history + handles its own SMS fallback
+          const templateDelivery = await sendWhatsAppTemplate(to, reengageTemplateSid(), undefined, { fallbackText: smsFallbackText });
+          return templateDelivery === "dropped" ? "dropped" : "fallback";
         } catch {
           console.warn(`[WA:WINDOW] re-engagement template failed for ${to.slice(-8)} — falling back to SMS`);
         }
@@ -653,12 +654,12 @@ export async function sendWhatsAppTemplate(
   contentSid: string,
   variables?: Record<string, string | number | null | undefined>,
   opts?: { mediaUrl?: string; fallbackText?: string },
-): Promise<void> {
+): Promise<DeliveryResult> {
   resetDeliveryStatsIfNeeded();
   if (!contentSid) {
     console.warn("[SCHEDULER:TEMPLATE] no contentSid provided — skipping send");
     deliveryStats.failed++;
-    return;
+    return "dropped";
   }
   // Share the same outbound rate gate as freeform sends.
   const now = Date.now();
@@ -669,7 +670,7 @@ export async function sendWhatsAppTemplate(
   // SHADOW (2026-08-04) — templates re-open a closed 24h window, so one escaping in staging
   // is a client pulled back into a conversation the build was not allowed to have.
   const logText = opts?.fallbackText || `[template ${contentSid}]`;
-  if (await shadowDoor(to, logText, "template", "server/scheduler/shared.ts", opts?.mediaUrl)) return;
+  if (await shadowDoor(to, logText, "template", "server/scheduler/shared.ts", opts?.mediaUrl)) return "dropped";
   const params: Record<string, unknown> = { contentSid };
   const cv = buildContentVariables(variables);
   if (cv) params.contentVariables = cv;
@@ -683,7 +684,7 @@ export async function sendWhatsAppTemplate(
   // The circuit-breaker check moved INTO the shared owner, which is why it no longer appears
   // above: it ran here before the shadow door, so a paused build still consulted a live breaker.
   const { deliverTwilioMessage } = await import("../outbound-delivery");
-  await deliverTwilioMessage(to, params, {
+  return deliverTwilioMessage(to, params, {
     label: "template",
     retryDelaysMs: [0, 3000, 8000],
     throwOnTerminal: true,

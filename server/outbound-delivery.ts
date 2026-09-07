@@ -41,6 +41,11 @@ import twilio from "twilio";
 
 export type DeliveryResult = "sent" | "dropped" | "fallback";
 
+/** A transport handoff exists only when the intended text reached Twilio or its owned fallback. */
+export function deliveryAccepted(result: DeliveryResult): boolean {
+  return result === "sent" || result === "fallback";
+}
+
 export interface DeliveryPolicy {
   /** Which door sent this. Appears in every failure line so a log names its origin. */
   label: string;

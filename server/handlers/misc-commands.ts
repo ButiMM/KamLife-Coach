@@ -872,32 +872,11 @@ export async function handleMiscCommands(ctx: {
         // different "one thing" from the weekly card than from the coach five minutes earlier.
         // One constitution does not mean one decision if two callers hand it different worlds.
         //
-        // The CARD is a weekly recap; the ACTION is what to do next, which is a daily question and
-        // the only one chooseAction was built to answer. So the numbers stay weekly and the
-        // decision context becomes today's — identical semantics to computeNextMove and morning.
-        const { chooseAction, underPolicy, PROACTIVE_LOG_FLOOR } = await import("../one-action");
-        const { sastHour } = await import("../sast");
-        const act = underPolicy(chooseAction({
-          goal: (user.goalType as any) || "general", weeksOnProgramme: Math.max(0, (user.programmeWeek || 1) - 1),
-          dreamGoal: user.dreamGoal, biggestStruggle: user.biggestStruggle, lifeContext: user.lifeContext,
-          doNotMention: user.doNotMention,
-          daysSinceAnyLog: truth.today.kcal > 0 ? 0 : (truth.window.daysLogged > 0 ? 1 : 7),
-          daysSinceWeighIn: truth.weight.daysSinceWeighIn, loggedToday: truth.today.kcal > 0,
-          proteinPct: protTarget > 0 ? truth.today.protein / protTarget : 1,
-          caloriePct: calTarget > 0 ? truth.today.kcal / calTarget : 1,
-          sessionsThisWeek: truth.sessions, sessionsTarget: Number(user.trainingDaysPerWeek) || 3,
-          stepsToday: truth.today.steps, stepsTarget: Number(user.stepsTarget) || 0,
-          hour: sastHour(), atKeyboard: true,
-        } as any), { foodSufficient: truth.window.daysLogged >= PROACTIVE_LOG_FLOOR,
-         // WEIGHT EVIDENCE IS NOT COUNTED HERE, and that is a known gap rather than a
-         // decision: the proactive side reads a stall verdict this path never computes, so
-         // passing anything but false would be inventing evidence. It means a client with a
-         // usable weight trend and a thin food log is still held on this path.
-         weightSufficient: false, dreamGoal: user.dreamGoal,
-         // The same three facts this call site already computed above (#203).
-         loggedToday: truth.today.kcal > 0,
-         daysSinceWeighIn: truth.weight.daysSinceWeighIn,
-         doNotMention: user.doNotMention });
+        // The CARD keeps its weekly measurements; the ACTION comes from the same live owner used
+        // by every other reactive surface. That owner also carries unresolved-loop state, so a
+        // report cannot reissue the instruction while the client's answer is still outstanding.
+        const { canonicalDecision } = await import("../understanding/live");
+        const act = await canonicalDecision(user, message);
         return `*${name} — last 7 days*\n\n💪 Sessions: *${truth.sessions}*\n📋 Days logged: *${truth.window.daysLogged}/7*\n🔥 Avg: *${truth.window.avgKcal} kcal* · *${truth.window.avgProtein}g* protein\n👟 Avg steps: *${truth.avgSteps.toLocaleString()}*${weightLine}\n\n*${act.todo}*`;
       }
       const todayLine = truth.today.kcal > 0

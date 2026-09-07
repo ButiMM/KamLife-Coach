@@ -104,7 +104,8 @@ export async function resumeWorkoutFeedbackExpectation(ctx: {
 /**
  * Resolve only an explicit negative answer to the canonical training move. Positive outcomes stay
  * with handleWorkoutCommands: the loop may close only after workout_logs either receives or
- * already holds the attributed session. Questions and intentions leave the marker untouched.
+ * already holds the attributed session. Pure questions and intentions leave the marker untouched;
+ * a turn that both reports failure and asks what next still records the supported outcome first.
  */
 export async function resumeOpenTrainingLoopOutcome(ctx: {
   message: string;
@@ -115,8 +116,10 @@ export async function resumeOpenTrainingLoopOutcome(ctx: {
   const { message, m, user, sourceMessageId } = ctx;
   const open = await loadOpenTrainingLoop(user);
   if (!open) return null;
-  if (looksLikeQuestion(m) || isFutureIntent(m)) return "pending";
-  if (!reportsOpenTrainingMoveFailed(message)) return null;
+  if (isFutureIntent(m)) return "pending";
+  // An explicit outcome remains an outcome when the client also asks what comes next. Persist
+  // what happened before the rest of the turn answers them; punctuation cannot veto the truth.
+  if (!reportsOpenTrainingMoveFailed(message)) return looksLikeQuestion(m) ? "pending" : null;
   if (!await consumeOpenTrainingLoop(user, open.marker)) return null;
   try {
     await recordOpenTrainingFailure(user, open.targetDay, sourceMessageId);
@@ -445,9 +448,7 @@ export async function handleWorkoutCommands(ctx: {
   const lowerMessage = String(m || "").toLowerCase();
   const refersToAssignedSession = ["the workout", "the session", "workout you told",
     "session you told", "workout you asked", "session you asked"].some(shape => lowerMessage.includes(shape));
-  const usesExplicitDay = ["today", "yesterday", "last night", "monday", "tuesday",
-    "wednesday", "thursday", "friday", "saturday", "sunday", "days ago"].some(shape => lowerMessage.includes(shape));
-  const openTargetDate = openTraining && refersToAssignedSession && hasCompletionWord && !usesExplicitDay
+  const openTargetDate = openTraining && refersToAssignedSession && hasCompletionWord && !stated.explicit
     ? new Date(openTraining.targetDay + "T12:00:00+02:00")
     : null;
   const when = openTargetDate && openTraining!.targetDay !== sastDayKey()
