@@ -179,6 +179,49 @@ assert s != open(p).read(), "revert patch matched nothing"
 open(p, "w").write(s)
 PY2
 
+# ── 13 · groceries go back to the unrotated schedule's fixed list ─────────────────────────────
+cat > /tmp/220p/13.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+before = s
+s = s.replace("groceriesForPlan(shopList, planBlock, shopTotal)", "{ list: shopList, total: shopTotal }")
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 14 · the day-indexed recomposition schedule is rotated like a pool ────────────────────────
+cat > /tmp/220p/14.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+before = s
+# BOTH HALVES. The day binding is now protected twice: the schedule is BUILT from a compliant
+# training-day carb, and the loop then indexes it by day instead of rotating it. Reverting only
+# the loop leaves the construction holding, so this restores the hardcoded carb as well — the
+# same coupled-mechanism situation already recorded for 4a and 11.
+s = s.replace('const trainingCarb = ["\u00bd medium sweet potato", ...lunchCarbs].find(x => c.allows(x));',
+              'const trainingCarb = "\u00bd medium sweet potato";')
+s = s.replace("    const dc = dinnerCarbsAreDayBound ? dinnerCarbs[i] : safeDinnerCarbs[i % safeDinnerCarbs.length];",
+              "    const dc = safeDinnerCarbs[i % safeDinnerCarbs.length];")
+s = s.replace("  if (dinnerCarbsAreDayBound && !dayBoundOk(dinnerCarbs)) return noPlanWithin(c);", "")
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 15 · a declared label is any occurrence of the word again ─────────────────────────────────
+cat > /tmp/220p/15.py <<'PY2'
+p = "server/food-swaps.ts"; s = open(p).read()
+s = s.replace('const declaredLabel = declaredTerms.find(t => /^(halaal|halal|kosher)$/.test(t)) || "";',
+              'const declaredLabel = declared.match(/\\b(halaal|halal|kosher)\\b/)?.[0] || "";')
+assert s != open(p).read(), "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 16 · the unsupported-kosher reply goes back to the dead-end ask ───────────────────────────
+cat > /tmp/220p/16.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+s = s.replace("  if (isKosher) return noPlanWithin(c, true);", "  if (isKosher) return noPlanWithin(c);")
+assert s != open(p).read(), "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
 echo "=============================================================================="
 echo "#220 — RED ON REVERT, one mechanism at a time"
 echo "=============================================================================="
@@ -202,4 +245,8 @@ run_case "kosher takes the halal path again (the PR #222 regression)"           
 run_case "the fixed 7-day template stops asking the predicate about its own meals"             /tmp/220p/11.py
 run_case "11b · the slot stops rotating over what the client may eat"                          /tmp/220p/11b.py
 run_case "salmon leaves the fish cluster"                                                      /tmp/220p/12.py
+run_case "groceries go back to the unrotated schedule's fixed list"                            /tmp/220p/13.py
+run_case "the day-indexed recomposition schedule is rotated like a pool"                       /tmp/220p/14.py
+run_case "a declared label is any occurrence of the word again"                                /tmp/220p/15.py
+run_case "the unsupported-kosher reply goes back to the dead-end ask"                          /tmp/220p/16.py
 echo "=============================================================================="

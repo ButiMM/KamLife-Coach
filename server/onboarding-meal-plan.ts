@@ -8,6 +8,90 @@ import { getDisplayName } from "./utils";
 // ONE OWNER FOR WHAT THIS CLIENT MAY EAT (#220). See the block inside the function.
 import { foodConstraints, noPlanWithin } from "./food-swaps";
 
+/**
+ * WHAT THE WEEK ACTUALLY EATS, AND THEREFORE WHAT TO BUY (#220 recovery).
+ *
+ * The shopping lists below are fixed strings sized for the plan the template USED to produce.
+ * Once the meal slots began rotating over what a client may eat, the week concentrated onto the
+ * surviving candidates and the list stopped covering it: `vegan, lentils` on the R300–600 tier
+ * prescribed 1 400g of tofu and 600g of dry soya mince while the list bought 800g and 250g. The
+ * client shops on Sunday and runs out on Thursday, which is a worse failure than the one the
+ * rotation fixed — they followed the instructions exactly.
+ *
+ * So the quantities are DERIVED. Each entry names the food as the MEALS write it and as the SHOP
+ * LINE writes it; the week's requirement is summed off the built plan, and the line is re-rendered
+ * at however many packs that needs, with the price scaled to match. Nothing is invented: the pack
+ * size and the pack price both come from the line that was already there.
+ *
+ * DRY VERSUS COOKED IS NOT A ROUNDING ERROR. "150g cooked lentils" against a 500g bag of DRY
+ * lentils is a 2.5× difference, and treating them as the same unit would under-buy by more than
+ * the defect this fixes. Where the meal states a cooked weight and the shop sells it dry, the
+ * ratio is stated on the entry.
+ */
+const SHOP_DERIVED: Array<{
+  /** Matches the shop line's leading name, anchored. */
+  shop: RegExp;
+  /** Captures the amount used in ONE meal component. Global — a line may name it more than once. */
+  meal: RegExp;
+  /** Meal weight -> shop weight. 1 when the shop sells it the way the meal states it. */
+  dryRatio?: number;
+}> = [
+  { shop: /^Firm tofu\b/i,      meal: /(\d+)\s*g firm tofu/gi },
+  { shop: /^Soya mince\b/i,     meal: /soya mince\s*(\d+)\s*g dry/gi },
+  { shop: /^Lentils\b/i,        meal: /(\d+)\s*g cooked lentils/gi, dryRatio: 1 / 2.5 },
+  { shop: /^Sugar beans\b/i,    meal: /(\d+)\s*g (?:cooked )?sugar beans|sugar beans \((\d+)\s*g[^)]*\)/gi, dryRatio: 1 / 2.5 },
+  { shop: /^Beef mince\b/i,     meal: /(\d+)\s*g beef mince/gi },
+  { shop: /^(?:Frozen )?[Cc]hicken\b/i, meal: /(\d+)\s*g chicken (?:breast|thigh)/gi },
+  { shop: /^Peanut butter\b/i,  meal: /(\d+)\s*tbsp (?:PB|peanut butter)/gi },
+];
+
+/** `Firm tofu 400g×2 — R70` -> { name, packQty: 400, unit: "g", packs: 2, packPrice: 35 }. */
+function readShopLine(line: string): { name: string; packQty: number; unit: string; packs: number; packPrice: number } | null {
+  const m = line.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*(kg|g|tins?|pack)\b(?:\s*×\s*(\d+))?(.*?)\s*—\s*R(\d+)$/i);
+  if (!m) return null;
+  const packs = Number(m[4] || 1);
+  const qty = Number(m[2]) * (/^kg$/i.test(m[3]) ? 1000 : 1);
+  const price = Number(m[6]);
+  if (!qty || !price || !packs) return null;
+  return { name: m[1].trim(), packQty: qty, unit: /^kg$/i.test(m[3]) ? "g" : m[3].toLowerCase(), packs, packPrice: price / packs };
+}
+
+/**
+ * Re-render the shopping list so its quantities cover the plan that was actually built, and drop
+ * any derived item the plan never names. Returns the list and its new estimated total; items this
+ * table does not know are passed through untouched and keep their original price.
+ */
+function groceriesForPlan(shopList: string, plan: string, originalTotal: number): { list: string; total: number } {
+  const need = new Map<RegExp, number>();
+  for (const row of SHOP_DERIVED) {
+    let grams = 0;
+    for (const hit of plan.matchAll(row.meal)) grams += Number(hit[1] || hit[2] || 0);
+    if (grams > 0) need.set(row.shop, grams * (row.dryRatio ?? 1));
+  }
+  let total = 0;
+  const lines = shopList.split("\n").map((line, i) => {
+    if (i === 0 || !line.trim()) return line;                       // the "*Your Weekly Shopping List*" header
+    const parsed = readShopLine(line);
+    const row = SHOP_DERIVED.find(r => r.shop.test(line));
+    if (!parsed || !row) { total += Number((line.match(/R(\d+)$/) || [0, 0])[1]); return line; }
+    const required = need.get(row.shop);
+    if (!required) return null;                                     // the plan never names it — do not buy it
+    const packs = Math.max(1, Math.ceil(required / parsed.packQty));
+    const price = Math.round(parsed.packPrice * packs);
+    total += price;
+    // EDIT THE LINE THAT IS ALREADY THERE, rather than rebuilding one from its parts. Two reasons:
+    // the line carries detail the parse does not model — "Soya mince 250g dry" loses its "dry" the
+    // moment it is reassembled, and a client reading "buy 750g of soya mince" for a dry weight
+    // buys three times too much — and this stays a QUANTITY EDIT rather than becoming a second
+    // place that authors shopping-list text.
+    return line
+      .replace(/(\d+(?:\.\d+)?\s*(?:kg|g|tins?|pack)\b)(\s*×\s*\d+)?/i,
+               (_m, q) => (packs > 1 ? `${q}×${packs}` : `${q}`))
+      .replace(/R\d+$/, `R${price}`);
+  }).filter((l): l is string => l !== null);
+  return { list: lines.join("\n"), total: total || originalTotal };
+}
+
 export function getOnboardingMealPlan(user: any): string {
   const budget = user.weeklyFoodBudget || "100_300";
   const goal = user.goalType || "fat_loss";
@@ -67,7 +151,7 @@ export function getOnboardingMealPlan(user: any): string {
   // mistake as reinterpreting kosher as halal, just quieter. Until a kosher-safe owner exists, the
   // honest answer is the one generateMealPlan already gives when it cannot build inside a
   // constraint, and the client is asked for what would let us build it.
-  if (isKosher) return noPlanWithin(c);
+  if (isKosher) return noPlanWithin(c, true);
   const isVegetarian = c.vegetarian;
   const isVegan = c.vegan;
   // Effective restriction flags extend allergy flags with dietary preferences
@@ -217,13 +301,28 @@ export function getOnboardingMealPlan(user: any): string {
 
   // ---- DINNER carbs — lighter for fat loss, same as lunch for others ----
   let dinnerCarbs: string[];
+  let dinnerCarbsAreDayBound = false;
   if (goal === "fat_loss") {
     dinnerCarbs = noGluten
       ? ["½ medium sweet potato", "½ cup samp and beans", "½ medium sweet potato", "½ cup brown rice", "½ medium sweet potato", "½ cup samp and beans", "½ medium sweet potato"]
       : ["½ cup brown rice", "½ medium sweet potato", "½ cup samp and beans", "½ medium sweet potato", "½ cup brown rice", "½ medium sweet potato", "½ cup samp and beans"];
   } else if (goal === "recomposition") {
     // Recomp: carbs on training days, veg-only on rest days — use isTraining per-day in the loop, not hardcoded positions
-    dinnerCarbs = allDays.map((day) => trainingSet.has(day) ? "½ medium sweet potato" : "extra veg only (rest day)") as string[];
+    // REPLACE THE DAY'S ENTRY, DON'T BORROW ANOTHER DAY'S. A training day needs a carb and a rest
+    // day deliberately has none, so when the stock training-day carb is excluded the substitute
+    // comes from the LUNCH CARB pool — still a carb, still this file's own vocabulary, still on
+    // the day that is supposed to have one. Only when no carb at all survives is there nothing
+    // honest to put on a training day, and the guard below refuses.
+    const restDayCarb = "extra veg only (rest day)";
+    const trainingCarb = ["½ medium sweet potato", ...lunchCarbs].find(x => c.allows(x));
+    dinnerCarbs = allDays.map((day) => trainingSet.has(day) ? (trainingCarb ?? "") : restDayCarb) as string[];
+    // A SCHEDULE, NOT A POOL (#220 recovery). Entry i means "what day i gets", and the other six
+    // entries are not interchangeable with it — index 0 is a TRAINING-day carb and index 1 says
+    // "(rest day)" in the client's own reply. Every other array in this file is a variety pool
+    // where any entry may land on any day; this one alone is day-bound, and rotating it printed
+    // "Dinner: 150g chicken breast + extra veg only (rest day)" on a Friday training day, with the
+    // training-day calories still claimed over veg. Flagged here, beside the line that builds it.
+    dinnerCarbsAreDayBound = true;
   } else {
     dinnerCarbs = lunchCarbs;
   }
@@ -287,6 +386,9 @@ export function getOnboardingMealPlan(user: any): string {
   // refusal below is for the case where a slot genuinely has nothing left, which is where the
   // fixed template really cannot answer.
   const survives = (pool: string[]) => pool.filter(x => c.allows(x));
+  // A DAY-BOUND SCHEDULE CANNOT BE ROTATED. Its entries carry the day's meaning, so the honest
+  // options are "every day's own entry is allowed" or "refuse" — never "borrow another day's".
+  const dayBoundOk = (schedule: string[]) => schedule.every(x => c.allows(x));
   const safeBf = survives(bfProteins);
   const safeLunch = survives(lunchProteins);
   const safeDinner = survives(dinnerProteins);
@@ -302,6 +404,7 @@ export function getOnboardingMealPlan(user: any): string {
   const safePost = survives(postOptions);
   if ([safeBf, safeLunch, safeDinner, safeBfCarbs, safeLunchCarbs, safeDinnerCarbs, safeVeg, safePre, safePost]
         .some(pool => pool.length === 0)) return noPlanWithin(c);
+  if (dinnerCarbsAreDayBound && !dayBoundOk(dinnerCarbs)) return noPlanWithin(c);
 
   // Build 7-day plan
   let plan = "";
@@ -312,7 +415,7 @@ export function getOnboardingMealPlan(user: any): string {
     const lp = safeLunch[i % safeLunch.length];
     const lc = safeLunchCarbs[i % safeLunchCarbs.length];
     const dp = safeDinner[i % safeDinner.length];
-    const dc = safeDinnerCarbs[i % safeDinnerCarbs.length];
+    const dc = dinnerCarbsAreDayBound ? dinnerCarbs[i] : safeDinnerCarbs[i % safeDinnerCarbs.length];
     const v = safeVeg[i % safeVeg.length];
     const v2 = safeVeg[(i + 3) % safeVeg.length];
     const pre = safePre[i % safePre.length];
@@ -477,6 +580,8 @@ export function getOnboardingMealPlan(user: any): string {
   const headerBlock = `${header}${trainingLine}${goalNoteSafe}${nightNote}${hivNote}${domesticNote}${studentNote}${unemployedNote}${postpartumNote}`;
   const planBlock = plan.trim();
   if (prescribed(planBlock).some((food: string) => !c.allows(food))) return noPlanWithin(c);
-  const shopBlock = `${shopList}\nEstimated total: R${shopTotal}${safeTip}`;
+  // THE LIST COVERS THE WEEK THAT WAS BUILT, not the week the template used to build.
+  const groceries = groceriesForPlan(shopList, planBlock, shopTotal);
+  const shopBlock = `${groceries.list}\nEstimated total: R${groceries.total}${safeTip}`;
   return `${headerBlock}\n\n---\n\n${planBlock}\n\n---\n\n${shopBlock}\n\n_Reply SWAP [day] to swap a day. Reply SHOPPING LIST for just the shopping list._`;
 }
