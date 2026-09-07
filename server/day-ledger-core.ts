@@ -137,6 +137,26 @@ export function weightChangeKg(weighIns: Array<{ weight: unknown }>): number | n
   return Math.round((kgs[kgs.length - 1] - kgs[0]) * 10) / 10;
 }
 
+/** Weeks of no meaningful movement (<0.3kg), with readings ordered newest first. */
+export function stalledWeeksFrom(weights: number[]): number {
+  if (weights.length < 3) return 0;
+  const newest = weights[0];
+  let weeks = 0;
+  for (const weight of weights.slice(1)) {
+    if (Math.abs(newest - weight) >= 0.3) break;
+    weeks++;
+  }
+  return weeks;
+}
+
+/** Logged weekend days in an already-canonical SAST window. */
+export function weekendLoggedDays(perDay: Array<{ day: string }>): number {
+  return perDay.filter(({ day }) => {
+    const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
+    return weekday === 0 || weekday === 6;
+  }).length;
+}
+
 // ── FOOD PROVENANCE — how much of this window do we actually KNOW? ──────────────────────────
 // Moved here from report-card.ts in Cut 11: pure derivation over ledger rows, which is what
 // this module is for, and the canonical progress object is now its main consumer. Known /

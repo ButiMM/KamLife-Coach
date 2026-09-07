@@ -79,6 +79,8 @@ export async function canonicalDecision(
     const { chooseAction, underPolicy, trainingDayIsDeclined, PROACTIVE_LOG_FLOOR } = await import("../one-action");
     const { readHeldConstraints, foodDayClosedWith } = await import("../held-constraints");
     const { getProgressTruth, sessionsThisCalendarWeek } = await import("../day-ledger");
+    const { stalledWeeksFrom, weekendLoggedDays } = await import("../day-ledger-core");
+    const { weightDirectionSpeakable } = await import("../adaptive-targets");
     const { sastDayKey, sastHour } = await import("../sast");
     const { getTodayWorkoutState } = await import("../workout-state");
     const { readHealthState } = await import("../health-state");
@@ -86,6 +88,7 @@ export async function canonicalDecision(
     const { ensureOpenTrainingLoop, loadOpenTrainingLoop } = await import("../memory");
 
     const truth = await getProgressTruth(user, { days: 7 });
+    const weightVerdict = await weightDirectionSpeakable(truth.weight.points, user);
     const openTraining = await loadOpenTrainingLoop(user);
     const held = await readHeldConstraints(user.phoneNumber, user).catch(() => ({ foodDayClosed: false, trainingDeclined: false, sick: false }));
     const weekSessions = await sessionsThisCalendarWeek(user.id).catch(() => 0);
@@ -130,17 +133,20 @@ export async function canonicalDecision(
       constraints: foodConstraints(user || {}),
       justAteProteinMeal: !!opts?.justAteProteinMeal,
     } as any), { foodSufficient: truth.window.daysLogged >= PROACTIVE_LOG_FLOOR,
-         // WEIGHT EVIDENCE IS NOT COUNTED HERE, and that is a known gap rather than a
-         // decision: the proactive side reads a stall verdict this path never computes, so
-         // passing anything but false would be inventing evidence. It means a client with a
-         // usable weight trend and a thin food log is still held on this path.
-         weightSufficient: false, dreamGoal: user.dreamGoal,
+         weightSufficient: weightVerdict.speakable, dreamGoal: user.dreamGoal,
          // …AND WHAT THE GATE NEEDS TO ASK INSTEAD OF HOLDING (#203). Three facts this call site
          // already computed for the DayState above; without them a sparse client's prescription
          // collapsed to a receipt with no next move at all.
          loggedToday: truth.today.kcal > 0,
          daysSinceWeighIn: truth.weight.daysSinceWeighIn,
-         doNotMention: user.doNotMention });
+         doNotMention: user.doNotMention,
+         hour: sastHour(),
+         loggedDays7d: truth.window.daysLogged,
+         weekendLoggedDays7d: weekendLoggedDays(truth.window.perDay),
+         stalledWeeks: stalledWeeksFrom([...truth.weight.points].reverse().map(p => p.kg)),
+         trainingAwaitingOutcome: !!openTraining,
+         foodDayClosed: foodDayClosedWith(held.foodDayClosed, message || ""),
+         trainingDeclined: held.trainingDeclined || trainingDayIsDeclined(message || "") });
 
     // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,
     // so it can tell a model reply that CARRIES the decision from one that invented its own.

@@ -146,6 +146,11 @@ export interface OneAction {
   todo: string;
   /** Why it matters — in their language, tied to the dream when we have one. */
   why: string;
+  /** The explicit fact this INVESTIGATE action is asking for, and why it can change the decision. */
+  investigation?: {
+    missingFact: "food_today" | "weight_current" | "weekend_food";
+    whyItMatters: string;
+  };
 }
 
 // ── WHAT GETS IN THEIR WAY ───────────────────────────────────────────────────────────────────
@@ -224,6 +229,7 @@ function askToLog(dream?: string | null): OneAction {
     kind: "log",
     todo: "Tell me what you ate today — one line is enough.",
     why: why("I can't coach a day I can't see.", dream),
+    investigation: { missingFact: "food_today", whyItMatters: "Today's food is absent." },
   };
 }
 
@@ -235,16 +241,29 @@ function holdAction(dream?: string | null): OneAction {
   };
 }
 
-function askToWeigh(dream?: string | null, neverWeighed = false): OneAction {
+function askToWeigh(dream?: string | null, neverWeighed = false, hour = 8): OneAction {
   return {
     kind: "weigh",
-    todo: "Stand on a scale this morning, before you eat.",
+    todo: `Stand on a scale ${hour >= 12 ? "tomorrow morning" : "this morning"}, before you eat.`,
     why: why(
       neverWeighed
         ? "It's one number and it's the only way either of us sees this working."
-        : "It's been a while — one number today and I can show you what's actually happening.",
+        : `It's been a while — one number ${hour >= 12 ? "tomorrow morning" : "today"} and I can show you what's actually happening.`,
       dream,
     ),
+    investigation: { missingFact: "weight_current", whyItMatters: "The weight evidence is missing or stale." },
+  };
+}
+
+function askAboutWeekend(dream?: string | null): OneAction {
+  return {
+    kind: "log",
+    todo: "What did eating look like over the weekend?",
+    why: why("That will tell me whether the plan needs changing or just carrying on.", dream),
+    investigation: {
+      missingFact: "weekend_food",
+      whyItMatters: "The stalled trend is known, but the weekend food evidence that could explain it is not.",
+    },
   };
 }
 
@@ -556,7 +575,7 @@ export function chooseAction(s: DayState): OneAction {
   const neverWeighed = s.daysSinceWeighIn === null;
   const scaleIsOffLimits = mentionsForbidden("weight scale weigh", s.doNotMention);
   if (!scaleIsOffLimits && ((neverWeighed && s.weeksOnProgramme >= 1) || (s.daysSinceWeighIn !== null && s.daysSinceWeighIn >= 10))) {
-    return askToWeigh(s.dreamGoal, neverWeighed);
+    return askToWeigh(s.dreamGoal, neverWeighed, s.hour);
   }
 
   // 4. UNDER-FUELLED ON A BULK. Nothing else works if they aren't eating.
@@ -680,10 +699,10 @@ export interface ProactiveStateForDecision {
   name: string;
   goalType: string;
   health: { sick: boolean };
-  food: { loggedDays7d: number | null; daysSinceAnyLog: number | null };
+  food: { loggedDays7d: number | null; weekendLoggedDays7d?: number | null; daysSinceAnyLog: number | null };
   workout: { sessionsLast7d: number; sessionsThisWeek?: number };
   steps: { avg7d: number | null };
-  weight: { daysSinceWeighIn: number | null; trendUsable: boolean };
+  weight: { daysSinceWeighIn: number | null; trendUsable: boolean; stalledWeeks?: number };
   today: { kcal: number; protein: number; steps: number; logged: boolean; hour: number };
   evidence: { foodSufficient: boolean; weightSufficient: boolean };
 }
@@ -912,8 +931,20 @@ export function underPolicy(
     foodSufficient: boolean; weightSufficient: boolean; dreamGoal?: string | null;
     /** From the same DayState the caller just built. Omitted = there is nothing worth asking. */
     loggedToday?: boolean; daysSinceWeighIn?: number | null; doNotMention?: string | null;
+    hour?: number; loggedDays7d?: number | null; weekendLoggedDays7d?: number | null;
+    stalledWeeks?: number; trainingAwaitingOutcome?: boolean;
+    foodDayClosed?: boolean; trainingDeclined?: boolean;
   },
 ): OneAction {
+  const asksUsefulWeekendFact = action.kind !== "rest" && action.kind !== "weigh"
+    && action.kind !== "come_back" && !opts.trainingAwaitingOutcome
+    && !opts.foodDayClosed && !opts.trainingDeclined
+    && opts.weightSufficient && (opts.stalledWeeks ?? 0) >= 2
+    && !opts.foodSufficient && (opts.loggedDays7d ?? 0) >= 2
+    && opts.weekendLoggedDays7d === 0
+    && !mentionsForbidden("food meal eat weekend", opts.doNotMention);
+  if (asksUsefulWeekendFact) return askAboutWeekend(opts.dreamGoal);
+
   const verdict = evidenceFromKind(action.kind)
     ?? evidenceFromLedger(opts.foodSufficient, opts.weightSufficient);
   if (verdict === "sufficient") return action;
@@ -936,7 +967,8 @@ export function underPolicy(
     foodSufficient: opts.foodSufficient, weightSufficient: opts.weightSufficient,
     loggedToday: opts.loggedToday ?? true,
     daysSinceWeighIn: opts.daysSinceWeighIn === undefined ? 0 : opts.daysSinceWeighIn,
-    doNotMention: opts.doNotMention, dreamGoal: opts.dreamGoal,
+    doNotMention: opts.doNotMention, dreamGoal: opts.dreamGoal, hour: opts.hour ?? 8,
+    trainingAwaitingOutcome: opts.trainingAwaitingOutcome,
   });
 }
 
@@ -958,13 +990,15 @@ export function underPolicy(
 function investigateInstead(ctx: {
   foodSufficient: boolean; weightSufficient: boolean; loggedToday: boolean;
   daysSinceWeighIn: number | null; doNotMention?: string | null; dreamGoal?: string | null;
+  hour: number; trainingAwaitingOutcome?: boolean;
 }): OneAction {
+  if (ctx.trainingAwaitingOutcome) return holdAction(ctx.dreamGoal);
   const canAskForFood = !ctx.foodSufficient && !ctx.loggedToday;
   const staleWeight = ctx.daysSinceWeighIn === null || ctx.daysSinceWeighIn >= 3;
   const canAskForWeight = !ctx.weightSufficient && staleWeight
     && !mentionsForbidden("weight scale weigh", ctx.doNotMention);
   return canAskForFood ? askToLog(ctx.dreamGoal)
-    : canAskForWeight ? askToWeigh(ctx.dreamGoal, ctx.daysSinceWeighIn === null)
+    : canAskForWeight ? askToWeigh(ctx.dreamGoal, ctx.daysSinceWeighIn === null, ctx.hour)
     : holdAction(ctx.dreamGoal);
 }
 
@@ -1029,14 +1063,18 @@ export function decideProactive(
   // rows produced an investigative ask when the client messaged us and CONTINUE/silence when we
   // messaged them. Convergence that only runs one way is not convergence. A hold under SUFFICIENT
   // evidence is still an earned verdict here, exactly as it is there.
-  if ((PRESCRIPTIVE.has(action.kind) || action.kind === "hold") && evidence === "insufficient") {
-    action = investigateInstead({
-      foodSufficient: s.evidence.foodSufficient, weightSufficient: s.evidence.weightSufficient,
-      loggedToday: s.today.logged, daysSinceWeighIn: s.weight.daysSinceWeighIn,
-      doNotMention: p.doNotMention, dreamGoal: p.dreamGoal,
-    });
-    evidence = evidenceFor(s, action.kind);
-  }
+  action = underPolicy(action, {
+    foodSufficient: s.evidence.foodSufficient, weightSufficient: s.evidence.weightSufficient,
+    loggedToday: s.today.logged, daysSinceWeighIn: s.weight.daysSinceWeighIn,
+    doNotMention: p.doNotMention, dreamGoal: p.dreamGoal, hour: opts?.hour ?? s.today.hour,
+    loggedDays7d: s.food.loggedDays7d,
+    weekendLoggedDays7d: s.food.weekendLoggedDays7d,
+    stalledWeeks: s.weight.stalledWeeks,
+    trainingAwaitingOutcome: opts?.trainingAwaitingOutcome,
+    foodDayClosed: opts?.foodDayClosed,
+    trainingDeclined: opts?.trainingDeclined,
+  });
+  evidence = evidenceFor(s, action.kind);
 
   const investigating = INVESTIGATIVE.has(action.kind);
   const state = selectDecisionState({

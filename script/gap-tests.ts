@@ -3455,6 +3455,85 @@ test("verdict: the downgrade asks for what is missing, never for what they just 
   assert.equal(nothingToAsk.line, "");
 });
 
+test("information value: a known stall asks for the missing weekend before changing food", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  const state = decisionState({
+    food: { loggedDays7d: 3, weekendLoggedDays7d: 0, daysSinceAnyLog: 0 },
+    weight: { daysSinceWeighIn: 1, trendUsable: true, stalledWeeks: 3 },
+    today: { kcal: 900, protein: 35, steps: 9000, logged: true, hour: 14 },
+    evidence: { foodSufficient: false, weightSufficient: true },
+  });
+  const d = decideProactive(state, decisionProfile as any, { hour: 14 });
+  assert.equal(d.state, "INVESTIGATE");
+  assert.equal(d.action.kind, "log");
+  assert.equal(d.action.investigation?.missingFact, "weekend_food");
+  assert.match(d.action.todo, /weekend/i);
+  assert.equal((d.action.todo.match(/\?/g) || []).length, 1, "one turn asks one question");
+
+  const answered = decideProactive(decisionState({
+    ...state,
+    food: { ...state.food, weekendLoggedDays7d: 1 },
+  }), decisionProfile as any, { hour: 14 });
+  assert.notEqual(answered.action.investigation?.missingFact, "weekend_food",
+    "canonical weekend evidence closes this missing fact; silence never fabricates an answer");
+});
+
+test("information value: open loop, holds and do-not-mention retain precedence", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  const stalled = decisionState({
+    food: { loggedDays7d: 3, weekendLoggedDays7d: 0, daysSinceAnyLog: 0 },
+    weight: { daysSinceWeighIn: 1, trendUsable: true, stalledWeeks: 3 },
+    today: { kcal: 1900, protein: 150, steps: 9000, logged: true, hour: 14 },
+    evidence: { foodSufficient: false, weightSufficient: true },
+  });
+  const open = decideProactive(stalled, decisionProfile as any, { trainingAwaitingOutcome: true, hour: 14 });
+  assert.notEqual(open.action.investigation?.missingFact, "weekend_food",
+    "an unresolved coaching outcome is already the one material question");
+
+  const forbidden = decideProactive(stalled,
+    { ...decisionProfile, doNotMention: "food and meals" } as any, { hour: 14 });
+  assert.notEqual(forbidden.action.investigation?.missingFact, "weekend_food");
+
+  const closed = decideProactive(stalled, decisionProfile as any, { foodDayClosed: true, hour: 14 });
+  assert.notEqual(closed.action.investigation?.missingFact, "weekend_food",
+    "a declared day hold is not replaced by a context question");
+
+  const sick = decideProactive({ ...stalled, health: { sick: true } }, decisionProfile as any, { hour: 14 });
+  assert.equal(sick.action.kind, "rest", "illness remains higher than information collection");
+});
+
+test("information value: reactive and proactive doors use the same missing-fact authority", async () => {
+  const { decideProactive, underPolicy, chooseAction, dayStateFrom } = await import("../server/one-action");
+  const state = decisionState({
+    food: { loggedDays7d: 3, weekendLoggedDays7d: 0, daysSinceAnyLog: 0 },
+    weight: { daysSinceWeighIn: 1, trendUsable: true, stalledWeeks: 3 },
+    today: { kcal: 900, protein: 35, steps: 9000, logged: true, hour: 14 },
+    evidence: { foodSufficient: false, weightSufficient: true },
+  });
+  const opts = {
+    foodSufficient: false, weightSufficient: true, loggedToday: true,
+    daysSinceWeighIn: 1, hour: 14, loggedDays7d: 3, weekendLoggedDays7d: 0,
+    stalledWeeks: 3,
+  };
+  const proactive = decideProactive(state, decisionProfile as any, { hour: 14 }).action;
+  const reactive = underPolicy(chooseAction(dayStateFrom(state, decisionProfile as any, { hour: 14 })), opts);
+  assert.equal(reactive.investigation?.missingFact, proactive.investigation?.missingFact);
+  assert.equal(reactive.todo, proactive.todo);
+});
+
+test("information value: an afternoon weight investigation is actionable", async () => {
+  const { decideProactive } = await import("../server/one-action");
+  const d = decideProactive(decisionState({
+    food: { loggedDays7d: 3, weekendLoggedDays7d: 1, daysSinceAnyLog: 0 },
+    weight: { daysSinceWeighIn: 3, trendUsable: false, stalledWeeks: 0 },
+    today: { kcal: 900, protein: 35, steps: 9000, logged: true, hour: 14 },
+    evidence: { foodSufficient: false, weightSufficient: false },
+  }), decisionProfile as any, { hour: 14 });
+  assert.equal(d.action.investigation?.missingFact, "weight_current");
+  assert.match(d.action.todo, /tomorrow morning/i);
+  assert.doesNotMatch(d.action.todo, /\bthis morning\b/i);
+});
+
 test("verdict: the reactive path is held to the same standard", () => {
   const cmd = readFileSync("server/handlers/one-action-command.ts", "utf-8");
   const code = cmd.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");

@@ -165,6 +165,10 @@ jobs:
       # fixture that answers every query the same way.
       - name: Thin-evidence coaching on real PostgreSQL
         run: npx tsx script/pg-thin-evidence-acceptance.ts
+      # INFORMATION VALUE (#213). Weekend coverage, stalled trend, the durable open loop and the
+      # later backdated answer are all real rows; this grades the one canonical INVESTIGATE owner.
+      - name: Highest-value investigation on real PostgreSQL
+        run: npx tsx script/pg-information-value-acceptance.ts
       # ONE COACH SPEAKING (#207). The repetition defect this closes is invisible to a fixture
       # that sends one message per client: it only appears across CONSECUTIVE durable writes by
       # the same person, where the decision is recomputed from day state that the new event did
