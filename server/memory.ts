@@ -2,10 +2,74 @@ import { pool } from "./db";
 import OpenAI from "openai";
 import { assertAiOnline, isAiOfflineError } from "./ai-offline";
 import { sastDaysBetween } from "./sast";
+import {
+  createOpenTrainingLoop,
+  isOpenTrainingLoopMarker,
+  readOpenTrainingLoop,
+  type OpenTrainingLoop,
+} from "./workout-feedback";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
 });
+
+/**
+ * Durable continuation state lives on users.awaiting_input_type. These compare-and-set helpers
+ * are beside the other client-memory writes rather than inside the language recogniser: parsing
+ * an answer and persisting whose answer is pending are separate jobs.
+ */
+export async function loadOpenTrainingLoop(user: any, now = Date.now()): Promise<OpenTrainingLoop | null> {
+  const marker = String(user?.awaitingInputType || "");
+  if (!isOpenTrainingLoopMarker(marker)) return null;
+  const open = readOpenTrainingLoop(marker, now);
+  if (open) return open;
+  const cleared = await pool.query(
+    "UPDATE users SET awaiting_input_type = NULL WHERE id = $1 AND awaiting_input_type = $2 RETURNING id",
+    [user.id, marker],
+  ).catch(() => ({ rows: [] }));
+  if (cleared.rows.length) user.awaitingInputType = null;
+  return null;
+}
+
+export async function ensureOpenTrainingLoop(
+  user: any,
+  targetDay: string,
+  source: OpenTrainingLoop["source"],
+  now = Date.now(),
+): Promise<OpenTrainingLoop | null> {
+  const existing = await loadOpenTrainingLoop(user, now);
+  if (existing) return existing;
+  if (user?.awaitingInputType) return null;
+  const marker = createOpenTrainingLoop(targetDay, source, now);
+  const opened = await pool.query(
+    "UPDATE users SET awaiting_input_type = $1 WHERE id = $2 AND awaiting_input_type IS NULL RETURNING id",
+    [marker, user.id],
+  ).catch(() => ({ rows: [] }));
+  if (!opened.rows.length) return null;
+  user.awaitingInputType = marker;
+  return readOpenTrainingLoop(marker, now);
+}
+
+export async function consumeOpenTrainingLoop(user: any, marker: string): Promise<boolean> {
+  const consumed = await pool.query(
+    "UPDATE users SET awaiting_input_type = NULL WHERE id = $1 AND awaiting_input_type = $2 RETURNING id",
+    [user.id, marker],
+  ).catch(() => ({ rows: [] }));
+  if (!consumed.rows.length) return false;
+  user.awaitingInputType = null;
+  return true;
+}
+
+/** Compensate a failed outcome write without ever overwriting a newer awaiting-input owner. */
+export async function restoreOpenTrainingLoop(user: any, marker: string): Promise<boolean> {
+  const restored = await pool.query(
+    "UPDATE users SET awaiting_input_type = $1 WHERE id = $2 AND awaiting_input_type IS NULL RETURNING id",
+    [marker, user.id],
+  ).catch(() => ({ rows: [] }));
+  if (!restored.rows.length) return false;
+  user.awaitingInputType = marker;
+  return true;
+}
 
 export async function initMemoryTable(): Promise<void> {
   try {

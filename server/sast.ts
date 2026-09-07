@@ -277,18 +277,21 @@ export type StatedWhen = "today" | "historical" | "ambiguous";
 export const SAYS_TODAY_RE = /\b(today|this morning|this afternoon|this evening|tonight|just now|right now|earlier today)\b/i;
 const A_SPAN_NOT_A_DAY = /\b(?:last|past|previous|this)\s+(?:week|month|fortnight)\b|\bweekend\b|\bthe\s+other\s+day\b|\ba\s+while\s+(?:back|ago)\b|\brecently\b|\blately\b|\bpast\s+few\s+days\b|\bcouple\s+of\s+(?:weeks|months)\b/i;
 
-export function statedWhen(message: string): { when: StatedWhen; date: Date } {
+export function statedWhen(message: string): { when: StatedWhen; date: Date; explicit: boolean } {
   const text = String(message || "");
   const resolved = parseMealDate(text);
   const isToday = sastDayStart(resolved).getTime() === sastDayStart().getTime();
+  const saysToday = SAYS_TODAY_RE.test(text);
 
   // A span first: "last week" resolves to nothing, so the parser would hand back today and the
   // write would land on the wrong day silently. This is the case that has no date to fall back on.
-  if (A_SPAN_NOT_A_DAY.test(text)) return { when: "ambiguous", date: resolved };
+  if (A_SPAN_NOT_A_DAY.test(text)) return { when: "ambiguous", date: resolved, explicit: true };
   // Both a today anchor and a past day in one message — we are being told two things and may
   // act on neither. Refusing costs a log; guessing corrupts a date the client cannot see to fix.
-  if (!isToday && SAYS_TODAY_RE.test(text)) return { when: "ambiguous", date: resolved };
-  return { when: isToday ? "today" : "historical", date: resolved };
+  if (!isToday && saysToday) return { when: "ambiguous", date: resolved, explicit: true };
+  // `today` can be either an explicit current-day statement or the parser's no-date default.
+  // Carry that distinction out of this owner so callers never grow a second day-word vocabulary.
+  return { when: isToday ? "today" : "historical", date: resolved, explicit: saysToday || !isToday };
 }
 
 // Returns true if the message contains a clear retroactive date reference (not today).

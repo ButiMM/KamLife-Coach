@@ -13,6 +13,7 @@ import {
   createWorkoutFeedbackExpectation,
   isWorkoutFeedbackExpectation,
   readWorkoutFeedbackExpectation,
+  reportsOpenTrainingMoveFailed,
   workoutFeedbackReply,
 } from "../workout-feedback";
 import { parseSessionReport, sessionReportReply, sessionMemoryLine, type SessionReport } from "../session-report";
@@ -21,7 +22,7 @@ import {
   buildFullProgramme, getKamlifeProgramme, renderSession, WORKOUT_DONE_RESPONSES,
 } from "../programme";
 import { checkPerfectDay } from "./checks";
-import { storeMemory } from "../memory";
+import { consumeOpenTrainingLoop, loadOpenTrainingLoop, restoreOpenTrainingLoop, storeMemory } from "../memory";
 import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat, turnMutation, turnAlreadyWrote } from "./chat-log";
@@ -38,6 +39,7 @@ import { calculateTargets } from "../targets";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { sendWhatsApp, saveState } from "../scheduler/shared";
 import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
+import { recordOpenTrainingFailure } from "../held-constraints";
 
 // Exercise-name vocabulary. parseLiftLog was deleted with lift logging on 2026-08-06, but
 // this pattern is NOT a parser input — it is a GUARD used twice below, and both uses are the
@@ -99,14 +101,61 @@ export async function resumeWorkoutFeedbackExpectation(ctx: {
   return reply;
 }
 
+/**
+ * Resolve only an explicit negative answer to the canonical training move. Positive outcomes stay
+ * with handleWorkoutCommands: the loop may close only after workout_logs either receives or
+ * already holds the attributed session. Pure questions and intentions leave the marker untouched;
+ * a turn that both reports failure and asks what next still records the supported outcome first.
+ */
+export async function resumeOpenTrainingLoopOutcome(ctx: {
+  message: string;
+  m: string;
+  user: any;
+  sourceMessageId?: string;
+}): Promise<"failed" | "pending" | null> {
+  const { message, m, user, sourceMessageId } = ctx;
+  const open = await loadOpenTrainingLoop(user);
+  if (!open) return null;
+  if (isFutureIntent(m)) return "pending";
+  // An explicit outcome remains an outcome when the client also asks what comes next. Persist
+  // what happened before the rest of the turn answers them; punctuation cannot veto the truth.
+  if (!reportsOpenTrainingMoveFailed(message)) return looksLikeQuestion(m) ? "pending" : null;
+  if (!await consumeOpenTrainingLoop(user, open.marker)) return null;
+  try {
+    await recordOpenTrainingFailure(user, open.targetDay, sourceMessageId);
+  } catch (e) {
+    await restoreOpenTrainingLoop(user, open.marker);
+    console.warn("[COACHING_LOOP] training failure truth not recorded; loop remains open:", e);
+    return "pending";
+  }
+  turnMutation("RESOLVE coaching_loop ref=" + open.ref + " outcome=failed target=" + open.targetDay, "[COACHING_LOOP]");
+  return "failed";
+}
+
 export async function handleWorkoutCommands(ctx: {
   phone: string;
   message: string;
   m: string;
   user: any;
+  sourceMessageId?: string;
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
   const firstName = user.name?.split(" ")[0] || "";
+  const openTraining = await loadOpenTrainingLoop(user);
+  let completedOpenTraining = false;
+  const closeTrainingLoop = async (resolvedDay: string): Promise<boolean> => {
+    if (!openTraining || openTraining.targetDay !== resolvedDay) return false;
+    const closed = await consumeOpenTrainingLoop(user, openTraining.marker);
+    if (closed) {
+      completedOpenTraining = true;
+      turnMutation(
+        "RESOLVE coaching_loop ref=" + openTraining.ref + " outcome=completed target="
+          + openTraining.targetDay + " source=" + (ctx.sourceMessageId || "unavailable"),
+        "[COACHING_LOOP]",
+      );
+    }
+    return closed;
+  };
 
   // ---- SESSION REPORTED IN PROSE — "today was my first day back, felt very bad" ----
   // Runs BEFORE the difficulty-feedback gate and the terse `isDone` match, because a
@@ -116,7 +165,10 @@ export async function handleWorkoutCommands(ctx: {
   const sessionReport = parseSessionReport(message);
   if (sessionReport && !looksLikeQuestion(m) && !isFutureIntent(m) && !mentionsNotDone(m)) {
     const handled = await logProseSession(user, phone, message, sessionReport, firstName);
-    if (handled) return handled;
+    if (handled) {
+      await closeTrainingLoop(sastDayKey());
+      return handled;
+    }
   }
 
   // ---- WORKOUT DIFFICULTY FEEDBACK — the post-session "how was it?" loop ----
@@ -233,6 +285,7 @@ export async function handleWorkoutCommands(ctx: {
       .limit(1);
 
     if (existingToday.length > 0) {
+      await closeTrainingLoop(sastDayKey());
       return `${firstName ? firstName + ", " : ""}session already logged today. Good work staying active.`;
     }
 
@@ -302,6 +355,7 @@ export async function handleWorkoutCommands(ctx: {
     // Log workout session
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
     turnMutation("INSERT workout completed=true", "[WORKOUT_LOG]");
+    await closeTrainingLoop(sastDayKey());
     invalidatePatternCache(user.id); // GPT's cached pattern summary must see this session immediately
 
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
@@ -381,13 +435,25 @@ export async function handleWorkoutCommands(ctx: {
   // already out-resolved, so "I trained Monday" and "I trained last week" both wrote TODAY.
   // utils.statedWhen answers today / historical / ambiguous for both branches below, from the
   // parser that owns dates — and hands back the date it resolved, so nothing parses twice.
-  const when = statedWhen(m);
   // "done/finished/completed" alone is too generic — must appear beside a workout word.
   // "trained", "did my workout/session/legs/etc." are workout-specific by themselves.
   const hasCompletionWord =
-    /\b(trained|did\s+(?:my\s+)?(?:workout|session|training|gym|legs?|upper(?:\s+body)?|lower(?:\s+body)?|chest|back|push|pull|cardio|arms?|shoulders?|squats?)|workout\s+(?:done|complete[d]?|finished)|session\s+(?:done|complete[d]?|finished)|training\s+(?:done|complete[d]?|finished)|gym\s+(?:done|complete[d]?|finished))\b/i.test(m)
+    /\b(trained|did\s+(?:(?:my|the)\s+)?(?:workout|session|training|gym|legs?|upper(?:\s+body)?|lower(?:\s+body)?|chest|back|push|pull|cardio|arms?|shoulders?|squats?)|workout\s+(?:done|complete[d]?|finished)|session\s+(?:done|complete[d]?|finished)|training\s+(?:done|complete[d]?|finished)|gym\s+(?:done|complete[d]?|finished))\b/i.test(m)
     || /\b(?:done|finished|complete[d]?)\b.{0,40}\b(?:workout|session|training|gym|legs?|upper|lower|chest|back|push|pull|cardio)\b/i.test(m)
     || /\b(?:workout|session|training|gym|legs?|upper|lower|chest|back|push|pull|cardio)\b.{0,40}\b(?:done|finished|complete[d]?)\b/i.test(m);
+  const stated = statedWhen(m);
+  // On the following day, "the session" / "the workout you told me to do" has one supported
+  // referent: the still-open canonical move. Use that move's stored SAST day. A bare "I did it"
+  // is intentionally absent — ambiguity never becomes a workout row.
+  const lowerMessage = String(m || "").toLowerCase();
+  const refersToAssignedSession = ["the workout", "the session", "workout you told",
+    "session you told", "workout you asked", "session you asked"].some(shape => lowerMessage.includes(shape));
+  const openTargetDate = openTraining && refersToAssignedSession && hasCompletionWord && !stated.explicit
+    ? new Date(openTraining.targetDay + "T12:00:00+02:00")
+    : null;
+  const when = openTargetDate && openTraining!.targetDay !== sastDayKey()
+    ? { when: "historical" as const, date: openTargetDate }
+    : stated;
   // TWO QUESTIONS, NOT ONE (2026-08-25). This regex conflated "did they report a training miss"
   // — which readTrainingDay owns — with "are they sick or injured", which is a health question and
   // is not this owner's to answer. The training half now comes from the owner; the health half
@@ -408,8 +474,7 @@ export async function handleWorkoutCommands(ctx: {
 
   if (isRetroDone) {
     const retroDate = when.date;
-    const retroStart = new Date(retroDate);
-    retroStart.setUTCHours(0, 0, 0, 0);
+    const retroStart = sastDayStart(retroDate);
     const retroEnd = new Date(retroStart.getTime() + 86_400_000);
     const dateLabel = mealDateLabel(retroDate);
 
@@ -422,10 +487,12 @@ export async function handleWorkoutCommands(ctx: {
       .limit(1);
 
     if (existing.length > 0) {
+      await closeTrainingLoop(sastDayKey(retroDate));
       return `${firstName ? firstName + ", already" : "Already"} got ${dateLabel}'s workout logged.`;
     }
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true, loggedAt: retroDate });
+    await closeTrainingLoop(sastDayKey(retroDate));
     // The SAST day, not String(Date).slice(0,10) — which produced "Fri Aug 2" and made the write
     // record unreadable by anything that needed to know WHICH day was written (2026-08-22).
     turnMutation(`INSERT workout completed=true at=${sastDayKey(retroDate)}`, "[WORKOUT_LOG]");
@@ -594,10 +661,12 @@ export async function handleWorkoutCommands(ctx: {
       .limit(1);
 
     if (existing.length > 0) {
+      await closeTrainingLoop(sastDayKey());
       return `${firstName ? firstName + ", " : ""}today's session is already logged. 👌`;
     }
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
+    await closeTrainingLoop(sastDayKey());
     turnMutation("INSERT workout", "[WRITE]");
     invalidatePatternCache(user.id); // GPT's cached pattern summary must see this session immediately
 
@@ -708,9 +777,11 @@ export async function handleWorkoutCommands(ctx: {
     // its answer survives a process restart and reaches workout-feedback before a prose/logging
     // handler gets a chance to reinterpret it. A newer question replaces the older single-slot
     // expectation, matching the existing awaitingInputType contract.
-    const feedbackExpectation = createWorkoutFeedbackExpectation();
-    await db.update(users).set({ awaitingInputType: feedbackExpectation }).where(eq(users.id, user.id));
-    user.awaitingInputType = feedbackExpectation;
+    if (!openTraining || completedOpenTraining) {
+      const feedbackExpectation = createWorkoutFeedbackExpectation();
+      await db.update(users).set({ awaitingInputType: feedbackExpectation }).where(eq(users.id, user.id));
+      user.awaitingInputType = feedbackExpectation;
+    }
 
     // Fire referral nudge 60 seconds later on the very first workout
     if (newTotal === 1) {

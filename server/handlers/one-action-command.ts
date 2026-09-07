@@ -20,15 +20,23 @@ import { getDayLedger } from "../day-ledger";
 import { sastDayStart, sastDaysBetween, sastHour, sastWeekStart } from "../sast";
 import { readHealthState } from "../health-state";
 import { foodConstraints } from "../food-swaps";
+import { loadOpenTrainingLoop } from "../memory";
+import { readHeldConstraints, NO_CONSTRAINTS } from "../held-constraints";
 
 /** Is this client inside a declared sick window? Asked of the state owner, not of the text. */
 const isSick = (user: any): boolean => readHealthState(user).isSick;
 
-async function buildDecisionInputs(user: any): Promise<{ state: ProactiveStateForDecision; profile: ProactiveProfile }> {
+async function buildDecisionInputs(user: any): Promise<{
+  state: ProactiveStateForDecision;
+  profile: ProactiveProfile;
+  trainingAwaitingOutcome: boolean;
+  trainingDeclined: boolean;
+  foodDayClosed: boolean;
+}> {
   const dayStart = sastDayStart();
   const weekStart = sastWeekStart();
 
-  const [ledger, lastMeal, lastWeigh, weekSessions, todaySteps, loggedDays] = await Promise.all([
+  const [ledger, lastMeal, lastWeigh, weekSessions, todaySteps, loggedDays, openTraining, held] = await Promise.all([
     getDayLedger(user.id, { user }),
     db.select({ at: mealLogs.loggedAt }).from(mealLogs)
       .where(eq(mealLogs.userId, user.id)).orderBy(desc(mealLogs.loggedAt)).limit(1),
@@ -47,6 +55,8 @@ async function buildDecisionInputs(user: any): Promise<{ state: ProactiveStateFo
       .from(mealLogs)
       .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, new Date(dayStart.getTime() - 6 * 86_400_000))))
       .catch(() => [{ days: 0 }]),
+    loadOpenTrainingLoop(user),
+    readHeldConstraints(user.phoneNumber, user).catch(() => NO_CONSTRAINTS),
   ]);
   const distinctLoggedDays = Number((loggedDays as { days: number }[])[0]?.days || 0);
 
@@ -100,6 +110,9 @@ async function buildDecisionInputs(user: any): Promise<{ state: ProactiveStateFo
       proteinTarget: Number(user?.proteinTarget) || 0,
       stepsTarget: Number(user?.stepsTarget) || 0,
     },
+    trainingAwaitingOutcome: !!openTraining,
+    trainingDeclined: held.trainingDeclined,
+    foodDayClosed: held.foodDayClosed,
   };
 }
 
@@ -122,8 +135,13 @@ export async function oneActionCommand(user: any, opts?: { atKeyboard?: boolean 
     // would have refused to prescribe on — the same client, the same ledgers, two standards
     // depending on who spoke first. decideProactive applies the verdict, and its downgrade turns
     // an unjustifiable prescription into the measurement that would justify it.
-    const { state, profile } = await buildDecisionInputs(user);
-    const decision = decideProactive(state, profile, { atKeyboard: !!opts?.atKeyboard });
+    const { state, profile, trainingAwaitingOutcome, trainingDeclined, foodDayClosed } = await buildDecisionInputs(user);
+    const decision = decideProactive(state, profile, {
+      atKeyboard: !!opts?.atKeyboard,
+      trainingAwaitingOutcome,
+      trainingDeclined,
+      foodDayClosed,
+    });
     return formatOneAction(decision.action, firstName);
   } catch (e: any) {
     console.error("[ONE_ACTION]", e?.message || e);

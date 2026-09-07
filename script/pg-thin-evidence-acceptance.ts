@@ -51,8 +51,8 @@ const { eq } = await import("drizzle-orm");
 const { handleMessage } = await import("../server/routes");
 const { canonicalDecision } = await import("../server/understanding/live");
 const { canonicalNextMove } = await import("../server/scheduler/proactive-decision");
-const { getProgressTruth } = await import("../server/day-ledger");
-const { sastHour } = await import("../server/sast");
+const { getProgressTruth, sessionsThisCalendarWeek } = await import("../server/day-ledger");
+const { sastHour, sastWeekStart } = await import("../server/sast");
 const { _resetOutboundDedupe } = await import("../server/reply-hygiene");
 
 let failed = 0;
@@ -335,9 +335,17 @@ REAL("\n=== REACTIVE AND PROACTIVE AGREE ===");
     `INSERT INTO step_logs (user_id, logged_at, steps, provenance, resolved_day)
      VALUES ($1, now(), 12000, 'client_report', to_char(now() AT TIME ZONE 'Africa/Johannesburg','YYYY-MM-DD'))`,
     [c.id]);
+  const sessionTarget = 3;
+  const canonicalWeekStart = sastWeekStart();
   await pool.query(
     `INSERT INTO workout_logs (user_id, logged_at, workout_completed)
-     SELECT $1, now() - (d || ' days')::interval, true FROM generate_series(0, 3) AS d`, [c.id]);
+     SELECT $1, $2::timestamptz + d * interval '1 millisecond', true
+       FROM generate_series(0, $3 - 1) AS d`,
+    [c.id, canonicalWeekStart, sessionTarget]);
+  const seededSessions = await sessionsThisCalendarWeek(c.id);
+  chk(seededSessions === sessionTarget,
+    "the sufficient-evidence fixture stays inside the canonical current SAST week",
+    `weekStart=${canonicalWeekStart.toISOString()} sessions=${seededSessions}/${sessionTarget}`);
   await pool.query(
     `INSERT INTO meal_logs (user_id, logged_at, meal_label, kcal_int, protein_int, items, raw_message, source)
      VALUES ($1, now(), 'dinner', 2200, 160, $2, 'seed', 'sa_scanner')`,

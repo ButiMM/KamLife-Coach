@@ -14,7 +14,7 @@ import { getTrajectoryForUser } from "../../trajectory-report";
 import { runWeeklyRecaps } from "../../weekly-recap";
 import { generateMealPlan } from "../../meal-plan";
 import { mentionsForbidden } from "../../brain/reply-verifier";
-import { canonicalNextMove } from "../proactive-decision";
+import { canonicalNextMove, recordCanonicalMoveOutbound } from "../proactive-decision";
 
 export async function runFridayWeekendStrategy(): Promise<void> {
   console.log("[SCHEDULER] JOB: Friday weekend strategy");
@@ -79,7 +79,8 @@ export async function runFridayWeekendStrategy(): Promise<void> {
       ].filter(Boolean);
       if (move.line) lines.push(``, move.line);
 
-      await sendWhatsApp(client.phoneNumber, lines.join("\n"));
+      const delivery = await sendWhatsApp(client.phoneNumber, lines.join("\n"));
+      await recordCanonicalMoveOutbound(client, move, delivery);
       sent++;
     } catch (err) { console.error(`[SCHEDULER] Friday strategy error — ${client.phoneNumber}:`, err); }
   }
@@ -116,14 +117,18 @@ export async function runSundayWeeklyReport(): Promise<void> {
       if (chats.length === 0) {
         if (clientAgeDays < 2) continue; // just onboarded today — skip
         const quiet = await canonicalNextMove(client);
-        if (quiet.line) await sendWhatsApp(client.phoneNumber, `${name}, nothing logged this week.\n\n${quiet.line}`);
+        if (quiet.line) {
+          const delivery = await sendWhatsApp(client.phoneNumber, `${name}, nothing logged this week.\n\n${quiet.line}`);
+          await recordCanonicalMoveOutbound(client, quiet, delivery);
+        }
         continue;
       }
       const daysWithLogs = new Set(chats.map(c => new Date(c.createdAt!).toDateString())).size;
       if (daysWithLogs < 3) {
         const thin = await canonicalNextMove(client);
         const opener = `${name}, ${daysWithLogs} day${daysWithLogs !== 1 ? "s" : ""} logged this week. You're in it.`;
-        await sendWhatsApp(client.phoneNumber, thin.line ? `${opener}\n\n${thin.line}` : opener);
+        const delivery = await sendWhatsApp(client.phoneNumber, thin.line ? `${opener}\n\n${thin.line}` : opener);
+        await recordCanonicalMoveOutbound(client, thin, delivery);
         continue;
       }
 
@@ -252,7 +257,8 @@ export async function runSundayWeeklyReport(): Promise<void> {
       // One-tap acceptance — routes to the deterministic step-target updater. Client's call.
       if (stepAdj) lines.push(``, `[BUTTONS:Set steps to ${stepAdj.newTarget}]`);
 
-      await sendWhatsApp(client.phoneNumber, lines.join("\n"));
+      const delivery = await sendWhatsApp(client.phoneNumber, lines.join("\n"));
+      await recordCanonicalMoveOutbound(client, move, delivery);
 
       try {
         const list = getShoppingList(budgetTierWeekly, weekNum + 1, clientGoalWeekly, foodConstraints(client as any));
@@ -394,7 +400,8 @@ export async function runWeekendFoodAudit(): Promise<void> {
       // Claim only when there is actually a pattern to flag — DB-backed weekly dedup.
       if (!(await claimProactive(client.id, "weekend_food_audit", thisWeekUTC()))) continue;
       const audit = await canonicalNextMove(client);
-      await sendWhatsApp(client.phoneNumber, audit.line ? `${pattern}\n\n${audit.line}` : pattern);
+      const delivery = await sendWhatsApp(client.phoneNumber, audit.line ? `${pattern}\n\n${audit.line}` : pattern);
+      await recordCanonicalMoveOutbound(client, audit, delivery);
     } catch (err) { console.error(`[SCHEDULER] Weekend food audit error — ${client.phoneNumber}:`, err); }
   }
 }

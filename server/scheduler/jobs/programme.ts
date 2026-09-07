@@ -7,7 +7,7 @@ import {
 } from "../shared";
 import { getGoalProfile } from "../../goal-profiles";
 import { getWeightTruth } from "../../day-ledger";
-import { canonicalNextMove } from "../proactive-decision";
+import { canonicalNextMove, recordCanonicalMoveOutbound } from "../proactive-decision";
 import { sastHour } from "../../sast";
 
 export async function runPhaseAdvancement(): Promise<void> {
@@ -112,7 +112,10 @@ export async function runWeeklyMondayCheckin(): Promise<void> {
       const move = await canonicalNextMove(client, { hour: sastHour() });
       if (move.line) msg = `${msg}\n\n${move.line}`;
       // Daily-slot claim before send (preserves daily-cap reach; DB-backed, restart-safe).
-      if (await claimDailySlot(client.id, "weekly_checkin")) { await sendWhatsApp(client.phoneNumber, msg); }
+      if (await claimDailySlot(client.id, "weekly_checkin")) {
+        const delivery = await sendWhatsApp(client.phoneNumber, msg);
+        await recordCanonicalMoveOutbound(client, move, delivery);
+      }
     } catch (err) { console.error(`[SCHEDULER] Weekly check-in error — ${client.phoneNumber}:`, err); }
   }
 }

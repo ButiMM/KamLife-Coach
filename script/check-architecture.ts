@@ -149,7 +149,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 420,
+  authorshipPoints: 419,
   twilioCallSites: 16,
 };
 

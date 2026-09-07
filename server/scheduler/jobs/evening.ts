@@ -7,7 +7,7 @@ import {
 } from "../shared";
 import { readHealthState } from "../../health-state";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
-import { canonicalNextMove } from "../proactive-decision";
+import { canonicalNextMove, recordCanonicalMoveOutbound } from "../proactive-decision";
 import { sastHour } from "../../sast";
 
 /**
@@ -74,7 +74,8 @@ export async function runEveningAccountability(): Promise<void> {
       if (todayLogs.length === 0) {
         const empty = await canonicalNextMove(client, { hour: sastHour() });
         if (empty.line && await claimDailySlot(client.id, "evening")) {
-          await sendWhatsApp(phone, `${name}, haven't heard from you today — no stress.\n\n${empty.line}`);
+          const delivery = await sendWhatsApp(phone, `${name}, haven't heard from you today — no stress.\n\n${empty.line}`);
+          await recordCanonicalMoveOutbound(client, empty, delivery);
         }
         continue;
       }
@@ -147,17 +148,21 @@ export async function runEveningAccountability(): Promise<void> {
       // actually chosen `train`, so a declined or sick day never renders it.
       if (move.action.kind === "train" && isTrainingDay) {
         if (await claimDailySlot(client.id, "evening")) {
-          await sendWhatsAppButtons(phone, `${recap}\n\n${move.line}`, [
+          const delivery = await sendWhatsAppButtons(phone, `${recap}\n\n${move.line}`, [
             "Doing it tonight",
             "Swap to tomorrow",
             "Rest day today",
           ]);
+          await recordCanonicalMoveOutbound(client, move, delivery);
         }
         continue;
       }
 
       const msg = [recap, move.line].filter(Boolean).join("\n\n");
-      if (msg && await claimDailySlot(client.id, "evening")) { await sendWhatsApp(phone, msg); }
+      if (msg && await claimDailySlot(client.id, "evening")) {
+        const delivery = await sendWhatsApp(phone, msg);
+        await recordCanonicalMoveOutbound(client, move, delivery);
+      }
     } catch (err) {
       console.error(`[SCHEDULER] Evening accountability error — ${client.phoneNumber}:`, err);
     }

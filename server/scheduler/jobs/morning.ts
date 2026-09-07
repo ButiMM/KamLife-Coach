@@ -16,9 +16,10 @@ import { readHealthState } from "../../health-state";
 import { morningClosingLine, composeMorning, yesterdayObservation, breakfastReplayLine } from "../../morning-message";
 import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
 import { chooseAction, decideProactive, formatOneAction, underPolicy } from "../../one-action";
-import { loadSituationFrame } from "../../memory";
+import { ensureOpenTrainingLoop, loadOpenTrainingLoop, loadSituationFrame } from "../../memory";
 import { readHeldConstraints } from "../../held-constraints";
 import { foodConstraints } from "../../food-swaps";
+import { deliveryAccepted } from "../../outbound-delivery";
 
 /**
  * WHAT WE SAY TO SOMEONE WHO HAS GONE — decided by the ladder, not written here.
@@ -481,12 +482,14 @@ export async function runMorningCheckin(): Promise<void> {
         // inferring it from a kind string.
         const breakfastAsk = `🍳 What's for breakfast?${repeatSuggestion || ""}`;
         let decisionLine = "";
+        let selectedTrainingMove = false;
         try {
           // ONE READER FOR BOTH CONSTRAINTS (2026-08-25, P0-4b). This was an inline copy of the
           // query that read only the food half — trainingDayIsDeclined existed and had nowhere to
           // go, so a client who said "I'm not training today" could still be told to. Now the
           // outbound floor and the decision read the same held state about the same day.
           const held = await readHeldConstraints(phone, client);
+          const openTraining = await loadOpenTrainingLoop(client);
           const decision = decideProactive(state, {
             dreamGoal: client.dreamGoal,
             biggestStruggle: client.biggestStruggle,
@@ -502,15 +505,17 @@ export async function runMorningCheckin(): Promise<void> {
             hour: 7,
             foodDayClosed: held.foodDayClosed,
             trainingDeclined: held.trainingDeclined,
+            trainingAwaitingOutcome: !!openTraining,
           });
           decisionLine = decision.line;
+          selectedTrainingMove = decision.action.kind === "train";
           console.log(`[MORNING] ${client.id.slice(-6)} decision=${decision.state} evidence=${decision.evidence} action=${decision.action.kind}`);
         } catch (e) {
           console.warn("[MORNING] one-action skipped:", (e as any)?.message || e);
         }
         // ONE COMPOSER. Every part above is now an INPUT, not a branch that assembles its own
         // slice of the message. The order of the message is decided in one place.
-        await sendWhatsApp(phone, composeMorning({
+        const delivery = await sendWhatsApp(phone, composeMorning({
           firstName: name,
           targetFixLine,
           identityLine,
@@ -525,6 +530,9 @@ export async function runMorningCheckin(): Promise<void> {
           situationLine: await loadSituationFrame(phone).catch(() => ""),
           sickYesterday: state.health.sickYesterday,
         }));
+        if (selectedTrainingMove && deliveryAccepted(delivery)) {
+          await ensureOpenTrainingLoop(client, todaySAST(), "proactive");
+        }
       }
     } catch (err) {
       console.error(`[SCHEDULER] Morning check-in error — ${client.phoneNumber}:`, err);

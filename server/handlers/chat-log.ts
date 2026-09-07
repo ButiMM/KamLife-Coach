@@ -129,6 +129,9 @@ interface TurnScope {
      * carries an instruction.
      */
     canonicalReply?: string | null;
+    /** Correlation carried by the existing durable awaiting-input owner for an open coaching move. */
+    openLoopRef?: string | null;
+    openLoopKind?: "train" | null;
     /**
      * Structured situation frame for a decision turn (birthday outing, eating out today).
      * Rendered by code from extractSalientSituation — not GPT prose.
@@ -613,7 +616,12 @@ export async function recordTurn(reply: string): Promise<void> {
     ]);
     const decision = currentRuntimeDecision();
     const evidenceRefs = decision?.focus === "safety" ? ["safety_gate"] : decision?.focus === "hunger" ? ["hunger_evidence"] : decision?.focus === "intake" ? ["deficit_evidence"] : [];
-    const stateRead = decision ? { ...t.stateRead, decisionState: decision.state, decisionEvidence: decision.evidence, decisionFocus: decision.focus, decisionEvidenceRefs: evidenceRefs, meaningfulProblem: decision.meaningfulProblem, hasMinimumUsefulQuestion: decision.hasMinimumUsefulQuestion } : t.stateRead;
+    const openLoop = t.evidence?.openLoopRef
+      ? { openLoopRef: t.evidence.openLoopRef, openLoopKind: t.evidence.openLoopKind || null }
+      : {};
+    const stateRead = decision
+      ? { ...t.stateRead, ...openLoop, decisionState: decision.state, decisionEvidence: decision.evidence, decisionFocus: decision.focus, decisionEvidenceRefs: evidenceRefs, meaningfulProblem: decision.meaningfulProblem, hasMinimumUsefulQuestion: decision.hasMinimumUsefulQuestion }
+      : { ...t.stateRead, ...openLoop };
     await db.insert(turnLedger).values({
       userId: t.userId, inputType: t.inputType, inputText: t.inputText, resolvedDay: t.resolvedDay,
       stateRead: Object.keys(stateRead).length ? stateRead : null, mutations: t.mutations.length ? t.mutations : null,
