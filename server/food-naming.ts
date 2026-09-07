@@ -32,6 +32,11 @@ const VARIANT_QUALIFIERS = [
   "in tomato sauce", "in oil", "in brine", "in water", "in syrup",
   "skinless", "lean", "extra lean", "fried", "grilled", "roasted", "boiled", "steamed",
   "diet", "zero", "sugar free", "sugar-free", "light", "double thick", "plain",
+  // HOW IT WAS KEPT, not what it is (#206). "Mixed frozen vegetables" for a client who wrote
+  // "mixed veggies" adds `frozen` — the same class of invented detail as `brown` or `grilled`,
+  // and the same corrosive effect: the entry prices the food, and the client is told they ate
+  // something they did not say. This is the founder's live failure of 7 Sep at its source.
+  "frozen", "tinned", "canned", "fresh", "dried", "instant",
 ];
 
 /** Normalise for comparison — lowercase, collapse whitespace, drop punctuation. */
