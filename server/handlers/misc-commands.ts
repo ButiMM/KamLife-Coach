@@ -69,6 +69,19 @@ export async function handleMiscCommands(ctx: {
 }): Promise<string | null> {
   const { phone, message, m, user, wroteThisTurn } = ctx;
 
+  // THE SAME QUESTION, WITH THE QUESTION MARK ON IT (#216). Several owners below match on exact
+  // strings, and `m` keeps terminal punctuation — so the most natural way a client asks reached
+  // none of them:
+  //
+  //     "what is my bmi"    -> "Your BMI is 26.5 — overweight range."
+  //     "what's my BMI?"    -> "one thing today: Tell me what you ate today"
+  //     "my weight?"        -> the same daily-direction fallback
+  //
+  // Same words, same intent, and a "?" decided whether the client got an answer. This is the one
+  // input those lists were always meant to receive; it is not a new routing family, and every
+  // membership test that uses it is an existing owner's own list.
+  const mq = m.replace(/[?!.\s]+$/, "");
+
   // Calendar facts are deterministic SAST state, not coaching.
   if (isCurrentDateQuestion(message)) {
     const reply = currentDateAnswer();
@@ -798,7 +811,7 @@ export async function handleMiscCommands(ctx: {
     const perMeal = Math.round(p / 4);
     return `*Your Daily Protein Target*\n\n💪 ${p}g protein per day.\n\nSpread across 4 meals — roughly ${perMeal}g each. Best SA sources: eggs (6g each), pilchards (20g per tin), chicken breast (30g per 100g), tinned tuna (25g per tin). This drives everything — muscle, fat loss, fullness.`;
   }
-  if (["weight", "my weight", "current weight"].includes(m)) {
+  if (["weight", "my weight", "current weight", "how much do i weigh", "what do i weigh"].includes(mq)) {
     const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged yet";
     // FROM THE WEIGHT THEY ARE (#128) — users.bmi is the onboarding snapshot and never moves.
     const bmiLive = bmiOf(user);
@@ -849,8 +862,21 @@ export async function handleMiscCommands(ctx: {
       const truth = await getProgressTruth(user, { days: 7, clientMessage: message });
       const calTarget = Number(user.calorieTarget) || 0;
       const protTarget = Number(user.proteinTarget) || 0;
+      // THE DIRECTION ON THIS CARD OBEYS THE SAME VERDICT AS EVERY OTHER SURFACE (#216).
+      //
+      // This was gated on `known` alone — can a change be computed — and printed "(down 3.2kg)"
+      // for a client whose illness-contaminated trend `check my body` had just refused to call, in
+      // the same minute, off the same rows. Two weight-derived conclusions, contradicting each
+      // other, and the client has no way to tell which one to believe.
+      //
+      // Same shape the body check uses: the READING is not the claim and still shows. What is
+      // withheld is the word that reads as a direction.
+      const { weightDirectionSpeakable: progressSpeech } = await import("../adaptive-targets");
+      const weekSpeakable = truth.weight.points.length >= 2
+        && (await progressSpeech(truth.weight.points.map(pt => ({ at: pt.at })), user)
+              .catch(() => ({ speakable: false }))).speakable;
       const weightLine = truth.weight.known && truth.weight.currentKg
-        ? `\n⚖️ Weight: *${truth.weight.currentKg}kg*${truth.weight.changeKg !== null ? ` (${truth.weight.changeKg <= 0 ? "down" : "up"} ${Math.abs(truth.weight.changeKg)}kg)` : ""}`
+        ? `\n⚖️ Weight: *${truth.weight.currentKg}kg*${weekSpeakable && truth.weight.changeKg !== null ? ` (${truth.weight.changeKg <= 0 ? "down" : "up"} ${Math.abs(truth.weight.changeKg)}kg)` : ""}`
         : "";
       if (wantsWeek) {
         // ONE NEXT MOVE, NEVER A QUESTION BACK. The model's version ended "What's one action you
@@ -992,7 +1018,7 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- NEW: BMI ----
-  if (["bmi", "my bmi", "what is my bmi", "what's my bmi", "check bmi"].includes(m)) {
+  if (["bmi", "my bmi", "what is my bmi", "what's my bmi", "check bmi", "whats my bmi"].includes(mq)) {
     // THE STORED COLUMN IS THE DAY THEY SIGNED UP. A client who has lost 14kg asked this and was
     // told the category they left months ago, with "Meaningful progress is possible" underneath.
     const bmiVal = bmiOf(user);
@@ -1235,7 +1261,7 @@ export async function handleMiscCommands(ctx: {
       //
       // The pace and the verdict are strictly MORE than the arrow, so they are gated by the same
       // answer rather than by rules of their own.
-      const { weightDirectionSpeakable } = await import("../adaptive-targets");
+      const { weightDirectionSpeakable, trendRefusalReason } = await import("../adaptive-targets");
       const bodySpeech = await weightDirectionSpeakable(
         weights.map(w => ({ at: new Date(w.date as any) })), user);
       if (weights.length >= 2) {
@@ -1248,7 +1274,7 @@ export async function handleMiscCommands(ctx: {
         // word that reads as a direction.
         report += bodySpeech.speakable
           ? `*Weight:* ${last.toFixed(1)}kg (${trend} from ${first.toFixed(1)}kg start)\n`
-          : `*Weight:* start ${first.toFixed(1)}kg · now ${last.toFixed(1)}kg — not enough clear weigh-ins to call a direction\n`;
+          : `*Weight:* start ${first.toFixed(1)}kg · now ${last.toFixed(1)}kg\n_${trendRefusalReason(bodySpeech.why)}_\n`;
 
         // Monthly rate
         const monthsOn = Math.max(1, daysOn / 30);
@@ -1678,7 +1704,7 @@ export async function handleMiscCommands(ctx: {
       // "this is muscle. Keep training hard." standing — a conclusion carrying the direction with
       // no direction words in it. Deferring the decision to the boundary loses the client's data
       // and keeps the claim. It has to be made here, before the reply is composed.
-      const { weightDirectionSpeakable } = await import("../adaptive-targets");
+      const { weightDirectionSpeakable, trendRefusalReason } = await import("../adaptive-targets");
       const speech = await weightDirectionSpeakable(
         (await getWeightTruth(user, { clientMessage: m })).points, user);
       const trend = !speech.speakable ? "" : diff < -0.5 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg` : diff > 0.5 ? `⬆️ Up ${diff.toFixed(1)}kg` : `➡️ Stable`;
@@ -1692,9 +1718,9 @@ export async function handleMiscCommands(ctx: {
         `Start: *${first.toFixed(1)}kg* → Now: *${last.toFixed(1)}kg*${trend ? ` (${trend})` : ""}\n` +
         `${weights.length} weigh-ins over ${spanDays >= 7 ? Math.round(spanDays / 7) + " weeks" : spanDays + " days"}${paceWk}\n\n` +
         (!speech.speakable
-          ? (speech.why === "illness"
-            ? `I'm not calling a direction off these — they sit around the time you were ill, and weight moves on fluid and appetite then. Weigh in a few clear mornings and I'll read it properly.`
-            : `I'm not calling a direction off these yet. Weigh in a few more mornings and I'll give you a straight read.`)
+          // THE ONE OWNER SAYS WHY (#216) — this mouth's own pair of sentences moved there so the
+          // body check could stop inventing a third answer to the same question.
+          ? trendRefusalReason(speech.why)
          : diff < -2 ? `Consistent progress. The deficit is working — stay patient and stay on plan.` :
          diff > 2 && user.goalType === "muscle_gain" ? `Gaining as planned. If lifts are going up, this is muscle. Keep training hard.` :
          Math.abs(diff) < 1 ? `Weight holding. Check measurements — you could be recomping (losing fat, gaining muscle). The tape does not lie.` :
