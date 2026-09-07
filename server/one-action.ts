@@ -410,7 +410,18 @@ export function trainingDayIsDeclined(text: string): boolean {
 export function foodDayIsClosed(text: string): boolean {
   const t = String(text || "");
   if (!t.trim()) return false;
-  if (/\b(?:won'?t|will not|not (?:going to|gonna)|can'?t|cannot)\s+(?:be able to\s+)?eat(?:\s+anymore)?\b/i.test(t)) return true;
+  // AND THIS CESSATION MUST APPLY TO EATING ITSELF TOO (#211) — the rule the composed clause below
+  // already states, which this earlier, simpler clause never got. "I can't eat" with a FOOD after
+  // it is a restriction, not a closed day, and the plainest way a client states one went straight
+  // through here:
+  //
+  //     "I can't eat dairy, what can I eat?"
+  //       -> food day CLOSED -> "You said you are done eating today, so I am leaving it there."
+  //
+  // They were asking what they CAN eat and were told they had finished eating. So the verb must be
+  // followed by the end of the clause or by a marker that scopes it in TIME; a food after it means
+  // they named what they avoid, and the dietary owner in memory.ts records exactly that.
+  if (/\b(?:won'?t|will not|not (?:going to|gonna)|can'?t|cannot)\s+(?:be able to\s+)?eat\b(?:\s+(?:any\s?more|again|tonight|today|now|this\s+(?:evening|afternoon|morning)))*\s*(?:[.!?,;]|$)/i.test(t)) return true;
   if (/\bno more food\b/i.test(t)) return true;
   // A STATED CESSATION OF EATING, COMPOSED RATHER THAN LISTED (2026-08-24).
   //

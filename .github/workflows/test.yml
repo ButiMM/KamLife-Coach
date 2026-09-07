@@ -171,6 +171,12 @@ jobs:
       # not move. Real rows, real front door, several turns.
       - name: Durable log turns are one coaching turn on real PostgreSQL
         run: npx tsx script/pg-log-turn-acceptance.ts
+      # FACTS, RETRACTIONS AND SAME-TURN PROPAGATION (#211). Retraction-before-append ordering,
+      # one operation building on another's patch, and unrelated columns left alone are all
+      # properties of a real transaction — a fixture that returns whatever it was handed cannot
+      # show any of them, which is how a retracted diet came back inside its own write.
+      - name: Facts, retractions and same-turn propagation on real PostgreSQL
+        run: npx tsx script/pg-facts-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot

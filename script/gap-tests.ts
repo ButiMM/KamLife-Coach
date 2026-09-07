@@ -4239,8 +4239,19 @@ test("#128/1: a client can take a restriction back", async () => {
     const kept = projectClientFacts({ dietaryRestrictions: "allergic to fish" }, detectFacts(said));
     assert.equal(kept.patch.dietaryRestrictions, undefined, `"${said}" leaves the allergy alone`);
   }
-  assert.equal(projectClientFacts({}, detectFacts("I'm not eating dairy")).patch.dietaryRestrictions,
-    "not eating dairy", "a restriction stated in the negative is still a restriction");
+  // A RESTRICTION STATED IN THE NEGATIVE IS STILL A RESTRICTION — and #211 narrowed WHAT gets
+  // stored, not whether. This asserted the raw span the capture happened to reach ("not eating
+  // dairy"); the column now holds the restriction word itself, because the span form put
+  // "vegan now" in the record and read back out of foodConstraints as two terms. Graded on the
+  // promise instead of the old string: the restriction is recorded, and it reaches the one reader
+  // that decides what may be offered.
+  const negative = projectClientFacts({}, detectFacts("I'm not eating dairy")).patch.dietaryRestrictions;
+  assert.equal(negative, "dairy", "a restriction stated in the negative is still a restriction");
+  assert.ok(foodConstraints({ dietaryRestrictions: negative } as any).terms.some(t => /dairy/i.test(t)),
+    "…and it reaches the constraint reader that governs every suggestion");
+  // …and the narrowing must not swallow the restriction entirely — a column that ends up empty
+  // would pass a "no longer says not eating dairy" check while starving the client of the guard.
+  assert.ok(negative && negative.length > 0, "the narrowed restriction is not an empty column");
 });
 
 // ── #128/4: THE PROTEIN CLOSER ──────────────────────────────────────────────────────────────

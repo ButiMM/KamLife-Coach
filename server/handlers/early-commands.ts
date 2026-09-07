@@ -480,10 +480,38 @@ export async function handleEarlyCommands(ctx: {
     /\b(i (don.?t|no longer|stopped|gave up) eat(ing)?)\b.*\b(meat|pork|chicken|beef|fish|pilchards|animal)\b/i.test(m) ||
     /\b(change|update)\b.*\b(diet(ary)?|food preference|eating)\b.*\b(halal|vegetarian|veggie|vegan|plant.?based)\b/i.test(m)
   ) {
+    // WHAT THE FRONT DOOR COMMITTED THIS TURN, NOT WHAT THIS REGEX RE-READS OFF THE MESSAGE (#211).
+    //
+    // These tests ran on the raw words, and the trigger above matches "i'm … vegan" with anything
+    // in between — so a RETRACTION announced an assertion, and `vegan` was tested before
+    // `vegetarian` so a replacement announced the thing being replaced:
+    //
+    //     "I'm not vegan anymore"        -> "got it — updated to *vegan*"
+    //     "I'm not vegan, I'm vegetarian" -> "got it — updated to *vegan*"
+    //
+    // recordClientFacts has already run at the door, before any routing, and `user` is the row it
+    // committed. Reading the canonical column instead makes this mouth render the one durable
+    // truth rather than hold a second opinion about it: a retraction leaves the column without a
+    // diet and this branch stands down, and a replacement names what the client actually is.
+    // WHAT THIS TURN ACTUALLY DID TO THE RECORD. detectFacts is the one extractor and is asked,
+    // not re-implemented. Without this the branch announced on every MENTION rather than on a
+    // change, so a halal client saying "I'm not vegan anymore" read "updated to *halal*" — a
+    // change that never happened, about a diet they did not just state.
+    const { detectFacts: _detect } = await import("../memory");
+    const _factsThisTurn = _detect(message);
+    const _takenBack = _factsThisTurn.retract?.dietaryRestrictions;
+    const _assertedThisTurn = _factsThisTurn.dietaryRestrictions;
+    const _dietTruth = String(user.dietaryRestrictions || "").toLowerCase();
     let _newDietFlag: string | null = null;
-    if (/\bvegan\b/i.test(m) || /\bplant.?based\b/i.test(m)) _newDietFlag = "diet:vegan";
-    else if (/\b(vegetarian|veggie)\b/i.test(m) || /\b(don.?t|no longer|stopped|gave up)\s+eat(ing)?\b.*\b(meat|chicken|beef|fish|pilchards|animal)\b/i.test(m.toLowerCase())) _newDietFlag = "diet:vegetarian";
-    else if (/\b(halal|muslim|islam|haram)\b/i.test(m)) _newDietFlag = "diet:halal";
+    if (!_assertedThisTurn) _newDietFlag = null;
+    else
+    if (/\bvegan\b/.test(_dietTruth) || /\bplant.?based\b/.test(_dietTruth)) _newDietFlag = "diet:vegan";
+    else if (/\b(vegetarian|veggie)\b/.test(_dietTruth)) _newDietFlag = "diet:vegetarian";
+    else if (/\b(halaal|halal)\b/.test(_dietTruth)) _newDietFlag = "diet:halal";
+    // The column is the authority on WHAT they are; it does not carry "I stopped eating meat", so
+    // that phrasing is still read off the message — and only when the column has not answered.
+    else if (/\b(don.?t|no longer|stopped|gave up)\s+eat(ing)?\b.*\b(meat|chicken|beef|fish|pilchards|animal)\b/i.test(m)) _newDietFlag = "diet:vegetarian";
+    else if (!_dietTruth && /\b(muslim|islam|haram)\b/i.test(m)) _newDietFlag = "diet:halal";
 
     if (_newDietFlag) {
       const _existingNotes = (user.profileNotes || "").replace(/\bdiet:\w+\b/g, "").trim();
@@ -504,6 +532,29 @@ export async function handleEarlyCommands(ctx: {
       const _dietReply = `${firstName ? firstName + ", g" : "G"}ot it — updated to *${_dietLabel}*. ${_dietNote}\n\nYour protein sources from now on: *${_dietProteins}*.\n\nType *meal plan* to get an updated eating plan.`;
       await logChat(user.id, message, _dietReply, "DIET_PREFERENCE_UPDATE");
       return _dietReply;
+    }
+
+    // AND A RETRACTION IS AN ANSWER TOO (#211). The trigger above fires on "I'm not vegan
+    // anymore" — the client is talking about their diet — but the column correctly holds nothing
+    // afterwards, so with the announcement suppressed the turn fell to the GPT fallback and the
+    // client read "Sorry Kam, I didn't quite catch that" after correcting their own record.
+    //
+    // detectFacts is the one extractor and is asked, not re-implemented; the stale `diet:` flag is
+    // cleared in the same breath so the meal-plan reader cannot keep building vegan plans off a
+    // restriction the canonical column no longer has.
+    // Confirmed only when the record now carries NO diet at all — something was genuinely taken
+    // off, or they never had one, and either way the sentence is true. A client who still holds a
+    // different restriction (halal) has had nothing changed by this, so the branch stands down and
+    // the rest of the pipeline answers them.
+    if (_takenBack && !_dietTruth) {
+      const _cleared = (user.profileNotes || "").replace(/\bdiet:\w+\b/g, "").trim();
+      if (_cleared !== (user.profileNotes || "").trim()) {
+        await db.update(users).set({ profileNotes: _cleared || null }).where(eq(users.phoneNumber, phone));
+        user.profileNotes = _cleared || null;
+      }
+      const _offReply = `${firstName ? firstName + ", g" : "G"}ot it — you're not ${_takenBack} anymore. I've taken that off your record.\n\nEverything I suggest from here is back to the full list.`;
+      await logChat(user.id, message, _offReply, "DIET_PREFERENCE_RETRACTED");
+      return _offReply;
     }
   }
 
