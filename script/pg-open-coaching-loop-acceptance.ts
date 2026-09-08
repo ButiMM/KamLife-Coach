@@ -19,25 +19,6 @@ process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
 
-// This suite grades an OPEN TRAINING MOVE, so its fixture must actually be on a training day.
-// It previously inherited the runner's weekday: Monday was green, Tuesday/Sunday was red because
-// the reactive owner correctly held training on a rest day while the setup still demanded the
-// Monday instruction. Freeze to noon on this SAST week's Monday; chronology remains relative and
-// the product contract is stricter, not weaker — a real rest day is never turned into training.
-const RealDate = Date;
-const wallClockNow = RealDate.now();
-const { sastWeekStart: acceptanceWeekStart } = await import("../server/sast");
-const acceptanceNow = acceptanceWeekStart(wallClockNow).getTime() + 12 * 3_600_000;
-const AcceptanceDate = function(this: unknown, ...args: unknown[]) {
-  if (!new.target) return new RealDate(acceptanceNow).toString();
-  return args.length ? new (RealDate as any)(...args) : new RealDate(acceptanceNow);
-} as unknown as DateConstructor;
-AcceptanceDate.now = () => acceptanceNow;
-AcceptanceDate.parse = RealDate.parse;
-AcceptanceDate.UTC = RealDate.UTC;
-AcceptanceDate.prototype = RealDate.prototype;
-globalThis.Date = AcceptanceDate;
-
 const REAL = console.log.bind(console);
 console.log = console.warn = console.error = () => {};
 
@@ -68,7 +49,10 @@ async function freshUser(over: Record<string, unknown> = {}) {
     age: 34,
     heightCm: 165,
     currentWeight: "75.0",
-    trainingDaysPerWeek: 1,
+    // The journey is about an OPEN TRAINING MOVE. Six days keeps this synthetic client on the
+    // product's real Mon–Sat schedule instead of accidentally grading a rest-day HOLD as a lost
+    // instruction. All chronology stays on the one actual application/database clock.
+    trainingDaysPerWeek: 6,
     calorieTarget: 2000,
     proteinTarget: 120,
     stepsTarget: 0,
