@@ -123,6 +123,9 @@ interface TurnScope {
      */
     canonicalKind?: string | null;
     canonicalTodo?: string | null;
+    /** Which existing training intervention was actually selected. Persisted only if the
+     * reconciled reply below really hands that instruction out to the client. */
+    canonicalIntervention?: "standard" | "minimum" | null;
     /**
      * THE WHOLE REPLY for a decision turn, rendered deterministically from chooseAction. On a
      * decision turn this REPLACES the model's prose — the model is not the author of a turn that
@@ -544,6 +547,24 @@ export async function inTurn<T>(inputType: string, inputText: string, fn: () => 
         return result;
       }
       const finalReply = await reconcileTurnReply(turnStore.getStore()!, result);
+      const scope = turnStore.getStore()!;
+      const todo = String(scope.evidence?.canonicalTodo || "").trim();
+      // A DECISION IS NOT AN OPEN ASK UNTIL IT LEAVES THE TURN (#208 post-merge repair).
+      // canonicalDecision is also called while preparing model context. Persisting there made
+      // that private read look like a delivered instruction; the final composer then saw its own
+      // phantom loop, chose HOLD, and reduced "2L of water" to a receipt with no training move.
+      // This is the existing durable owner, reached only after reconciliation, and the exact
+      // canonical instruction must still be present in the string handed back to the webhook.
+      if (scope.userId && scope.evidence?.canonicalKind === "train"
+          && !scope.evidence.openLoopRef && todo && finalReply.includes(todo)) {
+        const { ensureOpenTrainingLoop } = await import("../memory");
+        const { sastDayKey } = await import("../sast");
+        const opened = await ensureOpenTrainingLoop(
+          { id: scope.userId, awaitingInputType: null }, sastDayKey(), "reactive", Date.now(),
+          scope.evidence.canonicalIntervention === "minimum" ? "minimum" : "standard",
+        );
+        if (opened) turnEvidence({ openLoopRef: opened.ref, openLoopKind: "train" });
+      }
       resolveFinalReply(finalReply);
       return finalReply as T;
     } catch (err) {

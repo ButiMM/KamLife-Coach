@@ -85,7 +85,7 @@ export async function canonicalDecision(
     const { getTodayWorkoutState } = await import("../workout-state");
     const { readHealthState } = await import("../health-state");
     const { getDisplayName } = await import("../utils");
-    const { ensureOpenTrainingLoop, loadOpenTrainingLoop, weekendInvestigationAnswered } = await import("../memory");
+    const { loadOpenTrainingLoop, weekendInvestigationAnswered } = await import("../memory");
     const { getGoalProfile } = await import("../goal-profiles");
     const { getBehaviourPatternContext } = await import("../intelligence/profile");
 
@@ -165,18 +165,14 @@ export async function canonicalDecision(
     const { formatOneAction } = await import("../one-action");
     const rendered = act.kind === "hold" ? "" : formatOneAction(act, getDisplayName(user) || undefined);
 
-    const openedTraining = act.kind === "train"
-      ? await ensureOpenTrainingLoop(user, sastDayKey(), "reactive", Date.now(),
-          act.intervention === "minimum_training" ? "minimum" : "standard")
-      : null;
-
     const { turnEvidence } = await import("../handlers/chat-log");
     turnEvidence({
       canonicalKind: act.kind,
       canonicalTodo: act.kind === "hold" ? null : act.todo,
       canonicalReply: rendered || null,
-      openLoopRef: openedTraining?.ref || openTraining?.ref || null,
-      openLoopKind: openedTraining || openTraining ? "train" : null,
+      canonicalIntervention: act.intervention === "minimum_training" ? "minimum" : "standard",
+      openLoopRef: openTraining?.ref || null,
+      openLoopKind: openTraining ? "train" : null,
     });
 
     // "hold" means the honest answer is that nothing needs changing. An empty todo is what
