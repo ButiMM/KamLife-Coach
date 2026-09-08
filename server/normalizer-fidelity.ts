@@ -58,15 +58,87 @@ export function normalizerLive(): boolean {
 
 // Words a canonical is MADE of. Everything else it says is a claim about what the client ate,
 // did, or wants — and every one of those has to be traceable to their own words.
+//
+// THIS SET USED TO CARRY MEANING, AND THAT WAS THE HOLE (#234).
+//
+// It also held `breakfast lunch dinner supper snack meal`, `today yesterday morning afternoon
+// evening night tonight`, `steps step workout session training gym`, `change goal muscle gain fat
+// loss recomposition`, `kg kgs calories calorie protein`, `same repeat copy again` and
+// `did do done`. Exempting a word from the invention check says it carries no claim. Every one of
+// those carries a claim, so the check waved through exactly the rewrites that matter most:
+//
+//     "I had a pear"              -> "i had a pear for breakfast"      a meal slot, invented
+//     "I trained"                 -> "i trained yesterday"             a day, invented
+//     "had eggs"                  -> "i had eggs in the morning"       a time, invented
+//     "I was busy"                -> "i did my workout"                a session that never happened
+//     "I want to build a bit"     -> "change my goal to muscle gain"   a goal change never asked for
+//     "I didn't train"            -> "i did my workout"                the client's NO, reversed
+//
+// All six were ALLOWED before this cut and all six are measured in the acceptance. What remains
+// here is syntax: pronouns, auxiliaries, articles, prepositions, conjunctions. A word that could
+// finish the sentence "the client told us ___" does not belong in this set.
 const STRUCTURE = new Set([
   "i", "im", "i'm", "id", "i'd", "ill", "i'll", "had", "have", "has", "ate", "eat", "eating",
-  "did", "do", "done", "was", "were", "is", "are", "am", "for", "and", "or", "a", "an", "the",
+  "was", "were", "is", "are", "am", "for", "and", "or", "a", "an", "the",
   "some", "of", "with", "my", "me", "to", "it", "that", "this", "at", "on", "in", "plus", "as",
-  "gonna", "going", "will", "be", "get", "got", "just", "then", "also", "too", "about",
-  "breakfast", "lunch", "dinner", "supper", "snack", "meal", "today", "yesterday", "morning",
-  "afternoon", "evening", "night", "tonight", "steps", "step", "kg", "kgs", "workout", "session",
-  "training", "gym", "change", "goal", "muscle", "gain", "fat", "loss", "recomposition",
-  "calories", "calorie", "protein", "same", "repeat", "copy", "again", "s",
+  "gonna", "going", "will", "be", "get", "got", "just", "then", "also", "too", "about", "s",
+]);
+
+/**
+ * WHEN-WORDS, kept as a named class rather than an exemption.
+ *
+ * They must trace like anything else, with ONE authorisation: a raw message the retro-meal owner
+ * already reads as historical may be restated with a day word it does not literally contain —
+ * "I had pap last night" → "…yesterday" is that owner's translation of the client's own timing,
+ * not the normalizer inventing a day. `isRetroactiveMeal` is that owner and is asked here rather
+ * than re-implemented.
+ */
+const WHEN = new Set([
+  "today", "yesterday", "tomorrow", "morning", "afternoon", "evening", "night", "tonight",
+  "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+]);
+
+/**
+ * The signs of a client saying something did NOT happen.
+ *
+ * A closed token set rather than a pattern, for the same reason the food constraint owner uses one:
+ * a set is read against `words()`, which already strips the apostrophe — so "didn't" arrives as
+ * "didn" and is listed as such rather than needing a pattern to anticipate every spelling of it.
+ * It also keeps this file's regex count where it was; the budget is not raised for a brake.
+ *
+ * `workout.ts` holds NEGATED_SESSION for a NARROWER question — did the client negate a training
+ * session — and is deliberately not merged with this. That one decides whether to log; this one
+ * decides whether a rewrite may speak. Folding them would give one owner two jobs.
+ */
+const NEGATORS = new Set([
+  "no", "not", "never", "none", "without", "skipped", "missed", "failed", "forgot", "couldnt",
+  "didn", "dont", "doesnt", "havent", "hasnt", "hadnt", "wasnt", "werent", "isnt", "arent",
+  "wont", "cant", "couldn", "shouldnt", "wouldnt", "nothing", "neither", "nor",
+]);
+/**
+ * A negation the CLIENT is making about their own action.
+ *
+ * "you missed the black coffee yesterday" negates the COACH's logging, not the client's eating —
+ * they are correcting our record and the food really was eaten. Reading that as "the client says
+ * it did not happen" rejected an honest rewrite, which the recorded corpus caught immediately. So
+ * a negator directly after "you" is the client talking about us, and is not their No.
+ */
+const negates = (s: string): boolean => {
+  const ws = words(s);
+  return ws.some((w, i) => NEGATORS.has(w) && !["you", "u", "your", "youre", "ur"].includes(ws[i - 1] || ""));
+};
+
+/**
+ * What a LOOKUP names. A message that is only a question discards nothing by becoming a canonical
+ * command — "how many calories do I have left?" → "today's calories" is routing, not testimony,
+ * and rule 2 already says so. These words may therefore appear in such a canonical without
+ * tracing, because they name what is being ASKED FOR rather than claiming what the client did.
+ * Deliberately narrow, and only ever reachable when the canonical reports nothing itself, so
+ * "what should I eat?" → "i had pap for lunch" stays blocked.
+ */
+const LOOKUP = new Set([
+  "today", "calories", "calorie", "protein", "steps", "step", "weight", "kg", "kgs",
+  "left", "total", "totals", "remaining",
 ]);
 
 // Canonicalisation the classifier is explicitly asked to do (see the prompt in gpt.ts). These are
@@ -77,6 +149,9 @@ const TRANSLATIONS: Record<string, string[]> = {
   bread: ["isonka", "brood"],
   eggs: ["amaqanda", "mazai", "eier"],
   chicken: ["inkukhu", "kgoho", "hoender"],
+  // A MEAL SLOT NAMED IN ANOTHER LANGUAGE IS STILL THE CLIENT NAMING IT (#234).
+  // "Nditye isonka namaqanda kusasa" states the slot; only the language differs.
+  breakfast: ["kusasa", "ekuseni", "ontbyt"],
 };
 
 const words = (s: string): string[] =>
@@ -85,14 +160,55 @@ const words = (s: string): string[] =>
     .replace(/[^\w\s-]/g, " ")
     .split(/\s+/).filter(Boolean);
 
+/**
+ * Irregular forms of one verb. Morphology, not meaning: a client who wrote "done" and a canonical
+ * that says "did" are making the same claim, and the stemmer below cannot see that.
+ */
+const FORMS: Record<string, string[]> = {
+  did: ["do", "done", "doing"],
+  done: ["do", "did", "doing"],
+  doing: ["do", "did", "done"],
+  ate: ["eat", "eaten", "eating"],
+  had: ["have", "has", "having"],
+};
+
 /** Does this canonical word trace back to something the client actually wrote? */
 function traces(word: string, originalLower: string): boolean {
   if (word.length < 3) return true;                          // too short to be a claim on its own
   if (originalLower.includes(word)) return true;
-  const stem = word.replace(/(?:es|s)$/, "");                // veggies/veggie, eggs/egg
-  if (stem.length >= 3 && originalLower.includes(stem)) return true;
+  // veggies/veggie, eggs/egg, trained/train, training/train — the same claim in another form is
+  // not a new claim. Widened from `s|es` only, so that tightening STRUCTURE does not start
+  // blocking honest paraphrase along with the inventions.
+  for (const stem of [word.replace(/(?:es|s)$/, ""), word.replace(/(?:ed|ing)$/, "")]) {
+    if (stem.length >= 3 && originalLower.includes(stem)) return true;
+  }
+  for (const src of FORMS[word] || []) if (originalLower.includes(src)) return true;
   for (const src of TRANSLATIONS[word] || []) if (originalLower.includes(src)) return true;
+  // A TYPO IS STILL THE CLIENT'S WORD (#234). "Luch / Tin fish / Rice" → "…for lunch" is the
+  // flagship case this gate was built to ALLOW: they wrote the meal slot, they misspelled it.
+  // Tightening STRUCTURE made that a strict-trace question for the first time, so one edit of
+  // slack is the difference between reading a typo and inventing a meal. Bounded deliberately:
+  // distance 1, words of four letters or more, so it can forgive a slip and not a different word.
+  if (word.length >= 4) {
+    for (const raw of originalLower.split(/[^a-z]+/)) {
+      if (raw.length >= 4 && withinOneEdit(word, raw)) return true;
+    }
+  }
   return false;
+}
+
+/** True when one insertion, deletion or substitution turns `a` into `b`. */
+function withinOneEdit(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  let i = 0, j = 0, edits = 0;
+  while (i < short.length && j < long.length) {
+    if (short[i] === long[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (short.length === long.length) { i++; j++; } else { j++; }
+  }
+  return edits + (long.length - j) + (short.length - i) <= 1;
 }
 
 /**
@@ -141,10 +257,39 @@ export function normalizerFidelity(original: string, canonical: string): Fidelit
     return { ok: false, reason: "original reports steps; canonical drops the walk" };
   }
 
-  // 5. NOTHING INVENTED. Every claim in the canonical must trace to the client's own words.
+  // 5. THE CLIENT'S "NO" SURVIVES (#234). A rewrite that drops the negation reverses what
+  //    happened: "I didn't train" → "i did my workout" logged a session they had just told us
+  //    they did not do. Every word in that canonical traced — "did" to "didn't", "train" to
+  //    "train" — so the invention check could never have caught it. Negation is not a word, it is
+  //    the sign of the claim.
+  if (negates(orig) && !negates(canon)) {
+    return { ok: false, reason: "original negates; canonical asserts it happened" };
+  }
+
+  // 6. A STATEMENT IS NOT A QUESTION (#234). Rule 2 stops a question being flattened into a log.
+  //    This is the other direction: a canonical that ASKS something the client did not ask puts
+  //    words in their mouth and sends the coach off answering itself.
+  if (looksLikeQuestion(canon) && !looksLikeQuestion(orig)) {
+    return { ok: false, reason: "canonical asks a question the client did not ask" };
+  }
+
+  // 7. NOTHING INVENTED. Every claim in the canonical must trace to the client's own words.
+  //
+  //    The ONE authorised addition is a day word on a message the retro-meal owner already reads
+  //    as historical: "I had pap last night" → "…yesterday" is that owner restating the client's
+  //    own timing. Everything else — a meal slot, a time of day, a day on a message with no
+  //    timing in it at all — has to come from the client.
+  const retroAuthorised = isRetroactiveMeal(orig);
+  // Only when the client ASKED and the canonical claims nothing of its own.
+  const canonReports = canonIntents.hasFoodReport || canonIntents.hasStepsReport
+    || canonIntents.stepCount != null;
+  const lookupAuthorised = looksLikeQuestion(orig) && !carriesFacts && !canonReports;
   for (const w of words(canonLower)) {
     if (STRUCTURE.has(w) || /^\d+$/.test(w)) continue;        // numbers have their own brake
-    if (!traces(w, origLower)) return { ok: false, reason: `canonical invents "${w}"` };
+    if (traces(w, origLower)) continue;
+    if (WHEN.has(w) && retroAuthorised) continue;
+    if (LOOKUP.has(w) && lookupAuthorised) continue;
+    return { ok: false, reason: `canonical invents "${w}"` };
   }
 
   return { ok: true, reason: "faithful" };

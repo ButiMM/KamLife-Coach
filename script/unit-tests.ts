@@ -1581,6 +1581,61 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(normalizerFidelity("Nditye isonka namaqanda kusasa", "i had bread and eggs for breakfast").ok, true);
   });
 
+  // ── THE SEMANTIC-ADDITION CLASS (#234) ──────────────────────────────────────────────────────
+  //
+  // The live founder turn "I had a pear" -> "i had a pear for breakfast" is the evidence, not the
+  // scope. `STRUCTURE` exempted meal slots, day words, times, activity nouns and goal vocabulary
+  // from the invention check, so the gate waved through every rewrite that ADDED meaning of those
+  // kinds. Each row below was ALLOWED before this cut. They are asserted as a class, because a
+  // gate that only knows about pears is the same gate with one more special case.
+  test("normalizer fidelity: unsupported semantic additions fail closed", async () => {
+    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
+    const invented: Array<[string, string, string]> = [
+      ["meal slot (the founder turn)", "I had a pear", "i had a pear for breakfast"],
+      ["meal slot, second phrasing", "ate chicken and rice", "i had chicken and rice for dinner"],
+      ["a day the client never named", "I trained", "i trained yesterday"],
+      ["a time of day", "had eggs", "i had eggs in the morning"],
+      ["a goal change never asked for", "I want to build a bit", "change my goal to muscle gain"],
+      ["a session that never happened", "I was busy", "i did my workout"],
+    ];
+    for (const [why, raw, canon] of invented) {
+      assert.equal(normalizerFidelity(raw, canon).ok, false, `${why}: "${raw}" -> "${canon}"`);
+    }
+
+    // NEGATION IS NOT A WORD, IT IS THE SIGN OF THE CLAIM. Every word of "i did my workout" traces
+    // to "I didn't train" — "did" to "didn't", the rest is structure — so the invention check
+    // could never have caught the client's No being reversed. It has its own rule.
+    assert.equal(normalizerFidelity("I didn't train", "i did my workout").ok, false);
+    assert.equal(normalizerFidelity("I didn't train", "i did train").ok, false);
+    assert.match(normalizerFidelity("I didn't train", "i did train").reason, /negates/i);
+
+    // …and the other direction of rule 2: a canonical may not ASK what the client did not ask.
+    assert.equal(normalizerFidelity("pap and eggs", "pap and eggs?").ok, false);
+  });
+
+  test("normalizer fidelity: legitimate rewrites still survive the tightening", async () => {
+    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
+    // A gate that refuses everything would satisfy every assertion above. These are the rewrites
+    // the normalizer exists to make, and each one must still pass.
+    const kept: Array<[string, string, string]> = [
+      ["client stated the slot", "had a pear for breakfast", "i had a pear for breakfast"],
+      ["client stated the day", "I trained yesterday", "i trained yesterday"],
+      ["retro timing, translated", "I had pap last night", "i had pap yesterday"],
+      ["SA-language translation", "ngidle ipapa", "i had pap"],
+      ["a verb in another form", "workout done", "i did my workout"],
+      ["a typo is still their word", "Luch\nTin fish\nRice", "i had tin fish and rice for lunch"],
+    ];
+    for (const [why, raw, canon] of kept) {
+      assert.equal(normalizerFidelity(raw, canon).ok, true,
+        `${why}: "${raw}" -> "${canon}" was refused: ${normalizerFidelity(raw, canon).reason}`);
+    }
+
+    // A CORRECTION ABOUT OUR RECORD IS NOT THE CLIENT NEGATING THEMSELVES. "you missed X" says we
+    // failed to log it, and the food was really eaten — reading it as their No refused an honest
+    // rewrite, which the recorded corpus caught the moment the negation rule went in.
+    assert.equal(normalizerFidelity("you missed the black coffee", "i had black coffee").ok, true);
+  });
+
   test("normalizer fidelity: a pure question may still become a lookup", async () => {
     const { normalizerFidelity } = await import("../server/normalizer-fidelity");
     // Nothing is discarded when the question IS the whole message, so this rewrite stays legal —
