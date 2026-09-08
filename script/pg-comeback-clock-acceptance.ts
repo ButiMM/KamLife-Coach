@@ -48,7 +48,7 @@ const { pool, db } = await import("../server/db");
 const schema = await import("../shared/schema");
 const { handleMessage } = await import("../server/routes");
 const { resolveReentry } = await import("../server/understanding/reentry");
-const { lastExecutionAtForUser } = await import("../server/understanding/reentry-bridge");
+const { executionEvidenceForUser } = await import("../server/understanding/reentry-bridge");
 
 let failed = 0;
 const chk = (ok: boolean, msg: string, evidence = "") => {
@@ -56,12 +56,13 @@ const chk = (ok: boolean, msg: string, evidence = "") => {
   REAL(`  ${ok ? "PASS" : "FAIL"}  ${msg}${!ok && evidence ? `\n          ${evidence}` : ""}`);
 };
 
-/** Midday of the SAST day `n` days back — unambiguous whatever hour this suite runs. */
-const middaySastDaysAgo = (n: number) => {
+/** A named hour of the SAST day `n` days back — unambiguous whatever hour this suite runs. */
+const sastDayAt = (n: number, hhmm: string) => {
   const key = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg" })
     .format(new Date(Date.now() - n * 86_400_000));
-  return new Date(`${key}T12:00:00+02:00`);
+  return new Date(`${key}T${hhmm}:00+02:00`);
 };
+const middaySastDaysAgo = (n: number) => sastDayAt(n, "12:00");
 
 /** The shapes a comeback greeting can take. Deliberately broader than the one string we emit. */
 const WELCOME = /welcome back|good to (have you|see you)|you'?re back|glad you'?re back|where you left off|picking up where|clean restart|start again|fresh start/i;
@@ -132,9 +133,10 @@ REAL("\n=== 3 · WHAT THEY DID WHILE THEY WERE QUIET ===");
   await pool.query(`INSERT INTO workout_logs (user_id, logged_at, workout_completed) VALUES ($1,$2,true)`,
     [c.id, middaySastDaysAgo(3)]);
 
-  const seen = await lastExecutionAtForUser(c.id);
-  chk(!!seen, "the boundary reads execution evidence from the rows that already store it",
-    String(seen));
+  const seen = await executionEvidenceForUser(c.id);
+  chk(!!seen.lastExecutionAt && !!seen.lastWorkoutAt,
+    "the boundary reads execution evidence from the rows that already store it",
+    JSON.stringify(seen));
 
   const reply = await ask(c.phone, BACK);
   chk(/\b3 days away\b/.test(reply), "the gap stated is the one since they last DID something, not since they last wrote",
@@ -166,6 +168,50 @@ REAL("\n=== 3 · WHAT THEY DID WHILE THEY WERE QUIET ===");
     `execution=${r.daysSinceLastExecution}d contact=${r.daysSinceLastContact}d`);
   chk(!/while you were quiet/i.test(await ask(stale.phone, BACK)),
     "CONTROL: …and the reply does not claim they kept going");
+}
+
+REAL("\n=== 3B · THE SAME DAY HAS AN ORDER, AND TRAINING IS NOT ANY ACTIVITY ===");
+{
+  // ORDERING IS BETWEEN INSTANTS, NOT BETWEEN DAY AGES. A client who wrote on Sunday MORNING and
+  // then trained on Sunday EVENING did that workout during the silence — but both timestamps are
+  // the same number of SAST days old, so comparing ages says "not newer" and the evening
+  // disappears. The displayed age is a day count; the ordering question never was.
+  const evening = await client("EveningTrainer", { lastActiveAt: sastDayAt(2, "08:00") });
+  await pool.query(`INSERT INTO workout_logs (user_id, logged_at, workout_completed) VALUES ($1,$2,true)`,
+    [evening.id, sastDayAt(2, "19:00")]);
+  const eveningReply = await ask(evening.phone, BACK);
+  chk(/while you were quiet/i.test(eveningReply),
+    "a workout logged the evening AFTER the last morning message counts as during the silence",
+    JSON.stringify((eveningReply.match(/[^\n]*Training:[^\n]*/) || ["(no training line)"])[0]));
+
+  // THE CONTROL for that ordering, and the reason day-ages were used in the first place: a durable
+  // row written BY the last turn is part of that conversation, not evidence of a silent streak.
+  // The turn stamps lastActiveAt and the log within the same second, in no guaranteed order.
+  const sameTurn = await client("LoggedThenLeft", { lastActiveAt: sastDayAt(3, "18:00") });
+  await pool.query(`INSERT INTO workout_logs (user_id, logged_at, workout_completed) VALUES ($1,$2,true)`,
+    [sameTurn.id, new Date(sastDayAt(3, "18:00").getTime() + 400)]);
+  const sameTurnReply = await ask(sameTurn.phone, BACK);
+  chk(!/while you were quiet/i.test(sameTurnReply),
+    "CONTROL: a log written by the last turn itself is not execution during a silence that had not started",
+    JSON.stringify((sameTurnReply.match(/[^\n]*Training:[^\n]*/) || [""])[0]));
+
+  // ONE FLAG WAS ANSWERING TWO QUESTIONS. "Did they do anything while quiet?" is correctly
+  // type-agnostic — a meal is engagement. "Did they TRAIN while quiet?" is not: this client's only
+  // sessions predate the silence, and saying otherwise tells them about training they did not do.
+  const ate = await client("AteButDidNotTrain", { lastActiveAt: middaySastDaysAgo(9) });
+  await pool.query(
+    `INSERT INTO meal_logs (user_id, logged_at, meal_label, kcal_int, protein_int, items, raw_message, source)
+     VALUES ($1, $2, 'lunch', 500, 20, $3, 'seed', 'sa_scanner')`,
+    [ate.id, middaySastDaysAgo(3), JSON.stringify([{ name: "pap", grams: 200 }])]);
+  await pool.query(`INSERT INTO workout_logs (user_id, logged_at, workout_completed) VALUES ($1,$2,true)`,
+    [ate.id, middaySastDaysAgo(12)]);
+  const ateReply = await ask(ate.phone, BACK);
+  chk(/\b3 days away\b/.test(ateReply),
+    "a meal during the silence still moves the gap — engagement is engagement",
+    JSON.stringify((ateReply.match(/[^\n]*away[^\n]*/) || ["(no gap stated)"])[0]));
+  chk(/before you went quiet/i.test(ateReply) && !/while you were quiet/i.test(ateReply),
+    "…but the TRAINING line is not credited by it, because every session predates the silence",
+    JSON.stringify((ateReply.match(/[^\n]*Training:[^\n]*/) || ["(no training line)"])[0]));
 }
 
 REAL("\n=== 7 · NEGATIVE CONTROL — A SINGLE QUIET DAY IS NOT A COMEBACK ===");

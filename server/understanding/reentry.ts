@@ -34,8 +34,15 @@ export interface ReentryResolution {
    * us, and can write to us without executing.
    */
   daysSinceLastExecution: number | null;
-  /** Did they execute DURING the silence? True only when evidence is newer than last contact. */
+  /** Did they do ANYTHING durable during the silence — meal, workout or steps? */
   executedDuringAbsence: boolean;
+  /**
+   * Did they TRAIN during the silence? Deliberately separate from `executedDuringAbsence`: a
+   * client who logged meals while quiet but whose last session predates the gap has engaged and
+   * has NOT trained, and a coach that congratulates them on training tells them about a workout
+   * they did not do. Any surface making a claim about sessions reads this one.
+   */
+  trainedDuringAbsence: boolean;
   isReturning: boolean;
   hasExplicitReturnSignal: boolean;
   shouldHandleComeback: boolean;
@@ -59,20 +66,37 @@ const PROFILE_UPDATE = /\b(train(ing)?\s+(at|from|to)?\s*(home|gym)|home\s+worko
  * second definition of what a day is.
  */
 export function daysSinceContact(lastActiveAt: unknown, nowMs = Date.now()): number | null {
-  if (!lastActiveAt) return null;
-  // A TIMESTAMP IS A TIMESTAMP (#221). This did `new Date(String(x))`, which turns an epoch
-  // number into the string "1757289600000" and then into an Invalid Date — so a caller holding
-  // milliseconds got a silent `null`, read downstream as "we have never heard from them" rather
-  // than as the number they actually passed. Date and ISO string both still work; the number no
-  // longer falls through a stringify.
-  const at = typeof lastActiveAt === "number"
-    ? lastActiveAt
-    : lastActiveAt instanceof Date
-      ? lastActiveAt.getTime()
-      : new Date(String(lastActiveAt)).getTime();
-  if (!Number.isFinite(at) || at > nowMs) return null;
+  const at = instantOf(lastActiveAt);
+  if (at === null || at > nowMs) return null;
   return Math.max(0, sastDaysBetween(at, nowMs));
 }
+
+/**
+ * A TIMESTAMP IS A TIMESTAMP (#221). This module did `new Date(String(x))`, which turns an epoch
+ * number into the string "1757289600000" and then into an Invalid Date — so a caller holding
+ * milliseconds got a silent `null`, read downstream as "we have never heard from them" rather than
+ * as the number they actually passed. Date, ISO string and number all mean the same instant here.
+ *
+ * It is one function rather than a line inside `daysSinceContact` because the DAY AGE and the
+ * ORDERING of two events are different questions asked of the same reading, and they must not
+ * disagree about what a caller's value meant.
+ */
+function instantOf(at: unknown): number | null {
+  if (!at) return null;
+  const ms = typeof at === "number" ? at
+    : at instanceof Date ? at.getTime()
+    : new Date(String(at)).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * A durable row written BY the client's last turn lands within the same second as the contact
+ * stamp that turn wrote, in no guaranteed order — the handlers set `lastActiveAt` in the same
+ * update that files the log. Such a row is part of that conversation, not evidence of a silent
+ * streak, so "after the last contact" means after it by more than one turn's width. The smallest
+ * absence that can reach this code is two SAST days, so nothing real sits near this boundary.
+ */
+const SAME_TURN_MS = 5 * 60_000;
 
 /**
  * The gap at which a client counts as RETURNING. Lives here and nowhere else — this number was
@@ -130,21 +154,35 @@ export function isProfileUpdateMessage(message: string): boolean {
 export function resolveReentry(input: {
   lastActiveAt?: unknown;
   lastExecutionAt?: unknown;
+  lastWorkoutAt?: unknown;
   message: string;
   nowMs?: number;
 }): ReentryResolution {
-  const { daysSinceLastContact: days, isReturning } = contactState(input.lastActiveAt, input.nowMs);
+  const nowMs = input.nowMs ?? Date.now();
+  const { daysSinceLastContact: days, isReturning } = contactState(input.lastActiveAt, nowMs);
   const hasExplicitReturnSignal = isExplicitReturnSignal(input.message);
   const shouldHandleComeback = isReturning && hasExplicitReturnSignal && !isProfileUpdateMessage(input.message);
-  const daysSinceLastExecution = daysSinceContact(input.lastExecutionAt, input.nowMs);
-  // Newer than contact — strictly, so a log written in the same turn as the last message is not
-  // read as execution during a silence that had not started yet.
-  const executedDuringAbsence =
-    days !== null && daysSinceLastExecution !== null && daysSinceLastExecution < days;
+  const daysSinceLastExecution = daysSinceContact(input.lastExecutionAt, nowMs);
+
+  // ORDERING IS BETWEEN INSTANTS; ONLY THE DISPLAYED AGE IS A DAY COUNT (#221 review).
+  // This compared the two SAST day ages — `daysSinceLastExecution < days` — which cannot see
+  // inside a day. A client who wrote on Sunday MORNING and trained on Sunday EVENING has both
+  // events at the same age, so the evening session read as "not newer than contact" and was filed
+  // under the time before the silence it actually happened in. Days are the right unit for telling
+  // someone how long they were gone and the wrong one for asking which of two events came first.
+  const contactAt = instantOf(input.lastActiveAt);
+  const afterLastContact = (at: unknown) => {
+    const ms = instantOf(at);
+    return ms !== null && contactAt !== null && ms > contactAt + SAME_TURN_MS && ms <= nowMs;
+  };
+  const executedDuringAbsence = afterLastContact(input.lastExecutionAt);
+  const trainedDuringAbsence = afterLastContact(input.lastWorkoutAt);
+
   return {
     daysSinceLastContact: days,
     daysSinceLastExecution,
     executedDuringAbsence,
+    trainedDuringAbsence,
     isReturning,
     hasExplicitReturnSignal,
     shouldHandleComeback,

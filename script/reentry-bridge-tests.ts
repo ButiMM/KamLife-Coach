@@ -40,6 +40,7 @@ assert.deepEqual(
     daysSinceLastContact: 10,
     daysSinceLastExecution: null,
     executedDuringAbsence: false,
+    trainedDuringAbsence: false,
     isReturning: true,
     hasExplicitReturnSignal: true,
     shouldHandleComeback: true,

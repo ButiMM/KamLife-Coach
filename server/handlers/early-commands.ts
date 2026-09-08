@@ -38,7 +38,7 @@ import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from 
 import { handleAdviceCommands } from "./advice-commands";
 import { handleFoodCommands } from "./food-commands";
 import { PRICE_ESTIMATE_NOTE } from "../reply-contract";
-import { resolveReentryForUser, shouldHandleComebackForUser, lastExecutionAtForUser } from "../understanding/reentry-bridge";
+import { resolveReentryForUser, shouldHandleComebackForUser, executionEvidenceForUser } from "../understanding/reentry-bridge";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -1289,9 +1289,11 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // which now folds in the newest durable meal/workout/step row. Only fetched once the cheap
   // message test has already passed, so an ordinary turn pays nothing for it.
   const mayBeComeback = shouldHandleComebackForUser({ user, message: m });
+  const evidence = mayBeComeback ? await executionEvidenceForUser(user.id) : null;
   const reentry = resolveReentryForUser({
     user, message: m,
-    lastExecutionAt: mayBeComeback ? await lastExecutionAtForUser(user.id) : undefined,
+    lastExecutionAt: evidence?.lastExecutionAt,
+    lastWorkoutAt: evidence?.lastWorkoutAt,
   });
   const isComeback = reentry.shouldHandleComeback;
 
@@ -1362,7 +1364,12 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
         // days, which includes the absence itself, so a session done DURING the silence was filed
         // under the time before it. Naming when it happened is the difference between a coach who
         // noticed they kept going and one that plainly did not.
-        ? (reentry.executedDuringAbsence
+        //
+        // A SENTENCE ABOUT TRAINING READS TRAINING EVIDENCE (#221 review). This asked
+        // `executedDuringAbsence`, which is satisfied by a meal or a step count — so a client who
+        // ate while quiet and last trained before the gap was congratulated for sessions they did
+        // not do. The gap number stays type-agnostic; only this claim narrows.
+        ? (reentry.trainedDuringAbsence
             ? `🏋️ Training: *${sessions}* session${sessions !== 1 ? "s" : ""} in the last 14 days — including while you were quiet 👊`
             : `🏋️ Training: *${sessions}* session${sessions !== 1 ? "s" : ""} in the 14 days before you went quiet`)
         : `🏋️ Training: no sessions logged in the 14 days before your absence`);

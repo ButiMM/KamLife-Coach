@@ -42,7 +42,9 @@ PY
 cat > /tmp/221p/2.py <<'PY'
 p = "server/handlers/early-commands.ts"; s = open(p).read()
 before = s
-s = s.replace("    lastExecutionAt: mayBeComeback ? await lastExecutionAtForUser(user.id) : undefined,\n", "")
+s = s.replace("""    lastExecutionAt: evidence?.lastExecutionAt,
+    lastWorkoutAt: evidence?.lastWorkoutAt,
+""", "")
 assert s != before, "revert patch matched nothing"
 open(p, "w").write(s)
 PY
@@ -62,7 +64,7 @@ PY
 cat > /tmp/221p/4.py <<'PY'
 p = "server/handlers/early-commands.ts"; s = open(p).read()
 before = s
-s = s.replace("""        ? (reentry.executedDuringAbsence
+s = s.replace("""        ? (reentry.trainedDuringAbsence
             ? `🏋️ Training: *${sessions}* session${sessions !== 1 ? "s" : ""} in the last 14 days — including while you were quiet 👊`
             : `🏋️ Training: *${sessions}* session${sessions !== 1 ? "s" : ""} in the 14 days before you went quiet`)""",
               """        ? `🏋️ Training: *${sessions}* session${sessions !== 1 ? "s" : ""} in the 14 days before you went quiet`""")
@@ -77,8 +79,34 @@ PY
 cat > /tmp/221p/5.py <<'PY'
 p = "server/understanding/reentry.ts"; s = open(p).read()
 before = s
-s = s.replace("    days !== null && daysSinceLastExecution !== null && daysSinceLastExecution < days;",
-              "    daysSinceLastExecution !== null;")
+s = s.replace("    return ms !== null && contactAt !== null && ms > contactAt + SAME_TURN_MS && ms <= nowMs;",
+              "    return ms !== null;")
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY
+
+# ── 6 · event ordering goes back to comparing SAST day AGES ───────────────────────────────────
+#
+# The first Codex P2. Day ages are equal for two events on the same date, so a morning message and
+# an evening workout compare as "not newer" and the evening vanishes into the time before the gap.
+cat > /tmp/221p/6.py <<'PY'
+p = "server/understanding/reentry.ts"; s = open(p).read()
+before = s
+s = s.replace("    return ms !== null && contactAt !== null && ms > contactAt + SAME_TURN_MS && ms <= nowMs;",
+              """    return ms !== null && contactAt !== null && ms <= nowMs
+      && sastDaysBetween(ms, nowMs) < sastDaysBetween(contactAt, nowMs);""")
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY
+
+# ── 7 · the training sentence reads the type-agnostic flag again ──────────────────────────────
+#
+# The second Codex P2. A meal or a step count then satisfies a claim about SESSIONS, and a client
+# who ate while quiet is congratulated for training they did not do.
+cat > /tmp/221p/7.py <<'PY'
+p = "server/handlers/early-commands.ts"; s = open(p).read()
+before = s
+s = s.replace("        ? (reentry.trainedDuringAbsence", "        ? (reentry.executedDuringAbsence")
 assert s != before, "revert patch matched nothing"
 open(p, "w").write(s)
 PY
@@ -91,4 +119,6 @@ run_case "execution evidence never reaches the clock"                           
 run_case "the gap is measured from last CONTACT alone again"                      /tmp/221p/3.py
 run_case "mid-absence training is filed 'before you went quiet' again"            /tmp/221p/4.py
 run_case "any stored log counts as execution during the absence (opposite defect)" /tmp/221p/5.py
+run_case "event ordering compares SAST day AGES again (same-day evening is lost)"  /tmp/221p/6.py
+run_case "the training sentence reads the type-agnostic execution flag again"      /tmp/221p/7.py
 echo "=============================================================================="

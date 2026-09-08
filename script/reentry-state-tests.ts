@@ -83,19 +83,19 @@ assert.equal(isProfileUpdateMessage("I'm back"), false);
 
 assert.deepEqual(
   resolveReentry({ lastActiveAt: "2026-08-15T10:00:00.000Z", message: "I'm back", nowMs: now }),
-  { daysSinceLastContact: 2, daysSinceLastExecution: null, executedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: true, shouldHandleComeback: true },
+  { daysSinceLastContact: 2, daysSinceLastExecution: null, executedDuringAbsence: false, trainedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: true, shouldHandleComeback: true },
 );
 assert.deepEqual(
   resolveReentry({ lastActiveAt: "2026-08-15T10:00:00.000Z", message: "workout", nowMs: now }),
-  { daysSinceLastContact: 2, daysSinceLastExecution: null, executedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: false, shouldHandleComeback: false },
+  { daysSinceLastContact: 2, daysSinceLastExecution: null, executedDuringAbsence: false, trainedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: false, shouldHandleComeback: false },
 );
 assert.deepEqual(
   resolveReentry({ lastActiveAt: "2026-08-15T10:00:00.000Z", message: "I train at home now", nowMs: now }),
-  { daysSinceLastContact: 2, daysSinceLastExecution: null, executedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: false, shouldHandleComeback: false },
+  { daysSinceLastContact: 2, daysSinceLastExecution: null, executedDuringAbsence: false, trainedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: false, shouldHandleComeback: false },
 );
 assert.deepEqual(
   resolveReentry({ lastActiveAt: "2026-08-17T09:00:00.000Z", message: "I'm back", nowMs: now }),
-  { daysSinceLastContact: 0, daysSinceLastExecution: null, executedDuringAbsence: false, isReturning: false, hasExplicitReturnSignal: true, shouldHandleComeback: false },
+  { daysSinceLastContact: 0, daysSinceLastExecution: null, executedDuringAbsence: false, trainedDuringAbsence: false, isReturning: false, hasExplicitReturnSignal: true, shouldHandleComeback: false },
 );
 
 // Consumer boundary: callers receive the canonical result rather than duplicating the rules.
@@ -113,7 +113,7 @@ assert.equal(
 );
 assert.deepEqual(
   resolveReentryForUser({ user: { lastActiveAt: "2026-08-07T10:00:00.000Z" }, message: "sorry I've been busy", nowMs: now }),
-  { daysSinceLastContact: 10, daysSinceLastExecution: null, executedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: true, shouldHandleComeback: true },
+  { daysSinceLastContact: 10, daysSinceLastExecution: null, executedDuringAbsence: false, trainedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: true, shouldHandleComeback: true },
 );
 
 
@@ -179,10 +179,11 @@ console.log("reentry-state-tests: all assertions passed");
     .format(new Date(nowMs - n * 86_400_000))}T12:00:00+02:00`);
 
   const trained = resolveReentry({
-    lastActiveAt: day(9), lastExecutionAt: day(3), message: "I'm back", nowMs });
+    lastActiveAt: day(9), lastExecutionAt: day(3), lastWorkoutAt: day(3), message: "I'm back", nowMs });
   assert.equal(trained.daysSinceLastContact, 9, "contact is still contact");
   assert.equal(trained.daysSinceLastExecution, 3, "and execution is read on the same SAST clock");
   assert.equal(trained.executedDuringAbsence, true, "they kept going while they were quiet");
+  assert.equal(trained.trainedDuringAbsence, true, "and what they did was training");
   assert.equal(trained.shouldHandleComeback, true,
     "the DECISION still keys off contact — they are returning to the conversation either way");
 
@@ -193,15 +194,46 @@ console.log("reentry-state-tests: all assertions passed");
   assert.equal(stale.executedDuringAbsence, false,
     "a log older than the last message is not execution during the silence");
 
-  // CONTROL: same-day execution is not "during an absence" either — the silence had not started.
+  // ORDERING IS BETWEEN INSTANTS (#221 review). This compared SAST day AGES, which are equal for
+  // two events on the same date — so a client who wrote in the morning and trained that evening had
+  // the evening session filed under the time before the silence it actually happened in.
+  const at = (n: number, hhmm: string) => new Date(`${new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Johannesburg" }).format(new Date(nowMs - n * 86_400_000))}T${hhmm}:00+02:00`);
+  const evening = resolveReentry({
+    lastActiveAt: at(4, "08:00"), lastExecutionAt: at(4, "19:00"), lastWorkoutAt: at(4, "19:00"),
+    message: "I'm back", nowMs });
+  assert.equal(evening.executedDuringAbsence, true,
+    "an evening workout is after a morning message, even though both are four days old");
+  assert.equal(evening.daysSinceLastExecution, 4, "…while the DISPLAYED age stays a day count");
+
+  // CONTROL, and the reason day-ages were reached for in the first place: a durable row written BY
+  // the last turn shares that turn's second, in no guaranteed order — the handlers set lastActiveAt
+  // in the same update that files the log. It is conversation, not a silent streak.
+  const sameTurn = resolveReentry({
+    lastActiveAt: at(4, "12:00"), lastExecutionAt: new Date(at(4, "12:00").getTime() + 400),
+    message: "I'm back", nowMs });
+  assert.equal(sameTurn.executedDuringAbsence, false, "meaningfully newer, not merely newer");
+
+  // CONTROL: the same instant is likewise not "during an absence" — the silence had not started.
   const sameDay = resolveReentry({
     lastActiveAt: day(4), lastExecutionAt: day(4), message: "I'm back", nowMs });
   assert.equal(sameDay.executedDuringAbsence, false, "strictly newer, not merely equal");
+
+  // ONE FLAG WAS ANSWERING TWO QUESTIONS (#221 review). A meal during the silence is engagement and
+  // moves the gap; it is not training, and a coach that says otherwise credits a workout that never
+  // happened. The two must be able to disagree, so this asserts them disagreeing.
+  const ateOnly = resolveReentry({
+    lastActiveAt: day(9), lastExecutionAt: day(3), lastWorkoutAt: day(12), message: "I'm back", nowMs });
+  assert.equal(ateOnly.executedDuringAbsence, true, "eating while quiet is still engagement");
+  assert.equal(ateOnly.trainedDuringAbsence, false,
+    "…but the last session predates the silence, so they did not train during it");
+  assert.equal(ateOnly.daysSinceLastExecution, 3, "and the gap is measured from what they DID do");
 
   // CONTROL: no evidence at all must stay null rather than defaulting to a number.
   const none = resolveReentry({ lastActiveAt: day(9), message: "I'm back", nowMs });
   assert.equal(none.daysSinceLastExecution, null, "unknown execution is unknown, not 0");
   assert.equal(none.executedDuringAbsence, false);
+  assert.equal(none.trainedDuringAbsence, false);
 }
 
 console.log("reentry-state-tests: GREEN");
