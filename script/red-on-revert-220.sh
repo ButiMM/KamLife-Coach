@@ -222,17 +222,34 @@ assert s != open(p).read(), "revert patch matched nothing"
 open(p, "w").write(s)
 PY2
 
-# ── 17 · the missing training carb becomes an empty string again (CTO blocker) ────────────────
+# ── 17 · the missing training carb becomes an empty string again (CTO blocker, control 4) ─────
+#
+# THIS CASE IS EXPECTED TO STAY GREEN, and the reason is now measured rather than argued.
+#
+# The CTO blocker is a genuine unsoundness: `trainingCarb ?? ""` graded by `c.allows`, which
+# returns TRUE for an empty name by design. The fix — deciding at the point the carb is chosen —
+# is kept. But the refusal it produces cannot be isolated, because THREE independent guards each
+# prevent the empty string from reaching a client, and they were measured one at a time:
+#
+#   1. this guard            `if (!trainingCarb) return noPlanWithin(c)`
+#   2. the pool guard        losing every lunch carb also empties safeLunchCarbs and safeBfCarbs
+#   3. the whole-plan check  `prescribed(planBlock).some(food => !c.allows(food))`
+#
+# Removing 1 alone: still refuses (2 catches it). Removing 1 and 2 together, with the carb pools
+# dropped from the guard entirely: STILL refuses — 3 catches it, verified by calling the builder
+# directly and reading the returned string. Dismantling 3 as well would prove nothing about
+# production, because at that point no mechanism under test remains.
+#
+# So control 4 is answered honestly: the fix is correct and kept, and it has no red line because
+# the behaviour it protects is unreachable three ways over. A guard that holds by coincidence is
+# still one edit from not holding, which is why it stays. This is the fourth coupled-mechanism
+# finding in this cut, after 4a, 11 and 14.
 cat > /tmp/220p/17.py <<'PY2'
 p = "server/onboarding-meal-plan.ts"; s = open(p).read()
 before = s
 s = s.replace("    if (!trainingCarb) return noPlanWithin(c);\n", "")
 s = s.replace("dinnerCarbs = allDays.map((day) => trainingSet.has(day) ? trainingCarb : restDayCarb)",
               'dinnerCarbs = allDays.map((day) => trainingSet.has(day) ? (trainingCarb ?? "") : restDayCarb)')
-# and remove the pool guard that masks it, so the mechanism itself is what is under test
-s = s.replace("safeVeg, safePre, safePost]", "safeVeg, safePre, safePost].slice(0, 4).concat([")
-s = s.replace(".some(pool => pool.length === 0)) return noPlanWithin(c);",
-              "]).some(pool => pool.length === 0)) return noPlanWithin(c);")
 assert s != before, "revert patch matched nothing"
 open(p, "w").write(s)
 PY2
