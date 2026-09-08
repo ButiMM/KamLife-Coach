@@ -20,6 +20,7 @@ import { ensureOpenTrainingLoop, loadOpenTrainingLoop, loadSituationFrame } from
 import { readHeldConstraints } from "../../held-constraints";
 import { foodConstraints } from "../../food-swaps";
 import { deliveryAccepted } from "../../outbound-delivery";
+import { getBehaviourPatternContext } from "../../intelligence/profile";
 
 /**
  * WHAT WE SAY TO SOMEONE WHO HAS GONE — decided by the ladder, not written here.
@@ -36,11 +37,13 @@ import { deliveryAccepted } from "../../outbound-delivery";
  */
 async function silenceAsk(client: any, daysSilent: number): Promise<string> {
   const firstName = client.name?.split(" ")[0] || undefined;
+  const behaviourPatterns = await getBehaviourPatternContext(client.id);
   const profile = {
     dreamGoal: client.dreamGoal,
     biggestStruggle: client.biggestStruggle,
     lifeContext: client.lifeContext,
     doNotMention: client.doNotMention,
+    behaviourPatterns,
     constraints: foodConstraints(client || {}),
     weeksOnProgramme: Math.max(0, (client.programmeWeek || 1) - 1),
     sessionsTarget: Number(client.trainingDaysPerWeek) || 3,
@@ -483,6 +486,7 @@ export async function runMorningCheckin(): Promise<void> {
         const breakfastAsk = `🍳 What's for breakfast?${repeatSuggestion || ""}`;
         let decisionLine = "";
         let selectedTrainingMove = false;
+        let selectedTrainingIntervention: "standard" | "minimum" = "standard";
         try {
           // ONE READER FOR BOTH CONSTRAINTS (2026-08-25, P0-4b). This was an inline copy of the
           // query that read only the food half — trainingDayIsDeclined existed and had nowhere to
@@ -490,11 +494,13 @@ export async function runMorningCheckin(): Promise<void> {
           // outbound floor and the decision read the same held state about the same day.
           const held = await readHeldConstraints(phone, client);
           const openTraining = await loadOpenTrainingLoop(client);
+          const behaviourPatterns = await getBehaviourPatternContext(client.id);
           const decision = decideProactive(state, {
             dreamGoal: client.dreamGoal,
             biggestStruggle: client.biggestStruggle,
             lifeContext: client.lifeContext,
             doNotMention: client.doNotMention,
+            behaviourPatterns,
             constraints: foodConstraints(client || {}),
             weeksOnProgramme: Math.floor(progDays / 7),
             sessionsTarget: isTodayTrainingDay ? (Number(client.trainingDaysPerWeek) || 3) : 0,
@@ -509,6 +515,7 @@ export async function runMorningCheckin(): Promise<void> {
           });
           decisionLine = decision.line;
           selectedTrainingMove = decision.action.kind === "train";
+          selectedTrainingIntervention = decision.action.intervention === "minimum_training" ? "minimum" : "standard";
           console.log(`[MORNING] ${client.id.slice(-6)} decision=${decision.state} evidence=${decision.evidence} action=${decision.action.kind}`);
         } catch (e) {
           console.warn("[MORNING] one-action skipped:", (e as any)?.message || e);
@@ -531,7 +538,7 @@ export async function runMorningCheckin(): Promise<void> {
           sickYesterday: state.health.sickYesterday,
         }));
         if (selectedTrainingMove && deliveryAccepted(delivery)) {
-          await ensureOpenTrainingLoop(client, todaySAST(), "proactive");
+          await ensureOpenTrainingLoop(client, todaySAST(), "proactive", Date.now(), selectedTrainingIntervention);
         }
       }
     } catch (err) {

@@ -85,13 +85,17 @@ export async function canonicalDecision(
     const { getTodayWorkoutState } = await import("../workout-state");
     const { readHealthState } = await import("../health-state");
     const { getDisplayName } = await import("../utils");
-    const { ensureOpenTrainingLoop, loadOpenTrainingLoop, weekendInvestigationAnswered } = await import("../memory");
+    const { loadOpenTrainingLoop, weekendInvestigationAnswered } = await import("../memory");
     const { getGoalProfile } = await import("../goal-profiles");
+    const { getBehaviourPatternContext } = await import("../intelligence/profile");
 
     const truth = await getProgressTruth(user, { days: 7, weightWindowDays: 28 });
     const weightVerdict = await weightDirectionSpeakable(truth.weight.points, user);
-    const openTraining = await loadOpenTrainingLoop(user);
-    const held = await readHeldConstraints(user.phoneNumber, user).catch(() => ({ foodDayClosed: false, trainingDeclined: false, sick: false }));
+    const [openTraining, held, behaviourPatterns] = await Promise.all([
+      loadOpenTrainingLoop(user),
+      readHeldConstraints(user.phoneNumber, user).catch(() => ({ foodDayClosed: false, trainingDeclined: false, sick: false })),
+      getBehaviourPatternContext(user.id),
+    ]);
     const weekSessions = await sessionsThisCalendarWeek(user.id).catch(() => 0);
     const wState = await getTodayWorkoutState(user).catch(() => ({ type: "REST" as const }));
     const calTarget = Number(user.calorieTarget) || 0;
@@ -128,6 +132,7 @@ export async function canonicalDecision(
       // An unresolved canonical training move is already the client's one thing. Keep it open
       // across turns instead of selecting the same instruction again on every reply.
       trainingAwaitingOutcome: !!openTraining,
+      behaviourPatterns,
       // WHAT THIS CLIENT DOES NOT EAT, and WHETHER THEY JUST ATE A PROPER PROTEIN MEAL (#128).
       // The protein rung names foods and re-issued the instruction the plate had just carried
       // out; both facts already exist, and neither reached the ladder.
@@ -160,17 +165,14 @@ export async function canonicalDecision(
     const { formatOneAction } = await import("../one-action");
     const rendered = act.kind === "hold" ? "" : formatOneAction(act, getDisplayName(user) || undefined);
 
-    const openedTraining = act.kind === "train"
-      ? await ensureOpenTrainingLoop(user, sastDayKey(), "reactive")
-      : null;
-
     const { turnEvidence } = await import("../handlers/chat-log");
     turnEvidence({
       canonicalKind: act.kind,
       canonicalTodo: act.kind === "hold" ? null : act.todo,
       canonicalReply: rendered || null,
-      openLoopRef: openedTraining?.ref || openTraining?.ref || null,
-      openLoopKind: openedTraining || openTraining ? "train" : null,
+      canonicalIntervention: act.intervention === "minimum_training" ? "minimum" : "standard",
+      openLoopRef: openTraining?.ref || null,
+      openLoopKind: openTraining ? "train" : null,
     });
 
     // "hold" means the honest answer is that nothing needs changing. An empty todo is what

@@ -573,7 +573,7 @@ export const dailyConstraints = pgTable("daily_constraints", {
   kind: text("kind").notNull(),
   /** asserted | released */
   state: text("state").notNull(),
-  /** What resolved it: said | workout_logged. The client's words, or their actions. */
+  /** Provenance: said (day constraint) | said_open/said_time | workout_logged[_minimum]. */
   via: text("via").notNull(),
   /** The provider message this came from, when there was one — makes a retry idempotent. */
   sourceMessageId: text("source_message_id"),

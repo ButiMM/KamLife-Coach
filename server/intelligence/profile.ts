@@ -16,9 +16,10 @@
 import { db } from "../db";
 import {
   weightLogs, workoutLogs, mealLogs, stepLogs, chatHistory,
-  clientIntelligenceProfiles,
+  clientIntelligenceProfiles, dailyConstraints,
 } from "../../shared/schema";
 import { eq, gte, and, sql, asc } from "drizzle-orm";
+import { sastDayKey, sastDaysBetween, sastWeekStart } from "../sast";
 
 const DOW_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -28,6 +29,155 @@ interface MonthlySnapshot {
   planned: number;
   proteinDays: number;
   avgWeightKg: number | null;
+}
+
+export type BehaviourPatternKind =
+  | "weekend_training_misses"
+  | "work_pressure_training_misses"
+  | "minimum_training_reengaged";
+
+export interface BehaviourPatternEvidence {
+  id: number;
+  day: string;
+  source: "daily_constraints";
+  outcome: "failed" | "completed";
+  reason?: "time";
+  intervention?: "minimum";
+}
+
+export interface BehaviourPattern {
+  kind: BehaviourPatternKind;
+  /** Inactive records stay visible for provenance but have no decision authority. */
+  status: "active" | "decayed" | "superseded";
+  supportCount: number;
+  contradictionCount: number;
+  confidence: "observed" | "supported" | "strong";
+  firstObservedDay: string;
+  lastObservedDay: string;
+  evidence: BehaviourPatternEvidence[];
+}
+
+export interface BehaviourPatternState {
+  version: 1;
+  generatedAt: string;
+  patterns: BehaviourPattern[];
+}
+
+export interface BehaviourPatternDecisionContext {
+  weekendTrainingMisses: boolean;
+  workPressureTrainingMisses: boolean;
+  minimumTrainingReengaged: boolean;
+}
+
+export const NO_BEHAVIOUR_PATTERNS: BehaviourPatternDecisionContext = {
+  weekendTrainingMisses: false,
+  workPressureTrainingMisses: false,
+  minimumTrainingReengaged: false,
+};
+
+type TrainingOutcomeRow = {
+  id: number;
+  day: string;
+  state: string;
+  via: string;
+  saidAt: Date;
+};
+
+const dayAtNoon = (day: string) => new Date(`${day}T12:00:00+02:00`);
+const weekOf = (day: string) => sastDayKey(sastWeekStart(dayAtNoon(day)));
+const isWeekendDay = (day: string) => [0, 6].includes(new Date(`${day}T12:00:00Z`).getUTCDay());
+
+/**
+ * Turn attributable training outcomes into durable, bounded pattern state.
+ *
+ * A missing workout row is never evidence. Failure rows exist only because a client explicitly
+ * closed an open canonical training loop; completion rows exist only when that exact loop closed
+ * through the workout ledger. Negative patterns require two distinct weeks. Recent completed
+ * sessions can supersede them, and old evidence remains inspectable without retaining authority.
+ */
+export function buildBehaviourPatternState(
+  rows: TrainingOutcomeRow[], workoutDays: string[], now = new Date(),
+): BehaviourPatternState {
+  const evidence = rows
+    // Plain `said` also represents ordinary day constraints, including safety/injury contexts.
+    // Only rows written while an exact canonical loop closed are attributable outcomes.
+    .filter(row => ["said_open", "said_time", "workout_logged", "workout_logged_minimum"].includes(row.via))
+    .map((row): BehaviourPatternEvidence => ({
+    id: row.id,
+    day: row.day,
+    source: "daily_constraints",
+    outcome: row.state === "released" ? "completed" : "failed",
+    ...(row.via === "said_time" ? { reason: "time" as const } : {}),
+    ...(row.via === "workout_logged_minimum" ? { intervention: "minimum" as const } : {}),
+    }));
+  const completedDays = [...new Set(workoutDays)].sort();
+  const patterns: BehaviourPattern[] = [];
+
+  const negative = (
+    kind: Extract<BehaviourPatternKind, "weekend_training_misses" | "work_pressure_training_misses">,
+    supports: BehaviourPatternEvidence[], contradictions: string[],
+  ) => {
+    const distinct = [...new Map(supports.map(e => [weekOf(e.day), e])).values()].sort((a, b) => a.day.localeCompare(b.day));
+    if (distinct.length < 2) return;
+    const last = distinct[distinct.length - 1].day;
+    const laterContradictions = [...new Set(contradictions.filter(day => day > last).map(weekOf))];
+    const age = sastDaysBetween(dayAtNoon(last), now);
+    const status: BehaviourPattern["status"] = laterContradictions.length >= 2
+      ? "superseded" : age > 42 ? "decayed" : "active";
+    patterns.push({
+      kind, status, supportCount: distinct.length,
+      contradictionCount: laterContradictions.length,
+      confidence: distinct.length >= 3 ? "strong" : "supported",
+      firstObservedDay: distinct[0].day, lastObservedDay: last,
+      evidence: distinct.slice(-6),
+    });
+  };
+
+  const failed = evidence.filter(e => e.outcome === "failed");
+  negative("weekend_training_misses", failed.filter(e => isWeekendDay(e.day)), completedDays.filter(isWeekendDay));
+  negative("work_pressure_training_misses", failed.filter(e => e.reason === "time"), completedDays);
+
+  const minimum = evidence.filter(e => e.outcome === "completed" && e.intervention === "minimum")
+    .sort((a, b) => a.day.localeCompare(b.day));
+  if (minimum.length > 0) {
+    const last = minimum[minimum.length - 1].day;
+    patterns.push({
+      kind: "minimum_training_reengaged",
+      status: sastDaysBetween(dayAtNoon(last), now) > 42 ? "decayed" : "active",
+      supportCount: minimum.length, contradictionCount: 0,
+      // One linked intervention -> workout outcome is a directly observed result, not an inferred
+      // recurrence. It may be remembered as observed, while one isolated miss is never a pattern.
+      confidence: minimum.length >= 3 ? "strong" : minimum.length >= 2 ? "supported" : "observed",
+      firstObservedDay: minimum[0].day, lastObservedDay: last,
+      evidence: minimum.slice(-6),
+    });
+  }
+
+  return { version: 1, generatedAt: now.toISOString(), patterns };
+}
+
+export function decisionPatterns(raw: unknown): BehaviourPatternDecisionContext {
+  const state = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Partial<BehaviourPatternState> : null;
+  const active = Array.isArray(state?.patterns)
+    ? state.patterns.filter((p: any) => p?.status === "active").map((p: any) => p.kind)
+    : [];
+  return {
+    weekendTrainingMisses: active.includes("weekend_training_misses"),
+    workPressureTrainingMisses: active.includes("work_pressure_training_misses"),
+    minimumTrainingReengaged: active.includes("minimum_training_reengaged"),
+  };
+}
+
+/** Fast message-time projection from the existing profile row into the canonical decision. */
+export async function getBehaviourPatternContext(userId: string): Promise<BehaviourPatternDecisionContext> {
+  try {
+    const [row] = await db.select({ patternFlags: clientIntelligenceProfiles.patternFlags })
+      .from(clientIntelligenceProfiles).where(eq(clientIntelligenceProfiles.userId, userId)).limit(1);
+    return decisionPatterns(row?.patternFlags);
+  } catch {
+    return { ...NO_BEHAVIOUR_PATTERNS };
+  }
 }
 
 // ── Streak helper — given sorted date strings, find the longest run of
@@ -78,10 +228,11 @@ export async function buildClientProfile(user: {
       allMealDays,
       allStepDays,
       allChats,
+      trainingOutcomes,
     ] = await Promise.all([
       db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
         .from(weightLogs).where(eq(weightLogs.userId, userId)).orderBy(asc(weightLogs.loggedAt)),
-      db.select({ loggedAt: workoutLogs.loggedAt })
+      db.select({ loggedAt: workoutLogs.loggedAt, workoutCompleted: workoutLogs.workoutCompleted })
         .from(workoutLogs).where(eq(workoutLogs.userId, userId)).orderBy(asc(workoutLogs.loggedAt)),
       db.select({
         day: sql<string>`DATE(${mealLogs.loggedAt} AT TIME ZONE 'Africa/Johannesburg')`,
@@ -93,6 +244,14 @@ export async function buildClientProfile(user: {
         .groupBy(sql`DATE(${stepLogs.loggedAt} AT TIME ZONE 'Africa/Johannesburg')`),
       db.select({ createdAt: chatHistory.createdAt, intent: chatHistory.intent })
         .from(chatHistory).where(eq(chatHistory.userId, userId)),
+      db.select({
+        id: dailyConstraints.id, day: dailyConstraints.day,
+        state: dailyConstraints.state, via: dailyConstraints.via, saidAt: dailyConstraints.saidAt,
+      }).from(dailyConstraints).where(and(
+        eq(dailyConstraints.userId, userId),
+        eq(dailyConstraints.kind, "training"),
+        gte(dailyConstraints.saidAt, new Date(Date.now() - 120 * 24 * 60 * 60 * 1000)),
+      )).orderBy(asc(dailyConstraints.saidAt)),
     ]);
 
     // ── Weight journey ────────────────────────────────────────────────────────
@@ -116,6 +275,8 @@ export async function buildClientProfile(user: {
 
     // ── Training records ─────────────────────────────────────────────────────
     const workoutDates = allWorkouts.map(w => toSASTDate(w.loggedAt)).filter(Boolean);
+    const completedWorkoutDates = allWorkouts.filter(w => w.workoutCompleted === true)
+      .map(w => toSASTDate(w.loggedAt)).filter(Boolean);
     const longestWorkoutStreak = longestConsecutiveRun(workoutDates);
 
     // Best week sessions — group by ISO week
@@ -210,18 +371,11 @@ export async function buildClientProfile(user: {
       ? hourCounts.indexOf(Math.max(...hourCounts)) : null;
 
     // ── Pattern flags ─────────────────────────────────────────────────────────
-    const patternFlags: string[] = [];
-    if (weakestDow !== null) patternFlags.push(`silent_${DOW_NAMES[weakestDow].toLowerCase()}s`);
-    const totalFoodDays = allMealDays.length;
+    // Silence and logging frequency are engagement observations, not adherence outcomes. The old
+    // flags promoted both into behavioural truth. Keep the descriptive columns for scheduling,
+    // but persist only outcomes with explicit provenance and contradiction/decay rules.
+    const patternFlags = buildBehaviourPatternState(trainingOutcomes, completedWorkoutDates);
     const totalDays = Math.max(1, Math.floor((Date.now() - startedAt.getTime()) / 86_400_000));
-    if (totalFoodDays / totalDays >= 0.7) patternFlags.push("consistent_logger");
-    else if (totalFoodDays / totalDays < 0.3) patternFlags.push("sporadic_logger");
-    if (lifetimeSessionCompliance !== null && lifetimeSessionCompliance >= 0.8) patternFlags.push("high_compliance");
-    if (lifetimeSessionCompliance !== null && lifetimeSessionCompliance < 0.4) patternFlags.push("low_compliance");
-    const protCompliantDays = allMealDays.filter(d => d.protein >= proteinTarget * 0.8).length;
-    const protLoggedDays = allMealDays.filter(d => d.protein > 0).length;
-    if (protLoggedDays >= 14 && protCompliantDays / protLoggedDays < 0.4) patternFlags.push("chronic_protein_gap");
-    if (plateauCount >= 2) patternFlags.push("plateau_prone");
 
     // ── Narrative ─────────────────────────────────────────────────────────────
     const coachNarrative = buildNarrative({
@@ -230,7 +384,7 @@ export async function buildClientProfile(user: {
       longestWorkoutStreak, bestWeekSessions, bestWeekAvgProteinG, proteinTarget,
       lifetimeFoodLogDays, totalDays, plateauCount,
       weakestDow, peakEngagementHour,
-      patternFlags, monthlySnapshots,
+      monthlySnapshots,
       lifetimeSessionCompliance,
     });
 
@@ -296,7 +450,6 @@ function buildNarrative(d: {
   plateauCount: number;
   weakestDow: number | null;
   peakEngagementHour: number | null;
-  patternFlags: string[];
   monthlySnapshots: MonthlySnapshot[];
   lifetimeSessionCompliance: number | null;
 }): string {
@@ -345,8 +498,7 @@ function buildNarrative(d: {
   // Plateaus
   if (d.plateauCount >= 2) lines.push(`Has hit ${d.plateauCount} weight plateaus — pattern of progress then stall.`);
 
-  // Behavioral pattern
-  if (d.weakestDow !== null) lines.push(`Most likely to go quiet on ${DOW_NAMES[d.weakestDow]}s.`);
+  // Engagement timing is descriptive. Absence is never promoted into an adherence claim.
   if (d.peakEngagementHour !== null) {
     const h = d.peakEngagementHour;
     const label = h < 12 ? `${h}am` : h === 12 ? "12pm" : `${h - 12}pm`;
@@ -396,7 +548,6 @@ export async function getClientFacingInsight(userId: string, firstName: string):
     if ((p.longestWorkoutStreak ?? 0) >= 3) lines.push(`🔥 Best training streak: *${p.longestWorkoutStreak} sessions* without missing.`);
     if ((p.bestWeekAvgProteinG ?? 0) > 0) lines.push(`💪 Best protein week: *${p.bestWeekAvgProteinG}g/day* average.`);
     if ((p.lifetimeFoodLogDays ?? 0) >= 14) lines.push(`📓 You've logged *${p.lifetimeFoodLogDays} days* of food — that consistency is the whole reason this works.`);
-    if (p.weakestDow != null) lines.push(`👀 *${DOW_NAMES[p.weakestDow]}s* are where you tend to slip — that's the day we protect.`);
     if (p.peakEngagementHour != null) {
       const h = p.peakEngagementHour;
       const label = h < 12 ? `${h}am` : h === 12 ? "12pm" : `${h - 12}pm`;

@@ -35,6 +35,7 @@ import { mentionsForbidden } from "./brain/reply-verifier";
 // Pure as well, and already the owner of "what may this client be offered" for every plate,
 // grocery list and swap in the product (Cut 9, #177, #128).
 import { allowedAlternatives, NO_CONSTRAINTS, type FoodConstraints } from "./food-swaps";
+import type { BehaviourPatternDecisionContext } from "./intelligence/profile";
 
 export interface DayState {
   firstName?: string;
@@ -111,6 +112,8 @@ export interface DayState {
   trainingDeclined?: boolean;
   /** Coach K already asked for this training session and is waiting for its outcome. */
   trainingAwaitingOutcome?: boolean;
+  /** Evidence-backed, active longitudinal patterns from the existing intelligence profile. */
+  behaviourPatterns?: BehaviourPatternDecisionContext;
   /**
    * What this client does not eat — the same owner every food surface consults (#128).
    *
@@ -151,6 +154,8 @@ export interface OneAction {
     missingFact: "food_today" | "weight_current" | "weekend_food";
     whyItMatters: string;
   };
+  /** Provenance carried into the open loop; never rendered as client-facing prose. */
+  intervention?: "minimum_training";
 }
 
 // ── WHAT GETS IN THEIR WAY ───────────────────────────────────────────────────────────────────
@@ -166,7 +171,9 @@ export function readStruggle(text?: string | null): Struggle {
   // NO TRAILING \b ON A STEM. `\bmotivat\b` can never match "motivation" — there is no word
   // boundary in the middle of a word. The same mistake shipped earlier in this codebase as
   // `\bexhaust\b` against "exhausted". Stems are anchored at the START only.
-  if (/\b(?:time|busy|late|shift|work|hour|kid|schedule|rush)/.test(s)) return "time";
+  // `work` is employment/time-pressure evidence; `workout` is the training event itself. A stem
+  // without this boundary turned "that workout was too hard" into a work-pressure history.
+  if (/\b(?:time|busy|late|shift|work(?![\s-]*outs?\b)|hour|kid|schedule|rush)/.test(s)) return "time";
   if (/\b(?:money|afford|expensive|budget|cheap|broke|cost|price|pricey)/.test(s)) return "money";
   if (/\b(?:motivat|lazy|give up|giving up|quit|discipline|willpower|mood|bored)/.test(s)) return "motivation";
   if (/\b(?:know|understand|confus|clue|where to start|what to eat|portion)/.test(s)) return "knowledge";
@@ -661,14 +668,20 @@ export function chooseAction(s: DayState): OneAction {
 
   // 8. TRAINING, behind for the week — unless they already ruled today out.
   if (s.sessionsTarget > 0 && s.sessionsThisWeek < s.sessionsTarget
-      && !s.trainingDeclined && !s.trainingAwaitingOutcome) {
+      && !s.trainingDeclined && !s.trainingAwaitingOutcome
+      && !mentionsForbidden("training workout gym session", s.doNotMention)) {
     const left = s.sessionsTarget - s.sessionsThisWeek;
+    const minimumTraining = struggle === "motivation"
+      || s.behaviourPatterns?.weekendTrainingMisses
+      || s.behaviourPatterns?.workPressureTrainingMisses
+      || s.behaviourPatterns?.minimumTrainingReengaged;
     return {
       kind: "train",
-      todo: struggle === "motivation"
+      todo: minimumTraining
         ? "Do today's session. Even a bad one counts."
         : "Get today's session done.",
       why: why(`${left} more this week and you've done the whole plan.`, s.dreamGoal),
+      ...(minimumTraining ? { intervention: "minimum_training" as const } : {}),
     };
   }
 
@@ -714,6 +727,8 @@ export interface ProactiveProfile {
   doNotMention?: string | null;
   /** users.life_context — a durable fact (Cut 7), carried so the come_back rungs can name it. */
   lifeContext?: string | null;
+  /** Active evidence-backed patterns; an empty object means no pattern has earned authority. */
+  behaviourPatterns?: BehaviourPatternDecisionContext;
   /**
    * What this client does not eat (#128). REQUIRED, deliberately: the protein and eat_more rungs
    * name foods, and a profile that forgets to carry this produces a coach that offers a vegan
@@ -766,6 +781,7 @@ export function dayStateFrom(
     foodDayClosed: opts?.foodDayClosed,
     trainingDeclined: opts?.trainingDeclined,
     trainingAwaitingOutcome: opts?.trainingAwaitingOutcome,
+    behaviourPatterns: p.behaviourPatterns,
     justAteProteinMeal: opts?.justAteProteinMeal,
   };
 }

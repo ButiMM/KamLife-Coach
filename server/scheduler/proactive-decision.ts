@@ -41,6 +41,7 @@ import { foodConstraints } from "../food-swaps";
 import { sastDayKey } from "../sast";
 import { ensureOpenTrainingLoop, ensureOpenWeekendInvestigation, loadOpenTrainingLoop, weekendInvestigationAnswered } from "../memory";
 import { deliveryAccepted, type DeliveryResult } from "../outbound-delivery";
+import { getBehaviourPatternContext, type BehaviourPatternDecisionContext } from "../intelligence/profile";
 
 export interface CanonicalMove {
   /** Ready to place in a message. "" when the decision is `hold` — nothing to add is an answer. */
@@ -56,19 +57,23 @@ export interface CanonicalMove {
 /** Persist a follow-up only after a proactive sender has actually handed its move to outbound. */
 export async function recordCanonicalMoveOutbound(client: any, move: CanonicalMove, delivery: DeliveryResult) {
   if (!deliveryAccepted(delivery)) return null;
-  if (move.action.kind === "train") return ensureOpenTrainingLoop(client, sastDayKey(), "proactive");
+  if (move.action.kind === "train") return ensureOpenTrainingLoop(
+    client, sastDayKey(), "proactive", Date.now(),
+    move.action.intervention === "minimum_training" ? "minimum" : "standard",
+  );
   if (move.action.investigation?.missingFact === "weekend_food") {
     return ensureOpenWeekendInvestigation(client);
   }
   return null;
 }
 
-function profileOf(client: any) {
+function profileOf(client: any, behaviourPatterns: BehaviourPatternDecisionContext) {
   return {
     dreamGoal: client.dreamGoal,
     biggestStruggle: client.biggestStruggle,
     lifeContext: client.lifeContext,
     doNotMention: client.doNotMention,
+    behaviourPatterns,
     constraints: foodConstraints(client || {}),
     weeksOnProgramme: Math.max(0, (client.programmeWeek || 1) - 1),
     sessionsTarget: Number(client.trainingDaysPerWeek) || 3,
@@ -91,9 +96,12 @@ export async function canonicalNextMove(
   opts?: { hour?: number },
 ): Promise<CanonicalMove> {
   const firstName = String(client.name || "").split(" ")[0] || undefined;
-  const profile = profileOf(client);
-  const held = await readHeldConstraints(client.phoneNumber, client).catch(() => NO_CONSTRAINTS);
-  const openTraining = await loadOpenTrainingLoop(client);
+  const [held, openTraining, behaviourPatterns] = await Promise.all([
+    readHeldConstraints(client.phoneNumber, client).catch(() => NO_CONSTRAINTS),
+    loadOpenTrainingLoop(client),
+    getBehaviourPatternContext(client.id),
+  ]);
+  const profile = profileOf(client, behaviourPatterns);
 
   try {
     const state = await loadProactiveState(client);
@@ -134,6 +142,7 @@ export async function canonicalNextMove(
       foodDayClosed: held.foodDayClosed,
       trainingDeclined: held.trainingDeclined,
       trainingAwaitingOutcome: !!openTraining,
+      behaviourPatterns,
       // Same as morning's degraded branch (#203): the zeros above are placeholders for state this
       // path could not build, so no investigation context is passed and the gate holds.
     }), { foodSufficient: false, weightSufficient: false, dreamGoal: client.dreamGoal });
