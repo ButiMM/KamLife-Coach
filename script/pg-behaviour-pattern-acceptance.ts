@@ -183,8 +183,17 @@ await buildClientProfile(unrelated);
 check(Object.values(decisionPatterns((await profileRow(unrelated.id))?.patternFlags)).every(v => !v),
   "one client never inherits another client's pattern state");
 
-await ensureOpenTrainingLoop(active, sastDayKey(), "reactive");
-const whileOpen = await canonicalNextMove(active, { hour: 14 });
+const openControl = await freshUser();
+await seedDecisionEvidence(openControl.id);
+await db.insert(schema.clientIntelligenceProfiles).values({
+  userId: openControl.id, patternFlags: activeProfile.patternFlags,
+}).onConflictDoUpdate({
+  target: schema.clientIntelligenceProfiles.userId,
+  set: { patternFlags: activeProfile.patternFlags },
+});
+const openedControl = await ensureOpenTrainingLoop(openControl, sastDayKey(), "reactive");
+check(!!openedControl, "the #208 precedence control starts with a real durable open loop");
+const whileOpen = await canonicalNextMove(openControl, { hour: 14 });
 check(whileOpen.action.kind !== "train", "an unresolved #208 loop outranks pattern adaptation", whileOpen.action.kind);
 
 const sick = await freshUser({
