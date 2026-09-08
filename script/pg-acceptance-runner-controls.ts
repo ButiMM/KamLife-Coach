@@ -1,0 +1,174 @@
+/**
+ * CONTROLS FOR THE ACCEPTANCE RUNNER (#227) — the proof harness for the gate itself.
+ *
+ * A test runner is the one piece of infrastructure that cannot be graded by the suites it runs: if
+ * it silently skipped everything, every suite would still "pass". So it is graded here, against
+ * the real PostgreSQL container, with deliberate controlled failures.
+ *
+ * The two failures this cut exists to remove are both asserted as behaviour, not as intent:
+ *
+ *   EARLY-EXIT BLINDNESS — a red acceptance must not stop the ones behind it, and must still make
+ *   the job red. Both halves matter: a runner that keeps going but forgets to fail is worse than
+ *   the early exit it replaced, because it is a gate that no longer gates.
+ *
+ *   CONTAMINATION — the reset must actually remove what the previous acceptance wrote. That is
+ *   asserted WITH ITS OPPOSITE: the same two fixtures are run again with the reset disabled, and
+ *   the second one must then FAIL. Without that half, "the row was gone" is equally well explained
+ *   by the row never having been written.
+ */
+if (!process.env.DATABASE_URL) {
+  console.log("pg-acceptance-runner-controls: SKIPPED — no DATABASE_URL. This proof needs a real database.");
+  process.exit(0);
+}
+
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+const {
+  ACCEPTANCES, testDatabaseSafety, resetTestDatabase, runAcceptances, exitCodeFor,
+} = await import("./pg-acceptance-runner.ts");
+const { pool } = await import("../server/db");
+
+let failed = 0;
+const chk = (ok: boolean, msg: string, evidence = "") => {
+  if (!ok) failed++;
+  console.log(`  ${ok ? "PASS" : "FAIL"}  ${msg}${!ok && evidence ? `\n          ${evidence}` : ""}`);
+};
+
+// Fixtures: tiny scripts standing in for acceptances, so a controlled red is genuinely CONTROLLED
+// rather than borrowed from whichever product suite happens to be broken today.
+//
+// They are written INSIDE the repository, not /tmp, and the reason is worth recording: tsx decides
+// module format from the nearest package.json, so a .ts file under /tmp is transformed as CommonJS
+// and every `await import` in it fails to compile. A fixture that cannot run would have made the
+// contamination control vacuously "green" in the direction that matters least.
+const dir = mkdtempSync(join(process.cwd(), ".pg-runner-controls-"));
+const fixture = (name: string, body: string) => {
+  const p = join(dir, `${name}.ts`);
+  writeFileSync(p, body);
+  return ["npx", "tsx", p];
+};
+const PHONE = "whatsapp:+27999000227";
+
+const passing = fixture("passing", `console.log("fixture: passing"); process.exit(0);`);
+const failing = fixture("failing", `console.log("fixture: deliberately failing"); process.exit(1);`);
+const writesRow = fixture("writes-row", `
+  const { pool } = await import("../server/db.ts");
+  await pool.query("INSERT INTO users (phone_number, name) VALUES ($1, $2)", [${JSON.stringify(PHONE)}, "Contaminator"]);
+  await pool.end(); process.exit(0);`);
+const demandsEmpty = fixture("demands-empty", `
+  const { pool } = await import("../server/db.ts");
+  const { rows } = await pool.query("SELECT count(*)::int AS n FROM users WHERE phone_number = $1", [${JSON.stringify(PHONE)}]);
+  await pool.end();
+  console.log("fixture: saw " + rows[0].n + " contaminating row(s)");
+  process.exit(rows[0].n === 0 ? 0 : 1);`);
+
+const reset = () => resetTestDatabase(pool);
+const run = (cmd: string[]) => spawnSync(cmd[0], cmd.slice(1), { stdio: "inherit", env: process.env });
+const entry = (id: string, command: string[]) => ({ id, title: id, command });
+
+console.log("\n=== 1 · A RED ACCEPTANCE DOES NOT HIDE THE ONES BEHIND IT ===");
+{
+  const results = await runAcceptances(
+    [entry("first-red", failing), entry("second", passing), entry("third", passing)],
+    { reset, run });
+  chk(results.length === 3, "every acceptance after a failure still executed",
+    JSON.stringify(results.map(r => r.id)));
+  chk(results[0].ok === false && results[1].ok && results[2].ok,
+    "…and each verdict is recorded independently", JSON.stringify(results));
+
+  // The other half, and the one that makes this a gate rather than a report.
+  chk(exitCodeFor(results) === 1, "the job still exits RED because one of them failed",
+    `exit=${exitCodeFor(results)}`);
+}
+
+console.log("\n=== 2 · A FULLY GREEN SET IS GREEN ===");
+{
+  const results = await runAcceptances([entry("a", passing), entry("b", passing)], { reset, run });
+  chk(results.every(r => r.ok) && exitCodeFor(results) === 0,
+    "nothing red, nothing invented — the gate passes", JSON.stringify(results));
+}
+
+console.log("\n=== 3 · THE RESET ACTUALLY REMOVES WHAT THE LAST ACCEPTANCE WROTE ===");
+{
+  const results = await runAcceptances(
+    [entry("writes-row", writesRow), entry("demands-empty", demandsEmpty)], { reset, run });
+  chk(results.every(r => r.ok),
+    "a row seeded by one acceptance is gone before the next one starts", JSON.stringify(results));
+
+  // THE CONTROL. Without this, "the row was gone" is equally well explained by the row never
+  // having been written — which would make the check above prove nothing at all.
+  const noReset = await runAcceptances(
+    [entry("writes-row", writesRow), entry("demands-empty", demandsEmpty)],
+    { reset: async () => {}, run });
+  chk(noReset[0].ok && !noReset[1].ok,
+    "CONTROL: with the reset removed, the same pair contaminates and the second FAILS",
+    JSON.stringify(noReset));
+  await reset();
+}
+
+console.log("\n=== 4 · A RESET THAT FAILS IS NOT A REASON TO RUN ANYWAY ===");
+{
+  const results = await runAcceptances([entry("a", passing)], {
+    reset: async () => { throw new Error("database unreachable"); }, run });
+  chk(!results[0].ok && /reset failed/.test(results[0].note),
+    "an unresettable database is recorded as a failure, not run against whatever was left",
+    JSON.stringify(results));
+}
+
+console.log("\n=== 5 · THE RESET REFUSES ANY DATABASE THAT IS NOT A THROWAWAY ===");
+{
+  const CI = { CI: "true" };
+  const unsafe: Array<[string, string | undefined, any]> = [
+    ["no DATABASE_URL at all", undefined, CI],
+    ["a remote production host", "postgres://u:p@containers-us-west-1.railway.app:5432/railway", CI],
+    ["any non-loopback host", "postgres://u:p@10.0.0.7:5432/kamlife", CI],
+    ["a URL that is not PostgreSQL", "mysql://u:p@127.0.0.1:3306/kamlife", CI],
+    ["not a URL at all", "kamlife", CI],
+    ["NODE_ENV=production", "postgres://kam:kam@127.0.0.1:5432/kamlife", { ...CI, NODE_ENV: "production" }],
+    ["a laptop that did not opt in", "postgres://kam:kam@127.0.0.1:5432/kamlife", {}],
+  ];
+  for (const [name, url, env] of unsafe) {
+    const v = testDatabaseSafety(url, env);
+    chk(v.safe === false, `refused: ${name}`, JSON.stringify(v));
+  }
+
+  // CONTROLS BOTH WAYS. A guard that refuses everything would pass every line above and stop the
+  // gate from ever running — these are the two configurations that MUST be allowed.
+  chk(testDatabaseSafety("postgres://kam:kam@127.0.0.1:5432/kamlife", CI).safe === true,
+    "CONTROL: the CI service container is allowed");
+  chk(testDatabaseSafety("postgres://kam:kam@localhost:5432/journeylab",
+    { PG_ACCEPTANCE_ALLOW_RESET: "1" }).safe === true,
+    "CONTROL: a local database with a deliberate opt-in is allowed");
+}
+
+console.log("\n=== 6 · THE INVENTORY IS REAL, AND ITS SCRIPTS STILL STAND ALONE ===");
+{
+  const { existsSync } = await import("node:fs");
+  const missing = ACCEPTANCES
+    .filter(a => a.command[0] === "npx" && !existsSync(a.command[2]))
+    .map(a => a.command[2]);
+  chk(missing.length === 0, "every acceptance named in the inventory exists on disk",
+    JSON.stringify(missing));
+  chk(ACCEPTANCES.length >= 19, "the inventory still holds every acceptance the workflow listed",
+    `count=${ACCEPTANCES.length}`);
+
+  // Requirement 6 of the cut: the individual scripts must remain independently runnable, so that a
+  // builder debugging one acceptance never has to run the whole set. Proven by running one.
+  await reset();
+  const solo = spawnSync("npx", ["tsx", "script/pg-safety-turn-acceptance.ts"],
+    { encoding: "utf-8", env: process.env });
+  chk(solo.status === 0 && /GREEN/.test(solo.stdout || ""),
+    "an individual acceptance still runs on its own, outside the runner",
+    `status=${solo.status}`);
+}
+
+console.log(`\n${failed === 0
+  ? "pg-acceptance-runner-controls: GREEN — all checks passed"
+  : `pg-acceptance-runner-controls: RED — ${failed} check(s) failed`}`);
+
+rmSync(dir, { recursive: true, force: true });
+await resetTestDatabase(pool).catch(() => {});
+await pool.end().catch(() => {});
+process.exit(failed === 0 ? 0 : 1);

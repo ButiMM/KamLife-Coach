@@ -60,3 +60,4 @@ p2-work/
 # Ephemeral exact-merge-base checkout made by script/compare-unit-baseline.ts.
 # It must stay under the repository so the base checkout can resolve this checkout's node_modules.
 .unit-baseline-worktree-*/
+.pg-runner-controls-*/

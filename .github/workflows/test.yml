@@ -117,96 +117,23 @@ jobs:
       # so the forbidden command is not written here even in a comment.
       - name: Apply committed migrations to the ephemeral database
         run: npm run db:migrate
-      - name: Targeted multi-day food correction on real PostgreSQL
-        run: npx tsx script/pg-correction-acceptance.ts
-      - name: Safety early-return turn attribution on real PostgreSQL
-        run: npx tsx script/pg-safety-turn-acceptance.ts
-      # THE PROVENANCE OWNER IS A DATABASE FUNCTION (#184), so PostgreSQL is the only thing that
-      # can say whether its regular expressions compile. The broken version threw inside an
-      # AFTER INSERT trigger the application never awaits — a green suite, a normal reply, and
-      # every client-stated step count silently left untrusted.
-      - name: Step provenance bridge on real PostgreSQL
-        run: npx tsx script/pg-step-provenance-acceptance.ts
-      - name: Canonical client truth ordering on real PostgreSQL
-        run: npx tsx script/pg-client-truth-acceptance.ts
-      # TWO READERS, ONE SET OF FACTS (#179). Provenance, resolved_day and the workout ledger are
-      # COLUMNS, so only a real database can show that the canonical snapshot and the GPT
-      # fallback's context are reading the same rows — a fixture that answers every query the
-      # same way cannot tell two readers apart, which is how the divergence survived.
-      - name: Fallback reads canonical truth on real PostgreSQL
-        run: npx tsx script/pg-fallback-truth-acceptance.ts
-      # ONE COACH, PROACTIVELY AND REACTIVELY (#180). Held constraints are rows the client wrote
-      # today; whether the proactive decision reads them is only answerable against a database.
-      - name: Proactive decision authority on real PostgreSQL
-        run: npx tsx script/pg-proactive-authority-acceptance.ts
-      # A DAILY CONSTRAINT IS ABOUT WHAT SURVIVES (#194). The defect was a 24-message window, and
-      # a fixture that returns the same rows to every query cannot demonstrate a window.
-      - name: Daily constraint lifecycle on real PostgreSQL
-        run: npx tsx script/pg-daily-constraint-acceptance.ts
-      # THE CONSTRAINT REACHES EVERY MOUTH THAT NAMES A FOOD (#128). Which branch of the Next Meal
-      # menu a client reaches is composed from the day ledger — what is logged, what is left — so
-      # a fixture that answers every query the same way puts every client on one branch. That is
-      # how a menu with zero calls to the constraint owner looked fine.
-      - name: Food constraints reach the plate and grocery mouths on real PostgreSQL
-        run: npx tsx script/pg-food-constraint-mouths-acceptance.ts
-      # ONE ANSWER TO "WHICH WAY IS THE SCALE GOING" (#128). The verdict is computed from weigh-in
-      # ROWS — how many, how far apart, how recent — against an illness window in profile_notes,
-      # and the proactive half is graded on the message it actually sends, captured through the
-      # shadow door. Neither is expressible on a fixture that answers every query the same way.
-      - name: One weight-direction authority on real PostgreSQL
-        run: npx tsx script/pg-weight-authority-acceptance.ts
-      # ONE OPEN COACHING LOOP (#208). Restart durability, user isolation and exact SAST
-      # attribution require the real database; a fixture cannot prove compare-and-set closure.
-      - name: Open training move survives and resolves across turns
-        run: npx tsx script/pg-open-coaching-loop-acceptance.ts
-      # A SPARSE CLIENT IS COACHED, NOT JUST RECEIPTED (#203). Every decision here is computed
-      # from rows — how many days carry a meal, whether one carries TODAY, how stale the weigh-in
-      # is, and whether a same-day re-weigh updates or inserts. None of that is expressible on a
-      # fixture that answers every query the same way.
-      - name: Thin-evidence coaching on real PostgreSQL
-        run: npx tsx script/pg-thin-evidence-acceptance.ts
-      # INFORMATION VALUE (#213). Weekend coverage, stalled trend, the durable open loop and the
-      # later backdated answer are all real rows; this grades the one canonical INVESTIGATE owner.
-      - name: Highest-value investigation on real PostgreSQL
-        run: npx tsx script/pg-information-value-acceptance.ts
-      # ONE COACH SPEAKING (#207). The repetition defect this closes is invisible to a fixture
-      # that sends one message per client: it only appears across CONSECUTIVE durable writes by
-      # the same person, where the decision is recomputed from day state that the new event did
-      # not move. Real rows, real front door, several turns.
-      - name: Durable log turns are one coaching turn on real PostgreSQL
-        run: npx tsx script/pg-log-turn-acceptance.ts
-      # FACTS, RETRACTIONS AND SAME-TURN PROPAGATION (#211). Retraction-before-append ordering,
-      # one operation building on another's patch, and unrelated columns left alone are all
-      # properties of a real transaction — a fixture that returns whatever it was handed cannot
-      # show any of them, which is how a retracted diet came back inside its own write.
-      - name: Facts, retractions and same-turn propagation on real PostgreSQL
-        run: npx tsx script/pg-facts-acceptance.ts
-      # FOOD IDENTITY AND STATED PORTION (#206). Identity and portion are what get WRITTEN, and
-      # the invented-combo defects were visible only as kcal in the ledger — a matcher unit test
-      # cannot show that the row reaching meal_logs carries the right food at the right grams.
-      - name: Food identity and stated portion on real PostgreSQL
-        run: npx tsx script/pg-food-identity-acceptance.ts
-      # ONE WEIGHT AUTHORITY, ONE SPEAKABILITY VERDICT (#216). Illness contamination, window width
-      # and chronology are all properties of stored rows against stored dates, and the Monday
-      # claims only exist as a sent message — SHADOW=on captures them.
-      - name: Weight authority and speakability on real PostgreSQL
-        run: npx tsx script/pg-weight-speakability-acceptance.ts
-      # ONE RESTRICTION, EVERY SURFACE (#220). Consistency is a claim about what a CLIENT receives
-      # across surfaces reached by different handlers, different scheduler jobs and different cron
-      # minutes — a unit test on `allows` proves the predicate and nothing about who asked it.
-      # SHADOW=on captures the Sunday sends, so proactive food coaching is graded on the message.
-      - name: One restriction across every food surface on real PostgreSQL
-        run: npx tsx script/pg-restriction-consistency-acceptance.ts
-      # ONE COMEBACK CLOCK (#221). Both defects are claims about CHRONOLOGY across stored rows — a
-      # workout row's logged_at against a user's lastActiveAt, read through the real handler. A
-      # pure test can check the arithmetic; only this can show that the reply a returning client
-      # receives states the gap they actually experienced.
-      - name: One comeback clock on real PostgreSQL
-        run: npx tsx script/pg-comeback-clock-acceptance.ts
-      # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
-      # would be a second copy of this infrastructure for no gain. Deliberately NOT
-      # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot
-      # be reported as a warning, and a lane that goes yellow on a real defect is that warning
-      # wearing a different colour.
-      - name: Six critical journeys through the real system
-        run: npm run test:journeys
+      # ONE RUNNER, NOT EIGHTEEN STEPS (#227).
+      #
+      # These were eighteen sequential steps against one shared database, and that arrangement had
+      # two proven control failures: a step that failed ENDED THE JOB, so every acceptance behind it
+      # was skipped — a branch could add a proof that authoritative CI never once ran — and the
+      # shared database let one acceptance's rows change what the next one saw, which produced three
+      # false product regressions on #224 before it was caught.
+      #
+      # The runner resets the ephemeral database before each acceptance, runs all of them, records
+      # every verdict, and exits non-zero if any failed. NOT `continue-on-error`: a red is still a
+      # red gate, it simply no longer hides the evidence behind it. The inventory and the reason
+      # each acceptance needs real PostgreSQL now live in the runner, in one copy.
+      #
+      # The controls run FIRST and are the runner's own proof — a test runner is the one thing its
+      # own suites cannot grade, so it is graded here against this same container, with deliberate
+      # controlled failures, before it is trusted to grade anything else.
+      - name: Acceptance runner controls (deliberate controlled reds)
+        run: npx tsx script/pg-acceptance-runner-controls.ts
+      - name: Every acceptance, isolated, on real PostgreSQL
+        run: npx tsx script/pg-acceptance-runner.ts
