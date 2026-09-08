@@ -148,8 +148,15 @@ export async function handleWorkoutCommands(ctx: {
     if (!openTraining || openTraining.targetDay !== resolvedDay) return false;
     const closed = await consumeOpenTrainingLoop(user, openTraining.marker);
     if (closed) {
-      await recordOpenTrainingSuccess(user, resolvedDay, openTraining.intervention, ctx.sourceMessageId)
-        .catch(e => console.warn("[COACHING_LOOP] completion provenance not recorded:", e));
+      try {
+        await recordOpenTrainingSuccess(user, resolvedDay, openTraining.intervention, ctx.sourceMessageId);
+      } catch (e) {
+        // The workout row is still completion truth, but the loop carries which intervention led
+        // to it. Keep that relationship retryable if its provenance row cannot be committed.
+        await restoreOpenTrainingLoop(user, openTraining.marker);
+        console.warn("[COACHING_LOOP] completion provenance not recorded; loop restored:", e);
+        return false;
+      }
       completedOpenTraining = true;
       turnMutation(
         "RESOLVE coaching_loop ref=" + openTraining.ref + " outcome=completed target="

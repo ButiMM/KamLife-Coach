@@ -171,7 +171,9 @@ export function readStruggle(text?: string | null): Struggle {
   // NO TRAILING \b ON A STEM. `\bmotivat\b` can never match "motivation" — there is no word
   // boundary in the middle of a word. The same mistake shipped earlier in this codebase as
   // `\bexhaust\b` against "exhausted". Stems are anchored at the START only.
-  if (/\b(?:time|busy|late|shift|work|hour|kid|schedule|rush)/.test(s)) return "time";
+  // `work` is employment/time-pressure evidence; `workout` is the training event itself. A stem
+  // without this boundary turned "that workout was too hard" into a work-pressure history.
+  if (/\b(?:time|busy|late|shift|work(?![\s-]*outs?\b)|hour|kid|schedule|rush)/.test(s)) return "time";
   if (/\b(?:money|afford|expensive|budget|cheap|broke|cost|price|pricey)/.test(s)) return "money";
   if (/\b(?:motivat|lazy|give up|giving up|quit|discipline|willpower|mood|bored)/.test(s)) return "motivation";
   if (/\b(?:know|understand|confus|clue|where to start|what to eat|portion)/.test(s)) return "knowledge";

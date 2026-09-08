@@ -26,7 +26,10 @@ const { pool, db } = await import("../server/db");
 const schema = await import("../shared/schema");
 const { and, eq } = await import("drizzle-orm");
 const { handleMessage } = await import("../server/routes");
-const { ensureOpenTrainingLoop } = await import("../server/memory");
+const { ensureOpenTrainingLoop, loadOpenTrainingLoop } = await import("../server/memory");
+const {
+  recordDailyConstraint, recordOpenTrainingSuccess,
+} = await import("../server/held-constraints");
 const { buildClientProfile, decisionPatterns } = await import("../server/intelligence/profile");
 const { canonicalNextMove } = await import("../server/scheduler/proactive-decision");
 const { sastDayKey, sastDayStart } = await import("../server/sast");
@@ -124,6 +127,114 @@ check(adapted.action.kind === "train"
 check(!/weekend training|work[- ]pressure training|minimum training/i.test(String(activeProfile?.coachNarrative || "")),
   "structured pattern state is not copied into model-authored client prose",
   JSON.stringify(activeProfile?.coachNarrative));
+
+REAL("\n=== REVIEW CONTROLS — REASON AND IDEMPOTENCY COLLISIONS ===");
+const workoutWords = await freshUser();
+await failOpenMove(workoutWords, priorDay(1, 3),
+  "I couldn't do it; that workout was too hard", "SM-pattern-workout-1");
+await failOpenMove(workoutWords, priorDay(1, 2),
+  "I couldn't do it; the workout was too hard again", "SM-pattern-workout-2");
+await buildClientProfile(workoutWords);
+const workoutRows = await db.select().from(schema.dailyConstraints)
+  .where(and(eq(schema.dailyConstraints.userId, workoutWords.id), eq(schema.dailyConstraints.kind, "training")));
+check(workoutRows.length === 2 && workoutRows.every((r: any) => r.via === "said_open"),
+  "workout difficulty is retained as an open failure, never fabricated as work pressure",
+  JSON.stringify(workoutRows));
+check(!decisionPatterns((await profileRow(workoutWords.id))?.patternFlags).workPressureTrainingMisses,
+  "two workout-difficulty outcomes cannot earn a work-pressure pattern");
+
+const collision = await freshUser();
+const collisionDay = sastDayKey();
+const failSource = "SM-pattern-collision-failure";
+await ensureOpenTrainingLoop(collision, collisionDay, "reactive");
+await recordDailyConstraint(collision,
+  "I couldn't do it, no workout today because work was chaos", failSource);
+const plainFailure = await db.select().from(schema.dailyConstraints).where(and(
+  eq(schema.dailyConstraints.userId, collision.id),
+  eq(schema.dailyConstraints.sourceMessageId, failSource),
+  eq(schema.dailyConstraints.kind, "training"),
+));
+check(plainFailure.length === 1 && plainFailure[0]?.via === "said",
+  "the collision control starts with exactly one plain constraint row",
+  JSON.stringify(plainFailure));
+await handleMessage(collision.phoneNumber,
+  "I couldn't do it, no workout today because work was chaos", undefined, undefined, undefined, failSource);
+const failureRows = await db.select().from(schema.dailyConstraints).where(and(
+  eq(schema.dailyConstraints.userId, collision.id),
+  eq(schema.dailyConstraints.sourceMessageId, failSource),
+  eq(schema.dailyConstraints.kind, "training"),
+));
+const upgradedFailure = failureRows[0];
+check(failureRows.length === 1 && upgradedFailure?.via === "said_time" && upgradedFailure?.state === "asserted"
+    && upgradedFailure?.day === collisionDay,
+  "a plain same-turn constraint is upgraded to richer work-pressure failure provenance",
+  JSON.stringify(failureRows));
+
+const successSource = "SM-pattern-collision-success";
+await recordDailyConstraint(collision, "no workout today", successSource);
+const plainSuccess = await db.select().from(schema.dailyConstraints).where(and(
+  eq(schema.dailyConstraints.userId, collision.id),
+  eq(schema.dailyConstraints.sourceMessageId, successSource),
+  eq(schema.dailyConstraints.kind, "training"),
+));
+check(plainSuccess.length === 1 && plainSuccess[0]?.via === "said",
+  "the completion collision also starts with exactly one plain constraint row",
+  JSON.stringify(plainSuccess));
+await recordOpenTrainingSuccess(collision, collisionDay, "minimum", successSource);
+const successRows = await db.select().from(schema.dailyConstraints).where(and(
+  eq(schema.dailyConstraints.userId, collision.id),
+  eq(schema.dailyConstraints.sourceMessageId, successSource),
+  eq(schema.dailyConstraints.kind, "training"),
+));
+const upgradedSuccess = successRows[0];
+check(successRows.length === 1 && upgradedSuccess?.via === "workout_logged_minimum"
+    && upgradedSuccess?.state === "released",
+  "the same idempotency row upgrades to linked completion provenance",
+  JSON.stringify(successRows));
+
+REAL("\n=== REVIEW CONTROL — FAILED SUCCESS PROVENANCE REMAINS RETRYABLE ===");
+const retryable = await freshUser();
+const retrySource = "SM-pattern-provenance-retry";
+const retryLoop = await ensureOpenTrainingLoop(retryable, sastDayKey(), "reactive", Date.now(), "minimum");
+await pool.query(`
+  CREATE OR REPLACE FUNCTION reject_pattern_provenance_for_test() RETURNS trigger AS $$
+  BEGIN
+    IF NEW.source_message_id = '${retrySource}' THEN
+      RAISE EXCEPTION 'injected provenance failure';
+    END IF;
+    RETURN NEW;
+  END;
+  $$ LANGUAGE plpgsql;
+  DROP TRIGGER IF EXISTS reject_pattern_provenance_for_test ON daily_constraints;
+  CREATE TRIGGER reject_pattern_provenance_for_test
+    BEFORE INSERT OR UPDATE ON daily_constraints
+    FOR EACH ROW EXECUTE FUNCTION reject_pattern_provenance_for_test();
+`);
+try {
+  await handleMessage(retryable.phoneNumber, "workout done", undefined, undefined, undefined, retrySource);
+  const [afterFailure] = await db.select({ awaitingInputType: schema.users.awaitingInputType })
+    .from(schema.users).where(eq(schema.users.id, retryable.id)).limit(1);
+  check(!!retryLoop && afterFailure?.awaitingInputType === retryLoop.marker,
+    "a transient completion-provenance failure restores the exact open loop",
+    String(afterFailure?.awaitingInputType));
+} finally {
+  await pool.query(`
+    DROP TRIGGER IF EXISTS reject_pattern_provenance_for_test ON daily_constraints;
+    DROP FUNCTION IF EXISTS reject_pattern_provenance_for_test();
+  `);
+}
+await handleMessage(retryable.phoneNumber, "workout done", undefined, undefined, undefined, retrySource);
+const [afterRetry] = await db.select({ awaitingInputType: schema.users.awaitingInputType })
+  .from(schema.users).where(eq(schema.users.id, retryable.id)).limit(1);
+const retryProvenance = await db.select().from(schema.dailyConstraints).where(and(
+  eq(schema.dailyConstraints.userId, retryable.id),
+  eq(schema.dailyConstraints.sourceMessageId, retrySource),
+  eq(schema.dailyConstraints.kind, "training"),
+));
+check(!(await loadOpenTrainingLoop({ id: retryable.id, awaitingInputType: afterRetry?.awaitingInputType }))
+    && retryProvenance.length === 1 && retryProvenance[0]?.via === "workout_logged_minimum",
+  "retry closes once and preserves the intervention-to-outcome link",
+  JSON.stringify({ awaiting: afterRetry?.awaitingInputType, retryProvenance }));
 
 REAL("\n=== ONE EVENT AND SILENCE ARE NOT PATTERNS ===");
 const isolatedMiss = await freshUser();

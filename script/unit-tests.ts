@@ -10408,11 +10408,18 @@ test("coach identity: one normalisation, or the founder is a stranger to his own
 // Every async test must finish before a single number is printed — see the note on test().
 test("#217 behavioural patterns require attributable repetition, decay, and reach one decision owner", async () => {
   const { buildBehaviourPatternState, decisionPatterns } = await import("../server/intelligence/profile");
-  const { chooseAction } = await import("../server/one-action");
+  const { chooseAction, readStruggle } = await import("../server/one-action");
   const { createOpenTrainingLoop, readOpenTrainingLoop } = await import("../server/workout-feedback");
   const at = (day: string) => new Date(`${day}T10:00:00+02:00`);
   const row = (id: number, day: string, state = "asserted", via = "said_open") =>
     ({ id, day, state, via, saidAt: at(day) });
+
+  assert.equal(readStruggle("I couldn't do it; that workout was too hard"), null,
+    "workout vocabulary is not employment pressure");
+  assert.equal(readStruggle("Those work-outs were too hard"), null,
+    "hyphenated and plural workout vocabulary is not employment pressure");
+  assert.equal(readStruggle("I couldn't do it; work was chaos and my shift ran late"), "time",
+    "genuine employment pressure retains its existing classification");
 
   const oneMiss = buildBehaviourPatternState([row(1, "2026-08-01")], [], at("2026-08-10"));
   assert.equal(oneMiss.patterns.length, 0, "one bad weekend is an event, never a durable pattern");

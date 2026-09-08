@@ -209,7 +209,17 @@ export async function recordOpenTrainingFailure(
     .values({ userId: client.id, day: targetDay, kind: "training", state: "asserted",
       via: reason === "time" ? "said_time" : "said_open",
       sourceMessageId: sourceMessageId || null })
-    .onConflictDoNothing();
+    // The same turn may already have recorded its explicit "no training today" as plain `said`.
+    // Reconcile that one idempotency row to the richer open-loop outcome; silently keeping the
+    // weaker row loses the exact move attribution this owner has just established.
+    .onConflictDoUpdate({
+      target: [dailyConstraints.userId, dailyConstraints.sourceMessageId, dailyConstraints.kind],
+      set: {
+        day: targetDay,
+        state: "asserted",
+        via: reason === "time" ? "said_time" : "said_open",
+      },
+    });
 }
 
 /**
@@ -225,7 +235,14 @@ export async function recordOpenTrainingSuccess(
     .values({ userId: client.id, day: targetDay, kind: "training", state: "released",
       via: intervention === "minimum" ? "workout_logged_minimum" : "workout_logged",
       sourceMessageId: sourceMessageId || null })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [dailyConstraints.userId, dailyConstraints.sourceMessageId, dailyConstraints.kind],
+      set: {
+        day: targetDay,
+        state: "released",
+        via: intervention === "minimum" ? "workout_logged_minimum" : "workout_logged",
+      },
+    });
 }
 
 /**
