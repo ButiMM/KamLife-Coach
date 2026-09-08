@@ -302,8 +302,13 @@ await journey("2 · MULTI-DAY / CORRECTION — catch up three days, correct the 
   ok(waParts(t1.reply) <= 3, `a three-day catch-up is at most 3 WhatsApp messages (${waParts(t1.reply)})`);
 
   const byDay = (rs: Row[], key: string) => rs.filter(r => dayOf(r) === key);
-  const sorted = [...new Set(days)].sort();
-  const [mon, tue, wed] = sorted;
+  // Calendar sorting is not weekday identity. Early in the week, an explicit day that has not
+  // happened yet resolves to the previous week's occurrence, so e.g. Tuesday's date can sort
+  // before Monday's while both resolutions remain correct. Anchor each snapshot to the durable
+  // identity stated for that day; the correction below must still mutate only the rice row.
+  const mon = dayOf(before.find(r => itemNames(r).some(n => /egg|toast/i.test(n)))!);
+  const tue = dayOf(before.find(r => itemNames(r).some(n => /rice/i.test(n)))!);
+  const wed = dayOf(before.find(r => itemNames(r).some(n => /liver/i.test(n)))!);
   const monBefore = byDay(before, mon).map(snapMeal).join("|");
   const wedBefore = byDay(before, wed).map(snapMeal).join("|");
   const tueBefore = byDay(before, tue)[0];
