@@ -135,5 +135,16 @@ jobs:
       # controlled failures, before it is trusted to grade anything else.
       - name: Acceptance runner controls (deliberate controlled reds)
         run: npx tsx script/pg-acceptance-runner-controls.ts
+      # `!cancelled()`, NOT the default `success()` — THE SAME BLINDNESS ONE STEP HIGHER (#227).
+      #
+      # A step runs by default only if every step before it succeeded, so a red controls step would
+      # SKIP this one and take all nineteen verdicts with it — rebuilding the early-exit blindness
+      # this cut removes, at the seam the cut itself added. Not hypothetical: the controls execute a
+      # real acceptance to prove standalone runnability, so a product regression there could have
+      # silenced the entire acceptance run.
+      #
+      # This is NOT `continue-on-error`. Both steps still fail the job. It says only that the
+      # evidence is worth collecting even when the thing that grades the collector is unhappy.
       - name: Every acceptance, isolated, on real PostgreSQL
+        if: ${{ !cancelled() }}
         run: npx tsx script/pg-acceptance-runner.ts

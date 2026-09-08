@@ -16,11 +16,6 @@
  *   the second one must then FAIL. Without that half, "the row was gone" is equally well explained
  *   by the row never having been written.
  */
-if (!process.env.DATABASE_URL) {
-  console.log("pg-acceptance-runner-controls: SKIPPED — no DATABASE_URL. This proof needs a real database.");
-  process.exit(0);
-}
-
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,6 +23,30 @@ import { join } from "node:path";
 const {
   ACCEPTANCES, testDatabaseSafety, resetTestDatabase, runAcceptances, exitCodeFor,
 } = await import("./pg-acceptance-runner.ts");
+
+/**
+ * THE GUARD PROTECTS THIS FILE TOO (#227, review).
+ *
+ * The first version of this script checked only that DATABASE_URL was non-empty, then imported the
+ * pool and reset the database — while testing `testDatabaseSafety` as a pure function further down
+ * without ever applying it to its own destructive work. A controls script that can wipe a real
+ * database is the precise hazard this cut exists to close, sitting in the file whose job is to
+ * prove it is closed. It is applied FIRST now, before the pool is even imported.
+ */
+const safety = testDatabaseSafety(process.env.DATABASE_URL, process.env as any);
+if (!safety.safe) {
+  // No database at all is an environment without one — the same SKIP every acceptance does. A
+  // database that is present but not a throwaway is a REFUSAL, and must not read as a pass.
+  if (!process.env.DATABASE_URL) {
+    console.log("pg-acceptance-runner-controls: SKIPPED — no DATABASE_URL. This proof needs a real database.");
+    process.exit(0);
+  }
+  console.log(`pg-acceptance-runner-controls: REFUSING — ${safety.reason}.`);
+  console.log("These controls reset the database repeatedly, so they only ever point at a");
+  console.log("throwaway local/CI one. Outside CI, pass PG_ACCEPTANCE_ALLOW_RESET=1 deliberately.");
+  process.exit(2);
+}
+
 const { pool } = await import("../server/db");
 
 let failed = 0;
@@ -154,14 +173,67 @@ console.log("\n=== 6 · THE INVENTORY IS REAL, AND ITS SCRIPTS STILL STAND ALONE
   chk(ACCEPTANCES.length >= 19, "the inventory still holds every acceptance the workflow listed",
     `count=${ACCEPTANCES.length}`);
 
-  // Requirement 6 of the cut: the individual scripts must remain independently runnable, so that a
+  // Requirement 6 of the cut: the individual scripts must remain independently runnable, so a
   // builder debugging one acceptance never has to run the whole set. Proven by running one.
+  //
+  // GRADED ON EXECUTION, NOT ON THE PRODUCT (#227, review). This asserted the acceptance came back
+  // GREEN, which quietly made these infrastructure controls depend on product health: a real
+  // regression in that suite would have turned the controls red, and — before the workflow fix
+  // alongside this — skipped the whole acceptance run. What requirement 6 is about is whether the
+  // script still RUNS standalone, so that is what is asserted: it reached its own verdict line.
   await reset();
   const solo = spawnSync("npx", ["tsx", "script/pg-safety-turn-acceptance.ts"],
     { encoding: "utf-8", env: process.env });
-  chk(solo.status === 0 && /GREEN/.test(solo.stdout || ""),
-    "an individual acceptance still runs on its own, outside the runner",
-    `status=${solo.status}`);
+  chk(/pg-safety-turn-acceptance: (GREEN|RED)/.test(solo.stdout || ""),
+    "an individual acceptance still runs on its own, outside the runner, and reaches a verdict",
+    `status=${solo.status} tail=${JSON.stringify((solo.stdout || "").slice(-160))}`);
+}
+
+console.log("\n=== 7 · THE RESET RESTORES SCHEMA AN ACCEPTANCE BROKE, NOT JUST ROWS ===");
+{
+  // The defect this closes: `pg-step-provenance-acceptance` installs the pre-#184 faulty
+  // `kamlife_parse_step_report` on purpose and restores it three statements later. An exception in
+  // that window leaves the broken function installed — and TRUNCATE does not remove a function, so
+  // every later acceptance would run against a known-broken step parser and fail for reasons that
+  // belong to nothing in the diff. A reset that only empties tables does not deliver a clean
+  // database; this asserts that the one here does.
+  const defOf = async () => (await pool.query(
+    `SELECT pg_get_functiondef(p.oid) AS def FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'kamlife_parse_step_report'`)).rows[0]?.def || "";
+
+  const original = await defOf();
+  chk(!!original, "the migrated schema carries the step-provenance function to begin with");
+
+  await pool.query(`CREATE OR REPLACE FUNCTION public.kamlife_parse_step_report(raw text)
+    RETURNS integer LANGUAGE plpgsql IMMUTABLE AS $fn$ BEGIN RETURN 42; END; $fn$;`);
+  const broken = await defOf();
+  chk(broken !== original && /42/.test(broken),
+    "CONTROL: an acceptance really can leave a mutated function behind", "");
+
+  await reset();
+  chk(await defOf() === original,
+    "…and the reset puts the committed definition back, byte for byte",
+    JSON.stringify((await defOf()).slice(0, 120)));
+}
+
+console.log("\n=== 8 · THESE CONTROLS REFUSE AN UNSAFE DATABASE BEFORE TOUCHING IT ===");
+{
+  // The guard is asserted as a pure function above; this asserts it actually GATES this file's own
+  // destructive work. The child exits at the guard, so the recursion is one level deep and ends
+  // there — the marker below is belt and braces in case a future edit breaks the guard itself.
+  if (process.env.PG_CONTROLS_NO_RECURSE === "1") {
+    chk(true, "SKIPPED in the child process (recursion guard)");
+  } else {
+    const child = spawnSync("npx", ["tsx", "script/pg-acceptance-runner-controls.ts"], {
+      encoding: "utf-8",
+      env: { ...process.env, PG_CONTROLS_NO_RECURSE: "1", CI: "", PG_ACCEPTANCE_ALLOW_RESET: "",
+             DATABASE_URL: "postgres://u:p@containers-us-west-1.railway.app:5432/railway" },
+    });
+    chk(child.status === 2 && /REFUSING/.test(child.stdout || ""),
+      "pointed at a remote database, this script refuses and resets nothing",
+      `status=${child.status} out=${JSON.stringify((child.stdout || "").slice(0, 160))}`);
+  }
 }
 
 console.log(`\n${failed === 0

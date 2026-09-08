@@ -195,17 +195,37 @@ export function testDatabaseSafety(
 }
 
 /**
- * Empty every table this product owns, leaving the schema and the applied-migrations ledger alone.
- * Truncating `__drizzle_migrations` would make the next reader believe the schema was never built.
+ * A CLEAN DATABASE MEANS THE SCHEMA TOO, NOT ONLY THE ROWS (#227, review).
+ *
+ * The first version of this truncated every table, which is not the promise this runner makes.
+ * Acceptances mutate SCHEMA as well as data: `pg-step-provenance-acceptance` deliberately installs
+ * the pre-#184 faulty `kamlife_parse_step_report`, proves it reproduces the original error, and
+ * puts the working one back three statements later. If anything throws in that window the broken
+ * function stays installed — and TRUNCATE does not remove a function. Every later acceptance,
+ * Journey Lab included, would then run against a database whose step parser is the known-broken
+ * one, and report cascading failures that belong to nothing in the diff. That is the exact
+ * contamination this cut exists to end, arriving through a door truncation cannot close.
+ *
+ * So the reset rebuilds: drop the schema, drop the migration ledger with it, re-apply the
+ * committed migrations. Measured at ~1.5s, which is the right trade against a class of false
+ * failure that costs hours to diagnose and has already cost some.
+ *
+ * BOTH SCHEMAS, AND THAT IS NOT A DETAIL. Drizzle keeps `__drizzle_migrations` in its own `drizzle`
+ * schema, so dropping `public` alone leaves the ledger claiming every migration is applied and the
+ * re-migrate silently does nothing — a rebuild that produces an EMPTY database while reporting
+ * success. Proven by measurement: dropping `public` only left 0 tables behind.
  */
-export async function resetTestDatabase(pool: { query: (q: string) => Promise<unknown> }): Promise<void> {
-  await pool.query(`DO $$
-    DECLARE t text;
-    BEGIN
-      FOR t IN SELECT tablename FROM pg_tables
-               WHERE schemaname = 'public' AND tablename <> '__drizzle_migrations'
-      LOOP EXECUTE format('TRUNCATE TABLE %I CASCADE', t); END LOOP;
-    END $$;`);
+export async function resetTestDatabase(
+  pool: { query: (q: string) => Promise<unknown> },
+  migrate: () => { status: number | null } = () =>
+    spawnSync("npm", ["run", "db:migrate"], { stdio: "pipe", env: process.env }),
+): Promise<void> {
+  await pool.query(
+    `DROP SCHEMA IF EXISTS public CASCADE;
+     DROP SCHEMA IF EXISTS drizzle CASCADE;
+     CREATE SCHEMA public;`);
+  const { status } = migrate();
+  if (status !== 0) throw new Error(`db:migrate failed while rebuilding the test schema (exit ${status})`);
 }
 
 // ── EXECUTION AND COLLECTION ──────────────────────────────────────────────────────────────────
