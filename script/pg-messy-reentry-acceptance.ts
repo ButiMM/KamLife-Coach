@@ -42,7 +42,7 @@ const dayName = (daysBack: number) => new Intl.DateTimeFormat("en-ZA", {
 }).format(new Date(Date.now() - daysBack * 86_400_000));
 const noon = (day: string) => new Date(`${day}T12:00:00+02:00`);
 const dayOf = (value: Date | string) => sastDayKey(new Date(value));
-const WELCOME = /welcome back|good to (?:have|see) you|you(?:'|’)re back|glad you(?:'|’)re back|where you left off/i;
+const WELCOME = /welcome back|good to (?:have|see) you|you came back|you(?:'|’)re back|glad you(?:'|’)re back|where you left off/i;
 
 async function client(name: string, lastActiveDays = 5) {
   const phone = `whatsapp:+2792${String(Math.floor(Math.random() * 900000) + 100000)}`;
@@ -75,7 +75,7 @@ const n4 = dayName(4), n3 = dayName(3), n2 = dayName(2);
 
 REAL("\n=== 1–6 · THE REAL INCONSISTENT CLIENT RETURNS ===");
 const user = await client("Catchup");
-const open = await ensureOpenTrainingLoop(user, d2, "reactive", Date.now() - 2 * 86_400_000);
+const open = await ensureOpenTrainingLoop(user, d2, "reactive", Date.now() - 36 * 3_600_000);
 const catchup = [
   `I'm back after a few days. ${n4} breakfast I had eggs and toast.`,
   `${n3} I walked 6400 steps and I can't remember lunch.`,
@@ -120,6 +120,9 @@ check(!/no catch-up needed|start from today/i.test(COMEBACK_ACK),
 check(joinComebackAcknowledgement("You came back.\n\n", "Catchup, welcome back. Carry on.")
     === "Catchup, welcome back. Carry on.",
   "CONTROL: delivery never duplicates a welcome already owned by the canonical reply");
+check(joinComebackAcknowledgement("Welcome back.\n\n", "You came back and kept going.")
+    === "You came back and kept going.",
+  "CONTROL: the transport also recognises canonical comeback wording without the word welcome");
 check(!/start (?:again|over)|week 1|session 1 of|no catching up|just today/i.test(reply),
   "catch-up does not restart or deny the history the client supplied", JSON.stringify(reply.slice(0, 300)));
 check(/Logged 2 days/i.test(reply) && /6[,.]?400 steps/i.test(reply) && /session/i.test(reply),

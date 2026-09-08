@@ -45,8 +45,11 @@ await red("whole-bubble question veto", "server/handlers/food-context.ts",
   "if (mDayMatches.length >= 2 && !isQuestion && !isFrustration",
   "only the two supported meals land");
 await red("question segments become logs", "server/handlers/food-context.ts",
-  "      if (isAskingNotReporting(seg.text)) continue;\n", "",
+  "      if (isAskingNotReporting(seg.text) && !journeyMustKeepFacts(seg.text).food) continue;\n", "",
   "named-day food questions do not become catch-up meal rows");
+await red("fuzzy workout becomes food", "server/handlers/food-context.ts",
+  "scanForSAFoods(seg.text, { exactOnly: true })", "scanForSAFoods(seg.text)",
+  "only the two supported meals land");
 await red("historical outcome does not close #208", "server/backfill.ts",
   "      await closeOpenTrainingLoopForDay({ user, resolvedDay: beat.dayKey, sourceMessageId });\n", "",
   "matching older #208 loop closes exactly once");
@@ -54,15 +57,15 @@ await red("restart template claims contentful catch-up", "server/handlers/early-
   "if (isComeback && !ctx.hasMultiDayReport)", "if (isComeback)",
   "catch-up does not restart or deny the history");
 await red("direction leaves reconstructed turn", "server/routes.ts",
-  "looksLikeQuestion(message) && !looksLikeDirectionRequest(message)", "looksLikeQuestion(message)",
+  "    canonicalCloseOwnsQuestion,\n", "",
   "one reply reflects the supported multi-domain reconstruction");
 await red("transport duplicates and rejects catch-up", "server/routes/whatsapp.ts",
   "export const COMEBACK_ACK = `You came back — that's the real streak. 💛\\n\\n`;",
   "export const COMEBACK_ACK = `You came back — that's the real streak. 💛 No catch-up needed, we start from today.\\n\\n`;",
   "delivery acknowledgement does not reject supported history");
 await red("transport duplicates canonical welcome", "server/routes/whatsapp.ts",
-  `  return String(reply || "").toLowerCase().includes("welcome back") ? reply : prefix + reply;`,
-  "  return prefix + reply;", "delivery never duplicates a welcome");
+  `  return lower.includes("welcome back") || lower.includes("you came back") ? reply : prefix + reply;`,
+  "  return prefix + reply;", "transport also recognises canonical comeback wording");
 
 await pool.end();
 console.log(`pg-messy-reentry-red-on-revert: ${failed ? `RED — ${failed} ineffective control(s)` : "GREEN — every independent revert was caught"}`);

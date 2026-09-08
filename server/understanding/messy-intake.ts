@@ -523,14 +523,14 @@ export function proteinWrittenIn(writes: string[]): number {
 
 export function resolveTurn(
   ledger: TurnLedger,
-  opts: { hasFeeling: boolean; alsoAsksCoach: boolean; durableWrites?: string[] },
+  opts: { hasFeeling: boolean; alsoAsksCoach: boolean; canonicalCloseOwnsQuestion?: boolean; durableWrites?: string[] },
 ): { reply: string | null; committed: string } {
-  if (opts.hasFeeling && !opts.alsoAsksCoach) commitFact(ledger, "feeling", FEELING_ACK);
+  if (opts.hasFeeling && (!opts.alsoAsksCoach || opts.canonicalCloseOwnsQuestion)) commitFact(ledger, "feeling", FEELING_ACK);
   // WHAT WAS WRITTEN, not what was composed. The ledger parts below still drive the ACK text —
   // that is what they are for — but `committed` now answers the question its name asks.
   const committed = durableDomains(opts.durableWrites || []).join("+");
   if (committedCount(ledger) === 0) return { reply: null, committed };
-  if (opts.alsoAsksCoach) return { reply: null, committed };
+  if (opts.alsoAsksCoach && !opts.canonicalCloseOwnsQuestion) return { reply: null, committed };
   return { reply: composeMessyAck(ledger) || null, committed };
 }
 

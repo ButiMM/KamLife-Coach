@@ -33,7 +33,8 @@ async function comebackPrefix(phone: string): Promise<string> {
 
 /** The delivery join may add the fallback welcome only when the canonical reply did not. */
 export function joinComebackAcknowledgement(prefix: string, reply: string): string {
-  return String(reply || "").toLowerCase().includes("welcome back") ? reply : prefix + reply;
+  const lower = String(reply || "").toLowerCase();
+  return lower.includes("welcome back") || lower.includes("you came back") ? reply : prefix + reply;
 }
 
 // The sender number and the Twilio client both moved to outbound-delivery.ts with Cut B2. This

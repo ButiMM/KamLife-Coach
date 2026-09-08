@@ -781,8 +781,10 @@ export async function handleFoodContext(ctx: {
     for (const seg of daySegs) {
       // A question in the same bubble cannot erase a reported meal on another day. Equally, a
       // food question is not a log. The existing clause-level fact owner makes that distinction.
-      if (isAskingNotReporting(seg.text)) continue;
-      const segFoods = scanForSAFoods(seg.text);
+      if (isAskingNotReporting(seg.text) && !journeyMustKeepFacts(seg.text).food) continue;
+      // A dated segment is an automatic write, so identity must be exact. Fuzzy matching turned
+      // "did the workout" into the Pre-workout supplement and invented a meal on that day.
+      const segFoods = scanForSAFoods(seg.text, { exactOnly: true });
       if (segFoods.length === 0) continue;
       const segDate = parseMealDate(seg.day + " " + seg.text);
       // Quantity-aware, same as the main scanner path — "3 eggs and pap on Wednesday"

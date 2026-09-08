@@ -47,7 +47,7 @@ import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor } from "./understanding/live";
-import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains } from "./understanding/messy-intake";
+import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains, clausesOf } from "./understanding/messy-intake";
 import { foodDayIsClosed, readTrainingDay } from "./one-action";
 import { backfillAttributedDays } from "./backfill";
 import { isCoachCriticism } from "./reaction-guard";
@@ -998,10 +998,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     forceLog: turnFacts.mustForceFoodLog,
   });
   if (foodCtxResult !== null) commitFact(turn, "food", foodCtxResult + _backfillNote);
-
   // ── THE ONE COMPOSE ── replaces the food+feeling special case that used to live here, and
   // the food+steps string concatenation that lived inside food-context before that.
-  const hasFeeling = (turnFacts.hasFeeling || carriesFeelingClause(message)) && !foodDayIsClosed(message);
+  const hasFeeling = (turnFacts.hasFeeling || carriesFeelingClause(message)) && !foodDayIsClosed(message); const canonicalCloseOwnsQuestion = looksLikeDirectionRequest(clausesOf(message).slice(-1)[0] || message);
   // WRITE THEN COACH (2026-08-22). alsoAsksCoach used to require isMultiPartAsk (≥35 words or
   // two '?') or a feeling. The live bubble was 27 words and one '?':
   //   "What's the plan for me? / My breakfast was … / Guide for the rest of the day"
@@ -1010,8 +1009,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // elsewhere; it is not the continuation rule.
   const resolved = resolveTurn(turn, {
     hasFeeling,
-    // A direction ask already has the canonical next-action owner used by the close.
-    alsoAsksCoach: looksLikeQuestion(message) && !looksLikeDirectionRequest(message) && durableDomains(turnMutations()).length > 0,
+    alsoAsksCoach: looksLikeQuestion(message) && durableDomains(turnMutations()).length > 0,
+    canonicalCloseOwnsQuestion,
     // `committed` means COMMITTED now — read off the turn's durable write record.
     durableWrites: turnMutations(),
   });
