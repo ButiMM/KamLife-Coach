@@ -222,6 +222,53 @@ assert s != open(p).read(), "revert patch matched nothing"
 open(p, "w").write(s)
 PY2
 
+# ── 17 · the missing training carb becomes an empty string again (CTO blocker) ────────────────
+cat > /tmp/220p/17.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+before = s
+s = s.replace("    if (!trainingCarb) return noPlanWithin(c);\n", "")
+s = s.replace("dinnerCarbs = allDays.map((day) => trainingSet.has(day) ? trainingCarb : restDayCarb)",
+              'dinnerCarbs = allDays.map((day) => trainingSet.has(day) ? (trainingCarb ?? "") : restDayCarb)')
+# and remove the pool guard that masks it, so the mechanism itself is what is under test
+s = s.replace("safeVeg, safePre, safePost]", "safeVeg, safePre, safePost].slice(0, 4).concat([")
+s = s.replace(".some(pool => pool.length === 0)) return noPlanWithin(c);",
+              "]).some(pool => pool.length === 0)) return noPlanWithin(c);")
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 18 · profile fields are joined before splitting, losing the declared label ─────────────────
+cat > /tmp/220p/18.py <<'PY2'
+p = "server/food-swaps.ts"; s = open(p).read()
+before = s
+s = s.replace("""  const declaredTerms = [u.dietaryRestrictions, u.foodDislikes, u.otherMedicalNotes]
+    .flatMap(field => String(field || "").toLowerCase().split(/[,;]+|\\band\\b|\\n/))""",
+              """  const declaredTerms = [`${u.dietaryRestrictions || ""} ${u.foodDislikes || ""} ${u.otherMedicalNotes || ""}`]
+    .flatMap(field => String(field || "").toLowerCase().split(/[,;]+|\\band\\b|\\n/))""")
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 19 · the price must sit at end of line again ──────────────────────────────────────────────
+cat > /tmp/220p/19.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+before = s
+s = s.replace('const priceOf = (l: string) => Number((l.match(/—\\s*R(\\d+)/) || [0, 0])[1]);',
+              'const priceOf = (l: string) => Number((l.match(/R(\\d+)$/) || [0, 0])[1]);')
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 20 · every matching line covers the whole week on its own ─────────────────────────────────
+cat > /tmp/220p/20.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+before = s
+s = s.replace("    const extra = short > 0 && parsed.packQty === biggest ? Math.ceil(short / parsed.packQty) : 0;\n    const packs = parsed.packs + extra;",
+              "    const extra = 1;\n    const packs = Math.max(1, Math.ceil(required / parsed.packQty));")
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
 echo "=============================================================================="
 echo "#220 — RED ON REVERT, one mechanism at a time"
 echo "=============================================================================="
@@ -249,4 +296,15 @@ run_case "groceries go back to the unrotated schedule's fixed list"             
 run_case "the day-indexed recomposition schedule is rotated like a pool"                       /tmp/220p/14.py
 run_case "a declared label is any occurrence of the word again"                                /tmp/220p/15.py
 run_case "the unsupported-kosher reply goes back to the dead-end ask"                          /tmp/220p/16.py
+# 17 IS EXPECTED TO STAY GREEN, and that is the finding. The CTO blocker is a real unsoundness —
+# `trainingCarb ?? ""` graded by `c.allows`, which returns TRUE for an empty name — but it is not
+# a REACHABLE defect: trainingCarb is drawn from ["\u00bd medium sweet potato", ...lunchCarbs], so it is
+# absent only when every lunch carb is excluded, and that also empties safeLunchCarbs AND
+# safeBfCarbs, so a pool guard refuses first. No client input reaches the empty string. The fix is
+# kept because a guard that holds by coincidence is one edit away from not holding; the proof is
+# the reasoning above, not a red line, and it is reported as such rather than dressed up.
+run_case "17 · the missing training carb becomes an empty string again (CTO blocker)"          /tmp/220p/17.py
+run_case "18 · profile fields are joined before splitting, losing the declared label"          /tmp/220p/18.py
+run_case "19 · the price must sit at end of line again"                                       /tmp/220p/19.py
+run_case "20 · every matching line covers the whole week on its own"                          /tmp/220p/20.py
 echo "=============================================================================="

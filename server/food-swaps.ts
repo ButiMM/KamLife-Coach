@@ -841,8 +841,15 @@ export function foodConstraints(u: {
   //
   // THEIR WORD, NOT OUR DERIVATION. A client who told us "halaal" should hear "halaal" back, not
   // "no pork" — saying it in their own language is most of what makes being remembered land.
-  const declaredTerms = `${u.dietaryRestrictions || ""} ${u.foodDislikes || ""} ${u.otherMedicalNotes || ""}`
-    .toLowerCase().split(/[,;]+|\band\b|\n/).map(t => t.trim().replace(/^(no|not|never|only|i(?:'m| am)?)\s+/, "").trim());
+  // EACH FIELD IS SPLIT BEFORE THEY ARE COMBINED (#220 recovery, second round). Joining them with
+  // a space first meant `dietaryRestrictions: "kosher"` beside `foodDislikes: "broccoli"` became
+  // the single term "kosher broccoli", which matched no label — so a kosher client with ANY other
+  // preference recorded lost their declaration, lost noPork with it, and was handed the ordinary
+  // meat-and-dairy plan. A field boundary IS a term boundary; that is the whole reason there are
+  // three fields.
+  const declaredTerms = [u.dietaryRestrictions, u.foodDislikes, u.otherMedicalNotes]
+    .flatMap(field => String(field || "").toLowerCase().split(/[,;]+|\band\b|\n/))
+    .map(t => t.trim().replace(/^(no|not|never|only|i(?:'m| am)?)\s+/, "").trim());
   const declaredLabel = declaredTerms.find(t => /^(halaal|halal|kosher)$/.test(t)) || "";
 
   const has = (re: RegExp) => re.test(declared);

@@ -68,17 +68,42 @@ function groceriesForPlan(shopList: string, plan: string, originalTotal: number)
     for (const hit of plan.matchAll(row.meal)) grams += Number(hit[1] || hit[2] || 0);
     if (grams > 0) need.set(row.shop, grams * (row.dryRatio ?? 1));
   }
+
+  // ONE FOOD, SOMETIMES TWO LINES (#220 recovery, second round). On the R100–300 tier a fish
+  // exclusion puts BOTH "Chicken portions extra 500g" and "Frozen chicken portions 1kg" on the
+  // list, and scaling each to cover the whole week independently ordered 3.5kg of chicken for a
+  // 1 050g week — a fix for under-buying that started over-buying. Demand is shared across the
+  // lines that carry it, so the group is topped up only if what the list ALREADY provides falls
+  // short, and the extra packs go on the biggest pack size, which is the cheapest per gram.
+  const lines = shopList.split("\n");
+  const shortfall = new Map<RegExp, number>();
+  for (const [shop, required] of need) {
+    const group = lines.map(readShopLine).filter((x): x is NonNullable<typeof x> => !!x && shop.test(`${x.name} `));
+    const provided = group.reduce((g, x) => g + x.packQty * x.packs, 0);
+    if (provided < required) shortfall.set(shop, required - provided);
+  }
+
   let total = 0;
-  const lines = shopList.split("\n").map((line, i) => {
+  const out = lines.map((line, i) => {
     if (i === 0 || !line.trim()) return line;                       // the "*Your Weekly Shopping List*" header
     const parsed = readShopLine(line);
     const row = SHOP_DERIVED.find(r => r.shop.test(line));
-    if (!parsed || !row) { total += Number((line.match(/R(\d+)$/) || [0, 0])[1]); return line; }
+    // THE PRICE IS NOT ALWAYS THE END OF THE LINE. "Oats 500g — R15 (replaces pap)" carries a
+    // trailing note, and requiring the digits at end-of-line dropped that R15 from the recomputed
+    // total — the list added up to R152 and the client was told R137.
+    const priceOf = (l: string) => Number((l.match(/—\s*R(\d+)/) || [0, 0])[1]);
+    if (!parsed || !row) { total += priceOf(line); return line; }
     const required = need.get(row.shop);
     if (!required) return null;                                     // the plan never names it — do not buy it
-    const packs = Math.max(1, Math.ceil(required / parsed.packQty));
+    const short = shortfall.get(row.shop) ?? 0;
+    const biggest = Math.max(...lines.map(readShopLine)
+      .filter((x): x is NonNullable<typeof x> => !!x && row.shop.test(`${x.name} `))
+      .map(x => x.packQty));
+    const extra = short > 0 && parsed.packQty === biggest ? Math.ceil(short / parsed.packQty) : 0;
+    const packs = parsed.packs + extra;
     const price = Math.round(parsed.packPrice * packs);
     total += price;
+    if (extra === 0) return line;                                   // the list already covers it
     // EDIT THE LINE THAT IS ALREADY THERE, rather than rebuilding one from its parts. Two reasons:
     // the line carries detail the parse does not model — "Soya mince 250g dry" loses its "dry" the
     // moment it is reassembled, and a client reading "buy 750g of soya mince" for a dry weight
@@ -87,9 +112,9 @@ function groceriesForPlan(shopList: string, plan: string, originalTotal: number)
     return line
       .replace(/(\d+(?:\.\d+)?\s*(?:kg|g|tins?|pack)\b)(\s*×\s*\d+)?/i,
                (_m, q) => (packs > 1 ? `${q}×${packs}` : `${q}`))
-      .replace(/R\d+$/, `R${price}`);
+      .replace(/—\s*R\d+/, `— R${price}`);
   }).filter((l): l is string => l !== null);
-  return { list: lines.join("\n"), total: total || originalTotal };
+  return { list: out.join("\n"), total: total || originalTotal };
 }
 
 export function getOnboardingMealPlan(user: any): string {
@@ -315,7 +340,16 @@ export function getOnboardingMealPlan(user: any): string {
     // honest to put on a training day, and the guard below refuses.
     const restDayCarb = "extra veg only (rest day)";
     const trainingCarb = ["½ medium sweet potato", ...lunchCarbs].find(x => c.allows(x));
-    dinnerCarbs = allDays.map((day) => trainingSet.has(day) ? (trainingCarb ?? "") : restDayCarb) as string[];
+    // NO CARB MEANS NO SCHEDULE, DECIDED HERE (#220 recovery, second round — CTO blocker). The
+    // first draft wrote `trainingCarb ?? ""` and left the refusal to the day-bound guard below,
+    // which grades with `c.allows` — and `allows("")` is deliberately TRUE, because an empty food
+    // name is not a forbidden food. So an unbuildable training day could have graded as fine and
+    // rendered a blank dinner. It never did, only because losing every lunch carb also empties
+    // safeLunchCarbs and the pool guard fires first — a coincidence, not a guarantee, and exactly
+    // the kind of second-guard-happens-to-catch-it that this cut keeps finding. Decided at the
+    // point that knows: if there is no compliant training-day carb, there is no plan.
+    if (!trainingCarb) return noPlanWithin(c);
+    dinnerCarbs = allDays.map((day) => trainingSet.has(day) ? trainingCarb : restDayCarb) as string[];
     // A SCHEDULE, NOT A POOL (#220 recovery). Entry i means "what day i gets", and the other six
     // entries are not interchangeable with it — index 0 is a TRAINING-day carb and index 1 says
     // "(rest day)" in the client's own reply. Every other array in this file is a variety pool
