@@ -1010,7 +1010,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // elsewhere; it is not the continuation rule.
   const resolved = resolveTurn(turn, {
     hasFeeling,
-    alsoAsksCoach: looksLikeQuestion(message) && durableDomains(turnMutations()).length > 0,
+    // A direction ask already has the canonical next-action owner used by the close.
+    alsoAsksCoach: looksLikeQuestion(message) && !looksLikeDirectionRequest(message) && durableDomains(turnMutations()).length > 0,
     // `committed` means COMMITTED now — read off the turn's durable write record.
     durableWrites: turnMutations(),
   });

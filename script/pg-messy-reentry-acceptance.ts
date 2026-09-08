@@ -25,6 +25,7 @@ console.log = console.warn = console.error = () => {};
 const { pool, db } = await import("../server/db");
 const schema = await import("../shared/schema");
 const { handleMessage } = await import("../server/routes");
+const { joinComebackAcknowledgement } = await import("../server/routes/whatsapp");
 const { ensureOpenTrainingLoop } = await import("../server/memory");
 const { readOpenTrainingLoop } = await import("../server/workout-feedback");
 const { sastDayKey, sastDayKeyBefore } = await import("../server/sast");
@@ -79,7 +80,7 @@ const catchup = [
   `I'm back after a few days. ${n4} breakfast I had eggs and toast.`,
   `${n3} I walked 6400 steps and I can't remember lunch.`,
   `${n2} I felt flat because work was chaos, but I did the workout you told me to do.`,
-  "Today breakfast I had pap and chicken.",
+  "Today breakfast I had pap and chicken. What should I do today?",
 ].join(" ");
 const reply = await ask(user, catchup, "SM-catchup-229");
 await new Promise(resolve => setTimeout(resolve, 120));
@@ -111,6 +112,12 @@ check(constraints.filter((r: any) => r.kind === "training" && r.state === "relea
   "the outcome is attributed once through the existing loop owner", JSON.stringify(constraints));
 check((reply.match(new RegExp(WELCOME.source, "gi")) || []).length <= 1,
   "the re-entry turn contains at most one comeback acknowledgement", JSON.stringify(reply.slice(0, 240)));
+const delivered = joinComebackAcknowledgement("You came back — that's the real streak. 💛\n\n", reply);
+check((delivered.match(new RegExp(WELCOME.source, "gi")) || []).length === 1,
+  "the real delivery join adds exactly one acknowledgement to a contentful catch-up");
+check(joinComebackAcknowledgement("You came back.\n\n", "Catchup, welcome back. Carry on.")
+    === "Catchup, welcome back. Carry on.",
+  "CONTROL: delivery never duplicates a welcome already owned by the canonical reply");
 check(!/start (?:again|over)|week 1|session 1 of|no catching up|just today/i.test(reply),
   "catch-up does not restart or deny the history the client supplied", JSON.stringify(reply.slice(0, 300)));
 check(/Logged 2 days/i.test(reply) && /6[,.]?400 steps/i.test(reply) && /session/i.test(reply),

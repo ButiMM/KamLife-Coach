@@ -30,6 +30,11 @@ async function comebackPrefix(phone: string): Promise<string> {
   } catch { return ""; }
 }
 
+/** The delivery join may add the fallback welcome only when the canonical reply did not. */
+export function joinComebackAcknowledgement(prefix: string, reply: string): string {
+  return String(reply || "").toLowerCase().includes("welcome back") ? reply : prefix + reply;
+}
+
 // The sender number and the Twilio client both moved to outbound-delivery.ts with Cut B2. This
 // file resolved its own copy of each, which is how one door can end up sending from a number the
 // other does not know about.
@@ -234,9 +239,8 @@ async function processTextAsync(
     // The deterministic comeback owner may already have welcomed them. The transport is only a
     // fallback mouth for contentful catch-ups that correctly bypass that template; never send two
     // welcomes, and never tell someone who just supplied history that catching up was unwanted.
-    const replyAlreadyWelcomes = String(rawReply || "").toLowerCase().includes("welcome back");
     const cleanReply = rawReply && rawReply.trim().length > 0
-      ? (replyAlreadyWelcomes ? "" : welcomeBack) + rawReply
+      ? joinComebackAcknowledgement(welcomeBack, rawReply)
       : (mediaType?.startsWith("video/")
         ? `I got your video but couldn't process it — likely too long. Send a shorter clip (under 30 seconds, one set from the side) and I'll check your form.`
         : `I got your message but hit a snag processing it. Try sending it again, or type it differently — I'm here.`);

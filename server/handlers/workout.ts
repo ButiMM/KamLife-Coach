@@ -192,7 +192,7 @@ export async function handleWorkoutCommands(ctx: {
   // when someone just trains and then tells you) and `isDone` is anchored ^…$. The
   // session was being dropped AND the feeling ignored — see server/session-report.ts.
   const sessionReport = parseSessionReport(message);
-  if (sessionReport && !turnAlreadyWrote("workout") && !looksLikeQuestion(m) && !isFutureIntent(m) && !mentionsNotDone(m)) {
+  if (sessionReport && !looksLikeQuestion(m) && !isFutureIntent(m) && !mentionsNotDone(m)) {
     const handled = await logProseSession(user, phone, message, sessionReport, firstName);
     if (handled) {
       await closeTrainingLoop(sastDayKey());
