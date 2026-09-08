@@ -1089,7 +1089,20 @@ export async function handleMiscCommands(ctx: {
     // programmeWeek is phase-relative (resets to 1 each new phase), so "Week 1 | Session 19"
     // read as broken. Anchor the week to its phase so the two numbers make sense together.
     const phaseName = getPhaseNames()[user.programmePhase || 1] || "Foundation";
-    const sessionNote = totalSessions > 0 ? ` · Session ${totalSessions + 1}` : "";
+    // LIFETIME IS NOT A PROGRAMME POSITION (#221 journey 5).
+    //
+    // This read ` · Session ${totalSessions + 1}`, so a legacy client with twelve on the counter
+    // and seven durable rows was told "*Foundation Phase · Week 4 · Session 13*" — the header of
+    // the session they are about to do. That is a claim about WHERE THEY ARE IN THE PROGRAMME,
+    // built from a number that cannot answer it: `totalWorkoutsCompleted` is lifetime history,
+    // kept precisely because clients who started before every session had a durable row may own
+    // sessions no row can prove. Which session is due is owned by the programme cursor, and the
+    // next line of this very message already states it as "Day N — Today's Workout".
+    //
+    // The number is not deleted — deleting it would lose the real history the counter exists to
+    // carry. It is made to say what it is, the same way sessionHeaderLine already does with
+    // "Session N overall" after the same defect reached a client in July.
+    const sessionNote = totalSessions > 0 ? ` · ${totalSessions} sessions overall` : "";
     const gif2 = getPrimaryWorkoutGifUrl(workout);
     return `*${phaseName} Phase · Week ${week}${sessionNote}*\n\n*Day ${dayNum} — Today's Workout*\n\n${workout}\n\nSend *done* when finished.${viewerLine}${gif2 ? `\n[MEDIA:${gif2}]` : ""}`;
   }
