@@ -150,6 +150,13 @@ export const ACCEPTANCES: Acceptance[] = [
     // workout row's logged_at against a user's lastActiveAt, read through the real handler.
     command: ["npx", "tsx", "script/pg-comeback-clock-acceptance.ts"] },
 
+  { id: "session-recap", title: "One training recap that does not contradict itself",
+    // ONE RECAP (#221 journey 4). The contradiction only exists across two row families — workout
+    // rows present, meal rows absent — composed into one card by one owner. A fixture that answers
+    // every query the same way cannot put a client in the state where the card disagrees with
+    // itself, which is how "Sessions this week: 4" sat above "Days logged (7d): 0/7".
+    command: ["npx", "tsx", "script/pg-session-recap-acceptance.ts"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same

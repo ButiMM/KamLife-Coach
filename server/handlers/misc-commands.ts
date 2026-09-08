@@ -911,13 +911,20 @@ export async function handleMiscCommands(ctx: {
         // report cannot reissue the instruction while the client's answer is still outstanding.
         const { canonicalDecision } = await import("../understanding/live");
         const act = await canonicalDecision(user, message);
-        return `*${name} — last 7 days*\n\n💪 Sessions: *${truth.sessions}*\n📋 Days logged: *${truth.window.daysLogged}/7*\n🔥 Avg: *${truth.window.avgKcal} kcal* · *${truth.window.avgProtein}g* protein\n👟 Avg steps: *${truth.avgSteps.toLocaleString()}*${weightLine}\n\n*${act.todo}*`;
+        // NAME WHAT IT COUNTS (#221 journey 4). `window.daysLogged` is days carrying a MEAL — its
+        // own definition says so, and it is the divisor for the averages on the next line. Shown
+        // as bare "Days logged" it read as a claim about everything the client did, one line under
+        // the training count it silently excludes: "Sessions: 4" above "Days logged: 0/7".
+        return `*${name} — last 7 days*\n\n💪 Sessions: *${truth.sessions}*\n🍽️ Food logged: *${truth.window.daysLogged}/7 days*\n🔥 Avg: *${truth.window.avgKcal} kcal* · *${truth.window.avgProtein}g* protein\n👟 Avg steps: *${truth.avgSteps.toLocaleString()}*${weightLine}\n\n*${act.todo}*`;
       }
       const todayLine = truth.today.kcal > 0
         ? `🔥 Today: *${truth.today.kcal}${calTarget ? `/${calTarget}` : ""} kcal* · *${truth.today.protein}${protTarget ? `/${protTarget}` : ""}g* protein`
         : `🔥 Today: *nothing logged yet*`;
       const stepsLine = truth.today.steps > 0 ? `\n👟 Steps today: *${truth.today.steps.toLocaleString()}*` : "";
-      return `*${name}'s Progress*\n\n${todayLine}${stepsLine}\n💪 Sessions this week: *${truth.sessions}*\n📋 Days logged (7d): *${truth.window.daysLogged}/7*${weightLine}\n\nSend *this week* for the 7-day breakdown.`;
+      // Same relabelling as the 7-day card above, and this is where it was found: a client with
+      // four workout rows and no meal rows was shown "Sessions this week: 4" directly above
+      // "Days logged (7d): 0/7" — the coach contradicting itself in two consecutive lines.
+      return `*${name}'s Progress*\n\n${todayLine}${stepsLine}\n💪 Sessions this week: *${truth.sessions}*\n🍽️ Food logged: *${truth.window.daysLogged}/7 days*${weightLine}\n\nSend *this week* for the 7-day breakdown.`;
     } catch (e) {
       console.warn("[PROGRESS] truth unavailable:", (e as any)?.message || e);
       return `${name}, I can't read your numbers this second — give me a moment and ask again. I'd rather say that than guess.`;
