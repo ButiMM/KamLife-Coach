@@ -19,6 +19,16 @@ process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
 
+// This suite grades an OPEN TRAINING MOVE, so its fixture must actually be on a training day.
+// It previously inherited the runner's weekday: Monday was green, Tuesday/Sunday was red because
+// the reactive owner correctly held training on a rest day while the setup still demanded the
+// Monday instruction. Freeze to noon on this SAST week's Monday; chronology remains relative and
+// the product contract is stricter, not weaker — a real rest day is never turned into training.
+const wallClockNow = Date.now();
+const { sastWeekStart: acceptanceWeekStart } = await import("../server/sast");
+const acceptanceNow = acceptanceWeekStart(wallClockNow).getTime() + 12 * 3_600_000;
+Date.now = () => acceptanceNow;
+
 const REAL = console.log.bind(console);
 console.log = console.warn = console.error = () => {};
 
