@@ -117,8 +117,9 @@ check(/Logged 2 days/i.test(reply) && /6[,.]?400 steps/i.test(reply) && /session
   "one reply reflects the supported multi-domain reconstruction", JSON.stringify(reply.slice(0, 500)));
 check(/Heard you on how you're feeling/i.test(reply),
   "the final turn hears the contextual feeling rather than reducing it to rows", JSON.stringify(reply.slice(0, 500)));
-check(!/^\s*(?:got it|logged|noted)\b[\s\S]*$/i.test(reply) && reply.split("\n\n---\n\n").length === 1,
-  "the result is one coaching turn, not a terminal receipt or multiple WhatsApp replies",
+check(/stand on a scale|protein|\bwalk\b|get today'?s session|nothing new today|rest today/i.test(reply)
+    && reply.split("\n\n---\n\n").length === 1,
+  "the result carries today's canonical next decision in one WhatsApp reply, not a terminal receipt",
   JSON.stringify(reply.slice(0, 500)));
 check(turns.length === 1 && JSON.stringify(turns[0].mutations || []).includes(open?.ref || "missing-ref")
     && String(turns[0].reply || "") === reply,
