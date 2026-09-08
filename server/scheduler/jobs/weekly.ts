@@ -325,6 +325,10 @@ export async function runSundayEveningCheckin(): Promise<void> {
       if (completedSessions === 0 && distinctFoodDays === 0) {
         question = `${name}, this week was quiet. One question — what got in the way?`;
       } else if (completedSessions >= plannedSessions && distinctFoodDays >= 5) {
+        // NAME WHAT IT COUNTS (#221 journey 4). `distinctFoodDays` is days carrying a MEAL, and
+        // it sat beside a session count reading bare "days logged" — so a client who trained
+        // four times and logged no food was told "4 sessions, 0 days logged" in one sentence.
+        // The variable was always named honestly; only the sentence was not.
         question = isMuscleGainSunday
           ? `${name}, ${completedSessions} sessions done and food tracked all week. Solid. One question — what did you eat that gave you the most energy in the gym this week?`
           : isRecompSunday
@@ -346,10 +350,10 @@ export async function runSundayEveningCheckin(): Promise<void> {
           : `${name}, average steps this week: ${avgSteps.toLocaleString()}. Steps are your daily fat-burning base. What is the real barrier to walking more?`;
       } else {
         question = isMuscleGainSunday
-          ? `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days logged. One sentence — what felt strongest this week in the gym?`
+          ? `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days of food logged. One sentence — what felt strongest this week in the gym?`
           : isRecompSunday
-          ? `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days logged. One sentence — what did you notice changing this week?`
-          : `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days logged. One sentence — what do you want to be different next week?`;
+          ? `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days of food logged. One sentence — what did you notice changing this week?`
+          : `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days of food logged. One sentence — what do you want to be different next week?`;
       }
       if (await claimDailySlot(client.id, "sunday_evening")) { await sendWhatsApp(client.phoneNumber, question); }
     } catch (err) { console.error(`[SCHEDULER] Sunday check-in error — ${client.phoneNumber}:`, err); }
