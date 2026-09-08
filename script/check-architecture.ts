@@ -75,7 +75,7 @@ const BUDGET = {
    * a plateau nudge is a product decision, and this number is where that decision gets made
    * rather than forgotten. LOWER THIS as capabilities are wired or deleted. Never raise it.
    */
-  unreachableCapabilities: 42,
+  unreachableCapabilities: 41,
   /**
    * GUARD #14 — see unclassifiedSenders above. Six proactive senders still choose their own
    * behavioural instruction: monday's weigh-in reminder and diet-break restore, programme's weekly

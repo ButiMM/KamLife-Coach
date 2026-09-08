@@ -38,7 +38,7 @@ import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from 
 import { handleAdviceCommands } from "./advice-commands";
 import { handleFoodCommands } from "./food-commands";
 import { PRICE_ESTIMATE_NOTE } from "../reply-contract";
-import { resolveReentryForUser } from "../understanding/reentry-bridge";
+import { resolveReentryForUser, shouldHandleComebackForUser, executionEvidenceForUser } from "../understanding/reentry-bridge";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -1285,7 +1285,16 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // back after a real gap?" — was therefore answered here and, once the canonical resolver landed,
   // in two places at once. The regexes were byte-identical, so this swap is behaviour-preserving
   // by construction; what it removes is the second definition, not the behaviour.
-  const reentry = resolveReentryForUser({ user, message: m });
+  // EXECUTION EVIDENCE REACHES THE CLOCK (#221). The gap is read from the boundary that owns it,
+  // which now folds in the newest durable meal/workout/step row. Only fetched once the cheap
+  // message test has already passed, so an ordinary turn pays nothing for it.
+  const mayBeComeback = shouldHandleComebackForUser({ user, message: m });
+  const evidence = mayBeComeback ? await executionEvidenceForUser(user.id) : null;
+  const reentry = resolveReentryForUser({
+    user, message: m,
+    lastExecutionAt: evidence?.lastExecutionAt,
+    lastWorkoutAt: evidence?.lastWorkoutAt,
+  });
   const isComeback = reentry.shouldHandleComeback;
 
   if (isComeback) {
@@ -1294,7 +1303,14 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     // DISPLAY path, which needs a number, and the legacy code read 0 there. Keeping that default
     // is deliberate: null would render as "null days" to a client.
     const daysSilent = reentry.daysSinceLastContact ?? 0;
-    const daysText = daysSilent <= 7 ? `${daysSilent} day${daysSilent === 1 ? "" : "s"}` : daysSilent <= 14 ? "about a week" : "a while";
+    // HOW LONG THEY WERE REALLY GONE (#221). A client who trained on day 3 of a nine-day silence
+    // was told "about a week away" — measured from their last MESSAGE, as though the session had
+    // not happened. The gap the client recognises is the one since they last did something, and
+    // when that is newer than their last contact it is the honest number to say back to them.
+    const gap = reentry.executedDuringAbsence && reentry.daysSinceLastExecution !== null
+      ? reentry.daysSinceLastExecution
+      : daysSilent;
+    const daysText = gap <= 7 ? `${gap} day${gap === 1 ? "" : "s"}` : gap <= 14 ? "about a week" : "a while";
 
     // Pull their last-logged stats so the comeback feels informed, not generic.
     const snapLines: string[] = [];
@@ -1344,7 +1360,18 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
       const sessions = workoutCount[0]?.n || 0;
       snapLines.push(sessions > 0
-        ? `🏋️ Training: *${sessions}* session${sessions !== 1 ? "s" : ""} in the 14 days before you went quiet`
+        // "BEFORE YOU WENT QUIET" WAS A CLAIM, AND IT WAS FALSE (#221). This window is the last 14
+        // days, which includes the absence itself, so a session done DURING the silence was filed
+        // under the time before it. Naming when it happened is the difference between a coach who
+        // noticed they kept going and one that plainly did not.
+        //
+        // A SENTENCE ABOUT TRAINING READS TRAINING EVIDENCE (#221 review). This asked
+        // `executedDuringAbsence`, which is satisfied by a meal or a step count — so a client who
+        // ate while quiet and last trained before the gap was congratulated for sessions they did
+        // not do. The gap number stays type-agnostic; only this claim narrows.
+        ? (reentry.trainedDuringAbsence
+            ? `🏋️ Training: *${sessions}* session${sessions !== 1 ? "s" : ""} in the last 14 days — including while you were quiet 👊`
+            : `🏋️ Training: *${sessions}* session${sessions !== 1 ? "s" : ""} in the 14 days before you went quiet`)
         : `🏋️ Training: no sessions logged in the 14 days before your absence`);
     } catch { /* briefing is non-critical — warm restart still happens */ }
 

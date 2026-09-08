@@ -10,18 +10,28 @@ import {
 } from "../server/understanding/reentry";
 import { resolveReentryForUser, shouldHandleComebackForUser } from "../server/understanding/reentry-bridge";
 
-// Existing UnderstandingState boundary: 48 hours is the returning threshold.
-// MIGRATED FROM reentryFromAgeHours (2026-08-17). Same six cases, same expectations, now against
-// the canonical owner and driven by a TIMESTAMP rather than a pre-computed age in hours — because
-// the age was the defect: it was derived from clientUnderstanding.updatedAt, a persistence clock.
-// Verified equivalent before the old function was deleted: both agreed on all six, including the
-// future-clock case, which reentryFromAgeHours caught via its `ageHours < 0` guard.
+// REGRADED FOR SAST DAYS (#221). These cases were written against the ELAPSED-HOURS definition —
+// "48 hours is the returning threshold" — and that definition is the defect #221 names: the clock
+// divided by 86_400_000 instead of counting SAST calendar days, so a client last seen at 23:30 on
+// Sunday who wrote at 06:00 on Tuesday was two days gone, counted as one, and was DENIED the
+// comeback. The expectations move to the calendar because the semantics moved, and the semantics
+// moved because the product is a South African coach whose clients experience days, not periods
+// of 86 400 000 milliseconds.
+//
+// The cases themselves are unchanged and NOT weakened: same instants, same threshold constant,
+// same future/unknown handling. Only the day arithmetic differs, and each expectation below is
+// what the SAST calendar actually says about those two instants.
+//
+// MIGRATED FROM reentryFromAgeHours (2026-08-17), which read clientUnderstanding.updatedAt — a
+// persistence clock. That correction stands; this one replaces the remaining arithmetic.
 const NOW = Date.parse("2026-08-17T10:00:00.000Z");
 const hoursAgo = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
 
 assert.equal(RETURNING_DAYS, 2, "the threshold must live in exactly one place");
-assert.deepEqual(contactState(hoursAgo(0), NOW), { daysSinceLastContact: 0, isReturning: false });
-assert.deepEqual(contactState(hoursAgo(47.99), NOW), { daysSinceLastContact: 1, isReturning: false });
+assert.deepEqual(contactState(hoursAgo(0), NOW), { daysSinceLastContact: 0, isReturning: false },
+  "same instant is the same SAST day");
+assert.deepEqual(contactState(hoursAgo(47.99), NOW), { daysSinceLastContact: 2, isReturning: true },
+  "47.99h before noon on the 17th is noon on the 15th — two SAST days, and a client would say two");
 assert.deepEqual(contactState(hoursAgo(48), NOW), { daysSinceLastContact: 2, isReturning: true });
 assert.deepEqual(contactState(hoursAgo(240), NOW), { daysSinceLastContact: 10, isReturning: true });
 assert.deepEqual(contactState(null, NOW), { daysSinceLastContact: null, isReturning: false });
@@ -48,6 +58,12 @@ assert.equal(daysSinceContact("2026-08-07T10:00:00.000Z", now), 10);
 assert.equal(daysSinceContact(undefined, now), null);
 assert.equal(daysSinceContact("not-a-date", now), null);
 assert.equal(daysSinceContact("2026-08-18T10:00:00.000Z", now), null);
+// A TIMESTAMP IS A TIMESTAMP (#221). `new Date(String(1755424800000))` is an Invalid Date, so a
+// caller holding epoch milliseconds used to get a silent null — read downstream as "we have never
+// heard from this client" rather than as the number they passed. All three input shapes agree.
+assert.equal(daysSinceContact(Date.parse("2026-08-15T10:00:00.000Z"), now), 2, "epoch ms is accepted");
+assert.equal(daysSinceContact(new Date("2026-08-15T10:00:00.000Z"), now), 2, "a Date is accepted");
+assert.equal(daysSinceContact("2026-08-15T10:00:00.000Z", now), 2, "an ISO string is accepted");
 
 // Explicit comeback language is a signal; ordinary action messages are not.
 assert.equal(isExplicitReturnSignal("I'm back"), true);
@@ -67,19 +83,19 @@ assert.equal(isProfileUpdateMessage("I'm back"), false);
 
 assert.deepEqual(
   resolveReentry({ lastActiveAt: "2026-08-15T10:00:00.000Z", message: "I'm back", nowMs: now }),
-  { daysSinceLastContact: 2, isReturning: true, hasExplicitReturnSignal: true, shouldHandleComeback: true },
+  { daysSinceLastContact: 2, daysSinceLastExecution: null, executedDuringAbsence: false, trainedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: true, shouldHandleComeback: true },
 );
 assert.deepEqual(
   resolveReentry({ lastActiveAt: "2026-08-15T10:00:00.000Z", message: "workout", nowMs: now }),
-  { daysSinceLastContact: 2, isReturning: true, hasExplicitReturnSignal: false, shouldHandleComeback: false },
+  { daysSinceLastContact: 2, daysSinceLastExecution: null, executedDuringAbsence: false, trainedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: false, shouldHandleComeback: false },
 );
 assert.deepEqual(
   resolveReentry({ lastActiveAt: "2026-08-15T10:00:00.000Z", message: "I train at home now", nowMs: now }),
-  { daysSinceLastContact: 2, isReturning: true, hasExplicitReturnSignal: false, shouldHandleComeback: false },
+  { daysSinceLastContact: 2, daysSinceLastExecution: null, executedDuringAbsence: false, trainedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: false, shouldHandleComeback: false },
 );
 assert.deepEqual(
   resolveReentry({ lastActiveAt: "2026-08-17T09:00:00.000Z", message: "I'm back", nowMs: now }),
-  { daysSinceLastContact: 0, isReturning: false, hasExplicitReturnSignal: true, shouldHandleComeback: false },
+  { daysSinceLastContact: 0, daysSinceLastExecution: null, executedDuringAbsence: false, trainedDuringAbsence: false, isReturning: false, hasExplicitReturnSignal: true, shouldHandleComeback: false },
 );
 
 // Consumer boundary: callers receive the canonical result rather than duplicating the rules.
@@ -97,7 +113,7 @@ assert.equal(
 );
 assert.deepEqual(
   resolveReentryForUser({ user: { lastActiveAt: "2026-08-07T10:00:00.000Z" }, message: "sorry I've been busy", nowMs: now }),
-  { daysSinceLastContact: 10, isReturning: true, hasExplicitReturnSignal: true, shouldHandleComeback: true },
+  { daysSinceLastContact: 10, daysSinceLastExecution: null, executedDuringAbsence: false, trainedDuringAbsence: false, isReturning: true, hasExplicitReturnSignal: true, shouldHandleComeback: true },
 );
 
 
@@ -111,19 +127,30 @@ const { compileStateBlurb: promptBlurb } = await import("../server/understanding
 const seedFor = (lastActiveAt: unknown) =>
   seedUnderstanding({ id: "u1", name: "Thandi", lastActiveAt, goalType: "fat_loss" } as any);
 
+// N SAST DAYS AGO, AT MIDDAY (#221). These cases used to subtract hours from Date.now(), which is
+// stable under elapsed-hour arithmetic and NOT stable under calendar days: "47 hours ago" is two
+// SAST days at 09:00 and one at 23:00, so the suite's answer would depend on the hour it happened
+// to run. Anchoring each instant to midday of a named SAST day makes the expectation a fact about
+// the calendar rather than about the clock on the runner.
+const middayNSastDaysAgo = (n: number) => {
+  const key = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg" })
+    .format(new Date(Date.now() - n * 86_400_000));
+  return new Date(`${key}T12:00:00+02:00`).toISOString();
+};
+
 // Normal re-entry: 10 days away must reach the prompt as a returning client.
-const away = seedFor(new Date(Date.now() - 10 * 86_400_000).toISOString());
+const away = seedFor(middayNSastDaysAgo(10));
 assert.equal(away.current.reentry.isReturning, true);
 assert.match(promptBlurb(away), /returning after 10 days away/i);
 assert.match(promptBlurb(away), /do not pretend continuity/i);
 
-// Under the threshold: 47 hours is NOT a comeback and must say nothing about returning.
-const recent = seedFor(new Date(Date.now() - 47 * 3_600_000).toISOString());
+// Under the threshold: YESTERDAY is not a comeback and must say nothing about returning.
+const recent = seedFor(middayNSastDaysAgo(1));
 assert.equal(recent.current.reentry.isReturning, false);
 assert.doesNotMatch(promptBlurb(recent), /returning after/i);
 
 // Exactly at the threshold, and the phrasing the compiler reserves for it.
-const twoDays = seedFor(new Date(Date.now() - 49 * 3_600_000).toISOString());
+const twoDays = seedFor(middayNSastDaysAgo(2));
 assert.equal(twoDays.current.reentry.daysSinceLastContact, 2);
 assert.match(promptBlurb(twoDays), /returning after a couple of days/i);
 
@@ -139,3 +166,74 @@ assert.equal(future.current.reentry.daysSinceLastContact, null);
 assert.doesNotMatch(promptBlurb(future), /returning after/i);
 
 console.log("reentry-state-tests: all assertions passed");
+
+// ── LAST MEANINGFUL ENGAGEMENT, NOT LAST CONTACT (#221) ──────────────────────────────────────
+//
+// A client trained on day 3 of a nine-day silence and said so on return. The coach answered
+// "about a week away" and filed that session under "the 14 days BEFORE you went quiet" — both
+// wrong from one cause: the gap was measured from CONTACT alone, so the thing they actually did
+// during the absence was invisible to the clock.
+{
+  const nowMs = Date.parse("2026-09-08T10:00:00+02:00");
+  const day = (n: number) => new Date(`${new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg" })
+    .format(new Date(nowMs - n * 86_400_000))}T12:00:00+02:00`);
+
+  const trained = resolveReentry({
+    lastActiveAt: day(9), lastExecutionAt: day(3), lastWorkoutAt: day(3), message: "I'm back", nowMs });
+  assert.equal(trained.daysSinceLastContact, 9, "contact is still contact");
+  assert.equal(trained.daysSinceLastExecution, 3, "and execution is read on the same SAST clock");
+  assert.equal(trained.executedDuringAbsence, true, "they kept going while they were quiet");
+  assert.equal(trained.trainedDuringAbsence, true, "and what they did was training");
+  assert.equal(trained.shouldHandleComeback, true,
+    "the DECISION still keys off contact — they are returning to the conversation either way");
+
+  // CONTROL, and it is the one that matters: execution OLDER than last contact is not evidence of
+  // anything during an absence. Without this, every client with any history reads as "still going".
+  const stale = resolveReentry({
+    lastActiveAt: day(2), lastExecutionAt: day(9), message: "I'm back", nowMs });
+  assert.equal(stale.executedDuringAbsence, false,
+    "a log older than the last message is not execution during the silence");
+
+  // ORDERING IS BETWEEN INSTANTS (#221 review). This compared SAST day AGES, which are equal for
+  // two events on the same date — so a client who wrote in the morning and trained that evening had
+  // the evening session filed under the time before the silence it actually happened in.
+  const at = (n: number, hhmm: string) => new Date(`${new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Johannesburg" }).format(new Date(nowMs - n * 86_400_000))}T${hhmm}:00+02:00`);
+  const evening = resolveReentry({
+    lastActiveAt: at(4, "08:00"), lastExecutionAt: at(4, "19:00"), lastWorkoutAt: at(4, "19:00"),
+    message: "I'm back", nowMs });
+  assert.equal(evening.executedDuringAbsence, true,
+    "an evening workout is after a morning message, even though both are four days old");
+  assert.equal(evening.daysSinceLastExecution, 4, "…while the DISPLAYED age stays a day count");
+
+  // CONTROL, and the reason day-ages were reached for in the first place: a durable row written BY
+  // the last turn shares that turn's second, in no guaranteed order — the handlers set lastActiveAt
+  // in the same update that files the log. It is conversation, not a silent streak.
+  const sameTurn = resolveReentry({
+    lastActiveAt: at(4, "12:00"), lastExecutionAt: new Date(at(4, "12:00").getTime() + 400),
+    message: "I'm back", nowMs });
+  assert.equal(sameTurn.executedDuringAbsence, false, "meaningfully newer, not merely newer");
+
+  // CONTROL: the same instant is likewise not "during an absence" — the silence had not started.
+  const sameDay = resolveReentry({
+    lastActiveAt: day(4), lastExecutionAt: day(4), message: "I'm back", nowMs });
+  assert.equal(sameDay.executedDuringAbsence, false, "strictly newer, not merely equal");
+
+  // ONE FLAG WAS ANSWERING TWO QUESTIONS (#221 review). A meal during the silence is engagement and
+  // moves the gap; it is not training, and a coach that says otherwise credits a workout that never
+  // happened. The two must be able to disagree, so this asserts them disagreeing.
+  const ateOnly = resolveReentry({
+    lastActiveAt: day(9), lastExecutionAt: day(3), lastWorkoutAt: day(12), message: "I'm back", nowMs });
+  assert.equal(ateOnly.executedDuringAbsence, true, "eating while quiet is still engagement");
+  assert.equal(ateOnly.trainedDuringAbsence, false,
+    "…but the last session predates the silence, so they did not train during it");
+  assert.equal(ateOnly.daysSinceLastExecution, 3, "and the gap is measured from what they DID do");
+
+  // CONTROL: no evidence at all must stay null rather than defaulting to a number.
+  const none = resolveReentry({ lastActiveAt: day(9), message: "I'm back", nowMs });
+  assert.equal(none.daysSinceLastExecution, null, "unknown execution is unknown, not 0");
+  assert.equal(none.executedDuringAbsence, false);
+  assert.equal(none.trainedDuringAbsence, false);
+}
+
+console.log("reentry-state-tests: GREEN");
