@@ -136,7 +136,7 @@ async function main() {
   const { sastDayKey } = await import("../server/sast");
 
   /** Run one real turn and capture what it wrote and whether the front door applied a rewrite. */
-  async function turn(input: string): Promise<{ days: string[]; appliedRewrite: boolean }> {
+  async function turn(input: string): Promise<{ days: string[]; appliedRewrite: boolean; producedCanonical: boolean }> {
     const g = globalThis as any;
     g.__KAMLIFE_STUB_USER = { ...USER };
     g.__KAMLIFE_STUB_WRITES = [];
@@ -150,14 +150,20 @@ async function main() {
     // the only honest shape here regardless of the logging.
     const APPLIED = /^\[NORMALIZER\] [A-Z_]+\(\d+%\)/;
     let applied = false;
-    console.log = (...a: unknown[]) => { if (APPLIED.test(String(a[0] ?? ""))) applied = true; };
+    let produced = false;
+    console.log = (...a: unknown[]) => {
+      const l = String(a[0] ?? "");
+      if (APPLIED.test(l)) { applied = true; produced = true; }
+      // A refusal is ALSO proof the classifier ran and returned a canonical — see the guard below.
+      else if (l.startsWith("[NORMALIZER] fidelity gate REJECTED")) produced = true;
+    };
     try { await handleMessage(USER.phoneNumber, input); }
     finally { console.log = REAL_LOG; }
     const days = (g.__KAMLIFE_STUB_WRITES as Array<{ table: unknown; values: any }>)
       .filter(w => w.table === mealLogs && w.values?.loggedAt)
       .map(w => sastDayKey(new Date(w.values.loggedAt)));
     delete g.__KAMLIFE_STUB_WRITES;
-    return { days: [...new Set(days)], appliedRewrite: applied };
+    return { days: [...new Set(days)], appliedRewrite: applied, producedCanonical: produced };
   }
 
   await check("a multi-day batch still lands on three days through the front door", async () => {
@@ -199,12 +205,23 @@ async function main() {
     assert.ok(inventing.length > 0,
       "no recorded canonical carries an unwritten number, so this check graded nothing — re-record, "
       + "or retire it deliberately rather than letting it pass empty");
-    let anyApplied = false;
+    // LIVENESS IS "THE CLASSIFIER RAN", NOT "A REWRITE SURVIVED" (#234).
+    //
+    // This asserted that some corpus rewrite was APPLIED, to prove the brakes were not being
+    // graded against a dead normalizer. That signal stopped being available for an honest reason:
+    // the one entry still satisfying it was "you missed the black coffee yesterday" ->
+    // "i had black coffee for breakfast yesterday", which INVENTS the meal slot. #234 closed that
+    // class, so of the five recorded canonicals four now fail fidelity and the fifth is refused by
+    // the pre-existing number brake ("10k" -> "10000"). Nothing in this recording should be
+    // applied, and a guard demanding that one be applied would only be satisfied by reopening the
+    // defect. The purpose survives unchanged: prove the normalizer PRODUCED a canonical — applied
+    // or refused — because a dead normalizer produces neither.
+    let anyProduced = false;
     for (const c of CORPUS.filter(c => recorded.entries[c.input.toLowerCase()]?.canonical)) {
-      if ((await turn(c.input)).appliedRewrite) { anyApplied = true; break; }
+      if ((await turn(c.input)).producedCanonical) { anyProduced = true; break; }
     }
-    assert.ok(anyApplied,
-      "the front door applied NO rewrite from the whole corpus — the brakes cannot be graded "
+    assert.ok(anyProduced,
+      "the front door produced NO canonical from the whole corpus — the brakes cannot be graded "
       + "against a normalizer that is off");
   });
 
