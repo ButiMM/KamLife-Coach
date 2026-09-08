@@ -205,15 +205,52 @@ console.log("\n=== 7 · THE RESET RESTORES SCHEMA AN ACCEPTANCE BROKE, NOT JUST 
   const original = await defOf();
   chk(!!original, "the migrated schema carries the step-provenance function to begin with");
 
-  await pool.query(`CREATE OR REPLACE FUNCTION public.kamlife_parse_step_report(raw text)
-    RETURNS integer LANGUAGE plpgsql IMMUTABLE AS $fn$ BEGIN RETURN 42; END; $fn$;`);
-  const broken = await defOf();
-  chk(broken !== original && /42/.test(broken),
-    "CONTROL: an acceptance really can leave a mutated function behind", "");
+  // The scenario exactly: an acceptance that mutates the function and then DIES before restoring
+  // it, followed by one that requires the committed definition. Not a mutation done politely from
+  // this file — a failing acceptance, which is the case that actually happens.
+  const breaksAndDies = fixture("breaks-and-dies", `
+    const { pool } = await import("../server/db.ts");
+    await pool.query(\`CREATE OR REPLACE FUNCTION public.kamlife_parse_step_report(raw text)
+      RETURNS integer LANGUAGE plpgsql IMMUTABLE AS $fn$ BEGIN RETURN 42; END; $fn$;\`);
+    await pool.end();
+    console.log("fixture: schema mutated, now dying before restoring it");
+    process.exit(1);`);
+  const demandsCommittedFn = fixture("demands-committed-fn", `
+    const { pool } = await import("../server/db.ts");
+    const { rows } = await pool.query(\`SELECT pg_get_functiondef(p.oid) AS def FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'kamlife_parse_step_report'\`);
+    await pool.end();
+    const mutated = /RETURN 42/.test(rows[0]?.def || "");
+    console.log("fixture: step parser is " + (mutated ? "THE MUTATED ONE" : "the committed one"));
+    process.exit(mutated ? 1 : 0);`);
+
+  const results = await runAcceptances(
+    [entry("breaks-and-dies", breaksAndDies), entry("demands-committed-fn", demandsCommittedFn)],
+    { reset, run });
+  chk(!results[0].ok, "CONTROL: the mutating acceptance really did fail", JSON.stringify(results[0]));
+  chk(results[1].ok,
+    "a schema mutation left behind by a FAILING acceptance cannot reach the next one",
+    JSON.stringify(results[1]));
+
+  // THE CONTROL FOR THE CONTROL. With row-only truncation in place of the rebuild, the mutated
+  // function survives and the second acceptance fails — which is the defect this replaced, and the
+  // proof that the check above is testing the rebuild rather than describing a mutation that never
+  // happened.
+  const truncateOnly = async () => {
+    await pool.query(`DO $$ DECLARE t text; BEGIN
+      FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+      LOOP EXECUTE format('TRUNCATE TABLE %I CASCADE', t); END LOOP; END $$;`);
+  };
+  const underTruncate = await runAcceptances(
+    [entry("breaks-and-dies", breaksAndDies), entry("demands-committed-fn", demandsCommittedFn)],
+    { reset: truncateOnly, run });
+  chk(!underTruncate[1].ok,
+    "CONTROL: with row-only truncation the broken parser survives and the next acceptance FAILS",
+    JSON.stringify(underTruncate[1]));
 
   await reset();
-  chk(await defOf() === original,
-    "…and the reset puts the committed definition back, byte for byte",
+  chk(await defOf() === original, "…and the rebuild restores the committed definition byte for byte",
     JSON.stringify((await defOf()).slice(0, 120)));
 }
 
