@@ -24,10 +24,19 @@ process.env.NODE_ENV = "production";
 // the reactive owner correctly held training on a rest day while the setup still demanded the
 // Monday instruction. Freeze to noon on this SAST week's Monday; chronology remains relative and
 // the product contract is stricter, not weaker — a real rest day is never turned into training.
-const wallClockNow = Date.now();
+const RealDate = Date;
+const wallClockNow = RealDate.now();
 const { sastWeekStart: acceptanceWeekStart } = await import("../server/sast");
 const acceptanceNow = acceptanceWeekStart(wallClockNow).getTime() + 12 * 3_600_000;
-Date.now = () => acceptanceNow;
+const AcceptanceDate = function(this: unknown, ...args: unknown[]) {
+  if (!new.target) return new RealDate(acceptanceNow).toString();
+  return args.length ? new (RealDate as any)(...args) : new RealDate(acceptanceNow);
+} as unknown as DateConstructor;
+AcceptanceDate.now = () => acceptanceNow;
+AcceptanceDate.parse = RealDate.parse;
+AcceptanceDate.UTC = RealDate.UTC;
+AcceptanceDate.prototype = RealDate.prototype;
+globalThis.Date = AcceptanceDate;
 
 const REAL = console.log.bind(console);
 console.log = console.warn = console.error = () => {};
