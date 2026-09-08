@@ -19,6 +19,7 @@ import { prepareOutbound, prepareReactiveOutbound } from "../outbound-authority"
 // like a win, not a walk of shame. Self-deduping: that first message resets
 // lastActiveAt, so only one reply per comeback ever carries the line. Read the gap
 // BEFORE handleMessage runs (which updates lastActiveAt).
+export const COMEBACK_ACK = `You came back — that's the real streak. 💛\n\n`;
 async function comebackPrefix(phone: string): Promise<string> {
   try {
     const [u] = await db.select({ lastActiveAt: users.lastActiveAt, onboardingState: users.onboardingState })
@@ -26,7 +27,7 @@ async function comebackPrefix(phone: string): Promise<string> {
     if (!u || u.onboardingState !== "COMPLETE" || !u.lastActiveAt) return "";
     const gapDays = (Date.now() - new Date(u.lastActiveAt).getTime()) / 86_400_000;
     if (gapDays < 3) return "";
-    return `You came back — that's the real streak. 💛\n\n`;
+    return COMEBACK_ACK;
   } catch { return ""; }
 }
 

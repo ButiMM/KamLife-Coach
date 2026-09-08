@@ -170,6 +170,9 @@ export const ACCEPTANCES: Acceptance[] = [
     // and closure of an older open-loop ref are persisted chronology claims, not fixture claims.
     command: ["npx", "tsx", "script/pg-messy-reentry-acceptance.ts"] },
 
+  { id: "messy-reentry-reverts", title: "Messy re-entry controls fail on every mechanism revert",
+    command: ["npx", "tsx", "script/pg-messy-reentry-red-on-revert.ts"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same

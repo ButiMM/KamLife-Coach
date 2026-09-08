@@ -25,7 +25,7 @@ console.log = console.warn = console.error = () => {};
 const { pool, db } = await import("../server/db");
 const schema = await import("../shared/schema");
 const { handleMessage } = await import("../server/routes");
-const { joinComebackAcknowledgement } = await import("../server/routes/whatsapp");
+const { COMEBACK_ACK, joinComebackAcknowledgement } = await import("../server/routes/whatsapp");
 const { ensureOpenTrainingLoop } = await import("../server/memory");
 const { readOpenTrainingLoop } = await import("../server/workout-feedback");
 const { sastDayKey, sastDayKeyBefore } = await import("../server/sast");
@@ -112,9 +112,11 @@ check(constraints.filter((r: any) => r.kind === "training" && r.state === "relea
   "the outcome is attributed once through the existing loop owner", JSON.stringify(constraints));
 check((reply.match(new RegExp(WELCOME.source, "gi")) || []).length <= 1,
   "the re-entry turn contains at most one comeback acknowledgement", JSON.stringify(reply.slice(0, 240)));
-const delivered = joinComebackAcknowledgement("You came back — that's the real streak. 💛\n\n", reply);
+const delivered = joinComebackAcknowledgement(COMEBACK_ACK, reply);
 check((delivered.match(new RegExp(WELCOME.source, "gi")) || []).length === 1,
   "the real delivery join adds exactly one acknowledgement to a contentful catch-up");
+check(!/no catch-up needed|start from today/i.test(COMEBACK_ACK),
+  "the delivery acknowledgement does not reject supported history the client just supplied");
 check(joinComebackAcknowledgement("You came back.\n\n", "Catchup, welcome back. Carry on.")
     === "Catchup, welcome back. Carry on.",
   "CONTROL: delivery never duplicates a welcome already owned by the canonical reply");
@@ -131,6 +133,15 @@ check(/stand on a scale|protein|\bwalk\b|get today'?s session|nothing new today|
 check(turns.length === 1 && JSON.stringify(turns[0].mutations || []).includes(open?.ref || "missing-ref")
     && String(turns[0].reply || "") === reply,
   "the turn ledger reconstructs the loop resolution and exact delivered reply", JSON.stringify(turns[0] || {}));
+
+const nonFood = await client("NonFoodCatchup");
+const nonFoodReply = await ask(nonFood,
+  `I'm back. ${n3} I walked 5200 steps. ${n2} I completed my workout. What should I do today?`,
+  "SM-nonfood-catchup-229");
+check(/5[,.]?200 steps/i.test(nonFoodReply) && /session/i.test(nonFoodReply)
+    && /stand on a scale|tell me what you ate|protein|\bwalk\b|get today'?s session|rest today/i.test(nonFoodReply),
+  "a non-food catch-up also reaches today's decision instead of terminating at its receipt",
+  JSON.stringify(nonFoodReply.slice(0, 400)));
 
 REAL("\n=== 4 · A NAMED-DAY CORRECTION TOUCHES ONE HISTORICAL FACT ===");
 const before = await rows("meal_logs", user.id);
@@ -159,6 +170,10 @@ check(quietMeals.length === 1 && dayOf(quietMeals[0].logged_at) === today,
   "CONTROL: an ordinary daily report remains an ordinary single-day write");
 check(!WELCOME.test(quietReply) && !/logged \d+ days/i.test(quietReply),
   "CONTROL: one quiet day is not labelled multi-day re-entry", JSON.stringify(quietReply.slice(0, 240)));
+const questions = await client("Questioner", 1);
+await ask(questions, `${n4} can I eat eggs? ${n3} what about rice?`, "SM-food-questions-229");
+check((await rows("meal_logs", questions.id)).length === 0,
+  "CONTROL: named-day food questions do not become catch-up meal rows");
 
 REAL(`\n${failed === 0
   ? "pg-messy-reentry-acceptance: GREEN — all checks passed"
