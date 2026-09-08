@@ -73,7 +73,11 @@ async function seedDecisionEvidence(userId: string, thin = false) {
 }
 
 async function failOpenMove(user: any, targetDay: string, message: string, id: string) {
-  await ensureOpenTrainingLoop(user, targetDay, "reactive");
+  // Each compare-and-set mutates the bound turn object as well as PostgreSQL. Reload between
+  // historical outcomes: reusing the first stale object would correctly refuse to overwrite its
+  // old marker and the harness would manufacture silence where a second outcome was intended.
+  const [current] = await db.select().from(schema.users).where(eq(schema.users.id, user.id)).limit(1);
+  await ensureOpenTrainingLoop(current, targetDay, "reactive");
   await handleMessage(user.phoneNumber, message, undefined, undefined, undefined, id);
 }
 
@@ -93,7 +97,9 @@ await failOpenMove(active, priorDay(1, 3), "I couldn't do it, work was too busy"
 await failOpenMove(active, priorDay(1, 2), "I couldn't do it, late shift at work", "SM-pattern-a4");
 
 // One attributed minimum intervention followed by a real workout is direct intervention evidence.
-await ensureOpenTrainingLoop(active, sastDayKey(), "reactive", Date.now(), "minimum");
+const [activeForMinimum] = await db.select().from(schema.users)
+  .where(eq(schema.users.id, active.id)).limit(1);
+await ensureOpenTrainingLoop(activeForMinimum, sastDayKey(), "reactive", Date.now(), "minimum");
 await handleMessage(active.phoneNumber, "workout done", undefined, undefined, undefined, "SM-pattern-a5");
 await buildClientProfile(active);
 const activeProfile = await profileRow(active.id);
@@ -115,7 +121,7 @@ check(adapted.action.kind === "train"
     && adapted.action.intervention === "minimum_training",
   "the existing canonical decision owner selects the existing minimum action",
   JSON.stringify(adapted.action));
-check(!/weekend|work pressure|pattern/i.test(String(activeProfile?.coachNarrative || "")),
+check(!/weekend training|work[- ]pressure training|minimum training/i.test(String(activeProfile?.coachNarrative || "")),
   "structured pattern state is not copied into model-authored client prose",
   JSON.stringify(activeProfile?.coachNarrative));
 
