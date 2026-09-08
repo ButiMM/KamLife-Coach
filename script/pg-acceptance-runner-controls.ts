@@ -273,6 +273,13 @@ console.log("\n=== 8 · THESE CONTROLS REFUSE AN UNSAFE DATABASE BEFORE TOUCHING
   }
 }
 
+// ═══ TEMPORARY — CI DEMONSTRATION FOR #227, REVERTED IN THE VERY NEXT COMMIT ═══════════════════
+// The CTO gate requires proof that "controls can fail and all acceptances still run". That is a
+// property of the WORKFLOW's step condition, so no local run can demonstrate it — only a real CI
+// run in which this step is red. This line makes it red on purpose for exactly one run.
+chk(false, "TEMPORARY PROOF: a deliberately failing control, reverted in the next commit");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
 console.log(`\n${failed === 0
   ? "pg-acceptance-runner-controls: GREEN — all checks passed"
   : `pg-acceptance-runner-controls: RED — ${failed} check(s) failed`}`);
