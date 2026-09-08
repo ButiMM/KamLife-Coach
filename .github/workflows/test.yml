@@ -197,6 +197,12 @@ jobs:
       # SHADOW=on captures the Sunday sends, so proactive food coaching is graded on the message.
       - name: One restriction across every food surface on real PostgreSQL
         run: npx tsx script/pg-restriction-consistency-acceptance.ts
+      # ONE COMEBACK CLOCK (#221). Both defects are claims about CHRONOLOGY across stored rows — a
+      # workout row's logged_at against a user's lastActiveAt, read through the real handler. A
+      # pure test can check the arithmetic; only this can show that the reply a returning client
+      # receives states the gap they actually experienced.
+      - name: One comeback clock on real PostgreSQL
+        run: npx tsx script/pg-comeback-clock-acceptance.ts
       # THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
       # would be a second copy of this infrastructure for no gain. Deliberately NOT
       # continue-on-error: the whole point of the lab is that a known-wrong durable state cannot
