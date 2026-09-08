@@ -165,6 +165,11 @@ export const ACCEPTANCES: Acceptance[] = [
     // cursor discipline on a backfill is a claim about what a write did NOT touch.
     command: ["npx", "tsx", "script/pg-session-owner-acceptance.ts"] },
 
+  { id: "messy-reentry", title: "Messy multi-day catch-up and re-entry",
+    // MULTI-DAY RE-ENTRY (#229). Date placement, explicit unknowns, exact correction isolation
+    // and closure of an older open-loop ref are persisted chronology claims, not fixture claims.
+    command: ["npx", "tsx", "script/pg-messy-reentry-acceptance.ts"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same

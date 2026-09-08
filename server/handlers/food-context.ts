@@ -759,7 +759,7 @@ export async function handleFoodContext(ctx: {
     }
   }
 
-  if (mDayMatches.length >= 2 && !isQuestion && !isFrustration && !isFuturePlanning && hasActualFood) {
+  if (mDayMatches.length >= 2 && !isFrustration && !isFuturePlanning && hasActualFood) {
     mDayMatches.sort((a, b) => a.idx - b.idx);
 
     const daySegs: Array<{ day: string; text: string }> = [];
@@ -779,6 +779,9 @@ export async function handleFoodContext(ctx: {
     // Collect planned inserts first — only write if 2+ days have food hits
     const multiPlan: Array<{ label: string; foods: SAFood[]; kcal: number; prot: number; date: Date; raw: string }> = [];
     for (const seg of daySegs) {
+      // A question in the same bubble cannot erase a reported meal on another day. Equally, a
+      // food question is not a log. The existing clause-level fact owner makes that distinction.
+      if (isAskingNotReporting(seg.text)) continue;
       const segFoods = scanForSAFoods(seg.text);
       if (segFoods.length === 0) continue;
       const segDate = parseMealDate(seg.day + " " + seg.text);

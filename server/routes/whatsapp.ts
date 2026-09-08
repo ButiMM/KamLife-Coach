@@ -26,7 +26,7 @@ async function comebackPrefix(phone: string): Promise<string> {
     if (!u || u.onboardingState !== "COMPLETE" || !u.lastActiveAt) return "";
     const gapDays = (Date.now() - new Date(u.lastActiveAt).getTime()) / 86_400_000;
     if (gapDays < 3) return "";
-    return `You came back — that's the real streak. 💛 No catch-up needed, we start from today.\n\n`;
+    return `You came back — that's the real streak. 💛\n\n`;
   } catch { return ""; }
 }
 
@@ -231,8 +231,12 @@ async function processTextAsync(
     // NEVER-SILENT GUARANTEE (2026-07-13): an empty reply used to send NOTHING — a
     // tester's 38s form-check video got dead air ("And it has still not replied").
     // Whatever failed upstream, the client always hears back.
+    // The deterministic comeback owner may already have welcomed them. The transport is only a
+    // fallback mouth for contentful catch-ups that correctly bypass that template; never send two
+    // welcomes, and never tell someone who just supplied history that catching up was unwanted.
+    const replyAlreadyWelcomes = String(rawReply || "").toLowerCase().includes("welcome back");
     const cleanReply = rawReply && rawReply.trim().length > 0
-      ? welcomeBack + rawReply
+      ? (replyAlreadyWelcomes ? "" : welcomeBack) + rawReply
       : (mediaType?.startsWith("video/")
         ? `I got your video but couldn't process it — likely too long. Send a shorter clip (under 30 seconds, one set from the side) and I'll check your form.`
         : `I got your message but hit a snag processing it. Try sending it again, or type it differently — I'm here.`);

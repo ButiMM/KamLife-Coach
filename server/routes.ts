@@ -738,7 +738,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       }
     } catch (normErr) { console.warn("[NORMALIZER] exception — original message proceeds:", normErr instanceof Error ? normErr.message : normErr); }
   }
-
   // CUT 1 — ONE TURN COMMITS EVERY EVENT. The facts were parsed from the client's raw text
   // above, before the rewriter. If the note carries two or more, no handler below may end the
   // turn: each COMMITS what it did and control continues, and one composer builds one reply.
@@ -764,7 +763,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ════════════════════════════════════════════════════════════════════════════════════════════
   let _backfillNote = "";
   if (!mediaUrl) {
-    const backfilled = await backfillAttributedDays(user, message).catch(e => {
+    const backfilled = await backfillAttributedDays(user, message, new Date(), sourceMessageId).catch(e => {
       console.warn("[BACKFILL] skipped:", (e as any)?.message || e);
       return null;
     });
@@ -787,10 +786,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
         : "";
       const backfillReply = `Got it — logged across ${backfilled.days.length} day${backfilled.days.length === 1 ? "" : "s"}:\n${byDay}${missing}`;
       await logChat(user.id, message, backfillReply, "MULTI_DAY_BACKFILL");
-      return backfillReply;
+      // Evidence, not a response owner: the existing composer acknowledges it and coaches today.
+      const firstDomain = backfilled.writes[0]?.domain;
+      commitFact(turn, firstDomain === "steps" ? "steps" : "workout", backfillReply);
     }
   }
-
   const foodLogMgmtResult = await handleFoodLogMgmt(user, m);
   if (foodLogMgmtResult !== null) {
     // This is where the street-food educator claimed the 11:24 turn. It may still answer — after
@@ -945,7 +945,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // COMMITS, DOES NOT CLAIM THE TURN (Cut 2/3). On "2 litres of water and took my creatine" the
   // supplement handler inside it used to end the turn and the water was never logged. Standing
   // down loses the supplement instead — it must run, and commit.
-  const earlyResult = await handleEarlyCommands({ phone, message, m, user, sourceMessageId, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
+  const earlyResult = await handleEarlyCommands({ phone, message, m, user, sourceMessageId, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion, hasMultiDayReport: attributeMultiDayReport(message).hasMultipleDays });
   if (earlyResult !== null) {
     if (mayEndTurn("early-commands")) return closeCoachingTurn(earlyResult);
     commitFact(turn, "other", earlyResult);

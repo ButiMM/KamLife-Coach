@@ -56,6 +56,8 @@ export async function handleEarlyCommands(ctx: {
    *  SIDE EFFECTS (log, flip mode, dump content) must not fire — questions go to the
    *  coach. This is the structural fix for the keyword-hijack failure class. */
   isQuestion?: boolean;
+  /** Contentful catch-ups belong to the historical writers, not the restart template. */
+  hasMultiDayReport?: boolean;
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
   const firstName = user.name?.split(" ")[0] || "";
@@ -1297,7 +1299,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   });
   const isComeback = reentry.shouldHandleComeback;
 
-  if (isComeback) {
+  if (isComeback && !ctx.hasMultiDayReport) {
     // `daysSinceLastContact` is null when the contact clock is missing or in the future — a real
     // "we do not know". The DECISION above already treats that as not-returning; this is the
     // DISPLAY path, which needs a number, and the legacy code read 0 there. Keeping that default
