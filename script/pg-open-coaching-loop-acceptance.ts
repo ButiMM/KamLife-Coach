@@ -49,10 +49,7 @@ async function freshUser(over: Record<string, unknown> = {}) {
     age: 34,
     heightCm: 165,
     currentWeight: "75.0",
-    // The journey is about an OPEN TRAINING MOVE. Six days keeps this synthetic client on the
-    // product's real Mon–Sat schedule instead of accidentally grading a rest-day HOLD as a lost
-    // instruction. All chronology stays on the one actual application/database clock.
-    trainingDaysPerWeek: 6,
+    trainingDaysPerWeek: 1,
     calorieTarget: 2000,
     proteinTarget: 120,
     stepsTarget: 0,
@@ -101,7 +98,9 @@ async function openOn(user: any, targetDay: string, ageMs = 0) {
 }
 
 REAL("\n=== OPENED BY THE CANONICAL OWNER ===");
-const origin = await freshUser();
+// These two cases grade ORIGINATING a move, so they need a real scheduled day. The other cases
+// retain a one-session target: once that session resolves, another train action really is a nag.
+const origin = await freshUser({ trainingDaysPerWeek: 6 });
 const firstMove = await canonicalNextMove(origin);
 check((await reload(origin)).awaitingInputType === null,
   "selecting a proactive move without handing it to outbound creates no phantom ask");
@@ -123,7 +122,7 @@ check(!!originOpen && originOpen.targetDay === sastDayKey(), "the unresolved mov
 const whileOpen = await canonicalNextMove(originStored);
 check(whileOpen.action.kind !== "train", "an unresolved move is not re-issued on the next decision", whileOpen.action.kind);
 
-const reactiveOrigin = await freshUser();
+const reactiveOrigin = await freshUser({ trainingDaysPerWeek: 6 });
 const originReply = await handleMessage(
   reactiveOrigin.phoneNumber,
   "I drank 2 litres of water",
