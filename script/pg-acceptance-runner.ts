@@ -157,6 +157,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // itself, which is how "Sessions this week: 4" sat above "Days logged (7d): 0/7".
     command: ["npx", "tsx", "script/pg-session-recap-acceptance.ts"] },
 
+  { id: "session-owner", title: "One progression owner, despite a legacy lifetime mismatch",
+    // ONE PROGRESSION OWNER (#221 journeys 5-7). The whole proof is a legacy client whose lifetime
+    // counter disagrees with the durable ledger — seven rows against twelve — read through five
+    // different handlers that must still agree about where the client is in the programme. A
+    // fixture that answers every query the same way cannot produce that disagreement, and the
+    // cursor discipline on a backfill is a claim about what a write did NOT touch.
+    command: ["npx", "tsx", "script/pg-session-owner-acceptance.ts"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same
