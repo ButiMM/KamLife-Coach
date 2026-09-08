@@ -38,6 +38,7 @@ export interface OpenTrainingLoop {
   createdAt: number;
   ref: string;
   source: "reactive" | "proactive";
+  intervention: "standard" | "minimum";
   marker: string;
 }
 
@@ -46,8 +47,9 @@ export function createOpenTrainingLoop(
   source: OpenTrainingLoop["source"],
   now = Date.now(),
   ref = randomUUID(),
+  intervention: OpenTrainingLoop["intervention"] = "standard",
 ): string {
-  return [TRAINING_LOOP_OWNER, TRAINING_LOOP_TYPE, targetDay, now, ref, source].join(":");
+  return [TRAINING_LOOP_OWNER, TRAINING_LOOP_TYPE, targetDay, now, ref, source, intervention].join(":");
 }
 
 export function isOpenTrainingLoopMarker(marker: string | null | undefined): boolean {
@@ -61,7 +63,7 @@ export function readOpenTrainingLoop(
   const raw = String(marker || "");
   const parts = raw.split(":");
   if (
-    parts.length !== 6
+    ![6, 7].includes(parts.length)
     || parts[0] !== TRAINING_LOOP_OWNER
     || parts[1] !== TRAINING_LOOP_TYPE
     || parts[2].length !== 10
@@ -69,6 +71,7 @@ export function readOpenTrainingLoop(
     || parts[4].length !== 36
     || parts[4].split("-").length !== 5
     || !["reactive", "proactive"].includes(parts[5])
+    || (parts.length === 7 && !["standard", "minimum"].includes(parts[6]))
   ) return null;
   const createdAt = Number(parts[3]);
   const age = now - createdAt;
@@ -80,6 +83,7 @@ export function readOpenTrainingLoop(
     createdAt,
     ref: parts[4],
     source: parts[5] as OpenTrainingLoop["source"],
+    intervention: parts.length === 7 ? parts[6] as OpenTrainingLoop["intervention"] : "standard",
     marker: raw,
   };
 }

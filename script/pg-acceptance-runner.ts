@@ -110,6 +110,12 @@ export const ACCEPTANCES: Acceptance[] = [
     // later backdated answer are all real rows; this grades the one canonical INVESTIGATE owner.
     command: ["npx", "tsx", "script/pg-information-value-acceptance.ts"] },
 
+  { id: "behaviour-patterns", title: "Evidence-backed behavioural patterns",
+    // BEHAVIOURAL PATTERN STATE (#217). Repetition, attributed outcomes, user isolation and
+    // contradiction are properties of longitudinal rows. The profile must then be read by the
+    // same canonical decision through both doors; a fixture cannot establish either claim.
+    command: ["npx", "tsx", "script/pg-behaviour-pattern-acceptance.ts"] },
+
   { id: "log-turn", title: "Durable log turns are one coaching turn",
     // ONE COACH SPEAKING (#207). The repetition defect this closes is invisible to a fixture that
     // sends one message per client: it only appears across CONSECUTIVE durable writes by the same

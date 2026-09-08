@@ -30,7 +30,7 @@ import { sastDayKey } from "../sast";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
 import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, reportedInSomeClause, looksLikeQuestion, mentionsNotDone, sessionCountsIn, statedWhen, getDisplayName, WEIGHED_NUMBER_RE } from "../utils";
 import { applyRetroSessionState } from "../day-ledger";
-import { readTrainingDay } from "../one-action";
+import { readStruggle, readTrainingDay } from "../one-action";
 import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot, weekStartForTrainingClaim, attributableWeekSessionDates } from "../workout-state";
 import { handleWeightLog } from "./weight";
@@ -39,7 +39,7 @@ import { calculateTargets } from "../targets";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { sendWhatsApp, saveState } from "../scheduler/shared";
 import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
-import { recordOpenTrainingFailure } from "../held-constraints";
+import { recordOpenTrainingFailure, recordOpenTrainingSuccess } from "../held-constraints";
 
 // Exercise-name vocabulary. parseLiftLog was deleted with lift logging on 2026-08-06, but
 // this pattern is NOT a parser input — it is a GUARD used twice below, and both uses are the
@@ -122,7 +122,8 @@ export async function resumeOpenTrainingLoopOutcome(ctx: {
   if (!reportsOpenTrainingMoveFailed(message)) return looksLikeQuestion(m) ? "pending" : null;
   if (!await consumeOpenTrainingLoop(user, open.marker)) return null;
   try {
-    await recordOpenTrainingFailure(user, open.targetDay, sourceMessageId);
+    await recordOpenTrainingFailure(user, open.targetDay, sourceMessageId,
+      readStruggle(message) === "time" ? "time" : null);
   } catch (e) {
     await restoreOpenTrainingLoop(user, open.marker);
     console.warn("[COACHING_LOOP] training failure truth not recorded; loop remains open:", e);
@@ -147,6 +148,8 @@ export async function handleWorkoutCommands(ctx: {
     if (!openTraining || openTraining.targetDay !== resolvedDay) return false;
     const closed = await consumeOpenTrainingLoop(user, openTraining.marker);
     if (closed) {
+      await recordOpenTrainingSuccess(user, resolvedDay, openTraining.intervention, ctx.sourceMessageId)
+        .catch(e => console.warn("[COACHING_LOOP] completion provenance not recorded:", e));
       completedOpenTraining = true;
       turnMutation(
         "RESOLVE coaching_loop ref=" + openTraining.ref + " outcome=completed target="

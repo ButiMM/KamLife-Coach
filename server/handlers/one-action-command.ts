@@ -22,6 +22,7 @@ import { readHealthState } from "../health-state";
 import { foodConstraints } from "../food-swaps";
 import { loadOpenTrainingLoop } from "../memory";
 import { readHeldConstraints, NO_CONSTRAINTS } from "../held-constraints";
+import { getBehaviourPatternContext } from "../intelligence/profile";
 
 /** Is this client inside a declared sick window? Asked of the state owner, not of the text. */
 const isSick = (user: any): boolean => readHealthState(user).isSick;
@@ -36,7 +37,7 @@ async function buildDecisionInputs(user: any): Promise<{
   const dayStart = sastDayStart();
   const weekStart = sastWeekStart();
 
-  const [ledger, lastMeal, lastWeigh, weekSessions, todaySteps, loggedDays, openTraining, held] = await Promise.all([
+  const [ledger, lastMeal, lastWeigh, weekSessions, todaySteps, loggedDays, openTraining, held, behaviourPatterns] = await Promise.all([
     getDayLedger(user.id, { user }),
     db.select({ at: mealLogs.loggedAt }).from(mealLogs)
       .where(eq(mealLogs.userId, user.id)).orderBy(desc(mealLogs.loggedAt)).limit(1),
@@ -57,6 +58,7 @@ async function buildDecisionInputs(user: any): Promise<{
       .catch(() => [{ days: 0 }]),
     loadOpenTrainingLoop(user),
     readHeldConstraints(user.phoneNumber, user).catch(() => NO_CONSTRAINTS),
+    getBehaviourPatternContext(user.id),
   ]);
   const distinctLoggedDays = Number((loggedDays as { days: number }[])[0]?.days || 0);
 
@@ -104,6 +106,7 @@ async function buildDecisionInputs(user: any): Promise<{
       constraints: foodConstraints(user || {}),
       dreamGoal: user?.dreamGoal,
       biggestStruggle: user?.biggestStruggle,
+      behaviourPatterns,
       weeksOnProgramme: user?.createdAt ? Math.floor(sastDaysBetween(new Date(user.createdAt)) / 7) : 0,
       sessionsTarget: Number(user?.trainingDaysPerWeek) || 3,
       calorieTarget: Number(user?.calorieTarget) || 0,

@@ -10406,6 +10406,73 @@ test("coach identity: one normalisation, or the founder is a stranger to his own
 });
 
 // Every async test must finish before a single number is printed — see the note on test().
+test("#217 behavioural patterns require attributable repetition, decay, and reach one decision owner", async () => {
+  const { buildBehaviourPatternState, decisionPatterns } = await import("../server/intelligence/profile");
+  const { chooseAction } = await import("../server/one-action");
+  const { createOpenTrainingLoop, readOpenTrainingLoop } = await import("../server/workout-feedback");
+  const at = (day: string) => new Date(`${day}T10:00:00+02:00`);
+  const row = (id: number, day: string, state = "asserted", via = "said_open") =>
+    ({ id, day, state, via, saidAt: at(day) });
+
+  const oneMiss = buildBehaviourPatternState([row(1, "2026-08-01")], [], at("2026-08-10"));
+  assert.equal(oneMiss.patterns.length, 0, "one bad weekend is an event, never a durable pattern");
+
+  const active = buildBehaviourPatternState([
+    row(1, "2026-08-01"), row(2, "2026-08-08"),
+    row(3, "2026-07-27", "asserted", "said_time"),
+    row(4, "2026-08-03", "asserted", "said_time"),
+    row(5, "2026-08-05", "released", "workout_logged_minimum"),
+  ], [], at("2026-08-10"));
+  const context = decisionPatterns(active);
+  assert.deepEqual(context, {
+    weekendTrainingMisses: true,
+    workPressureTrainingMisses: true,
+    minimumTrainingReengaged: true,
+  });
+  assert.ok(active.patterns.every(p => p.evidence.every(e => e.source === "daily_constraints")),
+    "every usable pattern carries exact canonical provenance");
+  assert.equal(active.patterns.find(p => p.kind === "minimum_training_reengaged")?.confidence, "observed",
+    "one linked successful intervention is an observed outcome, not fabricated recurrence");
+
+  const superseded = buildBehaviourPatternState([
+    row(1, "2026-07-04"), row(2, "2026-07-11"),
+  ], ["2026-07-18", "2026-07-25"], at("2026-08-01"));
+  assert.equal(superseded.patterns[0]?.status, "superseded",
+    "two recent contradictory weekend completions remove old pattern authority");
+  assert.equal(decisionPatterns(superseded).weekendTrainingMisses, false);
+
+  const decayed = buildBehaviourPatternState([
+    row(1, "2026-04-04", "asserted", "said_time"),
+    row(2, "2026-04-11", "asserted", "said_time"),
+  ], [], at("2026-08-01"));
+  assert.equal(decayed.patterns[0]?.status, "decayed", "stale evidence stays inspectable but loses authority");
+
+  const base = {
+    goal: "fat_loss" as any, weeksOnProgramme: 8, daysSinceAnyLog: 0, daysSinceWeighIn: 0,
+    loggedToday: true, proteinPct: 1, caloriePct: 1, sessionsThisWeek: 0, sessionsTarget: 3,
+    stepsToday: 8000, stepsTarget: 8000, hour: 14,
+  };
+  const adapted = chooseAction({ ...base, behaviourPatterns: context });
+  assert.equal(adapted.kind, "train");
+  assert.equal(adapted.todo, "Do today's session. Even a bad one counts.");
+  assert.equal(adapted.intervention, "minimum_training",
+    "structured state selects existing minimum training action through chooseAction");
+  assert.equal(chooseAction({ ...base, behaviourPatterns: context, trainingAwaitingOutcome: true }).kind, "hold",
+    "the unresolved #208 loop retains precedence");
+  assert.equal(chooseAction({ ...base, behaviourPatterns: context, sick: true }).kind, "rest",
+    "safety retains precedence");
+  assert.equal(chooseAction({ ...base, behaviourPatterns: context, doNotMention: "training" }).kind, "hold",
+    "doNotMention prevents pattern state from reintroducing a forbidden instruction");
+
+  const marker = createOpenTrainingLoop("2026-08-10", "reactive", at("2026-08-10").getTime(),
+    "00000000-0000-4000-8000-000000000217", "minimum");
+  assert.equal(readOpenTrainingLoop(marker, at("2026-08-10").getTime())?.intervention, "minimum",
+    "the open owner carries intervention provenance without rendering it");
+  const legacy = marker.split(":").slice(0, 6).join(":");
+  assert.equal(readOpenTrainingLoop(legacy, at("2026-08-10").getTime())?.intervention, "standard",
+    "pre-#217 open loops remain readable");
+});
+
 await Promise.all(pending);
 
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);

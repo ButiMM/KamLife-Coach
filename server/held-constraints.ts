@@ -203,9 +203,27 @@ export async function recordOpenTrainingFailure(
   client: { id: string },
   targetDay: string,
   sourceMessageId?: string,
+  reason?: "time" | null,
 ): Promise<void> {
   await db.insert(dailyConstraints)
-    .values({ userId: client.id, day: targetDay, kind: "training", state: "asserted", via: "said",
+    .values({ userId: client.id, day: targetDay, kind: "training", state: "asserted",
+      via: reason === "time" ? "said_time" : "said_open",
+      sourceMessageId: sourceMessageId || null })
+    .onConflictDoNothing();
+}
+
+/**
+ * Record the positive outcome of the exact open training move that just closed. The workout row
+ * remains completion truth; this append-only row carries why that completion is attributable to
+ * a prior canonical intervention, including whether it was the minimum viable version.
+ */
+export async function recordOpenTrainingSuccess(
+  client: { id: string }, targetDay: string,
+  intervention: "standard" | "minimum", sourceMessageId?: string,
+): Promise<void> {
+  await db.insert(dailyConstraints)
+    .values({ userId: client.id, day: targetDay, kind: "training", state: "released",
+      via: intervention === "minimum" ? "workout_logged_minimum" : "workout_logged",
       sourceMessageId: sourceMessageId || null })
     .onConflictDoNothing();
 }

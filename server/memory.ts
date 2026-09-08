@@ -108,11 +108,12 @@ export async function ensureOpenTrainingLoop(
   targetDay: string,
   source: OpenTrainingLoop["source"],
   now = Date.now(),
+  intervention: OpenTrainingLoop["intervention"] = "standard",
 ): Promise<OpenTrainingLoop | null> {
   const existing = await loadOpenTrainingLoop(user, now);
   if (existing) return existing;
   if (user?.awaitingInputType) return null;
-  const marker = createOpenTrainingLoop(targetDay, source, now);
+  const marker = createOpenTrainingLoop(targetDay, source, now, undefined, intervention);
   const opened = await pool.query(
     "UPDATE users SET awaiting_input_type = $1 WHERE id = $2 AND awaiting_input_type IS NULL RETURNING id",
     [marker, user.id],
