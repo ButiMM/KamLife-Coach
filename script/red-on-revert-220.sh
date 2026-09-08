@@ -179,6 +179,113 @@ assert s != open(p).read(), "revert patch matched nothing"
 open(p, "w").write(s)
 PY2
 
+# ── 13 · groceries go back to the unrotated schedule's fixed list ─────────────────────────────
+cat > /tmp/220p/13.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+before = s
+s = s.replace("groceriesForPlan(shopList, planBlock, shopTotal)", "{ list: shopList, total: shopTotal }")
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 14 · the day-indexed recomposition schedule is rotated like a pool ────────────────────────
+cat > /tmp/220p/14.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+before = s
+# BOTH HALVES. The day binding is now protected twice: the schedule is BUILT from a compliant
+# training-day carb, and the loop then indexes it by day instead of rotating it. Reverting only
+# the loop leaves the construction holding, so this restores the hardcoded carb as well — the
+# same coupled-mechanism situation already recorded for 4a and 11.
+s = s.replace('const trainingCarb = ["\u00bd medium sweet potato", ...lunchCarbs].find(x => c.allows(x));',
+              'const trainingCarb = "\u00bd medium sweet potato";')
+s = s.replace("    const dc = dinnerCarbsAreDayBound ? dinnerCarbs[i] : safeDinnerCarbs[i % safeDinnerCarbs.length];",
+              "    const dc = safeDinnerCarbs[i % safeDinnerCarbs.length];")
+s = s.replace("  if (dinnerCarbsAreDayBound && !dayBoundOk(dinnerCarbs)) return noPlanWithin(c);", "")
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 15 · a declared label is any occurrence of the word again ─────────────────────────────────
+cat > /tmp/220p/15.py <<'PY2'
+p = "server/food-swaps.ts"; s = open(p).read()
+s = s.replace('const declaredLabel = declaredTerms.find(t => /^(halaal|halal|kosher)$/.test(t)) || "";',
+              'const declaredLabel = declared.match(/\\b(halaal|halal|kosher)\\b/)?.[0] || "";')
+assert s != open(p).read(), "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 16 · the unsupported-kosher reply goes back to the dead-end ask ───────────────────────────
+cat > /tmp/220p/16.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+s = s.replace("  if (isKosher) return noPlanWithin(c, true);", "  if (isKosher) return noPlanWithin(c);")
+assert s != open(p).read(), "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 17 · the missing training carb becomes an empty string again (CTO blocker, control 4) ─────
+#
+# THIS CASE IS EXPECTED TO STAY GREEN, and the reason is now measured rather than argued.
+#
+# The CTO blocker is a genuine unsoundness: `trainingCarb ?? ""` graded by `c.allows`, which
+# returns TRUE for an empty name by design. The fix — deciding at the point the carb is chosen —
+# is kept. But the refusal it produces cannot be isolated, because THREE independent guards each
+# prevent the empty string from reaching a client, and they were measured one at a time:
+#
+#   1. this guard            `if (!trainingCarb) return noPlanWithin(c)`
+#   2. the pool guard        losing every lunch carb also empties safeLunchCarbs and safeBfCarbs
+#   3. the whole-plan check  `prescribed(planBlock).some(food => !c.allows(food))`
+#
+# Removing 1 alone: still refuses (2 catches it). Removing 1 and 2 together, with the carb pools
+# dropped from the guard entirely: STILL refuses — 3 catches it, verified by calling the builder
+# directly and reading the returned string. Dismantling 3 as well would prove nothing about
+# production, because at that point no mechanism under test remains.
+#
+# So control 4 is answered honestly: the fix is correct and kept, and it has no red line because
+# the behaviour it protects is unreachable three ways over. A guard that holds by coincidence is
+# still one edit from not holding, which is why it stays. This is the fourth coupled-mechanism
+# finding in this cut, after 4a, 11 and 14.
+cat > /tmp/220p/17.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+before = s
+s = s.replace("    if (!trainingCarb) return noPlanWithin(c);\n", "")
+s = s.replace("dinnerCarbs = allDays.map((day) => trainingSet.has(day) ? trainingCarb : restDayCarb)",
+              'dinnerCarbs = allDays.map((day) => trainingSet.has(day) ? (trainingCarb ?? "") : restDayCarb)')
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 18 · profile fields are joined before splitting, losing the declared label ─────────────────
+cat > /tmp/220p/18.py <<'PY2'
+p = "server/food-swaps.ts"; s = open(p).read()
+before = s
+s = s.replace("""  const declaredTerms = [u.dietaryRestrictions, u.foodDislikes, u.otherMedicalNotes]
+    .flatMap(field => String(field || "").toLowerCase().split(/[,;]+|\\band\\b|\\n/))""",
+              """  const declaredTerms = [`${u.dietaryRestrictions || ""} ${u.foodDislikes || ""} ${u.otherMedicalNotes || ""}`]
+    .flatMap(field => String(field || "").toLowerCase().split(/[,;]+|\\band\\b|\\n/))""")
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 19 · the price must sit at end of line again ──────────────────────────────────────────────
+cat > /tmp/220p/19.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+before = s
+s = s.replace('const priceOf = (l: string) => Number((l.match(/—\\s*R(\\d+)/) || [0, 0])[1]);',
+              'const priceOf = (l: string) => Number((l.match(/R(\\d+)$/) || [0, 0])[1]);')
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
+# ── 20 · every matching line covers the whole week on its own ─────────────────────────────────
+cat > /tmp/220p/20.py <<'PY2'
+p = "server/onboarding-meal-plan.ts"; s = open(p).read()
+before = s
+s = s.replace("    const extra = short > 0 && parsed.packQty === biggest ? Math.ceil(short / parsed.packQty) : 0;\n    const packs = parsed.packs + extra;",
+              "    const extra = 1;\n    const packs = Math.max(1, Math.ceil(required / parsed.packQty));")
+assert s != before, "revert patch matched nothing"
+open(p, "w").write(s)
+PY2
+
 echo "=============================================================================="
 echo "#220 — RED ON REVERT, one mechanism at a time"
 echo "=============================================================================="
@@ -202,4 +309,19 @@ run_case "kosher takes the halal path again (the PR #222 regression)"           
 run_case "the fixed 7-day template stops asking the predicate about its own meals"             /tmp/220p/11.py
 run_case "11b · the slot stops rotating over what the client may eat"                          /tmp/220p/11b.py
 run_case "salmon leaves the fish cluster"                                                      /tmp/220p/12.py
+run_case "groceries go back to the unrotated schedule's fixed list"                            /tmp/220p/13.py
+run_case "the day-indexed recomposition schedule is rotated like a pool"                       /tmp/220p/14.py
+run_case "a declared label is any occurrence of the word again"                                /tmp/220p/15.py
+run_case "the unsupported-kosher reply goes back to the dead-end ask"                          /tmp/220p/16.py
+# 17 IS EXPECTED TO STAY GREEN, and that is the finding. The CTO blocker is a real unsoundness —
+# `trainingCarb ?? ""` graded by `c.allows`, which returns TRUE for an empty name — but it is not
+# a REACHABLE defect: trainingCarb is drawn from ["\u00bd medium sweet potato", ...lunchCarbs], so it is
+# absent only when every lunch carb is excluded, and that also empties safeLunchCarbs AND
+# safeBfCarbs, so a pool guard refuses first. No client input reaches the empty string. The fix is
+# kept because a guard that holds by coincidence is one edit away from not holding; the proof is
+# the reasoning above, not a red line, and it is reported as such rather than dressed up.
+run_case "17 · the missing training carb becomes an empty string again (CTO blocker)"          /tmp/220p/17.py
+run_case "18 · profile fields are joined before splitting, losing the declared label"          /tmp/220p/18.py
+run_case "19 · the price must sit at end of line again"                                       /tmp/220p/19.py
+run_case "20 · every matching line covers the whole week on its own"                          /tmp/220p/20.py
 echo "=============================================================================="

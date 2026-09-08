@@ -539,9 +539,21 @@ export function allowedProteinStaples(c: FoodConstraints): ProteinStaple[] {
  * it. Saying the restriction back in their own terms is the point; a plan we cannot build is not
  * a reason to be vague about why.
  */
-export function noPlanWithin(c: FoodConstraints): string {
+export function noPlanWithin(c: FoodConstraints, unsupported = false): string {
   const said = c.terms.length ? joinFoods(c.terms, "and") : "what you don't eat";
-  return `*Your Meal Plan*\n\nI can't build you a plan that respects ${said} out of the food I've got templates for — and I'd rather tell you that than send you one that breaks your word.\n\nTell me two or three proteins you DO eat and I'll build the week around them.`;
+  // NEVER ASK FOR SOMETHING THAT CANNOT CHANGE THE ANSWER (#220 recovery). The default ask —
+  // "name two or three proteins" — is real when the pools merely ran out for THIS client, because
+  // naming a protein they eat genuinely unblocks it. It is a dead end when we do not support the
+  // observance at all: kosher is refused unconditionally, so no answer they could give would ever
+  // produce a plan, and a question that cannot be answered usefully is worse than an honest no.
+  // One mouth, two closings, chosen by the caller that knows which case it is in.
+  const lead = unsupported
+    ? `I can't build you a meal plan for ${said} yet — these plans put meat and dairy in the same day and I can't vouch for how the food was prepared, so anything I sent you would only look right.`
+    : `I can't build you a plan that respects ${said} out of the food I've got templates for — and I'd rather tell you that than send you one that breaks your word.`;
+  const ask = unsupported
+    ? `Everything else still works. Log what you eat and I'll coach you on your real food, your targets and your training — and send me a specific meal any time you want it checked.`
+    : `Tell me two or three proteins you DO eat and I'll build the week around them.`;
+  return `*Your Meal Plan*\n\n${lead}\n\n${ask}`;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -820,11 +832,31 @@ export function foodConstraints(u: {
   const declared = `${u.dietaryRestrictions || ""} ${u.foodDislikes || ""} ${u.otherMedicalNotes || ""}`.toLowerCase();
   const conditions = (u.medicalConditions || "").toLowerCase();
 
+  // A DECLARATION, NOT A WORD THAT APPEARS (#220 recovery). `kosher` was matched ANYWHERE in the
+  // merged free text, so `foodDislikes: "kosher salt"` — an ingredient preference, and a common
+  // one — classified the client as observing kashrut AND set noPork. On its own that was a wrong
+  // label; once onboarding-meal-plan.ts began failing closed on it, a salt preference refused the
+  // client's entire meal plan. A label is a whole declared TERM: "kosher" is a declaration,
+  // "kosher salt" is a food. Same split the literal terms below already use.
+  //
+  // THEIR WORD, NOT OUR DERIVATION. A client who told us "halaal" should hear "halaal" back, not
+  // "no pork" — saying it in their own language is most of what makes being remembered land.
+  // EACH FIELD IS SPLIT BEFORE THEY ARE COMBINED (#220 recovery, second round). Joining them with
+  // a space first meant `dietaryRestrictions: "kosher"` beside `foodDislikes: "broccoli"` became
+  // the single term "kosher broccoli", which matched no label — so a kosher client with ANY other
+  // preference recorded lost their declaration, lost noPork with it, and was handed the ordinary
+  // meat-and-dairy plan. A field boundary IS a term boundary; that is the whole reason there are
+  // three fields.
+  const declaredTerms = [u.dietaryRestrictions, u.foodDislikes, u.otherMedicalNotes]
+    .flatMap(field => String(field || "").toLowerCase().split(/[,;]+|\band\b|\n/))
+    .map(t => t.trim().replace(/^(no|not|never|only|i(?:'m| am)?)\s+/, "").trim());
+  const declaredLabel = declaredTerms.find(t => /^(halaal|halal|kosher)$/.test(t)) || "";
+
   const has = (re: RegExp) => re.test(declared);
   const vegan = has(/\bvegan\b/) || /\bvegan\b/.test(conditions);
   const vegetarian = vegan || has(/\bvegetarian\b|\bno meat\b|\bplant.?based\b/) || /\bvegetarian\b/.test(conditions);
   const noDairy = vegan || has(/\bdairy\b|\blactose\b|\bmilk\b/);
-  const noPork = has(/\bpork\b|\bhalaal\b|\bhalal\b|\bkosher\b|\bbacon\b/);
+  const noPork = !!declaredLabel || has(/\bpork\b|\bbacon\b/);
   const noGluten = has(/\bgluten\b|\bceliac\b|\bcoeliac\b|\bwheat\b/);
   // PLURALS ARE THE WHOLE GAME HERE TOO (#220). `\bpeanut\b` does not match "peanuts", so a
   // client whose dietary_restrictions column read exactly "peanuts" had noPeanuts === false and
@@ -861,7 +893,7 @@ export function foodConstraints(u: {
 
   // THEIR WORD, NOT OUR DERIVATION. A client who told us "halaal" should hear "halaal" back, not
   // "no pork" — saying it in their own language is most of what makes being remembered land.
-  const declaredLabel = declared.match(/\b(halaal|halal|kosher)\b/)?.[0];
+
   const terms = [
     ...(vegan ? ["vegan"] : vegetarian ? ["vegetarian"] : []),
     ...(declaredLabel ? [declaredLabel] : []),
@@ -893,7 +925,7 @@ export function foodConstraints(u: {
     allows,
     vegan, vegetarian, noDairy, noPork, noGluten, noFish, noPeanuts,
     lowGI: /\bdiabet|pcos\b/.test(conditions) || /\bdiabet|pcos\b/.test(declared),
-    declaredLabel: declaredLabel || "",
+    declaredLabel,
   };
 }
 

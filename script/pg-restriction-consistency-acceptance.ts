@@ -464,6 +464,179 @@ REAL("    (CTO GATE P1-1 and P1-2 on PR #222, and their mandatory controls.)");
     JSON.stringify(fPlan.slice(0, 160)));
 }
 
+REAL("\n=== K · THE ROTATION'S OWN REGRESSIONS (#220 recovery, post-merge) ===");
+REAL("    (four defects Codex found on b04283a, verified against the real builder and closed.)");
+{
+  // P1 · THE WEEK EATS MORE THAN THE LIST BUYS. Rotation concentrates the plan onto the surviving
+  // candidates while the shopping list stayed a fixed string, so `vegan, lentils` prescribed 1400g
+  // of tofu and 600g of dry soya mince against a list buying 800g and 250g. The client shops on
+  // Sunday, follows the plan exactly, and runs out on Thursday — a worse failure than the one the
+  // rotation fixed, because they did nothing wrong.
+  const v = await client("Zanele", { dietaryRestrictions: "vegan, lentils", weeklyFoodBudget: "300_600" });
+  const plan = await ask(v.phone, "7 day meals");
+  const gramsOf = (re: RegExp) => [...plan.matchAll(re)].reduce((n, m) => n + Number(m[1] || 0), 0);
+  const eatenTofu = gramsOf(/(\d+)\s*g firm tofu/gi);
+  const eatenSoya = gramsOf(/soya mince\s*(\d+)\s*g dry/gi);
+  const boughtOf = (name: RegExp) => {
+    const line = (plan.split("\n").find(l => name.test(l) && /—\s*R\d+$/.test(l)) || "");
+    const m = line.match(/(\d+)\s*g(?:\s*×\s*(\d+))?/);
+    return m ? Number(m[1]) * Number(m[2] || 1) : 0;
+  };
+  chk(eatenTofu > 0 && boughtOf(/^Firm tofu/i) >= eatenTofu,
+    "the shopping list buys at least as much tofu as the week prescribes",
+    `eats ${eatenTofu}g, buys ${boughtOf(/^Firm tofu/i)}g`);
+  chk(eatenSoya > 0 && boughtOf(/^Soya mince/i) >= eatenSoya,
+    "…and at least as much soya mince",
+    `eats ${eatenSoya}g dry, buys ${boughtOf(/^Soya mince/i)}g`);
+  // THE CONTROL. Buying more is trivially satisfied by buying everything in the shop; the list
+  // must also stop listing what the plan never names, and stay priced.
+  chk(!/Cottage cheese|Greek yoghurt|Eggs \d+ pack/i.test(plan),
+    "CONTROL: …and does not list food this vegan's plan never names",
+    JSON.stringify(plan.split("\n").filter(l => /—\s*R\d+$/.test(l))));
+  // A DRY WEIGHT IS NOT A COOKED ONE, AND THE LINE MUST KEEP SAYING SO. Rebuilding the line from
+  // its parsed parts dropped "dry" from "Soya mince 250g dry", and a client buying 750g of soya
+  // mince by cooked weight buys nearly three times what they need.
+  chk(/Soya mince[^\n]*\bdry\b/i.test(plan), "the rewritten quantity keeps the line's own dry-weight wording",
+    JSON.stringify((plan.match(/[^\n]*Soya mince[^\n]*/i) || ["(absent)"])[0]));
+  chk(/Estimated total: R\d+/.test(plan) && !/R0\b/.test(plan), "CONTROL: …and the week still carries a real total",
+    JSON.stringify((plan.match(/Estimated total: R\d+/) || ["(absent)"])[0]));
+
+  // P2 · A DAY-INDEXED SCHEDULE IS NOT A CANDIDATE POOL. For recomposition, dinnerCarbs is
+  // "training days get a carb, rest days get none". Compacting it and rotating printed
+  // "extra veg only (rest day)" on Monday, Wednesday and Friday — the words reaching the client on
+  // a training day, with the training-day calories still claimed over veg.
+  const rc = await client("Lindiwe", { goalType: "recomposition", foodDislikes: "sweet potato" });
+  const rPlan = await ask(rc.phone, "7 day meals");
+  const dinners = rPlan.split("\n\n").join("\n").split("\n");
+  let day = "", misbound = 0, trainingDinners = 0;
+  for (const l of dinners) {
+    if (/^\*(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/.test(l)) day = l;
+    if (/^Dinner:/.test(l) && /Training Day/.test(day)) {
+      trainingDinners++;
+      if (/rest day/i.test(l)) misbound++;
+    }
+  }
+  chk(trainingDinners > 0 && misbound === 0,
+    "a training-day dinner is never given the rest-day entry",
+    `${misbound} of ${trainingDinners} training dinners said "(rest day)"`);
+  chk(!/sweet potato/i.test(body(rPlan)), "…while the excluded carb is still gone",
+    JSON.stringify((body(rPlan).match(/[^\n]*sweet potato[^\n]*/i) || [""])[0]));
+  chk(/½ cup brown rice|samp|pap|oats/i.test(rPlan),
+    "…and the training day still gets a real carb, replaced rather than borrowed",
+    JSON.stringify((rPlan.match(/Dinner:[^\n]*/) || [""])[0]));
+  // THE CONTROL: an unrestricted recomposition client keeps the original schedule exactly.
+  const rc2 = await client("Ayanda", { goalType: "recomposition" });
+  const r2 = await ask(rc2.phone, "7 day meals");
+  chk(/½ medium sweet potato/.test(r2) && /extra veg only \(rest day\)/.test(r2),
+    "CONTROL: an unrestricted recomposition client keeps the stock training/rest split",
+    JSON.stringify((r2.match(/Dinner:[^\n]*/) || [""])[0]));
+
+  // P2 · A FOOD THAT CONTAINS THE WORD IS NOT A DECLARATION. `foodDislikes: "kosher salt"` set
+  // declaredLabel, which set noPork, which — once the builder began failing closed — refused the
+  // client's entire meal plan over a salt preference.
+  const salt = await client("Refilwe", { foodDislikes: "kosher salt" });
+  const sPlan = await ask(salt.phone, "7 day meals");
+  chk(!/can't build/i.test(sPlan) && /Sunday/.test(sPlan),
+    "a `kosher salt` dislike is a food, not a declaration — the plan is still built",
+    JSON.stringify(sPlan.slice(0, 200)));
+  const { foodConstraints: fc } = await import("../server/food-swaps");
+  chk(fc({ foodDislikes: "kosher salt" }).declaredLabel === "",
+    "…and it sets no declared diet label at the canonical owner");
+  chk(!fc({ foodDislikes: "kosher salt" }).noPork,
+    "…nor the no-pork consequence that label used to carry");
+  // THE CONTROL: a real declaration still is one, in every column it can arrive in.
+  chk(fc({ dietaryRestrictions: "kosher" }).declaredLabel === "kosher"
+      && fc({ dietaryRestrictions: "halaal" }).declaredLabel === "halaal"
+      && fc({ foodDislikes: "halaal" }).declaredLabel === "halaal"
+      && fc({ dietaryRestrictions: "kosher" }).noPork,
+    "CONTROL: a declared kosher/halaal is still recognised, and still implies no pork");
+
+  // P2 · NEVER ASK FOR SOMETHING THAT CANNOT CHANGE THE ANSWER. Kosher is refused unconditionally,
+  // so "name two or three proteins you DO eat" was a question no answer could satisfy.
+  const k = await client("Yosef", { dietaryRestrictions: "kosher" });
+  const kPlan = await ask(k.phone, "7 day meals");
+  chk(!/two or three proteins/i.test(kPlan),
+    "the unsupported-kosher reply does not ask for proteins it cannot use",
+    JSON.stringify(kPlan));
+  chk(/can't build you a meal plan for kosher/i.test(kPlan) && /everything else still works/i.test(kPlan),
+    "…it says plainly what is unsupported, and what still is",
+    JSON.stringify(kPlan.slice(0, 240)));
+  // THE CONTROL: the ask is still there when it CAN unblock the plan.
+  const eggs = await client("Naledi", { foodDislikes: "eggs" });
+  chk(/two or three proteins/i.test(await ask(eggs.phone, "7 day meals")),
+    "CONTROL: …while a client whose pools merely ran out is still asked, because naming one helps");
+}
+
+REAL("\n=== L · THE RECOVERY'S OWN SECOND ROUND (#220, CTO blocker + three Codex findings) ===");
+{
+  const { foodConstraints: fc2 } = await import("../server/food-swaps");
+
+  // CTO BLOCKER · AN EMPTY FOOD NAME IS NOT AN ALLOWED FOOD. The schedule was built with
+  // `trainingCarb ?? ""` and graded by the day-bound guard, which asks `c.allows` — and
+  // `allows("")` is deliberately TRUE, because an empty name is not a forbidden food. So an
+  // unbuildable training day could grade as fine and render a blank dinner. It never did, only
+  // because losing every lunch carb also empties safeLunchCarbs and the pool guard fires first —
+  // a coincidence, not a guarantee. The decision now lives where the carb is chosen.
+  const noCarb = await client("Sibongile", { goalType: "recomposition",
+    foodDislikes: "sweet potato, rice, bread, samp, pap, oats, potatoes, pasta" });
+  const nc = await ask(noCarb.phone, "7 day meals");
+  chk(/can't build/i.test(nc), "no compliant training-day carb refuses outright",
+    JSON.stringify(nc.slice(0, 200)));
+  chk(!/Dinner:[^\n]*\+\s*\+|Dinner:[^\n]*\+\s*—/.test(nc), "…and never renders a blank dinner slot",
+    JSON.stringify((nc.match(/Dinner:[^\n]*/) || [""])[0]));
+
+  // CODEX P1 · A FIELD BOUNDARY IS A TERM BOUNDARY. Joining the three profile fields with a space
+  // before splitting turned `dietaryRestrictions: "kosher"` beside `foodDislikes: "broccoli"` into
+  // the single term "kosher broccoli" — no label, no noPork, and the kosher client was handed the
+  // ordinary meat-and-dairy plan. A kosher client with ANY other preference recorded lost the
+  // fail-closed path entirely.
+  for (const [label, over] of [
+    ["dietaryRestrictions + a dislike", { dietaryRestrictions: "kosher", foodDislikes: "broccoli" }],
+    ["dietaryRestrictions + medical notes", { dietaryRestrictions: "kosher", otherMedicalNotes: "lactose" }],
+  ] as Array<[string, Record<string, any>]>) {
+    chk(fc2(over).declaredLabel === "kosher" && fc2(over).noPork,
+      `the declared label survives ${label}`,
+      `declaredLabel=${JSON.stringify(fc2(over).declaredLabel)} noPork=${fc2(over).noPork}`);
+  }
+  const kb = await client("Yosef", { dietaryRestrictions: "kosher", foodDislikes: "broccoli" });
+  const kbPlan = await ask(kb.phone, "7 day meals");
+  chk(/can't build/i.test(kbPlan) && !/chicken|yoghurt/i.test(body(kbPlan)),
+    "…so a kosher client with a dislike still fails closed, and is offered no meat or dairy",
+    JSON.stringify(kbPlan.slice(0, 200)));
+  chk(fc2({ dietaryRestrictions: "halaal", foodDislikes: "broccoli" }).declaredLabel === "halaal",
+    "CONTROL: …and the halaal path survives the same shape");
+
+  // CODEX P2 · THE PRICE IS NOT ALWAYS THE END OF THE LINE. "Oats 500g — R15 (replaces pap)" has a
+  // trailing note; requiring the digits at end-of-line dropped that R15, so the list added up to
+  // R152 and the client was told R137.
+  const lowgi = await client("Palesa", { medicalConditions: "diabetes", weeklyFoodBudget: "under_100" });
+  const lg = await ask(lowgi.phone, "7 day meals");
+  const listed = lg.split("\n").filter(l => /—\s*R\d+/.test(l) && !/^(Estimated|🛒)/.test(l))
+    .reduce((n, l) => n + Number((l.match(/—\s*R(\d+)/) || [0, 0])[1]), 0);
+  const reported = Number((lg.match(/Estimated total: R(\d+)/) || [0, 0])[1]);
+  chk(listed > 0 && reported === listed, "the estimated total counts a price followed by a note",
+    `listed R${listed}, reported R${reported}`);
+  chk(/\(replaces pap\)/.test(lg), "CONTROL: …and the note itself still reaches the client",
+    JSON.stringify((lg.match(/[^\n]*replaces pap[^\n]*/) || ["(absent)"])[0]));
+
+  // CODEX P2 · ONE FOOD, SOMETIMES TWO LINES. A fish exclusion on the R100–300 tier puts two
+  // chicken lines on the list; scaling each to cover the whole week independently ordered 3.5kg
+  // for a 1 050g week — a fix for under-buying that started over-buying.
+  const fishy = await client("Kagiso", { dietaryRestrictions: "fish", weeklyFoodBudget: "100_300" });
+  const fp = await ask(fishy.phone, "7 day meals");
+  let eaten = 0;
+  for (const m of fp.matchAll(/(\d+)\s*g chicken (?:breast|thigh)/gi)) eaten += Number(m[1]);
+  let bought = 0;
+  for (const l of fp.split("\n").filter(l => /chicken/i.test(l) && /—\s*R\d+/.test(l))) {
+    const q = l.match(/(\d+(?:\.\d+)?)\s*(kg|g)\b(?:\s*×\s*(\d+))?/i);
+    if (q) bought += Number(q[1]) * (/kg/i.test(q[2]) ? 1000 : 1) * Number(q[3] || 1);
+  }
+  chk(eaten > 0 && bought >= eaten, "two lines for one food still cover the week between them",
+    `eats ${eaten}g, buys ${bought}g`);
+  chk(bought <= eaten * 2, "…without each line ordering the whole week on its own",
+    `eats ${eaten}g, buys ${bought}g`);
+}
+
 REAL(`\n${failed === 0
   ? "pg-restriction-consistency-acceptance: GREEN — all checks passed"
   : `pg-restriction-consistency-acceptance: RED — ${failed} check(s) failed`}`);
