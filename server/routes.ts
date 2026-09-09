@@ -47,7 +47,7 @@ import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor } from "./understanding/live";
-import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains } from "./understanding/messy-intake";
+import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains, clausesOf } from "./understanding/messy-intake";
 import { foodDayIsClosed, readTrainingDay } from "./one-action";
 import { backfillAttributedDays } from "./backfill";
 import { isCoachCriticism } from "./reaction-guard";
@@ -738,7 +738,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       }
     } catch (normErr) { console.warn("[NORMALIZER] exception — original message proceeds:", normErr instanceof Error ? normErr.message : normErr); }
   }
-
   // CUT 1 — ONE TURN COMMITS EVERY EVENT. The facts were parsed from the client's raw text
   // above, before the rewriter. If the note carries two or more, no handler below may end the
   // turn: each COMMITS what it did and control continues, and one composer builds one reply.
@@ -764,7 +763,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ════════════════════════════════════════════════════════════════════════════════════════════
   let _backfillNote = "";
   if (!mediaUrl) {
-    const backfilled = await backfillAttributedDays(user, message).catch(e => {
+    const backfilled = await backfillAttributedDays(user, message, new Date(), sourceMessageId).catch(e => {
       console.warn("[BACKFILL] skipped:", (e as any)?.message || e);
       return null;
     });
@@ -787,10 +786,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
         : "";
       const backfillReply = `Got it — logged across ${backfilled.days.length} day${backfilled.days.length === 1 ? "" : "s"}:\n${byDay}${missing}`;
       await logChat(user.id, message, backfillReply, "MULTI_DAY_BACKFILL");
-      return backfillReply;
+      // Evidence, not a response owner: the existing composer acknowledges it and coaches today.
+      const firstDomain = backfilled.writes[0]?.domain;
+      commitFact(turn, firstDomain === "steps" ? "steps" : "workout", backfillReply);
     }
   }
-
   const foodLogMgmtResult = await handleFoodLogMgmt(user, m);
   if (foodLogMgmtResult !== null) {
     // This is where the street-food educator claimed the 11:24 turn. It may still answer — after
@@ -945,7 +945,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // COMMITS, DOES NOT CLAIM THE TURN (Cut 2/3). On "2 litres of water and took my creatine" the
   // supplement handler inside it used to end the turn and the water was never logged. Standing
   // down loses the supplement instead — it must run, and commit.
-  const earlyResult = await handleEarlyCommands({ phone, message, m, user, sourceMessageId, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
+  const earlyResult = await handleEarlyCommands({ phone, message, m, user, sourceMessageId, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion, hasMultiDayReport: attributeMultiDayReport(message).hasMultipleDays });
   if (earlyResult !== null) {
     if (mayEndTurn("early-commands")) return closeCoachingTurn(earlyResult);
     commitFact(turn, "other", earlyResult);
@@ -998,10 +998,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     forceLog: turnFacts.mustForceFoodLog,
   });
   if (foodCtxResult !== null) commitFact(turn, "food", foodCtxResult + _backfillNote);
-
   // ── THE ONE COMPOSE ── replaces the food+feeling special case that used to live here, and
   // the food+steps string concatenation that lived inside food-context before that.
-  const hasFeeling = (turnFacts.hasFeeling || carriesFeelingClause(message)) && !foodDayIsClosed(message);
+  const hasFeeling = (turnFacts.hasFeeling || carriesFeelingClause(message)) && !foodDayIsClosed(message); const canonicalCloseOwnsQuestion = looksLikeDirectionRequest(clausesOf(message).slice(-1)[0] || message);
   // WRITE THEN COACH (2026-08-22). alsoAsksCoach used to require isMultiPartAsk (≥35 words or
   // two '?') or a feeling. The live bubble was 27 words and one '?':
   //   "What's the plan for me? / My breakfast was … / Guide for the rest of the day"
@@ -1011,6 +1010,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const resolved = resolveTurn(turn, {
     hasFeeling,
     alsoAsksCoach: looksLikeQuestion(message) && durableDomains(turnMutations()).length > 0,
+    canonicalCloseOwnsQuestion,
     // `committed` means COMMITTED now — read off the turn's durable write record.
     durableWrites: turnMutations(),
   });

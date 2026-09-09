@@ -133,6 +133,40 @@ export async function resumeOpenTrainingLoopOutcome(ctx: {
   return "failed";
 }
 
+/**
+ * Close the existing #208 training loop when its exact SAST day has acquired completion truth.
+ * Both the ordinary workout door and the multi-day backfill door call this owner: a late report
+ * is still the outcome of the move Coach K asked about, whichever input shape carried it home.
+ */
+export async function closeOpenTrainingLoopForDay(ctx: {
+  user: any;
+  resolvedDay: string;
+  sourceMessageId?: string;
+  openTraining?: Awaited<ReturnType<typeof loadOpenTrainingLoop>>;
+}): Promise<boolean> {
+  const open = ctx.openTraining === undefined
+    ? await loadOpenTrainingLoop(ctx.user)
+    : ctx.openTraining;
+  if (!open || open.targetDay !== ctx.resolvedDay) return false;
+  const closed = await consumeOpenTrainingLoop(ctx.user, open.marker);
+  if (!closed) return false;
+  try {
+    await recordOpenTrainingSuccess(
+      ctx.user, ctx.resolvedDay, open.intervention, ctx.sourceMessageId,
+    );
+  } catch (e) {
+    await restoreOpenTrainingLoop(ctx.user, open.marker);
+    console.warn("[COACHING_LOOP] completion provenance not recorded; loop restored:", e);
+    return false;
+  }
+  turnMutation(
+    "RESOLVE coaching_loop ref=" + open.ref + " outcome=completed target="
+      + open.targetDay + " source=" + (ctx.sourceMessageId || "unavailable"),
+    "[COACHING_LOOP]",
+  );
+  return true;
+}
+
 export async function handleWorkoutCommands(ctx: {
   phone: string;
   message: string;
@@ -145,25 +179,10 @@ export async function handleWorkoutCommands(ctx: {
   const openTraining = await loadOpenTrainingLoop(user);
   let completedOpenTraining = false;
   const closeTrainingLoop = async (resolvedDay: string): Promise<boolean> => {
-    if (!openTraining || openTraining.targetDay !== resolvedDay) return false;
-    const closed = await consumeOpenTrainingLoop(user, openTraining.marker);
-    if (closed) {
-      try {
-        await recordOpenTrainingSuccess(user, resolvedDay, openTraining.intervention, ctx.sourceMessageId);
-      } catch (e) {
-        // The workout row is still completion truth, but the loop carries which intervention led
-        // to it. Keep that relationship retryable if its provenance row cannot be committed.
-        await restoreOpenTrainingLoop(user, openTraining.marker);
-        console.warn("[COACHING_LOOP] completion provenance not recorded; loop restored:", e);
-        return false;
-      }
-      completedOpenTraining = true;
-      turnMutation(
-        "RESOLVE coaching_loop ref=" + openTraining.ref + " outcome=completed target="
-          + openTraining.targetDay + " source=" + (ctx.sourceMessageId || "unavailable"),
-        "[COACHING_LOOP]",
-      );
-    }
+    const closed = await closeOpenTrainingLoopForDay({
+      user, resolvedDay, sourceMessageId: ctx.sourceMessageId, openTraining,
+    });
+    if (closed) completedOpenTraining = true;
     return closed;
   };
 
@@ -268,7 +287,9 @@ export async function handleWorkoutCommands(ctx: {
   // Negation guard: "I couldn't run 5km", "missed my 5km", "skipped my run" report a
   // MISS — the bare-distance branch below would otherwise log a full session and
   // advance the programme off a run that never happened.
-  const isCardioLog = !looksLikeQuestion(m) && !isFutureIntent(m) && !mentionsNotDone(m) && (
+  // Historical backfill already wrote every supported session on its named day. Cardio words in
+  // that same bubble must not create a second, today-dated session or advance today's cursor.
+  const isCardioLog = !turnAlreadyWrote("workout") && !looksLikeQuestion(m) && !isFutureIntent(m) && !mentionsNotDone(m) && (
     // "went for a {activity}"
     /\b(?:went\s+for\s+(?:a\s+)?(?:run|jog|walk|swim|cycle|hike))\b/i.test(m)
     // "I ran / jogged / cycled / swam" (exercise-specific verbs — no context required)

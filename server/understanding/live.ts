@@ -715,6 +715,15 @@ export async function closeCoachingTurn(user: any, message: string, reply: strin
     justAteProteinMeal: protein >= PROPER_PROTEIN_G && !plateNeedsChange,
   }).catch(() => ({ todo: "" } as any));
 
+  // Return warmth belongs to the response composer, after the canonical re-entry owner has read
+  // the message and after the supported facts have reached the ledger. Transport must never add a
+  // second sentence from its own clock, especially one that can contradict a named-day dump.
+  const { resolveReentry } = await import("./reentry");
+  const returning = resolveReentry({ lastActiveAt: user?.lastActiveAt, message }).shouldHandleComeback;
+  const withReturnWarmth = (body: string) => returning && !/welcome back|you came back/i.test(body)
+    ? `Welcome back — I've got the catch-up you sent.\n\n${body}`
+    : body;
+
   const move = String(decided?.todo || "").trim();
   // ASKED ONLY WHEN IT WOULD ACTUALLY GO OUT, so a move the reply already owns is never recorded
   // as delivered. The key is namespaced off the client's id AND the move: the same map, the same
@@ -759,7 +768,7 @@ export async function closeCoachingTurn(user: any, message: string, reply: strin
       const { ensureOpenWeekendInvestigation } = await import("../memory");
       await ensureOpenWeekendInvestigation(user);
     }
-    return one;
+    return withReturnWarmth(one);
   }
 
   const next = withNextMove(out, moveToUse);
@@ -768,5 +777,5 @@ export async function closeCoachingTurn(user: any, message: string, reply: strin
     await ensureOpenWeekendInvestigation(user);
   }
   console.log(`[COACH_TURN] MOVE=${next !== out ? moveToUse : ""} (appended after ${wrote.join("+")})`);
-  return next;
+  return withReturnWarmth(next);
 }

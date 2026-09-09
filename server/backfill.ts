@@ -42,6 +42,7 @@ import { attributeMultiDayReport } from "./understanding/day-relative-situation"
 import { journeyMustKeepFacts, detectStepLog } from "./understanding/messy-intake";
 import { turnMutation } from "./handlers/chat-log";
 import { applyRetroSessionState } from "./day-ledger";
+import { closeOpenTrainingLoopForDay } from "./handlers/workout";
 
 export interface BackfillWrite { dayKey: string; domain: "food" | "workout" | "steps"; detail: string; }
 export interface BackfillResult {
@@ -72,6 +73,7 @@ export async function backfillAttributedDays(
   user: { id: string; phoneNumber?: string | null; totalWorkoutsCompleted?: number | null; lastWorkoutDate?: Date | string | null },
   message: string,
   now: Date = new Date(),
+  sourceMessageId?: string,
 ): Promise<BackfillResult | null> {
   const attribution = attributeMultiDayReport(message, now);
   if (!attribution.hasMultipleDays) return null;
@@ -117,6 +119,9 @@ export async function backfillAttributedDays(
         turnMutation(`INSERT workout completed=true at=${beat.dayKey}`, "[BACKFILL]");
         writes.push({ dayKey: beat.dayKey, domain: "workout", detail: "session" });
       }
+      // A catch-up sentence is not a different kind of outcome. The workout row above is the
+      // completion truth; now let the existing #208 owner close only the move for this exact day.
+      await closeOpenTrainingLoopForDay({ user, resolvedDay: beat.dayKey, sourceMessageId });
     }
 
     // STEPS — the same detector the live step door uses.
