@@ -356,12 +356,39 @@ function withoutTargetSegments(reply: string): string {
 export function adjudicableSessionCounts(text: string): number[] {
   return String(text || "")
     .split(/(\n+|(?<=[.!?])\s+)/)
-    .filter(seg => !OUT_OF_WINDOW.test(seg) && !TARGET_MARKER.test(seg))
+    .filter(seg => !OUT_OF_WINDOW.test(seg) && !TARGET_MARKER.test(seg) && !isMissClaim(seg))
     // "2/4 sessions" — keep the numerator, drop the denominator. The trailing space matters:
     // without it "2/4" would become "24".
     .map(seg => seg.replace(/(\d{1,2})\s*\/\s*\d{1,2}/g, "$1 "))
     .flatMap(seg => sessionCountsIn(seg));
 }
+
+/**
+ * A COUNT OF MISSES IS NOT A COUNT OF SESSIONS (#233).
+ *
+ * `SESSION_COUNT` allows up to two filler words between the number and the noun, so that
+ * "3 gym sessions this week" and "2 hard sessions" both read. That window also admits the word
+ * that REVERSES the claim: "One missed session" extracted as 1, the floor compared it to a record
+ * holding 0 completed in seven days, and blocked the message.
+ *
+ * The client had just said "I didn't train". The reply was the truthful missed-session response —
+ * the one owner that exists for exactly this turn — and the truth floor rejected it for asserting
+ * a session that had happened, when the sentence says the opposite. The client received
+ * REACTIVE_OUTBOUND_REPAIR instead, and on repeating themselves got the duplicate-meta reply,
+ * because the first answer had been wrongly blocked rather than wrongly written.
+ *
+ * This belongs here and not in the extractor: `sessionCountsIn` answers "what session numbers
+ * appear", which is deliberately not "what does this message CLAIM" — the distinction this
+ * function was created to draw. The floor keeps its full strength over every real completion
+ * claim; it stops reading a miss as one.
+ */
+const NOT_A_COMPLETION = new Set([
+  "missed", "miss", "misses", "missing", "skipped", "skip", "skipping",
+  "lost", "dropped", "cancelled", "canceled",
+]);
+/** A closed token set, not a pattern — the same shape #234 used, and it costs no regex budget. */
+const isMissClaim = (seg: string): boolean =>
+  seg.toLowerCase().split(/[^a-z]+/).some(w => NOT_A_COMPLETION.has(w));
 
 /**
  * DOES THIS CLAIM NAME A WINDOW WE MEASURED? One question, one owner (merged 2026-08-22).
@@ -373,7 +400,7 @@ export function adjudicableSessionCounts(text: string): number[] {
  * matcher gave each rule half a guard — the step rule could not see "this month" and the session
  * rule could not see "this morning" — so it is one list of the windows we do not hold.
  */
-const OUT_OF_WINDOW = /\b(?:before|after|by)\s+(?:lunch|breakfast|dinner|noon|midday|\d{1,2}\s?(?:am|pm))\b|\bthis (?:morning|afternoon|evening)\b|\bin the (?:morning|afternoon|evening)\b|\bper hour\b|\bsince (?:lunch|breakfast|this morning)\b|\b(?:this|last|the past|next)\s+month\b|\bin total\b|\ball[\s-]?time\b|\bsince you (?:started|began|joined)\b|\bthis year\b|\baltogether\b|\blifetime\b|\bin the bank\b|\btotal\s+(?:workouts?|sessions?|trainings?)\b/i;
+const OUT_OF_WINDOW = /\b(?:before|after|by)\s+(?:lunch|breakfast|dinner|noon|midday|\d{1,2}\s?(?:am|pm))\b|\bthis (?:morning|afternoon|evening)\b|\bin the (?:morning|afternoon|evening)\b|\bper hour\b|\bsince (?:lunch|breakfast|this morning)\b|\b(?:this|last|the past|next)\s+month\b|\bin total\b|\ball[\s-]?time\b|\bsince you (?:started|began|joined)\b|\bthis year\b|\baltogether\b|\boverall\b|\blifetime\b|\bin the bank\b|\btotal\s+(?:workouts?|sessions?|trainings?)\b/i;
 
 function verifyStepAttribution(reply: string, clientMessage: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
   const replySteps = extractStepNumbers(withoutTargetSegments(reply));

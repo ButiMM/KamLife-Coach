@@ -1365,7 +1365,7 @@ export async function handleLifecycle(ctx: {
   } else if (isMissedWorkout) {
     const name = spaceName(user);
     const total = user.totalWorkoutsCompleted || 0;
-    const missedReply = `One missed session${name} — that is all it is.\n\n${total > 0 ? `You have ${total} sessions completed. One miss does not erase that.` : "Getting back on track starts now."}\n\n*The rule:* Never miss twice. One miss is life. Two misses in a row is the start of a habit.\n\n*What to do right now:*\nDecide when you train next — not "tomorrow maybe", give me the specific time. 6am? 12pm? After work at 5pm?\n\nThat is your only job. Pick the time.`;
+    const missedReply = `One missed session${name} — that is all it is.\n\n${total > 0 ? `You have ${total} sessions overall. One miss does not erase that.` : "Getting back on track starts now."}\n\n*The rule:* Never miss twice. One miss is life. Two misses in a row is the start of a habit.\n\n*What to do right now:*\nDecide when you train next — not "tomorrow maybe", give me the specific time. 6am? 12pm? After work at 5pm?\n\nThat is your only job. Pick the time.`;
     await logChat(user.id, message, missedReply, "MISSED_WORKOUT");
     return missedReply;
   }
