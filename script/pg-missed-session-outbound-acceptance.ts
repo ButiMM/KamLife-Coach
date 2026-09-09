@@ -176,6 +176,60 @@ REAL("\n=== 4 · THE PEAR AND THE MESSY CATCH-UP ARE UNCHANGED ===");
     JSON.stringify((catchup.match(/[^\n]*lunch[^\n]*/) || ["(not mentioned)"])[0]));
 }
 
+REAL("\n=== 5 · THE CATCH-UP ANSWERS THE QUESTION IT WAS ASKED (Gate 3) ===");
+{
+  _resetOutboundDedupe();
+  const c = await client("Bonolo", { lastActiveAt: midday(4) });
+  const body = await outbound(c.phone,
+    "I'm back after a few days. Saturday breakfast I had eggs and rice. Sunday I walked 6400 steps "
+    + "and I can't remember lunch. Monday I felt flat because work was chaos, but I did the workout "
+    + "you told me to do. Today breakfast I had pap and chicken. What should I do today?");
+
+  // The facts stay exactly as #233 already landed them.
+  chk(/Saturday/i.test(body) && /Sunday/i.test(body) && /Monday/i.test(body),
+    "the days the client reported are all named back", JSON.stringify(body.slice(0, 120)));
+  chk(!/no catch-?up needed|we start from today/i.test(body),
+    "…no refusal and no start-from-today language", JSON.stringify(body.slice(0, 140)));
+  chk(!/lunch was|for lunch you had/i.test(body), "…the unknown lunch stays unknown",
+    JSON.stringify((body.match(/[^\n]*lunch[^\n]*/) || ["(not mentioned)"])[0]));
+
+  // GATE 3 ITSELF. The client asked what to do TODAY.
+  const closing = body.trim().split("\n").filter(l => l.trim()).slice(-1)[0] || "";
+  chk(!/scale (tomorrow|tonight)|tomorrow morning/i.test(closing),
+    "the closing answer is not a task for another day", JSON.stringify(closing));
+  chk(closing.trim().length > 0 && !/next move stays small\.?$/i.test(closing),
+    "…and it is not an empty hold — the turn ends on a move, not on an acknowledgement",
+    JSON.stringify(closing));
+  chk(!body.includes(REACTIVE_OUTBOUND_REPAIR), "…and the body is not the generic repair",
+    JSON.stringify(body.slice(0, 90)));
+}
+
+REAL("\n=== 6 · CONTROL — A SPARSE NON-DIRECTION TURN KEEPS ITS INVESTIGATION ===");
+{
+  // #203 is narrowed for one case, not disabled. A client who did NOT ask what to do today must
+  // still meet the investigation ladder exactly as before — otherwise this cut has quietly turned
+  // the sparse-client downgrade off for everyone.
+  const { underPolicy } = await import("../server/one-action");
+  const base = { kind: "protein", todo: "Make your next meal a proper protein meal.", why: "x" } as any;
+  const optsNoAsk = { foodSufficient: false, weightSufficient: false, loggedToday: true,
+    daysSinceWeighIn: null as number | null, hour: 19 };
+  const investigated = underPolicy(base, optsNoAsk);
+  chk(investigated.kind === "weigh",
+    "CONTROL: without a today-question the ladder still downgrades to the weigh investigation",
+    JSON.stringify({ kind: investigated.kind, todo: investigated.todo }));
+
+  const asked = underPolicy(base, { ...optsNoAsk, asksAboutToday: true });
+  chk(asked.kind !== "weigh" || !/tomorrow/i.test(String(asked.todo || "")),
+    "…and with one, it is not answered with a tomorrow-only weigh",
+    JSON.stringify({ kind: asked.kind, todo: asked.todo }));
+
+  // …and before midday the weigh is unchanged, because then it IS today's job.
+  const morning = underPolicy(base, { ...optsNoAsk, hour: 8, asksAboutToday: true });
+  chk(morning.kind === "weigh" && /this morning/i.test(String(morning.todo || "")),
+    "CONTROL: before midday a today-question still gets the weigh, worded for today",
+    JSON.stringify({ kind: morning.kind, todo: morning.todo }));
+}
+
 REAL(`\n${failed === 0
   ? "pg-missed-session-outbound-acceptance: GREEN — all checks passed"
   : `pg-missed-session-outbound-acceptance: RED — ${failed} check(s) failed`}`);

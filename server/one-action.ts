@@ -71,6 +71,11 @@ export interface DayState {
    */
   atKeyboard?: boolean;
   /**
+   * The client asked, in this turn, what to do TODAY (#233 Gate 3). Read by the rungs that can
+   * only offer a future date, so a question about today is never answered with another day.
+   */
+  asksAboutToday?: boolean;
+  /**
    * What is going on in their life, in their own words — "night shift", "just had a baby",
    * "retrenched". A durable fact from users.life_context (Cut 7), not an inference.
    *
@@ -248,14 +253,22 @@ function holdAction(dream?: string | null): OneAction {
   };
 }
 
+/**
+ * THE HOUR AFTER WHICH A FIRST-THING WEIGH-IN IS NO LONGER TODAY'S JOB. Named once because two
+ * places depend on it: this action's own wording, and the gate that decides whether it may be the
+ * ANSWER to a question about today.
+ */
+export const WEIGH_ACTIONABLE_BEFORE_HOUR = 12;
+
 function askToWeigh(dream?: string | null, neverWeighed = false, hour = 8): OneAction {
+  const forTomorrow = hour >= WEIGH_ACTIONABLE_BEFORE_HOUR;
   return {
     kind: "weigh",
-    todo: `Stand on a scale ${hour >= 12 ? "tomorrow morning" : "this morning"}, before you eat.`,
+    todo: `Stand on a scale ${forTomorrow ? "tomorrow morning" : "this morning"}, before you eat.`,
     why: why(
       neverWeighed
         ? "It's one number and it's the only way either of us sees this working."
-        : `It's been a while — one number ${hour >= 12 ? "tomorrow morning" : "today"} and I can show you what's actually happening.`,
+        : `It's been a while — one number ${forTomorrow ? "tomorrow morning" : "today"} and I can show you what's actually happening.`,
       dream,
     ),
     investigation: { missingFact: "weight_current", whyItMatters: "The weight evidence is missing or stale." },
@@ -581,7 +594,16 @@ export function chooseAction(s: DayState): OneAction {
   //    outcomes data — a client with no weigh-in is one we can never prove we helped.
   const neverWeighed = s.daysSinceWeighIn === null;
   const scaleIsOffLimits = mentionsForbidden("weight scale weigh", s.doNotMention);
-  if (!scaleIsOffLimits && ((neverWeighed && s.weeksOnProgramme >= 1) || (s.daysSinceWeighIn !== null && s.daysSinceWeighIn >= 10))) {
+  //    …BUT NOT AS THE ANSWER TO "WHAT SHOULD I DO TODAY" (#233 Gate 3). askToWeigh words itself
+  //    honestly for the clock — a first-thing weigh-in cannot happen retroactively, so after
+  //    midday it asks for TOMORROW morning. Correct as a nudge, wrong as an answer: a four-day
+  //    catch-up ending "What should I do today?" closed on "Stand on a scale tomorrow morning",
+  //    and every rung below that might have given them something to do today was skipped to say
+  //    it. Before midday this is unchanged and still outranks fuelling and steps; the morning and
+  //    proactive paths never set this flag at all.
+  const weighWouldBeTomorrow = s.hour >= WEIGH_ACTIONABLE_BEFORE_HOUR;
+  if (!scaleIsOffLimits && !(s.asksAboutToday && weighWouldBeTomorrow)
+      && ((neverWeighed && s.weeksOnProgramme >= 1) || (s.daysSinceWeighIn !== null && s.daysSinceWeighIn >= 10))) {
     return askToWeigh(s.dreamGoal, neverWeighed, s.hour);
   }
 
@@ -951,6 +973,8 @@ export function underPolicy(
     stalledWeeks?: number; trainingAwaitingOutcome?: boolean;
     foodDayClosed?: boolean; trainingDeclined?: boolean; weekendInvestigationAnswered?: boolean;
     weightIsGoal?: boolean;
+    /** The client asked, in this turn, what to do TODAY. See the gate below. */
+    asksAboutToday?: boolean;
   },
 ): OneAction {
   const asksUsefulWeekendFact = action.kind !== "rest" && action.kind !== "weigh"
@@ -981,13 +1005,37 @@ export function underPolicy(
   // and we did not ask". That is the receipt-only dead end, and the ladder below already knows
   // what to ask; it was simply never consulted from here.
   if (!PRESCRIPTIVE.has(action.kind) && action.kind !== "hold") return action;
-  return investigateInstead({
+  const investigation = investigateInstead({
     foodSufficient: opts.foodSufficient, weightSufficient: opts.weightSufficient,
     loggedToday: opts.loggedToday ?? true,
     daysSinceWeighIn: opts.daysSinceWeighIn === undefined ? 0 : opts.daysSinceWeighIn,
     doNotMention: opts.doNotMention, dreamGoal: opts.dreamGoal, hour: opts.hour ?? 8,
-    trainingAwaitingOutcome: opts.trainingAwaitingOutcome,
+    trainingAwaitingOutcome: opts.trainingAwaitingOutcome, asksAboutToday: opts.asksAboutToday,
   });
+
+  // A QUESTION ABOUT TODAY MUST GET AN ANSWER ABOUT TODAY (#233 Gate 3).
+  //
+  // The downgrade above is right for a nudge: when the evidence cannot carry a prescription, ask
+  // for the measurement instead of inventing one. But it has only three answers — log, weigh, or
+  // hold — and when the client is ASKING what to do today, two of them are not answers:
+  //
+  //   a weigh after midday   askToWeigh words itself honestly for the clock, so it says TOMORROW
+  //                          morning. A four-day catch-up ending "What should I do today?" closed
+  //                          on "Stand on a scale tomorrow morning, before you eat."
+  //   a hold with no todo    silence dressed as a decision. The client asked and got nothing.
+  //
+  // In that case the ladder's own answer — already computed, already today-scoped, and reached by
+  // the same evidence rules everything else uses — is the better one, so it stands. This does not
+  // disable #203: the downgrade still governs every nudge and every turn that is not a direct
+  // question about today, and the weigh is unchanged for the mornings when it IS today's job. It
+  // narrows one case, and only when the alternative is a future date or nothing at all.
+  if (opts.asksAboutToday) {
+    const futureOnlyWeigh = investigation.kind === "weigh"
+      && (opts.hour ?? 8) >= WEIGH_ACTIONABLE_BEFORE_HOUR;
+    const saysNothing = !String(investigation.todo || "").trim();
+    if ((futureOnlyWeigh || saysNothing) && String(action.todo || "").trim()) return action;
+  }
+  return investigation;
 }
 
 /**
@@ -1008,12 +1056,15 @@ export function underPolicy(
 function investigateInstead(ctx: {
   foodSufficient: boolean; weightSufficient: boolean; loggedToday: boolean;
   daysSinceWeighIn: number | null; doNotMention?: string | null; dreamGoal?: string | null;
-  hour: number; trainingAwaitingOutcome?: boolean;
+  hour: number; trainingAwaitingOutcome?: boolean; asksAboutToday?: boolean;
 }): OneAction {
   if (ctx.trainingAwaitingOutcome) return holdAction(ctx.dreamGoal);
   const canAskForFood = !ctx.foodSufficient && !ctx.loggedToday;
   const staleWeight = ctx.daysSinceWeighIn === null || ctx.daysSinceWeighIn >= 3;
+  // …and it must be askable TODAY when today is what was asked (#233 Gate 3), for the same
+  // reason as the ladder rung above.
   const canAskForWeight = !ctx.weightSufficient && staleWeight
+    && !(ctx.asksAboutToday && ctx.hour >= WEIGH_ACTIONABLE_BEFORE_HOUR)
     && !mentionsForbidden("weight scale weigh", ctx.doNotMention);
   return canAskForFood ? askToLog(ctx.dreamGoal)
     : canAskForWeight ? askToWeigh(ctx.dreamGoal, ctx.daysSinceWeighIn === null, ctx.hour)

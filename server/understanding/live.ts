@@ -17,6 +17,8 @@
  * keeps growing.
  */
 
+import { looksLikeDirectionRequest } from "../daily-direction";
+import { clausesOf } from "./messy-intake";
 import { eq, desc, inArray, and, gte } from "drizzle-orm";
 import { db } from "../db";
 import { readHealthState } from "../health-state";
@@ -101,6 +103,10 @@ export async function canonicalDecision(
     const calTarget = Number(user.calorieTarget) || 0;
     const protTarget = Number(user.proteinTarget) || 0;
 
+    // THE CLIENT ASKED WHAT TO DO TODAY (#233 Gate 3). Read with the owner routes.ts already
+    // uses to decide the canonical close owns the question, on the same last clause, so the turn
+    // and the decision agree about what was asked.
+    const asksAboutToday = looksLikeDirectionRequest(clausesOf(message || "").slice(-1)[0] || message || "");
     const act = underPolicy(chooseAction({
       firstName: getDisplayName(user) || undefined,
       goal: (user.goalType as any) || "general",
@@ -119,6 +125,7 @@ export async function canonicalDecision(
       hour: sastHour(),
       // They are typing to us right now — this rides out on a reply, not as a nudge.
       atKeyboard: true,
+      asksAboutToday,
       // A CONSTRAINT OUTLIVES THE SENTENCE THAT STATED IT (2026-08-25, P0-4b). This read only the
       // CURRENT message, so a client who closed food at 12:00 and asked an unrelated question at
       // 19:00 was decided for as though they had never said it — the constraint expired at the end
@@ -154,6 +161,11 @@ export async function canonicalDecision(
          foodDayClosed: foodDayClosedWith(held.foodDayClosed, message || ""),
          trainingDeclined: held.trainingDeclined || trainingDayIsDeclined(message || ""),
          weightIsGoal: getGoalProfile(user.goalType).weightIsGoal,
+         // THE CLIENT ASKED WHAT TO DO TODAY (#233 Gate 3). Read with the same owner routes.ts
+         // uses to decide the canonical close owns the question, on the same last clause — so the
+         // turn that hands this decision the question and the decision itself agree about what
+         // was asked. The gate it feeds is in underPolicy.
+         asksAboutToday: looksLikeDirectionRequest(clausesOf(message || "").slice(-1)[0] || message || ""),
          weekendInvestigationAnswered: weekendInvestigationAnswered(user) });
 
     // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,
@@ -163,12 +175,17 @@ export async function canonicalDecision(
     // renderer that already speaks in the coach's voice. No new vocabulary: formatOneAction is
     // what the morning brief has always used.
     const { formatOneAction } = await import("../one-action");
-    const rendered = act.kind === "hold" ? "" : formatOneAction(act, getDisplayName(user) || undefined);
+    // A HOLD IS SILENCE UNLESS THEY ASKED (#233 Gate 3). "hold" means nothing needs changing,
+    // and as a nudge that is correctly said by saying nothing. As the answer to "What should I do
+    // today?" silence is not an answer — holdAction's own words ("Nothing new today. Do exactly
+    // what you did yesterday.") are the honest one, and are rendered by the same renderer.
+    const rendered = act.kind === "hold" && !asksAboutToday
+      ? "" : formatOneAction(act, getDisplayName(user) || undefined);
 
     const { turnEvidence } = await import("../handlers/chat-log");
     turnEvidence({
       canonicalKind: act.kind,
-      canonicalTodo: act.kind === "hold" ? null : act.todo,
+      canonicalTodo: act.kind === "hold" && !asksAboutToday ? null : act.todo,
       canonicalReply: rendered || null,
       canonicalIntervention: act.intervention === "minimum_training" ? "minimum" : "standard",
       openLoopRef: openTraining?.ref || null,
@@ -184,7 +201,7 @@ export async function canonicalDecision(
     // because that fact stopped at this boundary. No extra query: these are the same two numbers
     // the caloriePct above is computed from.
     return {
-      todo: act.kind === "hold" ? "" : act.todo, kind: act.kind, reply: rendered,
+      todo: act.kind === "hold" && !asksAboutToday ? "" : act.todo, kind: act.kind, reply: rendered,
       day: { kcal: truth.today.kcal, kcalTarget: calTarget },
       investigation: act.investigation,
     };

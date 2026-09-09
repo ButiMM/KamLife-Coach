@@ -4476,7 +4476,12 @@ test("cut8: the decision stands down before the mouth ever has to", () => {
   // morning free to tell a client to stand on a scale they asked us never to raise.
   assert.ok(/const scaleIsOffLimits = mentionsForbidden\("weight scale weigh", s\.doNotMention\)/.test(code),
     "the weigh ask is never chosen");
-  assert.ok(/!scaleIsOffLimits && \(\(neverWeighed/.test(code), "…in the ordering itself");
+  // THE PROMISE IS THE ORDERING, NOT THE ADJACENCY (#233 Gate 3). This pinned
+  // `!scaleIsOffLimits && ((neverWeighed` as one literal string, so adding any second guard to the
+  // rung broke it even though the boundary still leads the condition — exactly the stale-shape
+  // trap the comment below describes and this file already learned once. What must hold is that
+  // the rung is gated on the boundary FIRST; what follows it is the rung's own business.
+  assert.ok(/if \(!scaleIsOffLimits\b/.test(code), "…in the ordering itself");
   // …AND IN THE VERDICT DOWNGRADE, WHICH REACHES askToWeigh BY A SECOND ROUTE.
   //
   // This used to grep for `mentionsForbidden("weight scale weigh", p.doNotMention)` in this file.
