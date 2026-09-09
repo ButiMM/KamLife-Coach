@@ -13,6 +13,7 @@ process.env.OPENAI_API_KEY = "sk-test-offline";
 process.env.OFFLINE_AI = "1";
 process.env.NORMALIZER = "off";
 process.env.ENGINE_LIVE = "off";
+process.env.SHADOW = "on";
 process.env.PROACTIVE_PAUSED = "true";
 process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000";
 process.env.TWILIO_AUTH_TOKEN = "test";
@@ -25,9 +26,10 @@ console.log = console.warn = console.error = () => {};
 const { pool, db } = await import("../server/db");
 const schema = await import("../shared/schema");
 const { handleMessage } = await import("../server/routes");
-const { COMEBACK_ACK, joinComebackAcknowledgement } = await import("../server/routes/whatsapp");
+const { processTextAsync } = await import("../server/routes/whatsapp");
 const { ensureOpenTrainingLoop } = await import("../server/memory");
 const { readOpenTrainingLoop } = await import("../server/workout-feedback");
+const { resolveReentry } = await import("../server/understanding/reentry");
 const { sastDayKey, sastDayKeyBefore } = await import("../server/sast");
 const { eq } = await import("drizzle-orm");
 
@@ -43,6 +45,7 @@ const dayName = (daysBack: number) => new Intl.DateTimeFormat("en-ZA", {
 const noon = (day: string) => new Date(`${day}T12:00:00+02:00`);
 const dayOf = (value: Date | string) => sastDayKey(new Date(value));
 const WELCOME = /welcome back|good to (?:have|see) you|you came back|you(?:'|’)re back|glad you(?:'|’)re back|where you left off/i;
+const GENERIC_COMEBACK_TEMPLATE = /\*To get back into it:\*|Tell me what you've eaten today \(even if it wasn't great\)|No guilt\. No catching up\. Just today/i;
 
 async function client(name: string, lastActiveDays = 5) {
   const phone = `whatsapp:+2792${String(Math.floor(Math.random() * 900000) + 100000)}`;
@@ -77,12 +80,16 @@ REAL("\n=== 1–6 · THE REAL INCONSISTENT CLIENT RETURNS ===");
 const user = await client("Catchup");
 const open = await ensureOpenTrainingLoop(user, d2, "reactive", Date.now() - 36 * 3_600_000);
 const catchup = [
-  `I'm back after a few days. ${n4} breakfast I had eggs and toast.`,
+  `I'm back after a few days. ${n4} breakfast I had eggs and rice.`,
   `${n3} I walked 6400 steps and I can't remember lunch.`,
   `${n2} I felt flat because work was chaos, but I did the workout you told me to do.`,
   "Today breakfast I had pap and chicken. What should I do today?",
 ].join(" ");
-const reply = await ask(user, catchup, "SM-catchup-229");
+const reentryBefore = resolveReentry({ lastActiveAt: user.lastActiveAt, message: catchup });
+check((reentryBefore.daysSinceLastContact ?? 0) >= 3 && reentryBefore.shouldHandleComeback,
+  "the acceptance client is returning after at least three days with an explicit catch-up message",
+  JSON.stringify(reentryBefore));
+await processTextAsync(user.phoneNumber, catchup, null, null, [], handleMessage, "SM-catchup-229");
 await new Promise(resolve => setTimeout(resolve, 120));
 
 const meals = await rows("meal_logs", user.id);
@@ -95,6 +102,11 @@ const constraints = (await pool.query(
 const turns = (await pool.query(
   `SELECT input_text, reply, mutations FROM turn_ledger WHERE user_id = $1 ORDER BY created_at DESC`, [user.id],
 )).rows;
+const outbound = (await pool.query(
+  `SELECT body FROM shadow_replies WHERE user_id = $1 AND channel = 'reply' ORDER BY id DESC LIMIT 1`, [user.id],
+)).rows;
+const reply = String(turns[0]?.reply || "");
+const finalBody = String(outbound[0]?.body || "");
 
 check(meals.length === 2 && meals.map((r: any) => dayOf(r.logged_at)).sort().join() === [d4, today].sort().join(),
   "only the two supported meals land, on their exact SAST days",
@@ -110,53 +122,79 @@ check(!readOpenTrainingLoop(after.awaitingInputType),
 check(constraints.filter((r: any) => r.kind === "training" && r.state === "released"
     && r.day === d2 && r.source_message_id === "SM-catchup-229").length === 1,
   "the outcome is attributed once through the existing loop owner", JSON.stringify(constraints));
-check((reply.match(new RegExp(WELCOME.source, "gi")) || []).length <= 1,
-  "the re-entry turn contains at most one comeback acknowledgement", JSON.stringify(reply.slice(0, 240)));
-const delivered = joinComebackAcknowledgement(COMEBACK_ACK, reply);
-check((delivered.match(new RegExp(WELCOME.source, "gi")) || []).length === 1,
-  "the real delivery join adds exactly one acknowledgement to a contentful catch-up");
-check(!/no catch-up needed|start from today/i.test(COMEBACK_ACK),
-  "the delivery acknowledgement does not reject supported history the client just supplied");
-check(joinComebackAcknowledgement("You came back.\n\n", "Catchup, welcome back. Carry on.")
-    === "Catchup, welcome back. Carry on.",
-  "CONTROL: delivery never duplicates a welcome already owned by the canonical reply");
-check(joinComebackAcknowledgement("Welcome back.\n\n", "You came back and kept going.")
-    === "You came back and kept going.",
-  "CONTROL: the transport also recognises canonical comeback wording without the word welcome");
-check(!/start (?:again|over)|week 1|session 1 of|no catching up|just today/i.test(reply),
-  "catch-up does not restart or deny the history the client supplied", JSON.stringify(reply.slice(0, 300)));
-check(/Logged 2 days/i.test(reply) && /6[,.]?400 steps/i.test(reply) && /session/i.test(reply),
-  "one reply reflects the supported multi-domain reconstruction", JSON.stringify(reply.slice(0, 500)));
-check(/Heard you on how you're feeling/i.test(reply),
-  "the final turn hears the contextual feeling rather than reducing it to rows", JSON.stringify(reply.slice(0, 500)));
-check(/stand on a scale|protein|\bwalk\b|get today'?s session|nothing new today|rest today/i.test(reply)
-    && reply.split("\n\n---\n\n").length === 1,
-  "the result carries today's canonical next decision in one WhatsApp reply, not a terminal receipt",
-  JSON.stringify(reply.slice(0, 500)));
+check(finalBody.length > 0,
+  "the four-day re-entry produces a final customer-visible outbound body after WhatsApp processing");
+check((finalBody.match(new RegExp(WELCOME.source, "gi")) || []).length === 1,
+  "the authoritative response composer adds one warm return acknowledgement after interpretation",
+  JSON.stringify(finalBody.slice(0, 300)));
+check(!/start (?:again|over)|week 1|session 1 of|no catching up|just today/i.test(finalBody),
+  "final outbound does not restart or deny the history the client supplied", JSON.stringify(finalBody.slice(0, 300)));
+check(!/no catch-up needed|we start from today/i.test(finalBody),
+  "final outbound contains neither 'No catch-up needed' nor 'we start from today'",
+  JSON.stringify(finalBody.slice(0, 300)));
+check(!GENERIC_COMEBACK_TEMPLATE.test(finalBody),
+  "a contentful multi-day catch-up does not terminate in the generic three-step comeback template",
+  JSON.stringify(finalBody.slice(0, 500)));
+check(/Logged 2 days/i.test(finalBody) && /6[,.]?400 steps/i.test(finalBody) && /session/i.test(finalBody),
+  "final outbound reflects the supported multi-domain reconstruction", JSON.stringify(finalBody.slice(0, 500)));
+check(/Heard you on how you're feeling/i.test(finalBody),
+  "final outbound hears the contextual feeling rather than reducing it to rows", JSON.stringify(finalBody.slice(0, 500)));
+const finalParagraph = finalBody.split(/\n\n+/).map((p: string) => p.trim()).filter(Boolean).at(-1) || "";
+check(/stand on a scale|protein|\bwalk\b|get today'?s session|nothing new today|rest today/i.test(finalParagraph)
+    && finalBody.split("\n\n---\n\n").length === 1,
+  "final outbound carries one coaching move for today in one coherent WhatsApp response",
+  JSON.stringify(finalBody.slice(0, 500)));
 check(turns.length === 1 && JSON.stringify(turns[0].mutations || []).includes(open?.ref || "missing-ref")
     && String(turns[0].reply || "") === reply,
-  "the turn ledger reconstructs the loop resolution and exact delivered reply", JSON.stringify(turns[0] || {}));
+  "the turn ledger reconstructs the loop resolution and exact authoritative reply", JSON.stringify(turns[0] || {}));
 
 const nonFood = await client("NonFoodCatchup");
 const nonFoodReply = await ask(nonFood,
-  `I'm back. ${n3} I walked 5200 steps. ${n2} I completed my workout. What should I do today?`,
+  `${n3} I walked 5200 steps. ${n2} I did the workout. What should I do today?`,
   "SM-nonfood-catchup-229");
 check(/5[,.]?200 steps/i.test(nonFoodReply) && /session/i.test(nonFoodReply)
     && /stand on a scale|tell me what you ate|protein|\bwalk\b|get today'?s session|rest today/i.test(nonFoodReply),
   "a non-food catch-up also reaches today's decision instead of terminating at its receipt",
   JSON.stringify(nonFoodReply.slice(0, 400)));
 
+const cardioCatchup = await client("CardioCatchup", 1);
+await ask(cardioCatchup,
+  `${n3} I trained. ${n2} I trained and did 30 minutes cardio.`,
+  "SM-cardio-catchup-233");
+const cardioWorkouts = await rows("workout_logs", cardioCatchup.id);
+const [cardioAfter] = await db.select().from(schema.users).where(eq(schema.users.id, cardioCatchup.id)).limit(1);
+check(cardioWorkouts.length === 2
+    && cardioWorkouts.map((r: any) => dayOf(r.logged_at)).sort().join() === [d3, d2].sort().join()
+    && !cardioWorkouts.some((r: any) => dayOf(r.logged_at) === today),
+  "historical cardio catch-up writes only the two named days, never a third workout today",
+  JSON.stringify(cardioWorkouts));
+check(Number(cardioAfter.totalWorkoutsCompleted) === 12
+    && Number(cardioAfter.programmeWeek) === 4 && Number(cardioAfter.programmeDayInWeek) === 1,
+  "historical cardio catch-up preserves today's programme cursor while updating lifetime truth",
+  JSON.stringify({ total: cardioAfter.totalWorkoutsCompleted, week: cardioAfter.programmeWeek, day: cardioAfter.programmeDayInWeek }));
+
+const fuzzyWorkout = await client("FuzzyWorkout", 1);
+await ask(fuzzyWorkout,
+  `${n4} I had eggs. ${n3} I did the workout. ${n2} I had pap.`,
+  "SM-fuzzy-workout-229");
+const fuzzyMeals = await rows("meal_logs", fuzzyWorkout.id);
+check(fuzzyMeals.length === 2
+    && fuzzyMeals.map((r: any) => dayOf(r.logged_at)).sort().join() === [d4, d2].sort().join()
+    && !fuzzyMeals.some((r: any) => dayOf(r.logged_at) === d3),
+  "a workout phrase between food days never becomes a fuzzy pre-workout meal",
+  fuzzyMeals.map((r: any) => `${dayOf(r.logged_at)}:${itemNames(r).join("+")}`).join(" | "));
+
 REAL("\n=== 4 · A NAMED-DAY CORRECTION TOUCHES ONE HISTORICAL FACT ===");
 const before = await rows("meal_logs", user.id);
 const neighborBefore = new Map(before.filter((r: any) => dayOf(r.logged_at) !== d4)
   .map((r: any) => [r.id, mealSnapshot(r)]));
 const targetBefore = before.find((r: any) => dayOf(r.logged_at) === d4);
-await ask(user, `${n4} wasn't toast, it was oats.`, "SM-catchup-correction-229");
+await ask(user, `${n4}: no rice, add oats.`, "SM-catchup-correction-229");
 const corrected = await rows("meal_logs", user.id);
 const targetAfter = corrected.find((r: any) => dayOf(r.logged_at) === d4);
 check(corrected.length === before.length && targetAfter?.id === targetBefore?.id,
   "the correction updates the same named-day row without adding a meal");
-check(!itemNames(targetAfter).some((n: string) => /toast/i.test(n))
+check(!itemNames(targetAfter).some((n: string) => /rice/i.test(n))
     && itemNames(targetAfter).some((n: string) => /oats/i.test(n)),
   "the denied food is replaced by the supported correction", JSON.stringify(itemNames(targetAfter)));
 check(corrected.filter((r: any) => dayOf(r.logged_at) !== d4)
@@ -177,6 +215,12 @@ const questions = await client("Questioner", 1);
 await ask(questions, `${n4} can I eat eggs? ${n3} what about rice?`, "SM-food-questions-229");
 check((await rows("meal_logs", questions.id)).length === 0,
   "CONTROL: named-day food questions do not become catch-up meal rows");
+const statusQuestion = await client("StatusQuestion", 1);
+await ask(statusQuestion,
+  `${n4} eggs. ${n3} toast. ${n2} pap. Are those logged?`,
+  "SM-food-status-233");
+check((await rows("meal_logs", statusQuestion.id)).length === 0,
+  "a batch status question stays read-only when its named-day segments do not explicitly report eating");
 
 REAL(`\n${failed === 0
   ? "pg-messy-reentry-acceptance: GREEN — all checks passed"

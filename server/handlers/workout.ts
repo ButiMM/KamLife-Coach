@@ -287,7 +287,9 @@ export async function handleWorkoutCommands(ctx: {
   // Negation guard: "I couldn't run 5km", "missed my 5km", "skipped my run" report a
   // MISS — the bare-distance branch below would otherwise log a full session and
   // advance the programme off a run that never happened.
-  const isCardioLog = !looksLikeQuestion(m) && !isFutureIntent(m) && !mentionsNotDone(m) && (
+  // Historical backfill already wrote every supported session on its named day. Cardio words in
+  // that same bubble must not create a second, today-dated session or advance today's cursor.
+  const isCardioLog = !turnAlreadyWrote("workout") && !looksLikeQuestion(m) && !isFutureIntent(m) && !mentionsNotDone(m) && (
     // "went for a {activity}"
     /\b(?:went\s+for\s+(?:a\s+)?(?:run|jog|walk|swim|cycle|hike))\b/i.test(m)
     // "I ran / jogged / cycled / swam" (exercise-specific verbs — no context required)

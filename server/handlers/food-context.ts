@@ -466,7 +466,11 @@ export async function handleFoodContext(ctx: {
   // tense is planning. A MEAL WORD IS NOT AN ASSERTION EITHER (2026-07-29) — bare breakfast|lunch|
   // dinner|snack was here, so "dinner" in ANY context meant "log this": the alternative that made
   // this logger OPT-OUT. The paired forms ("for dinner", "dinner was") were already listed.
-  const hasLogTrigger = /\b(ate|had|having|eating|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|added|put in|putting in)\b/.test(m);
+  // One owner for explicit food-report language. The batch path reuses this exact gate below so
+  // a trailing status question can govern bare food names without suppressing a real "I had ..."
+  // report in another clause.
+  const explicitlyReportsFood = (text: string) => /\b(ate|had|having|eating|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|added|put in|putting in)\b/i.test(text);
+  const hasLogTrigger = explicitlyReportsFood(m);
 
   // Future / planning / shopping intent — describes intended eating or shopping, NOT food consumed today.
   // Blocks directFoodScan and the main food scanner from firing on these messages.
@@ -776,9 +780,15 @@ export async function handleFoodContext(ctx: {
       daySegs.push({ day: name, text: segText });
     }
 
+    // A final status question applies to every referenced day. Bare food names in
+    // "Monday eggs. Tuesday toast. Are those logged?" identify records to inspect; they do not
+    // assert new meals. A segment with the existing explicit report signal remains a report.
+    const questionGovernsBatch = isAskingNotReporting(m);
+
     // Collect planned inserts first — only write if 2+ days have food hits
     const multiPlan: Array<{ label: string; foods: SAFood[]; kcal: number; prot: number; date: Date; raw: string }> = [];
     for (const seg of daySegs) {
+      if (questionGovernsBatch && !explicitlyReportsFood(seg.text)) continue;
       // A question in the same bubble cannot erase a reported meal on another day. Equally, a
       // food question is not a log. The existing clause-level fact owner makes that distinction.
       if (isAskingNotReporting(seg.text) && !journeyMustKeepFacts(seg.text).food) continue;

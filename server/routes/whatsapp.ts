@@ -14,29 +14,6 @@ import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply, stripInternalMarkers, isDuplicateOutbound } from "../reply-hygiene";
 import { prepareOutbound, prepareReactiveOutbound } from "../outbound-authority";
 
-// COMEBACK RECOGNITION (2026-07-13 retention P0): when a client messages after ≥3 days
-// of silence, their FIRST reply back opens with a warm welcome — the return must feel
-// like a win, not a walk of shame. Self-deduping: that first message resets
-// lastActiveAt, so only one reply per comeback ever carries the line. Read the gap
-// BEFORE handleMessage runs (which updates lastActiveAt).
-export const COMEBACK_ACK = `You came back — that's the real streak. 💛\n\n`;
-async function comebackPrefix(phone: string): Promise<string> {
-  try {
-    const [u] = await db.select({ lastActiveAt: users.lastActiveAt, onboardingState: users.onboardingState })
-      .from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    if (!u || u.onboardingState !== "COMPLETE" || !u.lastActiveAt) return "";
-    const gapDays = (Date.now() - new Date(u.lastActiveAt).getTime()) / 86_400_000;
-    if (gapDays < 3) return "";
-    return COMEBACK_ACK;
-  } catch { return ""; }
-}
-
-/** The delivery join may add the fallback welcome only when the canonical reply did not. */
-export function joinComebackAcknowledgement(prefix: string, reply: string): string {
-  const lower = String(reply || "").toLowerCase();
-  return lower.includes("welcome back") || lower.includes("you came back") ? reply : prefix + reply;
-}
-
 // The sender number and the Twilio client both moved to outbound-delivery.ts with Cut B2. This
 // file resolved its own copy of each, which is how one door can end up sending from a number the
 // other does not know about.
@@ -219,7 +196,7 @@ function renderReplyMarkers(reply: string): { text: string; media: string[] } {
 // ── Async text processor ──
 // All text messages are handled async so Twilio gets an instant 200 and never times out.
 // The real reply is delivered via outbound Twilio API once handleMessage resolves.
-async function processTextAsync(
+export async function processTextAsync(
   phone: string,
   message: string,
   mediaUrl: string | null,
@@ -230,7 +207,6 @@ async function processTextAsync(
 ): Promise<void> {
   const isImageMessage = !!(mediaUrl && mediaType?.startsWith("image/"));
   try {
-    const welcomeBack = await comebackPrefix(phone);
     const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined, sourceMessageId);
 
     // Render bot markers: buttons → keyword prompts, media extracted for separate sends.
@@ -238,11 +214,8 @@ async function processTextAsync(
     // NEVER-SILENT GUARANTEE (2026-07-13): an empty reply used to send NOTHING — a
     // tester's 38s form-check video got dead air ("And it has still not replied").
     // Whatever failed upstream, the client always hears back.
-    // The deterministic comeback owner may already have welcomed them. The transport is only a
-    // fallback mouth for contentful catch-ups that correctly bypass that template; never send two
-    // welcomes, and never tell someone who just supplied history that catching up was unwanted.
     const cleanReply = rawReply && rawReply.trim().length > 0
-      ? joinComebackAcknowledgement(welcomeBack, rawReply)
+      ? rawReply
       : (mediaType?.startsWith("video/")
         ? `I got your video but couldn't process it — likely too long. Send a shorter clip (under 30 seconds, one set from the side) and I'll check your form.`
         : `I got your message but hit a snag processing it. Try sending it again, or type it differently — I'm here.`);
@@ -284,14 +257,13 @@ async function processVoiceAsync(
   sourceMessageId?: string,
 ): Promise<void> {
   try {
-    const welcomeBack = await comebackPrefix(phone);
     const reply = await handleMessage(phone, message, mediaUrl, mediaType, undefined, sourceMessageId);
     // Render markers too — a voice note can trigger a workout (GIF + buttons) or a menu,
     // and previously those markers were sent to the client as literal text.
     const { text: rawVoiceText, media } = renderReplyMarkers(reply);
     // Never-silent guarantee (2026-07-13) — see processTextAsync.
     const text = rawVoiceText && rawVoiceText.trim().length > 0
-      ? welcomeBack + rawVoiceText
+      ? rawVoiceText
       : `I heard your voice note but couldn't work out what to do with it — say it once more, or type it.`;
     await sendFinal(phone, text, media);
     console.log(`[VOICE_ASYNC] delivered reply to ${phone.slice(-4)}`);
