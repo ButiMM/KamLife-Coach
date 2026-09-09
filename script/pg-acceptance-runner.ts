@@ -173,6 +173,13 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "messy-reentry-reverts", title: "Messy re-entry controls fail on every mechanism revert",
     command: ["npx", "tsx", "script/pg-messy-reentry-red-on-revert.ts"] },
 
+  { id: "missed-session-outbound", title: "The missed-session answer survives the outbound floor",
+    // #233. The handler's return was correct the whole time; the truth floor threw it away and the
+    // client got the generic repair. Only a real database and the real transport path can show
+    // that — the record the floor checks against IS the ledger, and the substitution happens in
+    // sendFinal, past every handler.
+    command: ["npx", "tsx", "script/pg-missed-session-outbound-acceptance.ts"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same

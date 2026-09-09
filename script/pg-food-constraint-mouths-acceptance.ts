@@ -207,7 +207,11 @@ chk(!/make (?:your next meal|lunch) a (?:proper )?protein/i.test(afterPlate),
   afterPlate.slice(0, 300));
 // NON-VACUOUS: a move WAS appended, and it moves forward from the plate rather than restating it.
 // Without this, a turn that appended nothing at all would satisfy the check above.
-chk(/one proper protein down/i.test(afterPlate),
+// THE PROMISE, NOT THE PHRASE (#233 Gate 3 copy adjudication). The rung's just-ate wording
+// became "For today, make your next meal another proper protein meal. That's your one move."
+// It still moves forward from the plate that landed — that is what ANOTHER carries — and it is
+// still a move rather than an empty turn, which is what this check exists to establish.
+chk(/one proper protein down|another proper protein/i.test(afterPlate),
   "…the move acknowledges the plate that landed, so this is not an empty turn",
   afterPlate.slice(0, 300));
 
