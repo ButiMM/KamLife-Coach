@@ -40,24 +40,18 @@ s=s.replace("export function adjudicableSessionCounts(text: string): number[] {"
 assert s!=b, "no match"; open(p,"w").write(s)
 PY
 cat > /tmp/233p/5.py <<'PY2'
-# Gate 3: the ladder rung may answer a today-question with a tomorrow-only weigh again.
+# Gate 3, mechanism 1: the ladder rung answers a today-question with a tomorrow-only weigh again,
+# masking the fuelling rung below it.
 p="server/one-action.ts"; s=open(p).read(); b=s
 s=s.replace("  if (!scaleIsOffLimits && !(s.asksAboutToday && weighWouldBeTomorrow)\n      && ((neverWeighed",
             "  if (!scaleIsOffLimits\n      && ((neverWeighed")
 assert s!=b, "no match"; open(p,"w").write(s)
 PY2
 cat > /tmp/233p/6.py <<'PY2'
-# Gate 3: the investigation ladder may do the same.
+# Gate 3, mechanism 2: the today-action precedence is removed, so the #203 downgrade replaces the
+# fuelling rung with an investigation even when the client asked what to do today.
 p="server/one-action.ts"; s=open(p).read(); b=s
-s=s.replace("    && !(ctx.asksAboutToday && ctx.hour >= WEIGH_ACTIONABLE_BEFORE_HOUR)\n","")
-assert s!=b, "no match"; open(p,"w").write(s)
-PY2
-cat > /tmp/233p/7.py <<'PY2'
-# Gate 3: a hold goes back to answering a direct question with silence.
-p="server/understanding/live.ts"; s=open(p).read(); b=s
-s=s.replace('todo: act.kind === "hold" && !asksAboutToday ? "" : act.todo,', 'todo: act.kind === "hold" ? "" : act.todo,')
-s=s.replace('const rendered = act.kind === "hold" && !asksAboutToday\n      ? "" : formatOneAction(act, getDisplayName(user) || undefined);',
-            'const rendered = act.kind === "hold" ? "" : formatOneAction(act, getDisplayName(user) || undefined);')
+s=s.replace("    if ((futureOnlyWeigh || saysNothing) && String(action.todo || \"\").trim()) return action;\n","")
 assert s!=b, "no match"; open(p,"w").write(s)
 PY2
 echo "=============================================================================="
@@ -67,7 +61,6 @@ run_case "a miss is read as a completed session again"            /tmp/233p/1.py
 run_case "the lifetime figure says 'completed' again"             /tmp/233p/2.py
 run_case "the floor no longer knows 'overall' is lifetime"        /tmp/233p/3.py
 run_case "the floor stops judging session counts (opposite defect)" /tmp/233p/4.py
-run_case "a today-question is answered with a tomorrow-only weigh again"  /tmp/233p/5.py
-run_case "the investigation ladder does the same"                        /tmp/233p/6.py
-run_case "a hold answers a direct question with silence again"           /tmp/233p/7.py
+run_case "the weigh rung masks the fuelling rung on a today-question"    /tmp/233p/5.py
+run_case "the today-action precedence is removed"                       /tmp/233p/6.py
 echo "=============================================================================="

@@ -193,41 +193,55 @@ REAL("\n=== 5 · THE CATCH-UP ANSWERS THE QUESTION IT WAS ASKED (Gate 3) ===");
   chk(!/lunch was|for lunch you had/i.test(body), "…the unknown lunch stays unknown",
     JSON.stringify((body.match(/[^\n]*lunch[^\n]*/) || ["(not mentioned)"])[0]));
 
-  // GATE 3 ITSELF. The client asked what to do TODAY.
   const closing = body.trim().split("\n").filter(l => l.trim()).slice(-1)[0] || "";
+
+  // THE EXACT TODO, from the existing today-scoped fuelling rung. Pinned rather than pattern-
+  // matched: this client logged 56g against a 150g target on a plate that cleared PROPER_PROTEIN_G,
+  // so the rung's own wording is the one below, and nothing else in the ladder produces it.
+  chk(closing === "That's one proper protein down — same again at your next meal.",
+    "the closing answer is the fuelling rung's own move, verbatim", JSON.stringify(closing));
+
+  chk(!/Nothing new today/i.test(body),
+    "…it is not the hold copy", JSON.stringify(closing));
+  chk(!/do exactly what you did yesterday/i.test(body),
+    "…and it does not invent a yesterday there is no evidence for", JSON.stringify(closing));
   chk(!/scale (tomorrow|tonight)|tomorrow morning/i.test(closing),
-    "the closing answer is not a task for another day", JSON.stringify(closing));
+    "…nor a task for another day", JSON.stringify(closing));
   chk(closing.trim().length > 0 && !/next move stays small\.?$/i.test(closing),
-    "…and it is not an empty hold — the turn ends on a move, not on an acknowledgement",
-    JSON.stringify(closing));
+    "…and the turn does not end on an acknowledgement with no move", JSON.stringify(closing));
   chk(!body.includes(REACTIVE_OUTBOUND_REPAIR), "…and the body is not the generic repair",
     JSON.stringify(body.slice(0, 90)));
 }
 
-REAL("\n=== 6 · CONTROL — A SPARSE NON-DIRECTION TURN KEEPS ITS INVESTIGATION ===");
+REAL("\n=== 6 · CONTROL — ORDINARY SPARSE TURNS ARE UNCHANGED ===");
 {
   // #203 is narrowed for one case, not disabled. A client who did NOT ask what to do today must
   // still meet the investigation ladder exactly as before — otherwise this cut has quietly turned
   // the sparse-client downgrade off for everyone.
-  const { underPolicy } = await import("../server/one-action");
-  const base = { kind: "protein", todo: "Make your next meal a proper protein meal.", why: "x" } as any;
-  const optsNoAsk = { foodSufficient: false, weightSufficient: false, loggedToday: true,
+  const { underPolicy, chooseAction } = await import("../server/one-action");
+  const fuelling = { kind: "protein", todo: "Make your next meal a protein one.", why: "x" } as any;
+  const sparse = { foodSufficient: false, weightSufficient: false, loggedToday: true,
     daysSinceWeighIn: null as number | null, hour: 19 };
-  const investigated = underPolicy(base, optsNoAsk);
-  chk(investigated.kind === "weigh",
-    "CONTROL: without a today-question the ladder still downgrades to the weigh investigation",
-    JSON.stringify({ kind: investigated.kind, todo: investigated.todo }));
 
-  const asked = underPolicy(base, { ...optsNoAsk, asksAboutToday: true });
-  chk(asked.kind !== "weigh" || !/tomorrow/i.test(String(asked.todo || "")),
-    "…and with one, it is not answered with a tomorrow-only weigh",
-    JSON.stringify({ kind: asked.kind, todo: asked.todo }));
+  chk(underPolicy(fuelling, sparse).kind === "weigh",
+    "CONTROL: without a today-question the downgrade still investigates, unchanged",
+    JSON.stringify(underPolicy(fuelling, sparse)));
 
-  // …and before midday the weigh is unchanged, because then it IS today's job.
-  const morning = underPolicy(base, { ...optsNoAsk, hour: 8, asksAboutToday: true });
-  chk(morning.kind === "weigh" && /this morning/i.test(String(morning.todo || "")),
-    "CONTROL: before midday a today-question still gets the weigh, worded for today",
-    JSON.stringify({ kind: morning.kind, todo: morning.todo }));
+  const asked = underPolicy(fuelling, { ...sparse, asksAboutToday: true });
+  chk(asked.kind === "protein" && asked.todo === fuelling.todo,
+    "…and with one, the today-scoped rung the ladder already chose is what stands",
+    JSON.stringify(asked));
+
+  // …and the weigh itself is untouched when it IS today's job.
+  const day = { firstName: "T", goal: "fat_loss", weeksOnProgramme: 3, daysSinceAnyLog: 0,
+    daysSinceWeighIn: 40, loggedToday: true, proteinPct: 1, caloriePct: 1, sessionsThisWeek: 3,
+    sessionsTarget: 3, stepsToday: 9000, stepsTarget: 8000, sick: false, atKeyboard: true } as any;
+  chk(chooseAction({ ...day, hour: 8, asksAboutToday: true }).kind === "weigh",
+    "CONTROL: before midday a today-question still reaches the weigh rung",
+    JSON.stringify(chooseAction({ ...day, hour: 8, asksAboutToday: true })));
+  chk(chooseAction({ ...day, hour: 19, asksAboutToday: false }).kind === "weigh",
+    "CONTROL: …and after midday it is unchanged for any turn that did not ask about today",
+    JSON.stringify(chooseAction({ ...day, hour: 19, asksAboutToday: false })));
 }
 
 REAL(`\n${failed === 0

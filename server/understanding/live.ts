@@ -175,17 +175,12 @@ export async function canonicalDecision(
     // renderer that already speaks in the coach's voice. No new vocabulary: formatOneAction is
     // what the morning brief has always used.
     const { formatOneAction } = await import("../one-action");
-    // A HOLD IS SILENCE UNLESS THEY ASKED (#233 Gate 3). "hold" means nothing needs changing,
-    // and as a nudge that is correctly said by saying nothing. As the answer to "What should I do
-    // today?" silence is not an answer — holdAction's own words ("Nothing new today. Do exactly
-    // what you did yesterday.") are the honest one, and are rendered by the same renderer.
-    const rendered = act.kind === "hold" && !asksAboutToday
-      ? "" : formatOneAction(act, getDisplayName(user) || undefined);
+    const rendered = act.kind === "hold" ? "" : formatOneAction(act, getDisplayName(user) || undefined);
 
     const { turnEvidence } = await import("../handlers/chat-log");
     turnEvidence({
       canonicalKind: act.kind,
-      canonicalTodo: act.kind === "hold" && !asksAboutToday ? null : act.todo,
+      canonicalTodo: act.kind === "hold" ? null : act.todo,
       canonicalReply: rendered || null,
       canonicalIntervention: act.intervention === "minimum_training" ? "minimum" : "standard",
       openLoopRef: openTraining?.ref || null,
@@ -201,7 +196,7 @@ export async function canonicalDecision(
     // because that fact stopped at this boundary. No extra query: these are the same two numbers
     // the caloriePct above is computed from.
     return {
-      todo: act.kind === "hold" && !asksAboutToday ? "" : act.todo, kind: act.kind, reply: rendered,
+      todo: act.kind === "hold" ? "" : act.todo, kind: act.kind, reply: rendered,
       day: { kcal: truth.today.kcal, kcalTarget: calTarget },
       investigation: act.investigation,
     };

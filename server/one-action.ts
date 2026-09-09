@@ -1010,7 +1010,7 @@ export function underPolicy(
     loggedToday: opts.loggedToday ?? true,
     daysSinceWeighIn: opts.daysSinceWeighIn === undefined ? 0 : opts.daysSinceWeighIn,
     doNotMention: opts.doNotMention, dreamGoal: opts.dreamGoal, hour: opts.hour ?? 8,
-    trainingAwaitingOutcome: opts.trainingAwaitingOutcome, asksAboutToday: opts.asksAboutToday,
+    trainingAwaitingOutcome: opts.trainingAwaitingOutcome,
   });
 
   // A QUESTION ABOUT TODAY MUST GET AN ANSWER ABOUT TODAY (#233 Gate 3).
@@ -1056,15 +1056,12 @@ export function underPolicy(
 function investigateInstead(ctx: {
   foodSufficient: boolean; weightSufficient: boolean; loggedToday: boolean;
   daysSinceWeighIn: number | null; doNotMention?: string | null; dreamGoal?: string | null;
-  hour: number; trainingAwaitingOutcome?: boolean; asksAboutToday?: boolean;
+  hour: number; trainingAwaitingOutcome?: boolean;
 }): OneAction {
   if (ctx.trainingAwaitingOutcome) return holdAction(ctx.dreamGoal);
   const canAskForFood = !ctx.foodSufficient && !ctx.loggedToday;
   const staleWeight = ctx.daysSinceWeighIn === null || ctx.daysSinceWeighIn >= 3;
-  // …and it must be askable TODAY when today is what was asked (#233 Gate 3), for the same
-  // reason as the ladder rung above.
   const canAskForWeight = !ctx.weightSufficient && staleWeight
-    && !(ctx.asksAboutToday && ctx.hour >= WEIGH_ACTIONABLE_BEFORE_HOUR)
     && !mentionsForbidden("weight scale weigh", ctx.doNotMention);
   return canAskForFood ? askToLog(ctx.dreamGoal)
     : canAskForWeight ? askToWeigh(ctx.dreamGoal, ctx.daysSinceWeighIn === null, ctx.hour)
