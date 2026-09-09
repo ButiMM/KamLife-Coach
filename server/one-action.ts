@@ -647,10 +647,14 @@ export function chooseAction(s: DayState): OneAction {
     // is still short, so the move goes forward from what they did.
     return {
       kind: "protein",
+      // THE MOVE IS AN INSTRUCTION, NOT A RECEIPT (#233 Gate 3). "That's one proper protein down —
+      // same again at your next meal" reads as a summary of what already happened; a client who
+      // asked what to do today has to find the instruction inside it. Same rung, same evidence,
+      // same clock rule — it now says the thing to do first and names itself as the one move.
       todo: s.justAteProteinMeal
         ? (closingTheDay
             ? "That's one proper protein down — start tomorrow the same way."
-            : "That's one proper protein down — same again at your next meal.")
+            : "For today, make your next meal another proper protein meal. That's your one move.")
         : closingTheDay
         ? eat("eggs, amasi or tin fish", "sugar beans, lentils or peanuts",
             kept => `Start tomorrow with protein — ${kept} at breakfast.`,

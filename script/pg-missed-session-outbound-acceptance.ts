@@ -195,11 +195,25 @@ REAL("\n=== 5 · THE CATCH-UP ANSWERS THE QUESTION IT WAS ASKED (Gate 3) ===");
 
   const closing = body.trim().split("\n").filter(l => l.trim()).slice(-1)[0] || "";
 
-  // THE EXACT TODO, from the existing today-scoped fuelling rung. Pinned rather than pattern-
-  // matched: this client logged 56g against a 150g target on a plate that cleared PROPER_PROTEIN_G,
-  // so the rung's own wording is the one below, and nothing else in the ladder produces it.
-  chk(closing === "That's one proper protein down — same again at your next meal.",
-    "the closing answer is the fuelling rung's own move, verbatim", JSON.stringify(closing));
+  // THE EXACT SENTENCE, pinned deterministically. The rung's wording turns tomorrow-facing after
+  // 20:00 — a rule that predates this cut and stays — so asserting it through the body alone would
+  // pass or fail on the hour CI happened to run, the run-hour dependence removed from two suites in
+  // #221. So it is pinned at a fixed hour on the rung itself, and the body is asserted to carry a
+  // fuelling move and never the old receipt wording, whatever the clock says.
+  const { chooseAction } = await import("../server/one-action");
+  const atMidday = chooseAction({
+    firstName: "Bonolo", goal: "fat_loss", weeksOnProgramme: 3, daysSinceAnyLog: 0,
+    daysSinceWeighIn: 40, loggedToday: true, proteinPct: 0.37, caloriePct: 0.27,
+    sessionsThisWeek: 3, sessionsTarget: 3, stepsToday: 6400, stepsTarget: 8000, sick: false,
+    hour: 13, atKeyboard: true, asksAboutToday: true, justAteProteinMeal: true,
+  } as any);
+  chk(atMidday.todo === "For today, make your next meal another proper protein meal. That's your one move.",
+    "the fuelling rung's move is the exact adjudicated sentence", JSON.stringify(atMidday.todo));
+
+  chk(!/one proper protein down — same again at your next meal/i.test(body),
+    "…and the old receipt wording is gone from the body", JSON.stringify(closing));
+  chk(/proper protein meal|proper protein down — start tomorrow/i.test(closing),
+    "the closing answer is the fuelling rung's move", JSON.stringify(closing));
 
   chk(!/Nothing new today/i.test(body),
     "…it is not the hold copy", JSON.stringify(closing));

@@ -4420,7 +4420,14 @@ test("#128/4: the action ladder's protein rung asks too, and does not re-issue t
   assert.equal(after.kind, "protein", "protein is still the lever");
   assert.ok(!/make (?:your next meal|lunch) a (?:proper )?protein/i.test(after.todo),
     `it must not re-issue the instruction just carried out — "${after.todo}"`);
-  assert.match(after.todo, /one proper protein down/i, "it acknowledges the plate that landed");
+  // THE PROMISE IS "MOVE FORWARD FROM THE PLATE", NOT ONE PHRASE (#233 Gate 3 copy adjudication).
+  // This pinned the literal "one proper protein down". The rung's just-ate wording was adjudicated
+  // to "For today, make your next meal another proper protein meal. That's your one move." — which
+  // still acknowledges the plate that landed, in the word ANOTHER, and still does not re-issue the
+  // instruction just carried out (asserted immediately above, unchanged and still passing). What
+  // #128/4 exists to stop is the re-issue; that is what stays pinned.
+  assert.ok(/one proper protein down|another proper protein/i.test(after.todo),
+    `it moves forward from the plate that landed — "${after.todo}"`);
   // CONTROL: the same client who did NOT just eat one still gets the instruction.
   assert.match(chooseAction({ ...base }).todo, /protein/i);
   assert.ok(/make your next meal a proper protein meal/i.test(chooseAction({ ...base }).todo),

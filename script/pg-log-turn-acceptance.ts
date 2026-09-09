@@ -211,7 +211,11 @@ REAL("\n=== CANONICAL TRUTH REACHES THE ACKNOWLEDGEMENT ===");
   _resetOutboundDedupe();
   const good = await client({}, EV);
   const win = await say(good.phone, "grilled chicken breast with broccoli and sweet potato for lunch");
-  chk(/one proper protein down/i.test(win.reply),
+  // THE PROMISE, NOT THE PHRASE (#233 Gate 3 copy adjudication). The rung's just-ate wording
+  // became "For today, make your next meal another proper protein meal. That's your one move."
+  // It still moves forward from the plate that landed — that is what ANOTHER carries — and it is
+  // still a move rather than an empty turn, which is what this check exists to establish.
+  chk(/one proper protein down|another proper protein/i.test(win.reply),
     "CONTROL: a plate we did NOT ask them to change still earns the protein closer",
     JSON.stringify(win.reply));
 }
