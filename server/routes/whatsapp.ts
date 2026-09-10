@@ -11,8 +11,10 @@ import { eq } from "drizzle-orm";
 import { captureQualitySignal } from "../quality-signals";
 import { recordMediaJob, completeMediaJob } from "../media-jobs";
 import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
-import { humanizeReply, stripInternalMarkers, isDuplicateOutbound } from "../reply-hygiene";
+import { humanizeReply, stripInternalMarkers } from "../reply-hygiene";
 import { prepareOutbound, prepareReactiveOutbound } from "../outbound-authority";
+import { finaliseInteraction } from "../handlers/chat-log";
+import type { DeliveryResult } from "../outbound-delivery";
 
 // The sender number and the Twilio client both moved to outbound-delivery.ts with Cut B2. This
 // file resolved its own copy of each, which is how one door can end up sending from a number the
@@ -33,7 +35,7 @@ import { prepareOutbound, prepareReactiveOutbound } from "../outbound-authority"
  * Everything reactive now goes through here, before the message is split into bubbles — a claim
  * or a paragraph can straddle a split, so shaping has to happen on the whole reply.
  */
-async function sendFinal(phone: string, text: string, media: string | string[] | null): Promise<void> {
+async function sendFinal(phone: string, text: string, media: string | string[] | null, rootId?: string): Promise<void> {
   // ONE PREPARATION CONTRACT (Cut B, 2026-08-31). This path ran provenance and hygiene but never
   // the TRUTH FLOOR — enforceOutboundTruth reached the 68 scheduler jobs and nothing a client
   // said hello to. Exactly the shape of the 2026-07-30 finding recorded above, one layer along:
@@ -64,32 +66,30 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   //    number, so no client has ever seen one — but "gated" is a condition that can be
   //    edited by mistake, and a backstop at the door cannot be.
   out = stripInternalMarkers(out);
-  // 2. The same words twice in ten minutes is never the right outcome, whatever upstream
-  //    produced the repeat. Live: two different messages got byte-identical replies.
   // ══════════════════════════════════════════════════════════════════════════════════════════
-  // P0-C — SILENCE IS NOT AN ACCEPTABLE TERMINAL STATE (2026-08-21, handset).
+  // 2. NO REACTIVE DUPLICATE AUTHORITY — REMOVED (Cut 1, 2026-09-10).
   //
-  //     14:45  "What's the way forward?"        → the withhold reply
-  //     14:46  "As my coach, what is the way    → NOTHING. 80 minutes.
-  //             forwards for me? In terms of
-  //             everything"
-  //     16:05  "?"                              → only then did the coach speak
+  // What stood here: `if (isDuplicateOutbound(phone, out))` replaced a repeated reply with
+  // "I gave you the same answer twice there — that means mine wasn't useful…". It was written
+  // against P0-C (2026-08-21, handset), where two near-identical questions a minute apart got the
+  // same deterministic withhold string and the SECOND WAS SWALLOWED — 80 minutes of silence.
   //
-  // Two near-identical questions a minute apart. The withhold string is deterministic, so the
-  // second reply was byte-identical to the first, and this dedupe swallowed it — the client was
-  // punished for asking again after a bad answer, with silence.
+  // Two findings retire it, both proven post-transport on 7833ebb before this cut:
   //
-  // The dedupe earns its place: two different messages once got byte-identical replies. But
-  // suppressing a repeat is not the same as saying nothing. A client who asks twice is telling us
-  // the first answer did not land, and that is the one moment where silence is least affordable.
-  if (isDuplicateOutbound(phone, out)) {
-    console.warn(`[DUPLICATE_SUPPRESSED] ${phone.slice(-4)} — identical reply within the window: "${out.slice(0, 70)}"`);
-    recordSilentTurnAvoided("duplicate");
-    // Say something DIFFERENT rather than nothing. Short, honest, and it moves the conversation
-    // on instead of repeating the answer that already failed to land.
-    out = "I gave you the same answer twice there — that means mine wasn't useful. Tell me the one "
-      + "thing you want sorted and I'll deal with that specifically.";
-  }
+  //   · It was already unreachable for its own case. enforceOutboundTruth rule 3 ran the same
+  //     duplicate test one layer up, under the key `proactive:<phone>`, and replaced the body with
+  //     the outbound repair before this line ever saw a repeat. A second question got
+  //     "Let me check that properly before I answer — give me one sec and ask me again." That
+  //     rule is now proactive-only, which is what actually restores the P0-C guarantee.
+  //   · The remaining premise does not hold. "Two different messages got byte-identical replies"
+  //     is an upstream defect, and answering it HERE means the one client who most needs the
+  //     answer — the one who asked twice because the first reply did not land — is the only client
+  //     who cannot have it. A truthful answer does not become untrue on repetition.
+  //
+  // Nothing replaces it, and that is the point: this is a deletion, not a migration. Twilio
+  // webhook retries are still dropped by MessageSid at the door below, so no genuine repeat is
+  // re-sent; only a client who really did ask twice is now really answered twice.
+  // ══════════════════════════════════════════════════════════════════════════════════════════
   if (!out.trim()) {
     // AND THE EMPTY CASE ENDS THE SAME WAY (2026-08-22, P0-3 completion).
     //
@@ -107,8 +107,29 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
       + "and I'll pick it up properly.";
   }
 
-  // 3. SHADOW (2026-08-04). Placed here — after the gate, the hygiene pass, the marker
-  //    strip and the dedupe — so what lands in the table is byte-for-byte what the client
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  // THE ROW THE TURN OPENED IS CLOSED HERE (Cut 1, 2026-09-10).
+  //
+  // `out` is now final: rendered, floored, provenance-checked, hygienised, marker-stripped, and
+  // NOT yet split into bubbles — the complete body the client reads. recordTurn wrote this
+  // interaction's row from inside the turn scope, where the mutations and the decision live; this
+  // finalises that same row by correlation. Deliberately not a second recorder, and deliberately
+  // not a relocation of recordTurn: moving the write here would lose the state half of the row and
+  // would stop recording every path that never reaches WhatsApp — the admin test webhook,
+  // journey-lab, the acceptance harnesses. See chat-log.finaliseInteraction.
+  //
+  // Captured BEFORE the shadow return below, because a shadow run must leave the same record a
+  // live send does; the delivery outcome is what differs, and it says so.
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  const verdict = prepared.blocked
+    ? { blocked: true, reason: prepared.reason ?? null, detail: prepared.detail ?? null, draft: (prepared.draft ?? text).slice(0, 4000) }
+    : { blocked: false };
+  const finalise = (deliveryOutcome: string) =>
+    finaliseInteraction(rootId, { deliveredBody: out, outboundVerdict: verdict, deliveryOutcome })
+      .catch(() => {});
+
+  // 3. SHADOW (2026-08-04). Placed here — after the gate, the hygiene pass and the marker
+  //    strip — so what lands in the table is byte-for-byte what the client
   //    would have received, not a draft. Before the TTS call, which costs money for audio
   //    nobody will hear. Returns false in a microsecond when the mode is off.
   //
@@ -122,7 +143,10 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   //    payload, it is asserted verbatim by crisis-reply.ts, and safety-audit.ts fails if
   //    that phrasing ever drifts.
   const isCrisisOut = out.includes("0800 567 567");
-  if ((await shadowDoor(phone, out, "reply", "server/routes/whatsapp.ts", media)) && !isCrisisOut) return;
+  if ((await shadowDoor(phone, out, "reply", "server/routes/whatsapp.ts", media)) && !isCrisisOut) {
+    await finalise("shadow");
+    return;
+  }
 
   // VOICE REPLY (2026-08-03) — for a client who opted in, the coach also speaks. The
   // text is sent either way and first: audio is additive, and a TTS failure must never
@@ -130,14 +154,16 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   let outMedia = media;
   const spoken = await voiceReplyFor(phone, out);
   if (spoken) outMedia = [...(Array.isArray(media) ? media : media ? [media] : []), spoken];
-  await sendParts(phone, splitMessage(out), outMedia);
+  // THE DELIVERY OWNER'S OWN VERDICT, not an assumption that awaiting a send means it landed.
+  const outcome = await sendParts(phone, splitMessage(out), outMedia);
+  await finalise(outcome);
 }
 
 async function sendParts(
   phone: string,
   parts: string[],
   replyMedia: string | string[] | null,
-): Promise<void> {
+): Promise<DeliveryResult> {
   const mediaUrls = Array.isArray(replyMedia) ? replyMedia.filter(Boolean) : (replyMedia ? [replyMedia] : []);
   // ONE DELIVERY OWNER (Cut B2, 2026-09-01). This built its own Twilio client, resolved its own
   // sender and ran its own retry loop — the third copy of that loop in the codebase. The schedule
@@ -160,12 +186,20 @@ async function sendParts(
   // chars, which a full workout blows past). That silently swallowed entire workout
   // replies — "Today's workout" returned nothing — while text-only menus delivered fine.
   // Decoupling guarantees the reply text always lands; a failed image only loses the image.
+  // THE TEXT'S OUTCOME IS THE TURN'S OUTCOME (Cut 1). Every result was discarded here, so the
+  // ledger could only ever have recorded an assumption. A failed IMAGE does not change what the
+  // client read — that is the decoupling described above — so media results are not folded in.
+  // The worst text outcome wins: one dropped bubble means the client did not get the message.
+  const rank: Record<DeliveryResult, number> = { sent: 0, fallback: 1, dropped: 2 };
+  let worst: DeliveryResult = textParts.length ? "sent" : "dropped";
   for (let i = 0; i < textParts.length; i++) {
-    await sendOne({ body: textParts[i].trim() }, `part ${i + 1}`);
+    const r = await sendOne({ body: textParts[i].trim() }, `part ${i + 1}`);
+    if (rank[r] > rank[worst]) worst = r;
   }
   for (let k = 0; k < mediaUrls.length; k++) {
     await sendOne({ mediaUrl: [mediaUrls[k]] }, `media ${k + 1}`);
   }
+  return worst;
 }
 
 // ── Bot marker rendering ──
@@ -204,10 +238,17 @@ export async function processTextAsync(
   allImageUrls: string[],
   handleMessage: RouteDeps["handleMessage"],
   sourceMessageId?: string,
+  /**
+   * ONE INBOUND MESSAGE, ONE INTERACTION (Cut 1). Handed to the turn AND to the transport, so the
+   * row recordTurn opens is the row sendFinal finalises. Twilio's MessageSid when the door has
+   * one; a minted id otherwise, so a source without a SID is still one interaction rather than
+   * an uncorrelatable half-row.
+   */
+  rootId: string = sourceMessageId || `wa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
 ): Promise<void> {
   const isImageMessage = !!(mediaUrl && mediaType?.startsWith("image/"));
   try {
-    const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined, sourceMessageId);
+    const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined, sourceMessageId, rootId);
 
     // Render bot markers: buttons → keyword prompts, media extracted for separate sends.
     const { text: rawReply, media: replyMediaUrls } = renderReplyMarkers(reply);
@@ -229,15 +270,15 @@ export async function processTextAsync(
     // so that album bursts (N photos sent together) result in ONE combined reply.
     // Replies that include a media URL (equipment GIFs, etc.) are sent immediately.
     if (isImageMessage && !replyMediaUrls.length) {
-      await resolveImageInflight(phone, cleanReply);
+      await resolveImageInflight(phone, cleanReply, rootId);
       return;
     }
 
-    await sendFinal(phone, cleanReply, replyMediaUrls);
+    await sendFinal(phone, cleanReply, replyMediaUrls, rootId);
   } catch (err: any) {
     console.error("[TEXT_ASYNC] failed:", err?.message || err);
     // For image messages: resolve inflight so the buffer doesn't hang, then send the error.
-    if (isImageMessage) await resolveImageInflight(phone, null).catch(() => {});
+    if (isImageMessage) await resolveImageInflight(phone, null, rootId).catch(() => {});
     await sendParts(phone, ["Eish, something went wrong on my side. Give me a second and try again."], null).catch(() => {});
   } finally {
     // Media crash-safety net: the client was replied to (or got a handled error) → close the job.
@@ -255,9 +296,10 @@ async function processVoiceAsync(
   mediaType: string,
   handleMessage: RouteDeps["handleMessage"],
   sourceMessageId?: string,
+  rootId: string = sourceMessageId || `wa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
 ): Promise<void> {
   try {
-    const reply = await handleMessage(phone, message, mediaUrl, mediaType, undefined, sourceMessageId);
+    const reply = await handleMessage(phone, message, mediaUrl, mediaType, undefined, sourceMessageId, rootId);
     // Render markers too — a voice note can trigger a workout (GIF + buttons) or a menu,
     // and previously those markers were sent to the client as literal text.
     const { text: rawVoiceText, media } = renderReplyMarkers(reply);
@@ -265,7 +307,7 @@ async function processVoiceAsync(
     const text = rawVoiceText && rawVoiceText.trim().length > 0
       ? rawVoiceText
       : `I heard your voice note but couldn't work out what to do with it — say it once more, or type it.`;
-    await sendFinal(phone, text, media);
+    await sendFinal(phone, text, media, rootId);
     console.log(`[VOICE_ASYNC] delivered reply to ${phone.slice(-4)}`);
   } catch (err: any) {
     console.error("[VOICE_ASYNC] failed:", err?.message || err);
@@ -345,6 +387,8 @@ const photoReplyBuffer = new Map<string, {
   failedCount: number;
   inflight: number;
   timer: ReturnType<typeof setTimeout> | null;
+  /** The root id of the most recent photo in the burst — the interaction the combined body answers. */
+  lastRootId: string | null;
 }>();
 
 function bumpImageInflight(phone: string): void {
@@ -353,13 +397,22 @@ function bumpImageInflight(phone: string): void {
     if (e.timer) { clearTimeout(e.timer); e.timer = null; }
     e.inflight++;
   } else {
-    photoReplyBuffer.set(phone, { parts: [], failedCount: 0, inflight: 1, timer: null });
+    photoReplyBuffer.set(phone, { parts: [], failedCount: 0, inflight: 1, timer: null, lastRootId: null });
   }
 }
 
-async function resolveImageInflight(phone: string, reply: string | null): Promise<void> {
+/**
+ * AN ALBUM IS N INTERACTIONS AND ONE REPLY (Cut 1). Each photo is its own inbound message with its
+ * own root id and its own ledger row, and this buffer deliberately answers them with a single
+ * combined body. The row finalised with that body is the LAST one — the same part flushPhotoBuffer
+ * already treats as authoritative, because only it has the totals after every meal was inserted.
+ * The earlier rows keep their handler reply and no delivered body, which is the honest record: no
+ * separate message was sent for them.
+ */
+async function resolveImageInflight(phone: string, reply: string | null, rootId?: string): Promise<void> {
   const e = photoReplyBuffer.get(phone);
-  if (!e) { if (reply) await sendFinal(phone, reply, null); return; }
+  if (!e) { if (reply) await sendFinal(phone, reply, null, rootId); return; }
+  if (rootId) e.lastRootId = rootId;
   if (reply) e.parts.push(reply); else e.failedCount++;
   e.inflight = Math.max(0, e.inflight - 1);
   if (e.inflight === 0) {
@@ -371,10 +424,10 @@ async function flushPhotoBuffer(phone: string): Promise<void> {
   const entry = photoReplyBuffer.get(phone);
   if (!entry) return;
   photoReplyBuffer.delete(phone);
-  const { parts, failedCount } = entry;
+  const { parts, failedCount, lastRootId } = entry;
   if (parts.length === 0) return; // all failed — errors already sent individually
   if (parts.length === 1 && failedCount === 0) {
-    await sendFinal(phone, parts[0], null);
+    await sendFinal(phone, parts[0], null, lastRootId || undefined);
     return;
   }
   // Multiple parts: strip "Today so far" footer from all but the last (the last has
@@ -384,7 +437,7 @@ async function flushPhotoBuffer(phone: string): Promise<void> {
   const batchNote = `\n\n_${parts.length} photo${parts.length > 1 ? "s" : ""} — all logged._`;
   const failNote = failedCount > 0 ? `\n_(${failedCount} unclear — resend in better light if needed)_` : "";
   const combined = bodies.join("\n\n") + batchNote + failNote;
-  await sendFinal(phone, combined, null);
+  await sendFinal(phone, combined, null, lastRootId || undefined);
 }
 
 export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "handleMessage" | "checkRateLimit">) {

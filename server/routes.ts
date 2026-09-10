@@ -38,7 +38,7 @@ import { stripSignupSource } from "./signup-source";
 import { captureSignupSource } from "./signup-capture";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
-import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnMutations, turnAlreadyWrote, turnEvidence } from "./handlers/chat-log";
+import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnMutations, turnAlreadyWrote, turnEvidence, turnCanonicalInput } from "./handlers/chat-log";
 import { handleWorkoutCommands, resumeOpenTrainingLoopOutcome, resumeWorkoutFeedbackExpectation } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
 import { handleMiscCommands } from "./handlers/misc-commands";
@@ -100,9 +100,9 @@ const RETRO_TURN = /(?<day>\byesterday\b|\blast night\b)|(?<food>\b(?:ate|eat|ea
 /**
  * ONE TURN, ONE LEDGER ROW (2026-08-10 directive, §6). This wrapper is the only place that knows
  * where a turn begins and ends, so it is the only place that can record one. It adds no routing
- * and no decisions — routeMessage below is the pipeline, unchanged.
+ * and no decisions. `rootId` is the transport's copy of this interaction's id — see chat-log.
  */
-export async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[], sourceMessageId?: string): Promise<string> {
+export async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[], sourceMessageId?: string, rootId?: string): Promise<string> {
   const kind = !mediaUrl ? "text"
     : /audio|ogg|voice/i.test(mediaContentType || "") ? "voice"
     : /video/i.test(mediaContentType || "") ? "video" : "photo";
@@ -111,7 +111,7 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     // Never awaited into the client's path: a ledger that can delay an answer is worse than none.
     void recordTurn(reply);
     return reply;
-  });
+  }, rootId || sourceMessageId);
 }
 
 async function routeMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[], sourceMessageId?: string): Promise<string> {
@@ -139,7 +139,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
 
   // QR ACQUISITION SOURCE — a scanned join-QR prefills "(ref: gymA)"; capture once, then strip.
   if (!user.signupSource && !mediaUrl && message && (await captureSignupSource(user, phone, message))) {
-    message = stripSignupSource(message);
+    message = stripSignupSource(message); turnCanonicalInput(message);
     m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
   }
 
@@ -227,7 +227,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
         .where(eq(users.phoneNumber, phone)).catch(() => {});
     } else if (pending && !saidYesterday && scanForSAFoods(m).length > 0) {
       // The food they promised, with no date on it. Put the day back and spend the token.
-      message = `yesterday ${message}`;
+      message = `yesterday ${message}`; turnCanonicalInput(message);
       m = `yesterday ${m}`;
       const base = (user.profileNotes || "").replace(/\s*\bretro:pending\b/gi, "").trim();
       void db.update(users).set({ profileNotes: base || null }).where(eq(users.phoneNumber, phone)).catch(() => {});
@@ -709,7 +709,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
               canon = "";
             } else {
               console.log(`[NORMALIZER] ${pre.intent}(${Math.round(pre.confidence * 100)}%) "${message.slice(0, 80)}" → "${canon.slice(0, 80)}"`);
-              message = canon;
+              message = canon; turnCanonicalInput(message);
               m = canon.toLowerCase().replace(/\s+/g, " ").trim();
             }
           }

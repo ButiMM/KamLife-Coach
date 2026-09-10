@@ -62,6 +62,10 @@ export async function enforceOutboundTruth(
   text: string,
   /** The recipient's row, when the door already holds it — carries the durable illness state. */
   recipientUser?: { profileNotes?: string | null } | null,
+  /** Which door is asking. Rules 1 and 2 are about TRUTH and apply to both; rule 3 is about
+   *  CADENCE and only ever made sense for the door nobody is waiting at. Defaults to proactive so
+   *  an un-migrated caller keeps the behaviour it had. */
+  mode: "reactive" | "proactive" = "proactive",
 ): Promise<OutboundVerdict> {
   const body = String(text || "");
   if (!body.trim()) return { ok: true };
@@ -126,9 +130,26 @@ export async function enforceOutboundTruth(
     }
   }
 
-  // 3. THE SAME MESSAGE TWICE IS NEVER RIGHT. The reactive door has said so since 2026-08-21; two
-  //    crons covering the same ground on the same morning had nothing stopping them.
-  if (isDuplicateOutbound(`proactive:${recipientKey}`, body)) {
+  // 3. TWO CRONS MUST NOT COVER THE SAME GROUND ON THE SAME MORNING — and that is the whole of
+  //    what this rule is for.
+  //
+  //    IT APPLIED TO REPLIES TOO, AND THAT WAS A CUSTOMER-VISIBLE DEFECT (Cut 1, 2026-09-10).
+  //    Proven post-transport on 7833ebb, one client asking the same question twice:
+  //
+  //        wire[0]  "Thabo — one thing today: *Stand on a scale tomorrow morning…*"
+  //        wire[1]  "Let me check that properly before I answer — give me one sec and ask me again."
+  //
+  //    The second answer was TRUE, it was the same true answer, and this rule refused it — so the
+  //    client was told to ask again, which would produce the identical outcome. That is precisely
+  //    the P0-C failure routes/whatsapp.ts records as fixed on 2026-08-21: a client who repeats
+  //    themselves is telling us the first answer did not land, and punishing them is the one thing
+  //    a coach may never do. A later, cruder authority had quietly reverted a documented fix, and
+  //    both ledger rows showed the correct reply, so nothing could see it.
+  //
+  //    A repeat is not a truth failure. It is a cadence judgement, and cadence only has meaning
+  //    where nobody is waiting. Twilio webhook retries are already dropped by MessageSid at the
+  //    door, so removing this for replies re-sends nothing that was not genuinely asked twice.
+  if (mode === "proactive" && isDuplicateOutbound(`proactive:${recipientKey}`, body)) {
     return { ok: false, reason: "duplicate", detail: body.slice(0, 60) };
   }
 
@@ -167,6 +188,12 @@ export interface OutboundPrepared {
   blocked: boolean;
   reason?: OutboundVerdict["reason"];
   detail?: string;
+  /**
+   * THE TEXT THAT WAS REFUSED (Cut 1). Without it a blocked turn recorded the repair and nothing
+   * else, so the only evidence of what the coach had actually composed was gone — which is how a
+   * floor can be wrong for weeks and look like a floor working. Set only on a refusal.
+   */
+  draft?: string;
 }
 
 /**
@@ -255,7 +282,7 @@ export async function prepareOutbound(
   const { provenanceGate } = await import("./verifiers/response-gate");
   const { humanizeReply } = await import("./reply-hygiene");
 
-  const verdict = await enforceOutboundTruth(userId, recipientKey, text, recipientUser);
+  const verdict = await enforceOutboundTruth(userId, recipientKey, text, recipientUser, mode);
   if (!verdict.ok) {
     if (mode === "proactive") {
       // THE OPERATOR SIGNAL IS PART OF THE CONTRACT. production-parity drives sendWhatsApp and
@@ -264,11 +291,11 @@ export async function prepareOutbound(
       // door was changed to ignore the verdict. Renaming it in a refactor broke the observable
       // while the behaviour was fine, which is the same defect one layer out. It keeps its name.
       console.error(`[OUTBOUND_AUTHORITY] BLOCKED proactive send to ${recipientKey.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
-      return { text: "", blocked: true, reason: verdict.reason, detail: verdict.detail };
+      return { text: "", blocked: true, reason: verdict.reason, detail: verdict.detail, draft: text };
     }
     console.error(`[OUTBOUND_AUTHORITY] BLOCKED reactive draft to ${recipientKey.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
     // Reactive: the client is waiting, so they get a safe sentence rather than nothing.
-    return { text: REACTIVE_OUTBOUND_REPAIR, blocked: true, reason: verdict.reason, detail: verdict.detail };
+    return { text: REACTIVE_OUTBOUND_REPAIR, blocked: true, reason: verdict.reason, detail: verdict.detail, draft: text };
   }
 
   // Shaping stays in this order: a claim spanning a bubble split has to be checked before the
@@ -298,14 +325,14 @@ export async function prepareOutbound(
       console.error(`[OUTBOUND_AUTHORITY] BLOCKED ${mode === "proactive" ? "proactive send" : "reactive draft"} `
         + `to ${recipientKey.slice(-8)} — ${leak.reason}`);
       return mode === "proactive"
-        ? { text: "", blocked: true, detail: leak.reason }
-        : { text: REACTIVE_OUTBOUND_REPAIR, blocked: true, detail: leak.reason };
+        ? { text: "", blocked: true, detail: leak.reason, draft: out }
+        : { text: REACTIVE_OUTBOUND_REPAIR, blocked: true, detail: leak.reason, draft: out };
     }
     return { text: out, blocked: false };
   } catch (e: any) {
     console.error(`[OUTBOUND_AUTHORITY] BLOCKED ${mode} send to ${recipientKey.slice(-8)} — preparation failed: ${e?.message || e}`);
     return mode === "proactive"
-      ? { text: "", blocked: true, detail: "preparation failed" }
-      : { text: REACTIVE_OUTBOUND_REPAIR, blocked: true, detail: "preparation failed" };
+      ? { text: "", blocked: true, detail: "preparation failed", draft: text }
+      : { text: REACTIVE_OUTBOUND_REPAIR, blocked: true, detail: "preparation failed", draft: text };
   }
 }
