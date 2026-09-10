@@ -61,6 +61,13 @@ export const ACCEPTANCES: Acceptance[] = [
     // client-stated step count silently left untrusted.
     command: ["npx", "tsx", "script/pg-step-provenance-acceptance.ts"] },
 
+  { id: "spoken-step-reverts", title: "Spoken compound counts fail on both owner reverts",
+    // VOICE INPUT TRUTH (2026-09-10). A correct transcript saying "eight thousand five hundred"
+    // passes two owners before it is durable: TypeScript extracts the value and PostgreSQL marks
+    // the row trusted. This restores each pre-cut owner independently and requires the relevant
+    // customer/DB acceptance to turn red; a crash or absent verdict is itself red.
+    command: ["bash", "script/red-on-revert-spoken-steps.sh"] },
+
   { id: "client-truth", title: "Canonical client truth ordering",
     command: ["npx", "tsx", "script/pg-client-truth-acceptance.ts"] },
 

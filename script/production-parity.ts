@@ -3283,7 +3283,7 @@ async function main() {
   // predicates AGREE catches the whole class the next time either is edited alone.
   check("steps . the recogniser and the extractor agree on what a step report is", async () => {
     const { looksLikeStepsReport } = await import("../server/utils");
-    const { detectStepLog } = await import("../server/understanding/messy-intake");
+    const { detectStepLog, parseMessyIntake } = await import("../server/understanding/messy-intake");
     const reports = [
       "my steps are 10k today", "my steps are 10000", "steps are 8000", "steps: 9000",
       "i walked 8000 steps today", "10000 steps", "i did 12k steps", "i've done 10k steps already",
@@ -3294,6 +3294,23 @@ async function main() {
       assert.ok(recognised && extracted > 0,
         `the two owners disagree on "${r}" — recognised=${recognised}, extracted=${extracted}. `
         + `A step report seen by one and not the other is a client's steps disappearing.`);
+    }
+
+    // THE TRANSCRIPT WAS RIGHT; THE PARSER MADE IT FALSE (2026-09-10, voice audit).
+    // Both the intake scan and the durable step owner must retain the hundreds spoken after
+    // "thousand". If either returns 8,000 here, later coaching sees a fabricated shortfall.
+    const spoken = [
+      ["I walked eight thousand five hundred steps", 8500],
+      ["I walked eight thousand and five hundred steps", 8500],
+      ["I walked twelve thousand two hundred steps", 12200],
+      ["I walked eight and a half thousand steps", 8500],
+      ["I walked eight thousand steps", 8000],
+    ] as const;
+    for (const [raw, expected] of spoken) {
+      assert.equal(detectStepLog(raw).steps, expected,
+        `the durable step owner changed "${raw}" to the wrong count`);
+      assert.equal(parseMessyIntake(raw).stepCount, expected,
+        `messy intake disagreed with the durable owner for "${raw}"`);
     }
   });
 
