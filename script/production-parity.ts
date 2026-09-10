@@ -1337,17 +1337,46 @@ async function main() {
   });
 
   // ── P0-3 · SILENCE IS NOT A TERMINAL STATE ────────────────────────────────────────────────
-  check("a suppressed duplicate does not become silence", () => {
+  //
+  // REGRADED 2026-09-10 (Cut 1), and STRENGTHENED rather than relaxed. State plainly what changed
+  // and why, because this is the fifth assertion in this repo found pinned to an implementation
+  // instead of the promise it exists to protect.
+  //
+  // It asserted the SHAPE of the fix: `if (isDuplicateOutbound(phone, out)) { … out = … }` — a
+  // branch that replaced a repeated reply with "I gave you the same answer twice there…". The
+  // property it was written for is the sentence in its own message: a client who asks twice is
+  // telling us the first answer did not land, and that is when silence costs most.
+  //
+  // Two things were then proven post-transport on 7833ebb:
+  //   · That branch was already UNREACHABLE for its own case. enforceOutboundTruth ran the same
+  //     duplicate test one layer up and replaced the body with the outbound repair first, so the
+  //     second asking got "…give me one sec and ask me again." The green assertion below was
+  //     grading a branch the product could not enter.
+  //   · Suppression was never the right answer anyway. A truthful reply does not become untrue on
+  //     repetition, so the strongest form of this property is that NOTHING suppresses a reply.
+  //
+  // So the check now asserts the deletion is real and total, on both doors. That is a harder
+  // property than the one it replaces: the old version passed with a duplicate authority present,
+  // this one fails if any reactive duplicate authority comes back. The behavioural counterpart —
+  // the same question asked twice, answered twice, graded on the wire — is section 1 of
+  // script/pg-interaction-truth-acceptance.ts, which needs a database and cannot live here.
+  check("no authority suppresses a repeated reply, on either door", () => {
     const wa = readFileSync("server/routes/whatsapp.ts", "utf-8")
       .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-    const dupBlock = /if \(isDuplicateOutbound\(phone, out\)\) \{([\s\S]*?)\n  \}/.exec(wa);
-    assert.ok(dupBlock, "the duplicate branch must exist");
-    assert.ok(!/\breturn;/.test(dupBlock[1]),
-      "a duplicate reply must not end the turn in silence — the client asked twice because the "
-      + "first answer did not land, which is when silence costs most");
-    assert.ok(/out = /.test(dupBlock[1]), "…it must say something different instead");
-    assert.ok(/recordSilentTurnAvoided\("duplicate"\)/.test(wa) && /recordSilentTurnAvoided\("empty"\)/.test(wa),
-      "both silent-terminal causes must be counted, by cause");
+    assert.ok(!/isDuplicateOutbound\s*\(\s*phone\b/.test(wa),
+      "the reactive door must hold no duplicate-suppression branch — a client who asks twice is "
+      + "telling us the first answer did not land, and both the silence and the meta-reply punish "
+      + "them for it");
+    const oa = readFileSync("server/outbound-authority.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.match(oa, /if \(mode === "proactive" && isDuplicateOutbound\(/,
+      "the floor's duplicate rule must be gated to the proactive door — ungated, it refuses a "
+      + "truthful REPLY and hands the client the repair sentence instead");
+    assert.ok(/recordSilentTurnAvoided\("empty"\)/.test(wa),
+      "the one remaining silent-terminal cause must still be counted");
+    assert.ok(!/recordSilentTurnAvoided\("duplicate"\)/.test(wa),
+      "…and the cause that no longer exists must not still be counted, or the founder's "
+      + "self-check reports a permanent zero as though it were a measurement");
   });
 
   // NEGATIVE CONTROL 4 — remove the empty-response fallback and this must go red.
