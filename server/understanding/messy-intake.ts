@@ -58,7 +58,7 @@ const FOOD_VERB =
 const FOOD_NOUN =
   /\b(breakfast|lunch|dinner|supper|brunch|snack|meal|mcdonald'?s?|kfc|nando'?s?|spur|steers|wimpy|takeaways?|take\s*away|pap|chicken|eggs?|mocha|coffee|bread|toast|rice|mince|wors|boerewors|pizza|burger|chips)\b/i;
 const STEPS =
-  /\b(steps?|walked|walking|ran\s+\d|\d+\s*km)\b/i;
+  /\b(steps?|staps?|walk(?:ed|ing)?|ran\s+\d|\d+\s*km)\b/i;
 const FEELING =
   /\b(tired|exhausted|stressed|stress|feel(?:ing)?|felt|anxious|motivat|struggling|overwhelmed|drained|hard\s+day|rough\s+day|not\s+coping)\b/i;
 // A REPORTED SESSION, not a request for one. "send me my workout" is a command and stays with
@@ -85,6 +85,30 @@ export const WORD_NUM: Record<string, number> = {
   hundred: 100, thousand: 1000,
 };
 
+const SPOKEN_STEP_CARDINAL =
+  "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty";
+const SPOKEN_HUNDREDS_CARDINAL = "one|two|three|four|five|six|seven|eight|nine";
+
+/**
+ * Parse the spoken-thousands shape emitted by STT. Whisper/Scribe commonly preserve
+ * "eight thousand five hundred" as words; dropping the hundreds here turns a truthful
+ * transcript into a false durable count of 8,000. This helper is shared by the messy-intake
+ * scan and the durable step owner so the two views cannot disagree about the same words.
+ */
+function spokenThousands(text: string): { value: number; match: RegExpMatchArray } | null {
+  const pattern = new RegExp(
+    `\\b(${SPOKEN_STEP_CARDINAL}|\\d+)\\s+(and\\s+a\\s+half\\s+)?thousand`
+      + `(?:\\s+(?:and\\s+)?(${SPOKEN_HUNDREDS_CARDINAL}|[1-9])\\s+hundred)?\\b`,
+    "i",
+  );
+  const match = String(text || "").match(pattern);
+  if (!match) return null;
+  const thousands = WORD_NUM[match[1].toLowerCase()] ?? Number(match[1]);
+  const hundreds = match[3] ? (WORD_NUM[match[3].toLowerCase()] ?? Number(match[3])) * 100 : 0;
+  const value = thousands * 1000 + (match[2] ? 500 : 0) + hundreds;
+  return Number.isFinite(value) && value > 0 && value < 200000 ? { value, match } : null;
+}
+
 function extractStepCount(text: string): number | null {
   const t = text.toLowerCase();
   // 8000 steps / 8,000 steps
@@ -93,7 +117,9 @@ function extractStepCount(text: string): number | null {
     const n = Number(digit[1].replace(/[,\s]/g, ""));
     if (Number.isFinite(n) && n > 0 && n < 200000) return Math.round(n);
   }
-  // eight thousand steps / 8 thousand steps
+  // eight thousand steps / eight thousand five hundred steps / 8 thousand steps
+  const spoken = STEPS.test(t) ? spokenThousands(t) : null;
+  if (spoken) return spoken.value;
   const word = t.match(
     /\b(?:(\d+)\s+)?(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen)?\s*(thousand|hundred)?\s*steps?\b/,
   );
@@ -338,10 +364,7 @@ export function detectStepLog(text: string): StepLogDetection {
     ? text.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*((min(?:ute)?s?|hrs?|hours?))/i) : null;
   const kShorthand = !!text.match(/\b[\d,]+(?:\.\d+)?\s*k\s*(?:steps?|staps?)\b/i);
   const wordThousand = !numMatch && !dev
-    ? (text.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\s*(?:steps?|staps?)?\b/i)
-        && /\b(steps?|staps?|walked|walking|walk)\b/i.test(text)
-        ? text.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\b/i)
-        : null)
+    ? (STEPS.test(text) ? spokenThousands(text) : null)
     : null;
 
   const isQuestionForm = /^(does|doesn.?t|do|don.?t|will|would|should|shouldn.?t|can|could|is|isn.?t|are|aren.?t|what|why|how|when|which)\b/i.test(text.trim())
@@ -351,8 +374,7 @@ export function detectStepLog(text: string): StepLogDetection {
 
   let steps = 0;
   if (wordThousand) {
-    const base = WORD_NUM[wordThousand[1].toLowerCase()] ?? parseInt(wordThousand[1]);
-    steps = base * 1000 + (wordThousand[2] ? 500 : 0);
+    steps = wordThousand.value;
   } else if (dev) {
     const num = parseFloat(dev[1].replace(/,/g, ""));
     steps = dev[2] ? Math.round(num * 1000) : Math.round(num);

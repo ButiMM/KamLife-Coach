@@ -77,6 +77,10 @@ chk(await parse("12,000 steps today") === 12000, "comma form → 12000", String(
 chk(await parse("walked 12k steps") === 12000, "k form → 12000", String(await parse("walked 12k steps")));
 chk(await parse("ten thousand steps") === 10000, "word form → 10000", String(await parse("ten thousand steps")));
 chk(await parse("twelve and a half thousand steps") === 12500, "word form with a half → 12500", String(await parse("twelve and a half thousand steps")));
+chk(await parse("eight thousand five hundred steps") === 8500,
+  "spoken thousands plus hundreds → 8500", String(await parse("eight thousand five hundred steps")));
+chk(await parse("twelve thousand and two hundred steps") === 12200,
+  "spoken thousands plus 'and' hundreds → 12200", String(await parse("twelve thousand and two hundred steps")));
 
 REAL("\n§1b …and the forms it must NOT read");
 chk(await parse("I paid R8000 for the gym") === null, "a price is not a step count", String(await parse("I paid R8000 for the gym")));
@@ -109,6 +113,19 @@ await handleMessage(u2.phone, "twelve and a half thousand steps").catch(() => ""
 const s2 = await stepRows(u2.id);
 chk(s2.length === 1 && Number(s2[0].steps) === 12500, `word form logged 12500 (${JSON.stringify(s2.map(r => r.steps))})`);
 chk(!!s2[0] && s2[0].provenance === "client_report", `and is trusted`, `provenance=${s2[0]?.provenance}`);
+
+// THE LIVE VOICE SHAPE. The transcriber can be perfectly right and still lose 500 here unless
+// the TypeScript writer and the PostgreSQL provenance owner agree on the complete spoken number.
+const u2b = await freshUser();
+const r2b = String(await handleMessage(u2b.phone, "I walked eight thousand five hundred steps")
+  .catch((e: any) => `THREW ${e?.message}`) ?? "");
+const s2b = await stepRows(u2b.id);
+chk(s2b.length === 1 && Number(s2b[0].steps) === 8500,
+  `compound word form writes exactly 8500 (${JSON.stringify(s2b.map(r => r.steps))})`);
+chk(!!s2b[0] && s2b[0].provenance === "client_report",
+  `the complete 8500 claim is trusted`, `provenance=${s2b[0]?.provenance}`);
+chk(/8[\s,\u00a0\u202f]?500\s*steps/i.test(r2b) && !/8[\s,\u00a0\u202f]?000\s*steps/i.test(r2b),
+  `the client is told 8500, never the truncated 8000`, JSON.stringify(r2b.slice(0, 160)));
 
 // SCREENSHOT RECEIPT — the form the media handler emits, graded at the parser because the
 // media path needs an image the front door cannot be handed here.
