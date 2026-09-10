@@ -349,6 +349,47 @@ export const turnLedger = pgTable("turn_ledger", {
   outboundVerdict: jsonb("outbound_verdict"),
   /** sent | dropped | fallback — the delivery owner's own verdict, not an assumption. */
   deliveryOutcome: text("delivery_outcome"),
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  // RAW VOICE PROVENANCE (2026-09-10).
+  //
+  // A voice note is transcribed, then CLEANED by a model, then — over 150 words — CONDENSED by a
+  // second model, and only the last of those three reaches the handlers. Until now none of them
+  // was persisted: `input_text` on the inner row held the CONDENSED text, and the words the
+  // client actually spoke existed only in a log line that rotates.
+  //
+  // So the two questions you must be able to answer about a bad voice turn had no evidence
+  // behind them: did we MIS-HEAR them, or did we hear them and then throw half of it away? One
+  // is an STT problem, the other is ours, and the fix is different in each case. They are stored
+  // as three separate columns rather than one "transcript" because the whole point is being able
+  // to diff them.
+  //
+  // Written on the OUTER voice row — the same row that already carries the decision, the final
+  // post-transport body and the build SHA — so one row answers the whole question. Null on every
+  // non-voice turn, and null on a voice turn that never produced a transcript at all.
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  /** EXACTLY what Scribe or Whisper returned, before cleanSATranscript touched it. */
+  voiceTranscriptRaw: text("voice_transcript_raw"),
+  /** After cleanSATranscript (which fails open, so this equals the raw text when it declined). */
+  voiceTranscriptCleaned: text("voice_transcript_cleaned"),
+  /** THE CLIENT'S WORDS AFTER THE LAST STAGE THAT TOUCHED THEM — condenseVoiceRamble's output
+   *  over 150 words, otherwise the cleaned text. CLIENT-ORIGIN ONLY.
+   *
+   *  It is deliberately NOT the string handleMessage received. media.ts appends an internal
+   *  "[LANGUAGE NOTE: …]" of our own when the transcript looks like a non-English SA language, and
+   *  putting that in here would mean a column named for the client's words held a sentence we
+   *  wrote. The exact handler input is `voice_provenance.handlerInput`; the two together make the
+   *  append reversible in both directions. */
+  voiceTextForBrain: text("voice_text_for_brain"),
+  /** { engine, wordCount, cleaned, condensed, handlerInput, languageNote }.
+   *
+   *  `cleaned`/`condensed` say whether that STAGE CHANGED the text — not whether it ran, because
+   *  both stages fail open and return their input unchanged. Both are computed from the BASE
+   *  client-origin texts: comparing against handlerInput would report every language-note turn as
+   *  condensed, which is a claim about the client's speech made from a string of ours.
+   *
+   *  `handlerInput` is the EXACT argument handleMessage was called with, recorded as the same
+   *  variable that is passed so the record cannot drift from the call. */
+  voiceProvenance: jsonb("voice_provenance"),
 }, (table) => ({
   userDateIdx: index("turn_ledger_user_date_idx").on(table.userId, table.createdAt),
   createdIdx: index("turn_ledger_created_idx").on(table.createdAt),

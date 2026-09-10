@@ -109,6 +109,24 @@ interface TurnScope {
   rootId: string;
   /** What the handlers actually saw, when something rewrote the client's words before routing. */
   canonicalInput: string | null;
+  /**
+   * THE THREE TEXTS A VOICE NOTE BECOMES (2026-09-10), recorded as they are produced rather than
+   * reconstructed afterwards. Absent on every non-voice turn.
+   */
+  voice?: {
+    engine?: "scribe" | "whisper";
+    raw?: string;
+    cleaned?: string;
+    /** CLIENT-ORIGIN text only: the condenser's output, or the cleaned text. No internal note. */
+    forBrain?: string;
+    /** The EXACT string handleMessage was called with — forBrain plus the internal language note
+     *  when one was detected. Recorded as the same variable that is passed, so the two cannot
+     *  drift apart. */
+    handlerInput?: string;
+    /** The note that was appended, or null when none was. Kept so the append is reversible. */
+    languageNote?: string | null;
+    wordCount?: number;
+  };
   resolvedDay: string | null;
   stateRead: Record<string, unknown>;
   mutations: string[];
@@ -724,6 +742,34 @@ export function turnCanonicalInput(text: string): void {
   if (t) t.canonicalInput = (text || "").slice(0, 2000);
 }
 
+/**
+ * WHAT THE CLIENT SAID, AT EACH STAGE IT SURVIVED (2026-09-10).
+ *
+ * Three of the four fields are CLIENT-ORIGIN text — raw, cleaned, forBrain. `handlerInput` is
+ * not: it is those words plus an internal language note we append ourselves, and it is stored
+ * separately for exactly that reason. Conflating them would put our own string in a column
+ * labelled as the client's.
+ *
+ * MERGES, and is called three times as the voice path produces each stage — after transcription,
+ * after cleanSATranscript, after condenseVoiceRamble. Incremental on purpose: the voice handler
+ * returns early on a garbled note, a single word and a model refusal, and those are precisely the
+ * turns where "what did we actually hear?" is the question. Recording only at the end would leave
+ * every failed voice turn blank, which is the current state and the reason this exists.
+ *
+ * Writes to the scope in flight, which for a voice note is the OUTER turn — media.ts calls this
+ * before it re-enters handleMessage — so the three texts land on the same row as the decision,
+ * the delivered body and the build SHA.
+ *
+ * Observational only. Nothing reads this back into a routing or coaching decision, and it must
+ * stay that way: the moment a handler consults it, the raw transcript stops being a record and
+ * becomes a second input, which is a different cut and a much bigger claim.
+ */
+export function turnVoice(facts: NonNullable<TurnScope["voice"]>): void {
+  const t = turnStore.getStore();
+  if (!t) return;
+  t.voice = { ...(t.voice || {}), ...facts };
+}
+
 export async function recordTurn(reply: string): Promise<void> {
   const t = turnStore.getStore();
   if (!t?.userId) return;
@@ -758,9 +804,38 @@ export async function recordTurn(reply: string): Promise<void> {
         : String(ev.canonicalTodo || "").trim() ? "instructed" : "hold",
       modelAuthored: !!ev.modelAuthored,
     };
+    // THE THREE VOICE TEXTS (2026-09-10). `cleaned` and `condensed` say whether that STAGE CHANGED
+    // the text, which is not the same question as whether it ran: both fail open and return their
+    // input unchanged, and "ran and declined" is a different diagnosis from "never ran".
+    //
+    // AND THE EXACT HANDLER INPUT, which is NOT `forBrain` (corrected 2026-09-10, same day).
+    // media.ts calls handleMessage with `forBrain + "\n\n[LANGUAGE NOTE: …]"` when the transcript
+    // looks like a non-English SA language. The first version of this cut stored `forBrain` under
+    // a comment claiming it was "what the handlers routed on" — a column holding something other
+    // than its label, which is precisely the defect revert case 2 of this cut's own red-on-revert
+    // exists to catch. Committing it here would have been the same error one layer along.
+    //
+    // So both are kept, and the SPLIT is the point: `voice_text_for_brain` is client-origin text
+    // and nothing else, and the note we appended ourselves lives beside it. `condensed` is
+    // therefore computed from the BASE text — comparing the handler input to the cleaned text
+    // would report every language-note turn as condensed, which is a claim about the client's
+    // words made from a string we wrote.
+    const v = t.voice;
+    const voiceProvenance = v
+      ? {
+        engine: v.engine ?? null,
+        wordCount: v.wordCount ?? null,
+        cleaned: v.cleaned !== undefined ? v.cleaned !== v.raw : null,
+        condensed: v.forBrain !== undefined ? v.forBrain !== v.cleaned : null,
+        handlerInput: v.handlerInput ?? null,
+        languageNote: v.languageNote ?? null,
+      }
+      : null;
     const written = await db.insert(turnLedger).values({
       userId: t.userId, inputType: t.inputType, inputText: t.inputText, resolvedDay: t.resolvedDay,
       rootId: t.rootId, inputTextCanonical: t.canonicalInput, decision: canonicalDecision,
+      voiceTranscriptRaw: v?.raw ?? null, voiceTranscriptCleaned: v?.cleaned ?? null,
+      voiceTextForBrain: v?.forBrain ?? null, voiceProvenance,
       stateRead: Object.keys(stateRead).length ? stateRead : null, mutations: t.mutations.length ? t.mutations : null,
       reply: recordedReply.slice(0, 4000), replyMs: Date.now() - t.startedAt,
       version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 12) || process.env.APP_VERSION || "dev",

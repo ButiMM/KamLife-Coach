@@ -1,7 +1,7 @@
 /** Media message handler — images, audio/voice, video. Every branch returns a string. */
 
 import crypto from "crypto";
-import { turnMutation } from "./chat-log";
+import { turnMutation, turnVoice } from "./chat-log";
 import { sttVocabularyPrompt } from "../foods";
 import { verdictFromLabelLine, foodConstraints } from "../food-swaps";
 import { tmpdir } from "os";
@@ -1273,7 +1273,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // what the scanner matches. Was 26 EXERCISE names until 2026-08-06 — hence the mishears.
       const whisperPrompt = sttVocabularyPrompt();
 
-      let transcribedText: string | undefined;
+      let transcribedText: string | undefined; let sttEngine: "scribe" | "whisper" = "whisper";
       let voiceQuality: { avgLogprob: number; comp: number } | null = null; // Whisper verbose_json only
 
       // ElevenLabs Scribe: better WER than Whisper on SA languages (Afrikaans, Zulu, Xhosa).
@@ -1284,7 +1284,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
             scribeTranscribe(audioBuffer, audioExt, storedLangPref || undefined)
           );
           if (scribeText) {
-            transcribedText = scribeText;
+            transcribedText = scribeText; sttEngine = "scribe";
             console.log(`[VOICE] scribe_ok text="${scribeText.slice(0, 80)}" len=${scribeText.length}`);
           }
         } catch (scribeErr: any) {
@@ -1358,7 +1358,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
           : "I got your voice note but had trouble processing it right now. Please resend it, or type your message and I'll reply straight away.";
       }
 
-      const wordCount = transcribedText.split(/\s+/).filter(Boolean).length;
+      const wordCount = transcribedText.split(/\s+/).filter(Boolean).length; turnVoice({ engine: sttEngine, raw: transcribedText, wordCount });
       if (wordCount < 2) {
         // Known single-word commands pass through directly — asking to resend wastes a round trip.
         const cleanWord = transcribedText.toLowerCase().replace(/[.!?,\s]+$/, "");
@@ -1395,7 +1395,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       clearVoiceFailure(user.id);
 
       // SA cleaner (safeguard D, fail-open) then HARD FLOOR: a transcript is the client's words, never a model refusal.
-      transcribedText = await cleanSATranscript(openai, transcribedText, user.id);
+      transcribedText = await cleanSATranscript(openai, transcribedText, user.id); turnVoice({ cleaned: transcribedText });
       if (looksLikeRefusal(transcribedText)) {
         console.error(`[VOICE][${mediaTrace}] refusal_as_transcript — discarding "${transcribedText.slice(0, 80)}"`);
         await cleanupTmp();
@@ -1415,12 +1415,12 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // reach food-context / compound handlers WHOLE. Condensing first was deleting the meal.
       const forBrain = (wordCount > 150 && !transcriptMustPassWhole(transcribedText))
         ? await condenseVoiceRamble(openai, transcribedText, user.id)
-        : transcribedText;
+        : transcribedText; const brainInput = forBrain + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""); turnVoice({ forBrain, handlerInput: brainInput, languageNote: languageNote || null });
 
       voiceStage = "coach_reply";
       voiceStageStart = Date.now();
       const voiceReply = await withTimeout("voice_coach_reply", 20000, () =>
-        handleMessage(phone, forBrain + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""), undefined, undefined, undefined, mediaSourceId)
+        handleMessage(phone, brainInput, undefined, undefined, undefined, mediaSourceId)
       );
       const coachReplyMs = Date.now() - voiceStageStart;
       const voiceTotalMs = Date.now() - voiceFlowStart;
