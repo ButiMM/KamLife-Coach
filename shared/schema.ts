@@ -317,12 +317,45 @@ export const turnLedger = pgTable("turn_ledger", {
   fixRef: text("fix_ref"),                   // the PR or commit claiming the fix
   triageNote: text("triage_note"),           // why the human classified it that way
   triagedAt: timestamp("triaged_at"),
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  // THE CUSTOMER-VISIBLE HALF OF THE TURN (Cut 1, 2026-09-10).
+  //
+  // Everything above this line describes what the HANDLERS did. `reply` is the string
+  // routeMessage returned, reconciled — and that is where the record stopped, while nineteen
+  // authorities downstream could still render, replace, repair or suppress it before a phone
+  // buzzed. Two proven consequences on 7833ebb: a ledger holding `[BUTTONS:…]` for a client who
+  // saw `▸ *Today's workout*`, and a client who asked the same question twice, was answered with
+  // "ask me again", and left two ledger rows both showing the correct coaching reply.
+  //
+  // So the row now carries both halves. `reply` keeps its meaning exactly — what the pipeline
+  // decided — and these say what left the building. A row where they differ is not a bug by
+  // itself; a row where nobody can tell is.
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  /** One id per inbound source message. Nested turns (a voice transcript re-entering
+   *  handleMessage) INHERIT it, so one client message is one interaction however many rows it
+   *  produces. Twilio's MessageSid when there is one; minted at the door when there is not. */
+  rootId: text("root_id"),
+  /** What the HANDLERS actually saw, when the normalizer, the retro-continuity carry or the
+   *  signup-source strip rewrote the client's words before any handler ran. Null when the raw
+   *  text proceeded untouched, which is the ordinary case. */
+  inputTextCanonical: text("input_text_canonical"),
+  /** The canonical decision and how the turn disposed of it: { kind, todo, disposition }. */
+  decision: jsonb("decision"),
+  /** The COMPLETE body handed to delivery — after marker rendering, the truth floor, provenance,
+   *  hygiene and the marker strip, and before Twilio bubble splitting. What the client read. */
+  deliveredBody: text("delivered_body"),
+  /** { blocked, reason, detail, draft } from prepareOutbound. `draft` is the rejected text, so a
+   *  blocked turn records what was refused as well as what was sent instead. */
+  outboundVerdict: jsonb("outbound_verdict"),
+  /** sent | dropped | fallback — the delivery owner's own verdict, not an assumption. */
+  deliveryOutcome: text("delivery_outcome"),
 }, (table) => ({
   userDateIdx: index("turn_ledger_user_date_idx").on(table.userId, table.createdAt),
   createdIdx: index("turn_ledger_created_idx").on(table.createdAt),
   versionIdx: index("turn_ledger_version_idx").on(table.version),
   failureIdx: index("turn_ledger_failure_idx").on(table.failureCategory),
   lifecycleIdx: index("turn_ledger_lifecycle_idx").on(table.lifecycleStatus),
+  rootIdx: index("turn_ledger_root_idx").on(table.rootId),
 }));
 
 export const clothingCheckins = pgTable(

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import { db } from "../db";
 import { users, chatHistory, escalations, turnLedger, workoutLogs, stepLogs, weightLogs } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
@@ -100,6 +101,14 @@ interface TurnScope {
   userId: string | null;
   inputType: string;
   inputText: string;
+  /**
+   * ONE INBOUND MESSAGE, ONE ID (Cut 1). Nested turns INHERIT this — a voice transcript that
+   * re-enters handleMessage opens a second scope and gets the same root — so "what happened to
+   * this client message" is answerable even while one message still produces two rows.
+   */
+  rootId: string;
+  /** What the handlers actually saw, when something rewrote the client's words before routing. */
+  canonicalInput: string | null;
   resolvedDay: string | null;
   stateRead: Record<string, unknown>;
   mutations: string[];
@@ -536,10 +545,21 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   }
 }
 
-export async function inTurn<T>(inputType: string, inputText: string, fn: () => Promise<T>): Promise<T> {
+/**
+ * THE ROOT ID IS INHERITED, NEVER RE-MINTED (Cut 1).
+ *
+ * A handler may re-enter handleMessage — handlers/media.ts:1423 does it for every voice note,
+ * handlers/food-context.ts:346 for a corrected meal — and that opens a SECOND scope inside the
+ * first. Proven on 7833ebb: one voice note, two turn_ledger rows, and nothing tying them
+ * together. Fixing the recursion is a separate cut; making one client message answerable is this
+ * one. So the inner scope takes the outer's id rather than inventing its own, and `seed` (the
+ * MessageSid, when the door has one) is used only when there is no scope to inherit from.
+ */
+export async function inTurn<T>(inputType: string, inputText: string, fn: () => Promise<T>, seed?: string): Promise<T> {
   let resolveFinalReply!: (reply: string) => void;
   const finalReplyPromise = new Promise<string>(resolve => { resolveFinalReply = resolve; });
-  return turnStore.run({ userId: null, inputType, inputText: (inputText || "").slice(0, 2000), resolvedDay: null, stateRead: {}, mutations: [], startedAt: Date.now(), finalReplyPromise }, async () => {
+  const rootId = turnStore.getStore()?.rootId || seed || `turn-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+  return turnStore.run({ userId: null, inputType, inputText: (inputText || "").slice(0, 2000), rootId, canonicalInput: null, resolvedDay: null, stateRead: {}, mutations: [], startedAt: Date.now(), finalReplyPromise }, async () => {
     try {
       const result = await fn();
       if (typeof result !== "string") {
@@ -627,9 +647,91 @@ export function turnPlateNeedsChange(): boolean {
   return !!turnStore.getStore()?.evidence?.plateNeedsChange;
 }
 
+/**
+ * ════════════════════════════════════════════════════════════════════════════════════════════
+ * CORRELATION, NOT A SECOND RECORDER (Cut 1).
+ *
+ * The obvious fix — move recordTurn into sendFinal — was refused, and the refusal is the design.
+ * recordTurn runs INSIDE the turn scope, which is where `mutations`, `stateRead`, `evidence` and
+ * the resolved day live; the transport runs after that scope has closed and holds none of it.
+ * Moving the write would have cost the whole state half of the row to buy the outbound half, and
+ * it would have stopped recording every path that never reaches WhatsApp at all — the admin test
+ * webhook, journey-lab, the acceptance harnesses. Writing a second row from the transport would
+ * have been worse: two recorders is the defect this cut exists to remove.
+ *
+ * So there is still exactly one INSERT, from inside the scope, and the transport later FINALISES
+ * that same row. This map is the join. recordTurn registers the row's id — as a promise, taken
+ * synchronously before the insert is awaited, because `void recordTurn(...)` means the transport
+ * can arrive first. A turn that never reaches transport simply keeps its half-row, which is the
+ * honest record of what happened to it.
+ * ════════════════════════════════════════════════════════════════════════════════════════════
+ */
+const _interactionRows = new Map<string, { id: Promise<string | null>; at: number }>();
+/** Long enough for a slow reply and a retrying delivery; short enough that a busy day cannot grow. */
+const INTERACTION_TTL_MS = 5 * 60_000;
+
+function rememberInteraction(rootId: string, id: Promise<string | null>): void {
+  const now = Date.now();
+  // The OUTER turn registers last — its reply is the one the transport carries — so last write
+  // wins deliberately. Recursion is not tidied here; it is made answerable.
+  _interactionRows.set(rootId, { id, at: now });
+  if (_interactionRows.size > 2000) {
+    for (const [k, v] of _interactionRows) if (now - v.at > INTERACTION_TTL_MS) _interactionRows.delete(k);
+  }
+}
+
+export interface InteractionOutcome {
+  /** The complete body handed to delivery, before Twilio bubble splitting. */
+  deliveredBody: string;
+  /** { blocked, reason, detail, draft } — draft is the refused text, when one was refused. */
+  outboundVerdict: Record<string, unknown> | null;
+  deliveryOutcome: string | null;
+}
+
+/**
+ * The transport closing the loop on a row recordTurn already opened. Never throws and never
+ * blocks a send: an unfinalised row is a worse record, not a worse product.
+ */
+export async function finaliseInteraction(rootId: string | undefined | null, outcome: InteractionOutcome): Promise<void> {
+  if (!rootId) return;
+  const entry = _interactionRows.get(rootId);
+  if (!entry) return;
+  try {
+    const id = await Promise.race([entry.id, new Promise<null>(r => setTimeout(() => r(null), 20000))]);
+    if (!id) return;
+    await db.update(turnLedger).set({
+      deliveredBody: outcome.deliveredBody.slice(0, 8000),
+      outboundVerdict: outcome.outboundVerdict,
+      deliveryOutcome: outcome.deliveryOutcome,
+    }).where(eq(turnLedger.id, id));
+    _interactionRows.delete(rootId);
+  } catch (e: any) {
+    console.warn("[TURN_LEDGER] finalise non-fatal:", e?.message);
+  }
+}
+
+/** Test/ops hook — the same shape reply-hygiene exposes for its dedupe window. */
+export function _resetInteractionCorrelation(): void { _interactionRows.clear(); }
+
+/**
+ * WHAT THE HANDLERS ACTUALLY SAW. Three places rewrite the client's words before any handler
+ * runs — the normalizer's canonical, the retro-continuity carry, the signup-source strip — and
+ * the ledger recorded only the raw text, so a turn routed on rewritten words looked like a turn
+ * routed on the client's. Last writer wins: the last rewrite is what reached the handlers.
+ */
+export function turnCanonicalInput(text: string): void {
+  const t = turnStore.getStore();
+  if (t) t.canonicalInput = (text || "").slice(0, 2000);
+}
+
 export async function recordTurn(reply: string): Promise<void> {
   const t = turnStore.getStore();
   if (!t?.userId) return;
+  // Registered BEFORE the first await. `void recordTurn(...)` is deliberately not awaited into the
+  // client's path, so the transport can reach finaliseInteraction while this insert is still in
+  // flight — it must find a promise to wait on, not an empty map.
+  let resolveRow!: (id: string | null) => void;
+  rememberInteraction(t.rootId, new Promise<string | null>(r => { resolveRow = r; }));
   try {
     const recordedReply = await Promise.race([
       t.finalReplyPromise,
@@ -643,13 +745,28 @@ export async function recordTurn(reply: string): Promise<void> {
     const stateRead = decision
       ? { ...t.stateRead, ...openLoop, decisionState: decision.state, decisionEvidence: decision.evidence, decisionFocus: decision.focus, decisionEvidenceRefs: evidenceRefs, meaningfulProblem: decision.meaningfulProblem, hasMinimumUsefulQuestion: decision.hasMinimumUsefulQuestion }
       : { ...t.stateRead, ...openLoop };
-    await db.insert(turnLedger).values({
+    // THE DECISION AND ITS DISPOSITION, from the owners that already hold both. `kind`/`todo` are
+    // chooseAction's, carried on the turn by canonicalDecision; `disposition` says what the turn
+    // did with them, read off the same evidence the response boundary reads — no new taxonomy and
+    // no second opinion about what the turn was.
+    const ev = t.evidence || {};
+    const canonicalDecision = {
+      kind: ev.canonicalKind ?? null,
+      todo: ev.canonicalTodo ?? null,
+      intervention: ev.canonicalIntervention ?? null,
+      disposition: ev.conversationalOnly ? "conversational"
+        : String(ev.canonicalTodo || "").trim() ? "instructed" : "hold",
+      modelAuthored: !!ev.modelAuthored,
+    };
+    const written = await db.insert(turnLedger).values({
       userId: t.userId, inputType: t.inputType, inputText: t.inputText, resolvedDay: t.resolvedDay,
+      rootId: t.rootId, inputTextCanonical: t.canonicalInput, decision: canonicalDecision,
       stateRead: Object.keys(stateRead).length ? stateRead : null, mutations: t.mutations.length ? t.mutations : null,
       reply: recordedReply.slice(0, 4000), replyMs: Date.now() - t.startedAt,
       version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 12) || process.env.APP_VERSION || "dev",
-    });
-  } catch (e) { console.warn("[TURN_LEDGER] non-fatal:", (e as any)?.message); }
+    }).returning({ id: turnLedger.id });
+    resolveRow(written[0]?.id ?? null);
+  } catch (e) { resolveRow(null); console.warn("[TURN_LEDGER] non-fatal:", (e as any)?.message); }
 }
 
 

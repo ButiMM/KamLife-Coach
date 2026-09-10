@@ -110,7 +110,15 @@ export function recordFalseConfirmation(): void { bump("writeintegrity:false_con
  * found the first one by waiting 80 minutes and then typing "?" — which is not a monitoring
  * strategy. Silence is a product failure; it now leaves a trace.
  */
-export function recordSilentTurnAvoided(cause: "duplicate" | "empty"): void {
+/**
+ * "duplicate" WAS A CAUSE AND NO LONGER IS (Cut 1, 2026-09-10). The reactive door used to
+ * suppress a repeated reply and count the suppression here. That branch is deleted: a client who
+ * asks twice now gets the answer twice, so there is no duplicate-shaped silence left to avoid.
+ * The member goes with it rather than staying as a metric that can only ever report zero — a
+ * counter nobody can trip reads on the founder's self-check as "this never happens", which is a
+ * stronger claim than "nothing measures it".
+ */
+export function recordSilentTurnAvoided(cause: "empty"): void {
   bump(`silentturn:${cause}`);
 }
 

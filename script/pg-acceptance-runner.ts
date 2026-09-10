@@ -180,6 +180,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // sendFinal, past every handler.
     command: ["npx", "tsx", "script/pg-missed-session-outbound-acceptance.ts"] },
 
+  { id: "interaction-truth", title: "The ledger records what the client received, and a repeat is answered",
+    // Cut 1. Two defects proven post-transport on 7833ebb and invisible to every handler-level
+    // suite: the same question asked twice got the outbound repair ("ask me again") while BOTH
+    // ledger rows showed the correct reply, and the ledger held `[BUTTONS:…]` for a client who saw
+    // `▸ *Today's workout*`. Only the real transport can grade either — the substitutions happen
+    // in prepareOutbound and sendFinal, past every handler.
+    command: ["npx", "tsx", "script/pg-interaction-truth-acceptance.ts"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same
