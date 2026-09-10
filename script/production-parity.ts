@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 57463)
-Total output lines: 3604
-
 /**
  * PRODUCTION-PARITY RESPONSE HARNESS — assert what the CLIENT receives (2026-08-20).
  *
@@ -928,7 +925,1702 @@ async function main() {
         // is reused here, so the thing to assert is that it came from the canonical decision —
         // by either name — not that it was recomputed by computeNextMove at this point.
         assert.ok(/computeNextMove\(|decision\.todo|engineDecision\.todo/.test(line),
-…27463 tokens truncated…     ]],
+          `${f} appends an instruction that did not come from the decision owner: ${line.trim().slice(0, 90)}`);
+      }
+    }
+    const live = readFileSync("server/understanding/live.ts", "utf-8");
+    assert.ok(/underPolicy\(chooseAction\(/.test(live),
+      "computeNextMove must reach chooseAction through the policy contract");
+    assert.ok(/getProgressTruth\(/.test(live),
+      "…and decide on canonical state, not on numbers it gathered itself");
+  });
+
+  check("every caller hands the decision owner the same world", () => {
+    // ONE CONSTITUTION IS NOT ONE DECISION if two callers feed it materially different inputs.
+    // The weekly answer passed WEEKLY AVERAGES into fields that mean today — window.avgProtein
+    // into `proteinPct`, avgSteps into `stepsToday` (the name says it) — and froze the clock at
+    // `hour: 12`, so the evening rule could never fire there and the same client could get a
+    // different "one thing" from the weekly card than from the coach five minutes earlier.
+    //
+    // The card's NUMBERS are weekly; the ACTION is what to do next, which is a daily question and
+    // the only one chooseAction was built to answer. Asserted at the call site, because this is a
+    // semantics bug that produces no crash and no visible difference in a green suite.
+    for (const f of ["server/handlers/misc-commands.ts", "server/understanding/live.ts"]) {
+      const code = readFileSync(f, "utf-8")
+        .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+      const call = /chooseAction\(\{([\s\S]*?)\}\s*(?:as any)?\)/.exec(code);
+      if (!call) continue;
+      const args = call[1];
+      for (const [field, wrong] of [["proteinPct", /window\.avg/], ["caloriePct", /window\.avg/],
+                                    ["stepsToday", /avgSteps/]] as const) {
+        const line = args.split("\n").find(l => l.includes(field + ":")) || "";
+        assert.ok(!wrong.test(line),
+          `${f} feeds a WEEKLY AVERAGE into ${field}, which means today. Two callers, two worlds, `
+          + `one decision function: ${line.trim().slice(0, 90)}`);
+      }
+      const hourLine = args.split("\n").find(l => /\bhour:/.test(l)) || "";
+      assert.ok(!/hour:\s*\d+/.test(hourLine),
+        `${f} freezes the clock (${hourLine.trim().slice(0, 40)}). The decision reads the hour to `
+        + `know whether an instruction can still be acted on today; a literal makes that a lie.`);
+    }
+  });
+
+  check("chooseAction is the only coaching decision owner", () => {
+    const owner = readFileSync("server/one-action.ts", "utf-8");
+    assert.ok(/export function chooseAction/.test(owner));
+    // Nothing outside the owner module may define a competing verdict producer.
+    for (const f of ["server/handlers/misc-commands.ts", "server/scheduler/jobs/morning.ts",
+                     "server/handlers/gpt-block.ts", "server/health-state.ts"]) {
+      const src = readFileSync(f, "utf-8");
+      assert.ok(!/function\s+(choose|decide)[A-Z]\w*\s*\(/.test(src),
+        `${f} defines its own decision function — chooseAction is the only one`);
+    }
+  });
+
+  // ── THE RULE'S COVERAGE, MEASURED AND PRINTED ─────────────────────────────────────────────
+  // The provenance rule compares model prose to the CANONICAL DECISION'S OWN TEXT, by domain.
+  // What it cannot do is recognise a directive whose grammar falls outside "advisory or
+  // imperative" — so the honest guarantee is bounded, and the bound belongs in every CI run
+  // rather than in a report nobody re-reads.
+  //
+  // Measurement, not detection. Adding cases here does not make the product safer; the residue
+  // closes only by making the model emit structure instead of prose, which is a larger change
+  // than this cut was authorised to make.
+  {
+    const { verifyBrainReply } = await import("../server/brain/reply-verifier");
+    const F = { clientMessage: "hi", evidence: { modelAuthored: true, canonicalKind: "hold", canonicalTodo: "" } } as any;
+    const blocked = (r: string) => !verifyBrainReply(r, F).ok;
+    const CASES = [
+      "Train chest today.", "Go to the gym today.", "Get your session done today.",
+      "You should hit legs today.", "Today is a good day for an upper body workout.",
+      "I'd get a push session in this afternoon.", "Let's do chest and triceps today.",
+      "Skip the gym today.", "Take a rest day.", "Rest today.", "Don't train today.",
+      "I'd give training a miss today.", "Sit today out.",
+      "Go for a 20-minute walk.", "Add 3000 steps today.", "Take a walk after dinner.",
+      "Try to get an extra walk in.", "A brisk 30 minutes outside would help.",
+      "Weigh yourself tomorrow morning.", "Step on the scale tomorrow.", "Jump on the scale in the morning.",
+      "Eat 30g more protein.", "Add another 40g of protein today.",
+      "Drop your calories to 1800.", "Lower your intake to 2000 kcal.",
+      "I'd bring your calories down a bit.", "Push your protein higher tomorrow.",
+    ];
+    const caught = CASES.filter(blocked).length;
+    const pct = Math.round(caught / CASES.length * 100);
+    console.log(`\n── prescription provenance ──\n${caught}/${CASES.length} plausible unlicensed `
+      + `phrasings refused on a CONTINUE turn (${pct}%). The residue ships. The rule compares prose `
+      + `to the canonical decision's own text; what escapes is grammar it does not recognise as an `
+      + `instruction, and that closes structurally, not with more signatures.`);
+
+    // The guarantee: on a CONTINUE turn — no canonical decision — the model may not introduce a
+    // behavioural instruction. That is the dangerous case and it must not rot.
+    check("no decision means no directive, whatever the phrasing", () => {
+      for (const r of ["Train chest today.", "Skip the gym today.", "Go for a 20-minute walk.",
+                       "Weigh yourself tomorrow morning.", "Drop your calories to 1800.",
+                       "Eat 30g more protein.", "You should hit legs today.",
+                       "I'd get a push session in this afternoon.", "Take a rest day."]) {
+        assert.ok(blocked(r), `the model could invent an instruction on a CONTINUE turn: ${r}`);
+      }
+    });
+  }
+
+  // ── P0-1 · TRAINING SPEECH BECOMES AUTHORITATIVE STATE ────────────────────────────────────
+  // 2026-08-21 handset: "I went to the gym in the morning" and "I did all four workouts this
+  // week" both fell past the workout writer (isDone was ^…$ anchored) and were confirmed by the
+  // model — "Noted 👌" — while the card two minutes later said WORKOUTS 1.
+  check("a reported session reaches the writer; a count claim does not fabricate rows", async () => {
+    const wk = readFileSync("server/handlers/workout.ts", "utf-8");
+    const code = wk.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/const isDone = !alreadyLoggedThisTurn && when\.when === "today" && \(reportsOneSession \|\|/.test(code),
+      "the completion path must accept a natural session report, not only the anchored forms — and "
+      + "only when the client said today");
+    assert.ok(/sessionCountsIn\(m\)\.length === 0/.test(code),
+      "a count claim must NOT be logged — we know how many, not which days, and undated rows are invented data");
+    for (const guard of ["FUTURE_OR_INTENT", "NEGATED_SESSION", "SOMEONE_ELSE", "OTHER_DOMAIN"]) {
+      assert.ok(new RegExp(`!${guard}\\.test\\((?:m|clause)\\)`).test(code),
+        `the session report must be guarded by ${guard} — "I'm going to the gym later" is not a log`);
+    }
+
+    // ONE OWNER, BOTH SIDES. The writer refuses to invent rows from a count claim and the verifier
+    // refuses to confirm one; they must be reading the same sentence the same way, or the exact
+    // message that caused both rules will be classified differently by each.
+    const { sessionCountsIn } = await import("../server/utils");
+    assert.deepEqual(sessionCountsIn("I did all four workouts this week"), [4],
+      "the count claim that started this must be seen as a count");
+    for (const single of ["I did a 45 minute session today", "I went to the gym in the morning",
+                          "did my 45 min workout", "my fourth session today", "3 sets of 10"]) {
+      assert.deepEqual(sessionCountsIn(single), [],
+        `a single dated report must still reach the writer: ${single}`);
+    }
+    assert.ok(!/const SESSION_COUNT = /.test(code),
+      "the writer must not keep a private copy of the count matcher — that is the drift this cut removed");
+  });
+
+  // NEGATIVE CONTROL 1 — remove turnMutation from the workout writer and this must go red.
+  //
+  // The previous version of this check asked whether the STRING "turnMutation(" appeared anywhere
+  // in four files. workout.ts contains four separate inserts; three of them could lose their
+  // recording and the file would still contain the word. That is the proxy-instead-of-the-property
+  // defect this harness exists to catch, and it was in the harness. It now audits every durable
+  // insert in the server, which is how the 15 unrecorded ones were found.
+  check("EVERY durable write records itself on the turn — not just one per file", () => {
+    const LEDGER = /\.insert\((workoutLogs|stepLogs|weightLogs|mealLogs)\)/;
+    const WINDOW = 18;   // statement + .values({…}) + the recording that follows it
+    const unrecorded: string[] = [];
+    const walk = (dir: string, out: string[] = []): string[] => {
+      for (const e of readdirSync(dir)) {
+        const full = join(dir, e);
+        if (statSync(full).isDirectory()) walk(full, out);
+        else if (e.endsWith(".ts")) out.push(full);
+      }
+      return out;
+    };
+    for (const file of walk("server")) {
+      const lines = readFileSync(file, "utf-8").split("\n");
+      lines.forEach((line, i) => {
+        if (!LEDGER.test(line)) return;
+        const after = lines.slice(i, i + WINDOW).join("\n");
+        if (!/\bturnMutation\(/.test(after)) unrecorded.push(`${file}:${i + 1} — ${line.trim().slice(0, 60)}`);
+      });
+    }
+    assert.equal(unrecorded.length, 0,
+      `durable writes that the turn does not know about — the write-integrity check cannot see `
+      + `these, so the coach can say "Noted" over them:\n      ${unrecorded.join("\n      ")}`);
+  });
+
+  // NEGATIVE CONTROL 2 / P0-B — the temporal contract, graded on what actually gets written.
+  //
+  //   explicit today            → today write
+  //   explicit historical date  → retro write, on the day they named
+  //   a span, or ambiguous      → NO today write
+  //
+  // Graded by watching the durable-write records the turn emits, not by reading the source: the
+  // previous version of this check asserted a variable name, and a variable name is not a write.
+  check("a training report is written to the day the client actually named", async () => {
+    const { statedWhen } = await import("../server/utils");
+    const { sastDayKey } = await import("../server/sast");
+    const today = sastDayKey();
+    const yesterday = sastDayKey(new Date(Date.now() - 86_400_000));
+
+    // What the pipeline COMMITTED this turn. "INSERT workout … at=<date>" is the retro writer;
+    // an "INSERT workout" with no date is a write to today.
+    const writesFor = (msg: string) => serialise(async () => {
+      const from = CONSOLE_LINES.length;
+      await say(msg);
+      const workoutWrites = CONSOLE_LINES.slice(from).filter(l => /INSERT workout\b/.test(l));
+      return {
+        today: workoutWrites.some(l => !/\bat=/.test(l)),
+        retro: workoutWrites.map(l => /\bat=(\d{4}-\d{2}-\d{2})/.exec(l)?.[1]).filter(Boolean) as string[],
+      };
+    });
+
+    // 1. "I trained Monday" — a day is named. It may NOT become today.
+    assert.equal(statedWhen("I trained Monday").when, "historical");
+    const monday = await writesFor("I trained Monday");
+    assert.ok(!monday.today, "a session reported for Monday was written to today");
+    assert.ok(monday.retro.length === 0 || monday.retro.every(d => d !== today),
+      `the Monday session landed on today: ${monday.retro.join(",")}`);
+
+    // 2. "I trained last week" — a SPAN. No day to write, so nothing is written.
+    assert.equal(statedWhen("I trained last week").when, "ambiguous");
+    const lastWeek = await writesFor("I trained last week");
+    assert.ok(!lastWeek.today, "a session reported for 'last week' was written to today");
+
+    // 3. "I trained yesterday" still reaches the retro writer, on yesterday.
+    assert.equal(statedWhen("I trained yesterday").when, "historical");
+    const yday = await writesFor("I trained yesterday");
+    assert.ok(!yday.today, "yesterday's session was written to today");
+    assert.ok(yday.retro.includes(yesterday),
+      `yesterday's session was not written to ${yesterday}: ${yday.retro.join(",") || "no write"}`);
+
+    // 4. "I trained this morning" still logs today.
+    assert.equal(statedWhen("I trained this morning").when, "today");
+    const thisMorning = await writesFor("I trained this morning");
+    assert.ok(thisMorning.today, "an explicit today report no longer logs today");
+
+    // The writer must not keep a second opinion about dates.
+    const wk = readFileSync("server/handlers/workout.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(!/hasRetroDayRef/.test(wk) && !/parseMealDate\(m\)/.test(wk),
+      "the workout writer must consult the one temporal owner, not re-derive the day itself");
+    assert.ok(/const isDone = !alreadyLoggedThisTurn && when\.when === "today" &&/.test(wk),
+      "every today-write must be gated on the temporal verdict, including the anchored short forms");
+  });
+
+  // NEGATIVE CONTROL 1b (P0-1B) — the model may not confirm a training history the log denies.
+  check("workoutLogs says 1, the model says 4 — the client hears the record", async () => {
+    const { verifyBrainReply } = await import("../server/brain/reply-verifier");
+    const held = { modelAuthored: true, sessionsWindow: 1, sessionsWindowDays: 7 };
+    // The handset sentence, verbatim (2026-08-21 14:36).
+    const live = verifyBrainReply("That's impressive — all four workouts done this week! Noted 👌",
+      { clientMessage: "I did all four workouts this week", evidence: held });
+    assert.ok(!live.ok, "the coach agreed with a training history the record contradicts");
+    assert.ok(/\b1\b/.test(live.violation || ""), "…and the correction must name what the record holds");
+
+    // Agreeing with the CLIENT is not provenance. Held state outranks their own figure.
+    assert.ok(!verifyBrainReply("You've done 4 sessions this week.",
+      { clientMessage: "I did 4 sessions", evidence: held }).ok,
+      "the client saying it does not make it true when the log says otherwise");
+
+    // The count we hold, recited, must pass — and so must the programme, which is not a claim.
+    for (const ok of ["That's 1 session on the record this week.", "Your programme is 3 sessions a week.",
+                      "Your target is 4 workouts this week."]) {
+      assert.ok(verifyBrainReply(ok, { clientMessage: "", evidence: held }).ok,
+        `an honest reply was destroyed: ${ok}`);
+    }
+    // The window is half the claim: a 7-day count is not a lifetime total.
+    assert.ok(!verifyBrainReply("That's 1 workout in total since you started.",
+      { clientMessage: "", evidence: held }).ok, "a count for a window we never counted must not ship");
+    // Deterministic replies recite counts they read themselves.
+    assert.ok(verifyBrainReply("That's 4 workouts this week.",
+      { clientMessage: "", evidence: { sessionsWindow: 1, sessionsWindowDays: 7 } }).ok,
+      "the rule must apply to model prose only");
+    // The count has to REACH the turn, or none of the above can fire.
+    assert.ok(/turnEvidence\(\{ sessionsWindow/.test(readFileSync("server/day-ledger.ts", "utf-8")),
+      "the authoritative session count must be left on the turn by the read that already ran");
+  });
+
+  // P0-A — THE CHECK CANNOT BE WALKED AROUND BY ROUTE ────────────────────────────────────────
+  //
+  // The rule above only bound turns where getProgressTruth happened to run. Most model paths do
+  // not call it, and on those the boundary held no count — so the fallback ("the client said four
+  // themselves") passed the exact 21 August sentence. This drives a REAL turn through the one
+  // outbound boundary, with the log holding 1, having never called getProgressTruth.
+  check("a model count claim cannot reach the client on a turn that never read the count", async () => {
+    const { inTurn, turnUser, turnEvidence } = await import("../server/handlers/chat-log");
+    const { workoutLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+
+    g.__KAMLIFE_STUB_ROWS = new Map([[workoutLogs, [{ n: 1 }]]]);   // authoritative count = 1
+    try {
+      const out = await inTurn("text", "I did all four workouts this week", async () => {
+        turnUser(USER.id);
+        // A model path, and NOTHING else: no getProgressTruth, no canonical decision, no ledger
+        // read. This is the shape of a specialist-agent or short-reply turn.
+        turnEvidence({ modelAuthored: true });
+        return "That's four workouts this week — great going.";
+      });
+
+      assert.notEqual(out, "That's four workouts this week — great going.",
+        "the model's count claim reached the client unchanged on a turn that held no count");
+      assert.ok(!/\bfour\b|\b4\b/i.test(out),
+        `the replacement still carries the fabricated count: ${out}`);
+
+      // …and the refusal must be the EVIDENCED one. If the boundary had not fetched, the claim
+      // would still be refused, but for the weaker reason — and the next unevidenced route would
+      // be one read away from passing. This asserts the count was actually read on this turn.
+      const { verifyBrainReply } = await import("../server/brain/reply-verifier");
+      const unevidenced = verifyBrainReply("That's four workouts this week — great going.",
+        { clientMessage: "I did all four workouts this week", evidence: { modelAuthored: true } });
+      assert.ok(!unevidenced.ok, "with no count on the turn the claim must still be refused");
+      assert.ok(/no authoritative count/i.test(unevidenced.violation || ""),
+        "an absent count is refused for being absent — a number the client said is not the record");
+
+      // THE POSITIVE HALF, and the one that proves the fetch actually happens. With the log
+      // holding four, the same sentence is TRUE and must survive — which it can only do if the
+      // boundary read the count on this turn. Without the fetch it would be refused as
+      // unevidenced, and the fix would be destroying honest replies to close the dishonest one.
+      g.__KAMLIFE_STUB_ROWS = new Map([[workoutLogs, [{ n: 4 }]]]);
+      const truthful = await inTurn("text", "I did all four workouts this week", async () => {
+        turnUser(USER.id);
+        turnEvidence({ modelAuthored: true });
+        return "That's four workouts this week — great going.";
+      });
+      assert.equal(truthful, "That's four workouts this week — great going.",
+        "a count the record supports was destroyed — the boundary did not read it");
+
+      // The invariant the boundary now guarantees, stated directly: held 1, claimed 4, blocked.
+      const evidenced = verifyBrainReply("That's four workouts this week — great going.",
+        { clientMessage: "I did all four workouts this week",
+          evidence: { modelAuthored: true, sessionsWindow: 1, sessionsWindowDays: 7 } });
+      assert.ok(!evidenced.ok && /holds 1/.test(evidenced.violation || ""),
+        "authoritative 1 against a claimed 4 must be refused, naming the record");
+    } finally {
+      delete g.__KAMLIFE_STUB_ROWS;
+    }
+
+    const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/scope\.evidence\.sessionsWindow == null[\s\S]{0,120}?sessionCountsIn\(draft\)[\s\S]{0,400}?sessionsSince\(/.test(log),
+      "the boundary must fetch the authoritative count when a model draft asserts one and the turn holds none");
+  });
+
+  check("a confirmation requires a write that actually happened", () => {
+    const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/scope\.evidence\?\.modelAuthored && scope\.mutations\.length === 0/.test(log),
+      "the boundary must know the turn wrote nothing");
+    assert.ok(/CLAIMS_A_WRITE/.test(log) && /recordFalseConfirmation\(\)/.test(log),
+      "…refuse the confirmation, and count it");
+  });
+
+  // ── P0-2 · THE MORNING BRIEF CANNOT CONTRADICT ITSELF ─────────────────────────────────────
+  check("a rest day cannot be told to train", async () => {
+    // The 06:00 brief sent "🛌 Rest day. No training" and "Get today's session done." in one
+    // message, because the rest-day headline was computed in morning.ts while the action line came
+    // from decideProactive — which was handed sessionsTarget: trainingDaysPerWeek regardless of
+    // what day it was. The decision owner could not know, so it did its job on false input.
+    const { chooseAction } = await import("../server/one-action");
+    const base = {
+      goal: "fat_loss", weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 2,
+      loggedToday: true, proteinPct: 0.8, caloriePct: 0.7, sessionsThisWeek: 0,
+      stepsToday: 3000, stepsTarget: 6000, hour: 7,
+    } as any;
+    const rest = chooseAction({ ...base, sessionsTarget: 0 });
+    assert.ok(!/session|train|gym/i.test(rest.todo),
+      `a rest day still produced a training instruction: ${rest.todo}`);
+    const training = chooseAction({ ...base, sessionsTarget: 4 });
+    assert.ok(/session|train/i.test(training.todo), "…and a training day still gets one");
+
+    const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/sessionsTarget: isTodayTrainingDay \?/.test(morning),
+      "the morning decision must be told whether today is a training day — the schedule is state, not a second policy");
+  });
+
+  // NEGATIVE CONTROL 3 — restore the STRUGGLING closing prescription and this must go red.
+  //
+  // Graded on the COMPLETE MESSAGE, not on decisionLine. decisionLine was already correct on
+  // 21 August; the contradiction came from a DIFFERENT part of the same message, so a test that
+  // only reads the decision cannot see the defect it is meant to catch.
+  check("the whole morning brief carries exactly one instruction, from one owner", async () => {
+    const { composeMorning, morningClosingLine } = await import("../server/morning-message");
+    const { carriesDirective } = await import("../server/brain/reply-verifier");
+
+    const restDay = ["*Today:*", "👟 8,500 steps", "🛌 Rest day. No training — stay on food and steps."];
+    const base = {
+      firstName: "Kam", targetFixLine: "", identityLine: "", streakLine: "", workoutLine: "",
+      yesterdayLine: "120g protein logged yesterday, against a 150g target.",
+      todayLines: restDay, decisionLine: "", breakfastAsk: "🍳 What's for breakfast?",
+      adaptLine: "", sickYesterday: false,
+    };
+
+    for (const trajectory of ["ON_A_RUN", "ON_TRACK", "RECOVERING", "STRUGGLING", "DISENGAGED"] as const) {
+      for (const activelyEngaged of [true, false]) {
+        const closingLine = morningClosingLine(trajectory, { activelyEngaged, completedSessions28: 2 }).trim();
+        const message = composeMorning({ ...base, closingLine });
+
+        // THE PART THAT IS NOT THE PLAN AND NOT THE DECISION MAY NOT INSTRUCT. On this brief the
+        // decision is `hold` — the honest verdict on a rest day — so ANY instruction in the
+        // message is a second authority, and on 21 August it was "let's get one in today" three
+        // lines under "Rest day. No training".
+        const narrative = message.split("\n\n")
+          .filter(p => !p.startsWith("*Today:*") && !restDay.some(l => p.includes(l)) && !p.startsWith("🍳"));
+        for (const part of narrative) {
+          for (const sentence of part.split(/(?<=[.!?])\s+/)) {
+            assert.ok(!carriesDirective(sentence),
+              `${trajectory}/engaged=${activelyEngaged}: the brief instructs outside the decision — `
+              + `"${sentence.trim()}" — in a message whose plan line says "Rest day. No training"`);
+          }
+        }
+        // REWRITTEN 2026-08-24. This asserted the sign-off still carried a NUMBER — which was the
+        // 28-day progress clock, since deleted as a second customer-facing scoreboard. Asserting
+        // its survival now demands the very behaviour that was removed. The property that still
+        // matters is the one this check exists for: whatever the sign-off says, the message
+        // carries exactly one instruction and it is the decision's. That is asserted above, for
+        // every trajectory. What is asserted here instead is that a genuinely LAPSED client is
+        // still recognised — the warm re-entry that survived the deletion.
+        if (!activelyEngaged && (trajectory === "RECOVERING" || trajectory === "DISENGAGED")) {
+          assert.match(message, /have you back/i,
+            `${trajectory}: a lapsed client lost their re-entry recognition`);
+        }
+      }
+    }
+
+    // …and when there IS a decision, it is the one instruction, and it arrives whole.
+    const withDecision = composeMorning({
+      ...base,
+      closingLine: morningClosingLine("STRUGGLING", { activelyEngaged: false, completedSessions28: 2 }).trim(),
+      decisionLine: "Kam — one thing today:\n\n*Log one meal today. Any meal.*\n\n_Six days of nothing logged is six days I can't coach._",
+    });
+    assert.ok(withDecision.includes("*Log one meal today. Any meal.*"), "the decision must reach the client intact");
+    assert.ok(!/get one in today|Reply 1 and I'll send it/i.test(withDecision),
+      "the closing line is prescribing beside the decision again");
+  });
+
+  // ── P0-3 · SILENCE IS NOT A TERMINAL STATE ────────────────────────────────────────────────
+  //
+  // REGRADED 2026-09-10 (Cut 1), and STRENGTHENED rather than relaxed. State plainly what changed
+  // and why, because this is the fifth assertion in this repo found pinned to an implementation
+  // instead of the promise it exists to protect.
+  //
+  // It asserted the SHAPE of the fix: `if (isDuplicateOutbound(phone, out)) { … out = … }` — a
+  // branch that replaced a repeated reply with "I gave you the same answer twice there…". The
+  // property it was written for is the sentence in its own message: a client who asks twice is
+  // telling us the first answer did not land, and that is when silence costs most.
+  //
+  // Two things were then proven post-transport on 7833ebb:
+  //   · That branch was already UNREACHABLE for its own case. enforceOutboundTruth ran the same
+  //     duplicate test one layer up and replaced the body with the outbound repair first, so the
+  //     second asking got "…give me one sec and ask me again." The green assertion below was
+  //     grading a branch the product could not enter.
+  //   · Suppression was never the right answer anyway. A truthful reply does not become untrue on
+  //     repetition, so the strongest form of this property is that NOTHING suppresses a reply.
+  //
+  // So the check now asserts the deletion is real and total, on both doors. That is a harder
+  // property than the one it replaces: the old version passed with a duplicate authority present,
+  // this one fails if any reactive duplicate authority comes back. The behavioural counterpart —
+  // the same question asked twice, answered twice, graded on the wire — is section 1 of
+  // script/pg-interaction-truth-acceptance.ts, which needs a database and cannot live here.
+  check("no authority suppresses a repeated reply, on either door", () => {
+    const wa = readFileSync("server/routes/whatsapp.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(!/isDuplicateOutbound\s*\(\s*phone\b/.test(wa),
+      "the reactive door must hold no duplicate-suppression branch — a client who asks twice is "
+      + "telling us the first answer did not land, and both the silence and the meta-reply punish "
+      + "them for it");
+    const oa = readFileSync("server/outbound-authority.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.match(oa, /if \(mode === "proactive" && isDuplicateOutbound\(/,
+      "the floor's duplicate rule must be gated to the proactive door — ungated, it refuses a "
+      + "truthful REPLY and hands the client the repair sentence instead");
+    assert.ok(/recordSilentTurnAvoided\("empty"\)/.test(wa),
+      "the one remaining silent-terminal cause must still be counted");
+    assert.ok(!/recordSilentTurnAvoided\("duplicate"\)/.test(wa),
+      "…and the cause that no longer exists must not still be counted, or the founder's "
+      + "self-check reports a permanent zero as though it were a measurement");
+  });
+
+  // NEGATIVE CONTROL 4 — remove the empty-response fallback and this must go red.
+  //
+  // Counting the silence was half a fix: `recordSilentTurnAvoided("empty"); return;` told US
+  // about the dropped turn and told the CLIENT nothing, which is the same 80 minutes of nothing
+  // the founder sat through on 21 August. The two silent-terminal causes get the same treatment.
+  check("an empty reply does not end the turn in silence either", () => {
+    const wa = readFileSync("server/routes/whatsapp.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const emptyBlock = /if \(!out\.trim\(\)\) \{([\s\S]*?)\n  \}/.exec(wa);
+    assert.ok(emptyBlock, "the empty-reply branch must exist");
+    assert.ok(!/\breturn;/.test(emptyBlock[1]),
+      "an empty reply must not end the turn in silence — the client is left staring at a message "
+      + "nobody answered, and knowing about it upstream does not answer it");
+    assert.ok(/out = /.test(emptyBlock[1]),
+      "…it must put an honest reply on the wire and carry on to the send");
+    // Both branches must reach the same door. A fallback that is assigned and then skipped is
+    // the same silence with extra steps.
+    const afterBranches = wa.slice(wa.indexOf("if (!out.trim())"));
+    assert.ok(/sendParts|sendTwilio|messages\.create/.test(afterBranches),
+      "the repaired reply must still be sent");
+  });
+
+  // ── MULTI-INTENT TURN: WRITE BEFORE COACHING (2026-08-22 live P0) ─────────────────────────
+  //
+  // 21 August 11:24, verbatim. One bubble carrying a date correction, a coaching question, a food
+  // report and a planning request. The food was never written: an EDUCATOR above the writer
+  // claimed the turn on "what" from the question clause, priced the livers, and told the client to
+  // "snap a photo when you get it". The verifier correctly refused a reply that priced a meal with
+  // no write behind it, and the repair path, reading an empty ledger, asked the client to log the
+  // meal they had just reported.
+  //
+  // THE INVARIANT: for an unambiguous durable fact, every applicable state write happens before
+  // any educational or coaching response can become final.
+  const HANDSET = "That day is today\nWhat's the plan for me?\n"
+    + "My breakfast was 3 slices of bread, eggs and chicken livers\n\nGuide for the rest of the day";
+
+  // Durable writes are observed through the turn's own mutation log — the record the write-
+  // integrity boundary already trusts — not by reading source or trusting a reply's wording.
+  const writesFor = (msg: string) => serialise(async () => {
+    const from = CONSOLE_LINES.length;
+    const out = await say(msg);
+    const lines = CONSOLE_LINES.slice(from);
+    return {
+      out,
+      meal: lines.some(l => /INSERT meal/i.test(l)),
+      workout: lines.some(l => /INSERT workout/i.test(l)),
+      continues: lines.some(l => /question continues to Coach K/i.test(l)),
+      amended: lines.some(l => /UPDATE meal/i.test(l)),
+      owed: lines.some(l => /\[TURN_OWED\]/.test(l)),
+      mealDays: lines.filter(l => /INSERT meal/i.test(l)).map(l => /at=(\S+ \S+ \d+)/.exec(l)?.[1] || "").filter(Boolean),
+      backfillWorkoutDays: lines.filter(l => /\[BACKFILL\] INSERT workout/.test(l)).map(l => /at=(\d{4}-\d{2}-\d{2})/.exec(l)?.[1] || "").filter(Boolean),
+      // EVERY workout write this turn, whoever made it — a duplicate row on another day is the
+      // defect the one-write-per-domain guard exists to stop, and it is invisible if we only
+      // count the backfill's own writes.
+      allWorkoutWrites: lines.filter(l => /INSERT workout/i.test(l)).length,
+      allStepWrites: lines.filter(l => /INSERT steps/i.test(l)).length,
+      backfillStepDays: lines.filter(l => /\[BACKFILL\] INSERT steps/.test(l)).map(l => /at=(\d{4}-\d{2}-\d{2})/.exec(l)?.[1] || "").filter(Boolean),
+    };
+  });
+
+  check("the handset turn: the meal is written, and the coach does not ask for it again", async () => {
+    const r = await writesFor(HANDSET);
+    assert.ok(r.meal, "the breakfast the client reported was not written");
+    assert.ok(!/log a meal or your steps and ask me again/i.test(r.out),
+      `the client was asked to log the meal they just reported: ${r.out}`);
+    assert.ok(!/snap a photo when you get it/i.test(r.out),
+      "an educator answered a finished breakfast as a future street purchase");
+    assert.ok(!/send the items in one line/i.test(r.out),
+      `mustForceFoodLog stole the turn after the write: ${r.out}`);
+    assert.ok(!/plate method/i.test(r.out),
+      `the plate educator stole the continuation: ${r.out.slice(0, 180)}`);
+  });
+
+  check("a fact is not vetoed by a question in another clause — and not only for food", async () => {
+    const food = await writesFor("My breakfast was 3 slices of bread, eggs and chicken livers. What's the plan for today?");
+    assert.ok(food.meal, "food + question lost the meal");
+    const workout = await writesFor("I trained chest today. What should I eat now?");
+    assert.ok(workout.workout, "workout + question lost the session — the fix is food-specific");
+    // The question BEFORE the fact, and a planning clause after it — both suppressed the report
+    // at a different layer (the door's veto, and the fact parser's own planning guard).
+    for (const both of ["My breakfast was eggs and pap. What should I eat next?",
+                        "Is that enough protein? My breakfast was eggs and pap."]) {
+      assert.ok((await writesFor(both)).meal, `a reported meal was lost to its neighbour clause: ${both}`);
+    }
+    // …and an ASK is still an ask. These must write nothing.
+    for (const ask of ["Is chicken good for me?", "What should I eat for lunch?",
+                       "I'm at the taxi rank, what should I get?", "Can I have a beer tonight?",
+                       "Should I hit the gym today?", "Did I train today?",
+                       "I'll have chicken and rice later", "Is a kota ok?"]) {
+      const r = await writesFor(ask);
+      assert.ok(!r.meal && !r.workout, `a question was written as a fact: "${ask}" → ${r.out.slice(0, 60)}`);
+    }
+  });
+
+  check("a handler that stands down for an owed write does not lose its own answer", async () => {
+    // "No send removed until its behaviour is accounted for by the new owner." The supplement
+    // confirmation is the only thing that knows what creatine is; it must survive the stand-down.
+    const r = await writesFor("I took my creatine. My breakfast was eggs and pap.");
+    assert.ok(r.meal, "the meal beside the supplement was lost");
+    assert.ok(/taken|creatine/i.test(r.out), `the supplement confirmation vanished: ${r.out}`);
+  });
+
+  check("committed means committed", async () => {
+    const { durableDomains } = await import("../server/understanding/messy-intake");
+    assert.deepEqual(durableDomains([]), [], "an empty turn has committed nothing");
+    assert.deepEqual(durableDomains(["INSERT meal kcal=669 prot=63"]), ["food"]);
+    // The 21 August turn "But I'll be at restaurants / Come on / Did you even log the food?"
+    // carries no food and wrote nothing, and printed `[TURN] committed food`.
+    assert.deepEqual(durableDomains(["TURN committed food"]), [],
+      "a ledger key is not a row — `committed` must read the durable write record");
+    const routes = readFileSync("server/routes.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/durableWrites: turnMutations\(\)/.test(routes),
+      "resolveTurn must be told what was durably written, not left to infer it");
+    assert.ok(/factsStillOwed\(\)\.length === 0 && !mustStayDeterministic/.test(routes),
+      "the engine is a mouth above the writers and must stand down on an owed fact");
+  });
+
+  // WRITE → COACH (2026-08-22). The meal now writes; the turn still died at the ack because
+  // alsoAsksCoach required isMultiPartAsk (≥35 words / two '?') or a feeling. The handset
+  // bubble is 27 words and one '?'. Continuation is: question AND this turn durably wrote.
+  check("a question after a durable write continues — the ack is not terminal", async () => {
+    const { resolveTurn, newTurnLedger, commitFact, durableDomains } = await import("../server/understanding/messy-intake");
+    const { looksLikeQuestion } = await import("../server/utils");
+
+    const eggs = "I had eggs";
+    assert.equal(looksLikeQuestion(eggs), false);
+    const eggsLedger = newTurnLedger(["food"]);
+    commitFact(eggsLedger, "food", "Got it — eggs.");
+    const eggsResolved = resolveTurn(eggsLedger, {
+      hasFeeling: false,
+      alsoAsksCoach: looksLikeQuestion(eggs) && durableDomains(["INSERT meal"]).length > 0,
+      durableWrites: ["INSERT meal"],
+    });
+    assert.ok(eggsResolved.reply, "a food report with no question must still ack");
+    assert.ok(/got it/i.test(eggsResolved.reply!), `ack vanished: ${eggsResolved.reply}`);
+
+    const permission = "Is chicken liver okay?";
+    assert.equal(looksLikeQuestion(permission), true);
+    const permResolved = resolveTurn(newTurnLedger(), {
+      hasFeeling: false,
+      alsoAsksCoach: looksLikeQuestion(permission) && durableDomains([]).length > 0,
+      durableWrites: [],
+    });
+    assert.equal(permResolved.reply, null, "no write → no ack; existing question path continues");
+    assert.equal(permResolved.committed, "");
+
+    const plan = "I had eggs. What's the plan for the rest of my day?";
+    assert.equal(looksLikeQuestion(plan), true);
+    const planLedger = newTurnLedger(["food"]);
+    commitFact(planLedger, "food", "Got it — eggs.");
+    const planResolved = resolveTurn(planLedger, {
+      hasFeeling: false,
+      alsoAsksCoach: looksLikeQuestion(plan) && durableDomains(["INSERT meal kcal=1"]).length > 0,
+      durableWrites: ["INSERT meal kcal=1"],
+    });
+    assert.equal(planResolved.reply, null, "write + question must not finish at the ack");
+    assert.equal(planResolved.committed, "food");
+
+    const handsetLedger = newTurnLedger(["food"]);
+    commitFact(handsetLedger, "food", "Got it — bread, eggs, chicken livers.");
+    const handsetResolved = resolveTurn(handsetLedger, {
+      hasFeeling: false,
+      alsoAsksCoach: looksLikeQuestion(HANDSET) && durableDomains(["INSERT meal"]).length > 0,
+      durableWrites: ["INSERT meal"],
+    });
+    assert.equal(looksLikeQuestion(HANDSET), true, "the handset bubble is a question");
+    assert.equal(handsetResolved.reply, null, "the handset ack must not be terminal");
+  });
+
+  check("I had eggs acks; a plan-ask after a meal write continues; a bare food question does not write", async () => {
+    const report = await writesFor("I had eggs");
+    assert.ok(report.meal, "I had eggs must write");
+    assert.ok(!report.continues, "a report with no question must not continue to the coach");
+    assert.ok(/\b(got it|logged)\b/i.test(report.out), `ack-only vanished: ${report.out}`);
+
+    const ask = await writesFor("Is chicken liver okay?");
+    assert.ok(!ask.meal, "a permission ask must not write a meal");
+
+    const both = await writesFor("I had eggs. What's the plan for the rest of my day?");
+    assert.ok(both.meal, "eggs + plan lost the meal");
+    assert.ok(both.continues, "eggs + plan finished at the ack — the plan never ran");
+    assert.ok(!/log a meal or your steps and ask me again/i.test(both.out), both.out);
+    assert.ok(!/send the items in one line/i.test(both.out),
+      `mustForceFoodLog asked them to retype a meal that was written: ${both.out}`);
+
+    const live = await writesFor(HANDSET);
+    assert.ok(live.meal, "handset breakfast not written");
+    assert.ok(live.continues, "handset turn died at the ack — coaching request discarded");
+    assert.ok(!/log a meal or your steps and ask me again/i.test(live.out), live.out);
+    assert.ok(!/send the items in one line/i.test(live.out), live.out);
+    assert.ok(!/plate method/i.test(live.out),
+      `misc plate stole the day-plan: ${live.out.slice(0, 180)}`);
+
+    const rest = await writesFor("My breakfast was 3 slices of bread, eggs and chicken livers.\nGuide the rest of the day?");
+    assert.ok(rest.meal, "exact regression lost the meal");
+    assert.ok(rest.continues, "exact regression died at the ack");
+    assert.ok(!/plate method/i.test(rest.out),
+      `plate educator consumed the rest-of-day ask: ${rest.out.slice(0, 180)}`);
+  });
+
+  check("a genuine plate ask still owns the turn — only a write on this turn stands it down", async () => {
+    const plate = await writesFor("show me the breakfast plate");
+    assert.ok(!plate.meal, "a plate ask must not log a meal");
+    assert.ok(/plate method/i.test(plate.out), `genuine plate request lost the guide: ${plate.out.slice(0, 160)}`);
+    assert.ok(!plate.continues, "a plate-only ask is not a write-then-coach continuation");
+
+    const routes = readFileSync("server/routes.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    const misc = readFileSync("server/handlers/misc-commands.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/wroteThisTurn/.test(routes) && /if \(wroteThisTurn\) return null/.test(misc),
+      "the plate educator must stand down on wroteThisTurn — deleting getPortionGuide is not the fix");
+    assert.ok(/getPortionGuide\(mealType\)/.test(misc),
+      "NEGATIVE CONTROL: the plate capability stays; ownership is what changed");
+  });
+
+  check("continuation is load-bearing — isMultiPartAsk must not gate alsoAsksCoach", () => {
+    const routes = readFileSync("server/routes.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/alsoAsksCoach: looksLikeQuestion\(message\) && durableDomains\(turnMutations\(\)\)\.length > 0/.test(routes),
+      "alsoAsksCoach must be: question AND this turn durably wrote");
+    assert.ok(!/alsoAsksCoach: looksLikeQuestion\(message\) && \(isMultiPartAsk/.test(routes),
+      "NEGATIVE CONTROL: restoring isMultiPartAsk as the continuation gate must fail this test — the handset is 27 words and one '?'");
+    assert.ok(/mustForceFoodLog && !durableDomains\(turnMutations\(\)\)\.includes\("food"\)/.test(routes),
+      "mustForceFoodLog must not steal a turn that already wrote the meal");
+    // chooseAction stays the owner; continuation reaches it only because handleGptBlock sits
+    // below resolveTurn. Position is the guarantee — do not invent a second decision path.
+    const resolveAt = routes.indexOf("resolveTurn(turn,");
+    const gptAt = routes.indexOf("handleGptBlock({");
+    const decisionOwner = readFileSync("server/handlers/gpt-block.ts", "utf-8");
+    assert.ok(resolveAt > 0 && gptAt > resolveAt,
+      "GPT must run AFTER the write/resolve, so canonicalDecision sees the new row");
+    assert.ok(/canonicalDecision\(user/.test(decisionOwner),
+      "the continuation path still decides through canonicalDecision → chooseAction");
+  });
+
+  check("specialists are advisors — they cannot be the WhatsApp mouth", () => {
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(!/gptReply = await nutritionAgent\(/.test(gpt), "nutritionAgent is still a mouth");
+    assert.ok(!/gptReply = await programmingAgent\(/.test(gpt), "programmingAgent is still a mouth");
+    assert.ok(!/gptReply = await mindsetAgent\(/.test(gpt), "mindsetAgent is still a mouth");
+    assert.ok(!/gptReply = await adminAgent\(/.test(gpt), "adminAgent is still a mouth");
+    assert.ok(/specialistNotes = factsOnlyNotes\(await nutritionAgent\(/.test(gpt), "nutrition must still supply notes");
+    assert.ok(/DOMAIN NOTES/.test(gpt), "notes must be labelled as not-the-reply");
+    assert.ok(/decisionBrief\(decision\)/.test(gpt), "the one mouth still receives the canonical decision");
+    const notesAt = gpt.indexOf("factsOnlyNotes(await nutritionAgent");
+    const mouthAt = gpt.indexOf("askCoachK(message, user, finalInstruction");
+    assert.ok(notesAt > 0 && mouthAt > notesAt, "askCoachK must run AFTER the specialist, as the mouth");
+    const agents = readFileSync("server/agents.ts", "utf-8");
+    assert.ok(/ADVISOR_LIMIT/.test(agents), "specialists must not be told to always end with an action");
+    assert.ok(!/Always end with one specific action/.test(agents),
+      "NEGATIVE CONTROL: restoring HARD_LIMIT on specialists would re-invent the 13:27 walk");
+  });
+
+  check("salient situation is one line from client facts, not a chat dump", async () => {
+    const { extractSalientSituation } = await import("../server/memory");
+    const birthday = extractSalientSituation([
+      "This weekend is my girlfriend's birthday. We going to restaurants.",
+      "That day is today\nWhat's the plan for me?\nMy breakfast was eggs\nGuide for the rest of the day",
+    ]);
+    assert.match(birthday, /celebration outing|restaurant/i);
+    assert.ok(!birthday.includes("eggs"), "breakfast is state, not situation");
+    assert.equal(extractSalientSituation(["I had eggs"]), "");
+    assert.equal(extractSalientSituation(["show me the breakfast plate"]), "");
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
+    assert.ok(/loadSalientSituation\(phone, message\)/.test(gpt),
+      "the one mouth must receive the situation line");
+    assert.ok(!/OccasionEngine|RelationshipContextService/.test(gpt),
+      "do not invent a situation service");
+  });
+
+  check("HOLD cannot be turned into a walk by leftover specialist copy", () => {
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/do not add an action from it/.test(gpt),
+      "DOMAIN NOTES must forbid turning HOLD into an action");
+    const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/stripModelDirectives\(draft, scope\.evidence\)/.test(log),
+      "HOLD still strips specialist-shaped instructions at the chokepoint");
+  });
+
+  check("DOMAIN NOTES are facts only — chicken/rice advice cannot become a second action", async () => {
+    const { factsOnlyNotes } = await import("../server/agents");
+    const leaked = factsOnlyNotes(
+      "How about grilled chicken with mixed veggies and rice? Also try to get a 20-minute walk in.",
+    );
+    assert.equal(leaked, "", "unprefixed advice must be discarded, not forwarded to the Coach");
+    const smuggled = factsOnlyNotes(
+      "OPTION: grilled chicken and rice\nOPTION: take a 20-minute walk\nFACT: breakfast logged bread, eggs, chicken livers\nSTATE: protein 38g of 186g",
+    );
+    assert.match(smuggled, /FACT: breakfast/);
+    assert.match(smuggled, /STATE: protein/);
+    assert.ok(!/OPTION:/i.test(smuggled), "OPTION is a recommendation with a prefix — drop it");
+    assert.ok(!/walk|how about/i.test(smuggled));
+    const agents = readFileSync("server/agents.ts", "utf-8");
+    assert.ok(/FACT: <one observed/.test(agents) && /No OPTION lines/.test(agents),
+      "advisor contract must demand FACT/STATE only");
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
+    assert.ok(/factsOnlyNotes\(await nutritionAgent/.test(gpt), "nutrition notes must pass the facts-only gate");
+    assert.ok(!/Always end with one specific action/.test(agents),
+      "NEGATIVE CONTROL: restoring HARD_LIMIT would re-invent the 13:27 walk");
+    const brief = readFileSync("server/understanding/live.ts", "utf-8");
+    assert.ok(/Write CONTEXT only/.test(brief), "the model is not asked to rephrase the action");
+    assert.ok(!/Say this in your own words/.test(brief),
+      "NEGATIVE CONTROL: restoring 'say this in your own words' re-opens the plate invention");
+    const verifier = readFileSync("server/brain/reply-verifier.ts", "utf-8");
+    assert.ok(/isImplementationChoice\(sentence\)/.test(verifier),
+      "the chokepoint must drop implementation choice, not only domain-tagged directives");
+  });
+
+  check("morning breakfast replay uses the meal row, never a mixed chat bubble", async () => {
+    const { breakfastReplayLine } = await import("../server/morning-message");
+    const mixed = {
+      rawMessage: "That day is today\nWhat's the plan for me?\nMy breakfast was 3 slices of bread, eggs and chicken livers\nGuide for the rest of the day",
+      items: [{ name: "Bread" }, { name: "Eggs" }, { name: "Chicken livers" }],
+      mealLabel: "breakfast",
+    };
+    const replay = breakfastReplayLine(mixed);
+    assert.match(replay, /Bread/i);
+    assert.match(replay, /Eggs/i);
+    assert.ok(!/that day is today/i.test(replay), "must not replay the coaching bubble");
+    assert.ok(!/guide for the rest/i.test(replay));
+    assert.ok(!/\?/.test(replay));
+    assert.equal(
+      breakfastReplayLine({ rawMessage: mixed.rawMessage, items: [], mealLabel: "breakfast" }),
+      "",
+      "raw mixed bubble with no items is not a meal",
+    );
+    assert.equal(breakfastReplayLine({ rawMessage: "2 eggs and toast", items: [], mealLabel: "breakfast" }), "2 eggs and toast");
+    const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/from\(mealLogs\)/.test(morning) && /breakfastReplayLine/.test(morning),
+      "morning must read mealLogs, not FOOD_LOG.message_in");
+    assert.ok(!/chatHistory\.messageIn/.test(morning),
+      "NEGATIVE CONTROL: restoring chatHistory.message_in as the breakfast source must fail");
+  });
+
+  check("ops alerts cannot enter a client thread", () => {
+    const sched = readFileSync("server/scheduler.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/resolveOpsAlertMsisdn\(\)/.test(sched), "scheduler diagnostics must go through the ops gate");
+    assert.ok(!/COACH_ALERT_PHONE \|\| process\.env\.ADMIN_PHONE_OVERRIDE/.test(sched),
+      "ADMIN_PHONE_OVERRIDE must not be a silent fallback onto a client number");
+    const checklist = sched.slice(sched.indexOf("run(\"0 7 * * *\"") >= 0 ? sched.indexOf("0 7 * * *") : sched.indexOf("Setup Checklist"));
+    assert.ok(/resolveOpsAlertMsisdn/.test(sched), "setup checklist uses the ops gate");
+    const shared = readFileSync("server/scheduler/shared.ts", "utf-8");
+    assert.ok(/destination is a coached client/.test(shared), "a client number must refuse the send");
+  });
+
+  check("WOW cannot manufacture a diagnostic question", async () => {
+    const { sanitizeCoachReply } = await import("../server/handlers/food-scanner");
+    const { isDiagnosticQuestion, isBareReaction, bareReactionFallback } = await import("../server/reaction-guard");
+    assert.equal(isBareReaction("WOW"), true);
+    assert.equal(isDiagnosticQuestion("What happened? Tell me."), true);
+    const out = sanitizeCoachReply("What happened? Tell me.", "WOW");
+    assert.ok(!isDiagnosticQuestion(out), "bare WOW must not ship 'what happened?'");
+    assert.ok(!/what happened/i.test(out));
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8");
+    assert.ok(/isDiagnosticQuestion\(shortReply\)/.test(gpt), "short-reply path must catch the diagnostic");
+    assert.ok(!/Ask what happened\. Two words/.test(readFileSync("server/coach-prompt.ts", "utf-8")),
+      "NEGATIVE CONTROL: restoring 'Ask what happened' for reactions must fail");
+    void bareReactionFallback;
+  });
+
+  check("recall claims require evidence — birthday weekend, targets, miss", async () => {
+    const { groundedRecallAnswer, looksLikeRecallQuestion } = await import("../server/memory");
+    const prior = ["This weekend is my girlfriend's birthday. We're going out."];
+    const q = "Do you remember what I said about my weekend?";
+    assert.equal(looksLikeRecallQuestion(q), true);
+    const hit = groundedRecallAnswer({ question: q, clientMessages: prior });
+    assert.match(hit, /girlfriend'?s birthday/i);
+    assert.ok(!/usually different/i.test(hit), "must not invent a generic weekend memory");
+    assert.match(hit, /^Yes — you said:/);
+
+    const viaSituation = groundedRecallAnswer({
+      question: q,
+      clientMessages: ["That day is today. Girlfriend's birthday. Going to restaurants."],
+    });
+    assert.match(viaSituation, /girlfriend'?s birthday/i);
+    assert.ok(!/usually different/i.test(viaSituation));
+
+    const miss = groundedRecallAnswer({
+      question: "Do you remember what I said about Saturday?",
+      clientMessages: ["I had eggs for breakfast"],
+    });
+    assert.equal(miss, "I don't have the exact detail in front of me. Remind me.");
+    assert.ok(!/^Yes/i.test(miss));
+
+    const targets = groundedRecallAnswer({
+      question: "Do you remember my target?",
+      clientMessages: [],
+      calorieTarget: 2800,
+      proteinTarget: 195,
+      stepsTarget: 6000,
+    });
+    assert.match(targets, /2800/);
+    assert.match(targets, /195/);
+    assert.ok(!/usually/i.test(targets));
+
+    const trained = groundedRecallAnswer({
+      question: "Do you remember when I last trained?",
+      clientMessages: [],
+      lastWorkoutDate: "2026-08-17T08:00:00.000Z",
+    });
+    assert.match(trained, /17/i);
+    assert.ok(!/usually/i.test(trained));
+
+    const noTrain = groundedRecallAnswer({
+      question: "Do you remember when I last trained?",
+      clientMessages: [],
+    });
+    assert.equal(noTrain, "I don't have the exact detail in front of me. Remind me.");
+
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/looksLikeRecallQuestion\(message\)/.test(gpt) && /answerRecall\(user, message\)/.test(gpt),
+      "recall must not fall through to GPT");
+    const recallAt = gpt.indexOf("looksLikeRecallQuestion(message)");
+    const composeAt = gpt.indexOf("if (decision.todo)");
+    assert.ok(recallAt > 0 && recallAt < composeAt, "recall must run before the decision-turn mouth");
+  });
+
+  check("decision-turn mouth is structural — attacker plates cannot sit above PROTEIN", async () => {
+    const { composeDecisionTurn, renderActionLine } = await import("../server/one-action");
+    const { frameSituationForClient, extractSalientSituation } = await import("../server/memory");
+    const PROTEIN = renderActionLine("Make your next meal a proper protein meal.");
+    const REST = renderActionLine("Rest today — your body is doing the work.");
+    const plates = [
+      "How about grilled chicken and rice?",
+      "Eggs tonight.",
+      "Maybe have some chicken.",
+      "Your next meal could be eggs and toast.",
+      "Chicken and rice would work.",
+      "Have chicken and rice.",
+      "Go with a light gym session.",
+    ];
+    const frame = frameSituationForClient(extractSalientSituation([
+      "That day is today. It's my girlfriend's birthday. We're going to restaurants.",
+    ]));
+    const out = composeDecisionTurn(frame, PROTEIN);
+    for (const p of plates) {
+      assert.ok(!out.toLowerCase().includes(p.toLowerCase().replace(/[?.]$/, "")),
+        `decision turn shipped a second instruction: ${p}`);
+    }
+    assert.ok(/birthday outing/i.test(out));
+    assert.ok(out.includes(PROTEIN) || /protein meal/i.test(out));
+    const restOut = composeDecisionTurn("", REST);
+    assert.ok(!/gym session/i.test(restOut) && /Rest today/i.test(restOut));
+
+    const gpt = readFileSync("server/handlers/gpt-block.ts", "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(/if \(decision\.todo\)/.test(gpt) && /composeDecisionTurn\(/.test(gpt),
+      "gpt-block must compose on a decision turn instead of asking the model to write the action");
+  });
+
+  // ── COACH CONTINUITY SLICE (2026-08-24) ──────────────────────────────────────────────────
+  check("continuity: this week is a SAST calendar week, not a rolling 7 days", async () => {
+    const { sastWeekStart, sastDayKey } = await import("../server/sast");
+    const monday = new Date("2026-08-24T04:00:00Z"); // 06:00 SAST Monday
+    assert.equal(sastDayKey(sastWeekStart(monday)), "2026-08-24");
+    const friday = new Date("2026-08-21T16:00:00Z");
+    assert.equal(sastDayKey(sastWeekStart(friday)), "2026-08-17");
+    const live = readFileSync("server/understanding/live.ts", "utf-8");
+    assert.ok(/sessionsThisCalendarWeek\(user\.id\)/.test(live),
+      "canonicalDecision must count this SAST week, not getProgressTruth({days:7})");
+    const cmd = readFileSync("server/handlers/one-action-command.ts", "utf-8");
+    assert.ok(/const weekStart = sastWeekStart\(\)/.test(cmd),
+      "reactive one-action must count this SAST calendar week");
+  });
+
+  check("continuity: a week-count claim never invents dates, and never says Noted", async () => {
+    const { attributableWeekSessionDates, weekStartForTrainingClaim } = await import("../server/workout-state");
+    const { sessionCountsIn } = await import("../server/utils");
+    assert.deepEqual(sessionCountsIn("I did all four workouts this week"), [4]);
+    const friday = new Date("2026-08-21T16:00:00Z"); // Friday this week — Fri is not past
+    const thisWeek = weekStartForTrainingClaim("I did all four workouts this week", friday)!;
+    assert.equal(attributableWeekSessionDates({
+      claimed: 4, trainingDaysPerWeek: 4, weekStart: thisWeek, existingDayKeys: [], now: friday,
+    }), null, "Friday cannot place all four days — today is still one of them");
+    const sunday = new Date("2026-08-23T16:00:00Z");
+    const lastWeek = weekStartForTrainingClaim("I did all four last week", sunday)!;
+    const placed = attributableWeekSessionDates({
+      claimed: 4, trainingDaysPerWeek: 4, weekStart: lastWeek, existingDayKeys: [], now: sunday,
+    });
+    assert.ok(placed && placed.length === 4, "last week on Sunday is fully past and attributable");
+    assert.equal(attributableWeekSessionDates({
+      claimed: 4, trainingDaysPerWeek: 4, weekStart: lastWeek, existingDayKeys: ["2026-08-17"], now: sunday,
+    }), null, "existing rows → abstain, do not fill gaps");
+    assert.equal(attributableWeekSessionDates({
+      claimed: 3, trainingDaysPerWeek: 4, weekStart: lastWeek, existingDayKeys: [], now: sunday,
+    }), null, "claimed !== schedule → abstain");
+    const wk = readFileSync("server/handlers/workout.ts", "utf-8");
+    assert.ok(/I won't guess/.test(wk) && /WORKOUT_WEEK_REFUSE/.test(wk),
+      "unattributable count must refuse, not fall through to Noted");
+  });
+
+  check("continuity: last sentence can change the action; last night frames morning", async () => {
+    const { chooseAction, foodDayIsClosed } = await import("../server/one-action");
+    const { frameSituationForClient, extractSalientSituation, situationWhen } = await import("../server/memory");
+    const { morningClosingLine, composeMorning } = await import("../server/morning-message");
+    const closed = "Honestly, I won't be able to eat anymore for the rest of the day. We just going to have alcohol and zero calorie drinks";
+    assert.equal(foodDayIsClosed(closed), true);
+    const eat = chooseAction({
+      goal: "muscle_gain" as any, weeksOnProgramme: 5, daysSinceAnyLog: 0, daysSinceWeighIn: 2,
+      loggedToday: true, proteinPct: 0.4, caloriePct: 0.4, sessionsThisWeek: 0, sessionsTarget: 4,
+      stepsToday: 5000, stepsTarget: 6000, hour: 19, foodDayClosed: true,
+    });
+    assert.notEqual(eat.kind, "eat_more", "closed food day must stand eat_more down");
+    assert.notEqual(eat.kind, "protein", "closed food day must stand protein down too");
+    const still = chooseAction({
+      goal: "muscle_gain" as any, weeksOnProgramme: 5, daysSinceAnyLog: 0, daysSinceWeighIn: 2,
+      loggedToday: true, proteinPct: 0.4, caloriePct: 0.4, sessionsThisWeek: 0, sessionsTarget: 4,
+      stepsToday: 5000, stepsTarget: 6000, hour: 19, foodDayClosed: false,
+    });
+    assert.equal(still.kind, "eat_more", "negative control: without the constraint, eat_more still fires");
+
+    const line = extractSalientSituation(["This weekend is my girlfriend's birthday. We're going to restaurants."]);
+    const lastNight = frameSituationForClient(line, "last_night");
+    assert.match(lastNight, /last night/i);
+    assert.ok(!/today is the birthday/i.test(lastNight));
+    assert.equal(frameSituationForClient(line, "stale"), "");
+    const sundayNight = new Date("2026-08-23T18:00:00Z");
+    const mondayMorn = new Date("2026-08-24T04:00:00Z");
+    assert.equal(situationWhen([{ text: "birthday outing", at: sundayNight }], mondayMorn), "last_night");
+
+    // An engaged client gets no lapse copy AND no second clock. `/4 sessions/` used to be asserted
+    // here; that was the 28-day count, and it is gone rather than reworded (2026-08-24).
+    const engaged = morningClosingLine("STRUGGLING", { activelyEngaged: true, completedSessions28: 4 });
+    assert.ok(!/fresh page/i.test(engaged), "engaged client must not get lapse copy");
+    assert.ok(!/\d/.test(engaged), `engaged client was handed a progress score: ${engaged}`);
+    // "fresh page" was the STRUGGLING sign-off attached to the 28-day score; both are gone
+    // (2026-08-24). STRUGGLING now says nothing rather than scoring the client, and warm
+    // re-entry survives for the trajectories that actually mean a lapse.
+    const lapsed = morningClosingLine("STRUGGLING", { activelyEngaged: false, completedSessions28: 4 });
+    assert.ok(!/fresh page/i.test(lapsed) && !/\d/.test(lapsed),
+      `the deleted 28-day sign-off came back: ${lapsed}`);
+    for (const t of ["RECOVERING", "DISENGAGED"] as const) {
+      assert.match(morningClosingLine(t, { activelyEngaged: false, completedSessions28: 4 }),
+        /have you back/i, `${t}: a lapsed client lost their re-entry recognition`);
+    }
+    const brief = composeMorning({
+      firstName: "Kam", targetFixLine: "", identityLine: "", streakLine: "5-day food streak.",
+      workoutLine: "", yesterdayLine: "144g protein logged yesterday, against a 186g target.",
+      todayLines: ["*Today:*", "👟 6,000 steps", "💪 Training day. Reply *1* for your workout."],
+      closingLine: engaged, decisionLine: "*Get today's session done.*", breakfastAsk: "",
+      adaptLine: "", situationLine: lastNight, sickYesterday: false,
+    });
+    assert.match(brief, /last night was the birthday/i);
+    assert.ok(!/fresh page/i.test(brief));
+  });
+
+  check("continuity: how-far is progress truth; WOW is not a ticket", async () => {
+    const misc = readFileSync("server/handlers/misc-commands.ts", "utf-8");
+    const distAt = misc.indexOf("how far (?:am i");
+    const dirAt = misc.indexOf("looksLikeDirectionRequest(m)");
+    assert.ok(distAt > 0 && distAt < dirAt, "distance-to-goal must claim before the plan card");
+    const { bareReactionFallback, isDiagnosticQuestion } = await import("../server/reaction-guard");
+    const wow = bareReactionFallback("Kam");
+    assert.equal(isDiagnosticQuestion(wow), false);
+    assert.ok(!/menu/i.test(wow) && !/didn't work/i.test(wow) && !/what happened/i.test(wow));
+    const routes = readFileSync("server/routes.ts", "utf-8");
+    assert.ok(/bareReactionFallback\(_bfName\)/.test(routes), "OMG must reuse the reaction mouth, not a ticket form");
+    assert.ok(/foodDayIsClosed\(message\)/.test(routes), "feeling ack must not swallow a closed food day");
+  });
+
+
+  // ── COACH-LOOP SLICE, PR #50 (2026-08-24) ─────────────────────────────────────────────────
+  //
+  //   messy input → truthful state → correct window → latest constraint → chooseAction → one Coach
+  //
+  // Five contracts, each graded on behaviour or state, never on source-string presence.
+
+  check("1 . a factual deficit question is answered, not replaced by an action", async () => {
+    const reply = await serialise(() => say("Am I in a deficit? I've only had breakfast"));
+    assert.match(reply, /built into your target/i, `the deficit question was not answered: ${reply}`);
+    assert.match(reply, /\b2800\b/, "...from the client's own target, via the existing owner");
+    assert.ok(!/one thing today|stand on a scale/i.test(reply),
+      `the action ladder replaced the question: ${reply}`);
+  });
+
+  check("1b . a meal SLOT is not a food, and never writes a phantom meal", async () => {
+    // "had breakfast" fuzzy-matched the alias "sa breakfast" and resolved to McDonald's Big
+    // Breakfast - a 760 kcal row the client never ate. Both words were already in
+    // FUZZY_BLACKLIST; the blacklist was only ever applied to single words, not to the pairs.
+    const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+    for (const slot of ["I've only had breakfast", "I had breakfast", "what's for lunch"]) {
+      assert.deepEqual(scanForSAFoods(slot).map((f: any) => f.name), [],
+        `a bare meal slot resolved to a branded food: ${slot}`);
+    }
+    assert.deepEqual(
+      scanForSAFoods("my breakfast was 3 slices of bread, eggs and chicken livers").map((f: any) => f.name),
+      ["Bread", "Eggs", "Chicken livers"], "a named meal stopped scanning");
+    const r = await writesFor("Am I in a deficit? I've only had breakfast");
+    assert.ok(!r.meal, "a question about the deficit wrote a meal");
+    // …and the owed-fact gate must not hold the pipeline down for a fact no writer can commit.
+    // "had breakfast" names a meal SLOT: there is no row to write, so nothing is owed and the
+    // ordinary handlers may answer. Without this the gate stands every handler down forever and
+    // the turn survives only because the ledger compose happens to rescue the reply.
+    assert.ok(!r.owed, "the gate owed a food write for a message naming no food");
+  });
+
+  check("2 . a named missing item amends the meal instead of asking for it again", async () => {
+    const { mealLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+    // SEED INSIDE THE QUEUE. Setting the stub rows outside it lets another check's cleanup run
+    // between the assignment and the turn that needs them — the seeded breakfast vanished and
+    // this check graded an empty ledger.
+    const named = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [{
+        id: "parity-meal-1", mealLabel: "breakfast", kcalInt: 669, proteinInt: 63,
+        carbsInt: 60, fatInt: 25, items: [{ name: "Bread" }, { name: "Eggs" }],
+        loggedAt: new Date(NOW - 3600_000),
+      }]]]);
+      const from = CONSOLE_LINES.length;
+      const out = await say("You missed the black coffee");
+      const lines = CONSOLE_LINES.slice(from);
+      delete g.__KAMLIFE_STUB_ROWS;
+      return {
+        out,
+        meal: lines.some(l => /INSERT meal/i.test(l)),
+        amended: lines.some(l => /UPDATE meal/i.test(l)),
+      };
+    });
+    {
+      assert.match(named.out, /added Coffee \(black\)/i,
+        `a named missing item was not added: ${named.out}`);
+      assert.ok(!/which meal did i miss/i.test(named.out),
+        "the client was asked to restate a meal they had already described");
+      assert.ok(named.amended, "the amendment was not recorded as a durable mutation");
+      assert.ok(!named.meal, "the amendment created a SECOND meal row - the meal is double-counted");
+
+      for (const vague of ["you missed a meal", "you forgot my lunch", "you didn't log that"]) {
+        const r = await writesFor(vague);
+        assert.match(r.out, /which meal did i miss/i, `the clarification fallback was lost: ${vague}`);
+      }
+    }
+  });
+
+  check("2b . a correction lands on the day being corrected, or not at all", async () => {
+    // The amend window was "today, no upper bound", so "you missed the black coffee yesterday"
+    // silently moved the correction onto TODAY's row — corrupting a day the client can no longer
+    // see. The day is resolved by the one temporal owner; an unpinnable day is not written.
+    const { statedWhen } = await import("../server/utils");
+    const { sastDayKey } = await import("../server/sast");
+    const dayOf = (msg: string) => {
+      const w = statedWhen(msg);
+      return w.when === "ambiguous" ? "ambiguous" : sastDayKey(w.when === "today" ? new Date() : w.date);
+    };
+    assert.equal(dayOf("You missed the black coffee"), sastDayKey(), "same-day correction left today");
+    assert.equal(dayOf("You missed the black coffee yesterday"),
+      sastDayKey(new Date(Date.now() - 86_400_000)), "a yesterday correction did not resolve to yesterday");
+    assert.equal(dayOf("you missed the black coffee last week"), "ambiguous",
+      "a span was pinned to a day it does not name");
+
+    // THE WINDOW ITSELF. dayKey is derived from the same `dayStart` that builds the gte/lt bounds,
+    // so it reports the day the query was actually scoped to — not a restatement of the input.
+    const { appendItemsToRecentMeal } = await import("../server/day-ledger");
+    const { mealLogs } = await import("../shared/schema");
+    const coffee = [{ name: "Coffee (black)", category: "drink", typicalPortionGrams: 250,
+      typicalPortionCalories: 5, typicalPortionProtein: 0, carbsPer100g: 0, fatPer100g: 0 }];
+    const g = globalThis as any;
+    const scoped = await serialise(async () => {
+      // BOTH DAYS ARE SEEDED, and they have to be (2026-08-25, issue #63). This seeded only a
+      // YESTERDAY row and then asserted that a TODAY-scoped amend succeeded. It passed because the
+      // stub ignored `where`, so a today-scoped query was handed yesterday's row. Against a stub
+      // that honours the window, a correct implementation finds nothing — so the assertion below
+      // could never have failed for the right reason. One row per day is what the check meant.
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [{
+        id: "parity-day-row", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 86_400_000),
+      }, {
+        id: "parity-day-row-today", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 3600_000),
+      }]]]);
+      const yesterday = new Date(Date.now() - 86_400_000);
+      const out = {
+        today: await appendItemsToRecentMeal(USER.id, coffee as any),
+        yesterday: await appendItemsToRecentMeal(USER.id, coffee as any, yesterday),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+    assert.equal(scoped.today?.dayKey, sastDayKey(), "the same-day amend was scoped to another day");
+    assert.equal(scoped.yesterday?.dayKey, sastDayKey(new Date(Date.now() - 86_400_000)),
+      "a yesterday correction was written into a different day's window");
+    // NOTE, stated rather than implied: under the offline stub recomputeTodayFoodTotals returns
+    // zero either way, so a `calories` assertion here could not fail and is not made. What is
+    // graded instead is the sentence the client reads, in 2c — which is now rendered from
+    // `dayKey`, so the reply cannot disagree with the row that was written.
+  });
+
+  check("2c . the client is told which day was changed", async () => {
+    const { mealLogs } = await import("../shared/schema");
+    const { sastDayStart } = await import("../server/utils");
+    const g = globalThis as any;
+    const named = namedPastDay();
+    const replies = await serialise(async () => {
+      // One row per day the check corrects — see 2b. A single yesterday row made the today case
+      // vacuous under a stub that could not filter.
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [{
+        id: "parity-day-row-2", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 86_400_000),
+      }, {
+        id: "parity-day-row-2-today", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: new Date(NOW - 3600_000),
+      }, {
+        // …and the named day the check corrects — three days back, so it is never today and never
+        // yesterday, whichever day of the week the suite runs on. See namedPastDay.
+        id: "parity-day-row-2-named", mealLabel: "breakfast", kcalInt: 500, proteinInt: 40,
+        carbsInt: 50, fatInt: 20, items: [{ name: "Oats" }], loggedAt: named.at,
+      }]]]);
+      const out = {
+        today: await say("You missed the black coffee"),
+        yesterday: await say("You missed the black coffee yesterday"),
+        named: await say(`You missed the black coffee from ${named.name}`),
+        span: await say("you missed the black coffee last week"),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+    assert.match(replies.today, /to your breakfast/i, `same-day wording changed: ${replies.today}`);
+    assert.match(replies.yesterday, /yesterday'?s breakfast/i,
+      `a past-day correction did not name the day: ${replies.yesterday}`);
+    assert.ok(!/_Today:/.test(replies.yesterday), "a past-day correction quoted today's total");
+    assert.match(replies.named, new RegExp(`${named.name}'?s breakfast`, "i"),
+      `a named-day correction did not name the day: ${replies.named}`);
+    // …AND THE MEAL THEY NAMED. With dinner logged after breakfast, "at breakfast" must not
+    // attach to dinner — the date defect one axis over, found reviewing this cut.
+    const slotted = await serialise(async () => {
+      // ANCHORED TO THE SAST DAY, NOT TO "NOW MINUS SEVEN HOURS" (2026-09-01).
+      //
+      // Breakfast was seeded at NOW − 7h, which is the previous SAST day on any run before 07:00.
+      // The amend window is correctly bounded to one day, so before 07:00 the named breakfast row
+      // was not in it, the lookup fell through to dinner, and this check went red on the clock
+      // rather than on the code — it failed identically on dc3c308 and on main at 06:47 SAST.
+      // Both rows now sit inside the day the correction resolves to, at every hour.
+      const dayStart = sastDayStart().getTime();
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [
+        { id: "p-dinner", mealLabel: "dinner", kcalInt: 800, proteinInt: 50, carbsInt: 70,
+          fatInt: 30, items: [{ name: "Steak" }], loggedAt: new Date(dayStart + 19 * 3600_000) },
+        { id: "p-bfast", mealLabel: "breakfast", kcalInt: 669, proteinInt: 63, carbsInt: 60,
+          fatInt: 25, items: [{ name: "Bread" }], loggedAt: new Date(dayStart + 7 * 3600_000) },
+      ]]]);
+      const out = {
+        named: await say("You missed the black coffee at breakfast"),
+        unnamed: await say("You missed the black coffee"),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+    // AND THE CONTROL FOR THAT PREFERENCE: a named meal the day does not hold must not be
+    // silently redirected to the meal that happens to be newest. Seeded with dinner only, so the
+    // `find` fails and the old `|| rows[0]` fallback would attach the coffee to dinner.
+    const absentSlot = await serialise(async () => {
+      const dayStart = sastDayStart().getTime();
+      g.__KAMLIFE_STUB_ROWS = new Map([[mealLogs, [
+        { id: "p-dinner-only", mealLabel: "dinner", kcalInt: 800, proteinInt: 50, carbsInt: 70,
+          fatInt: 30, items: [{ name: "Steak" }], loggedAt: new Date(dayStart + 19 * 3600_000) },
+      ]]]);
+      const out = await say("You missed the black coffee at breakfast");
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+    assert.match(slotted.named, /to your breakfast/i,
+      `the client named the meal and it went elsewhere: ${slotted.named}`);
+    assert.match(slotted.unnamed, /to your dinner/i,
+      `with no meal named, the most recent must stand: ${slotted.unnamed}`);
+    assert.ok(!/to your dinner/i.test(absentSlot),
+      `the client named a meal the day does not hold and it was written to another: ${absentSlot}`);
+    assert.match(absentSlot, /which meal did i miss/i,
+      `a named meal that is absent must be asked about, not guessed: ${absentSlot}`);
+    assert.match(replies.span, /which meal did i miss/i,
+      `an unpinnable day was written instead of clarified: ${replies.span}`);
+  });
+
+  check("3 . feedback about the coach is recognised, and never answered with an action", async () => {
+    const { isCoachCriticism } = await import("../server/reaction-guard");
+    for (const criticism of ["Wow that's vague and robotic", "No this is a disaster",
+                             "You are not a coach", "you're not a real coach", "You're not listening",
+                             "You didn't read what I said"]) {
+      assert.ok(isCoachCriticism(criticism), `not recognised as feedback about us: ${criticism}`);
+    }
+    for (const ours of ["You didn't answer my question", "you never answered my question",
+                        "That's not what I asked"]) {
+      assert.ok(isCoachCriticism(ours), `a complaint about us was missed: ${ours}`);
+    }
+    for (const notCriticism of ["I feel like a disaster today", "You are not a doctor, I know",
+                                "I had eggs and pap", "I'm struggling with all of this",
+                                // SUBJECT MATTERS: the client's own admission is not a complaint.
+                                "I didn't answer your question"]) {
+      assert.ok(!isCoachCriticism(notCriticism), `a client's own life read as criticism: ${notCriticism}`);
+    }
+    const reply = await serialise(() => say("You are not a coach"));
+    assert.ok(!/one thing today|stand on a scale/i.test(reply),
+      `an unrelated instruction answered a criticism: ${reply}`);
+  });
+
+  check("4 . the latest explicit constraint reaches the decision, not FEELING_ACK", async () => {
+    const { foodDayIsClosed, chooseAction } = await import("../server/one-action");
+    for (const closed of ["I think I'm going to stop eating today", "I'm not eating anymore today",
+                          "I'm done eating for today", "No more food today"]) {
+      assert.ok(foodDayIsClosed(closed), `a stated cessation was not read as one: ${closed}`);
+    }
+    // THE CESSATION MUST APPLY TO EATING ITSELF. "done eating badly" / "done eating junk" describe
+    // the MANNER and the OBJECT — the client is still eating.
+    for (const open of ["I can't stop eating", "I cannot stop eating today",
+                        "I'm not eating junk today", "I'm eating out tonight",
+                        "I'm done eating badly", "I'm done eating junk",
+                        "I stopped eating gluten today", "I'm done eating out for today"]) {
+      assert.ok(!foodDayIsClosed(open), `the food day was closed by mistake: ${open}`);
+    }
+    for (const closed2 of ["I'm done eating", "I'm done eating for the night"]) {
+      assert.ok(foodDayIsClosed(closed2), `a real closure was lost to the manner guard: ${closed2}`);
+    }
+    const base = {
+      goal: "fat_loss", weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 1,
+      loggedToday: true, proteinPct: 0.3, caloriePct: 0.4, sessionsThisWeek: 2,
+      sessionsTarget: 4, stepsToday: 7000, stepsTarget: 8000, hour: 19,
+    } as any;
+    assert.match(chooseAction({ ...base, foodDayClosed: false }).todo, /protein|eat/i,
+      "the open-day control no longer produces a food action, so the closed-day assertion proves nothing");
+    assert.ok(!/\beat\b|protein/i.test(chooseAction({ ...base, foodDayClosed: true }).todo),
+      "a client who said they are done eating was told to eat");
+    const reply = await serialise(() => say("I think I'm going to stop eating today"));
+    assert.ok(!/showing up still counts|heard you on how you'?re feeling/i.test(reply),
+      `a stated constraint was answered as a feeling: ${reply}`);
+  });
+
+  // ── AN EXPLICIT REFUSAL DOMINATES TODAY'S WORKOUT (2026-08-24 live) ───────────────────────
+  //
+  //   "I am NOT training today. I will train tomorrow."
+  //   → a full session, post-workout nutrition and "Send DONE"
+  //
+  // routes.ts had a DEFERRAL matcher ("I'll do it later") requiring a first-person future verb
+  // and a later-time word; a plain negation of today matched none of it, and nothing else owned
+  // a refusal. trainingDayIsDeclined is the twin of foodDayIsClosed — a DayState input, not a
+  // routing predicate — and it reaches both the renderer and chooseAction.
+  check("5 . a refusal to train today dominates the workout, and a report still logs", async () => {
+    const { trainingDayIsDeclined, chooseAction } = await import("../server/one-action");
+    for (const refusal of ["I am not training today. I will train tomorrow",
+                           "no I'm not training today", "I'm training tomorrow not today",
+                           "I'm not doing the workout today", "Skipping the gym today",
+                           "I'll train tomorrow instead"]) {
+      assert.ok(trainingDayIsDeclined(refusal), `an explicit refusal was not read as one: ${refusal}`);
+    }
+    // THE INVERSE. A report of training is not a refusal of it, and a question is a request.
+    for (const notRefusal of ["I trained today", "I did my workout today", "I'm training today",
+                              "Can I do my workout tomorrow instead?", "What is tomorrow's session?",
+                              "workout", "I'm not eating anymore today",
+                              // A NEGATED CESSATION IS AN AFFIRMATION. These say they DID train,
+                              // and marking a completed session as declined is the worse error.
+                              "I didn't skip the gym today", "I never skip the gym today",
+                              "no way I'm skipping the gym today", "I did not skip my session today"]) {
+      assert.ok(!trainingDayIsDeclined(notRefusal), `wrongly read as a refusal: ${notRefusal}`);
+    }
+    // ADVERSARIAL REVIEW OF THIS CUT (2026-08-24). A tag question is still a statement — the
+    // blanket "?" exclusion put the live failure two characters away from returning.
+    assert.ok(trainingDayIsDeclined("I'm not training today, ok?"),
+      "a refusal with a tag question was read as a request");
+    for (const request of ["Can I do my workout tomorrow instead?", "Should I train today?",
+                           "Do I train today?", "What is tomorrow's session?"]) {
+      assert.ok(!trainingDayIsDeclined(request), `an interrogative was recorded as a constraint: ${request}`);
+    }
+    // …while a genuine refusal that uses the same verb must survive the guard.
+    for (const stillRefusal of ["Skipping the gym today", "I want to skip the gym today",
+                                "I'm skipping training today"]) {
+      assert.ok(trainingDayIsDeclined(stillRefusal), `the negation guard swallowed a refusal: ${stillRefusal}`);
+    }
+
+    // The decision owner's own contract, as a unit: sessionsTarget 0 means no session today.
+    // NOTE: the router returns the deferral reply before chooseAction runs on a refusal turn, so
+    // this asserts the contract, not a wiring path — and no wiring was added that nothing reaches.
+    const base = {
+      goal: "fat_loss", weeksOnProgramme: 4, daysSinceAnyLog: 0, daysSinceWeighIn: 2,
+      loggedToday: true, proteinPct: 0.9, caloriePct: 0.8, sessionsThisWeek: 0,
+      stepsToday: 3000, stepsTarget: 6000, hour: 9,
+    } as any;
+    assert.match(chooseAction({ ...base, sessionsTarget: 4 }).todo, /session|train/i,
+      "the training-day control no longer prescribes a session, so the refusal case proves nothing");
+    assert.ok(!/session|train|gym/i.test(chooseAction({ ...base, sessionsTarget: 0 }).todo),
+      "a client who said they are not training today was told to train");
+
+    // …and the renderer stands down rather than printing the session over the refusal.
+    for (const refusal of ["no I'm not training today", "I'm training tomorrow not today",
+                           "I am not training today. I will train tomorrow"]) {
+      const reply = await serialise(() => say(refusal));
+      assert.ok(!/Week \d|Next Session|Foundation Phase|Send \*?DONE/i.test(reply),
+        `today's session was printed over an explicit refusal: ${reply.slice(0, 90)}`);
+      assert.match(reply, /rest today|when you'?re ready/i,
+        `the refusal was not acknowledged: ${reply.slice(0, 90)}`);
+    }
+    // A REQUEST TO MOVE A WORKOUT IS A SCHEDULE DECISION, NOT A REQUEST TO RENDER IT.
+    // "Can I do my workout tomorrow instead?" answered with the session was the client asking
+    // permission and being handed the object. The renderer stays one message away, on their terms.
+    for (const ask of ["Can I do my workout tomorrow instead?", "Can I train tomorrow instead?"]) {
+      const reply = await serialise(() => say(ask));
+      assert.ok(!/Week \d|Next Session|Foundation Phase|Send \*?DONE/i.test(reply),
+        `a schedule question was answered with the workout: ${ask} → ${reply.slice(0, 80)}`);
+      assert.match(reply, /rest day|do this session tomorrow|do it later today/i,
+        `the schedule question got no schedule answer: ${ask} → ${reply.slice(0, 80)}`);
+    }
+    // …and asking to SEE it still renders it — including when the ASK is phrased as permission.
+    // "Can I get tomorrow's session?" is a possessive naming the object; "Can I do my workout
+    // tomorrow?" proposes a time. Grammar decides, not a verb list.
+    // THE RENDERER ANSWERED — a session, or its own rest-day answer for a day that has none.
+    //
+    // This asserted `Week \d` alone, which encodes an assumption the fixture cannot keep: with
+    // trainingDaysPerWeek 3 the schedule is Mon/Wed/Fri, so "tomorrow" is a rest day on four days
+    // out of seven and the renderer correctly returns "*Tuesday — Rest Day.*". It failed on
+    // main@266a8c2b for that reason and passed the day before. The property under test is the
+    // GRAMMAR — a possessive naming the object reaches the workout owner, rather than being
+    // answered as a schedule question — and the rest-day render is that owner answering.
+    const RENDERED = /Week \d|\*\s*\w+day\s+—\s+Rest Day/i;
+    for (const view of ["Show me tomorrow's workout.", "Tomorrow's workout?",
+                        "Can I see tomorrow's workout?", "Can I get tomorrow's session?"]) {
+      const reply = await serialise(() => say(view));
+      assert.match(reply, RENDERED, `a view request stopped rendering: ${view} → ${reply.slice(0, 70)}`);
+      // …and it is NOT the schedule answer, which is the failure this whole block exists to catch.
+      assert.ok(!/do this session tomorrow|do it later today/i.test(reply),
+        `a view request was answered as a schedule question: ${view} → ${reply.slice(0, 70)}`);
+    }
+
+    // The opposite still holds end to end: a reported session is still written to today.
+    const trained = await writesFor("I trained chest today. What should I eat now?");
+    assert.ok(trained.workout, "a reported session stopped being recorded");
+    // And the ordinary workout doors are untouched.
+    for (const view of ["workout", "What is tomorrow's session?"]) {
+      const reply = await serialise(() => say(view));
+      assert.match(reply, RENDERED, `a legitimate workout view was broken: ${view} → ${reply.slice(0, 70)}`);
+    }
+  });
+
+  // ── P0-2 / P0-3 · THE BATCH LOGGER (2026-08-25) ───────────────────────────────────────────
+  //
+  // attributeMultiDayReport shipped in PR #52 with EIGHT test references and ZERO production
+  // callers. These grade the wiring, not the library.
+  check("P0-2 . a multi-day report writes each day, in one reply", async () => {
+    // THE FIXTURE IS DATED RELATIVE TO TODAY (determinism fix, 2026-08-25). It named Monday,
+    // Tuesday and Wednesday literally, so on a Tuesday one of the three resolved to TODAY and the
+    // three-day report collapsed into two — the suite graded a different scenario depending on the
+    // weekday CI happened to run. It failed on main@266a8c2b for exactly that reason, and passed
+    // in the same repo the day before. A guard whose verdict is a function of the calendar cannot
+    // hold a ratchet. These are the three days ending yesterday, so they are always distinct and
+    // always in the past, which is what this test was always about. Days 4-2 back, not 3-1:
+    // the reply renders the most recent day as "yesterday" rather than by name, which is correct
+    // and friendly — and would make a name assertion fail for the wrong reason.
+    const [d1, d2, d3] = [4, 3, 2].map(n =>
+      new Date(NOW - n * 86_400_000).toLocaleDateString("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" }));
+    const r = await writesFor(`${d1} pap and chicken. ${d2} eggs and toast. ${d3} I trained and walked 8000 steps`);
+    assert.ok(r.mealDays.length >= 2, `expected meals on two named days, got ${JSON.stringify(r.mealDays)}`);
+    // ONE reply, covering every domain — food from its own owner, training and steps from the
+    // backfill that dated them. An unacknowledged write is how "did you even log it?" happens.
+    assert.match(r.out, new RegExp(d1, "i"), `the reply lost a day: ${r.out.slice(0, 120)}`);
+    assert.match(r.out, new RegExp(d3, "i"), `the backfilled day was written but never acknowledged: ${r.out.slice(0, 120)}`);
+    assert.match(r.out, /session/i, "the reply does not mention the session it wrote");
+    // renderers use a non-breaking space for thousands; this is still the same client-reported 8,000.
+    assert.match(r.out, /8[\s,]?000 steps/i, `the reply does not mention the steps it wrote: ${r.out.slice(0, 400)}`);
+    assert.match(r.out, /kcal/i, "food lost its quantity-aware owner");
+    assert.ok(r.backfillWorkoutDays.length === 1, `expected one backfilled session, got ${JSON.stringify(r.backfillWorkoutDays)}`);
+    assert.ok(r.backfillStepDays.length === 1, `expected one backfilled step row, got ${JSON.stringify(r.backfillStepDays)}`);
+    // ONE row per event. Without the guard the single-day doors write the session again on the
+    // first day the bubble mentions, and the steps to today — two rows for one event, both wrong.
+    assert.equal(r.allWorkoutWrites, 1, `${r.allWorkoutWrites} workout rows written for one session`);
+    assert.equal(r.allStepWrites, 1, `${r.allStepWrites} step rows written for one report`);
+    // Distinct days, and none of them today — the whole point is that they land where named.
+    const days = new Set([...r.backfillWorkoutDays, ...r.backfillStepDays]);
+    assert.equal(days.size, 1, `the ${d3} session and steps landed on different days`);
+    assert.ok(!days.has(sastDayKeyOf(new Date())), "a named past day was written as today");
+    // ONE reply, and it says what was written.
+
+  });
+
+  // ── PHASE 2.2 · THE FRONT DOOR MAY NOT COLLAPSE DAYS ────────────────────────────────────────
+  //
+  // Issue #63 mechanism 2: a correct capability made unreachable by an earlier transformation.
+  // The multi-fact brake counts DOMAINS (factTypes.length >= 2), so three days of meals is
+  // `["food"]` — length 1 — and a catch-up note sailed past it. The batch logger downstream is
+  // correct; it never saw the raw text.
+  //
+  // SCOPE, STATED HONESTLY. This grades the DETERMINISTIC rule: given a message that names several
+  // days, is the rewrite refused? It does NOT establish what the live model returns for that
+  // message — that needs the recorded corpus, and normalizer-replay-tests reports the production
+  // surface as uncovered until it exists. Two different claims; only the first is proven here.
+  check("2.2 . a note naming several days is never spoken for by one canonical", async () => {
+    const { attributeMultiDayReport } = await import("../server/understanding/day-relative-situation");
+    const bonolo = "Monday I had pap and chicken, eggs and bread for breakfast, and rice with beef stew "
+      + "for dinner. Tuesday was oats, a chicken salad, and pasta with mince. Wednesday I had eggs "
+      + "and bacon, a burger and chips, and lamb chops with rice.";
+
+    // The premise the old brake missed: this IS one domain, which is why multiFact could not see it.
+    const { parseMessyIntake } = await import("../server/understanding/messy-intake");
+    assert.deepEqual(parseMessyIntake(bonolo).factTypes, ["food"],
+      "if this ever becomes multi-domain the original brake covers it and this check is moot");
+    assert.equal(parseMessyIntake(bonolo).factTypes.length >= 2, false,
+      "multiFact must still be FALSE here — that is the hole this closes");
+
+    // …and the day owner does see it. The brake now consults this, rather than a second opinion.
+    assert.equal(attributeMultiDayReport(bonolo).hasMultipleDays, true,
+      "the day owner did not see three days — the brake has nothing to consult");
+
+    // THE CONTROL. A single-day note must still be rewritable, or the fix is just a global veto
+    // that disables the normalizer for everything and calls it preservation.
+    for (const single of ["i had pap and eggs for breakfast", "yesterday I had chicken and rice"]) {
+      assert.equal(attributeMultiDayReport(single).hasMultipleDays, false,
+        `a single-day note was treated as multi-day, which would disable the rewrite wholesale: "${single}"`);
+    }
+  });
+
+  // AND THE BRAKE ACTUALLY FIRES — the effect, not the premise.
+  //
+  // The brake only runs with the normalizer ON, which every offline harness disables. So this uses
+  // the replay seam from #66 to hand the front door a canonical that COLLAPSES the three days, and
+  // asserts the client's meal still lands as three days — i.e. the raw text reached the batch owner.
+  //
+  // The fixture is synthetic ON PURPOSE and that is legitimate here: the claim under test is "given
+  // a rewrite that destroys days, does the brake refuse it", not "this is what gpt-4o-mini returns".
+  // The second claim needs the recorded corpus and is asserted in normalizer-replay-tests, which
+  // reports the production surface as uncovered until that recording exists.
+  check("2.2 outcome . a collapsing rewrite is refused and the days survive to the logger", async () => {
+    const g = globalThis as any;
+    const bonolo = "Monday I had pap and chicken, eggs and bread for breakfast, and rice with beef stew "
+      + "for dinner. Tuesday was oats, a chicken salad, and pasta with mince. Wednesday I had eggs "
+      + "and bacon, a burger and chips, and lamb chops with rice.";
+    const collapsed = "i had pap and chicken, eggs and bread, rice with beef stew, oats, chicken salad, "
+      + "pasta with mince, eggs and bacon, burger and chips, lamb chops and rice";
+
+    const out = await serialise(async () => {
+      const prevNorm = process.env.NORMALIZER;
+      delete process.env.NORMALIZER;                       // front door ON, as in production
+      g.__KAMLIFE_INTENT_FIXTURES = {
+        [bonolo.toLowerCase()]: { intent: "FOOD_LOG", confidence: 0.95, canonical: collapsed },
+      };
+      g.__KAMLIFE_STUB_USER = { ...USER };
+      try { return String(await handleMessage(USER.phoneNumber, bonolo) ?? ""); }
+      finally {
+        delete g.__KAMLIFE_INTENT_FIXTURES;
+        if (prevNorm === undefined) delete process.env.NORMALIZER; else process.env.NORMALIZER = prevNorm;
+      }
+    });
+
+    assertCustomerOutcome(out, {
+      got: /across \d+ day|logged 3 days|3 days/i,
+      because: "three days of meals reported in one message must be logged as three days, not one — "
+        + "a rewrite that names no day must never be allowed to speak for all of them",
+    });
+  });
+
+  check("P0-2b . a single-day message is untouched by the batch path", async () => {
+    // The gate is hasMultipleDays. Every existing single-day route must behave exactly as before.
+    for (const single of ["I had pap and eggs", "I trained chest today. What should I eat now?",
+                          "You missed the black coffee"]) {
+      const r = await writesFor(single);
+      // POSITIVE FORM (item 1.2): "the batch claim is absent" was equally satisfied by the turn
+      // doing nothing at all — which is the failure a regression guard most needs to catch.
+      assertCustomerOutcome(r.out, {
+        got: (t) => t.trim().length > 0,
+        notGot: /logged across \d+ day/i,
+        because: `a single-day message must still be served, unchanged: "${single}"`,
+      });
+    }
+  });
+
+  check("CUT A . GOAL_CHANGE supplementary weight crosses the canonical weight owner", async () => {
+    const g = globalThis as any;
+    const msg = "My current weight is 82kg and I joined a gym";
+    const { weightLogs } = await import("../shared/schema");
+    const { getWeightTruth } = await import("../server/day-ledger");
+    const result = await serialise(async () => {
+      const prevNorm = process.env.NORMALIZER;
+      delete process.env.NORMALIZER;
+      g.__KAMLIFE_INTENT_FIXTURES = {
+        [msg.toLowerCase()]: { intent: "GOAL_CHANGE", confidence: 0.95, canonical: "change my goal to muscle gain" },
+      };
+      g.__KAMLIFE_STUB_USER = { ...USER, trainingMode: "home", currentWeight: "84.5" };
+      g.__KAMLIFE_STUB_ROWS = new Map([[weightLogs, []]]);
+      g.__KAMLIFE_STUB_WRITES = [];
+      g.__KAMLIFE_STUB_REFLECT_WRITES = true;
+      try {
+        await handleMessage(USER.phoneNumber, msg, undefined, undefined, undefined, "SM-CUT-A-WEIGHT");
+        const events = g.__KAMLIFE_STUB_WRITES.filter((w: any) => w.table === weightLogs);
+        assert.equal(events.length, 1, "the turn must create one weight event, even if another weight route sees it later");
+        g.__KAMLIFE_STUB_ROWS = new Map([[weightLogs, [{ ...events[0].values, at: new Date() }]]]);
+        return { currentWeight: g.__KAMLIFE_STUB_USER.currentWeight, truth: await getWeightTruth(g.__KAMLIFE_STUB_USER) };
+      } finally {
+        delete g.__KAMLIFE_INTENT_FIXTURES;
+        delete g.__KAMLIFE_STUB_ROWS;
+        delete g.__KAMLIFE_STUB_WRITES;
+        delete g.__KAMLIFE_STUB_REFLECT_WRITES;
+        if (prevNorm === undefined) delete process.env.NORMALIZER; else process.env.NORMALIZER = prevNorm;
+      }
+    });
+    assert.equal(result.currentWeight, "82", "users.currentWeight must be the canonical value");
+    assert.equal(result.truth.currentKg, 82, "getWeightTruth must read the same event as current truth");
+  });
+
+  check("P0-3 . a historical write does not move today's programme", async () => {
+    // The retro path advanced programmeDayInWeek and programmeWeek, so "I trained on Monday"
+    // silently consumed TODAY's session slot. A backfill is a statement about that day only.
+    const g = globalThis as any;
+    const before = { ...USER, programmeDayInWeek: 2, programmeWeek: 5, totalWorkoutsCompleted: 7 };
+    const after = await serialise(async () => {
+      g.__KAMLIFE_STUB_USER = { ...before };
+      await say("I trained on Monday");
+      const u = { ...g.__KAMLIFE_STUB_USER };
+      g.__KAMLIFE_STUB_USER = { ...USER };
+      return u;
+    });
+    assert.equal(after.programmeDayInWeek, 2, "a backfill advanced today's programme slot");
+    assert.equal(after.programmeWeek, 5, "a backfill advanced the programme week");
+    // …while the facts about the past may still move.
+    assert.equal(after.totalWorkoutsCompleted, 8, "the lifetime session count was not updated");
+  });
+
+  // ── P0-4 · ONE COACH AT BOTH DOORS (2026-08-25) ───────────────────────────────────────────
+  //
+  // The behavioural-authority work lives in reconcileTurnReply, inside `inTurn` — so it governed
+  // REACTIVE replies only. 69 proactive sends across 14 files, 3 of which consult the decision
+  // owner. This grades the shared floor: a claim about durable state, checked against durable
+  // state, on the proactive path too.
+  check("P0-4 . a proactive send may not assert a training count the record denies", async () => {
+    const { enforceOutboundTruth } = await import("../server/outbound-authority");
+    const { mealLogs, workoutLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+
+    const verdicts = await serialise(async () => {
+      // The record holds ONE session in the window.
+      g.__KAMLIFE_STUB_ROWS = new Map([[workoutLogs, [{ n: 1 }]]]);
+      const out = {
+        contradicts: await enforceOutboundTruth(USER.id, "whatsapp:+27000000101", "Strong week — that's 4 sessions in the bag."),
+        matches: await enforceOutboundTruth(USER.id, "whatsapp:+27000000102", "That's 1 session this week — let's build on it."),
+        noClaim: await enforceOutboundTruth(USER.id, "whatsapp:+27000000103", "Morning Kam. 8,500 steps today and protein first."),
+        firstSend: await enforceOutboundTruth(USER.id, "whatsapp:+27000000104", "Same message body for the duplicate check."),
+        repeat: await enforceOutboundTruth(USER.id, "whatsapp:+27000000104", "Same message body for the duplicate check."),
+      };
+      delete g.__KAMLIFE_STUB_ROWS;
+      return out;
+    });
+
+    assert.ok(!verdicts.contradicts.ok, "a proactive message claimed 4 sessions against a record of 1");
+    assert.equal(verdicts.contradicts.reason, "session_count_contradicts_record");
+    assert.ok(verdicts.matches.ok, `a truthful count was blocked: ${verdicts.matches.detail}`);
+    // THE CONTROL THAT KEEPS THIS HONEST: the morning brief's step TARGET carries no evidence and
+    // must still go out. Porting verifyBrainReply wholesale would have silenced it.
+    assert.ok(verdicts.noClaim.ok, `an ordinary proactive message was blocked: ${verdicts.noClaim.detail}`);
+    assert.ok(verdicts.firstSend.ok, "the first send of a message was blocked");
+    assert.ok(!verdicts.repeat.ok && verdicts.repeat.reason === "duplicate",
+      "the same proactive message went out twice");
+  });
+
+  check("P0-4b . the proactive DOOR consults the floor, not just the floor existing", async () => {
+    // The first version of this asserted the source contained the call — and stayed green when
+    // the door was changed to ignore the verdict. This drives sendWhatsApp itself.
+    const { sendWhatsApp } = await import("../server/scheduler/shared");
+    const { workoutLogs } = await import("../shared/schema");
+    const g = globalThis as any;
+    const seen = await serialise(async () => {
+      g.__KAMLIFE_STUB_ROWS = new Map([[workoutLogs, [{ n: 1 }]]]);
+      const from = CONSOLE_LINES.length;
+      const realErr = console.error;
+      const errs: string[] = [];
+      console.error = (...a: any[]) => { errs.push(a.map(String).join(" ")); };
+      try {
+        await sendWhatsApp("whatsapp:+27000000201", "Strong week — that's 4 sessions in the bag.").catch(() => undefined);
+      } finally { console.error = realErr; }
+      delete g.__KAMLIFE_STUB_ROWS;
+      return { errs, after: CONSOLE_LINES.slice(from) };
+    });
+    assert.ok(seen.errs.some(l => /OUTBOUND_AUTHORITY\] BLOCKED/.test(l)),
+      `the door sent a message the floor rejected: ${JSON.stringify(seen.errs).slice(0, 160)}`);
+    assert.ok(!seen.after.some(l => /SCHEDULER\] Sent|delivery/i.test(l)),
+      "a rejected proactive message still reached the send path");
+  });
+
+  /**
+   * FIRE A REAL SCHEDULER JOB AND READ WHAT THE CLIENT WOULD HAVE READ.
+   *
+   * Not a call to the composer, and not a call to the decision — the exported cron entry point,
+   * through server/scheduler/shared.sendWhatsApp: the outbound floor, the provenance gate,
+   * humanizeReply, and the bubble split. Capture is via SHADOW mode, which is the product's own
+   * "record instead of send" door, so nothing here is a seam that exists only for the test.
+   *
+   * `saidToday` is chat_history as the held-constraint reader sees it — the client's own words.
+   */
+  async function runEveningThroughTheDoor(
+    saidToday: Array<{ message_in: string; created_at: Date }>,
+    ledger: { proteinTarget?: number; who: string },
+  ): Promise<string[]> {
+    const { runEveningAccountability } = await import("../server/scheduler/jobs/evening");
+    const { shadowReplies, sentProactive, mealLogs, workoutLogs, weightLogs, stepLogs, chatHistory, dailyConstraints } =
+      await import("../shared/schema");
+    const { constraintsAssertedBy } = await import("../server/held-constraints");
+    const { sastDayKey } = await import("../server/sast");
+    const g = globalThis as any;
+    const today = new Date();
+
+    return serialise(async () => {
+      const priorShadow = process.env.SHADOW;
+      const priorPause = process.env.PROACTIVE_PAUSED;
+      process.env.SHADOW = "on";
+      // The harness pins PROACTIVE_PAUSED=true so no cron fires while the reactive cases run. This
+      // case IS the cron, so the killswitch is lifted for its duration and restored after. Inside
+      // serialise(), so nothing else is running while it is off.
+      process.env.PROACTIVE_PAUSED = "false";
+      g.__KAMLIFE_STUB_PGROWS = (sql: string) => (/chat_history/i.test(String(sql)) ? saidToday : []);
+      g.__KAMLIFE_STUB_USER = {
+        ...USER,
+        // A DISTINCT CLIENT PER CASE. The proactive budget is per user and in memory, so two cases
+        // sharing an id means the second one is silenced by the first — and "it said nothing"
+        // would read as "it obeyed the constraint".
+        id: `parity-${ledger.who}`,
+        phoneNumber: `whatsapp:+2782000${ledger.who.length}${ledger.who.charCodeAt(0)}`,
+        trainingDaysPerWeek: 4,      // this week = 0/4 — by the ledger they are behind
+        totalWorkoutsCompleted: 0,
+        proteinTarget: ledger.proteinTarget ?? 140,
+        calorieTarget: 2000,
+        stepsTarget: 8500,
+        lastActiveAt: today,
+        profileNotes: "",
+      };
+      // A LEDGER THAT SUPPORTS A PRESCRIPTION. Without evidence, decideProactive downgrades every
+      // prescription to a question — which would make "it did not say train" true for the wrong
+      // reason. Two weigh-ins twenty days apart make the weight trend usable, which is the
+      // evidence gate's own sufficiency condition.
+      //
+      // Rows carry BOTH the column name and the alias each query selects it under, because the
+      // stub returns seeded rows verbatim rather than applying drizzle's projection.
+      const meal = { id: 1, at: today, loggedAt: today, kcalInt: 900, proteinInt: 0,
+                     todayCal: 900, todayProt: 0 };
+      g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([
+        [sentProactive, [{ id: 1 }]],                       // claimDailySlot must be winnable
+        [chatHistory, [{ id: 1, createdAt: today, intent: "FOOD_LOG", messageIn: "chicken and rice" }]],
+        [mealLogs, [meal]],
+        [workoutLogs, []],                                  // zero sessions this week
+        // getWeightTruth is the shared owner and orders oldest -> newest; the stub does not apply
+        // orderBy, so its seeded rows must have the chronology the real PostgreSQL query returns.
+        [weightLogs, [
+          { id: 1, weight: "83.4", w: "83.4", at: new Date(NOW - 20 * 86_400_000), loggedAt: new Date(NOW - 20 * 86_400_000) },
+          { id: 2, weight: "82.0", w: "82.0", at: new Date(NOW - 86_400_000), loggedAt: new Date(NOW - 86_400_000) },
+        ]],
         [stepLogs, [{ avg: 9000, steps: 9000, at: today, loggedAt: today }]],
         // WHAT THEY RULED OUT TODAY IS A ROW NOW (#194), not a sentence re-derived from the last
         // 24 chat messages — that window is what let a real client's closed day silently reopen
