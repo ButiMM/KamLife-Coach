@@ -85,6 +85,13 @@
       "when": 1787700000000,
       "tag": "0011_interaction_truth_boundary",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789056000000,
+      "tag": "0012_spoken_step_hundreds",
+      "breakpoints": true
     }
   ]
 }
