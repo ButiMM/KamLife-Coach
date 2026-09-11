@@ -195,6 +195,13 @@ export const ACCEPTANCES: Acceptance[] = [
     // in prepareOutbound and sendFinal, past every handler.
     command: ["npx", "tsx", "script/pg-interaction-truth-acceptance.ts"] },
 
+  { id: "journal-guard", title: "The migration journal cannot silently skip a migration",
+    // A SUCCESSFUL COMMAND THAT SKIPPED A MIGRATION (2026-09-11). `db:migrate` reported success and
+    // did not run 0013, because drizzle orders by the journal's `when` and 0013 was stamped behind
+    // 0012. No database is needed — the guard reads files — but it lives in this runner because
+    // this is the inventory that is actually authoritative, and a guard nobody runs is a comment.
+    command: ["bash", "script/red-on-revert-journal-guard.sh"] },
+
   { id: "voice-provenance", title: "The words the client actually spoke are durable",
     // RAW VOICE PROVENANCE (2026-09-10). A voice note becomes three strings — STT output, cleaned,
     // condensed — and only the last reached the ledger, so "did we mis-hear them, or hear them and
