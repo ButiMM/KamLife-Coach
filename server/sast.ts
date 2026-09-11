@@ -118,30 +118,16 @@ export function effectiveMealLoggedAt(loggedAt: Date, rawMessage: string, mealLa
   return new Date(loggedAt.getTime() - 24 * 3_600_000); // → the day that just ended
 }
 
-// A clock time written in a caption tells us the meal SLOT even when the photo is batch-sent
-// hours later (2026-07-22, Puntsa's photo diary: shot at "11:00", the whole day sent at 19:49
-// — the send-clock mislabelled it dinner). Requires a colon-time or am/pm so it never fires on
-// a quantity ("2 eggs", "500ml"). Returns null when there's no time to read.
-export function slotFromCaptionTime(msg: string): "breakfast" | "lunch" | "dinner" | "snack" | null {
-  const lo = (msg || "").toLowerCase();
-  let hour: number | null = null;
-  const hm = lo.match(/\b(\d{1,2}):(\d{2})\s*(am|pm)?\b/);
-  const ap = lo.match(/\b(\d{1,2})\s*(am|pm)\b/);
-  if (hm) {
-    hour = parseInt(hm[1], 10);
-    if (hm[3] === "pm" && hour < 12) hour += 12;
-    if (hm[3] === "am" && hour === 12) hour = 0;
-  } else if (ap) {
-    hour = parseInt(ap[1], 10);
-    if (ap[2] === "pm" && hour < 12) hour += 12;
-    if (ap[2] === "am" && hour === 12) hour = 0;
-  }
-  if (hour === null || hour < 0 || hour > 23) return null;
-  if (hour <= 11) return "breakfast"; // includes late-morning brunch (11:00 eggs)
-  if (hour <= 15) return "lunch";
-  if (hour <= 16) return "snack";
-  return "dinner";
-}
+// A CAPTION TIME IS A TIME, NOT A MEAL NAME — `slotFromCaptionTime` REMOVED (Cut 2, 2026-09-11).
+//
+// It read "11:00" or "1pm" out of a caption and returned breakfast/lunch/dinner. It was added so a
+// photo diary batch-sent at 19:49 would not have its whole morning stamped "dinner" by the SEND
+// clock — a real defect, for two named clients. Cut 2 removes the send-clock claim itself, so the
+// thing this defended against cannot happen, and what is left is a second clock naming a meal the
+// client never named. "I ate at 11:00" is not "I ate breakfast": people eat lunch at 11:00.
+//
+// A caption that NAMES the meal ("Breakfast", "for lunch") is unaffected — explicitMealSlot in
+// server/understanding/actions.ts reads the client's words and remains authoritative.
 
 // Does this client work nights? Read from the onboarding answers we already hold —
 // the same data that steers their programme timing.

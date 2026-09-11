@@ -21,7 +21,7 @@ import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodP
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
-import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary, timeGreeting, slotFromCaptionTime, effectiveMealLoggedAt } from "../server/utils";
+import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary, timeGreeting, effectiveMealLoggedAt } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../server/meal-select";
 import { getGoalProfile, usesMacroTargets, GOAL_KEYS, looksLikeGoalAnswer, classifyGoalFromText } from "../server/goal-profiles";
@@ -1273,31 +1273,36 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
-// PERSONAL MEAL-SLOT LEARNING (2026-07-17, Review #7 items 3b + gap-heuristic +
-// behavioural shift detection). The client's own hour-pattern beats the clock;
-// a light second meal on a used slot demotes to snack; weak patterns change nothing.
+// PERSONAL MEAL-SLOT LEARNING IS GONE, AND MUST STAY GONE (Cut 2, 2026-09-11).
+//
+// Three tests stood here proving that a client's own hour-pattern beat the clock, that a light
+// second plate on a used slot demoted to "snack", and that a weak pattern changed nothing. Every
+// one of them graded an INVENTION: the client had named no meal, and all three paths ended in a
+// string written to meal_logs.meal_label as a fact about them.
+//
+// They are not weakened, they are inverted — the capability they graded no longer exists, and
+// what replaces them is stricter than what they asserted. The old tests permitted a label on a
+// message that named none; this permits none.
 {
-  const { dominantSlotByHour, resolveInferredSlot } = await import("../server/portion-memory");
-  const at = (sastHour: number, label: string) => ({ loggedAt: new Date(Date.UTC(2026, 6, 10, (sastHour - 2 + 24) % 24, 15)), mealLabel: label });
-  test("slot learning: hour qualifies at >=3 logs and >=70% share — never on noise", async () => {
-    const strong = dominantSlotByHour([at(10, "lunch"), at(10, "lunch"), at(10, "lunch"), at(10, "breakfast")]);
-    assert.equal(strong.get(10), "lunch", "3/4 lunch at 10:00 = personal lunch hour");
-    const weak = dominantSlotByHour([at(10, "lunch"), at(10, "lunch"), at(10, "breakfast"), at(10, "breakfast")]);
-    assert.ok(!weak.has(10), "50/50 split teaches nothing");
-    const thin = dominantSlotByHour([at(10, "lunch"), at(10, "lunch")]);
-    assert.ok(!thin.has(10), "2 logs is not a pattern");
+  const { explicitMealSlot } = await import("../server/understanding/actions");
+  const { getPortionMemory } = await import("../server/portion-memory");
+  const pm = await import("../server/portion-memory");
+  test("slot inference: the hour-learning apparatus is not merely unused, it is absent", async () => {
+    for (const gone of ["dominantSlotByHour", "resolveInferredSlot", "getSlotContext"]) {
+      assert.ok(!(gone in pm), `${gone} is back in portion-memory — the clock is naming meals again`);
+    }
+    const sast = await import("../server/sast");
+    assert.ok(!("slotFromCaptionTime" in sast), "slotFromCaptionTime is back — a typed time is not a meal name");
+    assert.equal(typeof getPortionMemory, "function", "portion memory is a different question and must survive");
   });
-  test("slot learning: personal hour beats the clock; shift worker learned without a flag", async () => {
-    const ctx = { personalByHour: new Map([[10, "lunch"], [2, "night meal"]]), todaySlots: [] };
-    assert.equal(resolveInferredSlot("breakfast", 10, ctx, 600), "lunch", "the reviewer's 10:00 case");
-    assert.equal(resolveInferredSlot("snack", 2, ctx, 250), "night meal", "02:00 history wins, no onboarding flag needed");
-    assert.equal(resolveInferredSlot("breakfast", 7, ctx, 400), "breakfast", "no pattern for 07:00 = clock stands");
-  });
-  test("slot learning: light second meal on a used slot = snack; a real plate keeps its slot", async () => {
-    const ctx = { personalByHour: new Map<number, string>(), todaySlots: ["breakfast"] };
-    assert.equal(resolveInferredSlot("breakfast", 9, ctx, 180), "snack", "09:30 fruit after 07:30 breakfast");
-    assert.equal(resolveInferredSlot("breakfast", 9, ctx, 650), "breakfast", "a second full plate is honestly a second breakfast");
-    assert.equal(resolveInferredSlot("breakfast", 9, undefined, 180), "breakfast", "no context = old behaviour, fail-open");
+  test("slot inference: only the client's own words name a meal, at any hour", async () => {
+    for (const said of ["I had a pear", "chicken and rice", "2 eggs and toast", "had this at 1pm", "500ml water"]) {
+      assert.equal(explicitMealSlot(said), null, `"${said}" names no meal, so nothing may claim one`);
+    }
+    assert.equal(explicitMealSlot("I had pap for breakfast"), "breakfast");
+    assert.equal(explicitMealSlot("Yesterday at dinner I had chicken"), "dinner");
+    assert.equal(explicitMealSlot("afternoon snack - apple"), "snack");
+    assert.equal(explicitMealSlot("This morning I had 3 eggs"), "breakfast", "#174 stays answered");
   });
 }
 
@@ -7123,24 +7128,34 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
 }
 
 // ============================================================
-// PHOTO DIARY — CAPTION TIME SETS THE MEAL SLOT (2026-07-22, Puntsa's screenshots: she
-// photographs each meal but batch-sends the whole day in the evening. "11:00" breakfast
-// arriving at 19:49 must NOT be labelled dinner from the send-clock.)
+// PHOTO DIARY — A CAPTION TIME NO LONGER SETS THE MEAL SLOT (Cut 2, 2026-09-11; the block
+// here graded slotFromCaptionTime, added 2026-07-22 for Puntsa, who photographs each meal and
+// batch-sends the whole day at 19:49).
+//
+// THE DEFECT IT WAS BUILT FOR IS FIXED MORE COMPLETELY THAN IT FIXED IT. It stopped the SEND
+// clock calling an 11:00 breakfast "dinner" by having a SECOND clock — the one she typed — name
+// the meal instead. Cut 2 removes the send clock's claim outright, so there is nothing left to
+// out-rank, and "I ate at 11:00" is still not "I ate breakfast": people eat lunch at 11:00.
+//
+// NOT A SILENT LOSS. Four of that block's six captions still resolve, because in those four she
+// NAMED the meal — her words were always doing the work, and the clock was reading over her
+// shoulder. The two that no longer resolve are the two where she named only a time.
 // ============================================================
 {
-  test("caption-time: a time in the caption maps to the right slot", () => {
-    assert.equal(slotFromCaptionTime("11:00"), "breakfast");
-    assert.equal(slotFromCaptionTime("8am tea and eggs"), "breakfast");
-    assert.equal(slotFromCaptionTime("had this at 1pm"), "lunch");
-    assert.equal(slotFromCaptionTime("2:30pm snack"), "lunch");
-    assert.equal(slotFromCaptionTime("dinner at 19:30"), "dinner");
-    assert.equal(slotFromCaptionTime("supper 8pm"), "dinner");
+  const { explicitMealSlot } = await import("../server/understanding/actions");
+  test("caption: the client's own meal word still decides, exactly as before", () => {
+    assert.equal(explicitMealSlot("dinner at 19:30"), "dinner");
+    assert.equal(explicitMealSlot("supper 8pm"), "dinner");
+    assert.equal(explicitMealSlot("2:30pm snack"), "snack", "her word, not the 14:30 the old rule read as lunch");
+    assert.equal(explicitMealSlot("Lunch time"), "lunch");
   });
-  test("caption-time: quantities and plain text are NOT read as times", () => {
-    assert.equal(slotFromCaptionTime("2 eggs and toast"), null);
-    assert.equal(slotFromCaptionTime("500ml water"), null);
-    assert.equal(slotFromCaptionTime("Lunch time"), null); // no clock — the keyword path handles this
-    assert.equal(slotFromCaptionTime(""), null);
+  test("caption: a bare time names no meal, and nothing may fill that in", () => {
+    assert.equal(explicitMealSlot("11:00"), null, "people eat lunch at 11:00");
+    assert.equal(explicitMealSlot("8am tea and eggs"), null);
+    assert.equal(explicitMealSlot("had this at 1pm"), null);
+    assert.equal(explicitMealSlot("2 eggs and toast"), null);
+    assert.equal(explicitMealSlot("500ml water"), null);
+    assert.equal(explicitMealSlot(""), null);
   });
 }
 

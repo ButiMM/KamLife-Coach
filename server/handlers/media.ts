@@ -36,10 +36,10 @@ import { buildFormCheckPrompt, extractFormExercise } from "../form-check-prompt"
 // photo saves immediately, timer resets, one job processes the whole set 15s after the last.
 const _progressBurst = new Map<string, ReturnType<typeof setTimeout>>();
 import { getTodayWorkoutState } from "../workout-state";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim, isAskingNotReporting , getDisplayName, transcriptMustPassWhole } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, stripFoodLoggedClaim, isAskingNotReporting , getDisplayName, transcriptMustPassWhole } from "../utils";
 import { stripVoiceDenial } from "../reply-hygiene";
 import { detectVoiceLanguageNote } from "../voice-language";
-import { extractMealLabel } from "./food-context";
+import { explicitMealSlot } from "../understanding/actions";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { cardWillAttach } from "../card-policy";
 import { remainingInMeals, goalStatusLine } from "../education";
@@ -1065,7 +1065,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
             const extraKcal = extractKcal(extraText);
             const extraProt = extractProt(extraText);
             if (!(/^NOT_FOOD\b/i.test(extraText)) && (extraKcal > 0 || extraProt > 0)) {
-              const extraLabel = extractMealLabel(message || "", photoLoggedAt, { kcal: extraKcal, protein: extraProt }, user, await (await import("../portion-memory")).getSlotContext(user.id)) || slotFromSastHour(photoLoggedAt);
+              const extraLabel = explicitMealSlot(message || "");   // null unless the caption NAMES it
               const extraCommit = await commitFoodLog({
                 userId: user.id, phone, rawMessage: `[Album photo ${extraIndex + 2}]`, source: "photo",
                 kcalInt: extraKcal, proteinInt: extraProt, carbsInt: 0, fatInt: 0,
@@ -1123,13 +1123,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         // NAME-overlap dupe guard: a photo of a meal ALREADY logged today must not double-log.
         const dupe = extraImageUrls.length === 0 ? await findDuplicateMealToday(user.id, photoDesc) : null;
         if (dupe) {
-          const dupeReply = `📸 That looks like the *${dupe.desc}* you already logged today — I have NOT logged it again, your totals are safe.\n\nIf this is a second helping, say *"same as ${dupe.slot}"* and I'll log it properly.`;
+          const dupeReply = `📸 That looks like the *${dupe.desc}* you already logged today — I have NOT logged it again, your totals are safe.\n\nIf this is a second helping, ${dupe.slot ? `say *"same as ${dupe.slot}"*` : `name the meal — *"same for lunch"*, or whichever it is`} and I'll log it properly.`;
           await logChat(user.id, "[Food Photo — duplicate held]", dupeReply, "FOOD_PHOTO_DUPE");
           return dupeReply;
         }
-        // ONE WRITE DOOR (Box 2): commitFoodLog dedups + guarantees complete macros;
-        // caption wins over the clock for the slot.
-        const photoLabel = extractMealLabel(message || "", photoLoggedAt, { kcal: primaryPhotoKcal, protein: primaryPhotoProt }, user, await (await import("../portion-memory")).getSlotContext(user.id)) || slotFromSastHour(photoLoggedAt);
+        // ONE WRITE DOOR (Box 2): commitFoodLog dedups; the slot is the caption's when it NAMES
+        // one, else null — a 19:49 batch-send says nothing about when the plate was eaten (Cut 2).
+        const photoLabel = explicitMealSlot(message || "");
         // Structured items from the vision reply — names in "my meals", scalable corrections.
         photoCommit = await commitFoodLog({
           userId: user.id, phone, rawMessage: extraImageUrls.length > 0 ? `[Album photo 1] ${photoDesc}` : photoDesc, source: "photo",

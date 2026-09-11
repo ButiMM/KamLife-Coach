@@ -161,7 +161,12 @@ export async function handleMealRepeat(ctx: {
     // kcal, different slot), then told the client dinner was "already counted" while
     // it was never written (2026-07-05 audit). A dup = same kcal AND same slot.
     const dupWindow = new Date(Date.now() - 4 * 60_000);
-    const newLabel = String(targetLabel || sourceHint || match.mealLabel || "").toLowerCase();
+    // THE SLOT THIS MEAL IS BEING LOGGED AS — the one the client named for THIS meal, or none.
+    // `sourceHint` names the meal they copied FROM ("the same as my lunch") and `match.mealLabel`
+    // is that older row's own label; neither is a statement about the plate in front of them now.
+    // This must be the value actually stored below, or the guard compares a label the row will
+    // never carry and a webhook retry logs the meal twice (Cut 2).
+    const newLabel = String(targetLabel || "").toLowerCase();
     const recentRows = await db.select({ kcalInt: mealLogs.kcalInt, mealLabel: mealLogs.mealLabel }).from(mealLogs)
       .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, dupWindow)));
     if (recentRows.some(r => (r.kcalInt || 0) === (match.kcalInt || 0) && String(r.mealLabel || "").toLowerCase() === newLabel)) {
@@ -187,7 +192,7 @@ export async function handleMealRepeat(ctx: {
       proteinInt: match.proteinInt || 0,
       carbsInt: match.carbsInt || 0,
       fatInt: match.fatInt || 0,
-      mealLabel: targetLabel || sourceHint || match.mealLabel || null,
+      mealLabel: targetLabel || null,   // only what they called THIS meal (Cut 2)
       items: repeatedItems,
       loggedAt: new Date(),
       sourceMessageId: ctx.sourceMessageId,
@@ -196,7 +201,9 @@ export async function handleMealRepeat(ctx: {
     if (!committed.ok) return `I found that meal but couldn't save the copy just now. Send that again in a moment.`;
     if (committed.wasDup) return `Already logged ✅ — that meal is counted in today's total.`;
 
-    const labelDisplay = (targetLabel || sourceHint || match.mealLabel || "Meal").replace(/\b\w/g, c => c.toUpperCase());
+    // "*Lunch logged*" for a 19:10 copy of lunch told the client we had recorded a second lunch.
+    // The source still appears, truthfully, in fromNote below: "copied from lunch" (Cut 2).
+    const labelDisplay = (targetLabel || "Meal").replace(/\b\w/g, c => c.toUpperCase());
     const mealWasToday = match.loggedAt && new Date(match.loggedAt) >= todayStart;
     // Never say "copied from breakfast" ON a breakfast log — use a time reference instead.
     const fromNote = crossish && sourceHint && sourceHint !== targetLabel ? `copied from ${sourceHint}`

@@ -724,8 +724,12 @@ export async function findDuplicateMealToday(userId: string, desc: string): Prom
     for (const r of rows) {
       if (mealsOverlap(desc, r.rawMessage || "")) {
         return {
+          // "" WHEN THE ROW HAS NO NAMED SLOT (Cut 2). This read `|| "lunch"`, so a meal nobody
+          // called lunch was described back to the client as their lunch — and the sentence it
+          // feeds tells them to SAY "same as lunch", which would then store the copy as lunch too.
+          // An invention laundered through the client's own mouth. The caller words it truthfully.
           desc: (r.rawMessage || "that meal").replace(/\s+/g, " ").trim().slice(0, 70),
-          slot: (r.mealLabel || "lunch").toString(),
+          slot: (r.mealLabel || "").toString(),
         };
       }
     }

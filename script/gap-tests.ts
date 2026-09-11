@@ -4,7 +4,6 @@
  *
  * Functions tested here:
  *   scalePortionDescription  (food-context.ts)
- *   extractMealLabel         (food-context.ts)
  *   assessWeightRate         (weight.ts)
  *   parseMealDate            (utils.ts) — edge cases beyond routing-audit coverage
  *   isRetroactiveMeal        (utils.ts)
@@ -32,7 +31,6 @@ process.env.TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "test";
 process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+27000000000";
 
 // Dynamic imports — execute after env vars above, unlike static imports which are hoisted.
-const { extractMealLabel } = await import("../server/handlers/food-context");
 const { scalePortionDescription, adjustFoodsForSegment } = await import("../server/portion-memory");
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
@@ -746,71 +744,79 @@ test("scalePortionDescription: no numbers in desc — returns desc unchanged", (
 });
 
 // ============================================================
-// extractMealLabel — meal time extraction from message text
+// THE MEAL SLOT COMES FROM THE CLIENT'S WORDS, OR FROM NOWHERE (Cut 2, 2026-09-11).
+//
+// `extractMealLabel` was graded here. It is gone: its only truthful branch was explicitMealSlot,
+// which this repository already declares the one owner of "did the client name a slot?", and the
+// branches around it answered from the send clock, from the calorie count, and from a time the
+// client had typed. All three wrote a meal name into meal_logs.meal_label as a fact.
+//
+// EVERY KEYWORD ASSERTION BELOW IS THE ORIGINAL ONE, re-pointed at the surviving owner — the
+// promise "if they said it, we store it" is unchanged. The two clock tests are INVERTED, and the
+// inversion is stricter than what they asserted:
+//
+//   was: "caption wins over the clock"        -> still true, and now the clock has no claim at all
+//   was: "no caption at 1pm -> lunch"         -> at 1pm, saying nothing means nothing is claimed
+//   was: "no time signal -> any valid label"  -> that test could not fail; it accepted null AND
+//                                                every invented label. Now it demands null.
 // ============================================================
 
-test("extractMealLabel: 'for breakfast' → breakfast", () => {
-  assert.equal(extractMealLabel("I had eggs for breakfast"), "breakfast");
+test("meal slot: 'for breakfast' → breakfast", () => {
+  assert.equal(explicitMealSlot("I had eggs for breakfast"), "breakfast");
 });
 
-test("extractMealLabel: 'for lunch' → lunch", () => {
-  assert.equal(extractMealLabel("rice and chicken for lunch"), "lunch");
+test("meal slot: 'for lunch' → lunch", () => {
+  assert.equal(explicitMealSlot("rice and chicken for lunch"), "lunch");
 });
 
-test("extractMealLabel: 'for dinner' → dinner", () => {
-  assert.equal(extractMealLabel("had pap for dinner"), "dinner");
+test("meal slot: 'for dinner' → dinner", () => {
+  assert.equal(explicitMealSlot("had pap for dinner"), "dinner");
 });
 
-test("extractMealLabel: 'for supper' → dinner (supper maps to dinner)", () => {
-  assert.equal(extractMealLabel("had pap for supper"), "dinner");
+test("meal slot: 'for supper' → dinner (supper maps to dinner)", () => {
+  assert.equal(explicitMealSlot("had pap for supper"), "dinner");
 });
 
-test("extractMealLabel: 'snack' keyword → snack", () => {
-  assert.equal(extractMealLabel("afternoon snack — apple"), "snack");
+test("meal slot: 'snack' keyword → snack", () => {
+  assert.equal(explicitMealSlot("afternoon snack — apple"), "snack");
 });
 
-test("extractMealLabel: bare 'Lunch' at start of message → lunch", () => {
-  assert.equal(extractMealLabel("Lunch rice and beef"), "lunch");
+test("meal slot: bare 'Lunch' at start of message → lunch", () => {
+  assert.equal(explicitMealSlot("Lunch rice and beef"), "lunch");
 });
 
-test("extractMealLabel: bare 'Dinner' at start → dinner", () => {
-  assert.equal(extractMealLabel("Dinner pap and wors"), "dinner");
+test("meal slot: bare 'Dinner' at start → dinner", () => {
+  assert.equal(explicitMealSlot("Dinner pap and wors"), "dinner");
 });
 
-test("extractMealLabel: bare 'Breakfast' at start → breakfast", () => {
-  assert.equal(extractMealLabel("Breakfast 2 eggs and toast"), "breakfast");
+test("meal slot: bare 'Breakfast' at start → breakfast", () => {
+  assert.equal(explicitMealSlot("Breakfast 2 eggs and toast"), "breakfast");
 });
 
-test("extractMealLabel: 'breakfast was' → breakfast", () => {
-  assert.equal(extractMealLabel("breakfast was oats with milk"), "breakfast");
+test("meal slot: 'breakfast was' → breakfast", () => {
+  assert.equal(explicitMealSlot("breakfast was oats with milk"), "breakfast");
 });
 
-// BONOLO'S LOG (2026-07-14): a photo captioned "Breakfast" sent at 1pm was stamped
-// LUNCH because the PHOTO path used slotFromSastHour(now), ignoring her caption. The
-// caption keyword must win over the clock at any time of day — a batch-logger who
-// eats early and logs at midday must not have her whole morning dumped into LUNCH.
-test("extractMealLabel: caption wins over the clock — 'Breakfast' at 1pm → breakfast", () => {
-  const onePm = new Date("2026-07-14T13:00:00+02:00"); // SAST lunchtime
-  assert.equal(extractMealLabel("Breakfast", onePm), "breakfast");
-  assert.equal(extractMealLabel("Snack", onePm), "snack");
-  assert.equal(extractMealLabel("Dinner", onePm), "dinner");
+test("meal slot: 'dinner was' → dinner", () => {
+  assert.equal(explicitMealSlot("dinner was chicken and rice"), "dinner");
 });
 
-test("extractMealLabel: no caption at 1pm → clock fallback (lunch)", () => {
-  const onePm = new Date("2026-07-14T13:00:00+02:00");
-  assert.equal(extractMealLabel("", onePm, { kcal: 600, protein: 30 }), "lunch");
+// BONOLO'S LOG (2026-07-14): a photo captioned "Breakfast" sent at 1pm was stamped LUNCH because
+// the PHOTO path used slotFromSastHour(now), ignoring her caption. Her caption still wins — and
+// as of Cut 2 there is no longer a competing claim for it to win against.
+test("meal slot: the caption's own word stands at any hour", () => {
+  assert.equal(explicitMealSlot("Breakfast"), "breakfast");
+  assert.equal(explicitMealSlot("Snack"), "snack");
+  assert.equal(explicitMealSlot("Dinner"), "dinner");
 });
 
-test("extractMealLabel: 'dinner was' → dinner", () => {
-  assert.equal(extractMealLabel("dinner was chicken and rice"), "dinner");
-});
-
-test("extractMealLabel: no time signal — returns null (falls back to time-of-day)", () => {
-  // Pure message with no meal keyword — result depends on server clock, just check it's
-  // a valid label or null (not an unexpected string)
-  const result = extractMealLabel("oats and milk");
-  const VALID = new Set(["breakfast", "lunch", "dinner", "snack", null]);
-  assert.ok(VALID.has(result), `unexpected label: ${result}`);
+// THE INVERTED ONE. This asserted `extractMealLabel("", 1pm, 600kcal) === "lunch"` — a client who
+// said nothing, answered with "lunch" because of the hour their phone sent the message.
+test("meal slot: saying nothing at 1pm claims nothing", () => {
+  assert.equal(explicitMealSlot(""), null);
+  assert.equal(explicitMealSlot("chicken and rice"), null, "a 600-kcal plate is still not a named meal");
+  assert.equal(explicitMealSlot("I had a pear"), null, "the 22:00 pear — the named failure of Cut 2");
+  assert.equal(explicitMealSlot("oats and milk"), null);
 });
 
 // ============================================================

@@ -27,13 +27,13 @@ export async function tryLogReferent(ctx: { phone: string; message: string; user
   await db.update(users).set({ profileNotes: cleared }).where(eq(users.id, user.id));
   user.profileNotes = cleared;
 
-  const { commitFoodLog, extractMealLabel } = await import("./food-context");
-  const { getSlotContext } = await import("../portion-memory");
+  const { commitFoodLog } = await import("./food-context");
+  const { explicitMealSlot } = await import("../understanding/actions");
   const committed = await commitFoodLog({
     userId: user.id, phone, rawMessage: `${ref.mult}x ${pending.name}`.slice(0, 200),
     source: "referent", kcalInt: kcal, proteinInt: protein, carbsInt: 0, fatInt: 0,
     items: [{ name: pending.name, grams: 0, kcal, protein, category: "referent" }],
-    mealLabel: extractMealLabel(message, undefined, { kcal, protein }, user, await getSlotContext(user.id)),
+    mealLabel: explicitMealSlot(message),
     loggedAt: new Date(),
   });
   const amt = ref.mult === 1 ? "" : ref.mult === 0.5 ? "half of " : `${ref.mult}× `;

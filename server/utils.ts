@@ -27,13 +27,13 @@ export function buildContentVariables(vars?: Record<string, string | number | nu
 // Day boundaries live in server/sast.ts (ledger D6) — ONE definition of a SAST day for the whole
 // codebase. These two stay as re-exports so the existing call sites keep working unchanged while
 // they migrate; new code should import from ./sast directly.
-import { sastDayKey, sastDayStart, slotFromSastHour, effectiveMealLoggedAt, slotFromCaptionTime, isNightWorker, parseMealDate, statedWhen, SAYS_TODAY_RE, isRetroactiveMeal, stripInventedRetroDate, isFutureIntent } from "./sast";
+import { sastDayKey, sastDayStart, slotFromSastHour, effectiveMealLoggedAt, isNightWorker, parseMealDate, statedWhen, SAYS_TODAY_RE, isRetroactiveMeal, stripInventedRetroDate, isFutureIntent } from "./sast";
 import { clausesOf } from "./understanding/messy-intake";
 export { sastDayStart };
 export const sastToday = sastDayKey;
 
 // Temporal attribution lives in sast.ts. These re-exports preserve existing callers while they migrate.
-export { slotFromSastHour, effectiveMealLoggedAt, slotFromCaptionTime, isNightWorker, parseMealDate, statedWhen, SAYS_TODAY_RE, isRetroactiveMeal, stripInventedRetroDate, isFutureIntent };
+export { slotFromSastHour, effectiveMealLoggedAt, isNightWorker, parseMealDate, statedWhen, SAYS_TODAY_RE, isRetroactiveMeal, stripInventedRetroDate, isFutureIntent };
 
 /**
  * CANONICAL "HOW MANY TRAINING SESSIONS DOES THIS TEXT ASSERT?" (2026-08-22). Two callers, one
