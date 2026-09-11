@@ -10,6 +10,8 @@
 # not go red, the acceptance is not protecting what it claims to protect.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+source "$(dirname "$0")/lib/revert-db.sh"
+revert_db_require_safe
 ACC=script/pg-interaction-truth-acceptance.ts
 WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/cut1-revert.XXXXXX")"
 BACKUP="$WORK_ROOT/backup"
@@ -42,8 +44,7 @@ run_case () {
     restore_case
     return 1
   fi
-  if ! PGPASSWORD=kam psql -h 127.0.0.1 -U kam -d journeylab -q -c \
-    "DO \$\$ DECLARE t text; BEGIN FOR t IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('__drizzle_migrations','schema_migrations') LOOP EXECUTE format('TRUNCATE TABLE %I CASCADE', t); END LOOP; END \$\$;" >/dev/null 2>&1; then
+  if ! revert_db_reset; then
     echo "  !! database reset failed: $name"
     restore_case
     return 1

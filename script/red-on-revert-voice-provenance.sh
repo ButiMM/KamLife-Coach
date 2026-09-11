@@ -16,6 +16,8 @@
 # passed that text plus an internal language note.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+source "$(dirname "$0")/lib/revert-db.sh"
+revert_db_require_safe
 
 WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/voiceprov-revert.XXXXXX")"
 BACKUP="$WORK_ROOT/backup"
@@ -30,10 +32,6 @@ restore_case () {
 cleanup () { restore_case; rm -rf "$WORK_ROOT"; }
 trap cleanup EXIT INT TERM
 
-reset_db () {
-  PGPASSWORD=kam psql -h 127.0.0.1 -U kam -d journeylab -q -c \
-    "DO \$\$ DECLARE t text; BEGIN FOR t IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('__drizzle_migrations','schema_migrations') LOOP EXECUTE format('TRUNCATE TABLE %I CASCADE', t); END LOOP; END \$\$;" >/dev/null 2>&1
-}
 
 run_case () {
   local name="$1" patch="$2" suite="$3" label="$4"
@@ -44,7 +42,9 @@ run_case () {
   if ! python3 "$patch"; then
     echo "  !! patch failed: $name"; restore_case; return 1
   fi
-  reset_db
+  if ! revert_db_reset; then
+    echo "  !! database reset failed: $name"; restore_case; return 1
+  fi
   out="$(npx tsx "$suite" 2>&1)"
   status=$?
   verdict="$(printf '%s\n' "$out" | grep -E "^${label}:" | tail -1 || true)"
