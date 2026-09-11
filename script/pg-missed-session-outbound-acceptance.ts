@@ -195,25 +195,65 @@ REAL("\n=== 5 · THE CATCH-UP ANSWERS THE QUESTION IT WAS ASKED (Gate 3) ===");
 
   const closing = body.trim().split("\n").filter(l => l.trim()).slice(-1)[0] || "";
 
-  // THE EXACT SENTENCE, pinned deterministically. The rung's wording turns tomorrow-facing after
-  // 20:00 — a rule that predates this cut and stays — so asserting it through the body alone would
-  // pass or fail on the hour CI happened to run, the run-hour dependence removed from two suites in
-  // #221. So it is pinned at a fixed hour on the rung itself, and the body is asserted to carry a
-  // fuelling move and never the old receipt wording, whatever the clock says.
-  const { chooseAction } = await import("../server/one-action");
-  const atMidday = chooseAction({
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  // REGRADED 2026-09-11, AND STRENGTHENED. Disclosed rather than quietly adjusted.
+  //
+  // The comment that stood here claimed the run-hour dependence had been removed by pinning the
+  // rung at a fixed hour. It had not: the rung check below was pinned, but the FINAL assertion
+  // read the real outbound body, produced on the real clock. So this suite was green in the
+  // afternoon and red before midday, and it failed CI on main at 11:38 SAST for a PR that touched
+  // none of this. Proven on unmodified 9124647 at 11:55 SAST, same single failure.
+  //
+  // THE PRODUCT IS CORRECT AT BOTH HOURS, and that is the whole point:
+  //     hour 06/09/11  ->  weigh    "Stand on a scale this morning, before you eat."
+  //     hour 12/13/19  ->  protein  "For today, make your next meal another proper protein meal…"
+  // Before midday the weigh IS actionable today, so it lawfully answers a today-question. From
+  // midday it could only land tomorrow, and #233 Gate 3 requires the fuelling rung to stand
+  // instead. One promise, two lawful shapes, selected by a variable the test never controlled.
+  //
+  // So: BOTH rungs are now pinned and asserted on every run — the afternoon branch keeps the exact
+  // original sentence, and the morning branch, which was previously graded only by accident, gains
+  // an equally strict assertion it never had. The body check becomes hour-aware so it grades the
+  // shape that is lawful at the hour it actually ran. Strictly more constrained than before, and
+  // deterministic at every hour.
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  const { chooseAction, WEIGH_ACTIONABLE_BEFORE_HOUR } = await import("../server/one-action");
+  const rungAt = (hour: number) => chooseAction({
     firstName: "Bonolo", goal: "fat_loss", weeksOnProgramme: 3, daysSinceAnyLog: 0,
     daysSinceWeighIn: 40, loggedToday: true, proteinPct: 0.37, caloriePct: 0.27,
     sessionsThisWeek: 3, sessionsTarget: 3, stepsToday: 6400, stepsTarget: 8000, sick: false,
-    hour: 13, atKeyboard: true, asksAboutToday: true, justAteProteinMeal: true,
+    hour, atKeyboard: true, asksAboutToday: true, justAteProteinMeal: true,
   } as any);
+
+  const atMidday = rungAt(13);
   chk(atMidday.todo === "For today, make your next meal another proper protein meal. That's your one move.",
     "the fuelling rung's move is the exact adjudicated sentence", JSON.stringify(atMidday.todo));
 
+  // The morning branch, now graded rather than assumed: a weigh that CAN happen today is the
+  // lawful answer to a today-question, and it must be phrased for today, never for tomorrow.
+  const atMorning = rungAt(9);
+  chk(atMorning.kind === "weigh" && /this morning/i.test(String(atMorning.todo)),
+    "before midday the weigh rung answers the today-question, phrased for TODAY",
+    JSON.stringify(atMorning.todo));
+  chk(!/tomorrow/i.test(String(atMorning.todo)),
+    "…and never defers a today-question to tomorrow", JSON.stringify(atMorning.todo));
+
   chk(!/one proper protein down — same again at your next meal/i.test(body),
     "…and the old receipt wording is gone from the body", JSON.stringify(closing));
-  chk(/proper protein meal|proper protein down — start tomorrow/i.test(closing),
-    "the closing answer is the fuelling rung's move", JSON.stringify(closing));
+
+  // THE BODY, graded against the shape that is lawful at the hour this run actually happened.
+  const sastHour = Number(new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Johannesburg", hour: "2-digit", hour12: false,
+  }).format(new Date()));
+  if (sastHour >= WEIGH_ACTIONABLE_BEFORE_HOUR) {
+    chk(/proper protein meal|proper protein down — start tomorrow/i.test(closing),
+      `the closing answer is the fuelling rung's move (SAST ${sastHour}:00, weigh would be tomorrow-only)`,
+      JSON.stringify(closing));
+  } else {
+    chk(/this morning/i.test(closing) && !/tomorrow/i.test(closing),
+      `the closing answer is a move the client can make TODAY (SAST ${sastHour}:00, weigh is still actionable)`,
+      JSON.stringify(closing));
+  }
 
   chk(!/Nothing new today/i.test(body),
     "…it is not the hold copy", JSON.stringify(closing));
