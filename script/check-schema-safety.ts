@@ -89,6 +89,79 @@ if (uncreatable.length > 0) {
   );
 }
 
+// 5. THE JOURNAL MUST BE ORDERED, COMPLETE AND UNAMBIGUOUS (2026-09-11).
+//
+// A SUCCESSFUL COMMAND THAT SKIPPED A MIGRATION. While building the raw-voice-provenance cut,
+// `npm run db:migrate` printed "migrations applied successfully" and did not run 0013. The four
+// columns did not exist; the acceptance is what caught it, not this guard.
+//
+// The cause is that drizzle orders and records by the journal's `when`, not by filename. 0012 had
+// been stamped with a real epoch (1789056000000) and 0013 with a smaller hand-written one, so
+// drizzle treated 0013 as already applied and moved on. Nothing failed. Nothing warned.
+//
+// That is the worst shape a deploy step can have: not a wrong answer, but no answer wearing the
+// same colour as one. Production's own boot runner (server/index.ts phase 3) reads the DIRECTORY
+// in filename order, so the two systems would also disagree about what is applied — one of them
+// silently right, the other silently wrong, with no signal either way.
+//
+// So the journal is checked here, where the other schema-shaped traps already live. Read-only:
+// this adds no runtime behaviour and no second migration runner.
+const JOURNAL_PATH = "migrations/meta/_journal.json";
+if (existsSync(JOURNAL_PATH)) {
+  try {
+    const journal = JSON.parse(readFileSync(JOURNAL_PATH, "utf-8"));
+    const entries: Array<{ idx: number; when: number; tag: string }> = journal.entries || [];
+
+    // a. Indexes contiguous and ordered. A gap or a repeat means two authors edited the journal
+    //    without seeing each other, which is exactly when the rest of these rules start to matter.
+    entries.forEach((e, i) => {
+      if (e.idx !== i) {
+        problems.push(`${JOURNAL_PATH} entry ${i} has idx ${e.idx} — indexes must be contiguous and in order.`);
+      }
+    });
+
+    // b. `when` STRICTLY increasing. This is the rule whose violation skipped 0013 in silence.
+    for (let i = 1; i < entries.length; i++) {
+      if (entries[i].when <= entries[i - 1].when) {
+        problems.push(
+          `${JOURNAL_PATH}: "${entries[i].tag}" has when=${entries[i].when}, not after "${entries[i - 1].tag}" (${entries[i - 1].when}).`
+          + `\n     drizzle orders by this field, so a migration stamped behind its predecessor is`
+          + `\n     reported as applied and never runs. Stamp it later than every existing entry.`,
+        );
+      }
+    }
+
+    // c. Tags unique. Two entries naming one file is ambiguous about which was applied.
+    const seen = new Set<string>();
+    for (const e of entries) {
+      if (seen.has(e.tag)) problems.push(`${JOURNAL_PATH}: duplicate tag "${e.tag}".`);
+      seen.add(e.tag);
+    }
+
+    // d. Every journal entry has the SQL file it names.
+    for (const e of entries) {
+      if (!existsSync(join("migrations", `${e.tag}.sql`))) {
+        problems.push(`${JOURNAL_PATH} names "${e.tag}" but migrations/${e.tag}.sql does not exist.`);
+      }
+    }
+
+    // e. Every NUMBERED migration appears in the journal. Scoped to the `NNNN_` shape on purpose:
+    //    the repo carries two legacy unnumbered files (add_client_intelligence_profiles.sql,
+    //    add_shadow_replies.sql) that the boot runner executes by directory order and that drizzle
+    //    has never journaled. Failing them here would make this guard red on the day it ships,
+    //    which teaches people to disable it — the one outcome worse than not having it.
+    for (const f of migrations) {
+      if (!/^\d{4}_/.test(f)) continue;
+      const tag = f.replace(/\.sql$/, "");
+      if (!seen.has(tag)) {
+        problems.push(`migrations/${f} is a numbered migration with no journal entry — "db:migrate" will never run it.`);
+      }
+    }
+  } catch (e: any) {
+    problems.push(`${JOURNAL_PATH} could not be parsed: ${e?.message || e}`);
+  }
+}
+
 if (problems.length > 0) {
   console.error("schema safety: FAILED\n" + problems.map(p => `  ✗ ${p}`).join("\n"));
   console.error("\nWhy this guard exists: a bad `push` corrupts the day-ledger and the only way back\nis the 6-hourly backup — up to half a day of client food logs lost.\n");
