@@ -11,7 +11,6 @@
  * fabricating.
  */
 
-import { slotFromSastHour } from "./utils";
 
 /**
  * Which meal is being REPEATED and where does it go — pure, so it's unit-testable
@@ -38,8 +37,11 @@ export function parseMealRepeatTarget(m: string): { crossish: boolean; targetLab
   const sameBeM = !crossMealM && !sameAsMealM && !sameForM
     && m.match(/\b(breakfast|lunch|dinner|supper|snack)\b[^.!?]{0,40}?\b(?:will\s+be|is|are|gonna\s+be|be|stays?|remains?)\b[^.!?]{0,20}?\bthe\s+same\b/i);
   const crossish = !!(crossMealM || sameAsMealM || sameForM || sameBeM);
+  // "same as my lunch" NAMES THE SOURCE, NOT THE TARGET (Cut 2). This asked the send clock what
+  // to call the copy, so a 16:40 repeat of lunch was stored as somebody's "snack" and a 19:10 one
+  // as their "dinner" — a slot they never said, written as a fact about them. Unknown is null.
   const targetLabel = crossMealM ? crossMealM[1].toLowerCase().replace("supper", "dinner")
-    : sameAsMealM ? slotFromSastHour()
+    : sameAsMealM ? null
     : sameForM ? sameForM[1].toLowerCase().replace("supper", "dinner")
     : sameBeM ? sameBeM[1].toLowerCase().replace("supper", "dinner")
     : null;

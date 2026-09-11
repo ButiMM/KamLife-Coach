@@ -215,6 +215,19 @@ export const ACCEPTANCES: Acceptance[] = [
     // suite must turn red. A crash or an absent verdict is itself red.
     command: ["bash", "script/red-on-revert-voice-provenance.sh"] },
 
+  { id: "meal-slot-truth", title: "The clock may not name a meal the client did not name",
+    // CUT 2 (2026-09-11). At 06:00/13:00/22:00 SAST a client who names no meal must get no meal
+    // name written to their record. Needs a real database and the real front door: every claim is
+    // about which STRING landed in meal_logs.meal_label and what the post-transport body said
+    // about it, and the repeat case needs two turns of one client's real day to exist at all.
+    command: ["npx", "tsx", "script/pg-meal-slot-truth-acceptance.ts"] },
+
+  { id: "meal-slot-reverts", title: "Every removed meal-slot invention turns the acceptance red",
+    // The send clock, the calorie rule, a typed time, the photo path's own clock, the repeat
+    // target and the duplicate-guard sentence are each restored independently, plus two
+    // opposite-defect controls. A crash or an absent verdict is itself red.
+    command: ["bash", "script/red-on-revert-cut2-meal-slot.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same
