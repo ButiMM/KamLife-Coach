@@ -11,7 +11,8 @@
 #
 # Case 1 is the EXACT defect: a timestamp behind its predecessor.
 # Cases 2-5 are the other four ways the journal can lie about what will run.
-# Case 6 is the CONTROL: the unmodified tree must pass, or every case above is meaningless.
+# Case 7 proves the unique-index rule the order names explicitly.
+# The CONTROL at the end: the unmodified tree must pass, or every case above is meaningless.
 #
 # No database is required — the guard reads files only, which is why it can run in any job.
 set -uo pipefail
@@ -95,6 +96,16 @@ d["entries"].append({"idx": len(d["entries"]), "version": last["version"],
 json.dump(d, open(p,"w"), indent=2)
 PY
 
+# 7. A DUPLICATED INDEX with tags left unique. Contiguity already implies uniqueness, but
+#    "implied" is not proof — this demonstrates the rule the order names explicitly, so nobody has
+#    to reason about whether it holds.
+cat > "$PATCH_DIR/7.py" <<'PY2'
+import json
+p="migrations/meta/_journal.json"; d=json.load(open(p))
+d["entries"][-1]["idx"] = d["entries"][-2]["idx"]
+json.dump(d, open(p,"w"), indent=2)
+PY2
+
 echo "RED-ON-REVERT — migration journal guard. Every case below must report FAILED."
 failed=0
 run_case "1 (when behind its predecessor — the real defect)" "$PATCH_DIR/1.py" || failed=$((failed+1))
@@ -103,6 +114,7 @@ run_case "3 (index gap)"                                     "$PATCH_DIR/3.py" |
 run_case "4 (duplicate tag)"                                 "$PATCH_DIR/4.py" || failed=$((failed+1))
 run_case "5 (numbered migration absent from journal)"        "$PATCH_DIR/5.py" || failed=$((failed+1))
 run_case "6 (journal entry with no SQL file)"                "$PATCH_DIR/6.py" || failed=$((failed+1))
+run_case "7 (duplicate index, tags still unique)"           "$PATCH_DIR/7.py" || failed=$((failed+1))
 
 # CONTROL — the unmodified tree must pass. Without this every red above could come from a guard
 # that simply always fails, and the whole script would grade nothing.
@@ -117,4 +129,4 @@ if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) did not behave as required."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 6/6 breakages caught, and the real journal passes."
+echo "RED-ON-REVERT: GREEN — 7/7 breakages caught, and the real journal passes."
