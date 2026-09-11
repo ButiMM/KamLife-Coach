@@ -114,22 +114,49 @@ if (uncreatable.length > 0) {
 //
 // Read-only: no runtime behaviour, no second migration runner.
 const JOURNAL_PATH = "migrations/meta/_journal.json";
+/**
+ * THE ONLY TWO UNNUMBERED MIGRATIONS, BY EXACT NAME. Both predate the journal and are executed by
+ * the boot runner in directory order; drizzle has never recorded either. Listed literally rather
+ * than matched by shape so the exemption cannot grow: a new unnumbered file is a mistake, not a
+ * third legacy case.
+ */
+const LEGACY_UNNUMBERED = new Set(["add_client_intelligence_profiles.sql", "add_shadow_replies.sql"]);
 if (!existsSync(JOURNAL_PATH)) {
   problems.push(
     `${JOURNAL_PATH} is missing — "db:migrate" has no list to apply and will do nothing, silently.`
     + `\n     This file is the deploy path's only record of what has run. It is never optional.`,
   );
 } else {
-  let journal: any = null;
+  let journal: any;
+  let parsed = false;
   try {
     journal = JSON.parse(readFileSync(JOURNAL_PATH, "utf-8"));
+    parsed = true;
   } catch (e: any) {
     problems.push(`${JOURNAL_PATH} could not be parsed: ${e?.message || e}`);
   }
 
-  const entries: any[] | null = journal && Array.isArray(journal.entries) ? journal.entries : null;
-  if (journal && !entries) {
-    problems.push(`${JOURNAL_PATH} has no "entries" array — nothing can be verified about what will run.`);
+  // THE ROOT MUST BE A REAL OBJECT, and this is the third fail-open hole found in this guard.
+  // `JSON.parse("null")` SUCCEEDS and yields null; so do `false`, `0` and `""`. The previous
+  // version tested `journal && Array.isArray(journal.entries)`, so every one of those scalars made
+  // `entries` null, skipped the "no entries array" branch because `journal` was falsy, skipped
+  // every rule below it, and left the build green. Replacing the journal with the four characters
+  // `null` silenced the entire guard. An array root is rejected for the same reason: it carries no
+  // `entries` and is not the shape drizzle writes.
+  let entries: any[] | null = null;
+  if (parsed) {
+    const isPlainObject = journal !== null && typeof journal === "object" && !Array.isArray(journal);
+    if (!isPlainObject) {
+      problems.push(
+        `${JOURNAL_PATH} root is ${Array.isArray(journal) ? "an array" : JSON.stringify(journal)} — must be an object with an "entries" array.`
+        + `\n     JSON.parse accepts null, false, 0 and "" as valid documents, so a scalar here is a`
+        + `\n     parseable file that describes no migrations at all.`,
+      );
+    } else if (!Array.isArray(journal.entries)) {
+      problems.push(`${JOURNAL_PATH} has no "entries" array — nothing can be verified about what will run.`);
+    } else {
+      entries = journal.entries;
+    }
   }
 
   if (entries) {
@@ -213,6 +240,28 @@ if (!existsSync(JOURNAL_PATH)) {
     //    make this guard red on the day it ships, which teaches people to disable it — the one
     //    outcome worse than not having it.
     const NUMBERED = /^\d{4}_/;
+
+    // g. NO NEW UNNUMBERED MIGRATIONS, AND NO UNNUMBERED JOURNAL TAGS.
+    //
+    //    The NNNN_ scoping above exists to grandfather two files that predate the journal. It was
+    //    written as a SHAPE test, which means any future unnumbered file would inherit the
+    //    exemption and bypass journal membership, ordering and file-existence checking entirely —
+    //    the grandfather clause would quietly become a bypass. So the exemption is now EXACTLY
+    //    those two names, and everything else must be numbered.
+    for (const f of migrations) {
+      if (LEGACY_UNNUMBERED.has(f) || NUMBERED.test(f)) continue;
+      problems.push(
+        `migrations/${f} is not numbered — every migration after the two grandfathered legacy files`
+        + `\n     must use the NNNN_ prefix, or it bypasses journal membership and ordering entirely.`
+        + `\n     Grandfathered, by exact name: ${[...LEGACY_UNNUMBERED].join(", ")}`,
+      );
+    }
+    for (const e of entries) {
+      const tag = typeof e?.tag === "string" ? e.tag : "";
+      if (!tag || NUMBERED.test(tag)) continue;
+      problems.push(`${JOURNAL_PATH}: tag "${tag}" is not numbered — journal tags must use the NNNN_ prefix.`);
+    }
+
     const journalNumbered = entries
       .map(e => (typeof e?.tag === "string" ? e.tag : ""))
       .filter(t => NUMBERED.test(t));

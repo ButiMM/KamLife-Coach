@@ -15,6 +15,8 @@
 # Cases 8-11 are the FAIL-CLOSED holes: a deleted journal skipped every rule; a missing or
 # non-numeric `when` evaded the monotonic comparison; and two valid tags could be swapped
 # because membership was checked but ORDER was not. All three passed the first version.
+# Cases 12-13 close the last two: a journal of `null` is VALID JSON and silenced every rule,
+# and the NNNN_ exemption was a shape test, so any future unnumbered file would inherit it.
 # The CONTROL at the end: the unmodified tree must pass, or every case above is meaningless.
 #
 # No database is required — the guard reads files only, which is why it can run in any job.
@@ -148,6 +150,24 @@ d["entries"][i]["tag"], d["entries"][j]["tag"] = d["entries"][j]["tag"], d["entr
 json.dump(d, open(p,"w"), indent=2)
 PY2
 
+# 12. THE JOURNAL REPLACED WITH JSON `null`. `JSON.parse("null")` SUCCEEDS, so the file is valid
+#     JSON describing no migrations at all. The previous version tested `journal && ...`, which is
+#     falsy for null, so every rule below was skipped and the build stayed green — the whole guard
+#     silenced by four characters. `false`, `0` and `""` are the same hole.
+cat > "$PATCH_DIR/12.py" <<'PY2'
+open("migrations/meta/_journal.json","w").write("null")
+PY2
+
+# 13. A HARMLESS NEW UNNUMBERED MIGRATION. It looks like the two grandfathered legacy files, so a
+#     shape-based exemption would wave it through — and an unnumbered file is checked for journal
+#     membership, ordering and file existence by nothing at all. The exemption must be two exact
+#     names, not a pattern, or it becomes a bypass for every future migration.
+cat > "$PATCH_DIR/13.py" <<'PY2'
+open("migrations/add_a_harmless_looking_thing.sql","w").write(
+    "-- red-on-revert fixture: an unnumbered migration that must NOT inherit the legacy exemption\n"
+    "ALTER TABLE turn_ledger ADD COLUMN IF NOT EXISTS red_on_revert_unnumbered TEXT;\n")
+PY2
+
 echo "RED-ON-REVERT — migration journal guard. Every case below must report FAILED."
 failed=0
 run_case "1 (when behind its predecessor — the real defect)" "$PATCH_DIR/1.py" || failed=$((failed+1))
@@ -161,6 +181,8 @@ run_case "8 (journal deleted entirely)"                     "$PATCH_DIR/8.py" ||
 run_case "9 (when field removed)"                           "$PATCH_DIR/9.py" || failed=$((failed+1))
 run_case "10 (when present but non-numeric)"                "$PATCH_DIR/10.py" || failed=$((failed+1))
 run_case "11 (two valid numbered tags swapped)"             "$PATCH_DIR/11.py" || failed=$((failed+1))
+run_case "12 (journal replaced with JSON null)"             "$PATCH_DIR/12.py" || failed=$((failed+1))
+run_case "13 (new unnumbered migration file)"               "$PATCH_DIR/13.py" || failed=$((failed+1))
 
 # CONTROL — the unmodified tree must pass. Without this every red above could come from a guard
 # that simply always fails, and the whole script would grade nothing.
@@ -175,4 +197,4 @@ if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) did not behave as required."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 11/11 breakages caught, and the real journal passes."
+echo "RED-ON-REVERT: GREEN — 13/13 breakages caught, and the real journal passes."
