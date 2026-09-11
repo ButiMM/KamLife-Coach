@@ -195,6 +195,19 @@ export const ACCEPTANCES: Acceptance[] = [
     // in prepareOutbound and sendFinal, past every handler.
     command: ["npx", "tsx", "script/pg-interaction-truth-acceptance.ts"] },
 
+  { id: "voice-provenance", title: "The words the client actually spoke are durable",
+    // RAW VOICE PROVENANCE (2026-09-10). A voice note becomes three strings — STT output, cleaned,
+    // condensed — and only the last reached the ledger, so "did we mis-hear them, or hear them and
+    // then delete half of it?" had no durable evidence. Needs a real database: the claim is about
+    // which COLUMNS on which ROW survive the transport, and a fixture that answers every query the
+    // same way cannot tell two ledger rows apart.
+    command: ["npx", "tsx", "script/pg-voice-provenance-acceptance.ts"] },
+
+  { id: "voice-provenance-reverts", title: "Voice provenance fails on every stage revert",
+    // Each media.ts recording seam and the ledger writer are reverted independently; the relevant
+    // suite must turn red. A crash or an absent verdict is itself red.
+    command: ["bash", "script/red-on-revert-voice-provenance.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same
