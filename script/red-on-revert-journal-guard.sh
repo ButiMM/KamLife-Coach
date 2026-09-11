@@ -12,6 +12,9 @@
 # Case 1 is the EXACT defect: a timestamp behind its predecessor.
 # Cases 2-5 are the other four ways the journal can lie about what will run.
 # Case 7 proves the unique-index rule the order names explicitly.
+# Cases 8-11 are the FAIL-CLOSED holes: a deleted journal skipped every rule; a missing or
+# non-numeric `when` evaded the monotonic comparison; and two valid tags could be swapped
+# because membership was checked but ORDER was not. All three passed the first version.
 # The CONTROL at the end: the unmodified tree must pass, or every case above is meaningless.
 #
 # No database is required — the guard reads files only, which is why it can run in any job.
@@ -106,6 +109,45 @@ d["entries"][-1]["idx"] = d["entries"][-2]["idx"]
 json.dump(d, open(p,"w"), indent=2)
 PY2
 
+# 8. THE JOURNAL IS DELETED ENTIRELY. The first version of this guard opened with
+#    `if (existsSync(...))`, so removing the file skipped every rule below it and the build stayed
+#    green. A guard that can be silenced by deleting its subject is not a guard.
+cat > "$PATCH_DIR/8.py" <<'PY2'
+import os
+os.remove("migrations/meta/_journal.json")
+PY2
+
+# 9. `when` REMOVED from an entry. `undefined <= undefined` is false, so the monotonic rule passed
+#    while the ordering it claims to enforce was undefined.
+cat > "$PATCH_DIR/9.py" <<'PY2'
+import json
+p="migrations/meta/_journal.json"; d=json.load(open(p))
+del d["entries"][-1]["when"]
+json.dump(d, open(p,"w"), indent=2)
+PY2
+
+# 10. `when` PRESENT BUT NON-NUMERIC. String comparison would silently "work" for some values and
+#     not others; the field must be a finite number or the ordering means nothing.
+cat > "$PATCH_DIR/10.py" <<'PY2'
+import json
+p="migrations/meta/_journal.json"; d=json.load(open(p))
+d["entries"][-1]["when"] = "1789061218646"
+json.dump(d, open(p,"w"), indent=2)
+PY2
+
+# 11. TWO VALID NUMBERED TAGS SWAPPED. Indexes stay contiguous, timestamps stay strictly
+#     increasing, tags stay unique, every file still exists — every other rule passes. Only the
+#     ORDER rule can catch it, and without that rule drizzle and the boot runner would apply the
+#     same commit's migrations in different orders.
+cat > "$PATCH_DIR/11.py" <<'PY2'
+import json, re
+p="migrations/meta/_journal.json"; d=json.load(open(p))
+nums=[i for i,e in enumerate(d["entries"]) if re.match(r"^\d{4}_", e.get("tag",""))]
+i,j = nums[-2], nums[-1]
+d["entries"][i]["tag"], d["entries"][j]["tag"] = d["entries"][j]["tag"], d["entries"][i]["tag"]
+json.dump(d, open(p,"w"), indent=2)
+PY2
+
 echo "RED-ON-REVERT — migration journal guard. Every case below must report FAILED."
 failed=0
 run_case "1 (when behind its predecessor — the real defect)" "$PATCH_DIR/1.py" || failed=$((failed+1))
@@ -115,6 +157,10 @@ run_case "4 (duplicate tag)"                                 "$PATCH_DIR/4.py" |
 run_case "5 (numbered migration absent from journal)"        "$PATCH_DIR/5.py" || failed=$((failed+1))
 run_case "6 (journal entry with no SQL file)"                "$PATCH_DIR/6.py" || failed=$((failed+1))
 run_case "7 (duplicate index, tags still unique)"           "$PATCH_DIR/7.py" || failed=$((failed+1))
+run_case "8 (journal deleted entirely)"                     "$PATCH_DIR/8.py" || failed=$((failed+1))
+run_case "9 (when field removed)"                           "$PATCH_DIR/9.py" || failed=$((failed+1))
+run_case "10 (when present but non-numeric)"                "$PATCH_DIR/10.py" || failed=$((failed+1))
+run_case "11 (two valid numbered tags swapped)"             "$PATCH_DIR/11.py" || failed=$((failed+1))
 
 # CONTROL — the unmodified tree must pass. Without this every red above could come from a guard
 # that simply always fails, and the whole script would grade nothing.
@@ -129,4 +175,4 @@ if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) did not behave as required."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 7/7 breakages caught, and the real journal passes."
+echo "RED-ON-REVERT: GREEN — 11/11 breakages caught, and the real journal passes."
