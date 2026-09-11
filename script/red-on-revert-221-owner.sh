@@ -6,14 +6,17 @@
 # testing its mechanism, and is reported as such rather than dressed up.
 set -u
 cd "$(dirname "$0")/.."
+source "$(dirname "$0")/lib/revert-db.sh"
+revert_db_require_safe
 ACC=script/pg-session-owner-acceptance.ts
 
 run_case () {
   local name="$1" patch="$2"
   cp -r server /tmp/221o-server-backup
   python3 "$patch" || { echo "  !! patch failed to apply: $name"; rm -rf /tmp/221o-server-backup; return 1; }
-  PGPASSWORD=kam psql -h 127.0.0.1 -U kam -d journeylab -q -c \
-    "DO \$\$ DECLARE t text; BEGIN FOR t IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '__drizzle_migrations' LOOP EXECUTE format('TRUNCATE TABLE %I CASCADE', t); END LOOP; END \$\$;" >/dev/null 2>&1
+  if ! revert_db_reset; then
+    echo "  !! database reset failed: $name"; rm -rf /tmp/221o-server-backup; return 1
+  fi
   local out; out="$(npx tsx "$ACC" 2>&1)"
   echo "── REVERT: $name"
   echo "   $(echo "$out" | grep -E '^pg-session-owner-acceptance:' || echo '(no verdict — crashed)')"

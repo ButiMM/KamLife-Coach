@@ -9,6 +9,8 @@
 # Usage:  DATABASE_URL=... bash script/red-on-revert-221.sh
 set -u
 cd "$(dirname "$0")/.."
+source "$(dirname "$0")/lib/revert-db.sh"
+revert_db_require_safe
 ACC=script/pg-comeback-clock-acceptance.ts
 TRUNC="DO \$\$ DECLARE t text; BEGIN FOR t IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '__drizzle_migrations' LOOP EXECUTE format('TRUNCATE TABLE %I CASCADE', t); END LOOP; END \$\$;"
 
@@ -18,7 +20,9 @@ run_case () {
   python3 "$patch" || { echo "  !! patch failed to apply: $name"; rm -rf /tmp/221-server-backup; return 1; }
   # Truncate before EVERY run — these suites are not isolated from each other, and treating them
   # as if they were is exactly what produced a false four-acceptance regression report on #220.
-  PGPASSWORD=kam psql -h 127.0.0.1 -U kam -d journeylab -q -c "$TRUNC" >/dev/null 2>&1
+  if ! revert_db_reset; then
+    echo "  !! database reset failed: $name"; rm -rf /tmp/221-server-backup; return 1
+  fi
   local out; out="$(npx tsx "$ACC" 2>&1)"
   echo "── REVERT: $name"
   echo "   $(echo "$out" | grep -E '^pg-comeback-clock-acceptance:' || echo '(no verdict — crashed)')"
