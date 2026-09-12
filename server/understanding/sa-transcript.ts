@@ -52,11 +52,10 @@ function killswitchOff(): boolean {
  * THE CONTRACT. This cleaner repairs spelling. It does not rewrite clauses. So the cleaned head
  * must be the same tokens, in the same order, the same number of times — with only two exceptions:
  *
- *   - case, spacing and punctuation are free (they are normalised away before comparison)
- *   - a token may be REPLACED by an approved SA repair: the replacement must be a word this
- *     cleaner exists to produce, and must be a near-miss of what STT heard
+ *   - case, spacing and most punctuation are free (they are normalised away before comparison)
+ *   - one token may be REPLACED by another only if that EXACT pair is listed below
  *
- * Anything else — a deletion, an insertion, an unexplained substitution — returns the WHOLE RAW
+ * Anything else — a deletion, an insertion, an unlisted substitution — returns the WHOLE RAW
  * transcript. Numbers, weekdays and negations are protected absolutely: they may not be
  * substituted even for an approved word, because "8500" becoming "8000" and "missed" becoming
  * "finished" are the changes that cost a client their record rather than their spelling.
@@ -65,12 +64,24 @@ function killswitchOff(): boolean {
  * distinguish a clause from a spelling, which is precisely how the 60% and 95.84% replies both
  * got through.
  */
-const SA_REPAIR_WORDS = new Set([
-  // the SA food words the system prompt names, which is the whole reason this stage exists
-  "samp", "morogo", "pap", "pilchards", "chakalaka", "vetkoek", "umngqusho", "mngqusho",
-  "kota", "mageu", "maas", "wors", "boerewors", "umqombothi", "magwinya", "gatsby", "bunny",
-  // and the SA slang it is told to keep and spell correctly
-  "mos", "neh", "yoh", "eish", "lekker", "sharp", "sho", "shame", "ag", "hey", "hayibo", "sharp",
+
+/**
+ * VETTED PAIRS, NOT A VOCABULARY (amended 2026-09-12).
+ *
+ * The first version of this contract asked a different question: is the NEW word one of the SA
+ * words this cleaner exists to produce, and is it within edit distance 3 of the old one? That
+ * approves any near-neighbour of any listed word, which was reproduced as:
+ *
+ *     "I have pain"  ->  "I have pap"     ("pain" is 2 edits from "pap")
+ *     "I am sad"     ->  "I am pap"       ("sad"  is 2 edits from "pap")
+ *
+ * A client reporting pain had it replaced by a food word and no handler could tell. So the
+ * question is now the narrow one: was THIS EXACT substitution vetted by a person? Only the pair
+ * the cut was opened for is listed. Growing this map is a deliberate act with a name attached;
+ * guessing from a distance metric is not, which is why the metric is gone rather than tuned.
+ */
+const VETTED_REPAIRS = new Map<string, string>([
+  ["stamp", "samp"],
 ]);
 
 /**
@@ -93,32 +104,47 @@ function isProtected(token: string): boolean {
   return PROTECTED_TOKENS.has(token) || /\d/.test(token);
 }
 
-/** Lowercased words and numbers, punctuation and spacing removed — the client's lexical spine. */
+/**
+ * PUNCTUATION IS NOT GLOBALLY FREE (amended 2026-09-12).
+ *
+ * The first tokenizer was `/[a-z0-9']+/g`, and it had two holes that a reviewer reproduced:
+ *
+ *   - IT ATE THE SIGN. "-5" and "5" tokenize identically under it, so a reply turning
+ *     "my change was -5 kg" into "my change was 5 kg" — five kilograms lost read back as five
+ *     kilograms gained — was a token-for-token match and passed.
+ *   - IT ATE EVERYTHING NON-ASCII. A Sesotho or isiZulu word the client actually spoke matched
+ *     nothing and simply vanished from BOTH sides, so a reply that deleted it compared equal.
+ *
+ * So a quantity is one token including its leading sign and its internal separators: "-5", "8.5"
+ * and "8,500" are three different tokens and none of them is "85" or "5". Everything else is a run
+ * of Unicode letters, marks and digits, which keeps non-ASCII lexical content in the comparison
+ * instead of discarding it. Case, spacing, and punctuation BETWEEN tokens stay free — a full stop
+ * the model adds at the end of a sentence is still a repair, not a rewrite.
+ *
+ * This errs strict on purpose: "8500" and "8,500" are different tokens here, and a reply that
+ * regroups digits is refused. Refusing returns the client's own raw words, which is the safe half.
+ *
+ * INLINE, AND DELIBERATELY SO: the pattern it replaces was inline too. This is one predicate's
+ * tokenizer, not a named pattern authority that decides anything about a message, and naming it
+ * would move the architecture governor's regex count for a rewrite that adds no such authority.
+ */
+
+/** Leading sign forms STT and the model use interchangeably; the SIGN matters, its glyph does not. */
+const MINUS_FORMS = "-−–—";
+
+/** Lowercased words and signed quantities — the client's lexical spine, signs and all. */
 function lexicalTokens(s: string): string[] {
-  return (s.toLowerCase().match(/[a-z0-9']+/g) || []).map(t => t.replace(/'/g, ""));
+  // a quantity (sign, digits, internal separators) | a run of Unicode letters, marks and digits
+  return (s.toLowerCase().match(/[+−–—-]?\d+(?:[.,]\d+)*|[\p{L}\p{M}\p{N}'’]+/gu) || []).map((t) => {
+    const signed = MINUS_FORMS.includes(t[0]) ? "-" + t.slice(1) : t;
+    return signed.split("'").join("").split("’").join("");
+  });
 }
 
-/** How far apart two tokens are. Bounded work: both are single words. */
-function editDistance(a: string, b: string): number {
-  const rows: number[][] = [Array.from({ length: b.length + 1 }, (_, j) => j)];
-  for (let i = 1; i <= a.length; i++) {
-    rows[i] = [i];
-    for (let j = 1; j <= b.length; j++) {
-      rows[i][j] = Math.min(
-        rows[i - 1][j] + 1,
-        rows[i][j - 1] + 1,
-        rows[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
-      );
-    }
-  }
-  return rows[a.length][b.length];
-}
-
-/** A substitution is allowed only when it produces a word this cleaner exists to produce. */
+/** A substitution is allowed only when this exact FROM->TO pair was vetted by a person. */
 function isApprovedRepair(from: string, to: string): boolean {
   if (isProtected(from) || isProtected(to)) return false;
-  if (!SA_REPAIR_WORDS.has(to)) return false;
-  return editDistance(from, to) <= 3;
+  return VETTED_REPAIRS.get(from) === to;
 }
 
 /**

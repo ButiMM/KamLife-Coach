@@ -269,6 +269,100 @@ console.log("\n3b. A REPLY THAT DELETES PART OF THE HEAD IS REFUSED, FINISHED OR
     chk(!/went to the gym twice/.test(out), "…so nothing they did not say is in the record");
   }
 
+  // ── THE TWO HOLES THE REVIEWER REPRODUCED IN THE EDIT CONTRACT ITSELF ───────────────────────
+  // Both passed the ordered token contract as first written. Each is executed here exactly as it
+  // was reported, through the real cleaner, and each must keep the client's raw words.
+  //
+  // (a) A NEAR-NEIGHBOUR OF A FOOD WORD IS NOT A SPELLING REPAIR. Membership-plus-edit-distance
+  //     approved any word within three edits of any listed SA word, so a client reporting pain or
+  //     low mood had it replaced with a food word and nothing downstream could tell.
+  {
+    const filler = "and then I took the taxi to work like every other morning of this week. ";
+    for (const [said, invented, what] of [
+      ["I have pain in my knee since Saturday. ", "I have pap in my knee since Saturday. ", "pain"],
+      ["I am sad about how this month went. ", "I am pap about how this month went. ", "low mood"],
+      ["I ate porridge before I left the house. ", "I ate pap before I left the house. ", "an unvetted food swap"],
+    ]) {
+      const note = (said + filler.repeat(12)).trim();
+      const reply = (invented + filler.repeat(12)).trim();
+      chk(reply !== note, `the ${what} fixture really does differ from what was said`);
+      const out = await cleanSATranscript(stubOpenAI(reply, "stop"), note, null);
+      chk(out === note, `${what}: an unvetted substitution keeps the RAW transcript`,
+        `out ${out.length} of ${note.length}`);
+      chk(out.startsWith(said.trim().slice(0, 20)),
+        `…so the client's own words open the record, not the model's guess`,
+        JSON.stringify(out.slice(0, 40)));
+    }
+  }
+
+  // (b) THE SIGN AND THE DECIMAL POINT CARRY MEANING. The first tokenizer stripped both, so "-5"
+  //     and "5" compared equal — five kilograms lost read back as five kilograms gained — and
+  //     "8.5" was indistinguishable from "85" and from "8,500".
+  {
+    const filler = "and I am telling you everything that happened so you have the full picture. ";
+    for (const [said, rewritten, what] of [
+      ["My change was -5 kg this month. ", "My change was 5 kg this month. ", "a stripped minus sign"],
+      ["My change was −5 kg this month. ", "My change was 5 kg this month. ", "a stripped unicode minus"],
+      ["I am 8.5 kg down since January. ", "I am 85 kg down since January. ", "a lost decimal point"],
+      ["I am 8.5 kg down since January. ", "I am 8,500 kg down since January. ", "a regrouped quantity"],
+    ]) {
+      const note = (said + filler.repeat(12)).trim();
+      const reply = (rewritten + filler.repeat(12)).trim();
+      const out = await cleanSATranscript(stubOpenAI(reply, "stop"), note, null);
+      chk(out === note, `${what}: the quantity is protected and the RAW transcript is kept`,
+        `out ${JSON.stringify(out.slice(0, 34))}`);
+    }
+    // AND THE SAME NUMBER UNCHANGED IS STILL ACCEPTED — without this the four checks above are
+    // satisfied by a tokenizer that refuses every note containing a decimal.
+    const kept = ("I am 8.5 kg down since January. " + filler.repeat(12)).trim();
+    const repunct = kept.replace("I am 8.5 kg down since January.", "I am 8.5 kg down since January!");
+    const outKept = await cleanSATranscript(stubOpenAI(repunct, "stop"), kept, null);
+    chk(outKept === repunct, "a decimal left alone still lets a punctuation repair through",
+      JSON.stringify(outKept.slice(0, 40)));
+  }
+
+  // (c) NON-ASCII LEXICAL CONTENT IS NOT SILENTLY DISCARDED. The first tokenizer was ASCII-only,
+  //     so a token made of non-Latin letters produced NO tokens at all: it contributed nothing to
+  //     either side of the comparison, and a reply that added or removed one had an identical
+  //     token count and was accepted. Multilingual STT does emit non-Latin script on unclear
+  //     audio, and whatever it emits is the client's record until a person says otherwise.
+  //
+  //     THIS IS A PROPERTY FIXTURE, not a typical note — it is built to isolate the blind spot,
+  //     and the superseded tokenizer is reproduced below to prove the fixture is not vacuous.
+  {
+    const filler = "and after that I went to work and the day was long and hot. ";
+    // The ONLY difference between these two is the non-ASCII token. Removing a neighbouring
+    // ASCII word along with it would make the deletion visible for the wrong reason.
+    const spoken = "I made umngqusho and здоровье beans for the family. ";
+    const dropped = "I made umngqusho and beans for the family. ";
+    const note = (spoken + filler.repeat(12)).trim();
+    const reply = (dropped + filler.repeat(12)).trim();
+
+    // THE SUPERSEDED TOKENIZER, verbatim, purely as evidence that this deletion WAS invisible.
+    // It is a local control: nothing under test reads it.
+    const asciiOnly = (s: string) => (s.toLowerCase().match(/[a-z0-9']+/g) || []).map(t => t.replace(/'/g, ""));
+    chk(JSON.stringify(asciiOnly(note)) === JSON.stringify(asciiOnly(reply)),
+      "CONTROL: under the ASCII-only tokenizer the deleted word leaves NO trace at all",
+      `${asciiOnly(note).length} vs ${asciiOnly(reply).length} tokens`);
+
+    const out = await cleanSATranscript(stubOpenAI(reply, "stop"), note, null);
+    chk(out === note, "a deleted non-ASCII word keeps the RAW transcript", `out ${out.length}`);
+    chk(/здоровье/.test(out), "…so the word the client actually spoke is still in their record");
+
+    // AND THE INSERTION DIRECTION, which is the same blind spot pointed the other way: a word the
+    // client never said, appearing in their own record for free.
+    const outIns = await cleanSATranscript(stubOpenAI(note, "stop"), reply, null);
+    chk(outIns === reply, "an invented non-ASCII word keeps the RAW transcript", `out ${outIns.length}`);
+    chk(!/здоровье/.test(outIns), "…so nothing they did not say was added");
+
+    // …AND A NON-ASCII NOTE THAT IS NOT CHANGED STILL PASSES. A tokenizer that simply refused
+    // everything containing non-ASCII text would satisfy the checks above and break the stage.
+    const okReply = note.replace("I made umngqusho", "I made umngqusho,");
+    const outOk = await cleanSATranscript(stubOpenAI(okReply, "stop"), note, null);
+    chk(outOk === okReply, "an untouched non-ASCII note still accepts a punctuation repair",
+      JSON.stringify(outOk.slice(0, 40)));
+  }
+
   // AND THE REPAIRS THE CLEANER EXISTS FOR STILL LAND. Without these the contract is satisfied by
   // a cleaner that refuses everything, which deletes the whole point of the stage.
   {

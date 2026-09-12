@@ -251,6 +251,20 @@ REAL("\n6. NO STAGE BETWEEN THE CLIENT AND THE HANDLERS MAY SHORTEN WHAT THEY SA
     "…and numbers, days and negations may not be substituted at all");
   chk(!/coversTheEnd|cleaned\.length < head\.length/.test(wedge),
     "the superseded length gates are gone, not left unable to fail");
+  // VETTED PAIRS, NOT A VOCABULARY. "Is the new word an SA word within three edits?" approved
+  // "pain" -> "pap" and "sad" -> "pap". The question is now "was THIS pair vetted?".
+  chk(/VETTED_REPAIRS\.get\(from\) === to/.test(wedge),
+    "a substitution is allowed only as an explicitly vetted FROM->TO pair");
+  chk(!/editDistance|SA_REPAIR_WORDS/.test(wedge),
+    "…and the distance metric and the target vocabulary are gone, not merely unused");
+  // PUNCTUATION IS NOT GLOBALLY FREE. The old tokenizer ate the minus sign and the decimal point,
+  // so "-5" compared equal to "5" and "8.5" to "85".
+  chk(/\[\+−–—-\]\?\\d\+/.test(wedge),
+    "a quantity carries its leading sign into the comparison");
+  chk(/\\p\{L\}/.test(wedge),
+    "…and non-ASCII lexical content is compared, not silently discarded");
+  chk(!/\[a-z0-9'\]\+/.test(wedge),
+    "the ASCII-only tokenizer is gone, not left beside the one that replaced it");
 }
 
 REAL(`\n${failed === 0 ? "pg-long-voice-tail-acceptance: GREEN" : `pg-long-voice-tail-acceptance: ${failed} FAILED`}\n`);

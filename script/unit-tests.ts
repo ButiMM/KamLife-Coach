@@ -986,6 +986,18 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
       "the superseded length gates are gone, not left unable to fail");
     assert.ok(!/retainsOriginal/.test(wedge),
       "the permissive set-overlap check is gone — a set has no order, and a deleted clause passed it");
+    // VETTED PAIRS, NOT A VOCABULARY. "Is the new word an SA word within three edits?" approved
+    // "pain" -> "pap" and "sad" -> "pap": a client's clinical and mood content replaced by food.
+    assert.match(wedge, /VETTED_REPAIRS\.get\(from\) === to/,
+      "a substitution is allowed only as an explicitly vetted FROM->TO pair");
+    assert.ok(!/editDistance|SA_REPAIR_WORDS/.test(wedge),
+      "the distance metric and the target vocabulary are gone, not merely unused");
+    // PUNCTUATION IS NOT GLOBALLY FREE. The old tokenizer ate the sign and the decimal point, so
+    // "-5" compared equal to "5" and "8.5" to "85"; it also discarded non-ASCII words entirely.
+    assert.match(wedge, /\[\+−–—-\]\?\\d\+/, "a quantity carries its leading sign into the comparison");
+    assert.match(wedge, /\\p\{L\}/, "non-ASCII lexical content is compared, not silently discarded");
+    assert.ok(!/\[a-z0-9'\]\+/.test(wedge),
+      "the ASCII-only tokenizer is gone, not left beside the one that replaced it");
   });
   test("CFO: the weekly report surfaces AI cost by feature and guards the R199 margin", () => {
     const biz = readFileSync(join("server", "scheduler", "jobs", "business.ts"), "utf-8");

@@ -141,12 +141,33 @@ PYEOF
 # 2c. THE PROTECTED TOKENS STOP BEING PROTECTED. The contract still refuses deletions, so the
 #     count-based half survives — this reverts only the rule that a number, a weekday or a
 #     negation may never be substituted. 8500 becomes 8000 and "missed" becomes "finished",
-#     each a one-for-one swap that leaves the token count untouched.
+#     each a one-for-one swap that leaves the token count untouched. The vetted pair map alone
+#     does not catch these, so the map is widened to whatever the model returned.
 cat > "$PATCH_DIR/2c.py" <<'PYEOF'
 p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
 s=s.replace("  if (isProtected(from) || isProtected(to)) return false;\n", "")
-s=s.replace("  if (!SA_REPAIR_WORDS.has(to)) return false;", "  if (false) return false;")
-assert s!=b and "if (false) return false;" in s, "no match"; open(p,"w").write(s)
+s=s.replace("  return VETTED_REPAIRS.get(from) === to;", "  return true;")
+assert s!=b and "  return true;" in s, "no match"; open(p,"w").write(s)
+PYEOF
+
+# 2d. THE VETTED PAIR MAP BECOMES A VOCABULARY AGAIN — the first hole the reviewer reproduced.
+#     Asking "is the NEW word one of the SA words this cleaner produces?" instead of "was THIS
+#     pair vetted?" approves any near-neighbour of any listed word: "I have pain" becomes
+#     "I have pap", and a client reporting pain has it recorded as a plate of food.
+cat > "$PATCH_DIR/2d.py" <<'PYEOF'
+p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
+s=s.replace("  return VETTED_REPAIRS.get(from) === to;",
+            '  return to === "pap" || to === "samp";')
+assert s!=b and 'to === "pap"' in s, "no match"; open(p,"w").write(s)
+PYEOF
+
+# 2e. THE TOKENIZER GOES BACK TO ASCII-ONLY — the second hole. Signs and decimal points are eaten,
+#     so "-5 kg" compares equal to "5 kg" and "8.5" to "85"; non-Latin words produce no tokens at
+#     all, so one can be deleted from or invented into the client's record for free.
+cat > "$PATCH_DIR/2e.py" <<'PYEOF'
+p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
+s=s.replace("/[+−–—-]?\\d+(?:[.,]\\d+)*|[\\p{L}\\p{M}\\p{N}'’]+/gu", "/[a-z0-9']+/g")
+assert s!=b and "match(/[a-z0-9']+/g)" in s, "no match"; open(p,"w").write(s)
 PYEOF
 
 # 3. THE CONDENSER COMES BACK ON THE ROUTING PATH — a model's retelling reaches the handlers as
@@ -205,11 +226,11 @@ PYEOF
 
 echo "RED-ON-REVERT — Cut 3. Every case below must be caught by at least one grader."
 failed=0
-for i in 1 2 2b 2c 3 4 5 6 7; do
+for i in 1 2 2b 2c 2d 2e 3 4 5 6 7; do
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) left every grader green, crashed, or would not patch."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 9/9 cases caught."
+echo "RED-ON-REVERT: GREEN — 11/11 cases caught."
