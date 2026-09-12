@@ -32,7 +32,7 @@ process.env.NORMALIZER_FIXTURES_STRICT = "1";
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { CORPUS, CORPUS_PATH, recordingFingerprint } from "./record-normalizer";
+import { CORPUS, CORPUS_PATH, REQUIRED_CATEGORIES, recordingFingerprint } from "./record-normalizer";
 
 /** Captured before anything can override it — see turn() below. */
 const REAL_LOG = console.log.bind(console);
@@ -44,6 +44,25 @@ async function check(name: string, fn: () => Promise<void> | void) {
 }
 
 async function main() {
+  // ── THE CORPUS IS CHECKABLE WITHOUT THE RECORDING (#116, 2026-09-02) ────────────────────────
+  //
+  // Everything below needs the model's recorded answers. The corpus itself does not: whether the
+  // front door has representative inputs to replay at all is a property of this repository, and it
+  // is the half that silently rots — a category can be dropped in a refactor and nothing notices
+  // while the suite is standing down for a missing recording anyway.
+  //
+  // So this runs FIRST and can genuinely fail. It is not a substitute for replaying production
+  // behaviour and does not pretend to be: it asserts the corpus is representative, never that the
+  // normalizer is correct.
+  const covered = new Set(CORPUS.map(c => c.category));
+  const uncovered = REQUIRED_CATEGORIES.filter(c => !covered.has(c));
+  if (uncovered.length > 0) {
+    console.log(`✗ the corpus no longer represents ${uncovered.length} required input class(es): ${uncovered.join(", ")}`);
+    console.log(`  A front door with no recorded example of a class is a front door nobody is watching there.`);
+    process.exit(1);
+  }
+  const byCategory = REQUIRED_CATEGORIES.map(c => `${c} ${CORPUS.filter(e => e.category === c).length}`).join(" · ");
+
   if (!existsSync(CORPUS_PATH)) {
     // THE MARKER MATTERS AS MUCH AS THE MESSAGE (2026-08-25). Exiting 0 with a printed notice made
     // run-suites report `✓ normalizer-replay-tests` — a green tick on a suite that asserted
@@ -52,7 +71,9 @@ async function main() {
     console.log(
       `SUITE_SKIPPED: no recording at ${CORPUS_PATH} — the production front door is NOT covered\n` +
       `  Record it once with a real key:  OPENAI_API_KEY=sk-… npx tsx script/record-normalizer.ts\n` +
-      `  ${CORPUS.length} corpus inputs are waiting. This is a stated gap, not a pass.`);
+      `  ${CORPUS.length} corpus inputs are waiting, across ${REQUIRED_CATEGORIES.length} input classes: ${byCategory}.\n` +
+      `  The corpus is present and representative; what is missing is the RECORDING of production's\n` +
+      `  answers, which needs a real key. This is a stated gap, not a pass.`);
     process.exit(0);
   }
 

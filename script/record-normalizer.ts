@@ -41,27 +41,88 @@ export const CORPUS_PATH = "script/fixtures/normalizer-corpus.json";
  * Each entry says WHY it is here, because a corpus nobody can justify becomes a corpus nobody
  * dares change.
  */
-export const CORPUS: Array<{ input: string; why: string }> = [
+/**
+ * THE CATEGORIES A FRONT DOOR HAS TO SURVIVE (#116, 2026-09-02).
+ *
+ * Written down as data rather than as a claim in a pull request, because "which classes of messy
+ * input are covered" was previously answerable only by reading ten entries and judging. The replay
+ * suite asserts every one of these is present, and that assertion runs even when no recording
+ * exists — the corpus is checkable offline; only the model's answers are not.
+ */
+export const REQUIRED_CATEGORIES = [
+  "ordinary", "messy-punctuation", "sa-food", "correction-day",
+  "mixed-intent", "workout-feedback", "weight", "voice-transcript",
+] as const;
+export type CorpusCategory = typeof REQUIRED_CATEGORIES[number];
+
+export const CORPUS: Array<{ input: string; why: string; category: CorpusCategory }> = [
   { input: "No I moved yesterdays workout to today",
+    category: "workout-feedback",
     why: "#63: comprehension is correct (moved_to_today) and nothing consumes it — the reply is a food prompt" },
   { input: "My dinner is the same as the last meal",
+    category: "correction-day",
     why: "#63: reported as logged from yesterday; a back-reference whose day resolution is the risk" },
   { input: "No I'm just fine with this meal",
+    category: "ordinary",
     why: "#63: a plain decline answered with 'I didn't catch that one' — reproduces offline" },
   { input: "My steps are 10k today",
+    category: "ordinary",
     why: "#63: evidence stated, action contradicted it ('get a 20-minute walk in')" },
   { input: "Monday I had pap and chicken, eggs and bread for breakfast, and rice with beef stew for dinner. Tuesday was oats, a chicken salad, and pasta with mince. Wednesday I had eggs and bacon, a burger and chips, and lamb chops with rice.",
+    category: "sa-food",
     why: "#63 (Bonolo): three days in one batch. multiFact is false for a single-domain note, so the rewrite brake does not engage — this is the input that must not collapse into one day" },
   { input: "I had a burger and chips last night, I feel like I ruined everything",
+    category: "mixed-intent",
     why: "gauntlet: mouth-layer failure, 5 sentences where 3 are the rule" },
   { input: "Work is stressing me out and I ate takeaways again tonight",
+    category: "mixed-intent",
     why: "gauntlet: 6 sentences where 3 are the rule, and the stress is never acknowledged" },
   { input: "is today a rest day",
+    category: "ordinary",
     why: "gauntlet: 3 sentences where 2 are the rule" },
   { input: "I'm doing yesterday's session today",
+    category: "workout-feedback",
     why: "the adjacent shape of moved_to_today — a rewrite must not turn this into a refusal" },
   { input: "you missed the black coffee yesterday",
+    category: "correction-day",
     why: "a correction naming a past day; the day must survive the rewrite" },
+
+  // ── #116, 2026-09-02. Categories the corpus could not speak for, filled from evidence ALREADY
+  // in this repository — the Reality Test traces recorded in normalizer-fidelity.ts, the LAW 5
+  // mixed-turn table, the fragmentation finding, C1's continuity suite and the SA-transcript
+  // incident. No input here was imagined by a test author, and no expected output is stated
+  // anywhere in this file: what the model returns is recorded, never asserted by hand.
+
+  { input: "Actually no, that was yesterday. And it wasn't rice, it was pap. And I had spinach too.",
+    category: "correction-day",
+    why: "Reality Test J5, quoted verbatim in normalizer-fidelity.ts: the rewrite INVENTED tin fish and mixed veggies, destroyed the correction framing, and the turn logged as a fresh retro meal. The most damaging front-door failure this product has recorded" },
+  { input: "I'm feeling a bit useless honestly, and tonight there's a family thing with lots of food. What do I do about tonight?",
+    category: "mixed-intent",
+    why: "Reality Test J4, quoted verbatim in normalizer-fidelity.ts: rewritten to 'i had pap and beef stew for supper yesterday' — the question and the emotion discarded before routing, so nothing downstream could answer a question it never received" },
+  { input: "at nandos what should i order",
+    category: "messy-punctuation",
+    why: "tracking-contract fragmentation finding: three clients asked one question and a possessive plus a missing preposition split it into three candidates. Messy casing with no punctuation is the ordinary shape, not the exception" },
+  { input: "I had eggs. what should I eat?",
+    category: "mixed-intent",
+    why: "LAW 5 mixed turn: a report in one clause and a question in another. The rewrite must not drop either half — five of ten mixed turns lost the fact before that law existed" },
+  { input: "walked 8000 steps. what should I eat?",
+    category: "mixed-intent",
+    why: "LAW 5 on a second domain: steps were extracted and then thrown away because a whole-message question guard read the second clause" },
+  { input: "I'm trying to lose weight, weighed 84kg this morning",
+    category: "weight",
+    why: "tracking-contract: a weight REPORT carrying an intention word. utils.isFutureIntent excludes 'trying to' on purpose, and a rewrite that normalises this into a goal statement re-opens the false-write class #73 closed" },
+  { input: "Just right, and I had chicken and pap.",
+    category: "workout-feedback",
+    why: "C1 expectation-continuity: a workout-feedback answer and a meal in one message. Both must survive — the feedback is consumed once and the food still has to reach its writer" },
+  { input: "Lunch / Tin fish / Rice",
+    category: "messy-punctuation",
+    why: "normalizer-fidelity cites the bare slash-separated log list as the shape that DOES work today. A regression here is silent: it looks like ordinary logging until the day it stops" },
+  { input: "Yoh, I'm feeling mos kak today, neh?",
+    category: "voice-transcript",
+    why: "sa-transcript.ts: clients are voice-first and code-switch. This exact phrasing is the module's own worked example, and the transcript re-enters handleMessage as text, so the same normalizer consumes it" },
+  { input: "i had samp and chicken for lunch",
+    category: "voice-transcript",
+    why: "sa-transcript.ts records the live incident: a client said samp, STT heard 'stamp and chicken fingers', and the coach lectured her on food she never mentioned. The SA food word must survive the front door" },
 ];
 
 /** The prompt text and model this recording is only valid for. */
