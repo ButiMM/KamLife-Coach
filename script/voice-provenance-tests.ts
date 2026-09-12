@@ -33,9 +33,9 @@ const chk = (ok: boolean, msg: string, evidence = "") => {
 };
 
 /** A stub OpenAI client that returns whatever the test tells it to. No network. */
-const stubOpenAI = (reply: string) => ({
+const stubOpenAI = (reply: string, finish: string = "stop") => ({
   chat: { completions: { create: async () => ({
-    choices: [{ message: { content: reply } }],
+    choices: [{ message: { content: reply }, finish_reason: finish }],
     usage: { prompt_tokens: 1, completion_tokens: 1 },
   }) } },
 } as any);
@@ -84,7 +84,7 @@ console.log("\n2. THE CLEANER'S WINDOW NO LONGER DELETES WHAT IT COULD NOT SEE (
   const echo = () => ({
     chat: { completions: { create: async (req: any) => {
       handed = req.messages[req.messages.length - 1].content;
-      return { choices: [{ message: { content: handed } }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
+      return { choices: [{ message: { content: handed }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
     } } },
   } as any);
 
@@ -152,6 +152,111 @@ console.log("\n3. THE CLEANER STILL FAILS CLOSED ON A BAD REWRITE — NOW INCLUD
   const whole = await cleanSATranscript(stubOpenAI("I'm sorry, I can't help with that."), multiAsk, null);
   chk(whole === multiAsk, "a note asking more than one thing reaches the handlers whole",
     `${whole.length} vs ${multiAsk.length}`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+console.log("\n3b. A REPLY THAT DELETES PART OF THE HEAD IS REFUSED, FINISHED OR NOT");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// THE HOLE THIS CLOSES, demonstrated against the first version of this cut: a model reply carrying
+// 60% of the head passed the 50% floor and the word-overlap check, and 588 characters vanished —
+// a workout correction and a question among them. Preserving the tail is no defence when the model
+// can delete the end of the HEAD.
+//
+// THE CORRECTION AND THE QUESTION LIVE INSIDE THE HEAD HERE, on purpose. A fixture that put them
+// in the preserved tail would grade the rejoin, which already works, and would have passed while
+// the defect was live.
+{
+  const HEAD_FACTS = "I must correct something, I said I trained on Tuesday but I missed it. "
+    + "I had stamp and beans for lunch. "
+    + "And what should I eat when I get home late after eight at night? ";
+  const filler = "The taxi was late again this morning and the queue went around the corner. ";
+  const head = filler.repeat(17) + HEAD_FACTS;          // both facts at the END of the head
+  // TRIMMED AT CONSTRUCTION: cleanSATranscript trims its input before splitting, so a fixture
+  // ending in whitespace can never round-trip byte-for-byte and the positive control below fails
+  // by one character for a reason that has nothing to do with the guard it is checking.
+  const note = (head + filler.repeat(4)).trim();        // and a tail beyond the window
+  chk(note.length > 1500, `the fixture is longer than the window (${note.length} chars)`);
+  // PROVEN, NOT ASSUMED: the correction and the question are inside the part that is SENT to the
+  // model. If they had drifted into the preserved tail this section would grade the rejoin, which
+  // already worked, and would have been green while the defect was live.
+  {
+    const { splitForClean } = await import("../server/understanding/sa-transcript");
+    const split = splitForClean(note);
+    chk(/i said i trained on tuesday/i.test(split.head) && /what should i eat/i.test(split.head),
+      "both facts are inside the cleaner's head, not the preserved tail",
+      `head ${split.head.length} tail ${split.tail.length}`);
+    chk(split.tail.length > 0, "…and there is still a real tail", `tail ${split.tail.length}`);
+  }
+
+  const sixtyPercent = head.slice(0, Math.floor(head.length * 0.6));
+  chk(!/i said i trained on tuesday/i.test(sixtyPercent) && !/what should i eat/i.test(sixtyPercent),
+    "the 60% reply really does drop the correction and the question", `${sixtyPercent.length} chars`);
+
+  for (const finish of ["length", "stop"]) {
+    const out = await cleanSATranscript(stubOpenAI(sixtyPercent, finish), note, null);
+    chk(out === note, `a 60%-length reply with finish_reason="${finish}" keeps the RAW transcript`,
+      `in ${note.length} out ${out.length}`);
+    chk(/i said i trained on tuesday but i missed it/i.test(out),
+      `…so the workout correction survives (finish_reason="${finish}")`);
+    chk(/what should i eat when i get home late/i.test(out),
+      `…and so does the question (finish_reason="${finish}")`);
+  }
+
+  // A COMPLETE reply that reaches the end of the head is still accepted — without this the section
+  // is satisfied by a cleaner that refuses everything, which is the opposite defect.
+  //
+  // THE REPLY IS THE HEAD THE SPLITTER ACTUALLY SENDS, not my own guess at it: the split lands on
+  // a sentence boundary, so echoing `head` verbatim came back one character short and failed this
+  // check for a reason that had nothing to do with the guard.
+  const { splitForClean: splitAgain } = await import("../server/understanding/sa-transcript");
+  const properClean = splitAgain(note).head;
+  const good = await cleanSATranscript(stubOpenAI(properClean, "stop"), note, null);
+  chk(good === note, "a complete, faithful clean of the head is accepted and rejoined",
+    `in ${note.length} out ${good.length}`);
+
+  // AND THE SPELLING REPAIR THE CLEANER EXISTS FOR STILL HAPPENS. The whole point is samp, not
+  // stamp — a guard that made the cleaner inert would pass every check above.
+  const rawSamp = "Yoh I had stamp and beans and chicken for lunch today neh and it was lekker";
+  const fixed = rawSamp.replace("stamp", "samp");
+  const cleanedSamp = await cleanSATranscript(stubOpenAI(fixed, "stop"), rawSamp, null);
+  chk(cleanedSamp === fixed, "the SA-food repair still lands — samp, not stamp", JSON.stringify(cleanedSamp));
+
+  // ── EACH GATE ON ITS OWN ────────────────────────────────────────────────────────────────
+  // Three checks guard completeness and they must be individually graded, or two of them can be
+  // deleted while the section stays green on the strength of the third.
+  const truncatedStop = await cleanSATranscript(stubOpenAI(head.slice(0, Math.floor(head.length * 0.9)), "stop"), note, null);
+  chk(truncatedStop === note,
+    "COVERS-THE-END alone: a 90% prefix is refused though it clears the length floor",
+    `out ${truncatedStop.length}`);
+
+  // Keeps the head's ending, so coversTheEnd is satisfied — only the floor can catch it.
+  const endWords = properClean.trim().split(/\s+/).slice(-8).join(" ");
+  const hollowed = properClean.slice(0, Math.floor(properClean.length * 0.5)) + " " + endWords;
+  const hollowedOut = await cleanSATranscript(stubOpenAI(hollowed, "stop"), note, null);
+  chk(hollowedOut === note,
+    "THE FLOOR alone: a reply that keeps the ending but loses half the middle is refused",
+    `out ${hollowedOut.length}`);
+
+  // A complete, faithful clean that the model did not finish — only finish_reason can catch it.
+  //
+  // THE REPLY CARRIES A VISIBLE REPAIR (stamp -> samp), and it has to. An unfinished reply whose
+  // text is identical to the head produces the same string whether it is accepted or refused, so
+  // the check passed with the gate deleted — it could not tell the two outcomes apart. The edit is
+  // what makes acceptance observable.
+  const repaired = properClean.replace("stamp", "samp");
+  chk(repaired !== properClean, "the finish_reason fixture carries a visible repair");
+  const unfinished = await cleanSATranscript(stubOpenAI(repaired, "length"), note, null);
+  chk(unfinished === note && /stamp and beans/.test(unfinished) && !/samp and beans/.test(unfinished),
+    "FINISH_REASON alone: a reply that looks complete but reports length is refused",
+    `out ${unfinished.length}`);
+  // …and the same reply, finished, IS taken — otherwise the gate is just an off switch.
+  const finished = await cleanSATranscript(stubOpenAI(repaired, "stop"), note, null);
+  // NOT AN EQUAL-LENGTH CHECK: "stamp" -> "samp" is one character shorter, so demanding the same
+  // length fails on a correct repair. What must hold is that the repair landed AND the tail the
+  // model never saw is still attached to the end of it.
+  chk(/samp and beans/.test(finished) && finished.endsWith(splitAgain(note).tail),
+    "…while the identical reply with finish_reason=stop is accepted, repair and tail both",
+    `out ${finished.length} of ${note.length}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════

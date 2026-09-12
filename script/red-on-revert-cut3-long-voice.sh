@@ -30,9 +30,28 @@ restore_case () {
 cleanup () { restore_case; rm -rf "$WORK_ROOT"; }
 trap cleanup EXIT INT TERM
 
+# A DETECTION IS A GRADED FAILED ASSERTION, NOT A NON-ZERO EXIT (CTO review of #244).
+#
+# The first version of this harness counted ANY non-zero exit as "caught". A crash, an import
+# error, a timeout or a dead database would therefore have produced a confident 7/7 while nothing
+# was being detected at all — the same fail-open shape this whole rescue keeps finding, built into
+# the instrument that certifies the others.
+#
+# A case now counts only when a grader REACHES ITS OWN VERDICT LINE and that verdict reports failed
+# checks, with at least one "FAIL" assertion printed. A missing verdict is a crash and fails the
+# harness. `graded_red <output> <verdict-prefix> <red-pattern>` answers that question once.
+graded_red () {
+  local out="$1" prefix="$2" pattern="$3" verdict
+  verdict="$(printf '%s\n' "$out" | grep -E "^${prefix}" | tail -1 || true)"
+  if [[ -z "$verdict" ]]; then return 2; fi                        # no verdict = crashed
+  if [[ ! "$verdict" =~ $pattern ]]; then return 1; fi             # ran, but not red
+  if ! printf '%s\n' "$out" | grep -q '^  FAIL'; then return 1; fi # red with no failed assertion
+  return 0
+}
+
 run_case () {
   local name="$1" patch="$2"
-  local acc_out acc_status unit_out unit_status verdict red=""
+  local acc_out unit_out red="" crashed=""
   restore_case
   mkdir -p "$BACKUP"
   cp -a server "$BACKUP/server"
@@ -42,20 +61,34 @@ run_case () {
   if ! revert_db_reset; then
     echo "  !! database reset failed: $name"; restore_case; return 1
   fi
-  acc_out="$(npx tsx "$ACC" 2>&1)"; acc_status=$?
-  unit_out="$(npx tsx "$UNIT" 2>&1)"; unit_status=$?
-  verdict="$(printf '%s\n' "$acc_out" | grep -E '^pg-long-voice-tail-acceptance:' | tail -1 || true)"
+  acc_out="$(npx tsx "$ACC" 2>&1)"
+  unit_out="$(npx tsx "$UNIT" 2>&1)"
   echo "── REVERT: $name"
-  if [[ $acc_status -ne 0 ]]; then
+
+  graded_red "$acc_out" "pg-long-voice-tail-acceptance:" "FAILED"; local acc_rc=$?
+  graded_red "$unit_out" "voice-provenance-tests:" "FAILED"; local unit_rc=$?
+
+  if [[ $acc_rc -eq 0 ]]; then
     red="acceptance"
-    echo "   ${verdict:-'(no verdict — crashed)'}"
+    printf '%s\n' "$acc_out" | grep -E '^pg-long-voice-tail-acceptance:' | tail -1 | sed 's/^/   /'
     printf '%s\n' "$acc_out" | grep '^  FAIL' | sed 's/^/   /' | head -3 || true
+  elif [[ $acc_rc -eq 2 ]]; then
+    crashed="${crashed:+$crashed, }acceptance"
   fi
-  if [[ $unit_status -ne 0 ]]; then
+  if [[ $unit_rc -eq 0 ]]; then
     red="${red:+$red + }voice-provenance-tests"
     printf '%s\n' "$unit_out" | grep '^  FAIL' | sed 's/^/   /' | head -3 || true
+  elif [[ $unit_rc -eq 2 ]]; then
+    crashed="${crashed:+$crashed, }voice-provenance-tests"
   fi
   restore_case
+
+  # A CRASH IS NEVER A DETECTION, even when the other grader legitimately went red — a case that
+  # breaks a grader outright is not evidence about the mechanism it claims to test.
+  if [[ -n "$crashed" ]]; then
+    echo "  !! grader(s) produced NO VERDICT (crashed): $crashed — case $name proves nothing"
+    return 1
+  fi
   if [[ -z "$red" ]]; then
     echo "  !! BOTH graders stayed green: $name"
     return 1
@@ -65,6 +98,21 @@ run_case () {
 
 mkdir -p "$PATCH_DIR"
 
+# BOTH GRADERS MUST PASS UNTOUCHED FIRST. Detection means nothing unless the same two commands are
+# green on the unmodified tree: without this, a broken database or a bad import makes every case
+# below "caught" and the harness certifies itself.
+if ! revert_db_reset; then echo "!! database reset failed before the control"; exit 1; fi
+ctl_acc="$(npx tsx "$ACC" 2>&1)"; ctl_acc_status=$?
+ctl_unit="$(npx tsx "$UNIT" 2>&1)"; ctl_unit_status=$?
+if [[ $ctl_acc_status -ne 0 || $ctl_unit_status -ne 0 ]]; then
+  echo "!! CONTROL FAILED — the unmodified graders do not both pass, so nothing below proves anything."
+  printf '%s\n' "$ctl_acc" | grep -E '^pg-long-voice-tail-acceptance:|^  FAIL' | sed 's/^/   /' | head -5 || true
+  printf '%s\n' "$ctl_unit" | grep -E '^voice-provenance-tests:|^  FAIL' | sed 's/^/   /' | head -5 || true
+  exit 1
+fi
+echo "CONTROL: both graders are GREEN unmodified — detections below are real."
+
+
 # 1. THE CLEANER'S WINDOW DELETES THE TAIL AGAIN — the defect itself. 908 characters of a
 #    three-minute note, including both questions and the last thing they said.
 cat > "$PATCH_DIR/1.py" <<'PYEOF'
@@ -73,11 +121,28 @@ s=s.replace("  const { head, tail } = splitForClean(text);", '  const head = tex
 assert s!=b and 'const head = text.slice(0, 1500)' in s, "no match"; open(p,"w").write(s)
 PYEOF
 
-# 2. THE LOWER BOUND GOES — a reply cut off by max_tokens becomes the transcript, middle missing.
-#    There was a ceiling on the output length and never a floor.
+# 2. THE LENGTH FLOOR GOES. One of the three completeness gates, reverted alone — the fixture that
+#    catches it keeps the head's ending, so coversTheEnd cannot cover for it.
 cat > "$PATCH_DIR/2.py" <<'PYEOF'
 p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
-s=s.replace("      || cleaned.length < head.length * 0.5\n", "")
+s=s.replace("      || cleaned.length < head.length * 0.8\n", "")
+assert s!=b, "no match"; open(p,"w").write(s)
+PYEOF
+
+# 2b. THE FINISH-REASON GATE GOES. The model ran out of tokens mid-sentence and what came back is
+#     a fragment wearing the shape of an answer. Caught alone by a reply that is otherwise perfect.
+cat > "$PATCH_DIR/2b.py" <<'PYEOF'
+p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
+s=s.replace('      || finishReason !== "stop"\n', "")
+assert s!=b, "no match"; open(p,"w").write(s)
+PYEOF
+
+# 2c. THE END-COVERAGE GATE GOES. This is the hole the CTO demonstrated against the first version
+#     of this cut: a faithful PREFIX passes a length floor and a word-overlap test, and the end of
+#     the head — a correction and a question in the measured case — is deleted.
+cat > "$PATCH_DIR/2c.py" <<'PYEOF'
+p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
+s=s.replace("      || !coversTheEnd(head, cleaned)\n", "")
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
@@ -137,11 +202,11 @@ PYEOF
 
 echo "RED-ON-REVERT — Cut 3. Every case below must be caught by at least one grader."
 failed=0
-for i in 1 2 3 4 5 6 7; do
+for i in 1 2 2b 2c 3 4 5 6 7; do
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) left every grader green, crashed, or would not patch."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 7/7 cases caught."
+echo "RED-ON-REVERT: GREEN — 9/9 cases caught."

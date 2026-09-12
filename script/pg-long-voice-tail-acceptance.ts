@@ -186,12 +186,15 @@ REAL("\n3. 8,500 IS STILL 8,500 — the number is not reshaped on the way to its
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n4. NOTHING IS INVENTED FROM A NOTE THIS LONG (Cut 2 must stay true here)");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+// THE MEAL-SLOT CLAIM THAT USED TO STAND HERE IS REMOVED, not relaxed. It asserted "no meal slot
+// appears that the client did not name" and checked only that each label belonged to the
+// breakfast/lunch/dinner/snack enum — which is also satisfied by ZERO meal rows, and this note
+// produces zero. It read as attribution proof and measured nothing of the kind.
+//
+// Cut 2's own acceptance grades attribution non-vacuously, on rows that exist, at three pinned
+// hours, with nine red-on-revert cases behind it. Restating it here weakly could only ever
+// weaken it.
 {
-  const meals = (await pool.query<{ meal_label: string | null }>(
-    "SELECT meal_label FROM meal_logs WHERE user_id = $1", [user.id])).rows;
-  chk(meals.every(m => m.meal_label === null || ["breakfast", "lunch", "dinner", "snack"].includes(m.meal_label!)),
-    "no meal slot appears that the client did not name",
-    `labels=${JSON.stringify(meals.map(m => m.meal_label))}`);
   const bodies = await wire();
   chk(bodies.length > 0, "the client got an answer to a three-minute note", `${bodies.length} bodies`);
   chk(!/8\.5|85 steps|850 steps/.test(bodies.join("\n")),
@@ -216,9 +219,11 @@ REAL("\n5. WHAT THIS CUT DOES NOT FIX, RECORDED RATHER THAN CLAIMED");
   chk(alone.length === 1 && alone[0].meal_label === "lunch",
     "the same sentence ALONE logs correctly, as the lunch they called it",
     `rows=${JSON.stringify(alone)}`);
-  REAL(`    NOTE — inside the long note that sentence produced ${inNote} meal row(s). Not asserted`);
-  REAL(`    either way: first-match-wins gives one turn to one owner, which predates this cut and`);
-  REAL(`    is Cut 6's subject. Cut 3's job was to stop the words being deleted before they get there.`);
+  REAL(`    OUTSTANDING, UNDER CUT 6 — inside the long note that sentence produced ${inNote} meal`);
+  REAL(`    row(s), and the reply addresses neither of the client's two questions. Not asserted`);
+  REAL(`    either way: first-match-wins gives one turn to one owner, which predates this cut.`);
+  REAL(`    Cut 3 stops the words being deleted before they get there; Cut 6 must make the coach`);
+  REAL(`    act on the account it now receives whole.`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -233,8 +238,15 @@ REAL("\n6. NO STAGE BETWEEN THE CLIENT AND THE HANDLERS MAY SHORTEN WHAT THEY SA
   chk(!/condenseVoiceRamble/.test(media), "and media.ts condenses nothing before the handlers");
   chk(/const forBrain = transcribedText;/.test(media), "the routed text IS the cleaned transcript");
   chk(/return cleaned \+ tail;/.test(wedge), "the cleaner rejoins the part it could not send");
-  chk(/cleaned\.length < head\.length \* 0\.5/.test(wedge),
-    "a reply cut off by max_tokens cannot become the transcript");
+  // THREE GATES, NOT A NUMBER. The first version carried only a 50% floor, and a reply holding
+  // 60% of the head passed it while deleting a correction and a question. Naming the threshold
+  // here would pin the number instead of the promise.
+  chk(/finishReason !== "stop"/.test(wedge),
+    "a reply the model did not finish cannot become the transcript");
+  chk(/!coversTheEnd\(head, cleaned\)/.test(wedge),
+    "…nor can one that stops before the end of the head");
+  chk(/cleaned\.length < head\.length \* 0\.8/.test(wedge),
+    "…nor one that lost a fifth of it");
 }
 
 REAL(`\n${failed === 0 ? "pg-long-voice-tail-acceptance: GREEN" : `pg-long-voice-tail-acceptance: ${failed} FAILED`}\n`);

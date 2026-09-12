@@ -46,6 +46,30 @@ function retainsOriginal(raw: string, cleaned: string): boolean {
 }
 
 /**
+ * DID THE CLEAN REACH THE END OF WHAT IT WAS GIVEN? (Cut 3 amendment, 2026-09-12.)
+ *
+ * A length floor cannot tell a faithful clean from a faithful PREFIX. Demonstrated against the
+ * first version of this cut: a model reply carrying 60% of the head — 1,687 characters in, 1,099
+ * out — passed both the 50% floor and the word-overlap check, and 588 characters vanished, a
+ * workout correction and a question among them. The preserved tail was never the whole problem;
+ * the model can delete the end of the HEAD and the result still looks like prose.
+ *
+ * So the head's last words must be represented in the output. The cleaner's contract is a light
+ * spelling repair in the same order, so a handful of the final content words should survive one;
+ * a prefix that stops early cannot contain them at all. Two of six are allowed to change, which
+ * is what a genuine SA-food correction on the last line looks like.
+ */
+function coversTheEnd(head: string, cleaned: string): boolean {
+  const words = (s: string) => (s.toLowerCase().match(/[a-z']{3,}/g) || []);
+  const ending = words(head).slice(-6);
+  if (ending.length < 4) return true;              // too short to judge — the floor carries it
+  const out = new Set(words(cleaned));
+  let kept = 0;
+  for (const w of ending) if (out.has(w)) kept++;
+  return kept >= Math.ceil(ending.length * 0.6);
+}
+
+/**
  * THE CLEANER'S WINDOW IS A WINDOW, NOT A LIMIT ON WHAT THE CLIENT SAID (Cut 3, 2026-09-12).
  *
  * `text.slice(0, 1500)` went to the model and the model's answer came back as THE TRANSCRIPT.
@@ -110,25 +134,38 @@ export async function cleanSATranscript(openai: OpenAI, raw: string, userId?: st
       completionTokens: resp.usage?.completion_tokens ?? 0,
     });
     const cleaned = (resp.choices[0]?.message?.content || "").trim();
-    // Keep the ORIGINAL unless the output is a faithful light clean of THE HEAD. Reject: empty, a
-    // runaway rewrite (added content), a refusal / model talking back, or a rewrite that
-    // dropped most of the speaker's own words. Any of these → the raw transcript wins.
+    const finishReason = resp.choices[0]?.finish_reason;
+    // Keep the ORIGINAL unless the output can be SHOWN to be a complete, faithful light clean of
+    // THE HEAD. Reject: empty, a runaway rewrite, a refusal, a rewrite that dropped the speaker's
+    // words, a reply the model did not finish, or one that does not reach the end of the head.
     //
-    // GRADED AGAINST THE HEAD, NOT THE WHOLE TEXT, and that is a correction as well as a
-    // consequence. `retainsOriginal(text, cleaned)` compared the FULL transcript against a clean
-    // of its first 1,500 characters, so on a long note it was asking whether a fragment resembled
-    // the whole — a test that a truncation passes comfortably. It could never have caught the
-    // deletion above; it was measuring the wrong pair.
+    // GRADED AGAINST THE HEAD, NOT THE WHOLE TEXT. `retainsOriginal(text, cleaned)` compared the
+    // FULL transcript against a clean of its first 1,500 characters, so on a long note it asked
+    // whether a fragment resembled the whole — which a truncation passes comfortably.
     //
-    // THE LOWER BOUND IS NEW. There was a ceiling on the output length and no floor, so a reply cut
-    // off by max_tokens came back as the transcript with its own middle missing. Half the head is
-    // far below any honest clean (the prompt says keep the length) and far above a rounding error.
+    // COMPLETENESS IS PROVEN, NOT ASSUMED, and this is the amendment that earns the word "whole".
+    // The first version of this cut carried only a 50% floor, and a reply holding 60% of the head
+    // sailed through it: 1,687 characters in, 1,099 out, 588 gone with a workout correction and a
+    // question inside them. Three things close that, and any one of them failing keeps the raw:
+    //
+    //   finish_reason      must be "stop". "length" means the model ran out of tokens mid-sentence
+    //                      and what came back is a fragment wearing the shape of an answer. An
+    //                      ABSENT reason is not proof of completion either, so it is refused too —
+    //                      when completeness cannot be established the client's own words win.
+    //   the length floor   0.8, not 0.5. The prompt tells the model to keep the length; half the
+    //                      head was never a clean, it was a summary nobody asked for.
+    //   coversTheEnd       a faithful PREFIX passes a floor and an overlap test. It cannot pass a
+    //                      check that the head's last words are still there.
     if (!cleaned
+      || finishReason !== "stop"
       || cleaned.length > head.length * 1.8 + 40
-      || cleaned.length < head.length * 0.5
+      || cleaned.length < head.length * 0.8
+      || !coversTheEnd(head, cleaned)
       || looksLikeRefusal(cleaned)
       || !retainsOriginal(head, cleaned)) {
       if (looksLikeRefusal(cleaned)) console.warn("[SA_CLEAN] model refused — keeping raw transcript");
+      else if (finishReason !== "stop") console.warn(`[SA_CLEAN] incomplete reply (finish_reason=${String(finishReason)}) — keeping raw transcript`);
+      else if (cleaned && !coversTheEnd(head, cleaned)) console.warn("[SA_CLEAN] reply did not reach the end of the head — keeping raw transcript");
       return raw;
     }
     if (tail) console.log(`[SA_CLEAN] cleaned ${head.length} chars, carried ${tail.length} through unchanged`);

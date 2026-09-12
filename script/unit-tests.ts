@@ -971,7 +971,11 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     // back 1,500 chars long, the tail deleted, before any handler or guard saw it.
     assert.match(wedge, /export function splitForClean/, "the cleaner splits rather than truncates");
     assert.match(wedge, /return cleaned \+ tail;/, "…and rejoins the part it could not send");
-    assert.match(wedge, /cleaned\.length < head\.length \* 0\.5/, "a reply cut off by max_tokens cannot become the transcript");
+    // THREE GATES, NOT A NUMBER (CTO review of #244). A 50% floor alone let a reply carrying 60%
+    // of the head through, deleting a correction and a question with it.
+    assert.match(wedge, /finishReason !== "stop"/, "a reply the model did not finish cannot become the transcript");
+    assert.match(wedge, /!coversTheEnd\(head, cleaned\)/, "nor can one that stops before the end of the head");
+    assert.match(wedge, /cleaned\.length < head\.length \* 0\.8/, "nor one that lost a fifth of it");
     assert.match(wedge, /!retainsOriginal\(head, cleaned\)/, "the faithfulness check compares the head it actually cleaned");
   });
   test("CFO: the weekly report surfaces AI cost by feature and guards the R199 margin", () => {
