@@ -20,7 +20,7 @@ import {
   logMediaFailure, logMediaSuccess, logChat,
 } from "./chat-log";
 import { askCoachK } from "../gpt";
-import { cleanSATranscript } from "../understanding/sa-transcript";
+import { cleanSATranscript, transcriptFailsAdmission, whisperSegmentMetrics, type VoiceQuality } from "../understanding/sa-transcript";
 import { looksLikeRefusal } from "../understanding/refusal";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
@@ -1274,18 +1274,27 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const whisperPrompt = sttVocabularyPrompt();
 
       let transcribedText: string | undefined; let sttEngine: "scribe" | "whisper" = "whisper";
-      let voiceQuality: { avgLogprob: number; comp: number } | null = null; // Whisper verbose_json only
+      // EVERY ACCEPTED RESULT OWNS ITS OWN METRICS (Cut 4 amendment). This used to be set once, by
+      // Whisper attempt 1, and never cleared — so an EMPTY attempt 1 with bad segments left its
+      // metrics behind and a perfectly good forced-English retry inherited them and was refused.
+      // It is now assigned beside every text that is accepted, and null when that result reported
+      // nothing usable. Absent metrics mean the deterministic floor decides, never a zero-fill.
+      let voiceQuality: VoiceQuality = null;
 
       // ElevenLabs Scribe: better WER than Whisper on SA languages (Afrikaans, Zulu, Xhosa).
       // Try it first when configured; fall through to Whisper on any failure.
       if (process.env.ELEVENLABS_API_KEY) {
         try {
-          const scribeText = await withTimeout("scribe_transcribe", 20000, () =>
+          const scribe = await withTimeout("scribe_transcribe", 20000, () =>
             scribeTranscribe(audioBuffer, audioExt, storedLangPref || undefined)
           );
-          if (scribeText) {
-            transcribedText = scribeText; sttEngine = "scribe";
-            console.log(`[VOICE] scribe_ok text="${scribeText.slice(0, 80)}" len=${scribeText.length}`);
+          if (scribe?.text) {
+            transcribedText = scribe.text; sttEngine = "scribe";
+            // Carried and logged, never a rejection input: Scribe's scale is not Whisper's, which is what these thresholds were calibrated against.
+            voiceQuality = scribe.wordLogprobs.length ? { provider: "scribe", wordLogprobs: scribe.wordLogprobs } : null;
+            const lp = scribe.wordLogprobs;
+            const meanLp = lp.length ? (lp.reduce((a, b) => a + b, 0) / lp.length).toFixed(2) : "n/a";
+            console.log(`[VOICE] scribe_ok text="${scribe.text.slice(0, 80)}" len=${scribe.text.length} words=${lp.length} meanWordLogprob=${meanLp} langProb=${scribe.languageProbability ?? "n/a"}`);
           }
         } catch (scribeErr: any) {
           console.warn(`[VOICE] scribe_failed: ${scribeErr?.message || scribeErr}`);
@@ -1294,51 +1303,40 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
 
       // Whisper fallback (3 attempts with quality signals)
       if (!transcribedText) {
+        // ALL THREE ATTEMPTS ASK FOR verbose_json (Cut 4 amendment). Only attempt 1 used to, so the
+        // two retries produced no metrics at all and the garble floor had nothing to read on them.
+        // `take` is the single place a result is accepted, so text and metrics can never separate:
+        // whatever attempt is used brings its OWN metrics, and null when it reported none usable.
         let transcription: { text?: string } = { text: "" };
-        // verbose_json gives avg_logprob + compression_ratio — signals for catching garble.
+        const take = (v: any) => { transcription = { text: v?.text || "" }; voiceQuality = whisperSegmentMetrics(v); };
+        const ask = (label: string, ms: number, extra: Record<string, unknown>) =>
+          withTimeout(label, ms, () => openai.audio.transcriptions.create({
+            file: createReadStream(tmpAudioPath), model: "whisper-1", prompt: whisperPrompt,
+            response_format: "verbose_json", ...extra,
+          } as any));
         try {
-          const v: any = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
-            file: createReadStream(tmpAudioPath),
-            model: "whisper-1",
-            prompt: whisperPrompt,
-            response_format: "verbose_json",
-            ...(whisperLang ? { language: whisperLang } : {}),
-          }));
-          transcription = { text: v?.text || "" };
-          const segs: any[] = Array.isArray(v?.segments) ? v.segments : [];
-          if (segs.length) {
-            const avgLogprob = segs.reduce((s, x) => s + (x.avg_logprob ?? 0), 0) / segs.length;
-            const comp = Math.max(...segs.map((x) => x.compression_ratio ?? 0));
-            voiceQuality = { avgLogprob, comp };
-          }
-          console.log(`[VOICE] whisper_attempt_1_result text="${(transcription.text || "").slice(0, 80)}" len=${transcription.text?.length ?? 0} avgLogprob=${voiceQuality?.avgLogprob?.toFixed(2) ?? "n/a"} comp=${voiceQuality?.comp?.toFixed(2) ?? "n/a"}`);
+          take(await ask("voice_transcribe", 25000, whisperLang ? { language: whisperLang } : {}));
+          console.log(`[VOICE] whisper_attempt_1_result text="${(transcription.text || "").slice(0, 80)}" len=${transcription.text?.length ?? 0} metrics=${voiceQuality ? "yes" : "none"}`);
         } catch (transErr: any) {
           console.warn(`[VOICE] whisper_attempt_1_failed lang=${whisperLang || "auto"} error=${transErr?.message || transErr}`);
           try {
-            transcription = await withTimeout("voice_transcribe_retry", 25000, () => openai.audio.transcriptions.create({
-              file: createReadStream(tmpAudioPath),
-              model: "whisper-1",
-              prompt: whisperPrompt,
-            }));
-            } catch (retryErr: any) {
+            take(await ask("voice_transcribe_retry", 25000, {}));
+          } catch (retryErr: any) {
             console.warn(`[VOICE] whisper_attempt_2_failed error=${retryErr?.message || retryErr}`);
-            transcription = { text: "" };
+            transcription = { text: "" }; voiceQuality = null;
           }
         }
 
         transcribedText = transcription.text?.trim();
         if (!transcribedText) {
+          // THE EMPTY RESULT'S METRICS DO NOT SURVIVE IT. An empty attempt 1 carrying bad segments
+          // used to leave voiceQuality set, and the forced-English retry below inherited it — a
+          // good transcript refused on another call's numbers. `take` replaces BOTH together, so
+          // the clearing lives there and not in a separate line here that could never fail.
           console.log(`[VOICE] whisper_attempt_3_en bytes=${audioBuffer.byteLength}`);
           try {
-            const retryTranscription = await withTimeout("voice_transcribe_en_retry", 20000, () =>
-              openai.audio.transcriptions.create({
-                file: createReadStream(tmpAudioPath),
-                model: "whisper-1",
-                language: "en",
-                prompt: whisperPrompt,
-              })
-            );
-            transcribedText = retryTranscription.text?.trim() || "";
+            take(await ask("voice_transcribe_en_retry", 20000, { language: "en" }));
+            transcribedText = transcription.text?.trim() || "";
           } catch (retryErr: any) {
             console.warn(`[VOICE] whisper_attempt_3_failed error=${retryErr?.message || retryErr}`);
           }
@@ -1381,10 +1379,14 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         clearVoiceFailure(user.id);
       }
 
-      // Low-confidence (garble) guard — a very negative avg_logprob or high compression ratio betrays Whisper inventing words from a language it can't handle. Don't coach on
-      // nonsense — ask them to type (GPT reads typed SA languages well). Conservative thresholds avoid rejecting genuine accented English; metrics logged above to tune.
-      if (voiceQuality && wordCount >= 2 && (voiceQuality.avgLogprob < -1.0 || voiceQuality.comp > 2.5)) {
-        console.log(`[VOICE] low_confidence_garble avgLogprob=${voiceQuality.avgLogprob.toFixed(2)} comp=${voiceQuality.comp.toFixed(2)} text="${transcribedText.slice(0, 80)}"`);
+      // Low-confidence (garble) guard — don't coach on nonsense; ask them to type (GPT reads typed SA languages well). EVERY PROVIDER AND EVERY RETRY SINCE CUT 4 (2026-09-12):
+      // this read `if (voiceQuality && …)` and only Whisper attempt 1 sets voiceQuality, so Scribe (FIRST in production), the catch retry and the forced-English retry all SKIPPED
+      // it. See transcriptFailsAdmission in understanding/sa-transcript.ts for the reproduction and what it does where the provider reports nothing. Same refusal, same wording.
+      if (wordCount >= 2 && transcriptFailsAdmission(transcribedText, voiceQuality)) {
+        const vq = voiceQuality as VoiceQuality;   // `take` assigns in a closure, so TS's narrowing here is stale
+        const q = vq?.provider === "whisper" ? `avgLogprob=${vq.avgLogprob.toFixed(2)} comp=${vq.comp.toFixed(2)}`
+          : vq?.provider === "scribe" ? `scribeWords=${vq.wordLogprobs.length}` : "metrics=none";
+        console.log(`[VOICE] low_confidence_garble engine=${sttEngine} ${q} text="${transcribedText.slice(0, 80)}"`);
         const garbleCount = bumpVoiceFailure(user.id);
         if (garbleCount >= 2) {
           clearVoiceFailure(user.id);

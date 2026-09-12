@@ -462,5 +462,354 @@ console.log("\n4. THE RAW TRANSCRIPT IS CAPTURED BEFORE THE CLEANER CAN OVERWRIT
     "…and nothing passes the bare client text as the handler input any more");
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+console.log("\n5. EVERY PROVIDER AND EVERY RETRY MEETS THE ADMISSION FLOOR");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// HONEST LABEL, FIRST. This is STUB-DRIVEN EXECUTION of the real voice branch, not a measurement
+// of transcription accuracy. The audio download and the two STT clients are stubs; the SSRF guard,
+// the length caps, the word-count guard, the admission floor, the cleaner, the refusal floor and
+// the handler recursion are the shipped code, running. What it proves is which STRINGS are
+// admitted and which are refused — nothing here says anything about real-world WER.
+//
+// THE DEFECT, reproduced on f809456 before a line was changed: sixteen consecutive "you" reached
+// handleMessage and came back to the client as «🎤 I heard: "you you you…"» on THREE of the four
+// STT paths, because the floor read `if (voiceQuality && …)` and only Whisper attempt 1 populates
+// voiceQuality. Scribe runs FIRST when ELEVENLABS_API_KEY is set, so the production path was one
+// of the three.
+{
+  const { transcriptFailsAdmission } = await import("../server/understanding/sa-transcript");
+  type VoiceQuality = Parameters<typeof transcriptFailsAdmission>[1];
+
+  // ── THE PREDICATE, EXECUTED DIRECTLY. It is pure, so this needs no stubs at all. ────────────
+  // WHAT IT MUST NEVER REJECT comes first: if this product silences a client for saying "samp"
+  // or for code-switching, the floor is worse than the defect it replaces.
+  const MUST_PASS: [string, string][] = [
+    ["I had samp and beans for lunch and walked 8500 steps neh", "SA food, slang and a number"],
+    ["Yoh eish I am so tired today shame but I did my workout", "stacked SA slang"],
+    ["Ngiyabonga coach I ate pap ne morogo and chakalaka today", "code-switching isiZulu/English"],
+    ["ha ha ha no no no I did not skip it", "ordinary repetition a person really says"],
+    ["8500 steps 75 kg 2 litres 3 sets of 12", "numbers only"],
+    ["I am 8.5 kg down and my change was -5 cm this month", "signed and decimal quantities"],
+    ["pap pap eggs pap pap chicken pap pap beans pap pap fish",
+      "a repetitive but MEANINGFUL food list — a staple named beside five other foods"],
+  ];
+  for (const [text, what] of MUST_PASS) {
+    chk(!transcriptFailsAdmission(text, null), `ADMITTED (${what})`, JSON.stringify(text));
+    chk(!transcriptFailsAdmission(text, { provider: "whisper", avgLogprob: -0.3, comp: 1.5 }),
+      `…and still admitted when the provider reports good metrics (${what})`);
+  }
+
+  // WHAT IT MUST REJECT — narrow, deterministic, and about the STRING, not about fluency.
+  const MUST_FAIL: [string, VoiceQuality, string][] = [
+    ["you you you you you you you you you you you you", null, "eight-plus of one word in a row"],
+    ["the the the the the the the the", null, "the same loop with a different word"],
+    // ISOLATES THE CONSECUTIVE-RUN RULE. Every other loop fixture here has a vocabulary of one or
+    // two, so the alternating-loop rule would catch them even with the run rule disabled — and a
+    // revert case for the run rule would stay green. This one has a rich vocabulary and a long
+    // sentence around it, so only the run rule can see it.
+    ["I told my sister no no no no no no no no I am not eating that vetkoek today",
+      null, "an eight-word run inside an otherwise ordinary sentence"],
+    ["...", null, "no speech at all"],
+    ["[BLANK_AUDIO] [BLANK_AUDIO]", null, "an explicit no-speech marker, repeated"],
+    ["[BLANK_AUDIO]", null, "a single explicit no-speech marker"],
+    ["[SILENCE] [SILENCE] [SILENCE]", null, "the other marker STT emits on dead air"],
+    ["♪♪♪", null, "music marker, no letters or digits"],
+    ["   ", null, "whitespace"],
+    ["", null, "empty"],
+    ["thanks you thanks you thanks you thanks you thanks you thanks you thanks you",
+      null, "two words alternating past the dozen-token line"],
+    ["I had samp and beans for lunch and walked 8500 steps neh",
+      { provider: "whisper", avgLogprob: -1.8, comp: 1.2 }, "good words, but the provider says it did not hear them"],
+    ["I had samp and beans for lunch and walked 8500 steps neh",
+      { provider: "whisper", avgLogprob: -0.3, comp: 4.0 }, "good words, but a pathological compression ratio"],
+  ];
+  for (const [text, q, what] of MUST_FAIL) {
+    chk(transcriptFailsAdmission(text, q), `REFUSED (${what})`, JSON.stringify(text));
+  }
+
+  // THE VOCABULARY RULE IS `<= 2 DISTINCT`, NOT A RATIO — so its boundary is worth pinning from
+  // both sides. Three distinct words over a dozen tokens is admitted; two is not. Without the
+  // admitted half, a future tightening to "a low unique ratio" would pass this section silently
+  // while starting to refuse real speech.
+  chk(!transcriptFailsAdmission("no no no yes yes yes no no no yes yes maybe", null),
+    "a dozen tokens drawn from THREE distinct words is still admitted");
+  chk(transcriptFailsAdmission("no no no yes yes yes no no no yes yes yes", null),
+    "…and the same shape drawn from TWO is refused");
+
+  // THE PROVIDER'S OWN THRESHOLDS ARE UNCHANGED, not re-tuned under cover of this cut.
+  chk(!transcriptFailsAdmission("I walked to the shop and back this morning", { provider: "whisper", avgLogprob: -0.99, comp: 2.49 }),
+    "the shipped thresholds are kept exactly: -1.0 and 2.5 are still the lines");
+  chk(transcriptFailsAdmission("I walked to the shop and back this morning", { provider: "whisper", avgLogprob: -1.01, comp: 2.49 }),
+    "…and a hair past either one still refuses");
+
+  // ── THE WHOLE VOICE BRANCH, PER PROVIDER PATH ───────────────────────────────────────────────
+  // Driving handleMediaMessage for real. handleMessage is INJECTED, so "did the garble reach the
+  // handlers" is answered by whether our injected function was called — not inferred from a log.
+  process.env.MEDIA_URL_ALLOWLIST = "example.com";
+  process.env.TWILIO_ACCOUNT_SID = "ACstub";
+  process.env.TWILIO_AUTH_TOKEN = "stub";
+  const AUDIO_URL = "https://www.example.com/voice.ogg";
+  const audioBytes = new Uint8Array(40_000).fill(7);
+
+  // ATTEMPTS ARE COUNTED, NOT INFERRED FROM THE REQUEST SHAPE (Cut 4 amendment). All three Whisper
+  // calls now ask for verbose_json, so a stub that keyed on `response_format` would answer every
+  // one of them as attempt 1 and quietly stop testing the retries it claims to test.
+  type WhisperTurn = { throws?: boolean; text?: string; segments?: any[] };
+  let scribeReply: string | { text: string; words?: Array<{ logprob?: number }>; language_probability?: number } | null = null;
+  let whisperTurns: WhisperTurn[] = [];
+  let whisperCalls = 0;
+  let lastScribeSeen: any = null;
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: any, init?: any) => {
+    const u = String(url?.url || url);
+    if (u.startsWith(AUDIO_URL)) {
+      return new Response(audioBytes, { status: 200, headers: { "content-type": "audio/ogg" } });
+    }
+    if (u.includes("/speech-to-text")) {
+      if (scribeReply === null) return new Response("stub: scribe not configured for this case", { status: 500 });
+      const body = typeof scribeReply === "string" ? { text: scribeReply } : scribeReply;
+      lastScribeSeen = body;
+      return new Response(JSON.stringify(body), {
+        status: 200, headers: { "content-type": "application/json" } });
+    }
+    return realFetch(url, init);
+  }) as any;
+
+  const sttStub: any = {
+    audio: { transcriptions: { create: async (opts: any) => {
+      // Consume the read stream media.ts opened. Left alone it emits an async 'error' once the tmp
+      // file is cleaned up — a harness artifact of stubbing, not the code under test.
+      try { opts.file?.on?.("error", () => {}); opts.file?.destroy?.(); } catch { /* not a stream */ }
+      const turn = whisperTurns[whisperCalls] || {};
+      whisperCalls++;
+      if (turn.throws) throw new Error(`stubbed whisper attempt-${whisperCalls} failure`);
+      return { text: turn.text ?? "", segments: turn.segments || [] };
+    } } },
+    chat: { completions: { create: async () => ({
+      choices: [{ message: { content: "" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    }) } },
+  };
+
+  const { handleMediaMessage, clearVoiceFailure } = await import("../server/handlers/media");
+  const USER: any = {
+    id: "cut4-admission", name: "Lerato", phoneNumber: "whatsapp:+27821234567",
+    goal: "fat_loss", profileNotes: "", onboardingComplete: true,
+  };
+
+  const drive = async (): Promise<{ reachedHandlers: string | null; reply: string }> => {
+    // The floor escalates its wording on a repeat within the window. Each case is a fresh client
+    // as far as that counter is concerned, so one case cannot change the next one's answer.
+    clearVoiceFailure(USER.id);
+    whisperCalls = 0;
+    let reachedHandlers: string | null = null;
+    const reply = await handleMediaMessage({
+      phone: "whatsapp:+27821234567", message: "", mediaUrl: AUDIO_URL,
+      mediaContentType: "audio/ogg", allMediaUrls: [], user: { ...USER }, isCoach: false,
+      openai: sttStub,
+      handleMessage: async (_p: any, text: string) => { reachedHandlers = text; return "COACH REPLY"; },
+    } as any);
+    return { reachedHandlers, reply: String(reply) };
+  };
+
+  const GARBLE = "you you you you you you you you you you you you you you you you";
+  const GOOD = "I had samp and beans for lunch and walked 8500 steps neh";
+
+  const GOOD_SEGS = [{ avg_logprob: -0.2, compression_ratio: 1.4 }];
+  const BAD_SEGS = [{ avg_logprob: -1.8, compression_ratio: 4.0 }];
+  const whisperOnly = () => { delete process.env.ELEVENLABS_API_KEY; scribeReply = null; };
+
+  /**
+   * THE CALL SEQUENCE IS NOT THE ATTEMPT NUMBER, and assuming it was cost four failing checks
+   * while writing this. media.ts only runs attempt 2 when attempt 1 THROWS; an attempt 1 that
+   * returns successfully with empty text goes straight to attempt 3, which is then the SECOND
+   * call. Fixtures name attempts and this builds the call order media.ts will actually produce,
+   * so a future change to the retry chain breaks the count check below instead of silently
+   * relabelling which attempt a case was really testing.
+   */
+  const turns = (spec: { a1?: WhisperTurn; a2?: WhisperTurn; a3?: WhisperTurn }): WhisperTurn[] => {
+    const seq: WhisperTurn[] = [spec.a1 ?? {}];
+    if (spec.a1?.throws) seq.push(spec.a2 ?? {});
+    if (spec.a3) seq.push(spec.a3);
+    return seq;
+  };
+
+  // Each path is set up the way production reaches it, and named for what it is.
+  const PATHS: [string, () => void][] = [
+    ["SCRIBE (runs FIRST when ELEVENLABS_API_KEY is set — the production path)", () => {
+      process.env.ELEVENLABS_API_KEY = "stub"; scribeReply = GARBLE; whisperTurns = [];
+    }],
+    ["WHISPER attempt 2, the catch retry", () => {
+      whisperOnly(); whisperTurns = turns({ a1: { throws: true }, a2: { text: GARBLE, segments: GOOD_SEGS } });
+    }],
+    ["WHISPER attempt 3, the FORCED-ENGLISH retry", () => {
+      whisperOnly(); whisperTurns = turns({ a1: { text: "", segments: [] }, a3: { text: GARBLE, segments: GOOD_SEGS } });
+    }],
+    ["WHISPER attempt 1, which reports metrics (the only path that was ever guarded)", () => {
+      whisperOnly(); whisperTurns = turns({ a1: { text: GARBLE, segments: BAD_SEGS } });
+    }],
+  ];
+
+  for (const [label, setup] of PATHS) {
+    setup();
+    const { reachedHandlers, reply } = await drive();
+    chk(reachedHandlers === null, `${label}: the garble NEVER reaches handleMessage`,
+      `handlers got ${JSON.stringify(String(reachedHandlers ?? "").slice(0, 60))}`);
+    chk(!/🎤 I heard/.test(reply), `…and it is not echoed back to the client either`,
+      JSON.stringify(reply.slice(0, 70)));
+    // THE EXISTING MOUTH, NOT A NEW ONE: the refusal wording is the one media.ts already carried.
+    chk(/type it instead|please type what you need/i.test(reply),
+      `…and the client gets the existing clarification response`, JSON.stringify(reply.slice(0, 70)));
+  }
+
+  // THE OPPOSITE DEFECT, on every one of the same four paths. A floor that refuses everything
+  // would pass all twelve checks above and destroy the product, so each path must also ADMIT a
+  // real SA transcript — same harness, same client, only the transcript changed.
+  const GOOD_PATHS: [string, () => void][] = [
+    ["SCRIBE", () => { process.env.ELEVENLABS_API_KEY = "stub"; scribeReply = GOOD; whisperTurns = []; }],
+    ["WHISPER attempt 2", () => {
+      whisperOnly(); whisperTurns = turns({ a1: { throws: true }, a2: { text: GOOD, segments: GOOD_SEGS } });
+    }],
+    ["WHISPER attempt 3 (forced English)", () => {
+      whisperOnly(); whisperTurns = turns({ a1: { text: "", segments: [] }, a3: { text: GOOD, segments: GOOD_SEGS } });
+    }],
+    ["WHISPER attempt 1", () => {
+      whisperOnly(); whisperTurns = turns({ a1: { text: GOOD, segments: GOOD_SEGS } });
+    }],
+  ];
+  for (const [label, setup] of GOOD_PATHS) {
+    setup();
+    const { reachedHandlers } = await drive();
+    chk(typeof reachedHandlers === "string" && /samp and beans/.test(reachedHandlers),
+      `${label}: a real SA transcript still reaches the handlers, whole`,
+      `handlers got ${JSON.stringify(String(reachedHandlers ?? "NOTHING").slice(0, 60))}`);
+    chk(typeof reachedHandlers === "string" && /8500/.test(reachedHandlers),
+      `…with the number they said intact`);
+  }
+
+  // ── BAD WHISPER METRICS ARE REFUSED ON ALL THREE ATTEMPTS, NOT JUST THE FIRST ────────────────
+  // Until this amendment attempts 2 and 3 did not ask for verbose_json at all, so a transcript
+  // that LOOKS like ordinary words and that Whisper itself scored as garbage sailed through them:
+  // the deterministic floor cannot see a plausible-looking mishearing, and that is exactly what
+  // the provider's own numbers are for.
+  {
+    const PLAUSIBLE = "I hid the samp and beans for lunch and worked 8500 shops today";
+    const ON_ATTEMPT: [string, () => void][] = [
+      ["attempt 1", () => { whisperOnly(); whisperTurns = turns({ a1: { text: PLAUSIBLE, segments: BAD_SEGS } }); }],
+      ["attempt 2", () => { whisperOnly(); whisperTurns = turns({ a1: { throws: true }, a2: { text: PLAUSIBLE, segments: BAD_SEGS } }); }],
+      ["attempt 3", () => { whisperOnly(); whisperTurns = turns({ a1: { text: "", segments: [] }, a3: { text: PLAUSIBLE, segments: BAD_SEGS } }); }],
+    ];
+    for (const [which, setup] of ON_ATTEMPT) {
+      setup();
+      const { reachedHandlers } = await drive();
+      chk(reachedHandlers === null,
+        `a plausible-looking transcript Whisper itself scored as garbage is refused on ${which}`,
+        `handlers got ${JSON.stringify(String(reachedHandlers ?? "").slice(0, 60))}`);
+    }
+  }
+
+  // ── AN EMPTY RESULT'S METRICS MUST NOT POISON THE RETRY THAT REPLACES IT ─────────────────────
+  // THE EXACT CONTROL THE REVIEW ASKED FOR. voiceQuality was set once and never cleared, so an
+  // EMPTY attempt 1 carrying bad segments left its numbers behind and the forced-English retry
+  // was judged on them — a good transcript refused because a different call had gone badly.
+  {
+    whisperOnly();
+    whisperTurns = turns({
+      a1: { text: "", segments: BAD_SEGS },   // nothing said, and scored terribly
+      a3: { text: GOOD, segments: GOOD_SEGS }, // a real transcript, scored well
+    });
+    const { reachedHandlers } = await drive();
+    chk(typeof reachedHandlers === "string" && /samp and beans/.test(reachedHandlers),
+      "an EMPTY attempt 1 with bad metrics does not poison a good forced-English attempt 3",
+      `handlers got ${JSON.stringify(String(reachedHandlers ?? "NOTHING").slice(0, 60))}`);
+    // AND THE ATTEMPT REALLY RAN. Without this the check above would still pass if media.ts stopped
+    // retrying altogether and attempt 1's empty text were somehow admitted — a green light for the
+    // opposite bug. Two calls: attempt 1, then the forced-English retry.
+    chk(whisperCalls === 2, "…and it really was a second Whisper call that produced it",
+      `whisper calls = ${whisperCalls}`);
+  }
+
+  // ── SCRIBE'S OWN METADATA REACHES THE BOUNDARY, AND CHANGES NO VERDICT ───────────────────────
+  // The words[].logprob the API returns used to be discarded at the parse. It now survives to the
+  // shared boundary — and is deliberately inert there, because Scribe's scale is not Whisper's and
+  // a threshold invented to bridge them would be a guess with a number's authority.
+  {
+    process.env.ELEVENLABS_API_KEY = "stub"; whisperTurns = [];
+    lastScribeSeen = null;
+    scribeReply = { text: GOOD, words: [{ logprob: -0.11 }, { logprob: -0.05 }], language_probability: 0.97 };
+
+    // GRADED ON WHAT THE CODE PARSED, NOT ON WHAT THE STUB SENT. Scribe's logprobs are carried and
+    // deliberately reject nothing, so no verdict can reveal whether they survived the parse — an
+    // earlier version of this check asserted the STUB had returned words, which grades the harness
+    // and stays green with the parse reverted. media.ts logs what it actually read, so that line is
+    // the observable: it is the only place the parsed metadata becomes visible from outside.
+    const logged: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: any[]) => { logged.push(args.join(" ")); };
+    const { reachedHandlers } = await drive();
+    console.log = realLog;
+
+    const scribeLine = logged.find((l) => l.includes("[VOICE] scribe_ok")) || "";
+    chk(lastScribeSeen?.words?.length === 2, "the stub really did return per-word logprobs");
+    chk(/words=2\b/.test(scribeLine), "…and the code PARSED both of them out of the response",
+      JSON.stringify(scribeLine.slice(0, 120)));
+    chk(/meanWordLogprob=-0\.08/.test(scribeLine),
+      "…with their actual values, not a zero-fill", JSON.stringify(scribeLine.slice(0, 120)));
+    chk(/langProb=0\.97/.test(scribeLine),
+      "…and the language probability alongside them, as metadata and not as a verdict");
+    chk(typeof reachedHandlers === "string" && /samp and beans/.test(reachedHandlers),
+      "a configured Scribe transcript with metadata is still admitted",
+      `handlers got ${JSON.stringify(String(reachedHandlers ?? "NOTHING").slice(0, 60))}`);
+
+    // AND WITH LOGPROBS THAT WOULD TRIP WHISPER'S THRESHOLD, the verdict is unchanged — proving
+    // the numbers are carried rather than silently reused against a calibration they never had.
+    scribeReply = { text: GOOD, words: [{ logprob: -9.9 }, { logprob: -9.9 }], language_probability: 0.2 };
+    const worse = await drive();
+    chk(typeof worse.reachedHandlers === "string" && /samp and beans/.test(worse.reachedHandlers!),
+      "…and Scribe logprobs far past Whisper's line still do not reject, as intended");
+  }
+
+  // ── EXPLICIT NO-SPEECH MARKERS, THROUGH THE WHOLE BRANCH ─────────────────────────────────────
+  // The predicate checks above prove the string is refused. This proves the BRANCH refuses it:
+  // no handler recursion, and the existing clarification rather than a new mouth.
+  {
+    whisperOnly();
+    whisperTurns = turns({ a1: { text: "[BLANK_AUDIO] [BLANK_AUDIO] [BLANK_AUDIO]", segments: GOOD_SEGS } });
+    const { reachedHandlers, reply } = await drive();
+    chk(reachedHandlers === null, "repeated [BLANK_AUDIO] never reaches the handlers",
+      `handlers got ${JSON.stringify(String(reachedHandlers ?? "").slice(0, 60))}`);
+    chk(/type it instead|please type what you need/i.test(reply),
+      "…and the client gets the existing clarification response", JSON.stringify(reply.slice(0, 70)));
+
+    // AND A MARKER BESIDE REAL SPEECH KEEPS THE SPEECH. Stripping markers must not become a
+    // licence to drop content: only the marker goes.
+    whisperTurns = turns({ a1: { text: "[BLANK_AUDIO] " + GOOD, segments: GOOD_SEGS } });
+    const withSpeech = await drive();
+    chk(typeof withSpeech.reachedHandlers === "string" && /samp and beans/.test(withSpeech.reachedHandlers!),
+      "…while a marker sitting beside real speech still delivers the speech",
+      `handlers got ${JSON.stringify(String(withSpeech.reachedHandlers ?? "NOTHING").slice(0, 60))}`);
+  }
+
+  globalThis.fetch = realFetch;
+  delete process.env.ELEVENLABS_API_KEY;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+console.log("\n6. THE FLOOR IS ONE PREDICATE, READ BY EVERY PATH (source)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+{
+  const { readFileSync: rf } = await import("node:fs");
+  const live = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+  const media = live(rf("server/handlers/media.ts", "utf-8"));
+  chk(/transcriptFailsAdmission\(transcribedText, voiceQuality\)/.test(media),
+    "media.ts asks the shared predicate, and hands it whatever metrics it has");
+  chk(!/if \(voiceQuality && wordCount/.test(media),
+    "…and the metrics-only gate is gone, not left beside it");
+  chk((media.match(/transcriptFailsAdmission\(/g) || []).length === 1,
+    "exactly ONE admission decision in the voice branch — not one per provider",
+    `found ${(media.match(/transcriptFailsAdmission\(/g) || []).length}`);
+}
+
 console.log(`\n${failed === 0 ? "voice-provenance-tests: ALL GREEN" : `voice-provenance-tests: ${failed} FAILED`}`);
 process.exit(failed === 0 ? 0 : 1);

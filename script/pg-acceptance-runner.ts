@@ -247,6 +247,18 @@ export const ACCEPTANCES: Acceptance[] = [
     // because the acceptance drives the TEXT door where the cleaner never runs.
     command: ["bash", "script/red-on-revert-cut3-long-voice.sh"] },
 
+  { id: "stt-admission", title: "A garbled transcript writes nothing, a real one writes everything",
+    // CUT 4 (2026-09-12). The garble floor read `if (voiceQuality && …)` and voiceQuality is set
+    // only by Whisper attempt 1 — so Scribe (which runs FIRST in production), the catch retry and
+    // the forced-English retry all SKIPPED it. Needs a real database because the claim is about
+    // what a refused transcript does NOT store, and what an admitted one does.
+    command: ["npx", "tsx", "script/pg-stt-admission-acceptance.ts"] },
+
+  { id: "stt-admission-reverts", title: "Every bypass of the admission floor turns a grader red",
+    // One mechanism per case: the metrics-only condition returning, each content check removed,
+    // and two opposite-defect controls so a floor that refuses everything cannot pass.
+    command: ["bash", "script/red-on-revert-cut4-stt-admission.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same
