@@ -960,7 +960,11 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   // occupy. The assertions are inverted rather than dropped, and the inversion is stricter — the
   // old ones permitted a shortened note under conditions, these permit none.
   test("voice: the client's note reaches the handlers whole — nothing shortens it first", () => {
-    const wedge = readFileSync(join("server", "understanding", "sa-transcript.ts"), "utf-8");
+    // COMMENTS STRIPPED. The file EXPLAINS what was removed and why, so a bare text search matches
+    // the explanation and reports the code is back — the same fail-open shape this cut keeps
+    // finding, and the second time it caught me in this file.
+    const wedgeSrc = readFileSync(join("server", "understanding", "sa-transcript.ts"), "utf-8");
+    const wedge = wedgeSrc.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
     assert.ok(!/export async function condenseVoiceRamble/.test(wedge), "the summariser wedge is gone, not merely unused");
     assert.ok(!/CONDENSE_SYSTEM/.test(wedge), "…and so is the prompt that asked for a retelling");
     const media = readFileSync(join("server", "handlers", "media.ts"), "utf-8");
@@ -971,12 +975,17 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     // back 1,500 chars long, the tail deleted, before any handler or guard saw it.
     assert.match(wedge, /export function splitForClean/, "the cleaner splits rather than truncates");
     assert.match(wedge, /return cleaned \+ tail;/, "…and rejoins the part it could not send");
-    // THREE GATES, NOT A NUMBER (CTO review of #244). A 50% floor alone let a reply carrying 60%
-    // of the head through, deleting a correction and a question with it.
+    // AN ORDERED EDIT CONTRACT, NOT A PERCENTAGE. Two percentages were tried and beaten: a reply
+    // with 60% of the head, then one with 95.84% and the ending intact, each deleting a clause out
+    // of the middle. A share of the text cannot tell a spelling from a sentence.
     assert.match(wedge, /finishReason !== "stop"/, "a reply the model did not finish cannot become the transcript");
-    assert.match(wedge, /!coversTheEnd\(head, cleaned\)/, "nor can one that stops before the end of the head");
-    assert.match(wedge, /cleaned\.length < head\.length \* 0\.8/, "nor one that lost a fifth of it");
-    assert.match(wedge, /!retainsOriginal\(head, cleaned\)/, "the faithfulness check compares the head it actually cleaned");
+    assert.match(wedge, /!onlyApprovedRepairs\(head, cleaned\)/, "nor can one that is not a token-for-token repair");
+    assert.match(wedge, /before\.length !== after\.length/, "a deleted or invented clause changes the token count");
+    assert.match(wedge, /PROTECTED_TOKENS/, "numbers, days and negations may not be substituted at all");
+    assert.ok(!/coversTheEnd|cleaned\.length < head\.length/.test(wedge),
+      "the superseded length gates are gone, not left unable to fail");
+    assert.ok(!/retainsOriginal/.test(wedge),
+      "the permissive set-overlap check is gone — a set has no order, and a deleted clause passed it");
   });
   test("CFO: the weekly report surfaces AI cost by feature and guards the R199 margin", () => {
     const biz = readFileSync(join("server", "scheduler", "jobs", "business.ts"), "utf-8");

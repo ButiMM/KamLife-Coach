@@ -238,15 +238,19 @@ REAL("\n6. NO STAGE BETWEEN THE CLIENT AND THE HANDLERS MAY SHORTEN WHAT THEY SA
   chk(!/condenseVoiceRamble/.test(media), "and media.ts condenses nothing before the handlers");
   chk(/const forBrain = transcribedText;/.test(media), "the routed text IS the cleaned transcript");
   chk(/return cleaned \+ tail;/.test(wedge), "the cleaner rejoins the part it could not send");
-  // THREE GATES, NOT A NUMBER. The first version carried only a 50% floor, and a reply holding
-  // 60% of the head passed it while deleting a correction and a question. Naming the threshold
-  // here would pin the number instead of the promise.
+  // AN ORDERED EDIT CONTRACT, NOT A PERCENTAGE. Two percentages were tried and both were beaten:
+  // a reply with 60% of the head, then one with 95.84% of it and the ending intact, each deleting
+  // a clause out of the middle. A share of the text cannot tell a spelling from a sentence.
   chk(/finishReason !== "stop"/.test(wedge),
     "a reply the model did not finish cannot become the transcript");
-  chk(/!coversTheEnd\(head, cleaned\)/.test(wedge),
-    "…nor can one that stops before the end of the head");
-  chk(/cleaned\.length < head\.length \* 0\.8/.test(wedge),
-    "…nor one that lost a fifth of it");
+  chk(/!onlyApprovedRepairs\(head, cleaned\)/.test(wedge),
+    "…nor can one that is not a token-for-token repair of the head");
+  chk(/before\.length !== after\.length/.test(wedge),
+    "…because a deleted or invented clause changes the token count");
+  chk(/PROTECTED_TOKENS/.test(wedge),
+    "…and numbers, days and negations may not be substituted at all");
+  chk(!/coversTheEnd|cleaned\.length < head\.length/.test(wedge),
+    "the superseded length gates are gone, not left unable to fail");
 }
 
 REAL(`\n${failed === 0 ? "pg-long-voice-tail-acceptance: GREEN" : `pg-long-voice-tail-acceptance: ${failed} FAILED`}\n`);

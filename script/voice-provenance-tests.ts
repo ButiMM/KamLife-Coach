@@ -202,6 +202,91 @@ console.log("\n3b. A REPLY THAT DELETES PART OF THE HEAD IS REFUSED, FINISHED OR
       `…and so does the question (finish_reason="${finish}")`);
   }
 
+  // ── THE EDIT CONTRACT ───────────────────────────────────────────────────────────────────
+  // THE LENGTH FLOOR AND THE ENDING CHECK ARE GONE, and the fixtures that isolated them with them:
+  // the ordered token contract subsumes both, so neither could fail on its own any more and a case
+  // that cannot fail is a case that grades nothing.
+  //
+  // THIS IS THE CASE THAT BROKE THE PREVIOUS HEAD, reproduced exactly as it was reported: a reply
+  // that is the head with ONE CLAUSE REMOVED FROM THE MIDDLE. 95.84% of the head, ending intact,
+  // finish_reason "stop" — a length floor, an ending check and a 40% word-overlap test all accept
+  // it, and the client's correction and question are gone.
+  {
+    const { splitForClean } = await import("../server/understanding/sa-transcript");
+    const correction = "Actually I missed my Tuesday workout. What should I do today?";
+    const rawNote =
+      "I went to work and took the taxi like every other day. ".repeat(18)
+      + correction + " "
+      + "I came home and made tea and told you about my day. ".repeat(12)
+      + " FINAL7788.";
+    const { head: h, tail: t } = splitForClean(rawNote);
+    chk(h.includes(correction), "the correction really is inside the cleaner's head",
+      `raw ${rawNote.length} head ${h.length}`);
+    chk(t.length > 0, "…and there is still a tail beyond it", `tail ${t.length}`);
+
+    const middleDeleted = h.replace(correction, "");
+    chk(middleDeleted.length / h.length > 0.9,
+      "the reply keeps over 90% of the head — a length floor cannot see this",
+      `${(100 * middleDeleted.length / h.length).toFixed(2)}%`);
+
+    const out = await cleanSATranscript(stubOpenAI(middleDeleted, "stop"), rawNote, null);
+    chk(out === rawNote, "a clause deleted from the MIDDLE keeps the WHOLE raw transcript",
+      `in ${rawNote.length} out ${out.length}`);
+    chk(/Actually I missed my Tuesday workout/.test(out), "…so the correction survives");
+    chk(/What should I do today\?/.test(out), "…and so does the question");
+    chk(/FINAL7788/.test(out), "…and the tail is still there");
+  }
+
+  // A NEGATION FLIPPED, AND A QUANTITY CHANGED. Neither alters the token COUNT, so only the
+  // protected-token rule stands between the client and a record that says the opposite of what
+  // they said. "missed" -> "finished" and 8500 -> 8000 are the two that cost them their history.
+  {
+    const spine = "On Tuesday I missed my session and I walked 8500 steps to the office. ";
+    const note = "I want to tell you about my week and what happened on each day of it. ".repeat(14)
+      + spine + "That is everything for now.";
+    const flipped = note.replace("I missed my session", "I finished my session");
+    const outFlip = await cleanSATranscript(stubOpenAI(flipped, "stop"), note, null);
+    chk(outFlip === note, "a negation turned into its opposite keeps the raw transcript",
+      `out ${outFlip.length}`);
+    chk(/I missed my session/.test(outFlip), "…so the client still missed the session they missed");
+
+    const renumbered = note.replace("8500", "8000");
+    const outNum = await cleanSATranscript(stubOpenAI(renumbered, "stop"), note, null);
+    chk(outNum === note, "a spoken quantity rewritten keeps the raw transcript", `out ${outNum.length}`);
+    chk(/8500 steps/.test(outNum), "…so 8,500 is still 8,500");
+
+    const reday = note.replace("On Tuesday", "On Thursday");
+    const outDay = await cleanSATranscript(stubOpenAI(reday, "stop"), note, null);
+    chk(outDay === note, "a named day rewritten keeps the raw transcript", `out ${outDay.length}`);
+  }
+
+  // AN INSERTION IS AS BAD AS A DELETION — words the client never said, in their own record.
+  {
+    const note = "I had pap and chicken and I walked to work this morning like always. ".repeat(24);
+    const padded = note + " I also went to the gym twice this week.";
+    const out = await cleanSATranscript(stubOpenAI(padded, "stop"), note, null);
+    chk(out === note, "an invented sentence keeps the raw transcript", `out ${out.length}`);
+    chk(!/went to the gym twice/.test(out), "…so nothing they did not say is in the record");
+  }
+
+  // AND THE REPAIRS THE CLEANER EXISTS FOR STILL LAND. Without these the contract is satisfied by
+  // a cleaner that refuses everything, which deletes the whole point of the stage.
+  {
+    const rawSamp = "Yoh I had stamp and beans and chicken for lunch today neh and it was lekker";
+    const fixed = rawSamp.replace("stamp", "samp");
+    const cleanedSamp = await cleanSATranscript(stubOpenAI(fixed, "stop"), rawSamp, null);
+    chk(cleanedSamp === fixed, "stamp -> samp is accepted, as it must be", JSON.stringify(cleanedSamp));
+
+    const punctOnly = "yoh i had samp and beans for lunch today";
+    const repunctuated = "Yoh, I had samp and beans for lunch today.";
+    const outPunct = await cleanSATranscript(stubOpenAI(repunctuated, "stop"), punctOnly, null);
+    chk(outPunct === repunctuated, "case, spacing and punctuation are free", JSON.stringify(outPunct));
+
+    const already = "I had samp and beans and chicken for lunch today and it was lekker neh";
+    const outSame = await cleanSATranscript(stubOpenAI(already, "stop"), already, null);
+    chk(outSame === already, "an unchanged transcript passes through untouched");
+  }
+
   // A COMPLETE reply that reaches the end of the head is still accepted — without this the section
   // is satisfied by a cleaner that refuses everything, which is the opposite defect.
   //
@@ -214,46 +299,16 @@ console.log("\n3b. A REPLY THAT DELETES PART OF THE HEAD IS REFUSED, FINISHED OR
   chk(good === note, "a complete, faithful clean of the head is accepted and rejoined",
     `in ${note.length} out ${good.length}`);
 
-  // AND THE SPELLING REPAIR THE CLEANER EXISTS FOR STILL HAPPENS. The whole point is samp, not
-  // stamp — a guard that made the cleaner inert would pass every check above.
-  const rawSamp = "Yoh I had stamp and beans and chicken for lunch today neh and it was lekker";
-  const fixed = rawSamp.replace("stamp", "samp");
-  const cleanedSamp = await cleanSATranscript(stubOpenAI(fixed, "stop"), rawSamp, null);
-  chk(cleanedSamp === fixed, "the SA-food repair still lands — samp, not stamp", JSON.stringify(cleanedSamp));
-
-  // ── EACH GATE ON ITS OWN ────────────────────────────────────────────────────────────────
-  // Three checks guard completeness and they must be individually graded, or two of them can be
-  // deleted while the section stays green on the strength of the third.
-  const truncatedStop = await cleanSATranscript(stubOpenAI(head.slice(0, Math.floor(head.length * 0.9)), "stop"), note, null);
-  chk(truncatedStop === note,
-    "COVERS-THE-END alone: a 90% prefix is refused though it clears the length floor",
-    `out ${truncatedStop.length}`);
-
-  // Keeps the head's ending, so coversTheEnd is satisfied — only the floor can catch it.
-  const endWords = properClean.trim().split(/\s+/).slice(-8).join(" ");
-  const hollowed = properClean.slice(0, Math.floor(properClean.length * 0.5)) + " " + endWords;
-  const hollowedOut = await cleanSATranscript(stubOpenAI(hollowed, "stop"), note, null);
-  chk(hollowedOut === note,
-    "THE FLOOR alone: a reply that keeps the ending but loses half the middle is refused",
-    `out ${hollowedOut.length}`);
-
-  // A complete, faithful clean that the model did not finish — only finish_reason can catch it.
-  //
-  // THE REPLY CARRIES A VISIBLE REPAIR (stamp -> samp), and it has to. An unfinished reply whose
-  // text is identical to the head produces the same string whether it is accepted or refused, so
-  // the check passed with the gate deleted — it could not tell the two outcomes apart. The edit is
-  // what makes acceptance observable.
+  // FINISH_REASON IS STILL ITS OWN GATE — an otherwise perfect repair the model did not finish.
+  // The reply carries a visible repair so acceptance and refusal are distinguishable; identical
+  // text would produce the same string either way and the check would pass with the gate deleted.
   const repaired = properClean.replace("stamp", "samp");
   chk(repaired !== properClean, "the finish_reason fixture carries a visible repair");
   const unfinished = await cleanSATranscript(stubOpenAI(repaired, "length"), note, null);
   chk(unfinished === note && /stamp and beans/.test(unfinished) && !/samp and beans/.test(unfinished),
     "FINISH_REASON alone: a reply that looks complete but reports length is refused",
     `out ${unfinished.length}`);
-  // …and the same reply, finished, IS taken — otherwise the gate is just an off switch.
   const finished = await cleanSATranscript(stubOpenAI(repaired, "stop"), note, null);
-  // NOT AN EQUAL-LENGTH CHECK: "stamp" -> "samp" is one character shorter, so demanding the same
-  // length fails on a correct repair. What must hold is that the repair landed AND the tail the
-  // model never saw is still attached to the end of it.
   chk(/samp and beans/.test(finished) && finished.endsWith(splitAgain(note).tail),
     "…while the identical reply with finish_reason=stop is accepted, repair and tail both",
     `out ${finished.length} of ${note.length}`);

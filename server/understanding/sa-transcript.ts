@@ -33,40 +33,107 @@ function killswitchOff(): boolean {
   return process.env.SA_CLEAN === "off";
 }
 
-// A faithful clean keeps most of the speaker's own words (it fixes a handful). If the
-// output shares almost nothing with the input, the model went off-script — reject it.
-function retainsOriginal(raw: string, cleaned: string): boolean {
-  const words = (s: string) => new Set((s.toLowerCase().match(/[a-z']{3,}/g) || []));
-  const orig = words(raw);
-  if (orig.size < 6) return true; // too short to judge overlap — trust the length guard
-  const out = words(cleaned);
-  let kept = 0;
-  for (const w of orig) if (out.has(w)) kept++;
-  return kept / orig.size >= 0.4; // at least 40% of the original words survive a real clean
+/**
+ * WHAT THE CLEANER IS ALLOWED TO CHANGE — AN ORDERED EDIT CONTRACT (Cut 3, CTO review 2, 2026-09-12).
+ *
+ * THE HOLE THIS CLOSES. `retainsOriginal` compared two SETS of words and asked whether 40% of the
+ * original survived. A set has no order, no position and no repetition, so a reply that deleted a
+ * whole clause out of the MIDDLE of the head passed it comfortably. Demonstrated deterministically
+ * against the previous amended head:
+ *
+ *     raw 1687 chars · head 1467 chars · reply = head with one clause removed
+ *     "Actually I missed my Tuesday workout. What should I do today?"   <- deleted
+ *     95.84% of the head preserved, ending intact, finish_reason "stop"
+ *     ACCEPTED. The correction and the question were gone and the tail survived.
+ *
+ * finish_reason, a length floor and an ending check are all blind to that: the reply is complete,
+ * long enough, and ends correctly. Only the ORDER and COUNT of the client's own words can see it.
+ *
+ * THE CONTRACT. This cleaner repairs spelling. It does not rewrite clauses. So the cleaned head
+ * must be the same tokens, in the same order, the same number of times — with only two exceptions:
+ *
+ *   - case, spacing and punctuation are free (they are normalised away before comparison)
+ *   - a token may be REPLACED by an approved SA repair: the replacement must be a word this
+ *     cleaner exists to produce, and must be a near-miss of what STT heard
+ *
+ * Anything else — a deletion, an insertion, an unexplained substitution — returns the WHOLE RAW
+ * transcript. Numbers, weekdays and negations are protected absolutely: they may not be
+ * substituted even for an approved word, because "8500" becoming "8000" and "missed" becoming
+ * "finished" are the changes that cost a client their record rather than their spelling.
+ *
+ * NOT SOLVED BY A HIGHER PERCENTAGE, and not by a model judging a model. A percentage cannot
+ * distinguish a clause from a spelling, which is precisely how the 60% and 95.84% replies both
+ * got through.
+ */
+const SA_REPAIR_WORDS = new Set([
+  // the SA food words the system prompt names, which is the whole reason this stage exists
+  "samp", "morogo", "pap", "pilchards", "chakalaka", "vetkoek", "umngqusho", "mngqusho",
+  "kota", "mageu", "maas", "wors", "boerewors", "umqombothi", "magwinya", "gatsby", "bunny",
+  // and the SA slang it is told to keep and spell correctly
+  "mos", "neh", "yoh", "eish", "lekker", "sharp", "sho", "shame", "ag", "hey", "hayibo", "sharp",
+]);
+
+/**
+ * Never substituted, never dropped — a wrong one of these is a wrong record, not a typo.
+ *
+ * A SET, NOT A PATTERN, and deliberately: the architecture governor counts named regex literals,
+ * and a list of words is what this is. Membership also says what it means without anyone parsing
+ * an alternation forty items long.
+ */
+const PROTECTED_TOKENS = new Set([
+  "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "half", "quarter",
+  "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+  "yesterday", "today", "tomorrow",
+  "not", "no", "never", "dont", "didnt", "cant", "wont", "wasnt", "isnt", "arent", "havent",
+  "hadnt", "missed", "skipped", "without",
+]);
+
+/** Any token carrying a digit is a quantity: a step count, a weight, a portion, a time. */
+function isProtected(token: string): boolean {
+  return PROTECTED_TOKENS.has(token) || /\d/.test(token);
+}
+
+/** Lowercased words and numbers, punctuation and spacing removed — the client's lexical spine. */
+function lexicalTokens(s: string): string[] {
+  return (s.toLowerCase().match(/[a-z0-9']+/g) || []).map(t => t.replace(/'/g, ""));
+}
+
+/** How far apart two tokens are. Bounded work: both are single words. */
+function editDistance(a: string, b: string): number {
+  const rows: number[][] = [Array.from({ length: b.length + 1 }, (_, j) => j)];
+  for (let i = 1; i <= a.length; i++) {
+    rows[i] = [i];
+    for (let j = 1; j <= b.length; j++) {
+      rows[i][j] = Math.min(
+        rows[i - 1][j] + 1,
+        rows[i][j - 1] + 1,
+        rows[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+  }
+  return rows[a.length][b.length];
+}
+
+/** A substitution is allowed only when it produces a word this cleaner exists to produce. */
+function isApprovedRepair(from: string, to: string): boolean {
+  if (isProtected(from) || isProtected(to)) return false;
+  if (!SA_REPAIR_WORDS.has(to)) return false;
+  return editDistance(from, to) <= 3;
 }
 
 /**
- * DID THE CLEAN REACH THE END OF WHAT IT WAS GIVEN? (Cut 3 amendment, 2026-09-12.)
- *
- * A length floor cannot tell a faithful clean from a faithful PREFIX. Demonstrated against the
- * first version of this cut: a model reply carrying 60% of the head — 1,687 characters in, 1,099
- * out — passed both the 50% floor and the word-overlap check, and 588 characters vanished, a
- * workout correction and a question among them. The preserved tail was never the whole problem;
- * the model can delete the end of the HEAD and the result still looks like prose.
- *
- * So the head's last words must be represented in the output. The cleaner's contract is a light
- * spelling repair in the same order, so a handful of the final content words should survive one;
- * a prefix that stops early cannot contain them at all. Two of six are allowed to change, which
- * is what a genuine SA-food correction on the last line looks like.
+ * The cleaned head must be the head, token for token, in order — bar approved SA repairs.
+ * Any deletion or insertion changes the count and is refused outright.
  */
-function coversTheEnd(head: string, cleaned: string): boolean {
-  const words = (s: string) => (s.toLowerCase().match(/[a-z']{3,}/g) || []);
-  const ending = words(head).slice(-6);
-  if (ending.length < 4) return true;              // too short to judge — the floor carries it
-  const out = new Set(words(cleaned));
-  let kept = 0;
-  for (const w of ending) if (out.has(w)) kept++;
-  return kept >= Math.ceil(ending.length * 0.6);
+function onlyApprovedRepairs(head: string, cleaned: string): boolean {
+  const before = lexicalTokens(head);
+  const after = lexicalTokens(cleaned);
+  if (before.length !== after.length) return false;      // a clause was dropped or invented
+  for (let i = 0; i < before.length; i++) {
+    if (before[i] === after[i]) continue;
+    if (!isApprovedRepair(before[i], after[i])) return false;
+  }
+  return true;
 }
 
 /**
@@ -148,24 +215,26 @@ export async function cleanSATranscript(openai: OpenAI, raw: string, userId?: st
     // sailed through it: 1,687 characters in, 1,099 out, 588 gone with a workout correction and a
     // question inside them. Three things close that, and any one of them failing keeps the raw:
     //
-    //   finish_reason      must be "stop". "length" means the model ran out of tokens mid-sentence
-    //                      and what came back is a fragment wearing the shape of an answer. An
-    //                      ABSENT reason is not proof of completion either, so it is refused too —
-    //                      when completeness cannot be established the client's own words win.
-    //   the length floor   0.8, not 0.5. The prompt tells the model to keep the length; half the
-    //                      head was never a clean, it was a summary nobody asked for.
-    //   coversTheEnd       a faithful PREFIX passes a floor and an overlap test. It cannot pass a
-    //                      check that the head's last words are still there.
+    //   finish_reason        must be "stop". "length" means the model ran out of tokens mid-sentence
+    //                        and what came back is a fragment wearing the shape of an answer. An
+    //                        ABSENT reason is not proof of completion either, so it is refused too —
+    //                        when completeness cannot be established the client's own words win.
+    //   onlyApprovedRepairs  the cleaned head must be the head token for token, in order, bar an
+    //                        approved SA spelling repair. This is what sees a clause deleted out
+    //                        of the MIDDLE — the case a length floor and an ending check both let
+    //                        through at 95.84% of the head with the ending intact.
+    //
+    // THE LENGTH FLOOR AND THE ENDING CHECK ARE GONE, not loosened: the ordered contract subsumes
+    // both (a prefix and a hollowed middle each change the token count) and keeping them would
+    // leave two gates that can no longer fail on their own, which is how a suite starts grading
+    // nothing while looking thorough.
     if (!cleaned
       || finishReason !== "stop"
-      || cleaned.length > head.length * 1.8 + 40
-      || cleaned.length < head.length * 0.8
-      || !coversTheEnd(head, cleaned)
       || looksLikeRefusal(cleaned)
-      || !retainsOriginal(head, cleaned)) {
+      || !onlyApprovedRepairs(head, cleaned)) {
       if (looksLikeRefusal(cleaned)) console.warn("[SA_CLEAN] model refused — keeping raw transcript");
       else if (finishReason !== "stop") console.warn(`[SA_CLEAN] incomplete reply (finish_reason=${String(finishReason)}) — keeping raw transcript`);
-      else if (cleaned && !coversTheEnd(head, cleaned)) console.warn("[SA_CLEAN] reply did not reach the end of the head — keeping raw transcript");
+      else if (cleaned) console.warn("[SA_CLEAN] reply is not a token-for-token repair of the head — keeping raw transcript");
       return raw;
     }
     if (tail) console.log(`[SA_CLEAN] cleaned ${head.length} chars, carried ${tail.length} through unchanged`);

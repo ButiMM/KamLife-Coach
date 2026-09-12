@@ -121,29 +121,32 @@ s=s.replace("  const { head, tail } = splitForClean(text);", '  const head = tex
 assert s!=b and 'const head = text.slice(0, 1500)' in s, "no match"; open(p,"w").write(s)
 PYEOF
 
-# 2. THE LENGTH FLOOR GOES. One of the three completeness gates, reverted alone — the fixture that
-#    catches it keeps the head's ending, so coversTheEnd cannot cover for it.
+# 2. THE EDIT CONTRACT GOES — the gate that replaced two beaten percentages. Without it a reply
+#    can delete a clause out of the MIDDLE of the head: 95.84% of the text, ending intact,
+#    finish_reason "stop", and the client's correction and question gone.
 cat > "$PATCH_DIR/2.py" <<'PYEOF'
 p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
-s=s.replace("      || cleaned.length < head.length * 0.8\n", "")
+s=s.replace("      || !onlyApprovedRepairs(head, cleaned)) {", "      ) {")
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
-# 2b. THE FINISH-REASON GATE GOES. The model ran out of tokens mid-sentence and what came back is
-#     a fragment wearing the shape of an answer. Caught alone by a reply that is otherwise perfect.
+# 2b. THE FINISH-REASON GATE GOES. A separate promise from the edit contract: the model ran out of
+#     tokens mid-sentence, and what came back is a fragment wearing the shape of an answer.
 cat > "$PATCH_DIR/2b.py" <<'PYEOF'
 p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
 s=s.replace('      || finishReason !== "stop"\n', "")
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
-# 2c. THE END-COVERAGE GATE GOES. This is the hole the CTO demonstrated against the first version
-#     of this cut: a faithful PREFIX passes a length floor and a word-overlap test, and the end of
-#     the head — a correction and a question in the measured case — is deleted.
+# 2c. THE PROTECTED TOKENS STOP BEING PROTECTED. The contract still refuses deletions, so the
+#     count-based half survives — this reverts only the rule that a number, a weekday or a
+#     negation may never be substituted. 8500 becomes 8000 and "missed" becomes "finished",
+#     each a one-for-one swap that leaves the token count untouched.
 cat > "$PATCH_DIR/2c.py" <<'PYEOF'
 p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
-s=s.replace("      || !coversTheEnd(head, cleaned)\n", "")
-assert s!=b, "no match"; open(p,"w").write(s)
+s=s.replace("  if (isProtected(from) || isProtected(to)) return false;\n", "")
+s=s.replace("  if (!SA_REPAIR_WORDS.has(to)) return false;", "  if (false) return false;")
+assert s!=b and "if (false) return false;" in s, "no match"; open(p,"w").write(s)
 PYEOF
 
 # 3. THE CONDENSER COMES BACK ON THE ROUTING PATH — a model's retelling reaches the handlers as
