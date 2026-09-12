@@ -20,7 +20,7 @@ import {
   logMediaFailure, logMediaSuccess, logChat,
 } from "./chat-log";
 import { askCoachK } from "../gpt";
-import { cleanSATranscript, condenseVoiceRamble } from "../understanding/sa-transcript";
+import { cleanSATranscript } from "../understanding/sa-transcript";
 import { looksLikeRefusal } from "../understanding/refusal";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
@@ -36,7 +36,7 @@ import { buildFormCheckPrompt, extractFormExercise } from "../form-check-prompt"
 // photo saves immediately, timer resets, one job processes the whole set 15s after the last.
 const _progressBurst = new Map<string, ReturnType<typeof setTimeout>>();
 import { getTodayWorkoutState } from "../workout-state";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, stripFoodLoggedClaim, isAskingNotReporting , getDisplayName, transcriptMustPassWhole } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, stripFoodLoggedClaim, isAskingNotReporting , getDisplayName } from "../utils";
 import { stripVoiceDenial } from "../reply-hygiene";
 import { detectVoiceLanguageNote } from "../voice-language";
 import { explicitMealSlot } from "../understanding/actions";
@@ -1407,15 +1407,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const transcribeMs = Date.now() - voiceStageStart;
       console.log(`[MEDIA][${mediaTrace}] transcribe_ok words=${wordCount} ms=${transcribeMs} lang=${whisperLang || "auto"}${languageNote ? " detected=" + languageNote.split(" ")[4] : ""}`);
 
-      // SUMMARISER WEDGE: a long ramble (>90 words) → its actionable core before the brain (comprehension + R199 margin). Short notes untouched; echo still shows the original. Fail-open.
-      // 150, not 90 (2026-08-06): at 90 an ordinary "here is my day" note was summarised
-      // before the coach saw it — hence "read the rest of my transcript". See
-      // transcriptMustPassWhole, which refuses to condense anything asking more than one thing.
-      // Messy-life notes (food+steps+feeling, yesterday meals, branded short meals) must
-      // reach food-context / compound handlers WHOLE. Condensing first was deleting the meal.
-      const forBrain = (wordCount > 150 && !transcriptMustPassWhole(transcribedText))
-        ? await condenseVoiceRamble(openai, transcribedText, user.id)
-        : transcribedText; const brainInput = forBrain + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""); turnVoice({ forBrain, handlerInput: brainInput, languageNote: languageNote || null });
+      // THE SUMMARISER WEDGE IS GONE (Cut 3, 2026-09-12). A long note was replaced by a model's
+      // shorter retelling of it before any handler ran — the condensation WAS the client's words,
+      // because there is only one routed string and a second one would be a second authority.
+      // transcriptMustPassWhole held the line for most notes and could not hold it for all: the
+      // rule it enforced is now structural rather than conditional, which is the stronger state.
+      // What the client said reaches the handlers whole, every time, and costs what it costs.
+      const forBrain = transcribedText; const brainInput = forBrain + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""); turnVoice({ forBrain, handlerInput: brainInput, languageNote: languageNote || null });
 
       voiceStage = "coach_reply";
       voiceStageStart = Date.now();

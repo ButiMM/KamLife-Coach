@@ -3,17 +3,16 @@
  *
  * A voice note becomes three different strings before any handler sees it:
  *
- *     Scribe/Whisper  →  cleanSATranscript  →  condenseVoiceRamble (>150 words)  →  handlers
+ *     Scribe/Whisper  →  cleanSATranscript  →  handlers      (the condenser was removed in Cut 3)
  *
  * Until this cut only the last one was persisted, as `input_text` on the inner ledger row. So the
  * two questions you must be able to answer about a bad voice turn had no evidence behind them:
  * did we MIS-HEAR the client, or did we hear them correctly and then delete half of what they
  * said? Different defects, different owners, different fixes.
  *
- * These tests drive the two model stages FOR REAL — real cleanSATranscript, real
- * condenseVoiceRamble, real fail-open guards — against a stub OpenAI client, with OFFLINE_AI=0 so
- * the offline killswitch does not short-circuit the very code under test. Nothing here is
- * simulated except the network boundary itself.
+ * These tests drive the cleaner FOR REAL — real cleanSATranscript, real split, real fail-open
+ * guards — against a stub OpenAI client, with OFFLINE_AI=0 so the offline killswitch does not
+ * short-circuit the very code under test. Nothing here is simulated except the network boundary.
  *
  * The durable half (which columns, which row, what survives an early return) needs a database and
  * lives in script/pg-voice-provenance-acceptance.ts.
@@ -25,8 +24,7 @@ process.env.NODE_ENV = "production";
 
 import { readFileSync } from "node:fs";
 
-const { cleanSATranscript, condenseVoiceRamble } = await import("../server/understanding/sa-transcript");
-const { transcriptMustPassWhole } = await import("../server/utils");
+const { cleanSATranscript } = await import("../server/understanding/sa-transcript");
 
 let failed = 0;
 const chk = (ok: boolean, msg: string, evidence = "") => {
@@ -73,42 +71,87 @@ console.log("1. THE CLEANER FAILS OPEN, SO cleaned === raw IS A REAL EVENT AND N
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-console.log("\n2. THE CONDENSER IS THE STAGE THAT CAN LOSE THE MOST, AND IT ALSO FAILS OPEN");
+console.log("\n2. THE CLEANER'S WINDOW NO LONGER DELETES WHAT IT COULD NOT SEE (Cut 3)");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+// THE DEFECT THIS REPLACES, measured on 017efd9: a 2,408-character note was handed to the model
+// 1,500 characters at a time and the answer came back AS the transcript — 908 characters deleted,
+// the workout correction and both questions among them. §2 used to grade the condenser here; the
+// condenser is gone (it could only exist by replacing the client's words), so this grades the
+// stage that is still allowed to rewrite them.
 {
-  // A LONG NOTE WITH NO FOOD, NO STEPS, NO FEELING AND NO STACKED QUESTION — deliberately, because
-  // that narrow case is the ONLY thing the condenser is still allowed to touch. Everything else is
-  // protected by transcriptMustPassWhole (§3), and a fixture that tripped that guard would be
-  // grading the guard rather than the condenser. Two earlier fixtures did exactly that.
-  const long = ("The taxi from Soweto was late again this morning so I got to the office much "
-    + "later than usual and my manager gave me a warning about it ").repeat(3);
-  chk(!transcriptMustPassWhole(long), "the fixture really does reach the condenser (else §2 grades nothing)");
+  // A stub that echoes what it was handed, so the output reveals the window rather than hiding it.
+  let handed = "";
+  const echo = () => ({
+    chat: { completions: { create: async (req: any) => {
+      handed = req.messages[req.messages.length - 1].content;
+      return { choices: [{ message: { content: handed } }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
+    } } },
+  } as any);
 
-  const refused = await condenseVoiceRamble(stubOpenAI("I cannot assist with that request."), long, null);
-  chk(refused === long, "a refusal keeps the whole transcript", JSON.stringify(refused.slice(0, 50)));
+  const TAIL = "KNEECLICK7788";
+  const long = ("I want to tell you about my whole week because a lot has happened and I need you "
+    + "to have the full picture before you tell me what to do next about any of it. ").repeat(10)
+    + "One last thing before I forget: " + TAIL + ".";
+  chk(long.length > 1500, `the fixture is longer than the cleaner's window (${long.length} chars)`);
 
-  const condensed = await condenseVoiceRamble(stubOpenAI("My taxi was late so I got to work late."), long, null);
-  chk(condensed === "My taxi was late so I got to work late.",
-    "a real condense replaces it — and this is the text the handlers route on", JSON.stringify(condensed));
-  chk(condensed !== long, "…so forBrain and cleaned genuinely differ, which is what the flag records");
-
-  const short = "I had eggs.";
-  const untouched = await condenseVoiceRamble(stubOpenAI("SHOULD NOT BE USED"), short, null);
-  chk(untouched === short, "a short note is never condensed", JSON.stringify(untouched));
+  const out = await cleanSATranscript(echo(), long, null);
+  chk(handed.length <= 1500, "the model is still only sent one window", `handed ${handed.length}`);
+  chk(handed.length < long.length, "…so the window is real and this fixture exercises it");
+  chk(out.length === long.length, "nothing is deleted — what comes back is the whole note",
+    `in ${long.length} out ${out.length}`);
+  chk(out.includes(TAIL), "the last thing they said survives the cleaner");
+  chk(out === long, "and an echoing clean reproduces the note exactly, head and tail rejoined");
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-console.log("\n3. transcriptMustPassWhole STILL PROTECTS A MULTI-PART NOTE FROM THE CONDENSER");
+console.log("\n2b. THE SPLIT NEVER CUTS A WORD, AND THE TAIL REJOINS EXACTLY");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-// Not changed by this cut. Asserted because the provenance columns are how anyone will now SEE a
-// condense that ate something, and a reader has to be able to trust that a whole-pass note shows
-// forBrain === cleaned for a reason rather than by accident.
 {
+  const { splitForClean } = await import("../server/understanding/sa-transcript");
+  const short = "I had eggs and pap.";
+  chk(splitForClean(short).head === short && splitForClean(short).tail === "",
+    "a note inside the window is all head and no tail");
+
+  const long = ("The taxi was late again this morning and I had to wait for the second one. ").repeat(40);
+  const { head, tail } = splitForClean(long);
+  chk(head + tail === long, "head + tail is byte-identical to the original");
+  chk(head.length <= 1500, `the head fits the window (${head.length})`);
+  chk(tail.length > 0, "and there is a real tail to carry");
+  chk(!/\S$/.test(head) || /^\s/.test(tail) || head.endsWith("."),
+    "the split lands on a boundary, not inside a word", JSON.stringify(head.slice(-12) + "|" + tail.slice(0, 12)));
+
+  const nospace = "x".repeat(3000);
+  const hard = splitForClean(nospace);
+  chk(hard.head.length + hard.tail.length === nospace.length,
+    "a note with no whitespace at all still loses nothing", `${hard.head.length}+${hard.tail.length}`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+console.log("\n3. THE CLEANER STILL FAILS CLOSED ON A BAD REWRITE — NOW INCLUDING A SHORT ONE");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// §3 used to assert that transcriptMustPassWhole kept a multi-part note away from the condenser.
+// That promise is no longer conditional on a guard: no note is condensed, because the condenser
+// does not exist. What still needs grading is the cleaner's own floor — and the lower bound is
+// NEW, because a reply cut off by max_tokens used to come back as the transcript, middle missing.
+{
+  const long = ("I want to tell you about my whole week because a lot has happened and I need you "
+    + "to have the full picture before you tell me what to do next about any of it. ").repeat(10);
+
+  const truncated = await cleanSATranscript(stubOpenAI("I want to tell you about my whole week"), long, null);
+  chk(truncated === long, "a reply cut short keeps the RAW transcript rather than becoming it",
+    `${truncated.length} vs ${long.length}`);
+
+  const refused = await cleanSATranscript(stubOpenAI("I'm sorry, I can't help with that."), long, null);
+  chk(refused === long, "a refusal on a long note keeps the whole note too");
+
+  // A MULTI-PART NOTE, the shape transcriptMustPassWhole was written for. That predicate is gone
+  // (nothing shortens a transcript, so it could only ever answer "no"); the promise it carried is
+  // now the cleaner's arithmetic, which holds for this note and for the ones it never matched.
   const multiAsk = "What should I eat today? And also how many steps should I be doing? "
-    + "And can you tell me what my weight is doing? ".repeat(8);
-  chk(transcriptMustPassWhole(multiAsk), "a note asking more than one thing must pass whole");
-  const passed = await condenseVoiceRamble(stubOpenAI("SHOULD NOT BE USED"), multiAsk, null);
-  chk(passed === multiAsk, "…and the condenser declines it, leaving forBrain === cleaned");
+    + "And can you tell me what my weight is doing? ".repeat(30);
+  const whole = await cleanSATranscript(stubOpenAI("I'm sorry, I can't help with that."), multiAsk, null);
+  chk(whole === multiAsk, "a note asking more than one thing reaches the handlers whole",
+    `${whole.length} vs ${multiAsk.length}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -129,14 +172,19 @@ console.log("\n4. THE RAW TRANSCRIPT IS CAPTURED BEFORE THE CLEANER CAN OVERWRIT
   const cleanAt = src.indexOf("transcribedText = await cleanSATranscript(");
   const cleanedAt = src.indexOf("turnVoice({ cleaned: transcribedText })");
   const forBrainAt = src.indexOf("turnVoice({ forBrain,");
-  const condenseAt = src.indexOf("await condenseVoiceRamble(");
 
   chk(rawAt > 0, "media.ts records the raw transcript");
   chk(cleanAt > 0 && rawAt < cleanAt,
     "…BEFORE cleanSATranscript reassigns transcribedText", `raw@${rawAt} clean@${cleanAt}`);
   chk(cleanedAt > cleanAt, "the cleaned text is recorded after the cleaner ran", `cleaned@${cleanedAt}`);
-  chk(forBrainAt > condenseAt && condenseAt > 0,
-    "the for-brain text is recorded after the condenser", `forBrain@${forBrainAt} condense@${condenseAt}`);
+  chk(forBrainAt > cleanedAt, "the for-brain text is recorded after the cleaned text",
+    `forBrain@${forBrainAt} cleaned@${cleanedAt}`);
+  // AND THE ROUTED TEXT IS THE CLEANED TRANSCRIPT ITSELF (Cut 3). The condenser used to sit here
+  // and hand the handlers a shorter retelling; an assertion that it is gone is the only thing
+  // that stops it being reintroduced as a "small" optimisation on a long note.
+  chk(!/condenseVoiceRamble/.test(src), "media.ts no longer condenses anything before the handlers");
+  chk(/const forBrain = transcribedText;/.test(src),
+    "the handlers are routed the cleaned transcript, whole");
   // The recursion is what hands the text to the handlers. Recording must happen before it, or a
   // handler's own turn scope is the one in flight and the three texts land on the wrong row.
   const recurseAt = src.indexOf("handleMessage(phone, brainInput");

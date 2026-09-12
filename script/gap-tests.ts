@@ -507,20 +507,14 @@ test("messy intake: pure feeling does not force food log", () => {
   assert.equal(r.hasFoodReport, false);
 });
 
-test("isMessyLifeTranscript: short branded meal preserved whole", () => {
-  const { isMessyLifeTranscript } = UTILS;
-  assert.equal(
-    isMessyLifeTranscript("I had a McDonald's breakfast with a mocha"),
-    true,
-  );
-});
-
-test("isMessyLifeTranscript: food + feeling is messy life", () => {
-  const { isMessyLifeTranscript } = UTILS;
-  assert.equal(
-    isMessyLifeTranscript("I ate takeaways again and I feel like giving up"),
-    true,
-  );
+// isMessyLifeTranscript graded here: two life signals in one note meant "do not summarise this".
+// Cut 3 removed the summariser, so no note is summarised and the predicate has no caller. The
+// promise is inverted onto the pipeline, where it holds for notes the predicate never matched.
+test("a messy-life note reaches the handlers whole, whatever signals it carries", () => {
+  const media = readFileSync("server/handlers/media.ts", "utf-8");
+  assert.match(media, /const forBrain = transcribedText;/,
+    "every note is routed whole — no predicate decides which ones are safe to shorten");
+  assert.ok(!/condenseVoiceRamble/.test(media), "and there is nothing left to shorten them with");
 });
 
 

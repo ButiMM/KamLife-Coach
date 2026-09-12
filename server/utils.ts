@@ -1088,103 +1088,25 @@ export function nextDayDate(word: string): string | null {
 }
 
 /**
- * IS THIS A LOG, OR A RAMBLE? (2026-08-05.)
+ * MAY THIS TRANSCRIPT BE SHORTENED? — THE QUESTION NO LONGER HAS A CALLER (Cut 3, 2026-09-12).
  *
- * NAMED DELIBERATELY OUT OF THE looksLike* FAMILY, AND SAID OUT LOUD RATHER THAN DONE QUIETLY.
- * It was `looksLikeLogList` and the architecture guard refused it at 21 against a budget of 20 —
- * correctly, that guard exists to stop message-classifier predicates breeding. No looksLike*
- * predicate is currently dead, so there was nothing to pay with, and the documented
- * consolidation (merging looksLikeSteps/Water/WeightReport, ~30 call sites) is not a change to
- * start in the tail of a session.
+ * `transcriptMustPassWhole`, `isMessyLifeTranscript` and `transcriptIsLogList` stood here. They
+ * were the gate on the summariser wedge: a day's food list, a note asking two things, a note
+ * carrying a feeling, a messy-life note with two life signals — none of those could be condensed.
+ * They were written case by case, each one after a real client lost something.
  *
- * The argument for the rename: the looksLike* family all answer "which handler should take this
- * MESSAGE?". This answers "should this TRANSCRIPT be preprocessed before anything sees it?" —
- * a different question, at a different layer, with one caller.
+ * The wedge is gone. media.ts routed the condensed retelling to the handlers, which made it the
+ * client's words as far as anything downstream could tell, and there is only one routed string
+ * for a second version to occupy. Nothing shortens a transcript now, so the answer to "may this
+ * one be shortened?" is no for every note, always — and a predicate that can only ever return
+ * true is not a guard, it is a comment with a test suite.
  *
- * If the founder reads that as dodging the meter rather than a real distinction, the honest
- * alternative is the three-way consolidation above, which pays for this and two more besides.
+ * THIS IS STRICTER THAN WHAT THEY ENFORCED, not weaker. Each of them protected the notes it could
+ * recognise; every note is protected now, including the ones none of these three would have
+ * matched. That case existed: the founder's own 2,408-character note tripped all three guards and
+ * was still cut in half, because the CLEANER truncated it before any of them were consulted.
  *
- * The condenser exists for someone thinking out loud. It is the wrong tool entirely for someone
- * reciting their day's food, and it was being applied to both — the prompt said "keep every food
- * word-for-word" AND "short, 2-4 sentences", which for a client listing eight items are opposite
- * instructions. The model obeyed the shorter one and quietly dropped meals. Same shape as the
- * action directive that told the coach to call a tool and not speak: two rules, one loses, and
- * the loss is invisible.
- *
- * So a log-dense transcript is never condensed at all. There is no noise to drop in "4 fish
- * fingers, 3 eggs, 3 slices of bread and a black coffee" — every word is the payload, and a
- * summariser can only lose some of it. Cheaper too: no model call.
- *
- * Deliberately crude: three or more quantities. A ramble rarely carries three; a day's food
- * always does. When in doubt this keeps the raw text, which is the safe direction — a slightly
- * long message reaching the coach costs tokens, a dropped meal costs the client's trust.
+ * Their assertions are not dropped — they are inverted in unit-tests and gap-tests, where each
+ * one now grades the same promise against the structure rather than against a predicate.
  */
-/**
- * MUST THIS TRANSCRIPT REACH THE COACH WHOLE? (2026-08-06, founder's STT audit: he sent a
- * voice note whose content was literally "read the rest of my transcript".)
- *
- * The condenser rightly stops a three-minute ramble reaching the expensive model. What it must
- * never do is answer half of what someone said. Log lists were already exempt; this adds the
- * two other shapes where losing the tail is the same defect — a note asking MORE THAN ONE
- * thing, and one that stacks instructions ("also…", "one more…"). Deliberately generous: a
- * false positive costs a few cents, a false negative costs a client being ignored.
- */
-export function transcriptMustPassWhole(text: string): boolean {
-  const t = (text || "").trim();
-  if (!t) return false;
-  if (transcriptIsLogList(t)) return true;
-  const questions = (t.match(/\?/g) || []).length;
-  if (questions >= 2) return true;
-  // Spoken transcripts often carry no punctuation at all, so count question OPENERS too.
-  const openers = (t.toLowerCase().match(/\b(what|why|how|when|where|which|can i|should i|do i|is it|are they)\b/g) || []).length;
-  if (openers >= 2) return true;
-  const stackers = (t.toLowerCase().match(/\b(also|another thing|one more|and then|secondly|lastly|by the way|plus)\b/g) || []).length;
-  if (stackers >= 1 && (questions + openers) >= 1) return true;
-  // Messy-life voice notes (product core): food + movement, food + feeling, yesterday's
-  // meals, multi-beat day stories. Condensing these destroys the facts the log path needs
-  // and is how "I had McDonald's breakfast and a mocha" never reached food-context whole.
-  if (isMessyLifeTranscript(t)) return true;
-  // A PERSON TELLING YOU HOW THEY ARE IS NEVER SQUEEZED (CTO ruling, 2026-08-19). A long
-  // come-back ramble with no food and no steps is the Pulse client finally saying what is going
-  // on; shortening it to save tokens is tracker behaviour. The margin guard now reaches only a
-  // long note with no food, no steps, no feeling and no stacked question — narrower on purpose.
-  if (/\b(tired|exhausted|stressed|stress|feel(?:ing)?|felt|anxious|motivat|struggling|overwhelmed|depressed|hard day|rough day|not coping|drained|down|low|lost|give up|giving up)\b/.test(t)) return true;
-  return false;
-}
-
-/**
- * Two or more life signals in one note = the demographic we built for.
- * Keep the full transcript; do not summarise away the meal, the steps, or the feeling.
- */
-export function isMessyLifeTranscript(text: string): boolean {
-  const t = (text || "").toLowerCase();
-  if (!t) return false;
-  const words = t.split(/\s+/).filter(Boolean).length;
-  const food = /\b(ate|eaten|had|having|breakfast|lunch|dinner|supper|brunch|snack|meal|mcdonald|kfc|takeaway|pap|chicken|eggs?|mocha|coffee|food)\b/.test(t);
-  const steps = /\b(steps?|walked|walking|\d+\s*km|kilometers?|ran|run)\b/.test(t);
-  const feeling = /\b(tired|stressed|stress|feel(?:ing)?|felt|anxious|motivat|struggling|overwhelmed|depressed|hard day|rough day|not coping|drained)\b/.test(t);
-  const temporal = /\b(yesterday|last night|this morning|earlier today|then i|after that|before (?:that|gym|work))\b/.test(t);
-  // TEMPORAL IS A QUALIFIER, NOT A FACT — it still counts in `food && temporal` below, which is
-  // what makes "yesterday I had pap" a retro meal report.
-  const signals = [food, steps, feeling].filter(Boolean).length;
-  // Short branded meal reports still need the full string (scanner + GPT fallback).
-  if (food && /\b(mcdonald|kfc|nando|spur|steers|wimpy|mocha|breakfast|lunch|dinner)\b/.test(t) && words <= 40) return true;
-  if (signals >= 2) return true;
-  if (food && temporal) return true;
-  return false;
-}
-
-export function transcriptIsLogList(text: string): boolean {
-  const t = (text || "").toLowerCase();
-  const digits = t.match(/\b\d+(?:[.,]\d+)?\b/g) || [];
-  const words = t.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|quarter)\b/g) || [];
-  const quantities = digits.length + words.length;
-  // A log needs at least ONE quantity — that is what separates "two eggs and pap" from a
-  // ramble that happens to contain three "and"s. A story about the gym has none.
-  if (quantities === 0) return false;
-  // Then LIST STRUCTURE: the commas and "and"s that string items together. One spoken number
-  // in a sentence with three conjunctions is a day's food; a quantity on its own is not.
-  const listers = (t.match(/,/g) || []).length + (t.match(/\band\b/g) || []).length;
-  return quantities + listers >= 3;
-}
 

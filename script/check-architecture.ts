@@ -62,7 +62,7 @@ const BUDGET = {
    * to the true figure in one deliberate commit. Until then this red line is the marker, and it is
    * the ONLY thing in this guard that is red — one red line means something, four never did.
    */
-  regexLiterals: 446,
+  regexLiterals: 442,
   /**
    * GUARD #13 — see unreachableExports above. Sixty-two capabilities cannot be reached by a
    * client message today. This budget is deliberately set THREE BELOW that, so this guard is RED
@@ -273,7 +273,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "so 21 is the smallest truthful current baseline. FROM HERE IT FALLS ONLY.",
   },
   {
-    key: "regexLiterals", from: 318, to: 446, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09)",
+    key: "regexLiterals", from: 318, to: 442, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12)",
     why: "NOT A RAISE — A CORRECTED MEASUREMENT, and the follow-up this budget's own comment "
       + "declared owed on 2026-08-17: \"repair the matcher to see multi-line assignments and "
       + "re-baseline to the true figure in one deliberate commit.\" This is that commit. The "
@@ -299,7 +299,13 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "let buildPatternSummary infer training from chat wording — is deleted; the weekly training "
       + "signal now reads workout_logs, the durable owner that same function already queried for "
       + "its 28-day count. One pattern fewer because a SECOND ANSWER to \"did they train\" was "
-      + "removed, not because anything unrelated was compressed to make room.",
+      + "removed, not because anything unrelated was compressed to make room. AND IT FELL AGAIN: "
+      + "446 -> 442 on 2026-09-12 (Cut 3). Four patterns left with server/utils.ts "
+      + "transcriptMustPassWhole, isMessyLifeTranscript and transcriptIsLogList, deleted whole. They "
+      + "were the gate on the voice summariser — WHICH notes may be shortened — and the summariser is "
+      + "gone, so the only answer they could still give was no. A predicate with one possible answer "
+      + "is not a guard, and the reachability test in unit-tests said so before this entry did. "
+      + "Nothing was compressed to make room and no unrelated file was touched.",
   },
   {
     key: "modules", from: 237, to: 239, date: "2026-08-17",

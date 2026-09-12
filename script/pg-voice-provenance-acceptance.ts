@@ -7,7 +7,7 @@
  *
  * A voice note becomes three different strings before any handler sees it:
  *
- *     Scribe/Whisper  →  cleanSATranscript  →  condenseVoiceRamble (>150 words)  →  handlers
+ *     Scribe/Whisper  →  cleanSATranscript  →  handlers      (the condenser was removed in Cut 3)
  *
  * `turn_ledger.input_text` on the inner row held the LAST of those. The client's own words existed
  * only in a `[VOICE] scribe_ok text="…"` log line. So for any bad voice turn, the first question —

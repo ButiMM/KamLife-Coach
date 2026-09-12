@@ -954,25 +954,25 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const live = readFileSync(join("server", "understanding", "live.ts"), "utf-8");
     assert.match(live, /emitActions: actionMode !== "off" && !strategyTurn/, "strategy turns pass emitActions=false");
   });
-  test("voice: long rambles get condensed to their actionable core before the brain (margin + clarity)", () => {
+  // THIS TEST GRADED THE SUMMARISER WEDGE. Cut 3 (2026-09-12) removed it: media.ts routed the
+  // condensed retelling to the handlers, so the retelling WAS the client's words as far as
+  // anything downstream could tell, and there is only one routed string for a second version to
+  // occupy. The assertions are inverted rather than dropped, and the inversion is stricter — the
+  // old ones permitted a shortened note under conditions, these permit none.
+  test("voice: the client's note reaches the handlers whole — nothing shortens it first", () => {
     const wedge = readFileSync(join("server", "understanding", "sa-transcript.ts"), "utf-8");
-    assert.match(wedge, /export async function condenseVoiceRamble/, "the summariser wedge exists");
-    assert.match(wedge, /text\.length < 200\) return raw/, "short notes are never reshaped — a quick food log is safe");
-    assert.match(wedge, /feature: "voice_condense"/, "its cost is tagged so it shows in the CFO report");
-    assert.match(wedge, /out\.length >= text\.length \|\| looksLikeRefusal\(out\)\) return raw/, "fail-open: a bad condense keeps the raw transcript");
+    assert.ok(!/export async function condenseVoiceRamble/.test(wedge), "the summariser wedge is gone, not merely unused");
+    assert.ok(!/CONDENSE_SYSTEM/.test(wedge), "…and so is the prompt that asked for a retelling");
     const media = readFileSync(join("server", "handlers", "media.ts"), "utf-8");
-    // RAISED 90 → 150 on 2026-08-06. At 90 words an ordinary "here is my day" note was
-    // summarised before the coach saw it — which is how a client ends up sending a voice note
-    // that says "read the rest of my transcript". The margin guard survives, the half-answer
-    // does not; transcriptMustPassWhole is the second half of that fix.
-    // The condition gained the whole-transcript guard (a real improvement); this pinned the old
-    // spelling. Assert the two conditions that matter, not the punctuation between them.
-    assert.match(media, /wordCount > 150/, "only a genuine ramble (>150 words) is condensed");
-    assert.match(media, /!transcriptMustPassWhole\(transcribedText\)[\s\S]{0,40}condenseVoiceRamble/,
-      "…and never a note whose facts must reach the log path whole");
-    assert.match(media, /transcriptMustPassWhole/, "the whole-transcript guard is referenced in the comment trail");
-    assert.match(media, /const forBrain =/, "the condensed text feeds the brain");
-    assert.match(media, /echoTrimmed/, "the echo still shows what they actually said, not the condensed version");
+    assert.ok(!/condenseVoiceRamble/.test(media), "media.ts condenses nothing before the handlers");
+    assert.match(media, /const forBrain = transcribedText;/, "the handlers are routed the cleaned transcript itself");
+    assert.match(media, /echoTrimmed/, "the echo still shows what they actually said");
+    // THE CLEANER'S WINDOW IS A WINDOW, NOT A LIMIT. Measured on 017efd9: a 2,408-char note came
+    // back 1,500 chars long, the tail deleted, before any handler or guard saw it.
+    assert.match(wedge, /export function splitForClean/, "the cleaner splits rather than truncates");
+    assert.match(wedge, /return cleaned \+ tail;/, "…and rejoins the part it could not send");
+    assert.match(wedge, /cleaned\.length < head\.length \* 0\.5/, "a reply cut off by max_tokens cannot become the transcript");
+    assert.match(wedge, /!retainsOriginal\(head, cleaned\)/, "the faithfulness check compares the head it actually cleaned");
   });
   test("CFO: the weekly report surfaces AI cost by feature and guards the R199 margin", () => {
     const biz = readFileSync(join("server", "scheduler", "jobs", "business.ts"), "utf-8");
@@ -1387,32 +1387,42 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 }
 
 
-// "READ THE REST OF MY TRANSCRIPT" (2026-08-06). The condenser summarises long voice notes to
-// protect the margin, which is right — but it must never answer half of what someone said.
+// "READ THE REST OF MY TRANSCRIPT" (2026-08-06) — ANSWERED STRUCTURALLY (Cut 3, 2026-09-12).
+//
+// Five assertions stood here, each naming a shape the condenser was forbidden to touch: a note
+// asking two things, a note stacking an instruction on a question, a day's food list, a feeling
+// note. They graded `transcriptMustPassWhole`, a predicate that decided WHICH notes were safe.
+//
+// The condenser is gone, so no note is shortened and the predicate has no caller — the
+// reachability guard in this very file is what said so. These are inverted, not dropped, and the
+// inversion is stricter: the old rules protected the notes the predicate could recognise, and
+// this protects every note including the ones it could not.
+//
+// THE PROOF THAT THE PREDICATE WAS NEVER ENOUGH: the founder's own 2,408-character note matched
+// ALL THREE of those guards and was still cut in half, because the cleaner truncated it before
+// any of them were consulted. A guard downstream of the deletion cannot prevent the deletion.
 {
-  const { transcriptMustPassWhole } = await import("../server/utils");
-  test("a note asking TWO things is never condensed", async () => {
-    assert.ok(transcriptMustPassWhole("How much protein should I have today? And what should I eat after gym?"));
-    assert.ok(transcriptMustPassWhole("what can I eat at the taxi rank and how many calories do I have left"),
-      "spoken notes carry no punctuation — question openers must count");
+  test("no stage between the client and the handlers may shorten what they said", async () => {
+    const media = readFileSync(join("server", "handlers", "media.ts"), "utf-8");
+    // COMMENTS STRIPPED FIRST. The file EXPLAINS what was removed and why, so a bare text search
+    // matches the explanation and reports the code is back. A guard that cannot tell code from a
+    // comment about the code is the fail-open shape this repo keeps finding.
+    const wedgeSrc = readFileSync(join("server", "understanding", "sa-transcript.ts"), "utf-8");
+    const wedge = wedgeSrc.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+    assert.ok(!/condenseVoiceRamble/.test(wedge), "no condenser exists to be gated");
+    assert.match(media, /const forBrain = transcribedText;/,
+      "the routed text is the cleaned transcript itself — unconditionally, for every note");
+    assert.ok(!/wordCount > 150/.test(media), "and no length threshold decides whose words survive");
   });
-  test("a note that stacks an instruction on a question is never condensed", async () => {
-    assert.ok(transcriptMustPassWhole("What should I eat tonight, also can you change my goal to muscle gain"));
-  });
-  test("a day's food list is never condensed (the July regression)", async () => {
-    assert.ok(transcriptMustPassWhole("I had two eggs and pap for breakfast, chicken and rice for lunch, and a banana"));
-  });
-  test("a feeling note is never squeezed; a feeling-free ramble still can be", async () => {
-    // CTO ruling, 2026-08-19. This test used to assert the opposite — that a tired/traffic/sleep
-    // note was condensable, because the margin guard came first. It does not any more: a long
-    // come-back ramble with no food and no steps is the Pulse client saying what is actually
-    // going on, and summarising it to save tokens is tracker behaviour. The money is not worth
-    // the one note where they finally told you.
-    assert.ok(transcriptMustPassWhole(
-      "Eish coach I am so tired today the traffic was terrible and I did not sleep well at all last night"));
-    // The guard survives, narrowed: no food, no steps, no feeling, no stacked question.
-    assert.ok(!transcriptMustPassWhole(
-      "the taxi was late again and then the queue at the shop went around the corner and my phone died on the way home"));
+  // SOURCE-ONLY ON PURPOSE. Importing sa-transcript here keeps a handle open and this suite stops
+  // exiting — all 1,062 checks pass and the process hangs, which the runner reports as a 600s
+  // timeout with no failing assertion. splitForClean is DRIVEN for real, on these same shapes, in
+  // script/voice-provenance-tests.ts §2b, where the module is already loaded.
+  test("the cleaner's window cannot delete the part it did not send", () => {
+    const wedge = readFileSync(join("server", "understanding", "sa-transcript.ts"), "utf-8");
+    assert.match(wedge, /export function splitForClean/, "it splits");
+    assert.match(wedge, /return cleaned \+ tail;/, "and rejoins");
+    assert.match(wedge, /head: text\.slice\(0, at\), tail: text\.slice\(at\)/, "the tail is carried, not dropped");
   });
 }
 
@@ -2269,7 +2279,6 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
       ["bodyPhotoAsk", "server/onboarding-physique.ts"],    // the day-zero physique read
       ["hasTrialedBefore", "server/pricing-config.ts"],     // one trial per number, ever
       ["sttVocabularyPrompt", "server/foods.ts"],           // the transcription bias
-      ["transcriptMustPassWhole", "server/utils.ts"],       // "read the rest of my transcript"
       ["neverSilentLine", "server/reply-hygiene.ts"],       // the one fallback mouth
     ];
 
@@ -9771,22 +9780,25 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 
 
-  test("voice: a day's food is NEVER condensed — the condenser is for rambles", async () => {
-    const { transcriptIsLogList } = await import("../server/utils");
-    // The founder's own note. Every word is payload; a summariser can only lose some of it.
-    assert.equal(transcriptIsLogList("Yesterday I had 4 fish fingers, 3 eggs, 3 slices of bread, and a black coffee for breakfast"), true);
-    assert.equal(transcriptIsLogList("I had two eggs and pap this morning and then chicken and rice for lunch"), true, "spoken numbers count too");
-    assert.equal(transcriptIsLogList("I walked 8000 steps, drank 2 litres and weighed in at 83kg"), true);
-    // A genuine ramble — thinking out loud, no quantities — still gets condensed.
-    assert.equal(transcriptIsLogList("So I was thinking about the gym and whether I should go tonight because work has been really heavy and I feel like I am falling behind on everything"), false);
-    assert.equal(transcriptIsLogList(""), false);
+  // transcriptIsLogList graded here: "is this a day's food list, and therefore unshortenable?"
+  // Nothing is shortened now, so the question has no consumer and the predicate is gone (Cut 3).
+  // The promise it protected — a spoken day of food reaches the log path with every item intact —
+  // is asserted against the pipeline instead, where it cannot be bypassed by a shape it misreads.
+  test("a spoken day of food reaches the handlers with every item intact", () => {
+    const media = readFileSync(join("server", "handlers", "media.ts"), "utf-8");
+    assert.match(media, /const forBrain = transcribedText;/,
+      "the whole cleaned transcript is routed, so a day's food cannot be summarised out of it");
+    assert.ok(!/wordCount > 150/.test(media), "and no length threshold decides whose list survives");
   });
 
-  test("voice: the condense prompt no longer contradicts itself on length", async () => {
+  // "the condense prompt no longer contradicts itself on length" graded CONDENSE_SYSTEM, which
+  // told the model to be short AND to keep every food. Cut 3 deleted the prompt with the function
+  // it served. A prompt that cannot contradict itself is one that does not exist.
+  test("voice: there is no prompt asking a model to retell the client's note", async () => {
     const src = readFileSync("server/understanding/sa-transcript.ts", "utf-8");
-    assert.ok(!/short \(2-4 sentences\)/i.test(src),
-      "a hard sentence cap fights 'keep every food' — the model obeys the cap and drops meals");
-    assert.match(src, /WITHOUT LOSING A SINGLE FOOD OR/i, "keeping their day must beat being short");
+    assert.ok(!/CONDENSE_SYSTEM/.test(src), "the condense prompt is gone");
+    assert.ok(!/You condense a LONG South African voice-note transcript/.test(src), "…text and all");
+    assert.match(src, /do NOT summarize/i, "the surviving cleaner prompt still forbids summarising");
   });
 
 
