@@ -17,6 +17,48 @@ process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// THE CLOCK IS PINNED, AND THAT IS THE WHOLE SUBCUT (2026-09-12).
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+//
+// THIS ACCEPTANCE WAS GREEN ON WEEKDAYS AND RED ON THE WEEKEND. Measured on unmodified
+// 017efd9 on Saturday 12 September 2026 — four checks fail, on a build that passed the same four
+// in CI the previous afternoon:
+//
+//     FAIL  the real customer front door delivers the authorized weekend question
+//     FAIL  the reactive question becomes durable only after it is included in the reply
+//     FAIL  'I was travelling and didn't track' durably closes the open question
+//     FAIL  'it was normal' is accepted as the bounded answer to the question actually open
+//
+// THE MECHANISM, not a guess: the fixture seeds meals on WEEKDAYS ONLY so the weekend is the
+// unknown under test, then sends "Dinner is rice, mince and mixed veggies" through the real front
+// door. That message logs a meal for TODAY. On a Saturday, today IS a weekend day — so the live
+// turn manufactures the very weekend evidence the section exists to find missing, the INVESTIGATE
+// owner correctly stops asking, and four checks fail against a product that is behaving correctly.
+//
+// The defect was never in the product. It was an acceptance whose fixture depended on which day
+// of the week CI happened to start, exactly as #240's depended on the hour — and it was found the
+// same way, by a cut that touched none of this code being blocked by it.
+//
+// SO THE DAY IS CHOSEN RATHER THAN INHERITED. Everything below runs on a fixed Wednesday, which
+// makes every `ago(n)` offset, every seeded row and every live turn deterministic on every run at
+// every hour of every day. Date.now() alone is not enough — `new Date()` reads the system clock
+// directly and never consults it, so both move together or the pin is decorative.
+//
+// Installed BEFORE the server modules are imported, because they capture the clock as they load.
+const RealDate = Date;
+const PINNED_WEDNESDAY = RealDate.UTC(2026, 8, 9, 10, 0, 0);   // 2026-09-09 12:00 SAST, a Wednesday
+const PINNED_SATURDAY = RealDate.UTC(2026, 8, 12, 10, 0, 0);   // 2026-09-12 12:00 SAST, a Saturday
+const PINNED_SUNDAY = RealDate.UTC(2026, 8, 13, 10, 0, 0);     // 2026-09-13 12:00 SAST, a Sunday
+let PINNED_AT = PINNED_WEDNESDAY;
+class PinnedDate extends RealDate {
+  constructor(...args: any[]) { super(...(args.length === 0 ? [PINNED_AT] : args) as [any]); }
+  static now() { return PINNED_AT; }
+}
+(globalThis as any).Date = PinnedDate;
+/** Move the pinned day. Section E uses it to grade the Saturday the old fixture could only fail. */
+const pinTo = (at: number) => { PINNED_AT = at; };
+
 const REAL = console.log.bind(console);
 console.log = console.warn = console.error = () => {};
 
@@ -268,6 +310,67 @@ const isolatedMove = await canonicalNextMove(isolated, { hour: 14 });
 check(isolatedMove.action.investigation?.missingFact === "weekend_food",
   "one client's answer never fills another client's missing fact",
   JSON.stringify(isolatedMove.action));
+
+REAL("\n=== E — THE SATURDAY THIS SUITE COULD ONLY EVER FAIL ===");
+// NOT A REPAIR OF THE PIN — THE CASE THE PIN REVEALED. Everything above runs on a Wednesday, so
+// without this section the weekend day is simply never graded, which is the state that let the
+// old fixture be green for months and then red on a Saturday morning with nothing changed.
+//
+// THE PROMISE: the coach must not ask for a fact it already holds. On a weekend day the client's
+// own live log IS weekend evidence, so the weekend question must stop being selected — the exact
+// behaviour that looked like four failures when the fixture assumed a weekday.
+{
+  pinTo(PINNED_SATURDAY);
+  // OFFSETS DERIVED FROM THE PINNED DAY, NOT INHERITED. `weekdayOffsets` at the top of this file
+  // is computed under the Wednesday pin, and reusing it here seeded a meal on the Saturday itself
+  // — the fixture manufacturing the evidence the section exists to find missing, which is the
+  // very defect this subcut repairs. It failed on the first run and said so.
+  const satWeekdayOffsets = Array.from({ length: 7 }, (_, i) => i).filter(i => !isWeekend(ago(i))).slice(0, 3);
+  check(satWeekdayOffsets.every(o => !isWeekend(ago(o))) && satWeekdayOffsets.length === 3,
+    "the Saturday fixture seeds weekdays only", JSON.stringify(satWeekdayOffsets));
+  const sat = await freshUser();
+  await seedMeals(sat.id, satWeekdayOffsets);
+  await seedWeights(sat.id, stalled);
+
+  const beforeLog = await canonicalNextMove(sat, { hour: 14 });
+  check(beforeLog.action.investigation?.missingFact === "weekend_food",
+    "on a Saturday with weekday-only evidence the weekend is still the missing fact",
+    JSON.stringify(beforeLog.action));
+
+  _resetOutboundDedupe();
+  await say(sat.phoneNumber, "Dinner is rice, mince and mixed veggies");
+  const afterTruth = await getProgressTruth(await reload(sat.id), { days: 7 });
+  check(weekendLoggedDays(afterTruth.window.perDay) > 0,
+    "a meal logged ON a weekend day IS weekend evidence — this is why the day matters",
+    JSON.stringify(afterTruth.window.perDay));
+
+  const afterLog = await canonicalDecision(await reload(sat.id), "how am I doing?");
+  check(afterLog.investigation?.missingFact !== "weekend_food",
+    "…so the coach stops asking for the weekend it can now see",
+    `missing=${JSON.stringify(afterLog.investigation?.missingFact)} todo=${JSON.stringify(afterLog.todo)}`);
+
+  // SUNDAY, THE OTHER HALF OF THE WEEKEND. Saturday alone would leave the same class of gap one
+  // day wide: a fixture that happens to be right on one weekend day and never runs on the other.
+  pinTo(PINNED_SUNDAY);
+  const sunWeekdayOffsets = Array.from({ length: 7 }, (_, i) => i).filter(i => !isWeekend(ago(i))).slice(0, 3);
+  check(sunWeekdayOffsets.every(o => !isWeekend(ago(o))) && sunWeekdayOffsets.length === 3,
+    "the Sunday fixture seeds weekdays only", JSON.stringify(sunWeekdayOffsets));
+  const sun = await freshUser();
+  await seedMeals(sun.id, sunWeekdayOffsets);
+  await seedWeights(sun.id, stalled);
+  const sunBefore = await canonicalNextMove(sun, { hour: 14 });
+  check(sunBefore.action.investigation?.missingFact === "weekend_food",
+    "on a Sunday with weekday-only evidence the weekend is still the missing fact",
+    JSON.stringify(sunBefore.action));
+  _resetOutboundDedupe();
+  await say(sun.phoneNumber, "Dinner is rice, mince and mixed veggies");
+  const sunAfter = await canonicalDecision(await reload(sun.id), "how am I doing?");
+  check(sunAfter.investigation?.missingFact !== "weekend_food",
+    "…and a Sunday log closes it for the same reason a Saturday one does",
+    `missing=${JSON.stringify(sunAfter.investigation?.missingFact)}`);
+
+  pinTo(PINNED_WEDNESDAY);
+}
 
 for (const id of ids) await db.delete(schema.users).where(eq(schema.users.id, id)).catch(() => {});
 await pool.end();

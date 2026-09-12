@@ -117,6 +117,12 @@ export const ACCEPTANCES: Acceptance[] = [
     // later backdated answer are all real rows; this grades the one canonical INVESTIGATE owner.
     command: ["npx", "tsx", "script/pg-information-value-acceptance.ts"] },
 
+  { id: "information-value-clock", title: "The information-value acceptance is deterministic on every day",
+    // It was green every weekday and red every weekend, and it blocked PR #244 — a cut that
+    // touches none of this code — on a Saturday. Case 1 reproduces those four failures on demand
+    // by pinning the file to that Saturday, so the defect is provable on a Tuesday.
+    command: ["bash", "script/red-on-revert-information-value-clock.sh"] },
+
   { id: "behaviour-patterns", title: "Evidence-backed behavioural patterns",
     // BEHAVIOURAL PATTERN STATE (#217). Repetition, attributed outcomes, user isolation and
     // contradiction are properties of longitudinal rows. The profile must then be read by the
