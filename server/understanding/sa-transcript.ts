@@ -33,8 +33,61 @@ function killswitchOff(): boolean {
   return process.env.SA_CLEAN === "off";
 }
 
-/** What Whisper's `verbose_json` tells us about its own output. Absent on every other path. */
-export type VoiceQuality = { avgLogprob: number; comp: number } | null;
+/**
+ * WHAT A PROVIDER SAYS ABOUT ITS OWN OUTPUT — TAGGED, BECAUSE THE SCALES ARE NOT THE SAME.
+ *
+ * Whisper's `verbose_json` reports a per-segment average logprob and a compression ratio, and the
+ * two thresholds this codebase uses were tuned against THOSE. Scribe reports per-word logprobs,
+ * on its own scale, with no calibration against Whisper's — so they are carried and logged here
+ * and they do NOT reject anything. Inventing a Scribe threshold to match would be a guess wearing
+ * a number's clothes. (Scribe also returns `language_probability`; that answers "which language",
+ * not "did we hear it right", and it is not a confidence signal for this purpose.)
+ *
+ * A result that reports nothing falls to the narrow deterministic floor below, which is the point.
+ */
+export type VoiceQuality =
+  | { provider: "whisper"; avgLogprob: number; comp: number }
+  | { provider: "scribe"; wordLogprobs: number[] }
+  | null;
+
+/**
+ * Whisper segment metrics, or null when the call did not report usable ones.
+ *
+ * ABSENT IS NOT ZERO. Averaging `x.avg_logprob ?? 0` over segments that carry no logprob invents a
+ * confident-looking 0 — the best possible score — out of missing data, and the earlier version of
+ * this pipeline did exactly that. Non-finite values are dropped; if nothing finite survives, this
+ * returns null and the caller uses the deterministic floor instead of a fabricated number.
+ */
+export function whisperSegmentMetrics(raw: unknown): VoiceQuality {
+  const segs: any[] = Array.isArray((raw as any)?.segments) ? (raw as any).segments : [];
+  const logprobs = segs.map((x) => x?.avg_logprob).filter((n) => Number.isFinite(n)) as number[];
+  const ratios = segs.map((x) => x?.compression_ratio).filter((n) => Number.isFinite(n)) as number[];
+  if (!logprobs.length || !ratios.length) return null;
+  return {
+    provider: "whisper",
+    avgLogprob: logprobs.reduce((a, b) => a + b, 0) / logprobs.length,
+    comp: Math.max(...ratios),
+  };
+}
+
+/**
+ * The markers STT emits INSTEAD of words when it heard nothing it could transcribe.
+ *
+ * A WHITELIST, NOT "ANYTHING IN BRACKETS". Our clients write and say bracketed things, and a rule
+ * that threw away every bracketed token would quietly delete real content — including SA words a
+ * transcriber bracketed because it was unsure of them, which is precisely the content this product
+ * must not lose.
+ */
+const NO_SPEECH_MARKERS = new Set([
+  "blank_audio", "blank audio", "blank", "silence", "silent", "no speech", "nospeech",
+  "inaudible", "unintelligible", "music", "noise", "background noise", "sound",
+]);
+
+/** Drops only whitelisted no-speech markers; every other bracketed token is left exactly as it is. */
+function stripNoSpeechMarkers(s: string): string {
+  return s.replace(/[[(]([^\])]*)[\])]/g, (whole, inner) =>
+    NO_SPEECH_MARKERS.has(String(inner).trim().toLowerCase().replace(/\s+/g, " ")) ? " " : whole);
+}
 
 /**
  * THE ADMISSION FLOOR, FOR EVERY PROVIDER AND EVERY RETRY (Cut 4, 2026-09-12).
@@ -71,37 +124,45 @@ export function transcriptFailsAdmission(text: string, quality: VoiceQuality): b
   const t = (text || "").trim();
   if (!t) return true;
 
-  // 1. PROVIDER TRUTH FIRST, where the provider gave us any. Same thresholds as before.
-  if (quality && (quality.avgLogprob < -1.0 || quality.comp > 2.5)) return true;
+  // 1. PROVIDER TRUTH, ONLY WHERE IT IS CALIBRATED. These two thresholds were tuned against
+  //    Whisper's verbose_json and mean nothing applied to another provider's scale, so they are
+  //    asked of Whisper results and of nothing else. Scribe's word logprobs ride along unused.
+  if (quality?.provider === "whisper" && (quality.avgLogprob < -1.0 || quality.comp > 2.5)) return true;
 
-  // 2. NO SPEECH. "...", "♪♪♪", "[BLANK_AUDIO]" — a transcript with no letter and no digit in it
-  //    is not something a person said, whatever the provider called it.
-  if (!/[\p{L}\p{N}]/u.test(t)) return true;
+  // 2. NO SPEECH. "...", "♪♪♪" have no letter or digit at all. "[BLANK_AUDIO] [BLANK_AUDIO]" DOES
+  //    — it is spelled with letters — and the earlier version of this check claimed to catch it
+  //    while admitting it. So the whitelisted markers come out first, and what is left is asked.
+  //    A note that is a marker AND real speech keeps the speech: only the marker is dropped.
+  const spoken = stripNoSpeechMarkers(t);
+  if (!/[\p{L}\p{N}]/u.test(spoken)) return true;
 
-  // 3. PATHOLOGICAL REPETITION. Whisper loops a single token on silence or noise. Both tests are
-  //    set far outside ordinary speech: eight of the same word in a row, or a dozen words that are
-  //    really one word said over and over. "ha ha ha" and "no no no" stay admissible.
-  const words = t.toLowerCase().match(/[\p{L}\p{N}']+/gu) || [];
-  if (words.length < 2) return false;               // one word is owned upstream, not here
+  // 3. LOOPS, AND ONLY LOOPS. Whisper repeats itself on silence or noise. Both tests below are
+  //    about REPETITION STRUCTURE, not about how much of the text one word happens to occupy.
+  //
+  //    A FREQUENCY RULE STOOD HERE AND WAS WRONG: "commonest token > 60%" rejected
+  //    "pap pap eggs pap pap chicken pap pap beans pap pap fish" — six different foods, no loop —
+  //    because a staple naturally recurs in a list of meals. It refused exactly the speech this
+  //    product exists to hear, so it is deleted rather than tuned.
+  const words = spoken.toLowerCase().match(/[\p{L}\p{N}']+/gu) || [];
+  // Anything shorter than two words is the word-count guard's question, upstream of this one.
+  // That guard's own single-word behaviour is unchanged by this cut and is not claimed here.
+  if (words.length < 2) return false;
 
+  // A CONSECUTIVE RUN: the same word eight times with nothing between it. Far outside speech.
   let run = 1;
   for (let i = 1; i < words.length; i++) {
     run = words[i] === words[i - 1] ? run + 1 : 1;
     if (run >= 8) return true;
   }
 
+  // AN ALTERNATING LOOP: "thank you thank you thank you…" is Whisper's commonest output on
+  // silence and never trips a run, because no word ever follows itself. Counting VOCABULARY sees
+  // it — a dozen-plus words drawn from one or two distinct words is a loop, and a sentence is not.
+  // Deliberately a hard "two", not a ratio: a vocabulary of two is unambiguous, a ratio is a
+  // judgement about richness and would drift back toward grading how articulate a client sounds.
   if (words.length >= 12) {
-    const counts = new Map<string, number>();
-    for (const w of words) counts.set(w, (counts.get(w) || 0) + 1);
-    const commonest = Math.max(...counts.values());
-    if (commonest / words.length > 0.6) return true;
-
-    // A TWO-WORD LOOP NEVER TRIPS THE LINE ABOVE — "thank you thank you thank you…", which is
-    // Whisper's single most common output on silence, caps the commonest token at half. Found by
-    // a fixture of this cut's own failing, and closed by counting VOCABULARY instead of frequency:
-    // a dozen words drawn from one or two distinct words is a loop, and no sentence a person
-    // speaks is. Deliberately not a ratio — a vocabulary of two is unambiguous, a low ratio is not.
-    if (counts.size <= 2) return true;
+    const vocabulary = new Set(words);
+    if (vocabulary.size <= 2) return true;
   }
 
   return false;

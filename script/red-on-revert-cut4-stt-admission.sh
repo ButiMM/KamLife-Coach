@@ -117,7 +117,7 @@ PYEOF
 #    this is what "keep real metrics where they exist" buys, isolated.
 cat > "$PATCH_DIR/2.py" <<'PYEOF'
 p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
-s=s.replace("  if (quality && (quality.avgLogprob < -1.0 || quality.comp > 2.5)) return true;\n", "")
+s=s.replace('  if (quality?.provider === "whisper" && (quality.avgLogprob < -1.0 || quality.comp > 2.5)) return true;\n', "")
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
@@ -125,12 +125,13 @@ PYEOF
 #    in it becomes a transcript the coach answers.
 cat > "$PATCH_DIR/3.py" <<'PYEOF'
 p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
-s=s.replace("  if (!/[\\p{L}\\p{N}]/u.test(t)) return true;\n", "")
+s=s.replace("  if (!/[\\p{L}\\p{N}]/u.test(spoken)) return true;\n", "")
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
-# 4. THE CONSECUTIVE-RUN CHECK GOES. Sixteen "you" in a row — the reproduced defect's own string —
-#    is admitted again. The frequency rule still catches long loops, so this isolates the run.
+# 4. THE CONSECUTIVE-RUN CHECK GOES. Isolated by a fixture with a RICH vocabulary and an eight-word
+#    run inside it — every other loop fixture has a vocabulary of one or two, so the alternating
+#    rule would catch those and this case would stay green while the run rule was gone.
 cat > "$PATCH_DIR/4.py" <<'PYEOF'
 p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
 s=s.replace("    if (run >= 8) return true;", "    if (run >= 9999) return true;")
@@ -142,7 +143,7 @@ PYEOF
 #    it. This case exists because a fixture of this cut's own failed and found the gap.
 cat > "$PATCH_DIR/5.py" <<'PYEOF'
 p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
-s=s.replace("    if (counts.size <= 2) return true;\n", "")
+s=s.replace("    if (vocabulary.size <= 2) return true;\n", "")
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
@@ -167,13 +168,50 @@ s=s.replace("  const t = (text || \"\").trim();\n  if (!t) return true;",
 assert s!=b and "ngiyabonga" in s, "no match"; open(p,"w").write(s)
 PYEOF
 
+# 8. THE NO-SPEECH MARKER WHITELIST GOES. "[BLANK_AUDIO] [BLANK_AUDIO]" is spelled with letters, so
+#    the no-letter/no-digit test cannot see it — exactly the hole a review found in the first
+#    version of this cut, where the comment claimed the check caught it and it did not.
+cat > "$PATCH_DIR/8.py" <<'PYEOF'
+p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
+s=s.replace("  const spoken = stripNoSpeechMarkers(t);", "  const spoken = t;")
+assert s!=b and "const spoken = t;" in s, "no match"; open(p,"w").write(s)
+PYEOF
+
+# 9. THE METRICS GO BACK TO BEING SET ONCE AND NEVER REPLACED. An EMPTY attempt 1 carrying bad
+#    segments leaves its numbers behind, and the forced-English retry that replaces it is judged
+#    on them — a good transcript refused because a different call went badly.
+cat > "$PATCH_DIR/9.py" <<'PYEOF'
+p="server/handlers/media.ts"; s=open(p).read(); b=s
+s=s.replace("voiceQuality = whisperSegmentMetrics(v); };", "voiceQuality = voiceQuality ?? whisperSegmentMetrics(v); };")
+assert s!=b and "voiceQuality ?? whisperSegmentMetrics" in s, "no match"; open(p,"w").write(s)
+PYEOF
+
+# 10. ONLY THE FIRST WHISPER CALL KEEPS ITS METRICS — what asking for verbose_json on attempt 1
+#     alone produced. The retries then carry no provider numbers at all, so a plausible-LOOKING
+#     transcript that Whisper itself scored as garbage sails through them.
+cat > "$PATCH_DIR/10.py" <<'PYEOF'
+p="server/handlers/media.ts"; s=open(p).read(); b=s
+s=s.replace('const take = (v: any) => { transcription = { text: v?.text || "" }; voiceQuality = whisperSegmentMetrics(v); };',
+            'let _n = 0; const take = (v: any) => { transcription = { text: v?.text || "" }; voiceQuality = _n++ === 0 ? whisperSegmentMetrics(v) : null; };')
+assert s!=b and "_n++ === 0" in s, "no match"; open(p,"w").write(s)
+PYEOF
+
+# 11. SCRIBE'S METADATA IS THROWN AWAY AT THE PARSE AGAIN — the omission the review named. The
+#     transcript itself still works, so only a grader that looks for the metadata can see this.
+cat > "$PATCH_DIR/11.py" <<'PYEOF'
+p="server/elevenlabs.ts"; s=open(p).read(); b=s
+s=s.replace("    const wordLogprobs = (data.words || [])\n      .map((w) => w?.logprob)\n      .filter((n): n is number => typeof n === \"number\" && Number.isFinite(n));",
+            "    const wordLogprobs: number[] = [];")
+assert s!=b and "const wordLogprobs: number[] = [];" in s, "no match"; open(p,"w").write(s)
+PYEOF
+
 echo "RED-ON-REVERT — Cut 4. Every case below must be caught by at least one grader."
 failed=0
-for i in 1 2 3 4 5 6 7; do
+for i in 1 2 3 4 5 6 7 8 9 10 11; do
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) left every grader green, crashed, or would not patch."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 7/7 cases caught."
+echo "RED-ON-REVERT: GREEN — 11/11 cases caught."

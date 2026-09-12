@@ -75,9 +75,22 @@ const chk = (ok: boolean, msg: string, evidence = "") => {
 const AUDIO_URL = "https://www.example.com/voice.ogg";
 const audioBytes = new Uint8Array(40_000).fill(7);
 
-let scribeReply: string | null = null;
-let attempt1: { throws: boolean; text?: string; segments?: any[] } = { throws: true };
-let retryText = "";
+// ATTEMPTS ARE COUNTED, NOT INFERRED FROM THE REQUEST SHAPE. All three Whisper calls now ask for
+// verbose_json, so a stub keyed on `response_format` would answer every one as attempt 1 and stop
+// testing the retries. And the CALL ORDER is not the attempt number: media.ts runs attempt 2 only
+// when attempt 1 THROWS, so an attempt 1 that returns empty makes the forced-English retry the
+// SECOND call. `turns()` builds the order media.ts will really produce.
+type WhisperTurn = { throws?: boolean; text?: string; segments?: any[] };
+let scribeReply: string | { text: string; words?: Array<{ logprob?: number }>; language_probability?: number } | null = null;
+let whisperTurns: WhisperTurn[] = [];
+let whisperCalls = 0;
+
+const turns = (spec: { a1?: WhisperTurn; a2?: WhisperTurn; a3?: WhisperTurn }): WhisperTurn[] => {
+  const seq: WhisperTurn[] = [spec.a1 ?? {}];
+  if (spec.a1?.throws) seq.push(spec.a2 ?? {});
+  if (spec.a3) seq.push(spec.a3);
+  return seq;
+};
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (url: any, init?: any) => {
@@ -86,10 +99,10 @@ globalThis.fetch = (async (url: any, init?: any) => {
     return new Response(audioBytes, { status: 200, headers: { "content-type": "audio/ogg" } });
   }
   if (u.includes("/speech-to-text")) {
-    return scribeReply === null
-      ? new Response("stub: scribe not configured for this case", { status: 500 })
-      : new Response(JSON.stringify({ text: scribeReply }), {
-          status: 200, headers: { "content-type": "application/json" } });
+    if (scribeReply === null) return new Response("stub: scribe not configured for this case", { status: 500 });
+    const body = typeof scribeReply === "string" ? { text: scribeReply } : scribeReply;
+    return new Response(JSON.stringify(body), {
+      status: 200, headers: { "content-type": "application/json" } });
   }
   return realFetch(url, init);
 }) as any;
@@ -99,11 +112,10 @@ const sttStub: any = {
     // Consume the read stream media.ts opened; left alone it emits an async 'error' once the tmp
     // file is cleaned up. An artifact of stubbing, not of the code under test.
     try { opts.file?.on?.("error", () => {}); opts.file?.destroy?.(); } catch { /* not a stream */ }
-    if (opts.response_format === "verbose_json") {
-      if (attempt1.throws) throw new Error("stubbed attempt-1 failure");
-      return { text: attempt1.text, segments: attempt1.segments || [] };
-    }
-    return { text: retryText };
+    const turn = whisperTurns[whisperCalls] || {};
+    whisperCalls++;
+    if (turn.throws) throw new Error(`stubbed whisper attempt-${whisperCalls} failure`);
+    return { text: turn.text ?? "", segments: turn.segments || [] };
   } } },
   chat: { completions: { create: async () => ({
     choices: [{ message: { content: "" }, finish_reason: "stop" }],
@@ -122,9 +134,13 @@ const [user] = await db.insert(schema.users).values({
 const GARBLE = "you you you you you you you you you you you you you you you you";
 const GOOD = "I had samp and beans for lunch and I walked 8500 steps today neh";
 
+const GOOD_SEGS = [{ avg_logprob: -0.2, compression_ratio: 1.4 }];
+const BAD_SEGS = [{ avg_logprob: -1.8, compression_ratio: 4.0 }];
+
 let reachedHandlers: string | null = null;
 async function drive(): Promise<string> {
   clearVoiceFailure(user.id);
+  whisperCalls = 0;
   reachedHandlers = null;
   return String(await handleMediaMessage({
     phone, message: "", mediaUrl: AUDIO_URL, mediaContentType: "audio/ogg",
@@ -149,21 +165,29 @@ REAL("1. A REFUSED TRANSCRIPT WRITES NO FACTS — ON EVERY PROVIDER PATH");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // Each path is configured the way production reaches it. The count is read out of PostgreSQL
 // after the turn, not inferred from a return value.
+const whisperOnly = () => { delete process.env.ELEVENLABS_API_KEY; scribeReply = null; };
 const PATHS: Array<[string, () => void]> = [
   ["SCRIBE (first when ELEVENLABS_API_KEY is set — the production path)", () => {
-    process.env.ELEVENLABS_API_KEY = "stub"; scribeReply = GARBLE;
+    process.env.ELEVENLABS_API_KEY = "stub"; scribeReply = GARBLE; whisperTurns = [];
   }],
   ["WHISPER attempt 2, the catch retry", () => {
-    delete process.env.ELEVENLABS_API_KEY; scribeReply = null;
-    attempt1 = { throws: true }; retryText = GARBLE;
+    whisperOnly(); whisperTurns = turns({ a1: { throws: true }, a2: { text: GARBLE, segments: GOOD_SEGS } });
   }],
   ["WHISPER attempt 3, the FORCED-ENGLISH retry", () => {
-    delete process.env.ELEVENLABS_API_KEY; scribeReply = null;
-    attempt1 = { throws: false, text: "", segments: [] }; retryText = GARBLE;
+    whisperOnly(); whisperTurns = turns({ a1: { text: "", segments: [] }, a3: { text: GARBLE, segments: GOOD_SEGS } });
   }],
   ["WHISPER attempt 1, the only path that ever reported metrics", () => {
-    delete process.env.ELEVENLABS_API_KEY; scribeReply = null;
-    attempt1 = { throws: false, text: GARBLE, segments: [{ avg_logprob: -1.8, compression_ratio: 4.0 }] };
+    whisperOnly(); whisperTurns = turns({ a1: { text: GARBLE, segments: BAD_SEGS } });
+  }],
+  ["AN EXPLICIT NO-SPEECH MARKER, repeated", () => {
+    whisperOnly(); whisperTurns = turns({ a1: { text: "[BLANK_AUDIO] [BLANK_AUDIO] [BLANK_AUDIO]", segments: GOOD_SEGS } });
+  }],
+  ["A PLAUSIBLE-LOOKING transcript Whisper itself scored as garbage, on the forced-English retry", () => {
+    whisperOnly();
+    whisperTurns = turns({
+      a1: { text: "", segments: [] },
+      a3: { text: "I hid the samp and beans for lunch and worked 8500 shops today", segments: BAD_SEGS },
+    });
   }],
 ];
 
@@ -185,8 +209,8 @@ REAL("\n2. THE OPPOSITE DEFECT — A REAL TRANSCRIPT STILL WRITES ITS FACTS");
 {
   await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [user.id]);
   await pool.query("DELETE FROM step_logs WHERE user_id = $1", [user.id]);
-  delete process.env.ELEVENLABS_API_KEY; scribeReply = null;
-  attempt1 = { throws: false, text: GOOD, segments: [{ avg_logprob: -0.2, compression_ratio: 1.4 }] };
+  whisperOnly();
+  whisperTurns = turns({ a1: { text: GOOD, segments: GOOD_SEGS } });
 
   const reply = await drive();
   chk(typeof reachedHandlers === "string" && /samp and beans/.test(reachedHandlers!),
@@ -211,6 +235,52 @@ REAL("\n2. THE OPPOSITE DEFECT — A REAL TRANSCRIPT STILL WRITES ITS FACTS");
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n2b. AN EARLIER EMPTY RESULT DOES NOT POISON THE RETRY THAT REPLACES IT");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// voiceQuality was assigned once and never cleared, so an EMPTY attempt 1 carrying bad segments
+// left its numbers behind and the forced-English retry was judged on them. Graded on stored rows,
+// because "the coach replied" and "the facts landed" are different claims.
+{
+  await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [user.id]);
+  await pool.query("DELETE FROM step_logs WHERE user_id = $1", [user.id]);
+  whisperOnly();
+  whisperTurns = turns({ a1: { text: "", segments: BAD_SEGS }, a3: { text: GOOD, segments: GOOD_SEGS } });
+  await drive();
+  chk(whisperCalls === 2, "the forced-English retry really ran", `whisper calls = ${whisperCalls}`);
+  chk(typeof reachedHandlers === "string" && /samp and beans/.test(reachedHandlers!),
+    "a good retry is not refused on the failed attempt's metrics",
+    `handlers got ${JSON.stringify(String(reachedHandlers ?? "NOTHING").slice(0, 60))}`);
+  const { meals, steps } = await factCounts();
+  chk(meals >= 1 && steps >= 1, "…and its facts are stored", `meals=${meals} steps=${steps}`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n2c. SCRIBE'S METADATA SURVIVES THE PARSE, AND A REPETITIVE MEAL LIST IS STILL HEARD");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+{
+  await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [user.id]);
+  process.env.ELEVENLABS_API_KEY = "stub"; whisperTurns = [];
+  // Word logprobs far past Whisper's line. They are carried and logged, and they reject NOTHING:
+  // Scribe's scale is not Whisper's, and a threshold invented to bridge them would be a guess.
+  scribeReply = { text: GOOD, words: [{ logprob: -9.9 }, { logprob: -9.9 }], language_probability: 0.2 };
+  await drive();
+  chk(typeof reachedHandlers === "string" && /samp and beans/.test(reachedHandlers!),
+    "Scribe logprobs past Whisper's threshold do not reject — they are metadata, not a verdict",
+    `handlers got ${JSON.stringify(String(reachedHandlers ?? "NOTHING").slice(0, 60))}`);
+
+  // THE FREQUENCY RULE THAT STOOD HERE REFUSED THIS. Six foods, a staple repeated, no loop.
+  await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [user.id]);
+  scribeReply = { text: "I had pap and eggs then pap and chicken then pap and beans and pap and fish" };
+  await drive();
+  chk(typeof reachedHandlers === "string" && /pap and eggs/.test(reachedHandlers!),
+    "a repetitive but meaningful meal list reaches the handlers",
+    `handlers got ${JSON.stringify(String(reachedHandlers ?? "NOTHING").slice(0, 60))}`);
+  const meals = (await factCounts()).meals;
+  chk(meals >= 1, "…and it is stored as food, not refused as garble", `meals=${meals}`);
+  delete process.env.ELEVENLABS_API_KEY; scribeReply = null;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n3. THE FLOOR IS ONE PREDICATE AND EVERY PATH READS IT (source)");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 {
@@ -225,11 +295,32 @@ REAL("\n3. THE FLOOR IS ONE PREDICATE AND EVERY PATH READS IT (source)");
   chk((media.match(/transcriptFailsAdmission\(/g) || []).length === 1,
     "ONE admission decision in the voice branch, not one per provider",
     `found ${(media.match(/transcriptFailsAdmission\(/g) || []).length}`);
-  // THE PROVIDER'S OWN NUMBERS ARE KEPT, not replaced by guesses under cover of this cut.
+  // THE PROVIDER'S OWN NUMBERS ARE KEPT, not replaced by guesses under cover of this cut — and
+  // asked only of the provider they were calibrated against.
   chk(/quality\.avgLogprob < -1\.0 \|\| quality\.comp > 2\.5/.test(wedge),
     "the shipped provider thresholds are unchanged where the provider reports them");
+  chk(/quality\?\.provider === "whisper" &&/.test(wedge),
+    "…and they are applied to Whisper results only, never to Scribe's different scale");
   chk(!/looksLikeEnglish|fluen|confidenceGuess/i.test(wedge),
     "and nothing in the predicate judges how English the transcript sounds");
+  // THE FREQUENCY RULE IS GONE, not merely unreachable. It refused six foods because a staple
+  // recurred, which is broader than a loop check and broader than what was approved.
+  chk(!/commonest/.test(wedge),
+    "the commonest-token frequency rejection is deleted, not left able to come back");
+  // EVERY RETRY ASKS FOR METRICS, and every accepted result carries its own.
+  chk((media.match(/response_format: "verbose_json"/g) || []).length === 1,
+    "one request shape covers all three Whisper attempts, so no retry is metric-less",
+    `found ${(media.match(/response_format: "verbose_json"/g) || []).length}`);
+  chk(/voiceQuality = whisperSegmentMetrics\(v\)/.test(media),
+    "…and text and metrics are assigned together, so a result cannot inherit another's numbers");
+  // SCRIBE'S METADATA SURVIVES THE PARSE.
+  const eleven = live(readFileSync("server/elevenlabs.ts", "utf-8"));
+  chk(!/as \{ text\?: string \}/.test(eleven),
+    "elevenlabs.ts no longer narrows the Scribe response to its text");
+  chk(/wordLogprobs/.test(eleven) && /language_probability/.test(eleven),
+    "…and returns the provider's word logprobs and language probability alongside it");
+  chk(/Number\.isFinite/.test(eleven),
+    "…dropping absent values rather than zero-filling them into confident-looking scores");
 }
 
 REAL(`\n${failed === 0 ? "pg-stt-admission-acceptance: GREEN" : `pg-stt-admission-acceptance: ${failed} FAILED`}\n`);
