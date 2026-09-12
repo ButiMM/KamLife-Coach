@@ -20,7 +20,7 @@ import {
   logMediaFailure, logMediaSuccess, logChat,
 } from "./chat-log";
 import { askCoachK } from "../gpt";
-import { cleanSATranscript } from "../understanding/sa-transcript";
+import { cleanSATranscript, transcriptFailsAdmission } from "../understanding/sa-transcript";
 import { looksLikeRefusal } from "../understanding/refusal";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
@@ -1381,10 +1381,11 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         clearVoiceFailure(user.id);
       }
 
-      // Low-confidence (garble) guard — a very negative avg_logprob or high compression ratio betrays Whisper inventing words from a language it can't handle. Don't coach on
-      // nonsense — ask them to type (GPT reads typed SA languages well). Conservative thresholds avoid rejecting genuine accented English; metrics logged above to tune.
-      if (voiceQuality && wordCount >= 2 && (voiceQuality.avgLogprob < -1.0 || voiceQuality.comp > 2.5)) {
-        console.log(`[VOICE] low_confidence_garble avgLogprob=${voiceQuality.avgLogprob.toFixed(2)} comp=${voiceQuality.comp.toFixed(2)} text="${transcribedText.slice(0, 80)}"`);
+      // Low-confidence (garble) guard — don't coach on nonsense; ask them to type (GPT reads typed SA languages well). EVERY PROVIDER AND EVERY RETRY SINCE CUT 4 (2026-09-12):
+      // this read `if (voiceQuality && …)` and only Whisper attempt 1 sets voiceQuality, so Scribe (FIRST in production), the catch retry and the forced-English retry all SKIPPED
+      // it. See transcriptFailsAdmission in understanding/sa-transcript.ts for the reproduction and what it does where the provider reports nothing. Same refusal, same wording.
+      if (wordCount >= 2 && transcriptFailsAdmission(transcribedText, voiceQuality)) {
+        console.log(`[VOICE] low_confidence_garble engine=${sttEngine} avgLogprob=${voiceQuality?.avgLogprob?.toFixed(2) ?? "n/a"} comp=${voiceQuality?.comp?.toFixed(2) ?? "n/a"} text="${transcribedText.slice(0, 80)}"`);
         const garbleCount = bumpVoiceFailure(user.id);
         if (garbleCount >= 2) {
           clearVoiceFailure(user.id);

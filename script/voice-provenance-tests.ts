@@ -462,5 +462,220 @@ console.log("\n4. THE RAW TRANSCRIPT IS CAPTURED BEFORE THE CLEANER CAN OVERWRIT
     "…and nothing passes the bare client text as the handler input any more");
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+console.log("\n5. EVERY PROVIDER AND EVERY RETRY MEETS THE ADMISSION FLOOR");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// HONEST LABEL, FIRST. This is STUB-DRIVEN EXECUTION of the real voice branch, not a measurement
+// of transcription accuracy. The audio download and the two STT clients are stubs; the SSRF guard,
+// the length caps, the word-count guard, the admission floor, the cleaner, the refusal floor and
+// the handler recursion are the shipped code, running. What it proves is which STRINGS are
+// admitted and which are refused — nothing here says anything about real-world WER.
+//
+// THE DEFECT, reproduced on f809456 before a line was changed: sixteen consecutive "you" reached
+// handleMessage and came back to the client as «🎤 I heard: "you you you…"» on THREE of the four
+// STT paths, because the floor read `if (voiceQuality && …)` and only Whisper attempt 1 populates
+// voiceQuality. Scribe runs FIRST when ELEVENLABS_API_KEY is set, so the production path was one
+// of the three.
+{
+  const { transcriptFailsAdmission } = await import("../server/understanding/sa-transcript");
+
+  // ── THE PREDICATE, EXECUTED DIRECTLY. It is pure, so this needs no stubs at all. ────────────
+  // WHAT IT MUST NEVER REJECT comes first: if this product silences a client for saying "samp"
+  // or for code-switching, the floor is worse than the defect it replaces.
+  const MUST_PASS: [string, string][] = [
+    ["I had samp and beans for lunch and walked 8500 steps neh", "SA food, slang and a number"],
+    ["Yoh eish I am so tired today shame but I did my workout", "stacked SA slang"],
+    ["Ngiyabonga coach I ate pap ne morogo and chakalaka today", "code-switching isiZulu/English"],
+    ["ha ha ha no no no I did not skip it", "ordinary repetition a person really says"],
+    ["8500 steps 75 kg 2 litres 3 sets of 12", "numbers only"],
+    ["I am 8.5 kg down and my change was -5 cm this month", "signed and decimal quantities"],
+  ];
+  for (const [text, what] of MUST_PASS) {
+    chk(!transcriptFailsAdmission(text, null), `ADMITTED (${what})`, JSON.stringify(text));
+    chk(!transcriptFailsAdmission(text, { avgLogprob: -0.3, comp: 1.5 }),
+      `…and still admitted when the provider reports good metrics (${what})`);
+  }
+
+  // WHAT IT MUST REJECT — narrow, deterministic, and about the STRING, not about fluency.
+  const MUST_FAIL: [string, { avgLogprob: number; comp: number } | null, string][] = [
+    ["you you you you you you you you you you you you", null, "eight-plus of one word in a row"],
+    ["the the the the the the the the", null, "the same loop with a different word"],
+    ["...", null, "no speech at all"],
+    ["♪♪♪", null, "music marker, no letters or digits"],
+    ["   ", null, "whitespace"],
+    ["", null, "empty"],
+    ["thanks you thanks you thanks you thanks you thanks you thanks you thanks you",
+      null, "two words alternating past the dozen-token line"],
+    ["I had samp and beans for lunch and walked 8500 steps neh",
+      { avgLogprob: -1.8, comp: 1.2 }, "good words, but the provider says it did not hear them"],
+    ["I had samp and beans for lunch and walked 8500 steps neh",
+      { avgLogprob: -0.3, comp: 4.0 }, "good words, but a pathological compression ratio"],
+  ];
+  for (const [text, q, what] of MUST_FAIL) {
+    chk(transcriptFailsAdmission(text, q), `REFUSED (${what})`, JSON.stringify(text));
+  }
+
+  // THE VOCABULARY RULE IS `<= 2 DISTINCT`, NOT A RATIO — so its boundary is worth pinning from
+  // both sides. Three distinct words over a dozen tokens is admitted; two is not. Without the
+  // admitted half, a future tightening to "a low unique ratio" would pass this section silently
+  // while starting to refuse real speech.
+  chk(!transcriptFailsAdmission("no no no yes yes yes no no no yes yes maybe", null),
+    "a dozen tokens drawn from THREE distinct words is still admitted");
+  chk(transcriptFailsAdmission("no no no yes yes yes no no no yes yes yes", null),
+    "…and the same shape drawn from TWO is refused");
+
+  // THE PROVIDER'S OWN THRESHOLDS ARE UNCHANGED, not re-tuned under cover of this cut.
+  chk(!transcriptFailsAdmission("I walked to the shop and back this morning", { avgLogprob: -0.99, comp: 2.49 }),
+    "the shipped thresholds are kept exactly: -1.0 and 2.5 are still the lines");
+  chk(transcriptFailsAdmission("I walked to the shop and back this morning", { avgLogprob: -1.01, comp: 2.49 }),
+    "…and a hair past either one still refuses");
+
+  // ── THE WHOLE VOICE BRANCH, PER PROVIDER PATH ───────────────────────────────────────────────
+  // Driving handleMediaMessage for real. handleMessage is INJECTED, so "did the garble reach the
+  // handlers" is answered by whether our injected function was called — not inferred from a log.
+  process.env.MEDIA_URL_ALLOWLIST = "example.com";
+  process.env.TWILIO_ACCOUNT_SID = "ACstub";
+  process.env.TWILIO_AUTH_TOKEN = "stub";
+  const AUDIO_URL = "https://www.example.com/voice.ogg";
+  const audioBytes = new Uint8Array(40_000).fill(7);
+
+  let scribeReply: string | null = null;
+  let attempt1: { throws: boolean; text?: string; segments?: any[] } = { throws: true };
+  let retryText = "";
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: any, init?: any) => {
+    const u = String(url?.url || url);
+    if (u.startsWith(AUDIO_URL)) {
+      return new Response(audioBytes, { status: 200, headers: { "content-type": "audio/ogg" } });
+    }
+    if (u.includes("/speech-to-text")) {
+      return scribeReply === null
+        ? new Response("stub: scribe not configured for this case", { status: 500 })
+        : new Response(JSON.stringify({ text: scribeReply }), {
+            status: 200, headers: { "content-type": "application/json" } });
+    }
+    return realFetch(url, init);
+  }) as any;
+
+  const sttStub: any = {
+    audio: { transcriptions: { create: async (opts: any) => {
+      // Consume the read stream media.ts opened. Left alone it emits an async 'error' once the tmp
+      // file is cleaned up — a harness artifact of stubbing, not the code under test.
+      try { opts.file?.on?.("error", () => {}); opts.file?.destroy?.(); } catch { /* not a stream */ }
+      if (opts.response_format === "verbose_json") {
+        if (attempt1.throws) throw new Error("stubbed attempt-1 failure");
+        return { text: attempt1.text, segments: attempt1.segments || [] };
+      }
+      return { text: retryText };
+    } } },
+    chat: { completions: { create: async () => ({
+      choices: [{ message: { content: "" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    }) } },
+  };
+
+  const { handleMediaMessage, clearVoiceFailure } = await import("../server/handlers/media");
+  const USER: any = {
+    id: "cut4-admission", name: "Lerato", phoneNumber: "whatsapp:+27821234567",
+    goal: "fat_loss", profileNotes: "", onboardingComplete: true,
+  };
+
+  const drive = async (): Promise<{ reachedHandlers: string | null; reply: string }> => {
+    // The floor escalates its wording on a repeat within the window. Each case is a fresh client
+    // as far as that counter is concerned, so one case cannot change the next one's answer.
+    clearVoiceFailure(USER.id);
+    let reachedHandlers: string | null = null;
+    const reply = await handleMediaMessage({
+      phone: "whatsapp:+27821234567", message: "", mediaUrl: AUDIO_URL,
+      mediaContentType: "audio/ogg", allMediaUrls: [], user: { ...USER }, isCoach: false,
+      openai: sttStub,
+      handleMessage: async (_p: any, text: string) => { reachedHandlers = text; return "COACH REPLY"; },
+    } as any);
+    return { reachedHandlers, reply: String(reply) };
+  };
+
+  const GARBLE = "you you you you you you you you you you you you you you you you";
+  const GOOD = "I had samp and beans for lunch and walked 8500 steps neh";
+
+  // Each path is set up the way production reaches it, and named for what it is.
+  const PATHS: [string, () => void][] = [
+    ["SCRIBE (runs FIRST when ELEVENLABS_API_KEY is set — the production path)", () => {
+      process.env.ELEVENLABS_API_KEY = "stub"; scribeReply = GARBLE;
+    }],
+    ["WHISPER attempt 2, the catch retry", () => {
+      delete process.env.ELEVENLABS_API_KEY; scribeReply = null;
+      attempt1 = { throws: true }; retryText = GARBLE;
+    }],
+    ["WHISPER attempt 3, the FORCED-ENGLISH retry", () => {
+      delete process.env.ELEVENLABS_API_KEY; scribeReply = null;
+      attempt1 = { throws: false, text: "", segments: [] }; retryText = GARBLE;
+    }],
+    ["WHISPER attempt 1, which reports metrics (the only path that was ever guarded)", () => {
+      delete process.env.ELEVENLABS_API_KEY; scribeReply = null;
+      attempt1 = { throws: false, text: GARBLE, segments: [{ avg_logprob: -1.8, compression_ratio: 4.0 }] };
+    }],
+  ];
+
+  for (const [label, setup] of PATHS) {
+    setup();
+    const { reachedHandlers, reply } = await drive();
+    chk(reachedHandlers === null, `${label}: the garble NEVER reaches handleMessage`,
+      `handlers got ${JSON.stringify(String(reachedHandlers ?? "").slice(0, 60))}`);
+    chk(!/🎤 I heard/.test(reply), `…and it is not echoed back to the client either`,
+      JSON.stringify(reply.slice(0, 70)));
+    // THE EXISTING MOUTH, NOT A NEW ONE: the refusal wording is the one media.ts already carried.
+    chk(/type it instead|please type what you need/i.test(reply),
+      `…and the client gets the existing clarification response`, JSON.stringify(reply.slice(0, 70)));
+  }
+
+  // THE OPPOSITE DEFECT, on every one of the same four paths. A floor that refuses everything
+  // would pass all twelve checks above and destroy the product, so each path must also ADMIT a
+  // real SA transcript — same harness, same client, only the transcript changed.
+  const GOOD_PATHS: [string, () => void][] = [
+    ["SCRIBE", () => { process.env.ELEVENLABS_API_KEY = "stub"; scribeReply = GOOD; }],
+    ["WHISPER attempt 2", () => {
+      delete process.env.ELEVENLABS_API_KEY; scribeReply = null;
+      attempt1 = { throws: true }; retryText = GOOD;
+    }],
+    ["WHISPER attempt 3 (forced English)", () => {
+      delete process.env.ELEVENLABS_API_KEY; scribeReply = null;
+      attempt1 = { throws: false, text: "", segments: [] }; retryText = GOOD;
+    }],
+    ["WHISPER attempt 1", () => {
+      delete process.env.ELEVENLABS_API_KEY; scribeReply = null;
+      attempt1 = { throws: false, text: GOOD, segments: [{ avg_logprob: -0.2, compression_ratio: 1.4 }] };
+    }],
+  ];
+  for (const [label, setup] of GOOD_PATHS) {
+    setup();
+    const { reachedHandlers } = await drive();
+    chk(typeof reachedHandlers === "string" && /samp and beans/.test(reachedHandlers),
+      `${label}: a real SA transcript still reaches the handlers, whole`,
+      `handlers got ${JSON.stringify(String(reachedHandlers ?? "NOTHING").slice(0, 60))}`);
+    chk(typeof reachedHandlers === "string" && /8500/.test(reachedHandlers),
+      `…with the number they said intact`);
+  }
+
+  globalThis.fetch = realFetch;
+  delete process.env.ELEVENLABS_API_KEY;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+console.log("\n6. THE FLOOR IS ONE PREDICATE, READ BY EVERY PATH (source)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+{
+  const { readFileSync: rf } = await import("node:fs");
+  const live = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+  const media = live(rf("server/handlers/media.ts", "utf-8"));
+  chk(/transcriptFailsAdmission\(transcribedText, voiceQuality\)/.test(media),
+    "media.ts asks the shared predicate, and hands it whatever metrics it has");
+  chk(!/if \(voiceQuality && wordCount/.test(media),
+    "…and the metrics-only gate is gone, not left beside it");
+  chk((media.match(/transcriptFailsAdmission\(/g) || []).length === 1,
+    "exactly ONE admission decision in the voice branch — not one per provider",
+    `found ${(media.match(/transcriptFailsAdmission\(/g) || []).length}`);
+}
+
 console.log(`\n${failed === 0 ? "voice-provenance-tests: ALL GREEN" : `voice-provenance-tests: ${failed} FAILED`}`);
 process.exit(failed === 0 ? 0 : 1);

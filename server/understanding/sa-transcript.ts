@@ -33,6 +33,80 @@ function killswitchOff(): boolean {
   return process.env.SA_CLEAN === "off";
 }
 
+/** What Whisper's `verbose_json` tells us about its own output. Absent on every other path. */
+export type VoiceQuality = { avgLogprob: number; comp: number } | null;
+
+/**
+ * THE ADMISSION FLOOR, FOR EVERY PROVIDER AND EVERY RETRY (Cut 4, 2026-09-12).
+ *
+ * THE DEFECT, reproduced through the real voice branch on `f809456` with the network stubbed:
+ * sixteen consecutive "you" — Whisper's classic output on near-silent audio — reached
+ * `handleMessage` verbatim and was echoed back to the client as "🎤 I heard: …" on THREE of the
+ * four STT paths. The floor that exists to stop exactly this was written as
+ *
+ *     if (voiceQuality && wordCount >= 2 && (avgLogprob < -1.0 || comp > 2.5))
+ *
+ * and `voiceQuality` is populated ONLY by Whisper attempt 1, which alone asks for
+ * `response_format: "verbose_json"`. Attempt 2 (the catch retry), attempt 3 (forced English) and
+ * Scribe — which runs FIRST whenever ELEVENLABS_API_KEY is set, so it is the production path —
+ * all leave it null, and `voiceQuality &&` then skips the guard entirely rather than falling back
+ * to a weaker one. The guard was not failing. It was not running.
+ *
+ * SO THE METRICS ARE KEPT WHERE THEY EXIST AND NOTHING IS GUESSED WHERE THEY DO NOT. The two
+ * thresholds below are the ones that already shipped, unchanged. What is added for the metric-less
+ * paths is deliberately narrow: output with no speech in it at all, and output that repeats itself
+ * pathologically. Both are properties of the STRING, decidable without a model and without an
+ * opinion about how fluent English ought to sound.
+ *
+ * WHAT THIS MAY NEVER REJECT, and what the graders hold it to: valid SA food words and slang,
+ * code-switching between English and an SA language, and numbers. A client saying
+ * "yoh I had samp and beans and walked 8500 steps neh" is not garble, and a floor that cannot
+ * tell them apart would silence the clients this product exists for. When in doubt this admits —
+ * the cleaner, the refusal floor and the handlers all still stand behind it.
+ *
+ * NOT A RESPONSE OWNER. It answers one question — is this string admissible — and returns a
+ * boolean. The refusal wording stays where it was, in media.ts, unchanged.
+ */
+export function transcriptFailsAdmission(text: string, quality: VoiceQuality): boolean {
+  const t = (text || "").trim();
+  if (!t) return true;
+
+  // 1. PROVIDER TRUTH FIRST, where the provider gave us any. Same thresholds as before.
+  if (quality && (quality.avgLogprob < -1.0 || quality.comp > 2.5)) return true;
+
+  // 2. NO SPEECH. "...", "♪♪♪", "[BLANK_AUDIO]" — a transcript with no letter and no digit in it
+  //    is not something a person said, whatever the provider called it.
+  if (!/[\p{L}\p{N}]/u.test(t)) return true;
+
+  // 3. PATHOLOGICAL REPETITION. Whisper loops a single token on silence or noise. Both tests are
+  //    set far outside ordinary speech: eight of the same word in a row, or a dozen words that are
+  //    really one word said over and over. "ha ha ha" and "no no no" stay admissible.
+  const words = t.toLowerCase().match(/[\p{L}\p{N}']+/gu) || [];
+  if (words.length < 2) return false;               // one word is owned upstream, not here
+
+  let run = 1;
+  for (let i = 1; i < words.length; i++) {
+    run = words[i] === words[i - 1] ? run + 1 : 1;
+    if (run >= 8) return true;
+  }
+
+  if (words.length >= 12) {
+    const counts = new Map<string, number>();
+    for (const w of words) counts.set(w, (counts.get(w) || 0) + 1);
+    const commonest = Math.max(...counts.values());
+    if (commonest / words.length > 0.6) return true;
+
+    // A TWO-WORD LOOP NEVER TRIPS THE LINE ABOVE — "thank you thank you thank you…", which is
+    // Whisper's single most common output on silence, caps the commonest token at half. Found by
+    // a fixture of this cut's own failing, and closed by counting VOCABULARY instead of frequency:
+    // a dozen words drawn from one or two distinct words is a loop, and no sentence a person
+    // speaks is. Deliberately not a ratio — a vocabulary of two is unambiguous, a low ratio is not.
+    if (counts.size <= 2) return true;
+  }
+
+  return false;
+}
+
 /**
  * WHAT THE CLEANER IS ALLOWED TO CHANGE — AN ORDERED EDIT CONTRACT (Cut 3, CTO review 2, 2026-09-12).
  *
