@@ -564,6 +564,29 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
 }
 
 /**
+ * THE LEDGER'S RECORD OF WHAT THE CLIENT SAID MAY NOT CUT IT SILENTLY (Cut 3, 2026-09-12).
+ *
+ * Both recording sites trimmed the client's words to two thousand characters. A three-minute
+ * voice note is about 2,400, so the durable record of an ordinary long note lost its last four
+ * hundred — the same defect as the cleaner's window, one layer out, and in the one place built to
+ * answer "what did the client actually say?". Measured on 017efd9: a 2,408-character note was
+ * recorded as 2,000, with both of the client's questions and their final words missing.
+ *
+ * Found by this cut's own acceptance, not by reading the code: the cleaner was fixed, the tail
+ * reached the handlers, and the ledger still showed 2,000 characters.
+ *
+ * A ceiling still exists, because an unbounded row is a different kind of problem, but it is now
+ * far beyond any real note (roughly twenty minutes of speech) and a cut SAYS SO inside the stored
+ * value rather than trimming the end and leaving it looking complete.
+ */
+const LEDGER_TEXT_MAX = 32_000;
+function ledgerText(text: string): string {
+  const t = text || "";
+  if (t.length <= LEDGER_TEXT_MAX) return t;
+  return t.slice(0, LEDGER_TEXT_MAX) + `\n[TRUNCATED — ${t.length - LEDGER_TEXT_MAX} further characters not recorded]`;
+}
+
+/**
  * THE ROOT ID IS INHERITED, NEVER RE-MINTED (Cut 1).
  *
  * A handler may re-enter handleMessage — handlers/media.ts:1423 does it for every voice note,
@@ -577,7 +600,7 @@ export async function inTurn<T>(inputType: string, inputText: string, fn: () => 
   let resolveFinalReply!: (reply: string) => void;
   const finalReplyPromise = new Promise<string>(resolve => { resolveFinalReply = resolve; });
   const rootId = turnStore.getStore()?.rootId || seed || `turn-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-  return turnStore.run({ userId: null, inputType, inputText: (inputText || "").slice(0, 2000), rootId, canonicalInput: null, resolvedDay: null, stateRead: {}, mutations: [], startedAt: Date.now(), finalReplyPromise }, async () => {
+  return turnStore.run({ userId: null, inputType, inputText: ledgerText(inputText), rootId, canonicalInput: null, resolvedDay: null, stateRead: {}, mutations: [], startedAt: Date.now(), finalReplyPromise }, async () => {
     try {
       const result = await fn();
       if (typeof result !== "string") {
@@ -739,7 +762,7 @@ export function _resetInteractionCorrelation(): void { _interactionRows.clear();
  */
 export function turnCanonicalInput(text: string): void {
   const t = turnStore.getStore();
-  if (t) t.canonicalInput = (text || "").slice(0, 2000);
+  if (t) t.canonicalInput = ledgerText(text);
 }
 
 /**
@@ -751,7 +774,9 @@ export function turnCanonicalInput(text: string): void {
  * labelled as the client's.
  *
  * MERGES, and is called three times as the voice path produces each stage — after transcription,
- * after cleanSATranscript, after condenseVoiceRamble. Incremental on purpose: the voice handler
+ * after cleanSATranscript, and where the routed text is composed. (The third stage used to be
+ * condenseVoiceRamble; Cut 3 removed it, and forBrain is now the cleaned transcript itself, so
+ * forBrain === cleaned on every turn rather than on most of them.) Incremental on purpose: the voice handler
  * returns early on a garbled note, a single word and a model refusal, and those are precisely the
  * turns where "what did we actually hear?" is the question. Recording only at the end would leave
  * every failed voice turn blank, which is the current state and the reason this exists.

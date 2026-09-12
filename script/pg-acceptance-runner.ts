@@ -234,6 +234,19 @@ export const ACCEPTANCES: Acceptance[] = [
     // opposite-defect controls. A crash or an absent verdict is itself red.
     command: ["bash", "script/red-on-revert-cut2-meal-slot.sh"] },
 
+  { id: "long-voice-tail", title: "A long note reaches the handlers whole",
+    // CUT 3 (2026-09-12). The cleaner sent 1,500 characters to a model and returned the answer as
+    // THE TRANSCRIPT, deleting 908 characters of a three-minute note — both questions among them.
+    // Needs a real database and the real front door: the claim is about what the handlers were
+    // GIVEN, durably, and about the numbers that reached their owners afterwards.
+    command: ["npx", "tsx", "script/pg-long-voice-tail-acceptance.ts"] },
+
+  { id: "long-voice-reverts", title: "Every silent cut in the voice pipeline turns a grader red",
+    // Four truncations in one pipeline — the cleaner's window, its missing lower bound, the
+    // condenser, and the ledger's own cap — plus three opposite-defect controls. Two graders,
+    // because the acceptance drives the TEXT door where the cleaner never runs.
+    command: ["bash", "script/red-on-revert-cut3-long-voice.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same
