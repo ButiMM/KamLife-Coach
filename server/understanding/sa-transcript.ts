@@ -84,7 +84,7 @@ const NO_SPEECH_MARKERS = new Set([
 ]);
 
 /** Drops only whitelisted no-speech markers; every other bracketed token is left exactly as it is. */
-function stripNoSpeechMarkers(s: string): string {
+export function stripKnownNoSpeechMarkers(s: string): string {
   return s.replace(/[[(]([^\])]*)[\])]/g, (whole, inner) =>
     NO_SPEECH_MARKERS.has(String(inner).trim().toLowerCase().replace(/\s+/g, " ")) ? " " : whole);
 }
@@ -133,7 +133,7 @@ export function transcriptFailsAdmission(text: string, quality: VoiceQuality): b
   //    — it is spelled with letters — and the earlier version of this check claimed to catch it
   //    while admitting it. So the whitelisted markers come out first, and what is left is asked.
   //    A note that is a marker AND real speech keeps the speech: only the marker is dropped.
-  const spoken = stripNoSpeechMarkers(t);
+  const spoken = stripKnownNoSpeechMarkers(t);
   if (!/[\p{L}\p{N}]/u.test(spoken)) return true;
 
   // 3. LOOPS, AND ONLY LOOPS. Whisper repeats itself on silence or noise. Both tests below are

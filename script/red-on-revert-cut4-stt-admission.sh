@@ -173,7 +173,7 @@ PYEOF
 #    version of this cut, where the comment claimed the check caught it and it did not.
 cat > "$PATCH_DIR/8.py" <<'PYEOF'
 p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
-s=s.replace("  const spoken = stripNoSpeechMarkers(t);", "  const spoken = t;")
+s=s.replace("  const spoken = stripKnownNoSpeechMarkers(t);", "  const spoken = t;")
 assert s!=b and "const spoken = t;" in s, "no match"; open(p,"w").write(s)
 PYEOF
 
@@ -205,13 +205,24 @@ s=s.replace("    const wordLogprobs = (data.words || [])\n      .map((w) => w?.l
 assert s!=b and "const wordLogprobs: number[] = [];" in s, "no match"; open(p,"w").write(s)
 PYEOF
 
+# 12. ONLY MEDIA-PATH SANITATION GOES. The admission predicate still strips the marker for its
+#     boolean decision, so mixed marker + speech remains admissible — but the original provider
+#     string again reaches the cleaner, handlers, stored interpreted text and client echo. The
+#     behavioral mixed fixture must catch this; a source-string assertion alone is not evidence.
+cat > "$PATCH_DIR/12.py" <<'PYEOF'
+p="server/handlers/media.ts"; s=open(p).read(); b=s
+s=s.replace("transcribedText = stripKnownNoSpeechMarkers(transcribedText).trim();",
+            "transcribedText = transcribedText.trim();")
+assert s!=b and "transcribedText = transcribedText.trim();" in s, "no match"; open(p,"w").write(s)
+PYEOF
+
 echo "RED-ON-REVERT — Cut 4. Every case below must be caught by at least one grader."
 failed=0
-for i in 1 2 3 4 5 6 7 8 9 10 11; do
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) left every grader green, crashed, or would not patch."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 11/11 cases caught."
+echo "RED-ON-REVERT: GREEN — 12/12 cases caught."

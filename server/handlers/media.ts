@@ -20,7 +20,7 @@ import {
   logMediaFailure, logMediaSuccess, logChat,
 } from "./chat-log";
 import { askCoachK } from "../gpt";
-import { cleanSATranscript, transcriptFailsAdmission, whisperSegmentMetrics, type VoiceQuality } from "../understanding/sa-transcript";
+import { cleanSATranscript, stripKnownNoSpeechMarkers, transcriptFailsAdmission, whisperSegmentMetrics, type VoiceQuality } from "../understanding/sa-transcript";
 import { looksLikeRefusal } from "../understanding/refusal";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
@@ -1343,6 +1343,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         }
       }
 
+      if (transcribedText) { turnVoice({ engine: sttEngine, raw: transcribedText }); transcribedText = stripKnownNoSpeechMarkers(transcribedText).trim(); }
       if (!transcribedText) {
         const failCount = bumpVoiceFailure(user.id);
         if (failCount >= 3) {
@@ -1356,7 +1357,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
           : "I got your voice note but had trouble processing it right now. Please resend it, or type your message and I'll reply straight away.";
       }
 
-      const wordCount = transcribedText.split(/\s+/).filter(Boolean).length; turnVoice({ engine: sttEngine, raw: transcribedText, wordCount });
+      const wordCount = transcribedText.split(/\s+/).filter(Boolean).length; turnVoice({ wordCount });
       if (wordCount < 2) {
         // Known single-word commands pass through directly — asking to resend wastes a round trip.
         const cleanWord = transcribedText.toLowerCase().replace(/[.!?,\s]+$/, "");
@@ -1380,7 +1381,6 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       }
 
       // Low-confidence (garble) guard — don't coach on nonsense; ask them to type (GPT reads typed SA languages well). EVERY PROVIDER AND EVERY RETRY SINCE CUT 4 (2026-09-12):
-      // this read `if (voiceQuality && …)` and only Whisper attempt 1 sets voiceQuality, so Scribe (FIRST in production), the catch retry and the forced-English retry all SKIPPED
       // it. See transcriptFailsAdmission in understanding/sa-transcript.ts for the reproduction and what it does where the provider reports nothing. Same refusal, same wording.
       if (wordCount >= 2 && transcriptFailsAdmission(transcribedText, voiceQuality)) {
         const vq = voiceQuality as VoiceQuality;   // `take` assigns in a closure, so TS's narrowing here is stale

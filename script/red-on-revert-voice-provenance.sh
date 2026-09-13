@@ -70,7 +70,7 @@ ACC_LABEL=pg-voice-provenance-acceptance
 #    them — the exact state of the product before this cut.
 cat > "$PATCH_DIR/1.py" <<'PY'
 p="server/handlers/media.ts"; s=open(p).read(); b=s
-s=s.replace(" turnVoice({ engine: sttEngine, raw: transcribedText, wordCount });", "")
+s=s.replace("turnVoice({ engine: sttEngine, raw: transcribedText }); ", "")
 assert s!=b, "no match"; open(p,"w").write(s)
 PY
 
@@ -80,9 +80,9 @@ PY
 #    heard it correctly".
 cat > "$PATCH_DIR/2.py" <<'PY'
 p="server/handlers/media.ts"; s=open(p).read(); b=s
-s=s.replace(" turnVoice({ engine: sttEngine, raw: transcribedText, wordCount });", "")
+s=s.replace("turnVoice({ engine: sttEngine, raw: transcribedText }); ", "")
 s=s.replace("transcribedText = await cleanSATranscript(openai, transcribedText, user.id);",
-            "transcribedText = await cleanSATranscript(openai, transcribedText, user.id); turnVoice({ engine: sttEngine, raw: transcribedText, wordCount });")
+            "transcribedText = await cleanSATranscript(openai, transcribedText, user.id); turnVoice({ engine: sttEngine, raw: transcribedText });")
 assert s!=b, "no match"; open(p,"w").write(s)
 PY
 

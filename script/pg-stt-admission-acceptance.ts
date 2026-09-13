@@ -234,6 +234,33 @@ REAL("\n2. THE OPPOSITE DEFECT — A REAL TRANSCRIPT STILL WRITES ITS FACTS");
     "…and the number stored is the number they said", `steps=${storedSteps.rows[0]?.steps}`);
 }
 
+// THE MIXED MARKER DEFECT: admission already ignored the marker for its boolean decision, but the
+// original string still reached every consumer after that decision. Grade the live branch and
+// durable interpreted fact, not just the predicate that was already green before this fix.
+{
+  await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [user.id]);
+  await pool.query("DELETE FROM step_logs WHERE user_id = $1", [user.id]);
+  const RAW_MIXED = "[BLANK_AUDIO] " + GOOD;
+  whisperOnly();
+  whisperTurns = turns({ a1: { text: RAW_MIXED, segments: GOOD_SEGS } });
+
+  const reply = await drive();
+  chk(reachedHandlers === GOOD && !/BLANK_AUDIO/.test(reachedHandlers),
+    "a mixed marker is removed before the real handlers",
+    `handlers got ${JSON.stringify(String(reachedHandlers ?? "NOTHING").slice(0, 80))}`);
+  chk(/🎤 I heard/.test(reply) && !/BLANK_AUDIO/.test(reply),
+    "…and before the outbound echo", JSON.stringify(reply.slice(0, 100)));
+  const { meals, steps } = await factCounts();
+  chk(meals >= 1 && steps >= 1,
+    "…while the real speech still reaches the existing facts path", `meals=${meals} steps=${steps}`);
+  const stored = await pool.query(
+    "SELECT raw_message FROM meal_logs WHERE user_id = $1 ORDER BY logged_at DESC LIMIT 1", [user.id]);
+  chk(stored.rows.length >= 1 && /samp/i.test(stored.rows[0].raw_message || "")
+      && !/BLANK_AUDIO/.test(stored.rows[0].raw_message || ""),
+    "…and stored interpreted text contains the speech but no marker",
+    JSON.stringify(stored.rows[0]?.raw_message?.slice(0, 80)));
+}
+
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n2b. AN EARLIER EMPTY RESULT DOES NOT POISON THE RETRY THAT REPLACES IT");
 // ══════════════════════════════════════════════════════════════════════════════════════════════

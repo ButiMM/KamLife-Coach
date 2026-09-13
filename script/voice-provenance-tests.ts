@@ -593,24 +593,39 @@ console.log("\n5. EVERY PROVIDER AND EVERY RETRY MEETS THE ADMISSION FLOOR");
   };
 
   const { handleMediaMessage, clearVoiceFailure } = await import("../server/handlers/media");
+  const { inTurn, recordTurn, turnUser } = await import("../server/handlers/chat-log");
   const USER: any = {
     id: "cut4-admission", name: "Lerato", phoneNumber: "whatsapp:+27821234567",
     goal: "fat_loss", profileNotes: "", onboardingComplete: true,
   };
 
-  const drive = async (): Promise<{ reachedHandlers: string | null; reply: string }> => {
+  const drive = async (captureVoice = false): Promise<{ reachedHandlers: string | null; reply: string; voiceWrite: any }> => {
     // The floor escalates its wording on a repeat within the window. Each case is a fresh client
     // as far as that counter is concerned, so one case cannot change the next one's answer.
     clearVoiceFailure(USER.id);
     whisperCalls = 0;
     let reachedHandlers: string | null = null;
-    const reply = await handleMediaMessage({
+    let mediaReply = "";
+    const invoke = () => handleMediaMessage({
       phone: "whatsapp:+27821234567", message: "", mediaUrl: AUDIO_URL,
       mediaContentType: "audio/ogg", allMediaUrls: [], user: { ...USER }, isCoach: false,
       openai: sttStub,
       handleMessage: async (_p: any, text: string) => { reachedHandlers = text; return "COACH REPLY"; },
     } as any);
-    return { reachedHandlers, reply: String(reply) };
+    let reply: unknown;
+    if (captureVoice) {
+      (globalThis as any).__KAMLIFE_STUB_WRITES = [];
+      reply = await inTurn("voice", "", async () => {
+        turnUser(USER.id);
+        const body = String(await invoke()); mediaReply = body;
+        void recordTurn(body);
+        return body;
+      }, "cut4-mixed-marker");
+      await new Promise(resolve => setTimeout(resolve, 0));
+    } else { reply = await invoke(); mediaReply = String(reply); }
+    const voiceWrite = ((globalThis as any).__KAMLIFE_STUB_WRITES || [])
+      .find((w: any) => w.values?.voiceTranscriptRaw !== undefined)?.values;
+    return { reachedHandlers, reply: mediaReply, voiceWrite };
   };
 
   const GARBLE = "you you you you you you you you you you you you you you you you";
@@ -779,16 +794,35 @@ console.log("\n5. EVERY PROVIDER AND EVERY RETRY MEETS THE ADMISSION FLOOR");
     const { reachedHandlers, reply } = await drive();
     chk(reachedHandlers === null, "repeated [BLANK_AUDIO] never reaches the handlers",
       `handlers got ${JSON.stringify(String(reachedHandlers ?? "").slice(0, 60))}`);
-    chk(/type it instead|please type what you need/i.test(reply),
+    chk(/trouble processing|couldn't make it out|type it instead|please type what you need/i.test(reply),
       "…and the client gets the existing clarification response", JSON.stringify(reply.slice(0, 70)));
 
     // AND A MARKER BESIDE REAL SPEECH KEEPS THE SPEECH. Stripping markers must not become a
     // licence to drop content: only the marker goes.
-    whisperTurns = turns({ a1: { text: "[BLANK_AUDIO] " + GOOD, segments: GOOD_SEGS } });
-    const withSpeech = await drive();
-    chk(typeof withSpeech.reachedHandlers === "string" && /samp and beans/.test(withSpeech.reachedHandlers!),
-      "…while a marker sitting beside real speech still delivers the speech",
-      `handlers got ${JSON.stringify(String(withSpeech.reachedHandlers ?? "NOTHING").slice(0, 60))}`);
+    const RAW_MIXED = "[BLANK_AUDIO] " + GOOD;
+    whisperTurns = turns({ a1: { text: RAW_MIXED, segments: GOOD_SEGS } });
+    const withSpeech = await drive(true);
+    chk(withSpeech.reachedHandlers === GOOD && !/BLANK_AUDIO/.test(withSpeech.reachedHandlers),
+      "…while a marker beside real speech delivers only the real speech to handlers",
+      `handlers got ${JSON.stringify(String(withSpeech.reachedHandlers ?? "NOTHING").slice(0, 80))}`);
+    chk(/🎤 I heard/.test(withSpeech.reply) && /COACH REPLY/.test(withSpeech.reply),
+      "…and still reaches the existing facts/response path", JSON.stringify(withSpeech.reply.slice(0, 100)));
+    chk(!/BLANK_AUDIO/.test(withSpeech.reply),
+      "…with no marker in the final client body", JSON.stringify(withSpeech.reply.slice(0, 100)));
+    chk(withSpeech.voiceWrite?.voiceTranscriptRaw === RAW_MIXED,
+      "…while existing voice provenance retains the exact raw provider transcript",
+      JSON.stringify(withSpeech.voiceWrite?.voiceTranscriptRaw));
+    chk(withSpeech.voiceWrite?.voiceTranscriptCleaned === GOOD
+        && withSpeech.voiceWrite?.voiceTextForBrain === GOOD,
+      "…and stored interpreted text contains only the real speech",
+      JSON.stringify([withSpeech.voiceWrite?.voiceTranscriptCleaned, withSpeech.voiceWrite?.voiceTextForBrain]));
+
+    const BRACKETED = "[my knees hurt] " + GOOD;
+    whisperTurns = turns({ a1: { text: BRACKETED, segments: GOOD_SEGS } });
+    const bracketed = await drive();
+    chk(bracketed.reachedHandlers?.startsWith(BRACKETED) === true && bracketed.reply.includes("[my knees hurt]"),
+      "arbitrary non-whitelisted bracketed client speech remains unchanged",
+      JSON.stringify([bracketed.reachedHandlers, bracketed.reply.slice(0, 100)]));
   }
 
   globalThis.fetch = realFetch;
