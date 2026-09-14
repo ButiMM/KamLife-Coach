@@ -155,16 +155,6 @@ export function transcriptFailsAdmission(text: string, quality: VoiceQuality): b
     if (run >= 8) return true;
   }
 
-  // AN ALTERNATING LOOP: "thank you thank you thank you…" is Whisper's commonest output on
-  // silence and never trips a run, because no word ever follows itself. Counting VOCABULARY sees
-  // it — a dozen-plus words drawn from one or two distinct words is a loop, and a sentence is not.
-  // Deliberately a hard "two", not a ratio: a vocabulary of two is unambiguous, a ratio is a
-  // judgement about richness and would drift back toward grading how articulate a client sounds.
-  if (words.length >= 12) {
-    const vocabulary = new Set(words);
-    if (vocabulary.size <= 2) return true;
-  }
-
   return false;
 }
 

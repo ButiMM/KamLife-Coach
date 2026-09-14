@@ -492,6 +492,8 @@ console.log("\n5. EVERY PROVIDER AND EVERY RETRY MEETS THE ADMISSION FLOOR");
     ["I am 8.5 kg down and my change was -5 cm this month", "signed and decimal quantities"],
     ["pap pap eggs pap pap chicken pap pap beans pap pap fish",
       "a repetitive but MEANINGFUL food list — a staple named beside five other foods"],
+    ["thanks you thanks you thanks you thanks you thanks you thanks you thanks you",
+      "two-word repetition — vocabulary size alone is not evidence of silence"],
   ];
   for (const [text, what] of MUST_PASS) {
     chk(!transcriptFailsAdmission(text, null), `ADMITTED (${what})`, JSON.stringify(text));
@@ -503,10 +505,7 @@ console.log("\n5. EVERY PROVIDER AND EVERY RETRY MEETS THE ADMISSION FLOOR");
   const MUST_FAIL: [string, VoiceQuality, string][] = [
     ["you you you you you you you you you you you you", null, "eight-plus of one word in a row"],
     ["the the the the the the the the", null, "the same loop with a different word"],
-    // ISOLATES THE CONSECUTIVE-RUN RULE. Every other loop fixture here has a vocabulary of one or
-    // two, so the alternating-loop rule would catch them even with the run rule disabled — and a
-    // revert case for the run rule would stay green. This one has a rich vocabulary and a long
-    // sentence around it, so only the run rule can see it.
+    // ISOLATES THE CONSECUTIVE-RUN RULE with a rich sentence around the identical-word run.
     ["I told my sister no no no no no no no no I am not eating that vetkoek today",
       null, "an eight-word run inside an otherwise ordinary sentence"],
     ["...", null, "no speech at all"],
@@ -516,8 +515,6 @@ console.log("\n5. EVERY PROVIDER AND EVERY RETRY MEETS THE ADMISSION FLOOR");
     ["♪♪♪", null, "music marker, no letters or digits"],
     ["   ", null, "whitespace"],
     ["", null, "empty"],
-    ["thanks you thanks you thanks you thanks you thanks you thanks you thanks you",
-      null, "two words alternating past the dozen-token line"],
     ["I had samp and beans for lunch and walked 8500 steps neh",
       { provider: "whisper", avgLogprob: -1.8, comp: 1.2 }, "good words, but the provider says it did not hear them"],
     ["I had samp and beans for lunch and walked 8500 steps neh",
@@ -527,14 +524,12 @@ console.log("\n5. EVERY PROVIDER AND EVERY RETRY MEETS THE ADMISSION FLOOR");
     chk(transcriptFailsAdmission(text, q), `REFUSED (${what})`, JSON.stringify(text));
   }
 
-  // THE VOCABULARY RULE IS `<= 2 DISTINCT`, NOT A RATIO — so its boundary is worth pinning from
-  // both sides. Three distinct words over a dozen tokens is admitted; two is not. Without the
-  // admitted half, a future tightening to "a low unique ratio" would pass this section silently
-  // while starting to refuse real speech.
+  // Vocabulary size is not an admission decision. Both shapes remain admissible unless an
+  // identical-word run, marker or provider metric independently refuses them.
   chk(!transcriptFailsAdmission("no no no yes yes yes no no no yes yes maybe", null),
     "a dozen tokens drawn from THREE distinct words is still admitted");
-  chk(transcriptFailsAdmission("no no no yes yes yes no no no yes yes yes", null),
-    "…and the same shape drawn from TWO is refused");
+  chk(!transcriptFailsAdmission("no no no yes yes yes no no no yes yes yes", null),
+    "…and the same shape drawn from TWO is admitted too");
 
   // THE PROVIDER'S OWN THRESHOLDS ARE UNCHANGED, not re-tuned under cover of this cut.
   chk(!transcriptFailsAdmission("I walked to the shop and back this morning", { provider: "whisper", avgLogprob: -0.99, comp: 2.49 }),

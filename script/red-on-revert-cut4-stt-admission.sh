@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # RED-ON-REVERT — Cut 4, every provider and every retry meets the admission floor.
 #
-# ONE MECHANISM PER CASE. The floor is not one rule but four that must each be able to fail on its
-# own: the provider's reported metrics where they exist, and — for the three paths that report
-# none — no-speech output, a single word looped, and a two-word vocabulary. A case that reverts two
-# at once cannot tell you which one was load-bearing.
+# ONE MECHANISM PER CASE. The provider's reported metrics, marker/no-speech check and identical-word
+# run must each fail independently. A case that reverts two at once cannot identify the load-bearing rule.
 #
 # TWO GRADERS, AND THEY SEE DIFFERENT THINGS. The PostgreSQL acceptance answers "what did this
 # write?" against a real database; voice-provenance-tests answers "which strings are admitted?"
@@ -129,22 +127,12 @@ s=s.replace("  if (!/[\\p{L}\\p{N}]/u.test(spoken)) return true;\n", "")
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
-# 4. THE CONSECUTIVE-RUN CHECK GOES. Isolated by a fixture with a RICH vocabulary and an eight-word
-#    run inside it — every other loop fixture has a vocabulary of one or two, so the alternating
-#    rule would catch those and this case would stay green while the run rule was gone.
+# 4. THE CONSECUTIVE-RUN CHECK GOES. A rich sentence with eight identical words isolates the run
+#    guard without relying on any vocabulary-size judgment.
 cat > "$PATCH_DIR/4.py" <<'PYEOF'
 p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
 s=s.replace("    if (run >= 8) return true;", "    if (run >= 9999) return true;")
 assert s!=b and "run >= 9999" in s, "no match"; open(p,"w").write(s)
-PYEOF
-
-# 5. THE TWO-WORD VOCABULARY CHECK GOES. "thank you thank you thank you…" is Whisper's most common
-#    output on silence and it caps the commonest TOKEN at half, so the frequency rule never sees
-#    it. This case exists because a fixture of this cut's own failed and found the gap.
-cat > "$PATCH_DIR/5.py" <<'PYEOF'
-p="server/understanding/sa-transcript.ts"; s=open(p).read(); b=s
-s=s.replace("    if (vocabulary.size <= 2) return true;\n", "")
-assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
 # 6. CONTROL — THE FLOOR REFUSES EVERYTHING. The opposite defect, and the one that would silence
@@ -218,11 +206,11 @@ PYEOF
 
 echo "RED-ON-REVERT — Cut 4. Every case below must be caught by at least one grader."
 failed=0
-for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+for i in 1 2 3 4 6 7 8 9 10 11 12; do
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) left every grader green, crashed, or would not patch."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 12/12 cases caught."
+echo "RED-ON-REVERT: GREEN — 11/11 cases caught."

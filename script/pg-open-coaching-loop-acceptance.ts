@@ -19,10 +19,26 @@ process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
 
+// Test clock only: this journey requires a stable midweek boundary. Pin JavaScript and the one
+// PostgreSQL default used by workout completion so both clocks describe the same Wednesday.
+const RealDate = Date;
+const wallClockNow = RealDate.now();
+const { sastWeekStart: acceptanceWeekStart } = await import("../server/sast");
+let acceptanceNow = acceptanceWeekStart(wallClockNow).getTime() + 2 * 86_400_000 + 13 * 3_600_000;
+if (acceptanceNow > wallClockNow) acceptanceNow -= 7 * 86_400_000;
+class AcceptanceDate extends RealDate {
+  constructor(...args: any[]) { super(...(args.length === 0 ? [acceptanceNow] : args) as [any]); }
+  static now() { return acceptanceNow; }
+}
+(globalThis as any).Date = AcceptanceDate;
+
 const REAL = console.log.bind(console);
 console.log = console.warn = console.error = () => {};
 
 const { pool, db } = await import("../server/db");
+await pool.query(
+  `ALTER TABLE workout_logs ALTER COLUMN logged_at SET DEFAULT '${new RealDate(acceptanceNow).toISOString()}'::timestamptz`,
+);
 const schema = await import("../shared/schema");
 const { and, desc, eq } = await import("drizzle-orm");
 const { handleMessage } = await import("../server/routes");
@@ -281,6 +297,7 @@ check((await reload(safe)).awaitingInputType === null, "a safety decision opens 
 if (originOpen) await consumeOpenTrainingLoop(originStored, originOpen.marker);
 if (reactiveOpen) await consumeOpenTrainingLoop(reactiveOriginAfter, reactiveOpen.marker);
 for (const id of ids) await db.delete(schema.users).where(eq(schema.users.id, id)).catch(() => {});
+await pool.query("ALTER TABLE workout_logs ALTER COLUMN logged_at SET DEFAULT now()");
 await pool.end();
 
 if (failed) {
