@@ -91,7 +91,12 @@ const fakeTwilio = {
 };
 _setTwilioClientForTests(fakeTwilio);
 
-const reset = () => { sent = []; rejectFirstWith = 63016; };
+// Five consecutive simulated failures trip the shared circuit breaker, after which every later
+// case drops for the wrong reason. Closing it between cases keeps each one about its own mechanism.
+const { recordTwilioSuccess } = await import("../server/utils");
+const closeCircuit = () => recordTwilioSuccess();
+
+const reset = () => { closeCircuit(); sent = []; rejectFirstWith = 63016; };
 const freeform = () => sent.find(p => typeof p.body === "string");
 const template = () => sent.find(p => typeof p.contentSid === "string");
 
@@ -174,6 +179,7 @@ console.log("\n3. A GENERIC CHECK-IN IS NEVER RECORDED AS DELIVERY OF THE ORIGIN
     "a matched template is still reported as delivered", `outcome=${good}`);
 
   // AND AN OPEN WINDOW IS UNTOUCHED: no rejection, no template, plain freeform delivery.
+  closeCircuit();
   reset(); rejectFirstWith = null;
   const open = await sendWhatsApp("whatsapp:+27820000006", "Morning Thandi.", undefined, {
     name: "kamlife_daily_plan", variables: { "1": "Thandi", "2": "Walk 20 minutes" },
@@ -327,6 +333,105 @@ console.log("\n8. THE APPROVED PACK IS STILL SUBMITTABLE, AND THE TEMPLATES STIL
   chk(TEMPLATES.length === 4, "the pack is still four templates — none invented for this cut",
     `${TEMPLATES.length}`);
   chk(renderTemplateBody("kamlife_does_not_exist") === "", "an unknown template renders to nothing");
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+console.log("\n9. AN SMS THAT NEVER WENT IS NOT A DELIVERY");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// sendSMSFallback returned void, so every caller reported "fallback" — which deliveryAccepted()
+// reads as the message having arrived — whether the SMS went, failed, or was never attempted.
+// It is never attempted in production today: TWILIO_SMS_NUMBER is unset, so `if (!SMS_FROM) return`
+// was the first line and the whole channel-error path has been reporting successful delivery for
+// messages that reached nobody. 63007 (not opted in) goes straight to SMS, bypassing the window
+// recovery, so it isolates this path from the template work above.
+{
+  const { sendCriticalAlert } = await import("../server/scheduler/shared");
+  const NOT_OPTED_IN = 63007;
+
+  // (a) NO SMS CHANNEL AT ALL — production's current state.
+  delete process.env.TWILIO_SMS_NUMBER;
+  closeCircuit();
+  reset(); rejectFirstWith = NOT_OPTED_IN;
+  const noChannel = await sendWhatsApp("whatsapp:+27820000011", "Your payment did not go through.");
+  chk(noChannel === "dropped",
+    "with TWILIO_SMS_NUMBER unset, a channel error is DROPPED, not reported as fallback",
+    `outcome=${noChannel}`);
+  chk(!deliveryAccepted(noChannel), "…so no caller records it as delivered");
+
+  // (b) AN SMS CHANNEL THAT WORKS — the control, or (a) is satisfied by a door that always drops.
+  process.env.TWILIO_SMS_NUMBER = "+27000000001";
+  closeCircuit();
+  reset(); rejectFirstWith = NOT_OPTED_IN;
+  const withSms = await sendWhatsApp("whatsapp:+27820000012", "Your payment did not go through.");
+  chk(withSms === "fallback", "with a working SMS number the same failure IS a fallback",
+    `outcome=${withSms}`);
+  chk(deliveryAccepted(withSms), "…and that one does count as delivered");
+  chk(sent.some(p => p.from === "+27000000001" && typeof p.body === "string"),
+    "…because an SMS was really sent, from the SMS number",
+    JSON.stringify(sent.map(p => p.from)));
+
+  // (c) AN SMS CHANNEL THAT FAILS. Configured is not the same as delivered.
+  process.env.TWILIO_SMS_NUMBER = "+27000000001";
+  closeCircuit();
+  sent = [];
+  _setTwilioClientForTests({
+    messages: {
+      create: async (payload: Record<string, any>) => {
+        sent.push(payload);
+        const err: any = new Error("simulated failure");
+        err.code = payload.from === "+27000000001" ? 21610 : NOT_OPTED_IN;
+        err.status = 400;
+        throw err;
+      },
+    },
+  });
+  const smsFailed = await sendWhatsApp("whatsapp:+27820000013", "Your payment did not go through.");
+  chk(smsFailed === "dropped", "an SMS that was attempted and FAILED is dropped too",
+    `outcome=${smsFailed}`);
+  _setTwilioClientForTests(fakeTwilio);
+
+  // (d) sendCriticalAlert PROPAGATES the real outcome. It returned void, so the payment alerts —
+  //     the one class of message where a client loses their coaching if it does not arrive —
+  //     could not tell a delivery from a silence.
+  delete process.env.TWILIO_SMS_NUMBER;
+  closeCircuit();
+  reset(); rejectFirstWith = NOT_OPTED_IN;
+  const alert = await sendCriticalAlert("whatsapp:+27820000014", "Your payment did not go through.");
+  chk(alert === "dropped", "sendCriticalAlert returns the REAL outcome, not void", `outcome=${alert}`);
+
+  closeCircuit();
+  reset(); rejectFirstWith = null;
+  const alertOk = await sendCriticalAlert("whatsapp:+27820000015", "Your payment did not go through.");
+  chk(alertOk === "sent" && deliveryAccepted(alertOk),
+    "…and a delivered alert still reports sent", `outcome=${alertOk}`);
+
+  // (e) ITS OWN CATCH BRANCH, WHICH IS A DIFFERENT PATH. Above, sendWhatsApp RETURNS "dropped" and
+  //     sendCriticalAlert simply passes it on. The branch that used to lie is the one reached when
+  //     sendWhatsApp THROWS — a terminal non-channel failure — where it falls to SMS and previously
+  //     reported "fallback" whatever happened. A revert of that line stayed green until this case
+  //     existed, which is exactly what the harness is for.
+  delete process.env.TWILIO_SMS_NUMBER;
+  closeCircuit();
+  sent = [];
+  _setTwilioClientForTests({
+    messages: {
+      create: async (payload: Record<string, any>) => {
+        sent.push(payload);
+        const err: any = new Error("simulated terminal failure");
+        err.code = 21610;          // deliberately NOT a WhatsApp channel error
+        err.status = 400;          // non-transient, so the retry loop gives up at once
+        throw err;
+      },
+    },
+  });
+  const thrown = await sendCriticalAlert("whatsapp:+27820000016", "Your payment did not go through.");
+  chk(thrown === "dropped",
+    "when WhatsApp throws and there is no SMS channel, the alert is DROPPED, not 'fallback'",
+    `outcome=${thrown}`);
+  chk(!deliveryAccepted(thrown), "…so nothing records that payment alert as having arrived");
+  _setTwilioClientForTests(fakeTwilio);
+  closeCircuit();
+  delete process.env.TWILIO_SMS_NUMBER;
 }
 
 _setTwilioClientForTests(null);

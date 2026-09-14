@@ -131,6 +131,16 @@ export function _setTwilioClientForTests(c: any | null): void {
   _clientKey = "";
 }
 
+/**
+ * The one Twilio client, for the doors outside this module that still need it directly.
+ *
+ * server/scheduler/shared.ts built its OWN at import time and used it for the SMS fallback — the
+ * second copy Cut B2 removed from the send path and did not remove from this one. It is why a
+ * failed SMS could not be graded without the network, and why the fallback spent months reporting
+ * deliveries it had not made. Same client, same credentials, same test seam.
+ */
+export function twilioClientForSend(): any { return client(); }
+
 /** One client, rebuilt only if the credentials themselves change. */
 function client(): any {
   if (_clientOverride) return _clientOverride;

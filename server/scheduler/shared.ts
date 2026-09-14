@@ -17,7 +17,7 @@ import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply } from "../reply-hygiene";
 import { enforceOutboundTruth, prepareOutbound } from "../outbound-authority";
 import { templateSid, isValidTemplateSid, renderTemplateBody, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
-import { whatsappFrom, type DeliveryResult } from "../outbound-delivery";
+import { whatsappFrom, twilioClientForSend, type DeliveryResult } from "../outbound-delivery";
 
 export { db, pool };
 export { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles };
@@ -368,7 +368,12 @@ export const FROM_NUMBER = whatsappFrom();
 // SMS_FROM: set TWILIO_SMS_NUMBER to a Twilio phone number (e.g. +27XXXXXXXXX or a shortcode).
 // When WhatsApp delivery fails with a channel error, critical alerts fall back to SMS.
 // SMS works on every SA phone — no data, no app, no WhatsApp account required.
-const SMS_FROM = process.env.TWILIO_SMS_NUMBER || "";
+// READ AT SEND TIME, NOT AT IMPORT (Cut 6 amendment, 2026-09-14). As a module-level const this
+// was captured once at boot, so setting TWILIO_SMS_NUMBER in Railway did nothing until the next
+// redeploy — and it made the whole fallback path untestable, which is a large part of why it went
+// so long reporting deliveries it had not made. Lazy, like whatsappFrom() and reengageTemplateSid()
+// in this same file, both of which were made lazy for the same reason.
+const smsFrom = () => (process.env.TWILIO_SMS_NUMBER || "").trim();
 
 // Approved WhatsApp template (Twilio Content API SID, "HX…") used to re-open a
 // conversation when a freeform proactive send is rejected for being OUTSIDE the
@@ -391,30 +396,52 @@ const WA_CHANNEL_ERRORS = new Set([
   21408, // Region not permitted
 ]);
 
-async function sendSMSFallback(to: string, body: string): Promise<void> {
-  if (!SMS_FROM) return;
+/**
+ * Returns TRUE only when an SMS was actually accepted by Twilio.
+ *
+ * IT USED TO RETURN NOTHING (Cut 6 amendment, 2026-09-14). Every caller then reported "fallback"
+ * — which `deliveryAccepted()` reads as the message having arrived — whether the SMS went, failed,
+ * or was never attempted. And it is never attempted in production today: TWILIO_SMS_NUMBER is
+ * unset, so `if (!SMS_FROM) return` was the FIRST line, and the whole channel-error path has been
+ * reporting successful delivery for messages that reached nobody at all.
+ *
+ * That is the same defect as the generic check-in, one layer down: a door that cannot deliver
+ * telling its caller it did.
+ */
+async function sendSMSFallback(to: string, body: string): Promise<boolean> {
+  const SMS_FROM = smsFrom();
+  if (!SMS_FROM) {
+    console.warn(`[SMS:FALLBACK] TWILIO_SMS_NUMBER is unset — no SMS sent to ${to.slice(-8)}, and this message did NOT arrive`);
+    return false;
+  }
   const smsTo = to.replace(/^whatsapp:/, "");
   // SMS messages truncated to 320 chars — enough for an alert, not a coaching essay
   const smsBody = body.length > 320
     ? body.slice(0, 317) + "…"
     : body;
   try {
-    await twilioClient.messages.create({ from: SMS_FROM, to: smsTo, body: smsBody });
+    await twilioClientForSend().messages.create({ from: SMS_FROM, to: smsTo, body: smsBody });
     console.log(`[SMS:FALLBACK] → ${smsTo.slice(-8)}: ${smsBody.slice(0, 60)}…`);
+    return true;
   } catch (smsErr: unknown) {
     console.error(`[SMS:FALLBACK] ✗ SMS also failed for ${smsTo.slice(-8)}:`, (smsErr as any)?.message || smsErr);
+    return false;
   }
 }
 
 // sendCriticalAlert — use for subscription notices, account alerts, and service outages.
 // Tries WhatsApp first, falls back to SMS if WhatsApp fails.
 // DO NOT use for routine coaching responses — SMS coaching is not viable at full length.
-export async function sendCriticalAlert(to: string, body: string, windowTemplate?: WindowTemplate): Promise<void> {
+// RETURNS THE REAL OUTCOME (Cut 6 amendment, 2026-09-14). It returned void, so a caller could not
+// tell a delivered payment alert from one that reached nobody — on the one class of message where
+// the client loses their coaching if it does not arrive. `substituted` and `dropped` both mean
+// this alert did NOT land, and a caller can now act on that.
+export async function sendCriticalAlert(to: string, body: string, windowTemplate?: WindowTemplate): Promise<DeliveryResult> {
   try {
-    await sendWhatsApp(to, body, undefined, windowTemplate);
+    return await sendWhatsApp(to, body, undefined, windowTemplate);
   } catch {
     console.warn(`[ALERT] WhatsApp failed for ${to.slice(-8)} — attempting SMS fallback`);
-    await sendSMSFallback(to, body);
+    return (await sendSMSFallback(to, body)) ? "fallback" : "dropped";
   }
 }
 
@@ -671,7 +698,11 @@ async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | unde
       if (e.code !== 63016) {
         console.warn(`[WA:CHANNEL_ERROR] code=${e.code} for ${to.slice(-8)} — attempting SMS fallback`);
       }
-      await sendSMSFallback(to, smsFallbackText);
+      // THE OUTCOME IS WHETHER THE SMS ACTUALLY WENT. Reporting "fallback" unconditionally told
+      // every caller the client had read this message, including when TWILIO_SMS_NUMBER is unset
+      // — which it is, in production, right now. Nothing arrived; the answer is "dropped".
+      const smsLanded = await sendSMSFallback(to, smsFallbackText);
+      if (!smsLanded) return "dropped";
       void logOutboundToHistory(to, smsFallbackText); // best-effort, non-blocking
       return "fallback";
     },
@@ -790,7 +821,10 @@ export async function sendWhatsAppTemplate(
       const e = err as { code?: number };
       if (!e?.code || !WA_CHANNEL_ERRORS.has(e.code)) return null;
       console.warn(`[WA:CHANNEL_ERROR:TEMPLATE] code=${e.code} for ${to.slice(-8)}`);
-      if (opts?.fallbackText) await sendSMSFallback(to, opts.fallbackText);
+      // Same rule on this door: with no text to send, or no SMS channel to send it on, nothing
+      // reached the client and the caller must be told so.
+      const smsLanded = opts?.fallbackText ? await sendSMSFallback(to, opts.fallbackText) : false;
+      if (!smsLanded) return "dropped";
       void logOutboundToHistory(to, logText);
       return "fallback";
     },

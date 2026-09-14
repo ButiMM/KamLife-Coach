@@ -175,13 +175,34 @@ s=s.replace("            const d = await sendWhatsAppTemplate(to, matched, windo
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
+
+# 10. THE SMS FALLBACK GOES BACK TO REPORTING A DELIVERY IT DID NOT MAKE. With TWILIO_SMS_NUMBER
+#     unset — production's state today — nothing is sent and every caller is told "fallback",
+#     which deliveryAccepted() reads as the client having received the message.
+cat > "$PATCH_DIR/10.py" <<'PYEOF'
+p="server/scheduler/shared.ts"; s=open(p).read(); b=s
+s=s.replace('      const smsLanded = await sendSMSFallback(to, smsFallbackText);\n      if (!smsLanded) return "dropped";\n',
+            '      await sendSMSFallback(to, smsFallbackText);\n')
+assert s!=b, "no match"; open(p,"w").write(s)
+PYEOF
+
+# 11. sendCriticalAlert GOES BACK TO SWALLOWING THE OUTCOME. The payment alerts — the one class of
+#     message where a client loses their coaching if it does not arrive — cannot tell a delivery
+#     from a silence.
+cat > "$PATCH_DIR/11.py" <<'PYEOF'
+p="server/scheduler/shared.ts"; s=open(p).read(); b=s
+s=s.replace('    return (await sendSMSFallback(to, body)) ? "fallback" : "dropped";',
+            '    await sendSMSFallback(to, body); return "fallback";')
+assert s!=b, "no match"; open(p,"w").write(s)
+PYEOF
+
 echo "RED-ON-REVERT — Cut 6. Every case below must be caught by the grader."
 failed=0
-for i in 1 2 2b 3 4 5 6 7 8 9; do
+for i in 1 2 2b 3 4 5 6 7 8 9 10 11; do
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) left the grader green, crashed, or would not patch."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 10/10 cases caught."
+echo "RED-ON-REVERT: GREEN — 12/12 cases caught."

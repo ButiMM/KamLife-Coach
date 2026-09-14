@@ -137,6 +137,103 @@ REAL("\n3. THE OUTCOME VOCABULARY SAYS WHAT IT MEANS (source)");
     "…and the message's own approved template is consulted first");
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n4. THE REAL JOB OWNERS SELECT THEIR OWN TEMPLATE — not just sendWhatsApp directly");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// WHY THIS SECTION EXISTS. Every other proof in this cut drives sendWhatsApp with a template the
+// TEST supplies. That grades the shared door and says nothing about whether morning.ts, weekly.ts
+// and business.ts still hand it one: all three call sites could be disconnected tomorrow and the
+// suite would stay green. So these run the ACTUAL exported job functions against real rows, with
+// Twilio rejecting the first freeform send exactly as a closed 24-hour window does.
+{
+  const { _setTwilioClientForTests } = await import("../server/outbound-delivery");
+  const { runMorningCheckin } = await import("../server/scheduler/jobs/morning");
+  const { runSundayWeeklyReport } = await import("../server/scheduler/jobs/weekly");
+  const { runPaymentFailureRecovery } = await import("../server/scheduler/jobs/business");
+
+  const SID = {
+    daily: "HX0000000000000000000000000000000a",
+    weekly: "HX0000000000000000000000000000000b",
+    payment: "HX0000000000000000000000000000000c",
+    reengage: "HX0000000000000000000000000000000d",
+  };
+  process.env.TWILIO_DAILY_TEMPLATE_SID = SID.daily;
+  process.env.TWILIO_WEEKLY_TEMPLATE_SID = SID.weekly;
+  process.env.TWILIO_PAYMENT_TEMPLATE_SID = SID.payment;
+  process.env.TWILIO_REENGAGE_TEMPLATE_SID = SID.reengage;
+  process.env.PROACTIVE_PAUSED = "";   // these jobs are the subject; the killswitch would skip them
+
+  // Every freeform body is rejected with 63016 — the window is closed for everyone. Templates are
+  // accepted. Each payload is recorded so the claim is read off what was handed to Twilio.
+  let payloads: Array<Record<string, any>> = [];
+  _setTwilioClientForTests({
+    messages: {
+      create: async (p: Record<string, any>) => {
+        payloads.push(p);
+        if (typeof p.body === "string") {
+          const err: any = new Error("simulated 63016"); err.code = 63016; err.status = 400; throw err;
+        }
+        return { sid: "SM1" };
+      },
+    },
+  });
+  // SCOPED TO THIS CLIENT'S NUMBER. These jobs iterate EVERY user in the database, so an
+  // unscoped assertion reads other rows' sends — the first version of this section saw seventeen
+  // generic check-ins belonging to clients this cut never touched and called it a failure.
+  const sidsSent = () => payloads.filter(p => p.contentSid && p.to === phone).map(p => p.contentSid);
+  const bodiesSent = () => payloads.filter(p => typeof p.body === "string" && p.to === phone).length;
+
+  // ── MORNING ────────────────────────────────────────────────────────────────────────────────
+  // THE ROW IS SHAPED TO SATISFY EACH JOB'S OWN CONDITIONS, never to bypass them: old enough to
+  // be reported on, quiet for three days, and with REAL workout rows behind the counts the bodies
+  // quote — without those the outbound truth floor blocks the send, correctly, and the job never
+  // reaches its template. (It did exactly that here, which is how this fixture was found wrong.)
+  await pool.query(
+    `UPDATE users SET awaiting_input_type = NULL, subscription_status = 'active',
+       created_at = NOW() - INTERVAL '30 days',
+       total_workouts_completed = 4 WHERE id = $1`, [user.id]);
+  await pool.query("DELETE FROM workout_logs WHERE user_id = $1", [user.id]);
+  for (let d = 1; d <= 4; d++) {
+    await pool.query(
+      "INSERT INTO workout_logs (user_id, workout_completed, logged_at) VALUES ($1, true, NOW() - ($2 || ' days')::interval)",
+      [user.id, String(d)]);
+  }
+  payloads = [];
+  await runMorningCheckin().catch((e) => REAL(`  (morning job threw: ${(e as any)?.message})`));
+  chk(bodiesSent() > 0, "the morning job reached this client at all", `freeform attempts: ${bodiesSent()}`);
+  chk(sidsSent().includes(SID.daily),
+    "runMorningCheckin() sends the DAILY template when the window is closed",
+    `templates sent: ${JSON.stringify(sidsSent())}`);
+  chk(!sidsSent().includes(SID.reengage) || sidsSent().indexOf(SID.daily) >= 0,
+    "…rather than falling straight to the generic check-in", JSON.stringify(sidsSent()));
+
+  // ── WEEKLY ─────────────────────────────────────────────────────────────────────────────────
+  payloads = [];
+  await pool.query("DELETE FROM client_actions WHERE user_id = $1", [user.id]).catch(() => {});
+  await pool.query("DELETE FROM sent_proactive WHERE user_id = $1", [user.id]).catch(() => {});
+  await runSundayWeeklyReport().catch((e) => REAL(`  (weekly job threw: ${(e as any)?.message})`));
+  chk(bodiesSent() > 0, "the weekly job reached this client at all", `freeform attempts: ${bodiesSent()}`);
+  chk(sidsSent().includes(SID.weekly),
+    "runSundayWeeklyReport() sends the WEEKLY template when the window is closed",
+    `templates sent: ${JSON.stringify(sidsSent())}`);
+
+  // ── PAYMENT ────────────────────────────────────────────────────────────────────────────────
+  // The recovery only fires 1, 3 or 7 days after cancellation, and only for a client who has
+  // actually trained — so the row is shaped to satisfy the job's own conditions, not bypass them.
+  payloads = [];
+  await pool.query(
+    `UPDATE users SET subscription_status = 'inactive', cancelled_at = NOW() - INTERVAL '7 days',
+      total_workouts_completed = 4 WHERE id = $1`, [user.id]);
+  await pool.query("DELETE FROM sent_proactive WHERE user_id = $1", [user.id]).catch(() => {});
+  await runPaymentFailureRecovery().catch((e) => REAL(`  (payment job threw: ${(e as any)?.message})`));
+  chk(bodiesSent() > 0, "the payment job reached this client at all", `freeform attempts: ${bodiesSent()}`);
+  chk(sidsSent().includes(SID.payment),
+    "runPaymentFailureRecovery() sends the PAYMENT template on the DAY-SEVEN reminder",
+    `templates sent: ${JSON.stringify(sidsSent())}`);
+
+  _setTwilioClientForTests(null);
+}
+
 REAL(`\n${failed === 0 ? "pg-proactive-template-acceptance: GREEN" : `pg-proactive-template-acceptance: ${failed} FAILED`}\n`);
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
 await pool.end();

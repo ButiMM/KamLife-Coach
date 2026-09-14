@@ -114,11 +114,36 @@ export async function runSundayWeeklyReport(): Promise<void> {
       // versions of chooseAction's `come_back` and `log` rungs, and they were the versions that
       // reached the client who had gone quietest — the one the ladder's escalation was written
       // for. A week of silence and six weeks of silence got the same sentence here.
+      // THE WEEKLY TEMPLATE BELONGS TO ALL THREE EXITS (Cut 6 amendment, 2026-09-14). The full
+      // report below is not the only weekly review this job sends: a client with nothing logged
+      // and a client with a thin week each get one from the branches immediately below — and those
+      // are the clients MOST likely to be outside the 24-hour window, because going quiet is
+      // exactly what put them on this path. Wiring only the full report would have left the
+      // weekly review failing for precisely the people it was written for.
+      //
+      // Counts come from rows already fetched above, so this adds no query and states nothing it
+      // cannot back: sessions from workoutEntries, food days from the FOOD_LOG chats themselves.
+      const weeklyTemplateFor = (sessionsDone: number, foodDayCount: number) => ({
+        name: "kamlife_weekly_check",
+        variables: {
+          "1": name,
+          "2": `${sessionsDone} of ${client.trainingDaysPerWeek || 3}`,
+          "3": `${foodDayCount} of 7`,
+        },
+      });
+      const foodDaysFrom = (rows: typeof chats) => new Set(
+        rows.filter(c => c.intent === "FOOD_LOG" && c.createdAt)
+          .map(c => new Date(c.createdAt!).toDateString()),
+      ).size;
+
       if (chats.length === 0) {
         if (clientAgeDays < 2) continue; // just onboarded today — skip
         const quiet = await canonicalNextMove(client);
         if (quiet.line) {
-          const delivery = await sendWhatsApp(client.phoneNumber, `${name}, nothing logged this week.\n\n${quiet.line}`);
+          const delivery = await sendWhatsApp(
+            client.phoneNumber, `${name}, nothing logged this week.\n\n${quiet.line}`,
+            undefined, weeklyTemplateFor(workoutEntries.length, 0),
+          );
           await recordCanonicalMoveOutbound(client, quiet, delivery);
         }
         continue;
@@ -127,7 +152,10 @@ export async function runSundayWeeklyReport(): Promise<void> {
       if (daysWithLogs < 3) {
         const thin = await canonicalNextMove(client);
         const opener = `${name}, ${daysWithLogs} day${daysWithLogs !== 1 ? "s" : ""} logged this week. You're in it.`;
-        const delivery = await sendWhatsApp(client.phoneNumber, thin.line ? `${opener}\n\n${thin.line}` : opener);
+        const delivery = await sendWhatsApp(
+          client.phoneNumber, thin.line ? `${opener}\n\n${thin.line}` : opener,
+          undefined, weeklyTemplateFor(workoutEntries.length, foodDaysFrom(chats)),
+        );
         await recordCanonicalMoveOutbound(client, thin, delivery);
         continue;
       }
@@ -261,14 +289,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
       // was approved and wired with no call site, so a client who had not messaged in 24 hours got
       // the generic check-in instead of their 7-day review — and this job recorded a delivery and
       // a canonical move against it. The template carries the two counts the review is built on.
-      const weeklyTemplate = {
-        name: "kamlife_weekly_check",
-        variables: {
-          "1": name,
-          "2": `${completedSessions} of ${plannedSessions}`,
-          "3": `${foodDays} of 7`,
-        },
-      };
+      const weeklyTemplate = weeklyTemplateFor(completedSessions, foodDays);
       const delivery = await sendWhatsApp(client.phoneNumber, lines.join("\n"), undefined, weeklyTemplate);
       await recordCanonicalMoveOutbound(client, move, delivery);
 

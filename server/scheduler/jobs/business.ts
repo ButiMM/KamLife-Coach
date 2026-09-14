@@ -96,7 +96,7 @@ export async function runPaymentFailureRecovery(): Promise<void> {
       } else if (daysSinceFail === 3) {
         await sendCriticalAlert(client.phoneNumber, `${name} — your coaching's been paused 3 days. You're in Week ${client.programmeWeek || 1} with ${workouts} sessions done, and all of it is saved.\n\nWhenever you're ready to pick back up, this fixes it in 30 seconds:\n${payLink}`, paymentTemplate);
       } else if (daysSinceFail === 7) {
-        await sendCriticalAlert(client.phoneNumber, `${name}, last message about this — your subscription has been paused for a week.\n\n${workouts} sessions. Every meal logged. Every step counted. That work is not lost.\n\nWhen you're ready, reply *pay* and I'll send a fresh link. No pressure, no expiry on your data.\n\nIf you'd like to stop completely, reply *STOP* and I won't message again.`);
+        await sendCriticalAlert(client.phoneNumber, `${name}, last message about this — your subscription has been paused for a week.\n\n${workouts} sessions. Every meal logged. Every step counted. That work is not lost.\n\nWhen you're ready, reply *pay* and I'll send a fresh link. No pressure, no expiry on your data.\n\nIf you'd like to stop completely, reply *STOP* and I won't message again.`, paymentTemplate);
       }
     } catch (err) { console.error(`[SCHEDULER] Payment recovery error — ${client.phoneNumber}:`, err); }
   }
