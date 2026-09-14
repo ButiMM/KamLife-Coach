@@ -118,17 +118,37 @@ export const GYM_KEYTERMS: string[] = [
 ];
 
 /**
+ * What Scribe tells us about a transcription, beside the words themselves.
+ *
+ * THIS USED TO BE THROWN AWAY AT THE PARSE. The response was read as `{ text?: string }` and the
+ * function returned a bare string, so no caller could see the provider's own view of its output
+ * even in principle — and a review of Cut 4 correctly called that out as approved work omitted.
+ *
+ * `wordLogprobs` are Scribe's per-word confidences, on Scribe's scale. They are carried and
+ * logged; nothing rejects on them, because this codebase's thresholds were calibrated against
+ * Whisper and a number is not interchangeable just because it is also a logprob.
+ *
+ * `languageProbability` says how sure Scribe is about WHICH LANGUAGE it heard. That is not a
+ * statement about transcript correctness, and it must not be read as one.
+ */
+export type ScribeResult = {
+  text: string;
+  wordLogprobs: number[];
+  languageProbability: number | null;
+};
+
+/**
  * Transcribe audio using ElevenLabs Scribe v2.
  * Better WER than Whisper on SA languages (Afrikaans, Zulu, Xhosa, etc.).
  * `keyterms` bias the model toward domain words (exercise names, SA foods).
- * Returns the transcribed text, or null if not configured / fails.
+ * Returns the transcript AND the provider's own metadata, or null if not configured / fails.
  */
 export async function scribeTranscribe(
   audioBuffer: ArrayBuffer,
   ext: string,
   langHint?: string,
   keyterms: string[] = GYM_KEYTERMS,
-): Promise<string | null> {
+): Promise<ScribeResult | null> {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) return null;
 
@@ -155,8 +175,20 @@ export async function scribeTranscribe(
       return null;
     }
 
-    const data = await response.json() as { text?: string };
-    return data.text?.trim() || null;
+    const data = await response.json() as {
+      text?: string;
+      language_probability?: number;
+      words?: Array<{ logprob?: number }>;
+    };
+    const text = data.text?.trim() || "";
+    if (!text) return null;
+    // ABSENT IS NOT ZERO: a missing logprob is dropped, never defaulted to a confident-looking 0.
+    const wordLogprobs = (data.words || [])
+      .map((w) => w?.logprob)
+      .filter((n): n is number => typeof n === "number" && Number.isFinite(n));
+    const languageProbability = Number.isFinite(data.language_probability as number)
+      ? (data.language_probability as number) : null;
+    return { text, wordLogprobs, languageProbability };
   } catch (e: any) {
     console.error("[ELEVENLABS] Scribe failed:", e.message);
     return null;

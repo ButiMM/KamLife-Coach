@@ -37,6 +37,20 @@ process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
 
+// Test clock only: the progression fixture starts at programme day 2, so run its "today"
+// completion on the matching Wednesday slot. Otherwise Monday maps calendar slot 1 back to the
+// already-seeded day 2 and makes an advancing cursor look stationary.
+const RealDate = Date;
+const wallClockNow = RealDate.now();
+const { sastWeekStart: acceptanceWeekStart } = await import("../server/sast");
+let acceptanceNow = acceptanceWeekStart(wallClockNow).getTime() + 2 * 86_400_000 + 13 * 3_600_000;
+if (acceptanceNow > wallClockNow) acceptanceNow -= 7 * 86_400_000;
+class AcceptanceDate extends RealDate {
+  constructor(...args: any[]) { super(...(args.length === 0 ? [acceptanceNow] : args) as [any]); }
+  static now() { return acceptanceNow; }
+}
+(globalThis as any).Date = AcceptanceDate;
+
 const REAL = console.log.bind(console);
 console.log = console.warn = console.error = () => {};
 
