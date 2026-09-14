@@ -82,12 +82,21 @@ export async function runPaymentFailureRecovery(): Promise<void> {
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
       if (daysSinceFail !== 1 && daysSinceFail !== 3 && daysSinceFail !== 7) continue;
       if (!(await claimCritical(client.id, "payment_recovery", todaySAST()))) continue;
+      // OUTSIDE THE WINDOW, A LAPSED CLIENT STILL HEARS WHY (Cut 6, 2026-09-14).
+      // kamlife_payment_failed was approved and wired with no call site — so the one message a
+      // client most needs, about money, was the one most likely to be replaced by a generic
+      // check-in, because a client whose payment failed has usually gone quiet. The amount comes
+      // from the shared pricing constant, not a number retyped here.
+      const paymentTemplate = {
+        name: "kamlife_payment_failed",
+        variables: { "1": name, "2": String(PRICING.monthlyPriceZAR) },
+      };
       if (daysSinceFail === 1) {
-        await sendCriticalAlert(client.phoneNumber, `${name}, your payment didn't go through yesterday. Could be a bank issue — happens all the time.\n\nYour programme and ${workouts} sessions of progress are saved. Update your payment here and coaching continues immediately:\n${payLink}`);
+        await sendCriticalAlert(client.phoneNumber, `${name}, your payment didn't go through yesterday. Could be a bank issue — happens all the time.\n\nYour programme and ${workouts} sessions of progress are saved. Update your payment here and coaching continues immediately:\n${payLink}`, paymentTemplate);
       } else if (daysSinceFail === 3) {
-        await sendCriticalAlert(client.phoneNumber, `${name} — your coaching's been paused 3 days. You're in Week ${client.programmeWeek || 1} with ${workouts} sessions done, and all of it is saved.\n\nWhenever you're ready to pick back up, this fixes it in 30 seconds:\n${payLink}`);
+        await sendCriticalAlert(client.phoneNumber, `${name} — your coaching's been paused 3 days. You're in Week ${client.programmeWeek || 1} with ${workouts} sessions done, and all of it is saved.\n\nWhenever you're ready to pick back up, this fixes it in 30 seconds:\n${payLink}`, paymentTemplate);
       } else if (daysSinceFail === 7) {
-        await sendCriticalAlert(client.phoneNumber, `${name}, last message about this — your subscription has been paused for a week.\n\n${workouts} sessions. Every meal logged. Every step counted. That work is not lost.\n\nWhen you're ready, reply *pay* and I'll send a fresh link. No pressure, no expiry on your data.\n\nIf you'd like to stop completely, reply *STOP* and I won't message again.`);
+        await sendCriticalAlert(client.phoneNumber, `${name}, last message about this — your subscription has been paused for a week.\n\n${workouts} sessions. Every meal logged. Every step counted. That work is not lost.\n\nWhen you're ready, reply *pay* and I'll send a fresh link. No pressure, no expiry on your data.\n\nIf you'd like to stop completely, reply *STOP* and I won't message again.`, paymentTemplate);
       }
     } catch (err) { console.error(`[SCHEDULER] Payment recovery error — ${client.phoneNumber}:`, err); }
   }

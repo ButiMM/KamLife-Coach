@@ -39,9 +39,25 @@
  */
 import twilio from "twilio";
 
-export type DeliveryResult = "sent" | "dropped" | "fallback";
+/**
+ * "substituted" (Cut 6, 2026-09-14) — the transport delivered SOMETHING, and it was not this
+ * message. It exists for exactly one path: a proactive send rejected for being outside the
+ * 24-hour window, recovered by the generic re-engagement template. That template says "Coach K
+ * checking in"; it does not carry the morning plan, the weekly review or the payment alert that
+ * was actually being sent. Reporting that as "fallback" told every caller the client had received
+ * their message, so the morning job recorded a training move the client was never shown and the
+ * weekly job recorded a review nobody read.
+ */
+export type DeliveryResult = "sent" | "dropped" | "fallback" | "substituted";
 
-/** A transport handoff exists only when the intended text reached Twilio or its owned fallback. */
+/**
+ * A transport handoff exists only when THE INTENDED TEXT reached Twilio or its owned fallback.
+ *
+ * "substituted" is deliberately false here. SMS fallback carries the real words, and an approved
+ * template that matches the message carries them too — both are the message arriving in another
+ * shape. A generic check-in is a different message, and a caller asking "did they get this?" must
+ * be told no.
+ */
 export function deliveryAccepted(result: DeliveryResult): boolean {
   return result === "sent" || result === "fallback";
 }
@@ -79,10 +95,55 @@ export function whatsappFrom(): string {
   return raw ? `whatsapp:${raw.replace(/^whatsapp:/, "")}` : "";
 }
 
+/**
+ * Where Twilio POSTs what happened to a message after it accepted it — the existing
+ * /webhook/status route, derived from APP_URL rather than configured a second time.
+ *
+ * HTTPS ONLY, AND ABSENT RATHER THAN GUESSED. Twilio refuses a non-https callback, and a bad
+ * value makes every send fail rather than merely going unreported — so an APP_URL that is unset,
+ * local, or not https yields no callback at all and delivery behaves exactly as it does today.
+ * The receipt is worth having; it is not worth risking the message for.
+ */
+export function statusCallbackUrl(): string {
+  const base = (process.env.APP_URL || "").trim().replace(/\/+$/, "");
+  if (!base || !base.startsWith("https://")) return "";
+  return `${base}/webhook/status`;
+}
+
 let _client: any = null;
 let _clientKey = "";
+let _clientOverride: any = null;
+
+/**
+ * TEST SEAM — the same shape as the `_reset*` helpers this codebase already exports from
+ * production modules (_resetOutboundDedupe, _resetInteractionCorrelation, _resetReplyPaths).
+ *
+ * The 24-hour window recovery can only be graded by making Twilio REJECT a send with 63016, and
+ * that is a fact about a live WhatsApp sender and a real client's last inbound message — not
+ * something any fixture can arrange. Simulating the provider's answer is the only way to ask
+ * "which template did we then send, and what did we tell the caller?" without a live number.
+ *
+ * Pass null to restore the real client. Nothing in the product calls this.
+ */
+export function _setTwilioClientForTests(c: any | null): void {
+  _clientOverride = c;
+  _client = null;
+  _clientKey = "";
+}
+
+/**
+ * The one Twilio client, for the doors outside this module that still need it directly.
+ *
+ * server/scheduler/shared.ts built its OWN at import time and used it for the SMS fallback — the
+ * second copy Cut B2 removed from the send path and did not remove from this one. It is why a
+ * failed SMS could not be graded without the network, and why the fallback spent months reporting
+ * deliveries it had not made. Same client, same credentials, same test seam.
+ */
+export function twilioClientForSend(): any { return client(); }
+
 /** One client, rebuilt only if the credentials themselves change. */
 function client(): any {
+  if (_clientOverride) return _clientOverride;
   const key = `${process.env.TWILIO_ACCOUNT_SID || ""}:${process.env.TWILIO_AUTH_TOKEN || ""}`;
   if (!_client || _clientKey !== key) {
     _client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -123,7 +184,17 @@ export async function deliverTwilioMessage(
     return "dropped";
   }
 
-  const payload = { ...params, from, to };
+  // DELIVERY RECEIPTS, ON BOTH DOORS (Cut 6, 2026-09-14). server/routes/payments.ts has carried a
+  // signature-validated /webhook/status handler for months — it logs [DELIVERY FAIL] and writes a
+  // DELIVERY_FAILED row so a send that Twilio ACCEPTED but never delivered leaves evidence. No
+  // outbound call ever asked Twilio to POST there, so the handler could not fire and the row never
+  // existed: "accepted by Twilio" was the last thing we knew about any message.
+  //
+  // Set HERE and only here, because this is the one function both the freeform and the template
+  // door go through — the same reason the retry loop and the sender number live here.
+  const payload: Record<string, unknown> = { ...params, from, to };
+  const callback = statusCallbackUrl();
+  if (callback) payload.statusCallback = callback;
   const bodyLen = typeof params.body === "string" ? (params.body as string).length : 0;
   const hasMedia = Array.isArray(params.mediaUrl) && (params.mediaUrl as unknown[]).length > 0;
   const delays = policy.retryDelaysMs.length ? policy.retryDelaysMs : [0];

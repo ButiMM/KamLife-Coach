@@ -522,6 +522,17 @@ export async function runMorningCheckin(): Promise<void> {
         }
         // ONE COMPOSER. Every part above is now an INPUT, not a branch that assembles its own
         // slice of the message. The order of the message is decided in one place.
+        // OUTSIDE THE WINDOW, THE CLIENT STILL GETS THEIR ACTION (Cut 6, 2026-09-14).
+        // kamlife_daily_plan has existed, approved and wired, with no call site: a client who was
+        // quiet yesterday got the generic "Coach K checking in" instead of their morning plan, and
+        // this job recorded a delivery. The template carries the ONE thing that matters when the
+        // long body cannot be sent — their name and today's action — so the message degrades
+        // instead of disappearing. When there is no action to carry, no template is offered and
+        // the generic check-in runs, which now reports `substituted` rather than delivered.
+        const oneAction = (decisionLine || targetFixLine || "").trim();
+        const dailyTemplate = oneAction
+          ? { name: "kamlife_daily_plan", variables: { "1": name, "2": oneAction } }
+          : undefined;
         const delivery = await sendWhatsApp(phone, composeMorning({
           firstName: name,
           targetFixLine,
@@ -536,7 +547,7 @@ export async function runMorningCheckin(): Promise<void> {
           adaptLine,
           situationLine: await loadSituationFrame(phone).catch(() => ""),
           sickYesterday: state.health.sickYesterday,
-        }));
+        }), undefined, dailyTemplate);
         if (selectedTrainingMove && deliveryAccepted(delivery)) {
           await ensureOpenTrainingLoop(client, todaySAST(), "proactive", Date.now(), selectedTrainingIntervention);
         }

@@ -259,6 +259,18 @@ export const ACCEPTANCES: Acceptance[] = [
     // and two opposite-defect controls so a floor that refuses everything cannot pass.
     command: ["bash", "script/red-on-revert-cut4-stt-admission.sh"] },
 
+  { id: "proactive-template", title: "A generic check-in leaves no trace of a message it did not carry",
+    // CUT 6 (2026-09-14). The window-recovery template returned "fallback", which deliveryAccepted
+    // reads as true — so the morning job opened a training loop for a client who had seen only
+    // "Coach K checking in". Whether a follow-up row EXISTS afterwards is a database question.
+    command: ["npx", "tsx", "script/pg-proactive-template-acceptance.ts"] },
+
+  { id: "proactive-template-reverts", title: "Every way a quiet client stops hearing from the coach turns a grader red",
+    // CUT 6 (2026-09-14). Three approved templates had no call site, so every closed-window send
+    // degraded to a generic check-in AND was recorded as a delivery. One mechanism per case, plus
+    // two opposite-defect controls.
+    command: ["bash", "script/red-on-revert-cut6-proactive-templates.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same

@@ -16,8 +16,8 @@ import { readHealthState } from "../health-state";
 import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply } from "../reply-hygiene";
 import { enforceOutboundTruth, prepareOutbound } from "../outbound-authority";
-import { templateSid, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
-import { whatsappFrom, type DeliveryResult } from "../outbound-delivery";
+import { templateSid, isValidTemplateSid, renderTemplateBody, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
+import { whatsappFrom, twilioClientForSend, type DeliveryResult } from "../outbound-delivery";
 
 export { db, pool };
 export { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles };
@@ -368,7 +368,12 @@ export const FROM_NUMBER = whatsappFrom();
 // SMS_FROM: set TWILIO_SMS_NUMBER to a Twilio phone number (e.g. +27XXXXXXXXX or a shortcode).
 // When WhatsApp delivery fails with a channel error, critical alerts fall back to SMS.
 // SMS works on every SA phone — no data, no app, no WhatsApp account required.
-const SMS_FROM = process.env.TWILIO_SMS_NUMBER || "";
+// READ AT SEND TIME, NOT AT IMPORT (Cut 6 amendment, 2026-09-14). As a module-level const this
+// was captured once at boot, so setting TWILIO_SMS_NUMBER in Railway did nothing until the next
+// redeploy — and it made the whole fallback path untestable, which is a large part of why it went
+// so long reporting deliveries it had not made. Lazy, like whatsappFrom() and reengageTemplateSid()
+// in this same file, both of which were made lazy for the same reason.
+const smsFrom = () => (process.env.TWILIO_SMS_NUMBER || "").trim();
 
 // Approved WhatsApp template (Twilio Content API SID, "HX…") used to re-open a
 // conversation when a freeform proactive send is rejected for being OUTSIDE the
@@ -391,30 +396,52 @@ const WA_CHANNEL_ERRORS = new Set([
   21408, // Region not permitted
 ]);
 
-async function sendSMSFallback(to: string, body: string): Promise<void> {
-  if (!SMS_FROM) return;
+/**
+ * Returns TRUE only when an SMS was actually accepted by Twilio.
+ *
+ * IT USED TO RETURN NOTHING (Cut 6 amendment, 2026-09-14). Every caller then reported "fallback"
+ * — which `deliveryAccepted()` reads as the message having arrived — whether the SMS went, failed,
+ * or was never attempted. And it is never attempted in production today: TWILIO_SMS_NUMBER is
+ * unset, so `if (!SMS_FROM) return` was the FIRST line, and the whole channel-error path has been
+ * reporting successful delivery for messages that reached nobody at all.
+ *
+ * That is the same defect as the generic check-in, one layer down: a door that cannot deliver
+ * telling its caller it did.
+ */
+async function sendSMSFallback(to: string, body: string): Promise<boolean> {
+  const SMS_FROM = smsFrom();
+  if (!SMS_FROM) {
+    console.warn(`[SMS:FALLBACK] TWILIO_SMS_NUMBER is unset — no SMS sent to ${to.slice(-8)}, and this message did NOT arrive`);
+    return false;
+  }
   const smsTo = to.replace(/^whatsapp:/, "");
   // SMS messages truncated to 320 chars — enough for an alert, not a coaching essay
   const smsBody = body.length > 320
     ? body.slice(0, 317) + "…"
     : body;
   try {
-    await twilioClient.messages.create({ from: SMS_FROM, to: smsTo, body: smsBody });
+    await twilioClientForSend().messages.create({ from: SMS_FROM, to: smsTo, body: smsBody });
     console.log(`[SMS:FALLBACK] → ${smsTo.slice(-8)}: ${smsBody.slice(0, 60)}…`);
+    return true;
   } catch (smsErr: unknown) {
     console.error(`[SMS:FALLBACK] ✗ SMS also failed for ${smsTo.slice(-8)}:`, (smsErr as any)?.message || smsErr);
+    return false;
   }
 }
 
 // sendCriticalAlert — use for subscription notices, account alerts, and service outages.
 // Tries WhatsApp first, falls back to SMS if WhatsApp fails.
 // DO NOT use for routine coaching responses — SMS coaching is not viable at full length.
-export async function sendCriticalAlert(to: string, body: string): Promise<void> {
+// RETURNS THE REAL OUTCOME (Cut 6 amendment, 2026-09-14). It returned void, so a caller could not
+// tell a delivered payment alert from one that reached nobody — on the one class of message where
+// the client loses their coaching if it does not arrive. `substituted` and `dropped` both mean
+// this alert did NOT land, and a caller can now act on that.
+export async function sendCriticalAlert(to: string, body: string, windowTemplate?: WindowTemplate): Promise<DeliveryResult> {
   try {
-    await sendWhatsApp(to, body);
+    return await sendWhatsApp(to, body, undefined, windowTemplate);
   } catch {
     console.warn(`[ALERT] WhatsApp failed for ${to.slice(-8)} — attempting SMS fallback`);
-    await sendSMSFallback(to, body);
+    return (await sendSMSFallback(to, body)) ? "fallback" : "dropped";
   }
 }
 
@@ -513,7 +540,21 @@ async function logOutboundToHistory(to: string, body: string): Promise<void> {
   }
 }
 
-export async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<DeliveryResult> {
+/**
+ * `windowTemplate` (Cut 6, 2026-09-14) — the approved template that carries THIS message when the
+ * client is outside the 24-hour window. Optional, and deliberately so: the order was to wire the
+ * three approved content owners that already exist, not to sweep all 57 proactive sends behind a
+ * new dispatch framework. A send without one behaves exactly as it does today, except that the
+ * generic check-in it falls back to is no longer reported as having delivered it.
+ */
+export interface WindowTemplate {
+  /** A name from the registry in whatsapp-templates.ts. Nothing else can be sent. */
+  name: string;
+  /** Fills that template's {{1}},{{2}}… — sanitised and rendered like any other variables. */
+  variables?: Record<string, string | number | null | undefined>;
+}
+
+export async function sendWhatsApp(to: string, body: string, mediaUrl?: string, windowTemplate?: WindowTemplate): Promise<DeliveryResult> {
   // PROVENANCE FIRST (2026-07-30). Every outbound message — reactive reply, morning check-in,
   // weekly review — crosses this function, which makes it the only place a claim can be checked
   // for ALL of them. The gate had to go here rather than on the reply paths because the worst
@@ -563,7 +604,7 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   const parts = splitWhatsAppBody(shaped);
   for (let i = 0; i < parts.length; i++) {
     const remainingText = parts.slice(i).join("\n\n");
-    const outcome = await sendOneWhatsApp(to, parts[i], i === parts.length - 1 ? mediaUrl : undefined, remainingText);
+    const outcome = await sendOneWhatsApp(to, parts[i], i === parts.length - 1 ? mediaUrl : undefined, remainingText, windowTemplate);
     // "fallback" = SMS/template already carried remainingText; "dropped" = channel/gate
     // is down for this recipient right now. Either way the rest must not double-send.
     if (outcome !== "sent") return outcome;
@@ -571,7 +612,7 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   return "sent";
 }
 
-async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | undefined, smsFallbackText: string): Promise<"sent" | "dropped" | "fallback"> {
+async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | undefined, smsFallbackText: string, windowTemplate?: WindowTemplate): Promise<DeliveryResult> {
   resetDeliveryStatsIfNeeded();
   // THE TEMPLATE-LEAK GATE MOVED TO prepareOutbound (Cut B2, 2026-09-01). It ran here, and only
   // here, so "You ate undefined kcal" was blocked at 06:00 and delivered mid-conversation. It is
@@ -616,18 +657,52 @@ async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | unde
       // re-engagement template is configured, send THAT first — it re-opens the WhatsApp thread
       // (preferred over SMS). Only on its failure do we drop to SMS. Other channel errors (not
       // opted in, region blocked) go straight to SMS as before.
-      if (e.code === 63016 && reengageTemplateSid()) {
-        console.warn(`[WA:WINDOW] outside 24h window for ${to.slice(-8)} — sending re-engagement template`);
-        try {
-          const templateDelivery = await sendWhatsAppTemplate(to, reengageTemplateSid(), undefined, { fallbackText: smsFallbackText });
-          return templateDelivery === "dropped" ? "dropped" : "fallback";
-        } catch {
-          console.warn(`[WA:WINDOW] re-engagement template failed for ${to.slice(-8)} — falling back to SMS`);
+      if (e.code === 63016) {
+        // THE MESSAGE'S OWN TEMPLATE FIRST (Cut 6, 2026-09-14). Three approved templates existed
+        // in the registry — the morning plan, the weekly check and the payment alert — with no
+        // call site anywhere: every one of the 57 proactive sends was freeform, and the only
+        // template this codebase could send was the generic check-in. So a client outside the
+        // window did not get a late morning plan. They got "Coach K checking in", and the job
+        // recorded a delivery.
+        //
+        // When the caller names a template for THIS message, that one goes: the client reads
+        // their actual action, their actual sessions, their actual amount. Only when no template
+        // fits the message does the generic check-in run, and that outcome is `substituted`,
+        // which `deliveryAccepted` reads as false.
+        const matched = windowTemplate && templateSid(windowTemplate.name);
+        if (matched) {
+          console.warn(`[WA:WINDOW] outside 24h window for ${to.slice(-8)} — sending "${windowTemplate!.name}" with this message's own content`);
+          try {
+            const d = await sendWhatsAppTemplate(to, matched, windowTemplate!.variables, {
+              fallbackText: smsFallbackText, templateName: windowTemplate!.name,
+            });
+            if (d !== "dropped") return "fallback";           // the real content reached them
+          } catch {
+            console.warn(`[WA:WINDOW] "${windowTemplate!.name}" failed for ${to.slice(-8)} — trying the generic check-in`);
+          }
         }
-      } else {
+        if (reengageTemplateSid()) {
+          console.warn(`[WA:WINDOW] outside 24h window for ${to.slice(-8)} — sending the GENERIC re-engagement template; this message's own content is NOT delivered`);
+          try {
+            const templateDelivery = await sendWhatsAppTemplate(to, reengageTemplateSid(), undefined, {
+              fallbackText: smsFallbackText, templateName: WINDOW_RECOVERY_TEMPLATE,
+            });
+            // NOT "fallback". The check-in is a different message from the one being sent, and a
+            // caller asking "did they get this?" must be told no.
+            return templateDelivery === "dropped" ? "dropped" : "substituted";
+          } catch {
+            console.warn(`[WA:WINDOW] re-engagement template failed for ${to.slice(-8)} — falling back to SMS`);
+          }
+        }
+      }
+      if (e.code !== 63016) {
         console.warn(`[WA:CHANNEL_ERROR] code=${e.code} for ${to.slice(-8)} — attempting SMS fallback`);
       }
-      await sendSMSFallback(to, smsFallbackText);
+      // THE OUTCOME IS WHETHER THE SMS ACTUALLY WENT. Reporting "fallback" unconditionally told
+      // every caller the client had read this message, including when TWILIO_SMS_NUMBER is unset
+      // — which it is, in production, right now. Nothing arrived; the answer is "dropped".
+      const smsLanded = await sendSMSFallback(to, smsFallbackText);
+      if (!smsLanded) return "dropped";
       void logOutboundToHistory(to, smsFallbackText); // best-effort, non-blocking
       return "fallback";
     },
@@ -653,11 +728,18 @@ export async function sendWhatsAppTemplate(
   to: string,
   contentSid: string,
   variables?: Record<string, string | number | null | undefined>,
-  opts?: { mediaUrl?: string; fallbackText?: string },
+  opts?: { mediaUrl?: string; fallbackText?: string; templateName?: string },
 ): Promise<DeliveryResult> {
   resetDeliveryStatsIfNeeded();
   if (!contentSid) {
     console.warn("[SCHEDULER:TEMPLATE] no contentSid provided — skipping send");
+    deliveryStats.failed++;
+    return "dropped";
+  }
+  // FAIL CLOSED ON A MALFORMED SID (Cut 6). templateSid() already refuses to return one, so this
+  // catches a caller that built a SID some other way rather than duplicating that judgement.
+  if (!isValidTemplateSid(contentSid)) {
+    console.error(`[SCHEDULER:TEMPLATE] "${contentSid.slice(0, 8)}…" is not a Twilio Content SID — refusing to send`);
     deliveryStats.failed++;
     return "dropped";
   }
@@ -667,12 +749,47 @@ export async function sendWhatsAppTemplate(
   if (gap < SCHEDULER_MIN_GAP_MS) await new Promise(r => setTimeout(r, SCHEDULER_MIN_GAP_MS - gap));
   _lastSchedulerSendAt = Date.now();
 
+  // THE TEMPLATE'S OWN WORDS, UNDER THE SAME FLOOR AS EVERY OTHER MESSAGE (Cut 6, 2026-09-14).
+  //
+  // A template body renders AT TWILIO. Until now that meant the text a client read through this
+  // door existed nowhere in this process: the truth floor never saw it, and history recorded the
+  // literal string "[template HX…]" — so a client's own record could not answer "what did the
+  // coach say to me?", and the retired restart doctrine shipped inside kamlife_checking_in while
+  // three graders watched the freeform door and none watched this one.
+  //
+  // Rendered from the SAME registry entry that is submitted for approval, with the SAME sanitised
+  // variables that go to Twilio, so this is a faithful local copy of the render rather than a
+  // second authorship. Nothing is composed here.
+  const cv = buildContentVariables(variables);
+  const rendered = opts?.templateName
+    ? renderTemplateBody(opts.templateName, cv ? JSON.parse(cv) : undefined)
+    : "";
+  const logText = rendered || opts?.fallbackText || `[template ${contentSid}]`;
+
+  if (rendered) {
+    // Proactive policy, unchanged: nobody is waiting, so a refused message is blocked and
+    // recorded rather than repaired. A template that cannot pass the floor must not be sent —
+    // the whole point of rendering it here is that this question can now be asked at all.
+    let recipientRow: { id: string; profileNotes: string | null } | null = null;
+    try {
+      const rows = await db.select({ id: users.id, profileNotes: users.profileNotes })
+        .from(users).where(eq(users.phoneNumber, to)).limit(1);
+      recipientRow = (rows[0] as any) ?? null;
+    } catch (e: any) {
+      console.warn(`[OUTBOUND_AUTHORITY] template recipient lookup failed for ${to.slice(-8)}: ${e?.message || e}`);
+    }
+    const prepared = await prepareOutbound("proactive", recipientRow?.id ?? null, to, rendered, recipientRow);
+    if (prepared.blocked) {
+      console.error(`[OUTBOUND_AUTHORITY] BLOCKED template "${opts?.templateName}" to ${to.slice(-8)} — the approved body did not pass the floor`);
+      deliveryStats.failed++;
+      return "dropped";
+    }
+  }
+
   // SHADOW (2026-08-04) — templates re-open a closed 24h window, so one escaping in staging
   // is a client pulled back into a conversation the build was not allowed to have.
-  const logText = opts?.fallbackText || `[template ${contentSid}]`;
   if (await shadowDoor(to, logText, "template", "server/scheduler/shared.ts", opts?.mediaUrl)) return "dropped";
   const params: Record<string, unknown> = { contentSid };
-  const cv = buildContentVariables(variables);
   if (cv) params.contentVariables = cv;
   if (opts?.mediaUrl) params.mediaUrl = [opts.mediaUrl];
 
@@ -704,7 +821,10 @@ export async function sendWhatsAppTemplate(
       const e = err as { code?: number };
       if (!e?.code || !WA_CHANNEL_ERRORS.has(e.code)) return null;
       console.warn(`[WA:CHANNEL_ERROR:TEMPLATE] code=${e.code} for ${to.slice(-8)}`);
-      if (opts?.fallbackText) await sendSMSFallback(to, opts.fallbackText);
+      // Same rule on this door: with no text to send, or no SMS channel to send it on, nothing
+      // reached the client and the caller must be told so.
+      const smsLanded = opts?.fallbackText ? await sendSMSFallback(to, opts.fallbackText) : false;
+      if (!smsLanded) return "dropped";
       void logOutboundToHistory(to, logText);
       return "fallback";
     },

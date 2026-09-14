@@ -25,7 +25,7 @@
 import { FFMPEG_AVAILABLE } from "./video-frames";
 import { uploadedGifCount } from "./exercise-media";
 import { cardFontLoaded } from "./macro-card";
-import { templatesReady } from "./whatsapp-templates";
+import { templatesReady, malformedTemplateEnvNames } from "./whatsapp-templates";
 import { db } from "./db";
 import { schedulerState } from "../shared/schema";
 import { like, sql } from "drizzle-orm";
@@ -202,6 +202,20 @@ export function capabilities(): Capability[] {
       severity: "critical",
       fix: "Run `npx tsx script/template-pack.ts`, submit each template in Twilio, then paste the approved HX… SIDs into Railway.",
       ok: () => templatesReady(),
+    },
+
+    {
+      // 2026-09-14, Cut 6. A template variable created in Railway by pasting a name that carried a
+      // trailing newline is stored under the key "TWILIO_DAILY_TEMPLATE_SID\n". The SID inside it
+      // is perfectly good, but process.env.TWILIO_DAILY_TEMPLATE_SID is undefined — so the check
+      // above reports "not approved yet" and the true cause, an invisible character in the KEY,
+      // appears nowhere. This is the difference between a week of waiting on Meta and a minute of
+      // retyping a variable name.
+      name: "Template SID variable names",
+      impact: "A template SID is set in Railway under a key with a stray newline in its NAME. The SID is never read, the template reads as unapproved, and the proactive message it carries silently does not go out.",
+      severity: "critical",
+      fix: "Recreate each named variable in Railway with the same SID value and no trailing whitespace in the key, then delete the malformed one.",
+      ok: () => malformedTemplateEnvNames().length === 0,
     },
 
     {

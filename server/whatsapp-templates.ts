@@ -95,9 +95,19 @@ export const TEMPLATES: WaTemplate[] = [
     category: "MARKETING",
     env: "TWILIO_REENGAGE_TEMPLATE_SID",
     unblocks: "Reaching a client who has gone quiet — the only way back into a chat that has been silent for over 24 hours.",
+    // NO RESTART DOCTRINE (Cut 6, 2026-09-14). This body ended "…and we start from today", which
+    // is the doctrine three existing acceptances already forbid on the freeform door
+    // (pg-messy-reentry, pg-missed-session-outbound, and a red-on-revert case that reintroduces
+    // it). It shipped here anyway because a template body renders AT TWILIO and never passes
+    // through those graders — the one channel nothing was reading.
+    //
+    // It is also false. Re-opening a closed window says nothing about the client's history: their
+    // logs, their weeks and their progress are all still there, and telling someone who has been
+    // training for two months that we "start from today" erases what they did. This template may
+    // re-open a conversation. It may not reset the record.
     body:
       "It is Coach K checking in. You have been quiet for a bit and I am not writing you off.\n\n" +
-      "There is no catching up to do and nothing you logged is lost. Reply with one word and we start from today.",
+      "There is no catching up to do and nothing you logged is lost. Reply with one word and we pick up where you left off.",
     vars: [],
     samples: [],
   },
@@ -177,11 +187,85 @@ export function invalidTemplates(list: WaTemplate[] = TEMPLATES): Array<{ name: 
 
 // ── Wiring: from an approved SID to an actual send ───────────────────────────────────────────
 
-/** The approved SID for a template, or "" if it has not been submitted/pasted into Railway yet. */
+/**
+ * A Twilio Content SID is "HX" followed by 32 hex characters. Anything else is a misconfiguration,
+ * not a template — and Twilio rejects it at send time, which on the proactive path means a client
+ * who was quiet gets nothing and the log carries one line about it.
+ */
+export function isValidTemplateSid(sid: string): boolean {
+  return /^HX[0-9a-f]{32}$/i.test(sid);
+}
+
+/**
+ * The approved SID for a template, or "" when it is missing, blank or malformed.
+ *
+ * FAIL CLOSED, LOUDLY (Cut 6, 2026-09-14). This returned `(process.env[t.env] || "").trim()`, so a
+ * pasted value with a stray character, a whole "HX…" line copied with its label, or an empty
+ * string all read as a usable SID and were handed to Twilio. Returning "" instead routes the
+ * caller to the behaviour it already has for an unwired template, and the console line names the
+ * variable — because the alternative is a silent 63016 for exactly the clients who went quiet.
+ */
 export function templateSid(name: string): string {
   const t = TEMPLATES.find(x => x.name === name);
   if (!t) return "";
-  return (process.env[t.env] || "").trim();
+  const raw = process.env[t.env];
+  if (raw === undefined) return "";
+  const sid = raw.trim();
+  if (!sid) {
+    console.error(`[TEMPLATE] ${t.env} is set but empty — treating "${t.name}" as unwired.`);
+    return "";
+  }
+  if (!isValidTemplateSid(sid)) {
+    console.error(`[TEMPLATE] ${t.env} is not a Twilio Content SID ("HX" + 32 hex) — refusing to send "${t.name}" with it. Got ${sid.length} chars starting "${sid.slice(0, 6)}".`);
+    return "";
+  }
+  return sid;
+}
+
+/**
+ * Environment KEYS that carry the name of a template variable with whitespace attached.
+ *
+ * THE REAL CONDITION THIS EXISTS FOR (Cut 6, 2026-09-14): a variable created in Railway by pasting
+ * a name that carried a trailing newline is stored under the key "TWILIO_DAILY_TEMPLATE_SID\n".
+ * The SID inside it is perfectly good. `process.env.TWILIO_DAILY_TEMPLATE_SID` is `undefined`, so
+ * the template reads as never submitted, the self-check reports "not approved yet", and the true
+ * cause — a key with an invisible character in its NAME — appears nowhere.
+ *
+ * Nothing is read from the malformed key: a name nobody can type is not a configuration this code
+ * should quietly honour. It is reported so a person fixes it in the one place it can be fixed.
+ */
+export function malformedTemplateEnvNames(): Array<{ expected: string; actual: string }> {
+  const found: Array<{ expected: string; actual: string }> = [];
+  for (const t of TEMPLATES) {
+    if (process.env[t.env] !== undefined) continue;      // correctly named — nothing to report
+    for (const key of Object.keys(process.env)) {
+      if (key !== t.env && key.trim() === t.env) found.push({ expected: t.env, actual: key });
+    }
+  }
+  return found;
+}
+
+/**
+ * The approved body with its placeholders filled — what the client will actually read.
+ *
+ * WHY THIS EXISTS AT ALL (Cut 6, 2026-09-14). A template body renders AT TWILIO, so until now the
+ * text a client received through this door existed nowhere in our process: the truth floor never
+ * saw it, the provenance gate never saw it, and history recorded the literal string
+ * "[template HX…]". Two consequences, both real — the retired restart doctrine shipped in
+ * kamlife_checking_in for weeks with three graders watching the freeform door and none watching
+ * this one, and a client's own record could not answer "what did the coach actually say?".
+ *
+ * Rendering the SAME body the registry submits for approval keeps one source: if this drifts from
+ * what Meta approved, the template is wrong, not this function. It is a faithful local copy of the
+ * render, not a second authorship — no wording is composed here.
+ */
+export function renderTemplateBody(name: string, variables?: Record<string, string | number | null | undefined>): string {
+  const t = TEMPLATES.find(x => x.name === name);
+  if (!t) return "";
+  return t.body.replace(PLACEHOLDER, (_m, n) => {
+    const v = variables?.[String(n)];
+    return v === undefined || v === null ? "" : String(v);
+  });
 }
 
 /** Templates with no SID in the environment — i.e. the proactive messages that cannot go out. */
