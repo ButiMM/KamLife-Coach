@@ -190,7 +190,10 @@ async function sendParts(
   // ledger could only ever have recorded an assumption. A failed IMAGE does not change what the
   // client read — that is the decoupling described above — so media results are not folded in.
   // The worst text outcome wins: one dropped bubble means the client did not get the message.
-  const rank: Record<DeliveryResult, number> = { sent: 0, fallback: 1, dropped: 2 };
+  // "substituted" cannot occur on this reactive door — it is the proactive window-recovery
+  // outcome (Cut 6) — but it ranks with "dropped" because both mean the client did not read
+  // THIS message, which is the question this rank answers.
+  const rank: Record<DeliveryResult, number> = { sent: 0, fallback: 1, substituted: 2, dropped: 3 };
   let worst: DeliveryResult = textParts.length ? "sent" : "dropped";
   for (let i = 0; i < textParts.length; i++) {
     const r = await sendOne({ body: textParts[i].trim() }, `part ${i + 1}`);

@@ -257,7 +257,19 @@ export async function runSundayWeeklyReport(): Promise<void> {
       // One-tap acceptance — routes to the deterministic step-target updater. Client's call.
       if (stepAdj) lines.push(``, `[BUTTONS:Set steps to ${stepAdj.newTarget}]`);
 
-      const delivery = await sendWhatsApp(client.phoneNumber, lines.join("\n"));
+      // OUTSIDE THE WINDOW, THE WEEK'S NUMBERS STILL LAND (Cut 6, 2026-09-14). kamlife_weekly_check
+      // was approved and wired with no call site, so a client who had not messaged in 24 hours got
+      // the generic check-in instead of their 7-day review — and this job recorded a delivery and
+      // a canonical move against it. The template carries the two counts the review is built on.
+      const weeklyTemplate = {
+        name: "kamlife_weekly_check",
+        variables: {
+          "1": name,
+          "2": `${completedSessions} of ${plannedSessions}`,
+          "3": `${foodDays} of 7`,
+        },
+      };
+      const delivery = await sendWhatsApp(client.phoneNumber, lines.join("\n"), undefined, weeklyTemplate);
       await recordCanonicalMoveOutbound(client, move, delivery);
 
       try {

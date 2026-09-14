@@ -13,15 +13,45 @@ export function normaliseMsisdn(raw: string): string {
   return d;
 }
 
+/**
+ * WhatsApp rejects a template VARIABLE that carries a line break, a tab, or a run of spaces —
+ * the value has to be a single inline run of text. `validateTemplate` in whatsapp-templates.ts
+ * has always checked this, but it checks the SAMPLES submitted for approval. Nothing checked the
+ * values actually sent, and the values actually sent are computed prose: kamlife_daily_plan's
+ * {{2}} is today's one action, straight out of one-action.ts.
+ *
+ * So a perfectly approved template plus a two-line action equals a rejected send, on the proactive
+ * path, for a client who is by definition not watching — which is the failure shape this whole cut
+ * exists to remove.
+ *
+ * FLATTENED, NOT REFUSED. A newline inside a variable is a formatting accident, not a false claim:
+ * dropping the message would cost the client their morning plan to save its line breaks. The text
+ * is preserved; only the whitespace that WhatsApp will not accept is normalised away.
+ */
+export function sanitiseContentVariable(value: string): string {
+  return value
+    .replace(/\s*[\r\n]+\s*/g, " ")   // line breaks (and the indentation around them) → one space
+    .replace(/\t+/g, " ")             // tabs are rejected the same way
+    .replace(/ {2,}/g, " ")           // Meta strips or rejects runs of spaces
+    .trim();
+}
+
 // Twilio's Content API wants template variables as a JSON STRING keyed "1","2",…
 // (matching the {{1}},{{2}} placeholders in the approved template). Returns undefined
 // when there are no usable variables, so we never send an empty "{}" — which some
 // template configs reject — and never send null/undefined values.
+//
+// Values are sanitised BEFORE the empty check (Cut 6, 2026-09-14): a variable that is nothing but
+// a newline is not a value, and sending it as one is how a template renders with a blank where a
+// client's name should be.
 export function buildContentVariables(vars?: Record<string, string | number | null | undefined>): string | undefined {
   if (!vars) return undefined;
-  const entries = Object.entries(vars).filter(([, v]) => v !== undefined && v !== null && String(v) !== "");
+  const entries = Object.entries(vars)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => [k, sanitiseContentVariable(String(v))] as const)
+    .filter(([, v]) => v !== "");
   if (entries.length === 0) return undefined;
-  return JSON.stringify(Object.fromEntries(entries.map(([k, v]) => [k, String(v)])));
+  return JSON.stringify(Object.fromEntries(entries));
 }
 
 // Day boundaries live in server/sast.ts (ledger D6) — ONE definition of a SAST day for the whole
