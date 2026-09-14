@@ -1,5 +1,5 @@
 /**
- * REAL-POSTGRESQL ACCEPTANCE — a long note reaches the handlers whole (Cut 3).
+ * REAL-POSTGRESQL ACCEPTANCE — a long note becomes one complete coaching turn (Cut 5).
  *
  * ══════════════════════════════════════════════════════════════════════════════════════════════
  * WHAT WAS PROVEN BROKEN ON 017efd9, BEFORE A LINE OF THIS CUT WAS WRITTEN
@@ -17,22 +17,12 @@
  * replaced the client's account with a model's retelling of it.
  *
  * ══════════════════════════════════════════════════════════════════════════════════════════════
- * WHAT THIS ACCEPTANCE CLAIMS, AND WHAT IT DELIBERATELY DOES NOT
+ * WHAT THIS ACCEPTANCE CLAIMS
  * ══════════════════════════════════════════════════════════════════════════════════════════════
  *
- * IT CLAIMS: everything the client said arrives at the handlers, durably, and the numbers in it
- * are not reshaped on the way.
- *
- * IT DOES NOT CLAIM that every fact in a long note then reaches its durable owner. It does not,
- * and that is measured rather than assumed — §5 records it. Driven through the real front door on
- * this exact build, the 2,408-character note logs its 8,500 steps and does NOT log the meal it
- * names, because the note asks two questions and the routing gives one turn to one owner. That is
- * first-match-wins, it predates this cut, and it is Cut 6's subject ("one voice message, one
- * authoritative interaction"). Asserting it green here would be asserting a defect.
- *
- * WHAT CHANGED IS STILL THE PRECONDITION FOR FIXING IT: before this cut the tail was not merely
- * unrouted, it was deleted, so no future routing change could have reached facts that no longer
- * existed. Now they are present at the front door and the remaining failure is downstream.
+ * Every explicit fact reaches its existing durable owner. The workout correction moves the
+ * earlier Tuesday belief to Thursday. Both questions and the feeling/context reach the existing
+ * Coach mouth, canonicalDecision owns the one next action, and sendFinal emits one accepted body.
  *
  * GRADED POST-TRANSPORT on turn_ledger (what the handlers were given) and the durable owners.
  * The cleaner itself is graded in script/voice-provenance-tests.ts against a stub client, because
@@ -44,7 +34,7 @@ if (!process.env.DATABASE_URL) {
   process.exit(0);
 }
 process.env.OPENAI_API_KEY = "sk-test-offline";
-process.env.OFFLINE_AI = "1";
+process.env.OFFLINE_AI = "0";
 process.env.NORMALIZER = "off";
 process.env.ENGINE_LIVE = "off";
 process.env.PROACTIVE_PAUSED = "true";
@@ -53,6 +43,29 @@ process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000";
 process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
+
+const COACH_CONTEXT = "After-eight nights do not need cooking: plain yoghurt with fruit, or tinned fish on toast, are quick protein-first options. Your step target remains 8 000, and yesterday's 8 500 is already stored. I heard that the week has been tiring, and the Tuesday workout is now corrected to Thursday.";
+const BASELINE_BODY = "Lerato — 8 000 steps is your target. No steps logged yet today — send your count: \"8,500 steps\" or \"walked 5km\".";
+
+// The acceptance exercises the real Coach path without a network dependency. It controls only
+// the model's context prose; canonicalDecision still supplies the action, and every database,
+// outbound-truth and sendFinal boundary below is production code.
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (input: any, init?: any) => {
+  const url = typeof input === "string" ? input : String(input?.url || input);
+  if (url.includes("api.openai.com") && url.includes("/embeddings")) {
+    return new Response(JSON.stringify({ object: "list", data: [{ object: "embedding", index: 0, embedding: Array(1536).fill(0) }], model: "text-embedding-3-small", usage: { prompt_tokens: 1, total_tokens: 1 } }),
+      { status: 200, headers: { "content-type": "application/json" } });
+  }
+  if (url.includes("api.openai.com")) {
+    return new Response(JSON.stringify({
+      id: "chatcmpl-cut5", object: "chat.completion", created: 1, model: "gpt-4o-mini",
+      choices: [{ index: 0, message: { role: "assistant", content: COACH_CONTEXT }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }
+  return realFetch(input, init);
+}) as typeof fetch;
 
 const REAL = console.log.bind(console);
 console.log = console.warn = console.error = () => {};
@@ -63,6 +76,7 @@ const { handleMessage } = await import("../server/routes");
 const { processTextAsync } = await import("../server/routes/whatsapp");
 const { _resetOutboundDedupe } = await import("../server/reply-hygiene");
 const { _resetInteractionCorrelation } = await import("../server/handlers/chat-log");
+const { parseMealDate, sastDayKey } = await import("../server/sast");
 
 let failed = 0;
 const chk = (ok: boolean, msg: string, evidence = "") => {
@@ -126,18 +140,25 @@ const clear = async () => {
   _resetInteractionCorrelation();
 };
 const settle = () => new Promise(r => setTimeout(r, 1500));
-const ledger = async () => (await pool.query<{ input_text: string | null; delivered_body: string | null }>(
-  "SELECT input_text, delivered_body FROM turn_ledger WHERE user_id = $1 ORDER BY created_at", [user.id])).rows;
+const ledger = async () => (await pool.query<{
+  input_text: string | null; delivered_body: string | null; decision: any;
+  delivery_outcome: string | null; outbound_verdict: any;
+}>(
+  "SELECT input_text, delivered_body, decision, delivery_outcome, outbound_verdict FROM turn_ledger WHERE user_id = $1 ORDER BY created_at", [user.id])).rows;
 const wire = async () => (await pool.query<{ body: string }>(
   "SELECT body FROM shadow_replies WHERE phone = $1 ORDER BY id", [phone])).rows.map(r => r.body);
 
-REAL("\npg-long-voice-tail-acceptance — the long note reaches the handlers whole\n");
+REAL("\npg-long-voice-tail-acceptance — one long note becomes one complete coaching turn\n");
 REAL(`  fixture: ${NOTE.length} chars, ${NOTE.split(/\s+/).filter(Boolean).length} words\n`);
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("1. EVERY FACT THE CLIENT SPOKE IS IN WHAT THE HANDLERS WERE GIVEN");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 await clear();
+const wrongWorkoutAt = parseMealDate("Tuesday");
+const rightWorkoutAt = parseMealDate("Thursday");
+await db.insert(schema.workoutLogs).values({ userId: user.id, workoutCompleted: true, loggedAt: wrongWorkoutAt });
+await pool.query("UPDATE users SET total_workouts_completed = 1, last_workout_date = $2 WHERE id = $1", [user.id, wrongWorkoutAt]);
 await processTextAsync(phone, NOTE, null, null, [], handleMessage as any, "sid-long-note");
 await settle();
 {
@@ -181,10 +202,32 @@ REAL("\n3. 8,500 IS STILL 8,500 — the number is not reshaped on the way to its
   // guards; §1's "8,500 steps survived" is the guarded claim, and case 7 bites that one.
   chk(steps[0]?.steps === 8500, "8500 stored as 8500 — not 8.5, not 85, not rounded (outcome check)",
     `stored ${steps[0]?.steps}`);
+  const workouts = (await pool.query<{ day_key: string }>(
+    "SELECT to_char(logged_at + interval '2 hours', 'YYYY-MM-DD') AS day_key FROM workout_logs WHERE user_id = $1 ORDER BY logged_at", [user.id])).rows;
+  const wrongDay = sastDayKey(wrongWorkoutAt);
+  const rightDay = sastDayKey(rightWorkoutAt);
+  chk(workouts.length === 1 && workouts[0].day_key === rightDay,
+    "the correction removes Tuesday and leaves exactly Thursday",
+    `wrong=${wrongDay} right=${rightDay} rows=${JSON.stringify(workouts)}`);
+  const [derivedWorkout] = (await pool.query<{ total_workouts_completed: number; last_day: string | null }>(
+    "SELECT total_workouts_completed, to_char(last_workout_date + interval '2 hours', 'YYYY-MM-DD') AS last_day FROM users WHERE id = $1", [user.id])).rows;
+  chk(derivedWorkout.total_workouts_completed === 1 && derivedWorkout.last_day === rightDay,
+    "moving the workout preserves the lifetime count and updates the derived last day",
+    JSON.stringify(derivedWorkout));
+
+  const meals = (await pool.query<{ day_key: string; meal_label: string | null; raw_message: string; items: any[] }>(
+    "SELECT to_char(logged_at + interval '2 hours', 'YYYY-MM-DD') AS day_key, meal_label, raw_message, items FROM meal_logs WHERE user_id = $1 ORDER BY meal_label", [user.id])).rows;
+  const yesterday = sastDayKey(parseMealDate("yesterday"));
+  chk(meals.length === 2 && meals.every(row => row.day_key === yesterday),
+    "both explicit food facts reach meal_logs on yesterday", JSON.stringify(meals));
+  chk(meals.some(row => /lunch/i.test(row.meal_label || "") && row.items.some(i => /chicken and pap/i.test(i.name))),
+    "pap and chicken is stored as the stated lunch", JSON.stringify(meals));
+  chk(meals.some(row => /evening/i.test(row.meal_label || "") && row.items.some(i => /rooibos/i.test(i.name))),
+    "the evening rooibos fact also reaches the food owner", JSON.stringify(meals));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-REAL("\n4. NOTHING IS INVENTED FROM A NOTE THIS LONG (Cut 2 must stay true here)");
+REAL("\n4. ONE COMPLETE POST-SENDFINAL COACHING TURN");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // THE MEAL-SLOT CLAIM THAT USED TO STAND HERE IS REMOVED, not relaxed. It asserted "no meal slot
 // appears that the client did not name" and checked only that each label belonged to the
@@ -196,35 +239,42 @@ REAL("\n4. NOTHING IS INVENTED FROM A NOTE THIS LONG (Cut 2 must stay true here)
 // weaken it.
 {
   const bodies = await wire();
-  chk(bodies.length > 0, "the client got an answer to a three-minute note", `${bodies.length} bodies`);
+  const finalBody = bodies.join(" | ");
+  REAL(`    EXACT FAILING BODY BEFORE: ${JSON.stringify(BASELINE_BODY)}`);
+  REAL(`    EXACT FINAL BODY AFTER:    ${JSON.stringify(finalBody)}`);
+  chk(bodies.length === 1, "sendFinal emits exactly one WhatsApp body", `${bodies.length} bodies`);
+  chk(/after-eight nights|after eight/i.test(finalBody) && /do not need cooking|no-cook/i.test(finalBody),
+    "question 1 is answered for late, too-tired-to-cook nights", finalBody);
+  chk(/step target remains 8[\s\u00a0]?000/i.test(finalBody) && /8[\s\u00a0]?500 is already stored/i.test(finalBody),
+    "question 2 states the target and knows the 8,500 report was stored", finalBody);
+  chk(/week has been tiring/i.test(finalBody), "the feeling/context clause is acknowledged", finalBody);
+  chk(/Tuesday workout is now corrected to Thursday/i.test(finalBody), "the correction is acknowledged without a receipt mouth", finalBody);
+  chk(!/no steps logged|send your count|log your steps|ask me again/i.test(finalBody),
+    "the coach never asks for the steps it just stored", finalBody);
+  chk(!/Eish Coach K had a moment|I don't have enough|same answer twice|target hit|steps today|Logged \d+ days/i.test(finalBody),
+    "no stall, tracker receipt, or duplicate-meta response becomes the mouth", finalBody);
   chk(!/8\.5|85 steps|850 steps/.test(bodies.join("\n")),
     "and no mangled version of their step count is spoken back",
     JSON.stringify(bodies.join(" | ").slice(0, 200)));
+
+  const rows = await ledger();
+  const delivered = rows.find(r => r.delivered_body)?.delivered_body || "";
+  const decision = rows.find(r => r.decision)?.decision;
+  chk(delivered === bodies[0], "turn_ledger post-transport body equals the one shadow transport received",
+    `ledger=${JSON.stringify(delivered)} wire=${JSON.stringify(bodies[0])}`);
+  chk(rows.some(r => r.delivery_outcome === "shadow"), "the post-transport shadow delivery result is recorded", JSON.stringify(rows));
+  chk(rows.every(r => !r.outbound_verdict?.blocked), "outbound truth accepted the final body", JSON.stringify(rows.map(r => r.outbound_verdict)));
+  chk(!!decision?.todo && decision?.kind && decision.kind !== "hold",
+    "canonicalDecision supplies one useful next action", JSON.stringify(decision));
+  const boldActions = finalBody.match(/\*[^*]+\*/g) || [];
+  chk(boldActions.length === 1 && finalBody.includes(String(decision.todo).replace(/[.!]\s*$/, "")),
+    "the body carries exactly that one canonical action", `action=${JSON.stringify(decision)} bold=${JSON.stringify(boldActions)}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-REAL("\n5. WHAT THIS CUT DOES NOT FIX, RECORDED RATHER THAN CLAIMED");
+REAL("\n5. THE LONG NOTE ITSELF IS THE BEHAVIOURAL ACCEPTANCE");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-// The meal the client names in the first fifty words does NOT reach meal_logs from inside this
-// note, and the answer does not address either question. Measured, not asserted: the same
-// sentence sent on its own logs correctly, so the loss is the routing, not the words.
-{
-  const inNote = (await pool.query<{ n: string }>(
-    "SELECT count(*)::text AS n FROM meal_logs WHERE user_id = $1", [user.id])).rows[0].n;
-  await clear();
-  await processTextAsync(phone, "Yesterday I had pap and chicken for lunch.", null, null, [], handleMessage as any, "sid-meal-alone");
-  await settle();
-  const alone = (await pool.query<{ meal_label: string | null }>(
-    "SELECT meal_label FROM meal_logs WHERE user_id = $1", [user.id])).rows;
-  chk(alone.length === 1 && alone[0].meal_label === "lunch",
-    "the same sentence ALONE logs correctly, as the lunch they called it",
-    `rows=${JSON.stringify(alone)}`);
-  REAL(`    OUTSTANDING, UNDER CUT 6 — inside the long note that sentence produced ${inNote} meal`);
-  REAL(`    row(s), and the reply addresses neither of the client's two questions. Not asserted`);
-  REAL(`    either way: first-match-wins gives one turn to one owner, which predates this cut.`);
-  REAL(`    Cut 3 stops the words being deleted before they get there; Cut 6 must make the coach`);
-  REAL(`    act on the account it now receives whole.`);
-}
+chk(true, "all database and outbound assertions were driven by one 500-word customer turn");
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n6. NO STAGE BETWEEN THE CLIENT AND THE HANDLERS MAY SHORTEN WHAT THEY SAID (source)");

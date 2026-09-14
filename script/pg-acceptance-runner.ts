@@ -247,6 +247,11 @@ export const ACCEPTANCES: Acceptance[] = [
     // because the acceptance drives the TEXT door where the cleaner never runs.
     command: ["bash", "script/red-on-revert-cut3-long-voice.sh"] },
 
+  { id: "long-turn-reverts", title: "Every Cut 5 long-turn seam turns the behavioral acceptance red",
+    // Food routing, correction replacement, single-question early ownership and the complete
+    // Coach context are reverted independently against the same post-sendFinal journey.
+    command: ["bash", "script/red-on-revert-cut5-long-turn.sh"] },
+
   { id: "stt-admission", title: "A garbled transcript writes nothing, a real one writes everything",
     // CUT 4 (2026-09-12). The garble floor read `if (voiceQuality && …)` and voiceQuality is set
     // only by Whisper attempt 1 — so Scribe (which runs FIRST in production), the catch retry and

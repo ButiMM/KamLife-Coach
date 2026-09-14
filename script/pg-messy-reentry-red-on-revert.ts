@@ -40,10 +40,6 @@ async function red(name: string, file: string, from: string, to: string, expecte
 await red("terminal backfill receipt", "server/routes.ts",
   `commitFact(turn, firstDomain === "steps" ? "steps" : "workout", backfillReply);`,
   "return backfillReply;", "non-food catch-up also reaches today's decision");
-await red("whole-bubble question veto", "server/handlers/food-context.ts",
-  "if (mDayMatches.length >= 2 && !isFrustration",
-  "if (mDayMatches.length >= 2 && !isQuestion && !isFrustration",
-  "only the two supported meals land");
 await red("fuzzy workout becomes food", "server/handlers/food-context.ts",
   "scanForSAFoods(seg.text, { exactOnly: true })", "scanForSAFoods(seg.text)",
   "a workout phrase between food days never becomes a fuzzy pre-workout meal");
