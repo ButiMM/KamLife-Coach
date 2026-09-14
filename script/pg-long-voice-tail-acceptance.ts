@@ -50,9 +50,25 @@ const BASELINE_BODY = "Lerato — 8 000 steps is your target. No steps logged ye
 // The acceptance exercises the real Coach path without a network dependency. It controls only
 // the model's context prose; canonicalDecision still supplies the action, and every database,
 // outbound-truth and sendFinal boundary below is production code.
+// WHAT WAS ACTUALLY ASKED OF THE MODEL, recorded (Cut 5 completion, 2026-09-14).
+//
+// The stub below returns COACH_CONTEXT — a fixed string that already contains answers to both
+// questions. That is unavoidable (a live model's wording cannot be graded deterministically) and
+// it means the "question 1 is answered" checks in §4 grade DELIVERY, not authorship: whatever the
+// Coach mouth produced reached the client whole instead of being replaced by a tracker receipt.
+//
+// The half that was missing is the half this cut is actually about: was the brain GIVEN the whole
+// note? Without it, gpt-block could hand the model one question, or the first 500 characters, and
+// every §4 check would still pass because the stub answers regardless. So every outbound request
+// body is kept and §4b asks that question directly.
+const askedOfModel: string[] = [];
+
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
   const url = typeof input === "string" ? input : String(input?.url || input);
+  if (url.includes("api.openai.com") && !url.includes("/embeddings") && typeof init?.body === "string") {
+    askedOfModel.push(init.body);
+  }
   if (url.includes("api.openai.com") && url.includes("/embeddings")) {
     return new Response(JSON.stringify({ object: "list", data: [{ object: "embedding", index: 0, embedding: Array(1536).fill(0) }], model: "text-embedding-3-small", usage: { prompt_tokens: 1, total_tokens: 1 } }),
       { status: 200, headers: { "content-type": "application/json" } });
@@ -243,12 +259,16 @@ REAL("\n4. ONE COMPLETE POST-SENDFINAL COACHING TURN");
   REAL(`    EXACT FAILING BODY BEFORE: ${JSON.stringify(BASELINE_BODY)}`);
   REAL(`    EXACT FINAL BODY AFTER:    ${JSON.stringify(finalBody)}`);
   chk(bodies.length === 1, "sendFinal emits exactly one WhatsApp body", `${bodies.length} bodies`);
+  // THESE FOUR GRADE DELIVERY, NOT AUTHORSHIP, and say so. The Coach mouth is stubbed, so the
+  // answers are the fixture's; what is proven is that the Coach's answer to each part REACHES THE
+  // CLIENT INTACT rather than being replaced by the tracker receipt printed above. §4b proves the
+  // model was asked the questions in the first place, which is what makes these mean anything.
   chk(/after-eight nights|after eight/i.test(finalBody) && /do not need cooking|no-cook/i.test(finalBody),
-    "question 1 is answered for late, too-tired-to-cook nights", finalBody);
+    "the Coach's answer to question 1 survives to the client's screen", finalBody);
   chk(/step target remains 8[\s\u00a0]?000/i.test(finalBody) && /8[\s\u00a0]?500 is already stored/i.test(finalBody),
-    "question 2 states the target and knows the 8,500 report was stored", finalBody);
-  chk(/week has been tiring/i.test(finalBody), "the feeling/context clause is acknowledged", finalBody);
-  chk(/Tuesday workout is now corrected to Thursday/i.test(finalBody), "the correction is acknowledged without a receipt mouth", finalBody);
+    "…and its answer to question 2, including that the 8,500 report was stored", finalBody);
+  chk(/week has been tiring/i.test(finalBody), "…and the feeling/context clause", finalBody);
+  chk(/Tuesday workout is now corrected to Thursday/i.test(finalBody), "…and the correction, with no receipt mouth in front of it", finalBody);
   chk(!/no steps logged|send your count|log your steps|ask me again/i.test(finalBody),
     "the coach never asks for the steps it just stored", finalBody);
   chk(!/Eish Coach K had a moment|I don't have enough|same answer twice|target hit|steps today|Logged \d+ days/i.test(finalBody),
@@ -272,9 +292,60 @@ REAL("\n4. ONE COMPLETE POST-SENDFINAL COACHING TURN");
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n4b. THE BRAIN WAS ASKED THE WHOLE NOTE — not a window of it, not one question");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// THE GAP THIS CLOSES. §1 proves the HANDLERS were given the whole note; §4 proves whatever the
+// Coach answered reached the client. Between them sat the step this cut is named for, ungraded:
+// what gpt-block actually hands the model. With the mouth stubbed, a prompt carrying one question,
+// or the first five hundred characters, produces exactly the same green §4 — the stub answers
+// regardless. So this reads the outbound request body itself.
+//
+// It is deliberately about PRESENCE, not phrasing: the model must be able to see every part the
+// client spoke. What it then says with them is the model's business and is not asserted here.
+{
+  // SCOPED TO THE COACH CALL, not every model request in the turn. Joining all of them hid a
+  // windowed Coach prompt behind another call that still carried the note — the first version of
+  // this section did exactly that and its revert case stayed green. The multi-question
+  // instruction is what gpt-block sends ONLY on this path, so it identifies the request uniquely.
+  const coachRequests = askedOfModel.filter(r => r.includes("Answer EVERY one directly"));
+  chk(coachRequests.length > 0,
+    "the multi-question Coach mouth was actually called",
+    `${askedOfModel.length} model requests, ${coachRequests.length} of them the Coach's`);
+  const prompt = coachRequests.join("\n");
+
+  // JSON-escaped in the request body, so the fixture's own text is escaped the same way before
+  // it is looked for — otherwise an apostrophe would fail this for the wrong reason.
+  const inPrompt = (needle: string) => prompt.includes(JSON.stringify(needle).slice(1, -1));
+
+  chk(inPrompt("What should I be eating on the days when I get home after eight at night"),
+    "question 1 reaches the model, in the client's own words");
+  chk(inPrompt("how many steps should I actually be aiming for"),
+    "question 2 reaches it too — a multi-question note is not answered one question deep");
+  chk(inPrompt("I said I did my workout on Tuesday but actually I missed it"),
+    "the correction reaches it, so the coach is not answering from a record it is still fixing");
+  chk(inPrompt("makes me want to give up"),
+    "the feeling reaches it, which is the part a tracker receipt always dropped");
+  chk(inPrompt("8500"), "the spoken step count reaches it unreshaped");
+  chk(inPrompt("pap and chicken for lunch"), "and the meals the client named");
+  chk(inPrompt(TAIL_MARKER),
+    "…including the LAST words of the note, which is where the 1,500-character window used to cut");
+
+  // AND THE WHOLE THING, not merely every fact I happened to list. A per-fact list can only ever
+  // find losses I thought to look for; the note's own length is the check that finds the rest.
+  chk(prompt.includes(JSON.stringify(NOTE).slice(1, -1)),
+    "the entire note is present verbatim, not reassembled from the parts this file names",
+    `note ${NOTE.length} chars; prompt ${prompt.length} chars`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n5. THE LONG NOTE ITSELF IS THE BEHAVIOURAL ACCEPTANCE");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-chk(true, "all database and outbound assertions were driven by one 500-word customer turn");
+// NOT chk(true, …). An assertion that cannot fail reads as a PASS and measures nothing, which is
+// the shape this rescue keeps finding. What is true and checkable is that ONE turn drove all of
+// the above, and that it is genuinely the long note rather than a trimmed stand-in.
+chk(NOTE.length > 2000 && NOTE.includes(TAIL_MARKER),
+  `one ${NOTE.length}-character customer turn drove every assertion above, tail included`,
+  `${NOTE.length} chars`);
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n6. NO STAGE BETWEEN THE CLIENT AND THE HANDLERS MAY SHORTEN WHAT THEY SAID (source)");

@@ -61,10 +61,16 @@ run_case "single-question renderer reclaims the complete turn" server/routes.ts 
   'const miscResult = multiQuestionTurn ? null' 'const miscResult = false ? null' || failed=$((failed + 1))
 run_case "Coach context no longer answers both questions" server/handlers/gpt-block.ts \
   'if (isMultiPartAsk(message)) {' 'if (false) {' || failed=$((failed + 1))
+# THE BRAIN IS HANDED A WINDOW AGAIN — the defect this whole cut is named for, moved one stage
+# later. The mouth is stubbed in the acceptance, so it answers whatever it is asked and every
+# delivery check stays green; only §4b, which reads the outbound request body, can see this.
+run_case "the model is given a window of the note instead of the note" server/handlers/gpt-block.ts \
+  '() => askCoachK(message, user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));' \
+  '() => askCoachK(message.slice(0, 500), user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));' || failed=$((failed + 1))
 
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-cut5-long-turn: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-cut5-long-turn: GREEN — 4/4 behavioral reverts caught"
+echo "red-on-revert-cut5-long-turn: GREEN — 5/5 behavioral reverts caught"
