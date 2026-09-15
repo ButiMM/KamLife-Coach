@@ -167,6 +167,13 @@ interface TurnScope {
      * Rendered by code from extractSalientSituation — not GPT prose.
      */
     situationFrame?: string | null;
+    /**
+     * THIS TURN ALREADY COMPOSED ITS DECISION TURN (C10, 2026-09-15). Set by the exits that call
+     * composeDecisionTurn themselves; read only by reconcileTurnReply, to stand its own rebuild
+     * down rather than say the same sentence a second way. Absent on the exits that compose
+     * nothing, which is exactly the set the rebuild exists for.
+     */
+    decisionComposed?: boolean;
     modelAuthored?: boolean;
     /**
      * This turn is a CLARIFICATION or a de-escalation, not a coaching turn. It still gets its
@@ -344,6 +351,12 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   // The confirmation vocabulary is short, closed, and specified rather than discovered — these
   // are the words the CTO enumerated. It is not a phrase hunt: any word here is a claim about
   // state, and a claim about state is checkable against state.
+  // THE REPAIR HAS TO SURVIVE THE REBUILD BELOW (C10, 2026-09-15). The decision-turn branch
+  // recomposes the whole reply from evidence and ignores `draft` — deliberately, so the action
+  // line cannot be appended twice — which meant this repair was computed, logged, counted, and
+  // then overwritten three lines later by a composition built from the model's own context. Held
+  // here so the rebuild uses the honest sentence as its context instead of the false one.
+  let integrityRepair = "";
   if (scope.evidence?.modelAuthored && scope.mutations.length === 0) {
     const CLAIMS_A_WRITE = /\b(?:logged|noted|saved|recorded|updated|tracked|added (?:it|that)|got (?:it|that) down|put (?:it|that) down|marked (?:it|that))\b/i;
     if (CLAIMS_A_WRITE.test(draft)) {
@@ -353,6 +366,7 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
       // The honest reply: we heard them, and we are asking for what we can actually record.
       draft = "I've got that — but I haven't written it down yet, and I won't say I have when I "
         + "haven't. Send it the way you'd log it and I'll put it on your record properly.";
+      integrityRepair = draft;
     }
   }
 
@@ -375,13 +389,30 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
       draft = kept;
     }
 
-    if (decisionTurn) {
+    // A TURN THAT COMPOSED ITSELF IS NOT RECOMPOSED (C10). The exception is a write-integrity
+    // repair: that one REPLACES the reply, so the composed turn it replaces must be rebuilt
+    // around the honest sentence — otherwise the false confirmation ships with the action under
+    // it. Every other composed turn is already stripped, already delivered-shaped, and already
+    // carries its answer; rebuilding it here could only lose one of those.
+    if (decisionTurn && (!scope.evidence.decisionComposed || integrityRepair)) {
       // STRUCTURAL MOUTH (2026-08-23). The model body is discarded. Context is the
       // situation frame code already owns. The action is the canonical line. Concatenating
       // `kept` in front of the action is the leak the reviewer proved ("Eggs tonight").
       const { composeDecisionTurn } = await import("../one-action");
       const rendered = String(scope.evidence.canonicalReply || "").trim() || renderActionLine(todo);
-      draft = composeDecisionTurn(String(scope.evidence.situationFrame || ""), rendered);
+      // A WRITE-INTEGRITY REPAIR OUTRANKS THE RECORDED FRAME. When the rule above fired, the
+      // frame this turn recorded is the context of a reply that claimed a write that never
+      // happened; composing from it puts the claim straight back. The honest sentence becomes the
+      // context and the canonical action still appends, so the client gets both — told the truth
+      // about the record, and told what to do about it.
+      //
+      // `integrityRepair` is already directive-stripped: the strip above runs on `draft`, which
+      // by then IS the repair, so its "send it the way you'd log it" clause is removed before it
+      // can compete with the canonical action. That is why this reads `draft` and not the literal.
+      draft = composeDecisionTurn(
+        integrityRepair ? draft : String(scope.evidence.situationFrame || ""),
+        rendered,
+      );
     } else if (!draft) {
       draft = "I'm here — tell me what's going on and we'll take it from there.";
     }
@@ -494,11 +525,36 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   if (likelyGeneric && meaningful && !suspiciousStateLanguage) {
     console.log(`[REPLY_THIN] ...${scope.userId.slice(-6)} — generic reply to a meaningful message`);
   }
-  if (!suspiciousStateLanguage && !meaningful) return reply;
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  // THE REPAIRED DRAFT IS THE REPLY. `return reply` HERE THREW AWAY EVERY REPAIR ABOVE (C10).
+  //
+  // Reproduced through the live front door on 85d1b73, with the function's own log line as the
+  // witness that the repair ran and was then discarded:
+  //
+  //     client  "What does maintenance calories mean?"
+  //     model   "Maintenance calories are the number that holds your weight steady. Noted 👌"
+  //     log     [WRITE_INTEGRITY] blocked a confirmation with no write on the turn
+  //     wire    "Maintenance calories are the number that holds your weight steady. Noted 👌 …"
+  //
+  // Nothing was written on that turn. The write-integrity rule saw the false confirmation, logged
+  // it, counted it through recordFalseConfirmation, and built the honest replacement — and then
+  // every exit below this point returned `reply`, the ORIGINAL model string, so the client was
+  // told "Noted 👌" about a record that does not exist. That is the 21 August handset defect
+  // still shipping, past the boundary written to stop it.
+  //
+  // `reply` is also the UNVERIFIED text. The verifier above ran on `draft`; returning `reply`
+  // returned a string no check on this turn ever approved. Both halves are the same mistake:
+  // the function reconciles into `draft` and then hands back the thing it reconciled away from.
+  //
+  // Every exit from here on returns `draft`. The stale-number path already returned `corrected`,
+  // which is `draft` plus a ledger substitution, and the verifier-blocked path already returned
+  // its safe replacement — those two were the only exits that were ever right.
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  if (!suspiciousStateLanguage && !meaningful) return draft;
 
   try {
     const [user] = await db.select().from(users).where(eq(users.id, scope.userId)).limit(1);
-    if (!user) return reply;
+    if (!user) return draft;
     const dayStart = sastDayStart(new Date());
     const [todayWorkouts, todaySteps, latestWeightRow] = await Promise.all([
       db.select({ id: workoutLogs.id, loggedAt: workoutLogs.loggedAt }).from(workoutLogs)
@@ -541,7 +597,10 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
       }
       console.warn(`[POST_TURN_FIX] ...${scope.userId.slice(-6)} weight ${replyWeightNumbers.join(",")} → ${latestWeight}`);
     }
-    if (corrected === draft) return reply;
+    // NOTHING WAS STALE — so the reply is the repaired draft, not the original. This was the
+    // ordinary-turn exit, and therefore the one the defect above shipped through on almost every
+    // turn: a turn with no stale step or weight number lands here, which is most of them.
+    if (corrected === draft) return draft;
 
     // A CORRECTION IS RE-VERIFIED BEFORE IT CAN BE SENT. The old path had no such discipline —
     // whatever the second model returned went straight out.
@@ -558,8 +617,12 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
     } catch (logErr) { console.warn("[POST_TURN_FIX] chatHistory update non-fatal:", (logErr as any)?.message || logErr); }
     return corrected;
   } catch (e) {
+    // A FAILED LEDGER READ IS NOT A REASON TO UN-REPAIR THE REPLY. The reads in this block exist
+    // to correct stale numbers; losing them costs a correction, and returning `reply` would cost
+    // the write-integrity repair and the directive strip as well — which is a strictly worse
+    // outcome than the one this catch is handling.
     console.warn("[POST_TURN_RECONCILE] non-fatal:", (e as any)?.message || e);
-    return reply;
+    return draft;
   }
 }
 

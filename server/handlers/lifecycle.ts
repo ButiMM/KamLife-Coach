@@ -1214,8 +1214,31 @@ export async function handleLifecycle(ctx: {
   const todayCalCheck = (user.todayCaloriesDate === sastToday()) ? (user.todayCalories || 0) : 0; // toISOString() is UTC — drifts from SAST 00:00–02:00; sastToday() matches stored format
   const calTarget2 = user.calorieTarget || 1800;
   const isLateDay = new Date(Date.now() + 2 * 3_600_000).getUTCHours() >= 16; // SAST hour — getHours() is UTC on Railway
+  // AN UNPROMPTED WARNING MAY NOT SWALLOW A QUESTION (C9/C10, 2026-09-15).
+  //
+  // This branch is an OBSERVATION about the client's day — nobody asked for it — and it returns,
+  // so on a first-match-wins pipeline above the Coach it ends the turn. On the flagship journey:
+  //
+  //     client  "I had a pear. What should I have for dinner tonight?"
+  //     wire    "Only 103 kcal by this time of day, Thandi — that is too low. …"
+  //
+  // Their question is never answered. The two regexes below are why it reaches this turn at all:
+  // "had" satisfies the first and "dinner" the second — and both of those words are in the
+  // QUESTION, not in a complaint about eating too little.
+  //
+  // IT WAS DORMANT, NOT ABSENT. Before C9 the pear was written to yesterday, so todayCalCheck was
+  // 0 and this branch could not fire; correcting the date is what surfaced it. Recorded plainly
+  // because "the acceptance went red after a fix" and "the fix broke something" are different
+  // things, and this is the first: the defect was always here, waiting for a client whose food
+  // landed on the right day.
+  //
+  // looksLikeQuestion is the owner routes.ts already consults to decide that the Coach mouth owns
+  // a turn (`alsoAsksCoach`), and #92 aligned the mouth's own gate to it. Asking it here is the
+  // same question with the same owner — not a new gate. A client who ASKS about under-eating
+  // still gets an answer: the Coach path answers questions, which is the point.
   const isUnderEating =
     isLateDay &&
+    !looksLikeQuestion(message) &&
     todayCalCheck > 0 &&
     todayCalCheck < calTarget2 * 0.45 &&
     /\b(only|just|that.?s it|ate|had)\b/i.test(m) &&
