@@ -15,7 +15,7 @@ import { tellDontAsk } from "../reply-hygiene";
 import { logChat, withTimeout, turnEvidence } from "./chat-log";
 import { checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./checks";
 import { detectLanguage } from "../constants";
-import { checkGptRateLimit, sastDayStart, sastToday, isMultiPartAsk, looksLikeDeepEmotionalShare , getDisplayName} from "../utils";
+import { checkGptRateLimit, sastDayStart, sastToday, looksLikeQuestion, looksLikeDeepEmotionalShare , getDisplayName} from "../utils";
 import { getKamlifeProgramme } from "../programme";
 import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
@@ -675,20 +675,43 @@ SA voice. Direct. Coach forward, not backward.`;
           return applyReplyVerifier(gptReply, user, message);
         }
       }
-      if (isMultiPartAsk(message)) {
+      if (looksLikeQuestion(message)) {
         // A canonical action answers "what next"; it does not answer factual questions riding in
         // the same voice note. Ask the existing Coach mouth for CONTEXT only, then let the
         // existing decision composer add the one action chosen by canonicalDecision. This keeps
         // the model out of prescription authority while preventing a two-question turn from
         // collapsing to an unrelated action line.
+        //
+        // ONE OWNER OF "THIS TURN ALSO ASKS THE COACH SOMETHING" (#92, 2026-09-15).
+        //
+        // This gate was isMultiPartAsk — ≥60 characters AND (two "?" | a joiner | ≥35 words) — so
+        // a client who asked ONE question on a decision turn never reached the Coach mouth at all
+        // and the else-branch below sent the canonical action line by itself. Traced on b7908c7
+        // through the real front door, three different turns produced the SAME body, byte for byte:
+        //
+        //     "I had a pear. What should I have for dinner tonight?"   (51 chars)
+        //     "What does maintenance calories mean?"                   (36 chars)
+        //     "Hey coach, it's been a busy week but I'm still here"
+        //         all three ->  "Thandi — one thing today: *Tell me what you ate today — one line
+        //                        is enough.* _I can't coach a day I can't see._"
+        //
+        // askCoachK was never called on any of them. That is the tracker complaint exactly: the
+        // question is not answered badly, it is not answered, and the client is instructed to
+        // report a pear the same turn had already written to meal_logs.
+        //
+        // routes.ts had already settled which owner answers this question — `alsoAsksCoach:
+        // looksLikeQuestion(message) && …` at the turn resolver, with a standing negative control
+        // in production-parity forbidding isMultiPartAsk from gating it. Two owners for one
+        // question, and the narrower one won at the mouth. This is the alignment, not a new gate:
+        // same branch, same mouth, same composer, the canonical action still appended last.
         const questionContextInstruction = `${decisionBrief(decision)}
 
-This message contains multiple explicit questions. Answer EVERY one directly, in the order asked.
+This message contains one or more explicit questions. Answer EVERY one directly, in the order asked.
 The facts in this same message have already been committed: never ask the client to report them again.
 Write context only and do not add a next action; the canonical action is appended after your answer.
 
 ${finalInstruction}`;
-        const questionContext = await withTimeout("gpt_multi_question", 30000,
+        const questionContext = await withTimeout("gpt_question_context", 30000,
           () => askCoachK(message, user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));
         gptReply = composeDecisionTurn(
           questionContext === AGENT_ERROR ? situationFrame : questionContext,
