@@ -158,7 +158,30 @@ export function parseMealDate(message: string): Date {
   }
 
   // "last night" → yesterday at 8pm SAST
-  if (/\b(last night|tonight|yesterday.?night|previous night)\b/.test(text)) {
+  //
+  // "TONIGHT" IS NOT LAST NIGHT (C9, 2026-09-15). It sat in this alternation and so resolved,
+  // at every hour of the day, to YESTERDAY 20:00. "I had a pear. What should I have for dinner
+  // tonight?" therefore stored the pear — eaten minutes earlier — on yesterday's SAST day: it
+  // left today's totals, the day read back 0 kcal, and the coach answered by asking the client
+  // to tell it what they had eaten today, about food it had just written. The word belonged to
+  // the QUESTION about a meal still to come, and it was read as a report about a meal gone by.
+  //
+  // THE PRODUCT ALREADY SAYS TONIGHT MEANS TODAY — three times, in this same file, from the same
+  // commit that added the line above (45fb2d1):
+  //
+  //   effectiveMealLoggedAt   "tonight" is in the list that KEEPS loggedAt, so even in the
+  //                           00:00–04:59 window it is not the day that just ended
+  //   the forgot/missed gate  "tonight" is excluded alongside "today", "just now", "now"
+  //   SAYS_TODAY_RE           "tonight" is literally inside the regex named SAYS_TODAY_RE
+  //
+  // Three owners to one, and the one is the only branch that writes the meal's DATE. The comment
+  // on this branch names "last night" alone; "tonight" was never argued for, here or anywhere.
+  //
+  // REMOVED, NOT WINDOWED. The tempting repair is "tonight means yesterday before 04:00 SAST" —
+  // but that is a SECOND owner of the midnight window, and effectiveMealLoggedAt is the first.
+  // It already reads that window, already reads this word, and already answers: keep the day.
+  // Falling through to the default hands it the question instead of answering it twice.
+  if (/\b(last night|yesterday.?night|previous night)\b/.test(text)) {
     return new Date(todayStartSAST.getTime() - 86_400_000 + 20 * 3_600_000);
   }
 
