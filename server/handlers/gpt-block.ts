@@ -20,7 +20,7 @@ import { getKamlifeProgramme } from "../programme";
 import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
 import { safetyGate } from "../verifiers/response-gate";
-import { verifyBrainReply } from "../brain/reply-verifier";
+import { verifyBrainReply, stripModelDirectives } from "../brain/reply-verifier";
 import { isBareReaction, isCoachCriticism, readsAsTherapySpeak, bareReactionFallback, isDiagnosticQuestion } from "../reaction-guard";
 
 // ── SCENARIO GUIDE — the coach's situation playbook ────────────────────────────
@@ -713,8 +713,41 @@ Write context only and do not add a next action; the canonical action is appende
 ${finalInstruction}`;
         const questionContext = await withTimeout("gpt_question_context", 30000,
           () => askCoachK(message, user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));
+        // "WRITE CONTEXT ONLY" IS AN INSTRUCTION UNTIL SOMETHING ENFORCES IT (#92 review, Codex).
+        //
+        // The prompt above tells the model not to add a next action. A prompt is guidance, and the
+        // widened gate routes the question shape this is most common in — "what should I have for
+        // dinner?" — at a model with every reason to answer in imperatives. Measured on this branch
+        // before this line existed: the mouth returned "Have grilled chicken and rice tonight. Then
+        // walk 3km after dinner. Also eat 200g of chicken tonight." and the client received all
+        // three with `decision.todo` under them. Four next moves, three of them the model's.
+        //
+        // stripModelDirectives is the existing owner of that removal and it was not on this path.
+        // It keeps the canonical sentence, drops sentences that select the plate or issue a domain
+        // instruction, and leaves explanation untouched — so "a pear is fine" survives and "Eat
+        // 200g of chicken tonight." does not. Its evidence is the decision already in hand rather
+        // than turn state, because this runs before the turn is tagged model-authored.
+        //
+        // ITS BOUND, MEASURED HERE RATHER THAN QUOTED (#92): it is weaker than its own docstring's
+        // "~89% of plausible phrasings" on this shape. IMPERATIVE anchors the verb to the start of
+        // a sentence, so a leading adverb defeats it ("Also eat 200g…", "Then walk 3km…" both
+        // survive); "have" is not in its verb list; and directiveDomains additionally requires a
+        // BEHAVIOUR_DOMAINS noun, which food words are deliberately excluded from. So this removes
+        // the bare imperative and NOT every prescription a model can phrase. Closing that gap means
+        // widening a predicate shared by every model path in the product — a separate cut with its
+        // own blast radius, not a line to slip into this one. Stated so the next reader does not
+        // mistake this call for a closed boundary.
+        //
+        // An answer stripped to nothing falls back to the situation frame — the same value the
+        // AGENT_ERROR arm already uses, which is what this branch did for every turn before the
+        // gate widened. No new fallback.
+        const context = questionContext === AGENT_ERROR
+          ? situationFrame
+          : stripModelDirectives(questionContext, {
+              modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
+            } as any).kept || situationFrame;
         gptReply = composeDecisionTurn(
-          questionContext === AGENT_ERROR ? situationFrame : questionContext,
+          context,
           decision.reply || renderActionLine(decision.todo),
         );
       } else {

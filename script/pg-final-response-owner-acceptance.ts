@@ -106,6 +106,7 @@ const { processTextAsync } = await import("../server/routes/whatsapp");
 const { _resetOutboundDedupe } = await import("../server/reply-hygiene");
 const { _resetInteractionCorrelation } = await import("../server/handlers/chat-log");
 const { isMultiPartAsk, looksLikeQuestion } = await import("../server/utils");
+const { stripModelDirectives } = await import("../server/brain/reply-verifier");
 
 let failed = 0;
 const chk = (ok: boolean, msg: string, evidence = "") => {
@@ -248,6 +249,65 @@ for (const [name, t] of [["pear", pear], ["meaning", meaning]] as const) {
   chk(t.body.indexOf(todo) > t.body.indexOf(BASELINE_TAIL) - 1 && t.body.indexOf(todo) > 40,
     `${name}: the action is appended AFTER the answer, not in front of it`,
     `answerEnds=${t.body.indexOf(todo)} body=${JSON.stringify(t.body.slice(0, 120))}`);
+  // COUNTING BOLD IS NOT COUNTING INSTRUCTIONS (#92 review, Codex). A model answer to a
+  // prescriptive question can carry a second next move in plain prose, and the three checks above
+  // would all stay green through it. This asks the product's own directive owner, mechanically:
+  // nothing in the delivered body may be a sentence stripModelDirectives would remove.
+  //
+  // HONEST BOUND, and it is the reason the PR does not call the review finding closed: this
+  // detects exactly what that owner detects — a bare sentence-initial imperative naming a
+  // behaviour domain. "Also eat 200g of chicken tonight." is not on that list today. The
+  // assertion is mechanical and real, and it is not a proof that no second instruction exists.
+  const residue = stripModelDirectives(t.body, {
+    modelAuthored: true, canonicalTodo: t.decision?.todo, canonicalKind: t.decision?.kind,
+  } as any);
+  chk(residue.removed.length === 0,
+    `${name}: the delivered body carries no sentence the directive owner would strip`,
+    `removed=${JSON.stringify(residue.removed)}`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n3b. A MODEL PRESCRIPTION DOES NOT BECOME A SECOND NEXT MOVE");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The review finding this cut took on (#92, Codex): a prescriptive question invites the model to
+// answer with an instruction, and composeDecisionTurn then appends the canonical action under it.
+// Here the mouth is made to return one, and the claim is that it does not reach the client.
+//
+// WHAT THIS DOES AND DOES NOT PROVE. The fixture's imperative is the shape the product's own
+// directive owner recognises, so this grades the removal doing its job on the wire. Phrasings that
+// owner does NOT recognise still get through, and the run prints that bound below rather than
+// asserting it — following this repo's KNOWN, NOT FIXED HERE convention, because an assertion that
+// a defect persists turns red on the day someone fixes it. The PR does not call the finding closed.
+const PRESCRIBED = "Eat 200g of chicken tonight. A pear is a fine snack and it is already on your record.";
+const prescribe = await turn(PEAR, `{"intent":"FOOD_LOG","confidence":0.9,"canonical":"i had a pear"}`, PRESCRIBED);
+{
+  REAL(`    MOUTH RETURNED: ${JSON.stringify(PRESCRIBED)}`);
+  REAL(`    WIRE          : ${JSON.stringify(prescribe.body)}`);
+  chk(!/Eat 200g of chicken tonight/i.test(prescribe.body),
+    "a bare imperative from the mouth never reaches the client", prescribe.body);
+  chk(/a pear is a fine snack/i.test(prescribe.body),
+    "…while the explanation beside it survives — the answer is not thrown away with it",
+    prescribe.body);
+  const todo = String(prescribe.decision?.todo || "").replace(/[.!]\s*$/, "");
+  chk((prescribe.body.match(/\*[^*]+\*/g) || []).length === 1 && prescribe.body.includes(todo),
+    "…and the canonical action is still the one instruction that lands",
+    `todo=${JSON.stringify(todo)} body=${JSON.stringify(prescribe.body)}`);
+
+  // ⚠ KNOWN, NOT FIXED HERE — measured, not assumed. Reported the way tracking-contract-tests
+  // reports the water-intention gap: the reader sees the boundary's real edge on every run.
+  const UNCAUGHT = ["Have grilled chicken and rice tonight.", "Then walk 3km after dinner.",
+                    "Also eat 200g of chicken tonight."];
+  const escapes = UNCAUGHT.filter(s => stripModelDirectives(s, {
+    modelAuthored: true, canonicalTodo: prescribe.decision?.todo, canonicalKind: prescribe.decision?.kind,
+  } as any).removed.length === 0);
+  if (escapes.length) {
+    REAL(`  ⚠ KNOWN, NOT FIXED HERE — ${escapes.length} prescription shape(s) the directive owner does not recognise:`);
+    for (const s of escapes) REAL(`      ${JSON.stringify(s)}`);
+    REAL(`    IMPERATIVE anchors its verb to the start of a sentence, so a leading adverb defeats it;`);
+    REAL(`    "have" is not in its verb list; and directiveDomains also wants a BEHAVIOUR_DOMAINS noun,`);
+    REAL(`    which food words are deliberately excluded from. Closing it means widening a predicate`);
+    REAL(`    shared by every model path in the product — its own cut, with its own blast radius.`);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════

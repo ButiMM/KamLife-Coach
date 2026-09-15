@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # RED-ON-REVERT — #92, one final response owner answers the client's question.
 #
-# ONE MECHANISM PER CASE. This cut is one gate, but the claim behind it has four independent
-# moving parts: WHICH turns reach the Coach mouth, WHAT the mouth is given, WHETHER its answer
-# survives composition, and WHETHER the canonical action still lands last. A green suite that
+# ONE MECHANISM PER CASE. This cut is one gate and one removal, but the claim behind them has
+# five independent moving parts: WHICH turns reach the Coach mouth, WHAT the mouth is given, WHAT
+# it is told, WHETHER its answer survives composition stripped of prescriptions, and WHETHER the
+# canonical action still lands last. A green suite that
 # cannot tell those apart says nothing about which of them is load-bearing.
 #
 # TWO CONTROLS FOR THE OPPOSITE DEFECT. "Answer the question" is trivially satisfied by handing
@@ -86,8 +87,13 @@ PYEOF
 #    green through it because the model really was asked.
 cat > "$PATCH_DIR/2.py" <<'PYEOF'
 p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
-s=s.replace("          questionContext === AGENT_ERROR ? situationFrame : questionContext,\n",
-            "          situationFrame,\n", 1)
+old = """        const context = questionContext === AGENT_ERROR
+          ? situationFrame
+          : stripModelDirectives(questionContext, {
+              modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
+            } as any).kept || situationFrame;"""
+new = """        const context = situationFrame;"""
+s=s.replace(old, new, 1)
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
@@ -96,11 +102,11 @@ PYEOF
 cat > "$PATCH_DIR/3.py" <<'PYEOF'
 p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
 old="""        gptReply = composeDecisionTurn(
-          questionContext === AGENT_ERROR ? situationFrame : questionContext,
+          context,
           decision.reply || renderActionLine(decision.todo),
         );"""
 new="""        gptReply = composeDecisionTurn(
-          questionContext === AGENT_ERROR ? situationFrame : questionContext,
+          context,
           "",
         );"""
 s=s.replace(old, new, 1)
@@ -143,6 +149,22 @@ s=s.replace("  } else if (isMissedWorkout) {", "  } else if (false) {")
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
+# 8. THE MODEL'S PRESCRIPTION IS NO LONGER REMOVED BEFORE COMPOSITION. The mouth's own imperative
+#    reaches the client with the canonical action underneath it — two next moves, the review
+#    finding this cut took on. Isolated from the gate: the question still reaches the Coach.
+cat > "$PATCH_DIR/8.py" <<'PYEOF2'
+p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
+old = """        const context = questionContext === AGENT_ERROR
+          ? situationFrame
+          : stripModelDirectives(questionContext, {
+              modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
+            } as any).kept || situationFrame;"""
+new = """        const context = questionContext === AGENT_ERROR ? situationFrame : questionContext;"""
+s=s.replace(old, new, 1)
+assert s!=b, "no match"; open(p,"w").write(s)
+PYEOF2
+
+
 # THE GRADER MUST PASS UNTOUCHED FIRST. Without this a broken import makes every case below
 # "caught" and the harness certifies itself.
 ctl="$(npx tsx "$ACC" 2>&1)"; ctl_status=$?
@@ -155,11 +177,11 @@ echo "CONTROL: the acceptance is GREEN unmodified — detections below are real.
 
 echo "RED-ON-REVERT — #92. Every case below must be caught by the acceptance."
 failed=0
-for i in 1 2 3 4 5 6 7; do
+for i in 1 2 3 4 5 6 7 8; do
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) left the acceptance green, crashed, or would not patch."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 7/7 cases caught."
+echo "RED-ON-REVERT: GREEN — 8/8 cases caught."
