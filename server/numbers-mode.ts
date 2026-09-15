@@ -72,39 +72,30 @@ const mendStrippedSentence = (s: string): string => s
 
 export function stripNumbersFromProse(text: string): string {
   const src = text || "";
-  const withoutFigures = stripFigureTokens(src);
 
-  // DEBRIS CLEANUP ONLY RUNS WHEN THERE IS DEBRIS (#92 review 3, 2026-09-15).
-  //
-  // The rules below exist to tidy what the figure removals leave behind — "breast: and." and
-  // "roughly , left". They ran UNCONDITIONALLY, and one of them deletes real words:
+  // THE DEBRIS MEND BELONGS TO THE SENTENCE THAT LOST A FIGURE, AND TO NO OTHER (#92 review,
+  // 2026-09-15). The mend exists to tidy what a removal leaves behind — "breast: and." and
+  // "roughly , left". It ran over the WHOLE reply, and one of its rules deletes real words:
   //
   //     .replace(/\b(?:roughly|about|approximately|around|is|at|and|with|of)\s*(?=[.,!?;:])/gi, "")
   //
-  // `is`, `at`, `and`, `with` and `of` are deleted wherever they sit in front of punctuation,
-  // whether or not a figure was ever removed. numbers:low is the DEFAULT — every client without
-  // `numbers:full` in profileNotes — so this reached ordinary replies. Caught post-transport by
-  // this cut's acceptance, on a sentence containing no figures at all:
+  // `is`, `at`, `and`, `with` and `of` are deleted wherever they sit in front of punctuation.
+  // numbers:low is the DEFAULT — every client without `numbers:full` — so this was ordinary
+  // replies. Both halves were caught post-transport by this cut's acceptance:
   //
-  //     sent    "…the number that holds your weight exactly where it is: above it you gain…"
-  //     wire    "…the number that holds your weight exactly where it: above it you gain…"
+  //   a reply with no figures at all
+  //     sent   "…the number that holds your weight exactly where it is: above it you gain…"
+  //     wire   "…the number that holds your weight exactly where it: above it you gain…"
   //
-  // A client was shipped broken English by a function whose entire job is removing numbers from a
-  // reply that had none. Gating the cleanup on an actual removal is the whole fix: when a figure
-  // WAS stripped the behaviour is byte-identical to before, and when none was this is now the
-  // no-op its own name promises.
-  if (withoutFigures === src) return src;
-
-  // …AND ONLY ON THE SENTENCE THAT LOST ONE (#92 review 4, 2026-09-15). Gating the whole reply on
-  // "was anything stripped" was not enough: in a MIXED reply the cleanup still ran over sentences
-  // that never held a figure.
-  //
+  //   and a MIXED reply, which a whole-reply "did we strip anything?" gate does NOT protect
   //     sent   "That meal was 600 kcal. The question is: what works for you?"
   //     wire   "That meal was. The question: what works for you?"
   //
-  // The first sentence lost its figure, which is the job. The second lost the word "is", and
-  // nothing in it was ever touched. So the mend is applied per sentence, to the ones that actually
-  // changed — the debris can only ever be where the removal was.
+  // Per-sentence is the whole fix, and it covers both: debris can only ever be where the removal
+  // was, so a sentence that did not change is never rewritten. A no-figure reply is now untouched
+  // because none of its sentences change — no separate early return, which was tried first and
+  // then measured as redundant once this loop existed. A guard that can no longer fail is dead
+  // code, and its revert case would have been an assertion that cannot go red.
   const parts = src.split(/(?<=[.!?])(\s+)/); // [sentence, separator, sentence, …]
   const mended = parts
     .map((part, i) => {
