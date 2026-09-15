@@ -715,7 +715,7 @@ canonical action appended below is the only instruction this reply is allowed to
 
 ${finalInstruction}`;
         const questionContext = await withTimeout("gpt_question_context", 30000,
-          () => askCoachK(message, user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));
+          () => askCoachK(message.slice(0, 500), user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));
         // "WRITE CONTEXT ONLY" IS AN INSTRUCTION UNTIL SOMETHING ENFORCES IT (#92 review, Codex).
         //
         // The prompt above tells the model not to add a next action. A prompt is guidance, and the
