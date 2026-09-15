@@ -603,8 +603,24 @@ const ADVISORY = /\b(?:you\s+(?:should|need\s+to|have\s+to|could|might\s+want\s+
  * with `decision.todo` appended underneath. Only the bare "Eat 200g…" form was recognised — four
  * next moves reached the wire, three of them the model's. The mechanism is one optional adverbial
  * before the verb; the verb list and the domain requirement are unchanged.
+ *
+ * A FRONTED MEAL OR TIME PHRASE DOES THE SAME (#92 review round 2, 2026-09-15). The reviewer's
+ * counterexample was "For dinner tonight keep it protein-first: grilled chicken with a small
+ * portion of rice" — an order with a prepositional phrase in front of the verb, so the anchor
+ * missed it and the client received it alongside the canonical action. Two directions, one reply.
+ *
+ * The fronted set is CLOSED and made of adjuncts that cannot themselves be a subject. A general
+ * "any words before the verb" form was tried first and rejected: it read "After-eight nights do
+ * not need cooking" as an order, because it let a NOUN PHRASE sit where the adjunct goes and
+ * turned subject-plus-verb into a false imperative — which would have deleted Cut 5's answer to
+ * the after-eight question. The negation guard below is the second half of that: an imperative is
+ * never negated with "not", so "do not need" is description, not instruction.
  */
-const IMPERATIVE = /(?:^|[.!?]\s+|\n)\s*(?:(?:also|then|so|now|next|instead|rather|first|finally|additionally),?\s+)?(?:train|do|hit|get|go|take|skip|rest|walk|weigh|eat|add|drop|lower|raise|push|bring|start|stop|keep|make|try|sit|jump|step|log|send)\b/i;
+const IMPERATIVE_LEAD = "(?:(?:also|then|so|now|next|instead|rather|first|finally|additionally),?\\s+|(?:for\\s+(?:dinner|lunch|breakfast|supper|the\\s+rest\\s+of\\s+the\\s+day)|tonight|tomorrow|today|this\\s+(?:morning|afternoon|evening)|after\\s+(?:work|gym|training|dinner|lunch|supper))\\b[^.!?]{0,25}?\\s+)?";
+const IMPERATIVE = new RegExp(
+  `(?:^|[.!?]\\s+|\\n)\\s*${IMPERATIVE_LEAD}` +
+  `(?:train|do|hit|get|go|take|skip|rest|walk|weigh|eat|add|drop|lower|raise|push|bring|start|stop|keep|make|try|sit|jump|step|log|send)` +
+  `\\b(?!\\s*(?:not\\b|n['’]t\\b))`, "i");
 
 /**
  * CHOOSING THE IMPLEMENTATION (2026-08-23). "How about grilled chicken with rice?" is not

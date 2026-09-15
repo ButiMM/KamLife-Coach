@@ -192,6 +192,27 @@ assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF2
 
 
+# 12. THE FRONTED MEAL PHRASE DEFEATS THE IMPERATIVE AGAIN — the reviewer's counterexample. "For
+#     dinner tonight keep it protein-first: grilled chicken…" stops being an order and ships beside
+#     the canonical action: two directions in one reply, which is what §3e exists to refuse.
+cat > "$PATCH_DIR/12.py" <<'PYEOF2'
+p="server/brain/reply-verifier.ts"; s=open(p).read(); b=s
+i=s.index("const IMPERATIVE_LEAD =")
+j=s.index("\n", i)
+s=s[:i] + 'const IMPERATIVE_LEAD = "(?:(?:also|then|so|now|next|instead|rather|first|finally|additionally),?\\\\s+)?";' + s[j:]
+assert s!=b, "no match"; open(p,"w").write(s)
+PYEOF2
+
+# 13. THE DEBRIS CLEANUP RUNS UNCONDITIONALLY AGAIN. numbers:low is the default, so every client
+#     without numbers:full loses the words is/at/and/with/of wherever they precede punctuation —
+#     broken English shipped by a function removing numbers from a reply that had none.
+cat > "$PATCH_DIR/13.py" <<'PYEOF2'
+p="server/numbers-mode.ts"; s=open(p).read(); b=s
+s=s.replace("  if (withoutFigures === src) return src;\n", "", 1)
+assert s!=b, "no match"; open(p,"w").write(s)
+PYEOF2
+
+
 # THE GRADER MUST PASS UNTOUCHED FIRST. Without this a broken import makes every case below
 # "caught" and the harness certifies itself.
 ctl="$(npx tsx "$ACC" 2>&1)"; ctl_status=$?
@@ -204,11 +225,11 @@ echo "CONTROL: the acceptance is GREEN unmodified — detections below are real.
 
 echo "RED-ON-REVERT — #92. Every case below must be caught by the acceptance."
 failed=0
-for i in 1 2 3 4 5 6 7 8 9 10 11; do
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) left the acceptance green, crashed, or would not patch."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 11/11 cases caught."
+echo "RED-ON-REVERT: GREEN — 13/13 cases caught."

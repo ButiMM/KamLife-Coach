@@ -51,12 +51,36 @@ export function stripFoodLineNumbers(foodLines: string): string {
 // Deliberately conservative — only touches explicit kcal/calorie/gram-protein/portion
 // tokens, and tidies the small dangling artefacts that leaves ("roughly ,").
 export function stripNumbersFromProse(text: string): string {
-  return (text || "")
-    // figure tokens first
+  const src = text || "";
+  // figure tokens first
+  const withoutFigures = src
     .replace(/~?\s*\d[\d,]*\s*kcal\s*[|,/]?\s*(?:and\s*)?~?\s*\d+\s*g\s*(?:of\s*)?protein/gi, "")
     .replace(/~?\s*\d[\d,]*\s*(?:kcal|calories|cals?)\b/gi, "")
     .replace(/~?\s*\d+\s*g\s*(?:of\s*)?protein/gi, "")
-    .replace(/\(\s*~?\s*\d[\d,]*\s*(?:g|ml|grams?)\s*\)/gi, "")
+    .replace(/\(\s*~?\s*\d[\d,]*\s*(?:g|ml|grams?)\s*\)/gi, "");
+
+  // DEBRIS CLEANUP ONLY RUNS WHEN THERE IS DEBRIS (#92 review 3, 2026-09-15).
+  //
+  // The rules below exist to tidy what the figure removals leave behind — "breast: and." and
+  // "roughly , left". They ran UNCONDITIONALLY, and one of them deletes real words:
+  //
+  //     .replace(/\b(?:roughly|about|approximately|around|is|at|and|with|of)\s*(?=[.,!?;:])/gi, "")
+  //
+  // `is`, `at`, `and`, `with` and `of` are deleted wherever they sit in front of punctuation,
+  // whether or not a figure was ever removed. numbers:low is the DEFAULT — every client without
+  // `numbers:full` in profileNotes — so this reached ordinary replies. Caught post-transport by
+  // this cut's acceptance, on a sentence containing no figures at all:
+  //
+  //     sent    "…the number that holds your weight exactly where it is: above it you gain…"
+  //     wire    "…the number that holds your weight exactly where it: above it you gain…"
+  //
+  // A client was shipped broken English by a function whose entire job is removing numbers from a
+  // reply that had none. Gating the cleanup on an actual removal is the whole fix: when a figure
+  // WAS stripped the behaviour is byte-identical to before, and when none was this is now the
+  // no-op its own name promises.
+  if (withoutFigures === src) return src;
+
+  return withoutFigures
     // clean the connective debris the removals leave behind
     .replace(/:\s*(?:and|is|with|of|at)\b\s*(?=[.,!?;:])/gi, "") // "breast: and." → "breast."
     .replace(/\b(?:roughly|about|approximately|around|is|at|and|with|of)\s*(?=[.,!?;:])/gi, "")

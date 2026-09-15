@@ -709,6 +709,9 @@ SA voice. Direct. Coach forward, not backward.`;
 This message contains one or more explicit questions. Answer EVERY one directly, in the order asked.
 The facts in this same message have already been committed: never ask the client to report them again.
 Write context only and do not add a next action; the canonical action is appended after your answer.
+Phrase every answer as INFORMATION, never as an order. Say what the options ARE ("quick
+protein-first options for a late dinner are X or Y"), not what to do ("have X tonight"). The
+canonical action appended below is the only instruction this reply is allowed to contain.
 
 ${finalInstruction}`;
         const questionContext = await withTimeout("gpt_question_context", 30000,
@@ -728,15 +731,13 @@ ${finalInstruction}`;
         // 200g of chicken tonight." does not. Its evidence is the decision already in hand rather
         // than turn state, because this runs before the turn is tagged model-authored.
         //
-        // ITS BOUND, MEASURED HERE RATHER THAN QUOTED (#92): it is weaker than its own docstring's
-        // "~89% of plausible phrasings" on this shape. IMPERATIVE anchors the verb to the start of
-        // a sentence, so a leading adverb defeats it ("Also eat 200g…", "Then walk 3km…" both
-        // survive); "have" is not in its verb list; and directiveDomains additionally requires a
-        // BEHAVIOUR_DOMAINS noun, which food words are deliberately excluded from. So this removes
-        // the bare imperative and NOT every prescription a model can phrase. Closing that gap means
-        // widening a predicate shared by every model path in the product — a separate cut with its
-        // own blast radius, not a line to slip into this one. Stated so the next reader does not
-        // mistake this call for a closed boundary.
+        // THREE ROUNDS OF REVIEW WIDENED IT, EACH ON A MEASURED COUNTEREXAMPLE (#92): the leading
+        // adverb ("Also eat 200g…", "Then walk 3km…"), the bare plate pick ("Have grilled chicken
+        // and rice tonight."), and the fronted meal phrase ("For dinner tonight keep it
+        // protein-first: …"). All three reached a client alongside the canonical action. The
+        // acceptance no longer grades this by asking the filter whether the filter is satisfied —
+        // it counts client-visible instructions with its own definition, so the next phrasing this
+        // owner misses shows up as a failing turn rather than as a green suite.
         //
         // An answer stripped to nothing falls back to the situation frame — the same value the
         // AGENT_ERROR arm already uses, which is what this branch did for every turn before the

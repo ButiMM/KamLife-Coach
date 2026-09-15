@@ -30,7 +30,11 @@
  * ══════════════════════════════════════════════════════════════════════════════════════════════
  *
  * §1/§2  A single question on a decision turn is answered, and that answer survives to the wire.
- * §3     The canonical action is still the ONE action, still appended last, still from the decision.
+ * §0     The instruction counter is validated before anything is graded with it.
+ * §3     The client is told to do exactly ONE thing, counted independently of production's
+ *        filter — not by counting bold text, and not by asking the filter about itself.
+ * §3b-e  A prescription from the mouth never becomes a second next move, in every phrasing
+ *        review has produced: bare imperative, stacked orders, and a fronted meal phrase.
  * §4     A turn carrying NO question is UNCHANGED — the Coach mouth is not called and the body is
  *        the canonical line alone. Without this, "answer the question" is satisfied by handing the
  *        model every decision turn, which is the architecture the 2026-08-23 reviewer disproved.
@@ -67,9 +71,20 @@ process.env.NODE_ENV = "production";
 // This matters: left unstubbed it returns confidence 0 on a non-JSON reply, which drives the turn
 // into gpt-block's low-confidence clarify exit — a DIFFERENT path, and grading it here would be
 // grading the fixture's own breakage instead of the product.
+// THE FIXTURES ANSWER AS INFORMATION, NOT AS ORDERS, AND THAT IS THE PRODUCT RULE (#92 review 3).
+//
+// The first version of `dinner` read "For dinner tonight keep it protein-first: grilled chicken
+// with a small portion of rice" — and §1 REQUIRED that sentence to survive to the client while §3
+// called the turn one action. Those two claims cannot both be right: the client was told to eat
+// chicken tonight AND to report today's food. The reviewer named it, and the fixture was the
+// defect as much as the filter was.
+//
+// A coach answering "what should I have for dinner?" describes what fits; the canonical action is
+// the only thing the client is told to DO. §3e drives the order-shaped version separately and
+// proves it never reaches the wire.
 const ANSWERS: Record<string, string> = {
-  dinner: "A pear is a fine snack and it is already on your record. For dinner tonight keep it protein-first: grilled chicken with a small portion of rice and a big handful of spinach.",
-  maintenance: "Maintenance calories are the number that holds your weight exactly where it is — eat that and nothing moves, eat under it and you lose.",
+  dinner: "A pear is a fine snack and it is already on your record. Quick protein-first options for a late dinner are plain yoghurt with fruit, or tinned fish on toast.",
+  maintenance: "Maintenance calories are the number that holds your weight exactly where it is: above it you gain, below it you lose.",
 };
 let COACH_ANSWER = ANSWERS.dinner;
 let CLASSIFY = `{"intent":"OTHER","confidence":0.85,"canonical":""}`;
@@ -171,6 +186,51 @@ async function turn(message: string, classify: string, answer: string) {
   };
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// HOW MANY THINGS IS THE CLIENT BEING TOLD TO DO?
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+//
+// THIS DELIBERATELY DOES NOT IMPORT stripModelDirectives. An earlier version of this file graded
+// the one-action law two ways, and both were circular or cosmetic:
+//
+//   · counting bold segments — formatting, not instructions; and
+//   · asking the production filter whether the production filter was satisfied — which can only
+//     ever confirm that the filter agrees with itself.
+//
+// Both were green on the body the reviewer produced as a counterexample:
+//
+//     "A pear is a fine snack and it is already on your record. For dinner tonight keep it
+//      protein-first: grilled chicken with a small portion of rice and a big handful of spinach.
+//      Thandi — one thing today: *Tell me what you ate today — one line is enough.*"
+//
+// One bold segment, nothing the filter recognised, and two things the client is told to do.
+//
+// So this carries its own, deliberately BROADER definition of "an instruction": second-person
+// advice, or a bare imperative verb heading a clause, optionally behind a fronted adjunct — minus
+// the canonical sentence, which is the one instruction a turn is allowed. Broader than production
+// on purpose: a grader that recognised exactly what the filter recognises could never catch the
+// filter falling behind, which is the failure this section exists for. Validated against labelled
+// sentences in §0 below, so it is not trusted on assertion either.
+function instructionSentences(body: string): string[] {
+  const ADVISORY_T = /\b(?:you\s+(?:should|need\s+to|have\s+to|could|must|might\s+want\s+to|ought\s+to)|try\s+to|make\s+sure|aim\s+(?:to|for)|i'?d\s+\w+|let'?s|i\s+(?:suggest|recommend)|how about|what about|why not|go for|stick\s+(?:to|with))\b/i;
+  const VERB_T = "eat|have|take|get|go|walk|train|do|hit|skip|rest|weigh|add|drop|log|send|tell|keep|grab|swap|choose|pick|start|stop|push|bring|finish|aim|cut|lower|raise";
+  // A fronted adjunct is a prepositional or temporal phrase, never "any words" — otherwise a
+  // subject noun phrase slides into that slot and "Your step target remains 8 000" reads as an order.
+  const FRONTED = "(?:for|at|on|after|before|with|in|by|tonight|tomorrow|today|this\\s+\\w+|next\\s+\\w+|also|then|so|now|instead|rather|first|finally)\\b[^.!?]{0,30}?\\s+";
+  const IMPERATIVE_T = new RegExp(`(?:^|[:;]\\s*)(?:${FRONTED})?(?:${VERB_T})\\b(?!\\s*(?:not\\b|n['’]t\\b))`, "i");
+  return String(body || "")
+    .replace(/[*_]/g, "")
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map(s => s.trim())
+    .filter(s => s && !/\?$/.test(s) && (ADVISORY_T.test(s) || IMPERATIVE_T.test(s)));
+}
+
+/** Instructions in the delivered body that are NOT the canonical action — must always be zero. */
+function competingInstructions(body: string, canonicalTodo: string | null | undefined): string[] {
+  const canon = String(canonicalTodo || "").trim().toLowerCase().replace(/[.!]+$/, "");
+  return instructionSentences(body).filter(s => !(canon && s.toLowerCase().includes(canon)));
+}
+
 /**
  * THE CLIENT'S TURN AS THE MOUTH RECEIVED IT — askCoachK's `userMessage`, which is the LAST user
  * message in the request, after the system prompt and the replayed chat history.
@@ -194,6 +254,38 @@ function lastClientTurn(requestBody: string): string {
 REAL("\npg-final-response-owner-acceptance — one owner answers the client's question\n");
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("0. THE INSTRUMENT ITSELF — the instruction counter is checked before anything is graded with it");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Every one-action claim below rests on this function. An unvalidated counter that answers "zero"
+// to everything would make the whole section green and mean nothing — which is the exact shape of
+// the bold-count it replaces.
+{
+  const LABELLED: Array<[string, boolean]> = [
+    ["For dinner tonight keep it protein-first: grilled chicken with a small portion of rice.", true],
+    ["Have grilled chicken and rice tonight.", true],
+    ["Then walk 3km after dinner.", true],
+    ["Also eat 200g of chicken tonight.", true],
+    ["Eat 200g of chicken tonight.", true],
+    ["You should get your steps in before supper.", true],
+    ["Tell me what you ate today — one line is enough.", true],
+    ["A pear is a fine snack and it is already on your record.", false],
+    ["Quick protein-first options for a late dinner are plain yoghurt with fruit, or tinned fish on toast.", false],
+    ["After-eight nights do not need cooking: plain yoghurt with fruit are quick protein-first options.", false],
+    ["Maintenance calories are the number that holds your weight exactly where it is: above it you gain, below it you lose.", false],
+    ["Your step target remains 8 000, and yesterday's 8 500 is already stored.", false],
+    ["Pap is a carbohydrate, so it sits beside your protein rather than replacing it.", false],
+    ["That plate came in around 600 kcal.", false],
+  ];
+  const wrong = LABELLED.filter(([s, want]) => (instructionSentences(s).length > 0) !== want);
+  chk(wrong.length === 0,
+    `the instruction counter labels all ${LABELLED.length} reference sentences correctly`,
+    wrong.map(([s, want]) => `${want ? "missed" : "false positive"}: ${JSON.stringify(s.slice(0, 70))}`).join("\n          "));
+  chk(instructionSentences("Tell me what you ate today — one line is enough.").length === 1
+      && competingInstructions("Tell me what you ate today — one line is enough.", "Tell me what you ate today — one line is enough.").length === 0,
+    "…and the canonical sentence counts as an instruction, then is excluded as THE allowed one");
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("1. THE LOG-PLUS-QUESTION TURN — the pear is written AND the question is answered");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 const pear = await turn(PEAR, `{"intent":"FOOD_LOG","confidence":0.9,"canonical":"i had a pear"}`, ANSWERS.dinner);
@@ -201,7 +293,7 @@ const pear = await turn(PEAR, `{"intent":"FOOD_LOG","confidence":0.9,"canonical"
   REAL(`    EXACT FAILING BODY BEFORE: "Thandi — one thing today: *Tell me what you ate today — one line is enough.* _I can't coach a day I can't see._"`);
   REAL(`    EXACT FINAL BODY AFTER:    ${JSON.stringify(pear.body)}`);
   chk(pear.bodies.length === 1, "sendFinal emits exactly one WhatsApp body", `${pear.bodies.length} bodies`);
-  chk(/protein-first/i.test(pear.body) && /grilled chicken/i.test(pear.body),
+  chk(/quick protein-first options/i.test(pear.body) && /tinned fish on toast/i.test(pear.body),
     "the Coach's answer to the dinner question survives to the client's screen", pear.body);
   chk(pear.delivered === pear.bodies[0],
     "turn_ledger's post-transport body equals the body the transport received",
@@ -249,21 +341,16 @@ for (const [name, t] of [["pear", pear], ["meaning", meaning]] as const) {
   chk(t.body.indexOf(todo) > t.body.indexOf(BASELINE_TAIL) - 1 && t.body.indexOf(todo) > 40,
     `${name}: the action is appended AFTER the answer, not in front of it`,
     `answerEnds=${t.body.indexOf(todo)} body=${JSON.stringify(t.body.slice(0, 120))}`);
-  // COUNTING BOLD IS NOT COUNTING INSTRUCTIONS (#92 review, Codex). A model answer to a
-  // prescriptive question can carry a second next move in plain prose, and the three checks above
-  // would all stay green through it. This asks the product's own directive owner, mechanically:
-  // nothing in the delivered body may be a sentence stripModelDirectives would remove.
-  //
-  // HONEST BOUND, and it is the reason the PR does not call the review finding closed: this
-  // detects exactly what that owner detects — a bare sentence-initial imperative naming a
-  // behaviour domain. "Also eat 200g of chicken tonight." is not on that list today. The
-  // assertion is mechanical and real, and it is not a proof that no second instruction exists.
-  const residue = stripModelDirectives(t.body, {
-    modelAuthored: true, canonicalTodo: t.decision?.todo, canonicalKind: t.decision?.kind,
-  } as any);
-  chk(residue.removed.length === 0,
-    `${name}: the delivered body carries no sentence the directive owner would strip`,
-    `removed=${JSON.stringify(residue.removed)}`);
+  // COUNTING BOLD IS NOT COUNTING INSTRUCTIONS (#92 review). The bold check above is kept because
+  // formatting is also part of the contract, but it is not the one-action claim — a second next
+  // move in plain prose passes it, which is exactly what the reviewer demonstrated. The claim is
+  // made by §0's counter, which has its own definition of an instruction and is broader than the
+  // production filter on purpose: a grader that recognised precisely what the filter recognises
+  // could never see the filter fall behind, and falling behind is what happened three times.
+  const competing = competingInstructions(t.body, t.decision?.todo);
+  chk(competing.length === 0,
+    `${name}: the client is told to do exactly ONE thing, and it is the canonical action`,
+    `also told to: ${JSON.stringify(competing)}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -289,9 +376,9 @@ const prescribe = await turn(PEAR, `{"intent":"FOOD_LOG","confidence":0.9,"canon
     "…while the explanation beside it survives — the answer is not thrown away with it",
     prescribe.body);
   const todo = String(prescribe.decision?.todo || "").replace(/[.!]\s*$/, "");
-  chk((prescribe.body.match(/\*[^*]+\*/g) || []).length === 1 && prescribe.body.includes(todo),
+  chk(competingInstructions(prescribe.body, prescribe.decision?.todo).length === 0 && prescribe.body.includes(todo),
     "…and the canonical action is still the one instruction that lands",
-    `todo=${JSON.stringify(todo)} body=${JSON.stringify(prescribe.body)}`);
+    `todo=${JSON.stringify(todo)} also told to: ${JSON.stringify(competingInstructions(prescribe.body, prescribe.decision?.todo))}`);
 
 }
 
@@ -321,11 +408,40 @@ const stacked = await turn(PEAR, `{"intent":"FOOD_LOG","confidence":0.9,"canonic
   chk((stacked.body.match(/\*[^*]+\*/g) || []).length === 1 && stacked.body.includes(todo),
     "…leaving exactly one instruction in the body, and it is the canonical one",
     `todo=${JSON.stringify(todo)} body=${JSON.stringify(stacked.body)}`);
-  const residue = stripModelDirectives(stacked.body, {
-    modelAuthored: true, canonicalTodo: stacked.decision?.todo, canonicalKind: stacked.decision?.kind,
-  } as any);
-  chk(residue.removed.length === 0, "…and the directive owner finds nothing left to strip",
-    JSON.stringify(residue.removed));
+  chk(competingInstructions(stacked.body, stacked.decision?.todo).length === 0,
+    "…and nothing else in the body tells the client to do anything",
+    JSON.stringify(competingInstructions(stacked.body, stacked.decision?.todo)));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n3e. THE REVIEWER'S COUNTEREXAMPLE — an order wearing a fronted meal phrase");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The body this section exists for, produced by the reviewer against the previous head:
+//
+//   "A pear is a fine snack and it is already on your record. For dinner tonight keep it
+//    protein-first: grilled chicken with a small portion of rice and a big handful of spinach.
+//    Thandi — one thing today: *Tell me what you ate today — one line is enough.*"
+//
+// One bold segment, nothing the production filter recognised, and TWO things the client is told
+// to do. The old §1 fixture was that sentence and §1 REQUIRED it to survive — the acceptance was
+// asserting the defect. It is driven here instead, where the claim is that it does not ship.
+const ORDERED = "A pear is a fine snack and it is already on your record. For dinner tonight keep it protein-first: grilled chicken with a small portion of rice and a big handful of spinach.";
+const ordered = await turn(PEAR, `{"intent":"FOOD_LOG","confidence":0.9,"canonical":"i had a pear"}`, ORDERED);
+{
+  REAL(`    MOUTH RETURNED: ${JSON.stringify(ORDERED)}`);
+  REAL(`    WIRE          : ${JSON.stringify(ordered.body)}`);
+  const competing = competingInstructions(ordered.body, ordered.decision?.todo);
+  chk(competing.length === 0,
+    "the client is told to do exactly ONE thing — the fronted-phrase order does not ship",
+    `also told to: ${JSON.stringify(competing)}`);
+  chk(!/keep it protein-first/i.test(ordered.body),
+    "…the order itself is gone from the body", ordered.body);
+  chk(/a pear is a fine snack/i.test(ordered.body),
+    "…and the explanation beside it survives, so closing the boundary did not delete the answer",
+    ordered.body);
+  const todo = String(ordered.decision?.todo || "").replace(/[.!]\s*$/, "");
+  chk(ordered.body.includes(todo), "…and the canonical action is the instruction that remains",
+    `todo=${JSON.stringify(todo)} body=${JSON.stringify(ordered.body)}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -365,8 +481,9 @@ const catchup = await turn(CATCHUP, `{"intent":"RANT","confidence":0.7,"canonica
     `${catchup.coachRequests.length} coach request(s)`);
   chk(!/protein-first|grilled chicken/i.test(catchup.body),
     "…and no model prose reaches a client who asked nothing", catchup.body);
-  chk(catchup.body.includes(BASELINE_TAIL) && (catchup.body.match(/\*[^*]+\*/g) || []).length === 1,
-    "…the canonical action line is still exactly what goes out", catchup.body);
+  chk(catchup.body.includes(BASELINE_TAIL) && competingInstructions(catchup.body, catchup.decision?.todo).length === 0,
+    "…the canonical action line is still exactly what goes out, and nothing competes with it",
+    `also told to: ${JSON.stringify(competingInstructions(catchup.body, catchup.decision?.todo))}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
