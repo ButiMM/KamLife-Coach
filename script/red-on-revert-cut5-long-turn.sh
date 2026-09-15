@@ -30,6 +30,17 @@ s = p.read_text(encoding="utf-8")
 assert before in s, f"revert seam not found in {p}"
 p.write_text(s.replace(before, after, 1), encoding="utf-8")
 PY
+  # A STALE SEAM IS NOT AN UNGUARDED MECHANISM (#92, 2026-09-15). The assert above already refused
+  # to patch a seam that had moved — and its exit status was dropped, so the run continued against
+  # an UNMUTATED file, the acceptance stayed green, and the verdict below read
+  # "acceptance did not turn red", i.e. the product had regressed. It had not: the line had been
+  # renamed. Found for real when #92 renamed this cut's gate; the job went red with a message
+  # pointing at the wrong thing. Both outcomes are still failures — this only makes them say which.
+  local patched=$?
+  if [[ $patched -ne 0 ]]; then
+    echo "  FAIL  $name — revert seam not found in $file; this harness is stale, the product is not"
+    return 1
+  fi
   if ! revert_db_reset; then echo "  FAIL  $name — database reset failed"; return 1; fi
   out="$(npx tsx "$ACC" 2>&1)"
   verdict="$(printf '%s\n' "$out" | grep '^pg-long-voice-tail-acceptance:' | tail -1 || true)"
@@ -59,8 +70,12 @@ run_case "workout correction stops replacing the earlier belief" server/backfill
   'if (workoutMove) {' 'if (false && workoutMove) {' || failed=$((failed + 1))
 run_case "single-question renderer reclaims the complete turn" server/routes.ts \
   'const miscResult = multiQuestionTurn ? null' 'const miscResult = false ? null' || failed=$((failed + 1))
+# THE SEAM MOVED, THE MECHANISM DID NOT (#92, 2026-09-15). This branch is still the one that asks
+# the Coach mouth for context on a decision turn and lets the composer append the canonical action;
+# only the gate in front of it was renamed, from isMultiPartAsk to the owner routes.ts already uses.
+# Re-anchored, not relaxed: same file, same branch, same mutation, same claim.
 run_case "Coach context no longer answers both questions" server/handlers/gpt-block.ts \
-  'if (isMultiPartAsk(message)) {' 'if (false) {' || failed=$((failed + 1))
+  'if (looksLikeQuestion(message)) {' 'if (false) {' || failed=$((failed + 1))
 # THE BRAIN IS HANDED A WINDOW AGAIN — the defect this whole cut is named for, moved one stage
 # later. The mouth is stubbed in the acceptance, so it answers whatever it is asked and every
 # delivery check stays green; only §4b, which reads the outbound request body, can see this.
