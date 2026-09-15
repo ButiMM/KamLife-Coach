@@ -87,11 +87,9 @@ PYEOF
 #    green through it because the model really was asked.
 cat > "$PATCH_DIR/2.py" <<'PYEOF'
 p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
-old = """        const context = questionContext === AGENT_ERROR
-          ? situationFrame
-          : stripModelDirectives(questionContext, {
-              modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
-            } as any).kept || situationFrame;"""
+old = """        const context = stripModelDirectives(questionContext, {
+          modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
+        } as any).kept || situationFrame;"""
 new = """        const context = situationFrame;"""
 s=s.replace(old, new, 1)
 assert s!=b, "no match"; open(p,"w").write(s)
@@ -154,13 +152,42 @@ PYEOF
 #    finding this cut took on. Isolated from the gate: the question still reaches the Coach.
 cat > "$PATCH_DIR/8.py" <<'PYEOF2'
 p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
-old = """        const context = questionContext === AGENT_ERROR
-          ? situationFrame
-          : stripModelDirectives(questionContext, {
-              modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
-            } as any).kept || situationFrame;"""
-new = """        const context = questionContext === AGENT_ERROR ? situationFrame : questionContext;"""
+old = """        const context = stripModelDirectives(questionContext, {
+          modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
+        } as any).kept || situationFrame;"""
+new = """        const context = questionContext;"""
 s=s.replace(old, new, 1)
+assert s!=b, "no match"; open(p,"w").write(s)
+PYEOF2
+
+
+# 9. THE LEADING ADVERB DEFEATS THE IMPERATIVE AGAIN. The verb is re-anchored to the start of a
+#    sentence, so "Then walk 3km after dinner." and "Also eat 200g of chicken tonight." stop being
+#    orders and ride out beside the canonical action — the review finding, restored.
+cat > "$PATCH_DIR/9.py" <<'PYEOF2'
+p="server/brain/reply-verifier.ts"; s=open(p).read(); b=s
+s=s.replace("const IMPERATIVE = /(?:^|[.!?]\\s+|\\n)\\s*(?:(?:also|then|so|now|next|instead|rather|first|finally|additionally),?\\s+)?(?:train|do|hit",
+            "const IMPERATIVE = /(?:^|[.!?]\\s+|\\n)\\s*(?:train|do|hit", 1)
+assert s!=b, "no match"; open(p,"w").write(s)
+PYEOF2
+
+# 10. THE UNAVAILABLE-MOUTH CHECK GOES BACK TO ONE STRING. A rate-limited coach reads as a real
+#     answer, gets composed as context, and the canonical action is appended underneath it — a
+#     question the coach never answered delivered as a confident instruction to log food.
+cat > "$PATCH_DIR/10.py" <<'PYEOF2'
+p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
+s=s.replace("        if (isCoachUnavailableReply(questionContext)) {",
+            "        if (questionContext === AGENT_ERROR) {", 1)
+assert s!=b, "no match"; open(p,"w").write(s)
+PYEOF2
+
+# 11. THE BARE PLATE PICK IS NO LONGER A CHOICE. "Have grilled chicken and rice tonight." names no
+#     BEHAVIOUR_DOMAINS noun, so with this shape removed nothing recognises it and the model picks
+#     the client's dinner alongside the canonical action.
+cat > "$PATCH_DIR/11.py" <<'PYEOF2'
+p="server/brain/reply-verifier.ts"; s=open(p).read(); b=s
+s=s.replace("|(?:^|[.!?]\\s+|\\n)\\s*(?:(?:also|then|so|now|next|instead|rather),?\\s+)?(?:have|grab|go with|make it|stick (?:with|to))\\b/i;",
+            "/i;", 1)
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF2
 
@@ -177,11 +204,11 @@ echo "CONTROL: the acceptance is GREEN unmodified — detections below are real.
 
 echo "RED-ON-REVERT — #92. Every case below must be caught by the acceptance."
 failed=0
-for i in 1 2 3 4 5 6 7 8; do
+for i in 1 2 3 4 5 6 7 8 9 10 11; do
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) left the acceptance green, crashed, or would not patch."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 8/8 cases caught."
+echo "RED-ON-REVERT: GREEN — 11/11 cases caught."

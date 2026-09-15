@@ -293,21 +293,63 @@ const prescribe = await turn(PEAR, `{"intent":"FOOD_LOG","confidence":0.9,"canon
     "…and the canonical action is still the one instruction that lands",
     `todo=${JSON.stringify(todo)} body=${JSON.stringify(prescribe.body)}`);
 
-  // ⚠ KNOWN, NOT FIXED HERE — measured, not assumed. Reported the way tracking-contract-tests
-  // reports the water-intention gap: the reader sees the boundary's real edge on every run.
-  const UNCAUGHT = ["Have grilled chicken and rice tonight.", "Then walk 3km after dinner.",
-                    "Also eat 200g of chicken tonight."];
-  const escapes = UNCAUGHT.filter(s => stripModelDirectives(s, {
-    modelAuthored: true, canonicalTodo: prescribe.decision?.todo, canonicalKind: prescribe.decision?.kind,
-  } as any).removed.length === 0);
-  if (escapes.length) {
-    REAL(`  ⚠ KNOWN, NOT FIXED HERE — ${escapes.length} prescription shape(s) the directive owner does not recognise:`);
-    for (const s of escapes) REAL(`      ${JSON.stringify(s)}`);
-    REAL(`    IMPERATIVE anchors its verb to the start of a sentence, so a leading adverb defeats it;`);
-    REAL(`    "have" is not in its verb list; and directiveDomains also wants a BEHAVIOUR_DOMAINS noun,`);
-    REAL(`    which food words are deliberately excluded from. Closing it means widening a predicate`);
-    REAL(`    shared by every model path in the product — its own cut, with its own blast radius.`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n3c. THE REVIEW'S EXACT SHAPE — \"Have… Then… Also…\" plus the answer");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// THE MERGE BLOCKER, GRADED ON THE WIRE. The earlier version of this cut recorded these three
+// phrasings as a known gap; they are the ones a model actually reaches for when asked "what should
+// I have for dinner?", so a recorded gap is a shipped defect. Every one is a second next move, and
+// the answer sitting beside them is not — it must survive while they do not.
+const STACKED = "Have grilled chicken and rice tonight. Then walk 3km after dinner. Also eat 200g of chicken tonight. A pear is a fine snack and it is already on your record.";
+const stacked = await turn(PEAR, `{"intent":"FOOD_LOG","confidence":0.9,"canonical":"i had a pear"}`, STACKED);
+{
+  REAL(`    MOUTH RETURNED: ${JSON.stringify(STACKED)}`);
+  REAL(`    WIRE          : ${JSON.stringify(stacked.body)}`);
+  for (const [what, re] of [
+    ["the plate pick", /Have grilled chicken and rice tonight/i],
+    ["the bolted-on second domain", /Then walk 3km after dinner/i],
+    ["the quantified prescription", /Also eat 200g of chicken tonight/i],
+  ] as const) {
+    chk(!re.test(stacked.body), `${what} never reaches the client`, stacked.body);
   }
+  chk(/a pear is a fine snack/i.test(stacked.body),
+    "…and the answer standing beside them survives — the boundary closes without deleting it",
+    stacked.body);
+  const todo = String(stacked.decision?.todo || "").replace(/[.!]\s*$/, "");
+  chk((stacked.body.match(/\*[^*]+\*/g) || []).length === 1 && stacked.body.includes(todo),
+    "…leaving exactly one instruction in the body, and it is the canonical one",
+    `todo=${JSON.stringify(todo)} body=${JSON.stringify(stacked.body)}`);
+  const residue = stripModelDirectives(stacked.body, {
+    modelAuthored: true, canonicalTodo: stacked.decision?.todo, canonicalKind: stacked.decision?.kind,
+  } as any);
+  chk(residue.removed.length === 0, "…and the directive owner finds nothing left to strip",
+    JSON.stringify(residue.removed));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n3d. CONTROL — AN UNAVAILABLE MODEL DOES NOT BECOME A CONFIDENT LOGGING ACTION");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The other half of the blocker. askCoachK returns five different sentences when it cannot answer;
+// this drives the one a caller comparing against a single constant would have MISSED, so the check
+// grades the predicate and not a lucky string match.
+const BUSY = "Coach K is a bit busy right now. Give it 30 seconds and try again.";
+const busy = await turn(PEAR, `{"intent":"FOOD_LOG","confidence":0.9,"canonical":"i had a pear"}`, BUSY);
+{
+  REAL(`    MOUTH RETURNED: ${JSON.stringify(BUSY)}`);
+  REAL(`    WIRE          : ${JSON.stringify(busy.body)}`);
+  chk(busy.bodies.length === 1, "one body", `${busy.bodies.length} bodies`);
+  chk(/a bit busy right now/i.test(busy.body),
+    "the client is told the coach could not answer", busy.body);
+  chk(!/one thing today/i.test(busy.body) && (busy.body.match(/\*[^*]+\*/g) || []).length === 0,
+    "…and no canonical action is appended to an answer that never happened", busy.body);
+  chk(!/Tell me what you ate today/i.test(busy.body),
+    "…so an unanswered question never ships as a confident instruction to log food", busy.body);
+  const meals = (await pool.query<{ items: any[] }>("SELECT items FROM meal_logs WHERE user_id = $1", [user.id])).rows;
+  chk(meals.length === 1 && meals[0].items.some(i => /pear/i.test(i.name)),
+    "…while the fact the client did state is still written — silence upstream costs no write",
+    JSON.stringify(meals));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════

@@ -20,7 +20,7 @@ import { getKamlifeProgramme } from "../programme";
 import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
 import { safetyGate } from "../verifiers/response-gate";
-import { verifyBrainReply, stripModelDirectives } from "../brain/reply-verifier";
+import { verifyBrainReply, stripModelDirectives, isCoachUnavailableReply } from "../brain/reply-verifier";
 import { isBareReaction, isCoachCriticism, readsAsTherapySpeak, bareReactionFallback, isDiagnosticQuestion } from "../reaction-guard";
 
 // ── SCENARIO GUIDE — the coach's situation playbook ────────────────────────────
@@ -741,11 +741,29 @@ ${finalInstruction}`;
         // An answer stripped to nothing falls back to the situation frame — the same value the
         // AGENT_ERROR arm already uses, which is what this branch did for every turn before the
         // gate widened. No new fallback.
-        const context = questionContext === AGENT_ERROR
-          ? situationFrame
-          : stripModelDirectives(questionContext, {
-              modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
-            } as any).kept || situationFrame;
+        // AN UNANSWERED QUESTION MUST NOT BECOME A CONFIDENT INSTRUCTION (#92 review).
+        //
+        // This compared against AGENT_ERROR — one locally redeclared copy of one of the five
+        // sentences askCoachK returns when it fails. A rate-limited, timed-out or 401 coach
+        // therefore read as a successful answer: "Coach K is a bit busy right now. Give it 30
+        // seconds and try again." was composed as CONTEXT, with the canonical action appended
+        // under it, so a question the coach never answered went out as an instruction to log food.
+        // And when the string DID match, `context` fell back to a usually-empty situation frame,
+        // which produced the bare action line — the same confident instruction with no answer.
+        //
+        // The client asked something and we could not answer. They are told that, in the sentence
+        // the model owner already wrote for it, and no next action is invented on top of it:
+        // conversationalOnly is the existing flag for "this turn answers, it does not instruct",
+        // and it is what the frustration and engine-confirm exits above already use.
+        if (isCoachUnavailableReply(questionContext)) {
+          console.warn(`[COACH_UNAVAILABLE] question went unanswered for ...${user.id.slice(-6)} — not appending an action`);
+          turnEvidence({ conversationalOnly: true });
+          await logChat(user.id, message, questionContext, "COACH_UNAVAILABLE").catch(() => {});
+          return applyReplyVerifier(questionContext, user, message);
+        }
+        const context = stripModelDirectives(questionContext, {
+          modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
+        } as any).kept || situationFrame;
         gptReply = composeDecisionTurn(
           context,
           decision.reply || renderActionLine(decision.todo),
