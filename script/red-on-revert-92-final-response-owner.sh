@@ -166,8 +166,10 @@ PYEOF2
 #    orders and ride out beside the canonical action — the review finding, restored.
 cat > "$PATCH_DIR/9.py" <<'PYEOF2'
 p="server/brain/reply-verifier.ts"; s=open(p).read(); b=s
-s=s.replace("const IMPERATIVE = /(?:^|[.!?]\\s+|\\n)\\s*(?:(?:also|then|so|now|next|instead|rather|first|finally|additionally),?\\s+)?(?:train|do|hit",
-            "const IMPERATIVE = /(?:^|[.!?]\\s+|\\n)\\s*(?:train|do|hit", 1)
+i=s.index("const IMPERATIVE_LEAD =")
+j=s.index("\n", i)
+# Keep the fronted meal/time branch, drop the adverbial one: "Also eat…" and "Then walk…" survive.
+s=s[:i] + 'const IMPERATIVE_LEAD = "(?:(?:for\\\\s+(?:dinner|lunch|breakfast|supper|the\\\\s+rest\\\\s+of\\\\s+the\\\\s+day)|tonight|tomorrow|today|this\\\\s+(?:morning|afternoon|evening)|after\\\\s+(?:work|gym|training|dinner|lunch|supper))\\\\b[^.!?]{0,25}?\\\\s+)?";' + s[j:]
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF2
 
