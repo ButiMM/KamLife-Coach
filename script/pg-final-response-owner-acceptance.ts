@@ -445,6 +445,34 @@ const ordered = await turn(PEAR, `{"intent":"FOOD_LOG","confidence":0.9,"canonic
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n3f. A MIXED REPLY KEEPS ITS WORDS — the sentence that lost no figure is not mended");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// numbers:low is the DEFAULT — every client without `numbers:full`. Its debris cleanup exists to
+// tidy what a stripped figure leaves behind, and it used to run over the WHOLE reply. Gating it on
+// "was anything stripped at all" was not enough, because a mixed reply strips one sentence and
+// mends every other one too:
+//
+//     sent   "That meal was 600 kcal. The question is: what works for you?"
+//     wire   "That meal was. The question: what works for you?"
+//
+// Graded on the wire rather than on the helper, because the helper is not what a client reads.
+const MIXED = "That meal was 600 kcal. The question is: what works for you on a late night?";
+const mixed = await turn(PEAR, `{"intent":"FOOD_LOG","confidence":0.9,"canonical":"i had a pear"}`, MIXED);
+{
+  REAL(`    MOUTH RETURNED: ${JSON.stringify(MIXED)}`);
+  REAL(`    WIRE          : ${JSON.stringify(mixed.body)}`);
+  chk(/The question is: what works for you on a late night\?/.test(mixed.body),
+    "the sentence that held no figure reaches the client with every word it was written with",
+    mixed.body);
+  chk(!/600\s*kcal/i.test(mixed.body),
+    "…while the figure itself is still removed, so numbers:low still does its job", mixed.body);
+  chk(mixed.bodies.length === 1, "one body", `${mixed.bodies.length} bodies`);
+  chk(competingInstructions(mixed.body, mixed.decision?.todo).length === 0,
+    "…and the turn still carries exactly one instruction",
+    JSON.stringify(competingInstructions(mixed.body, mixed.decision?.todo)));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n3d. CONTROL — AN UNAVAILABLE MODEL DOES NOT BECOME A CONFIDENT LOGGING ACTION");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // The other half of the blocker. askCoachK returns five different sentences when it cannot answer;
