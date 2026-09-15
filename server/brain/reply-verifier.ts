@@ -590,7 +590,37 @@ const domainsIn = (text: string): Set<string> => {
 
 /** The GRAMMAR of an instruction — advisory or imperative. Not a list of phrasings. */
 const ADVISORY = /\b(?:you\s+(?:should|need\s+to|have\s+to|could|might\s+want\s+to|ought\s+to)|i'?d\s+\w+|let'?s\b|try\s+to\b|make\s+sure\b|aim\s+(?:to|for)\b|would\s+help\b|(?:it'?s|today\s+is)\s+a\s+good\s+(?:day|time)\s+(?:for|to)\b)/i;
-const IMPERATIVE = /(?:^|[.!?]\s+|\n)\s*(?:train|do|hit|get|go|take|skip|rest|walk|weigh|eat|add|drop|lower|raise|push|bring|start|stop|keep|make|try|sit|jump|step|log|send)\b/i;
+/**
+ * A LEADING ADVERB DOES NOT STOP A SENTENCE BEING AN ORDER (#92 review, 2026-09-15).
+ *
+ * This anchored the verb directly to the start of a sentence, so the instruction survived the
+ * moment the model joined it to the previous one. Measured on the #92 branch, the mouth answering
+ * "what should I have for dinner tonight?" returned, and the client received, all of:
+ *
+ *     "Have grilled chicken and rice tonight. Then walk 3km after dinner.
+ *      Also eat 200g of chicken tonight."
+ *
+ * with `decision.todo` appended underneath. Only the bare "Eat 200g…" form was recognised — four
+ * next moves reached the wire, three of them the model's. The mechanism is one optional adverbial
+ * before the verb; the verb list and the domain requirement are unchanged.
+ *
+ * A FRONTED MEAL OR TIME PHRASE DOES THE SAME (#92 review round 2, 2026-09-15). The reviewer's
+ * counterexample was "For dinner tonight keep it protein-first: grilled chicken with a small
+ * portion of rice" — an order with a prepositional phrase in front of the verb, so the anchor
+ * missed it and the client received it alongside the canonical action. Two directions, one reply.
+ *
+ * The fronted set is CLOSED and made of adjuncts that cannot themselves be a subject. A general
+ * "any words before the verb" form was tried first and rejected: it read "After-eight nights do
+ * not need cooking" as an order, because it let a NOUN PHRASE sit where the adjunct goes and
+ * turned subject-plus-verb into a false imperative — which would have deleted Cut 5's answer to
+ * the after-eight question. The negation guard below is the second half of that: an imperative is
+ * never negated with "not", so "do not need" is description, not instruction.
+ */
+const IMPERATIVE_LEAD = "(?:(?:also|then|so|now|next|instead|rather|first|finally|additionally),?\\s+|(?:for\\s+(?:dinner|lunch|breakfast|supper|the\\s+rest\\s+of\\s+the\\s+day)|tonight|tomorrow|today|this\\s+(?:morning|afternoon|evening)|after\\s+(?:work|gym|training|dinner|lunch|supper))\\b[^.!?]{0,25}?\\s+)?";
+const IMPERATIVE = new RegExp(
+  `(?:^|[.!?]\\s+|\\n)\\s*${IMPERATIVE_LEAD}` +
+  `(?:train|do|hit|get|go|take|skip|rest|walk|weigh|eat|add|drop|lower|raise|push|bring|start|stop|keep|make|try|sit|jump|step|log|send)` +
+  `\\b(?!\\s*(?:not\\b|n['’]t\\b))`, "i");
 
 /**
  * CHOOSING THE IMPLEMENTATION (2026-08-23). "How about grilled chicken with rice?" is not
@@ -600,17 +630,33 @@ const IMPERATIVE = /(?:^|[.!?]\s+|\n)\s*(?:train|do|hit|get|go|take|skip|rest|wa
  *
  * Closed grammar of *selecting the thing*, not a list of foods or exercises. Domain-free:
  * the shape is the decision, whatever noun follows.
+ *
+ * THE BARE IMPERATIVE PICKS THE PLATE TOO (#92 review, 2026-09-15). "Have grilled chicken and
+ * rice tonight." is the same act as "How about grilled chicken with rice?" — it selects the meal —
+ * and it escaped BOTH predicates: `have` is not an IMPERATIVE verb, and chicken and rice are not
+ * BEHAVIOUR_DOMAINS nouns, deliberately. This constant is the domain-free one, so the shape
+ * belongs here rather than in a food-word list, which is the thing this file exists to prevent.
  */
-const IMPLEMENTATION_CHOICE = /\b(?:how about|what about|why don'?t you|why not (?:go|try|do|have)|i (?:suggest|recommend)|go for)\b/i;
+const IMPLEMENTATION_CHOICE = /\b(?:how about|what about|why don'?t you|why not (?:go|try|do|have)|i (?:suggest|recommend)|go for)\b|(?:^|[.!?]\s+|\n)\s*(?:(?:also|then|so|now|next|instead|rather),?\s+)?(?:have|grab|go with|make it|stick (?:with|to))\b/i;
 
 export function isImplementationChoice(sentence: string): boolean {
-  return IMPLEMENTATION_CHOICE.test(sentence || "");
+  const s = String(sentence || "");
+  // AN INSTRUCTION IS NOT A QUESTION. "Have you eaten yet?" opens on the same verb and selects
+  // nothing — it asks. The interrogative picks this constant deliberately carries ("how about…?",
+  // "why not…?") are kept, because those choose the thing while wearing a question mark.
+  if (/\?\s*$/.test(s.trim()) && !/\b(?:how about|what about|why don'?t you|why not)\b/i.test(s)) return false;
+  return IMPLEMENTATION_CHOICE.test(s);
 }
 
 /** Is this sentence telling the client to change what they DO? */
 function directiveDomains(sentence: string): Set<string> {
-  const shaped = ADVISORY.test(sentence) || IMPERATIVE.test(sentence);
-  return shaped ? domainsIn(sentence) : new Set<string>();
+  const s = String(sentence || "");
+  // Same rule as above, for the imperative grammar: an order that ends in a question mark is a
+  // question. Without this, widening the lead-in above would start deleting the model's own
+  // clarifying questions along with its orders.
+  const imperative = IMPERATIVE.test(s) && !/\?\s*$/.test(s.trim());
+  const shaped = ADVISORY.test(s) || imperative;
+  return shaped ? domainsIn(s) : new Set<string>();
 }
 
 /**
@@ -938,3 +984,34 @@ export function stripForbidden(reply: string, doNotMention?: string | null): For
 
 /** What we say when the entire reply was about the thing they asked us to drop. */
 export const HONOURED_SILENCE = "You asked me to leave that one alone, so I will. Tell me what you ate and we work from there.";
+
+/**
+ * DID THE MOUTH ACTUALLY ANSWER? (#92 review, 2026-09-15.)
+ *
+ * askCoachK returns one of these when it could not produce a reply — offline, 401, rate limit,
+ * timeout, the unexpected-error catch, and the "keep it simple" line its own verifier falls back
+ * to. Callers compared against ONE of them, a locally redeclared copy of the offline string, so a
+ * rate-limited or timed-out coach read as a successful answer and was composed into the reply as
+ * content — with the canonical action appended underneath, delivering a question the coach never
+ * answered as a confident instruction to log food. Measured on the #92 branch.
+ *
+ * IT LIVES HERE, NOT BESIDE THE RETURNS IT NAMES, and that is a budget decision rather than an
+ * ownership one: gpt.ts sits at 1449 of its 1450-line ceiling, and this module is the one that
+ * already decides whether a model reply may be sent. The staleness that placement risks is the
+ * exact defect above, so it is not left to discipline: unit-tests reads askCoachK's own catch
+ * block out of gpt.ts and fails if it ever returns a sentence this list does not recognise.
+ *
+ * Suffix match because the last one is prefixed with the client's first name.
+ */
+const COACH_UNAVAILABLE_REPLIES = [
+  "Eish Coach K had a moment. Try that again.",
+  "I'm having a technical issue on my end — give me a few minutes and try again. Your programme and targets are all saved.",
+  "Coach K is a bit busy right now. Give it 30 seconds and try again.",
+  "Network hiccup on my side. Send that again in a moment.",
+  "let's keep it simple — tell me what you ate or what you trained today, and I'll take it from there.",
+];
+
+export function isCoachUnavailableReply(reply: string): boolean {
+  const t = String(reply || "").trim();
+  return !t || COACH_UNAVAILABLE_REPLIES.some(s => t === s || t.endsWith(s));
+}

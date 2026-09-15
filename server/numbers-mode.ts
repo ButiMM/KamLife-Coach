@@ -50,25 +50,63 @@ export function stripFoodLineNumbers(foodLines: string): string {
 // deterministic total line), scrub it so a numbers:low client never sees a figure.
 // Deliberately conservative — only touches explicit kcal/calorie/gram-protein/portion
 // tokens, and tidies the small dangling artefacts that leaves ("roughly ,").
+const stripFigureTokens = (s: string): string => s
+  .replace(/~?\s*\d[\d,]*\s*kcal\s*[|,/]?\s*(?:and\s*)?~?\s*\d+\s*g\s*(?:of\s*)?protein/gi, "")
+  .replace(/~?\s*\d[\d,]*\s*(?:kcal|calories|cals?)\b/gi, "")
+  .replace(/~?\s*\d+\s*g\s*(?:of\s*)?protein/gi, "")
+  .replace(/\(\s*~?\s*\d[\d,]*\s*(?:g|ml|grams?)\s*\)/gi, "");
+
+/** The tidy-up for a sentence that actually lost a figure — never applied to one that did not. */
+const mendStrippedSentence = (s: string): string => s
+  .replace(/:\s*(?:and|is|with|of|at)\b\s*(?=[.,!?;:])/gi, "") // "breast: and." → "breast."
+  .replace(/\b(?:roughly|about|approximately|around|is|at|and|with|of)\s*(?=[.,!?;:])/gi, "")
+  // stranded quantifier mid-sentence (2026-07-16 live: "space for about left today" —
+  // the amount was stripped, the word 'about' stayed): bridge it readably.
+  .replace(/\b(about|roughly|around|approximately)\s+(left|remaining|to go|over|short|more)\b/gi, "a bit $2")
+  .replace(/\s+([.,!?;:])/g, "$1")   // pull punctuation back to the word
+  .replace(/[,:;]+(?=[.!?])/g, "")   // "slice,." → "slice."
+  .replace(/([!?])\.+/g, "$1")       // "spread!." → "spread!"
+  .replace(/\.{2,}/g, ".")           // ".." → "."
+  .replace(/:\s*(?=$|\n)/gm, "")     // dangling colon at line end
+  .replace(/\(\s*\)/g, "");
+
 export function stripNumbersFromProse(text: string): string {
-  return (text || "")
-    // figure tokens first
-    .replace(/~?\s*\d[\d,]*\s*kcal\s*[|,/]?\s*(?:and\s*)?~?\s*\d+\s*g\s*(?:of\s*)?protein/gi, "")
-    .replace(/~?\s*\d[\d,]*\s*(?:kcal|calories|cals?)\b/gi, "")
-    .replace(/~?\s*\d+\s*g\s*(?:of\s*)?protein/gi, "")
-    .replace(/\(\s*~?\s*\d[\d,]*\s*(?:g|ml|grams?)\s*\)/gi, "")
-    // clean the connective debris the removals leave behind
-    .replace(/:\s*(?:and|is|with|of|at)\b\s*(?=[.,!?;:])/gi, "") // "breast: and." → "breast."
-    .replace(/\b(?:roughly|about|approximately|around|is|at|and|with|of)\s*(?=[.,!?;:])/gi, "")
-    // stranded quantifier mid-sentence (2026-07-16 live: "space for about left today" —
-    // the amount was stripped, the word 'about' stayed): bridge it readably.
-    .replace(/\b(about|roughly|around|approximately)\s+(left|remaining|to go|over|short|more)\b/gi, "a bit $2")
-    .replace(/\s+([.,!?;:])/g, "$1")   // pull punctuation back to the word
-    .replace(/[,:;]+(?=[.!?])/g, "")   // "slice,." → "slice."
-    .replace(/([!?])\.+/g, "$1")        // "spread!." → "spread!"
-    .replace(/\.{2,}/g, ".")            // ".." → "."
-    .replace(/:\s*(?=$|\n)/gm, "")      // dangling colon at line end
-    .replace(/\(\s*\)/g, "")
+  const src = text || "";
+
+  // THE DEBRIS MEND BELONGS TO THE SENTENCE THAT LOST A FIGURE, AND TO NO OTHER (#92 review,
+  // 2026-09-15). The mend exists to tidy what a removal leaves behind — "breast: and." and
+  // "roughly , left". It ran over the WHOLE reply, and one of its rules deletes real words:
+  //
+  //     .replace(/\b(?:roughly|about|approximately|around|is|at|and|with|of)\s*(?=[.,!?;:])/gi, "")
+  //
+  // `is`, `at`, `and`, `with` and `of` are deleted wherever they sit in front of punctuation.
+  // numbers:low is the DEFAULT — every client without `numbers:full` — so this was ordinary
+  // replies. Both halves were caught post-transport by this cut's acceptance:
+  //
+  //   a reply with no figures at all
+  //     sent   "…the number that holds your weight exactly where it is: above it you gain…"
+  //     wire   "…the number that holds your weight exactly where it: above it you gain…"
+  //
+  //   and a MIXED reply, which a whole-reply "did we strip anything?" gate does NOT protect
+  //     sent   "That meal was 600 kcal. The question is: what works for you?"
+  //     wire   "That meal was. The question: what works for you?"
+  //
+  // Per-sentence is the whole fix, and it covers both: debris can only ever be where the removal
+  // was, so a sentence that did not change is never rewritten. A no-figure reply is now untouched
+  // because none of its sentences change — no separate early return, which was tried first and
+  // then measured as redundant once this loop existed. A guard that can no longer fail is dead
+  // code, and its revert case would have been an assertion that cannot go red.
+  const parts = src.split(/(?<=[.!?])(\s+)/); // [sentence, separator, sentence, …]
+  const mended = parts
+    .map((part, i) => {
+      if (i % 2 === 1) return part;             // separator, never rewritten
+      const stripped = stripFigureTokens(part);
+      return stripped === part ? part : mendStrippedSentence(stripped);
+    })
+    .join("");
+
+  // Whole-body tidying only — whitespace, never words.
+  return mended
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

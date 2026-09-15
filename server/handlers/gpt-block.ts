@@ -15,12 +15,12 @@ import { tellDontAsk } from "../reply-hygiene";
 import { logChat, withTimeout, turnEvidence } from "./chat-log";
 import { checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./checks";
 import { detectLanguage } from "../constants";
-import { checkGptRateLimit, sastDayStart, sastToday, isMultiPartAsk, looksLikeDeepEmotionalShare , getDisplayName} from "../utils";
+import { checkGptRateLimit, sastDayStart, sastToday, looksLikeQuestion, looksLikeDeepEmotionalShare , getDisplayName} from "../utils";
 import { getKamlifeProgramme } from "../programme";
 import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
 import { safetyGate } from "../verifiers/response-gate";
-import { verifyBrainReply } from "../brain/reply-verifier";
+import { verifyBrainReply, stripModelDirectives, isCoachUnavailableReply } from "../brain/reply-verifier";
 import { isBareReaction, isCoachCriticism, readsAsTherapySpeak, bareReactionFallback, isDiagnosticQuestion } from "../reaction-guard";
 
 // ── SCENARIO GUIDE — the coach's situation playbook ────────────────────────────
@@ -675,23 +675,98 @@ SA voice. Direct. Coach forward, not backward.`;
           return applyReplyVerifier(gptReply, user, message);
         }
       }
-      if (isMultiPartAsk(message)) {
+      if (looksLikeQuestion(message)) {
         // A canonical action answers "what next"; it does not answer factual questions riding in
         // the same voice note. Ask the existing Coach mouth for CONTEXT only, then let the
         // existing decision composer add the one action chosen by canonicalDecision. This keeps
         // the model out of prescription authority while preventing a two-question turn from
         // collapsing to an unrelated action line.
+        //
+        // ONE OWNER OF "THIS TURN ALSO ASKS THE COACH SOMETHING" (#92, 2026-09-15).
+        //
+        // This gate was isMultiPartAsk — ≥60 characters AND (two "?" | a joiner | ≥35 words) — so
+        // a client who asked ONE question on a decision turn never reached the Coach mouth at all
+        // and the else-branch below sent the canonical action line by itself. Traced on b7908c7
+        // through the real front door, three different turns produced the SAME body, byte for byte:
+        //
+        //     "I had a pear. What should I have for dinner tonight?"   (51 chars)
+        //     "What does maintenance calories mean?"                   (36 chars)
+        //     "Hey coach, it's been a busy week but I'm still here"
+        //         all three ->  "Thandi — one thing today: *Tell me what you ate today — one line
+        //                        is enough.* _I can't coach a day I can't see._"
+        //
+        // askCoachK was never called on any of them. That is the tracker complaint exactly: the
+        // question is not answered badly, it is not answered, and the client is instructed to
+        // report a pear the same turn had already written to meal_logs.
+        //
+        // routes.ts had already settled which owner answers this question — `alsoAsksCoach:
+        // looksLikeQuestion(message) && …` at the turn resolver, with a standing negative control
+        // in production-parity forbidding isMultiPartAsk from gating it. Two owners for one
+        // question, and the narrower one won at the mouth. This is the alignment, not a new gate:
+        // same branch, same mouth, same composer, the canonical action still appended last.
         const questionContextInstruction = `${decisionBrief(decision)}
 
-This message contains multiple explicit questions. Answer EVERY one directly, in the order asked.
+This message contains one or more explicit questions. Answer EVERY one directly, in the order asked.
 The facts in this same message have already been committed: never ask the client to report them again.
 Write context only and do not add a next action; the canonical action is appended after your answer.
+Phrase every answer as INFORMATION, never as an order. Say what the options ARE ("quick
+protein-first options for a late dinner are X or Y"), not what to do ("have X tonight"). The
+canonical action appended below is the only instruction this reply is allowed to contain.
 
 ${finalInstruction}`;
-        const questionContext = await withTimeout("gpt_multi_question", 30000,
+        const questionContext = await withTimeout("gpt_question_context", 30000,
           () => askCoachK(message, user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));
+        // "WRITE CONTEXT ONLY" IS AN INSTRUCTION UNTIL SOMETHING ENFORCES IT (#92 review, Codex).
+        //
+        // The prompt above tells the model not to add a next action. A prompt is guidance, and the
+        // widened gate routes the question shape this is most common in — "what should I have for
+        // dinner?" — at a model with every reason to answer in imperatives. Measured on this branch
+        // before this line existed: the mouth returned "Have grilled chicken and rice tonight. Then
+        // walk 3km after dinner. Also eat 200g of chicken tonight." and the client received all
+        // three with `decision.todo` under them. Four next moves, three of them the model's.
+        //
+        // stripModelDirectives is the existing owner of that removal and it was not on this path.
+        // It keeps the canonical sentence, drops sentences that select the plate or issue a domain
+        // instruction, and leaves explanation untouched — so "a pear is fine" survives and "Eat
+        // 200g of chicken tonight." does not. Its evidence is the decision already in hand rather
+        // than turn state, because this runs before the turn is tagged model-authored.
+        //
+        // THREE ROUNDS OF REVIEW WIDENED IT, EACH ON A MEASURED COUNTEREXAMPLE (#92): the leading
+        // adverb ("Also eat 200g…", "Then walk 3km…"), the bare plate pick ("Have grilled chicken
+        // and rice tonight."), and the fronted meal phrase ("For dinner tonight keep it
+        // protein-first: …"). All three reached a client alongside the canonical action. The
+        // acceptance no longer grades this by asking the filter whether the filter is satisfied —
+        // it counts client-visible instructions with its own definition, so the next phrasing this
+        // owner misses shows up as a failing turn rather than as a green suite.
+        //
+        // An answer stripped to nothing falls back to the situation frame — the same value the
+        // AGENT_ERROR arm already uses, which is what this branch did for every turn before the
+        // gate widened. No new fallback.
+        // AN UNANSWERED QUESTION MUST NOT BECOME A CONFIDENT INSTRUCTION (#92 review).
+        //
+        // This compared against AGENT_ERROR — one locally redeclared copy of one of the five
+        // sentences askCoachK returns when it fails. A rate-limited, timed-out or 401 coach
+        // therefore read as a successful answer: "Coach K is a bit busy right now. Give it 30
+        // seconds and try again." was composed as CONTEXT, with the canonical action appended
+        // under it, so a question the coach never answered went out as an instruction to log food.
+        // And when the string DID match, `context` fell back to a usually-empty situation frame,
+        // which produced the bare action line — the same confident instruction with no answer.
+        //
+        // The client asked something and we could not answer. They are told that, in the sentence
+        // the model owner already wrote for it, and no next action is invented on top of it:
+        // conversationalOnly is the existing flag for "this turn answers, it does not instruct",
+        // and it is what the frustration and engine-confirm exits above already use.
+        if (isCoachUnavailableReply(questionContext)) {
+          console.warn(`[COACH_UNAVAILABLE] question went unanswered for ...${user.id.slice(-6)} — not appending an action`);
+          turnEvidence({ conversationalOnly: true });
+          await logChat(user.id, message, questionContext, "COACH_UNAVAILABLE").catch(() => {});
+          return applyReplyVerifier(questionContext, user, message);
+        }
+        const context = stripModelDirectives(questionContext, {
+          modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
+        } as any).kept || situationFrame;
         gptReply = composeDecisionTurn(
-          questionContext === AGENT_ERROR ? situationFrame : questionContext,
+          context,
           decision.reply || renderActionLine(decision.todo),
         );
       } else {

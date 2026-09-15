@@ -10587,6 +10587,36 @@ test("#217 behavioural patterns require attributable repetition, decay, and reac
     "pre-#217 open loops remain readable");
 });
 
+// ── #92 — THE UNAVAILABLE-MOUTH LIST MAY NOT GO STALE ────────────────────────────────────────
+//
+// isCoachUnavailableReply lives in brain/reply-verifier.ts because gpt.ts sits on its line
+// ceiling, so the list is not beside the returns it names. That distance is exactly how the
+// original defect happened — gpt-block kept its own copy of ONE of six sentences, and a
+// rate-limited coach read as a real answer. This reads askCoachK's own catch block out of the
+// source and fails if it ever returns a sentence the predicate does not recognise, so adding a
+// seventh failure string in gpt.ts turns this red instead of silently shipping the defect again.
+test("#92 every sentence askCoachK returns on failure is recognised as an unanswered turn", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { isCoachUnavailableReply } = await import("../server/brain/reply-verifier");
+  const src = readFileSync("server/gpt.ts", "utf-8");
+  const start = src.indexOf("export async function askCoachK");
+  assert.ok(start > 0, "askCoachK is still in gpt.ts");
+  const body = src.slice(start, src.indexOf("\nexport ", start + 40));
+  const catchAt = body.lastIndexOf("} catch (err: any) {");
+  assert.ok(catchAt > 0, "askCoachK still has its failure catch");
+  const returns = [...body.slice(catchAt).matchAll(/return "([^"]{20,})";/g)].map(m => m[1]);
+  assert.ok(returns.length >= 4, `expected askCoachK's failure returns, found ${returns.length}`);
+  for (const r of returns) {
+    assert.ok(isCoachUnavailableReply(r), `askCoachK can return this and nothing recognises it: ${JSON.stringify(r)}`);
+  }
+  // The verifier-refused fallback is a template literal, so it is asserted by value.
+  assert.ok(isCoachUnavailableReply("Thandi, let's keep it simple — tell me what you ate or what you trained today, and I'll take it from there."),
+    "the name-prefixed fallback is recognised too");
+  // CONTROL: a real answer must not read as unavailability, or the guard would swallow every turn.
+  assert.ok(!isCoachUnavailableReply("A pear is a fine snack and it is already on your record."),
+    "CONTROL: a genuine answer is not an unavailable mouth");
+});
+
 await Promise.all(pending);
 
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);

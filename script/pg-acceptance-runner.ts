@@ -252,6 +252,19 @@ export const ACCEPTANCES: Acceptance[] = [
     // Coach context are reverted independently against the same post-sendFinal journey.
     command: ["bash", "script/red-on-revert-cut5-long-turn.sh"] },
 
+  { id: "final-response-owner", title: "A client's question is answered by the one final response owner",
+    // #92 (2026-09-15). On a decision turn the Coach mouth was gated on isMultiPartAsk, so a SHORT
+    // question was never asked at all and three unrelated turns shipped the same canonical action
+    // line byte for byte. Needs a real database and the real front door: every claim is about the
+    // post-sendFinal body, what the mouth was handed, and which turns must NOT change.
+    command: ["npx", "tsx", "script/pg-final-response-owner-acceptance.ts"] },
+
+  { id: "final-response-reverts", title: "Every #92 response-owner seam turns the acceptance red",
+    // The gate, the composed answer, the canonical action, what the mouth is handed and what it is
+    // told — reverted independently — plus two opposite-defect controls: a gate opened to every
+    // decision turn, and a turn whose deterministic owner stands down.
+    command: ["bash", "script/red-on-revert-92-final-response-owner.sh"] },
+
   { id: "stt-admission", title: "A garbled transcript writes nothing, a real one writes everything",
     // CUT 4 (2026-09-12). The garble floor read `if (voiceQuality && …)` and voiceQuality is set
     // only by Whisper attempt 1 — so Scribe (which runs FIRST in production), the catch retry and
