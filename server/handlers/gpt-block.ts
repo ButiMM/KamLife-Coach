@@ -765,11 +765,29 @@ ${finalInstruction}`;
         const context = stripModelDirectives(questionContext, {
           modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
         } as any).kept || situationFrame;
+        // THIS TURN HAS ALREADY BEEN COMPOSED — SAY SO (C10, 2026-09-15).
+        //
+        // reconcileTurnReply has a decision-turn branch that recomposes the whole reply from
+        // `evidence.situationFrame` plus the canonical line. That exists for the exits which never
+        // compose one — the specialists, the short and frustration replies. This branch DOES
+        // compose one, so letting the other owner build it again is two mouths saying the same
+        // sentence, and they can only diverge. They did: the recomposition is built from the
+        // pre-delivery context, so a numbers:low client's "600 kcal" — stripped from the composed
+        // reply at the end of this function — came back into the rebuilt one.
+        //
+        // It also loses the answer. The frame recorded above is the GENERIC one; this branch
+        // answers with the client's own question context, so a rebuild from evidence would reply
+        // to "what should I have for dinner?" with a frame that never mentions dinner: #92's
+        // defect restored by the fix for a different one.
+        //
+        // One flag, read by the one owner that needs it, rather than a second copy of the context.
+        turnEvidence({ decisionComposed: true });
         gptReply = composeDecisionTurn(
           context,
           decision.reply || renderActionLine(decision.todo),
         );
       } else {
+        turnEvidence({ decisionComposed: true });
         gptReply = composeDecisionTurn(
           situationFrame,
           decision.reply || renderActionLine(decision.todo),
