@@ -56,7 +56,7 @@ import { mustStayDeterministic } from "./understanding/action-router";
 import { attributeMultiDayReport } from "./understanding/day-relative-situation";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity, normalizerLive } from "./normalizer-fidelity";
-import { carriesFeelingClause } from "./unlogged-notice";import { recordDailyConstraint } from "./held-constraints";import { looksLikeDirectionRequest } from "./daily-direction";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, reportedInSomeClause, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
+import { carriesFeelingClause } from "./unlogged-notice";import { recordDailyConstraint } from "./held-constraints";import { looksLikeDirectionRequest } from "./daily-direction";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, isMultiPartAsk, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, reportedInSomeClause, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { conditionWelcome, mentionsConditionOrMedication } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
@@ -524,6 +524,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const scannerSawFood = scanForSAFoods(message).some(f => !/^water$/i.test(f.name));
   turnFacts = withKnownFood(turnFacts, scannerSawFood);
   const multiFact = turnFacts.factTypes.length >= 2;
+  const multiQuestionTurn = isMultiPartAsk(message);
   const turn = newTurnLedger(turnFacts.factTypes);
   if (multiFact) console.log(`[TURN] ${turnFacts.factTypes.join("+")} in the client's own words — no handler may end this turn`);
 
@@ -990,23 +991,26 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     if (mayEndTurn("water")) return closeCoachingTurn(waterPart);
   }
 
-  // ---- FOOD CONTEXT (corrections, braai, eating out, relog, scanner, GPT fallback) ----
-  // Messy-life intake: stated meal (incl. branded takeaway voice notes) forces food path.
+  // ---- FOOD CONTEXT: a tail question must not turn earlier stated meals into a plan. ----
+  // Select declarative food clauses; the whole raw note remains the turn provenance.
+  const foodClauses = multiQuestionTurn && turnFacts.hasFoodReport
+    ? clausesOf(message).filter(c => {
+        const scannerFoundFood = scanForSAFoods(c).some(f => !/^water$/i.test(f.name));
+        const parsed = withKnownFood(parseMessyIntake(c), scannerFoundFood);
+        return parsed.mustForceFoodLog && scannerFoundFood && !looksLikeQuestion(c);
+      })
+    : [];
+  const foodMessage = foodClauses.length > 0 ? foodClauses.join(" ") : message;
   const foodCtxResult = await handleFoodContext({
-    phone, message, m, user, handleMessage, sourceMessageId,
-    classifierQuestion: normalizedQuestion,
+    phone, message: foodMessage, m: foodMessage.toLowerCase().replace(/\s+/g, " ").trim(), user, handleMessage, sourceMessageId,
+    classifierQuestion: foodMessage === message ? normalizedQuestion : false,
     forceLog: turnFacts.mustForceFoodLog,
   });
   if (foodCtxResult !== null) commitFact(turn, "food", foodCtxResult + _backfillNote);
-  // ── THE ONE COMPOSE ── replaces the food+feeling special case that used to live here, and
-  // the food+steps string concatenation that lived inside food-context before that.
+  // ── THE ONE COMPOSE ── replaces the former food+feeling and food+steps special cases.
   const hasFeeling = (turnFacts.hasFeeling || carriesFeelingClause(message)) && !foodDayIsClosed(message); const canonicalCloseOwnsQuestion = looksLikeDirectionRequest(clausesOf(message).slice(-1)[0] || message);
-  // WRITE THEN COACH (2026-08-22). alsoAsksCoach used to require isMultiPartAsk (≥35 words or
-  // two '?') or a feeling. The live bubble was 27 words and one '?':
-  //   "What's the plan for me? / My breakfast was … / Guide for the rest of the day"
-  // The meal wrote; resolveTurn then returned the ack and the plan never ran. A question on a
-  // turn that durably wrote is two jobs — the adapter must not finish. isMultiPartAsk stays
-  // elsewhere; it is not the continuation rule.
+  // WRITE THEN COACH: a question plus a durable write is two jobs; the adapter must not finish.
+  // This is deliberately broader than isMultiPartAsk so short log+ask turns also continue.
   const resolved = resolveTurn(turn, {
     hasFeeling,
     alsoAsksCoach: looksLikeQuestion(message) && durableDomains(turnMutations()).length > 0,
@@ -1020,44 +1024,33 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
   if (resolved.reply) return closeCoachingTurn(resolved.reply);
 
-  // ---- WEIGHT FORECAST / TRAJECTORY ----
-  // The anti-"it's a scam" tool: from the client's OWN logged food + steps vs their
-  // maintenance, deterministic energy math (never the LLM) projects the scale. If they
-  // logged a surplus, it says so — the plate, not the plan. Available to every client.
+  // ---- WEIGHT FORECAST / TRAJECTORY: deterministic math from the client's own logs. ----
+  // If they logged a surplus, it says so — the plate, not the plan.
   if (/^(forecast|my forecast|weight forecast|trajectory|my trajectory|projection|my projection|am i on track|will i (lose|gain|drop|pick up)|how much (weight )?(will|am|would) i (going to |gonna )?(lose|gain|drop|pick up))\b/i.test(m.trim())) {
     const { getTrajectoryForUser } = await import("./trajectory-report");
     const report = await getTrajectoryForUser(user.id);
     if (report) return report.whatsappText;
   }
 
-  // ---- PROGRESS CHECK ----
-  // Days 31-40 rollout: when the engine is live it OWNS the "how am I doing / my progress"
-  // conversation — snapshot-grounded (real numbers injected) and sick-aware, so it stops
-  // the old advisory template's training-push at a sick client. The deterministic progress
-  // stays the fallback (ENGINE_LIVE=off reverts instantly). Advisory-only, so nothing is
-  // lost by deferring it.
+  // ---- PROGRESS CHECK: the live engine owns snapshot-grounded, sick-aware progress. ----
+  // Deterministic progress remains the ENGINE_LIVE=off fallback.
 
-  // Claimants between resolveTurn and GPT, classified (2026-08-22):
-  //   trajectory        — FACTUAL RENDERER (whole-message forecast only)
-  //   misc oneAction / looksLikeDirectionRequest — genuine coaching owner (keep)
-  //   misc plate/portion — EDUCATIONAL MOUTH (stands down when this turn wrote)
-  //   lifecycle         — command adapter (menu keys; does not match a mixed log+ask)
-  //   engine / gpt      — genuine coaching owner (chooseAction)
-  //   mustForceFoodLog  — adapter; already stood down after INSERT meal
+  // Between resolveTurn and GPT: trajectory is factual; misc/lifecycle own whole commands;
+  // the engine owns coaching; educational adapters stand down after a durable write.
   const wroteThisTurn = durableDomains(turnMutations()).length > 0;
-  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });
+  // A one-question renderer must not claim a multi-question turn or contradict its writes.
+  // The Coach below receives the complete turn after all facts are committed.
+  const miscResult = multiQuestionTurn ? null
+    : await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });
   if (miscResult !== null) return miscResult;
-
-
-  const lifecycleResult = await handleLifecycle({ phone, message, m, user, isQuestion: normalizedQuestion });
+  // Lifecycle owns whole commands, not "the scale is not moving" inside a long account.
+  const lifecycleResult = multiQuestionTurn ? null
+    : await handleLifecycle({ phone, message, m, user, isQuestion: normalizedQuestion });
   if (lifecycleResult !== null) return lifecycleResult;
-
-
   // ---- THE MEANING ENGINE — the turn's one judgment path, below every deterministic owner.
   //
-  // Position is the guarantee. Everything above has been asked and declined, so this cannot take
-  // a turn that belongs to a rail — no phrase list is standing between them. Fail-open: if the
-  // engine has nothing, gpt-block answers.
+  // Position is the guarantee: every rail above has declined. If the engine has nothing,
+  // gpt-block answers.
   //
   // !isTransactionReport stays (2026-08-19, four live failures): a stated meal report is a write,
   // and until branded/voice LOG_MEAL is proven under the engine, food-context owns those turns.

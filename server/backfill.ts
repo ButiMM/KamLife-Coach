@@ -36,13 +36,14 @@
  */
 
 import { db } from "./db";
-import { workoutLogs, stepLogs } from "../shared/schema";
-import { and, eq, gte, lt } from "drizzle-orm";
+import { workoutLogs, stepLogs, users } from "../shared/schema";
+import { and, desc, eq, gte, lt } from "drizzle-orm";
 import { attributeMultiDayReport } from "./understanding/day-relative-situation";
 import { journeyMustKeepFacts, detectStepLog } from "./understanding/messy-intake";
 import { turnMutation } from "./handlers/chat-log";
 import { applyRetroSessionState } from "./day-ledger";
 import { closeOpenTrainingLoopForDay } from "./handlers/workout";
+import { parseMealDate, sastDayKey } from "./sast";
 
 export interface BackfillWrite { dayKey: string; domain: "food" | "workout" | "steps"; detail: string; }
 export interface BackfillResult {
@@ -104,13 +105,63 @@ export async function backfillAttributedDays(
   const writes: BackfillWrite[] = [];
   const undated: string[] = [];
 
+  // A correction is a MOVE, not two independent dated reports. The attribution splitter has to
+  // remove the day words in order to attach them, so this sentence otherwise becomes three
+  // false fragments: "did my workout on" is assigned to the preceding day, Tuesday's fragment
+  // is a miss with no noun, and Thursday's fragment contains the later "I trained" objection.
+  // Handle the complete correction once, through this existing multi-day workout owner, before
+  // ordinary dated beats are considered.
+  const workoutMove = message.match(
+    /\b(?:said|told)[^.!?]{0,100}\b(?:workout|session|training)\s+on\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b[^.!?]{0,100}\b(?:missed|didn'?t|did\s+not|skipped)\b[^.!?]{0,100}\b(?:did|completed|trained)\b[^.!?]{0,50}\bon\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i,
+  );
+  const correctionDays = new Set<string>();
+  if (workoutMove) {
+    const wrongDay = sastDayKey(parseMealDate(workoutMove[1]));
+    const rightDay = sastDayKey(parseMealDate(workoutMove[2]));
+    correctionDays.add(wrongDay);
+    correctionDays.add(rightDay);
+    const wrong = dayWindow(wrongDay);
+    const right = dayWindow(rightDay);
+    const removed = await db.delete(workoutLogs)
+      .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, wrong.start), lt(workoutLogs.loggedAt, wrong.end)))
+      .returning({ id: workoutLogs.id });
+    const heldRight = await db.select({ id: workoutLogs.id }).from(workoutLogs)
+      .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, right.start), lt(workoutLogs.loggedAt, right.end)))
+      .limit(1);
+    let inserted = false;
+    if (heldRight.length === 0) {
+      await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true, loggedAt: noonOn(rightDay) });
+      inserted = true;
+      writes.push({ dayKey: rightDay, domain: "workout", detail: `session corrected from ${workoutMove[1]} to ${workoutMove[2]}` });
+    }
+    if (removed.length > 0) turnMutation(`DELETE workout at=${wrongDay}`, "[BACKFILL]");
+    if (inserted) turnMutation(`INSERT workout completed=true at=${rightDay}`, "[BACKFILL]");
+
+    // A move changes the event's day, not the lifetime count. Keep the user's derived fields in
+    // step with the ledger using the actual insert/delete delta; the programme cursor remains
+    // untouched because both days are historical.
+    const total = Math.max(0, (Number(user.totalWorkoutsCompleted) || 0) + (inserted ? 1 : 0) - removed.length);
+    const [latest] = await db.select({ loggedAt: workoutLogs.loggedAt }).from(workoutLogs)
+      .where(eq(workoutLogs.userId, user.id)).orderBy(desc(workoutLogs.loggedAt)).limit(1);
+    await db.update(users).set({
+      totalWorkoutsCompleted: total,
+      lastWorkoutDate: latest?.loggedAt || null,
+      lastActiveAt: new Date(),
+    }).where(eq(users.id, user.id));
+    user.totalWorkoutsCompleted = total;
+    user.lastWorkoutDate = latest?.loggedAt || null;
+    await closeOpenTrainingLoopForDay({ user, resolvedDay: rightDay, sourceMessageId });
+  }
+
   for (const beat of attribution.beats) {
     if (!beat.dayKey) { if (beat.text.trim()) undated.push(beat.text.trim()); continue; }
     const { start, end } = dayWindow(beat.dayKey);
     const at = noonOn(beat.dayKey);
 
     // WORKOUT — one row on the named day, and nothing about today. Idempotent per day.
-    if (journeyMustKeepFacts(beat.text).workout) {
+    const beatEnd = beat.text.trim().toLowerCase();
+    const danglingDayReference = ["workout on", "session on", "training on", "trained on"].some(s => beatEnd.endsWith(s));
+    if (!correctionDays.has(beat.dayKey) && !danglingDayReference && journeyMustKeepFacts(beat.text).workout) {
       const existing = await db.select({ id: workoutLogs.id }).from(workoutLogs)
         .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, start), lt(workoutLogs.loggedAt, end)))
         .limit(1);
@@ -144,7 +195,7 @@ export async function backfillAttributedDays(
   // with different numbers. The contract is shared with both retro paths in workout.ts; see
   // applyRetroSessionState. Only days we ACTUALLY inserted count, so the idempotency guard above
   // keeps a repeated report from inflating the total.
-  const sessionDays = writes.filter(w => w.domain === "workout").map(w => noonOn(w.dayKey));
+  const sessionDays = writes.filter(w => w.domain === "workout" && !correctionDays.has(w.dayKey)).map(w => noonOn(w.dayKey));
   if (sessionDays.length > 0) {
     try {
       await applyRetroSessionState(user, sessionDays);

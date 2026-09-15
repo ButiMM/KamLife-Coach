@@ -15,7 +15,7 @@ import { tellDontAsk } from "../reply-hygiene";
 import { logChat, withTimeout, turnEvidence } from "./chat-log";
 import { checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./checks";
 import { detectLanguage } from "../constants";
-import { checkGptRateLimit, sastDayStart, sastToday, looksLikeDeepEmotionalShare , getDisplayName} from "../utils";
+import { checkGptRateLimit, sastDayStart, sastToday, isMultiPartAsk, looksLikeDeepEmotionalShare , getDisplayName} from "../utils";
 import { getKamlifeProgramme } from "../programme";
 import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
@@ -675,10 +675,31 @@ SA voice. Direct. Coach forward, not backward.`;
           return applyReplyVerifier(gptReply, user, message);
         }
       }
-      gptReply = composeDecisionTurn(
-        situationFrame,
-        decision.reply || renderActionLine(decision.todo),
-      );
+      if (isMultiPartAsk(message)) {
+        // A canonical action answers "what next"; it does not answer factual questions riding in
+        // the same voice note. Ask the existing Coach mouth for CONTEXT only, then let the
+        // existing decision composer add the one action chosen by canonicalDecision. This keeps
+        // the model out of prescription authority while preventing a two-question turn from
+        // collapsing to an unrelated action line.
+        const questionContextInstruction = `${decisionBrief(decision)}
+
+This message contains multiple explicit questions. Answer EVERY one directly, in the order asked.
+The facts in this same message have already been committed: never ask the client to report them again.
+Write context only and do not add a next action; the canonical action is appended after your answer.
+
+${finalInstruction}`;
+        const questionContext = await withTimeout("gpt_multi_question", 30000,
+          () => askCoachK(message, user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));
+        gptReply = composeDecisionTurn(
+          questionContext === AGENT_ERROR ? situationFrame : questionContext,
+          decision.reply || renderActionLine(decision.todo),
+        );
+      } else {
+        gptReply = composeDecisionTurn(
+          situationFrame,
+          decision.reply || renderActionLine(decision.todo),
+        );
+      }
     } else {
     // SPECIALISTS ARE ADVISORS, NOT MOUTHS (2026-08-23). routeToAgent still picks a domain so
     // nutrition/programme facts reach the Coach. Their string must never be the WhatsApp reply —
