@@ -2,7 +2,9 @@
 
 **Branch** `fix/c9-meal-date-slot`
 **Base** `85d1b73c12219a9c6b694795a2edd17aeb197d8b` (`main`)
-**Head** `992c3de904f801c964cfae39c9d3d6ed41dc952d`
+**Head — last commit that changes product code** `992c3de904f801c964cfae39c9d3d6ed41dc952d`
+(the branch tip is one commit later and carries only this report; the PR names it. Every test
+result below was measured on `992c3de`, and the tip changes no file under `server/` or `script/`.)
 **Status** IMPLEMENTED — not merged, not deployed.
 
 One branch, one PR, two commits. Nothing merged, nothing force-pushed, no other cut started.
