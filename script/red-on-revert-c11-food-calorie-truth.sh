@@ -186,9 +186,13 @@ run_case "one food's preparation basis is copied onto every food" server/portion
 # 14. A CORRECTION WE CANNOT PLACE GOES SILENT AGAIN. The reply stops naming what today holds, so
 #     the named 877 sentence ends in "I don't see chicken breasts in today's log to correct" over a
 #     plate the client logged one turn earlier, and the day never moves.
+#
+#     ANCHORED ON THE HELD-ROWS READ, not on a branch: the two dead-end replies were consolidated
+#     into one mouth when the authorship governor refused the second, so the seam is the line that
+#     reads what today holds. Emptying it leaves the same sentence naming nothing.
 run_case "an unplaceable correction stops naming what is held" server/handlers/food-log-mgmt.ts \
-  '      if (rowsQC.length > 0) {' \
-  '      if (false) {' || failed=$((failed + 1))
+  '      const heldQC = rowsQC.slice(0, 3)' \
+  '      const heldQC = rowsQC.slice(0, 0)' || failed=$((failed + 1))
 
 restore_case
 if [[ $failed -ne 0 ]]; then

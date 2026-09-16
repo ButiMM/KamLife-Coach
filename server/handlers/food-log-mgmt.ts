@@ -329,12 +329,13 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       // honest number to compute here; what we can do honestly is say what today holds and let
       // the client restate the plate. The rows are described through the ledger's own `foodsOf`
       // so "what is held" reads the same here as on the card.
-      if (rowsQC.length > 0) {
-        const held = rowsQC.slice(0, 3)
-          .map(r => `${foodsOf(r.items, r.rawMessage)} (~${r.kcalInt || 0} kcal)`).join(", ");
-        return `I can't place ${qc.food} against what's logged — today I've got ${held}. Send that plate again the way it should read and I'll swap it in.`;
-      }
-      return `I don't see ${qc.food} in today's log to correct. Send *my meals* to check what's logged.`;
+      //
+      // ONE MOUTH, NOT TWO. An empty day and a day we cannot match in are the same answer to the
+      // same question, so they are one sentence with one clause that differs — the authorship
+      // governor counts places words reach a client, and this dead end is one place.
+      const heldQC = rowsQC.slice(0, 3)
+        .map(r => `${foodsOf(r.items, r.rawMessage)} (~${r.kcalInt || 0} kcal)`).join(", ");
+      return `I can't place ${qc.food} against ${heldQC ? `what's logged — today I've got ${heldQC}` : "today's log, which is still empty"}. Send the plate the way it should read and I'll log it properly.`;
     } catch (err) {
       console.error("[QTY_CORRECTION]", err);
     }
