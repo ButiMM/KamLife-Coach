@@ -121,13 +121,20 @@ export async function canonicalDecision(
     // ate today" immediately after telling us. This branch only looked correct because the pear
     // in the named journey happens to come to 103 kcal — the CTO named that precisely.
     //
-    // TWO SOURCES, BOTH ALREADY OWNED HERE, and no new one added. `truth.today.meals` is the row
-    // list the ledger already returns, and `turnAlreadyWrote("food")` is the reader the turn scope
-    // already exposes for "did this turn commit a food write" — the same mutation log the
-    // write-integrity boundary is checked against. A read cannot be stale about a write this turn
-    // made, and a row cannot be absent because its calories are zero.
-    const { turnAlreadyWrote } = await import("../handlers/chat-log");
-    const foodRowToday = (truth.today.meals?.length || 0) > 0 || turnAlreadyWrote("food");
+    // THE ROW LIST THE LEDGER ALREADY RETURNS, AND NOTHING ELSE. `truth.today.meals` is built by
+    // getDayLedger from the rows inside today's SAST window, so it is already the answer to both
+    // halves: a zero-calorie row is in it, and a row written earlier THIS turn is in it too,
+    // because this read runs after the food handlers have committed.
+    //
+    // `turnAlreadyWrote("food")` WAS ALSO IN THIS CONDITION AND HAD TO COME OUT. It reports that
+    // the turn committed a meal, and says nothing about WHICH DAY that meal was for — so a
+    // three-day catch-up, which writes Monday, Tuesday and Wednesday and leaves today empty, made
+    // today read as logged. The ladder then had nothing to ask and the client's catch-up ended in
+    // a bare receipt with no question: exactly the dead end #203 exists to prevent, caught by
+    // pg-thin-evidence-acceptance. The mutation note does carry a day, but as `at=Wed Sep 16` —
+    // human-readable and UTC-local, not comparable to a SAST day key — so it is not a fix either.
+    // Nothing is lost by removing it: a write for TODAY is a row in today's window by definition.
+    const foodRowToday = (truth.today.meals?.length || 0) > 0;
     const act = underPolicy(chooseAction({
       firstName: getDisplayName(user) || undefined,
       goal: (user.goalType as any) || "general",
