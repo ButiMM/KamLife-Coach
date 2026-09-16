@@ -309,6 +309,24 @@ REAL("\n7. THE PHOTO TOTAL IS EVIDENCE, NOT A SECOND LEDGER (source-graded, and 
   const nothing = reconcileVisionMeal("NOT_FOOD", 0, 0);
   chk(nothing.items.length === 0 && nothing.kcalInt === 0, "and nothing is written for a non-food photo");
 
+  // A ZERO-CALORIE ITEM IS NOT AN ABSENT ITEM. The first cut of this reconciler filtered to
+  // kcal > 0 before deciding, which deleted a parsed free item whenever anything else on the plate
+  // had calories — a photo of eggs and black coffee kept the eggs and lost the coffee. The meal
+  // total stayed right, so nothing downstream complained, and the client's record simply stopped
+  // containing a thing they ate. That is this cut's own defect committed by its own repair.
+  const withFree = reconcileVisionMeal([
+    "Boiled eggs (2): ~140 kcal, 12g protein",
+    "Black coffee: ~0 kcal, 0g protein",
+    "TOTAL: 140 kcal | 12g protein",
+  ].join("\n"), 140, 12);
+  chk(withFree.items.length === 2, "a zero-calorie photo item survives beside a priced one",
+    JSON.stringify(withFree.items.map(i => i.name)));
+  chk(withFree.items.some(i => /coffee/i.test(i.name) && i.kcal === 0),
+    "…and it keeps its own zero, rather than being dropped or invented up",
+    JSON.stringify(withFree.items));
+  chk(withFree.kcalInt === 140 && withFree.items.reduce((s, i) => s + i.kcal, 0) === 140,
+    "…while the meal total is unchanged and still equals the item sum", JSON.stringify(withFree));
+
   const { readFileSync } = await import("node:fs");
   const media = readFileSync("server/handlers/media.ts", "utf-8");
   const live = media.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
@@ -394,6 +412,21 @@ REAL("\n8. A CORRECTION REPLACES — IT DOES NOT ADD");
     chk(j.total === t, `${label}: users.today_calories agrees`, `user=${j.total} rows=${t}`);
   }
 
+  // 8e — THE QUANTITY AUTHORITY, REACHED THROUGH THE IDENTITY PATH. Routing consolidation sends
+  // bare quantity claims to parseQuantityCorrection, but resolveFood still prices every
+  // corrected-TO food — and that food can carry a quantity of its own. This is the live seam where
+  // bypassing adjustFoodsForSegment still costs the client half their calories: two breasts is
+  // 594, one is 297, and before the repair this path always said 297.
+  const idQty = await journey("correct-idqty", [[13, "I had rice"], [14, "it wasn't rice, it was two chicken breasts"]]);
+  ledgerHolds("correct-idqty", idQty.rows);
+  const idQtyTotal = idQty.rows.reduce((s, r) => s + r.kcal_int, 0);
+  chk(idQtyTotal > 500 && idQtyTotal < 700,
+    "a replacement that names a quantity is priced for that quantity",
+    `total=${idQtyTotal} items=${JSON.stringify(idQty.rows.map(names))}`);
+  chk(idQty.rows.some(r => (r.items || []).some(i => Number(i.quantity) === 2)),
+    "…and the persisted item records the quantity it was priced for",
+    JSON.stringify(idQty.rows.map(r => r.items)));
+
   // 8c — CONTROL: the identity axis still replaces. This one worked before the repair and must
   // keep working, or the fix has traded one broken axis for another.
   const ident = await journey("correct-identity", [[13, "I had rice"], [14, "it wasn't rice, it was pap"]]);
@@ -448,6 +481,39 @@ REAL("\n9. A ZERO-CALORIE LOG COUNTS AS LOGGED — EVERYWHERE, INCLUDING THE CAR
     `body=${JSON.stringify(coachBody.slice(0, 300))}`);
   chk((await rows()).length === 1,
     "and the question wrote nothing of its own", `rows=${(await rows()).length}`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n10. THE PERSISTED ITEM EXPLAINS ITS OWN CALORIES");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The ledger is the items, so an item that states 440 kcal and cannot say how it got there is a
+// number nobody can check, reproduce or correct. This grades the LOGGING path's provenance —
+// §8e grades the correction path's — because they are different writers and a repair to one says
+// nothing about the other.
+{
+  const j = await journey("provenance", [[13, "I had 2 cups cooked rice"]]);
+  ledgerHolds("provenance", j.rows);
+  const it: any = (j.rows[0]?.items || [])[0] || {};
+  chk(j.rows.length === 1 && !!it.name, "the plate is stored", JSON.stringify(j.rows.map(r => r.items)));
+  chk(Number(it.quantity) === 2, "the item records HOW MUCH — two, not one", `quantity=${it.quantity}`);
+  chk(String(it.unit || "").toLowerCase() === "cups", "…in the client's own unit", `unit=${JSON.stringify(it.unit)}`);
+  chk(it.portionSource === "explicit", "…and that the client stated it rather than us guessing",
+    `portionSource=${JSON.stringify(it.portionSource)}`);
+  chk(/2 cups/i.test(String(it.portionDescription || "")),
+    "…against a portion description scaled to what they said", `desc=${JSON.stringify(it.portionDescription)}`);
+  chk(it.basis === "cooked" && it.canonicalBasis === "cooked",
+    "…on the preparation basis both sides agree on", `basis=${it.basis}/${it.canonicalBasis}`);
+  chk(Number(it.grams) === 400 && Number(it.kcal) === 440,
+    "…and the grams and calories that follow from all of it", `grams=${it.grams} kcal=${it.kcal}`);
+
+  // A GUESS MUST SAY IT IS ONE. The same fields on a plate where the client stated no amount: the
+  // value of portionSource is that "default" and "explicit" are distinguishable afterwards.
+  const g = await journey("provenance-default", [[13, "I had rice"]]);
+  const gi: any = (g.rows[0]?.items || [])[0] || {};
+  chk(gi.portionSource === "default", "an unstated amount is recorded as a default, not as fact",
+    `portionSource=${JSON.stringify(gi.portionSource)}`);
+  chk(Number(gi.quantity) === 1 && gi.unit === null,
+    "…with no unit invented for words the client never said", `quantity=${gi.quantity} unit=${JSON.stringify(gi.unit)}`);
 }
 
 REAL(`\n${failed === 0 ? "pg-food-calorie-truth-acceptance: GREEN" : `pg-food-calorie-truth-acceptance: ${failed} FAILED`}\n`);

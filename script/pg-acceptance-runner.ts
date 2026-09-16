@@ -278,6 +278,19 @@ export const ACCEPTANCES: Acceptance[] = [
     // caption's plainly named meal goes missing instead of being wrongly invented.
     command: ["bash", "script/red-on-revert-c9-meal-date-slot.sh"] },
 
+  { id: "food-calorie-truth", title: "One food evidence, one nutritional truth",
+    // C11 (2026-09-16). The governing rule is that meal calories EQUAL the sum of their persisted
+    // item calories, and the ledger held it throughout — the mismatch was upstream. A correction
+    // degraded into an append (580 -> 877), the quantity axis did not exist, provenance was
+    // dropped at persistence, and the photo total was a second ledger beside its own items.
+    command: ["npx", "tsx", "script/pg-food-calorie-truth-acceptance.ts"] },
+
+  { id: "food-calorie-truth-reverts", title: "Every C11 food-truth seam turns the acceptance red",
+    // Eight isolated mutations: both correction-owner escapes, the portion-authority bypass, the
+    // unresolvable-removal append, provenance dropped at persistence, the discarded repeat slot,
+    // a zero-calorie day read as unlogged, and the photo total defeating its own item sums.
+    command: ["bash", "script/red-on-revert-c11-food-calorie-truth.sh"] },
+
   { id: "turn-reply-integrity", title: "The reply reconcileTurnReply repaired is the reply that ships",
     // C10 (2026-09-15). reconcileTurnReply computed its write-integrity repair and directive strip
     // into `draft`, then returned `reply` — the original, unverified model string — from every

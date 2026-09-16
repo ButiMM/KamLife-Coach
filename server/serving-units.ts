@@ -110,14 +110,23 @@ export function reconcileVisionMeal(
   statedProtein: number,
 ): { items: Array<{ name: string; grams: number; kcal: number; protein: number; category: string }>; kcalInt: number; proteinInt: number } {
   const items = itemsFromVisionText(text);
-  const priced = items.filter(i => (i.kcal || 0) > 0);
-  if (priced.length > 0) {
-    const kcal = priced.reduce((s, i) => s + (i.kcal || 0), 0);
-    const protein = priced.reduce((s, i) => s + (i.protein || 0), 0);
+  // EVERY PARSED ITEM IS DURABLE TRUTH, INCLUDING THE FREE ONES (C11 amendment, 2026-09-16).
+  //
+  // The first cut of this filtered to `kcal > 0` before deciding, which silently deleted a parsed
+  // zero-calorie item whenever anything else on the plate had calories: a photo of eggs and black
+  // coffee kept the eggs and lost the coffee. The meal total stayed correct, so nothing downstream
+  // complained — and the client's record simply stopped containing a thing they ate.
+  //
+  // That is the same defect this whole cut is about, committed by its own repair: a zero-calorie
+  // item is not an absent item. The list is now every line the model gave us, and the total is the
+  // sum across all of them, zeros included — which changes no total and saves every food.
+  if (items.length > 0) {
+    const kcal = items.reduce((s, i) => s + (i.kcal || 0), 0);
+    const protein = items.reduce((s, i) => s + (i.protein || 0), 0);
     if (statedKcal > 0 && Math.abs(statedKcal - kcal) > Math.max(25, kcal * 0.1)) {
       console.warn(`[PHOTO_TOTAL_DISAGREES] model said ${statedKcal} kcal, its own items sum to ${kcal} — items win`);
     }
-    return { items: priced, kcalInt: kcal, proteinInt: protein };
+    return { items, kcalInt: kcal, proteinInt: protein };
   }
   if (statedKcal > 0 || statedProtein > 0) {
     return {
