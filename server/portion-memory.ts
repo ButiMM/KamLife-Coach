@@ -239,8 +239,58 @@ function normaliseWordNumbers(text: string): string {
   return phrased.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\b/gi, w => map[w.toLowerCase()] ?? w);
 }
 
+/**
+ * HOW THE FOOD WAS PREPARED, WHEN THE CLIENT SAYS SO (C11, 2026-09-16).
+ *
+ * "100g dry rice" and "100g cooked rice" are not the same food by calories — dry is roughly three
+ * times cooked — and the ledger could not tell them apart because nothing read the word. It is
+ * recorded here as the client's own claim and travels with the item; whether the numbers can be
+ * computed from it is a separate question, and one this codebase answers by asking rather than
+ * guessing when it cannot (see the basis conflict check in the food logger).
+ *
+ * Closed set, and deliberately small: these are preparation states that change a food's density,
+ * not a vocabulary of cooking methods. "Grilled" and "fried" belong to identity, which the food
+ * table already owns.
+ */
+const PREP_WORDS = "(?:cooked|uncooked|raw|dry|dried)";
+const PREP_RE = new RegExp(`\\b${PREP_WORDS}\\b`, "i");
+/** The basis a food's canonical portion is expressed in, when its own description says. */
+export function canonicalBasis(portionDescription?: string): string | null {
+  const m = PREP_RE.exec(String(portionDescription || ""));
+  return m ? m[0].toLowerCase() : null;
+}
+/** The basis the CLIENT stated for this food, read from their own words. */
+export function statedBasis(text: string): string | null {
+  const m = PREP_RE.exec(String(text || ""));
+  return m ? m[0].toLowerCase() : null;
+}
+/**
+ * The first priced food whose stated basis its own canonical portion contradicts, or null.
+ *
+ * Narrow by construction: BOTH bases must be known and disagree. A client who names no basis, or
+ * names the one the table already assumes ("100g cooked rice" against "1 cup cooked"), yields
+ * null and logs exactly as before. Lives here because this is where basis is read and normalised;
+ * what the caller DOES about a conflict is the food logger's business, not this file's.
+ */
+export function basisConflict(foods: any[]): any | null {
+  return (foods || []).find((f: any) =>
+    f?.statedBasis && f?.canonicalBasis && !sameBasis(f.statedBasis, f.canonicalBasis)) || null;
+}
+
+/** Two basis words that mean the same thing — "dry" and "dried", "uncooked" and "raw". */
+export function sameBasis(a: string | null, b: string | null): boolean {
+  if (!a || !b) return true;                       // nothing stated → nothing conflicts
+  const norm = (s: string) => (s === "dried" ? "dry" : s === "uncooked" ? "raw" : s);
+  const x = norm(a), y = norm(b);
+  if (x === y) return true;
+  // Raw and dry are distinct claims about different food classes (raw meat, dry grain), but
+  // neither is "cooked", so a conflict with cooked is what actually matters here.
+  return false;
+}
+
 export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal?: Map<string, PortionStat>) {
   const normText = normaliseWordNumbers(segText);
+  const segBasis = statedBasis(segText);
 
   // Portion-size modifier — "big plate of pap" → 1.5×, "half a portion" → 0.5×
   // Applied globally across all foods in the segment (whole meal was described as big/small)
@@ -262,15 +312,25 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal
     let quantity = 1;
     let explicitQty = false; // the client SAID an amount — memory never overrides speech
     let quantityEstimated = false; // WE interpreted the amount — identity can be db, quantity a guess
+    let statedUnit: string | null = null;   // the client's own unit word, kept for the ledger (C11)
     for (const alias of allAliases) {
       const qtyDirect = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:${escapeRegex(alias)})`, "i"));
       // UNIT-AWARE (2026-08-13): capture the unit WORD and classify it — "2 plates", "2 tablespoons",
       // "2 pieces" and "2 spoons" are four different claims, and the old catch-all made all four N
       // whole portions, so "2 spoons of pap" logged 660 kcal. See classifyPortionUnit above.
-      const qtyWithUnit = qtyDirect ? null : normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+([a-z]+)\\s+(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
+      //
+      // …AND A PREPARATION WORD BETWEEN THE UNIT AND THE FOOD NO LONGER DEFEATS IT (C11,
+      // 2026-09-16). This allowed exactly ONE word between the number and the food, so "2 cups
+      // COOKED rice" matched nothing at all and was logged as ONE cup — the client said two and
+      // the record said one. `PREP_WORDS` is the closed set of basis words that legitimately sit
+      // there; anything else still fails to match, because a wider gap is how "2 hours before
+      // rice" would become a quantity.
+      const qtyWithUnit = qtyDirect ? null : normText.match(new RegExp(
+        `(\\d+(?:\\.\\d+)?)\\s+([a-z]+)\\s+(?:${PREP_WORDS}\\s+)?(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
       const qtyBefore = qtyDirect || qtyWithUnit;
       if (qtyBefore) {
         explicitQty = true;
+        if (qtyWithUnit) statedUnit = String(qtyWithUnit[2] || "").toLowerCase() || null;
         const userQty = parseFloat(qtyBefore[1]);
         const unit = qtyWithUnit ? classifyPortionUnit(qtyWithUnit[2], f.typicalPortionDescription, f.typicalPortionGrams) : null;
         if (unit && unit.fraction !== null) {
@@ -319,6 +379,10 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal
           adjustedDescription: `${f.typicalPortionDescription} — your usual`,
           quantity: 1,
           portionSource: "personal" as const,
+          // Provenance travels with every branch, not just the common one (C11).
+          statedUnit: null,
+          statedBasis: segBasis,
+          canonicalBasis: canonicalBasis(f.typicalPortionDescription),
         };
       }
     }
@@ -336,6 +400,14 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal
       portionSource,
       // Identity verified, quantity estimated — "2 spoons of pap" is db-true about pap, a guess about how much.
       origin: quantityEstimated ? "ai" as const : undefined,
+      // ── THE EVIDENCE BEHIND THE NUMBER (C11, 2026-09-16) ───────────────────────────────────
+      // A persisted item could state its calories and nothing about how they were reached, so no
+      // surface could explain or reproduce them. These three carry the client's own words: the
+      // unit they measured in, the preparation basis they named, and the basis the food table's
+      // canonical portion is expressed in — which is what makes a conflict between them visible.
+      statedUnit,
+      statedBasis: segBasis,
+      canonicalBasis: canonicalBasis(f.typicalPortionDescription),
     };
   });
 }

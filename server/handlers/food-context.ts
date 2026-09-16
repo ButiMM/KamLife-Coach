@@ -28,7 +28,9 @@ import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting, reportedInSomeClause } from "../utils";
 import { explicitMealSlot } from "../understanding/actions";
-import { getPortionMemory, adjustFoodsForSegment } from "../portion-memory";
+// The canonical item shape — the nutritional ledger's own definition (C11).
+import { itemsFromAdjusted } from "../day-ledger-core";
+import { getPortionMemory, adjustFoodsForSegment, basisConflict } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
@@ -160,16 +162,6 @@ type HandleMessageFn = (phone: string, message: string, mediaUrl?: string, media
  * are the ADJUSTED values, so an item's numbers always add up to the row total computed from the
  * same objects.
  */
-function itemsFromAdjusted(foods: any[]) {
-  return (foods || []).map((f: any) => ({
-    name: f.name,
-    grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
-    kcal: f.adjustedCalories,
-    protein: f.adjustedProtein,
-    category: f.category,
-    origin: f.origin || "db",
-  }));
-}
 
 export async function handleFoodContext(ctx: {
   phone: string;
@@ -985,6 +977,19 @@ export async function handleFoodContext(ctx: {
       } catch (e) {
         console.warn("[PARTIAL-MATCH SUPP] error:", e);
       }
+    }
+
+    // A BASIS WE CANNOT CONVERT IS A NUMBER WE MAY NOT INVENT (C11). "100g dry rice" and "100g
+    // cooked rice" both came back 220 kcal on e53763b, priced against Rice's canonical "1 cup
+    // cooked" — dry is roughly three times cooked, so the client who said DRY got the cooked
+    // number with no way to see it. We hold no dry↔cooked factor per food; inventing one writes a
+    // confident wrong number, so we ask. basisConflict owns the detection (portion-memory).
+    const clash: any = basisConflict(allAdjustedFoods);
+    if (clash) {
+      console.warn(`[FOOD_BASIS_CONFLICT] ...${String(user.id).slice(-6)} — said ${clash.statedBasis}, ${clash.name} priced ${clash.canonicalBasis}`);
+      const reply = `Quick one before I log it — my numbers for *${clash.name}* are for ${clash.canonicalBasis} weight, and you said ${clash.statedBasis}. Those are very different calories. Tell me the ${clash.canonicalBasis} amount and I'll log it properly.`;
+      await logChat(user.id, message, reply, "FOOD_BASIS_CONFLICT").catch(() => {});
+      return reply;
     }
 
     // Build the multi-meal breakdown AFTER supplement attribution (so GPT items are included).
