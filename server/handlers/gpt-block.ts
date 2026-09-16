@@ -607,6 +607,17 @@ SA voice. Direct. Coach forward, not backward.`;
     if (!hasObviousFoodSignal && !hasObviousStepSignal && !hasObviousWeightSignal && !hasObviousWorkout) {
       // The buttons DO answer this one — it ends in a question, which is the rule (2026-08-06).
       const clarifyReply = `Sorry${user.name ? " " + user.name.split(" ")[0] : ""}, I didn't quite catch that 🙂 Say it another way, or what do you need?[BUTTONS:Today's workout|Log food|My progress]`;
+      // ASKING WHAT THEY MEANT IS NOT A COACHING TURN (C10, 2026-09-15). The four other clarify
+      // exits in this file set conversationalOnly; this one did not, and it did not matter while
+      // reconcileTurnReply discarded its own rebuild. Once the repaired draft actually ships, the
+      // rebuild sees a decision turn and replaces "Sorry, I didn't quite catch that 🙂 …" and its
+      // three buttons with "one thing today: Tell me what you ate today" — an instruction issued
+      // over the top of a question we just admitted we could not understand.
+      //
+      // conversationalOnly is the existing flag for "this turn answers, it does not instruct",
+      // and chat-log's own comment already states the rule: a clarification never receives an
+      // action line. This exit is simply brought into line with its four siblings.
+      turnEvidence({ conversationalOnly: true });
       await logChat(user.id, message, clarifyReply, "UNCLEAR");
       return clarifyReply;
     }

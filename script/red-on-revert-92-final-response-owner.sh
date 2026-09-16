@@ -147,9 +147,19 @@ s=s.replace("  } else if (isMissedWorkout) {", "  } else if (false) {")
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
-# 8. THE MODEL'S PRESCRIPTION IS NO LONGER REMOVED BEFORE COMPOSITION. The mouth's own imperative
-#    reaches the client with the canonical action underneath it — two next moves, the review
-#    finding this cut took on. Isolated from the gate: the question still reaches the Coach.
+# 8. THE MODEL'S PRESCRIPTION IS NO LONGER REMOVED. The mouth's own imperative reaches the client
+#    with the canonical action underneath it — two next moves, the review finding this cut took on.
+#
+#    RE-AIMED AT BOTH STRIPPERS (C10, 2026-09-15), and the reason is recorded rather than the case
+#    quietly relaxed. This reverted gpt-block's strip alone and STAYED GREEN. Not because the
+#    product regressed: because C10 made the SECOND stripper live. reconcileTurnReply always
+#    stripped directives into `draft` and then returned `reply`, so the boundary that this
+#    codebase calls "the one place every reply crosses" was inert; now it returns `draft`, and it
+#    catches the prescription that gpt-block's strip used to catch alone.
+#
+#    So the mechanism is guarded twice, and a revert of either one alone is no longer a
+#    client-visible defect. The claim this case makes — the model's prescription does not reach
+#    the client — is only falsifiable by removing both. That is what it now does.
 cat > "$PATCH_DIR/8.py" <<'PYEOF2'
 p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
 old = """        const context = stripModelDirectives(questionContext, {
@@ -158,6 +168,12 @@ old = """        const context = stripModelDirectives(questionContext, {
 new = """        const context = questionContext;"""
 s=s.replace(old, new, 1)
 assert s!=b, "no match"; open(p,"w").write(s)
+
+p2="server/handlers/chat-log.ts"; s2=open(p2).read(); b2=s2
+old2 = """    const { kept, removed } = stripModelDirectives(draft, scope.evidence);"""
+new2 = """    const { kept, removed } = { kept: draft, removed: [] as string[] };"""
+s2=s2.replace(old2, new2, 1)
+assert s2!=b2, "no match (boundary stripper)"; open(p2,"w").write(s2)
 PYEOF2
 
 
