@@ -463,6 +463,13 @@ RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K — apply the SCENARIO GUIDE f
   if (PURE_REACTIONS.has(m)) {
     const acks = ["Sharp.", "Noted.", "Lekker.", "Good.", "Keep it up.", "Yebo. 👊", "Sho."];
     const ack = acks[Math.floor(Math.random() * acks.length)];
+    // SAYING THANK YOU IS NOT A COACHING TURN (C10, 2026-09-15). Like the punct reply just above
+    // and the clarify exit below, this answers and does not instruct — but unlike them it never
+    // said so. That cost nothing while reconcileTurnReply discarded its own rebuild; now that the
+    // repaired draft ships, "ngiyabonga" came back as "one thing today: *Stand on a scale this
+    // morning*" instead of "Sho." Answering a thank-you with an order is not coaching, it is not
+    // listening. conversationalOnly is the existing flag for exactly this.
+    turnEvidence({ conversationalOnly: true });
     await logChat(user.id, message, ack, "REACTION_ACK");
     return ack;
   }
@@ -607,6 +614,17 @@ SA voice. Direct. Coach forward, not backward.`;
     if (!hasObviousFoodSignal && !hasObviousStepSignal && !hasObviousWeightSignal && !hasObviousWorkout) {
       // The buttons DO answer this one — it ends in a question, which is the rule (2026-08-06).
       const clarifyReply = `Sorry${user.name ? " " + user.name.split(" ")[0] : ""}, I didn't quite catch that 🙂 Say it another way, or what do you need?[BUTTONS:Today's workout|Log food|My progress]`;
+      // ASKING WHAT THEY MEANT IS NOT A COACHING TURN (C10, 2026-09-15). The four other clarify
+      // exits in this file set conversationalOnly; this one did not, and it did not matter while
+      // reconcileTurnReply discarded its own rebuild. Once the repaired draft actually ships, the
+      // rebuild sees a decision turn and replaces "Sorry, I didn't quite catch that 🙂 …" and its
+      // three buttons with "one thing today: Tell me what you ate today" — an instruction issued
+      // over the top of a question we just admitted we could not understand.
+      //
+      // conversationalOnly is the existing flag for "this turn answers, it does not instruct",
+      // and chat-log's own comment already states the rule: a clarification never receives an
+      // action line. This exit is simply brought into line with its four siblings.
+      turnEvidence({ conversationalOnly: true });
       await logChat(user.id, message, clarifyReply, "UNCLEAR");
       return clarifyReply;
     }
@@ -765,11 +783,29 @@ ${finalInstruction}`;
         const context = stripModelDirectives(questionContext, {
           modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
         } as any).kept || situationFrame;
+        // THIS TURN HAS ALREADY BEEN COMPOSED — SAY SO (C10, 2026-09-15).
+        //
+        // reconcileTurnReply has a decision-turn branch that recomposes the whole reply from
+        // `evidence.situationFrame` plus the canonical line. That exists for the exits which never
+        // compose one — the specialists, the short and frustration replies. This branch DOES
+        // compose one, so letting the other owner build it again is two mouths saying the same
+        // sentence, and they can only diverge. They did: the recomposition is built from the
+        // pre-delivery context, so a numbers:low client's "600 kcal" — stripped from the composed
+        // reply at the end of this function — came back into the rebuilt one.
+        //
+        // It also loses the answer. The frame recorded above is the GENERIC one; this branch
+        // answers with the client's own question context, so a rebuild from evidence would reply
+        // to "what should I have for dinner?" with a frame that never mentions dinner: #92's
+        // defect restored by the fix for a different one.
+        //
+        // One flag, read by the one owner that needs it, rather than a second copy of the context.
+        turnEvidence({ decisionComposed: true });
         gptReply = composeDecisionTurn(
           context,
           decision.reply || renderActionLine(decision.todo),
         );
       } else {
+        turnEvidence({ decisionComposed: true });
         gptReply = composeDecisionTurn(
           situationFrame,
           decision.reply || renderActionLine(decision.todo),

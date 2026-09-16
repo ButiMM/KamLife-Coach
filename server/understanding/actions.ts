@@ -13,10 +13,15 @@
  * range; every enum is whitelisted; a malformed LOG_MEAL becomes JUST_REPLY rather than a
  * fabricated log. Nothing the model can emit can crash, corrupt, or over-write state.
  *
- * Pure and dependency-free so it is fully unit-testable and safe to import anywhere.
+ * Pure and side-effect-free so it is fully unit-testable and safe to import anywhere. Its only
+ * dependencies are the other pure floors it must not re-implement: the clause splitter and the
+ * asking/intent composition (C9, 2026-09-15 — see explicitMealSlot). Neither touches the database,
+ * the clock or the network, and neither imports this file, so the graph stays acyclic.
  * NOT yet wired to the live pipeline — wiring + replay proof is the next increment, and
  * it stays behind a flag until it beats the current system on replay for five days.
  */
+import { clausesOf } from "./messy-intake";
+import { reportedInSomeClause } from "../utils";
 
 // The meal slots the logger understands (mirrors utils.slotFromSastHour's output).
 const MEAL_SLOTS = new Set(["breakfast", "lunch", "dinner", "snack", "night meal"]);
@@ -26,7 +31,43 @@ const MEAL_SLOTS = new Set(["breakfast", "lunch", "dinner", "snack", "night meal
 // relabelled breakfast — the executor's slot-vs-clock check only ever saw action.meal,
 // never the client's words, so an explicit claim had no way to survive an odd hour.)
 // Single owner for both the executor's precedence check and food-context's text label.
+//
+// ── A SLOT NAMED IN A QUESTION IS NOT A SLOT NAMED ABOUT THE FOOD (C9, 2026-09-15) ────────────
+//
+// "I had a pear. What should I have for dinner?" stored the pear with meal_label = 'dinner'. The
+// client named no meal for the pear at all: the word "dinner" belonged to a question about a meal
+// they had not eaten yet, and the matcher below read the whole bubble, so it took it anyway.
+// Measured through the live front door, and independent of the date defect C9 also fixed — with
+// "tonight" removed from the message the row still came back labelled 'dinner'.
+//
+// THIS IS #182 ONE AXIS OVER, and the rule is the one already written down there: a word may only
+// label the eating if it belongs to the eating. #182 enforced that for the morning phrase with a
+// bounded window; the same question across a sentence boundary is what clausesOf and the asking /
+// intent floors already answer, so this composes those rather than adding a third answer.
+//
+// WHAT IT DOES, AND ONLY THIS: if any clause REPORTS eating, the slot may be read from those
+// clauses and nowhere else. If none does, nothing changes — the whole message is matched exactly
+// as before. That fallback is deliberate and load-bearing: a photo caption ("Dinner 🍗") names no
+// verb, and "I had chicken for dinner, is that ok?" is one clause that the asking floor declines,
+// so both keep the slot the client plainly gave. The change can therefore only ever WITHDRAW a
+// slot claim from words that report no eating; it cannot invent one anywhere.
+//
+// ALL the reporting clauses, rejoined and matched in ONE pass — not clause by clause. That keeps
+// this function's internal precedence exactly as it was: an explicitly named meal still outranks a
+// bare mention wherever in the message each appears, which a per-clause loop would silently
+// reorder into "whichever clause came first". The join uses a newline; clausesOf keeps each
+// clause's own terminator, and MORNING_MEAL_RE's GAP already excludes . ! ? and ; so the boundary
+// is guarded either way — the newline is belt-and-braces, not the thing doing the work.
 export function explicitMealSlot(msg: string): "breakfast" | "lunch" | "dinner" | "snack" | null {
+  const whole = String(msg || "");
+  // reportedInSomeClause applies the asking and intent floors; the predicate stays domain-only,
+  // because a caller that re-checks those itself is the duplication that made the floor
+  // unfalsifiable once (utils.ts). On a single clause it answers "does THIS clause report eating".
+  const reporting = clausesOf(whole).filter(c => reportedInSomeClause(c, cl => EATING_REPORT_RE.test(cl)));
+  return slotNamedIn(reporting.length > 0 ? reporting.join("\n") : whole);
+}
+
+function slotNamedIn(msg: string): "breakfast" | "lunch" | "dinner" | "snack" | null {
   const lo = (msg || "").toLowerCase();
   if (/\b(for breakfast|breakfast was|had breakfast|breakfast:|ate breakfast|morning meal)\b/i.test(lo)) return "breakfast";
   if (/\b(for lunch|lunch was|had lunch|lunch:|ate lunch|midday)\b/i.test(lo)) return "lunch";
@@ -94,6 +135,18 @@ const GAP = String.raw`(?:(?!\b(?:and|then|but|so|before|after|plus)\b)[^.!?;\n]
 const MORNING_MEAL_RE = new RegExp(
   `\\b${MORNING}\\b${GAP}{0,25}?\\b(?:i\\s+)?(?:just\\s+)?${ATE}\\b`
   + `|\\b${ATE}\\b${GAP}{0,40}?\\b${MORNING}\\b`, "i");
+
+// DOES THIS CLAUSE REPORT EATING? (C9) — the domain half of explicitMealSlot's clause filter, and
+// nothing more: asking and intent are the floors' job, not this predicate's. Built from the same
+// ATE vocabulary #182 already established, so the two answers cannot drift apart.
+//
+// IT DELIBERATELY EXCLUDES BARE "have", and the reason is a habit, not a question. The asking
+// floor already declines "what should I have for dinner?" whatever this matches, so that sentence
+// is not what this line protects. "I have rice for dinner every day. I had a pear." is: a
+// statement of what the client usually does, in the present tense, asking nothing and planning
+// nothing. Admit "have" and that clause becomes a report, and the pear is labelled dinner on the
+// strength of a habit. "I have eaten" needs no help here — `eaten` already covers it.
+const EATING_REPORT_RE = new RegExp(`\\b${ATE}\\b`, "i");
 
 export type CoachAction =
   // Pure conversation — the default and the safe fallback. Coach K just talks.

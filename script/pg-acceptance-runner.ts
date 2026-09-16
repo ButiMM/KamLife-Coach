@@ -265,6 +265,33 @@ export const ACCEPTANCES: Acceptance[] = [
     // decision turn, and a turn whose deterministic owner stands down.
     command: ["bash", "script/red-on-revert-92-final-response-owner.sh"] },
 
+  { id: "meal-date-slot", title: "The eating clause owns the meal's date and slot, not the dinner question",
+    // C9 (2026-09-15). "I had a pear. What should I have for dinner tonight?" stored the pear on
+    // YESTERDAY labelled "dinner" — both words were taken from the question — and the reply then
+    // asked the client to log food it had just written. Needs a real database and the real front
+    // door: the claims are the stored row's SAST day and label, and the post-transport body.
+    command: ["npx", "tsx", "script/pg-meal-date-slot-acceptance.ts"] },
+
+  { id: "meal-date-slot-reverts", title: "Every C9 date and slot seam turns the acceptance red",
+    // The date word, the clause scoping, the eating vocabulary and the floors it composes —
+    // reverted independently — plus the opposite-defect control: a fallback removed so that a
+    // caption's plainly named meal goes missing instead of being wrongly invented.
+    command: ["bash", "script/red-on-revert-c9-meal-date-slot.sh"] },
+
+  { id: "turn-reply-integrity", title: "The reply reconcileTurnReply repaired is the reply that ships",
+    // C10 (2026-09-15). reconcileTurnReply computed its write-integrity repair and directive strip
+    // into `draft`, then returned `reply` — the original, unverified model string — from every
+    // ordinary exit, so a client was told "Noted 👌" about a record that does not exist. Needs a
+    // real database and the real front door: the claims are the function's RETURN VALUE, the
+    // post-transport body, and the stored rows that make the confirmation false.
+    command: ["npx", "tsx", "script/pg-turn-reply-integrity-acceptance.ts"] },
+
+  { id: "turn-reply-integrity-reverts", title: "Every C10 reply-integrity seam turns the acceptance red",
+    // The ordinary exit, the held repair, the second mouth and the flag it reads — reverted
+    // independently — plus the other owner on the same journey: an under-eating warning that
+    // swallowed the client's question entirely.
+    command: ["bash", "script/red-on-revert-c10-turn-reply-integrity.sh"] },
+
   { id: "stt-admission", title: "A garbled transcript writes nothing, a real one writes everything",
     // CUT 4 (2026-09-12). The garble floor read `if (voiceQuality && …)` and voiceQuality is set
     // only by Whisper attempt 1 — so Scribe (which runs FIRST in production), the catch retry and
