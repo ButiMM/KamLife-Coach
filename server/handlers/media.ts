@@ -52,7 +52,7 @@ import { checkVoiceLength, bumpVoiceFailure, clearVoiceFailure } from "../media-
 export { bumpVoiceFailure, clearVoiceFailure } from "../media-limits";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { commitFoodLog } from "./food-context";
-import { itemsFromVisionText } from "../serving-units";
+import { reconcileVisionMeal, itemsFromVisionText } from "../serving-units";
 import { tryLogDistanceScreenshot } from "./distance-log";
 import { encodePendingFood } from "../food-referent";
 import { recordServiceCost, selectVisionModel, estimateVisionCostUSD } from "../cost-tracking";
@@ -441,8 +441,8 @@ export async function handleMediaMessage(ctx: {
                   const prot = tl ? parseInt(tl[2], 10) : 0;
                   if (kcal <= 0 && prot <= 0) return;
                   const collageCommit = await commitFoodLog({
-                    userId: user.id, phone, source: "photo", kcalInt: kcal, proteinInt: prot,
-                    carbsInt: 0, fatInt: 0, items: itemsFromVisionText(txt), loggedAt: new Date(),
+                    userId: user.id, phone, source: "photo", ...reconcileVisionMeal(txt, kcal, prot),
+                    carbsInt: 0, fatInt: 0, loggedAt: new Date(),
                     rawMessage: "[Collage food]", mealLabel: "Collage meal", sourceMessageId: mediaSourceId,
                   });
                   if (!collageCommit.ok || collageCommit.wasDup) return;
@@ -501,8 +501,8 @@ export async function handleMediaMessage(ctx: {
                     console.log(`[ALBUM_FOOD] extracted kcal=${kcal} prot=${prot}`);
                     if (kcal <= 0 && prot <= 0) continue; // non-food image — skip
                     const albumCommit = await commitFoodLog({
-                      userId: user.id, phone, source: "photo", kcalInt: kcal, proteinInt: prot,
-                      carbsInt: 0, fatInt: 0, items: itemsFromVisionText(text), loggedAt: new Date(),
+                      userId: user.id, phone, source: "photo", ...reconcileVisionMeal(text, kcal, prot),
+                      carbsInt: 0, fatInt: 0, loggedAt: new Date(),
                       rawMessage: `[Album photo ${albumIndex + 1}]`, mealLabel: "Album meal",
                       sourceMessageId: mediaSourceId, allowIntentionalRepeat: true,
                     });
@@ -1068,8 +1068,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
               const extraLabel = explicitMealSlot(message || "");   // null unless the caption NAMES it
               const extraCommit = await commitFoodLog({
                 userId: user.id, phone, rawMessage: `[Album photo ${extraIndex + 2}]`, source: "photo",
-                kcalInt: extraKcal, proteinInt: extraProt, carbsInt: 0, fatInt: 0,
-                items: itemsFromVisionText(extraText), mealLabel: extraLabel, loggedAt: photoLoggedAt,
+                ...reconcileVisionMeal(extraText, extraKcal, extraProt), carbsInt: 0, fatInt: 0,
+                mealLabel: extraLabel, loggedAt: photoLoggedAt,
                 sourceMessageId: mediaSourceId, allowIntentionalRepeat: true,
               });
               if (!extraCommit.ok || extraCommit.wasDup) continue;
@@ -1131,10 +1131,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         // one, else null — a 19:49 batch-send says nothing about when the plate was eaten (Cut 2).
         const photoLabel = explicitMealSlot(message || "");
         // Structured items from the vision reply — names in "my meals", scalable corrections.
-        photoCommit = await commitFoodLog({
+        photoCommit = await commitFoodLog({   // items own the total; vision TOTAL is a cross-check (C11)
           userId: user.id, phone, rawMessage: extraImageUrls.length > 0 ? `[Album photo 1] ${photoDesc}` : photoDesc, source: "photo",
-          kcalInt: primaryPhotoKcal, proteinInt: primaryPhotoProt, carbsInt: 0, fatInt: 0,
-          items: itemsFromVisionText(visionDisplay), mealLabel: photoLabel, loggedAt: photoLoggedAt,
+          ...reconcileVisionMeal(visionDisplay, primaryPhotoKcal, primaryPhotoProt), carbsInt: 0, fatInt: 0,
+          mealLabel: photoLabel, loggedAt: photoLoggedAt,
           sourceMessageId: mediaSourceId, allowIntentionalRepeat: extraImageUrls.length > 0,
         });
       }

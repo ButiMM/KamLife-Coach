@@ -283,12 +283,43 @@ REAL("\n7. THE PHOTO TOTAL IS EVIDENCE, NOT A SECOND LEDGER (source-graded, and 
 // vision call needs the network. What survives without it is the write-site claim: the photo
 // writer persists ITEMS, and the meal total it stores is their sum rather than a model figure
 // standing beside them. Graded on source, and named so nobody reads it as an end-to-end proof.
+// The RECONCILER is graded as a pure function — that part needs no network — and the WIRING is
+// graded on source, because the vision call itself cannot run offline. Both halves are named so
+// neither reads as an end-to-end photo proof, which this is not.
 {
+  const { reconcileVisionMeal } = await import("../server/serving-units");
+  const VISION = [
+    "Chicken breast (180g): ~297 kcal, 56g protein",
+    "Rice (200g): ~220 kcal, 5g protein",
+    "TOTAL: 800 kcal | 70g protein",           // the model's own arithmetic, wrong on purpose
+  ].join("\n");
+  const rec = reconcileVisionMeal(VISION, 800, 70);
+  const sum = rec.items.reduce((s, i) => s + i.kcal, 0);
+  chk(rec.kcalInt === sum, "the reconciled meal total IS the sum of its items", `kcal=${rec.kcalInt} sum=${sum}`);
+  chk(rec.kcalInt === 517, "the model's disagreeing TOTAL does not win", `kcal=${rec.kcalInt}`);
+  chk(rec.items.length === 2, "and every priced item survives", `items=${rec.items.length}`);
+
+  // The harder half: the model gives a total and NO parseable items. Storing that total with an
+  // empty items array is a calorie figure with no evidence behind it — the shape the ledger exists
+  // to prevent — so the total survives as one item standing for the plate.
+  const bare = reconcileVisionMeal("TOTAL: 640 kcal | 41g protein", 640, 41);
+  chk(bare.items.length === 1 && bare.items[0].kcal === 640 && bare.kcalInt === 640,
+    "an unparseable plate still stores its number AS an item, so sum still equals total",
+    JSON.stringify(bare));
+  const nothing = reconcileVisionMeal("NOT_FOOD", 0, 0);
+  chk(nothing.items.length === 0 && nothing.kcalInt === 0, "and nothing is written for a non-food photo");
+
   const { readFileSync } = await import("node:fs");
   const media = readFileSync("server/handlers/media.ts", "utf-8");
   const live = media.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-  chk(/commitFoodLog\(/.test(live), "the photo path writes through the one food writer");
-  chk(/items:/.test(live), "and persists items, not a bare total");
+  const commits = (live.match(/commitFoodLog\(\{/g) || []).length;
+  const reconciled = (live.match(/reconcileVisionMeal\(/g) || []).length;
+  chk(commits > 0 && reconciled >= 4,
+    "WIRING (source-graded): every photo write site reconciles before it commits",
+    `commitFoodLog sites=${commits} reconcileVisionMeal calls=${reconciled}`);
+  chk(!/kcalInt:\s*(?:kcal|prot|extraKcal|primaryPhotoKcal)\b/.test(live),
+    "and no photo write still takes its total straight from the vision figure",
+    `still raw: ${JSON.stringify((live.match(/kcalInt:\s*\w+/g) || []).slice(0, 6))}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -321,20 +352,47 @@ REAL("\n8. A CORRECTION REPLACES — IT DOES NOT ADD");
   chk(qty.total === qtyTotal, "users.today_calories agrees with the rows",
     `user=${qty.total} rows=${qtyTotal}`);
 
-  // 8b — THE UNRESOLVABLE REMOVAL. "not one" names nothing on the plate we hold, so there is no
-  // honest replacement to make. The day must NOT grow, and the client must be told — the same
-  // answer §6 already requires for food we cannot price: ask, never guess.
+  // 8b — THE NAMED DEFECT'S OWN SENTENCE. This is the fixture that took the day to 877. It now
+  // routes to the quantity owner (§8d), so what it must never do again is GROW the day.
   const add = await journey("correct-append", [[13, "I had chicken and rice"], [14, "Actually it was two chicken breasts not one"]]);
   ledgerHolds("correct-append", add.rows);
   const addTotal = add.rows.reduce((s, r) => s + r.kcal_int, 0);
   chk(addTotal <= 580,
-    "a correction never ADDS to the day — the append is gone",
+    "a correction never ADDS to the day — the 877 append is gone",
     `total=${addTotal} items=${JSON.stringify(add.rows.map(names))}`);
-  chk(/couldn'?t find|tell me what it should be|got \*/i.test(add.bodies.join("\n")),
-    "and the client is told what we hold and asked what it should be",
-    `body=${JSON.stringify(add.bodies.join(" | ").slice(0, 260))}`);
   chk(add.total === addTotal, "users.today_calories agrees with the rows",
     `user=${add.total} rows=${addTotal}`);
+
+  // 8b' — A REMOVAL WE GENUINELY CANNOT PLACE. The client corrects away a food that is not on the
+  // plate we hold. There is no honest replacement to make, so the day must not move AND the client
+  // must be told — the same answer §6 requires for food we cannot price: ask, never guess. Without
+  // the `unresolved` signal this wrote the addition alone, which is the append defect's mechanism
+  // surviving in a phrasing the quantity owner does not claim.
+  const unres = await journey("correct-unresolvable", [[13, "I had chicken and rice"], [14, "it wasn't beef, it was fish"]]);
+  ledgerHolds("correct-unresolvable", unres.rows);
+  const unresTotal = unres.rows.reduce((s, r) => s + r.kcal_int, 0);
+  chk(unresTotal === 580, "the day is left exactly as it was — no half-applied correction",
+    `total=${unresTotal} items=${JSON.stringify(unres.rows.map(names))}`);
+  chk(/couldn'?t find|what it should be/i.test(unres.bodies.join("\n")),
+    "and the client is told what we hold and asked what it should be",
+    `body=${JSON.stringify(unres.bodies.join(" | ").slice(0, 300))}`);
+
+  // 8d — THE SAME CLAIM, SPELLED FOUR WAYS. parseQuantityCorrection required digits and
+  // planCorrection caught the rest, so one question had two owners split by nothing but spelling
+  // — and the word path was the broken one. Every form must reach the same day.
+  for (const [label, correction] of [
+    ["digits, trailing", "Actually it was 2 chicken breasts not 1"],
+    ["digits, comma", "2 chicken breasts, not 1"],
+    ["words, identity grammar", "it wasn't one chicken breast, it was two chicken breasts"],
+    ["digits, identity grammar", "it wasn't 1 chicken breast, it was 2 chicken breasts"],
+  ] as const) {
+    const j = await journey(`qform-${label.replace(/\W/g, "")}`, [[13, "I had one chicken breast"], [14, correction]]);
+    ledgerHolds(`qform-${label}`, j.rows);
+    const t = j.rows.reduce((s, r) => s + r.kcal_int, 0);
+    chk(t > 500 && t < 700, `${label}: reaches the same two-breast day`,
+      `total=${t} items=${JSON.stringify(j.rows.map(names))}`);
+    chk(j.total === t, `${label}: users.today_calories agrees`, `user=${j.total} rows=${t}`);
+  }
 
   // 8c — CONTROL: the identity axis still replaces. This one worked before the repair and must
   // keep working, or the fix has traded one broken axis for another.
@@ -369,6 +427,27 @@ REAL("\n9. A ZERO-CALORIE LOG COUNTS AS LOGGED — EVERYWHERE, INCLUDING THE CAR
   chk(!/nothing logged yet/i.test(body),
     "the progress card does not call a logged day empty",
     `body=${JSON.stringify(body.slice(0, 260))}`);
+  // THE CARD MUST NOT CONTRADICT ITSELF EITHER. Before the repair it printed "Today: nothing
+  // logged yet" directly above "Food logged: 1/7 days" — two adjacent lines disagreeing about the
+  // same day, which is the defect its own comment records being fixed once before.
+  chk(!(/nothing logged yet/i.test(body) && /Food logged:\s*\*[1-9]/i.test(body)),
+    "…and does not print both \"nothing logged\" and a logged-day count",
+    `body=${JSON.stringify(body.slice(0, 260))}`);
+
+  // AND THE COACH'S OWN DECISION AGREES. The card is one surface; the ladder is the one that
+  // chooses what to say next, and it read the same calorie total. A zero-calorie day that still
+  // asks the client to report the food they already sent is the same defect one surface over.
+  await pool.query("DELETE FROM shadow_replies WHERE phone = $1", [phone]);
+  _resetOutboundDedupe(); _resetInteractionCorrelation();
+  const un2 = freezeSast(13);
+  try { await processTextAsync(phone, "What should I have for dinner tonight?", null, null, [], handleMessage as any, "c11-zero-coach"); await settle(); }
+  finally { un2(); }
+  const coachBody = (await wire()).join("\n");
+  chk(!/\btell me what you ate today\b/i.test(coachBody),
+    "the Coach does not ask for food the zero-calorie day already holds",
+    `body=${JSON.stringify(coachBody.slice(0, 300))}`);
+  chk((await rows()).length === 1,
+    "and the question wrote nothing of its own", `rows=${(await rows()).length}`);
 }
 
 REAL(`\n${failed === 0 ? "pg-food-calorie-truth-acceptance: GREEN" : `pg-food-calorie-truth-acceptance: ${failed} FAILED`}\n`);

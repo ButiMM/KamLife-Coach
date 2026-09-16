@@ -505,11 +505,37 @@ export function splitWhatsAppBody(text: string, maxLen = 1500): string[] {
 // ============================================================
 const NON_FOOD_UNIT_RE = /^(kgs?|kilograms?|grams?|ml|mls|litres?|liters?|kms?|kilometers?|kilometres?|steps?|reps?|sets?|kcal|cals?|calories|min|mins|minutes?|hrs?|hours?|days?|weeks?|percent|%)\b/i;
 
+// Quantity/portion scaling — shared by the scanner, smart-log and multi-day paths.
+export function normaliseWordNumbers(text: string): string {
+  const map: Record<string, string> = {
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    "half": "0.5", "a": "1", "an": "1",
+  };
+  // Phrase pass FIRST: "half a vienna" must become "0.5 vienna", not "0.5 1 vienna" —
+  // the a→1 word map was eating the half and logging a whole item (2026-07-23).
+  const phrased = text.replace(/\bhalf\s+(?:a|an|the)\s+/gi, "0.5 ");
+  return phrased.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\b/gi, w => map[w.toLowerCase()] ?? w);
+}
+
 export function parseQuantityCorrection(m: string): { count: number; food: string; oldCount: number } | null {
   // "half a X" is a real count (2026-07-23 live: "Not 2 Viennas but only half a Vienna").
-  const norm = m.replace(/\bhalf\s+(?:a|an|the)\s+/gi, "0.5 ");
+  //
+  // WORD NUMBERS ARE NUMBERS (C11, 2026-09-16). This normalised only the "half a" phrase, so the
+  // patterns below — which require \d on both sides — owned "2 breasts not 1" and never saw "two
+  // breasts not one". One question, two owners, split by nothing but spelling: the word form fell
+  // through to the identity path, which took "one" as a food to remove, matched it against no
+  // plate, and let the addition land alone. That is how "Actually it was two chicken breasts not
+  // one" turned a 580 kcal day into 877. normaliseWordNumbers is the existing owner of word→digit
+  // and now runs first, so both spellings reach the same answer.
+  const norm = normaliseWordNumbers(m);
   const match = norm.match(/\b(\d+(?:\.\d+)?)\s+([a-z][a-z ]{2,24}?)\s*[,.!]?\s+not\s+(\d+(?:\.\d+)?)\b/i)
-    || norm.match(/\bnot\s+(\d+(?:\.\d+)?)\s*[a-z ]{0,12}?[,.]?\s*(?:it was|i had|just|but(?:\s+only)?|actually|only|make it|it'?s)\s+(\d+(?:\.\d+)?)\s+([a-z][a-z ]{2,24}?)\b/i);
+    // "WASN'T N X, IT WAS M X" IS A QUANTITY CLAIM IN IDENTITY GRAMMAR (C11). This required a bare
+    // "not", so the commonest phrasing of all went to the identity path, which produced a removal
+    // with no addition — emptying the plate's items while leaving its calorie total standing, and
+    // breaking the one rule the ledger has: meal calories equal the sum of their items. The window
+    // widened from 12 to 24 because the food name sits inside it ("wasn't 1 chicken breast, …").
+    || norm.match(/\b(?:wasn'?t|was\s+not|not)\s+(\d+(?:\.\d+)?)\s*[a-z ]{0,24}?[,.]?\s*(?:it was|i had|just|but(?:\s+only)?|actually|only|make it|it'?s)\s+(\d+(?:\.\d+)?)\s+([a-z][a-z ]{2,24}?)\b/i);
   if (!match) return null;
   // First pattern: [new, food, old]; second: [old, new, food]
   const firstForm = /^\d/.test(match[1]) && !/^\d/.test(match[2]);

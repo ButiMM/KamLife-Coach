@@ -82,6 +82,53 @@ export function itemsFromVisionText(text: string): Array<{ name: string; grams: 
   return out.slice(0, 12);
 }
 
+/**
+ * THE PHOTO TOTAL IS EVIDENCE, NOT A SECOND LEDGER (C11, 2026-09-16).
+ *
+ * Every photo write took its meal total from the vision model's "TOTAL: N kcal" line and its items
+ * from the per-item lines — two independent numbers from one reply, with nothing reconciling them.
+ * The governing contract for food truth is that meal calories EQUAL the sum of their persisted
+ * item calories, so a photo row could contradict its own items and no reader could tell which was
+ * true. Worse, when no item line parsed, the row stored a total with an EMPTY items array: a
+ * calorie figure with no evidence behind it at all, which is precisely the shape the ledger exists
+ * to prevent.
+ *
+ * The rule here is the contract, applied once:
+ *
+ *   · items parsed  → the meal total IS their sum. The model's TOTAL is a cross-check, and a
+ *                     disagreement is logged rather than silently preferred.
+ *   · none parsed   → the model's total survives as ONE item standing for the whole plate, so the
+ *                     sum still equals the total and the row still says where its number came from.
+ *   · neither       → nothing to write.
+ *
+ * This does not price food and does not second-guess the model's arithmetic; it decides which of
+ * two numbers the model already produced is the record. That is a reconciliation, not an engine.
+ */
+export function reconcileVisionMeal(
+  text: string,
+  statedKcal: number,
+  statedProtein: number,
+): { items: Array<{ name: string; grams: number; kcal: number; protein: number; category: string }>; kcalInt: number; proteinInt: number } {
+  const items = itemsFromVisionText(text);
+  const priced = items.filter(i => (i.kcal || 0) > 0);
+  if (priced.length > 0) {
+    const kcal = priced.reduce((s, i) => s + (i.kcal || 0), 0);
+    const protein = priced.reduce((s, i) => s + (i.protein || 0), 0);
+    if (statedKcal > 0 && Math.abs(statedKcal - kcal) > Math.max(25, kcal * 0.1)) {
+      console.warn(`[PHOTO_TOTAL_DISAGREES] model said ${statedKcal} kcal, its own items sum to ${kcal} — items win`);
+    }
+    return { items: priced, kcalInt: kcal, proteinInt: protein };
+  }
+  if (statedKcal > 0 || statedProtein > 0) {
+    return {
+      items: [{ name: "Photographed meal", grams: 0, kcal: statedKcal, protein: statedProtein, category: "photo" }],
+      kcalInt: statedKcal,
+      proteinInt: statedProtein,
+    };
+  }
+  return { items: [], kcalInt: 0, proteinInt: 0 };
+}
+
 // Per-serving estimate for the corrected food, or null if we have no sensible portion for it.
 // Probes both the raw word and its singular so plurals ("slices") match a singular pattern.
 export function perServingEstimate(food: string): { kcal: number; protein: number } | null {

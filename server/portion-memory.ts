@@ -17,6 +17,8 @@ import { mealLogs } from "../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { type SAFood } from "./foods";
 import { escapeRegex, portionDefaultCount } from "./handlers/food-scanner";
+// One owner for word->digit, in the shared pure module (C11) — parseQuantityCorrection needs it too.
+import { normaliseWordNumbers } from "./utils";
 
 export type PortionStat = { kcal: number; protein: number; n: number };
 type ItemRow = Array<{ name?: string; foodName?: string; kcal?: number; protein?: number }> | null;
@@ -226,18 +228,6 @@ export function scalePortionDescription(desc: string, quantity: number): string 
  * that is where it was first called from — the handler now imports it like any other caller.
  */
 
-// Quantity/portion scaling — shared by the scanner, smart-log and multi-day paths.
-function normaliseWordNumbers(text: string): string {
-  const map: Record<string, string> = {
-    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
-    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
-    "half": "0.5", "a": "1", "an": "1",
-  };
-  // Phrase pass FIRST: "half a vienna" must become "0.5 vienna", not "0.5 1 vienna" —
-  // the a→1 word map was eating the half and logging a whole item (2026-07-23).
-  const phrased = text.replace(/\bhalf\s+(?:a|an|the)\s+/gi, "0.5 ");
-  return phrased.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\b/gi, w => map[w.toLowerCase()] ?? w);
-}
 
 /**
  * HOW THE FOOD WAS PREPARED, WHEN THE CLIENT SAYS SO (C11, 2026-09-16).
