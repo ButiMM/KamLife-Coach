@@ -19,6 +19,7 @@ FILES=(
   server/meal-select.ts
   server/handlers/misc-commands.ts
   server/serving-units.ts
+  server/portion-memory.ts
 )
 
 for f in "${FILES[@]}"; do cp "$f" "$WORK_ROOT/$(printf '%s' "$f" | tr '/' '_')"; done
@@ -135,9 +136,45 @@ run_case "the photo total defeats item sums and free items vanish" server/servin
     const kcal = statedKcal;
     const protein = statedProtein;' || failed=$((failed + 1))
 
+# ── THE FIVE REVIEW FINDINGS ────────────────────────────────────────────────────────────────
+# Cases 9–13 guard the repairs made after review of 66a4443. Two of those defects were this cut's
+# own, which is precisely why they need seams: a repair that introduces a defect is not caught by
+# the tests written for the defect it was repairing.
+
+# 9. A WEIGHT IS A SERVING COUNT AGAIN. The mass/volume conversion stands down, so "200 grams of
+#    chicken breast" goes back to dividing 200 by the portion's serving count — the branch that
+#    logged 22,000 kcal for 100g of rice.
+run_case "a stated weight is counted as servings" server/portion-memory.ts \
+  '        const massGrams = statedUnit ? MASS_UNIT_GRAMS[statedUnit] : undefined;' \
+  '        const massGrams: number | undefined = undefined;' || failed=$((failed + 1))
+
+# 10. UNREAD FOOD IS DELETED AGAIN. The shortfall reconciliation stands down, so a photo reply with
+#     one line we can parse and one we cannot persists only the line we read.
+run_case "a photo line we could not parse is silently dropped" server/serving-units.ts \
+  '    if (unread > 0 && statedKcal > 0 && statedKcal - kcal > Math.max(25, kcal * 0.1)) {' \
+  '    if (false) {' || failed=$((failed + 1))
+
+# 11. A PHOTO ITEM STOPS SAYING WHERE IT CAME FROM. summariseProvenance then reads it as unknown,
+#     and the confidence of every photo meal degrades.
+run_case "a parsed photo item loses its origin" server/serving-units.ts \
+  'category: "photo", origin: "photo" });' \
+  'category: "photo" });' || failed=$((failed + 1))
+
+# 12. A CORRECTED COUNT MOVES THE CALORIES AND LEAVES THE EVIDENCE BEHIND. The row again claims one
+#     breast's quantity, grams and portion description over two breasts' calories.
+run_case "a corrected count rescales calories but not provenance" server/handlers/food-log-mgmt.ts \
+  '          const newItemsQC = itemsQC.map(i => i === itemQC ? rescaleLedgerItem(i, ratio) : i);' \
+  '          const newItemsQC = itemsQC.map(i => i === itemQC ? { ...i, kcal: newItemKcal, protein: newItemProt } : i);' || failed=$((failed + 1))
+
+# 13. ONE BASIS IS COPIED ACROSS THE WHOLE SEGMENT. "cooked rice and raw chicken thigh" records both
+#     as cooked, and basisConflict can no longer see the raw chicken it exists to catch.
+run_case "one food's preparation basis is copied onto every food" server/portion-memory.ts \
+  '    const foodBasis = statedBasisFor(segText, allAliases) || soleBasis;' \
+  '    const foodBasis = statedBasis(segText);' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-c11-food-calorie-truth: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-c11-food-calorie-truth: GREEN — 8/8 behavioral reverts caught"
+echo "red-on-revert-c11-food-calorie-truth: GREEN — 13/13 behavioral reverts caught"
