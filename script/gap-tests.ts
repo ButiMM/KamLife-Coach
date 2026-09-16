@@ -4457,10 +4457,16 @@ test("cut8: the reply path honours do_not_mention, above the meaningful-message 
   const chatLog = readFileSync("server/handlers/chat-log.ts", "utf-8");
   const code = chatLog.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
   assert.ok(/stripForbidden\(draft, banned\.doNotMention\)/.test(code), "the mouth is bound");
-  // ORDER MATTERS. `if (!suspiciousStateLanguage && !meaningful) return reply;` returns early for
+  // ORDER MATTERS. `if (!suspiciousStateLanguage && !meaningful) return …` returns early for
   // ordinary turns — a promise honoured only on "meaningful" messages is not honoured.
+  //
+  // ANCHORED ON THE GATE, NOT ON WHAT IT RETURNS (C10, 2026-09-15). This read the whole line
+  // including `return reply;`, so when C10 corrected that exit to return the REPAIRED draft the
+  // anchor vanished and this test failed — reporting an ordering defect that did not exist. The
+  // claim here is about ORDER, so it anchors on the condition, which is the part that expresses
+  // it. It still fails if the early return is deleted or moved above the bind.
   const bind = code.indexOf("stripForbidden(draft");
-  const earlyReturn = code.indexOf("if (!suspiciousStateLanguage && !meaningful) return reply;");
+  const earlyReturn = code.indexOf("if (!suspiciousStateLanguage && !meaningful) return");
   assert.ok(bind > 0 && earlyReturn > 0 && bind < earlyReturn,
     "the check must run before the early return, or it only fires on some turns");
 });

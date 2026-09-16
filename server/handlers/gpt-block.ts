@@ -463,6 +463,13 @@ RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K — apply the SCENARIO GUIDE f
   if (PURE_REACTIONS.has(m)) {
     const acks = ["Sharp.", "Noted.", "Lekker.", "Good.", "Keep it up.", "Yebo. 👊", "Sho."];
     const ack = acks[Math.floor(Math.random() * acks.length)];
+    // SAYING THANK YOU IS NOT A COACHING TURN (C10, 2026-09-15). Like the punct reply just above
+    // and the clarify exit below, this answers and does not instruct — but unlike them it never
+    // said so. That cost nothing while reconcileTurnReply discarded its own rebuild; now that the
+    // repaired draft ships, "ngiyabonga" came back as "one thing today: *Stand on a scale this
+    // morning*" instead of "Sho." Answering a thank-you with an order is not coaching, it is not
+    // listening. conversationalOnly is the existing flag for exactly this.
+    turnEvidence({ conversationalOnly: true });
     await logChat(user.id, message, ack, "REACTION_ACK");
     return ack;
   }

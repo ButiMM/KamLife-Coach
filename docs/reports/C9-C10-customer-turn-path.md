@@ -2,10 +2,11 @@
 
 **Branch** `fix/c9-meal-date-slot`
 **Base** `85d1b73c12219a9c6b694795a2edd17aeb197d8b` (`main`)
-**Head — last commit that changes product code** `992c3de904f801c964cfae39c9d3d6ed41dc952d`
-(the branch tip is one commit later and carries only this report; the PR names it. Every test
-result below was measured on `992c3de`, and the tip changes no file under `server/` or `script/`.)
+**Head — last commit that changes product code** `95da7c502b64b0cda713803f730c50ffed0c01cd`
 **Status** IMPLEMENTED — not merged, not deployed.
+
+Commits: `7137bed` (C9) · `992c3de` (C10) · `95da7c5` (the two suites C10 turned red, repaired at
+their owners). Any commit after `95da7c5` carries only this report.
 
 One branch, one PR, two commits. Nothing merged, nothing force-pushed, no other cut started.
 
@@ -158,10 +159,31 @@ the central section green by construction.
 `names`, `sast`, `reach`, `schema-safety`, `pricing`, `prompt-integrity`) — no budget raised.
 
 `pg-final-response-owner-acceptance` (#92) and `pg-meal-slot-truth-acceptance` (Cut 2) both GREEN.
-**#92's acceptance went red mid-cut and the cause is recorded rather than smoothed over:** C9's
-corrected date made the under-eating branch reachable, which swallowed the question the #92 suite
-exists to protect. It was isolated by bisecting to `7137bed` and confirming `85d1b73` green in a
-worktree, then fixed at the lifecycle owner — not by weakening an assertion.
+
+### Three suites went red during this cut. None was fixed by weakening an assertion.
+
+Each was isolated against `85d1b73` in a worktree first, so "my change" is measured, not assumed.
+
+1. **`final-response-owner` (#92), during C9.** C9's corrected date made lifecycle's under-eating
+   branch reachable, and it swallowed the very question that suite exists to protect. Bisected to
+   `7137bed`, base confirmed green, fixed at the lifecycle owner.
+
+2. **`interaction-truth`, after C10 — a real client-visible regression I caused.**
+   `zzqq flurblewump gribbet` returned *"Sorry Gib, I didn't quite catch that 🙂 …"* with three
+   buttons on `85d1b73`, and *"one thing today: Tell me what you ate today"* on `992c3de`. Once
+   the repaired draft ships, the decision rebuild replaces a clarification — and its buttons —
+   with an instruction issued over a question we had just admitted we could not understand. The
+   clarify exit was the only one of five not setting `conversationalOnly`; brought into line.
+
+3. **`final-response-reverts` case 8 — not a regression, and the difference matters.** It reverted
+   gpt-block's `stripModelDirectives` and stayed **green**, because C10 made the *second* stripper
+   live: `reconcileTurnReply` always stripped into `draft` and then returned `reply`, so the
+   boundary this codebase calls *"the one place every reply crosses"* was inert. It is now
+   load-bearing. The mechanism is guarded twice, so the case's claim is only falsifiable by
+   removing both — re-aimed at both strippers, with the reason recorded in the harness rather than
+   the case quietly deleted.
+
+**Full local PostgreSQL inventory on `95da7c5`: see §5.**
 
 ---
 

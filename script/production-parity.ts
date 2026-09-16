@@ -790,8 +790,18 @@ async function main() {
       "NEGATIVE CONTROL: putting model prose in the situation slot reopens the second decision");
     const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
       .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-    assert.ok(!/composeDecisionTurn\(draft/.test(log) && /composeDecisionTurn\(String\(scope\.evidence\.situationFrame/.test(log),
-      "the chokepoint must pass situationFrame, not the model draft, into composeDecisionTurn");
+    // THE CONTROL KEEPS ITS TEETH, THE FALLBACK IS NAMED (C10, 2026-09-15). `draft` — the model's
+    // prose — still may not occupy the situation slot; that is the leak this control exists for
+    // and the first clause below is unchanged. What is now also permitted is `integrityRepair`,
+    // the sentence the WRITE-INTEGRITY rule itself authored when it refused a false confirmation.
+    // That is product-authored text, not the model's, and it has to be the context of the rebuilt
+    // turn or the "Noted 👌" the rule just removed is composed straight back in.
+    //
+    // Both halves are still required: the situation frame must remain the fallback, so this
+    // cannot be satisfied by quietly dropping it.
+    assert.ok(!/composeDecisionTurn\(\s*draft\b/.test(log)
+      && /composeDecisionTurn\(integrityRepair \|\| String\(scope\.evidence\.situationFrame/.test(log),
+      "the chokepoint must pass the situation frame (or the write-integrity repair), never the model draft");
   });
 
   check("the residue is instrumented for beta, not argued about", () => {
@@ -1246,8 +1256,17 @@ async function main() {
   check("a confirmation requires a write that actually happened", () => {
     const log = readFileSync("server/handlers/chat-log.ts", "utf-8")
       .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-    assert.ok(/scope\.evidence\?\.modelAuthored && scope\.mutations\.length === 0/.test(log),
+    // BOTH TERMS, IN ONE CONDITION — with room for the turn-kind guard between them (C10).
+    // This read the two conjuncts as one adjacent literal, so narrowing the rule to skip
+    // acknowledgement-only turns broke the anchor and reported that the boundary no longer knows
+    // whether the turn wrote. It does: both terms are still required here, and still in the same
+    // condition. The window is tight enough that moving either into a different `if` fails.
+    assert.ok(/scope\.evidence\?\.modelAuthored[^\n]{0,120}?scope\.mutations\.length === 0/.test(log),
       "the boundary must know the turn wrote nothing");
+    // AND THE NARROWING IS ITSELF PINNED. A turn that only acknowledges asserts nothing about the
+    // record — but that exemption must stay tied to conversationalOnly, not widen silently.
+    assert.ok(/!scope\.evidence\.conversationalOnly/.test(log),
+      "the write-integrity exemption must be the conversational-only flag, not a broader test");
     assert.ok(/CLAIMS_A_WRITE/.test(log) && /recordFalseConfirmation\(\)/.test(log),
       "…refuse the confirmation, and count it");
   });

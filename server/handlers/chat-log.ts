@@ -357,7 +357,20 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   // then overwritten three lines later by a composition built from the model's own context. Held
   // here so the rebuild uses the honest sentence as its context instead of the false one.
   let integrityRepair = "";
-  if (scope.evidence?.modelAuthored && scope.mutations.length === 0) {
+  // NOT ON A TURN THAT ONLY ACKNOWLEDGES (C10, 2026-09-15). `modelAuthored` is set by tag() once
+  // per turn, so it stays true for exits that return DETERMINISTIC product text — and one of the
+  // seven gratitude acks is the single word "Noted.", which this rule's vocabulary matches. The
+  // client said "ngiyabonga"; nothing was written because nothing was claimed; and the reply came
+  // back "I've got that — but I haven't written it down yet…". A confession to a thank-you.
+  //
+  // (It also made routing-audit fail about one run in seven, since the ack is chosen at random —
+  // so this was a latent flake as well as a defect.)
+  //
+  // conversationalOnly means "this turn answers, it does not instruct", and a turn that instructs
+  // nothing asserts nothing about the record either. Every exit that sets it returns either
+  // product-authored text or one of askCoachK's own fixed failure sentences, none of which can
+  // claim a write — so the rule loses no coverage it was written for.
+  if (scope.evidence?.modelAuthored && !scope.evidence.conversationalOnly && scope.mutations.length === 0) {
     const CLAIMS_A_WRITE = /\b(?:logged|noted|saved|recorded|updated|tracked|added (?:it|that)|got (?:it|that) down|put (?:it|that) down|marked (?:it|that))\b/i;
     if (CLAIMS_A_WRITE.test(draft)) {
       console.log(`[WRITE_INTEGRITY] blocked a confirmation with no write on the turn: ${draft.slice(0, 90)}`);
@@ -387,6 +400,10 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
       recordDirectiveStripped(decisionTurn);
       console.log(`[ACTION_LINE] removed ${removed.length} model instruction(s) on a ${decisionTurn ? "decision" : "hold"} turn: ${removed[0].slice(0, 70)}`);
       draft = kept;
+      // The repair IS `draft` at this point, so a strip that fires rewrites it too — and the
+      // rebuild below composes from `integrityRepair`, which must therefore carry the stripped
+      // text rather than the original with its own instruction still in it.
+      if (integrityRepair) integrityRepair = kept;
     }
 
     // A TURN THAT COMPOSED ITSELF IS NOT RECOMPOSED (C10). The exception is a write-integrity
@@ -406,13 +423,18 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
       // context and the canonical action still appends, so the client gets both — told the truth
       // about the record, and told what to do about it.
       //
-      // `integrityRepair` is already directive-stripped: the strip above runs on `draft`, which
-      // by then IS the repair, so its "send it the way you'd log it" clause is removed before it
-      // can compete with the canonical action. That is why this reads `draft` and not the literal.
-      draft = composeDecisionTurn(
-        integrityRepair ? draft : String(scope.evidence.situationFrame || ""),
-        rendered,
-      );
+      // `integrityRepair` IS the directive-stripped repair: the strip above runs on `draft`, which
+      // by then is the repair, and writes the stripped text back to both — so its "send it the way
+      // you'd log it" clause is gone before it can compete with the canonical action.
+      //
+      // IT READS `integrityRepair`, NOT `draft`, AND THE DIFFERENCE IS THE WHOLE RULE.
+      // production-parity holds a standing negative control here: model prose may never occupy the
+      // situation slot, because that is the "Eggs tonight" leak which reopens a second decision.
+      // The first cut of this passed `draft` and the control fired — correctly, on the SHAPE, even
+      // though on that path `draft` happened to be product-authored. The code now says what it
+      // means: this slot takes the sentence the write-integrity rule wrote, or the frame, never
+      // the model's.
+      draft = composeDecisionTurn(integrityRepair || String(scope.evidence.situationFrame || ""), rendered);
     } else if (!draft) {
       draft = "I'm here — tell me what's going on and we'll take it from there.";
     }
