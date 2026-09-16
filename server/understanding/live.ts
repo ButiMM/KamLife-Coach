@@ -107,15 +107,36 @@ export async function canonicalDecision(
     // uses to decide the canonical close owns the question, on the same last clause, so the turn
     // and the decision agree about what was asked.
     const asksAboutToday = looksLikeDirectionRequest(clausesOf(message || "").slice(-1)[0] || message || "");
+
+    // ── A LOG IS A ROW, NOT A CALORIE COUNT (C10, 2026-09-15) ────────────────────────────────
+    //
+    // `loggedToday: truth.today.kcal > 0` made the day's TOTAL the test for whether the client had
+    // logged anything, so three ordinary states all read as "logged nothing":
+    //
+    //   · a genuinely zero-calorie entry — black coffee, a Coke Zero, water with lemon;
+    //   · a row whose kcal the scanner could not resolve and stored as 0 or null;
+    //   · a row written THIS turn that the aggregate read has not caught up with.
+    //
+    // In each case the decision ladder chooses askToLog and the client is told "Tell me what you
+    // ate today" immediately after telling us. This branch only looked correct because the pear
+    // in the named journey happens to come to 103 kcal — the CTO named that precisely.
+    //
+    // TWO SOURCES, BOTH ALREADY OWNED HERE, and no new one added. `truth.today.meals` is the row
+    // list the ledger already returns, and `turnAlreadyWrote("food")` is the reader the turn scope
+    // already exposes for "did this turn commit a food write" — the same mutation log the
+    // write-integrity boundary is checked against. A read cannot be stale about a write this turn
+    // made, and a row cannot be absent because its calories are zero.
+    const { turnAlreadyWrote } = await import("../handlers/chat-log");
+    const foodRowToday = (truth.today.meals?.length || 0) > 0 || turnAlreadyWrote("food");
     const act = underPolicy(chooseAction({
       firstName: getDisplayName(user) || undefined,
       goal: (user.goalType as any) || "general",
       dreamGoal: user.dreamGoal, biggestStruggle: user.biggestStruggle,
       lifeContext: user.lifeContext, doNotMention: user.doNotMention,
       weeksOnProgramme: Math.max(0, (user.programmeWeek || 1) - 1),
-      daysSinceAnyLog: truth.today.kcal > 0 ? 0 : (truth.window.daysLogged > 0 ? 1 : 7),
+      daysSinceAnyLog: foodRowToday ? 0 : (truth.window.daysLogged > 0 ? 1 : 7),
       daysSinceWeighIn: truth.weight.daysSinceWeighIn,
-      loggedToday: truth.today.kcal > 0,
+      loggedToday: foodRowToday,
       proteinPct: protTarget > 0 ? truth.today.protein / protTarget : 1,
       caloriePct: calTarget > 0 ? truth.today.kcal / calTarget : 1,
       sessionsThisWeek: weekSessions,
@@ -150,7 +171,14 @@ export async function canonicalDecision(
          // …AND WHAT THE GATE NEEDS TO ASK INSTEAD OF HOLDING (#203). Three facts this call site
          // already computed for the DayState above; without them a sparse client's prescription
          // collapsed to a receipt with no next move at all.
-         loggedToday: truth.today.kcal > 0,
+         // THE SAME TEST, THE SECOND TIME — and it is the one that decided the named case.
+         // `loggedToday` is read twice on this call: once by chooseAction above, and again here
+         // by the investigation gate, which is what actually chose "Tell me what you ate today"
+         // for a client whose day held a zero-calorie row. Fixing only the first left the defect
+         // exactly where it was, measured rather than assumed: with the ladder's copy corrected
+         // the decision still came back `missingFact: "food_today"`. One value, computed once,
+         // used in both places, so they cannot disagree again.
+         loggedToday: foodRowToday,
          daysSinceWeighIn: truth.weight.daysSinceWeighIn,
          doNotMention: user.doNotMention,
          hour: sastHour(),

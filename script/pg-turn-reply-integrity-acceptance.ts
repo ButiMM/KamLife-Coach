@@ -408,6 +408,78 @@ REAL("\n6. THE TWO READINGS AGREE — the function's answer is the client's repl
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n7. A LOG IS A ROW, NOT A CALORIE COUNT");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// `loggedToday: truth.today.kcal > 0` made the day's TOTAL the test for whether the client had
+// logged anything — so a zero-calorie entry, a row whose calories the scanner could not resolve,
+// and a row written this turn that the aggregate has not caught up with all read as "logged
+// nothing", and the ladder chose askToLog. The named journey only passed because a pear happens
+// to come to 103 kcal.
+//
+// THE ROW IS WRITTEN DIRECTLY, AT ZERO. A fixture that logs black coffee proves nothing here —
+// it is 5 kcal, so `kcal > 0` would pass it too. This inserts the state the rule is about and
+// then asks an ordinary question, so the only thing under test is what the ladder concludes.
+{
+  // The detector, validated here rather than asserted on faith — the same discipline section 0
+  // applies to the other two. It must fire on the demand and decline the near-miss the product
+  // legitimately uses when it has stored nothing at all.
+  const asksToLogFood = (b: string): boolean =>
+    /\b(?:tell|send|give|show|log|share)\b[^.!?\n]{0,45}?\b(?:what you ate|what you'?ve eaten|what you had|your (?:meals?|food))\b/i.test(String(b || ""));
+  chk(asksToLogFood("Tell me what you ate today — one line is enough.")
+      && !asksToLogFood("Stand on a scale tomorrow morning, before you eat.")
+      && !asksToLogFood("Got it — you ate something. Tell me the items in one line and I'll log it."),
+    "the re-log detector fires on the demand and declines the two near-misses");
+
+  COACH_ANSWER = MOUTH.dinnerAnswer;
+  await clear();
+  const unfreeze = freezeSast(13);
+  try {
+    const at = new RealDate(RealDate.UTC(SAST_DAY[0], SAST_DAY[1], SAST_DAY[2], 9, 0, 0));
+    await pool.query(
+      `INSERT INTO meal_logs (user_id, raw_message, kcal_int, protein_int, logged_at, meal_label, source)
+       VALUES ($1, $2, 0, 0, $3, NULL, 'text')`, [user.id, "a glass of water", at]);
+    await processTextAsync(phone, "What should I have for dinner tonight?", null, null, [], handleMessage as any, "c10-zero");
+    await settle();
+  } finally { unfreeze(); }
+  const rows = await meals();
+  const body = (await wire()).join("\n");
+  chk(rows.length === 1 && (rows[0].kcal_int || 0) === 0,
+    "STORED FACTS: the day holds exactly one row, and it is worth zero calories",
+    `rows=${JSON.stringify(rows.map(r => r.kcal_int))}`);
+  chk(!asksToLogFood(body),
+    "FINAL BODY: a zero-calorie row still counts as logged — no demand to report the day again",
+    `body=${JSON.stringify(body.slice(0, 300))}`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n8. A QUESTION IS NOT A MEAL — the bare ask reaches the Coach");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// "What should I have for dinner tonight?" was answered by the food logger — "Got it — you ate
+// something. Tell me the items in one line…" — because that gate fired on the WORD "dinner" and
+// never checked its own premise that the client had reported eating. They ate nothing, said so,
+// and asked a question; "Got it" is false and the question is never answered, because that
+// clarify returns. Present on 85d1b73 and inherited by this journey.
+{
+  COACH_ANSWER = MOUTH.dinnerAnswer;
+  const bare = await turnAt(13, "What should I have for dinner tonight?", "c10-bare");
+  chk(bare.rows.length === 0, "STORED FACTS: nothing is written — they reported no food",
+    `rows=${bare.rows.length}`);
+  chk(!/you ate something/i.test(bare.bodies.join("\n")),
+    "FINAL BODY: the client is not told \"Got it — you ate something\" about food they never ate",
+    `body=${JSON.stringify(bare.bodies.join(" | ").slice(0, 260))}`);
+  chk(bare.bodies.join("\n").includes("Quick protein-first options for a late dinner"),
+    "FINAL BODY: the question reaches the Coach and is answered",
+    `body=${JSON.stringify(bare.bodies.join(" | ").slice(0, 260))}`);
+  // THE CONTROL THAT KEEPS THIS HONEST. The same gate must still claim a message that DOES report
+  // eating inside a question — otherwise this trades the logger's over-reach for a silent drop.
+  COACH_ANSWER = MOUTH.dinnerAnswer;
+  const reportsAndAsks = await turnAt(13, "I had chicken for dinner, is that ok?", "c10-both");
+  chk(reportsAndAsks.bodies.join("").trim().length > 0 && !/you ate something/i.test(reportsAndAsks.bodies.join("\n")),
+    "CONTROL: a turn that reports AND asks is still answered, not dropped",
+    `body=${JSON.stringify(reportsAndAsks.bodies.join(" | ").slice(0, 260))}`);
+}
+
 REAL(`\n${failed === 0 ? "pg-turn-reply-integrity-acceptance: GREEN" : `pg-turn-reply-integrity-acceptance: ${failed} FAILED`}\n`);
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
 await pool.end();

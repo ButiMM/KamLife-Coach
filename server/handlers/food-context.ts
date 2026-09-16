@@ -26,7 +26,7 @@ import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from 
 import { logChat, withTimeout, turnMutation } from "./chat-log";
 import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
-import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting } from "../utils";
+import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting, reportedInSomeClause } from "../utils";
 import { explicitMealSlot } from "../understanding/actions";
 import { getPortionMemory, adjustFoodsForSegment } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
@@ -1422,7 +1422,18 @@ export async function handleFoodContext(ctx: {
 
   // Last resort: clear "I had … meal" must never reach freeform coach (invents macros /
   // "what did you eat?"). One clarify, no numbers, no steps.
-  if ((hasStrongFoodTrigger || hasNamedMealIntent || forceLog) && !isFuturePlanning && !isEmotionalOnly) {
+  //
+  // ── "CLEAR 'I HAD … MEAL'" IS THE PREMISE, SO IT HAS TO BE TRUE (C10, 2026-09-15) ──────────
+  // The gate never checked it: hasNamedMealIntent fires on the WORD "dinner", so a client who
+  // reported nothing and asked a question was answered by the logger — "What should I have for
+  // dinner tonight?" got "Got it — you ate something. Tell me the items in one line…". "Got it"
+  // is false and the question dies here, because this returns. On 85d1b73 too, inherited by C9.
+  // reportedInSomeClause is the floor C9 used one axis over: per-clause asking/intent tests with
+  // a domain-only predicate, so "I had chicken for dinner, is that ok?" still reports eating and
+  // still clarifies, while a pure question reaches the Coach. forceLog keeps its override.
+  const reportsEatingSomewhere = !!reportedInSomeClause(message, c => /\b(?:had|ate|eaten|eating|having)\b/i.test(c));
+  if ((hasStrongFoodTrigger || hasNamedMealIntent || forceLog) && !isFuturePlanning && !isEmotionalOnly
+      && (reportsEatingSomewhere || forceLog)) {
     console.warn(`[FOOD_GATE] strong meal signal fell through — forcing clarify: "${message.slice(0, 80)}"`);
     const clarifyReply = `Got it — you ate something. Tell me the items in one line (e.g. "McDonald's breakfast and a mocha") and I'll log it.`;
     await logChat(user.id, message, clarifyReply, "FOOD_CLARIFY");
