@@ -516,6 +516,173 @@ REAL("\n10. THE PERSISTED ITEM EXPLAINS ITS OWN CALORIES");
     "…with no unit invented for words the client never said", `quantity=${gi.quantity} unit=${JSON.stringify(gi.unit)}`);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n11. WHAT REVIEW FOUND — the defects this cut shipped, widened, or left standing");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Five findings from the review of 66a4443. Each was reproduced before it was repaired, and two
+// of them were this cut's OWN doing. They are graded here rather than in the sections above
+// because what they have in common is their provenance, and a reader who wants to know whether
+// review's findings are actually closed should be able to read that in one place.
+
+// ── 11a — A WEIGHT IS AN AMOUNT OF FOOD, NOT A COUNT OF SERVINGS ────────────────────────────
+// "100 grams rice" divided 100 by the portion's serving count and logged ONE HUNDRED portions:
+// 22,000 kcal, stamped as database-verified. Measured on e53763b, so the bug predates this cut —
+// but this cut WIDENED it, because admitting a preparation word between the unit and the food
+// pulled "100 grams cooked rice" (220 kcal on e53763b) into the same branch. Both forms below.
+{
+  const w = await journey("weight-grams", [[13, "I had 200 grams of chicken breast"]]);
+  ledgerHolds("weight-grams", w.rows);
+  const wi: any = (w.rows[0]?.items || [])[0] || {};
+  chk(w.rows.length === 1 && Number(wi.grams) === 200,
+    "the persisted grams ARE the weight the client stated", `grams=${wi.grams} rows=${w.rows.length}`);
+  chk(w.total > 250 && w.total < 400,
+    "…and the calories are one portion's worth of it, not two hundred portions", `total=${w.total}`);
+
+  const kg = await journey("weight-kg", [[13, "I had 1 kg of chicken breast"]]);
+  ledgerHolds("weight-kg", kg.rows);
+  chk(Number(((kg.rows[0]?.items || [])[0] as any)?.grams) === 1000 && kg.total > 1400 && kg.total < 1900,
+    "a kilogram converts to a kilogram, not to a thousand servings",
+    `total=${kg.total} items=${JSON.stringify(kg.rows.map(r => r.items))}`);
+
+  const prep = await journey("weight-prep", [[13, "I had 100 grams cooked rice"]]);
+  ledgerHolds("weight-prep", prep.rows);
+  const pi: any = (prep.rows[0]?.items || [])[0] || {};
+  chk(prep.rows.length === 1 && Number(pi.grams) === 100 && prep.total > 60 && prep.total < 200,
+    "the phrasing this cut widened into the bug is priced as 100g of rice",
+    `total=${prep.total} items=${JSON.stringify(prep.rows.map(r => r.items))}`);
+
+  // CONTROL: a unit with no fixed size is nobody's weight. "Cup", "plate" and "spoon" must keep
+  // going to classifyPortionUnit — the owner that knows a cup of rice is a portion of rice — or
+  // the repair has traded a catastrophic over-count for a silent under-count.
+  const cups = await journey("weight-control-cups", [[13, "I had 2 cups of rice"]]);
+  ledgerHolds("weight-control-cups", cups.rows);
+  const ci: any = (cups.rows[0]?.items || [])[0] || {};
+  chk(Number(ci.quantity) === 2 && Number(ci.grams) === 400 && cups.total === 440,
+    "CONTROL: two cups of rice is still two portions of rice, untouched by the weight path",
+    `total=${cups.total} items=${JSON.stringify(cups.rows.map(r => r.items))}`);
+}
+
+// ── 11b — A LINE WE COULD NOT PARSE IS FOOD WE MAY NOT DELETE ───────────────────────────────
+// The reconciler's grammar is strict, so one reply can hold a line it reads and a line it does
+// not. Taking the item sum unconditionally persisted only the line we could read and dropped the
+// rest, under-counting the client's day by exactly the food we failed to parse.
+{
+  const { reconcileVisionMeal } = await import("../server/serving-units");
+  const partial = reconcileVisionMeal([
+    "Chicken breast (180g): ~300 kcal, 56g protein",
+    "Rice: about 250 calories",                    // real phrasing, outside the grammar
+    "TOTAL: 550 kcal | 61g protein",
+  ].join("\n"), 550, 61);
+  const psum = partial.items.reduce((s, i) => s + i.kcal, 0);
+  chk(partial.kcalInt === 550 && psum === 550,
+    "the unread food survives as its own item, and the ledger still balances",
+    JSON.stringify(partial));
+  chk(partial.items.length === 2 && partial.items.some(i => i.kcal === 250),
+    "…carrying exactly the shortfall the model's own total says is missing",
+    JSON.stringify(partial.items));
+
+  // CONTROL: a shortfall with EVERY line read is the model's arithmetic, not lost food. This is
+  // the distinction the repair turns on — without it the reconciler would answer §7's fixture by
+  // inventing 283 kcal of "other items" that the model never claimed were on the plate.
+  const arith = reconcileVisionMeal([
+    "Chicken breast (180g): ~297 kcal, 56g protein",
+    "Rice (200g): ~220 kcal, 5g protein",
+    "TOTAL: 800 kcal | 70g protein",
+  ].join("\n"), 800, 70);
+  chk(arith.kcalInt === 517 && arith.items.length === 2,
+    "CONTROL: a disagreeing total whose every line we read invents nothing", JSON.stringify(arith));
+
+  // CONTROL: a total BELOW the item sum is the model's arithmetic being wrong, not an item being
+  // missing. There the parsed items stand and nothing is invented to make the numbers meet.
+  const over = reconcileVisionMeal([
+    "Chicken breast (180g): ~297 kcal, 56g protein",
+    "Rice (200g): ~220 kcal, 5g protein",
+    "TOTAL: 300 kcal | 70g protein",
+  ].join("\n"), 300, 70);
+  chk(over.kcalInt === 517 && over.items.length === 2,
+    "CONTROL: a model total below its own items adds no phantom item", JSON.stringify(over));
+}
+
+// ── 11c — A PHOTO ITEM SAYS WHERE IT CAME FROM ──────────────────────────────────────────────
+// summariseProvenance reads `origin` and defaults a missing one to "unknown". Giving the photo
+// path items without tagging them turned a formerly-classifiable row into an unknown one, and at
+// half the day unknown the food confidence drops to "insufficient" — so this cut's own repair
+// would have degraded the confidence of every photo meal it fixed.
+{
+  const { reconcileVisionMeal, itemsFromVisionText } = await import("../server/serving-units");
+  const parsed = itemsFromVisionText("Chicken breast (180g): ~297 kcal, 56g protein");
+  chk(parsed.length === 1 && parsed[0].origin === "photo",
+    "a parsed vision item records that a photo is where its number came from", JSON.stringify(parsed));
+  const bare = reconcileVisionMeal("TOTAL: 640 kcal | 41g protein", 640, 41);
+  const short = reconcileVisionMeal(
+    "Chicken breast (180g): ~300 kcal, 56g protein\nRice: about 250 calories\nTOTAL: 550 kcal", 550, 61);
+  chk(short.items.length === 2 && bare.items.length === 1
+    && bare.items.every(i => i.origin === "photo") && short.items.every(i => i.origin === "photo"),
+    "…and so does every item the reconciler synthesises for it",
+    JSON.stringify([bare.items, short.items]));
+}
+
+// ── 11d — A CORRECTED COUNT RESCALES THE EVIDENCE, NOT ONLY THE CALORIES ────────────────────
+// The quantity-correction path scaled kcal and protein and wrote everything else back untouched,
+// so after "two chicken breasts not one" the row held TWO breasts' calories while still stating
+// quantity 1 and one breast's grams. That is the exact contradiction C11's provenance fields
+// exist to make impossible: the row can no longer explain the number it shows.
+{
+  const c = await journey("correct-provenance", [[13, "I had one chicken breast"], [14, "Actually it was two chicken breasts not one"]]);
+  ledgerHolds("correct-provenance", c.rows);
+  const all = c.rows.flatMap(r => (Array.isArray(r.items) ? r.items : []) as any[]);
+  const br = all.find(i => /breast/i.test(String(i.name || "")));
+  chk(!!br, "the corrected food is still on the plate", JSON.stringify(c.rows.map(r => r.items)));
+  if (br) {
+    chk(Number(br.quantity) === 2,
+      "the item states the count the client corrected it to", `quantity=${br.quantity}`);
+    chk(Number(br.grams) === 360,
+      "…the grams that follow from that count", `grams=${br.grams}`);
+    chk(/\b2\b/.test(String(br.portionDescription || "")),
+      "…and a portion description that describes the same amount",
+      `desc=${JSON.stringify(br.portionDescription)}`);
+    chk(Number(br.kcal) > 500 && Number(br.kcal) < 700,
+      "…all of it beside the calories it already got right", `kcal=${br.kcal}`);
+  }
+}
+
+// ── 11e — A PREPARATION WORD BELONGS TO THE FOOD IT IS ATTACHED TO ──────────────────────────
+// One basis was read per segment and copied onto every food in it, so "cooked rice and raw
+// chicken thigh" recorded BOTH as cooked. The chicken's item then claimed a preparation the
+// client never made about it, and basisConflict — which reads exactly that field — could no
+// longer see the raw chicken at all.
+{
+  const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+  const { adjustFoodsForSegment, basisConflict } = await import("../server/portion-memory");
+  const mixed = "cooked rice and raw chicken thigh";
+  const adj: any[] = adjustFoodsForSegment(scanForSAFoods(mixed) as any, mixed) as any;
+  const rice = adj.find(f => /rice/i.test(f.name));
+  const thigh = adj.find(f => /thigh/i.test(f.name));
+  chk(!!rice && !!thigh, "both foods are found", JSON.stringify(adj.map(f => f.name)));
+  chk(rice?.statedBasis === "cooked" && thigh?.statedBasis === "raw",
+    "each food carries the basis the client stated about IT",
+    JSON.stringify(adj.map(f => [f.name, f.statedBasis])));
+  chk(/thigh/i.test(String(basisConflict(adj)?.name || "")),
+    "…so the raw food priced as cooked is the one we would ask about",
+    JSON.stringify(basisConflict(adj)?.name));
+
+  // A basis that cannot be attached to any food is not assigned to one. Two foods, one loose
+  // preparation word: whichever the client meant, guessing writes a claim they did not make.
+  const loose = "I had rice and chicken breast, both cooked";
+  const la: any[] = adjustFoodsForSegment(scanForSAFoods(loose) as any, loose) as any;
+  chk(la.every(f => f.statedBasis === null),
+    "an unattached word in a two-food sentence is recorded as no basis at all",
+    JSON.stringify(la.map(f => [f.name, f.statedBasis])));
+
+  // CONTROL: one food, one preparation word — still read, whichever side of the food it sits.
+  for (const [label, text] of [["before", "I had 2 cups cooked rice"], ["after", "I had rice, cooked"]] as const) {
+    const a: any[] = adjustFoodsForSegment(scanForSAFoods(text) as any, text) as any;
+    chk(a.length > 0 && a.every(f => f.statedBasis === "cooked"),
+      `CONTROL: a single food still takes its own basis (${label})`,
+      JSON.stringify(a.map(f => [f.name, f.statedBasis])));
+  }
+}
+
 REAL(`\n${failed === 0 ? "pg-food-calorie-truth-acceptance: GREEN" : `pg-food-calorie-truth-acceptance: ${failed} FAILED`}\n`);
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
 await pool.end();

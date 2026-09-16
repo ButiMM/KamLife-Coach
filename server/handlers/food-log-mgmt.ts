@@ -15,7 +15,7 @@ import { parseIdentityCorrection, correctionCandidates, holdForReplacement, isMe
 import { UNAVAILABLE_RE } from "../food-swaps";
 import { turnMutation, turnState, logChat } from "./chat-log";
 // The quantity authority the food logger already prices through — see resolveFood below (C11).
-import { adjustFoodsForSegment } from "../portion-memory";
+import { adjustFoodsForSegment, rescaleLedgerItem } from "../portion-memory";
 
 /**
  * THE SAST DAY A CORRECTION NAMES, when it names one earlier than today (#164).
@@ -279,7 +279,10 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
           const newItemProt = Math.round((itemQC.protein || 0) * ratio);
           const newKcalQC = Math.max(0, (targetQC.kcalInt || 0) - itemQC.kcal + newItemKcal);
           const newProtQC = Math.max(0, (targetQC.proteinInt || 0) - (itemQC.protein || 0) + newItemProt);
-          const newItemsQC = itemsQC.map(i => i === itemQC ? { ...i, kcal: newItemKcal, protein: newItemProt } : i);
+          // The item's OWN provenance is rescaled with its calories — grams, quantity and the
+          // portion description move by the same ratio, so the row still explains its number
+          // instead of claiming one breast while holding two breasts' calories (C11 review).
+          const newItemsQC = itemsQC.map(i => i === itemQC ? rescaleLedgerItem(i, ratio) : i);
           await db.update(mealLogs).set({ kcalInt: newKcalQC, proteinInt: newProtQC, items: newItemsQC, corrected: true }).where(eq(mealLogs.id, targetQC.id));
           invalidateFoodTotalsCache(user.id);
           const recQC = await recomputeTodayFoodTotals(user.id);

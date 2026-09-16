@@ -67,19 +67,41 @@ export function foodMatchesText(food: string, text: string | null | undefined): 
 // kcal, 6g protein") into structured items. Photo meals used to store items: [] — so "my
 // meals" showed "Food photo" and a correction ("2 slices not 3") had no item to scale
 // (2026-07-23). Best-effort: unparseable lines are skipped, never guessed.
-export function itemsFromVisionText(text: string): Array<{ name: string; grams: number; kcal: number; protein: number; category: string }> {
-  const out: Array<{ name: string; grams: number; kcal: number; protein: number; category: string }> = [];
+type VisionItem = { name: string; grams: number; kcal: number; protein: number; category: string; origin?: string };
+
+/**
+ * The parse, and what it could not read (C11 review, 2026-09-16).
+ *
+ * The grammar above is strict on purpose, so a reply can hold one line it reads and one it does
+ * not: "Chicken: 300 kcal" parses, "Rice: about 250 calories" does not. Knowing THAT a line was
+ * missed is what lets the reconciler tell a model arithmetic error (its total disagrees, but we
+ * read every line it wrote) from lost food (its total disagrees BECAUSE a line went unread) —
+ * two situations with opposite correct answers. A line counts as unread only if it states
+ * calories of its own; prose the model wraps around its list is not a food we failed to parse.
+ */
+function parseVisionLines(text: string): { items: VisionItem[]; unread: number } {
+  const out: VisionItem[] = [];
+  let unread = 0;
   for (const line of (text || "").split("\n")) {
     const l = line.trim();
     if (!l || /^total\b/i.test(l)) continue;
     const m = l.match(/^[-•*\s]*([A-Za-z][^:–—]{1,50}?)\s*(?:\(([^)]*)\))?\s*[:–—]\s*[~≈]?\s*(\d[\d,]*)\s*kcal(?:.*?(\d+)\s*g\s*protein)?/i);
-    if (!m) continue;
-    const name = m[1].replace(/[*_]/g, "").trim();
-    if (!name || name.length > 50) continue;
+    const name = m ? m[1].replace(/[*_]/g, "").trim() : "";
+    if (!m || !name || name.length > 50) {
+      if (/\d/.test(l) && /kcal|calorie/i.test(l)) unread++;
+      continue;
+    }
     const grams = (() => { const g = (m[2] || "").match(/(\d+)\s*(?:g|ml)\b/i); return g ? parseInt(g[1], 10) : 0; })();
-    out.push({ name, grams, kcal: parseInt(m[3].replace(/,/g, ""), 10) || 0, protein: m[4] ? parseInt(m[4], 10) : 0, category: "photo" });
+    // ORIGIN, NOT JUST CATEGORY (C11 review). summariseProvenance reads `origin` and defaults a
+    // missing one to "unknown"; at half the day unknown, food confidence drops to insufficient.
+    // A vision item IS model-derived, and "photo" is the recorded fact for that.
+    out.push({ name, grams, kcal: parseInt(m[3].replace(/,/g, ""), 10) || 0, protein: m[4] ? parseInt(m[4], 10) : 0, category: "photo", origin: "photo" });
   }
-  return out.slice(0, 12);
+  return { items: out.slice(0, 12), unread };
+}
+
+export function itemsFromVisionText(text: string): VisionItem[] {
+  return parseVisionLines(text).items;
 }
 
 /**
@@ -108,8 +130,8 @@ export function reconcileVisionMeal(
   text: string,
   statedKcal: number,
   statedProtein: number,
-): { items: Array<{ name: string; grams: number; kcal: number; protein: number; category: string }>; kcalInt: number; proteinInt: number } {
-  const items = itemsFromVisionText(text);
+): { items: Array<{ name: string; grams: number; kcal: number; protein: number; category: string; origin?: string }>; kcalInt: number; proteinInt: number } {
+  const { items, unread } = parseVisionLines(text);
   // EVERY PARSED ITEM IS DURABLE TRUTH, INCLUDING THE FREE ONES (C11 amendment, 2026-09-16).
   //
   // The first cut of this filtered to `kcal > 0` before deciding, which silently deleted a parsed
@@ -123,14 +145,44 @@ export function reconcileVisionMeal(
   if (items.length > 0) {
     const kcal = items.reduce((s, i) => s + (i.kcal || 0), 0);
     const protein = items.reduce((s, i) => s + (i.protein || 0), 0);
-    if (statedKcal > 0 && Math.abs(statedKcal - kcal) > Math.max(25, kcal * 0.1)) {
+    // ── A LINE WE COULD NOT PARSE IS FOOD WE MAY NOT DELETE (C11 review, 2026-09-16) ──────────
+    //
+    // itemsFromVisionText has a strict grammar, so a reply can hold one line it reads and one it
+    // does not: "Chicken: 300 kcal" parses, "Rice: about 250 calories" does not, and the model's
+    // own TOTAL says 550. Taking the item sum unconditionally persisted 300 and silently dropped
+    // the rice — under-counting a client's day by the food we failed to read, with a warning that
+    // no client ever sees. Found by review.
+    //
+    // The model's total is the evidence that something is missing, so the shortfall becomes an
+    // item of its own. The ledger still balances, the day is still right, and the row still says
+    // plainly which part came from a line we could read and which from the total alone.
+    //
+    // TWO CONDITIONS, AND BOTH ARE LOAD-BEARING. A total that disagrees is not by itself evidence
+    // of lost food — when every line the model wrote was read, a disagreeing total is the model's
+    // own arithmetic being wrong, and the contract is unchanged: the items are the ledger and the
+    // total does not win. Only a shortfall NEXT TO a line we could not read is missing food, and
+    // only then is an item synthesised for it. A total BELOW the item sum is never missing food.
+    if (unread > 0 && statedKcal > 0 && statedKcal - kcal > Math.max(25, kcal * 0.1)) {
+      console.warn(`[PHOTO_TOTAL_DISAGREES] model said ${statedKcal} kcal, parsed items sum to ${kcal} — keeping the difference as unread food`);
+      const rest = items.concat([{
+        name: "Other items on the plate", grams: 0,
+        kcal: statedKcal - kcal,
+        protein: Math.max(0, statedProtein - protein),
+        category: "photo", origin: "photo",
+      }]);
+      return { items: rest, kcalInt: statedKcal, proteinInt: Math.max(protein, statedProtein) };
+    }
+    if (statedKcal > 0 && kcal - statedKcal > Math.max(25, kcal * 0.1)) {
       console.warn(`[PHOTO_TOTAL_DISAGREES] model said ${statedKcal} kcal, its own items sum to ${kcal} — items win`);
     }
     return { items, kcalInt: kcal, proteinInt: protein };
   }
   if (statedKcal > 0 || statedProtein > 0) {
     return {
-      items: [{ name: "Photographed meal", grams: 0, kcal: statedKcal, protein: statedProtein, category: "photo" }],
+      // origin "photo" so the evidence-sufficiency path still reads this as model-derived. Before
+      // C11 this row had EMPTY items and summariseProvenance classified it from source === "photo";
+      // giving it one untagged item would have quietly reclassified it as unknown (C11 review).
+      items: [{ name: "Photographed meal", grams: 0, kcal: statedKcal, protein: statedProtein, category: "photo", origin: "photo" }],
       kcalInt: statedKcal,
       proteinInt: statedProtein,
     };
