@@ -392,7 +392,11 @@ REAL("\n8. A CORRECTION REPLACES — IT DOES NOT ADD");
   // stored plate, or ask against what is actually held. Widening the food match to force the first
   // arm would match the combo and scale the whole plate — 1160 kcal, rice doubled with the chicken
   // — so the honest arm here is the second one, and it is graded on the delivered body.
-  const addBody = add.bodies.join("\n");
+  // THE CORRECTION TURN'S OWN BODY, not the conversation's. Graded against the join first, this
+  // assertion passed on the revert — because turn one's receipt ("Got it — Chicken and rice") had
+  // already said the words, so the correction reply could name nothing and still green. The
+  // red-on-revert case is what found it; a vacuous assertion is worse than an absent one.
+  const addBody = add.bodies[add.bodies.length - 1] || "";
   chk(addTotal !== 580 || /chicken and rice/i.test(addBody),
     "the named 877 sentence either moves the plate or names what today actually holds",
     `total=${addTotal} body=${JSON.stringify(addBody.slice(-300))}`);
