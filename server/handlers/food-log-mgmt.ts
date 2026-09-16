@@ -16,6 +16,8 @@ import { UNAVAILABLE_RE } from "../food-swaps";
 import { turnMutation, turnState, logChat } from "./chat-log";
 // The quantity authority the food logger already prices through — see resolveFood below (C11).
 import { adjustFoodsForSegment, rescaleLedgerItem } from "../portion-memory";
+// The ledger's own "what did this row hold" reader — see the unplaceable-correction reply below.
+import { foodsOf } from "../day-ledger-core";
 
 /**
  * THE SAST DAY A CORRECTION NAMES, when it names one earlier than today (#164).
@@ -312,6 +314,25 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
         await db.update(users).set({ awaitingInputType: holdForReplacement(targetQC.id, qc.food) }).where(eq(users.id, user.id));
         const recQC2 = await recomputeTodayFoodTotals(user.id);
         return `Wrong count noted — I'm holding that entry until you replace it, so nothing is lost. Send it as "${qc.count} ${qc.food}" plus whatever else was on the plate and I'll swap it in.\n\nStill on today: ~${recQC2.calories} kcal | ~${recQC2.protein}g protein.`;
+      }
+      // ── A CORRECTION WE CANNOT PLACE STILL ANSWERS AGAINST WHAT IS HELD (C11 review) ───────
+      //
+      // The named 877 journey ends here, and measured it ended in a no-op: "I had chicken and
+      // rice" persists as ONE combo item — `Chicken and rice`, 580 kcal, 1 plate (400g) — so
+      // "Actually it was two chicken breasts not one" matches no food, and the client correcting
+      // their own record was told their record does not contain it. The day never moved and the
+      // reply named nothing, which is the same silence §6 forbids for food we cannot price.
+      //
+      // The match is deliberately NOT widened to close this. "chicken breasts" would then match
+      // the combo `Chicken and rice` and scale the whole plate by two — 1160 kcal, with the rice
+      // doubled along with the chicken. There is no chicken COMPONENT to scale, so there is no
+      // honest number to compute here; what we can do honestly is say what today holds and let
+      // the client restate the plate. The rows are described through the ledger's own `foodsOf`
+      // so "what is held" reads the same here as on the card.
+      if (rowsQC.length > 0) {
+        const held = rowsQC.slice(0, 3)
+          .map(r => `${foodsOf(r.items, r.rawMessage)} (~${r.kcalInt || 0} kcal)`).join(", ");
+        return `I can't place ${qc.food} against what's logged — today I've got ${held}. Send that plate again the way it should read and I'll swap it in.`;
       }
       return `I don't see ${qc.food} in today's log to correct. Send *my meals* to check what's logged.`;
     } catch (err) {

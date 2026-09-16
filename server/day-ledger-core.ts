@@ -113,8 +113,10 @@ export function freshTodayWater(waterLastResetDate: string | null | undefined, t
   return Math.round(v * 10) / 10;
 }
 
-// A meal row → its readable food description.
-function foodsOf(items: unknown, raw: string | null): string {
+// A meal row → its readable food description. Exported because a correction that cannot be
+// placed has to say what IS held, and "what is held" must read the same way there as it does on
+// the card and in the diary — one owner, not a second phrasing of the same rows (C11 review).
+export function foodsOf(items: unknown, raw: string | null): string {
   if (Array.isArray(items)) {
     const names = items.map((i: any) => (i && typeof i.name === "string" ? i.name : "")).filter(Boolean);
     if (names.length) return names.join(", ");

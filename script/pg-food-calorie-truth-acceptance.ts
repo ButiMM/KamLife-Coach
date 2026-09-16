@@ -381,6 +381,25 @@ REAL("\n8. A CORRECTION REPLACES — IT DOES NOT ADD");
   chk(add.total === addTotal, "users.today_calories agrees with the rows",
     `user=${add.total} rows=${addTotal}`);
 
+  // AND A NO-OP IS NOT AN ANSWER EITHER (C11 review). `addTotal <= 580` alone greened the defect's
+  // own sentence doing NOTHING — and measured, that is exactly what it did. "I had chicken and
+  // rice" persists as ONE combo item (`Chicken and rice`, 580 kcal, 1 plate), so the correction's
+  // food matches nothing and the client was told *"I don't see chicken breasts in today's log to
+  // correct"* about the plate they had just logged. A band on the total cannot catch this: 580 is
+  // the UNCORRECTED day, so any band wide enough to admit the corrected answer admits the no-op.
+  //
+  // The contract is therefore on the outcome, not the number: the sentence must either change the
+  // stored plate, or ask against what is actually held. Widening the food match to force the first
+  // arm would match the combo and scale the whole plate — 1160 kcal, rice doubled with the chicken
+  // — so the honest arm here is the second one, and it is graded on the delivered body.
+  const addBody = add.bodies.join("\n");
+  chk(addTotal !== 580 || /chicken and rice/i.test(addBody),
+    "the named 877 sentence either moves the plate or names what today actually holds",
+    `total=${addTotal} body=${JSON.stringify(addBody.slice(-300))}`);
+  chk(!/don'?t see .* in today'?s log to correct/i.test(addBody),
+    "…and the client is never told their own logged plate does not exist",
+    `body=${JSON.stringify(addBody.slice(-300))}`);
+
   // 8b' — A REMOVAL WE GENUINELY CANNOT PLACE. The client corrects away a food that is not on the
   // plate we hold. There is no honest replacement to make, so the day must not move AND the client
   // must be told — the same answer §6 requires for food we cannot price: ask, never guess. Without

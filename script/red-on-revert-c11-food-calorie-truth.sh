@@ -124,17 +124,28 @@ run_case "a zero-calorie day is treated as unlogged" server/handlers/misc-comman
   '      const loggedToday = (truth.today.meals?.length || 0) > 0;' \
   '      const loggedToday = truth.today.kcal > 0;' || failed=$((failed + 1))
 
-# 8. THE PHOTO TOTAL DEFEATS THE ITEM SUMS, and its zero-calorie items disappear with it. One
-#    mutation covers both because one line does both: filtering to priced items before deciding is
-#    exactly how the model's own total came to stand over a list that no longer summed to it.
-run_case "the photo total defeats item sums and free items vanish" server/serving-units.ts \
-  '  if (items.length > 0) {
-    const kcal = items.reduce((s, i) => s + (i.kcal || 0), 0);
+# 8. THE PHOTO TOTAL DEFEATS THE ITEM SUMS. The meal stores the model's figure while its items
+#    say something else — a row that contradicts its own evidence.
+#
+#    SPLIT FROM CASE 8b BECAUSE ONE MUTATION WAS NOT TWO (C11 review). The first version of this
+#    case bolted a `priced` filter onto the same patch, but the function returns `items`, not
+#    `priced` — so the filter was dead and only the total-vs-sum claim ever went red. The
+#    zero-calorie deletion was UNGUARDED while appearing to be guarded, which is worse than an
+#    absent case. Found by review; each claim now has a mutation that actually causes it.
+run_case "the photo total defeats item sums" server/serving-units.ts \
+  '    const kcal = items.reduce((s, i) => s + (i.kcal || 0), 0);
     const protein = items.reduce((s, i) => s + (i.protein || 0), 0);' \
-  '  const priced = items.filter(i => (i.kcal || 0) > 0);
-  if (priced.length > 0) {
-    const kcal = statedKcal;
+  '    const kcal = statedKcal;
     const protein = statedProtein;' || failed=$((failed + 1))
+
+# 8b. A PARSED ZERO-CALORIE PHOTO ITEM IS DELETED. The filter goes in at the parse boundary, where
+#     it genuinely removes the item from everything downstream: the eggs survive, the black coffee
+#     does not, and the meal total stays 140 — so the ledger contract still holds and nothing
+#     downstream complains. That silence is the defect's whole character.
+run_case "a parsed zero-calorie photo item is deleted" server/serving-units.ts \
+  '  const { items, unread } = parseVisionLines(text);' \
+  '  const { items: parsedAll, unread } = parseVisionLines(text);
+  const items = parsedAll.filter(i => (i.kcal || 0) > 0);' || failed=$((failed + 1))
 
 # ── THE FIVE REVIEW FINDINGS ────────────────────────────────────────────────────────────────
 # Cases 9–13 guard the repairs made after review of 66a4443. Two of those defects were this cut's
@@ -172,9 +183,16 @@ run_case "one food's preparation basis is copied onto every food" server/portion
   '    const foodBasis = statedBasisFor(segText, allAliases) || soleBasis;' \
   '    const foodBasis = statedBasis(segText);' || failed=$((failed + 1))
 
+# 14. A CORRECTION WE CANNOT PLACE GOES SILENT AGAIN. The reply stops naming what today holds, so
+#     the named 877 sentence ends in "I don't see chicken breasts in today's log to correct" over a
+#     plate the client logged one turn earlier, and the day never moves.
+run_case "an unplaceable correction stops naming what is held" server/handlers/food-log-mgmt.ts \
+  '      if (rowsQC.length > 0) {' \
+  '      if (false) {' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-c11-food-calorie-truth: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-c11-food-calorie-truth: GREEN — 13/13 behavioral reverts caught"
+echo "red-on-revert-c11-food-calorie-truth: GREEN — 15/15 behavioral reverts caught"
