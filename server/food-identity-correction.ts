@@ -260,22 +260,39 @@ export function planCorrection(message: string, movesDay: boolean): CorrectionPl
  * into its parts only when a removal actually targets one of them; otherwise it is left exactly
  * as logged, because splitting a dish nobody is correcting would change numbers for no reason.
  */
+// A REMOVAL WE CANNOT RESOLVE IS NOT A REMOVAL WE MAY IGNORE (C11, 2026-09-16).
+//
+// The loop below used to `continue` past a removal that matched no stored item, and the add loop
+// ran anyway — so a correction whose removal could not be placed silently degraded into an
+// APPEND. Measured on e53763b through the live front door:
+//
+//     13:00  "I had chicken and rice"                         -> 580 kcal
+//     14:00  "Actually it was two chicken breasts not one"     -> 877 kcal
+//
+// The client corrected their record downward and the coach added 297 kcal to it. planCorrection
+// had put the quantity WORD "one" into `remove`, and "one" matches no food, so the removal
+// vanished while the add landed.
+//
+// `unresolved` is the fix's whole mechanism: the caller can now tell "I replaced what they named"
+// from "I could not find what they named and added something anyway", which are opposite
+// outcomes that used to be the same return value.
 export function applyCorrection<T extends { name?: string }>(
   items: T[],
   plan: CorrectionPlan,
   resolve: (food: string) => T | null,
-): { items: T[]; removed: string[]; added: string[] } {
+): { items: T[]; removed: string[]; added: string[]; unresolved: string[] } {
   const hits = (name: string, food: string) => {
     const a = name.toLowerCase(), b = food.toLowerCase();
     return a === b || a.includes(b) || b.includes(a);
   };
   let work: T[] = [...items];
   const removed: string[] = [];
+  const unresolved: string[] = [];
 
   for (const food of plan.remove) {
     // A whole item that IS the food goes.
     const exact = work.findIndex(i => hits(String(i.name || ""), food));
-    if (exact === -1) continue;
+    if (exact === -1) { unresolved.push(food); continue; }
     const name = String(work[exact].name || "");
     const parts = name.split(/\s*(?:,|\band\b|\bwith\b|\+)\s*/i).map(p => p.trim()).filter(Boolean);
     if (parts.length > 1) {
@@ -294,7 +311,7 @@ export function applyCorrection<T extends { name?: string }>(
     const r = resolve(food);
     if (r) { work.push(r); added.push(food); }
   }
-  return { items: work, removed, added };
+  return { items: work, removed, added, unresolved };
 }
 
 /**

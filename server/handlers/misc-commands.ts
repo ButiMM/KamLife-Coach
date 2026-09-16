@@ -917,7 +917,19 @@ export async function handleMiscCommands(ctx: {
         // the training count it silently excludes: "Sessions: 4" above "Days logged: 0/7".
         return `*${name} — last 7 days*\n\n💪 Sessions: *${truth.sessions}*\n🍽️ Food logged: *${truth.window.daysLogged}/7 days*\n🔥 Avg: *${truth.window.avgKcal} kcal* · *${truth.window.avgProtein}g* protein\n👟 Avg steps: *${truth.avgSteps.toLocaleString()}*${weightLine}\n\n*${act.todo}*`;
       }
-      const todayLine = truth.today.kcal > 0
+      // A LOG IS A ROW, NOT A CALORIE COUNT (C11, 2026-09-16). This asked the day's TOTAL whether
+      // the client had logged, so a zero-calorie day — black coffee, a Coke Zero, water, or any
+      // row the scanner could not price — rendered as "nothing logged yet" over food we were
+      // holding. The card then contradicted itself in two adjacent lines, exactly as the comment
+      // below records it doing once before:
+      //
+      //     🔥 Today: *nothing logged yet*
+      //     🍽️ Food logged: *1/7 days*
+      //
+      // `truth.today.meals` is the row list getDayLedger already returns; the figures still come
+      // from the totals, because a zero total is the honest number to show for a zero-calorie day.
+      const loggedToday = (truth.today.meals?.length || 0) > 0;
+      const todayLine = loggedToday
         ? `🔥 Today: *${truth.today.kcal}${calTarget ? `/${calTarget}` : ""} kcal* · *${truth.today.protein}${protTarget ? `/${protTarget}` : ""}g* protein`
         : `🔥 Today: *nothing logged yet*`;
       const stepsLine = truth.today.steps > 0 ? `\n👟 Steps today: *${truth.today.steps.toLocaleString()}*` : "";

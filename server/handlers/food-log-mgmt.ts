@@ -13,7 +13,9 @@ import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine, sca
 import { parseIdentityCorrection, correctionCandidates, holdForReplacement, isMealDateMove, planCorrection, applyCorrection, parseDropLoggedItem, type IdentityCorrection } from "../food-identity-correction";
 
 import { UNAVAILABLE_RE } from "../food-swaps";
-import { turnMutation, turnState } from "./chat-log";
+import { turnMutation, turnState, logChat } from "./chat-log";
+// The quantity authority the food logger already prices through — see resolveFood below (C11).
+import { adjustFoodsForSegment } from "../portion-memory";
 
 /**
  * THE SAST DAY A CORRECTION NAMES, when it names one earlier than today (#164).
@@ -152,15 +154,62 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
         : eq(mealLogs.userId, user.id))
       .orderBy(desc(mealLogs.loggedAt)).limit(1);
     if (row) {
+      // ── A CORRECTION IS PRICED BY THE QUANTITY AUTHORITY, NOT BY THE TABLE ROW (C11) ────────
+      //
+      // This read typicalPortionCalories straight off the scanner hit, so every corrected-to food
+      // was priced as ONE table portion however many the client named. It is a second calorie
+      // authority in effect: the logging path prices through adjustFoodsForSegment, and this path
+      // did not, so the same words cost different amounts depending on which door they came
+      // through. Measured on e53763b:
+      //
+      //     "I had one chicken breast"                                   -> 297 kcal
+      //     "it wasn't one chicken breast, it was two chicken breasts"   -> 297 kcal
+      //
+      // The removal worked and the add replaced it with one breast again, so a client could never
+      // correct a quantity at all — it read as a no-op. Same root cause as the append above, one
+      // axis over, and it is why both halves of this repair are needed together: fixing only the
+      // append would still leave the quantity wrong, and fixing only this would have made the
+      // append case WORSE (580 + 594 instead of 580 + 297).
+      //
+      // adjustFoodsForSegment is the owner the food logger already uses. It is handed the food
+      // phrase as the client wrote it, so "two chicken breasts" carries its own quantity, and the
+      // portion provenance it computes travels with the item instead of being thrown away.
       const resolveFood = (food: string) => {
         const hit = scanForSAFoods(food, { exactOnly: true })[0] || scanForSAFoods(food)[0];
-        return hit ? {
-          name: hit.name, grams: hit.typicalPortionGrams || 100, kcal: hit.typicalPortionCalories || 0,
-          protein: hit.typicalPortionProtein || 0, category: hit.category,
-        } : null;
+        if (!hit) return null;
+        const [priced] = adjustFoodsForSegment([hit], food);
+        const qty = Number(priced?.quantity) || 1;
+        return {
+          name: hit.name,
+          grams: Math.round((hit.typicalPortionGrams || 100) * qty),
+          kcal: Math.round(Number(priced?.adjustedCalories ?? hit.typicalPortionCalories) || 0),
+          protein: Math.round(Number(priced?.adjustedProtein ?? hit.typicalPortionProtein) || 0),
+          category: hit.category,
+          quantity: qty,
+          portionSource: priced?.portionSource,
+        };
       };
       const stored = (Array.isArray(row.items) ? row.items : []) as Array<{ name?: string; kcal?: number; protein?: number }>;
-      const { items: newItems, removed, added } = applyCorrection(stored, plan, resolveFood as any);
+      const { items: newItems, removed, added, unresolved } = applyCorrection(stored, plan, resolveFood as any);
+      // ── WE DID NOT FIND WHAT THEY SAID WAS WRONG, SO WE DO NOT GUESS (C11) ─────────────────
+      //
+      // An unresolved removal means the client named something to take off the plate that is not
+      // on the plate we hold. Writing the add anyway is how "Actually it was two chicken breasts
+      // not one" turned a 580 kcal day into 877: the removal vanished and the addition landed.
+      //
+      // Their record is left exactly as it was and they are told what we hold, which is the same
+      // answer this codebase already gives for food it cannot price — ask rather than guess. It
+      // is deliberately NOT a partial write: a correction half-applied is a number the client
+      // cannot see and did not ask for.
+      if (unresolved.length > 0 && !plan.moves) {
+        const held = stored.map(i => String(i.name || "")).filter(Boolean);
+        console.warn(`[CORRECTION_UNRESOLVED] ...${String(user.id).slice(-6)} — cannot place ${JSON.stringify(unresolved)} against ${JSON.stringify(held)}`);
+        const reply = held.length > 0
+          ? `I've got *${held.join(", ")}* on that meal — I couldn't find the part you're correcting. Tell me what it should be instead and I'll fix the whole meal.`
+          : `I couldn't find the meal you're correcting. Send it the way you'd log it and I'll put it on your record properly.`;
+        await logChat(user.id, m, reply, "FOOD_CORRECTION_UNRESOLVED").catch(() => {});
+        return reply;
+      }
       const target = plan.moves ? parseMealDate(m) : (row.at as Date);
       // Totals come from the items when every item carries its own numbers; otherwise the row's
       // stored totals stand, because inventing a total from a partial plate is how a correction
