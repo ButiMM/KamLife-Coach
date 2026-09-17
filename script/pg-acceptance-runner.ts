@@ -291,6 +291,15 @@ export const ACCEPTANCES: Acceptance[] = [
     // a zero-calorie day read as unlogged, and the photo total defeating its own item sums.
     command: ["bash", "script/red-on-revert-c11-food-calorie-truth.sh"] },
 
+  { id: "question-owns-turn", title: "A fact survives the question riding with it, and the question is answered",
+    // C12 (2026-09-17). "I had a pear. What should I do today?" wrote NOTHING and asked for the
+    // pear back; "I had chicken and rice for lunch. What should I do today?" priced the question's
+    // own words as food and never answered it. Both halves worked alone — the bubble broke both.
+    command: ["npx", "tsx", "script/pg-question-owns-turn-acceptance.ts"] },
+
+  { id: "question-owns-turn-reverts", title: "Every C12 question-owns-turn seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-c12-question-owns-turn.sh"] },
+
   { id: "turn-reply-integrity", title: "The reply reconcileTurnReply repaired is the reply that ships",
     // C10 (2026-09-15). reconcileTurnReply computed its write-integrity repair and directive strip
     // into `draft`, then returned `reply` — the original, unverified model string — from every
