@@ -1,4 +1,5 @@
-import { parseMessyIntake } from "./understanding/messy-intake";
+import { parseMessyIntake, clausesOf } from "./understanding/messy-intake";
+import { looksLikeQuestion } from "./utils";
 /**
  * UNLOGGED NOTICE — never silently drop food the client named. Pure, unit-tested.
  *
@@ -140,6 +141,27 @@ function spansClaimedByOtherFacts(message: string): string {
   const claimed = r.intents
     .filter(i => i.kind === "steps_report" || i.kind === "feeling")
     .map(i => i.text);
+  // ── A QUESTION IS SOMETHING ELSE THAT CLAIMED THOSE WORDS (C12, 2026-09-17) ────────────────
+  //
+  // Measured on 33b477f: "I had chicken and rice for lunch. What should I do today?" logged the
+  // meal and then told the client "⚠️ I could not price *what, should*" and asked whether it was
+  // fried or grilled. The client's own question came back to them as two mystery foods.
+  //
+  // The damage is not only the nonsense. That clarify is a QUESTION, and ownsNextAction treats a
+  // question anywhere in the closing block as the next action already claimed — so withNextMove
+  // then dropped the real coaching move the decision ladder had already computed ("Make your next
+  // meal a proper protein meal"). The client asked what to do today, and the answer was deleted by
+  // a nag invented from the words they used to ask it.
+  //
+  // This is the rule this function already states: not "is the word food-ish" but "did something
+  // else in this note already claim it". A question clause claims its own words.
+  // Only the INTERROGATIVE fragment, never the whole mixed clause (C12 review). clausesOf splits
+  // on sentence punctuation, so "I had rice with skopo and masonja, is that enough protein?" is
+  // ONE clause that ends in "?" — claiming it whole swallowed the reported foods too, and the
+  // client was never told skopo and masonja were missing from the total. Commas separate them.
+  for (const clause of clausesOf(message)) {
+    for (const part of clause.split(",")) if (looksLikeQuestion(part.trim())) claimed.push(part);
+  }
   // A reported session is a fact too, but it has no intent span — take the clause it sits in.
   if (r.hasWorkoutReport) {
     for (const clause of String(message).split(/[.!?,]|\band\b/i)) {

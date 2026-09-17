@@ -26,7 +26,7 @@ import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from 
 import { logChat, withTimeout, turnMutation } from "./chat-log";
 import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
-import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting, reportedInSomeClause } from "../utils";
+import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting, reportedInSomeClause, mentionsNotDone } from "../utils";
 import { explicitMealSlot } from "../understanding/actions";
 // The canonical item shape — the nutritional ledger's own definition (C11).
 import { itemsFromAdjusted } from "../day-ledger-core";
@@ -626,11 +626,11 @@ export async function handleFoodContext(ctx: {
     || /^(is |does |do |will |can |should |are |have |has |what |why |which )\b/i.test(m)
     // WO2 fix 3: an ask stands this path down UNLESS the meal was dated in the PAST (J4 dates it, J3's "KFC tonight?" does not). Both sides asserted in acceptance-hold.ts.
     || (isAskingNotReporting(m) && !isRetroactiveMeal(m));
-  // A QUESTION IN ONE CLAUSE DOES NOT DELETE A FACT IN ANOTHER (2026-08-22, live P0).
-  // hasSubstantiveQuestion reads the WHOLE message: "My breakfast was 3 slices of bread, eggs and
-  // chicken livers" logs 669 kcal; prefix "What's the plan for me?" and nothing is written, then
-  // the client is told to log it. journeyMustKeepFacts owns "is this an unambiguous food REPORT".
-  const factOwed = journeyMustKeepFacts(message).food;
+  // A QUESTION IN ONE CLAUSE DOES NOT DELETE A FACT IN ANOTHER (2026-08-22 live P0; widened C12).
+  // journeyMustKeepFacts owned this only for food said in MEAL WORDS, so "I had a pear." is no
+  // report at bubble OR clause level and "I had a pear. What should I do today?" wrote nothing.
+  // A clause DENYING it is not a report either — mentionsNotDone owns that (C12 review).
+  const factOwed = journeyMustKeepFacts(message).food || (hasActualFood && !!reportedInSomeClause(message, c => explicitlyReportsFood(c) && !mentionsNotDone(c)));
   const foodLogOverride = hasLogTrigger && hasActualFood
     && (factOwed || (!hasSubstantiveQuestion && !classifierQuestion));
   // Diagnostic: when a meal silently fails to log in production, this line names the reason instantly.
