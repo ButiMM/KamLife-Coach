@@ -11,6 +11,8 @@
  * fabricating.
  */
 
+// The one owner for "did the CLIENT name a meal slot" — see parseMealRepeatTarget (C11).
+import { explicitMealSlot } from "./understanding/actions";
 
 /**
  * Which meal is being REPEATED and where does it go — pure, so it's unit-testable
@@ -40,8 +42,22 @@ export function parseMealRepeatTarget(m: string): { crossish: boolean; targetLab
   // "same as my lunch" NAMES THE SOURCE, NOT THE TARGET (Cut 2). This asked the send clock what
   // to call the copy, so a 16:40 repeat of lunch was stored as somebody's "snack" and a 19:10 one
   // as their "dinner" — a slot they never said, written as a fact about them. Unknown is null.
+  // …BUT IF THEY NAMED THE TARGET TOO, THAT IS NOT THE CLOCK TALKING (C11, 2026-09-16).
+  //
+  // "Same as lunch for dinner" matches sameAsMealM — which captures "lunch" as the SOURCE and
+  // returns a null target by the rule above — and the "for dinner" that follows was never read.
+  // Measured on e53763b: the copy's calories and items were exact, and meal_label came back NULL,
+  // so the client's dinner sat on the day as a meal nobody could see as a dinner.
+  //
+  // explicitMealSlot is the codebase's one owner for "did the CLIENT name a slot", and C9 made it
+  // clause-aware. Asking it costs nothing here and keeps Cut 2's guarantee intact by construction:
+  // a target is only taken when the client named a slot that is NOT the source they are copying
+  // from. "Same as my lunch" still resolves to lunch-as-source and a null target, exactly as
+  // before, because the only slot named IS the source.
+  const namedTarget = sameAsMealM ? explicitMealSlot(m) : null;
+  const sourceNamed = sameAsMealM ? sameAsMealM[1].toLowerCase().replace("supper", "dinner") : null;
   const targetLabel = crossMealM ? crossMealM[1].toLowerCase().replace("supper", "dinner")
-    : sameAsMealM ? null
+    : sameAsMealM ? (namedTarget && namedTarget !== sourceNamed ? namedTarget : null)
     : sameForM ? sameForM[1].toLowerCase().replace("supper", "dinner")
     : sameBeM ? sameBeM[1].toLowerCase().replace("supper", "dinner")
     : null;

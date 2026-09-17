@@ -149,7 +149,12 @@ p="server/meal-select.ts"; s=open(p).read(); b=s
 s=s.replace('import { parseMealDate }', 'import { slotFromSastHour } from "./utils";\nimport { parseMealDate }')
 if "slotFromSastHour" not in s:
     s = 'import { slotFromSastHour } from "./utils";\n' + s
-s=s.replace("    : sameAsMealM ? null", "    : sameAsMealM ? slotFromSastHour()")
+# THE SEAM MOVED, THE MECHANISM DID NOT (C11, 2026-09-16). This anchored on
+# `: sameAsMealM ? null`, and C11 rewrote that arm so an EXPLICITLY NAMED target survives
+# ("Same as lunch for dinner" stored meal_label NULL). Cut 2's guarantee is untouched: with no
+# named target — or with only the source named — the arm still evaluates to null, never the send
+# clock. Re-anchored, not relaxed: same file, same arm, same mutation, same claim.
+s=s.replace("    : sameAsMealM ? (namedTarget && namedTarget !== sourceNamed ? namedTarget : null)", "    : sameAsMealM ? slotFromSastHour()")
 assert s!=b and "sameAsMealM ? slotFromSastHour()" in s, "no match"; open(p,"w").write(s)
 PY
 

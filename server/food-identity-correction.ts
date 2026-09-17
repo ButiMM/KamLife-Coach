@@ -42,6 +42,16 @@ const NOT_A_SWAP = /\bnot\s+(?:sure|really|going|yet|today|hungry|feeling|well|g
 // reading is already caught by NOT_A_SWAP and the fullness handler in food-commands.)
 const NOT_A_FOOD = /^(?:i|we|you|he|she|they|train|trained|training|eat|ate|eating|go|going|went|do|did|doing|work|worked|feel|felt|know|think|want|need|sure|fine|ok|okay|good|great|bad|hard|easy|better|worse|right|wrong|done|ready|late|early|hungry|sick|tired)\b/i;
 
+// A quantity, however it is spelled. This module is import-free by design, so the word list lives
+// here rather than reaching for normaliseWordNumbers; it is the same closed set, and it exists for
+// one purpose — to route a quantity claim to parseQuantityCorrection instead of the identity path.
+// A Set rather than an alternation so the digit test below stays the only regex this needs.
+const NUMBER_WORDS = new Set(["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "half"]);
+function isPureNumber(s: string): boolean {
+  const t = (s || "").trim().toLowerCase();
+  return /^\d+(\.\d+)?$/.test(t) || NUMBER_WORDS.has(t);
+}
+
 const STRIP = /^(?:a|an|the|some|my|it|that|this)\s+/i;
 
 function clean(s: string): string {
@@ -94,7 +104,12 @@ export function parseIdentityCorrection(message: string): IdentityCorrection | n
 function valid(right: string, wrong: string): boolean {
   if (!right || !wrong || right === wrong) return false;
   // A pure number on either side is a QUANTITY correction — parseQuantityCorrection owns those.
-  if (/^\d+(\.\d+)?$/.test(right) || /^\d+(\.\d+)?$/.test(wrong)) return false;
+  // WRITTEN-OUT NUMBERS ARE NUMBERS TOO (C11, 2026-09-16). This tested digits only, so the rule
+  // held for "not 1" and leaked for "not one" — the same claim, routed to a different owner by
+  // nothing but spelling. The identity path then took "one" as a food to remove, matched it
+  // against nothing, and (before the unresolved guard) let the add land alone: "Actually it was
+  // two chicken breasts not one" turned a 580 kcal day into 877.
+  if (isPureNumber(right) || isPureNumber(wrong)) return false;
   if (NOT_A_FOOD.test(right) || NOT_A_FOOD.test(wrong)) return false;
   if (right.split(" ").length > 4 || wrong.split(" ").length > 4) return false;
   return true;
@@ -234,8 +249,12 @@ const STOPWORDS = new Set(["it", "that", "this", "them", "those", "yesterday", "
 
 export function planCorrection(message: string, movesDay: boolean): CorrectionPlan {
   const s = String(message || "").toLowerCase();
-  const remove = allGroups(REMOVE_CUES, s);
-  const add = allGroups(ADD_CUES, s);
+  // A BARE QUANTITY IS NOT A FOOD TO REMOVE (C11). "not one" / "not 1" is a claim about HOW MUCH,
+  // and parseQuantityCorrection owns that question — see `valid` above, which applies the same
+  // rule on the identity side. Without this the cue captured the number itself, so the plan asked
+  // for a removal no plate could satisfy and the correction degraded into an addition.
+  const remove = allGroups(REMOVE_CUES, s).filter(f => !isPureNumber(f));
+  const add = allGroups(ADD_CUES, s).filter(f => !isPureNumber(f));
   // "it was pap, not rice" is a REPLACE — parseIdentityCorrection already reads that shape, so
   // this asks it rather than keeping a second copy of the same three regexes.
   const ic = parseIdentityCorrection(message);
@@ -260,22 +279,39 @@ export function planCorrection(message: string, movesDay: boolean): CorrectionPl
  * into its parts only when a removal actually targets one of them; otherwise it is left exactly
  * as logged, because splitting a dish nobody is correcting would change numbers for no reason.
  */
+// A REMOVAL WE CANNOT RESOLVE IS NOT A REMOVAL WE MAY IGNORE (C11, 2026-09-16).
+//
+// The loop below used to `continue` past a removal that matched no stored item, and the add loop
+// ran anyway — so a correction whose removal could not be placed silently degraded into an
+// APPEND. Measured on e53763b through the live front door:
+//
+//     13:00  "I had chicken and rice"                         -> 580 kcal
+//     14:00  "Actually it was two chicken breasts not one"     -> 877 kcal
+//
+// The client corrected their record downward and the coach added 297 kcal to it. planCorrection
+// had put the quantity WORD "one" into `remove`, and "one" matches no food, so the removal
+// vanished while the add landed.
+//
+// `unresolved` is the fix's whole mechanism: the caller can now tell "I replaced what they named"
+// from "I could not find what they named and added something anyway", which are opposite
+// outcomes that used to be the same return value.
 export function applyCorrection<T extends { name?: string }>(
   items: T[],
   plan: CorrectionPlan,
   resolve: (food: string) => T | null,
-): { items: T[]; removed: string[]; added: string[] } {
+): { items: T[]; removed: string[]; added: string[]; unresolved: string[] } {
   const hits = (name: string, food: string) => {
     const a = name.toLowerCase(), b = food.toLowerCase();
     return a === b || a.includes(b) || b.includes(a);
   };
   let work: T[] = [...items];
   const removed: string[] = [];
+  const unresolved: string[] = [];
 
   for (const food of plan.remove) {
     // A whole item that IS the food goes.
     const exact = work.findIndex(i => hits(String(i.name || ""), food));
-    if (exact === -1) continue;
+    if (exact === -1) { unresolved.push(food); continue; }
     const name = String(work[exact].name || "");
     const parts = name.split(/\s*(?:,|\band\b|\bwith\b|\+)\s*/i).map(p => p.trim()).filter(Boolean);
     if (parts.length > 1) {
@@ -294,7 +330,7 @@ export function applyCorrection<T extends { name?: string }>(
     const r = resolve(food);
     if (r) { work.push(r); added.push(food); }
   }
-  return { items: work, removed, added };
+  return { items: work, removed, added, unresolved };
 }
 
 /**

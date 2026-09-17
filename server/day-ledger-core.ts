@@ -25,6 +25,79 @@ export interface DayLedger {
   meals: LedgerMeal[];
 }
 
+/**
+ * THE CANONICAL ITEM — the shape the nutritional ledger is written in (C11, 2026-09-16).
+ *
+ * The governing contract for food truth is one sentence: persisted canonical items ARE the
+ * nutritional ledger, and meal calories equal the sum of their persisted item calories. That
+ * makes the item — not the row total, not the reply, not the card — what every surface must agree
+ * with, so its shape belongs here beside the ledger's other shapes rather than inside a handler.
+ *
+ * WHAT WAS DROPPED, AND WHY IT MATTERED. The mapper this replaces kept name/grams/kcal/protein/
+ * category/origin and discarded everything explaining where the number came from.
+ * adjustFoodsForSegment computes `quantity` and `portionSource` ("explicit" | "vague" | "size" |
+ * "personal" | "default") precisely so an inferred portion carries HOW it was decided; both died
+ * one function later. `grams` is the quantity multiplied INTO the table portion, so it cannot be
+ * divided back out without knowing that portion at read time.
+ *
+ * So a row could state 580 kcal and nothing could say whether the client measured it, we
+ * estimated it, or it came from their own history — no surface could explain the number, no
+ * correction could reproduce it, and a repeat copied a figure with no provenance at all.
+ *
+ * NO MIGRATION, NO SECOND LEDGER: meal_logs.items is jsonb and already free-form. These are extra
+ * keys on the same object; every reader destructuring name/grams/kcal/protein is untouched, and a
+ * row written before this reads exactly as it did — the new keys are simply absent, which is the
+ * honest record for a row whose provenance was never captured.
+ */
+/** What a persisted food item records. Optional fields are absent on rows written before C11. */
+export interface LedgerItem {
+  name: string;
+  grams: number;
+  kcal: number;
+  protein: number;
+  category: string;
+  /** "db" when the food table priced it; "ai" when we interpreted the amount. */
+  origin: string;
+  /** Multiples of the food's canonical portion. 1 means one table portion. */
+  quantity?: number;
+  /** The client's own unit word — "cups", "slices", "spoons" — when they used one. */
+  unit?: string | null;
+  /** How the portion was decided: explicit | vague | size | personal | default. */
+  portionSource?: string | null;
+  /** The portion this was priced against, scaled — "2 cups cooked (400g)". */
+  portionDescription?: string | null;
+  /** Preparation basis the CLIENT stated: cooked | uncooked | raw | dry | dried. */
+  basis?: string | null;
+  /** Preparation basis the food table's canonical portion is expressed in, when it says. */
+  canonicalBasis?: string | null;
+}
+
+/**
+ * Build canonical items from the foods adjustFoodsForSegment has priced.
+ *
+ * Deliberately total: every field is derived from what the pricer produced, so an item can never
+ * claim provenance the pricing did not actually have. Absent is absent — `null`, not a guess.
+ */
+export function itemsFromAdjusted(foods: any[]): LedgerItem[] {
+  return (foods || []).map((f: any) => {
+    const quantity = Number(f.quantity) || 1;
+    return {
+      name: f.name,
+      grams: Math.round((f.typicalPortionGrams || 100) * quantity),
+      kcal: f.adjustedCalories,
+      protein: f.adjustedProtein,
+      category: f.category,
+      origin: f.origin || "db",
+      quantity,
+      unit: f.statedUnit ?? null,
+      portionSource: f.portionSource ?? null,
+      portionDescription: f.adjustedDescription ?? f.typicalPortionDescription ?? null,
+      basis: f.statedBasis ?? null,
+      canonicalBasis: f.canonicalBasis ?? null,
+    };
+  });
+}
+
 export interface LedgerRow {
   label: string | null; kcal: number | null; protein: number | null;
   carbs: number | null; fat: number | null; loggedAt: Date | null;
@@ -40,8 +113,10 @@ export function freshTodayWater(waterLastResetDate: string | null | undefined, t
   return Math.round(v * 10) / 10;
 }
 
-// A meal row → its readable food description.
-function foodsOf(items: unknown, raw: string | null): string {
+// A meal row → its readable food description. Exported because a correction that cannot be
+// placed has to say what IS held, and "what is held" must read the same way there as it does on
+// the card and in the diary — one owner, not a second phrasing of the same rows (C11 review).
+export function foodsOf(items: unknown, raw: string | null): string {
   if (Array.isArray(items)) {
     const names = items.map((i: any) => (i && typeof i.name === "string" ? i.name : "")).filter(Boolean);
     if (names.length) return names.join(", ");
