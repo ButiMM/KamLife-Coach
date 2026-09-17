@@ -1008,20 +1008,13 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   });
   if (foodCtxResult !== null) commitFact(turn, "food", foodCtxResult + _backfillNote);
   // ── THE ONE COMPOSE ── replaces the former food+feeling and food+steps special cases.
-  const hasFeeling = (turnFacts.hasFeeling || carriesFeelingClause(message)) && !foodDayIsClosed(message);
+  const hasFeeling = (turnFacts.hasFeeling || carriesFeelingClause(message)) && !foodDayIsClosed(message); const canonicalCloseOwnsQuestion = looksLikeDirectionRequest(clausesOf(message).slice(-1)[0] || message);
   // WRITE THEN COACH: a question plus a durable write is two jobs; the adapter must not finish.
   // This is deliberately broader than isMultiPartAsk so short log+ask turns also continue.
-  //
-  // ── THE ACK CLAIMED A QUESTION IT DOES NOT ANSWER (C12, 2026-09-17) ───────────────────────
-  // canonicalCloseOwnsQuestion was asserted from looksLikeDirectionRequest on the last clause — a
-  // claim about what the CLIENT ASKED, where the name claims what the ACK CONTAINS. Only the second
-  // licenses closing the turn here, and composeMessyAck joins the committed fact parts and nothing
-  // else. So it short-circuited "write then coach" on exactly the turns needing it: measured, "I had
-  // a pear. What should I do today?" delivered "Got it — Pear. 👌" and nothing about today. Not
-  // passed — a predicate that can only return false is the same false claim with a longer name.
   const resolved = resolveTurn(turn, {
     hasFeeling,
     alsoAsksCoach: looksLikeQuestion(message) && durableDomains(turnMutations()).length > 0,
+    canonicalCloseOwnsQuestion,
     // `committed` means COMMITTED now — read off the turn's durable write record.
     durableWrites: turnMutations(),
   });
