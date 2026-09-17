@@ -886,7 +886,12 @@ export function classifyPainReport(m: string): PainClass | null {
   const bodyPart = /\b(knee|knees|shoulder|shoulders|back|ankle|ankles|wrist|wrists|hip|hips|neck|elbow|elbows|leg|legs|arm|arms|hamstring|quad|calf|calves|glute|chest muscle|muscle)\b/i;
   const mentionsPain = /\b(pain|painful|hurts?|hurting|sore|soreness|stiff|aching|aches?|doms|eina)\b/i.test(s)
     || /\b(pulled|strained|tore|torn|twisted|sprained|injur|swollen|swelling|popped|gave (?:way|in|out))\b/i.test(s)
-    || (bodyPart.test(s) && /\b(problems?|issues?|trouble|acting up|playing up|niggle|niggling)\b/i.test(s));
+    // A JOINT SYMPTOM IS A PAIN REPORT EVEN WITHOUT THE WORD PAIN (C13, 2026-09-17). Measured:
+    // "my knee is clicking after the squats" returned null here, so the safety owner never saw a
+    // knee complaint at all and the turn was answered with "tell me what you ate today". These
+    // are joint-mechanical words a client uses instead of "sore", and they only count NEXT TO a
+    // named body part — "the clock is clicking" is not a knee.
+    || (bodyPart.test(s) && /\b(problems?|issues?|trouble|acting up|playing up|niggle|niggling|click(?:s|ing|y)?|crunch(?:es|ing|y)?|grind(?:s|ing)?|lock(?:s|ing|ed)?|giving\s+me\s+grief)\b/i.test(s));
   if (!mentionsPain) return null;
   // INJURY — sharp/structural signals, or pain that worsens under load.
   if (/\b(sharp|stabbing|shooting|popped|pop sound|snapped|tore|torn|tear|sprain(?:ed)?|twisted|swollen|swelling|gave (?:way|in|out)|can'?t (?:bend|straighten|put weight)|pulled (?:a muscle|my)|strained my|i (?:hurt|injured) my|got injured|injury)\b/i.test(s)) return "injury";

@@ -359,7 +359,15 @@ export function adjudicableSessionCounts(text: string): number[] {
     .filter(seg => !OUT_OF_WINDOW.test(seg) && !TARGET_MARKER.test(seg) && !isMissClaim(seg))
     // "2/4 sessions" — keep the numerator, drop the denominator. The trailing space matters:
     // without it "2/4" would become "24".
-    .map(seg => seg.replace(/(\d{1,2})\s*\/\s*\d{1,2}/g, "$1 "))
+    //
+    // …AND A DAY IS NOT A SESSION (C13, 2026-09-17). SESSION_COUNT allows filler words between the
+    // number and the noun, so the DOMS reply's "Peak soreness is usually day 2 after training" was
+    // read as a claim of TWO sessions. Measured on f6b424b: a client saying "my knee is sore after
+    // the squats" had the safety owner's answer BLOCKED — session_count_contradicts_record, said 2,
+    // record holds 0 — and received the outbound repair stall instead. The sibling case is already
+    // documented below as isMissClaim; this is the same class, bound to "day" instead of "missed".
+    // Widening the existing replace rather than adding a matcher keeps the regex budget where it is.
+    .map(seg => seg.replace(/(\d{1,2})\s*\/\s*\d{1,2}|\bday\s+\d{1,2}\b/gi, (_m, num) => (num ? `${num} ` : "day ")))
     .flatMap(seg => sessionCountsIn(seg));
 }
 
