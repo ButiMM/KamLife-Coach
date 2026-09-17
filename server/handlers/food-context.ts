@@ -630,7 +630,28 @@ export async function handleFoodContext(ctx: {
   // hasSubstantiveQuestion reads the WHOLE message: "My breakfast was 3 slices of bread, eggs and
   // chicken livers" logs 669 kcal; prefix "What's the plan for me?" and nothing is written, then
   // the client is told to log it. journeyMustKeepFacts owns "is this an unambiguous food REPORT".
-  const factOwed = journeyMustKeepFacts(message).food;
+  // ── AND THE RULE ONLY HELD FOR FOOD SAID IN MEAL WORDS (C12, 2026-09-17) ──────────────────
+  //
+  // journeyMustKeepFacts asks parseMessyIntake, which needs a meal word or a comparably strong
+  // form before it calls a clause a food REPORT. "I had a pear." is not one of those, so it
+  // parses as no report — at bubble level AND clause by clause. Measured: "I had a pear. What
+  // should I do today?" wrote NOTHING and answered *"Got it — you ate something. Tell me the
+  // items in one line"*, about the item the client had just named, while "I had a pear" alone
+  // logs fine. A question in the next sentence deleted the fact, which is the exact defect the
+  // rule above was written against, surviving in the phrasings the parser cannot see.
+  //
+  // Worse, the journey that DID work was working by accident: in "I had a pear. What should I
+  // have for dinner tonight?" it is the word "dinner" — inside the QUESTION — that flips the
+  // bubble-level parse to true. Neither clause reports food on its own, so the pear was kept
+  // for a reason that has nothing to do with the pear.
+  //
+  // The missing evidence is the food table, and messy-intake cannot consult it: that module has
+  // no imports by design and must not grow one. This handler already holds both halves — the
+  // scanner said a known food is named, and reportedInSomeClause (the C9 floor: per-clause, with
+  // the asking and future-intent tests applied) says some clause reports eating it. A clause
+  // that reports eating a food we can price is a food report, whatever words it used.
+  const factOwed = journeyMustKeepFacts(message).food
+    || (hasActualFood && !!reportedInSomeClause(message, explicitlyReportsFood));
   const foodLogOverride = hasLogTrigger && hasActualFood
     && (factOwed || (!hasSubstantiveQuestion && !classifierQuestion));
   // Diagnostic: when a meal silently fails to log in production, this line names the reason instantly.
