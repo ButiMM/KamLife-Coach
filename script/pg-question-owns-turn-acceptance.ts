@@ -67,7 +67,13 @@ process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
 
 /** The mouth's answer. Deliberately says nothing this file grades — see the header. */
-const COACH_ANSWER = "A pear is a fine snack and it is already on your record. Quick protein-first options for a late dinner are plain yoghurt with fruit, or tinned fish on toast.";
+// THE MOUTH'S ANSWER — deliberately shares NO WORD with anything this file grades (C12 review).
+// The first version read "Quick protein-first options for a late dinner…", so /protein/i matched
+// the STUB whenever a turn reached the coach — including on the revert where the ladder's move
+// was dropped. A grader must name something only the owner under test can emit, so this string
+// contains neither "protein" nor "dinner", and its sentinel phrase appears nowhere in the product.
+const COACH_SENTINEL = /tinned fish on toast/i;
+const COACH_ANSWER = "Yoghurt with fruit, or tinned fish on toast, sits well this evening and fits what you have left today.";
 const CLASSIFY = `{"intent":"OTHER","confidence":0.85,"canonical":""}`;
 
 const realFetch = globalThis.fetch;
@@ -231,6 +237,20 @@ const isPlanDump = (b: string): boolean =>
   chk(namesUnpriced("⚠️ I could not price *what, should* — not in the total yet.")
     && !namesUnpriced("Got it — Pear. 👌"),
     "the unpriced-words detector fires on the measured defect and not on a clean receipt");
+  // THE SENTINEL MUST REJECT THE DEFECT IT IS AIMED AT. Section 4 claims the dinner question is
+  // ANSWERED; the shape that must fail it is the one measured on this branch — the receipt plus the
+  // ladder's protein staple and nothing about dinner. Validated here so the claim cannot be met by
+  // a body that never answers, and so the sentinel is shown to share no word with a ladder move.
+  const STAPLE_ONLY = "Got it — Pear. 👌\n\nMake your next meal a proper protein meal.";
+  chk(!COACH_SENTINEL.test(STAPLE_ONLY),
+    "the coach sentinel REJECTS a receipt-plus-protein-staple body — the measured failure shape",
+    `body=${JSON.stringify(STAPLE_ONLY)}`);
+  chk(COACH_SENTINEL.test(COACH_ANSWER) && !/protein|dinner/i.test(COACH_ANSWER),
+    "…accepts the Coach's own answer, and that answer contains neither \"protein\" nor \"dinner\"",
+    `stub=${JSON.stringify(COACH_ANSWER)}`);
+  chk(!/proper protein meal/i.test(COACH_ANSWER),
+    "…so the ladder-move assertion cannot be satisfied by the fixture mouth",
+    `stub=${JSON.stringify(COACH_ANSWER)}`);
   chk(isPlanDump("Here's your plan, Thandi 👇\n\n*Today:*\n💪 Training day")
     && isPlanDump("x\n\n*This week:*\nTrain 3 days")
     && !isPlanDump("Thandi — one thing today:\n\n*Just say hi.*"),
@@ -284,7 +304,7 @@ REAL("\n2. THE QUESTION IS ANSWERED BY ONE MOUTH, NOT BY A RECEIPT AND NOT BY TH
   // the closing block as the next action already claimed, and withNextMove then declined to append
   // the real one. Grading only "an answer was sent" would have passed that turn, so the move
   // itself is graded.
-  chk(/protein/i.test(same.last),
+  chk(/proper protein meal/i.test(same.last),
     "…and it is the move the decision ladder actually computed, not a shorter reply that dropped it",
     `body=${JSON.stringify(same.last.slice(-200))}`);
 
@@ -319,10 +339,17 @@ REAL("\n3. THE SAME-TURN WRITE IS VISIBLE TO THE DECISION");
     "…nor price the question's own words as unlogged food",
     `body=${JSON.stringify(late.last.slice(0, 260))}`);
 
-  // THE NEGATIVE HALF: a genuinely empty late day SHOULD still be asked. Without this the claim
-  // above is satisfied by a product that simply never asks, which is a different defect.
+  // THE NEGATIVE HALF, AND WHAT IT CANNOT SHOW (C12 review). The claim above would also be
+  // satisfied by a product that never asks at all, so the honest counterweight is a genuinely
+  // empty late day. MEASURED: this fixture's client is ~14 weeks absent, so the re-entry rung
+  // ("Just say hi") outranks askToLog and the empty day is not asked to log either. The negative
+  // half is therefore NOT established here, and this says so rather than asserting a demand that
+  // does not arrive or re-dating the fixture to manufacture one. What it does hold is that the
+  // bare question writes nothing — the half that matters for the claim this section makes.
   const empty = await journey("late-empty", [[19, "What should I do today?"]]);
   chk(empty.rows.length === 0, "CONTROL: nothing is written for a bare question", `rows=${empty.rows.length}`);
+  chk(!/could not price/i.test(empty.last),
+    "CONTROL: …and a bare question is never priced as food", `body=${JSON.stringify(empty.last.slice(0, 160))}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -377,6 +404,18 @@ REAL("\n4. THE CONTROLS — every shape the repair must leave exactly as it was"
     `rows=${c9.rows.length} label=${JSON.stringify(c9.rows[0]?.meal_label)}`);
   chk(!asksToLogFood(c9.last), "CONTROL: …and still does not ask for the pear back",
     `body=${JSON.stringify(c9.last.slice(0, 220))}`);
+  // AND THE DINNER QUESTION IS ANSWERED, WHICH STORAGE NEVER PROVED (C12 review). This control
+  // asserted the stored row and the absence of a re-log ask, so a body of receipt + the ladder's
+  // protein staple satisfied it completely — the client asks what to have for dinner and is told
+  // to make their next meal a protein one, which is not an answer to what they asked. The mouth is
+  // stubbed, so what is graded is WHICH OWNER SPOKE: the coach's answer reaching the client is the
+  // deterministic half, and its sentinel shares no word with the receipt or with any ladder move.
+  chk(COACH_SENTINEL.test(c9.last),
+    "CONTROL: …and the dinner question is answered by the Coach, not replaced by a staple move",
+    `body=${JSON.stringify(c9.last.slice(0, 260))}`);
+  chk(!/^got it — pear\. ?👌/i.test(c9.last.trim()),
+    "CONTROL: …so the turn does not close on the receipt alone",
+    `body=${JSON.stringify(c9.last.slice(0, 200))}`);
 }
 
 REAL(`\n${failed === 0 ? "pg-question-owns-turn-acceptance: GREEN" : `pg-question-owns-turn-acceptance: ${failed} FAILED`}\n`);
