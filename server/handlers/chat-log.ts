@@ -230,7 +230,19 @@ function isMeaningfulClientMessage(message: string): boolean {
 }
 
 function extractStepNumbers(text: string): number[] {
-  const matches = text.match(/\b\d{1,3}(?:,\d{3})*\s*steps?\b/gi) || [];
+  // READ THE LOCALE THE PRODUCT WRITES IN (C13, 2026-09-17).
+  //
+  // This recognised COMMA grouping only, while every step figure the product renders is written
+  // with toLocaleString("en-ZA") — which groups with a NON-BREAKING SPACE. So "8\u00a0500 steps"
+  // was read as "500 steps": the verifier compared 500 against the authoritative 8500, decided it
+  // was wrong, and replaceNumberToken rewrote it to "8 8,500 steps — nice one". A client who said
+  // eight thousand five hundred was shown two numbers, neither of them what they said.
+  //
+  // The row was never wrong; this is the BODY. The writers keep the house format the rest of the
+  // suite asserts ("the day holds 9 000"), and the reader is taught the same grouping instead —
+  // the separator set is exactly what toLocaleString emits, so there is still one locale, now
+  // spoken by both owners rather than one.
+  const matches = text.match(/\b\d{1,3}(?:[,\u00a0\u202f ]\d{3})*\s*steps?\b/gi) || [];
   return [...new Set(matches.map(v => Number(v.replace(/\D/g, ""))).filter(n => Number.isFinite(n)))];
 }
 

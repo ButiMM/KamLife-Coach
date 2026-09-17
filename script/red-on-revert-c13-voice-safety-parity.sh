@@ -15,6 +15,7 @@ FILES=(
   server/handlers/misc-commands.ts
   server/utils.ts
   server/brain/reply-verifier.ts
+  server/handlers/chat-log.ts
 )
 
 for f in "${FILES[@]}"; do cp "$f" "$WORK_ROOT/$(printf '%s' "$f" | tr '/' '_')"; done
@@ -87,9 +88,17 @@ run_case "a calendar day is read as a completed session" server/brain/reply-veri
   '.map(seg => seg.replace(/(\d{1,2})\s*\/\s*\d{1,2}|\bday\s+\d{1,2}\b/gi, (_m, num) => (num ? `${num} ` : "day ")))' \
   '.map(seg => seg.replace(/(\d{1,2})\s*\/\s*\d{1,2}/g, "$1 "))' || failed=$((failed + 1))
 
+# 4. THE VERIFIER STOPS READING THE LOCALE THE PRODUCT WRITES IN. extractStepNumbers goes back to
+#    comma-only grouping, so the en-ZA non-breaking space hides the thousands: it reads "500",
+#    compares it to 8500 and "corrects" a number that was never wrong — the client hears
+#    "8 8,500 steps — nice one" after saying eight thousand five hundred.
+run_case "the verifier cannot read the locale the product writes in" server/handlers/chat-log.ts \
+  '  const matches = text.match(/\b\d{1,3}(?:[,\u00a0\u202f ]\d{3})*\s*steps?\b/gi) || [];' \
+  '  const matches = text.match(/\b\d{1,3}(?:,\d{3})*\s*steps?\b/gi) || [];' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-c13-voice-safety-parity: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-c13-voice-safety-parity: GREEN — 3/3 behavioral reverts caught"
+echo "red-on-revert-c13-voice-safety-parity: GREEN — 4/4 behavioral reverts caught"

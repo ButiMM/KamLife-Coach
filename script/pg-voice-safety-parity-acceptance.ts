@@ -307,6 +307,24 @@ REAL("\n4. VOICE PARITY — the spoken forms land where the typed forms do");
     "a spoken count is stored as 8500 — not 8000, not 8, not 85",
     `rows=${JSON.stringify(st)}`);
   chk(!IS_STALL(spoken.last), "…and the turn is answered", `body=${JSON.stringify(spoken.last.slice(0, 160))}`);
+  // THE BODY, NOT ONLY THE ROW (C13). The row was always 8500; what the client HEARD was
+  // "8 8,500 steps — nice one". getStepResponse rendered "8\u00a0500" (en-ZA groups with a
+  // non-breaking space) and extractStepNumbers recognises comma grouping only, so it read "500",
+  // compared it to 8500 and "corrected" a number that was never wrong. Graded on the delivered
+  // body: exactly one step figure, and it is the stored one.
+  const figures = (spoken.last.match(/\d[\d,\u00a0 ]*(?=\s*steps)/gi) || []).map(t => t.replace(/[^\d]/g, ""));
+  chk(figures.length === 1 && figures[0] === "8500",
+    "the body carries ONE step figure and it is the stored one — never \"8 8,500\"",
+    `figures=${JSON.stringify(figures)} body=${JSON.stringify(spoken.last.slice(0, 160))}`);
+  chk(!/\b8\s+8[,\u00a0 ]?500\b/.test(spoken.last),
+    "…and the measured duplication shape is absent",
+    `body=${JSON.stringify(spoken.last.slice(0, 160))}`);
+  // PARITY: the digit form and the spoken form say the same thing to the client.
+  await pool.query("DELETE FROM step_logs WHERE user_id = $1", [user.id]);
+  const typed = await isolated(13, "I walked 8500 steps today", "c13-typed");
+  chk(typed.last.split("steps")[0].trim() === spoken.last.split("steps")[0].trim(),
+    "…and the typed form renders the figure identically — one locale, both paths",
+    `spoken=${JSON.stringify(spoken.last.slice(0, 60))} typed=${JSON.stringify(typed.last.slice(0, 60))}`);
   await pool.query("DELETE FROM step_logs WHERE user_id = $1", [user.id]);
 
   const voicePear = await isolated(13, "I had a pear", "c13-pear");
