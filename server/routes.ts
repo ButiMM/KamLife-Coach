@@ -1008,13 +1008,29 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   });
   if (foodCtxResult !== null) commitFact(turn, "food", foodCtxResult + _backfillNote);
   // ── THE ONE COMPOSE ── replaces the former food+feeling and food+steps special cases.
-  const hasFeeling = (turnFacts.hasFeeling || carriesFeelingClause(message)) && !foodDayIsClosed(message); const canonicalCloseOwnsQuestion = looksLikeDirectionRequest(clausesOf(message).slice(-1)[0] || message);
+  const hasFeeling = (turnFacts.hasFeeling || carriesFeelingClause(message)) && !foodDayIsClosed(message);
   // WRITE THEN COACH: a question plus a durable write is two jobs; the adapter must not finish.
   // This is deliberately broader than isMultiPartAsk so short log+ask turns also continue.
+  //
+  // ── THE ACK CLAIMED A QUESTION IT DOES NOT ANSWER (C12, 2026-09-17) ───────────────────────
+  //
+  // canonicalCloseOwnsQuestion was asserted from looksLikeDirectionRequest on the last clause —
+  // that is a claim about what the CLIENT ASKED, while the name is a claim about what the ACK
+  // CONTAINS. They are different propositions, and only the second one licenses closing the turn
+  // here. composeMessyAck joins the committed fact parts and nothing else: there is no canonical
+  // close in it, for a direction request or anything else.
+  //
+  // So the flag short-circuited "write then coach" on exactly the turns that needed it, and the
+  // client got the receipt alone. Measured: "I had a pear. What should I do today?" delivered
+  // "Got it — Pear. 👌" and not one word about today. The question was owned by a sentence that
+  // was never going to answer it.
+  //
+  // It is not passed. Writing a predicate here that can only ever return false would be the same
+  // false claim with a longer name; if an ack ever does compose the close, that is the day this
+  // argument comes back, with the ledger as its evidence.
   const resolved = resolveTurn(turn, {
     hasFeeling,
     alsoAsksCoach: looksLikeQuestion(message) && durableDomains(turnMutations()).length > 0,
-    canonicalCloseOwnsQuestion,
     // `committed` means COMMITTED now — read off the turn's durable write record.
     durableWrites: turnMutations(),
   });

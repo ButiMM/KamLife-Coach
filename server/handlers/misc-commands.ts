@@ -148,7 +148,21 @@ export async function handleMiscCommands(ctx: {
     } catch (e) { console.error("[GOAL_DISTANCE]", e); }
   }
 
-  if (looksLikeDirectionRequest(m)) {
+  // ── A TURN THAT JUST WROTE A FACT IS NOT A COLD "WHAT'S THE PLAN" (C12, 2026-09-17) ────────
+  //
+  // buildDailyDirection answers the whole-plan ask across every pillar, which is right for a
+  // client opening with "what's my plan". It is wrong the moment the same words ride along with
+  // a report: "I had a pear. What should I do today?" logged the pear and then answered with
+  // "Here's your plan 👇", four pillars, a week summary and a *Log food* button — on the turn
+  // that had just logged food. Measured; the bare question reaches the one-move owner and gets
+  // "one thing today", so the same question had two owners and the dump won whenever a fact
+  // was written.
+  //
+  // wroteThisTurn is the signal this handler already takes and already stands down on twice
+  // below, for the same reason: after a durable write the client is mid-conversation, not asking
+  // to be re-onboarded to their own programme. Standing down here hands the question to the
+  // canonical one-action owner instead of adding a second mouth beside it.
+  if (looksLikeDirectionRequest(m) && !wroteThisTurn) {
     const ws = await getTodayWorkoutState(user).catch(() => ({ type: "NORMAL" as const }));
     return buildDailyDirection(user, ws as any);
   }
