@@ -70,7 +70,7 @@ failed=0
 #    alone, which asks parseMessyIntake, which needs a meal word — so "I had a pear." is no report,
 #    the isQuestion veto stands, and the pear is dropped and then asked for back.
 run_case "a food report without a meal word is deleted by the question" server/handlers/food-context.ts \
-  '  const factOwed = journeyMustKeepFacts(message).food || (hasActualFood && !!reportedInSomeClause(message, explicitlyReportsFood));' \
+  '  const factOwed = journeyMustKeepFacts(message).food || (hasActualFood && !!reportedInSomeClause(message, c => explicitlyReportsFood(c) && !mentionsNotDone(c)));' \
   '  const factOwed = journeyMustKeepFacts(message).food;' || failed=$((failed + 1))
 
 # 2. THE QUESTION'S OWN WORDS ARE PRICED AS FOOD AGAIN. spansClaimedByOtherFacts stops claiming
@@ -79,8 +79,8 @@ run_case "a food report without a meal word is deleted by the question" server/h
 #    already claimed and withNextMove drops the coaching move the ladder had computed. One
 #    mutation, both harms, which is why it is one mutation.
 run_case "the question's own words are priced as unlogged food" server/unlogged-notice.ts \
-  '  for (const clause of clausesOf(message)) if (looksLikeQuestion(clause)) claimed.push(clause);' \
-  '  // reverted: question clauses claim nothing' || failed=$((failed + 1))
+  '    for (const part of clause.split(",")) if (looksLikeQuestion(part.trim())) claimed.push(part);' \
+  '    // reverted: no question fragment claims its own words' || failed=$((failed + 1))
 
 restore_case
 if [[ $failed -ne 0 ]]; then

@@ -26,7 +26,7 @@ import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from 
 import { logChat, withTimeout, turnMutation } from "./chat-log";
 import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
-import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting, reportedInSomeClause } from "../utils";
+import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting, reportedInSomeClause, mentionsNotDone } from "../utils";
 import { explicitMealSlot } from "../understanding/actions";
 // The canonical item shape — the nutritional ledger's own definition (C11).
 import { itemsFromAdjusted } from "../day-ledger-core";
@@ -628,9 +628,9 @@ export async function handleFoodContext(ctx: {
     || (isAskingNotReporting(m) && !isRetroactiveMeal(m));
   // A QUESTION IN ONE CLAUSE DOES NOT DELETE A FACT IN ANOTHER (2026-08-22 live P0; widened C12).
   // journeyMustKeepFacts owned this only for food said in MEAL WORDS, so "I had a pear." is no
-  // report at bubble OR clause level: "I had a pear. What should I do today?" wrote nothing, then
-  // asked for the item just named. messy-intake cannot read the food table (no imports by design).
-  const factOwed = journeyMustKeepFacts(message).food || (hasActualFood && !!reportedInSomeClause(message, explicitlyReportsFood));
+  // report at bubble OR clause level and "I had a pear. What should I do today?" wrote nothing.
+  // A clause DENYING it is not a report either — mentionsNotDone owns that (C12 review).
+  const factOwed = journeyMustKeepFacts(message).food || (hasActualFood && !!reportedInSomeClause(message, c => explicitlyReportsFood(c) && !mentionsNotDone(c)));
   const foodLogOverride = hasLogTrigger && hasActualFood
     && (factOwed || (!hasSubstantiveQuestion && !classifierQuestion));
   // Diagnostic: when a meal silently fails to log in production, this line names the reason instantly.

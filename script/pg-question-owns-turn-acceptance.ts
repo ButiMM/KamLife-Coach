@@ -353,6 +353,16 @@ REAL("\n4. THE CONTROLS — every shape the repair must leave exactly as it was"
     "CONTROL: …and still receives the whole-plan answer, which this cut does not take away",
     `body=${JSON.stringify(plan.last.slice(0, 220))}`);
 
+  // A CLAUSE THAT DENIES EATING IS NOT A REPORT OF IT (C12 review). explicitlyReportsFood matches
+  // the bare word "had", so widening factOwed to clause-scoped eating reports pulled a DENIAL into
+  // the override: "I had a pear in my bag but didn't eat it" would have written 103 kcal for food
+  // the client said they did not eat. The bare form logs on 33b477f too, so the defect predates
+  // this branch — but this branch would have carried it into every question-bearing turn.
+  const denied = await journey("denied-eating", [[13, "I had a pear in my bag but didn't eat it. What should I do today?"]]);
+  chk(denied.rows.length === 0,
+    "food the client says they did NOT eat is not written, question or no question",
+    `rows=${denied.rows.length} kcal=${denied.rows.map(r => r.kcal_int).join(",")}`);
+
   const pure = await journey("pure-question", [[19, "What should I have for dinner tonight?"]]);
   chk(pure.rows.length === 0,
     "CONTROL: a pure food question still writes no meal — asking is not reporting",

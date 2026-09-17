@@ -155,7 +155,13 @@ function spansClaimedByOtherFacts(message: string): string {
   //
   // This is the rule this function already states: not "is the word food-ish" but "did something
   // else in this note already claim it". A question clause claims its own words.
-  for (const clause of clausesOf(message)) if (looksLikeQuestion(clause)) claimed.push(clause);
+  // Only the INTERROGATIVE fragment, never the whole mixed clause (C12 review). clausesOf splits
+  // on sentence punctuation, so "I had rice with skopo and masonja, is that enough protein?" is
+  // ONE clause that ends in "?" — claiming it whole swallowed the reported foods too, and the
+  // client was never told skopo and masonja were missing from the total. Commas separate them.
+  for (const clause of clausesOf(message)) {
+    for (const part of clause.split(",")) if (looksLikeQuestion(part.trim())) claimed.push(part);
+  }
   // A reported session is a fact too, but it has no intent span — take the clause it sits in.
   if (r.hasWorkoutReport) {
     for (const clause of String(message).split(/[.!?,]|\band\b/i)) {
