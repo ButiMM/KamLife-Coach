@@ -1013,21 +1013,12 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // This is deliberately broader than isMultiPartAsk so short log+ask turns also continue.
   //
   // ── THE ACK CLAIMED A QUESTION IT DOES NOT ANSWER (C12, 2026-09-17) ───────────────────────
-  //
-  // canonicalCloseOwnsQuestion was asserted from looksLikeDirectionRequest on the last clause —
-  // that is a claim about what the CLIENT ASKED, while the name is a claim about what the ACK
-  // CONTAINS. They are different propositions, and only the second one licenses closing the turn
-  // here. composeMessyAck joins the committed fact parts and nothing else: there is no canonical
-  // close in it, for a direction request or anything else.
-  //
-  // So the flag short-circuited "write then coach" on exactly the turns that needed it, and the
-  // client got the receipt alone. Measured: "I had a pear. What should I do today?" delivered
-  // "Got it — Pear. 👌" and not one word about today. The question was owned by a sentence that
-  // was never going to answer it.
-  //
-  // It is not passed. Writing a predicate here that can only ever return false would be the same
-  // false claim with a longer name; if an ack ever does compose the close, that is the day this
-  // argument comes back, with the ledger as its evidence.
+  // canonicalCloseOwnsQuestion was asserted from looksLikeDirectionRequest on the last clause — a
+  // claim about what the CLIENT ASKED, where the name claims what the ACK CONTAINS. Only the second
+  // licenses closing the turn here, and composeMessyAck joins the committed fact parts and nothing
+  // else. So it short-circuited "write then coach" on exactly the turns needing it: measured, "I had
+  // a pear. What should I do today?" delivered "Got it — Pear. 👌" and nothing about today. Not
+  // passed — a predicate that can only return false is the same false claim with a longer name.
   const resolved = resolveTurn(turn, {
     hasFeeling,
     alsoAsksCoach: looksLikeQuestion(message) && durableDomains(turnMutations()).length > 0,
