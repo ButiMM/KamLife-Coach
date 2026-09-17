@@ -300,6 +300,16 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "question-owns-turn-reverts", title: "Every C12 question-owns-turn seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-c12-question-owns-turn.sh"] },
 
+  { id: "voice-safety-parity", title: "Pain reaches the safety owner, and its answer reaches the client",
+    // C13 (2026-09-17). "my knee is clicking and sore after the squats, should I take
+    // anti-inflammatories?" was answered by the SUPPLEMENT handler — "keep it consistent" — with
+    // the knee never mentioned; a clicking knee reached no safety owner at all; and once routing
+    // was fixed the DOMS answer was blocked by the truth floor reading "day 2" as two sessions.
+    command: ["npx", "tsx", "script/pg-voice-safety-parity-acceptance.ts"] },
+
+  { id: "voice-safety-parity-reverts", title: "Every C13 safety-parity seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-c13-voice-safety-parity.sh"] },
+
   { id: "turn-reply-integrity", title: "The reply reconcileTurnReply repaired is the reply that ships",
     // C10 (2026-09-15). reconcileTurnReply computed its write-integrity repair and directive strip
     // into `draft`, then returned `reply` — the original, unverified model string — from every
