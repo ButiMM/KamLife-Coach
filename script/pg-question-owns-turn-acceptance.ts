@@ -278,6 +278,15 @@ REAL("\n2. THE QUESTION IS ANSWERED BY ONE MOUTH, NOT BY A RECEIPT AND NOT BY TH
     `body=${JSON.stringify(same.last.slice(0, 260))}`);
   chk(same.last.trim().length > 40,
     "…the client receives an actual answer", `len=${same.last.trim().length}`);
+  // THE MOVE THE DECISION COMPUTED IS THE MOVE THAT SHIPS. Instrumented on 33b477f, the ladder
+  // returned kind=protein todo="Make your next meal a proper protein meal." and the delivered body
+  // carried none of it: the unpriced-words nag is a QUESTION, ownsNextAction reads a question in
+  // the closing block as the next action already claimed, and withNextMove then declined to append
+  // the real one. Grading only "an answer was sent" would have passed that turn, so the move
+  // itself is graded.
+  chk(/protein/i.test(same.last),
+    "…and it is the move the decision ladder actually computed, not a shorter reply that dropped it",
+    `body=${JSON.stringify(same.last.slice(-200))}`);
 
   // TWO TURNS, THE CTO'S SECOND NAMED JOURNEY. Log, then ask. The ask is its own turn, so the
   // write is in the record rather than in flight — and the answer must still be one move.

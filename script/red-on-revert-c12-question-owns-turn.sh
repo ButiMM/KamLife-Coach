@@ -13,8 +13,7 @@ ACC=script/pg-question-owns-turn-acceptance.ts
 WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/c12-revert.XXXXXX")"
 FILES=(
   server/handlers/food-context.ts
-  server/routes.ts
-  server/handlers/misc-commands.ts
+  server/unlogged-notice.ts
 )
 
 for f in "${FILES[@]}"; do cp "$f" "$WORK_ROOT/$(printf '%s' "$f" | tr '/' '_')"; done
@@ -74,22 +73,18 @@ run_case "a food report without a meal word is deleted by the question" server/h
   '  const factOwed = journeyMustKeepFacts(message).food || (hasActualFood && !!reportedInSomeClause(message, explicitlyReportsFood));' \
   '  const factOwed = journeyMustKeepFacts(message).food;' || failed=$((failed + 1))
 
-# 2. THE ACK CLAIMS THE QUESTION AGAIN. canonicalCloseOwnsQuestion is re-asserted from what the
-#    CLIENT ASKED, so resolveTurn stops continuing to the Coach and the receipt ships alone.
-run_case "the ack re-claims a direction question it does not answer" server/routes.ts \
-  '    alsoAsksCoach: looksLikeQuestion(message) && durableDomains(turnMutations()).length > 0,' \
-  '    alsoAsksCoach: looksLikeQuestion(message) && durableDomains(turnMutations()).length > 0,
-    canonicalCloseOwnsQuestion: looksLikeDirectionRequest(clausesOf(message).slice(-1)[0] || message),' || failed=$((failed + 1))
-
-# 3. THE PLAN DUMP TAKES THE TURN AGAIN. buildDailyDirection stops standing down after a durable
-#    write, so a turn that just logged food is answered with four pillars and a *Log food* button.
-run_case "the whole-plan dump answers a turn that just wrote a fact" server/handlers/misc-commands.ts \
-  '  if (looksLikeDirectionRequest(m) && !wroteThisTurn) {' \
-  '  if (looksLikeDirectionRequest(m)) {' || failed=$((failed + 1))
+# 2. THE QUESTION'S OWN WORDS ARE PRICED AS FOOD AGAIN. spansClaimedByOtherFacts stops claiming
+#    question clauses, so "What should I do today?" comes back as the unpriced foods "what" and
+#    "should" — and because that clarify is a QUESTION, ownsNextAction reads the next action as
+#    already claimed and withNextMove drops the coaching move the ladder had computed. One
+#    mutation, both harms, which is why it is one mutation.
+run_case "the question's own words are priced as unlogged food" server/unlogged-notice.ts \
+  '  for (const clause of clausesOf(message)) if (looksLikeQuestion(clause)) claimed.push(clause);' \
+  '  // reverted: question clauses claim nothing' || failed=$((failed + 1))
 
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-c12-question-owns-turn: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-c12-question-owns-turn: GREEN — 3/3 behavioral reverts caught"
+echo "red-on-revert-c12-question-owns-turn: GREEN — 2/2 behavioral reverts caught"
