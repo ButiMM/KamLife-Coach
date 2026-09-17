@@ -217,12 +217,22 @@ export async function handleMiscCommands(ctx: {
     "vitamin": "multivitamin",
   };
   const suppMatch = Object.entries(suppKeywords).find(([kw]) => m.includes(kw));
-  if (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take")) {
+  // ── A PAINFUL JOINT IS NOT A SUPPLEMENT QUESTION (C13, 2026-09-17) ─────────────────────────
+  // "should i take" is matched as a bare substring, so "my knee is clicking and sore after the
+  // squats, should I take anti-inflammatories?" entered here — and was answered "keep it
+  // consistent", i.e. keep taking them, with the knee never mentioned. classifyPainReport already
+  // returns "soreness" for that sentence, and the triage owner is THIS FILE, further down: the
+  // supplement branch simply sits above it. Only this branch stands down, so the turn reaches the
+  // triage below rather than leaving the handler entirely. No new mouth.
+  if (classifyPainReport(m) === null && (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take"))) {
     // ALREADY TAKING IT (2026-07-16 live: 'But I'm already taking creatine daily' was
     // first week-gated, then SOLD the full creatine pitch — contradiction + deaf). A
     // client already on a supplement gets acknowledgment + usage guidance, no gate, no sell.
-    if (/\b(already|currently)\b.{0,20}\b(taking|on|using|use|drink(ing)?)\b/i.test(m) || /\bi take\b/i.test(m)) {
-      const suppName = suppMatch ? suppMatch[1] : "it";
+    // AND "SHOULD I TAKE" CONTAINS "I TAKE" (C13). A question about STARTING was read as already
+    // taking, and with nothing named suppName fell back to "it" — the literal "(it)" a client was
+    // shown. If we cannot name the thing, we cannot tell them to keep taking it.
+    if (!!suppMatch && (/\b(already|currently)\b.{0,20}\b(taking|on|using|use|drink(ing)?)\b/i.test(m) || /\bi take\b/i.test(m))) {
+      const suppName = suppMatch[1];
       const alreadyReply = suppName === "creatine"
         ? `Good — keep the creatine going: 5g every day (training days and rest days), any time, with water. Consistency is the whole game with it; you'll feel the full effect after 2–4 weeks. Nothing else needed.`
         : `Good — if it's working for you and it's a basic (${suppName}), keep it consistent and keep your protein from real food the priority. If you ever notice side effects, tell me.`;
