@@ -135,13 +135,42 @@ export async function canonicalDecision(
     // human-readable and UTC-local, not comparable to a SAST day key — so it is not a fix either.
     // Nothing is lost by removing it: a write for TODAY is a row in today's window by definition.
     const foodRowToday = (truth.today.meals?.length || 0) > 0;
+
+    // ── A QUIET WEEK IS A QUIET WEEK (C14, 2026-09-18) ───────────────────────────────────────
+    //
+    // `daysSinceAnyLog: foodRowToday ? 0 : (truth.window.daysLogged > 0 ? 1 : 7)` invented this
+    // number out of a boolean. Three separate lies came out of that one line:
+    //
+    //   · EVERY gap inside the window was reported as ONE. A client whose last meal was five
+    //     days ago and a client who logged yesterday reached the ladder as the same person.
+    //   · A client with nothing in seven days was reported as exactly SEVEN — whether they had
+    //     been with us a year or joined the day before yesterday.
+    //   · None of it was measured. The field is documented as "days since they logged anything
+    //     at all", and the only input to it was "is there a row today" plus "is there any row".
+    //
+    // THE ROWS THAT ANSWER IT ARE ALREADY IN HAND. `truth.window.perDay` is exactly the logged
+    // days, as SAST day keys, and foldWindowRows sorts them — so the most recent one IS the last
+    // log, and the gap is subtraction between two day keys. Nothing extra is asked of the
+    // database. Past the window's edge we honestly know only "at least `days`", and never more
+    // than the client has been here: `daysOnProgramme` is the ceiling, so somebody three days old
+    // is never reported as a week gone. This is the same quantity `sastDaysBetween(lastMealAt)`
+    // computes in one-action-command.ts and scheduler/shared.ts — the two callers that were
+    // already doing it properly while this one guessed.
+    const loggedDayKeys = (truth.window.perDay || []).map(d => d.day).filter(Boolean).sort();
+    const lastLoggedKey = loggedDayKeys[loggedDayKeys.length - 1] || null;
+    const dayGap = (from: string): number =>
+      Math.round((Date.parse(`${sastDayKey()}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+    const daysSinceAnyLog = foodRowToday ? 0
+      : lastLoggedKey ? Math.max(0, dayGap(lastLoggedKey))
+      : Math.min(truth.window.days, truth.daysOnProgramme);
+
     const act = underPolicy(chooseAction({
       firstName: getDisplayName(user) || undefined,
       goal: (user.goalType as any) || "general",
       dreamGoal: user.dreamGoal, biggestStruggle: user.biggestStruggle,
       lifeContext: user.lifeContext, doNotMention: user.doNotMention,
       weeksOnProgramme: Math.max(0, (user.programmeWeek || 1) - 1),
-      daysSinceAnyLog: foodRowToday ? 0 : (truth.window.daysLogged > 0 ? 1 : 7),
+      daysSinceAnyLog,
       daysSinceWeighIn: truth.weight.daysSinceWeighIn,
       loggedToday: foodRowToday,
       proteinPct: protTarget > 0 ? truth.today.protein / protTarget : 1,
