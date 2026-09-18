@@ -129,8 +129,14 @@ export async function buildDayState(user: any): Promise<DayState> {
  * `atKeyboard` — set it when this goes out as a REPLY to something the client just sent, so the
  * decision does not ask an obviously-present person to come back. Leave it off for proactive
  * sends (the morning message), where they genuinely are not here.
+ *
+ * `asksAboutToday` — set it when the client's message WAS the question "what should I do today?".
+ * Both reactive callers set both flags (C15); they used to disagree about the first and neither
+ * ever set the second, which is how one question had two answers.
  */
-export async function oneActionCommand(user: any, opts?: { atKeyboard?: boolean }): Promise<string> {
+export async function oneActionCommand(
+  user: any, opts?: { atKeyboard?: boolean; asksAboutToday?: boolean },
+): Promise<string> {
   const firstName = String(user?.name || "").trim().split(/\s+/)[0] || undefined;
   try {
     // THROUGH THE GATED DECISION (2026-08-18, verdict enforcement). This called chooseAction
@@ -141,6 +147,11 @@ export async function oneActionCommand(user: any, opts?: { atKeyboard?: boolean 
     const { state, profile, trainingAwaitingOutcome, trainingDeclined, foodDayClosed } = await buildDecisionInputs(user);
     const decision = decideProactive(state, profile, {
       atKeyboard: !!opts?.atKeyboard,
+      // THE HANDLER THAT EXISTS TO ANSWER "WHAT SHOULD I DO TODAY?" NOW SAYS SO (C15). The flag
+      // was computed in understanding/live.ts and passed from there, and never set here — so the
+      // one caller whose whole job is that question was the one caller that never told the
+      // decision it had been asked. Gate 3's escape and the weigh rung's clock rule both read it.
+      asksAboutToday: !!opts?.asksAboutToday,
       trainingAwaitingOutcome,
       trainingDeclined,
       foodDayClosed,

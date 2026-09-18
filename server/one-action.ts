@@ -793,7 +793,7 @@ export interface ProactiveProfile {
  */
 export function dayStateFrom(
   s: ProactiveStateForDecision, p: ProactiveProfile,
-  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; trainingAwaitingOutcome?: boolean; weekendInvestigationAnswered?: boolean; justAteProteinMeal?: boolean },
+  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; trainingAwaitingOutcome?: boolean; weekendInvestigationAnswered?: boolean; justAteProteinMeal?: boolean; asksAboutToday?: boolean },
 ): DayState {
   return {
     firstName: s.name,
@@ -824,6 +824,7 @@ export function dayStateFrom(
     constraints: p.constraints ?? NO_CONSTRAINTS,
     hour: opts?.hour ?? s.today.hour,
     atKeyboard: opts?.atKeyboard,
+    asksAboutToday: opts?.asksAboutToday,   // C15: live.ts passed this; the projection dropped it
     foodDayClosed: opts?.foodDayClosed,
     trainingDeclined: opts?.trainingDeclined,
     trainingAwaitingOutcome: opts?.trainingAwaitingOutcome,
@@ -1057,7 +1058,11 @@ export function underPolicy(
     const futureOnlyWeigh = investigation.kind === "weigh"
       && (opts.hour ?? 8) >= WEIGH_ACTIONABLE_BEFORE_HOUR;
     const saysNothing = !String(investigation.todo || "").trim();
-    if ((futureOnlyWeigh || saysNothing) && String(action.todo || "").trim()) return action;
+    // …AND A SESSION MOVE IS THE THIRD (C15). Four quiet days makes food insufficient BY
+    // ARITHMETIC, so a client at the keyboard with 0 of 3 sessions done had "Get today's session
+    // done." become "Tell me what you ate today" — graded on a ledger it never came from. Only
+    // when they ASKED: #203's sparse client, nudged rather than asking, is still asked first.
+    if ((futureOnlyWeigh || saysNothing || action.kind === "train") && String(action.todo || "").trim()) return action;
   }
   return investigation;
 }
@@ -1093,17 +1098,15 @@ function investigateInstead(ctx: {
 }
 
 /**
- * ILLNESS IS ITS OWN EVIDENCE (2026-08-18, verdict enforcement pass).
+ * WHAT IS EVIDENCED BY BEING TRUE, NOT BY THE LEDGERS (2026-08-18, verdict enforcement pass).
  *
- * Measured on the traced client set: a durably sick client came back CONTINUE / insufficient /
- * "Rest today" — a prescription under a verdict that says carry on. The message was RIGHT; the
- * evidence model was wrong. Sufficiency was computed only from the food and weight ledgers, and a
- * sick client has neither, so illness — which is directly observed durable state, not an inference
- * from thin data — read as "we cannot tell". Rest is the best-founded instruction the coach ever
- * gives. It is sufficient by construction.
- *
- * Silence is the same kind of fact: `come_back` follows from an observed absence, not a guess.
- */
+ * `rest`: a sick client has neither ledger and rest is the best-founded instruction we give,
+ * measured as CONTINUE / insufficient / "Rest today" — a prescription under a verdict saying
+ * carry on. `come_back`: silence follows from an observed absence. `train` is NOT here, and C15
+ * tried: it follows from workout_logs and from neither ledger this grades, but exempting it
+ * globally overrides #203 (a SPARSE client is asked the measurement) and turned pg-thin-evidence,
+ * pg-log-turn and pg-honest-gap red. It survives the downgrade only when the client ASKED —
+ * see underPolicy's Gate 3. */
 function evidenceFromKind(kind: ActionKind): DecisionEvidence | null {
   if (kind === "rest") return "sufficient";
   if (INVESTIGATIVE.has(kind)) return "insufficient";
@@ -1122,7 +1125,7 @@ function evidenceFor(s: ProactiveStateForDecision, kind: ActionKind): DecisionEv
 
 export function decideProactive(
   s: ProactiveStateForDecision, p: ProactiveProfile,
-  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; trainingAwaitingOutcome?: boolean; weekendInvestigationAnswered?: boolean; justAteProteinMeal?: boolean },
+  opts?: { atKeyboard?: boolean; hour?: number; foodDayClosed?: boolean; trainingDeclined?: boolean; trainingAwaitingOutcome?: boolean; weekendInvestigationAnswered?: boolean; justAteProteinMeal?: boolean; asksAboutToday?: boolean },
 ): ProactiveDecision {
   let action = chooseAction(dayStateFrom(s, p, opts));
   let evidence = evidenceFor(s, action.kind);
@@ -1139,13 +1142,9 @@ export function decideProactive(
   // question, and no intervention dressed up as settled. The client still hears something useful,
   // and it is something we can stand behind.
   //
-  // ASK FOR WHAT IS ACTUALLY MISSING. The first version of this downgrade sent "Tell me what you
-  // ate today" to a client who HAD logged today — their seven-day record was thin, not their
-  // morning — which is handing the work back for something they had just done, the exact failure
-  // Law 22 exists to prevent. Caught by re-running the trace on the sparse-log client, whose
-  // fixture logs today.
-  // ONE LADDER, BOTH PATHS (#203). This block was the downgrade; it is now a call to it, so the
-  // reactive gate cannot hold where this one investigates.
+  // ONE LADDER, BOTH PATHS (#203): this block WAS the downgrade and is now a call to it, so the
+  // reactive gate cannot hold where this one investigates. Its rules — ASK FOR WHAT IS ACTUALLY
+  // MISSING, and why a client who logged today is never asked to log — are on investigateInstead.
   //
   // …AND THE HOLD BRANCH HAS TO BE ON BOTH SIDES OF THAT SENTENCE. The first cut of #203 widened
   // only the reactive gate to cover an insufficient-evidence `hold`, which converged the
@@ -1164,6 +1163,7 @@ export function decideProactive(
     foodDayClosed: opts?.foodDayClosed,
     trainingDeclined: opts?.trainingDeclined,
     weekendInvestigationAnswered: opts?.weekendInvestigationAnswered,
+    asksAboutToday: opts?.asksAboutToday,   // C15: Gate 3 was unreachable from this path
     weightIsGoal: getGoalProfile(s.goalType).weightIsGoal,
   });
   evidence = evidenceFor(s, action.kind);
