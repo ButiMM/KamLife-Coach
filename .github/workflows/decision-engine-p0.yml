@@ -18,6 +18,8 @@ on:
 jobs:
   p0-decision:
     runs-on: ubuntu-latest
+    # Measured 25s. A hang here is a hang, not a slow run.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
