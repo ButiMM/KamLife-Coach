@@ -310,6 +310,17 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "voice-safety-parity-reverts", title: "Every C13 safety-parity seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-c13-voice-safety-parity.sh"] },
 
+  { id: "honest-gap", title: "A quiet week is a quiet week, and the ask is honest or absent",
+    // C14 (2026-09-18). A client who joined FIVE DAYS AGO, never logged, typing at the keyboard,
+    // was told "It's been about 14 weeks … Your numbers are exactly where you left them" —
+    // `dayStateFrom` mapped "no meal row on file" to the sentinel 99 and rung 1 divided it by
+    // seven. And every late empty day closed on "I can't coach a day I can't see.", a complaint
+    // under a request that already said everything the request needed to say.
+    command: ["npx", "tsx", "script/pg-honest-gap-acceptance.ts"] },
+
+  { id: "honest-gap-reverts", title: "Every C14 honest-gap seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-c14-honest-gap.sh"] },
+
   { id: "turn-reply-integrity", title: "The reply reconcileTurnReply repaired is the reply that ships",
     // C10 (2026-09-15). reconcileTurnReply computed its write-integrity repair and directive strip
     // into `draft`, then returned `reply` — the original, unverified model string — from every

@@ -236,11 +236,18 @@ function why(base: string, dream?: string | null): string {
 // enforcement further down, which downgrades a prescription it cannot justify into the measurement
 // that WOULD justify it. One copy of the wording, so the two can never drift.
 
-function askToLog(dream?: string | null): OneAction {
+/**
+ * ONE USEFUL ASK, OR SILENCE (C14, 2026-09-18). The why was *"I can't coach a day I can't see."*
+ * — theatre, about the coach not the client, carrying nothing the todo did not already carry, and
+ * read worst where seen most: the last word of a turn that had just answered them. So there is no
+ * why, and both renderers emit a reason only when one exists. `dream` goes with it: "That's what
+ * gets you to *X*." under a request for food is a non-sequitur.
+ */
+function askToLog(): OneAction {
   return {
     kind: "log",
     todo: "Tell me what you ate today — one line is enough.",
-    why: why("I can't coach a day I can't see.", dream),
+    why: "",
     investigation: { missingFact: "food_today", whyItMatters: "Today's food is absent." },
   };
 }
@@ -566,15 +573,21 @@ export function chooseAction(s: DayState): OneAction {
       };
     }
     if (weeks >= 1) {
+      // A CLOSED FOOD DAY BINDS THIS RUNG TOO (C14). "Log one meal today" is written for somebody
+      // who will still eat today; said to a client who has just told us they are eating nothing
+      // else, it sells them the one thing they ruled out, so they get the time-pressed ask, which
+      // is about food they HAVE eaten. The 99 sentinel kept every never-logged client past the
+      // four-week rung, which is why no case reached this branch before.
+      const alreadyEaten = struggle === "time" || !!s.foodDayClosed;
       return {
         kind: "come_back",
-        todo: struggle === "time" ? "Tell me one thing you ate this week." : "Log one meal today. Any meal.",
-        why: why(`No catching up, no starting over${because ? `, especially ${because}` : ""}. One meal puts you straight back in.`, s.dreamGoal),
+        todo: alreadyEaten ? "Tell me one thing you ate this week." : "Log one meal today. Any meal.",
+        why: why(`No catching up, no starting over${because ? `, especially ${because}` : ""}. ${alreadyEaten ? "One line" : "One meal"} puts you straight back in.`, s.dreamGoal),
       };
     }
     return {
       kind: "come_back",
-      todo: struggle === "time"
+      todo: struggle === "time" || !!s.foodDayClosed   // …and on the shorter gap, for one reason
         ? "Log one thing today — even just what you had for lunch"
         : "Log one meal today. Any meal.",
       why: why(`Nothing resets and nothing is lost${because ? ` — ${because}, a few quiet days is nothing` : " — you pick up exactly where you left off"}.`, s.dreamGoal),
@@ -681,7 +694,7 @@ export function chooseAction(s: DayState): OneAction {
   }
 
   // 6. NOTHING LOGGED AND THE DAY IS NEARLY OVER.
-  if (!s.loggedToday && s.hour >= LATE) return askToLog(s.dreamGoal);
+  if (!s.loggedToday && s.hour >= LATE) return askToLog();
 
   // 7. STEPS. The easiest win there is, and the one most people can actually do on a bad day.
   if (s.stepsTarget > 0 && s.stepsToday < s.stepsTarget * 0.5 && s.hour >= 12) {
@@ -773,9 +786,10 @@ export interface ProactiveProfile {
 /**
  * ProactiveState → DayState. The one projection.
  *
- * `daysSinceAnyLog: null` means NEVER LOGGED, and it becomes 99 — a long silence, which routes to
- * "come back" rather than to a protein tip about a day that does not exist. That mapping was
- * already in buildDayState; it is stated here so both callers cannot disagree about it.
+ * `daysSinceAnyLog: null` means NEVER LOGGED — a state with no duration in it at all — and it
+ * becomes the client's own tenure, so the silence rung is reached on how long they have actually
+ * been here and never on a number nobody measured (C14). That mapping was already in
+ * buildDayState; it is stated here so both callers cannot disagree about it.
  */
 export function dayStateFrom(
   s: ProactiveStateForDecision, p: ProactiveProfile,
@@ -787,7 +801,13 @@ export function dayStateFrom(
     dreamGoal: p.dreamGoal,
     biggestStruggle: p.biggestStruggle,
     weeksOnProgramme: p.weeksOnProgramme,
-    daysSinceAnyLog: s.food.daysSinceAnyLog ?? 99,
+    // ── NEVER LOGGED IS NOT FOURTEEN WEEKS GONE (C14) ── `?? 99` turned "we hold no meal row
+    // for this client" into a ninety-nine day absence and rung 1 read it back. Measured on
+    // 0deb7f8 through the live front door, a client who JOINED FIVE DAYS AGO, at the keyboard,
+    // was told: "Just say hi … It's been about 14 weeks … Your numbers are exactly where you
+    // left them." Every clause is false. 99 measured nothing — a sentinel picked for being big,
+    // which floor(99 / 7) spoke aloud. The honest ceiling on a gap never observed is their tenure.
+    daysSinceAnyLog: s.food.daysSinceAnyLog ?? p.weeksOnProgramme * 7,
     daysSinceWeighIn: s.weight.daysSinceWeighIn,
     loggedToday: s.today.logged,
     // A target of zero means "not set", and dividing by it would make every client look starved.
@@ -1067,7 +1087,7 @@ function investigateInstead(ctx: {
   const staleWeight = ctx.daysSinceWeighIn === null || ctx.daysSinceWeighIn >= 3;
   const canAskForWeight = !ctx.weightSufficient && staleWeight
     && !mentionsForbidden("weight scale weigh", ctx.doNotMention);
-  return canAskForFood ? askToLog(ctx.dreamGoal)
+  return canAskForFood ? askToLog()
     : canAskForWeight ? askToWeigh(ctx.dreamGoal, ctx.daysSinceWeighIn === null, ctx.hour)
     : holdAction(ctx.dreamGoal);
 }
@@ -1163,7 +1183,8 @@ export function decideProactive(
 
   return {
     state, evidence, action,
-    line: action.kind === "hold" ? "" : `*${action.todo}*\n\n_${action.why}_`,
+    // THE REASON ONLY WHEN THERE IS ONE (C14): an empty why here emitted a bare `__` (askToLog).
+    line: action.kind === "hold" ? "" : `*${action.todo}*${action.why ? `\n\n_${action.why}_` : ""}`,
   };
 }
 
@@ -1173,5 +1194,6 @@ export function decideProactive(
  */
 export function formatOneAction(a: OneAction, firstName?: string): string {
   const fn = (firstName || "").trim();
-  return `${fn ? fn + " — o" : "O"}ne thing today:\n\n*${a.todo}*\n\n_${a.why}_`;
+  // An action with no why renders as the ask alone (C14), not the ask plus empty italics.
+  return `${fn ? fn + " — o" : "O"}ne thing today:\n\n*${a.todo}*${a.why ? `\n\n_${a.why}_` : ""}`;
 }
