@@ -23,6 +23,8 @@ concurrency:
 jobs:
   drill:
     runs-on: ubuntu-latest
+    # Same shape as the gauntlet: scheduled, real model, nobody watching.
+    timeout-minutes: 45
     env:
       OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
     steps:

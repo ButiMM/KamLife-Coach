@@ -29,6 +29,8 @@ concurrency:
 jobs:
   gauntlet:
     runs-on: ubuntu-latest
+    # A nightly real-model run with no ceiling can sit for hours unattended.
+    timeout-minutes: 45
     env:
       OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
       # The engine is the thing being graded, so it must be on — the same as production.
