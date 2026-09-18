@@ -367,14 +367,40 @@ REAL("\n6. CONTROL — a client who really has been gone two months is still tol
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // THE ANTI-OVERREACH CASE. Every assertion above is a NOT, and a cut that silenced the come_back
 // rung altogether would pass all of them. It must not: an absence we have actually measured is
-// still named, out loud, in weeks. This case fails if the fix went further than the defect.
+// still named, out loud, in weeks, with the RIGHT number of weeks — that is the C14 claim and it
+// is unchanged.
+//
+// WHERE IT IS GRADED MOVED IN C15, AND THE CLAIM DID NOT. This drove "what should I do today?"
+// through the front door, which reaches the client where they are STANDING — at the keyboard,
+// having just typed. C15 made misc-commands.ts say so (`atKeyboard: true`), which the CTO's C14
+// verdict named as the next package's work in as many words: "a present client 60 days gone still
+// hears come-back. Inherited." They now get coached instead, and §7 of pg-present-client grades
+// that. The absence rung is for a client who is NOT here, so it is graded where such a client is
+// actually reached: the proactive projection, with atKeyboard off. Nothing was weakened — the
+// same rung, the same wording, the same week arithmetic, asked of the path it governs.
 {
-  await seed(9, { mealDaysAgo: [60, 61], weighDaysAgo: 60, createdDaysAgo: 120, activeDaysAgo: 60 });
-  const body = await say(9, "what should I do today?", "SMc14a6");
+  const absent = dayStateFrom({
+    name: "Thandi", goalType: "fat_loss", health: { sick: false },
+    food: { loggedDays7d: 0, daysSinceAnyLog: 60 }, workout: { sessionsLast7d: 0 },
+    steps: { avg7d: null }, weight: { daysSinceWeighIn: 60, trendUsable: false },
+    today: { kcal: 0, protein: 0, steps: 0, logged: false, hour: 9 },
+    evidence: { foodSufficient: false, weightSufficient: false },
+  } as any, { constraints: NO_CONSTRAINTS, weeksOnProgramme: 17, sessionsTarget: 3,
+    calorieTarget: 1900, proteinTarget: 130, stepsTarget: 8000 } as any,
+    { atKeyboard: false, hour: 9 } as any);
+  const act = chooseAction(absent);
+  const body = formatOneAction(act, "Thandi");
   chk(speaksAbsenceWeeks(body), "a real sixty-day absence is still spoken as weeks", JSON.stringify(body));
   chk(/\babout 8 weeks\b/i.test(body), "and it is the RIGHT number of weeks — sixty days is eight, not fourteen",
     JSON.stringify(body));
   chk(talksToSomeoneWhoLeft(body), "and they are still addressed as somebody coming back", JSON.stringify(body));
+
+  // …AND THE PRESENT CLIENT IS NOT. The same sixty days, same client, at the keyboard: C15's
+  // change, asserted here so a revert of it turns this file red too.
+  await seed(9, { mealDaysAgo: [60, 61], weighDaysAgo: 60, createdDaysAgo: 120, activeDaysAgo: 60 });
+  const present = await say(9, "what should I do today?", "SMc14a6");
+  chk(!talksToSomeoneWhoLeft(present),
+    "a client who is HERE is not told to come back", JSON.stringify(present));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════

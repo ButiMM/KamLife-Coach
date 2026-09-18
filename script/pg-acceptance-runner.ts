@@ -321,6 +321,18 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "honest-gap-reverts", title: "Every C14 honest-gap seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-c14-honest-gap.sh"] },
 
+  { id: "present-client", title: "The present client is coached, and one question has one answer",
+    // C15 (2026-09-18). Four quiet days, at the keyboard: "what should I do today?" answered
+    // "Log one meal today", "I'm lost" answered "Tell me what you ate today", and "I'm struggling"
+    // answered with sympathy and no move at all — while 0 of 3 sessions sat in workout_logs. Two
+    // callers of one question disagreed about atKeyboard and neither set asksAboutToday; `train`
+    // was graded on the food ledger, which four quiet days makes insufficient by arithmetic; and
+    // the canonical close returned early on any turn that wrote no durable fact.
+    command: ["npx", "tsx", "script/pg-present-client-acceptance.ts"] },
+
+  { id: "present-client-reverts", title: "Every C15 present-client seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-c15-present-client.sh"] },
+
   { id: "turn-reply-integrity", title: "The reply reconcileTurnReply repaired is the reply that ships",
     // C10 (2026-09-15). reconcileTurnReply computed its write-integrity repair and directive strip
     // into `draft`, then returned `reply` — the original, unverified model string — from every

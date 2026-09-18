@@ -91,7 +91,14 @@ export async function handleMiscCommands(ctx: {
 
   // ---- DIRECTION / OVERALL PLAN ---- The client wants the WHOLE plan across every pillar (train/rest, food, steps, water), not a bare workout dump (2026-07-09: a client asked and got an exercise list). Deterministic, from their real targets and today's training state. The shared detector (utils.looksLikeDirectionRequest) ALSO gates the brain in routes.ts, so a direction ask can never be swallowed by the model (2026-07-11: the brain answered it with a workout dump on a rest day).
   // THE ONE ACTION FIRST (2026-07-28): "just tell me what to do" is a different question from "give me my whole plan", and the answer to the first must never be the second. See server/one-action.ts.
-  if (/^(?:one thing|what now|what should i do(?: today)?|whats? my one thing|today.?s one thing)\??$/i.test(m.trim())) return await oneActionCommand(user);
+  // BOTH FLAGS, BECAUSE BOTH ARE TRUE (C15). This called oneActionCommand(user) bare while the
+  // confusion branch in early-commands.ts called it with `atKeyboard: true`, so one question had
+  // two answers: the come_back rung spoke here ("Log one meal today. Any meal.") and not there.
+  // The client typed this a second ago — they are at the keyboard — and the message IS the
+  // question about today, which is the flag Gate 3's escape and the weigh rung's clock rule read.
+  if (/^(?:one thing|what now|what should i do(?: today)?|whats? my one thing|today.?s one thing)\??$/i.test(m.trim())) {
+    return await oneActionCommand(user, { atKeyboard: true, asksAboutToday: true });
+  }
 
   // Distance to goal is a progress-truth question, not the daily-direction card.
   // "How far am I from my goal???" must not fall through to GPT or to the plan menu.

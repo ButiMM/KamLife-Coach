@@ -66,7 +66,7 @@ import { assembleDeficitEvidence, hasRelevantDeficitEvidence, weightTrendUsable,
  * rather than the model deciding in prose and a verifier trying to work out what it decided.
  */
 export async function canonicalDecision(
-  user: any, message?: string, opts?: { justAteProteinMeal?: boolean },
+  user: any, message?: string, opts?: { justAteProteinMeal?: boolean; bidForCoaching?: boolean },
 ): Promise<{ todo: string; kind: string; reply: string; day: { kcal: number; kcalTarget: number } | null; investigation?: { missingFact: string; whyItMatters: string } }> {
   try {
     // ONE CONSTITUTION (2026-08-21). This called theNextMove(), a SECOND ranked ladder —
@@ -106,7 +106,11 @@ export async function canonicalDecision(
     // THE CLIENT ASKED WHAT TO DO TODAY (#233 Gate 3). Read with the owner routes.ts already
     // uses to decide the canonical close owns the question, on the same last clause, so the turn
     // and the decision agree about what was asked.
-    const asksAboutToday = looksLikeDirectionRequest(clausesOf(message || "").slice(-1)[0] || message || "");
+    // A BID FOR COACHING IS A REQUEST FOR TODAY'S MOVE (C15). "I'm struggling" is not phrased as
+    // a direction request and is one: the client is asking what to do and saying they cannot. The
+    // caller has already decided this turn is a bid — it does not get decided twice.
+    const asksAboutToday = !!opts?.bidForCoaching
+      || looksLikeDirectionRequest(clausesOf(message || "").slice(-1)[0] || message || "");
 
     // ── A LOG IS A ROW, NOT A CALORIE COUNT (C10, 2026-09-15) ────────────────────────────────
     //
@@ -229,7 +233,7 @@ export async function canonicalDecision(
          // uses to decide the canonical close owns the question, on the same last clause — so the
          // turn that hands this decision the question and the decision itself agree about what
          // was asked. The gate it feeds is in underPolicy.
-         asksAboutToday: looksLikeDirectionRequest(clausesOf(message || "").slice(-1)[0] || message || ""),
+         asksAboutToday,
          weekendInvestigationAnswered: weekendInvestigationAnswered(user) });
 
     // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,
@@ -772,7 +776,9 @@ export async function runMeaningEngineLive(ctx: {
  * Rationale, measurements and both-ways grading: script/tracking-contract-tests.ts, LAW 4, and
  * script/pg-log-turn-acceptance.ts.
  */
-export async function closeCoachingTurn(user: any, message: string, reply: string | null): Promise<string> {
+export async function closeCoachingTurn(
+  user: any, message: string, reply: string | null, opts?: { coachWithoutWrite?: boolean },
+): Promise<string> {
   const out = String(reply ?? "");
   const { turnMutations, turnReceipt, turnPlateNeedsChange } = await import("../handlers/chat-log");
   const { durableDomains, proteinWrittenIn } = await import("./messy-intake");
@@ -780,7 +786,16 @@ export async function closeCoachingTurn(user: any, message: string, reply: strin
   const { PROPER_PROTEIN_G } = await import("../macro-card-attach");
   const mutations = turnMutations();
   const wrote = durableDomains(mutations);
-  if (!out || wrote.length === 0) return out;
+  // A BID FOR COACHING IS NOT ALWAYS A WRITE (C15, journey 1). This closed on `wrote.length === 0`,
+  // so a turn that committed no durable fact was acknowledged and left there — and "I'm struggling"
+  // is exactly that turn. Measured on d92c0ce: four quiet days, client at the keyboard, and the
+  // whole reply was "Heard you on how you're feeling. Showing up still counts. Next move stays
+  // small." No move, from a coach that had one to give. The gate is right for a greeting and wrong
+  // for a client saying they are struggling, and the difference is not something to re-derive here:
+  // routes.ts already computed `hasFeeling` for the composer and now says so. Everything below is
+  // unchanged, including the duplicate-window suppression, so a bid still cannot re-issue a move
+  // the client was just given.
+  if (!out || (wrote.length === 0 && !opts?.coachWithoutWrite)) return out;
   // THE PLATE THIS TURN JUST WROTE, off the same record `wrote` was read from. PROPER_PROTEIN_G
   // is the card's number, named once, so "did they just eat a proper protein meal" cannot mean
   // one thing on the picture and another in the text — AND NOT A PLATE THIS TURN ALREADY TOLD
@@ -789,6 +804,7 @@ export async function closeCoachingTurn(user: any, message: string, reply: strin
   const plateNeedsChange = turnPlateNeedsChange();
   const decided = await canonicalDecision(user, message, {
     justAteProteinMeal: protein >= PROPER_PROTEIN_G && !plateNeedsChange,
+    bidForCoaching: !!opts?.coachWithoutWrite,
   }).catch(() => ({ todo: "" } as any));
 
   // Return warmth belongs to the response composer, after the canonical re-entry owner has read

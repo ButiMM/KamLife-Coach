@@ -594,7 +594,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
   /** Every exit for a durable-write turn closes through the decision owner — see
    *  understanding/live.closeCoachingTurn and tracking-contract-tests LAW 4. */
-  const closeCoachingTurn = (reply: string | null) => closeCoachingTurnFor(user, message, reply); const trainingLoopOutcome = await resumeOpenTrainingLoopOutcome({ message, m, user, sourceMessageId }); await resumeOpenWeekendInvestigation(user, message);
+  const closeCoachingTurn = (reply: string | null, opts?: { coachWithoutWrite?: boolean }) => closeCoachingTurnFor(user, message, reply, opts); const trainingLoopOutcome = await resumeOpenTrainingLoopOutcome({ message, m, user, sourceMessageId }); await resumeOpenWeekendInvestigation(user, message);
   if (trainingLoopOutcome !== null) turnEvidence({ conversationalOnly: true });
   const feedbackReply = await resumeWorkoutFeedbackExpectation({ phone, message, m, user }); if (feedbackReply !== null) turnEvidence({ conversationalOnly: true });
   if (feedbackReply !== null && mayEndTurn("workout-feedback")) return closeCoachingTurn(feedbackReply); if (feedbackReply !== null) commitFact(turn, "workout", feedbackReply); if (normalizerLive() && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
@@ -1022,7 +1022,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     turnMutation(`TURN committed ${resolved.committed}${resolved.reply ? "" : "; question continues to Coach K"}`);
     console.log(`[TURN] committed ${resolved.committed}${resolved.reply ? "" : "; question continues to Coach K"} — "${message.slice(0, 70)}"`);
   }
-  if (resolved.reply) return closeCoachingTurn(resolved.reply);
+  // A FEELING IS A BID FOR COACHING, NOT A FACT (C15, journey 1). `hasFeeling` is already computed
+  // above for the composer; the close needs the same answer and must not work it out a second time.
+  if (resolved.reply) return closeCoachingTurn(resolved.reply, { coachWithoutWrite: hasFeeling });
 
   // ---- WEIGHT FORECAST / TRAJECTORY: deterministic math from the client's own logs. ----
   // If they logged a surplus, it says so — the plate, not the plan.

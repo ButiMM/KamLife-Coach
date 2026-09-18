@@ -1434,7 +1434,9 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     let action = "";
     try {
       const { oneActionCommand } = await import("./one-action-command");
-      action = (await oneActionCommand(user, { atKeyboard: true })).replace(/\[BUTTONS:[^\]]+\]/g, "").trim();
+      // BOTH FLAGS, MATCHING misc-commands (C15). This branch's own trigger list contains "what do i
+      // do now" — that IS the question about today, and Gate 3 reads the flag.
+      action = (await oneActionCommand(user, { atKeyboard: true, asksAboutToday: true })).replace(/\[BUTTONS:[^\]]+\]/g, "").trim();
     } catch (e) {
       console.warn("[CONFUSED] one-action failed:", (e as any)?.message || e);
     }
@@ -1449,8 +1451,12 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     // client was asking about. The canonical owner decides it now; a second spelling of "is this a
     // question" in a handler is what let this one through.
     if (ctx.isQuestion || looksLikeQuestion(message)) return null;
-    // And no preamble that promises a simplification the next line does not deliver.
-    const lead = firstName ? `${firstName} — here's the one that matters:` : `Here's the one that matters:`;
+    // ONE HEADER, ONE NAME (C15). This stapled its own lead onto a body that formatOneAction had
+    // already headed and already addressed, so the client read their own name twice in four words:
+    //   "Thandi — here's the one that matters:\n\nThandi — one thing today:\n\n*Get today's
+    //    session done.*"
+    // Two mouths introducing one instruction. The lead is the one that says nothing the body does
+    // not, so the lead goes — the same subtraction the comment below already argues for.
     // Only fall back to the menu if the one action could not be built at all. A sitemap is a
     // worse answer than a plain instruction, so it is the last resort, never the first.
     if (!action) {
@@ -1458,9 +1464,8 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
       await logChat(user.id, message, menuReply.replace(/\[BUTTONS:[^\]]+\]/g, "").trim(), "CONFUSED_RECOVERY");
       return menuReply;
     }
-    const reply = `${lead}\n\n${action}`;
-    await logChat(user.id, message, reply, "CONFUSED_ONE_ACTION");
-    return reply;
+    await logChat(user.id, message, action, "CONFUSED_ONE_ACTION");
+    return action;
   }
 
   return null;
