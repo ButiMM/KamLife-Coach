@@ -31,6 +31,10 @@ jobs:
     # This is deliberately PR-only: only a pull request has an authoritative base SHA.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # A HUNG JOB MUST LOOK DIFFERENT FROM A SLOW ONE. GitHub's default is 360 minutes, so a wedged
+    # step is indistinguishable from a long one for six hours. These are generous against measured
+    # durations (30s / 3m / 47m), so only a genuine hang trips them.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,6 +56,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -92,6 +97,9 @@ jobs:
   # Railway data is reachable from it.
   pg-acceptance:
     runs-on: ubuntu-latest
+    # Measured 47m27s on 8d96f96. 90 leaves headroom for a slow runner and still fails a hang
+    # four hours before the platform default would.
+    timeout-minutes: 90
     services:
       postgres:
         image: postgres:16
