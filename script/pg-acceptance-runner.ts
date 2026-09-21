@@ -333,6 +333,12 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "present-client-reverts", title: "Every C15 present-client seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-c15-present-client.sh"] },
 
+  { id: "c16-plate", title: "A named dinner ask gets a cookable plate, while pear truth and maintenance survive",
+    // C16 (2026-09-21). The existing next-meal menu rejected any utterance naming dinner, so
+    // a log-plus-dinner question bypassed the ledger-aware plate owner. Grade product-menu words
+    // in the delivered body, not the model stub, with ENGINE_LIVE on.
+    command: ["npx", "tsx", "script/pg-c16-plate-acceptance.ts"] },
+
   { id: "turn-reply-integrity", title: "The reply reconcileTurnReply repaired is the reply that ships",
     // C10 (2026-09-15). reconcileTurnReply computed its write-integrity repair and directive strip
     // into `draft`, then returned `reply` — the original, unverified model string — from every

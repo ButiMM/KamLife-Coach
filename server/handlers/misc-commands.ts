@@ -43,6 +43,7 @@ import { foodConstraints, allowedAlternatives, allowedProteinStaples } from "../
 import { getDayLedger, getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
+import { engineLive } from "../understanding/live";
 import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
@@ -336,7 +337,11 @@ export async function handleMiscCommands(ctx: {
   // `what should i eat` (not `...next`): the bare form is the SAME plate-ask as "what can I eat",
   // which this door already owns. Requiring the suffix is what sent it to the meal-plan door
   // instead (2026-08-27). Dropping one word covers both, and adds no new vocabulary.
-  if (/\b(what should i eat|next meal|(?:suggest|give|send|show|recommend)(?:\s+me)?\s*a?n?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(breakfast|lunch|dinner|supper|braai|social)\b/i.test(m)) {
+  // A named meal is a plate request on the live coaching path. Keep the engine-off model
+  // fallback's established ownership, and do not price a future meal from today's ledger.
+  // "Have" needs meal context; "what should I have done" is not a food question.
+  const namesOneMeal = ["breakfast", "lunch", "dinner", "supper"].some(meal => m.includes(meal));
+  if (/\b(what should i eat|what should i have\s+for\s+(?:breakfast|lunch|dinner|supper)|next meal|(?:suggest|give|send|show|recommend)(?:\s+me)?\s*a?n?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(braai|social|tomorrow|next\s+(?:week|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i.test(m) && (engineLive() || !namesOneMeal)) {
     const ledger = await getDayLedger(user.id, { user });
     const todayCals = ledger.kcal;
     const todayProt = ledger.protein;
@@ -415,7 +420,16 @@ export async function handleMiscCommands(ctx: {
 
     if (todayCals === 0) {
       suggestion += `No food logged yet today.\n\n`;
-      const starts = budget === "under_100"
+      const namedLaterMeal = ["lunch", "dinner", "supper"].some(meal => m.includes(meal));
+      const starts = namedLaterMeal
+        ? (budget === "under_100"
+            ? ["*Tin of pilchards + pap* (~350 kcal, 24g protein)",
+               "*Soya mince + pap + spinach* (~600 kcal, 40g protein)",
+               "*Sugar beans + lentils + pap + spinach* (~610 kcal, 26g protein)"]
+            : ["*Chicken breast + rice + spinach* (~450 kcal, 35g protein)",
+               "*Tofu stir-fry + rice* (~550 kcal, 30g protein)",
+               "*Lentil and chickpea curry + rice* (~600 kcal, 26g protein)"])
+        : budget === "under_100"
         ? (goal === "muscle_gain"
             ? [`*3 eggs + pap + spinach* (~420 kcal, 24g protein)\nCheap, filling, high protein to start the day.`,
                `*Sugar beans + pap + spinach* (~450 kcal, 22g protein)\nCheap, filling, high protein to start the day.`]
