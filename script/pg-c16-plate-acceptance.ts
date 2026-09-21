@@ -120,6 +120,13 @@ chk(/maintenance calories.{0,100}(?:weight|steady)/i.test(maintenance.body),
   "the maintenance question is answered", JSON.stringify(maintenance.body.slice(0, 350)));
 chk(!asksToRelog(maintenance.body), "the maintenance answer makes no food-log demand", JSON.stringify(maintenance.body.slice(0, 350)));
 
+const future = await turn("What should I have for dinner tomorrow?", "future");
+chk(future.meals.length === 0 && !PRODUCT_PLATE.test(future.body),
+  "a future dinner is not priced against today's plate menu", JSON.stringify(future.body.slice(0, 350)));
+const reflection = await turn("What should I have done differently last week?", "reflection");
+chk(reflection.meals.length === 0 && !PRODUCT_PLATE.test(reflection.body),
+  "a non-food 'have done' question is not claimed by the plate menu", JSON.stringify(reflection.body.slice(0, 350)));
+
 REAL(`\npg-c16-plate-acceptance: ${failed === 0 ? "GREEN" : `${failed} FAILED`}\n`);
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
 await pool.end();

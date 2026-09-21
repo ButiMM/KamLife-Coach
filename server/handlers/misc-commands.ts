@@ -43,6 +43,7 @@ import { foodConstraints, allowedAlternatives, allowedProteinStaples } from "../
 import { getDayLedger, getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
+import { engineLive } from "../understanding/live";
 import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
@@ -336,9 +337,11 @@ export async function handleMiscCommands(ctx: {
   // `what should i eat` (not `...next`): the bare form is the SAME plate-ask as "what can I eat",
   // which this door already owns. Requiring the suffix is what sent it to the meal-plan door
   // instead (2026-08-27). Dropping one word covers both, and adds no new vocabulary.
-  // A named meal is still a request for a plate, not a reason to bypass this ledger-aware menu.
-  // Keep event-specific braai/social advice outside this ordinary next-meal door.
-  if (/\b(what should i (?:eat|have)|next meal|(?:suggest|give|send|show|recommend)(?:\s+me)?\s*a?n?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(braai|social)\b/i.test(m)) {
+  // A named meal is a plate request on the live coaching path. Keep the engine-off model
+  // fallback's established ownership, and do not price a future meal from today's ledger.
+  // "Have" needs meal context; "what should I have done" is not a food question.
+  const namesOneMeal = ["breakfast", "lunch", "dinner", "supper"].some(meal => m.includes(meal));
+  if (/\b(what should i eat|what should i have\s+for\s+(?:breakfast|lunch|dinner|supper)|next meal|(?:suggest|give|send|show|recommend)(?:\s+me)?\s*a?n?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(braai|social|tomorrow|next\s+(?:week|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i.test(m) && (engineLive() || !namesOneMeal)) {
     const ledger = await getDayLedger(user.id, { user });
     const todayCals = ledger.kcal;
     const todayProt = ledger.protein;

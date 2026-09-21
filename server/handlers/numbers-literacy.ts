@@ -15,6 +15,7 @@ import { detectToneSignal } from "../tone-mode";
 import { messageSpeaksNumbers, wantsVoiceReplies } from "../numbers-mode";
 import { sendWhatsApp } from "../scheduler";
 import { sastDayStart, looksLikeSurplusDeficitQuestion } from "../utils";
+import { engineLive } from "../understanding/live";
 
 // SURPLUS/DEFICIT IS MATHS, NOT PROSE (2026-07-17 nightly drill caught the third
 // recurrence of this class on the model path). The client's target ALREADY contains
@@ -23,6 +24,14 @@ import { sastDayStart, looksLikeSurplusDeficitQuestion } from "../utils";
 // with today's remaining kcal instead; now the answer is computed, never generated.
 export async function handleSurplusDeficitQuestion(ctx: { message: string; m: string; user: any }): Promise<string | null> {
   const { message, m, user } = ctx;
+  // C16: a pure meaning question is education, not a request to log today's meals. Keep it in
+  // the existing numbers-literacy owner on the live path; the engine-off model tests retain
+  // their established question/answer path. No calorie estimate or target change is implied.
+  if (engineLive() && ["what does maintenance calories mean", "what are maintenance calories", "what is maintenance calories"].some(q => m.includes(q))) {
+    const reply = "Maintenance calories are roughly the amount of energy that keeps your weight steady over time. Judge that by the weight trend, not one day's scale reading.";
+    await logChat(user.id, message, reply, "MAINTENANCE_MEANING");
+    return reply;
+  }
   if (!looksLikeSurplusDeficitQuestion(m)) return null;
   const target = user.calorieTarget || 0;
   if (!target) return null;

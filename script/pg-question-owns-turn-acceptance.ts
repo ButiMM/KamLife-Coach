@@ -74,9 +74,6 @@ process.env.NODE_ENV = "production";
 // contains neither "protein" nor "dinner", and its sentinel phrase appears nowhere in the product.
 const COACH_SENTINEL = /tinned fish on toast/i;
 const COACH_ANSWER = "Yoghurt with fruit, or tinned fish on toast, sits well this evening and fits what you have left today.";
-// C16 moves the named dinner question from the model mouth to the existing plate suggester.
-// Keep this C12 control positive: a receipt plus a generic protein staple is still not an answer.
-const PRODUCT_PLATE = /2 chicken thighs \+ rice \+ mixed veg|Chicken breast \+ rice \+ spinach|3 eggs \+ brown bread \+ tomato/i;
 const CLASSIFY = `{"intent":"OTHER","confidence":0.85,"canonical":""}`;
 
 const realFetch = globalThis.fetch;
@@ -254,9 +251,6 @@ const isPlanDump = (b: string): boolean =>
   chk(!/proper protein meal/i.test(COACH_ANSWER),
     "…so the ladder-move assertion cannot be satisfied by the fixture mouth",
     `stub=${JSON.stringify(COACH_ANSWER)}`);
-  chk(!PRODUCT_PLATE.test(STAPLE_ONLY) && !PRODUCT_PLATE.test(COACH_ANSWER)
-      && PRODUCT_PLATE.test("Pick one: 2 chicken thighs + rice + mixed veg (~680 kcal, 55g protein)"),
-    "the C16 plate detector rejects the staple and model fixture, but sees a product plate");
   chk(isPlanDump("Here's your plan, Thandi 👇\n\n*Today:*\n💪 Training day")
     && isPlanDump("x\n\n*This week:*\nTrain 3 days")
     && !isPlanDump("Thandi — one thing today:\n\n*Just say hi.*"),
@@ -410,10 +404,14 @@ REAL("\n4. THE CONTROLS — every shape the repair must leave exactly as it was"
     `rows=${c9.rows.length} label=${JSON.stringify(c9.rows[0]?.meal_label)}`);
   chk(!asksToLogFood(c9.last), "CONTROL: …and still does not ask for the pear back",
     `body=${JSON.stringify(c9.last.slice(0, 220))}`);
-  // C16 changed the answer's owner to the ledger-aware plate suggester. Continue to require an
-  // actual cookable plate, not merely the receipt plus a generic protein staple or model fixture.
-  chk(PRODUCT_PLATE.test(c9.last),
-    "CONTROL: …and the dinner question is answered with a product-menu plate, not a staple move",
+  // AND THE DINNER QUESTION IS ANSWERED, WHICH STORAGE NEVER PROVED (C12 review). This control
+  // asserted the stored row and the absence of a re-log ask, so a body of receipt + the ladder's
+  // protein staple satisfied it completely — the client asks what to have for dinner and is told
+  // to make their next meal a protein one, which is not an answer to what they asked. The mouth is
+  // stubbed, so what is graded is WHICH OWNER SPOKE: the coach's answer reaching the client is the
+  // deterministic half, and its sentinel shares no word with the receipt or with any ladder move.
+  chk(COACH_SENTINEL.test(c9.last),
+    "CONTROL: …and the dinner question is answered by the Coach, not replaced by a staple move",
     `body=${JSON.stringify(c9.last.slice(0, 260))}`);
   chk(!/^got it — pear\. ?👌/i.test(c9.last.trim()),
     "CONTROL: …so the turn does not close on the receipt alone",
