@@ -17,7 +17,8 @@ process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
 
-const COACH_ANSWER = "Maintenance calories are the amount of energy that keeps your weight steady.";
+// Deliberately wrong for the maintenance turn: a model fallback must not make that assertion pass.
+const COACH_ANSWER = "Tell me what you ate today — one line is enough.";
 const CLASSIFY = `{"intent":"OTHER","confidence":0.85,"canonical":""}`;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
@@ -54,14 +55,17 @@ const chk = (ok: boolean, claim: string, evidence = "") => {
 };
 const PRODUCT_PLATE = /2 chicken thighs \+ rice \+ mixed veg|Chicken breast \+ rice \+ spinach|Tin of pilchards \+ pap|Tofu stir-fry \+ rice|Lentil and chickpea curry \+ rice/i;
 const RE_LOG = /\b(?:tell|send|log|share)\b[^.!?\n]{0,45}\b(?:what you ate|what you had|your (?:meals?|food)|food today)\b|\bwhat did you eat\b/i;
+const MAINTENANCE_ANSWER = /maintenance calories.{0,100}(?:weight|steady)/i;
 const asksToRelog = (body: string) => RE_LOG.test(body);
 
-// Validate the grader before using it. The model fixture contains no plate or log demand.
+// Validate the grader before using it. The model fixture cannot answer maintenance or supply a plate.
 chk(PRODUCT_PLATE.test("Start with: Chicken breast + rice + spinach (~450 kcal, 35g protein)"), "plate detector sees a cookable dinner menu item");
 chk(!PRODUCT_PLATE.test("Got it — Pear. Make your next meal a proper protein meal.") && !PRODUCT_PLATE.test(COACH_ANSWER),
   "plate detector rejects a generic staple and the model fixture");
 chk(asksToRelog("Tell me what you ate today — one line is enough.") && !asksToRelog("A pear is logged for today."),
   "re-log detector both fires and declines");
+chk(!MAINTENANCE_ANSWER.test(COACH_ANSWER) && asksToRelog(COACH_ANSWER),
+  "the model fixture cannot satisfy the maintenance answer or no-log-demand assertions");
 
 const RealDate = Date;
 const fixed = RealDate.UTC(2026, 8, 18, 11, 30, 0); // 13:30 SAST
@@ -114,9 +118,9 @@ chk(pear.meals.length === 1 && /pear/i.test(pear.meals[0].raw_message || "") && 
 chk(PRODUCT_PLATE.test(pear.body), "the pear-and-dinner turn receives a product-menu plate", JSON.stringify(pear.body.slice(0, 350)));
 chk(!asksToRelog(pear.body), "the pear is not requested again", JSON.stringify(pear.body.slice(0, 350)));
 
-const maintenance = await turn("What does maintenance calories mean?", "maintenance");
+const maintenance = await turn("What do maintenance calories mean?", "maintenance");
 chk(maintenance.meals.length === 0, "the maintenance question does not write a meal");
-chk(/maintenance calories.{0,100}(?:weight|steady)/i.test(maintenance.body),
+chk(MAINTENANCE_ANSWER.test(maintenance.body),
   "the maintenance question is answered", JSON.stringify(maintenance.body.slice(0, 350)));
 chk(!asksToRelog(maintenance.body), "the maintenance answer makes no food-log demand", JSON.stringify(maintenance.body.slice(0, 350)));
 

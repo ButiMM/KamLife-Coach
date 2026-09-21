@@ -27,7 +27,7 @@ export async function handleSurplusDeficitQuestion(ctx: { message: string; m: st
   // C16: a pure meaning question is education, not a request to log today's meals. Keep it in
   // the existing numbers-literacy owner on the live path; the engine-off model tests retain
   // their established question/answer path. No calorie estimate or target change is implied.
-  if (engineLive() && ["what does maintenance calories mean", "what are maintenance calories", "what is maintenance calories"].some(q => m.includes(q))) {
+  if (engineLive() && ["what do maintenance calories mean", "what does maintenance calories mean", "what are maintenance calories", "what is maintenance calories"].some(q => m.includes(q))) {
     const reply = "Maintenance calories are roughly the amount of energy that keeps your weight steady over time. Judge that by the weight trend, not one day's scale reading.";
     await logChat(user.id, message, reply, "MAINTENANCE_MEANING");
     return reply;
