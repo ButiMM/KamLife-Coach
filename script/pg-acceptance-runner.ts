@@ -339,6 +339,17 @@ export const ACCEPTANCES: Acceptance[] = [
     // in the delivered body, not the model stub, with ENGINE_LIVE on.
     command: ["npx", "tsx", "script/pg-c16-plate-acceptance.ts"] },
 
+  { id: "followup-arrives", title: "The coach does not chase a commitment the client already kept",
+    // C17 (2026-09-21). A client said they were away until Friday, came back Wednesday and logged
+    // a meal. Thursday 19:00 the booked nudge fired anyway: "Tomorrow you're back! … nothing
+    // reset, your plan's exactly where you left it." cancelReturnNudges has ONE call site, behind
+    // a health hold in sick-flow.ts, so a holiday nudge can never take that exit and a client who
+    // simply resumes logging declares nothing. The firing job now asks the durable ledgers.
+    command: ["npx", "tsx", "script/pg-followup-arrives-acceptance.ts"] },
+
+  { id: "followup-arrives-reverts", title: "Every C17 follow-up seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-c17-followup-arrives.sh"] },
+
   { id: "turn-reply-integrity", title: "The reply reconcileTurnReply repaired is the reply that ships",
     // C10 (2026-09-15). reconcileTurnReply computed its write-integrity repair and directive strip
     // into `draft`, then returned `reply` — the original, unverified model string — from every

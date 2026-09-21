@@ -8,8 +8,8 @@
  */
 
 import { db } from "./db";
-import { reminders } from "../shared/schema";
-import { eq, and, lte } from "drizzle-orm";
+import { reminders, mealLogs, workoutLogs } from "../shared/schema";
+import { eq, and, lte, like, sql } from "drizzle-orm";
 
 import { returnNudgeTime, describeFireTime } from "./reminders-parse";
 import type { Recurrence } from "./reminders-parse";
@@ -49,10 +49,27 @@ export async function cancelAllReminders(userId: string): Promise<number> {
   return pending.length;
 }
 
-/** Cancel any pending auto 'return' nudge for a user (dedupe when the date changes, or on recovery). */
+/**
+ * Cancel any pending auto return nudge for a user (dedupe when the date changes, or on recovery).
+ *
+ * MATCHES EVERY RETURN KIND, INCLUDING LEGACY (C17). The reason is now carried in `kind` as
+ * `return_sick` / `return_away`, and rows booked before that still read plain `return`. An
+ * equality filter would have silently stopped cancelling the new ones the day they shipped.
+ */
 export async function cancelReturnNudges(userId: string): Promise<void> {
   await db.update(reminders).set({ status: "cancelled" })
-    .where(and(eq(reminders.userId, userId), eq(reminders.status, "pending"), eq(reminders.kind, "return")));
+    .where(and(eq(reminders.userId, userId), eq(reminders.status, "pending"), like(reminders.kind, "return%")));
+}
+
+/** Is this reminder one of the coach's own return nudges, whatever its reason? */
+export function isReturnKind(kind: unknown): boolean {
+  return String(kind || "").startsWith("return");
+}
+
+/** The reason a return nudge was booked. `null` for a legacy row that never stored one. */
+export function returnReason(kind: unknown): "sick" | "away" | null {
+  const k = String(kind || "");
+  return k === "return_sick" ? "sick" : k === "return_away" ? "away" : null;
 }
 
 /**
@@ -68,7 +85,54 @@ export async function scheduleReturnNudge(userId: string, phone: string, dateStr
   const body = kind === "sick"
     ? "Tomorrow's the day you're cleared to get back to it. 💪 How are you feeling? If you're good, we start easy — session one at 60%, one less set. Reply *I'm back* and I'll set it up. No rush if you need another day."
     : "Tomorrow you're back! Ready to pick up right where you left off — nothing reset, your plan's exactly where you left it. Reply *I'm back* and we go again. 💪";
-  await db.insert(reminders).values({ userId, phoneNumber: phone, body, fireAt: nudgeAt, kind: "return" });
+  // THE REASON IS PRESERVED AT WRITE (C17). It was discarded here — both a sick hold and a
+  // holiday booked a row saying only `return` — so the firing job had no way to apply evidence
+  // appropriate to WHY the client was away. Carried in `kind` rather than a new column: the
+  // column is free text, the value is a discriminator, and no migration touches a live ledger.
+  await db.insert(reminders).values({ userId, phoneNumber: phone, body, fireAt: nudgeAt, kind: `return_${kind}` });
+}
+
+/**
+ * HAS THIS CLIENT ALREADY COME BACK? (C17.)
+ *
+ * A return nudge is written for somebody we believe is still away: "Tomorrow you're back! Ready
+ * to pick up right where you left off — nothing reset". Said to a client who came back early and
+ * has been logging since, it is the coach chasing a commitment they already kept, in the restart
+ * language three existing acceptances forbid on the reactive door.
+ *
+ * ONE CANCELLER EXISTED AND IT COULD NOT SEE THEM. `cancelReturnNudges` is called from exactly
+ * one place — sick-flow.ts, behind `holdOnRecord.phase !== "none"` — so it fires only for a client
+ * on a HEALTH hold who declares a return in words. A holiday nudge has no hold, so that branch is
+ * unreachable for it, and a client who simply starts logging again declares nothing.
+ *
+ * THE EVIDENCE MUST MATCH THE REASON, and the first version of this did not.
+ *
+ *   away — client-authored activity is the declaration. A meal or a session is something the
+ *          client DID; it is the thing the nudge is asking for.
+ *
+ *   STEPS ARE NOT, AND THIS IS THE WHOLE POINT. routes/health-sync.ts walks clients through an
+ *          iOS Shortcuts automation set to Time of Day / 9:00 PM / Daily, which POSTs a step count
+ *          every night with nobody touching the phone. Counting that as a return meant an away
+ *          client's own handset quietly retired their nudge — and only for the clients engaged
+ *          enough to have set the integration up.
+ *
+ *   sick — no activity retires it. A client can eat while still ill, and this nudge does not ask
+ *          "are you alive", it says "you're cleared to get back to it … session one at 60%".
+ *          Nothing in a ledger is medical clearance. The explicit declaration handled by
+ *          sick-flow.ts remains the only thing that cancels a sick nudge.
+ *
+ *   legacy — a row booked before the reason was stored is treated as `sick`: conservative, and it
+ *          leaves pre-existing rows behaving exactly as they did before this cut.
+ */
+export async function hasReturnedSince(userId: string, since: Date, kind: unknown): Promise<boolean> {
+  if (returnReason(kind) !== "away") return false;
+  const [row] = await db.select({
+    n: sql<number>`(
+      (SELECT COUNT(*) FROM ${mealLogs}    WHERE ${mealLogs.userId}    = ${userId} AND ${mealLogs.loggedAt}    >= ${since})
+    + (SELECT COUNT(*) FROM ${workoutLogs} WHERE ${workoutLogs.userId} = ${userId} AND ${workoutLogs.loggedAt} >= ${since})
+    )::int`,
+  }).from(reminders).where(eq(reminders.userId, userId)).limit(1);
+  return Number(row?.n || 0) > 0;
 }
 
 /** Fetch + claim all reminders due now (status flips to 'sent' atomically-ish per row). */
