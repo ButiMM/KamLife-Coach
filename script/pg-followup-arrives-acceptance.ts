@@ -100,13 +100,28 @@ async function reset() {
   _resetOutboundDedupe();
 }
 
-/** A return nudge of the given reason, booked two days ago, now due. */
+/**
+ * A return nudge of the given reason, booked two days ago, now due.
+ *
+ * THE RETURN DATE IS TWO DAYS OUT, NOT ONE, AND THAT IS NOT ARBITRARY. `scheduleReturnNudge` books
+ * 19:00 SAST the EVENING BEFORE the return date and no-ops when that moment has already passed. A
+ * return date of "tomorrow" therefore books nothing at all from 19:00 SAST onwards — this file was
+ * green every time it was run in the afternoon and red on the CI run that started at 20:54 SAST,
+ * where all nine "the nudge fires / was retired" assertions failed against an EMPTY reminders
+ * table. Two days out puts the nudge at least seventeen hours ahead at every hour of the clock.
+ * The row's fire_at is dragged into the past below anyway, so the booking time is scaffolding: it
+ * only has to exist. What is graded is the firing job, not when the nudge was scheduled.
+ */
 async function bookDueNudge(reason: "sick" | "away" = "away") {
-  const dayAfter = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-  await scheduleReturnNudge(user.id, phone, dayAfter, reason);
-  await pool.query(
+  const returnDate = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10);
+  await scheduleReturnNudge(user.id, phone, returnDate, reason);
+  const { rowCount } = await pool.query(
     "UPDATE reminders SET fire_at = now() - interval '1 minute', created_at = now() - interval '2 days' WHERE user_id = $1",
     [user.id]);
+  // THE FIXTURE ASSERTS ITSELF. A silent no-op here reads downstream as "the product stopped
+  // sending return nudges" — nine failures pointing at the wrong owner. If the row is missing,
+  // say so here, in the language of the thing that is actually broken.
+  if (!rowCount) { REAL(`  FAIL  FIXTURE: scheduleReturnNudge booked no row for ${returnDate} — nothing below is about the product`); failed++; }
 }
 
 const logMealAgo = (interval: string) => pool.query(
