@@ -526,7 +526,56 @@ export function summarise(results: AcceptanceResult[]): string {
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * THE WORKING TREE MUST BE CLEAN, BEFORE AND AFTER (B, 2026-09-18).
+ *
+ * The revert harnesses in this inventory MUTATE files under server/ and restore them from an EXIT
+ * trap. A trap does not fire on SIGKILL, and it does not fire if the runner is killed while a
+ * harness is mid-case — which happened on 2026-09-17 and left four deliberately-broken mutations
+ * stranded in the tree, found one at a time over the following hour. A stranded mutation looks
+ * exactly like a real code change in `git status`, and committing one would push a knowingly
+ * broken product line.
+ *
+ * So: refuse to START on a dirty server/ (otherwise a harness's own backup captures the damage and
+ * faithfully "restores" it), and FAIL at the end if the tree did not come back clean, naming the
+ * files. Advisory only when git is unavailable — this is a guard, not a new dependency.
+ */
+function dirtyServerFiles(): string[] | null {
+  const r = spawnSync("git", ["status", "--porcelain", "--", "server/"], { encoding: "utf-8" });
+  if (r.status !== 0 || typeof r.stdout !== "string") return null;   // no git: advisory, not fatal
+  return r.stdout.split("\n").map(l => l.trim()).filter(Boolean);
+}
+
 async function main() {
+  const only = (() => {
+    const i = process.argv.indexOf("--only");
+    return i >= 0 ? (process.argv[i + 1] || "").split(",").map(x => x.trim()).filter(Boolean) : [];
+  })();
+  // ONE SUITE, WHEN ONE SUITE IS THE QUESTION. The full inventory is ~50 suites and ~120 revert
+  // mutations, each re-running a whole acceptance — roughly an hour. Running all of it to re-check
+  // the one cut you just changed is the single largest avoidable cost in this loop; measured, the
+  // same question answered with --only took 31 seconds.
+  const entries = only.length > 0 ? ACCEPTANCES.filter(a => only.includes(a.id)) : ACCEPTANCES;
+  if (only.length > 0) {
+    const unknown = only.filter(id => !ACCEPTANCES.some(a => a.id === id));
+    if (unknown.length > 0) {
+      console.error(`pg-acceptance-runner: unknown --only id(s): ${unknown.join(", ")}`);
+      console.error(`Known ids: ${ACCEPTANCES.map(a => a.id).join(", ")}`);
+      process.exit(2);
+    }
+    console.log(`pg-acceptance-runner: --only ${only.join(", ")} (${entries.length} of ${ACCEPTANCES.length} suites)`);
+  }
+
+  const dirtyBefore = dirtyServerFiles();
+  if (dirtyBefore && dirtyBefore.length > 0) {
+    console.error("pg-acceptance-runner: REFUSING TO RUN — server/ is dirty:");
+    console.error(dirtyBefore.map(l => `  ${l}`).join("\n"));
+    console.error("The revert harnesses below mutate these files and restore them from a backup");
+    console.error("taken at their own start, so starting dirty bakes the current state in as");
+    console.error("\"clean\". Commit, or `git checkout -- server/`, first.");
+    process.exit(2);
+  }
+
   const safety = testDatabaseSafety(process.env.DATABASE_URL, process.env as any);
   if (!safety.safe) {
     console.error(`pg-acceptance-runner: REFUSING TO RESET — ${safety.reason}.`);
@@ -537,7 +586,7 @@ async function main() {
   }
 
   const { pool } = await import("../server/db");
-  const results = await runAcceptances(ACCEPTANCES, {
+  const results = await runAcceptances(entries, {
     reset: () => resetTestDatabase(pool),
     // stdio inherited so each acceptance's own PASS/FAIL lines stay in the CI log verbatim —
     // the summary is an index to that output, never a replacement for it.
@@ -546,6 +595,15 @@ async function main() {
   });
   console.log(summarise(results));
   await pool.end().catch(() => {});
+  // A HARNESS THAT DID NOT RESTORE IS A FAILED RUN, whatever its suites reported. Saying so here is
+  // the difference between finding the damage now and finding it in tomorrow's `git status`.
+  const dirtyAfter = dirtyServerFiles();
+  if (dirtyAfter && dirtyAfter.length > 0) {
+    console.error("\npg-acceptance-runner: RED — server/ did not come back clean:");
+    console.error(dirtyAfter.map(l => `  ${l}`).join("\n"));
+    console.error("A revert harness mutated these and did not restore them. Run `git checkout -- server/`.");
+    process.exit(1);
+  }
   process.exit(exitCodeFor(results));
 }
 
