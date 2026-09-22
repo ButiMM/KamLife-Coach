@@ -388,6 +388,18 @@ export const ACCEPTANCES: Acceptance[] = [
     // two opposite-defect controls.
     command: ["bash", "script/red-on-revert-cut6-proactive-templates.sh"] },
 
+  { id: "evening-delivery", title: "The empty day reaches the client, or the record says it did not",
+    // C17 EVENING. evening.ts sends the one message written FOR a silent client — which is exactly
+    // the client whose 24-hour window is shut — so it degrades to the generic check-in. No approved
+    // template content-matches it, so the substitution stands; what could not stand was filing it
+    // as an ordinary delivery. Durable question: what does chat_history say the coach said?
+    command: ["npx", "tsx", "script/pg-evening-delivery-acceptance.ts"] },
+
+  { id: "evening-delivery-reverts", title: "Every C17 evening seam turns the acceptance red",
+    // C17 EVENING. One mechanism per case, plus the control that refuses the cheapest way to pass
+    // every "it did not arrive" assertion: sending nothing at all.
+    command: ["bash", "script/red-on-revert-c17-evening-delivery.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same

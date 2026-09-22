@@ -528,13 +528,13 @@ const SCHEDULER_MIN_GAP_MS = Math.round(1000 / _sendRatePerSec);
 // `to` passed by proactive jobs is the exact stored phoneNumber (whatsapp:+27…),
 // so an equality match resolves the user. Coach/admin alerts go to numbers with
 // no matching user row and are simply skipped — correct.
-async function logOutboundToHistory(to: string, body: string): Promise<void> {
+async function logOutboundToHistory(to: string, body: string, intent = "PROACTIVE"): Promise<void> {
   const text = (body || "").trim();
   if (!text) return; // media-only sends carry no text worth remembering
   try {
     const u = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, to)).limit(1);
     if (!u.length) return;
-    await db.insert(chatHistory).values({ userId: u[0].id, messageIn: null, messageOut: text, intent: "PROACTIVE" });
+    await db.insert(chatHistory).values({ userId: u[0].id, messageIn: null, messageOut: text, intent });
   } catch (e: any) {
     console.warn(`[SCHEDULER] outbound history log failed (non-fatal) for ${to.slice(-8)}: ${e?.message || e}`);
   }
@@ -810,7 +810,16 @@ export async function sendWhatsAppTemplate(
       recordTwilioSuccess();
       deliveryStats.sent++;
       console.log(`[SCHEDULER:TEMPLATE] → ${to.slice(-8)}: ${contentSid}`);
-      void logOutboundToHistory(to, logText); // best-effort, non-blocking
+      // THE RECORD SAYS WHICH MESSAGE THIS WAS (C17 evening). The generic check-in is the ONE
+      // template that is not the message its caller asked to send — it is the substitute that
+      // goes out when the window is shut and nothing content-matched exists. The body stored
+      // here was already honest (the rendered check-in, not the intended coaching), but the row
+      // was filed as PROACTIVE, indistinguishable from a message that actually landed. So
+      // "today's coaching never reached this client" was true in the world and unreadable in
+      // the ledger. A free-text discriminator, the same shape as the return nudge's
+      // `return_sick`/`return_away`: no migration, no live ledger rewritten, no new mechanism.
+      void logOutboundToHistory(to, logText, opts?.templateName === WINDOW_RECOVERY_TEMPLATE
+        ? "PROACTIVE_SUBSTITUTED" : "PROACTIVE"); // best-effort, non-blocking
     },
     onFailure: () => {
       recordTwilioFailure();

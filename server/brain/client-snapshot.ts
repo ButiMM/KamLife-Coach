@@ -14,7 +14,7 @@
 import { db } from "../db";
 import { workoutLogs, mealLogs, stepLogs, chatHistory } from "../../shared/schema";
 import { getWeightTruth, readTrustedStepDays } from "../day-ledger";
-import { eq, gte, desc, asc, and, sql } from "drizzle-orm";
+import { eq, gte, desc, asc, and, sql, inArray } from "drizzle-orm";
 import { weeklyTrendSlopeKg } from "../handlers/weight";
 import { getPhaseNames } from "../programme";
 import { energyFrameLine, waterTargetLitres } from "../targets";
@@ -252,7 +252,15 @@ export async function buildClientSnapshot(user: any): Promise<string> {
 
     const [lastProactive] = await db.select({ messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
       .from(chatHistory)
-      .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "PROACTIVE"), gte(chatHistory.createdAt, since(2))))
+      // BOTH DELIVERY INTENTS, BECAUSE THIS ASKS WHAT THEY READ (C17 evening). A send that
+      // degraded to the generic check-in is filed PROACTIVE_SUBSTITUTED, and an equality filter
+      // would skip it — so the newest automated message the client actually received would be
+      // invisible here and the line would name an OLDER one as "something you said". The
+      // substitution is precisely the message they may quote back, since it is the only one that
+      // reached them. The row already stores the delivered body, so the excerpt is honest.
+      .where(and(eq(chatHistory.userId, user.id),
+        inArray(chatHistory.intent, ["PROACTIVE", "PROACTIVE_SUBSTITUTED"]),
+        gte(chatHistory.createdAt, since(2))))
       .orderBy(desc(chatHistory.createdAt)).limit(1)
       .catch(() => [] as { messageOut: string | null; createdAt: Date | null }[]);
     if (lastProactive?.messageOut) {
