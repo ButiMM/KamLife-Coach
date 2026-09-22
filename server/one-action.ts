@@ -40,11 +40,8 @@ import type { BehaviourPatternDecisionContext } from "./intelligence/profile";
 export interface DayState {
   firstName?: string;
   goal: GoalKey;
-  /** Their three-month dream, in their own words, from onboarding. */
   dreamGoal?: string | null;
-  /** What they said would get in the way. Decides WHICH action is realistic for them. */
   biggestStruggle?: string | null;
-  /** The saved weekly food budget, not a guess from today's message. */
   weeklyFoodBudget?: string | null;
   weeksOnProgramme: number;
   /** Days since they logged anything at all. 0 = today. */
@@ -551,8 +548,6 @@ export function foodDayIsReopened(text: string): boolean {
 
 export function chooseAction(s: DayState): OneAction {
   const struggle = readStruggle(s.biggestStruggle);
-  // The existing plate owner treats the explicit under_100 tier as the low-budget menu.
-  // Do not infer affordability from every numeric tier: 100_300 is not the same constraint.
   const budgetConstrained = s.weeklyFoodBudget === "under_100";
   const isBulk = s.goal === "muscle_gain";
 
@@ -763,7 +758,6 @@ export interface ProactiveStateForDecision {
   today: { kcal: number; protein: number; steps: number; logged: boolean; hour: number };
   evidence: { foodSufficient: boolean; weightSufficient: boolean };
 }
-
 export interface ProactiveProfile {
   dreamGoal?: string | null;
   biggestStruggle?: string | null;
