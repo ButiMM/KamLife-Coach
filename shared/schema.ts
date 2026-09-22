@@ -148,6 +148,22 @@ export const users = pgTable(
   },
 );
 
+// One auditable seven-day adaptive review per client/SAST day. The stored overlay is the prior
+// value; a HOLD records it unchanged rather than pretending the baseline was re-applied.
+export const adaptiveTargetReviews = pgTable("adaptive_target_reviews", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  decisionDay: date("decision_day").notNull(),
+  state: text("state").notNull(), // CHANGE | HOLD
+  reason: text("reason").notNull(),
+  priorTargets: jsonb("prior_targets").notNull(),
+  nextTargets: jsonb("next_targets").notNull(),
+  evidence: jsonb("evidence").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, table => ({
+  userDayUnique: uniqueIndex("adaptive_target_reviews_user_day_unique").on(table.userId, table.decisionDay),
+}));
+
 export const weightLogs = pgTable(
   "weight_logs",
   {

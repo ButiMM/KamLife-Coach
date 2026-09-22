@@ -5,7 +5,7 @@ import { reportCardMarker } from "../report-card";
 import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../shared/schema";
 import { eq, and, gte, desc, count, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
-import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, sessionHeaderLine, renderSession } from "../programme";
+import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, renderSession } from "../programme";
 import { calculateTargets, stepBurnKcal, recalcTargetsForProfile } from "../targets";
 import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
@@ -658,22 +658,15 @@ export async function handleEarlyCommands(ctx: {
     // MISSED SESSION(S)
     if (state.type === "MISSED") {
       const missed = state.missedSessions.join(" and ");
-      const catchupIntro = sickActive ? sickViewHeader.trim() : pick([
-        `${firstName ? firstName + ", y" : "Y"}ou missed ${missed}. ${state.todayName} is still a training day — do it now and you're back on track.`,
-        `${firstName ? firstName + " —" : ""} ${missed} missed. But today counts. Get this session done and the week is back on track.`,
-        `${missed} didn't happen. That's done — don't double back. ${state.todayName}'s session is what matters now.`,
-        `${missed} slipped. ${firstName ? firstName + ", " : ""}today is the reset. One session and you're back in it.`,
-      ]);
-      const todaySlot = getTodaySlot(user);
-      const workout = buildDayWorkout({ ...effectiveUser, programmeDayInWeek: todaySlot });
-      const week = user.programmeWeek || 1;
-      const sessionNum = user.totalWorkoutsCompleted || 0;
-      const injuryNote = user.injuries && user.injuries.trim() && user.injuries.toLowerCase() !== "none"
-        ? `\n\n⚠️ *Active injury noted (${user.injuries}):* Skip any exercise that causes sharp pain.`
-        : "";
-      const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
-      const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-      const missedReply = `${catchupIntro}\n\n${sessionHeaderLine(week, sessionNum)}\n\n${workout}${injuryNote}\n\n${doneHint}\n\nHow's that looking?${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+      // A missed calendar slot does not create a debt. Today's scheduled slot is the next
+      // realistic session; it is not a make-up or a reset. Use the same session mouth as the
+      // normal workout command so injury/equipment changes cannot diverge here.
+      const earlier = missed ? `${missed} ${state.missedSessions.length === 1 ? "session" : "sessions"} didn't happen. ` : "";
+      const intro = sickActive ? sickViewHeader
+        : `${earlier}Today's scheduled session is next when you're ready.\n\n`;
+      const missedReply = renderSession({ ...effectiveUser, injuries: user.injuries }, {
+        slot: getTodaySlot(user), intro, doneHint,
+      });
       await logChat(user.id, message, missedReply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_MISSED_CATCHUP");
       return missedReply;
     }

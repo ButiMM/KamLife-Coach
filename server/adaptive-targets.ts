@@ -24,7 +24,8 @@ import type { FoodDataConfidence, FoodProvenance } from "./report-card";
 
 export type AdaptReason =
   | "sick" | "recovering" | "losing_too_fast" | "gaining_too_fast"
-  | "stalled" | "stalled_unlogged" | "stalled_over_target" | "inactive" | "none";
+  | "stalled" | "stalled_unlogged" | "stalled_unknown_intake" | "stalled_under_target"
+  | "stalled_over_target" | "inactive" | "none";
 
 export interface AdaptiveInput {
   /** The client's baseline targets from onboarding/profile (the "set point"). */
@@ -226,11 +227,26 @@ export function adaptTargets(inp: AdaptiveInput): AdaptiveTargets {
         changed: true,
       };
     }
+    if (typeof logged !== "number" || typeof inp.avgKcal7d !== "number"
+        || !Number.isFinite(inp.avgKcal7d)) {
+      return {
+        ...base, reason: "stalled_unknown_intake",
+        note: "The scale looks flat, but I can't read a reliable food average this week. Your targets stay where they are until we know what was eaten.",
+        changed: true,
+      };
+    }
     if (typeof inp.avgKcal7d === "number" && inp.baseCalories > 0
         && inp.avgKcal7d > inp.baseCalories * INTAKE_OVER_TARGET_RATIO) {
       return {
         ...base, reason: "stalled_over_target",
         note: `Three weeks flat, and you're averaging ${Math.round(inp.avgKcal7d)} kcal against a ${base.calorieTarget} target — so the target isn't what's stuck, it hasn't been tested yet. I'm leaving your numbers exactly where they are; let's get the food closer to target first.`,
+        changed: true,
+      };
+    }
+    if (inp.baseCalories > 0 && inp.avgKcal7d < inp.baseCalories * 0.90) {
+      return {
+        ...base, reason: "stalled_under_target",
+        note: `Three weeks flat, but the ${logged} logged days average ${Math.round(inp.avgKcal7d)} kcal against your ${base.calorieTarget} target. I'm holding the target, not cutting it further; first let's check whether the portions and missing days tell the same story.`,
         changed: true,
       };
     }

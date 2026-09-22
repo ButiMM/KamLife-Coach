@@ -106,6 +106,7 @@ async function buildDecisionInputs(user: any): Promise<{
       constraints: foodConstraints(user || {}),
       dreamGoal: user?.dreamGoal,
       biggestStruggle: user?.biggestStruggle,
+      weeklyFoodBudget: user?.weeklyFoodBudget,
       behaviourPatterns,
       weeksOnProgramme: user?.createdAt ? Math.floor(sastDaysBetween(new Date(user.createdAt)) / 7) : 0,
       sessionsTarget: Number(user?.trainingDaysPerWeek) || 3,

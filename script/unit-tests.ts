@@ -7458,7 +7458,7 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.equal(r.reason, "gaining_too_fast");
   });
   test("adaptive: a 3-week stall gets a SMALL trim plus steps, never a crash", () => {
-    const r = adaptTargets({ ...base, stalledWeeks: 3 });
+    const r = adaptTargets({ ...base, stalledWeeks: 3, loggedDays7d: 7, avgKcal7d: 1980 });
     assert.equal(r.reason, "stalled");
     assert.ok(r.calorieTarget >= 1760 && r.calorieTarget < 2000, `small trim only: ${r.calorieTarget}`);
     assert.ok(r.stepsTarget > 8000, "steps move too");
@@ -7489,10 +7489,11 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.ok(/2 days/.test(r.note), "say how thin, plainly");
   });
 
-  test("adaptive: unknown intake keeps the OLD behaviour — no silent change for existing clients", () => {
+  test("adaptive: unknown intake holds rather than cutting an untested target", () => {
     const r = adaptTargets({ ...base, stalledWeeks: 3 });
-    assert.equal(r.reason, "stalled", "no intake data must behave exactly as it did before");
-    assert.ok(r.calorieTarget < 2000);
+    assert.equal(r.reason, "stalled_unknown_intake");
+    assert.equal(r.calorieTarget, 2000);
+    assert.equal(r.stepsTarget, 8000);
   });
 
   test("adaptive: intake just over the noise band does NOT block the trim", () => {
@@ -7502,7 +7503,8 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 
   test("adaptive: the floor holds — a stall never starves a light client", () => {
-    const r = adaptTargets({ ...base, baseCalories: 1400, weightKg: 55, stalledWeeks: 5 });
+    const r = adaptTargets({ ...base, baseCalories: 1400, weightKg: 55, stalledWeeks: 5,
+      loggedDays7d: 7, avgKcal7d: 1390 });
     assert.ok(r.calorieTarget >= 1400 * 0.93 && r.calorieTarget >= 1210, `never below floor: ${r.calorieTarget}`);
     assert.ok(r.stepsTarget > 8000, "moves with steps at the floor");
   });

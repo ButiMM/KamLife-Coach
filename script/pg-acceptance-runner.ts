@@ -350,6 +350,45 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "followup-arrives-reverts", title: "Every C17 follow-up seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-c17-followup-arrives.sh"] },
 
+  { id: "c18-budget-memory", title: "Saved budget and diet change the delivered one-action food move",
+    command: ["npx", "tsx", "script/pg-c18-budget-memory-acceptance.ts"] },
+
+  { id: "c18-budget-memory-reverts", title: "Every C18 budget read and decision seam turns the delivered move red",
+    command: ["bash", "script/red-on-revert-c18-budget-memory.sh"] },
+
+  { id: "c18-adaptive-review", title: "A seven-day plateau changes or holds targets with an auditable reason",
+    command: ["npx", "tsx", "script/pg-c18-adaptive-review-acceptance.ts"] },
+
+  { id: "c18-adaptive-review-reverts", title: "Every C18 plateau guard and audit seam turns the review red",
+    command: ["bash", "script/red-on-revert-c18-adaptive-review.sh"] },
+
+  { id: "c18-owner", title: "Budget, diet, injury, steps, health and plateau decisions differ on evidence",
+    command: ["npx", "tsx", "script/c18-owner-repro.ts"] },
+
+  { id: "c18-programme-reverts", title: "An injured client's programme cannot regress to unsafe exercise or food copy",
+    command: ["bash", "script/red-on-revert-c18-programme.sh"] },
+
+  { id: "c18-training-memory", title: "Onboarding training constraints change the programme delivered after transport",
+    command: ["npx", "tsx", "script/pg-c18-training-memory-acceptance.ts"] },
+
+  { id: "c18-missed-schedule", title: "Missed sessions yield the next scheduled slot without a backlog",
+    command: ["npx", "tsx", "script/pg-c18-missed-schedule-acceptance.ts"] },
+
+  { id: "c18-missed-schedule-reverts", title: "C18 next-slot and no-reset seams turn the delivered answer red",
+    command: ["bash", "script/red-on-revert-c18-missed-schedule.sh"] },
+
+  { id: "c18-direction", title: "Daily direction uses the recorded day and one affordable next move",
+    command: ["npx", "tsx", "script/pg-c18-direction-acceptance.ts"] },
+
+  { id: "c18-direction-reverts", title: "C18 day-ledger and one-action reads are required in the delivered direction",
+    command: ["bash", "script/red-on-revert-c18-direction.sh"] },
+
+  { id: "c18-health-hold", title: "A durable health hold blocks training progression in the delivered reply",
+    command: ["npx", "tsx", "script/pg-c18-health-hold-acceptance.ts"] },
+
+  { id: "c18-health-hold-reverts", title: "Removing the C18 rest decision turns the delivered health answer red",
+    command: ["bash", "script/red-on-revert-c18-health-hold.sh"] },
+
   { id: "turn-reply-integrity", title: "The reply reconcileTurnReply repaired is the reply that ships",
     // C10 (2026-09-15). reconcileTurnReply computed its write-integrity repair and directive strip
     // into `draft`, then returned `reply` — the original, unverified model string — from every
