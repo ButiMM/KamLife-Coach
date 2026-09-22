@@ -364,6 +364,14 @@ At 13:30 on a frozen clock the same path ends at `lifecycle.ts:1536`, *"I didn't
 **Effort:** S
 **Confidence:** high
 
+### [P2] Two revenue owners, one of them a constant
+**Where:** `server/routes/finance.ts:4-5, 29-80` versus `/api/dashboard/revenue`; `server/routes/finance.ts:34`; `server/routes/dashboard.ts:934`
+**What the code actually does:** `/api/dashboard/finance` derives AI cost from `gpt_costs` and WhatsApp cost from real billable message volume at the shared `cost-tracking.ts` rate — which is what it should do. But its own header records that `/api/dashboard/revenue` still uses "a fixed R43/user cost guess". Both endpoints count every `inactive` client as "cancelled", so payment lapses and voluntary cancellations are one number. The exchange rate defaults to R18.50/$ here too (`finance.ts:43`), a third copy after `gpt.ts:1145`.
+**Why it matters, in business terms:** Two answers to "are we making money per client", depending on which page is open, and churn that cannot separate "left" from "card failed".
+**Fix:** Retire the constant-based endpoint; split cancellation from lapse (it is part of the payments fix).
+**Effort:** S
+**Confidence:** high
+
 ### [P2] The whale flag only renders on a dashboard
 **Where:** `server/cost-tracking.ts:14-24`; `server/routes/admin-client.ts:121-305`
 **What the code actually does:** A client costing more than half their fee is flagged only when someone opens the admin page. Nothing alerts or throttles.
@@ -453,6 +461,7 @@ Checked, and nothing material found:
 - **PayFast ITN intake** (`payments.ts:75-170`): passphrase-signed MD5 verification, which refuses to run without a passphrase; merchant id check; amount check (±R5); idempotency on retries. Correct. The defects are in cancellation and re-activation, not intake.
 - **Crisis language:** deterministic, before any model, with SADAG and Lifeline numbers (verified: "I don't want to be here anymore" → `CRISIS`).
 - **Medication dosing:** metformin and insulin questions are refused deterministically, before any model. The insulin-*omission* wording is the one gap, logged under P1.
+- **Unit economics from real volume:** `server/routes/finance.ts` computes AI cost from `gpt_costs` and WhatsApp cost from real billable message volume at the single `cost-tracking.ts` rate, as the brief requires. (An earlier draft of this audit wrongly said the file did not exist; I had checked `server/finance.ts` only.)
 - **Secrets:** no live-looking API keys, Twilio SIDs or private keys in tracked files. Only `.env.example` is tracked.
 - **Re-entry copy:** no shame language in comeback messages or templates. The restart doctrine was removed from `kamlife_checking_in` in Cut 6, and the come-back rung reads "No catching up, no starting over…".
 - **Several #63 failures are genuinely fixed on current main** — the moved workout, "same as the last meal", "10k steps" and the black-coffee correction were all replayed. So is multi-day *day* attribution; the row collapse remains.
@@ -472,7 +481,7 @@ Checked, and nothing material found:
 7. **Are the three CI jobs required status checks** (branch protection)? Not visible from code.
 8. **The real production failure distribution.** Pull 30 days of `turn_ledger` + `chat_history` and replay them through the rig used here. This audit could not.
 9. **The "316 audited patterns".** No such corpus exists in the repo; "316" appears only as a past `regexLiterals` count in `check-architecture.ts`. Supply the set to recompute. My measured substitute: 37 of 40 real messages paid a model call.
-10. **`finance.ts` does not exist.** Where is revenue and unit economics computed today?
+10. **Which revenue view does the founder actually read** — `/api/dashboard/finance` (real volume) or `/api/dashboard/revenue` (fixed R43/user guess)? See the P2 finding on two revenue owners.
 11. **What the live model says** on the scope, GLP-1, under-18 and very-low-intake paths. The deterministic layers let these through; the model's actual answer needs a live run.
 
 ---
