@@ -73,6 +73,7 @@ const { _setTwilioClientForTests } = await import("../server/outbound-delivery")
 const { sendWhatsApp, dailyProactiveCount } = await import("../server/scheduler/shared");
 const { runEveningAccountability } = await import("../server/scheduler/jobs/evening");
 const { _resetOutboundDedupe } = await import("../server/reply-hygiene");
+const { buildClientSnapshot } = await import("../server/brain/client-snapshot");
 
 let failed = 0;
 const chk = (ok: boolean, msg: string, evidence = "") => {
@@ -264,6 +265,35 @@ REAL("\n5. NOTHING DOWNSTREAM TREATS A SUBSTITUTION AS COACHING DELIVERED");
   const { rows: loops } = await pool.query(
     "SELECT status FROM client_actions WHERE user_id = $1", [user.id]).catch(() => ({ rows: [] } as any));
   chk(loops.length === 0, "a substituted evening opens no open loop", JSON.stringify(loops));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n6. THE SNAPSHOT STILL NAMES THE MESSAGE THEY ACTUALLY READ");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The reader that asks "what was the last automated coach message?" filters on the delivery
+// intent, so marking a substitution changes what it can see. If it matched PROACTIVE alone, the
+// newest message the client received would be invisible and the model would be handed an OLDER
+// one as "something you said" — the client quotes the check-in back and the coach denies sending
+// it. The discriminator must not cost the snapshot its newest truth.
+{
+  await reset();
+  // An ordinary proactive lands yesterday, inside the snapshot's two-day window…
+  await pool.query(
+    `INSERT INTO chat_history (user_id, message_in, message_out, intent, created_at)
+     VALUES ($1, NULL, 'Morning Lerato — your plan for today is ready.', 'PROACTIVE', now() - interval '20 hours')`,
+    [user.id]);
+  // …and today's evening send degrades to the generic check-in.
+  stubTwilio(true);
+  await sendWhatsApp(phone, "Lerato, haven't heard from you today — no stress.\n\n*Log one meal.*");
+  await new Promise(r => setTimeout(r, 2000));
+
+  const snapshot = await buildClientSnapshot({ ...user, id: user.id });
+  const line = snapshot.split("\n").find(l => l.includes("Last automated coach message")) || "";
+  chk(!!line, "the snapshot carries a last-automated-message line at all", JSON.stringify(snapshot.slice(0, 120)));
+  chk(isCheckIn(line), "…and it is the check-in the client READ, not the older plan",
+    JSON.stringify(line.slice(0, 140)));
+  chk(!/your plan for today is ready/i.test(line),
+    "…so the model is not handed a stale message as the newest one", JSON.stringify(line.slice(0, 140)));
 }
 
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);

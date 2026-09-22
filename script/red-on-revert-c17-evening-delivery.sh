@@ -121,13 +121,25 @@ s=s.replace('return templateDelivery === "dropped" ? "dropped" : "substituted";'
 assert s != b, "no match"; open(p, "w").write(s)
 PYEOF
 
+# 6. THE SNAPSHOT READER GOES BACK TO MATCHING `PROACTIVE` ALONE — the cost of the discriminator,
+#    paid in the one reader that filters on it (Codex P2 on 412614a). The substituted send becomes
+#    invisible to buildClientSnapshot, so the model is handed an OLDER message as "the last
+#    automated coach message": the client quotes back the check-in they actually read and the
+#    coach has no record of having sent it.
+cat > "$PATCH_DIR/6.py" <<'PYEOF'
+p = "server/brain/client-snapshot.ts"; s = open(p).read(); b = s
+s = s.replace('inArray(chatHistory.intent, ["PROACTIVE", "PROACTIVE_SUBSTITUTED"]),',
+              'eq(chatHistory.intent, "PROACTIVE"),')
+assert s != b, "no match"; open(p, "w").write(s)
+PYEOF
+
 echo "RED-ON-REVERT — C17 evening. Every case below must turn the acceptance red."
 failed=0
-for i in 1 2 3 4 5; do
+for i in 1 2 3 4 5 6; do
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-c17-evening-delivery: FAILED — $failed case(s) left it green, crashed, or would not patch."
   exit 1
 fi
-echo "red-on-revert-c17-evening-delivery: GREEN — 5/5 behavioral reverts caught"
+echo "red-on-revert-c17-evening-delivery: GREEN — 6/6 behavioral reverts caught"
