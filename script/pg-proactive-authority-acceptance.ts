@@ -78,6 +78,26 @@ const said = async (u: any, text: string) => {
 // ── §1 A CONSTRAINT THE CLIENT STATED BINDS THE PROACTIVE COACH ─────────────────────────────
 REAL("\n§1 'I am not training today' — the case that used to contradict");
 const a = await seed();
+// Weighed yesterday, so the weigh rung stands down and §2's control compares like with like: a
+// never-weighed client is asked to weigh first whatever they declared (#275 took away the
+// come-back rung that used to answer first for a present client with no food log).
+const weighedYesterday = (u: any) => pool.query(
+  "INSERT INTO weight_logs (user_id, weight, logged_at) VALUES ($1, '84.5', now() - interval '1 day')", [u.id]);
+// …and logging past the evidence floor with protein on track, so the training rung is the one
+// that would answer if the decline were ignored. Without this §1 passes for any reason at all.
+const loggingWell = async (u: any) => {
+  await pool.query(
+    `INSERT INTO meal_logs (user_id, logged_at, meal_label, kcal_int, protein_int, items, raw_message, source)
+     SELECT $1::uuid, now() - make_interval(days => d), 'lunch', 700, 70, $2::jsonb, 'seed', 'sa_scanner' FROM generate_series(0, 4) d
+     UNION ALL SELECT $1::uuid, now(), 'breakfast', 700, 70, $2::jsonb, 'seed', 'sa_scanner'`,
+    [u.id, JSON.stringify([{ name: "chicken", grams: 150 }])]);
+  await pool.query(
+    `INSERT INTO step_logs (user_id, logged_at, steps, provenance, resolved_day)
+     VALUES ($1, now(), 6000, 'client_report', to_char(now() AT TIME ZONE 'Africa/Johannesburg','YYYY-MM-DD'))`,
+    [u.id]);
+};
+await weighedYesterday(a);
+await loggingWell(a);
 await said(a, "I am not training today");
 const heldA = await readHeldConstraints(a.phoneNumber, a);
 chk(heldA.trainingDeclined === true, "the constraint is read from the client's own words",
@@ -98,22 +118,18 @@ REAL("\n§2 a PRESENT client who declared nothing — training must still be rea
 // `daysSinceAnyLog >= 3` — logs, not chat — so a control client who has been chatting but logging
 // nothing still reads as gone and gets the come-back move whatever else is true. That would have
 // made this control unfalsifiable, which is exactly what it is here to prevent. This one has been
-// logging: food yesterday and today, steps today.
+// logging the same way as §1's client, so every rung above training stands down and the control
+// lands where it is meant to.
 const b = await seed();
-await pool.query(
-  `INSERT INTO meal_logs (user_id, logged_at, meal_label, kcal_int, protein_int, items, raw_message, source)
-   VALUES ($1, now() - interval '1 day', 'lunch', 600, 45, $2, 'seed', 'sa_scanner'),
-          ($1, now(),                     'lunch', 600, 45, $2, 'seed', 'sa_scanner')`,
-  [b.id, JSON.stringify([{ name: "chicken", grams: 150 }])]);
-await pool.query(
-  `INSERT INTO step_logs (user_id, logged_at, steps, provenance, resolved_day)
-   VALUES ($1, now(), 6000, 'client_report', to_char(now() AT TIME ZONE 'Africa/Johannesburg','YYYY-MM-DD'))`,
-  [b.id]);
+await weighedYesterday(b);
+await loggingWell(b);
 const heldB = await readHeldConstraints(b.phoneNumber, b);
 chk(heldB.trainingDeclined === false, "no constraint is invented from silence", JSON.stringify(heldB));
 const moveB = await canonicalNextMove(b, { hour: 18 });
 chk(moveB.action.kind !== "come_back",
   "a present client is not treated as absent — the absence rung stands down",
+  `action=${moveB.action.kind}`);
+chk(moveB.action.kind === "train", "training is reachable for a client who declared nothing",
   `action=${moveB.action.kind}`);
 chk(moveB.action.kind !== moveA.action.kind,
   "the decision genuinely differs once the constraint is gone",
@@ -140,7 +156,8 @@ await said(c, "I'm not eating anything else today");
 const heldC = await readHeldConstraints(c.phoneNumber, c);
 chk(heldC.foodDayClosed === true, "the closure is read", JSON.stringify(heldC));
 const moveC = await canonicalNextMove(c, { hour: 20 });
-chk(!/\beat\b|\bmeal\b|protein tonight/i.test(moveC.line) || moveC.action.kind === "hold",
+// "before you eat" times tomorrow's weigh-in; it sells nothing tonight.
+chk(!/\beat\b|\bmeal\b|protein tonight/i.test(moveC.line.replace(/before you eat/gi, "")) || moveC.action.kind === "hold",
   "the proactive move does not sell food to a client who closed the day",
   `action=${moveC.action.kind} line=${moveC.line.slice(0, 110)}`);
 
