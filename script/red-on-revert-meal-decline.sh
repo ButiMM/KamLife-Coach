@@ -68,8 +68,8 @@ failed=0
 # 1. A TRIGGER WORD MAKES A CORRECTION AGAIN — "No … meal" / "No … had" qualifies without naming
 #    anything to replace the entry with (AUDIT.md Trace 1's exact mechanism).
 run_case "a decline with a food trigger word is treated as a correction" server/handlers/food-context.ts \
-  '  const isFoodCorrection = hasFoodAfterPrefix || !!slotOnly;' \
-  '  const isFoodCorrection = hasFoodAfterPrefix || !!slotOnly || (hasCorrectionPrefix && /\b(had|meal)\b/i.test(m));' || failed=$((failed + 1))
+  '  const isFoodCorrection = hasFoodAfterPrefix || claimsOtherFood || !!slotOnly;' \
+  '  const isFoodCorrection = hasFoodAfterPrefix || claimsOtherFood || !!slotOnly || (hasCorrectionPrefix && /\b(had|meal)\b/i.test(m));' || failed=$((failed + 1))
 
 # 2. A SLOT WORD ANYWHERE IS A RELABEL — "No, lunch was fine as it is" moves the meal.
 run_case "a slot named as a verdict relabels the meal" server/handlers/food-context.ts \
@@ -108,6 +108,12 @@ run_case "a decline repeating the logged food supersedes it" server/handlers/foo
   '      if (!repeatsRecord && correctedMsgCandidate' \
   '      if (correctedMsgCandidate' || failed=$((failed + 1))
 
+# 9. A CORRECTION TO AN UNFAMILIAR FOOD APPENDS (Codex attack @ 238bd21) — "No, I had injera
+#    instead" logs injera beside the pap it replaced.
+run_case "a correction naming a food the scanner does not know appends" server/handlers/food-context.ts \
+  '  const isFoodCorrection = hasFoodAfterPrefix || claimsOtherFood || !!slotOnly;' \
+  '  const isFoodCorrection = hasFoodAfterPrefix || !!slotOnly;' || failed=$((failed + 1))
+
 # NOT A CASE, DELIBERATELY: the invalidateFoodTotalsCache() before the recount. Removing it was
 # tried and the acceptance stayed green — the re-entered turn re-derives the day from the ledger, so
 # the stale figure only exists in the window while that turn runs. A seam that cannot turn red is
@@ -118,4 +124,4 @@ if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-meal-decline: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-meal-decline: GREEN — 8/8 behavioral reverts caught"
+echo "red-on-revert-meal-decline: GREEN — 9/9 behavioral reverts caught"

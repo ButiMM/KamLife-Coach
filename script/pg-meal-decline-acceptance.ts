@@ -51,6 +51,17 @@ globalThis.fetch = (async (input: any, init?: any) => {
     return new Response(JSON.stringify({ object: "list", data: [{ object: "embedding", index: 0, embedding: Array(1536).fill(0) }], model: "text-embedding-3-small", usage: { prompt_tokens: 1, total_tokens: 1 } }),
       { status: 200, headers: { "content-type": "application/json" } });
   }
+  // The food fallback, made deterministic for the one unfamiliar food this proof names — so the
+  // replacement's write does not depend on a live model (Codex attack @ 238bd21).
+  if (url.includes("api.openai.com") && body.includes('"log_food"') && /injera/i.test(body)) {
+    const args = { is_food: true, coach_note: "Noted.", foods: [{ name: "Injera", kcal: 350, protein_g: 10, carbs_g: 70, fat_g: 2, portion_desc: "2 pieces", category: "carb" }] };
+    return new Response(JSON.stringify({
+      id: "chatcmpl-264f", object: "chat.completion", created: 1, model: "gpt-4o-mini",
+      choices: [{ index: 0, finish_reason: "tool_calls", message: { role: "assistant", content: null,
+        tool_calls: [{ id: "call_1", type: "function", function: { name: "log_food", arguments: JSON.stringify(args) } }] } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }
   if (url.includes("api.openai.com")) {
     const isClassifier = body.includes("message-understanding brain");
     return new Response(JSON.stringify({
@@ -171,6 +182,17 @@ REAL("\n2. A GENUINE CORRECTION SUPERSEDES — the replacement lands, and the re
   const cached = Number((await pool.query("SELECT today_calories FROM users WHERE id = $1", [user.id])).rows[0].today_calories);
   const held = after.reduce((n, r) => n + r.kcal_int, 0);
   chk(cached === held, "the cached day total is the replacement's, not the superseded meal's", `today_calories=${cached} meals=${held}`);
+}
+
+{
+  // Codex attack @ 238bd21: a correction to a food the SA scanner does not know. Requiring a
+  // scanner-named food made this an APPEND — injera logged beside the pap it replaced.
+  const before = await freshLunch("SM264-2c");
+  const t = await say("No, I had injera instead", "SM264-2d");
+  const after = await meals();
+  chk(after.length === 1 && !after.some(r => r.id === before.id) && /injera/i.test(JSON.stringify(after)),
+    "a correction to a food the scanner does not know replaces the lunch rather than joining it", JSON.stringify(after));
+  chk(t.mutations.some(n => /\bSUPERSEDE\b/.test(n) && n.includes(before.id)), "and the replacement is recorded", `mutations=${JSON.stringify(t.mutations)}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════

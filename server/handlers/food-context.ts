@@ -277,11 +277,15 @@ export async function handleFoodContext(ctx: {
   const idNegationOnly = ID_CORRECTION_PREFIX.test(m) && /\bnot\b/i.test(m) && scanForSAFoods(candidateSansNot).length === 0;
   const hasFoodAfterPrefix = hasCorrectionPrefix && !idNegationOnly && candidateSansNot.length > 2 && scanForSAFoods(candidateSansNot).length > 0;
   // A DECLINE IS NOT A CORRECTION (#264, AUDIT.md Trace 1): "No … this meal" deleted the lunch. A
-  // correction names a replacement food, or a meal slot and nothing else ("actually it was dinner").
+  // correction names a replacement, or a meal slot and nothing else ("actually it was dinner").
   const slotOnly = hasCorrectionPrefix && !idNegationOnly && !hasFoodAfterPrefix
     ? candidateSansNot.replace(/\b(?:it|was|is|i|had|that|this|for|my|the|a|an|meal)\b|[,.!]/gi, " ").trim().match(/^(breakfast|lunch|dinner|supper|snack)$/i)
     : null;
-  const isFoodCorrection = hasFoodAfterPrefix || !!slotOnly;
+  // An explicit eating claim replaces the entry even when the scanner cannot name the food ("No, I
+  // had injera instead" — Codex @ 238bd21); "…what I had", "had enough", "had it" are verdicts.
+  const claimsOtherFood = hasCorrectionPrefix && !idNegationOnly && (/\binstead\b/i.test(candidateSansNot)
+    || /\b(?:had|ate|eaten)\s+(?!(?:enough|it|that|this|them|what|too|plenty|lots|nothing)\b|a\s+lot\b)(?:(?:a|an|some|the|my)\s+)?[a-z]/i.test(candidateSansNot));
+  const isFoodCorrection = hasFoodAfterPrefix || claimsOtherFood || !!slotOnly;
 
   const isReferenceCorrection = /\b(go with|goes with|part of|was correcting|was part|belongs to|same meal|together with|included in|go together|read it again|read that again|i was correcting|that.?s the same|the above mentioned|above mentioned|i said i had|i said for lunch|i said for dinner|i said for breakfast)\b/i.test(m);
 
@@ -301,13 +305,10 @@ export async function handleFoodContext(ctx: {
         .orderBy(desc(chatHistory.createdAt)).limit(1);
       const corrWindowStart = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() - 120_000) : todayStartCorr;
       const corrWindowEnd   = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() + 120_000) : new Date();
-      const [target] = await db.select().from(mealLogs)
-        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, corrWindowStart), lt(mealLogs.loggedAt, corrWindowEnd)))
-        .orderBy(desc(mealLogs.loggedAt)).limit(1);
-      // NAMING WHAT IS ALREADY THERE CORRECTS NOTHING (Codex attack @ 7f93588): "No, the pap and
-      // chicken were lekker" falls through to be read as what it is; the meal is not touched.
-      const heldNames = new Set([...scanForSAFoods(String(target?.rawMessage || "")),
-        ...(Array.isArray(target?.items) ? target!.items as any[] : [])].map(f => String(f?.name || "").toLowerCase()));
+      const [target] = await db.select().from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, corrWindowStart),
+        lt(mealLogs.loggedAt, corrWindowEnd))).orderBy(desc(mealLogs.loggedAt)).limit(1);
+      // NAMING WHAT IS ALREADY THERE CORRECTS NOTHING ("No, the pap and chicken were lekker" — Codex @ 7f93588).
+      const heldNames = new Set([...scanForSAFoods(String(target?.rawMessage || "")), ...(Array.isArray(target?.items) ? target!.items as any[] : [])].map(f => String(f?.name || "").toLowerCase()));
       const namedNow = scanForSAFoods(candidateSansNot).map(f => f.name.toLowerCase());
       const repeatsRecord = !!target && namedNow.length > 0 && namedNow.every(n => heldNames.has(n));
       if (relabelTo && target) {
