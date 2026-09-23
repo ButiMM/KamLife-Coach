@@ -105,6 +105,9 @@ export const users = pgTable(
     waterStreak: integer("water_streak").default(0),
     waterLastResetDate: text("water_last_reset_date"),
     cancelledAt: timestamp("cancelled_at"),
+    // Why the subscription ended — client_cancelled | payment_lapsed | payfast_cancelled | refunded.
+    // Status stays "inactive" for all four (the gate blocks exactly that); NULL = ended before 0014.
+    subscriptionEndReason: text("subscription_end_reason"),
     createdAt: timestamp("created_at").defaultNow(),
     bmi: numeric("bmi"),
     medicalConditions: text("medical_conditions"),
