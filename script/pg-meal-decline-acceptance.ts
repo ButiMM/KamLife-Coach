@@ -195,6 +195,35 @@ REAL("\n2. A GENUINE CORRECTION SUPERSEDES — the replacement lands, and the re
   chk(t.mutations.some(n => /\bSUPERSEDE\b/.test(n) && n.includes(before.id)), "and the replacement is recorded", `mutations=${JSON.stringify(t.mutations)}`);
 }
 
+{
+  // Codex review @ 238bd21: striking one food out of the logged plate is a correction, even though
+  // what remains was already on it.
+  // Itemised (not a combo), so what remains really is a subset of what was logged.
+  for (const tb of ["meal_logs", "chat_history", "turn_ledger"]) await pool.query(`DELETE FROM ${tb} WHERE user_id = $1`, [user.id]);
+  await say("I had rice and chicken breast for lunch", "SM264-2e");
+  const before = (await meals())[0];
+  const t = await say("No, I had chicken breast, not rice", "SM264-2f");
+  const after = await meals();
+  chk(!!before && after.length === 1 && !after.some(r => r.id === before.id) && !/\brice\b/i.test(JSON.stringify(after.map(r => r.raw_message))),
+    "\"No, I had chicken breast, not rice\" leaves one meal, and no rice in it", `before=${JSON.stringify(before)} after=${JSON.stringify(after)} mutations=${JSON.stringify(t.mutations)}`);
+}
+{
+  // Codex review @ 7f93588: the replacement can land as an IN-PLACE amend of an earlier meal from
+  // the last half hour (amendRecentMeal), not a new row. That is a landing; restoring the wrong meal
+  // on top of it would leave both.
+  for (const tb of ["meal_logs", "chat_history", "turn_ledger"]) await pool.query(`DELETE FROM ${tb} WHERE user_id = $1`, [user.id]);
+  await say("I had chicken breast and rice", "SM264-2g");
+  const earlier = (await meals())[0];
+  await say("I had pap and beef stew", "SM264-2h");
+  const wrong = (await meals()).find(r => r.id !== earlier?.id)!;
+  const t = await say("No, I had chicken breast, rice and avocado", "SM264-2i");
+  const after = await meals();
+  chk(!!earlier && !!wrong && !after.some(r => r.id === wrong.id),
+    "a replacement written as an amend of an earlier meal still supersedes the wrong one", `after=${JSON.stringify(after)} mutations=${JSON.stringify(t.mutations)}`);
+  chk(t.mutations.some(n => /\bSUPERSEDE\b/.test(n) && n.includes(wrong?.id || "~")), "and it is recorded as a supersede, not a restore",
+    `mutations=${JSON.stringify(t.mutations)}`);
+}
+
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n3. CONTROL — a slot correction relabels, keeps the calories, and says so in the record");
 // ══════════════════════════════════════════════════════════════════════════════════════════════

@@ -310,7 +310,9 @@ export async function handleFoodContext(ctx: {
       // NAMING WHAT IS ALREADY THERE CORRECTS NOTHING ("No, the pap and chicken were lekker" — Codex @ 7f93588).
       const heldNames = new Set([...scanForSAFoods(String(target?.rawMessage || "")), ...(Array.isArray(target?.items) ? target!.items as any[] : [])].map(f => String(f?.name || "").toLowerCase()));
       const namedNow = scanForSAFoods(candidateSansNot).map(f => f.name.toLowerCase());
-      const repeatsRecord = !!target && namedNow.length > 0 && namedNow.every(n => heldNames.has(n));
+      // …unless it strikes one of them out: "No, I had chicken, not pap" corrects (Codex @ 238bd21).
+      const negatesHeld = [...correctedMsgCandidate.matchAll(/\bnot\s+([\w'-]+)/gi)].some(x => [...heldNames].some(h => h.includes(x[1].toLowerCase())) || String(target?.rawMessage || "").toLowerCase().includes(x[1].toLowerCase()));
+      const repeatsRecord = !!target && !negatesHeld && namedNow.length > 0 && namedNow.every(n => heldNames.has(n));
       if (relabelTo && target) {
         friction();
         // Relabel only — calories unchanged, so no recompute needed.
@@ -323,33 +325,31 @@ export async function handleFoodContext(ctx: {
         friction();
         // SUPERSEDE, NEVER LOSE (#264). Out first so the replacement's reply reads the right day; gone for
         // good only once a replacement lands, else restored exactly. Recorded either way.
-        const heldIds = new Set((await db.select({ id: mealLogs.id }).from(mealLogs)
-          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartCorr)))).map(r => r.id));
-        // After the commit: the recount reads on its own connection and would see the removed row.
+        // A replacement "lands" as a new row OR as an in-place amend of another row (Codex @ 7f93588).
+        const daySigs = async () => new Map((await db.select({ id: mealLogs.id, k: mealLogs.kcalInt, i: mealLogs.items }).from(mealLogs)
+          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartCorr)))).map(r => [r.id, `${r.k}|${JSON.stringify(r.i)}`]));
+        const heldSigs = await daySigs();
         const recount = async () => { invalidateFoodTotalsCache(user.id); const t = await recomputeTodayFoodTotals(user.id);
           await db.update(users).set({ todayCalories: t.calories, todayProteinG: t.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id)); };
-        try {
+        try { // the recount runs after the commit: it reads on its own connection
           await db.transaction(async (tx) => {
             if (lastFoodLog) await tx.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog.id));
             if (target) await tx.delete(mealLogs).where(eq(mealLogs.id, target.id));
           });
           if (lastFoodLog || target) await recount();
         } catch (e) { console.warn("[food-correction-tx]", e); }
-        // Strip "not <word>": "chicken not beef" re-logs chicken only, never chicken AND beef.
         const cleaned = correctedMsgCandidate.replace(/\bnot\s+\w+/gi, " ").replace(/\s+/g, " ").trim();
-        const replyCorr = await handleMessage(phone, cleaned.length > 2 ? cleaned : correctedMsgCandidate);
+        const replyCorr = await handleMessage(phone, cleaned.length > 2 ? cleaned : correctedMsgCandidate); // "not X" stripped: never re-log X
         if (target) {
-          const landed = (await db.select({ id: mealLogs.id }).from(mealLogs)
-            .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartCorr))))
-            .map(r => r.id).filter(id => !heldIds.has(id));
+          const landed = [...(await daySigs())].filter(([id, sig]) => id !== target.id && heldSigs.get(id) !== sig).map(([id]) => id);
           if (landed.length > 0) {
             turnMutation(`SUPERSEDE meal ${target.id} kcal=${target.kcalInt} label=${target.mealLabel || "none"} raw="${String(target.rawMessage || "").slice(0, 80)}" by [${landed.join(",")}]`, "[MEAL_CORRECTION]");
           } else {
-            await db.transaction(async (tx) => {
+            const restored = await db.transaction(async (tx) => {
               await tx.insert(mealLogs).values(target);
               if (lastFoodLog) await tx.update(chatHistory).set({ intent: "FOOD_LOG" }).where(eq(chatHistory.id, lastFoodLog.id));
-            }).then(recount).catch(e => console.warn("[food-correction-restore]", e));
-            turnMutation(`RESTORE meal ${target.id} kcal=${target.kcalInt} — the correction logged no replacement`, "[MEAL_CORRECTION]");
+            }).then(recount).then(() => true, e => { console.error("[food-correction-restore] FAILED", e); return false; });
+            turnMutation(`${restored ? "RESTORE" : "RESTORE_FAILED"} meal ${target.id} kcal=${target.kcalInt} raw="${String(target.rawMessage || "").slice(0, 80)}" — the correction logged no replacement`, "[MEAL_CORRECTION]");
           }
         }
         return replyCorr;
