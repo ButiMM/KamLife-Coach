@@ -65,6 +65,33 @@ export const ONBOARDING_STATES = new Set<string>([
 ]);
 
 // ============================================================
+// AGE GATE (#267) — Coach K coaches adults only
+// A calorie deficit and a weight-loss programme are not something to hand a 14-17-year-old
+// over WhatsApp, so under 18 is a hard stop: at the age question, in a bulk intake, when a
+// client says their age mid-conversation, and when the record already says under 18. One
+// message for every path, and no age is kept for a minor. The account stays in
+// BLOCKED_UNDERAGE, which every proactive job skips (they select COMPLETE clients only).
+// ============================================================
+export const UNDERAGE_REPLY = `Coach K is built for adults, so I can't coach you until you're 18. For now, the best people to plan your training and eating with are a parent or guardian, a school coach, or the nurse at your clinic. 💙`;
+
+const AGE_WORDS: Record<string, number> = { ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17 };
+
+/** A first-person age under 18 ("I'm 16", "I am a 15 year old", "I'm 17, can I…"), or null.
+ *  The number must be followed by "years old" or end the clause, so "I'm 16 weeks pregnant",
+ *  "I'm 17kg down" and "I'm 15 minutes late" are not ages. */
+export function statedMinorAge(text: string): number | null {
+  const s = String(text || "").toLowerCase().replace(/[‘’ʼ]/g, "'");
+  const m = s.match(/\b(?:i'?m|i\s+am|my\s+age\s+is|i\s+(?:just\s+)?turned)\s+(?:only\s+|just\s+|a\s+)?(1[0-7]|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)(?:[\s-]*(?:years?|yrs?|y\/?o)\b(?:[\s-]*old)?|(?=\s*(?:[.,!?;)]|$|and\b|but\b|so\b|today\b)))/);
+  return m ? AGE_WORDS[m[1]] ?? Number(m[1]) : null;
+}
+
+/** Close the account to coaching. Returns the new state so a caller can carry it forward. */
+export async function blockUnderage(phone: string): Promise<"BLOCKED_UNDERAGE"> {
+  await db.update(users).set({ onboardingState: "BLOCKED_UNDERAGE", age: null }).where(eq(users.phoneNumber, phone));
+  return "BLOCKED_UNDERAGE";
+}
+
+// ============================================================
 // MENU TEXT — context-aware
 // ============================================================
 
@@ -469,9 +496,9 @@ const BULK_RESUME: Array<{ state: string; missing: (u: any) => boolean; ask: (u:
 
 async function commitBulkIntake(user: any, bulk: BulkIntake, source: string, phone: string): Promise<string> {
   // UNDERAGE GATE, re-applied. A blob must not be a way around the age check.
-  if (typeof bulk.age === "number" && bulk.age < 14) {
-    await db.update(users).set({ onboardingState: "BLOCKED_UNDERAGE" }).where(eq(users.phoneNumber, phone));
-    return `Coach K is for ages 14 and up. Chat to a parent or guardian about getting started together.`;
+  if (typeof bulk.age === "number" && bulk.age < 18) {
+    await blockUnderage(phone);
+    return UNDERAGE_REPLY;
   }
   const set: Record<string, unknown> = {};
   if (bulk.name) set.name = bulk.name;
@@ -534,7 +561,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
 
   // ---- BLOCKED states — hard exits ----
   if (state === "BLOCKED_UNDERAGE") {
-    return `Coach K is for ages 14 and up. When you're ready, message again and we'll build your programme.`;
+    return UNDERAGE_REPLY;
   }
 
   // ---- PRE_ONBOARD — 1-2 conversational exchanges before formal questionnaire ----
@@ -691,12 +718,11 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     if (isNaN(age) || age < 10 || age > 110) {
       return `Just your age — for example: 28`;
     }
-    if (age < 14) {
-      await db.update(users).set({ onboardingState: "BLOCKED_UNDERAGE" }).where(eq(users.phoneNumber, phone));
-      return `Coach K is designed for ages 14 and up. Chat to a parent or guardian about getting started together.`;
+    if (age < 18) {
+      await blockUnderage(phone);
+      return UNDERAGE_REPLY;
     }
     const isElderly = age >= 60;
-    const isYouth = age < 18;
     await db.update(users).set({
       age,
       elderlyClient: isElderly,
@@ -704,9 +730,6 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     }).where(eq(users.phoneNumber, phone));
 
     // Age-appropriate response
-    if (isYouth) {
-      return `${age} — sharp, young legend. 💪 What's your weight and height?\n\nExample: *78kg, 1.72m*`;
-    }
     if (isElderly) {
       return `${age} — respect. I'll keep your programme joint-friendly and safe.\n\nWhat's your weight and height?\n\nExample: *78kg, 1.72m*`;
     }
