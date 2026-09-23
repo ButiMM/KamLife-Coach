@@ -109,6 +109,8 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 **Gate judge:** an OpenAI model, a different model family from the builder, called with the existing OpenAI key. The judge never sees builder reasoning, only the input, the stored state and the final WhatsApp body.
 
+**Tester-visible rule:** every PR description opens with one line, "What testers will notice:", in plain language. If the answer is nothing, it says why the PR is still needed today. Work is ordered so the changes testers feel most land first.
+
 **Merge rule:** a PR merges only when the gate passes, no hard invariant fails, and Codex's attack comment has been answered with either a fix or a stated reason it doesn't apply.
 
 ## 7. Frozen and closed
