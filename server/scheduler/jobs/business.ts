@@ -467,7 +467,7 @@ export async function runAutoCalAdjust(): Promise<void> {
           // guard below; without this, only plateaus got corrected, never over-shooting.
           const tooFastKg = Math.max(1.8, last * 0.03);
           if (change <= -tooFastKg && currentCal < 3500) {
-            newCal  = currentCal + 150;
+            newCal  = Math.max(calFloor, currentCal + 150);
             newProt = Math.min(currentProt + 10, 220);
             msg = `${name}, you're down ${Math.abs(change).toFixed(1)}kg in 3 weeks — faster than the safe lane, and losing that quick starts costing you muscle, not just fat. Adjustments:\n\n📈 Calories: *${currentCal} → ${newCal} kcal/day*\n🥩 Protein: *${currentProt} → ${newProt}g/day* (muscle shield)\n\nThe scale slowing down slightly is the plan working, not stalling. Keep training.`;
           } else
@@ -495,7 +495,7 @@ export async function runAutoCalAdjust(): Promise<void> {
           // change <= 0.3 incorrectly fired when someone was losing weight significantly,
           // sending "weight hasn't moved" when they were actually down 2kg.
           if (change < 0.1 && currentCal < 3500) {
-            newCal = Math.min(3500, currentCal + 150);
+            newCal = Math.max(calFloor, Math.min(3500, currentCal + 150));
             if (change < -0.3) {
               // Losing weight on a muscle-gain programme — clearer message than "hasn't moved"
               msg = `${name}, you are losing weight on a muscle-building programme — down ${Math.abs(change).toFixed(1)}kg in 3 weeks. That is the wrong direction. Calories bumped: *${currentCal} → ${newCal} kcal/day*.\n\nAdd carbs around training: rice, oats, sweet potato, banana before gym. Protein stays at ${currentProt}g.`;
@@ -510,7 +510,7 @@ export async function runAutoCalAdjust(): Promise<void> {
             msg = `${name}, your weight has gone up ${change.toFixed(1)}kg in 3 weeks. For body recomp we want steady, not gaining. Pulling calories back slightly: *${currentCal} → ${newCal} kcal/day*.\n\nProtein stays at ${currentProt}g. Keep the training consistent — that is where the muscle comes from.`;
           } else if (change < -1.5) {
             // Losing too fast — risking muscle loss
-            newCal = Math.min(3500, currentCal + 100);
+            newCal = Math.max(calFloor, Math.min(3500, currentCal + 100));
             msg = `${name}, you are losing faster than expected for recomp — ${Math.abs(change).toFixed(1)}kg in 3 weeks. That is too fast and we risk losing muscle with the fat. Adding calories back: *${currentCal} → ${newCal} kcal/day*.\n\nProtein stays at ${currentProt}g. Recomp is a slow game — the goal is body composition, not just the scale.`;
           }
           // ±0.5kg: perfect recomp — no adjustment needed

@@ -88,8 +88,11 @@ export interface ProactiveStateForAdapt {
   weight: { weeklyKgChange: number | null; stalledWeeks: number };
 }
 
-export function adaptiveInputFrom(s: ProactiveStateForAdapt): AdaptiveInput {
+/** `who` carries the floor's demographics (#268). The 05:45 writer and the morning line that
+ *  replays it both pass the client, so the number stored and the number spoken are one answer. */
+export function adaptiveInputFrom(s: ProactiveStateForAdapt, who?: { gender?: string | null; age?: number | null; lifeSituation?: string | null }): AdaptiveInput {
   return {
+    gender: who?.gender, age: who?.age, lifeSituation: who?.lifeSituation,
     baseCalories: s.baseline.calories,
     baseProtein: s.baseline.protein,
     baseSteps: s.baseline.steps,

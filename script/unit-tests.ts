@@ -2446,6 +2446,26 @@ test("gains-fear masterclass survived the deletion — it is in the coaching pro
     const stalledWoman = { ...stalledMan, gender: "female", baseCalories: 1500 };
     assert.ok(adaptTargets(stalledWoman).calorieTarget >= 1400, "the overlay's own 1400 hold still applies to women");
   });
+  test("calorie floor: the morning line replays the writer's answer, demographics included", async () => {
+    // Codex @ ec5dcf4: the 05:45 writer passed gender/age/life situation and the 06:00 replay did
+    // not, so a breastfeeding client was stored at 1800 and told 1770.
+    const { adaptiveInputFrom } = await import("../server/adaptive-targets");
+    const state = { goalType: "fat_loss", weightKg: 70, baseline: { calories: 1900, protein: 120, steps: 7000 },
+      health: { sick: false, recovering: false, daysSick: 0 }, food: { avgKcal7d: 1900, loggedDays7d: 6 },
+      steps: { avg7d: 7000 }, weight: { weeklyKgChange: 0, stalledWeeks: 3 } };
+    const who = { gender: "female", age: 30, lifeSituation: "postpartum_breastfeeding" };
+    const writer = adaptTargets(adaptiveInputFrom(state, who));
+    assert.ok(writer.calorieTarget >= 1800, `a breastfeeding client was cut to ${writer.calorieTarget}`);
+    assert.equal(adaptTargets(adaptiveInputFrom(state, who)).note, writer.note);
+    for (const f of ["server/scheduler/jobs/adaptive.ts", "server/scheduler/jobs/morning.ts"]) {
+      assert.ok(/adaptiveInputFrom\(\w+, \w+\)/.test(readFileSync(f, "utf-8")), `${f} derives the adaptive input without the client`);
+    }
+  });
+  test("calorie floor: every raise in the three-week re-evaluation starts from the floor", async () => {
+    // Codex @ f5a4470: a legacy 1200 baseline + 150 was written and announced as 1350 for a man.
+    const src = readFileSync("server/scheduler/jobs/business.ts", "utf-8");
+    assert.ok(!/newCal\s*=\s*(?:Math\.min\(3500, )?currentCal \+ 1[05]0/.test(src), "a raise can still land under the floor");
+  });
   test("calorie floor: every writer reads the one table", async () => {
     for (const [f, needle] of [["server/handlers/weight.ts", "calorieFloor(user)"], ["server/scheduler/jobs/business.ts", "calorieFloor(client)"],
       ["server/scheduler/jobs/monday.ts", "calorieFloor(client)"], ["server/adaptive-targets.ts", "calorieFloor({"]] as const) {
