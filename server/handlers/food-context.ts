@@ -310,10 +310,9 @@ export async function handleFoodContext(ctx: {
       // NAMING WHAT IS ALREADY THERE CORRECTS NOTHING ("No, the pap and chicken were lekker" — Codex @ 7f93588).
       const heldNames = new Set([...scanForSAFoods(String(target?.rawMessage || "")), ...(Array.isArray(target?.items) ? target!.items as any[] : [])].map(f => String(f?.name || "").toLowerCase()));
       const namedNow = scanForSAFoods(candidateSansNot).map(f => f.name.toLowerCase());
-      // …unless it strikes one of them out: "No, I had chicken, not pap" corrects (Codex @ 238bd21).
-      const negatesHeld = [...correctedMsgCandidate.matchAll(/\bnot\s+([\w'-]+)/gi)].some(x => [...heldNames].some(h => h.includes(x[1].toLowerCase())) || String(target?.rawMessage || "").toLowerCase().includes(x[1].toLowerCase()));
-      // …and names ALL of it — "rice and chicken breast" drops the avocado (Codex @ 8e15426).
-      const repeatsRecord = !!target && !negatesHeld && namedNow.length > 0 && namedNow.every(n => heldNames.has(n)) && ((r => r.length ? r : [...heldNames])(scanForSAFoods(String(target.rawMessage || "")).map(f => f.name.toLowerCase()))).every(n => namedNow.includes(n));
+      // …and names ALL of it: "rice and chicken breast" drops the avocado, and "chicken breast, not rice"
+      // strikes the rice (Codex @ 8e15426, @ 238bd21).
+      const repeatsRecord = !!target && namedNow.length > 0 && namedNow.every(n => heldNames.has(n)) && ((r => r.length ? r : [...heldNames])(scanForSAFoods(String(target.rawMessage || "")).map(f => f.name.toLowerCase()))).every(n => namedNow.includes(n));
       if (relabelTo && target) {
         friction();
           await db.update(mealLogs).set({ mealLabel: relabelTo, corrected: true }).where(eq(mealLogs.id, target.id));

@@ -116,9 +116,9 @@ run_case "a correction naming a food the scanner does not know appends" server/h
 
 # 10. STRIKING A FOOD OUT IS READ AS A REPEAT (Codex review @ 238bd21) — "No, I had chicken
 #     breast, not rice" adds a second meal beside the rice one.
-run_case "a removal-only correction is treated as naming the record" server/handlers/food-context.ts \
-  '      const repeatsRecord = !!target && !negatesHeld && namedNow.length > 0' \
-  '      const repeatsRecord = !!target && namedNow.length > 0' || failed=$((failed + 1))
+# (Case 10's own seam, `!negatesHeld`, is gone: the names-all-of-it rule of case 13 already treats
+# "chicken breast, not rice" as a correction, so the strike-out check could no longer turn anything
+# red and was deleted rather than kept as unobservable code.)
 
 # 11. AN IN-PLACE AMEND IS NOT A LANDING (Codex review @ 7f93588) — the wrong meal is restored on
 #     top of the amended one.
@@ -151,4 +151,4 @@ if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-meal-decline: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-meal-decline: GREEN — 13/13 behavioral reverts caught"
+echo "red-on-revert-meal-decline: GREEN — 12/12 behavioral reverts caught"
