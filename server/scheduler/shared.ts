@@ -279,6 +279,35 @@ export function weeklyKeyedKey(clientId: string, messageKey: string, window: str
 // budget so weekly/event jobs can no longer stack on top of the daily anchor — pass
 // { critical: true } for the rare flagship send that must never be capped (e.g. the
 // Sunday weekly report). Billing should use claimCritical(), not this.
+/**
+ * THE WEIGH-IN ASK, RECORDED WHEN IT GOES OUT (#275). One row per SAST day in sent_proactive;
+ * the ladder reads the newest back and will not ask again inside WEIGH_ASK_GAP_DAYS.
+ */
+export async function recordWeighAsk(userId: string): Promise<void> {
+  if (!userId) return;
+  await db.insert(sentProactive).values({ userId, messageKey: "weigh_ask", dedupeWindow: todaySAST() })
+    .onConflictDoNothing().catch((e: any) => console.warn("[WEIGH_ASK] not recorded:", e?.message || e));
+}
+
+/** When we last asked them to weigh, and whether they have written to us today (SAST). */
+export async function readWeighAskAndPresence(userId: string): Promise<{ daysSinceWeighAsk: number | null; presentToday: boolean }> {
+  const { sastDaysBetween } = await import("../sast");
+  const [ask, inbound] = await Promise.all([
+    db.select({ at: sentProactive.sentAt }).from(sentProactive)
+      .where(and(eq(sentProactive.userId, userId), eq(sentProactive.messageKey, "weigh_ask")))
+      .orderBy(desc(sentProactive.sentAt)).limit(1).catch(() => [] as any[]),
+    // A MESSAGE THEY SENT: proactive rows carry message_in NULL, system rows a bracketed tag.
+    db.select({ id: chatHistory.id }).from(chatHistory)
+      .where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, sastDayStart()),
+        sql`${chatHistory.messageIn} IS NOT NULL AND ${chatHistory.messageIn} <> '' AND ${chatHistory.messageIn} NOT LIKE '[%'`))
+      .limit(1).catch(() => [] as any[]),
+  ]);
+  return {
+    daysSinceWeighAsk: ask[0]?.at ? sastDaysBetween(new Date(ask[0].at)) : null,
+    presentToday: inbound.length > 0,
+  };
+}
+
 export async function claimProactive(
   userId: string,
   messageKey: string,
@@ -1007,10 +1036,14 @@ export interface ProactiveState {
   steps: { avg7d: number | null };
   weight: { weeklyKgChange: number | null; trendUsable: boolean; stalledWeeks: number;
     /** From the same canonical 28-day weight truth as direction and stall. */
-    daysSinceWeighIn: number | null };
+    daysSinceWeighIn: number | null;
+    /** Days since a weigh-in ASK went out; null = never (#275). */
+    daysSinceWeighAsk: number | null };
   /** TODAY, not the 7-day picture. The one-action decision turns on these. */
   today: { kcal: number; protein: number; steps: number; logged: boolean; hour: number };
   reentry: { daysSinceLastContact: number | null; isReturning: boolean };
+  /** They messaged us today, SAST (#275). A present client is not asked to log. */
+  presentToday: boolean;
   /** Can a decision be made, or only a question asked? Missing ≠ negative. */
   evidence: { foodSufficient: boolean; weightSufficient: boolean };
 }
@@ -1046,7 +1079,7 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
   const { sastDayStart, sastDaysBetween, sastHour, sastWeekStart } = await import("../sast");
   const dayStart0 = sastDayStart();
 
-  const [progress, stepAgg, workoutRows, lastMeal, todaySteps] = await Promise.all([
+  const [progress, stepAgg, workoutRows, lastMeal, todaySteps, asks] = await Promise.all([
     getProgressTruth(client, { days: 7, weightWindowDays: 28 }).catch(() => null),
     db.select({ avg: sql<number>`COALESCE(AVG(${stepLogs.steps}),0)::int` }).from(stepLogs)
       .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, since(7)))).catch(() => [] as any[]),
@@ -1063,6 +1096,7 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
     db.select({ steps: stepLogs.steps }).from(stepLogs)
       .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, dayStart0)))
       .orderBy(desc(stepLogs.loggedAt)).limit(1).catch(() => [] as any[]),
+    readWeighAskAndPresence(client.id),
   ]);
 
   const weightPoints = progress?.weight.points ?? [];
@@ -1120,6 +1154,7 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
     weight: {
       weeklyKgChange, trendUsable, stalledWeeks: stalledWeeksFrom(weightPoints),
       daysSinceWeighIn: progress?.weight.daysSinceWeighIn ?? null,
+      daysSinceWeighAsk: asks.daysSinceWeighAsk,
     },
     today: {
       kcal: progress?.today.kcal ?? 0,
@@ -1129,6 +1164,7 @@ export async function loadProactiveState(client: any): Promise<ProactiveState> {
       hour: sastHour(),
     },
     reentry: contactState(client.lastActiveAt),
+    presentToday: asks.presentToday,
     evidence: {
       foodSufficient: loggedDays7d !== null && loggedDays7d >= PROACTIVE_LOG_FLOOR,
       weightSufficient: trendUsable,

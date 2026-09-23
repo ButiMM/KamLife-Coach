@@ -422,6 +422,14 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "safety-routing-reverts", title: "Every #266 safety-routing seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-safety-routing.sh"] },
 
+  { id: "visible-nags", title: "Present clients are not told to log; no invented gaps, daily weigh-ins or trial",
+    // #275. Presence is read from chat_history rows the database stamps, the weigh-in cap from
+    // sent_proactive, and "Just finished dinner" must reach meal_logs through the front door.
+    command: ["npx", "tsx", "script/pg-visible-nags-acceptance.ts"] },
+
+  { id: "visible-nags-reverts", title: "Every #275 nag/gap/weigh-in seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-visible-nags.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same
