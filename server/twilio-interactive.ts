@@ -75,9 +75,15 @@ async function _getOrCreateTemplate(buttons: string[]): Promise<string | null> {
 export async function sendWhatsAppButtons(
   to: string,
   body: string,
-  buttons: string[]
+  buttons: string[],
+  /** Proactive callers say so: this door holds no user row, so it asks the opt-out owner (#265). */
+  sendOpts?: { proactive?: boolean },
 ): Promise<DeliveryResult> {
   if (!FROM_NUMBER) return "dropped";
+  if (sendOpts?.proactive) {
+    const { isPhoneOptedOut } = await import("./health-state");
+    if (await isPhoneOptedOut(to).catch(() => false)) return "dropped";
+  }
 
   // SHADOW (2026-08-04) — the third client-facing door. A button set is a message; if it
   // could reach a phone while the build is in staging, the mode is a lie.

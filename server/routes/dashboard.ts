@@ -2,12 +2,12 @@ import type { Express } from "express";
 import { db } from "../db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory, escalations, abExperiments, abAssignments, mealLogs } from "../../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
-import twilio from "twilio";
 import { PRICING, calculateMRR, calculateARPU, calculateLTV, calculateTrialConversion } from "../../shared/pricing";
 import { calculateTargets } from "../targets";
 import { getDayType } from "../programme";
 import { sastDayStart } from "../utils";
 import { requireAdminKey } from "./auth";
+import { sendWhatsApp } from "../scheduler/shared";
 import type { RouteDeps } from "./types";
 import { getOrAssignVariant } from "../ab";
 
@@ -235,9 +235,7 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       const workouts = client.totalWorkoutsCompleted || 0;
       const week = client.programmeWeek || 1;
 
-      const twilioClient2 = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
-      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}` : "";
-      if (!fromNum) return res.status(500).json({ error: "TWILIO_WHATSAPP_NUMBER not configured" });
+      if (!process.env.TWILIO_WHATSAPP_NUMBER) return res.status(500).json({ error: "TWILIO_WHATSAPP_NUMBER not configured" });
 
       const messages: Record<string, string> = {
         checkin: `${name}, Coach K here. Haven't heard from you in a while — everything okay? No pressure, just checking in. Reply anything and we pick up where we left off.`,
@@ -247,7 +245,10 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       };
 
       const msg = messages[type] || messages.checkin;
-      await twilioClient2.messages.create({ from: fromNum, to: phone, body: msg });
+      // THROUGH THE PROACTIVE DOOR (#265), not straight to Twilio: it is a proactive message, so the
+      // opt-out, the truth floor and shadow capture apply to it exactly as they do to a cron job.
+      const outcome = await sendWhatsApp(phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`, msg);
+      if (outcome === "dropped") return res.status(409).json({ success: false, error: "Not sent — refused at the send boundary (opted out, or the truth floor)" });
       await logChat(client.id, `[COACH_INTERVENTION:${type}]`, msg, "COACH_INTERVENTION");
 
       res.json({ success: true, type, phone: phone.slice(-4) });
@@ -262,9 +263,7 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       const { message: broadcastMsg, filter = "all" } = req.body;
       if (!broadcastMsg) return res.status(400).json({ error: "message is required" });
 
-      const twilioClient2 = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
-      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}` : "";
-      if (!fromNum) return res.status(500).json({ error: "TWILIO_WHATSAPP_NUMBER not configured" });
+      if (!process.env.TWILIO_WHATSAPP_NUMBER) return res.status(500).json({ error: "TWILIO_WHATSAPP_NUMBER not configured" });
 
       const allComplete = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
       const now = Date.now();
@@ -275,15 +274,17 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       if (filter === "active") targets = allComplete.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) >= twoDaysAgo);
       if (filter === "atrisk") targets = allComplete.filter(u => !u.lastActiveAt || new Date(u.lastActiveAt) < twoDaysAgo);
 
+      // Through the proactive door (#265): a broadcast to everyone must not reach people who opted out.
       let sent = 0;
       let failed = 0;
+      let refused = 0;
       for (const u of targets) {
         try {
-          await twilioClient2.messages.create({ from: fromNum, to: u.phoneNumber, body: broadcastMsg });
-          sent++;
+          const outcome = await sendWhatsApp(u.phoneNumber, broadcastMsg);
+          if (outcome === "dropped") refused++; else sent++;
         } catch { failed++; }
       }
-      res.json({ sent, failed, total: targets.length });
+      res.json({ sent, failed, refused, total: targets.length });
     } catch (err) {
       res.status(500).json({ error: "Broadcast failed" });
     }
@@ -870,23 +871,18 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       else if (filterType === "paying") allUsers = allUsers.filter(u => u.payment === "active");
       else if (filterType === "at_risk") allUsers = allUsers.filter(u => u.lastActive && new Date(u.lastActive) < sevenDaysAgo && new Date(u.lastActive) >= new Date(Date.now() - 14 * 86400_000));
 
-      const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
-      let sent = 0, failed = 0;
+      let sent = 0, failed = 0, refused = 0;
 
+      // Through the proactive door (#265) — the opt-out and the send-rate gate live there.
       for (const u of allUsers) {
         if (!u.phone) continue;
         try {
-          await twilioClient.messages.create({
-            from: `whatsapp:${(process.env.TWILIO_WHATSAPP_NUMBER || "").replace(/^whatsapp:/, "")}`,
-            to: u.phone.startsWith("whatsapp:") ? u.phone : `whatsapp:${u.phone}`,
-            body: message,
-          });
-          sent++;
-          await new Promise(r => setTimeout(r, 100));
+          const outcome = await sendWhatsApp(u.phone.startsWith("whatsapp:") ? u.phone : `whatsapp:${u.phone}`, message);
+          if (outcome === "dropped") refused++; else sent++;
         } catch { failed++; }
       }
 
-      res.json({ success: true, sent, failed, total: allUsers.length });
+      res.json({ success: true, sent, failed, refused, total: allUsers.length });
     } catch (err) {
       console.error("[BULK MSG] Error:", err);
       res.status(500).json({ error: "Bulk message failed" });

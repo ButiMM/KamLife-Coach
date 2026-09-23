@@ -6,6 +6,8 @@ import { eq, and } from "drizzle-orm";
 import twilio from "twilio";
 import { PRICING } from "../../shared/pricing";
 import { sendCriticalAlert } from "../scheduler/shared";
+import { deliverTwilioMessage } from "../outbound-delivery";
+import { isOptedOut } from "../health-state";
 
 function checkAdminKey(provided: string | string[] | undefined): boolean {
   const dashKey = process.env.COACH_DASHBOARD_KEY;
@@ -231,10 +233,11 @@ export function registerPaymentRoutes(app: Express) {
         console.error(`[PAYFAST:${itnId}] idempotency insert failed (non-duplicate):`, idempErr);
       }
 
-      const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER
-        ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
-        : "";
+      // THE ITN'S NOTICES (#265): through the delivery owner rather than a private Twilio client —
+      // same text, same number, plus retries and delivery receipts — and never to someone who opted
+      // out. `fromNum` is empty for an opted-out payer, so every notice to them below stands down.
+      const fromNum = !isOptedOut(targetUser) && process.env.TWILIO_WHATSAPP_NUMBER ? "set" : "";
+      const notify = (to: string, body: string) => deliverTwilioMessage(to, { body }, { label: "payfast", retryDelaysMs: [0, 2000] });
 
       // A CHARGE ON A SUBSCRIPTION THE CLIENT CANCELLED (2026-09-22). This used to fall into the
       // activation below: status active, cancelled_at nulled, "Subscription renewed" — the
@@ -264,7 +267,7 @@ export function registerPaymentRoutes(app: Express) {
         const wasInactive = targetUser.subscriptionStatus !== "active";
 
         // All DB state changes in one transaction — subscription update + referral reward
-        let referrerData: { phone: string; name: string | null; newExpiry: Date } | null = null;
+        let referrerData: { phone: string; name: string | null; newExpiry: Date; optedOut: boolean } | null = null;
         await db.transaction(async (tx) => {
           await tx.update(users).set({
             subscriptionStatus: "active",
@@ -303,7 +306,7 @@ export function registerPaymentRoutes(app: Express) {
                 await tx.update(users)
                   .set({ subscriptionRenewsAt: newExpiry })
                   .where(eq(users.id, referrer.id));
-                referrerData = { phone: referrer.phoneNumber, name: referrer.name, newExpiry };
+                referrerData = { phone: referrer.phoneNumber, name: referrer.name, newExpiry, optedOut: isOptedOut(referrer) };
               }
             }
           }
@@ -313,13 +316,10 @@ export function registerPaymentRoutes(app: Express) {
 
         // Send notifications AFTER the transaction commits (Twilio calls can't be rolled back)
         if (referrerData) {
-          const { phone: refPhone, name: refName, newExpiry } = referrerData as { phone: string; name: string | null; newExpiry: Date };
+          const { phone: refPhone, name: refName, newExpiry, optedOut: refOptedOut } = referrerData as { phone: string; name: string | null; newExpiry: Date; optedOut: boolean };
           const refTo = refPhone.startsWith("whatsapp:") ? refPhone : `whatsapp:${refPhone}`;
-          if (fromNum) {
-            await twilioC.messages.create({
-              from: fromNum, to: refTo,
-              body: `${refName || "Hey"} Your referral just joined KamLife Coach! You have earned one free month — your subscription has been extended to ${newExpiry.toISOString().slice(0, 10)}. Keep sharing your code and keep stacking free months.`,
-            }).catch(e => console.error("[REFERRAL] Notify error:", e));
+          if (process.env.TWILIO_WHATSAPP_NUMBER && !refOptedOut) {
+            await notify(refTo, `${refName || "Hey"} Your referral just joined KamLife Coach! You have earned one free month — your subscription has been extended to ${newExpiry.toISOString().slice(0, 10)}. Keep sharing your code and keep stacking free months.`).catch(e => console.error("[REFERRAL] Notify error:", e));
           }
           console.log(`[REFERRAL] Rewarded ${refPhone} — extended to ${(referrerData as any).newExpiry.toISOString().slice(0, 10)}`);
         }
@@ -330,17 +330,14 @@ export function registerPaymentRoutes(app: Express) {
 
         if (isRenewal) {
           if (fromNum) {
-            await twilioC.messages.create({
-              from: fromNum, to: normalisedPhone,
-              body: `Payment confirmed, ${name}. Subscription renewed for another month. Coach K is here — let's go.`
-            });
+            await notify(normalisedPhone, `Payment confirmed, ${name}. Subscription renewed for another month. Coach K is here — let's go.`);
           }
         } else {
           if (fromNum) {
             const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomp" };
             const modeLabel: Record<string, string> = { gym: "Gym", gym_dumbbell: "Dumbbell gym", home: "Home", walk_only: "Walk + home" };
             const welcomeMsg = `Payment confirmed, ${name}. Welcome to KamLife Coach.\n\nGoal: ${goalLabel[targetUser.goalType || "fat_loss"] || "fat loss"} · Mode: ${modeLabel[targetUser.trainingMode || "home"] || "Home"} · Phase 1\n\n*What to expect:*\nWeek 1–2: Your body adapts. Energy improves. Scale may not move yet — this is normal.\nWeek 3: The hard week. Mirror hasn't changed. Most people quit here. Don't.\nWeek 4–6: Visible changes start. This is where the work pays off.\nWeek 8–12: Real transformation. Clothes fit differently. Strength up.\n\nCoach K checks in every morning and evening. Log everything — meals, steps, workouts. The more you log, the better I coach you.\n\n_Coach K is AI-powered — not a human coach and not a doctor. Always consult your doctor for medical advice._\n\nYour Day 1 workout is below. Do it today and reply *done* when finished.`;
-            await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: welcomeMsg });
+            await notify(normalisedPhone, welcomeMsg);
 
             try {
               const { buildDay1Workout } = await import("../programme");
@@ -351,7 +348,7 @@ export function registerPaymentRoutes(app: Express) {
                 // the new client's first workout silently never arrived). Send each bubble.
                 for (const part of day1.split(/\n\n---\n\n/)) {
                   const p = part.trim();
-                  if (p) await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: p });
+                  if (p) await notify(normalisedPhone, p);
                 }
               }
             } catch (e) {
@@ -384,10 +381,8 @@ export function registerPaymentRoutes(app: Express) {
 
         if (fromNum) {
           const name = targetUser.name || "there";
-          await twilioC.messages.create({
-            from: fromNum, to: normalisedPhone,
-            body: `${name}, your KamLife Coach subscription has been cancelled. Your progress is saved — you can rejoin anytime. Reply *join* when you are ready.`
-          }).catch(e => console.error("[TWILIO_CANCEL_NOTIFY]", e?.message || e));
+          await notify(normalisedPhone, `${name}, your KamLife Coach subscription has been cancelled. Your progress is saved — you can rejoin anytime. Reply *join* when you are ready.`)
+            .catch(e => console.error("[TWILIO_CANCEL_NOTIFY]", e?.message || e));
         }
       } else if (paymentStatus === "PENDING") {
         // EFT / manual payments show PENDING before COMPLETE. Log and wait — do NOT
@@ -409,10 +404,8 @@ export function registerPaymentRoutes(app: Express) {
         }).catch(e => console.error("[PAYFAST] adminEvents insert failed:", e));
         if (fromNum) {
           const name = targetUser.name || "there";
-          await twilioC.messages.create({
-            from: fromNum, to: normalisedPhone,
-            body: `${name}, your KamLife Coach payment has been refunded. Your access has been paused. If this is a mistake, reply *pay* or contact us at support@kamlifecoach.co.za.`,
-          }).catch(e => console.error("[TWILIO_REFUND_NOTIFY]", e?.message || e));
+          await notify(normalisedPhone, `${name}, your KamLife Coach payment has been refunded. Your access has been paused. If this is a mistake, reply *pay* or contact us at support@kamlifecoach.co.za.`)
+            .catch(e => console.error("[TWILIO_REFUND_NOTIFY]", e?.message || e));
         }
       } else if (paymentStatus === "REFUND_REVERSED") {
         // Chargeback reversed — reinstate if the user is still inactive.

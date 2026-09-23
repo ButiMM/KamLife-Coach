@@ -422,6 +422,16 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "safety-routing-reverts", title: "Every #266 safety-routing seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-safety-routing.sh"] },
 
+  { id: "opt-out", title: "An opt-out is honoured on every send path",
+    // #265 (AUDIT.md P0). Only the exact word STOP opted out, and only jobs that remembered to read
+    // the pause honoured it — payment recovery, critical alerts, the dashboard broadcast and the
+    // payment webhook did not. Needs the front door, the scheduler door, the dashboard/admin and
+    // PayFast routes over HTTP, and the delivery owner's test seam.
+    command: ["npx", "tsx", "script/pg-opt-out-acceptance.ts"] },
+
+  { id: "opt-out-reverts", title: "Every #265 opt-out seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-opt-out.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same

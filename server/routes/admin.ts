@@ -5,7 +5,6 @@ import { evaluateScaling } from "../scaling-milestones";
 import { eq, desc, asc, and, gte, isNull, or, inArray, notInArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { NOT_A_BOT_FUMBLE } from "../quality-signals";
-import twilio from "twilio";
 import { requireAdminKey } from "./auth";
 import { computeClientRisk, sortByRisk } from "../client-triage";
 import { frictionCountsLast7 } from "../friction";
@@ -427,18 +426,15 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
       if (!user) return res.status(404).json({ message: "User not found" });
 
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      const whatsappFrom = process.env.TWILIO_WHATSAPP_NUMBER;
-      if (!accountSid || !authToken || !whatsappFrom) {
+      if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_WHATSAPP_NUMBER) {
         return res.status(503).json({ message: "Twilio not configured — set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER" });
       }
-
-      const twilioC = twilio(accountSid, authToken);
-      const fromNum = whatsappFrom.startsWith("whatsapp:") ? whatsappFrom : `whatsapp:${whatsappFrom}`;
       const toNum = user.phoneNumber.startsWith("whatsapp:") ? user.phoneNumber : `whatsapp:${user.phoneNumber}`;
 
-      await twilioC.messages.create({ from: fromNum, to: toNum, body: message.trim() });
+      // Through the proactive door (#265): a message the founder types is still a proactive message,
+      // so a client who opted out does not receive it, and the founder is told so.
+      const outcome = await sendWhatsApp(toNum, message.trim());
+      if (outcome === "dropped") return res.status(409).json({ message: "Not sent — refused at the send boundary (the client opted out, or the truth floor refused the text)" });
       await logChat(user.id, "[admin-sent]", message.trim(), "ADMIN_MESSAGE");
 
       console.log(`[ADMIN] Message sent to ${toNum.slice(-8)}: "${message.slice(0, 60)}"`);
