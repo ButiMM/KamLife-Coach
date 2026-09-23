@@ -214,6 +214,13 @@ REAL("\n4. CONTROLS — what an opt-out is not, and what it does not stop");
   await say(H, "Please stop messaging me for 2 weeks, I'm on holiday");
   const notes = (await pool.query("SELECT profile_notes n FROM users WHERE id = $1", [H.id])).rows[0].n || "";
   chk(/paused_until:/.test(notes) && !/opted_out:/.test(notes), "a timed holiday pause is still a pause, not an opt-out", `profile_notes=${notes}`);
+  // A TOPIC IS NOT THE CHANNEL (Codex @ 7716559) — main never opted these out, and neither may this.
+  for (const text of ["I don't want your messages about calories, just send my workouts", "Stop messaging me about my weight"]) {
+    const T = await client("Topic Refusal");
+    await say(T, text);
+    const tn = (await pool.query("SELECT profile_notes n FROM users WHERE id = $1", [T.id])).rows[0].n || "";
+    chk(!/opted_out:/.test(tn) && (await proactiveReaches(T)).length === 3, `"${text}" refuses a topic, not every message`, `profile_notes=${tn}`);
+  }
   const Q = await client("Snack Question");
   await say(Q, "How do I stop snacking at night?");
   chk((await proactiveReaches(Q)).length === 3, "\"how do I stop snacking?\" is a question, not an opt-out");

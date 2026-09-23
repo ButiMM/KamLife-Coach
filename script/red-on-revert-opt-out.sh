@@ -112,9 +112,15 @@ run_case "the payment webhook ignores the opt-out" server/routes/payments.ts \
   '      const fromNum = !isOptedOut(targetUser) && process.env.TWILIO_WHATSAPP_NUMBER ? "set" : "";' \
   '      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER ? "set" : "";' || failed=$((failed + 1))
 
+# 9. A TOPIC IS READ AS THE CHANNEL (Codex @ 7716559) — "messages about calories, just send my
+#    workouts" opts the client out of everything.
+run_case "a topic refusal opts the client out" server/handlers/safety.ts \
+  '|\b(?:messages?|messaging|texting|sending|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);' \
+  '/i.test(m);' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-opt-out: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-opt-out: GREEN — 8/8 behavioral reverts caught"
+echo "red-on-revert-opt-out: GREEN — 9/9 behavioral reverts caught"

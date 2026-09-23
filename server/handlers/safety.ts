@@ -230,7 +230,9 @@ export async function runSafetyGuards(
   // enforceOutboundTruth, which refuses every proactive send to a client carrying opted_out.
   const optOut = (/^(?:stop(?:\s+all)?|opt[\s-]?out|unsubscribe(?:\s+me)?)[.!\s]*$/i.test(m)
       || /\b(?:stop|quit)\s+(?:sending|messaging|texting|contacting|whatsapp(?:ing)?)\s+me\b|\bstop\s+(?:sending\s+)?(?:me\s+)?(?:these|the|your|all)\s+messages\b|\b(?:don'?t|do\s+not)\s+(?:want|need)\s+(?:these|your|any\s+more|anymore|any)\s+messages\b|\bno\s+more\s+messages\b|\bunsubscribe\s+me\b/i.test(m))
-    && !/\b\d+\s*(?:days?|weeks?|months?)\b|\bfor\s+(?:a|one|two|three|a\s+few)\s+(?:days?|weeks?|months?)\b|\buntil\b/i.test(m);
+    // A LENGTH is a pause; a TOPIC is a preference, not a channel opt-out (Codex @ 7716559): "I don't
+    // want your messages about calories, just send my workouts" asked for workouts.
+    && !/\b\d+\s*(?:days?|weeks?|months?)\b|\bfor\s+(?:a|one|two|three|a\s+few)\s+(?:days?|weeks?|months?)\b|\buntil\b|\b(?:messages?|messaging|texting|sending|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);
   if (optOut) {
     const ou = await ensureSafetyTurnUser(phone, message, context.sourceMessageId, context.boundUser);
     if (ou) await setOptOut(ou).catch((e) => console.error("[OPT_OUT] could not record:", e));
