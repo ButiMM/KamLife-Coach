@@ -1,6 +1,8 @@
 # Build queue
 
-Claude Code takes the first unchecked item, builds it as one PR, ticks it after merge, and takes the next. Order puts what testers feel first. Maintained by the CTO.
+Two lanes, so the core work starts now instead of after the harm fixes. Each Claude Code session works one lane: take its first unchecked item, one PR, tick it after merge, take the next. Lane A files and lane B files don't overlap. If you're not told a lane, you're lane A. Maintained by the CTO.
+
+## Lane A: harm and visible fixes
 
 - [x] #263 Payments: cancellation stops billing (PR #277, merged)
 - [ ] #286 Opt-out inside a life-context message still opts out (follow-up from #285)
@@ -11,7 +13,12 @@ Claude Code takes the first unchecked item, builds it as one PR, ticks it after 
 - [ ] #267 Age gate
 - [ ] #268 Calorie floors
 - [ ] #269 POPIA deletion actually deletes
+
+## Lane B: the new core (a second Claude Code session)
+
 - [ ] #270 Customer replay gate, baseline on main
 - [ ] #271 Event record and fact store
 - [ ] #272 Understanding step and single composer, shadow, then switch
 - [ ] #273 Account for #260 before closing it
+
+Lane B owns new files only (`script/replay*`, `server/core/`, new migrations). It touches `server/routes.ts` only in #272's switch PR, after lane A is empty.
