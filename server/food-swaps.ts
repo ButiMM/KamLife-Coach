@@ -338,9 +338,10 @@ const SUBSTITUTES: Array<{ match: RegExp; job: FoodJob; sub: Substitution }> = [
  * Did they say the shop LET THEM DOWN, rather than asking whether a food is good for them?
  * "Couldn't find", "they didn't have", "too expensive", "out of stock", "chicken was finished".
  * "Finished" only with the FOOD as its subject (#275): "Just finished dinner, pap and wors" is a
- * meal to log, and was answered "No stress — lean mince instead" and never logged.
+ * meal to log, and was answered "No stress — lean mince instead" and never logged. A shop after it
+ * keeps the terse report ("Chicken finished at Shoprite", Codex @ 0433c88); a time does not.
  */
-export const UNAVAILABLE_RE = /\b(could ?n[o']?t find|couldn t find|did ?n[o']?t have|don't have|dont have|no more|out of stock|sold out|(?:was|were|is|are|all|got)\s+finished|too expensive|can'?t afford|too pricey|nothing left|they were out)\b/i;
+export const UNAVAILABLE_RE = /\b(could ?n[o']?t find|couldn t find|did ?n[o']?t have|don't have|dont have|no more|out of stock|sold out|(?:was|were|is|are|all|got|'s)\s+finished|(?<!\b(?:i|we|just|already)\s)finished\s+(?:at|in|from|by)\s+(?!\d)|too expensive|can'?t afford|too pricey|nothing left|they were out)\b/i;
 
 /** The substitution for a named food, or null when we have nothing honest to offer. */
 // DELETED 2026-08-24: substituteFor() — unreferenced. The SUBSTITUTES table it read is still

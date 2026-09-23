@@ -2389,6 +2389,18 @@ test("gains-fear masterclass survived the deletion — it is in the coaching pro
   });
 }
 
+// "FINISHED" IS A SHOP REPORT ONLY WITH THE FOOD AS ITS SUBJECT, OR A SHOP AFTER IT (#275). "Just
+// finished dinner" is a meal to log; "Chicken finished at Shoprite" (Codex @ 0433c88) is not.
+{
+  const { UNAVAILABLE_RE } = await import("../server/food-swaps");
+  test("availability: 'finished' reads the subject and the shop", async () => {
+    for (const t of ["Chicken finished at Shoprite", "The chicken's finished", "The chicken was finished at Shoprite, what else?", "Beef finished in Checkers"])
+      assert.ok(UNAVAILABLE_RE.test(t), `"${t}" is a shop that ran out`);
+    for (const t of ["Just finished dinner, pap and wors", "I finished at 7", "We finished at the braai", "just finished at gym", "Finished my lunch"])
+      assert.ok(!UNAVAILABLE_RE.test(t), `"${t}" is not a shop report`);
+  });
+}
+
 // DAY-ZERO PHYSIQUE READ (2026-07-17, founder: "shouldn't they be sending us pictures
 // before we put people on the wrong program?"). The photo decides the recommendation;
 // the client decides the goal — assist, never override.
