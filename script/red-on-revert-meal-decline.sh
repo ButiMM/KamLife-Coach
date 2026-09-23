@@ -140,9 +140,15 @@ run_case "\"No thanks\" excludes an explicit correction" server/handlers/food-co
   '|| /\b(?:actually|instead|i\s+meant|wrong)\b/i.test(m) || (/\b(?:had|ate|eaten)\b/i.test(m) && [...m.matchAll(/\bnot\s+(?:the\s+|my\s+|a\s+)?([a-z][a-z'"'"'-]+)/gi)].some(x => scanForSAFoods(x[1]).length > 0))) &&' \
   ') &&' || failed=$((failed + 1))
 
+# 13. PART OF THE PLATE IS A REPEAT OF THE RECORD (Codex @ 8e15426) — "No, I had rice and chicken
+#     breast" leaves the avocado on the day.
+run_case "a correction naming part of the plate is a repeat" server/handlers/food-context.ts \
+  ' && ((r => r.length ? r : [...heldNames])(scanForSAFoods(String(target.rawMessage || "")).map(f => f.name.toLowerCase()))).every(n => namedNow.includes(n));' \
+  ';' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-meal-decline: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-meal-decline: GREEN — 12/12 behavioral reverts caught"
+echo "red-on-revert-meal-decline: GREEN — 13/13 behavioral reverts caught"

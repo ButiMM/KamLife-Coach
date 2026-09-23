@@ -187,6 +187,20 @@ REAL("\n2. A GENUINE CORRECTION SUPERSEDES — the replacement lands, and the re
 }
 
 {
+  // Codex review @ 8e15426: a correction naming only PART of the plate drops the rest. Treated as a
+  // repeat of the record, the avocado stayed on the day.
+  for (const tb of ["meal_logs", "chat_history", "turn_ledger"]) await pool.query(`DELETE FROM ${tb} WHERE user_id = $1`, [user.id]);
+  await pool.query("UPDATE users SET awaiting_input_type = NULL, today_calories = 0, today_protein_g = 0 WHERE id = $1", [user.id]);
+  await say("I had rice, chicken breast and avocado for lunch", "SM264-2g");
+  const before = (await meals())[0];
+  const t = await say("No, I had rice and chicken breast", "SM264-2h");
+  const after = await meals();
+  chk(!!before && /avocado/i.test(JSON.stringify(before)), "FIXTURE — the first plate holds the avocado", JSON.stringify(before));
+  chk(after.length === 1 && !/avocado/i.test(JSON.stringify(after)), "a correction naming part of the plate drops the rest", JSON.stringify(after));
+  chk(t.mutations.some(n => /\bSUPERSEDE\b/.test(n) && n.includes(before?.id || "~")), "and the replacement is recorded", `mutations=${JSON.stringify(t.mutations)}`);
+}
+
+{
   // Codex attack @ 8e15426: courtesy wording in front of an explicit correction. "No thanks" was
   // excluded before the correction evidence was read, so the burger was appended beside the pap.
   const before = await freshLunch("SM264-2e");

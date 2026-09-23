@@ -312,11 +312,11 @@ export async function handleFoodContext(ctx: {
       const namedNow = scanForSAFoods(candidateSansNot).map(f => f.name.toLowerCase());
       // …unless it strikes one of them out: "No, I had chicken, not pap" corrects (Codex @ 238bd21).
       const negatesHeld = [...correctedMsgCandidate.matchAll(/\bnot\s+([\w'-]+)/gi)].some(x => [...heldNames].some(h => h.includes(x[1].toLowerCase())) || String(target?.rawMessage || "").toLowerCase().includes(x[1].toLowerCase()));
-      const repeatsRecord = !!target && !negatesHeld && namedNow.length > 0 && namedNow.every(n => heldNames.has(n));
+      // …and names ALL of it — "rice and chicken breast" drops the avocado (Codex @ 8e15426).
+      const repeatsRecord = !!target && !negatesHeld && namedNow.length > 0 && namedNow.every(n => heldNames.has(n)) && ((r => r.length ? r : [...heldNames])(scanForSAFoods(String(target.rawMessage || "")).map(f => f.name.toLowerCase()))).every(n => namedNow.includes(n));
       if (relabelTo && target) {
         friction();
-        // Relabel only — calories unchanged, so no recompute needed.
-        await db.update(mealLogs).set({ mealLabel: relabelTo, corrected: true }).where(eq(mealLogs.id, target.id));
+          await db.update(mealLogs).set({ mealLabel: relabelTo, corrected: true }).where(eq(mealLogs.id, target.id));
         turnMutation(`RELABEL meal ${target.id} ${target.mealLabel || "none"}→${relabelTo}`, "[MEAL_CORRECTION]");
         await logChat(user.id, message, `Moved that to ${relabelTo}`, "FOOD_RELABEL");
         return `Moved that to *${relabelTo}* ✅`;
