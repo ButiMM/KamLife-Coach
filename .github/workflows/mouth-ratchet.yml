@@ -1,0 +1,15 @@
+name: mouth-ratchet
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+permissions:
+  contents: read
+jobs:
+  ratchet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 script/mouth-count.py
+        env:
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}

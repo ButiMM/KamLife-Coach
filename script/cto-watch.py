@@ -63,9 +63,16 @@ if len(open_prs) >= 3 and not [p for p in today if p["title"].startswith(("[harm
 if todo and not open_prs and last_merge and NOW - last_merge > IDLE_AFTER:
     alerts.append(f"**Idle:** no open build PR and nothing merged for {int((NOW-last_merge).total_seconds()//60)} min, with {len(todo)} queue items left. Next: {todo[0]}")
 
+import subprocess
+try:
+    mouths = json.loads(subprocess.run(["python3", "script/mouth-count.py", "--json"], capture_output=True, text=True).stdout)
+    mouth_line = "**Mouths on main:** " + ", ".join(f"{k} {v}" for k, v in mouths.items())
+except Exception:
+    mouth_line = "**Mouths on main:** unavailable"
 body = "\n".join([
     f"_Updated {NOW:%H:%M} UTC by the CTO watch. Runs every 20 minutes and on every PR event._", "",
     *(alerts or ["No alerts."]), "",
+    mouth_line, "",
     f"**Queue:** {len(done)} done, {len(todo)} left. Next: {todo[0] if todo else 'queue empty'}", "",
     "| PR | Title | Head | State |", "|---|---|---|---|", *(rows or ["| none | | | |"]), "",
     "**Merged today (UTC):**",

@@ -23,7 +23,8 @@ jobs:
         with:
           sparse-checkout: |
             docs/QUEUE.md
-            script/cto-watch.py
+            script
+            server
       - run: python3 script/cto-watch.py
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
