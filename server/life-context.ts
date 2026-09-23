@@ -133,7 +133,9 @@ const ORDINARY = /\b(?:depressed|down|sad|anxious)\s+(?:about|by|with)\s+(?:my|t
 
 /** Read a message for life context. Null = ordinary coaching; handle it normally. */
 export function readLifeContext(message: string): ContextRead | null {
-  const s = (message || "").trim();
+  // Callers pass the RAW message, and an iPhone sends "I’m" with a typographic apostrophe — which
+  // every pattern below spells "i'?m". Normalised once here, for every context (Codex @ 8e4f231).
+  const s = (message || "").trim().replace(/[\u2018\u2019\u02bc]/g, "'");
   if (!s) return null;
   if (ORDINARY.test(s)) return null;
   // WANTING TO QUIT THE PROGRAMME IS NOT A MENTAL-HEALTH EVENT (2026-07-28). "I can't do this

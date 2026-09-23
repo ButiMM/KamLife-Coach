@@ -160,6 +160,18 @@ const P = await client("Bonolo Pregnant");
   chk(!givesWeightLossTarget(toP), "a proactive calorie target never reaches a pregnant client", `sent=${JSON.stringify(toP)}`);
 }
 
+{
+  // Codex attack @ 8e4f231: WhatsApp on an iPhone sends a typographic apostrophe. "I’m" must route
+  // exactly like "I'm" — through the real front door, recorded, and flagged.
+  const Q = await client("Bonolo Smartquote");
+  const r = await say(Q, "I\u2019m 14 weeks pregnant, what should my calorie target be?");
+  chk(!givesWeightLossTarget(r) && refersToCare(r) && (await situation(Q)) === "pregnant",
+    "\"I\u2019m pregnant\" (smart apostrophe) routes, records and refers exactly like \"I'm\"", `life_situation=${await situation(Q)} reply=${JSON.stringify(r)}`);
+  const E = await client("Lindi Smartquote");
+  const r2 = await say(E, "I\u2019ve been making myself throw up after dinner so the calories don\u2019t count");
+  chk(givesEdHelpline(r2) && (await situation(E)) === "disordered_eating", "the purging disclosure with smart quotes routes too", `reply=${JSON.stringify(r2)}`);
+}
+
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n2. DISORDERED EATING — AUDIT.md Trace 6 and the behaviours around it");
 // ══════════════════════════════════════════════════════════════════════════════════════════════

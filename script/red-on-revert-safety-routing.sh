@@ -114,9 +114,15 @@ run_case "onboarding records a pregnancy as postpartum" server/onboarding.ts \
   '    if (/^1\b/.test(lower) || /\bpregnan/.test(lower) || user.lifeSituation === "pregnant") {' \
   '    if (false) {' || failed=$((failed + 1))
 
+# 10. A TYPOGRAPHIC APOSTROPHE DEFEATS EVERY PATTERN (Codex attack @ 8e4f231) — "I’m pregnant"
+#     from an iPhone goes to the totals branch and gets the target.
+run_case "\"I’m pregnant\" with a smart apostrophe is missed" server/life-context.ts \
+  '  const s = (message || "").trim().replace(/[\u2018\u2019\u02bc]/g, "'"'"'");' \
+  '  const s = (message || "").trim();' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-safety-routing: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-safety-routing: GREEN — 9/9 behavioral reverts caught"
+echo "red-on-revert-safety-routing: GREEN — 10/10 behavioral reverts caught"
