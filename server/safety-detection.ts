@@ -6,6 +6,8 @@
 //   high    → billing, medical, frustrated (coach paged + 4h SLA)
 //   normal  → human_requested          (inbox only, 12h SLA)
 
+import { readLifeContext } from "./life-context";
+
 export type EscalationPriority = "urgent" | "high" | "normal" | "low";
 
 export interface EscalationDecision {
@@ -38,6 +40,10 @@ export function detectEscalation(message: string): EscalationDecision {
   // Crisis/self-harm — urgent
   if (/\b(want to die|kill myself|end it all|cannot go on|can't go on|suicidal|self.?harm|cutting myself|hurting myself|not worth living|end my life|no reason to live|give up on life)\b/i.test(m))
     return { should: true, reason: "crisis", priority: "urgent" };
+  // Disordered eating — urgent (#266). The behaviour list has ONE owner, life-context.ts; this
+  // reads it rather than keeping a second copy. Before this, a purging disclosure paged nobody.
+  if (readLifeContext(message)?.context === "disordered_eating")
+    return { should: true, reason: "eating_disorder", priority: "urgent" };
   // Acute medical emergencies — checked before "injury" so cardiac/respiratory
   // signals aren't mis-flagged as a muscle strain
   if (/\b(chest pain|chest tight|tight chest|can'?t breathe?|cannot breathe?|fainted|fainting|passed out|black(ed)? out|collapsed|seizure|convulsion|heart attack|having a stroke|had a stroke|coughing up blood)\b/i.test(m))

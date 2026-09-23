@@ -40,13 +40,16 @@
 import { isDuplicateOutbound } from "./reply-hygiene";
 import { readHeldConstraints, asksForFoodToday, asksForTrainingToday } from "./held-constraints";
 import { adjudicableSessionCounts } from "./brain/reply-verifier";
+import { withheldContext, lifeContextReply, NUMBERS_PAUSED } from "./life-context";
 
 export interface OutboundVerdict {
   /** May this leave the building? */
   ok: boolean;
   /** Machine-readable cause, for the counters. */
-  reason?: "session_count_contradicts_record" | "duplicate" | "contradicts_held_constraint";
+  reason?: "session_count_contradicts_record" | "duplicate" | "contradicts_held_constraint" | "numbers_withheld";
   detail?: string;
+  /** What a waiting client hears instead, when the refusal has a better answer than the stall. */
+  repair?: string;
 }
 
 /** The window every weekly surface already uses; getProgressTruth's default. */
@@ -61,7 +64,7 @@ export async function enforceOutboundTruth(
   recipientKey: string,
   text: string,
   /** The recipient's row, when the door already holds it — carries the durable illness state. */
-  recipientUser?: { profileNotes?: string | null } | null,
+  recipientUser?: { profileNotes?: string | null; lifeSituation?: string | null } | null,
   /** Which door is asking. Rules 1 and 2 are about TRUTH and apply to both; rule 3 is about
    *  CADENCE and only ever made sense for the door nobody is waiting at. Defaults to proactive so
    *  an un-migrated caller keeps the behaviour it had. */
@@ -69,6 +72,17 @@ export async function enforceOutboundTruth(
 ): Promise<OutboundVerdict> {
   const body = String(text || "");
   if (!body.trim()) return { ok: true };
+
+  // 0. NUMBERS WITHHELD (#266). A pregnant client, or one who disclosed disordered eating, was
+  //    told "no calorie targets, no weigh-ins from me" — and every brief, card and model reply
+  //    carried on sending both. Enforced HERE because both doors pass through here: one rule, every
+  //    path. The promise sentence itself is exempt, or the refusal could never be delivered.
+  const withheld = withheldContext(recipientUser?.lifeSituation);
+  if (withheld && !body.includes(NUMBERS_PAUSED)
+      && /\b\d[\d,]{1,5}\s*(?:kcal|calories|cal)\b|\b(?:calorie|kcal)\s+(?:target|goal|budget|deficit)|\bdeficit\b|\bfat[- ]loss\b|\bweight[- ]loss\b|\blos(?:e|ing)\s+(?:the\s+)?(?:weight|fat|\d+\s*kg)\b|\bweigh[- ]?ins?\b|\b(?:step|stand)\s+on\s+(?:a|the)\s+scale\b|\bweigh\s+yourself\b|\b(?:calories|kcal|protein|carbs?|fat|macros?)\s*[:=]?\s*\*?\d|\b\d{2,4}\s*g\b|\bprotein\s+(?:target|goal)\b|\b(?:target|goal)\s+weight\b|\b\d{2,3}(?:[.,]\d+)?\s*kg\b/i.test(body)) {
+    return { ok: false, reason: "numbers_withheld", detail: `${withheld}: ${body.slice(0, 60)}`,
+      repair: lifeContextReply({ context: withheld, refer: true, demand: "pause" }) };
+  }
 
   // 1. A TRAINING COUNT MUST MATCH THE RECORD. The reactive path has refused to confirm a session
   //    history the log denies since 2026-08-22; a weekly or programme message asserting the same
@@ -277,7 +291,7 @@ export async function prepareOutbound(
   userId: string | null,
   recipientKey: string,
   text: string,
-  recipientUser?: { profileNotes?: string | null } | null,
+  recipientUser?: { profileNotes?: string | null; lifeSituation?: string | null } | null,
 ): Promise<OutboundPrepared> {
   const { provenanceGate } = await import("./verifiers/response-gate");
   const { humanizeReply } = await import("./reply-hygiene");
@@ -295,7 +309,7 @@ export async function prepareOutbound(
     }
     console.error(`[OUTBOUND_AUTHORITY] BLOCKED reactive draft to ${recipientKey.slice(-8)} — ${verdict.reason}: ${verdict.detail}`);
     // Reactive: the client is waiting, so they get a safe sentence rather than nothing.
-    return { text: REACTIVE_OUTBOUND_REPAIR, blocked: true, reason: verdict.reason, detail: verdict.detail, draft: text };
+    return { text: verdict.repair ?? REACTIVE_OUTBOUND_REPAIR, blocked: true, reason: verdict.reason, detail: verdict.detail, draft: text };
   }
 
   // Shaping stays in this order: a claim spanning a bubble split has to be checked before the

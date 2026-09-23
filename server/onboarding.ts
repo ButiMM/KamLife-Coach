@@ -17,6 +17,16 @@ import { getTodayWorkoutState } from "./workout-state";
 import { parseFirstName } from "./onboarding-name";
 import { MEDICAL_QUESTION, bodyPhotoAsk } from "./onboarding-physique";
 import { handleWeightLog } from "./handlers/weight";
+import { checkEscalation } from "./handlers/chat-log";
+import { lifeContextReply } from "./life-context";
+
+// PREGNANT IS ITS OWN ANSWER (#266). This asked "are you currently pregnant, recently gave birth,
+// or breastfeeding?" and offered one yes — "postpartum or breastfeeding" — so "Yes, I'm pregnant"
+// was stored as postpartum and told "We will lose the weight slowly". One constant, because a
+// bare "yes" is asked again rather than guessed. "2" still means No, as it did on the old menu, so
+// a client mid-signup at deploy cannot become postpartum by answering the menu they were shown;
+// an old "1" (postpartum) now reads as pregnant — the safe direction: numbers withheld, person flagged.
+const POSTPARTUM_QUESTION = `One more — are you currently pregnant, recently gave birth, or breastfeeding?\n\n1️⃣ Pregnant\n2️⃣ No — continue\n3️⃣ Recently gave birth or breastfeeding`;
 
 /**
  * "No thanks" to an OPTIONAL onboarding step — one owner, two callers (2026-08-06).
@@ -652,13 +662,21 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       ...(focusArea ? { primaryFocusArea: focusArea } : { primaryFocusArea: null }),
       onboardingState: "ASK_POSTPARTUM",
     }).where(eq(users.phoneNumber, phone));
-    return `One more — are you currently pregnant, recently gave birth, or breastfeeding?\n\n1️⃣ Yes — postpartum or breastfeeding\n2️⃣ No — continue`;
+    return POSTPARTUM_QUESTION;
   }
 
   // ---- ASK_POSTPARTUM ----
   if (state === "ASK_POSTPARTUM") {
     const lower = msg.toLowerCase().trim();
-    const isPostpartum = msg.includes("1") || lower.includes("yes") || lower.includes("breastfeed") || lower.includes("postpartum") || lower.includes("gave birth") || lower.includes("nursing") || lower.includes("new mom") || lower.includes("new mum") || lower.includes("baby");
+    // Pregnant — by the menu, in words, or already recorded by the safety guard on an earlier turn.
+    // Recorded, a person flagged, and no weight-loss promise; the numbers stay withheld from here.
+    if (/^1\b/.test(lower) || /\bpregnan/.test(lower) || user.lifeSituation === "pregnant") {
+      await db.update(users).set({ lifeSituation: "pregnant", onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
+      if (user.lifeSituation !== "pregnant") await checkEscalation(user.id, "Said during onboarding: pregnant").catch(() => {});
+      return user.lifeSituation === "pregnant" ? "How old are you?" : `${lifeContextReply({ context: "pregnancy", refer: true, demand: "pause" })}\n\nHow old are you?`;
+    }
+    if (/^(?:yes|yeah|yep|ja)\b[\s.!]*$/.test(lower)) return POSTPARTUM_QUESTION;
+    const isPostpartum = /^3\b/.test(lower) || lower.includes("breastfeed") || lower.includes("postpartum") || lower.includes("gave birth") || lower.includes("nursing") || lower.includes("new mom") || lower.includes("new mum") || lower.includes("baby");
     if (isPostpartum) {
       await db.update(users).set({ lifeSituation: "postpartum_breastfeeding", onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
       return `Understood — your plan will be adjusted. While breastfeeding your body needs more calories, not fewer. We will lose the weight slowly and safely so your milk supply stays strong.\n\nHow old are you?`;
