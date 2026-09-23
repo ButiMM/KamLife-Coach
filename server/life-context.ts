@@ -31,6 +31,7 @@ export type LifeContext =
   | "crisis_adjacent"        // sustained hopelessness (below self-harm, which safety.ts owns)
   | "disordered_eating"
   | "alcohol_coping"
+  | "pregnancy"              // not a crisis — but no weight-loss programme may reach her (#266)
   // Hard life — comfort, lighten the load, no referral needed unless they ask.
   | "bereavement"
   | "own_illness"
@@ -48,6 +49,8 @@ export interface ContextRead {
   refer: boolean;
   /** What happens to targets and the programme. This is the part they actually feel. */
   demand: "pause" | "lighten" | "keep";
+  /** Disordered eating that involves skipping insulin — the reply adds a do-not-do-this line. */
+  insulin?: boolean;
 }
 
 const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: ContextRead["demand"] }> = [
@@ -57,7 +60,13 @@ const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: Conte
     // NAMING IT COUNTS (2026-07-28): the behaviour patterns below were the only trigger, so
     // "I've been diagnosed with an eating disorder" fell through to own_illness and got "rest
     // up, you'll be back". Someone who says the words out loud must reach the clinical branch.
-    re: /\b(?:eating\s+disorder|anorexi(?:a|c)|bulimi(?:a|c)|make\s+myself\s+(?:sick|throw\s+up|vomit)|purge|purging|binge(?:ing|d)?\s+(?:and|then)\s+(?:purg|starv)|starv(?:e|ing)\s+myself|laxatives?\s+to\s+lose|not\s+eaten\s+(?:in|for)\s+(?:\d+\s+|a\s+few\s+)?days?)\b/i,
+    //
+    // EVERY TENSE OF THE BEHAVIOUR (#266, AUDIT.md Trace 6). "make myself throw up" matched and
+    // "I've been MAKING myself throw up" did not — so the disclosure fell to the food path and was
+    // asked "what was it, roughly?". "I MADE myself sick" fell to own_illness and was told to rest.
+    // Laxative use needs a weight or after-eating cue (constipation is not this); skipping insulin
+    // needs a weight or calorie cue (a sick-day dose question is not this).
+    re: /\b(?:eating\s+disorder|anorexi(?:a|c)|bulimi(?:a|c)|(?:make|makes|making|made)\s+myself\s+(?:sick|throw\s+up|vomit|puke)|(?:throw(?:ing)?\s+up|threw\s+up|vomit(?:ing|ed)?|puk(?:e|ing|ed))\s+(?:on\s+purpose|deliberately)|purge|purging|binge(?:ing|d)?\s+(?:and|then)\s+(?:purg|starv)|starv(?:e|ing)\s+myself|(?:tak(?:e|es|ing)|took|us(?:e|es|ing)|used)\s+(?:laxatives?|diuretics?|water\s+pills)\b[^.!?]{0,40}\b(?:weight|gain|calories|lose|slim|after\s+(?:eating|i\s+eat|meals?|dinner|lunch|breakfast))|laxatives?\s+to\s+lose|(?:skip(?:ping|ped)?|stop(?:ping)?|miss(?:ing)?|cut(?:ting)?\s+(?:back\s+)?(?:on\s+)?|not\s+tak(?:e|ing))\s+(?:my\s+)?insulin\b[^.!?]{0,40}\b(?:weight|calories|lose|slim|cut)|not\s+eaten\s+(?:in|for)\s+(?:\d+\s+|a\s+few\s+)?days?)\b/i,
   },
   {
     context: "alcohol_coping", refer: true, demand: "pause",
@@ -66,6 +75,14 @@ const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: Conte
   {
     context: "crisis_adjacent", refer: true, demand: "pause",
     re: /\b(?:i(?:'?m| am)|been|feeling)\s+(?:really\s+|so\s+|honestly\s+|very\s+|quite\s+|just\s+)?(?:depressed|hopeless|worthless|numb|empty)\b|\b(?:my\s+)?depression\s+(?:is\s+back|came\s+back|has\s+come\s+back|got\s+worse|is\s+bad)\b|\bcan'?t\s+(?:get\s+out\s+of\s+bed|face\s+the\s+day|cope|go\s+on|do\s+this\s+any\s?more)\b|\bno\s+(?:point|reason)\s+(?:in\s+)?(?:any\s?more|to\s+anything)\b|\bnothing\s+matters\b|\bbreaking\s+down\b|\bfalling\s+apart\b/i,
+  },
+
+  {
+    // PREGNANCY (#266, AUDIT.md Trace 3). "I'm 14 weeks pregnant, what should my calorie target
+    // be?" was answered with her fat-loss target. First person only: "my sister is pregnant" and
+    // "I'm not pregnant" are ordinary talk, and "I'm expecting" needs a baby after it.
+    context: "pregnancy", refer: true, demand: "pause",
+    re: /\b(?:(?:i'?m|i\s+am|currently)\s+(?:\d{1,2}\s+(?:weeks?|months?)\s+)?pregnant|(?:i'?m|i\s+am|we'?re|we\s+are)\s+expecting\s+(?:a\s+(?:baby|child)|twins|(?:my|our)\s+(?:first|second|third)\b)|my\s+pregnancy|(?:first|second|third|1st|2nd|3rd)\s+trimester)\b/i,
   },
 
   // ── Hard life — the common case ───────────────────────────────────────────────────
@@ -124,12 +141,28 @@ export function readLifeContext(message: string): ContextRead | null {
   // someone who is simply exhausted, and it ends the relationship. server/quit-save.ts owns it.
   if (looksLikeQuitMoment(s)) return null;
   for (const p of P) {
-    if (p.re.test(s)) return { context: p.context, refer: p.refer, demand: p.demand };
+    if (p.re.test(s)) return { context: p.context, refer: p.refer, demand: p.demand, ...(p.context === "disordered_eating" && /\binsulin\b/i.test(s) ? { insulin: true } : {}) };
   }
   return null;
 }
 
 const SADAG = `*SADAG* — 0800 567 567, free, 24 hours. Or SMS 31393 and they'll call you back.`;
+
+/**
+ * THE PROMISE, AND THE KEY THAT KEEPS IT (#266). The disordered-eating reply has always said this;
+ * nothing enforced it. It is now true because the outbound floor refuses calorie targets and
+ * weigh-ins to anyone whose life_situation withholds them — and that floor recognises this exact
+ * sentence as the promise itself rather than as a target, so it can be sent.
+ */
+// No "calorie" in it: the reply verifier refuses a medication referral (the insulin case) that
+// mentions diet words, and it is right to — so the promise is worded to pass, not the rule loosened.
+export const NUMBERS_PAUSED = "I'm pausing your numbers — no targets, no weigh-ins from me.";
+
+/** The durable record of a withheld context, and the reverse read. Stored in users.life_situation. */
+export const WITHHELD_SITUATION = { pregnancy: "pregnant", disordered_eating: "disordered_eating" } as const;
+export function withheldContext(lifeSituation: string | null | undefined): "pregnancy" | "disordered_eating" | null {
+  return lifeSituation === "pregnant" ? "pregnancy" : lifeSituation === "disordered_eating" ? "disordered_eating" : null;
+}
 
 /**
  * What the coach says. Warm, short, human, and never a diagnosis.
@@ -143,8 +176,15 @@ export function lifeContextReply(read: ContextRead, firstName = ""): string {
   const door = `Nothing is expected of you here. When you're ready — one meal, one walk — tell me and I'll pick it up from there. No catching up, no lost progress.`;
 
   switch (read.context) {
+    // ONE MOUTH FOR "YOUR NUMBERS ARE WITHHELD" (#266). Pregnancy joins disordered eating here
+    // rather than getting a mouth of its own: both stop the weight-loss programme, refer out and
+    // flag a person, and the outbound floor answers every later target with this same text. The insulin
+    // line is the ONE sentence in this file that names a medicine, on purpose: skipping insulin to
+    // lose weight is dangerous within days. It directs nothing about the dose — the reply verifier
+    // refuses any medication instruction, "don't skip" included — only "your doctor, today".
     case "disordered_eating":
-      return `${fn}I'm glad you told me.\n\nThat's beyond what a coach should be handling, and putting targets on top of it would do you harm. It needs someone properly trained.\n\n${SADAG}\n\nI'm pausing your numbers — no calorie targets, no weigh-ins from me. Your body isn't the problem to solve right now.`;
+    case "pregnancy":
+      return `${fn}${read.context === "pregnancy" ? `thank you for telling me.\n\nDuring pregnancy, what you eat and how you train should be guided by your doctor, midwife or clinic — not by a weight-loss programme. Please check with them before you carry on with any plan.` : `I'm glad you told me.\n\n${read.insulin ? `Anything about your insulin is your doctor's decision, not mine — please speak to your doctor or clinic about this today, and if you feel very unwell, call 10177 or go to an emergency room.\n\n` : ""}That's beyond what a coach should be handling, and putting targets on top of it would do you harm. It needs someone properly trained.\n\n${SADAG}`}\n\n${NUMBERS_PAUSED} I've let a person on our team know.${read.context === "pregnancy" ? "" : " Your body isn't the problem to solve right now."}`;
 
     case "alcohol_coping":
       return `${fn}thank you for saying that out loud — most people don't.\n\nI'll be straight: that's not something I can coach you out of, and pretending I could would waste your time. There are people who genuinely handle it.\n\n${SADAG}\n\nI'm still here for the ordinary stuff. ${door}`;

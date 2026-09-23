@@ -15,7 +15,7 @@ import {
   gptCosts, userIntegrations, clientIntelligenceProfiles,
 } from "../../shared/schema";
 import { eq, desc } from "drizzle-orm";
-import { readLifeContext, lifeContextReply } from "../life-context";
+import { readLifeContext, lifeContextReply, WITHHELD_SITUATION } from "../life-context";
 import { looksLikeQuitMoment, quitSaveReply, readObstacle } from "../quit-save";
 import { markLifeQuiet } from "../life-quiet";
 import { isCrisisMessage, crisisReply, crisisAlertBody } from "../crisis-reply";
@@ -153,6 +153,13 @@ export async function runSafetyGuards(
     const reply = lifeContextReply(life, (lifeUser?.name || "").split(" ")[0]);
     // Comfort that isn't followed by silence is just a nice sentence — go quiet on nudges too.
     if (lifeUser?.id) markLifeQuiet(lifeUser.id, life).catch(() => {});
+    // …and a withheld context is DURABLE (#266). A 7-day quiet window was all pregnancy and
+    // disordered eating ever got, so day 8's brief carried the calorie target again. This is the
+    // key the outbound floor reads, on every later turn and every proactive send.
+    if (lifeUser?.id && (life.context === "pregnancy" || life.context === "disordered_eating")) {
+      await db.update(users).set({ lifeSituation: WITHHELD_SITUATION[life.context] }).where(eq(users.id, lifeUser.id))
+        .catch((e) => console.error("[SAFETY] could not record withheld context:", e));
+    }
     try { await logChat(lifeUser?.id || "unknown", message, reply, `LIFE_${life.context.toUpperCase()}`); } catch (e) { console.warn("[non-fatal]", e); }
     return reply;
   }

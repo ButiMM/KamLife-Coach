@@ -413,6 +413,15 @@ export const ACCEPTANCES: Acceptance[] = [
     // that stops checking WHICH subscription was charged locks out a client coming back on a new one.
     command: ["bash", "script/red-on-revert-payments-cancel-truth.sh"] },
 
+  { id: "safety-routing", title: "Pregnancy and disordered eating are routed before any reply",
+    // #266 (AUDIT.md Traces 3, 6). A pregnancy question got her fat-loss target; a purging
+    // disclosure was asked "what was it, roughly?". Needs the front door AND the proactive door,
+    // users.life_situation, escalations and the post-transport bodies.
+    command: ["npx", "tsx", "script/pg-safety-routing-acceptance.ts"] },
+
+  { id: "safety-routing-reverts", title: "Every #266 safety-routing seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-safety-routing.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same
