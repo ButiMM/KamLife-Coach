@@ -4,6 +4,7 @@
 - `docs/ORDERS.md` is the plan. It overrides every other doc.
 - **Your work queue is `docs/QUEUE.md`.** Take the first unchecked item, build it as one pull request, then take the next. Don't wait to be told.
 - Every PR: open the description with "What testers will notice:", add the label `attack:codex`, and comment `@codex attack this PR per docs/ORDERS.md §6` with the head SHA.
+- **Priority order, checked before every new task:** (1) answer every open Codex attack on your PRs, (2) merge every PR whose attack is answered and whose tests pass, (3) only then start the next queue item. Nothing reaches testers until it merges, so an unanswered attack outranks new work.
 - **Never sit idle waiting for a review.** After opening a PR, start the next queue item on a new branch. Come back when Codex attacks.
 - Answer every Codex attack with a comment starting `ANSWER`: the fix commit, or why it doesn't apply.
 - Merge when tests pass (and the gate, once #270 exists) and the attack is answered. If Codex hasn't attacked within 45 minutes of your last push, you may merge; any later finding goes to the top of `docs/QUEUE.md`.
