@@ -1,3 +1,4 @@
+import { calorieFloor } from "../../targets";
 import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations,
   abExperiments, abAssignments,
@@ -452,7 +453,7 @@ export async function runAutoCalAdjust(): Promise<void> {
         const name        = (client.name || "").split(" ")[0] || "there";
         const goal        = client.goalType || "fat_loss";
         const isFemale    = client.gender === "female";
-        const calFloor    = isFemale ? 1300 : 1500;
+        const calFloor    = calorieFloor(client);
 
         let newCal:  number | null = null;
         let newProt: number | null = null;

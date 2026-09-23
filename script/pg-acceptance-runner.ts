@@ -422,6 +422,14 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "safety-routing-reverts", title: "Every #266 safety-routing seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-safety-routing.sh"] },
 
+  { id: "calorie-floor", title: "One calorie floor, and no writer below it",
+    // #268. The weigh-in auto-adjust needs real weight_logs across a fortnight and the front door;
+    // the diet-break restore needs the real job against a seeded client.
+    command: ["npx", "tsx", "script/pg-calorie-floor-acceptance.ts"] },
+
+  { id: "calorie-floor-reverts", title: "Every #268 floor seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-calorie-floor.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same

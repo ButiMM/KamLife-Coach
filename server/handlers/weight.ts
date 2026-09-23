@@ -5,7 +5,7 @@ import { neverSilentLine } from "../reply-hygiene";
 import { trendCalorieAdjust } from "../adaptive-targets";
 import { escalationSLA } from "../safety-detection";
 import { eq, and, gte, lt, asc, desc } from "drizzle-orm";
-import { calculateTargets } from "../targets";
+import { calculateTargets, calorieFloor } from "../targets";
 import { storeMemory } from "../memory";
 import { invalidatePatternCache } from "../cache";
 
@@ -443,7 +443,7 @@ export async function handleWeightLog(
       // Still gated on the guards above — 4+ weigh-ins over 10+ days, latest reading must not
       // contradict the fortnight trend. TREND_AUTOADJUST=off is the revert.
       if (process.env.TREND_AUTOADJUST !== "off") {
-        finalCals = Math.max(1200, Math.min(4000, newCals + calAdjust));
+        finalCals = Math.max(calorieFloor(user), Math.min(4000, newCals + calAdjust));
       } else {
         calAdjust = 0;
       }

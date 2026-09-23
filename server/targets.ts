@@ -58,6 +58,23 @@ export function maintenanceKcal(
   return Number.isFinite(m) ? m : 2000;
 }
 
+/**
+ * THE CALORIE FLOOR — one table, sex- and age-aware, used by every writer of a calorie target (#268).
+ * There were five: this file's own two, a sex-blind 1400 in the adaptive overlay, 1300/1500 in the
+ * three-week re-evaluation, and a sex-blind 1200 in the weigh-in auto-adjust, which could set a man
+ * to ~1350 against the 1500 every other path held him to. No writer may go below this number.
+ */
+export function calorieFloor(p: { gender?: string | null; age?: number | null; lifeSituation?: string | null }): number {
+  const female = p.gender === "female";
+  if (p.lifeSituation === "postpartum_breastfeeding") return 1800;   // below this, milk supply drops
+  const age = Number(p.age);
+  if (Number.isFinite(age) && age > 0 && age < 18) return female ? 1600 : 1800;   // growing bodies
+  if (Number.isFinite(age) && age >= 60) return female ? 1400 : 1600;
+  // 1300, not 1200, for women: the three-week re-evaluation already held 1300, and one floor may
+  // only take a path UP (#268). Onboarding's female floor rises by 100; nothing falls.
+  return female ? 1300 : 1500;
+}
+
 export function calculateTargets(
   weightKg: number,
   goalType: string,
@@ -108,7 +125,7 @@ export function calculateTargets(
   const bmrFloor = Math.round(isFemale
     ? (10 * weightKg) + (6.25 * heightCm) - (5 * age) - 161
     : (10 * weightKg) + (6.25 * heightCm) - (5 * age) + 5);
-  const minCal = Math.max(isBreastfeeding ? 1800 : (isFemale ? 1200 : 1500), adj < 0 ? bmrFloor : 0);
+  const minCal = Math.max(calorieFloor({ gender, age, lifeSituation }), adj < 0 ? bmrFloor : 0);
   // NaN guard: if any input (weight/age/height/bmr) was non-numeric, never ship "NaN kcal".
   calorieTarget = Number.isFinite(calorieTarget) ? Math.max(minCal, Math.min(4500, calorieTarget)) : minCal;
 
@@ -140,13 +157,11 @@ export function calculateTargets(
   // ── Age adjustments ──
   // Youth: don't over-restrict
   if (age < 18) {
-    calorieTarget = Math.max(calorieTarget, isFemale ? 1600 : 1800);
     proteinTarget = Math.min(proteinTarget, Math.round(proteinRefKg * 1.8)); // don't overload growing bodies
   }
   // Elderly: preserve muscle, moderate calories
   if (age >= 60) {
     proteinTarget = Math.max(proteinTarget, Math.round(proteinRefKg * 1.6)); // elderly need MORE protein not less
-    calorieTarget = Math.max(calorieTarget, isFemale ? 1400 : 1600);
   }
 
   return { calorieTarget, proteinTarget };
