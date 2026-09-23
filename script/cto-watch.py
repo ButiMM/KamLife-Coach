@@ -29,8 +29,10 @@ for p in open_prs:
     comments = api("GET", f"/issues/{n}/comments?per_page=100")
     if "What testers will notice" not in (p["body"] or ""):
         comment_once(n, f"cto-notice-{n}", "**CTO watch:** the description must open with \"What testers will notice:\" (CLAUDE.md standing orders).", comments)
-    attacks = [c for c in comments if re.search(rf"ATTACK @ `?{sha[:7]}", c["body"])]
-    answers = [c for c in comments if c["body"].lstrip().startswith("ANSWER")]
+    human = [c for c in comments if not c["user"]["login"].endswith("[bot]") or "codex" in c["user"]["login"]]
+    human = [c for c in human if "<!-- cto-" not in c["body"]]
+    attacks = [c for c in human if c["body"].lstrip().startswith(f"ATTACK @ {sha[:7]}") or c["body"].lstrip().startswith(f"ATTACK @ `{sha[:7]}")]
+    answers = [c for c in human if c["body"].lstrip().startswith("ANSWER")]
     commits = api("GET", f"/pulls/{n}/commits?per_page=100")
     head_time = ts(commits[-1]["commit"]["committer"]["date"]) if commits else ts(p["created_at"])
     if not attacks:
