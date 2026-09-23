@@ -82,7 +82,7 @@ const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: Conte
     // be?" was answered with her fat-loss target. First person only: "my sister is pregnant" and
     // "I'm not pregnant" are ordinary talk, and "I'm expecting" needs a baby after it.
     context: "pregnancy", refer: true, demand: "pause",
-    re: /\b(?:(?:i'?m|i\s+am|currently)\s+(?:\d{1,2}\s+(?:weeks?|months?)\s+)?pregnant|(?:i'?m|i\s+am|we'?re|we\s+are)\s+expecting\s+(?:a\s+(?:baby|child)|twins|(?:my|our)\s+(?:first|second|third)\b)|my\s+pregnancy|(?:first|second|third|1st|2nd|3rd)\s+trimester)\b/i,
+    re: /\b(?:(?:i'?m|i\s+am)\s+(?:currently\s+|now\s+)?(?:\d{1,2}\s+(?:weeks?|months?)\s+)?pregnant|(?:i'?m|i\s+am|we'?re|we\s+are)\s+expecting\s+(?:a\s+(?:baby|child)|twins|(?:my|our)\s+(?:first|second|third)\b)|my\s+pregnancy|(?:first|second|third|1st|2nd|3rd)\s+trimester)\b/i,
   },
 
   // ── Hard life — the common case ───────────────────────────────────────────────────
@@ -141,8 +141,11 @@ export function readLifeContext(message: string): ContextRead | null {
   // WANTING TO QUIT THE PROGRAMME IS NOT A MENTAL-HEALTH EVENT (2026-07-28). "I can't do this
   // anymore" about tracking food was being answered with a suicide helpline — insulting to
   // someone who is simply exhausted, and it ends the relationship. server/quit-save.ts owns it.
-  if (looksLikeQuitMoment(s)) return null;
+  // A QUIT MOMENT DOES NOT OUTRANK A SAFETY DISCLOSURE (Codex @ 8e4f231): "I'm pregnant and I want
+  // to quit" is a pregnancy first. Every other context still stands down for quit-save.
+  const quit = looksLikeQuitMoment(s);
   for (const p of P) {
+    if (quit && p.context !== "disordered_eating" && p.context !== "pregnancy") continue;
     if (p.re.test(s)) return { context: p.context, refer: p.refer, demand: p.demand, ...(p.context === "disordered_eating" && /\binsulin\b/i.test(s) ? { insulin: true } : {}) };
   }
   return null;

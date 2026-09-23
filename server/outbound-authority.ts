@@ -79,7 +79,7 @@ export async function enforceOutboundTruth(
   //    path. The promise sentence itself is exempt, or the refusal could never be delivered.
   const withheld = withheldContext(recipientUser?.lifeSituation);
   if (withheld && !body.includes(NUMBERS_PAUSED)
-      && /\b\d[\d,]{1,5}\s*(?:kcal|calories|cal)\b|\b(?:calorie|kcal)\s+(?:target|goal|budget|deficit)|\bdeficit\b|\bfat[- ]loss\b|\bweight[- ]loss\b|\blos(?:e|ing)\s+(?:the\s+)?(?:weight|fat|\d+\s*kg)\b|\bweigh[- ]?ins?\b|\b(?:step|stand)\s+on\s+(?:a|the)\s+scale\b|\bweigh\s+yourself\b/i.test(body)) {
+      && /\b\d[\d,]{1,5}\s*(?:kcal|calories|cal)\b|\b(?:calorie|kcal)\s+(?:target|goal|budget|deficit)|\bdeficit\b|\bfat[- ]loss\b|\bweight[- ]loss\b|\blos(?:e|ing)\s+(?:the\s+)?(?:weight|fat|\d+\s*kg)\b|\bweigh[- ]?ins?\b|\b(?:step|stand)\s+on\s+(?:a|the)\s+scale\b|\bweigh\s+yourself\b|\b(?:calories|kcal|protein|carbs?|fat|macros?)\s*[:=]?\s*\*?\d|\b\d{2,4}\s*g\b|\bprotein\s+(?:target|goal)\b|\b(?:target|goal)\s+weight\b|\b\d{2,3}(?:[.,]\d+)?\s*kg\b/i.test(body)) {
     return { ok: false, reason: "numbers_withheld", detail: `${withheld}: ${body.slice(0, 60)}`,
       repair: lifeContextReply({ context: withheld, refer: true, demand: "pause" }) };
   }

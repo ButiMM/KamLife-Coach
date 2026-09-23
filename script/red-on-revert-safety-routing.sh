@@ -17,6 +17,7 @@ FILES=(
   server/safety-detection.ts
   server/outbound-authority.ts
   server/onboarding.ts
+  server/handlers/chat-log.ts
 )
 
 for f in "${FILES[@]}"; do cp "$f" "$WORK_ROOT/$(printf '%s' "$f" | tr '/' '_')"; done
@@ -76,8 +77,8 @@ run_case "a purging disclosure in the present continuous is missed" server/life-
 
 # 2. A FIRST-PERSON PREGNANCY IS NOT READ — Trace 3's question goes to the totals branch.
 run_case "\"I'm pregnant\" is not recognised" server/life-context.ts \
-  're: /\b(?:(?:i'"'"'?m|i\s+am|currently)\s+(?:\d{1,2}' \
-  're: /\b(?:(?:xq266)\s+(?:\d{1,2}' || failed=$((failed + 1))
+  're: /\b(?:(?:i'"'"'?m|i\s+am)\s+(?:currently\s+|now\s+)?(?:\d{1,2}' \
+  're: /\b(?:(?:xq266)\s+(?:currently\s+|now\s+)?(?:\d{1,2}' || failed=$((failed + 1))
 
 # 3. THE CONTEXT IS NOT RECORDED — a 7-day quiet window, then the targets resume.
 run_case "a withheld context is not recorded durably" server/handlers/safety.ts \
@@ -120,9 +121,35 @@ run_case "\"I’m pregnant\" with a smart apostrophe is missed" server/life-cont
   '  const s = (message || "").trim().replace(/[\u2018\u2019\u02bc]/g, "'"'"'");' \
   '  const s = (message || "").trim();' || failed=$((failed + 1))
 
+# 11. A THIRD PERSON IS READ AS THE CLIENT (Codex review @ 8e4f231) — "My sister is currently
+#     pregnant" withholds the client's own targets.
+run_case "\"currently pregnant\" without a first-person subject is the client's pregnancy" server/life-context.ts \
+  're: /\b(?:(?:i'"'"'?m|i\s+am)\s+(?:currently\s+|now\s+)?' \
+  're: /\b(?:(?:i'"'"'?m|i\s+am|currently)\s+(?:currently\s+|now\s+)?' || failed=$((failed + 1))
+
+# 12. QUIT LANGUAGE HIDES A DISCLOSURE FROM THE OWNER (Codex review @ 8e4f231).
+run_case "a quit moment suppresses the pregnancy / disordered-eating read" server/life-context.ts \
+  '    if (quit && p.context !== "disordered_eating" && p.context !== "pregnancy") continue;' \
+  '    if (quit) continue;' || failed=$((failed + 1))
+
+# 13. …AND THE QUIT SAVE ANSWERS FIRST.
+run_case "the quit save answers a safety disclosure" server/handlers/safety.ts \
+  '  if (looksLikeQuitMoment(message) && !safetyFirst) {' \
+  '  if (looksLikeQuitMoment(message)) {' || failed=$((failed + 1))
+
+# 14. A PROTEIN / MACRO TARGET REACHES A WITHHELD CLIENT (Codex review @ 8e4f231).
+run_case "a protein target passes the withheld floor" server/outbound-authority.ts \
+  '|\b(?:calories|kcal|protein|carbs?|fat|macros?)\s*[:=]?\s*\*?\d|\b\d{2,4}\s*g\b|\bprotein\s+(?:target|goal)\b|\b(?:target|goal)\s+weight\b|\b\d{2,3}(?:[.,]\d+)?\s*kg\b/i.test(body)) {' \
+  '/i.test(body)) {' || failed=$((failed + 1))
+
+# 15. AN OPEN CASE SWALLOWS THE URGENT ONE (Codex review @ 8e4f231).
+run_case "an unrelated open escalation absorbs a disordered-eating disclosure" server/handlers/chat-log.ts \
+  '    if (open.some(r => r.reason === esc.reason) || (open.length > 0 && esc.priority !== "urgent")) return;' \
+  '    if (open.length > 0) return;' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-safety-routing: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-safety-routing: GREEN — 10/10 behavioral reverts caught"
+echo "red-on-revert-safety-routing: GREEN — 15/15 behavioral reverts caught"

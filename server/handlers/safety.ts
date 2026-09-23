@@ -123,7 +123,8 @@ export async function runSafetyGuards(
   // The single highest-value conversation in the product, and it had no handler: it fell to the
   // general coach, or (worse) tripped the crisis path and got a helpline. Answered from their
   // REAL numbers — see server/quit-save.ts.
-  if (looksLikeQuitMoment(message)) {
+  const safetyFirst = ["disordered_eating", "pregnancy"].includes(readLifeContext(message)?.context || "");
+  if (looksLikeQuitMoment(message) && !safetyFirst) {
     const qu = await db.select({ id: users.id, name: users.name, createdAt: users.createdAt, totalWorkoutsCompleted: users.totalWorkoutsCompleted })
       .from(users).where(eq(users.phoneNumber, phone)).limit(1);
     const u = bindKnownSafetyUser(qu[0]);
