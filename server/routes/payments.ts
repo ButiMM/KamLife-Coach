@@ -366,6 +366,14 @@ export function registerPaymentRoutes(app: Express) {
           console.log(`[PAYFAST:${itnId}] CANCELLED ITN confirms the client's own cancel — ${safePhone}`);
           return;
         }
+        // A CANCELLATION IS FOR ONE SUBSCRIPTION (Codex attack @ 1309c98). A late or retried
+        // CANCELLED for token A, arriving after the client rejoined on token B, ended the
+        // subscription they were paying on. Only the one they are paying on now can be ended here.
+        const current = data.token ? await latestPayFastToken(normalisedPhone, eventKey) : null;
+        if (data.token && current && current !== data.token) {
+          console.log(`[PAYFAST:${itnId}] CANCELLED ITN for superseded token — ${safePhone} is on a newer subscription; nothing changed`);
+          return;
+        }
         await db.update(users).set({
           subscriptionStatus: "inactive",
           cancelledAt: new Date(),

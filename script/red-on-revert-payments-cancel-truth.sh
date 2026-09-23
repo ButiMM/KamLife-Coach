@@ -141,9 +141,14 @@ run_case "a pre-0014 cancellation is not backfilled" migrations/0014_subscriptio
   "UPDATE users u SET subscription_end_reason = 'client_cancelled'" \
   "UPDATE users u SET subscription_end_reason = u.subscription_end_reason" || failed=$((failed + 1))
 
+# 14. A STALE CANCELLATION ENDS THE NEW SUBSCRIPTION (Codex attack @ 1309c98).
+run_case "a cancellation for a superseded token ends the current subscription" server/routes/payments.ts \
+  '        if (data.token && current && current !== data.token) {' \
+  '        if (false) {' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-payments-cancel-truth: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-payments-cancel-truth: GREEN — 13/13 behavioral reverts caught"
+echo "red-on-revert-payments-cancel-truth: GREEN — 14/14 behavioral reverts caught"

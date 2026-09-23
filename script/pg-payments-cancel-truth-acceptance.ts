@@ -438,6 +438,28 @@ REAL("\n9. A CLIENT WHO CANCELLED BEFORE 0014 — the charge does not reactivate
     "the charge is recorded and the founder is told to refund it", `admin_events=${JSON.stringify(await adminActions(T.phone))}`);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n10. A STALE CANCELLATION FOR AN OLD SUBSCRIPTION — the new one is untouched (Codex attack @ 1309c98)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+{
+  const R = await makeClient("27820000978", "Refilwe Rejoin");
+  await postItn(signItn(itnFields(R.digits, "COMPLETE", "tok-refilwe-A", "pf-refilwe-A1", "alpha")));
+  pfMode = "ok";
+  await cancelThroughFrontDoor(R, "SMpay10");
+  await postItn(signItn(itnFields(R.digits, "COMPLETE", "tok-refilwe-B", "pf-refilwe-B1", "alpha")));
+  chk((await row(R.phone)).subscription_status === "active", "control: the new subscription (token B) is active");
+  const cl0 = await lastShadowId();
+  await postItn(signItn(itnFields(R.digits, "CANCELLED", "tok-refilwe-A", "pf-refilwe-A-cancel", "alpha")));
+  const r10 = await row(R.phone);
+  chk(r10.subscription_status === "active" && r10.cancelled_at === null,
+    "PayFast's late cancellation of token A does not end the subscription she is paying on (token B)",
+    `status=${r10.subscription_status} cancelled_at=${r10.cancelled_at}`);
+  // CONTROL: a CANCELLED ITN for the CURRENT token still ends it.
+  await postItn(signItn(itnFields(R.digits, "CANCELLED", "tok-refilwe-B", "pf-refilwe-B-cancel", "alpha")));
+  chk((await row(R.phone)).subscription_status === "inactive", "control: PayFast cancelling the current subscription still ends it");
+  void cl0;
+}
+
 server.close();
 await pool.end().catch(() => {});
 REAL(`\npg-payments-cancel-truth-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}`);
