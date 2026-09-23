@@ -2,6 +2,10 @@
 
 This repository builds KamLife Coach. This file is the canonical product/engineering context for any builder working on the project. Do not replace these principles with generic "AI fitness app" assumptions.
 
+## Git workflow (applies to every builder)
+
+Never push to `main`; it deploys to production. Work on a branch, open a pull request, one task per pull request. Do not merge your own pull request until tests pass and the other builder has reviewed it. See `CLAUDE.md` for the full rules.
+
 ## Product thesis
 
 KamLife is **continuous decision-making under incomplete information**.
