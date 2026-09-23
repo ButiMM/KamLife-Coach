@@ -53,7 +53,7 @@ export interface ContextRead {
   insulin?: boolean;
 }
 
-const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: ContextRead["demand"] }> = [
+const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: ContextRead["demand"]; thirdParty?: RegExp; own?: RegExp }> = [
   // ── Clinical edge — ordered first, most serious wins ───────────────────────────────
   {
     context: "disordered_eating", refer: true, demand: "pause",
@@ -66,6 +66,10 @@ const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: Conte
     // asked "what was it, roughly?". "I MADE myself sick" fell to own_illness and was told to rest.
     // Laxative use needs a weight or after-eating cue (constipation is not this); skipping insulin
     // needs a weight or calorie cue (a sick-day dose question is not this).
+    // SOMEBODY ELSE'S CONDITION (Codex @ 9331eda): "My sister has bulimia" names the term but not
+    // the client. With a third party as subject, only the client's own claim counts.
+    thirdParty: /\b(?:my|our|a|her|his)\s+(?:sister|brother|daughter|son|friend|mom|mum|mother|dad|father|wife|husband|girlfriend|boyfriend|partner|cousin|aunt|niece|nephew|colleague|child|kid|teen(?:ager)?)\b|\b(?:she|he)\s+(?:has|is|was|keeps|makes|made|takes|took)\b/i,
+    own: /\b(?:i\s+(?:have|had|was|am)|i'?ve\s+(?:got|had|been)|i'?m)\s+(?:\w+\s+){0,3}?(?:an?\s+)?(?:eating\s+disorder|anorexi|bulimi|purg|diagnosed|starv)|\bmy\s+(?:own\s+)?(?:eating\s+disorder|anorexia|bulimia)\b|\bmyself\b/i,
     re: /\b(?:eating\s+disorder|anorexi(?:a|c)|bulimi(?:a|c)|(?:make|makes|making|made)\s+myself\s+(?:sick|throw\s+up|vomit|puke)|(?:throw(?:ing)?\s+up|threw\s+up|vomit(?:ing|ed)?|puk(?:e|ing|ed))\s+(?:on\s+purpose|deliberately)|purge|purging|binge(?:ing|d)?\s+(?:and|then)\s+(?:purg|starv)|starv(?:e|ing)\s+myself|(?:tak(?:e|es|ing)|took|us(?:e|es|ing)|used)\s+(?:laxatives?|diuretics?|water\s+pills)\b[^.!?]{0,40}\b(?:weight|gain|calories|lose|slim|after\s+(?:eating|i\s+eat|meals?|dinner|lunch|breakfast))|laxatives?\s+to\s+lose|(?:skip(?:ping|ped)?|stop(?:ping)?|miss(?:ing)?|cut(?:ting)?\s+(?:back\s+)?(?:on\s+)?|not\s+tak(?:e|ing))\s+(?:my\s+)?insulin\b[^.!?]{0,40}\b(?:weight|calories|lose|slim|cut)|not\s+eaten\s+(?:in|for)\s+(?:\d+\s+|a\s+few\s+)?days?)\b/i,
   },
   {
@@ -146,6 +150,7 @@ export function readLifeContext(message: string): ContextRead | null {
   const quit = looksLikeQuitMoment(s);
   for (const p of P) {
     if (quit && p.context !== "disordered_eating" && p.context !== "pregnancy") continue;
+    if (p.thirdParty?.test(s) && !p.own?.test(s)) continue;
     if (p.re.test(s)) return { context: p.context, refer: p.refer, demand: p.demand, ...(p.context === "disordered_eating" && /\binsulin\b/i.test(s) ? { insulin: true } : {}) };
   }
   return null;

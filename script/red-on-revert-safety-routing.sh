@@ -147,9 +147,15 @@ run_case "an unrelated open escalation absorbs a disordered-eating disclosure" s
   '    if (open.some(r => r.reason === esc.reason) || (open.length > 0 && esc.priority !== "urgent")) return;' \
   '    if (open.length > 0) return;' || failed=$((failed + 1))
 
+# 16. SOMEBODY ELSE'S DISORDER IS THE CLIENT'S (Codex @ 9331eda) — "My sister has bulimia" is stored
+#     and escalated as the client's own condition.
+run_case "a third party's eating disorder is read as the client's" server/life-context.ts \
+  '    if (p.thirdParty?.test(s) && !p.own?.test(s)) continue;' \
+  '' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-safety-routing: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-safety-routing: GREEN — 15/15 behavioral reverts caught"
+echo "red-on-revert-safety-routing: GREEN — 16/16 behavioral reverts caught"
