@@ -40,10 +40,9 @@ import type { BehaviourPatternDecisionContext } from "./intelligence/profile";
 export interface DayState {
   firstName?: string;
   goal: GoalKey;
-  /** Their three-month dream, in their own words, from onboarding. */
   dreamGoal?: string | null;
-  /** What they said would get in the way. Decides WHICH action is realistic for them. */
   biggestStruggle?: string | null;
+  weeklyFoodBudget?: string | null;
   weeksOnProgramme: number;
   /** Days since they logged anything at all. 0 = today. */
   daysSinceAnyLog: number;
@@ -549,6 +548,7 @@ export function foodDayIsReopened(text: string): boolean {
 
 export function chooseAction(s: DayState): OneAction {
   const struggle = readStruggle(s.biggestStruggle);
+  const budgetConstrained = s.weeklyFoodBudget === "under_100";
   const isBulk = s.goal === "muscle_gain";
 
   // 1. NOTHING ELSE MATTERS IF THEY ARE GONE. A protein tip to someone who vanished four days
@@ -638,7 +638,7 @@ export function chooseAction(s: DayState): OneAction {
       kind: "eat_more",
       // A RECIPE, NOT A LIST OF ALTERNATIVES, so it is kept or dropped whole rather than filtered
       // into "beans does it".
-      todo: struggle === "money"
+      todo: struggle === "money" || budgetConstrained
         ? (plate => plate ? `Add one more proper meal today — ${plate} does it.` : "Add one more proper meal today.")(
             ["eggs, bread and peanut butter", "beans, bread and peanuts"].find(x => c.allows(x)))
         : "Add one more proper meal today.",
@@ -676,7 +676,7 @@ export function chooseAction(s: DayState): OneAction {
         ? eat("tin fish, eggs or amasi", "tinned beans, lentils or peanuts",
             kept => `Make your next meal a protein one — ${kept}. Two minutes.`,
             "Make your next meal a protein one. Two minutes.")
-        : struggle === "money"
+        : struggle === "money" || budgetConstrained
         ? eat("eggs, pilchards or sugar beans", "sugar beans, lentils or peanuts",
             kept => `Get protein into your next meal — ${kept}.`,
             "Get protein into your next meal.")
@@ -758,10 +758,10 @@ export interface ProactiveStateForDecision {
   today: { kcal: number; protein: number; steps: number; logged: boolean; hour: number };
   evidence: { foodSufficient: boolean; weightSufficient: boolean };
 }
-
 export interface ProactiveProfile {
   dreamGoal?: string | null;
   biggestStruggle?: string | null;
+  weeklyFoodBudget?: string | null;
   /** users.do_not_mention — carried so the decision never chooses an ask they asked us to drop. */
   doNotMention?: string | null;
   /** users.life_context — a durable fact (Cut 7), carried so the come_back rungs can name it. */
@@ -800,6 +800,7 @@ export function dayStateFrom(
     goal: (s.goalType as GoalKey) || ("general" as GoalKey),
     dreamGoal: p.dreamGoal,
     biggestStruggle: p.biggestStruggle,
+    weeklyFoodBudget: p.weeklyFoodBudget,
     weeksOnProgramme: p.weeksOnProgramme,
     // ── NEVER LOGGED IS NOT FOURTEEN WEEKS GONE (C14) ── `?? 99` turned "we hold no meal row
     // for this client" into a ninety-nine day absence and rung 1 read it back. Measured on

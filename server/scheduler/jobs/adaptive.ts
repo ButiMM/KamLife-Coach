@@ -24,6 +24,7 @@
 
 import { db, users, eq, getActiveClients, saveState, todaySAST, hasRunToday, loadProactiveState } from "../shared";
 import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
+import { adaptiveTargetReviews } from "../../../shared/schema";
 
 /** Strip a stale hand-off marker before writing a fresh one, so yesterday's note can never be
  *  read as today's. Every write path clears it, including the ones that then don't set it. */
@@ -56,7 +57,25 @@ export async function runAdaptiveTargets(): Promise<void> {
       const notes = String(c.profileNotes || "");
 
       const out = adaptTargets(input);
-      if (!out.changed) continue;
+
+      // The stored overlay is what the client currently sees. A review and any mutation must
+      // commit together; the user/day uniqueness also makes a same-day retry harmless.
+      const priorTargets = { ...s.current };
+      const isHold = !out.changed || out.reason === "stalled_unlogged" || out.reason === "stalled_unknown_intake"
+        || out.reason === "stalled_under_target" || out.reason === "stalled_over_target"
+        || (out.calorieTarget === s.current.calories && out.proteinTarget === s.current.protein
+          && out.stepsTarget === s.current.steps);
+      const review = {
+        userId: c.id,
+        decisionDay: today,
+        state: isHold ? "HOLD" : "CHANGE",
+        reason: out.reason,
+        priorTargets,
+        nextTargets: isHold ? priorTargets : {
+          calories: out.calorieTarget, protein: out.proteinTarget, steps: out.stepsTarget,
+        },
+        evidence: { ...input, currentTargets: priorTargets },
+      };
 
       // A STALL THE ENGINE DELIBERATELY DID NOT ACT ON. Both new outcomes leave every target
       // exactly where it was and say why — so they fall through the "nothing changed → stay
@@ -64,13 +83,23 @@ export async function runAdaptiveTargets(): Promise<void> {
       // Rate-limited to once a week: this job runs daily and a stalled, under-logging client
       // would otherwise be told the same thing every morning for three weeks, which is nagging,
       // not coaching.
-      if (out.reason === "stalled_unlogged" || out.reason === "stalled_over_target") {
+      if (out.reason === "stalled_unlogged" || out.reason === "stalled_unknown_intake"
+          || out.reason === "stalled_under_target" || out.reason === "stalled_over_target") {
         const lastNotice = notes.match(/stall_notice:(\d{4}-\d{2}-\d{2})/)?.[1];
-        if (lastNotice && (Date.now() - new Date(lastNotice).getTime()) / 86_400_000 < 7) continue;
-        const kept = clearTokens(notes).replace(/\s*\bstall_notice:\d{4}-\d{2}-\d{2}\b/g, "").trim();
-        await db.update(users)
-          .set({ profileNotes: `${kept} stall_notice:${today} adapt_note:${today}`.trim() })
-          .where(eq(users.id, c.id));
+        const noticeDue = !lastNotice || (Date.now() - new Date(lastNotice).getTime()) / 86_400_000 >= 7;
+        const inserted = await db.transaction(async tx => {
+          const rows = await tx.insert(adaptiveTargetReviews).values(review).onConflictDoNothing()
+            .returning({ id: adaptiveTargetReviews.id });
+          if (rows.length === 0) return false;
+          if (noticeDue) {
+            const kept = clearTokens(notes).replace(/\s*\bstall_notice:\d{4}-\d{2}-\d{2}\b/g, "").trim();
+            await tx.update(users)
+              .set({ profileNotes: `${kept} stall_notice:${today} adapt_note:${today}`.trim() })
+              .where(eq(users.id, c.id));
+          }
+          return true;
+        });
+        if (!inserted || !noticeDue) continue;
         console.log(`[ADAPTIVE] ${c.id.slice(-6)} ${out.reason}: targets held at ${input.baseCalories} kcal (logged ${input.loggedDays7d ?? "?"}d, avg ${input.avgKcal7d ?? "?"} kcal) — note handed to morning`);
         continue;
       }
@@ -78,8 +107,10 @@ export async function runAdaptiveTargets(): Promise<void> {
       // Nothing actually different from what they already HOLD — compared against the stored
       // overlay, not the baseline the engine reasoned from. Those diverge now: an unchanged
       // decision recomputed from baseline can still equal what the client already has.
-      if (out.calorieTarget === s.current.calories && out.proteinTarget === s.current.protein
-          && out.stepsTarget === s.current.steps) continue;
+      if (isHold) {
+        await db.insert(adaptiveTargetReviews).values(review).onConflictDoNothing();
+        continue;
+      }
 
       // MARK IT DELIBERATE, or the morning sanity audit reverts it before lunch (2026-07-30
       // live: this job wrote 2530, morning.ts saw 332 kcal off the profile figure, called it
@@ -87,12 +118,19 @@ export async function runAdaptiveTargets(): Promise<void> {
       // pattern as sick_until, and the same exemption a diet break already gets.
       const keptNotes = clearTokens(notes).replace(/\s*\badapted_until:\d{4}-\d{2}-\d{2}\b/g, "").trim();
       const adaptedUntil = new Date(Date.now() + 13 * 86_400_000).toISOString().slice(0, 10);
-      await db.update(users).set({
-        calorieTarget: out.calorieTarget,
-        proteinTarget: out.proteinTarget,
-        stepsTarget: out.stepsTarget,
-        profileNotes: `${keptNotes} adapted_until:${adaptedUntil}${out.note ? ` adapt_note:${today}` : ""}`.trim(),
-      }).where(eq(users.id, c.id));
+      const inserted = await db.transaction(async tx => {
+        const rows = await tx.insert(adaptiveTargetReviews).values(review).onConflictDoNothing()
+          .returning({ id: adaptiveTargetReviews.id });
+        if (rows.length === 0) return false;
+        await tx.update(users).set({
+          calorieTarget: out.calorieTarget,
+          proteinTarget: out.proteinTarget,
+          stepsTarget: out.stepsTarget,
+          profileNotes: `${keptNotes} adapted_until:${adaptedUntil}${out.note ? ` adapt_note:${today}` : ""}`.trim(),
+        }).where(eq(users.id, c.id));
+        return true;
+      });
+      if (!inserted) continue;
 
       moved++;
       console.log(`[ADAPTIVE] ${c.id.slice(-6)} ${out.reason}: ${input.baseCalories}→${out.calorieTarget} kcal, steps ${input.baseSteps}→${out.stepsTarget} — note handed to morning`);

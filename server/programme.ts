@@ -1243,9 +1243,11 @@ const PHASE_OPENERS: Record<number, string> = {
 };
 
 const GOAL_FINISH_GYM: Record<string, string> = {
-  fat_loss: "_After: protein within 60 min — eggs, chicken, pilchards. Keep carbs light if you're not training again today._",
-  muscle_gain: "_After: eat rice + protein within 30 minutes. This is the most important meal of your day — do not skip it._",
-  recomposition: "_After: protein within 60 min, moderate carbs. Sweet potato or pap + chicken. Fuel the rebuild._",
+  // The session owner does not know which foods this client eats or when they last ate.
+  // Food-specific swaps belong to the food owner, not to a generic workout footer.
+  fat_loss: "_After: use a protein food you already eat at your next usual meal._",
+  muscle_gain: "_After: have your next usual meal with protein and enough food to support training._",
+  recomposition: "_After: have your next usual meal with protein and carbs._",
 };
 
 export function getWeekContext(phase: number, week: number, isBeginner = false, sessionsDone = 0): { rationale: string; sets: string; reps: string; rest: string } {
@@ -1500,7 +1502,30 @@ function getKamlifeProgrammeInner(user: any, todayOnly = false): string {
     walkingFooter = `\n\n*Walking today:* ${progressiveSteps.toLocaleString()} steps${programmeWeek <= 4 ? ` (building up — full target is ${baseSteps.toLocaleString()})` : ""}. Send a screenshot or tell me your count.`;
   }
 
-  if (mode !== "gym" && mode !== "gym_dumbbell") return prefix + HOME_PROGRAMME_GUIDE + walkingFooter;
+  if (mode !== "gym" && mode !== "gym_dumbbell") {
+    if (mode === "walk_only" || mode === "walk") return prefix + buildDayWorkoutInner(user) + walkingFooter;
+    // The static home guide predates saved injuries and experience: it prescribes squats and
+    // lunges to a knee-injured client and gives a beginner and a veteran the same first session.
+    // Today's instruction uses the existing structured day owner, whose exercise filter and
+    // experience-based sets apply before the programme becomes a client instruction. A requested
+    // full guide keeps its old shape unless injury requires the same safe structured days.
+    const injury = String(user.injuries || "").trim();
+    if (todayOnly || (injury && injury.toLowerCase() !== "none")) {
+      const days = user.trainingDaysPerWeek || 3;
+      const gender = user.gender || "male";
+      const phase = user.programmePhase || 1;
+      const phaseName = getPhaseNames()[phase] || "Foundation";
+      const slots = todayOnly ? [user.programmeDayInWeek || 1]
+        : Array.from({ length: Math.min(4, Math.max(2, days)) }, (_, i) => i + 1);
+      return prefix + slots.map(slot => {
+        const { exercises, label } = getNewHomeDay(days, slot, gender);
+        return formatGymDay(swapImpactForHeavy(exercises, user), label, phase, phaseName,
+          programmeWeek, getPhaseMultiplier(phase), user.goalType || "fat_loss", false,
+          injury, exp, false, user.totalWorkoutsCompleted || 0);
+      }).join("\n\n---\n\n") + walkingFooter;
+    }
+    return prefix + HOME_PROGRAMME_GUIDE + walkingFooter;
+  }
 
   const isDumbbell = mode === "gym_dumbbell";
   const isGlutesFocus = user.primaryFocusArea === "glutes_legs";

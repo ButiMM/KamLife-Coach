@@ -172,6 +172,7 @@ export async function canonicalDecision(
       firstName: getDisplayName(user) || undefined,
       goal: (user.goalType as any) || "general",
       dreamGoal: user.dreamGoal, biggestStruggle: user.biggestStruggle,
+      weeklyFoodBudget: user.weeklyFoodBudget,
       lifeContext: user.lifeContext, doNotMention: user.doNotMention,
       weeksOnProgramme: Math.max(0, (user.programmeWeek || 1) - 1),
       daysSinceAnyLog,

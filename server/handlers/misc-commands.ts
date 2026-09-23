@@ -44,6 +44,7 @@ import { getDayLedger, getProgressTruth, sessionsThisCalendarWeek, getWeightTrut
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
 import { engineLive } from "../understanding/live";
+import { readHealthState } from "../health-state";
 import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
@@ -158,7 +159,27 @@ export async function handleMiscCommands(ctx: {
 
   if (looksLikeDirectionRequest(m)) {
     const ws = await getTodayWorkoutState(user).catch(() => ({ type: "NORMAL" as const }));
-    return buildDailyDirection(user, ws as any);
+    try {
+      const [truth, sessionsThisWeek, nextMove] = await Promise.all([
+        getProgressTruth(user, { days: 7, clientMessage: message }),
+        sessionsThisCalendarWeek(user.id),
+        oneActionCommand(user, { atKeyboard: true, asksAboutToday: true }),
+      ]);
+      const health = readHealthState(user);
+      const change = truth.weight.known ? truth.weight.changeKg : null;
+      const weightTrend = change === null ? "unknown" as const
+        : change <= -0.3 ? "down" as const : change >= 0.3 ? "up" as const : "flat" as const;
+      const latestFood = truth.today.meals.at(-1)?.foods.replace(/\s+/g, " ").trim().slice(0, 70);
+      return buildDailyDirection(user, ws as any, {
+        mealsLogged: truth.today.meals.length, latestFood,
+        proteinLogged: truth.today.protein, stepsRecorded: truth.today.steps,
+        weightTrend, recovering: health.isSick || health.isRecovering,
+        sessionsThisWeek, nextMove,
+      });
+    } catch (e) {
+      console.warn("[DAILY_DIRECTION] measured context unavailable; using the basic direction", e);
+      return buildDailyDirection(user, ws as any);
+    }
   }
 
   // "What have you learned about me?" — surface the un-copyable personal intelligence so the

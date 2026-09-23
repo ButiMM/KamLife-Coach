@@ -43,17 +43,44 @@ export function looksLikeDirectionRequest(m: string): boolean {
 
 type DirectionWorkoutState = { type: "REST" | "NORMAL" | "MISSED" | "ALREADY_DONE"; todayName?: string; nextTrainingName?: string };
 
+/** Measured by the existing day-ledger and one-action owners; never inferred from an empty row. */
+export interface DirectionActual {
+  mealsLogged: number;
+  latestFood?: string;
+  proteinLogged: number;
+  stepsRecorded: number;
+  weightTrend: "down" | "up" | "flat" | "unknown";
+  recovering: boolean;
+  sessionsThisWeek: number;
+  nextMove: string;
+}
+
 export function buildDailyDirection(
   user: { name?: string | null; calorieTarget?: number | null; proteinTarget?: number | null; stepsTarget?: number | null; trainingMode?: string | null; trainingDaysPerWeek?: number | null },
   workoutState: DirectionWorkoutState,
+  actual?: DirectionActual,
 ): string {
   const first = (user.name || "").split(" ")[0] || "";
   const hi = first ? `Here's your plan, ${first} 👇` : "Here's your plan 👇";
-  const steps = (user.stepsTarget || 8000).toLocaleString();
+  const steps = (user.stepsTarget || 8000).toLocaleString("en-US");
   const cal = user.calorieTarget || null;
   const prot = user.proteinTarget || null;
   const mode = user.trainingMode || "home";
   const trainingDays = Math.min(6, Math.max(2, user.trainingDaysPerWeek || 3));
+
+  if (actual) {
+    const food = actual.mealsLogged
+      ? `${actual.mealsLogged} meal${actual.mealsLogged === 1 ? "" : "s"} recorded today${actual.latestFood ? `; latest: ${actual.latestFood}` : ""}. Protein recorded: ${Math.round(actual.proteinLogged)}g${prot ? ` of ${prot}g` : ""}.`
+      : "No food recorded today — that is a gap in the record, not proof of what you ate.";
+    const stepsToday = Math.max(0, Math.round(actual.stepsRecorded)).toLocaleString("en-US");
+    const movement = actual.recovering ? "Recovery comes first today; no training push."
+      : workoutState.type === "ALREADY_DONE" ? "Today's session is done."
+      : workoutState.type === "REST" ? `Today is a rest day${workoutState.nextTrainingName ? `; next scheduled session: ${workoutState.nextTrainingName}` : ""}.`
+      : `${actual.sessionsThisWeek} of ${trainingDays} scheduled sessions recorded this week.`;
+    const trend = actual.weightTrend === "unknown" ? "The scale trend is not clear enough to change the plan."
+      : `The measured scale trend is ${actual.weightTrend}; one reading alone does not change the plan.`;
+    return `${hi}\n\n${food}\nSteps recorded: ${stepsToday} of ${steps}. ${movement}\n${trend}\n\n${actual.nextMove}`;
+  }
 
   // Today's training line — honour rest / already-done / walk-only, never insist on a gym day.
   let trainToday: string;
@@ -69,7 +96,7 @@ export function buildDailyDirection(
 
   // Food line — keep the number but plain, protein first.
   const foodLine = cal
-    ? `🍳 Eat around ${cal.toLocaleString()}${prot ? ` — protein first, aim ${prot}g` : ""}`
+    ? `🍳 Eat around ${cal.toLocaleString("en-US")}${prot ? ` — protein first, aim ${prot}g` : ""}`
     : `🍳 Log every meal — a photo or one line, I do the maths`;
 
   const stepsLine = (mode === "walk_only" || mode === "walk") ? "" : `\n👟 ${steps} steps`;

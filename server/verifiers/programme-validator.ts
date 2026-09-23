@@ -45,7 +45,13 @@ export function validateProgramme(
       return { ...SAFE_RESULT };
     }
 
-    const conflicts = checkExercisesAgainstInjuries(programmeText, bodyParts);
+    // A filtered session names removed exercises in its "Skipped (injury)" receipt and says
+    // "No running" in its recovery footer. Neither is a prescribed movement. Keep checking
+    // the actual exercise blocks; otherwise the safety checker contradicts a safe programme.
+    const prescribedText = programmeText
+      .replace(/^.*Skipped \(injury\):.*$/gim, "")
+      .replace(/\bno running\b/gi, "");
+    const conflicts = checkExercisesAgainstInjuries(prescribedText, bodyParts);
     if (conflicts.length === 0) {
       return { ...SAFE_RESULT };
     }
