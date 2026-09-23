@@ -18,6 +18,7 @@ FILES=(
   server/twilio-interactive.ts
   server/routes/dashboard.ts
   server/routes/payments.ts
+  server/routes/admin.ts
 )
 
 for f in "${FILES[@]}"; do cp "$f" "$WORK_ROOT/$(printf '%s' "$f" | tr '/' '_')"; done
@@ -118,9 +119,19 @@ run_case "a topic refusal opts the client out" server/handlers/safety.ts \
   '|\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);' \
   '/i.test(m);' || failed=$((failed + 1))
 
+# 10. RECOVERY IS READ AS CONSENT (Codex @ bbffa67) — "I'm back" wipes the opt-out with the pause.
+run_case "an ordinary unpause lifts the opt-out" server/health-state.ts \
+  '  if (isOptedOut(user) && !opts.optOut) return false;' \
+  '' || failed=$((failed + 1))
+
+# 11. A SUBSTITUTE COUNTS AS DELIVERY (Codex @ bbffa67) — the founder's text is reported and logged as sent.
+run_case "the admin door treats a substituted template as its message" server/routes/admin.ts \
+  '      if (!deliveryAccepted(outcome)) return' \
+  '      if (false) return' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-opt-out: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-opt-out: GREEN — 9/9 behavioral reverts caught"
+echo "red-on-revert-opt-out: GREEN — 11/11 behavioral reverts caught"

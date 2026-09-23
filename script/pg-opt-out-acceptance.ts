@@ -157,6 +157,7 @@ const PHRASES = [
   "Unsubscribe me",
   "I don't want these messages anymore",
   "no more messages please",
+  "Please don't contact me again",   // Codex @ 5c0cd6d
 ];
 const OPTED: Array<{ id: string; phone: string }> = [];
 for (const text of PHRASES) {
@@ -207,6 +208,30 @@ REAL("\n3. THE DASHBOARD AND ADMIN DOORS — broadcast, intervention, admin mess
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n3b. A SUBSTITUTE IS NOT THE MESSAGE — the admin door outside the 24-hour window (Codex @ bbffa67)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+{
+  // Freeform is refused with 63016 and the generic re-engagement template goes instead. The founder
+  // typed a message the client never received: it must not be reported, or logged, as sent.
+  const shadowWas = process.env.SHADOW;
+  process.env.SHADOW = "";   // the shadow door intercepts before the 63016 path graded here
+  process.env.TWILIO_REENGAGE_TEMPLATE_SID = "HX0000000000000000000000000000000d";
+  _setTwilioClientForTests({ messages: { create: async (p: Record<string, any>) => {
+    if (typeof p.body === "string") { const err: any = new Error("simulated 63016"); err.code = 63016; err.status = 400; throw err; }
+    return { sid: "SM265sub" };
+  } } } as any);
+  const text = `Admin note ${++seq}: your new plan is ready.`;
+  const res: any = await post("/api/admin/send-message", { userId: ORDINARY.id, message: text });
+  _setTwilioClientForTests(null);
+  process.env.SHADOW = shadowWas;
+  await new Promise(r => setTimeout(r, 1000));
+  const logged = await pool.query("SELECT COUNT(*)::int n FROM chat_history WHERE user_id = $1 AND message_out = $2", [ORDINARY.id, text]);
+  chk(res?.success !== true && /not delivered/i.test(String(res?.message || "")),
+    "the founder is told the message was NOT delivered when only the generic template went", JSON.stringify(res));
+  chk(logged.rows[0].n === 0, "…and the undelivered text is not logged as said to the client", `rows=${logged.rows[0].n}`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n4. CONTROLS — what an opt-out is not, and what it does not stop");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 {
@@ -228,6 +253,11 @@ REAL("\n4. CONTROLS — what an opt-out is not, and what it does not stop");
   const O = OPTED[0];
   const r = await say(O, "What should I eat for dinner?");
   chk(r.length > 0, "a client who opted out and then writes to us still gets a reply", `reply=${JSON.stringify(r)}`);
+  // Recovery is not consent (Codex @ bbffa67): the unpause branch lifted the opt-out with the pause.
+  await say(O, "I'm back");
+  const on = (await pool.query("SELECT profile_notes n FROM users WHERE id = $1", [O.id])).rows[0].n || "";
+  chk(/opted_out:/.test(on) && (await proactiveReaches(O)).length === 0,
+    "\"I'm back\" does not lift an opt-out — only START does", `profile_notes=${on}`);
   await say(O, "START");
   chk((await proactiveReaches(O)).length === 3, "after START, proactive messages resume");
 }

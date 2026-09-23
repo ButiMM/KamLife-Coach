@@ -8,6 +8,7 @@ import { getDayType } from "../programme";
 import { sastDayStart } from "../utils";
 import { requireAdminKey } from "./auth";
 import { sendWhatsApp } from "../scheduler/shared";
+import { deliveryAccepted } from "../outbound-delivery";
 import type { RouteDeps } from "./types";
 import { getOrAssignVariant } from "../ab";
 
@@ -249,6 +250,7 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       // opt-out, the truth floor and shadow capture apply to it exactly as they do to a cron job.
       const outcome = await sendWhatsApp(phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`, msg);
       if (outcome === "dropped") return res.status(409).json({ success: false, error: "Not sent — refused at the send boundary (opted out, or the truth floor)" });
+      if (!deliveryAccepted(outcome)) return res.status(502).json({ success: false, error: "Not delivered — outside WhatsApp's 24-hour window, only the generic check-in template went" });
       await logChat(client.id, `[COACH_INTERVENTION:${type}]`, msg, "COACH_INTERVENTION");
 
       res.json({ success: true, type, phone: phone.slice(-4) });
@@ -278,13 +280,14 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       let sent = 0;
       let failed = 0;
       let refused = 0;
+      let substituted = 0;
       for (const u of targets) {
         try {
           const outcome = await sendWhatsApp(u.phoneNumber, broadcastMsg);
-          if (outcome === "dropped") refused++; else sent++;
+          if (outcome === "dropped") refused++; else if (deliveryAccepted(outcome)) sent++; else substituted++;
         } catch { failed++; }
       }
-      res.json({ sent, failed, refused, total: targets.length });
+      res.json({ sent, failed, refused, substituted, total: targets.length });
     } catch (err) {
       res.status(500).json({ error: "Broadcast failed" });
     }
@@ -871,18 +874,18 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       else if (filterType === "paying") allUsers = allUsers.filter(u => u.payment === "active");
       else if (filterType === "at_risk") allUsers = allUsers.filter(u => u.lastActive && new Date(u.lastActive) < sevenDaysAgo && new Date(u.lastActive) >= new Date(Date.now() - 14 * 86400_000));
 
-      let sent = 0, failed = 0, refused = 0;
+      let sent = 0, failed = 0, refused = 0, substituted = 0;
 
       // Through the proactive door (#265) — the opt-out and the send-rate gate live there.
       for (const u of allUsers) {
         if (!u.phone) continue;
         try {
           const outcome = await sendWhatsApp(u.phone.startsWith("whatsapp:") ? u.phone : `whatsapp:${u.phone}`, message);
-          if (outcome === "dropped") refused++; else sent++;
+          if (outcome === "dropped") refused++; else if (deliveryAccepted(outcome)) sent++; else substituted++;
         } catch { failed++; }
       }
 
-      res.json({ success: true, sent, failed, refused, total: allUsers.length });
+      res.json({ success: true, sent, failed, refused, substituted, total: allUsers.length });
     } catch (err) {
       console.error("[BULK MSG] Error:", err);
       res.status(500).json({ error: "Bulk message failed" });

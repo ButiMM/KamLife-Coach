@@ -231,11 +231,15 @@ export async function setExplicitPause(
   return until;
 }
 
-/** Lift a pause — and an opt-out, which START also ends. Returns whether there was one to lift. */
+/** Lift a pause. Only START (`optOut: true`) also ends an opt-out: "I'm feeling better" from a
+ *  client who opted out is not consent to be messaged again (Codex @ bbffa67), so it lifts
+ *  nothing — the 365-day pause belongs to the opt-out. Returns whether anything was lifted. */
 export async function clearPause(
   user: { id?: string; phoneNumber?: string; profileNotes?: string | null },
+  opts: { optOut?: boolean } = {},
 ): Promise<boolean> {
   const notes = String(user.profileNotes || "");
+  if (isOptedOut(user) && !opts.optOut) return false;
   if (!/(?:paused_until|opted_out):\d{4}-\d{2}-\d{2}/.test(notes)) return false;
   const cleaned = notes.replace(/\s*\|?\s*(?:paused_until|opted_out):\d{4}-\d{2}-\d{2}/g, "").trim();
   const { db, users, eq } = await writer();
