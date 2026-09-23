@@ -1,6 +1,6 @@
 # ORDERS — Coach K
 
-**Owner:** CTO (Claude, chat). **Version 2, 23 September 2026.** Incorporates the Grok review, the Claude Code audit (`AUDIT.md`) and the outgoing CTO's handover.
+**Owner:** CTO (Claude, chat). **Version 3, 23 September 2026.** Incorporates the Grok review, the Claude Code audit (`AUDIT.md`) and the outgoing CTO's handover.
 
 Every builder and reviewer reads this before starting work. It overrides every earlier plan, programme doc, cut list and status file (including C18–C20, `OUTSTANDING.md`, `LAUNCH_BLOCKERS.md`, `DEFECTS.md` and the `docs/CTO-*` files). When anything disagrees with this file, this file wins.
 
@@ -66,7 +66,7 @@ For each: reproduce the failure first as a failing test, then show the changed s
 - **Cases:** the known real failures (`AUDIT.md`, issue #119's normaliser gap), then consented, de-identified tester turns.
 - **Real conditions:** runs the production-shaped path with the live model and production-relevant flags.
 - **Graded on:** persisted rows, sourced facts, the post-transport WhatsApp body, safety, delivery and follow-on turns.
-- **Judge:** a different model family from the builders, independent of them.
+- **Judge:** an OpenAI model, a different family from the builder (see §6).
 - **Recorded per run:** model version, prompt version, corpus version, and before/after scores.
 - **Held-out set:** a portion of cases the builders never see, so they can't tune to them.
 - **Baseline:** recorded on current `main` before any replacement is graded.
@@ -102,13 +102,14 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 | Who | Owns | Doesn't |
 |---|---|---|
-| **Claude Code** | The core build (Steps 2–5), and the merge and deploy path. | Review its own PRs as independent. |
-| **Codex** | The `harm` issues, under an explicit file lock. Then release-breaker: takes an exact SHA, runs adversarial customer replays, reports the first divergence with a failing assertion. | Act as CTO, run a queue, assign builders, or review its own implementation as independent. |
-| **Grok** | Primary independent reviewer and gate judge. | Build. |
+| **Claude Code** | All building: every `harm` and `core` issue, the merge and the deploy path. | Review its own PRs as independent. Merge a PR before Codex has attacked it. |
+| **Codex** | Attack only. On every PR: take the exact head SHA, hit it with adversarial, realistic South African client messages (code-switching, voice transcripts, messy multi-day logs, refusals, corrections, safety and payment edge cases), and post the first divergence as a PR comment with a failing assertion. | Build, fix, or approve its own findings as resolved. |
 | **CTO (Claude, chat)** | These orders, the issue queue, repo settings, and verifying claims against the code. | Write product code. |
 | **Founder** | Product, safety-policy and commercial decisions. | Poll CI, merge PRs, or relay messages. |
 
-File locks: Claude Code owns `server/routes.ts`, `server/gpt.ts`, `server/understanding/`, `server/brain/` and new core files. Codex owns the files its `harm` issues touch. If a builder needs a file the other owns, it comments on the issue.
+**Gate judge:** an OpenAI model, a different model family from the builder, called with the existing OpenAI key. The judge never sees builder reasoning, only the input, the stored state and the final WhatsApp body.
+
+**Merge rule:** a PR merges only when the gate passes, no hard invariant fails, and Codex's attack comment has been answered with either a fix or a stated reason it doesn't apply.
 
 ## 7. Frozen and closed
 
