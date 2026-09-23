@@ -1,0 +1,30 @@
+name: cto-watch
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  pull_request:
+    types: [opened, synchronize, reopened, closed, labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+concurrency:
+  group: cto-watch
+  cancel-in-progress: false
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            docs/QUEUE.md
+            script/cto-watch.py
+      - run: python3 script/cto-watch.py
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}

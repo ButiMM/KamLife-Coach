@@ -8,7 +8,7 @@ You attack; you do not build. `docs/ORDERS.md` §6 defines the role.
 
 1. **Find work from GitHub itself, not from memory or a cached view:** list open pull requests with the label `attack:codex`. `docs/QUEUE.md` shows what is being built and in which order.
 2. For each such PR you have not yet attacked at its current head SHA: check out that exact SHA and hit it with adversarial, realistic South African client messages (code-switching, voice-note transcripts, messy multi-day logs, refusals, corrections, safety and payment edge cases).
-3. Comment on the PR: the first place it breaks, with a failing assertion and the head SHA you tested. If you find nothing, say what you tried, at which SHA.
+3. Comment on the PR, starting with `ATTACK @ <first 7 characters of the head SHA>`: the first place it breaks, with a failing assertion. The CTO watch uses that line to track you. If you find nothing, say what you tried, at which SHA.
 4. When the head SHA changes, attack again.
 5. Never report "no work" without having listed open PRs from GitHub in that same run.
 
