@@ -99,7 +99,7 @@ run_case "a relabel is not recorded" server/handlers/food-context.ts \
 # 7. "NO THANKS" CORRECTS AGAIN (Codex attack @ 7f93588) — a decline that names a new food, such
 #    as a later plan, deletes the lunch and re-enters as a log.
 run_case "\"No thanks\" is read as a correction prefix" server/handlers/food-context.ts \
-  'const hasCorrectionPrefix = (!/^no[,!\s]*(?:thanks|thank\s+you|ta)\b/i.test(m) ||' \
+  'const hasCorrectionPrefix = (!/^(?:no|nope|nah)[,!\s]*(?:thanks|thank\s+you|ta)\b/i.test(m) ||' \
   'const hasCorrectionPrefix = (true ||' || failed=$((failed + 1))
 
 # 8. NAMING THE MEAL ON RECORD CORRECTS IT (Codex attack @ 7f93588) — "No, the pap and chicken

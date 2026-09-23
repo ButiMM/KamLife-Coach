@@ -247,6 +247,25 @@ REAL("\n2. A GENUINE CORRECTION SUPERSEDES — the replacement lands, and the re
     "\"No, I had chicken breast, not rice\" leaves one meal, and no rice in it", `before=${JSON.stringify(before)} after=${JSON.stringify(after)} mutations=${JSON.stringify(t.mutations)}`);
 }
 {
+  // Codex @ bf64579: "instead of rice" kept the rice it rejected; "Nope" was not a correction.
+  for (const tb of ["meal_logs", "chat_history", "turn_ledger"]) await pool.query(`DELETE FROM ${tb} WHERE user_id = $1`, [user.id]);
+  await say("I had rice", "SM264-3a");
+  const before = (await meals())[0];
+  const t = await say("No, I had chicken breast instead of rice", "SM264-3b");
+  const after = await meals();
+  chk(!!before && after.length === 1 && !after.some(r => r.id === before.id) && !/\brice\b/i.test(JSON.stringify(after.map(r => r.raw_message))),
+    "\"No, I had chicken breast instead of rice\" leaves one meal, and no rice in it", `before=${JSON.stringify(before)} after=${JSON.stringify(after)} mutations=${JSON.stringify(t.mutations)}`);
+  for (const tb of ["meal_logs", "chat_history", "turn_ledger"]) await pool.query(`DELETE FROM ${tb} WHERE user_id = $1`, [user.id]);
+  await say("I had pap", "SM264-3c");
+  const pap = (await meals())[0];
+  const n = await say("Nope, I had a burger, not pap.", "SM264-3d");
+  const afterN = await meals();
+  chk(!!pap && afterN.length === 1 && !afterN.some(r => r.id === pap.id) && /burger/i.test(JSON.stringify(afterN)) && n.mutations.some(x => /SUPERSEDE/.test(x)),
+    "\"Nope, I had a burger, not pap.\" replaces the lunch, recorded", `after=${JSON.stringify(afterN)} mutations=${JSON.stringify(n.mutations)}`);
+  const d = await say("Nope, I'm fine with this meal", "SM264-3e");
+  chk((await meals()).length === 1 && !d.mutations.some(x => /SUPERSEDE|DELETE/i.test(x)), "CONTROL — \"Nope, I'm fine with this meal\" changes nothing", JSON.stringify(d.mutations));
+}
+{
   // Codex review @ 7f93588: the replacement can land as an IN-PLACE amend of an earlier meal from
   // the last half hour (amendRecentMeal), not a new row. That is a landing; restoring the wrong meal
   // on top of it would leave both.

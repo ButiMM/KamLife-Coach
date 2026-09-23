@@ -262,18 +262,18 @@ export async function handleFoodContext(ctx: {
   }
 
   // ---- CORRECTION DETECTION — "no I had a burger", "actually it was chicken" ----
-  const CORRECTION_PREFIX = /^(no[,!\s]+|actually[,\s]+|i meant[,\s]+|not that[,\s]+|wait[,\s]+|no wait[,\s]+|correction[,\s]*)/i;
+  const CORRECTION_PREFIX = /^(no[,!\s]+|nope[,!\s]+|nah[,!\s]+|actually[,\s]+|i meant[,\s]+|not that[,\s]+|wait[,\s]+|no wait[,\s]+|correction[,\s]*)/i;
   // RE-IDENTIFICATION corrections: the client fixing a MIS-READ food, phrased "it's X / it is
   // not X / that's actually Y" (2026-07-22 live: "It is not vetkoek" was domain-redirected and
   // "It is stew wors" logged as a NEW snack instead of fixing the last meal — client fighting it).
   const ID_CORRECTION_PREFIX = /^(it'?s|it is|that'?s|that is|it was|this is|its)\s+/i;
   // "No thanks" declines (Codex @ 7f93588) unless the correction is explicit: "actually", "instead", "I meant", or "had X, not <food>" (Codex @ 8e15426).
-  const hasCorrectionPrefix = (!/^no[,!\s]*(?:thanks|thank\s+you|ta)\b/i.test(m) || /\b(?:actually|instead|i\s+meant|wrong)\b/i.test(m) || (/\b(?:had|ate|eaten)\b/i.test(m) && [...m.matchAll(/\bnot\s+(?:the\s+|my\s+|a\s+)?([a-z][a-z'-]+)/gi)].some(x => scanForSAFoods(x[1]).length > 0))) && (CORRECTION_PREFIX.test(m) || ID_CORRECTION_PREFIX.test(m));
+  const hasCorrectionPrefix = (!/^(?:no|nope|nah)[,!\s]*(?:thanks|thank\s+you|ta)\b/i.test(m) || /\b(?:actually|instead|i\s+meant|wrong)\b/i.test(m) || (/\b(?:had|ate|eaten)\b/i.test(m) && [...m.matchAll(/\bnot\s+(?:the\s+|my\s+|a\s+)?([a-z][a-z'-]+)/gi)].some(x => scanForSAFoods(x[1]).length > 0))) && (CORRECTION_PREFIX.test(m) || ID_CORRECTION_PREFIX.test(m));
   const correctedMsgCandidate = m.replace(CORRECTION_PREFIX, "").replace(ID_CORRECTION_PREFIX, "").trim();
-  // Food detection uses the candidate with "not X" STRIPPED, so "it is not vetkoek" doesn't
+  // Food detection uses the candidate with "not X" and "instead of X" STRIPPED (Codex @ bf64579), so "it is not vetkoek" doesn't
   // look like a request to log vetkoek. A pure negation (no replacement food) must NOT re-log —
   // it routes to the "what was it?" ask below.
-  const candidateSansNot = correctedMsgCandidate.replace(/\bnot\s+[\w'-]+/gi, " ").replace(/\s+/g, " ").trim();
+  const candidateSansNot = correctedMsgCandidate.replace(/\b(?:instead\s+of|rather\s+than)\s+.*?(?=[,.!?;]|\bi\s+(?:had|ate)\b|$)/gi, " ").replace(/\bnot\s+[\w'-]+/gi, " ").replace(/\s+/g, " ").trim();
   const idNegationOnly = ID_CORRECTION_PREFIX.test(m) && /\bnot\b/i.test(m) && scanForSAFoods(candidateSansNot).length === 0;
   const hasFoodAfterPrefix = hasCorrectionPrefix && !idNegationOnly && candidateSansNot.length > 2 && scanForSAFoods(candidateSansNot).length > 0;
   // A DECLINE IS NOT A CORRECTION (#264, AUDIT.md Trace 1): "No … this meal" deleted the lunch. A
@@ -338,7 +338,7 @@ export async function handleFoodContext(ctx: {
           });
           if (lastFoodLog || target) await recount();
         } catch (e) { console.warn("[food-correction-tx]", e); }
-        const cleaned = correctedMsgCandidate.replace(/\bnot\s+\w+/gi, " ").replace(/\s+/g, " ").trim();
+        const cleaned = correctedMsgCandidate.replace(/\b(?:instead\s+of|rather\s+than)\s+.*?(?=[,.!?;]|\bi\s+(?:had|ate)\b|$)/gi, " ").replace(/\bnot\s+\w+/gi, " ").replace(/\s+/g, " ").trim();
         const replyCorr = await handleMessage(phone, cleaned.length > 2 ? cleaned : correctedMsgCandidate); // "not X" stripped: never re-log X
         if (target) {
           const landed = [...(await daySigs())].filter(([id, sig]) => id !== target.id && heldSigs.get(id) !== sig).map(([id]) => id);
