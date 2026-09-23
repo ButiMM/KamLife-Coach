@@ -274,9 +274,15 @@ export async function handleFoodContext(ctx: {
   // it routes to the "what was it?" ask below.
   const candidateSansNot = correctedMsgCandidate.replace(/\bnot\s+[\w'-]+/gi, " ").replace(/\s+/g, " ").trim();
   const idNegationOnly = ID_CORRECTION_PREFIX.test(m) && /\bnot\b/i.test(m) && scanForSAFoods(candidateSansNot).length === 0;
-  const hasFoodTriggerAfterPrefix = /\b(had|ate|eaten|eating|breakfast|lunch|dinner|supper|meal|it was|was a|i had|i said|the above|mentioned|i'll have|i will have)\b/i.test(m);
   const hasFoodAfterPrefix = hasCorrectionPrefix && !idNegationOnly && candidateSansNot.length > 2 && scanForSAFoods(candidateSansNot).length > 0;
-  const isFoodCorrection = hasCorrectionPrefix && !idNegationOnly && (hasFoodTriggerAfterPrefix || hasFoodAfterPrefix);
+  // A DECLINE IS NOT A CORRECTION (#264, AUDIT.md Trace 1): "No I'm just fine with this meal" matched
+  // the "No" prefix plus the trigger word "meal", and the lunch was deleted. A correction must name
+  // its replacement: a food the scanner reads, or a meal slot and nothing else ("actually it was
+  // dinner"). "lunch was fine as it is" names a slot as a verdict, not a move.
+  const slotOnly = hasCorrectionPrefix && !idNegationOnly && !hasFoodAfterPrefix
+    ? candidateSansNot.replace(/\b(?:it|was|is|i|had|that|this|for|my|the|a|an|meal)\b|[,.!]/gi, " ").trim().match(/^(breakfast|lunch|dinner|supper|snack)$/i)
+    : null;
+  const isFoodCorrection = hasFoodAfterPrefix || !!slotOnly;
 
   const isReferenceCorrection = /\b(go with|goes with|part of|was correcting|was part|belongs to|same meal|together with|included in|go together|read it again|read that again|i was correcting|that.?s the same|the above mentioned|above mentioned|i said i had|i said for lunch|i said for dinner|i said for breakfast)\b/i.test(m);
 
@@ -288,71 +294,65 @@ export async function handleFoodContext(ctx: {
       return gptRef;
     } else {
       const todayStartCorr = sastDayStart();
-      // Label-only correction ("that was lunch not breakfast") names a meal slot but no food.
-      // RELABEL the meal instead of deleting it, so the logged calories survive. Strip "not X"
-      // first so "lunch not breakfast" affirms lunch, not breakfast.
-      const correctedHasFood = correctedMsgCandidate.length > 2 && scanForSAFoods(correctedMsgCandidate).length > 0;
-      const relabelMatch = !correctedHasFood
-        ? correctedMsgCandidate.replace(/\bnot\s+\w+/gi, " ").match(/\b(breakfast|lunch|dinner|supper|snack)\b/i)
-        : null;
-      const relabelTo = relabelMatch ? relabelMatch[1].toLowerCase() : null;
-      let relabelDone = false;
-      try {
-        // Get the last FOOD_LOG chat entry — we need its timestamp to find the
-        // RIGHT meal log to delete. Without this, correcting breakfast after logging
-        // a snack would delete the snack (most-recent) instead of breakfast.
-        const [lastFoodLog] = await db.select({ id: chatHistory.id, createdAt: chatHistory.createdAt })
-          .from(chatHistory)
-          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStartCorr)))
-          .orderBy(desc(chatHistory.createdAt))
-          .limit(1);
-        // Find the meal log whose loggedAt is closest to (within 2 minutes of) the
-        // chatHistory entry we just found. This correctly pairs "log at 8am" with
-        // "mealLog at 8am" even when later meals exist.
-        const corrWindowStart = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() - 120_000) : todayStartCorr;
-        const corrWindowEnd   = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() + 120_000) : new Date();
-        const [lastMealLogCorr] = await db.select({ id: mealLogs.id })
-          .from(mealLogs)
-          .where(and(
-            eq(mealLogs.userId, user.id),
-            gte(mealLogs.loggedAt, corrWindowStart),
-            lt(mealLogs.loggedAt, corrWindowEnd),
-          ))
-          .orderBy(desc(mealLogs.loggedAt))
-          .limit(1);
-        // Wrap relabel/delete + recount + cache update in a transaction — all or nothing.
-        await db.transaction(async (tx) => {
-          if (relabelTo && lastMealLogCorr) {
-            // Relabel only — calories unchanged, so no recompute needed.
-            await tx.update(mealLogs).set({ mealLabel: relabelTo, corrected: true }).where(eq(mealLogs.id, lastMealLogCorr.id));
-            relabelDone = true;
-          } else {
-            if (lastFoodLog) {
-              await tx.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog.id));
-            }
-            if (lastMealLogCorr) {
-              await tx.delete(mealLogs).where(eq(mealLogs.id, lastMealLogCorr.id));
-            }
-            if (lastFoodLog || lastMealLogCorr) {
-              const recomputed = await recomputeTodayFoodTotals(user.id);
-              await tx.update(users).set({
-                todayCalories: recomputed.calories,
-                todayProteinG: recomputed.protein,
-                todayCaloriesDate: sastToday(),
-              }).where(eq(users.id, user.id));
-            }
-          }
-        });
-      } catch (e) { console.warn("[food-correction-tx]", e); }
-      if (relabelDone) {
+      const relabelTo = slotOnly ? slotOnly[1].toLowerCase() : null;
+      // The last FOOD_LOG chat entry's timestamp pins the RIGHT meal (not merely the newest).
+      const [lastFoodLog] = await db.select({ id: chatHistory.id, createdAt: chatHistory.createdAt })
+        .from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStartCorr)))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(1);
+      // The meal log closest to (within 2 minutes of) that chat entry.
+      const corrWindowStart = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() - 120_000) : todayStartCorr;
+      const corrWindowEnd   = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() + 120_000) : new Date();
+      const [target] = await db.select().from(mealLogs)
+        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, corrWindowStart), lt(mealLogs.loggedAt, corrWindowEnd)))
+        .orderBy(desc(mealLogs.loggedAt))
+        .limit(1);
+
+      if (relabelTo && target) {
+        // Relabel only — calories unchanged, so no recompute needed.
+        await db.update(mealLogs).set({ mealLabel: relabelTo, corrected: true }).where(eq(mealLogs.id, target.id));
+        turnMutation(`RELABEL meal ${target.id} ${target.mealLabel || "none"}→${relabelTo}`, "[MEAL_CORRECTION]");
         await logChat(user.id, message, `Moved that to ${relabelTo}`, "FOOD_RELABEL");
         return `Moved that to *${relabelTo}* ✅`;
       }
       if (correctedMsgCandidate && correctedMsgCandidate.length > 2 && correctedMsgCandidate !== m) {
-        // Strip "not <word>" so a corrected re-log doesn't re-add the negated item:
-        // "chicken not beef" logs chicken only, never chicken AND beef.
+        // SUPERSEDE, NEVER LOSE (#264). Out first so the replacement's reply reads the right day; gone for
+        // good only once a replacement lands, else restored exactly. Recorded either way.
+        const heldIds = new Set((await db.select({ id: mealLogs.id }).from(mealLogs)
+          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartCorr)))).map(r => r.id));
+        // After the commit: the recount reads on its own connection and would see the removed row.
+        const recount = async () => {
+          invalidateFoodTotalsCache(user.id);
+          const recomputed = await recomputeTodayFoodTotals(user.id);
+          await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() })
+            .where(eq(users.id, user.id));
+        };
+        try {
+          await db.transaction(async (tx) => {
+            if (lastFoodLog) await tx.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog.id));
+            if (target) await tx.delete(mealLogs).where(eq(mealLogs.id, target.id));
+          });
+          if (lastFoodLog || target) await recount();
+        } catch (e) { console.warn("[food-correction-tx]", e); }
+        // Strip "not <word>": "chicken not beef" re-logs chicken only, never chicken AND beef.
         const cleaned = correctedMsgCandidate.replace(/\bnot\s+\w+/gi, " ").replace(/\s+/g, " ").trim();
-        return await handleMessage(phone, cleaned.length > 2 ? cleaned : correctedMsgCandidate);
+        const replyCorr = await handleMessage(phone, cleaned.length > 2 ? cleaned : correctedMsgCandidate);
+        if (target) {
+          const landed = (await db.select({ id: mealLogs.id }).from(mealLogs)
+            .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartCorr))))
+            .map(r => r.id).filter(id => !heldIds.has(id));
+          if (landed.length > 0) {
+            turnMutation(`SUPERSEDE meal ${target.id} kcal=${target.kcalInt} label=${target.mealLabel || "none"} raw="${String(target.rawMessage || "").slice(0, 80)}" by [${landed.join(",")}]`, "[MEAL_CORRECTION]");
+          } else {
+            await db.transaction(async (tx) => {
+              await tx.insert(mealLogs).values(target);
+              if (lastFoodLog) await tx.update(chatHistory).set({ intent: "FOOD_LOG" }).where(eq(chatHistory.id, lastFoodLog.id));
+            }).then(recount).catch(e => console.warn("[food-correction-restore]", e));
+            turnMutation(`RESTORE meal ${target.id} kcal=${target.kcalInt} — the correction logged no replacement`, "[MEAL_CORRECTION]");
+          }
+        }
+        return replyCorr;
       }
     }
   }
