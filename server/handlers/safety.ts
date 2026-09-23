@@ -232,10 +232,12 @@ export async function runSafetyGuards(
       || /\b(?:stop|quit)\s+(?:sending|messaging|texting|contacting|whatsapp(?:ing)?)\s+me\b|\bstop\s+(?:sending\s+)?(?:me\s+)?(?:these|the|your|all)\s+messages\b|\b(?:don'?t|do\s+not)\s+(?:want|need)\s+(?:these|your|any\s+more|anymore|any)\s+messages\b|\bno\s+more\s+messages\b|\bunsubscribe\s+me\b/i.test(m))
     // A LENGTH is a pause; a TOPIC is a preference, not a channel opt-out (Codex @ 7716559): "I don't
     // want your messages about calories, just send my workouts" asked for workouts.
-    && !/\b\d+\s*(?:days?|weeks?|months?)\b|\bfor\s+(?:a|one|two|three|a\s+few)\s+(?:days?|weeks?|months?)\b|\buntil\b|\b(?:messages?|messaging|texting|sending|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);
+    && !/\b\d+\s*(?:days?|weeks?|months?)\b|\bfor\s+(?:a|one|two|three|a\s+few)\s+(?:days?|weeks?|months?)\b|\buntil\b|\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);
   if (optOut) {
     const ou = await ensureSafetyTurnUser(phone, message, context.sourceMessageId, context.boundUser);
-    if (ou) await setOptOut(ou).catch((e) => console.error("[OPT_OUT] could not record:", e));
+    // NEVER CONFIRM WHAT DID NOT PERSIST (Codex @ 0c6dbe5): no token, no "no more messages".
+    const saved = !!ou && await setOptOut(ou).then(() => true, (e) => { console.error("[OPT_OUT] could not record:", e); return false; });
+    if (!saved) return `Sorry — I couldn't save that just now. Please send *STOP* again in a minute and I'll stop messaging you.`;
     const first = (ou?.name || "").split(" ")[0];
     const stopReply = `Done${first ? `, ${first}` : ""}. No more messages from me. Your data is saved.${ou?.subscriptionStatus === "active" ? "\n\nYour subscription is still active — reply *cancel* if you also want to stop paying." : ""}\n\nReply *START* anytime to resume coaching.`;
     try { await logChat(ou?.id || "unknown", message, stopReply, "OPT_OUT"); } catch (e) { console.warn("[non-fatal]", e); }

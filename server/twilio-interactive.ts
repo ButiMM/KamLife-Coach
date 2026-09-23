@@ -82,7 +82,8 @@ export async function sendWhatsAppButtons(
   if (!FROM_NUMBER) return "dropped";
   if (sendOpts?.proactive) {
     const { isPhoneOptedOut } = await import("./health-state");
-    if (await isPhoneOptedOut(to).catch(() => false)) return "dropped";
+    // FAIL CLOSED (Codex @ 0c6dbe5): a consent state we cannot read is not permission.
+    if (await isPhoneOptedOut(to).catch(() => true)) return "dropped";
   }
 
   // SHADOW (2026-08-04) — the third client-facing door. A button set is a message; if it
