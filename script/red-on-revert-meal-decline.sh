@@ -96,6 +96,18 @@ run_case "a relabel is not recorded" server/handlers/food-context.ts \
   '        turnMutation(`RELABEL meal' \
   '        void (`RELABEL meal' || failed=$((failed + 1))
 
+# 7. "NO THANKS" CORRECTS AGAIN (Codex attack @ 7f93588) — a decline that names a new food, such
+#    as a later plan, deletes the lunch and re-enters as a log.
+run_case "\"No thanks\" is read as a correction prefix" server/handlers/food-context.ts \
+  'const hasCorrectionPrefix = !/^no[,!\s]*(?:thanks|thank\s+you|ta)\b/i.test(m) && (CORRECTION_PREFIX.test(m) || ID_CORRECTION_PREFIX.test(m));' \
+  'const hasCorrectionPrefix = CORRECTION_PREFIX.test(m) || ID_CORRECTION_PREFIX.test(m);' || failed=$((failed + 1))
+
+# 8. NAMING THE MEAL ON RECORD CORRECTS IT (Codex attack @ 7f93588) — "No, the pap and chicken
+#    were lekker" supersedes the unchanged lunch with itself.
+run_case "a decline repeating the logged food supersedes it" server/handlers/food-context.ts \
+  '      if (!repeatsRecord && correctedMsgCandidate' \
+  '      if (correctedMsgCandidate' || failed=$((failed + 1))
+
 # NOT A CASE, DELIBERATELY: the invalidateFoodTotalsCache() before the recount. Removing it was
 # tried and the acceptance stayed green — the re-entered turn re-derives the day from the ledger, so
 # the stale figure only exists in the window while that turn runs. A seam that cannot turn red is
@@ -106,4 +118,4 @@ if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-meal-decline: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-meal-decline: GREEN — 6/6 behavioral reverts caught"
+echo "red-on-revert-meal-decline: GREEN — 8/8 behavioral reverts caught"

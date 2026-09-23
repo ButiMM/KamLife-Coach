@@ -138,6 +138,11 @@ const DECLINES = [
   "No thanks, I'm happy with my meal",
   "No I'm good with what I had",
   "No, lunch was fine as it is",
+  // Codex attack @ 7f93588: a decline that REPEATS the meal names a food the scanner reads, so it
+  // qualified as a correction and superseded the unchanged lunch with itself.
+  "No thanks, I had enough pap and chicken",
+  "No, the pap and chicken were lekker — leave it as is",
+  "No thanks, I'll have a burger later",
 ];
 for (const [i, text] of DECLINES.entries()) {
   const before = await freshLunch(`SM264-1${i}a`);
@@ -146,7 +151,7 @@ for (const [i, text] of DECLINES.entries()) {
   chk(after.length === 1 && after[0].id === before.id && after[0].kcal_int === before.kcal_int,
     `"${text}" leaves the logged meal exactly as it was`,
     `before=${JSON.stringify(before)} after=${JSON.stringify(after)} mutations=${JSON.stringify(t.mutations)}`);
-  chk(!t.mutations.some(n => /\b(?:DELETE|SUPERSEDE|DROP|CORRECT|RELABEL)\b/.test(n) || n.includes(before?.id || "~")),
+  chk(!t.mutations.some(n => /\b(?:DELETE|SUPERSEDE|RESTORE|DROP|CORRECT|RELABEL)\b/.test(n) || n.includes(before?.id || "~")),
     `"${text}" records no change to the meal`, `mutations=${JSON.stringify(t.mutations)}`);
   chk(!claimsRemoval(t.reply), `"${text}" is not told anything was removed`, `reply=${JSON.stringify(t.reply)}`);
   if (i === 0) REAL(`        final body: ${JSON.stringify(t.reply)}`);
