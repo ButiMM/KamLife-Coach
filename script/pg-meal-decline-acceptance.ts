@@ -201,6 +201,18 @@ REAL("\n2. A GENUINE CORRECTION SUPERSEDES — the replacement lands, and the re
 }
 
 {
+  // Codex review @ a514b3a: the same food in a different amount is a correction, not a repeat.
+  for (const tb of ["meal_logs", "chat_history", "turn_ledger"]) await pool.query(`DELETE FROM ${tb} WHERE user_id = $1`, [user.id]);
+  await pool.query("UPDATE users SET awaiting_input_type = NULL, today_calories = 0, today_protein_g = 0 WHERE id = $1", [user.id]);
+  await say("I had 2 eggs for lunch", "SM264-2i");
+  const before = (await meals())[0];
+  await say("No, I had 3 eggs", "SM264-2j");
+  const after = await meals();
+  chk(after.length === 1 && after[0].id !== before?.id && after[0].kcal_int > (before?.kcal_int ?? 0),
+    "\"No, I had 3 eggs\" after 2 eggs replaces it with the larger amount", `before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
+}
+
+{
   // Codex attack @ 8e15426: courtesy wording in front of an explicit correction. "No thanks" was
   // excluded before the correction evidence was read, so the burger was appended beside the pap.
   const before = await freshLunch("SM264-2e");
