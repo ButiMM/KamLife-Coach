@@ -191,10 +191,21 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
 }
 
 // ── THE RUN ─────────────────────────────────────────────────────────────────────────────────
+const runStart = new Date();
 const results: CaseResult[] = [];
 for (const [i, k] of CASES.entries()) results.push(await runCase(k, i, false));
 for (const [i, k] of heldOut.entries()) results.push(await runCase(k, 1000 + i, true));
-const productModels = (await pool.query<{ model: string }>("SELECT DISTINCT model FROM gpt_costs WHERE created_at > now() - interval '6 hours' ORDER BY model")).rows.map(r => r.model);
+const productModels = (await pool.query<{ model: string }>("SELECT DISTINCT model FROM gpt_costs WHERE created_at >= $1 ORDER BY model", [runStart])).rows.map(r => r.model);
+// DID A MODEL ACTUALLY ANSWER? A run where the product recorded no model call, or every judge call
+// failed, graded the deterministic floor only. That is not a gate result, whatever the checks say
+// (the first CI run of this gate passed exactly that way: key present, no model reached).
+const judgeErrors = results.map(r => r.verdict).filter(v => v.startsWith("judge unavailable"));
+if (!OFFLINE && (productModels.length === 0 || judgeErrors.length === results.length)) {
+  REAL(`replay-gate: NOT TESTED — no model answered (product models recorded: ${productModels.length}; judge failures: ${judgeErrors.length}/${results.length}).`);
+  if (judgeErrors[0]) REAL(`first judge error: ${judgeErrors[0].slice(0, 300)}`);
+  await pool.end().catch(() => {});
+  process.exit(2);
+}
 
 const key = (r: CaseResult, c: CheckResult) => `${r.id}::${c.what}`;
 const hardNow = new Map(results.flatMap(r => r.checks.filter(c => c.invariant).map(c => [key(r, c), c.pass] as const)));
