@@ -99,8 +99,8 @@ run_case "a relabel is not recorded" server/handlers/food-context.ts \
 # 7. "NO THANKS" CORRECTS AGAIN (Codex attack @ 7f93588) — a decline that names a new food, such
 #    as a later plan, deletes the lunch and re-enters as a log.
 run_case "\"No thanks\" is read as a correction prefix" server/handlers/food-context.ts \
-  'const hasCorrectionPrefix = !/^no[,!\s]*(?:thanks|thank\s+you|ta)\b/i.test(m) && (CORRECTION_PREFIX.test(m) || ID_CORRECTION_PREFIX.test(m));' \
-  'const hasCorrectionPrefix = CORRECTION_PREFIX.test(m) || ID_CORRECTION_PREFIX.test(m);' || failed=$((failed + 1))
+  'const hasCorrectionPrefix = (!/^no[,!\s]*(?:thanks|thank\s+you|ta)\b/i.test(m) ||' \
+  'const hasCorrectionPrefix = (true ||' || failed=$((failed + 1))
 
 # 8. NAMING THE MEAL ON RECORD CORRECTS IT (Codex attack @ 7f93588) — "No, the pap and chicken
 #    were lekker" supersedes the unchanged lunch with itself.
@@ -134,9 +134,15 @@ run_case "a replacement written as an amend is not seen as landed" server/handle
 # the stale figure only exists in the window while that turn runs. A seam that cannot turn red is
 # not claimed as guarded.
 
+# 12. COURTESY HIDES AN EXPLICIT CORRECTION (Codex attack @ 8e15426) — "No thanks, actually I had a
+#     burger, not pap." appends the burger beside the pap it replaces.
+run_case "\"No thanks\" excludes an explicit correction" server/handlers/food-context.ts \
+  '|| /\b(?:actually|instead|i\s+meant|wrong)\b/i.test(m) || (/\b(?:had|ate|eaten)\b/i.test(m) && [...m.matchAll(/\bnot\s+(?:the\s+|my\s+|a\s+)?([a-z][a-z'"'"'-]+)/gi)].some(x => scanForSAFoods(x[1]).length > 0))) &&' \
+  ') &&' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-meal-decline: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-meal-decline: GREEN — 11/11 behavioral reverts caught"
+echo "red-on-revert-meal-decline: GREEN — 12/12 behavioral reverts caught"

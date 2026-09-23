@@ -267,8 +267,8 @@ export async function handleFoodContext(ctx: {
   // not X / that's actually Y" (2026-07-22 live: "It is not vetkoek" was domain-redirected and
   // "It is stew wors" logged as a NEW snack instead of fixing the last meal — client fighting it).
   const ID_CORRECTION_PREFIX = /^(it'?s|it is|that'?s|that is|it was|this is|its)\s+/i;
-  // "No thanks" declines; it never corrects (Codex attack on #264 @ 7f93588).
-  const hasCorrectionPrefix = !/^no[,!\s]*(?:thanks|thank\s+you|ta)\b/i.test(m) && (CORRECTION_PREFIX.test(m) || ID_CORRECTION_PREFIX.test(m));
+  // "No thanks" declines (Codex @ 7f93588) unless the correction is explicit: "actually", "instead", "I meant", or "had X, not <food>" (Codex @ 8e15426).
+  const hasCorrectionPrefix = (!/^no[,!\s]*(?:thanks|thank\s+you|ta)\b/i.test(m) || /\b(?:actually|instead|i\s+meant|wrong)\b/i.test(m) || (/\b(?:had|ate|eaten)\b/i.test(m) && [...m.matchAll(/\bnot\s+(?:the\s+|my\s+|a\s+)?([a-z][a-z'-]+)/gi)].some(x => scanForSAFoods(x[1]).length > 0))) && (CORRECTION_PREFIX.test(m) || ID_CORRECTION_PREFIX.test(m));
   const correctedMsgCandidate = m.replace(CORRECTION_PREFIX, "").replace(ID_CORRECTION_PREFIX, "").trim();
   // Food detection uses the candidate with "not X" STRIPPED, so "it is not vetkoek" doesn't
   // look like a request to log vetkoek. A pure negation (no replacement food) must NOT re-log —

@@ -154,6 +154,8 @@ const DECLINES = [
   "No thanks, I had enough pap and chicken",
   "No, the pap and chicken were lekker — leave it as is",
   "No thanks, I'll have a burger later",
+  // …and the courtesy exception must not grow into a correction on a bare "not <food>".
+  "No thanks, not the chakalaka",
 ];
 for (const [i, text] of DECLINES.entries()) {
   const before = await freshLunch(`SM264-1${i}a`);
@@ -182,6 +184,17 @@ REAL("\n2. A GENUINE CORRECTION SUPERSEDES — the replacement lands, and the re
   const cached = Number((await pool.query("SELECT today_calories FROM users WHERE id = $1", [user.id])).rows[0].today_calories);
   const held = after.reduce((n, r) => n + r.kcal_int, 0);
   chk(cached === held, "the cached day total is the replacement's, not the superseded meal's", `today_calories=${cached} meals=${held}`);
+}
+
+{
+  // Codex attack @ 8e15426: courtesy wording in front of an explicit correction. "No thanks" was
+  // excluded before the correction evidence was read, so the burger was appended beside the pap.
+  const before = await freshLunch("SM264-2e");
+  const t = await say("No thanks, actually I had a burger, not pap.", "SM264-2f");
+  const after = await meals();
+  chk(after.length === 1 && !after.some(r => r.id === before.id) && /burger/i.test(JSON.stringify(after)),
+    "\"No thanks, actually I had a burger, not pap.\" replaces the lunch", JSON.stringify(after));
+  chk(t.mutations.some(n => /\bSUPERSEDE\b/.test(n) && n.includes(before.id)), "and the replacement is recorded", `mutations=${JSON.stringify(t.mutations)}`);
 }
 
 {
