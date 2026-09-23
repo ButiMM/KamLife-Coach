@@ -2,7 +2,7 @@
 
 ## Standing orders (read first, every session)
 - `docs/ORDERS.md` is the plan. It overrides every other doc.
-- **Your work queue is `docs/QUEUE.md`.** Take the first unchecked item, build it as one pull request, then take the next. Don't wait to be told.
+- **Your work queue is `docs/QUEUE.md`.** It has two lanes. Work your lane (lane A unless told "lane B"): take its first unchecked item, build it as one pull request, then take the next. Don't wait to be told.
 - Every PR: open the description with "What testers will notice:", add the label `attack:codex`, and comment `@codex attack this PR per docs/ORDERS.md §6` with the head SHA.
 - **Merge standard:** see `docs/ORDERS.md` §6. If a Codex finding is not worse than current `main`, open a follow-up issue labelled `harm` (or `core`), add it to the top of `docs/QUEUE.md`, reply `ANSWER: follow-up #N, not a regression against main`, and merge. After two attack rounds, merge with follow-ups.
 - If `main` has moved and your PR conflicts, rebase it first; that outranks everything except answering attacks.
