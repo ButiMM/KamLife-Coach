@@ -400,6 +400,19 @@ export const ACCEPTANCES: Acceptance[] = [
     // every "it did not arrive" assertion: sending nothing at all.
     command: ["bash", "script/red-on-revert-c17-evening-delivery.sh"] },
 
+  { id: "payments-cancel-truth", title: "Cancelling stops the money, and the money tells the truth",
+    // Audit P0 (2026-09-22). "yes, cancel" promised "you will not be charged again" and nothing
+    // reached PayFast; the next charge reactivated the client and nulled cancelled_at; a canceller
+    // was lined up for "your payment didn't go through"; and a real PayFast ITN — signed in the
+    // order PayFast sends it — was refused because the webhook re-sorted the fields. Needs the
+    // real ITN route over HTTP, payment_events, admin_events and the post-transport bodies.
+    command: ["npx", "tsx", "script/pg-payments-cancel-truth-acceptance.ts"] },
+
+  { id: "payments-cancel-truth-reverts", title: "Every payments seam turns the acceptance red",
+    // Twelve isolated mutations, including the opposite-defect case: a charge-after-cancel guard
+    // that stops checking WHICH subscription was charged locks out a client coming back on a new one.
+    command: ["bash", "script/red-on-revert-payments-cancel-truth.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same

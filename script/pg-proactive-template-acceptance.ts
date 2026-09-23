@@ -220,10 +220,12 @@ REAL("\n4. THE REAL JOB OWNERS SELECT THEIR OWN TEMPLATE — not just sendWhatsA
   // ── PAYMENT ────────────────────────────────────────────────────────────────────────────────
   // The recovery only fires 1, 3 or 7 days after cancellation, and only for a client who has
   // actually trained — so the row is shaped to satisfy the job's own conditions, not bypass them.
+  // Since 0014 one of those conditions is that the ending WAS a lapse: a client's own cancel also
+  // writes inactive + cancelled_at, and must never be told their payment failed.
   payloads = [];
   await pool.query(
     `UPDATE users SET subscription_status = 'inactive', cancelled_at = NOW() - INTERVAL '7 days',
-      total_workouts_completed = 4 WHERE id = $1`, [user.id]);
+      subscription_end_reason = 'payment_lapsed', total_workouts_completed = 4 WHERE id = $1`, [user.id]);
   await pool.query("DELETE FROM sent_proactive WHERE user_id = $1", [user.id]).catch(() => {});
   await runPaymentFailureRecovery().catch((e) => REAL(`  (payment job threw: ${(e as any)?.message})`));
   chk(bodiesSent() > 0, "the payment job reached this client at all", `freeform attempts: ${bodiesSent()}`);

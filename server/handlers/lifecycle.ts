@@ -9,7 +9,7 @@ import {
   users, weightLogs, workoutLogs, stepLogs, chatHistory,
   mealLogs, exerciseLogs, bodyMeasurements, clothingCheckins,
   weeklyCheckins, escalations, abAssignments, progressPhotos,
-  sentProactive, clientActions,
+  sentProactive, clientActions, adminEvents,
 } from "../../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql } from "drizzle-orm";
 import {
@@ -32,6 +32,7 @@ import { foodConstraints } from "../food-swaps";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
 import { sendCriticalAlert } from "../scheduler/shared";
+import { cancelPayFastSubscription, latestPayFastToken } from "../routes/payments";
 import { isAskingNotReporting, sastToday, sastDayStart, proteinOptions , commaName, spaceName, getDisplayName, parseMealDate, isRetroactiveMeal, mealDateLabel, looksLikeQuestion, isMultiPartAsk} from "../utils";
 import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
@@ -545,20 +546,32 @@ export async function handleLifecycle(ctx: {
     await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
     if (/^(yes|confirm|cancel|yep|ja|yeah)$/i.test(m)) {
       const name = getDisplayName(user) || "there";
+      // PayFast recurring billing keeps charging until the subscription is cancelled on
+      // PayFast's side — marking the user inactive locally does not stop the charge. So the
+      // cancel goes to PayFast first, and the client is promised "not charged again" ONLY when
+      // PayFast confirmed it (2026-09-22: the promise used to be made with no call at all).
+      const token = await latestPayFastToken(phone);
+      const billing = await cancelPayFastSubscription(token);
       await db.update(users).set({
         subscriptionStatus: "inactive",
         cancelledAt: new Date(),
+        subscriptionEndReason: "client_cancelled",
       }).where(eq(users.phoneNumber, phone));
-      // PayFast recurring billing keeps charging until the subscription is cancelled on
-      // PayFast's side — marking the user inactive locally does not stop the charge.
-      // Alert the founder to action the PayFast cancellation so the user is not billed again.
+      await db.insert(adminEvents).values({
+        action: billing.ok ? "subscription_cancelled" : "subscription_cancel_unconfirmed",
+        targetPhone: phone,
+        reason: billing.detail,
+        meta: { token, paymentReference: user.paymentReference ?? null },
+      }).catch((e) => console.error("[CANCEL] adminEvents insert failed:", e));
       const coachAlertPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
       if (coachAlertPhone) {
         const alertTo = `whatsapp:+${coachAlertPhone.replace(/\D/g, "")}`;
-        await sendCriticalAlert(alertTo, `[BILLING] ${name} (${phone}) cancelled their subscription. Cancel their PayFast recurring billing${user.paymentReference ? ` (ref: ${user.paymentReference})` : ""} now so they are not charged again.`).catch((e) => console.error("[CANCEL] Founder alert failed:", e));
+        await sendCriticalAlert(alertTo, `[BILLING] ${name} (${phone}) cancelled their subscription. ${billing.ok ? `PayFast recurring billing cancelled (token ${token}).` : `PayFast did NOT confirm the cancel (${billing.detail}). Cancel their recurring billing by hand now${token ? ` (token ${token})` : user.paymentReference ? ` (ref: ${user.paymentReference})` : ""} so they are not charged again.`}`).catch((e) => console.error("[CANCEL] Founder alert failed:", e));
       }
       const appUrl2 = process.env.APP_URL || "https://kamlifecoach.co.za";
-      const confirmedCancelReply = `Done, ${name}. Your coaching is stopped and your recurring billing is being cancelled — you will not be charged again. If you ever see another charge, reply *refund* and we will sort it immediately.\n\nYour profile and ${user.totalWorkoutsCompleted || 0} sessions are saved for 90 days. Come back anytime.\n\nIf you change your mind, reply *rejoin* or visit ${appUrl2}.`;
+      // "since you started" marks the count as a lifetime figure; without it the outbound truth
+      // floor reads it against the 7-day ledger and replaces this whole reply with "ask me again".
+      const confirmedCancelReply = `Done, ${name}. Your coaching is stopped ${billing.ok ? "and your recurring billing is cancelled — you will not be charged again." : "and your billing is being cancelled by hand today, because PayFast did not confirm it automatically."} If you ever see another charge, reply *refund* and we will sort it immediately.\n\nYour profile and the ${user.totalWorkoutsCompleted || 0} sessions you've done since you started are saved for 90 days. Come back anytime.\n\nIf you change your mind, reply *rejoin* or visit ${appUrl2}.`;
       await logChat(user.id, message, confirmedCancelReply, "CANCEL_CONFIRMED");
       return confirmedCancelReply;
     } else {

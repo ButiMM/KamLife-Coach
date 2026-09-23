@@ -5,12 +5,67 @@ import { users, chatHistory, paymentEvents, adminEvents } from "../../shared/sch
 import { eq, and } from "drizzle-orm";
 import twilio from "twilio";
 import { PRICING } from "../../shared/pricing";
+import { sendCriticalAlert } from "../scheduler/shared";
 
 function checkAdminKey(provided: string | string[] | undefined): boolean {
   const dashKey = process.env.COACH_DASHBOARD_KEY;
   if (!dashKey) return false;
   const key = (Array.isArray(provided) ? provided[0] : provided) || "";
   try { return key.length === dashKey.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(dashKey)); } catch { return false; }
+}
+
+/** PHP urlencode(), which is what PayFast hashes: spaces as "+", and !'()*~ escaped. */
+function phpUrlencode(v: string): string {
+  return encodeURIComponent(v).replace(/[!'()*~]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`).replace(/%20/g, "+");
+}
+
+/**
+ * THE SUBSCRIPTION THE CLIENT IS PAYING ON (2026-09-22). PayFast identifies a recurring
+ * subscription by its `token`, which arrives on every COMPLETE ITN and is kept in
+ * payment_events.raw_body. `excludeEventKey` skips the ITN being processed right now, so the
+ * answer is "the subscription they were paying on before this notification".
+ */
+export async function latestPayFastToken(phone: string, excludeEventKey = ""): Promise<string | null> {
+  const { pool } = await import("../db");
+  const { rows } = await pool.query<{ token: string }>(
+    `SELECT raw_body->>'token' AS token FROM payment_events
+      WHERE provider = 'payfast' AND phone = $1 AND payment_status = 'COMPLETE'
+        AND COALESCE(raw_body->>'token', '') <> '' AND provider_payment_id <> $2
+      ORDER BY processed_at DESC LIMIT 1`,
+    [phone, excludeEventKey],
+  );
+  return rows[0]?.token ?? null;
+}
+
+/**
+ * CANCEL THE RECURRING BILLING AT PAYFAST (2026-09-22). Until this existed, "yes, cancel" set the
+ * row inactive and told the client "you will not be charged again" while the PayFast subscription
+ * kept billing — nothing ever reached PayFast. PUT /subscriptions/{token}/cancel, signed the way
+ * PayFast's SDK signs API calls (Auth::generateApiSignature: the headers plus the passphrase,
+ * sorted by key, PHP-urlencoded, md5). Never throws: the caller must be able to tell the client
+ * the truth either way, so failure is a value.
+ */
+export async function cancelPayFastSubscription(token: string | null): Promise<{ ok: boolean; detail: string }> {
+  const merchantId = process.env.PAYFAST_MERCHANT_ID;
+  const passphrase = process.env.PAYFAST_PASSPHRASE;
+  if (!token) return { ok: false, detail: "no PayFast subscription token on file" };
+  if (!merchantId || !passphrase) return { ok: false, detail: "PAYFAST_MERCHANT_ID or PAYFAST_PASSPHRASE not set" };
+  const timestamp = new Date().toISOString().slice(0, 19) + "+00:00"; // ISO-8601 with offset, as PayFast requires
+  const headers: Record<string, string> = { "merchant-id": merchantId, version: "v1", timestamp };
+  const signed: Record<string, string> = { ...headers, passphrase };
+  const signature = crypto.createHash("md5")
+    .update(Object.keys(signed).sort().map(k => `${k}=${phpUrlencode(signed[k])}`).join("&"))
+    .digest("hex");
+  const url = `https://api.payfast.co.za/subscriptions/${encodeURIComponent(token)}/cancel`
+    + (process.env.PAYFAST_SANDBOX === "true" ? "?testing=true" : "");
+  try {
+    const res = await fetch(url, { method: "PUT", headers: { ...headers, signature }, signal: AbortSignal.timeout(10_000) });
+    const body: any = await res.json().catch(() => null);
+    if (res.ok && body?.status === "success") return { ok: true, detail: "cancelled at PayFast" };
+    return { ok: false, detail: `PayFast HTTP ${res.status}: ${JSON.stringify(body?.data ?? body)}`.slice(0, 200) };
+  } catch (e: any) {
+    return { ok: false, detail: `PayFast request failed: ${e?.message || e}`.slice(0, 200) };
+  }
 }
 
 export function registerPaymentRoutes(app: Express) {
@@ -95,29 +150,37 @@ export function registerPaymentRoutes(app: Express) {
       }
 
       // Validate signature — passphrase is REQUIRED; reject if not configured
-      const crypto = require("crypto");
       const passphrase = process.env.PAYFAST_PASSPHRASE;
       if (!passphrase) {
         console.error(`[PAYFAST:${itnId}] REJECTED — PAYFAST_PASSPHRASE env var not set. Cannot validate ITN signature safely. Configure it in Railway.`);
         return;
       }
-      const paramString = Object.entries(data)
-        .filter(([k]) => k !== "signature")
-        .sort(([a], [b]) => a.localeCompare(b)) // PayFast ITN spec: keys must be sorted alphabetically before hashing
-        .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, "+")}`)
-        .join("&");
-      const signatureBase = `${paramString}&passphrase=${encodeURIComponent(passphrase)}`;
-      const expectedSig = crypto.createHash("md5").update(signatureBase).digest("hex");
-      const sigMissing = !data.signature;
-      const sigMismatch = !sigMissing && !crypto.timingSafeEqual(
-        Buffer.from(data.signature as string),
-        Buffer.from(expectedSig),
-      );
-      if (sigMissing || sigMismatch) {
-        console.error(`[PAYFAST:${itnId}] REJECTED — signature ${sigMissing ? "missing" : "mismatch"} for ${safePhone}.`);
+      // FIELD ORDER (2026-09-22). PayFast signs an ITN over its fields IN THE ORDER IT SENDS
+      // THEM — PayFast's own SDK validates it that way (PaymentIntegrations/Notification.php,
+      // dataToString: no sort, stops at `signature`). 629610e (2026-06-19) re-sorted the keys on
+      // the belief that the ITN spec required it, noting it "may fix" failures; sorting is the
+      // rule for API calls, not for ITNs. Received order is the canonical check. The sorted form
+      // is still accepted, so a deploy that is wrong about PayFast in either direction activates
+      // nobody less than before — the log line says which one matched, and once Railway shows only
+      // "received" the sorted branch should be deleted.
+      const fields = Object.entries(data).filter(([k]) => k !== "signature");
+      const md5Of = (pairs: [string, string][], enc: (v: string) => string) => crypto.createHash("md5")
+        .update(`${pairs.map(([k, v]) => `${k}=${enc(String(v))}`).join("&")}&passphrase=${enc(passphrase)}`)
+        .digest("hex");
+      const legacyEnc = (v: string) => encodeURIComponent(v).replace(/%20/g, "+");
+      const candidates: [string, string][] = [
+        ["received", md5Of(fields, phpUrlencode)],
+        ["sorted_legacy", md5Of([...fields].sort(([a], [b]) => a.localeCompare(b)), legacyEnc)],
+      ];
+      const sent = String(data.signature || "");
+      const matched = sent
+        ? candidates.find(([, sig]) => sig.length === sent.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(sig)))
+        : undefined;
+      if (!matched) {
+        console.error(`[PAYFAST:${itnId}] REJECTED — signature ${sent ? "mismatch" : "missing"} for ${safePhone}.`);
         return;
       }
-      console.log(`[PAYFAST:${itnId}] Signature valid`);
+      console.log(`[PAYFAST:${itnId}] Signature valid (order=${matched[0]})`);
 
       // Validate merchant ID
       const expectedMerchantId = process.env.PAYFAST_MERCHANT_ID;
@@ -173,6 +236,29 @@ export function registerPaymentRoutes(app: Express) {
         ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
         : "";
 
+      // A CHARGE ON A SUBSCRIPTION THE CLIENT CANCELLED (2026-09-22). This used to fall into the
+      // activation below: status active, cancelled_at nulled, "Subscription renewed" — the
+      // client's decision erased by the money taken against it. The same token they were paying
+      // on when they cancelled means this is that subscription, still billing. A different token
+      // is a new subscription they chose, and activates as normal.
+      if (paymentStatus === "COMPLETE" && targetUser.subscriptionEndReason === "client_cancelled" && data.token
+        && data.token === await latestPayFastToken(normalisedPhone, eventKey)) {
+        const retry = await cancelPayFastSubscription(data.token);
+        await db.insert(adminEvents).values({
+          action: "charged_after_cancellation",
+          targetPhone: normalisedPhone,
+          reason: `COMPLETE ITN on cancelled subscription; cancel retry: ${retry.detail}`,
+          meta: { pfPaymentId, token: data.token, amountGross, cancelRetryOk: retry.ok },
+        }).catch(e => console.error("[PAYFAST] adminEvents insert failed:", e));
+        console.error(`[PAYFAST:${itnId}] CHARGED AFTER CANCELLATION — ${safePhone} R${amountGross} pf_id=${pfPaymentId} — client left inactive`);
+        const coachAlertPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
+        if (coachAlertPhone) {
+          await sendCriticalAlert(`whatsapp:+${coachAlertPhone.replace(/\D/g, "")}`, `[BILLING] ${targetUser.name || "Client"} (${normalisedPhone}) was charged R${amountGross} (pf ${pfPaymentId}) on a subscription they cancelled. They are still cancelled. Refund this payment. PayFast cancel retry: ${retry.ok ? "confirmed" : `FAILED — cancel token ${data.token} by hand`}.`)
+            .catch(e => console.error("[PAYFAST] founder alert failed:", e));
+        }
+        return;
+      }
+
       if (paymentStatus === "COMPLETE") {
         const renewsAt = new Date(Date.now() + 30 * 86_400_000);
         const wasInactive = targetUser.subscriptionStatus !== "active";
@@ -185,6 +271,7 @@ export function registerPaymentRoutes(app: Express) {
             subscriptionRenewsAt: renewsAt,
             paymentReference: pfPaymentId || null,
             cancelledAt: null,
+            subscriptionEndReason: null,
           }).where(eq(users.phoneNumber, normalisedPhone));
 
           if (wasInactive && targetUser.referredBy) {
@@ -273,9 +360,24 @@ export function registerPaymentRoutes(app: Express) {
           }
         }
       } else if (paymentStatus === "CANCELLED") {
+        // Our own API cancel makes PayFast send this. The client already cancelled, was already
+        // told, and their cancelled_at is the moment they decided — leave all three alone.
+        if (targetUser.subscriptionEndReason === "client_cancelled" && targetUser.subscriptionStatus === "inactive") {
+          console.log(`[PAYFAST:${itnId}] CANCELLED ITN confirms the client's own cancel — ${safePhone}`);
+          return;
+        }
+        // A CANCELLATION IS FOR ONE SUBSCRIPTION (Codex attack @ 1309c98). A late or retried
+        // CANCELLED for token A, arriving after the client rejoined on token B, ended the
+        // subscription they were paying on. Only the one they are paying on now can be ended here.
+        const current = data.token ? await latestPayFastToken(normalisedPhone, eventKey) : null;
+        if (data.token && current && current !== data.token) {
+          console.log(`[PAYFAST:${itnId}] CANCELLED ITN for superseded token — ${safePhone} is on a newer subscription; nothing changed`);
+          return;
+        }
         await db.update(users).set({
           subscriptionStatus: "inactive",
           cancelledAt: new Date(),
+          subscriptionEndReason: "payfast_cancelled",
         }).where(eq(users.phoneNumber, normalisedPhone));
 
         console.log(`[PAYFAST] Subscription CANCELLED — ${normalisedPhone}`);
@@ -296,6 +398,7 @@ export function registerPaymentRoutes(app: Express) {
         await db.update(users).set({
           subscriptionStatus: "inactive",
           cancelledAt: new Date(),
+          subscriptionEndReason: "refunded",
         }).where(eq(users.phoneNumber, normalisedPhone));
         console.log(`[PAYFAST:${itnId}] Payment REFUNDED — ${normalisedPhone} — subscription deactivated`);
         await db.insert(adminEvents).values({
@@ -315,7 +418,7 @@ export function registerPaymentRoutes(app: Express) {
         // Chargeback reversed — reinstate if the user is still inactive.
         if (targetUser.subscriptionStatus === "inactive") {
           const renewsAt = new Date(Date.now() + 30 * 86_400_000);
-          await db.update(users).set({ subscriptionStatus: "active", subscriptionRenewsAt: renewsAt, cancelledAt: null })
+          await db.update(users).set({ subscriptionStatus: "active", subscriptionRenewsAt: renewsAt, cancelledAt: null, subscriptionEndReason: null })
             .where(eq(users.phoneNumber, normalisedPhone));
           console.log(`[PAYFAST:${itnId}] REFUND_REVERSED — ${normalisedPhone} — subscription reinstated`);
         }
@@ -345,6 +448,7 @@ export function registerPaymentRoutes(app: Express) {
         subscriptionStatus: "active",
         subscriptionRenewsAt: renewsAt,
         cancelledAt: null,
+        subscriptionEndReason: null,
       }).where(eq(users.phoneNumber, normalisedPhone));
       await db.insert(adminEvents).values({
         action: "force_activate",

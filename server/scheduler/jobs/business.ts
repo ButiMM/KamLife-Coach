@@ -55,7 +55,7 @@ export async function runSubscriptionExpiryCheck(): Promise<void> {
       // billing isn't exactly 30 days — only expire once renewal is >3 days overdue.
       if (msUntilRenewal < -threeDaysMs && client.subscriptionStatus === "active") {
         const daysOverdue = Math.floor(-msUntilRenewal / 86_400_000);
-        await db.update(users).set({ subscriptionStatus: "inactive", cancelledAt: new Date() }).where(eq(users.phoneNumber, client.phoneNumber));
+        await db.update(users).set({ subscriptionStatus: "inactive", cancelledAt: new Date(), subscriptionEndReason: "payment_lapsed" }).where(eq(users.phoneNumber, client.phoneNumber));
         if (await claimCritical(client.id, "sub_expired", todaySAST())) {
           await sendCriticalAlert(client.phoneNumber, `${name}, your subscription has expired. Your profile and progress history are saved. To continue with Coach K, renew at kamlifecoach.co.za or reply *pay* for a payment link.`);
         }
@@ -67,9 +67,16 @@ export async function runSubscriptionExpiryCheck(): Promise<void> {
 
 export async function runPaymentFailureRecovery(): Promise<void> {
   console.log("[SCHEDULER] JOB: Payment failure recovery");
-  const allUsers = await db.select().from(users);
-  const failedUsers = allUsers.filter(u =>
-    u.subscriptionStatus === "inactive" && u.cancelledAt && u.onboardingState === "COMPLETE" && u.totalWorkoutsCompleted && u.totalWorkoutsCompleted > 0
+  // ONLY A LAPSE IS A FAILED PAYMENT (2026-09-22). This selected every inactive row with a
+  // cancelled_at — which a client's own cancel also writes — so the day after cancelling they were
+  // told "your payment didn't go through … update your payment here". The expiry job records
+  // payment_lapsed; nothing else is a payment failure. Rows that ended before the reason existed
+  // carry NULL and are left alone: an unknown ending is not grounds for a payment-failed message.
+  const lapsedUsers = await db.select().from(users).where(and(
+    eq(users.subscriptionStatus, "inactive"), eq(users.subscriptionEndReason, "payment_lapsed"),
+  ));
+  const failedUsers = lapsedUsers.filter(u =>
+    u.cancelledAt && u.onboardingState === "COMPLETE" && u.totalWorkoutsCompleted && u.totalWorkoutsCompleted > 0
   );
   const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
   const merchantId = process.env.PAYFAST_MERCHANT_ID;
@@ -92,11 +99,11 @@ export async function runPaymentFailureRecovery(): Promise<void> {
         variables: { "1": name, "2": String(PRICING.monthlyPriceZAR) },
       };
       if (daysSinceFail === 1) {
-        await sendCriticalAlert(client.phoneNumber, `${name}, your payment didn't go through yesterday. Could be a bank issue — happens all the time.\n\nYour programme and ${workouts} sessions of progress are saved. Update your payment here and coaching continues immediately:\n${payLink}`, paymentTemplate);
+        await sendCriticalAlert(client.phoneNumber, `${name}, your payment didn't go through yesterday. Could be a bank issue — happens all the time.\n\nYour programme and ${workouts} sessions of progress since you started are saved. Update your payment here and coaching continues immediately:\n${payLink}`, paymentTemplate);
       } else if (daysSinceFail === 3) {
-        await sendCriticalAlert(client.phoneNumber, `${name} — your coaching's been paused 3 days. You're in Week ${client.programmeWeek || 1} with ${workouts} sessions done, and all of it is saved.\n\nWhenever you're ready to pick back up, this fixes it in 30 seconds:\n${payLink}`, paymentTemplate);
+        await sendCriticalAlert(client.phoneNumber, `${name} — your coaching's been paused 3 days. You're in Week ${client.programmeWeek || 1} with ${workouts} sessions done since you started, and all of it is saved.\n\nWhenever you're ready to pick back up, this fixes it in 30 seconds:\n${payLink}`, paymentTemplate);
       } else if (daysSinceFail === 7) {
-        await sendCriticalAlert(client.phoneNumber, `${name}, last message about this — your subscription has been paused for a week.\n\n${workouts} sessions. Every meal logged. Every step counted. That work is not lost.\n\nWhen you're ready, reply *pay* and I'll send a fresh link. No pressure, no expiry on your data.\n\nIf you'd like to stop completely, reply *STOP* and I won't message again.`, paymentTemplate);
+        await sendCriticalAlert(client.phoneNumber, `${name}, last message about this — your subscription has been paused for a week.\n\n${workouts} sessions since you started. Every meal logged. Every step counted. That work is not lost.\n\nWhen you're ready, reply *pay* and I'll send a fresh link. No pressure, no expiry on your data.\n\nIf you'd like to stop completely, reply *STOP* and I won't message again.`, paymentTemplate);
       }
     } catch (err) { console.error(`[SCHEDULER] Payment recovery error — ${client.phoneNumber}:`, err); }
   }
@@ -134,11 +141,11 @@ export async function runSignupNudge(): Promise<void> {
         if (daysSinceCancelled !== 3 && daysSinceCancelled !== 7 && daysSinceCancelled !== 30) continue;
         if (!(await claimCritical(client.id, "winback", todaySAST()))) continue;
         if (daysSinceCancelled === 3) {
-          await sendCriticalAlert(client.phoneNumber, `${name} — you've done ${workouts} sessions with Coach K. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for ${PRICING.monthlyDisplay}:*\n${payLink}`);
+          await sendCriticalAlert(client.phoneNumber, `${name} — you've done ${workouts} sessions with Coach K since you started. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for ${PRICING.monthlyDisplay}:*\n${payLink}`);
         } else if (daysSinceCancelled === 7) {
           await sendCriticalAlert(client.phoneNumber, `${name}, a week since you left.\n\nThe people who come back after a week are the ones who actually get results — they know what consistency feels like now.\n\n${PRICING.monthlyDisplay}. Your data is here:\n${payLink}`);
         } else if (daysSinceCancelled === 30) {
-          await sendCriticalAlert(client.phoneNumber, `${name} — 30 days. Coach K here.\n\nOne message to say your profile is still here if you want it. ${workouts} sessions logged. Progress saved.\n\n${PRICING.monthlyDisplay} if you're ready:\n${payLink}\n\nIf not — no hard feelings. Reply STOP and I won't message again.`);
+          await sendCriticalAlert(client.phoneNumber, `${name} — 30 days. Coach K here.\n\nOne message to say your profile is still here if you want it. ${workouts} sessions logged since you started. Progress saved.\n\n${PRICING.monthlyDisplay} if you're ready:\n${payLink}\n\nIf not — no hard feelings. Reply STOP and I won't message again.`);
         }
       }
     } catch (err) { console.error(`[SCHEDULER] Signup/win-back error — ${client.phoneNumber}:`, err); }
