@@ -259,6 +259,12 @@ for (const text of ["My sister has bulimia. How can I help her?", "My daughter w
   await say(K, "I've been purging after dinner and my sister doesn't know");
   chk((await situation(K)) === "disordered_eating", "CONTROL — the client's own disclosure beside a sister is still theirs", `life_situation=${await situation(K)}`);
 }
+// …IN ANY TENSE (Codex @ de0a99a): "I started purging" is the client's own, whoever else is named.
+for (const text of ["I started purging after dinner and my boyfriend is worried", "I purge after meals and my mom doesn't know"]) {
+  const K = await client("Own With Other");
+  await say(K, text);
+  chk((await situation(K)) === "disordered_eating", `"${text}" is still the client's disclosure`, `life_situation=${await situation(K)}`);
+}
 
 await pool.end().catch(() => {});
 REAL(`\npg-safety-routing-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}`);
