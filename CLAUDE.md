@@ -1,9 +1,13 @@
 # KamLife Coach — Claude Code Instructions
 
 ## Git workflow
-- **Always work directly on `main`.**
-- Commit and push to `main` after every task. No feature branches.
-- Never create a PR unless explicitly asked.
+- **Never push to `main`.** `main` deploys straight to production (Railway), so anything pushed there reaches testers with no checks.
+- Every change: create a branch from `main`, commit there, push the branch, and open a pull request.
+- One task per pull request. Keep them small.
+- Every pull request description states: what changed, why, how it was verified, and lines added / removed.
+- Do not merge your own pull request until the tests pass on it and the other builder has reviewed it.
+- Never write "fixed" or "done" in a commit or pull request unless a test shows it.
+- These rules override any older instruction in this repo that says otherwise.
 
 ## Stack
 - TypeScript / Node.js / Express — deployed on Railway
