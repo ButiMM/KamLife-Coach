@@ -82,8 +82,8 @@ run_case "a request with a length is treated as a permanent opt-out" server/hand
 
 # 3. THE OPT-OUT IS NOT RECORDED — the reply says "No more messages", nothing holds it.
 run_case "the opt-out is not recorded" server/handlers/safety.ts \
-  '    if (ou) await setOptOut(ou)' \
-  '    if (false) await setOptOut(ou)' || failed=$((failed + 1))
+  'const saved = !!ou && await setOptOut(ou).then(' \
+  'const saved = !!ou && await Promise.resolve().then(' || failed=$((failed + 1))
 
 # 4. THE BOUNDARY DOES NOT READ IT — every job, alert and recovery message goes out again.
 run_case "the proactive send boundary ignores the opt-out" server/outbound-authority.ts \
@@ -115,7 +115,7 @@ run_case "the payment webhook ignores the opt-out" server/routes/payments.ts \
 # 9. A TOPIC IS READ AS THE CHANNEL (Codex @ 7716559) — "messages about calories, just send my
 #    workouts" opts the client out of everything.
 run_case "a topic refusal opts the client out" server/handlers/safety.ts \
-  '|\b(?:messages?|messaging|texting|sending|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);' \
+  '|\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);' \
   '/i.test(m);' || failed=$((failed + 1))
 
 restore_case
