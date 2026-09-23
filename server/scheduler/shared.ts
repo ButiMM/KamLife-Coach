@@ -296,10 +296,11 @@ export async function readWeighAskAndPresence(userId: string): Promise<{ daysSin
     db.select({ at: sentProactive.sentAt }).from(sentProactive)
       .where(and(eq(sentProactive.userId, userId), eq(sentProactive.messageKey, "weigh_ask")))
       .orderBy(desc(sentProactive.sentAt)).limit(1).catch(() => [] as any[]),
-    // A MESSAGE THEY SENT: proactive rows carry message_in NULL, system rows a bracketed tag.
+    // A MESSAGE THEY SENT: proactive rows carry message_in NULL; ours are tagged [system]/[admin…].
+    // "[Photo]" or "[Scale Photo]" is the client writing to us (Codex @ 30703f5).
     db.select({ id: chatHistory.id }).from(chatHistory)
       .where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, sastDayStart()),
-        sql`${chatHistory.messageIn} IS NOT NULL AND ${chatHistory.messageIn} <> '' AND ${chatHistory.messageIn} NOT LIKE '[%'`))
+        sql`${chatHistory.messageIn} IS NOT NULL AND ${chatHistory.messageIn} <> '' AND ${chatHistory.messageIn} NOT LIKE '[system]%' AND ${chatHistory.messageIn} NOT LIKE '[admin%'`))
       .limit(1).catch(() => [] as any[]),
   ]);
   return {

@@ -400,10 +400,6 @@ export async function runSafetyGuards(
         await tx.delete(sentProactive).where(eq(sentProactive.userId, uid));
         await tx.delete(clientActions).where(eq(clientActions.userId, uid));
         await tx.delete(abAssignments).where(eq(abAssignments.userId, uid));
-        // trialed_numbers is NOT deleted here, on purpose (2026-08-06). It holds a salted
-        // one-way hash and no readable personal data, it is the record that makes "one trial
-        // per number, ever" survive this exact command, and deleting it would reopen the
-        // start-cancel-start loop through the POPIA path. Do not add it to this transaction.
         await tx.delete(users).where(eq(users.id, uid));
       }
       const [created] = await tx.insert(users).values({
@@ -461,10 +457,6 @@ export async function runSafetyGuards(
         await tx.delete(sentProactive).where(eq(sentProactive.userId, uid));
         await tx.delete(clientActions).where(eq(clientActions.userId, uid));
         await tx.delete(abAssignments).where(eq(abAssignments.userId, uid));
-        // trialed_numbers is NOT deleted here, on purpose (2026-08-06). It holds a salted
-        // one-way hash and no readable personal data, it is the record that makes "one trial
-        // per number, ever" survive this exact command, and deleting it would reopen the
-        // start-cancel-start loop through the POPIA path. Do not add it to this transaction.
         await tx.delete(users).where(eq(users.id, uid));
       }
       const [created] = await tx.insert(users).values({

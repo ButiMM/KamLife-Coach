@@ -156,6 +156,13 @@ REAL("\n1. A CLIENT WHO IS TALKING TO US IS NOT TOLD TO LOG");
   chk(toBack.action.kind !== "come_back" && toBack.action.kind !== "log",
     "four quiet food days, but they wrote today: no come-back meal ask", `${toBack.action.kind} ${JSON.stringify(toBack.line)}`);
 
+  // A PHOTO IS THE CLIENT WRITING (Codex @ 30703f5): media rows are logged as "[Scale Photo]".
+  const photo = await client(10);
+  await sparse(photo);
+  await pool.query("INSERT INTO chat_history (user_id, message_in, message_out, intent) VALUES ($1,'[Scale Photo]','84kg noted','WEIGHT_PHOTO')", [photo.id]);
+  const toPhoto = await canonicalNextMove(await fresh(photo.phoneNumber), { hour: 19 });
+  chk(toPhoto.action.kind !== "log", "a client who sent a photo today is present too", toPhoto.action.kind);
+
   const absent = await client(3);
   await sparse(absent);
   // Our own proactive row (message_in NULL) and a system row are not the client speaking.
@@ -236,6 +243,9 @@ REAL("\n5. NO TRIAL, AND NO PRICE WE CANNOT STAND BEHIND");
   const hi = await say(tester, "hi", "SM275t1");
   chk(!!hi, "the beta tester's greeting is answered", JSON.stringify(hi));
   chk(!/free trial|days? remaining|days? left on/i.test(hi), "the greeting counts down no free trial", JSON.stringify(hi));
+  // THE ONE-TRIAL RECORD GOES WITH THE TRIAL (Codex @ 30703f5): no rule reads it, so it is not kept.
+  const kept = (await pool.query("SELECT to_regclass('public.trialed_numbers') AS t")).rows[0].t;
+  chk(kept === null, "no table of trialed phone hashes outlives the trial rule", String(kept));
   const price = handleConversionObjection({ user: {}, m: "how much is it", payLink: "https://pay.test/x", name: "Kam" } as any)?.reply || "";
   chk(!!price && !/R250/.test(price), "the price answer quotes no personal-trainer price", JSON.stringify(price));
 }
