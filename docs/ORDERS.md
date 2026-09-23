@@ -111,6 +111,8 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 **Tester-visible rule:** every PR description opens with one line, "What testers will notice:", in plain language. If the answer is nothing, it says why the PR is still needed today. Work is ordered so the changes testers feel most land first.
 
+**Merge standard (how a PR finishes):** a PR merges when (1) the failure its issue describes is reproduced and fixed, (2) checks pass, and (3) nothing is worse than current `main` on a hard invariant. A Codex finding that is a new edge case, not a regression against `main`, becomes a follow-up issue at the top of `docs/QUEUE.md` and does not block the merge. After two attack rounds on one PR, all remaining non-regression findings become follow-ups. Better than `main` ships; perfect doesn't wait.
+
 **Merge rule:** a PR merges only when the gate passes, no hard invariant fails, and Codex's attack comment has been answered with either a fix or a stated reason it doesn't apply.
 
 ## 7. Frozen and closed
