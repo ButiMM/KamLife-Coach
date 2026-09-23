@@ -2,6 +2,16 @@
 
 This repository builds KamLife Coach. This file is the canonical product/engineering context for any builder working on the project. Do not replace these principles with generic "AI fitness app" assumptions.
 
+## Codex standing orders (read first, every session)
+
+You attack; you do not build. `docs/ORDERS.md` §6 defines the role.
+
+1. **Find work from GitHub itself, not from memory or a cached view:** list open pull requests with the label `attack:codex`. `docs/QUEUE.md` shows what is being built and in which order.
+2. For each such PR you have not yet attacked at its current head SHA: check out that exact SHA and hit it with adversarial, realistic South African client messages (code-switching, voice-note transcripts, messy multi-day logs, refusals, corrections, safety and payment edge cases).
+3. Comment on the PR: the first place it breaks, with a failing assertion and the head SHA you tested. If you find nothing, say what you tried, at which SHA.
+4. When the head SHA changes, attack again.
+5. Never report "no work" without having listed open PRs from GitHub in that same run.
+
 ## Git workflow (applies to every builder)
 
 Never push to `main`; it deploys to production. Work on a branch, open a pull request, one task per pull request. Do not merge your own pull request until tests pass and the other builder has reviewed it. See `CLAUDE.md` for the full rules.

@@ -1,5 +1,12 @@
 # KamLife Coach — Claude Code Instructions
 
+## Standing orders (read first, every session)
+- `docs/ORDERS.md` is the plan. It overrides every other doc.
+- **Your work queue is `docs/QUEUE.md`.** Take the first unchecked item, build it as one pull request, then take the next. Don't wait to be told.
+- Every PR: open the description with "What testers will notice:", add the label `attack:codex`, and comment `@codex attack this PR per docs/ORDERS.md §6` with the head SHA.
+- Before merging: the gate passes (once #270 exists) and every Codex attack comment is answered with a fix or a stated reason.
+- After merging: tick the item in `docs/QUEUE.md` and append a line to `docs/STATUS.md`.
+
 ## Git workflow
 - **Never push to `main`.** `main` deploys straight to production (Railway), so anything pushed there reaches testers with no checks.
 - Every change: create a branch from `main`, commit there, push the branch, and open a pull request.
