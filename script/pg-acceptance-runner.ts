@@ -388,6 +388,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // two opposite-defect controls.
     command: ["bash", "script/red-on-revert-cut6-proactive-templates.sh"] },
 
+  { id: "calorie-floor", title: "One calorie floor, and no writer below it",
+    // #268. The weigh-in auto-adjust needs real weight_logs across a fortnight and the front door;
+    // the diet-break restore needs the real job against a seeded client.
+    command: ["npx", "tsx", "script/pg-calorie-floor-acceptance.ts"] },
+
+  { id: "calorie-floor-reverts", title: "Every #268 floor seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-calorie-floor.sh"] },
+
   { id: "evening-delivery", title: "The empty day reaches the client, or the record says it did not",
     // C17 EVENING. evening.ts sends the one message written FOR a silent client — which is exactly
     // the client whose 24-hour window is shut — so it degrades to the generic check-in. No approved
@@ -421,14 +429,6 @@ export const ACCEPTANCES: Acceptance[] = [
 
   { id: "safety-routing-reverts", title: "Every #266 safety-routing seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-safety-routing.sh"] },
-
-  { id: "calorie-floor", title: "One calorie floor, and no writer below it",
-    // #268. The weigh-in auto-adjust needs real weight_logs across a fortnight and the front door;
-    // the diet-break restore needs the real job against a seeded client.
-    command: ["npx", "tsx", "script/pg-calorie-floor-acceptance.ts"] },
-
-  { id: "calorie-floor-reverts", title: "Every #268 floor seam turns the acceptance red",
-    command: ["bash", "script/red-on-revert-calorie-floor.sh"] },
 
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
