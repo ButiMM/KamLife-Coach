@@ -409,6 +409,35 @@ REAL("\n8. THREE DAYS AFTER — the win-back a canceller is meant to get is not 
     "the day-3 win-back reaches the client who cancelled, and does not call it a failed payment", `sent: ${JSON.stringify(toLerato)}`);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n9. A CLIENT WHO CANCELLED BEFORE 0014 — the charge does not reactivate them either (Codex attack @ 14f70ad)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+{
+  // The durable state every pre-0014 canceller carries: inactive, cancelled_at set, the
+  // CANCEL_CONFIRMED turn in chat_history, and NO end reason — the column did not exist. The
+  // guard reads the reason, so without a backfill this client is invisible to it.
+  const T = await makeClient("27820000976", "Thabo Legacy");
+  await postItn(signItn(itnFields(T.digits, "COMPLETE", "tok-thabo-1", "pf-thabo-1", "alpha")));
+  const cancelledAt = new Date(Date.now() - 10 * 86_400_000);
+  await pool.query("UPDATE users SET subscription_status = 'inactive', cancelled_at = $2, subscription_end_reason = NULL WHERE id = $1", [T.id, cancelledAt]);
+  await pool.query("INSERT INTO chat_history (user_id, message_in, message_out, intent, created_at) VALUES ($1, 'yes', 'Done, Thabo.', 'CANCEL_CONFIRMED', $2)", [T.id, cancelledAt]);
+  // CONTROL: a pre-0014 LAPSE — same shape, no cancel turn. It must not be marked a cancel.
+  const U = await makeClient("27820000977", "Unathi Lapsed");
+  await pool.query("UPDATE users SET subscription_status = 'inactive', cancelled_at = $2, subscription_end_reason = NULL WHERE id = $1", [U.id, cancelledAt]);
+  // Deploy: the migration runs on boot. Idempotent, so running it again here is the real thing.
+  const { readFileSync } = await import("node:fs");
+  await pool.query(readFileSync("migrations/0014_subscription_end_reason.sql", "utf8"));
+  const reasons = (await pool.query("SELECT phone_number, subscription_end_reason r FROM users WHERE id = ANY($1)", [[T.id, U.id]])).rows;
+  chk(reasons.find(r => r.phone_number === U.phone)?.r == null, "control: a pre-0014 lapse is not relabelled as a cancel", JSON.stringify(reasons));
+  const f0 = await lastShadowId();
+  await postItn(signItn(itnFields(T.digits, "COMPLETE", "tok-thabo-1", "pf-thabo-2", "alpha")));
+  const r9 = await row(T.phone);
+  chk(r9.subscription_status === "inactive", "a charge on a pre-0014 cancelled subscription does not reactivate the client", `status=${r9.subscription_status}`);
+  chk(!!r9.cancelled_at && new Date(r9.cancelled_at).getTime() === cancelledAt.getTime(), "and their cancellation date survives", `cancelled_at=${r9.cancelled_at}`);
+  chk((await adminActions(T.phone)).includes("charged_after_cancellation") && /\brefund\b/i.test((await shadowSince(FOUNDER, f0)).join("\n")),
+    "the charge is recorded and the founder is told to refund it", `admin_events=${JSON.stringify(await adminActions(T.phone))}`);
+}
+
 server.close();
 await pool.end().catch(() => {});
 REAL(`\npg-payments-cancel-truth-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}`);

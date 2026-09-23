@@ -20,3 +20,19 @@
 -- lands carry NULL, which every reader treats as "reason unknown" — never as a lapse.
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_end_reason TEXT;
+
+-- BACKFILL THE CLIENTS WHO CANCELLED BEFORE THIS COLUMN EXISTED (Codex attack on #277 @ 14f70ad).
+-- Leaving them NULL made them invisible to the charge-after-cancellation guard: their next PayFast
+-- charge reactivated them and nulled cancelled_at, exactly the defect this migration exists for.
+-- A voluntary cancel is identifiable: the cancel-confirmation turn is in chat_history within
+-- minutes of cancelled_at. A lapse has no such turn and stays NULL (never "payment_lapsed" here:
+-- that would re-arm failure messages at people nobody can prove lapsed). Idempotent — only NULLs.
+UPDATE users u SET subscription_end_reason = 'client_cancelled'
+ WHERE u.subscription_end_reason IS NULL
+   AND u.subscription_status = 'inactive'
+   AND u.cancelled_at IS NOT NULL
+   AND EXISTS (
+     SELECT 1 FROM chat_history c
+      WHERE c.user_id = u.id AND c.intent = 'CANCEL_CONFIRMED'
+        AND c.created_at BETWEEN u.cancelled_at - interval '10 minutes' AND u.cancelled_at + interval '10 minutes'
+   );

@@ -15,6 +15,7 @@ FILES=(
   server/routes/payments.ts
   server/handlers/lifecycle.ts
   server/scheduler/jobs/business.ts
+  migrations/0014_subscription_end_reason.sql
 )
 
 for f in "${FILES[@]}"; do cp "$f" "$WORK_ROOT/$(printf '%s' "$f" | tr '/' '_')"; done
@@ -134,9 +135,15 @@ run_case "the day-3 win-back is swallowed by the truth floor" server/scheduler/j
   '${workouts} sessions with Coach K since you started.' \
   '${workouts} sessions with Coach K.' || failed=$((failed + 1))
 
+# 13. PRE-0014 CANCELLERS ARE NOT BACKFILLED (Codex attack @ 14f70ad) — their next charge
+#     reactivates them, because the guard cannot see a cancel it has no reason for.
+run_case "a pre-0014 cancellation is not backfilled" migrations/0014_subscription_end_reason.sql \
+  "UPDATE users u SET subscription_end_reason = 'client_cancelled'" \
+  "UPDATE users u SET subscription_end_reason = u.subscription_end_reason" || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-payments-cancel-truth: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-payments-cancel-truth: GREEN — 12/12 behavioral reverts caught"
+echo "red-on-revert-payments-cancel-truth: GREEN — 13/13 behavioral reverts caught"
