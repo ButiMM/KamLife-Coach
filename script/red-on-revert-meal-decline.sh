@@ -143,8 +143,8 @@ run_case "\"No thanks\" excludes an explicit correction" server/handlers/food-co
 # 13. PART OF THE PLATE IS A REPEAT OF THE RECORD (Codex @ 8e15426) — "No, I had rice and chicken
 #     breast" leaves the avocado on the day.
 run_case "a correction naming part of the plate is a repeat" server/handlers/food-context.ts \
-  ' && ((r => r.length ? r : [...heldNames])(scanForSAFoods(String(target.rawMessage || "")).map(f => f.name.toLowerCase()))).every(n => namedNow.includes(n));' \
-  ';' || failed=$((failed + 1))
+  ' && ((r => r.length ? r : [...heldNames])(scanForSAFoods(String(target.rawMessage || "")).map(f => f.name.toLowerCase()))).every(n => namedNow.includes(n)) && amounts(' \
+  ' && amounts(' || failed=$((failed + 1))
 
 # 14. A NEW AMOUNT IS A REPEAT (Codex @ a514b3a) — "No, I had 3 eggs" after 2 eggs keeps 2 eggs.
 run_case "a correction that changes only the amount is a repeat" server/handlers/food-context.ts \
