@@ -376,6 +376,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // and two opposite-defect controls so a floor that refuses everything cannot pass.
     command: ["bash", "script/red-on-revert-cut4-stt-admission.sh"] },
 
+  { id: "popia-deletion", title: "\"Delete my data\" deletes the client, everywhere",
+    // #269. Needs the real front door, the real foreign-key cascades and every table in the
+    // catalogue that holds a user_id or a phone.
+    command: ["npx", "tsx", "script/pg-popia-deletion-acceptance.ts"] },
+
+  { id: "popia-deletion-reverts", title: "Every #269 deletion seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-popia-deletion.sh"] },
+
   { id: "proactive-template", title: "A generic check-in leaves no trace of a message it did not carry",
     // CUT 6 (2026-09-14). The window-recovery template returned "fallback", which deliveryAccepted
     // reads as true — so the morning job opened a training loop for a client who had seen only

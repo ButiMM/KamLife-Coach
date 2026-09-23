@@ -14,7 +14,8 @@ import {
   sentProactive, clientActions, adminEvents,
   gptCosts, userIntegrations, clientIntelligenceProfiles,
 } from "../../shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
+import { latestPayFastToken, cancelPayFastSubscription } from "../routes/payments";
 import { readLifeContext, lifeContextReply, WITHHELD_SITUATION } from "../life-context";
 import { looksLikeQuitMoment, quitSaveReply, readObstacle } from "../quit-save";
 import { markLifeQuiet } from "../life-quiet";
@@ -322,57 +323,47 @@ export async function runSafetyGuards(
     const boundDeleteUser = bindKnownSafetyUser(existing[0]);
     const name = boundDeleteUser.name || "there";
     await db.update(users).set({ awaitingInputType: "delete_confirm" }).where(eq(users.phoneNumber, phone));
-    return `${name}, this will permanently delete all your data — workouts, steps, food logs, measurements, weight history, and your profile. This cannot be undone.\n\nReply *DELETE* (in capitals) to confirm, or anything else to cancel.`;
+    return `${name}, this will permanently delete your account and everything in it — your profile, messages, food logs, workouts, steps, weight history, measurements and photos — and cancel any subscription first. This cannot be undone.\n\nThe one thing we keep is your payment records, for five years, because tax law requires it. They're used for nothing else.\n\nReply *DELETE* (in capitals) to confirm, or anything else to cancel.`;
   }
 
   if (m === "delete") {
     const existing = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
     if (existing.length > 0 && existing[0].awaitingInputType === "delete_confirm") {
       const uid = bindKnownSafetyUser(existing[0]).id;
-      console.log(`[POPIA DELETE] User ${uid} (${phone}) requested data deletion at ${new Date().toISOString()}`);
+      console.log(`[POPIA DELETE] User ${uid} requested data deletion at ${new Date().toISOString()}`);
+      // BILLING FIRST (#269). A deleted client must not go on being charged. The #263 cancel, and
+      // the reply promises only what PayFast confirmed. The token lives on the payment record,
+      // which is kept, so an unconfirmed cancel can still be done by hand from the admin view.
+      const token = await latestPayFastToken(phone);
+      const billing = token ? await cancelPayFastSubscription(token) : null;
+      // THE ROW GOES, SO EVERY CASCADE FIRES (#269). This used to clear a hand-kept list of tables
+      // and UPDATE the row, so every table added since — the turn ledger with raw messages,
+      // client_understanding, daily_constraints, gpt_costs — and the row's own life story, dream
+      // goal, email and targets all survived "permanently deleted". Every user_id foreign key
+      // cascades except quality_signals (SET NULL would keep the message text); the rest below are
+      // keyed by phone. The one documented exception is payment_events: financial records, kept
+      // five years for tax law and used for nothing else.
       await db.transaction(async (tx) => {
-        await tx.delete(chatHistory).where(eq(chatHistory.userId, uid));
-        await tx.delete(stepLogs).where(eq(stepLogs.userId, uid));
-        await tx.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
-        await tx.delete(weightLogs).where(eq(weightLogs.userId, uid));
-        await tx.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
-        await tx.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
-        await tx.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
-        await tx.delete(mealLogs).where(eq(mealLogs.userId, uid));
-        await tx.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
-        await tx.delete(escalations).where(eq(escalations.userId, uid));
-        await tx.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
-        await tx.delete(clientIntelligenceProfiles).where(eq(clientIntelligenceProfiles.userId, uid));
-        await tx.delete(userIntegrations).where(eq(userIntegrations.userId, uid));
-        await tx.delete(sentProactive).where(eq(sentProactive.userId, uid));
-        await tx.delete(clientActions).where(eq(clientActions.userId, uid));
-        await tx.delete(abAssignments).where(eq(abAssignments.userId, uid));
-        await tx.update(users).set({
-          phoneNumber: `[deleted-${uid}]`,
-          name: null,
-          onboardingState: null,
-          popiConsent: false,
-          awaitingInputType: null,
-          currentWeight: null,
-          heightCm: null,
-          age: null,
-          gender: null,
-          medicalConditions: null,
-          injuries: null,
-          otherMedicalNotes: null,
-          profileNotes: null,
-          lastActiveAt: null,
-          cancelledAt: new Date(),
-        }).where(eq(users.id, uid));
+        await tx.execute(sql`DELETE FROM quality_signals WHERE user_id = ${uid}`);
+        await tx.execute(sql`DELETE FROM shadow_replies WHERE user_id = ${uid} OR phone = ${phone}`);
+        await tx.execute(sql`DELETE FROM media_jobs WHERE user_id = ${uid} OR phone_number = ${phone}`);
+        await tx.execute(sql`DELETE FROM admin_events WHERE target_phone = ${phone}`);
+        await tx.delete(users).where(eq(users.id, uid));
+        if (billing) await tx.insert(adminEvents).values({
+          action: billing.ok ? "account_deleted_subscription_cancelled" : "account_deleted_subscription_cancel_unconfirmed",
+          targetPhone: null, reason: billing.detail, meta: { token },
+        });
       });
       try {
         await pool.query("DELETE FROM memories WHERE phone = $1", [phone]);
-        console.log(`[POPIA DELETE] Vector memories cleared for ${phone}`);
       } catch (memErr: any) {
         console.warn(`[POPIA DELETE] Vector memory deletion failed (non-fatal): ${memErr.message}`);
       }
-      console.log(`[POPIA DELETE] Completed — all data deleted for ${uid}`);
-      return "Done. All your data has been permanently deleted in compliance with POPIA. If you want to start fresh, just send any message.";
+      console.log(`[POPIA DELETE] Completed for ${uid}${billing ? ` — billing: ${billing.detail}` : ""}`);
+      const billingLine = !billing ? ""
+        : billing.ok ? "Your subscription is cancelled at PayFast, so you won't be charged again. "
+        : "PayFast didn't confirm the subscription cancel automatically, so it's flagged and we'll cancel it by hand today. ";
+      return `Done. Your account is permanently deleted — profile, messages, food logs, workouts, weight history and photos. ${billingLine}Only your payment records are kept, for five years, because tax law requires it.\n\nIf you want to start fresh, just send any message.`;
     }
   }
 
