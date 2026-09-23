@@ -1,0 +1,52 @@
+name: Customer replay gate
+
+# #270, docs/ORDERS.md §4 Step 2. Real failures replayed through the production-shaped path —
+# real PostgreSQL, the live model, ENGINE_LIVE=on, the live normaliser — and graded on stored rows
+# and the post-transport WhatsApp body. A hard invariant (ORDERS §3) that passes in
+# docs/replay-baseline.json and fails on this PR fails the job. The judge is an OpenAI model.
+#
+# No key, no verdict: without the OpenAI secret the gate exits 2 and this job is RED, never green.
+
+on:
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: replay-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kam
+          POSTGRES_PASSWORD: kam
+          POSTGRES_DB: kamlife
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://kam:kam@127.0.0.1:5432/kamlife
+      OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
+      REPLAY_HELDOUT_JSON: ${{ secrets.REPLAY_HELDOUT_JSON }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Apply committed migrations to the ephemeral database
+        run: npm run db:migrate
+      - name: Replay the corpus through the production path and grade it
+        run: npx tsx script/replay-gate.ts
+      - name: Keep the run record
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-results
+          path: replay-results/

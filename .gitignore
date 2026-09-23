@@ -61,3 +61,4 @@ p2-work/
 # It must stay under the repository so the base checkout can resolve this checkout's node_modules.
 .unit-baseline-worktree-*/
 .pg-runner-controls-*/
+replay-results/
