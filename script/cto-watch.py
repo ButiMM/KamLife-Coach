@@ -21,6 +21,7 @@ def comment_once(n, marker, text, comments):
     return False
 
 rows = []
+alerts = []
 open_prs = [p for p in api("GET", "/pulls?state=open&per_page=50")
             if any(l["name"] == "attack:codex" for l in p["labels"])]
 for p in open_prs:
@@ -45,6 +46,9 @@ for p in open_prs:
         state = "attack answered: ready to merge when tests pass"
     else:
         state = "attack unanswered: builder must answer"
+        age = int((NOW - ts(attacks[-1]["created_at"])).total_seconds() // 60)
+        if age > 30:
+            alerts.append(f"**Blocked:** #{n} has had a Codex attack unanswered for {age} min. Answer it before new work (CLAUDE.md priority order).")
         comment_once(n, f"cto-answer-{attacks[-1]['id']}", "**CTO watch:** Codex's attack above is unanswered. Reply with a comment starting `ANSWER`: the fix commit, or why it doesn't apply.", comments)
     rows.append(f"| #{n} | {p['title'][:60]} | `{short}` | {state} |")
 
@@ -54,7 +58,8 @@ done = [l[6:] for l in queue.splitlines() if l.startswith("- [x] ")]
 merged = [p for p in api("GET", "/pulls?state=closed&sort=updated&direction=desc&per_page=30") if p.get("merged_at")]
 today = [p for p in merged if ts(p["merged_at"]).date() == NOW.date()]
 last_merge = max((ts(p["merged_at"]) for p in merged), default=None)
-alerts = []
+if len(open_prs) >= 3 and not [p for p in today if p["title"].startswith(("[harm]", "[core]", "[visible]"))]:
+    alerts.append(f"**Nothing reaching testers:** {len(open_prs)} build PRs open, none merged today. Close out open PRs before starting more.")
 if todo and not open_prs and last_merge and NOW - last_merge > IDLE_AFTER:
     alerts.append(f"**Idle:** no open build PR and nothing merged for {int((NOW-last_merge).total_seconds()//60)} min, with {len(todo)} queue items left. Next: {todo[0]}")
 
