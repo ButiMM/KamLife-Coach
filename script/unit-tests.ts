@@ -5934,6 +5934,11 @@ test("scope: a classifier error fails CLOSED — an unrecognised topic is declin
   assert.ok(v.redirectMessage, "a decline carries the warm redirect");
   const coaching = await classifyDomain(broken, "My lower back aches after sitting at my desk all day, what can I do?");
   assert.equal(coaching.classification, "in-domain", "coaching never reaches the failing classifier");
+  // Codex @ 83a96af: a health message the old list missed was declined during an outage.
+  for (const m of ["My ankle is swollen after I fell yesterday, what should I do?", "I get dizzy when I stand up after squats",
+                   "My shoulder clicks when I lift my arm above my head"]) {
+    assert.equal((await classifyDomain(broken, m, { ongoing: true })).classification, "in-domain", `outage must not decline: "${m}"`);
+  }
 });
 test("scope: the redirect does not introduce Coach K to somebody mid-conversation", () => {
   assert.match(offDomainRedirect("write me an essay about the French Revolution please", true) || "", /outside what I can help with/);

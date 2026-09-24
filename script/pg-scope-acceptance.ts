@@ -97,6 +97,7 @@ const coaching = [
   "I'm type 2 diabetic, what breakfast keeps my sugar steady?",
   // Coaching that only the wider #321 vocabulary recognises: failing closed must not decline it.
   "My lower back aches after sitting at my desk all day, what can I do?",
+  "My ankle is swollen after I fell yesterday, what should I do?",
   // A life event that mentions an off-topic thing is not an ask for it.
   "I had to update my CV last night so I skipped gym, can I still train today?",
 ];

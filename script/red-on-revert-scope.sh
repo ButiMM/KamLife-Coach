@@ -96,7 +96,7 @@ run_case "the gpt fallback is not gated" server/routes.ts \
 
 # 6. FAILING CLOSED WITHOUT THE WIDER COACHING VOCABULARY — main's list: a back ache is declined in an outage.
 run_case "coaching words the old list missed fall to a failing classifier" server/understanding/domain-guard.ts \
-  '\\d\\s?kgs?\\b|\\blos(?:e|ing)\\b|\\bgain(?:ing)?\\b|\\btoned?\\b|fitness|\\bin shape\\b|diabet|blood pressure|cholesterol|pregnan|\\bknee|\\bback\\b|\\bhurts?\\b|\\baches?\\b|' \
+  '\\d\\s?kgs?\\b|\\blos(?:e|ing)\\b|\\bgain(?:ing)?\\b|\\btoned?\\b|fitness|\\bin shape\\b|diabet|blood pressure|cholesterol|pregnan|\\bknee|\\bback\\b|\\bhurts?\\b|\\baches?\\b|ankle|wrist|shoulder|\\bhips?\\b|\\bneck\\b|elbow|\\bfoot\\b|\\bfeet\\b|\\blegs?\\b|\\barms?\\b|chest|headache|migraine|swell|swollen|sprain|bruis|\\bfell\\b|\\bfall(?:en)?\\b|dizz|faint|nause|vomit|cramp|\\bperiod\\b|\\bblood\\b|heart|breath|asthma|medic|doctor|clinic|hospital|symptom|' \
   '' || failed=$((failed + 1))
 
 # 7. A LIFE EVENT THAT MENTIONS AN OFF-TOPIC THING IS DECLINED — "update my CV so I skipped gym".
