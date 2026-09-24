@@ -7,7 +7,7 @@
 - [x] #315 (PR #383) Cancel menu "4 — Just cancel" sends a shopping list and the subscription stays active: the client is still billed
 - [ ] #306 (PR #386) A minor stopped by the age gate keeps an active paid subscription
 - [x] #303 (PR #384) Terms still promise a 7-day trial: make the copy match reality (no trial; guarantee wording as implemented)
-- [ ] #328 (PR #385) 14-day money-back guarantee, implemented end to end
+- [x] #328 (PR #385) 14-day money-back guarantee, implemented end to end
 
 ## Lane B: the new core (top priority). Two parallel worktrees: B1 (gate, then Coach Health) and B2 (client record, then understanding and composer)
 
