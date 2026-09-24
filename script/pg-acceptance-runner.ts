@@ -481,6 +481,11 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "scope-reverts", title: "Every #321 scope seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-scope.sh"] },
 
+  { id: "cancel-menu", title: "The cancel menu owns its own answers: \"4 — Just cancel\" cancels (#315)",
+    // "4" got the shopping list and the client stayed billed; "2" and "3" got the step and food-log
+    // prompts. Needs the real front door, the stored subscription and the post-transport bodies.
+    command: ["npx", "tsx", "script/pg-cancel-menu-acceptance.ts"] },
+
   { id: "spend-cap", title: "The AI spend cap fails safe (#340)",
     // A daily account-wide ceiling that stops model calls, an unreadable spend query that means
     // "over", and the meaning engine under the same cap. Needs gpt_costs, admin_events, the bodies.
