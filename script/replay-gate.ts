@@ -207,7 +207,9 @@ if (!OFFLINE && (productModels.length === 0 || judgeErrors.length === results.le
   process.exit(2);
 }
 
-const key = (r: CaseResult, c: CheckResult) => `${r.id}::${c.what}`;
+// A held-out check is keyed by an opaque hash (Codex @ 8ed032c): it enters the baseline and gates
+// exactly like a public check, and neither its case nor its wording appears in any file or log.
+const key = (r: CaseResult, c: CheckResult) => r.heldOut ? `held-out:${sha(`${r.id}::${c.what}`)}` : `${r.id}::${c.what}`;
 const hardNow = new Map(results.flatMap(r => r.checks.filter(c => c.invariant).map(c => [key(r, c), c.pass] as const)));
 const baseline = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, "utf8")) : null;
 // A baseline check that passed must still EXIST and pass (Codex @ ced3cb0): deleting or renaming it
@@ -230,11 +232,10 @@ const record = {
 mkdirSync("replay-results", { recursive: true });
 writeFileSync(`replay-results/run-${versions.gitSha.slice(0, 7)}.json`, JSON.stringify(record, null, 2));
 
-// THE BASELINE CANDIDATE. Only the public cases' verdicts — a held-out check name would leak its case.
-const publicIds = new Set(results.filter(r => !r.heldOut).map(r => r.id));
+// THE BASELINE CANDIDATE. Held-out checks are in it under their opaque keys, so they gate too.
 const candidate = {
   recordedAt: record.runAt, gitSha: versions.gitSha, versions, productModels, meanScore,
-  hard: Object.fromEntries([...hardNow].filter(([k]) => publicIds.has(k.split("::")[0]))),
+  hard: Object.fromEntries(hardNow),
   scores: Object.fromEntries(results.filter(r => !r.heldOut).map(r => [r.id, r.score])),
 };
 if (!OFFLINE) {
