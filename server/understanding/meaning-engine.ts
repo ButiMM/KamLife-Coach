@@ -165,6 +165,8 @@ export interface MeaningInput {
   emitActions?: boolean;
   /** The already-made coaching decision, stated to the model before it writes. */
   decisionBrief?: string;
+  /** The client record's active facts, in the client's words (#271). INTERIM: deleted in the #272 switch PR. */
+  clientFacts?: string;
 }
 
 export interface MeaningResult {
@@ -250,6 +252,7 @@ Rules: CONTINUE means do not invent a change merely to create novelty. INVESTIGA
       THINK_HEADER,
       `WHAT YOU KNOW ABOUT THIS CLIENT RIGHT NOW:\n${blurb}`,
       keyFacts,
+      input.clientFacts || "",
       snapshot ? `THEIR REAL NUMBERS (authoritative — quote these, never invent):\n${snapshot}` : "",
       input.hungerEvidence ? renderHungerEvidence(input.hungerEvidence) : "",
       input.deficitEvidence ? renderDeficitEvidence(input.deficitEvidence) : "",

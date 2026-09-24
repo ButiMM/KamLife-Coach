@@ -5897,6 +5897,39 @@ test("domain-guard: clearly off-topic messages are NOT fast-pathed (defer to cla
   for (const m of ambiguous) assert.ok(!isObviouslyInDomain(m), `must NOT fast-path off-topic: "${m}"`);
 });
 
+// #271: the extractor's answer is data, not truth — anything malformed or not in the client's words is dropped.
+test("client record: extracted facts must be typed and in the client's own words", async () => {
+  const { parseExtraction } = await import("../server/core/client-record");
+  const msg = "I'm training for the Comrades marathon in June and my knee gets sore on long runs.";
+  const ok = parseExtraction(JSON.stringify({ facts: [
+    { kind: "injury", subject: "Knee", statement: "my knee gets sore on long runs" },
+    { kind: "goal", subject: "comrades", statement: "I want to lose 10kg" },            // not what they said
+    { kind: "mood", subject: "happy", statement: "training for the Comrades" },         // not a kind
+    { kind: "goal", subject: "", statement: "training for the Comrades marathon" },     // no subject
+  ] }), msg);
+  assert.deepEqual(ok.map(f => [f.kind, f.subject]), [["injury", "knee"]]);
+  assert.deepEqual(parseExtraction("not json", msg), []);
+  assert.deepEqual(parseExtraction(JSON.stringify({ facts: "x" }), msg), []);
+});
+
+// Codex @ 4c36554: verbatim is not enough — quoted and reported words belong to someone else.
+test("client record: a quote or reported speech is not the client's own fact", async () => {
+  const { parseExtraction } = await import("../server/core/client-record");
+  const fact = (statement: string) => JSON.stringify({ facts: [{ kind: "life_event", subject: "pregnancy", statement, detail: {}, valid_from: null, valid_until: null, corrects: null }] });
+  // The attack's exact case, and its curly-quote and unquoted-report variants.
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), 'My sister said "I\'m pregnant" and asked if she can still train.'), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My sister said \u201cI\u2019m pregnant\u201d and asked if she can still train."), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My sister told me that I'm pregnant, can she train?"), []);
+  assert.deepEqual(parseExtraction(fact("I'm training for Comrades"), "My friend says I'm training for Comrades too hard."), []);
+  // Codex @ 63f489a: reported speech in the languages our clients mix in.
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My sister o re I'm pregnant, can she still train?"), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "Usisi wami uthi I'm pregnant, angaqeqesha?"), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My suster sê I'm pregnant, kan sy nog oefen?"), []);
+  // CONTROLS: the client's own voice still counts, even when a quote appears elsewhere.
+  assert.equal(parseExtraction(fact("I'm pregnant"), "I'm pregnant, 12 weeks.").length, 1);
+  assert.equal(parseExtraction(fact("I'm pregnant"), 'I\'m pregnant and my mom said "rest more".').length, 1);
+});
+
 // #321: scope is enforced in code. An ask FOR an off-domain thing is declined without a model;
 // a mention of one inside a coaching message is not an ask.
 test("scope: off-domain asks are declined without a model", () => {
