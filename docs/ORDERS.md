@@ -117,6 +117,8 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 **Merge standard (how a PR finishes):** a PR merges when (1) the failure its issue describes is reproduced and fixed, (2) checks pass, and (3) nothing is worse than current `main` on a hard invariant. A Codex finding that is a new edge case, not a regression against `main`, becomes a follow-up issue at the top of `docs/QUEUE.md` and does not block the merge. After two attack rounds on one PR, all remaining non-regression findings become follow-ups. Better than `main` ships; perfect doesn't wait.
 
+**Database suite (founder decision, option 3):** runs off GitHub, by Codex, on the exact head SHA of every `ready` PR. A PR needs `DBSUITE @ <head sha>: PASS` from Codex to merge. If Codex can't run it (UNAVAILABLE), the CTO decides the fallback (paid CI with a hard cap).
+
 **Merge rule:** a PR merges only when the gate passes, no hard invariant fails, and Codex's attack comment has been answered with either a fix or a stated reason it doesn't apply.
 
 ## 7. Frozen and closed
