@@ -41,6 +41,7 @@ The full list of names and code defaults is in the outgoing CTO's handover (22-2
 | 24 Sep | Lane B (new core) is the priority; old pipeline frozen except live harm |
 | 24 Sep | Test phone numbers and names in old Replit logs are **not** real people |
 | 24 Sep | The founder's 10 manual clients stay on manual coaching for now; **the goal is to move everyone onto the bot** once it's accurate. The founder, his clients and testers all use the bot continuously. |
+| 24 Sep | **No new paid services, API keys or subscriptions** without a written case from the CTO and a yes from the founder. It's an MVP: free first. The nightly paid sweep was dropped for a free one. |
 | parked | Coach K price: founder wants R199-R249 (code says R149). Decide when the core works. |
 
 ## Founder checks still open (Railway, only the founder can see it)
