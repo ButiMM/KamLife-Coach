@@ -16,10 +16,20 @@ name: Tests
 # founder about nothing. The builder runs the full suite locally before every push;
 # CI re-verifies on PRs, once nightly, and on demand. Re-add push triggers when the
 # minutes quota is refilled.
+# MINUTES (2026-09-23, CTO): the 47-minute database suite ran on every push of every PR, including
+# docs-only PRs, and burned the month's quota in a day. Now: docs/workflow-only PRs run nothing; fast
+# tests run on every push; the database suite runs once, when the builder labels the PR `ready`.
+# No nightly run: every change is already gated at its PR.
 on:
   pull_request:
-  schedule:
-    - cron: "0 2 * * *" # 4am SAST, once daily
+    types: [opened, synchronize, reopened, labeled]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - ".github/workflows/cto-watch.yml"
+      - ".github/workflows/mouth-ratchet.yml"
+      - "script/cto-watch.py"
+      - "script/mouth-count.py"
   workflow_dispatch: {}
 
 concurrency:
@@ -96,6 +106,8 @@ jobs:
   # the credentials are the throwaway ones this container is created with, and no production or
   # Railway data is reachable from it.
   pg-acceptance:
+    # The expensive one (~47 min). Runs once per PR, when the builder adds the `ready` label.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ready')
     runs-on: ubuntu-latest
     # Measured 47m27s on 8d96f96. 90 leaves headroom for a slow runner and still fails a hang
     # four hours before the platform default would.
