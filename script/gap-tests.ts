@@ -3354,13 +3354,14 @@ test("sweep: the >7-day client's decision is used, not computed and discarded", 
   assert.ok(!/if \(daysSilent > 7\) continue;/.test(morning), "the client is no longer discarded");
   assert.ok(/const decision = decideProactive\(state, profile/.test(morning),
     "morning asks the decision owner for the client it used to drop");
-  assert.ok(/return formatOneAction\(decision\.action, firstName\)/.test(morning),
+  // #275: returned with a flag so the send can record a weigh-in ask — the text is still the answer.
+  assert.ok(/text: formatOneAction\(decision\.action, firstName\)/.test(morning),
     "…and the message IS its answer, not a second wording of it");
   // The degraded fallback still SPEAKS — and since 2026-08-21 it speaks under the same policy
   // contract as the gate, so a ledger failure can no longer turn into a prescription the gate
   // would have refused. Verified live: the silence rung is come_back (investigative), so
   // underPolicy passes it through unchanged and the drifting client still hears something.
-  assert.ok(/return formatOneAction\(underPolicy\(chooseAction\(\{/.test(morning),
+  assert.ok(/text: formatOneAction\(underPolicy\(chooseAction\(\{/.test(morning),
     "a drifting client must not get silence because a ledger read timed out — and the fallback "
     + "must reach the decision owner through the policy contract, not around it");
   // The shape changed on 2026-08-28 when the gate stopped taking a pre-computed verdict and

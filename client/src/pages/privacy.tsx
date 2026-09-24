@@ -126,7 +126,7 @@ export default function PrivacyPolicy() {
                 { right: "Right to be notified", detail: "You were notified of our data collection at the start of your coaching via our WhatsApp consent message." },
                 { right: "Right to access", detail: "You may request a copy of all personal information we hold about you. Contact us at " + BUSINESS_EMAIL + "." },
                 { right: "Right to correction", detail: "You may request correction of inaccurate personal information at any time by messaging Coach K or emailing us." },
-                { right: "Right to deletion", detail: "Reply 'delete my data' to Coach K at any time. This immediately and permanently deletes all your data from our systems." },
+                { right: "Right to deletion", detail: "Reply 'delete my data' to Coach K at any time. This immediately and permanently deletes your data from our systems. The one exception is payment records, which are kept for 5 years as South African tax law requires (see section 5)." },
                 { right: "Right to object", detail: "You may object to the processing of your personal information by cancelling your subscription and requesting deletion." },
                 { right: "Right to withdraw consent", detail: "You may withdraw your consent at any time. This will end your coaching service and your data will be deleted within 90 days." },
               ].map((r) => (

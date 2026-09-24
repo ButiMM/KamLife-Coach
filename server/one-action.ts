@@ -45,10 +45,15 @@ export interface DayState {
   /** What they said would get in the way. Decides WHICH action is realistic for them. */
   biggestStruggle?: string | null;
   weeksOnProgramme: number;
-  /** Days since they logged anything at all. 0 = today. */
-  daysSinceAnyLog: number;
+  /** Days since they logged anything at all. 0 = today; null = no meal row, a gap nobody measured
+   *  (#275) — never a number, so no rung can speak an absence we did not observe. */
+  daysSinceAnyLog: number | null;
   /** Days since their last weigh-in; null when they have never weighed. */
   daysSinceWeighIn: number | null;
+  /** Days since we last ASKED them to weigh; null = never (#275). See WEIGH_ASK_GAP_DAYS. */
+  daysSinceWeighAsk?: number | null;
+  /** They messaged us today, or are typing now (#275). A present client is not asked to log. */
+  presentToday?: boolean;
   loggedToday: boolean;
   /** Today's totals as a share of target, 0..1+. */
   proteinPct: number;
@@ -266,6 +271,15 @@ function holdAction(dream?: string | null): OneAction {
  * ANSWER to a question about today.
  */
 export const WEIGH_ACTIONABLE_BEFORE_HOUR = 12;
+
+/**
+ * ONE WEIGH-IN ASK A WEEK, AT MOST (#275). The rung fires on "never weighed" or "ten days stale",
+ * and both stay true every day until they step on a scale — so a client who ignored it was asked
+ * again every morning. The ask is recorded when it goes out (recordWeighAsk) and read back here.
+ */
+export const WEIGH_ASK_GAP_DAYS = 7;
+const weighAskedRecently = (d: number | null | undefined): boolean =>
+  d !== null && d !== undefined && d < WEIGH_ASK_GAP_DAYS;
 
 function askToWeigh(dream?: string | null, neverWeighed = false, hour = 8): OneAction {
   const forTomorrow = hour >= WEIGH_ACTIONABLE_BEFORE_HOUR;
@@ -553,8 +567,8 @@ export function chooseAction(s: DayState): OneAction {
 
   // 1. NOTHING ELSE MATTERS IF THEY ARE GONE. A protein tip to someone who vanished four days
   //    ago is a coach talking to an empty room.
-  //    Unless they are on the other end of the line as this is written — see atKeyboard.
-  if (s.daysSinceAnyLog >= 3 && !s.atKeyboard) {
+  //    Unless they are on the other end of the line as this is written, or wrote today (#275).
+  if (s.daysSinceAnyLog !== null && s.daysSinceAnyLog >= 3 && !s.atKeyboard && !s.presentToday) {
     // SILENCE ESCALATES (2026-07-29). Three days away and six weeks away used to get the same
     // sentence. They are not the same person: someone gone three days needs a nudge, someone
     // gone six weeks has usually decided they failed and is embarrassed to come back. The longer
@@ -615,7 +629,7 @@ export function chooseAction(s: DayState): OneAction {
   //    it. Before midday this is unchanged and still outranks fuelling and steps; the morning and
   //    proactive paths never set this flag at all.
   const weighWouldBeTomorrow = s.hour >= WEIGH_ACTIONABLE_BEFORE_HOUR;
-  if (!scaleIsOffLimits && !(s.asksAboutToday && weighWouldBeTomorrow)
+  if (!scaleIsOffLimits && !(s.asksAboutToday && weighWouldBeTomorrow) && !weighAskedRecently(s.daysSinceWeighAsk)
       && ((neverWeighed && s.weeksOnProgramme >= 1) || (s.daysSinceWeighIn !== null && s.daysSinceWeighIn >= 10))) {
     return askToWeigh(s.dreamGoal, neverWeighed, s.hour);
   }
@@ -694,7 +708,7 @@ export function chooseAction(s: DayState): OneAction {
   }
 
   // 6. NOTHING LOGGED AND THE DAY IS NEARLY OVER.
-  if (!s.loggedToday && s.hour >= LATE) return askToLog();
+  if (!s.loggedToday && s.hour >= LATE && !s.atKeyboard && !s.presentToday) return askToLog();
 
   // 7. STEPS. The easiest win there is, and the one most people can actually do on a bad day.
   if (s.stepsTarget > 0 && s.stepsToday < s.stepsTarget * 0.5 && s.hour >= 12) {
@@ -754,7 +768,9 @@ export interface ProactiveStateForDecision {
   food: { loggedDays7d: number | null; weekendLoggedDays7d?: number | null; daysSinceAnyLog: number | null };
   workout: { sessionsLast7d: number; sessionsThisWeek?: number };
   steps: { avg7d: number | null };
-  weight: { daysSinceWeighIn: number | null; trendUsable: boolean; stalledWeeks?: number };
+  weight: { daysSinceWeighIn: number | null; trendUsable: boolean; stalledWeeks?: number; daysSinceWeighAsk?: number | null };
+  /** They sent us a message today, SAST (#275) — read from chat_history, not last_active_at. */
+  presentToday?: boolean;
   today: { kcal: number; protein: number; steps: number; logged: boolean; hour: number };
   evidence: { foodSufficient: boolean; weightSufficient: boolean };
 }
@@ -801,14 +817,12 @@ export function dayStateFrom(
     dreamGoal: p.dreamGoal,
     biggestStruggle: p.biggestStruggle,
     weeksOnProgramme: p.weeksOnProgramme,
-    // ── NEVER LOGGED IS NOT FOURTEEN WEEKS GONE (C14) ── `?? 99` turned "we hold no meal row
-    // for this client" into a ninety-nine day absence and rung 1 read it back. Measured on
-    // 0deb7f8 through the live front door, a client who JOINED FIVE DAYS AGO, at the keyboard,
-    // was told: "Just say hi … It's been about 14 weeks … Your numbers are exactly where you
-    // left them." Every clause is false. 99 measured nothing — a sentinel picked for being big,
-    // which floor(99 / 7) spoke aloud. The honest ceiling on a gap never observed is their tenure.
-    daysSinceAnyLog: s.food.daysSinceAnyLog ?? p.weeksOnProgramme * 7,
+    // NEVER LOGGED IS NOT AN ABSENCE (C14, #275). `?? 99` and then `?? weeksOnProgramme * 7` both
+    // turned "no meal row" into a gap rung 1 spoke aloud. Unknown is unknown.
+    daysSinceAnyLog: s.food.daysSinceAnyLog,
     daysSinceWeighIn: s.weight.daysSinceWeighIn,
+    daysSinceWeighAsk: s.weight.daysSinceWeighAsk ?? null,
+    presentToday: !!s.presentToday,
     loggedToday: s.today.logged,
     // A target of zero means "not set", and dividing by it would make every client look starved.
     // 1 = "at target", i.e. nothing to say — the same fail-safe buildDayState used.
@@ -956,37 +970,15 @@ export function composeDecisionTurn(situationFrame: string, actionLine: string):
  * So the gate stops taking a verdict and takes the EVIDENCE, then reaches the verdict through the
  * same two functions decideProactive uses. Neither path can hold an opinion the other does not.
  *
- * CLOSED — SPARSE EVIDENCE ACTION DIVERGENCE (#203, 2026-09-06).
+ * CLOSED — SPARSE EVIDENCE ACTION DIVERGENCE (#203, 2026-09-06). The reactive gate held where
+ * decideProactive investigated ("sparse but healthy": weigh vs "Nothing new today"), so a client
+ * who reported 8000 steps got a truthful receipt and no coaching. The founder rule settles it:
+ * daily reporting is not a prerequisite for coaching, and insufficient evidence must not become a
+ * receipt-only dead end. Every call site already computed loggedToday, daysSinceWeighIn and
+ * doNotMention into its DayState; they are now passed on to this gate.
  *
- * The note that stood here said one evidence -> one policy was established but one policy -> one
- * ACTION was not, and that the reactive gate held where decideProactive investigated:
- *
- *     sparse but healthy   decideProactive -> weigh  "Stand on a scale this morning."
- *                          underPolicy     -> hold   "Nothing new today."
- *
- * It also said exactly what closing it would take — "this gate also performing the
- * askToLog/askToWeigh downgrade, which needs today.logged, daysSinceWeighIn and doNotMention at
- * the reactive call sites" — and parked it because the product question was UNPROVEN.
- *
- * BOTH HALVES ARE NOW SETTLED. #203 answers the product question from the founder rule: daily
- * reporting is not a prerequisite for coaching, and insufficient evidence must not become a
- * receipt-only dead end. And the three facts were never missing — every call site already computes
- * loggedToday, daysSinceWeighIn and doNotMention into the DayState it hands to chooseAction. They
- * simply were not passed on to the gate.
- *
- * TRACED THROUGH THE REAL FRONT DOOR ON REAL POSTGRESQL BEFORE ANYTHING CHANGED. Clients weighed
- * recently, so the `weigh` rung stands down and this gate is the thing that decides:
- *
- *     "I walked 8000 steps today"    train -> hold  ->  "8 000 steps — nice one. 👌"
- *     "87.4kg this morning"          walk  -> hold  ->  "87.4kg — noted. 👌"
- *     three days in one message      walk  -> hold  ->  the receipt, and nothing else
- *
- * A truthful receipt and no coaching, from a product whose whole claim is the next action.
- *
- * THE DEFAULTS PRESERVE THE OLD BEHAVIOUR, DELIBERATELY. A caller that passes no context reads as
- * "logged today, weighed today" and therefore still holds. Inventing `loggedToday: false` for a
- * caller that does not know would ask a client who logged an hour ago to log — the Law 22 failure
- * the downgrade's own history describes.
+ * THE DEFAULTS PRESERVE THE OLD BEHAVIOUR: no context reads as "logged today, weighed today",
+ * so a caller that does not know never asks a client who logged an hour ago to log (Law 22).
  */
 export function underPolicy(
   action: OneAction,
@@ -1000,6 +992,9 @@ export function underPolicy(
     weightIsGoal?: boolean;
     /** The client asked, in this turn, what to do TODAY. See the gate below. */
     asksAboutToday?: boolean;
+    /** Typing now or messaged today (#275): never downgraded to "tell me what you ate". */
+    present?: boolean;
+    daysSinceWeighAsk?: number | null;
   },
 ): OneAction {
   const asksUsefulWeekendFact = action.kind !== "rest" && action.kind !== "weigh"
@@ -1036,6 +1031,7 @@ export function underPolicy(
     daysSinceWeighIn: opts.daysSinceWeighIn === undefined ? 0 : opts.daysSinceWeighIn,
     doNotMention: opts.doNotMention, dreamGoal: opts.dreamGoal, hour: opts.hour ?? 8,
     trainingAwaitingOutcome: opts.trainingAwaitingOutcome,
+    present: opts.present, daysSinceWeighAsk: opts.daysSinceWeighAsk,
   });
 
   // A QUESTION ABOUT TODAY MUST GET AN ANSWER ABOUT TODAY (#233 Gate 3).
@@ -1085,12 +1081,14 @@ export function underPolicy(
 function investigateInstead(ctx: {
   foodSufficient: boolean; weightSufficient: boolean; loggedToday: boolean;
   daysSinceWeighIn: number | null; doNotMention?: string | null; dreamGoal?: string | null;
-  hour: number; trainingAwaitingOutcome?: boolean;
+  hour: number; trainingAwaitingOutcome?: boolean; present?: boolean; daysSinceWeighAsk?: number | null;
 }): OneAction {
   if (ctx.trainingAwaitingOutcome) return holdAction(ctx.dreamGoal);
-  const canAskForFood = !ctx.foodSufficient && !ctx.loggedToday;
+  // A CLIENT WHO IS TALKING TO US IS NOT A TRACKER TO FILL IN (#275). Under the log floor every
+  // reply to a client with fewer than four logged days ended "Tell me what you ate today".
+  const canAskForFood = !ctx.foodSufficient && !ctx.loggedToday && !ctx.present;
   const staleWeight = ctx.daysSinceWeighIn === null || ctx.daysSinceWeighIn >= 3;
-  const canAskForWeight = !ctx.weightSufficient && staleWeight
+  const canAskForWeight = !ctx.weightSufficient && staleWeight && !weighAskedRecently(ctx.daysSinceWeighAsk)
     && !mentionsForbidden("weight scale weigh", ctx.doNotMention);
   return canAskForFood ? askToLog()
     : canAskForWeight ? askToWeigh(ctx.dreamGoal, ctx.daysSinceWeighIn === null, ctx.hour)
@@ -1165,6 +1163,8 @@ export function decideProactive(
     weekendInvestigationAnswered: opts?.weekendInvestigationAnswered,
     asksAboutToday: opts?.asksAboutToday,   // C15: Gate 3 was unreachable from this path
     weightIsGoal: getGoalProfile(s.goalType).weightIsGoal,
+    present: !!opts?.atKeyboard || !!s.presentToday,
+    daysSinceWeighAsk: s.weight.daysSinceWeighAsk ?? null,
   });
   evidence = evidenceFor(s, action.kind);
 

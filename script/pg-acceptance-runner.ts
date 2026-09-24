@@ -376,6 +376,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // and two opposite-defect controls so a floor that refuses everything cannot pass.
     command: ["bash", "script/red-on-revert-cut4-stt-admission.sh"] },
 
+  { id: "popia-deletion", title: "\"Delete my data\" deletes the client, everywhere",
+    // #269. Needs the real front door, the real foreign-key cascades and every table in the
+    // catalogue that holds a user_id or a phone.
+    command: ["npx", "tsx", "script/pg-popia-deletion-acceptance.ts"] },
+
+  { id: "popia-deletion-reverts", title: "Every #269 deletion seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-popia-deletion.sh"] },
+
   { id: "proactive-template", title: "A generic check-in leaves no trace of a message it did not carry",
     // CUT 6 (2026-09-14). The window-recovery template returned "fallback", which deliveryAccepted
     // reads as true — so the morning job opened a training loop for a client who had seen only
@@ -407,6 +415,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // C17 EVENING. One mechanism per case, plus the control that refuses the cheapest way to pass
     // every "it did not arrive" assertion: sending nothing at all.
     command: ["bash", "script/red-on-revert-c17-evening-delivery.sh"] },
+
+  { id: "visible-nags", title: "Present clients are not told to log; no invented gaps, daily weigh-ins or trial",
+    // #275. Presence is read from chat_history rows the database stamps, the weigh-in cap from
+    // sent_proactive, and "Just finished dinner" must reach meal_logs through the front door.
+    command: ["npx", "tsx", "script/pg-visible-nags-acceptance.ts"] },
+
+  { id: "visible-nags-reverts", title: "Every #275 nag/gap/weigh-in seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-visible-nags.sh"] },
 
   { id: "payments-cancel-truth", title: "Cancelling stops the money, and the money tells the truth",
     // Audit P0 (2026-09-22). "yes, cancel" promised "you will not be charged again" and nothing
