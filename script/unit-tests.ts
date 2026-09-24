@@ -2415,6 +2415,67 @@ test("gains-fear masterclass survived the deletion — it is in the coaching pro
   });
 }
 
+// ONE CALORIE FLOOR (#268). Five floors disagreed; the weigh-in auto-adjust clamped a man at a
+// sex-blind 1200 and the adaptive overlay at a sex-blind 1400, both under the 1500 every other path
+// held him to. One table now, and no writer below it.
+{
+  const { calorieFloor, calculateTargets } = await import("../server/targets");
+  const { adaptTargets } = await import("../server/adaptive-targets");
+  test("calorie floor: one sex- and age-aware table", async () => {
+    assert.equal(calorieFloor({ gender: "male", age: 35 }), 1500);
+    assert.equal(calorieFloor({ gender: "female", age: 35 }), 1300);
+    assert.equal(calorieFloor({ gender: "female", age: 16 }), 1600);
+    assert.equal(calorieFloor({ gender: "male", age: 16 }), 1800);
+    assert.equal(calorieFloor({ gender: "female", age: 65 }), 1400);
+    assert.equal(calorieFloor({ gender: "male", age: 65 }), 1600);
+    assert.equal(calorieFloor({ gender: "female", age: 30, lifeSituation: "postpartum_breastfeeding" }), 1800);
+  });
+  test("calorie floor: the profile target never goes below it", async () => {
+    for (const [sex, age, life] of [["male", 55, "office"], ["female", 55, "office"], ["female", 16, "office"],
+      ["male", 70, "office"], ["female", 30, "postpartum_breastfeeding"]] as const) {
+      const { calorieTarget } = calculateTargets(45, "fat_loss", life, 0, sex, age, 150);
+      assert.ok(calorieTarget >= calorieFloor({ gender: sex, age, lifeSituation: life }),
+        `${sex} ${age} ${life}: ${calorieTarget} is under the floor`);
+    }
+  });
+  test("calorie floor: the adaptive overlay never cuts a man under 1500", async () => {
+    const stalledMan = { baseCalories: 1500, baseProtein: 100, baseSteps: 6000, goalType: "fat_loss", weightKg: 50,
+      sick: false, stalledWeeks: 3, avgKcal7d: 1500, loggedDays7d: 6, gender: "male", age: 55 } as any;
+    const out = adaptTargets(stalledMan);
+    assert.ok(out.calorieTarget >= 1500, `a stalled 50kg man was cut to ${out.calorieTarget}`);
+    const stalledWoman = { ...stalledMan, gender: "female", baseCalories: 1500 };
+    assert.ok(adaptTargets(stalledWoman).calorieTarget >= 1400, "the overlay's own 1400 hold still applies to women");
+  });
+  test("calorie floor: the morning line replays the writer's answer, demographics included", async () => {
+    // Codex @ ec5dcf4: the 05:45 writer passed gender/age/life situation and the 06:00 replay did
+    // not, so a breastfeeding client was stored at 1800 and told 1770.
+    const { adaptiveInputFrom } = await import("../server/adaptive-targets");
+    const state = { goalType: "fat_loss", weightKg: 70, baseline: { calories: 1900, protein: 120, steps: 7000 },
+      health: { sick: false, recovering: false, daysSick: 0 }, food: { avgKcal7d: 1900, loggedDays7d: 6 },
+      steps: { avg7d: 7000 }, weight: { weeklyKgChange: 0, stalledWeeks: 3 } };
+    const who = { gender: "female", age: 30, lifeSituation: "postpartum_breastfeeding" };
+    const writer = adaptTargets(adaptiveInputFrom(state, who));
+    assert.ok(writer.calorieTarget >= 1800, `a breastfeeding client was cut to ${writer.calorieTarget}`);
+    assert.equal(adaptTargets(adaptiveInputFrom(state, who)).note, writer.note);
+    for (const f of ["server/scheduler/jobs/adaptive.ts", "server/scheduler/jobs/morning.ts"]) {
+      assert.ok(/adaptiveInputFrom\(\w+, \w+\)/.test(readFileSync(f, "utf-8")), `${f} derives the adaptive input without the client`);
+    }
+  });
+  test("calorie floor: every raise in the three-week re-evaluation starts from the floor", async () => {
+    // Codex @ f5a4470: a legacy 1200 baseline + 150 was written and announced as 1350 for a man.
+    const src = readFileSync("server/scheduler/jobs/business.ts", "utf-8");
+    assert.ok(!/newCal\s*=\s*(?:Math\.min\(3500, )?currentCal \+ 1[05]0/.test(src), "a raise can still land under the floor");
+  });
+  test("calorie floor: every writer reads the one table", async () => {
+    for (const [f, needle] of [["server/handlers/weight.ts", "calorieFloor(user)"], ["server/scheduler/jobs/business.ts", "calorieFloor(client)"],
+      ["server/scheduler/jobs/monday.ts", "calorieFloor(client)"], ["server/adaptive-targets.ts", "calorieFloor({"]] as const) {
+      const src = readFileSync(f, "utf-8");
+      assert.ok(src.includes(needle), `${f} no longer reads the one calorie floor`);
+      assert.ok(!/Math\.max\(\s*1[2-5]00\s*,/.test(src), `${f} clamps at a literal calorie floor again`);
+    }
+  });
+}
+
 // DAY-ZERO PHYSIQUE READ (2026-07-17, founder: "shouldn't they be sending us pictures
 // before we put people on the wrong program?"). The photo decides the recommendation;
 // the client decides the goal — assist, never override.

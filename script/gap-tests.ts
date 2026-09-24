@@ -3038,8 +3038,8 @@ test("proactive budget: adaptive does not speak, and its line is not lost", () =
   // until its behaviour is accounted for by the new owner.
   assert.ok(/adapt_note:\$\{today\}/.test(adaptive), "adaptive marks the day it produced a line");
   assert.ok(/adapt_note:\(/.test(morning), "morning looks for that marker");
-  assert.ok(/adaptTargets\(adaptiveInputFrom\(state\)\)\.note/.test(morning),
-    "morning asks the SAME pure engine for the line — no second copy of the words to drift");
+  assert.ok(/adaptTargets\(adaptiveInputFrom\(state, client\)\)\.note/.test(morning),
+    "morning asks the SAME pure engine, with the same client demographics (#268), for the line — no second copy of the words to drift");
   assert.ok(/marked === todaySAST\(\)/.test(morning), "a marker from another day is stale");
 
   // It must reach the stalled_unlogged client, who is stalled BECAUSE they barely log — so their

@@ -1,4 +1,5 @@
 import type { FoodDataConfidence, FoodProvenance } from "./report-card";
+import { calorieFloor } from "./targets";
 /**
  * ADAPTIVE TARGET ENGINE — the brain that was missing.
  *
@@ -33,6 +34,10 @@ export interface AdaptiveInput {
   baseSteps: number;
   goalType: string;              // fat_loss | muscle_gain | recomposition | wellness
   weightKg: number;
+  /** Who they are, for the one calorie floor (#268). The client row, not ProactiveState. */
+  gender?: string | null;
+  age?: number | null;
+  lifeSituation?: string | null;
   /** Currently sick (sick_until in the future). */
   sick: boolean;
   /** Days since the illness started — drives the recovering ramp. */
@@ -83,8 +88,11 @@ export interface ProactiveStateForAdapt {
   weight: { weeklyKgChange: number | null; stalledWeeks: number };
 }
 
-export function adaptiveInputFrom(s: ProactiveStateForAdapt): AdaptiveInput {
+/** `who` carries the floor's demographics (#268). The 05:45 writer and the morning line that
+ *  replays it both pass the client, so the number stored and the number spoken are one answer. */
+export function adaptiveInputFrom(s: ProactiveStateForAdapt, who?: { gender?: string | null; age?: number | null; lifeSituation?: string | null }): AdaptiveInput {
   return {
+    gender: who?.gender, age: who?.age, lifeSituation: who?.lifeSituation,
     baseCalories: s.baseline.calories,
     baseProtein: s.baseline.protein,
     baseSteps: s.baseline.steps,
@@ -141,10 +149,11 @@ export function calorieCeiling(weightKg: number, goalType: string): number {
 }
 
 /** Absolute safety floor — we never send anyone below this, whatever the maths says. */
-function calorieFloor(weightKg: number, goalType: string): number {
-  const byWeight = Math.round(weightKg * 22);          // ~22 kcal/kg is a conservative floor
-  const hard = goalType === "muscle_gain" ? 1800 : 1400;
-  return Math.max(hard, byWeight);
+function adaptiveFloor(inp: AdaptiveInput): number {
+  const byWeight = Math.round(inp.weightKg * 22);      // ~22 kcal/kg is a conservative floor
+  const hold = inp.goalType === "muscle_gain" ? 1800 : 1400;   // this overlay's own, higher hold
+  // Never below the ONE floor (#268): a man was held at a sex-blind 1400 here, under his 1500.
+  return Math.max(calorieFloor({ gender: inp.gender, age: inp.age, lifeSituation: inp.lifeSituation }), hold, byWeight);
 }
 
 export function adaptTargets(inp: AdaptiveInput): AdaptiveTargets {
@@ -153,7 +162,7 @@ export function adaptTargets(inp: AdaptiveInput): AdaptiveTargets {
     proteinTarget: Math.round(inp.baseProtein),
     stepsTarget: Math.round(inp.baseSteps),
   };
-  const floor = calorieFloor(inp.weightKg, inp.goalType);
+  const floor = adaptiveFloor(inp);
   const ceiling = calorieCeiling(inp.weightKg, inp.goalType);
   const unchanged = (reason: AdaptReason = "none"): AdaptiveTargets =>
     ({ ...base, reason, note: "", changed: false });

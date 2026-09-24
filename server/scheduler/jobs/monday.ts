@@ -1,3 +1,4 @@
+import { calorieFloor } from "../../targets";
 import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs,
   eq, gte, lt, and, desc, asc, count, sql,
@@ -224,7 +225,7 @@ export async function runDietBreakCheck(): Promise<void> {
       // "Log your food today", a next-move instruction chosen right here. The announcement is the
       // message; what to do about it is canonicalNextMove's decision, on its own schedule, with
       // the client's held constraints in front of it. One sentence removed, no ladder left.
-      const restored = client.dietBreakCalTarget!;
+      const restored = Math.max(calorieFloor(client), client.dietBreakCalTarget!);
       await db.update(users).set({ calorieTarget: restored, dietBreakEndsAt: null, dietBreakCalTarget: null }).where(eq(users.id, client.id));
       const name = (client.name || "").split(" ")[0] || "there";
       await sendWhatsApp(client.phoneNumber, `${name}, diet break is done. Back to the deficit.\n\n*Your targets from today:*\n• Calories: ${restored} kcal/day\n• Protein: ${client.proteinTarget || 120}g/day — unchanged\n\nYour metabolism is reset. Your glycogen is full.`).catch((e: unknown) => console.error("[monday] diet-break restore WA failed:", client.id, e));
