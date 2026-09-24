@@ -364,6 +364,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // swallowed the client's question entirely.
     command: ["bash", "script/red-on-revert-c10-turn-reply-integrity.sh"] },
 
+  { id: "age-gate", title: "Under-18s cannot complete signup or keep being coached",
+    // #267. Needs the real front door (the onboarding state machine and the mid-conversation
+    // gate in routes.ts), users.onboarding_state and the post-transport body.
+    command: ["npx", "tsx", "script/pg-age-gate-acceptance.ts"] },
+
+  { id: "age-gate-reverts", title: "Every #267 age-gate seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-age-gate.sh"] },
+
   { id: "stt-admission", title: "A garbled transcript writes nothing, a real one writes everything",
     // CUT 4 (2026-09-12). The garble floor read `if (voiceQuality && …)` and voiceQuality is set
     // only by Whisper attempt 1 — so Scribe (which runs FIRST in production), the catch retry and
@@ -455,6 +463,14 @@ export const ACCEPTANCES: Acceptance[] = [
 
   { id: "safety-routing-reverts", title: "Every #266 safety-routing seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-safety-routing.sh"] },
+
+  { id: "scope", title: "The coach stays a coach: scope is enforced in code and fails closed",
+    // #321 (Grok §8, audit C2). "Write my CV", crypto and antibiotic asks were answered, and a
+    // classifier error failed OPEN. Needs the real front door and the post-transport bodies.
+    command: ["npx", "tsx", "script/pg-scope-acceptance.ts"] },
+
+  { id: "scope-reverts", title: "Every #321 scope seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-scope.sh"] },
 
   { id: "spend-cap", title: "The AI spend cap fails safe (#340)",
     // A daily account-wide ceiling that stops model calls, an unreadable spend query that means
