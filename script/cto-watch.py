@@ -102,6 +102,26 @@ for n, sha, title in mergeable:
 if merged_now:
     alerts.append("**Auto-merged this run:** " + ", ".join(f"#{n}" for n in merged_now))
 
+merged = [p for p in api("GET", "/pulls?state=closed&sort=updated&direction=desc&per_page=30") if p.get("merged_at")]
+# Free daily sweep items (no AI): the checkable parts of docs/CTO-SWEEP.md.
+try:
+    open_prs_all = api("GET", "/pulls?state=open&per_page=100")
+    pr_text = " ".join((x["title"] or "") + " " + (x["body"] or "") for x in open_prs_all)
+    stale = []
+    for iss in api("GET", "/issues?state=open&per_page=100&sort=created&direction=asc"):
+        if "pull_request" in iss: continue
+        labels = {l["name"] for l in iss["labels"]}
+        if labels & {"harm", "core"} and NOW - ts(iss["created_at"]) > dt.timedelta(days=2) and f"#{iss['number']}" not in pr_text:
+            stale.append(iss["number"])
+    if stale:
+        alerts.append("**Findings older than 2 days with no PR:** " + ", ".join(f"#{n}" for n in stale[:15]))
+    for p2 in [x for x in merged if NOW - ts(x["merged_at"]) < dt.timedelta(hours=24) and x["title"].startswith("[core]")]:
+        fl = api("GET", f"/pulls/{p2['number']}/files?per_page=100")
+        if any(f["filename"].startswith("migrations/") and f["status"] == "added" for f in fl) and "Retires:" not in (p2["body"] or ""):
+            alerts.append(f"**Layer merged:** #{p2['number']} added a store in the last 24 h without saying what it retires.")
+except Exception as e:
+    alerts.append(f"(sweep checks skipped: {str(e)[:80]})")
+
 queue = open("docs/QUEUE.md").read()
 todo = [l[6:] for l in queue.splitlines() if l.startswith("- [ ] ")]
 done = [l[6:] for l in queue.splitlines() if l.startswith("- [x] ")]
