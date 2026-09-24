@@ -14,8 +14,8 @@
 
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "../db";
-import { users, weightLogs, mealLogs, workoutLogs } from "../../shared/schema";
-import { formatOutcomesReport, type ClientOutcome } from "../outcomes";
+import { users, weightLogs, mealLogs, workoutLogs, turnLedger } from "../../shared/schema";
+import { formatOutcomesReport, compareByMove, formatMoveComparison, type ClientOutcome } from "../outcomes";
 import { sastDayKey, sastDaysBetween } from "../sast";
 
 /**
@@ -90,11 +90,39 @@ export async function gatherOutcomes(): Promise<ClientOutcome[]> {
   });
 }
 
+/**
+ * WHICH ADVICE EACH CLIENT ACTUALLY GOT (#369). A move counts only when the turn recommended it
+ * (the canonical decision's disposition is "instructed") AND a reply was delivered — advice the
+ * client never saw cannot have changed anything. Rendered by the test like the four above.
+ */
+export function movesQuery(database: typeof db) {
+  return database.select({ userId: turnLedger.userId, kind: sql<string>`${turnLedger.decision}->>'kind'` })
+    .from(turnLedger)
+    .where(and(
+      sql`${turnLedger.decision}->>'disposition' = 'instructed'`,
+      sql`${turnLedger.decision}->>'kind' IS NOT NULL`,
+      sql`COALESCE(${turnLedger.deliveredBody}, '') <> ''`,
+    ))
+    .groupBy(turnLedger.userId, sql`${turnLedger.decision}->>'kind'`);
+}
+
+export async function gatherMoves(): Promise<Map<string, Set<string>>> {
+  const byUser = new Map<string, Set<string>>();
+  for (const r of await movesQuery(db)) {
+    if (!r.userId || !r.kind) continue;
+    if (!byUser.has(r.userId)) byUser.set(r.userId, new Set());
+    byUser.get(r.userId)!.add(r.kind);
+  }
+  return byUser;
+}
+
 export async function outcomesCommand(message: string): Promise<string> {
   const asked = parseInt((message.match(/\b(\d{1,2})\b/) || [])[1] || "8", 10);
   const atWeeks = Math.max(1, Math.min(52, asked));
   try {
-    return formatOutcomesReport(await gatherOutcomes(), atWeeks);
+    const [all, moves] = await Promise.all([gatherOutcomes(), gatherMoves()]);
+    // Did the advice work? Appended to the same report, under the same honesty rules (#369).
+    return formatOutcomesReport(all, atWeeks) + (all.length ? formatMoveComparison(compareByMove(all, moves, atWeeks), atWeeks) : "");
   } catch (e: any) {
     // SHOW THE REASON. This is a coach-only command, and "try again in a moment" told the founder
     // nothing while the real error sat in a Railway log he was never going to read. A diagnostic

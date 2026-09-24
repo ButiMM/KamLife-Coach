@@ -62,7 +62,7 @@ const BUDGET = {
    * to the true figure in one deliberate commit. Until then this red line is the marker, and it is
    * the ONLY thing in this guard that is red — one red line means something, four never did.
    */
-  regexLiterals: 441,
+  regexLiterals: 440,
   /**
    * GUARD #13 — see unreachableExports above. Sixty-two capabilities cannot be reached by a
    * client message today. This budget is deliberately set THREE BELOW that, so this guard is RED
@@ -279,7 +279,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "so 21 is the smallest truthful current baseline. FROM HERE IT FALLS ONLY.",
   },
   {
-    key: "regexLiterals", from: 318, to: 441, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12, to 441 on 2026-09-15)",
+    key: "regexLiterals", from: 318, to: 440, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12, to 441 on 2026-09-15, to 440 on 2026-09-23)",
     why: "NOT A RAISE — A CORRECTED MEASUREMENT, and the follow-up this budget's own comment "
       + "declared owed on 2026-08-17: \"repair the matcher to see multi-line assignments and "
       + "re-baseline to the true figure in one deliberate commit.\" This is that commit. The "
@@ -629,6 +629,11 @@ const NOT_CLIENT_FACING: Array<[string, string]> = [
  * delivery door as text.
  */
 const NOT_CLIENT_FACING_RETURNS: Array<[string, RegExp, string]> = [
+  [
+    "server/outcomes.ts",
+    /^\s*return `\\n\\n\*By move\* \(clients who got it/,
+    "formatMoveComparison (#369) is the founder's coach-only outcomes report, reached only by the outcomes command; never sent to a client",
+  ],
   [
     "server/index.ts",
     /^\s*return \["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "ECONNRESET", "EHOSTUNREACH", "EAI_AGAIN"\]\.includes\(code\)/,

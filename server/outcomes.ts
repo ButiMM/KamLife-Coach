@@ -194,6 +194,44 @@ export function summariseCohort(all: ClientOutcome[], atWeeks: number, label = `
   };
 }
 
+/**
+ * DID THE ADVICE WORK? (#369) For each move the coach actually recommended and delivered (the
+ * turn's canonical decision `kind`, disposition "instructed"), compare the clients who got it with
+ * the clients who did not, on the same goal verdict as everything above. Pure; the caller gathers
+ * which client got which move.
+ *
+ * Same honesty rules: a side with fewer than MIN_SAMPLE measured clients, or one mostly unmeasured,
+ * gets no verdict at all — "too few to say" is the answer, not a percentage. And it is a comparison,
+ * not a proof: clients who received a move differ in other ways, so "better" means "worth testing".
+ */
+export interface MoveComparison {
+  kind: string;
+  got: CohortSummary;
+  didnt: CohortSummary;
+  verdict: "better" | "worse" | "same" | "too_few";
+}
+/** A gap under this in success rate is noise at these sample sizes. */
+export const MOVE_GAP = 0.15;
+
+export function compareByMove(all: ClientOutcome[], movesByUser: Map<string, Set<string>>, atWeeks: number): MoveComparison[] {
+  const kinds = [...new Set([...movesByUser.values()].flatMap(s => [...s]))].sort();
+  return kinds.map(kind => {
+    const got = summariseCohort(all.filter(o => movesByUser.get(o.userId)?.has(kind)), atWeeks, kind);
+    const didnt = summariseCohort(all.filter(o => !movesByUser.get(o.userId)?.has(kind)), atWeeks, `not ${kind}`);
+    const judgeable = !got.tooFewToJudge && !didnt.tooFewToJudge && !got.blindSpot && !didnt.blindSpot;
+    const gap = got.successRate - didnt.successRate;
+    const verdict = !judgeable ? "too_few" : gap >= MOVE_GAP ? "better" : gap <= -MOVE_GAP ? "worse" : "same";
+    return { kind, got, didnt, verdict } as MoveComparison;
+  }).filter(c => c.got.n > 0);
+}
+
+export function formatMoveComparison(rows: MoveComparison[], atWeeks: number): string {
+  if (rows.length === 0) return `\n\n*By move:* no delivered advice on record for clients at week ${atWeeks} yet.`;
+  const word = { better: "✅ did better", worse: "🚨 did worse", same: "no clear difference", too_few: "too few to say" } as const;
+  return `\n\n*By move* (clients who got it vs those who didn't — a comparison, not proof):\n` + rows.map(r =>
+    `• ${r.kind}: ${r.got.success}/${r.got.measured} vs ${r.didnt.success}/${r.didnt.measured} — ${word[r.verdict]}`).join("\n");
+}
+
 /** Per-goal breakdown — this is what tells you the product works for one goal and not another. */
 export function byGoal(all: ClientOutcome[], atWeeks: number): CohortSummary[] {
   const goals = [...new Set(all.map(o => o.goal))];
