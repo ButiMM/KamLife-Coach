@@ -62,13 +62,3 @@ export async function claimOncePerDay(userId: string, key: string): Promise<bool
   }
 }
 
-/** Read-only check. Prefer claimOncePerDay — checking then acting has a race between the two. */
-export async function alreadyDoneToday(userId: string, key: string): Promise<boolean> {
-  if (!userId) return false;
-  return seen.has(cacheKey(userId, key, sastDayKey()));
-}
-
-/** Test seam — the cache is process-wide and would leak between cases otherwise. */
-export function _resetOnceDailyCache(): void {
-  seen.clear();
-}

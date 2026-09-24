@@ -50,14 +50,13 @@ The project uses a single-repo structure with three main directories:
   - `step_logs` — Daily step count logs per user
   - `weekly_checkins` — Weekly check-in responses
   - `chat_history` — Log of all WhatsApp conversations with intent classification
-  - `conversations` / `messages` — Replit AI integration chat storage (separate from coaching chat)
 - **Migrations**: Managed via `drizzle-kit push` (schema push approach, not migration files)
 - **Connection**: Uses `pg` Pool with Drizzle wrapper
 
 ### Storage Layer
-- `server/storage.ts` defines an `IStorage` interface with a `DatabaseStorage` implementation
-- All database operations go through this storage abstraction
-- Supports user CRUD, log creation/retrieval, weekly check-ins, chat logging, and flagged user queries
+- There is no storage abstraction: handlers query through Drizzle (`server/db.ts`) directly.
+  The old `server/storage.ts` (`IStorage`) and the Replit `conversations`/`messages` chat tables
+  were unused and were deleted in #352 (migration 0016).
 
 ### Key Design Decisions
 1. **Shared API Contract**: The `shared/routes.ts` file acts as a typed contract between frontend and backend, with Zod schemas for request/response validation. The `buildUrl` helper handles parameterized routes.

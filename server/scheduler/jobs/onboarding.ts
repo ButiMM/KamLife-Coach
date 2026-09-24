@@ -1,11 +1,10 @@
 import {
-  db, users, chatHistory, stepLogs, weightLogs,
-  eq, gte, and, asc, desc,
-  sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot,
-  getActiveClients, isPaused, programmeDaysSince, sastDayStart,
+  db, users, chatHistory, stepLogs,
+  eq, gte, and,
+  sendWhatsApp, canSendProactive, claimDailySlot,
+  getActiveClients, isPaused, programmeDaysSince,
 } from "../shared";
 import { getGoalProfile } from "../../goal-profiles";
-import { getWeightTruth } from "../../day-ledger";
 
 // One-time catch-up: send step sync guide to any active client who has never
 // received it (existing beta testers signed up before Day 3 auto-message was added).
@@ -95,96 +94,5 @@ export async function runEarlyOnboarding(): Promise<void> {
         await sendWhatsApp(client.phoneNumber, `One week done, ${name}. Seven days of showing up.\n\n${workoutsDone >= 3 ? `${workoutsDone} sessions this week — you are on track.` : workoutsDone > 0 ? `${workoutsDone} session${workoutsDone !== 1 ? "s" : ""} done — aim for ${client.trainingDaysPerWeek || 3} next week.` : "No sessions logged yet — this week, do one. Just one."}\n\n*What happens in Week 2:*\nYour body starts adapting. Energy improves. Soreness decreases. The habit begins to form. Most ${goal} results show at Week 4-6 — you are building the foundation right now.\n\nKeep going — just tell me what you need, whenever you need it.`);
       }
     } catch (err) { console.error(`[SCHEDULER] Early onboarding error — ${client.phoneNumber}:`, err); }
-  }
-}
-
-export async function runMonthlyMeasurements(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Monthly measurements");
-  const clients = await getActiveClients();
-  const threeMonthsAgo = new Date(Date.now() - 90 * 86_400_000);
-  const lastMonthStart = new Date(Date.now() - 35 * 86_400_000);
-
-  for (const client of clients) {
-    if (isPaused(client)) continue;
-    if (!(await claimDailySlot(client.id, "monthly_measurements"))) continue;
-    try {
-      const name = (client.name || "there").split(" ")[0];
-      // THE SCALE COMES FROM ITS OWNER (2026-08-25, P0-5 · weight). Two direct weight_logs reads
-      // fed "Scale says you're down 1.4kg since we started" into a proactive send — and proactive
-      // text never passes the reactive mouth, so the do-not-mention strip could not reach it
-      // either. Nothing in this file had ever asked. A withheld client keeps photo day and the
-      // energy-and-clothes question, which is the part of this message that was never about a
-      // number anyway.
-      const wt = await getWeightTruth(client, { windowDays: 92 }).catch(() => null);
-      const contextLine = wt?.known && wt.changeKg !== null && Math.abs(wt.changeKg) > 0
-        ? `\n\nScale says you're ${wt.changeKg < 0 ? `down ${Math.abs(wt.changeKg).toFixed(1)}kg` : `up ${wt.changeKg.toFixed(1)}kg`} since we started. ${
-            ((client.goalType || "fat_loss") === "fat_loss" && wt.changeKg < 0)
-            || ((client.goalType || "fat_loss") === "muscle_gain" && wt.changeKg > 0)
-              ? "That's the right direction." : "Let's look at what needs to change."}`
-        : "";
-      const msg = wt?.currentKg != null
-        ? `${name}, it's the 1st — *photo day* 📸\n\nWeigh in this morning (before food, after bathroom) and send me the number.\n\nThen send a *progress photo* — front on, good light, same spot as last month, relaxed. And tell me how your *energy and clothes* are feeling.${contextLine}`
-        : `${name}, it's the 1st — *photo day* 📸\n\nStep on the scale this morning, before food, after bathroom. Send me the number.\n\nThen send a *progress photo* — front on, good light, relaxed — and tell me how your *energy* is and how your *clothes* are fitting.\n\nYour shape and your energy show the change long before the scale does. No tape measure — we go on how you look and feel.`;
-      await sendWhatsApp(client.phoneNumber, msg);
-    } catch (err) { console.error(`[SCHEDULER] Monthly measurements error — ${client.phoneNumber}:`, err); }
-  }
-}
-
-export async function runReferralNudge(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Referral nudge");
-  const clients = await getActiveClients();
-
-  for (const client of clients) {
-    if (isPaused(client)) continue;
-    try {
-      const days = programmeDaysSince(client.programmeStartDate);
-      if (![7, 30, 60, 90].includes(days)) continue;
-      if (!client.referralCode) continue;
-      const name = client.name || "there";
-      const code = client.referralCode;
-      const msgs: Record<number, string> = {
-        7: `${name}, one week in and you are still here — most people are not. If you know someone who needs this, your referral code is *${code}*. When a friend joins, you get a free month. Share it with one person today.`,
-        30: `${name}, 30 days with Coach K. You are proof this works. Someone in your contacts needs to hear about this — share your code *${code}* and let them start where you did. One message, one person.`,
-        60: `${name}, 60 days in. Two months of real work. People around you have noticed. When they ask what you are doing, tell them — and share code *${code}*. Every friend who joins earns you a free month. No limit.`,
-        90: `${name}, 90 days. A quarter year of consistency. That is rare and worth talking about. Your code is *${code}* — share it with someone who has been talking about getting fit. They get a cheaper start. You get rewarded.`,
-      };
-      if (!(await claimDailySlot(client.id, "referral_nudge"))) continue;
-      await sendWhatsApp(client.phoneNumber, msgs[days]);
-    } catch (err) { console.error(`[SCHEDULER] Referral nudge error — ${client.phoneNumber}:`, err); }
-  }
-}
-
-export async function runGoalReassessment(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Goal reassessment check");
-  const clients = await getActiveClients();
-
-  for (const client of clients) {
-    if (isPaused(client)) continue;
-    try {
-      const days = programmeDaysSince(client.programmeStartDate);
-      if (![30, 60, 90].includes(days)) continue;
-      const name = client.name || "there";
-      const goal = client.goalType || "fat_loss";
-      const profile = getGoalProfile(goal);
-      const goalLabelStr = profile.label.toLowerCase();
-      // Health-led clients (weightIsGoal=false) are NOT chasing the scale — the milestone check-in
-      // asks how they FEEL and whether the habits stuck, never "send me your weight" (2026-07-22).
-      const chasesWeight = profile.weightIsGoal;
-      if (!(await claimDailySlot(client.id, "goal_reassessment"))) continue;
-      if (days === 30) {
-        await sendWhatsApp(client.phoneNumber, chasesWeight
-          ? `${name}, 30 days in. Time to check in properly.\n\nWeigh yourself this morning and send me the number. Also — is your goal still ${goalLabelStr}? Or has something shifted? One reply: your weight in kg, and yes or no if the goal is the same.`
-          : `${name}, 30 days in. Time to check in properly.\n\nForget the scale — tell me how you FEEL compared to a month ago. Energy? Sleep? Are the habits starting to feel automatic? And is your goal still ${goalLabelStr}? Reply and let's take stock.`);
-      } else if (days === 60) {
-        const weight = client.currentWeight ? `You started at ${client.currentWeight}kg.` : "";
-        await sendWhatsApp(client.phoneNumber, chasesWeight
-          ? `${name}, 60 days. ${weight} Two months of work deserves a proper check-in. Send me your current weight and I will tell you exactly how you are tracking against your ${goalLabelStr} goal. One number, right now.`
-          : `${name}, 60 days. Two months of showing up. Tell me the real wins — more energy, better sleep, moving easier, a habit that stuck? That's what we're building. What's changed for you?`);
-      } else if (days === 90) {
-        await sendWhatsApp(client.phoneNumber, chasesWeight
-          ? `${name}, 90 days — a full quarter. This is the reset point. Send me your weight, and tell me if your goal needs to change. People often start on fat loss and find they want to shift toward building muscle once they have lost the first round. Where are you now?`
-          : `${name}, 90 days — a full quarter of looking after yourself. This is the reset point. Tell me how you're feeling and whether your goal still fits, or if you want to aim at something new now that the habits are in. Where are you at?`);
-      }
-    } catch (err) { console.error(`[SCHEDULER] Goal reassessment error — ${client.phoneNumber}:`, err); }
   }
 }

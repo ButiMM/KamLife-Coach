@@ -9,13 +9,15 @@
  * send time, and per-message logging isn't worth the write). costToServeThisMonth sums all three
  * into rand, so a member bleeding margin shows up ranked and flagged.
  *
- * Pure math is unit-tested; the DB reads fail-open (a cost read must never break a reply).
+ * Pure math is unit-tested; the dashboard reads fail-open (a cost read must never break a reply).
+ * The SPEND CAP at the bottom is the exception: it fails SAFE (#340).
  */
 
 import { db } from "./db";
-import { gptCosts, chatHistory } from "../shared/schema";
+import { gptCosts, chatHistory, adminEvents } from "../shared/schema";
 import { eq, gte, and, sql, isNotNull } from "drizzle-orm";
 import { PRICING } from "../shared/pricing";
+import { sastDayStart } from "./utils";
 
 // ── Rate assumptions (estimates until real invoices land — see the finance deep-dive) ──
 export const USD_ZAR = 18.5;                       // same rate the north-star endpoint uses
@@ -198,5 +200,91 @@ export async function memberCostThisMonth(userId: string): Promise<MemberCost | 
   } catch (e) {
     console.warn("[cost] member cost read failed:", (e as any)?.message || e);
     return null;
+  }
+}
+
+/**
+ * THE SPEND CAP FAILS SAFE (#340). A cost query that errors used to mean "no limit", so a failing
+ * query plus a public number anyone can message meant unbounded OpenAI spend. Now:
+ *   - the account-wide daily ceiling (GLOBAL_AI_DAILY_HARD_CAP_USD, defaulting to the watchdog's
+ *     soft cap) is a HARD stop, checked before the per-client limits and cached for a minute;
+ *   - any error reading spend counts as "over", so the client gets the short degraded reply the
+ *     cap already has, never an unbounded model call;
+ *   - each distinct failure is recorded once an hour in admin_events for the founder's view.
+ */
+const capAlertedAt = new Map<string, number>();
+async function recordCapEvent(action: string, reason: string, meta: Record<string, unknown> = {}): Promise<void> {
+  const last = capAlertedAt.get(action) ?? 0;
+  if (Date.now() - last < 3600_000) return;
+  capAlertedAt.set(action, Date.now());
+  console.error(`[AI_SPEND_CAP] ${action}: ${reason}`);
+  await db.insert(adminEvents).values({ action, reason, meta }).catch(() => {});
+}
+let globalCapCache: { at: number; ok: boolean } | null = null;
+export function _resetSpendCapCache(): void { globalCapCache = null; capAlertedAt.clear(); }
+export async function isUnderGlobalDailyCap(): Promise<boolean> {
+  if (globalCapCache && Date.now() - globalCapCache.at < 60_000) return globalCapCache.ok;
+  const raw = parseFloat(process.env.GLOBAL_AI_DAILY_HARD_CAP_USD || process.env.GLOBAL_AI_DAILY_SOFT_CAP_USD || "15");
+  const capUsd = isFinite(raw) && raw > 0 ? raw : 15;
+  let ok: boolean;
+  try {
+    const r = await db.select({ total: sql<string>`COALESCE(SUM(cost_usd::numeric), 0)` }).from(gptCosts).where(gte(gptCosts.createdAt, sastDayStart()));
+    const spent = parseFloat(r[0]?.total || "0");
+    ok = spent < capUsd;
+    if (!ok) await recordCapEvent("ai_spend_global_cap_hit", `spent $${spent.toFixed(2)} today, ceiling $${capUsd}`, { spent, capUsd });
+  } catch (e) {
+    ok = false;
+    await recordCapEvent("ai_spend_cap_unreadable", `cost query failed: ${(e as Error)?.message || e}`);
+  }
+  globalCapCache = { at: Date.now(), ok };
+  return ok;
+}
+
+export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
+  if (!(await isUnderGlobalDailyCap())) return false;
+  try {
+    const todayStart = sastDayStart();
+    const result = await db.select({ count: sql`count(*)` })
+      .from(chatHistory)
+      .where(and(
+        eq(chatHistory.userId, userId),
+        gte(chatHistory.createdAt, todayStart),
+        sql`message_in IS NOT NULL AND message_in != ''`
+      ));
+    const count = parseInt(String(result[0]?.count || 0));
+    // 40 locked out a stress-testing (voice-heavy) client mid-conversation. 80 mini
+    // replies ≈ $0.09/day worst case — the monthly $ cap below is the real margin guard.
+    if (count >= 80) return false;
+    // Monthly AI spend cap — env var AI_SPEND_CAP_USD_PER_USER_PER_MONTH (default $5)
+    // Prevents a single power user from consuming more than the revenue they generate.
+    return isUnderMonthlyCostCap(userId);
+  } catch (e) {
+    await recordCapEvent("ai_spend_cap_unreadable", `call-count query failed: ${(e as Error)?.message || e}`);
+    return false; // fail SAFE (#340): the short degraded reply, never an unbounded model call
+  }
+}
+
+async function isUnderMonthlyCostCap(userId: string): Promise<boolean> {
+  const capUsd = parseFloat(process.env.AI_SPEND_CAP_USD_PER_USER_PER_MONTH || "5");
+  if (!isFinite(capUsd) || capUsd <= 0) return true; // cap disabled
+  try {
+    const monthStart = new Date();
+    monthStart.setUTCDate(1);
+    monthStart.setUTCHours(0, 0, 0, 0);
+    const result = await db.select({ total: sql<string>`COALESCE(SUM(cost_usd::numeric), 0)` })
+      .from(gptCosts)
+      .where(and(
+        eq(gptCosts.userId, userId),
+        gte(gptCosts.createdAt, monthStart),
+      ));
+    const spent = parseFloat(result[0]?.total || "0");
+    if (spent >= capUsd) {
+      console.warn(`[AI_SPEND_CAP] user ...${userId.slice(-6)} hit $${capUsd} cap (spent $${spent.toFixed(4)} this month)`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    await recordCapEvent("ai_spend_cap_unreadable", `monthly cost query failed: ${(e as Error)?.message || e}`);
+    return false; // fail SAFE (#340): the short degraded reply, never an unbounded model call
   }
 }

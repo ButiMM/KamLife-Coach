@@ -107,7 +107,7 @@ export function coerceUnderstanding(raw: any, fallbackName = "there"): Understan
 }
 
 export function persistableUnderstanding(s: UnderstandingState): Pick<UnderstandingState, "profile" | "observations"> { return { profile: s.profile, observations: s.observations }; }
-export function serializeUnderstanding(s: UnderstandingState): string { return JSON.stringify(s); }
+
 export function parseUnderstanding(json: string | null | undefined, fallbackName = "there"): UnderstandingState {
   if (!json) return defaultUnderstanding(fallbackName);
   try { return coerceUnderstanding(JSON.parse(json), fallbackName); } catch { return defaultUnderstanding(fallbackName); }
