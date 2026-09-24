@@ -1,18 +1,14 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
-import { sastDayKey, sastDayKeyBefore, sastHour } from "../sast";
+import { sastDayKey, sastDayKeyBefore } from "../sast";
 import { neverSilentLine } from "../reply-hygiene";
 import { carriesFeelingClause } from "../unlogged-notice";
-import { claimOncePerDay } from "../once-daily";
-import { swapNudge } from "../food-swaps";
 import { enforceCoachGuardrails } from "../coach-guardrails";
-import { educationNote, remainingInMeals, weeklyNetWording, dinnerIsLogged, dinnerCloseLine } from "../education";
-import { getNumbersMode, stripFoodLineNumbers, plainProteinNudge } from "../numbers-mode";
-import { stepBurnKcal } from "../targets";
+import { weeklyNetWording } from "../education";
+import { getNumbersMode } from "../numbers-mode";
 import { humanizeReply } from "../reply-hygiene";
 import { displayFoodName } from "../food-naming";
 import { guardMalformed, safeFallback, recordGuardResult } from "../malformed-guard";
 import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../food-fuzzy";
-import { usesMacroTargets } from "../goal-profiles";
 import { db } from "../db";
 import { mealLogs, chatHistory, users } from "../../shared/schema";
 import { eq, and, gte, sql, desc, inArray, isNotNull } from "drizzle-orm";
@@ -48,17 +44,6 @@ setInterval(() => {
 }, 60_000).unref();
 
 // Track streak celebration shown today — prevents it firing on every meal log
-const _streakShownToday = new Map<string, string>();
-
-
-export function hasShownStreakToday(userId: string): boolean {
-  return _streakShownToday.get(userId) === sastDayKey();
-}
-
-export function markStreakShownToday(userId: string): void {
-  _streakShownToday.set(userId, sastDayKey());
-}
-
 export async function computeFoodLogStreak(userId: string): Promise<number> {
   try {
     const sixtyDaysAgo = new Date(Date.now() - 60 * 86_400_000);
@@ -147,7 +132,6 @@ export function portionDefaultCount(desc: string): number {
   const n = m ? parseFloat(m[1]) : 1;
   return n > 0 ? n : 1;
 }
-
 
 // Sugary sodas / energy drinks that have a true zero-calorie version. Matched against
 // a food entry's name + aliases, scoped to drink categories only, so real meals are never

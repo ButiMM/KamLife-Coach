@@ -963,51 +963,7 @@ setInterval(() => {
   }
 }, 15 * 60_000);
 
-export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
-  try {
-    const todayStart = sastDayStart();
-    const result = await db.select({ count: sql`count(*)` })
-      .from(chatHistory)
-      .where(and(
-        eq(chatHistory.userId, userId),
-        gte(chatHistory.createdAt, todayStart),
-        sql`message_in IS NOT NULL AND message_in != ''`
-      ));
-    const count = parseInt(String(result[0]?.count || 0));
-    // 40 locked out a stress-testing (voice-heavy) client mid-conversation. 80 mini
-    // replies ≈ $0.09/day worst case — the monthly $ cap below is the real margin guard.
-    if (count >= 80) return false;
-    // Monthly AI spend cap — env var AI_SPEND_CAP_USD_PER_USER_PER_MONTH (default $5)
-    // Prevents a single power user from consuming more than the revenue they generate.
-    return isUnderMonthlyCostCap(userId);
-  } catch {
-    return true;
-  }
-}
-
-async function isUnderMonthlyCostCap(userId: string): Promise<boolean> {
-  const capUsd = parseFloat(process.env.AI_SPEND_CAP_USD_PER_USER_PER_MONTH || "5");
-  if (!isFinite(capUsd) || capUsd <= 0) return true; // cap disabled
-  try {
-    const monthStart = new Date();
-    monthStart.setUTCDate(1);
-    monthStart.setUTCHours(0, 0, 0, 0);
-    const result = await db.select({ total: sql<string>`COALESCE(SUM(cost_usd::numeric), 0)` })
-      .from(gptCosts)
-      .where(and(
-        eq(gptCosts.userId, userId),
-        gte(gptCosts.createdAt, monthStart),
-      ));
-    const spent = parseFloat(result[0]?.total || "0");
-    if (spent >= capUsd) {
-      console.warn(`[AI_SPEND_CAP] user ...${userId.slice(-6)} hit $${capUsd} cap (spent $${spent.toFixed(4)} this month)`);
-      return false;
-    }
-    return true;
-  } catch {
-    return true; // fail open — never block coaching due to a cost query failure
-  }
-}
+export { isUnderGPTCallLimit, isUnderGlobalDailyCap, _resetSpendCapCache } from "./cost-tracking"; // the spend cap fails safe (#340)
 
 // Fixed slice of the static brain kept on the hot path: voice + coaching framework +
 // the CLAUDE.md-protected goal-aware food logic (ends ~18.4k chars), excluding the

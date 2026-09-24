@@ -164,22 +164,3 @@ export async function assertSafeMediaUrl(rawUrl: string): Promise<URL> {
   return url;
 }
 
-/**
- * Convenience wrapper: validate then fetch with an AbortController timeout.
- * The primary public API is assertSafeMediaUrl(); use this where a guarded fetch
- * with a hard timeout is wanted in one call.
- */
-export async function safeFetchMedia(
-  rawUrl: string,
-  init?: RequestInit,
-  timeoutMs = 12000,
-): Promise<Response> {
-  await assertSafeMediaUrl(rawUrl);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(rawUrl, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}

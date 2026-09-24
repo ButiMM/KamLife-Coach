@@ -398,9 +398,6 @@ export function provenanceStats(): { checked: number; rewritten: number; rate: n
     byKind: [..._byKind.entries()].sort((a, b) => b[1] - a[1]),
   };
 }
-
-export function _resetProvenanceStats(): void { _checked = 0; _rewritten = 0; _byKind.clear(); }
-
 /** One line for the founder-facing audit — the calibration metric. */
 export function provenanceStatsLine(): string {
   const s = provenanceStats();
@@ -552,7 +549,3 @@ export async function shadowDoor(
   return true;
 }
 
-/** Captured-since-restart, for the founder-facing self-check. */
-export function shadowStats(): { on: boolean; captured: number } {
-  return { on: shadowMode(), captured: _shadowCaptured };
-}
