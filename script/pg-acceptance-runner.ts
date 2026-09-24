@@ -456,6 +456,14 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "safety-routing-reverts", title: "Every #266 safety-routing seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-safety-routing.sh"] },
 
+  { id: "scope", title: "The coach stays a coach: scope is enforced in code and fails closed",
+    // #321 (Grok §8, audit C2). "Write my CV", crypto and antibiotic asks were answered, and a
+    // classifier error failed OPEN. Needs the real front door and the post-transport bodies.
+    command: ["npx", "tsx", "script/pg-scope-acceptance.ts"] },
+
+  { id: "scope-reverts", title: "Every #321 scope seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-scope.sh"] },
+
   { id: "spend-cap", title: "The AI spend cap fails safe (#340)",
     // A daily account-wide ceiling that stops model calls, an unreadable spend query that means
     // "over", and the meaning engine under the same cap. Needs gpt_costs, admin_events, the bodies.

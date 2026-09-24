@@ -4,11 +4,11 @@ export interface MedicationContextDecision {
   present: boolean;
   medicationClass: "glp1" | "other" | null;
   unsafeRequest: boolean;
-  reason: "dosing" | "titration" | "stopping" | "sourcing" | "adverse_reaction" | null;
+  reason: "dosing" | "titration" | "stopping" | "sourcing" | "adverse_reaction" | "choosing" | null;
 }
 
 const GLP1_RE = /\b(ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide|liraglutide|dulaglutide|saxenda|victoza|rybelsus)\b/i;
-const MED_RE = /\b(medication|meds?|medicine|insulin|tablets?|pills?|prescription|treatment)\b/i;
+const MED_RE = /\b(medication|meds?|medicine|insulin|tablets?|pills?|prescription|treatment|antibiotics?|painkillers?|antidepressants?)\b/i;
 
 export function detectMedicationContext(message: string): MedicationContextDecision {
   const m = String(message || "").toLowerCase();
@@ -32,6 +32,11 @@ export function detectMedicationContext(message: string): MedicationContextDecis
   }
   if (/\b(side effects?|adverse reaction|bad reaction|allergic|vomiting|severe nausea|severe abdominal pain|dehydration)\b/i.test(m) && glp1) {
     return { present: true, medicationClass: "glp1", unsafeRequest: true, reason: "adverse_reaction" };
+  }
+  // CHOOSING A MEDICINE (#321): "what antibiotic should I take for a sore throat" asks the coach to
+  // prescribe. Not an emergency, not coaching — the scope gate points it to a doctor or pharmacist.
+  if (/\b(what|which)\s+(antibiotics?|medication|medicine|meds|pills?|tablets?|painkillers?|antidepressants?)\b[^.!?]{0,40}\b(should|can|must|do)\s+i\s+(take|use|get|buy)\b/i.test(m)) {
+    return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "choosing" };
   }
   return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: false, reason: null };
 }
