@@ -116,6 +116,10 @@ import subprocess
 try:
     mouths = json.loads(subprocess.run(["python3", "script/mouth-count.py", "--json"], capture_output=True, text=True).stdout)
     mouth_line = "**Mouths on main:** " + ", ".join(f"{k} {v}" for k, v in mouths.items())
+    import pathlib
+    srv = sum(len(f.read_text(errors="ignore").splitlines()) for f in pathlib.Path("server").rglob("*.ts"))
+    tst = sum(len(f.read_text(errors="ignore").splitlines()) for f in pathlib.Path("script").rglob("*") if f.is_file() and f.suffix in (".ts", ".sh", ".mjs", ".py"))
+    mouth_line += f"\n\n**Size:** server {srv:,} lines (target ≤25,000 once the new core has switched), tests {tst:,} lines (target ≤20,000). Baseline 24 Sep: server 74,888, tests 57,037."
 except Exception:
     mouth_line = "**Mouths on main:** unavailable"
 PROD = "https://kamlife-coach-production.up.railway.app/health"
