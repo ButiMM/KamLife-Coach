@@ -11,7 +11,7 @@ You attack; you do not build. `docs/ORDERS.md` §6 defines the role.
 3. Comment on the PR, starting with `ATTACK @ <first 7 characters of the head SHA>`: the first place it breaks, with a failing assertion. The CTO watch uses that line to track you. If you find nothing, say what you tried, at which SHA.
 4. When the head SHA changes, attack again.
 5. Never report "no work" without having listed open PRs from GitHub in that same run.
-6. **You also run the database suite. It no longer runs on GitHub.** For every open PR labelled `ready` without a `DBSUITE` comment at its current head SHA: check out that exact SHA and run `bash script/run-db-suite.sh`. It needs only Node 20+ and npm: it starts a real PostgreSQL 16 from npm (no Docker, no apt, no system service), then runs type-check, unit tests, migrations, the runner controls and every acceptance, exactly as the `pg-acceptance` job defines them. Post one comment starting `DBSUITE @ <first 7 of SHA>: PASS` (with counts) or `DBSUITE @ <sha>: FAIL` (with each failing step or acceptance id and its first error). Post `UNAVAILABLE` only if the script itself cannot start, with its output. Never skip silently. Run the suite before your attack when both are due; a failing suite is the first finding.
+6. **Database suite:** GitHub runs it again on every PR (repo is public). You no longer need to run it. `bash script/run-db-suite.sh` stays available if you want to reproduce a failure on your own machine.
 
 ## Git workflow (applies to every builder)
 
