@@ -36,7 +36,7 @@
 
 import { chooseAction, decideProactive, formatOneAction, underPolicy, type OneAction } from "../one-action";
 import { readHeldConstraints, NO_CONSTRAINTS, type HeldConstraints } from "../held-constraints";
-import { loadProactiveState } from "./shared";
+import { loadProactiveState, recordWeighAsk } from "./shared";
 import { foodConstraints } from "../food-swaps";
 import { sastDayKey } from "../sast";
 import { ensureOpenTrainingLoop, ensureOpenWeekendInvestigation, loadOpenTrainingLoop, weekendInvestigationAnswered } from "../memory";
@@ -57,6 +57,7 @@ export interface CanonicalMove {
 /** Persist a follow-up only after a proactive sender has actually handed its move to outbound. */
 export async function recordCanonicalMoveOutbound(client: any, move: CanonicalMove, delivery: DeliveryResult) {
   if (!deliveryAccepted(delivery)) return null;
+  if (move.action.kind === "weigh") return recordWeighAsk(client.id);
   if (move.action.kind === "train") return ensureOpenTrainingLoop(
     client, sastDayKey(), "proactive", Date.now(),
     move.action.intervention === "minimum_training" ? "minimum" : "standard",
@@ -296,7 +297,6 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
     because: "Adjudicated 2026-09-05 (#180). Read the message rather than the job name: it lists the three ways to get steps into the product — type a number, send a screenshot, reply 'connect steps'. It teaches the product's surface, which is runEarlyOnboarding's reading, and never tells anyone to walk." },
 
   // ── trial.ts / reminders.ts / narrative.ts / media-recovery.ts / spend-watchdog.ts ─────────
-  { job: "runTrialCountdown", file: "trial", cls: "OPERATIONAL", because: "Trial expiry and conversion." },
   { job: "runSpendWatchdog", file: "spend-watchdog", cls: "OPERATIONAL", because: "Cost alert to the founder." },
   { job: "runMediaJobRecovery", file: "media-recovery", cls: "OPERATIONAL",
     because: "Apologises for a failed media job and asks for a resend. A system apology, not coaching." },

@@ -112,7 +112,9 @@ for (const [said, what] of [
 ] as Array<[string, string]>) {
   const c = await client({}, { meals: [3], weights: WEIGHED });
   const reply = await say(c.phone, said);
-  chk(ASKS.test(reply), `${what} from a sparse client ends in the question that would unlock coaching`,
+  // #275 REVERSES THIS HALF OF #203: a client reporting to us is talking to us, and the tracker
+  // ask ("tell me what you ate today") is no longer stapled to their receipt.
+  chk(!ASKS.test(reply), `${what} from a sparse client is not answered with a tracker ask (#275)`,
     JSON.stringify(reply.slice(0, 220)));
   chk(/8\s?000|87\.4/.test(reply), `…and the receipt they earned is still there`, reply.slice(0, 120));
 }
@@ -134,7 +136,7 @@ for (const [said, what] of [
   // the second is denied is denied by the UPDATE and by nothing else.
   _resetOutboundDedupe();
   const secondFresh = await say(c.phone, "87.4kg this morning");
-  chk(ASKS.test(first) && ASKS.test(secondFresh),
+  chk(ASKS.test(first) === ASKS.test(secondFresh) && /88\.1/.test(first) && /87\.4/.test(secondFresh),
     "the second weigh-in of a day is coached exactly like the first",
     `first=${JSON.stringify(first.slice(0, 90))} second=${JSON.stringify(secondFresh.slice(0, 90))}`);
 
@@ -143,7 +145,7 @@ for (const [said, what] of [
   const c2 = await client({}, { meals: [3], weights: WEIGHED });
   const a = await say(c2.phone, "88.1kg this morning");
   const b = await say(c2.phone, "87.4kg this morning");
-  chk(ASKS.test(a) && /87\.4/.test(b),
+  chk(/88\.1/.test(a) && /87\.4/.test(b),
     "…and back to back the second is still answered with their figure",
     `first=${JSON.stringify(a.slice(0, 90))} second=${JSON.stringify(b.slice(0, 90))}`);
   chk(!ASKS.test(b),
@@ -157,7 +159,7 @@ for (const [said, what] of [
   const reply = await say(c.phone,
     "Monday I had pap and chicken. Tuesday oats and a chicken salad. Wednesday eggs and rice.");
   chk(/Logged 3 days/i.test(reply), "three days reported at once are still all logged", reply.slice(0, 90));
-  chk(ASKS.test(reply), "…and the catch-up ends with the one question that moves the decision on",
+  chk(!ASKS.test(reply), "…and the catch-up is not answered with a tracker ask (#275)",
     JSON.stringify(reply.slice(-140)));
 }
 
@@ -229,8 +231,8 @@ REAL("\n=== WEIGH-IN RECENCY ===");
   const reply = await say(c.phone, "I walked 8000 steps today");
   chk(!/stand on a scale/i.test(reply),
     "a client who weighed TODAY, once, is not asked to weigh again", JSON.stringify(reply.slice(0, 200)));
-  chk(/tell me what you ate today/i.test(reply),
-    "…and the food question is asked instead — the honest gap", JSON.stringify(reply.slice(0, 200)));
+  chk(!/tell me what you ate today/i.test(reply),
+    "…nor told to log — they are talking to us (#275)", JSON.stringify(reply.slice(0, 200)));
 }
 
 // (2) ONE READING, GENUINELY STALE. The same shape, nine days old: the ask is now the right one.
@@ -275,8 +277,10 @@ REAL("\n=== REACTIVE AND PROACTIVE AGREE ===");
   const [u] = await db.select().from(schema.users).where(eq(schema.users.id, c.id)).limit(1);
   const reactive = await canonicalDecision(u, "I walked 8000 steps today");
   const proactive = await canonicalNextMove(u, { hour: sastHour() });
-  chk(reactive.kind === "log" || reactive.kind === "weigh",
-    "the reactive gate investigates rather than holding", `kind=${reactive.kind}`);
+  // #275: BOTH paths now know this client is present — one typing, one reading today's message —
+  // and neither hands them the tracker ask. That, not an identical `kind`, is the contract now.
+  chk(reactive.kind !== "log" && reactive.kind !== "come_back",
+    "the reactive gate does not ask a present client to log", `kind=${reactive.kind}`);
   // BOTH INVESTIGATE — and that, not an identical `kind`, is the contract.
   //
   // Asserting kind equality here failed on `reactive=log proactive=come_back`, and chasing it
@@ -288,12 +292,9 @@ REAL("\n=== REACTIVE AND PROACTIVE AGREE ===");
   // The two paths are therefore answering one question under two genuinely different facts, and
   // both reach for the SAME missing measurement. What #203 forbids is one path investigating while
   // the other holds, and that is what is asserted.
-  chk(proactive.action.kind !== "hold",
-    "…and the proactive path investigates too, rather than holding on the same rows",
-    `reactive=${reactive.kind} proactive=${proactive.action.kind}`);
-  chk(/log|eat|meal/i.test(proactive.action.todo || ""),
-    "…reaching for the same missing measurement the reactive path asked for",
-    `proactive todo="${proactive.action.todo}"`);
+  chk(proactive.action.kind !== "log" && proactive.action.kind !== "come_back",
+    "…and neither does the proactive path, for a client who wrote to us today",
+    `reactive=${reactive.kind} proactive=${proactive.action.kind} todo="${proactive.action.todo}"`);
 }
 
 // THE PROACTIVE LADDER'S OWN HOLD, which is the branch blocker 2 is about.

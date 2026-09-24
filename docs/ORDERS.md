@@ -26,6 +26,10 @@ Keep the plumbing. Replace the coaching core behind it.
 
 **Capabilities that must survive the switch:** food decisions and swaps, messy retrospective logging, voice notes, adaptive training, proactive accountability.
 
+## 1b. The product
+
+`docs/TESTER-EXPERIENCE.md` defines what testers experience when Coach K is done. It is the gate's journey list and the target for lane B.
+
 ## 2. Release standard
 
 A turn is correct only when all four hold:
@@ -98,6 +102,18 @@ For each: reproduce the failure first as a failing test, then show the changed s
 
 The failure behind every rebuild was mouths: many places that can claim a turn and speak before the coach. `script/mouth-count.py` counts them, and `docs/mouths.json` holds the current numbers. The `mouth-ratchet` check fails any PR that increases a count. A PR that removes mouths lowers the numbers in `docs/mouths.json` in the same PR. The counts can only go down. Every #272 switch PR must lower `routeMessage_exits_before_engine`.
 
+## 4c. Old-pipeline freeze (24 Sep)
+
+No new fixes on the old pattern-matching pipeline except for live harm to clients, money or data. Everything else is a gate case the new core must pass. Every pattern patch adds another mouth's worth of edges; the core removes them.
+
+## 4d. Replace, don't add (24 Sep)
+
+Every `[core]` PR says what it **retires**: stores, handlers, AI calls, prompt text. It names the switch PR that deletes them. A new store beside the old ones, with nothing retired, is a layer, and layers are how four rebuilds failed. The watch flags any `[core]` PR that adds a table without a `Retires:` section. Code size is tracked on #280 against a target of 25,000 server lines or fewer.
+
+## 4e. Components (24 Sep)
+
+`docs/COMPONENTS.md` decides keep, reuse, replace or delete for every part of the codebase. The new core **calls** existing tools (food data, targets, day maths, programmes, vision, voice) and never rebuilds them. Replaced components are deleted in their switch PR. `docs/delete-list.txt` (41 files, 23,083 lines) must reach zero.
+
 ## 5. Stopping rule
 
 If, after the gate baseline and shadow core are running, the shadow core does not beat the old path on the memory and safety cases within five working days, stop and reassess the design. Don't keep cutting. This is the rule #63 lacked.
@@ -112,6 +128,8 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 | **Founder** | Product, safety-policy and commercial decisions. | Poll CI, merge PRs, or relay messages. |
 
 **Gate judge:** an OpenAI model, a different model family from the builder, called with the existing OpenAI key. The judge never sees builder reasoning, only the input, the stored state and the final WhatsApp body.
+
+**Quality bar under auto-merge (24 Sep):** speed never lowers the bar. Every PR needs green tests (all six database shards) and a passing mouth ratchet. REGRESSION findings block. Hard invariants (§3) block. EDGE findings aren't dropped: each becomes an issue **and a gate case the new core must pass before its message family switches**. A PR labelled `switch`, which moves real testers onto the new coach, never merges on a timeout: it needs an actual Codex attack, answered, and a green replay gate showing it beats the old code.
 
 **Tester-visible rule:** every PR description opens with one line, "What testers will notice:", in plain language. If the answer is nothing, it says why the PR is still needed today. Work is ordered so the changes testers feel most land first.
 

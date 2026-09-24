@@ -76,7 +76,7 @@ failed=0
 #    absence again, so a client five days old, at the keyboard, is told it has been fourteen weeks
 #    and that their numbers are exactly where they left them.
 run_case "never logged is read as ninety-nine days gone" server/one-action.ts \
-  '    daysSinceAnyLog: s.food.daysSinceAnyLog ?? p.weeksOnProgramme * 7,' \
+  '    daysSinceAnyLog: s.food.daysSinceAnyLog,' \
   '    daysSinceAnyLog: s.food.daysSinceAnyLog ?? 99,' || failed=$((failed + 1))
 
 # 2. THE THEATRE LINE COMES BACK. The ask carries a reason again, and the reason is a complaint

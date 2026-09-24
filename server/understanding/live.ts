@@ -155,18 +155,16 @@ export async function canonicalDecision(
     // THE ROWS THAT ANSWER IT ARE ALREADY IN HAND. `truth.window.perDay` is exactly the logged
     // days, as SAST day keys, and foldWindowRows sorts them — so the most recent one IS the last
     // log, and the gap is subtraction between two day keys. Nothing extra is asked of the
-    // database. Past the window's edge we honestly know only "at least `days`", and never more
-    // than the client has been here: `daysOnProgramme` is the ceiling, so somebody three days old
-    // is never reported as a week gone. This is the same quantity `sastDaysBetween(lastMealAt)`
-    // computes in one-action-command.ts and scheduler/shared.ts — the two callers that were
-    // already doing it properly while this one guessed.
+    // database. Past the window's edge the gap is UNKNOWN (#275), and says so: null, not a
+    // number built from the window size or their tenure.
     const loggedDayKeys = (truth.window.perDay || []).map(d => d.day).filter(Boolean).sort();
     const lastLoggedKey = loggedDayKeys[loggedDayKeys.length - 1] || null;
     const dayGap = (from: string): number =>
       Math.round((Date.parse(`${sastDayKey()}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
     const daysSinceAnyLog = foodRowToday ? 0
-      : lastLoggedKey ? Math.max(0, dayGap(lastLoggedKey))
-      : Math.min(truth.window.days, truth.daysOnProgramme);
+      : lastLoggedKey ? Math.max(0, dayGap(lastLoggedKey)) : null;
+    const { readWeighAskAndPresence, recordWeighAsk } = await import("../scheduler/shared");
+    const { daysSinceWeighAsk } = await readWeighAskAndPresence(user.id);
 
     const act = underPolicy(chooseAction({
       firstName: getDisplayName(user) || undefined,
@@ -176,6 +174,7 @@ export async function canonicalDecision(
       weeksOnProgramme: Math.max(0, (user.programmeWeek || 1) - 1),
       daysSinceAnyLog,
       daysSinceWeighIn: truth.weight.daysSinceWeighIn,
+      daysSinceWeighAsk,
       loggedToday: foodRowToday,
       proteinPct: protTarget > 0 ? truth.today.protein / protTarget : 1,
       caloriePct: calTarget > 0 ? truth.today.kcal / calTarget : 1,
@@ -234,7 +233,10 @@ export async function canonicalDecision(
          // turn that hands this decision the question and the decision itself agree about what
          // was asked. The gate it feeds is in underPolicy.
          asksAboutToday,
+         // THEY ARE TYPING TO US (#275): a reply never ends "tell me what you ate today".
+         present: true, daysSinceWeighAsk,
          weekendInvestigationAnswered: weekendInvestigationAnswered(user) });
+    if (act.kind === "weigh") await recordWeighAsk(user.id);
 
     // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,
     // so it can tell a model reply that CARRIES the decision from one that invented its own.
