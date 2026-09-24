@@ -3,6 +3,8 @@
 This repository builds KamLife Coach. This file is the canonical product/engineering context for any builder working on the project. Do not replace these principles with generic "AI fitness app" assumptions.
 
 ## Codex standing orders (read first, every session)
+Before asking the founder anything, check `docs/SYSTEM.md` and the repo. Asking him for something already recorded or findable is a failure.
+
 
 You attack; you do not build. `docs/ORDERS.md` §6 defines the role.
 
