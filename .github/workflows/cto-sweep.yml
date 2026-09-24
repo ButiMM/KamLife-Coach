@@ -1,0 +1,36 @@
+name: cto-sweep
+# Nightly independent review of the whole project against docs/CTO-SWEEP.md, so gaps surface
+# without the founder or the CTO having to ask. Needs the ANTHROPIC_API_KEY repo secret; skips
+# cleanly without it.
+on:
+  schedule:
+    - cron: "0 3 * * *"   # 05:00 SAST
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  checks: read
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Skip without a key
+        id: key
+        env:
+          K: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: if [ -z "$K" ]; then echo "has=no" >> "$GITHUB_OUTPUT"; echo "No ANTHROPIC_API_KEY; skipping."; else echo "has=yes" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.has == 'yes'
+      - uses: anthropics/claude-code-action@v1
+        if: steps.key.outputs.has == 'yes'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are the independent nightly reviewer for KamLife Coach. Read docs/CTO-SWEEP.md and follow it exactly.
+            Use the gh CLI to read open and recently merged PRs, their comments and check runs, issues, and issue #280.
+            Answer every question with evidence. Post one issue titled "CTO sweep <date>" labelled cto-sweep with the answers,
+            and open a separate issue for every untracked gap. Do not modify code or open PRs.
+          claude_args: "--allowedTools Bash(gh:*),Read,Glob,Grep"

@@ -11,6 +11,10 @@ Every builder, reviewer and the CTO reads this before asking the founder a quest
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT` | `db-backup.yml` | Cloudflare R2, where backups are stored |
 | `REPLAY_HELDOUT_JSON` | replay gate | Not set yet. Held-out cases; until it exists, split the audit's real failures into seen and held-out. |
 
+## Key rotation
+
+When the OpenAI key changes in Railway, update the GitHub secret `AI_INTEGRATIONS_OPENAI_API_KEY` the same day. They're separate copies. On 24 Sep the GitHub copy was an old revoked key (ending `wfkA`), and the replay gate failed with 401 until the founder updated it.
+
 ## Services
 
 - **Hosting:** Railway, deploys `main` automatically. Runtime settings and flags live in Railway, not in the repo.
