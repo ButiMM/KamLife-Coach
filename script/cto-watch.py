@@ -29,6 +29,19 @@ for p in open_prs:
     n, sha = p["number"], p["head"]["sha"]
     short = sha[:10]
     comments = api("GET", f"/issues/{n}/comments?per_page=100")
+    files = api("GET", f"/pulls/{n}/files?per_page=100")
+    adds_store = any(f["filename"].startswith("migrations/") and f["status"] == "added" for f in files)
+    if p["title"].startswith("[core]") and adds_store and "Retires:" not in (p["body"] or ""):
+        comment_once(n, f"cto-retires-{n}", "**CTO watch (layer check):** this `[core]` PR adds a new table or store. Its description needs a `Retires:` section naming which existing stores, handlers or calls it replaces, and the switch PR that deletes them. Otherwise it's another layer (docs/ORDERS.md §4c).", comments)
+        alerts.append(f"**Layer check:** #{n} adds a store without saying what it retires.")
+    for c in comments[-15:]:
+        body = c["body"].lstrip()
+        if "<!-- cto-" in body or c["user"]["login"].endswith("[bot]"):
+            continue
+        if re.match(r"^[*_\s]*(BLOCKED|FOUNDER[- ]ACTION)", body) or re.search(r"\b401\b|Incorrect API key|needs? the founder|founder must", body[:400]):
+            if NOW - ts(c["created_at"]) < dt.timedelta(hours=12):
+                alerts.insert(0, f"**🚨 BLOCKED, needs the founder:** #{n}: {body[:160].replace(chr(10), ' ')}")
+                break
     if "What testers will notice" not in (p["body"] or ""):
         comment_once(n, f"cto-notice-{n}", "**CTO watch:** the description must open with \"What testers will notice:\" (CLAUDE.md standing orders).", comments)
     human = [c for c in comments if not c["user"]["login"].endswith("[bot]") or "codex" in c["user"]["login"]]
@@ -116,12 +129,35 @@ import subprocess
 try:
     mouths = json.loads(subprocess.run(["python3", "script/mouth-count.py", "--json"], capture_output=True, text=True).stdout)
     mouth_line = "**Mouths on main:** " + ", ".join(f"{k} {v}" for k, v in mouths.items())
+    import pathlib
+    srv = sum(len(f.read_text(errors="ignore").splitlines()) for f in pathlib.Path("server").rglob("*.ts"))
+    tst = sum(len(f.read_text(errors="ignore").splitlines()) for f in pathlib.Path("script").rglob("*") if f.is_file() and f.suffix in (".ts", ".sh", ".mjs", ".py"))
+    try:
+        dl = [l.strip() for l in open("docs/delete-list.txt") if l.strip() and not l.startswith("#")]
+        alive = [f for f in dl if pathlib.Path(f).exists()]
+        alive_lines = sum(len(pathlib.Path(f).read_text(errors="ignore").splitlines()) for f in alive)
+        mouth_line += f"\n\n**Old components still alive:** {len(alive)} of {len(dl)} files marked for deletion ({alive_lines:,} lines). Target: 0. See docs/COMPONENTS.md."
+    except Exception:
+        pass
+    mouth_line += f"\n\n**Size:** server {srv:,} lines (target ≤25,000 once the new core has switched), tests {tst:,} lines (target ≤20,000). Baseline 24 Sep: server 74,888, tests 57,037."
 except Exception:
     mouth_line = "**Mouths on main:** unavailable"
+PROD = "https://kamlife-coach-production.up.railway.app/health"
+try:
+    with urllib.request.urlopen(urllib.request.Request(PROD, headers={"User-Agent": "cto-watch"}), timeout=15) as r:
+        h = json.loads(r.read() or b"{}")
+    live = (h.get("version") or "")[:7]
+    main_sha = api("GET", "/commits/main")["sha"][:7]
+    prod_line = f"**Production:** up, running `{live}`" + ("" if live == main_sha else f" (main is `{main_sha}`)")
+    if live != main_sha and last_merge and NOW - last_merge > dt.timedelta(minutes=25):
+        alerts.append(f"**Deploy lag:** production runs `{live}` but main is `{main_sha}`, 25+ min after the last merge. Check Railway.")
+except Exception as e:
+    prod_line = "**Production: UNREACHABLE**"
+    alerts.append(f"**Production health check failed:** {str(e)[:100]}. Testers may be getting no replies. Check Railway now.")
 body = "\n".join([
     f"_Updated {NOW:%H:%M} UTC by the CTO watch. Runs every 15 minutes and on PR open/push/merge._", "",
     *(alerts or ["No alerts."]), "",
-    mouth_line, "",
+    mouth_line, prod_line, "",
     f"**Queue:** {len(done)} done, {len(todo)} left. Next: {todo[0] if todo else 'queue empty'}", "",
     "| PR | Title | Head | Attack | GitHub checks |", "|---|---|---|---|---|", *(rows or ["| none | | | | |"]), "",
     "**Merged today (UTC):**",
