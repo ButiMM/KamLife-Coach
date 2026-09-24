@@ -255,6 +255,15 @@ REAL("\n2. A GENUINE CORRECTION SUPERSEDES — the replacement lands, and the re
   const after = await meals();
   chk(!!before && after.length === 1 && !after.some(r => r.id === before.id) && !/\brice\b/i.test(JSON.stringify(after.map(r => r.raw_message))),
     "\"No, I had chicken breast instead of rice\" leaves one meal, and no rice in it", `before=${JSON.stringify(before)} after=${JSON.stringify(after)} mutations=${JSON.stringify(t.mutations)}`);
+  // Codex @ d960c71: the rejected side ends where an addition starts — the beans are not rejected.
+  for (const tb of ["meal_logs", "chat_history", "turn_ledger"]) await pool.query(`DELETE FROM ${tb} WHERE user_id = $1`, [user.id]);
+  await say("I had rice", "SM264-3f");
+  const rb = (await meals())[0];
+  const tb2 = await say("No, I had chicken breast instead of rice and I also had beans", "SM264-3g");
+  const afterB = await meals();
+  const rawB = JSON.stringify(afterB.map(r => r.raw_message));
+  chk(!!rb && afterB.length === 1 && !afterB.some(r => r.id === rb.id) && /chicken/i.test(rawB) && /beans/i.test(rawB) && !/\brice\b/i.test(rawB),
+    "\"…instead of rice and I also had beans\" keeps the beans and drops the rice", `after=${JSON.stringify(afterB)} mutations=${JSON.stringify(tb2.mutations)}`);
   for (const tb of ["meal_logs", "chat_history", "turn_ledger"]) await pool.query(`DELETE FROM ${tb} WHERE user_id = $1`, [user.id]);
   await say("I had pap", "SM264-3c");
   const pap = (await meals())[0];

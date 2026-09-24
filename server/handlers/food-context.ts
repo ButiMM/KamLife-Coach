@@ -273,7 +273,7 @@ export async function handleFoodContext(ctx: {
   // Food detection uses the candidate with "not X" and "instead of X" STRIPPED (Codex @ bf64579), so "it is not vetkoek" doesn't
   // look like a request to log vetkoek. A pure negation (no replacement food) must NOT re-log —
   // it routes to the "what was it?" ask below.
-  const candidateSansNot = correctedMsgCandidate.replace(/\b(?:instead\s+of|rather\s+than)\s+.*?(?=[,.!?;]|\bi\s+(?:had|ate)\b|$)/gi, " ").replace(/\bnot\s+[\w'-]+/gi, " ").replace(/\s+/g, " ").trim();
+  const candidateSansNot = correctedMsgCandidate.replace(/\b(?:instead\s+of|rather\s+than)\s+.*?(?=[,.!?;]|\s(?:and\s+)?(?:i\s+(?:also\s+)?(?:had|ate)|also|plus|then)\b|$)/gi, " ").replace(/\bnot\s+[\w'-]+/gi, " ").replace(/\s+/g, " ").trim();
   const idNegationOnly = ID_CORRECTION_PREFIX.test(m) && /\bnot\b/i.test(m) && scanForSAFoods(candidateSansNot).length === 0;
   const hasFoodAfterPrefix = hasCorrectionPrefix && !idNegationOnly && candidateSansNot.length > 2 && scanForSAFoods(candidateSansNot).length > 0;
   // A DECLINE IS NOT A CORRECTION (#264, AUDIT.md Trace 1): "No … this meal" deleted the lunch. A
@@ -338,7 +338,7 @@ export async function handleFoodContext(ctx: {
           });
           if (lastFoodLog || target) await recount();
         } catch (e) { console.warn("[food-correction-tx]", e); }
-        const cleaned = correctedMsgCandidate.replace(/\b(?:instead\s+of|rather\s+than)\s+.*?(?=[,.!?;]|\bi\s+(?:had|ate)\b|$)/gi, " ").replace(/\bnot\s+\w+/gi, " ").replace(/\s+/g, " ").trim();
+        const cleaned = correctedMsgCandidate.replace(/\b(?:instead\s+of|rather\s+than)\s+.*?(?=[,.!?;]|\s(?:and\s+)?(?:i\s+(?:also\s+)?(?:had|ate)|also|plus|then)\b|$)/gi, " ").replace(/\bnot\s+\w+/gi, " ").replace(/\s+/g, " ").trim();
         const replyCorr = await handleMessage(phone, cleaned.length > 2 ? cleaned : correctedMsgCandidate); // "not X" stripped: never re-log X
         if (target) {
           const landed = [...(await daySigs())].filter(([id, sig]) => id !== target.id && heldSigs.get(id) !== sig).map(([id]) => id);
