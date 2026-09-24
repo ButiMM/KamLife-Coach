@@ -110,6 +110,10 @@ No new fixes on the old pattern-matching pipeline except for live harm to client
 
 Every `[core]` PR says what it **retires**: stores, handlers, AI calls, prompt text. It names the switch PR that deletes them. A new store beside the old ones, with nothing retired, is a layer, and layers are how four rebuilds failed. The watch flags any `[core]` PR that adds a table without a `Retires:` section. Code size is tracked on #280 against a target of 25,000 server lines or fewer.
 
+## 4e. Components (24 Sep)
+
+`docs/COMPONENTS.md` decides keep, reuse, replace or delete for every part of the codebase. The new core **calls** existing tools (food data, targets, day maths, programmes, vision, voice) and never rebuilds them. Replaced components are deleted in their switch PR. `docs/delete-list.txt` (41 files, 23,083 lines) must reach zero.
+
 ## 5. Stopping rule
 
 If, after the gate baseline and shadow core are running, the shadow core does not beat the old path on the memory and safety cases within five working days, stop and reassess the design. Don't keep cutting. This is the rule #63 lacked.
