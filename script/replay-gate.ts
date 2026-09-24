@@ -132,7 +132,16 @@ const versions = {
 };
 
 // ── ONE CASE ────────────────────────────────────────────────────────────────────────────────
-type CheckResult = { what: string; invariant: string | null; pass: boolean; evidence: string };
+type CheckResult = { what: string; invariant: string | null; pass: boolean; evidence: string; def?: string };
+/**
+ * A check's identity is its FULL definition, not its name (Codex @ d4ddc3d). The fingerprint covers
+ * what the case sends (seed, before-turns, turns) and the check itself (query, pattern, expected
+ * value). A PR that keeps the name but weakens what is tested produces a new key, so main's passing
+ * key is missing from the PR's run: a regression. An intended corpus edit carries the PR label
+ * `gate-corpus`, which a human adds on purpose (see the exit below).
+ */
+const defOf = (k: ReplayCase, c: Check) =>
+  sha(JSON.stringify({ newClient: k.newClient ?? false, seed: k.seed ?? null, before: k.before ?? [], turns: k.turns, check: c }));
 type CaseResult = { id: string; journey: Journey; heldOut: boolean; checks: CheckResult[]; hardPass: boolean; score: number | null; verdict: string; bodies: string[]; neverSeen: string[];
   /** The new coach in shadow: its would-be replies, graded on the reply checks, the never-see list and the judge. */
   core: { replyPass: boolean; score: number | null; neverSeen: string[] } | null };
@@ -230,7 +239,7 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
   // A stranger's row is created by the front door; read it back so the checks and the judge see it.
   const userId: string = u?.id ?? (await pool.query("SELECT id FROM users WHERE phone_number = $1", [phone])).rows[0]?.id ?? "00000000-0000-0000-0000-000000000000";
   const checks: CheckResult[] = [];
-  for (const c of k.checks) checks.push(await runCheck(c, userId, phone, bodies));
+  for (const c of k.checks) checks.push({ ...(await runCheck(c, userId, phone, bodies)), def: defOf(k, c) });
   const neverSeen = NEVER_SEE.filter(n => bodies.some(b => new RegExp(n.pattern, n.flags ?? "").test(b))).map(n => n.what);
   const { score, verdict } = await judge(k, userId, bodies);
   let core: CaseResult["core"] = null;
@@ -290,7 +299,7 @@ if (!OFFLINE && (productModels.length === 0 || judgeErrors.length > 0)) {
 
 // A held-out check is keyed by an opaque hash (Codex @ 8ed032c): it enters the baseline and gates
 // exactly like a public check, and neither its case nor its wording appears in any file or log.
-const key = (r: CaseResult, c: CheckResult) => r.heldOut ? `held-out:${sha(`${r.id}::${c.what}`)}` : `${r.id}::${c.what}`;
+const key = (r: CaseResult, c: CheckResult) => r.heldOut ? `held-out:${sha(`${r.id}::${c.what}#${c.def}`)}` : `${r.id}::${c.what}#${c.def}`;
 const hardNow = new Map(results.flatMap(r => r.checks.filter(c => c.invariant).map(c => [key(r, c), c.pass] as const)));
 const baseline = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, "utf8")) : null;
 // A baseline check that passed must still EXIST and pass (Codex @ ced3cb0): deleting or renaming it
@@ -359,4 +368,10 @@ if (!OFFLINE && !baseline && !WRITE_BASELINE) {
   REAL(`replay-gate: NOT TESTED — no baseline at ${BASELINE_PATH}. Record one first: run this gate on main with --write-baseline.`);
   process.exit(2);
 }
-process.exit(regressions.length ? 1 : 0);
+// A PR that deliberately changes the corpus (label `gate-corpus`) may retire or redefine a check:
+// those keys are reported above but do not fail the run. A check that still exists and now FAILS
+// is a regression whatever the label says.
+const corpusChange = (process.env.PR_LABELS || "").split(",").map(l => l.trim()).includes("gate-corpus");
+const blocking = corpusChange ? regressions.filter(r => !r.endsWith("(check no longer exists)")) : regressions;
+if (corpusChange && blocking.length < regressions.length) REAL(`replay-gate: ${regressions.length - blocking.length} retired or redefined check(s) accepted under the gate-corpus label.`);
+process.exit(blocking.length ? 1 : 0);

@@ -36,6 +36,7 @@ jobs:
       DATABASE_URL: postgres://kam:kam@127.0.0.1:5432/kamlife
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}  # the key the founder set for the judge first
       REPLAY_HELDOUT_JSON: ${{ secrets.REPLAY_HELDOUT_JSON }}
+      PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
