@@ -80,6 +80,14 @@ assert.equal(dosing.reason, "dosing");
 const titration = detectMedicationContext("Can I increase my Wegovy dose next week?");
 assert.equal(titration.unsafeRequest, true);
 assert.equal(titration.reason, "titration");
+// #378 (Codex @ 4a849d4 on #345): insulin was a medication but not a titration target, so
+// "double my insulin" stood the medication guard down. The attack's exact assertion:
+assert.deepEqual(detectMedicationContext("Can I double my insulin tonight? My sugar is high."), {
+  present: true, medicationClass: "other", unsafeRequest: true, reason: "titration",
+});
+assert.equal(detectMedicationContext("Should I lower my blood pressure tablets now that I'm walking?").reason, "titration");
+// Control: taking insulin is context, not an unsafe request.
+assert.equal(detectMedicationContext("I'm on insulin, what's a good breakfast?").unsafeRequest, false);
 const stopping = detectMedicationContext("Should I stop Mounjaro?");
 assert.equal(stopping.unsafeRequest, true);
 assert.equal(stopping.reason, "stopping");

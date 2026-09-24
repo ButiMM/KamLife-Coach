@@ -20,7 +20,7 @@ export function detectMedicationContext(message: string): MedicationContextDecis
       || /\bhow\s+much\s+(?:ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide)\b/i.test(m)) {
     return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "dosing" };
   }
-  if (/\b(titrate|titration|increase|decrease|raise|lower|double|halve|step up|step down)\b[^.!?]{0,40}\b(ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide|liraglutide|dulaglutide|saxenda|victoza|rybelsus|medication|meds?|dose|dosage)\b/i.test(m)) {
+  if (/\b(titrate|titration|increase|decrease|raise|lower|double|halve|step up|step down)\b[^.!?]{0,40}\b(ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide|liraglutide|dulaglutide|saxenda|victoza|rybelsus|medication|meds?|medicine|insulin|tablets?|pills?|dose|dosage)\b/i.test(m)) {
     return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "titration" };
   }
   if (/\b(stop|start|skip|come off|go off|wean off|quit)\b[^.!?]{0,30}\b(ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide|liraglutide|dulaglutide|saxenda|victoza|rybelsus|medication|meds?|medicine|insulin|tablets?|pills?)\b/i.test(m)) {
