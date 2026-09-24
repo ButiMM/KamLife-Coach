@@ -80,6 +80,12 @@ for p in open_prs:
         latest[r["name"]] = r          # judge each check by its most recent run only
     runs = list(latest.values())
     failing = sorted({r["name"] for r in runs if r["conclusion"] in ("failure", "timed_out")})
+    for r in runs:
+        out = (r.get("output") or {})
+        txt = " ".join(str(out.get(k) or "") for k in ("title", "summary", "text")).lower()
+        if r["conclusion"] in ("failure", "timed_out") and any(w in txt for w in ("429", "no credits", "insufficient_quota", "incorrect api key", "401")):
+            alerts.insert(0, f"**🚨 AI ACCOUNT PROBLEM (founder):** check `{r['name']}` on #{n} reports an OpenAI credits or key error. Top up or fix the key at platform.openai.com. If production shares the account, the live coach may be failing too.")
+            break
     pending = sorted({r["name"] for r in runs if r["status"] != "completed"})
     checks = "failing: " + ", ".join(failing) if failing else ("running: " + ", ".join(pending) if pending else ("green" if runs else "none"))
     if failing:
