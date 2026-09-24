@@ -152,7 +152,7 @@ const meals = async (): Promise<Meal[]> => (await pool.query<Meal>(
 const wire = async (): Promise<string[]> => (await pool.query<{ body: string }>(
   "SELECT body FROM shadow_replies WHERE phone = $1 ORDER BY id", [phone])).rows.map(r => r.body);
 const clear = async () => {
-  for (const t of ["meal_logs", "chat_history", "turn_ledger", "workout_logs", "step_logs", "escalations"]) {
+  for (const t of ["meal_logs", "chat_history", "turn_ledger", "workout_logs", "step_logs", "escalations", "sent_proactive"]) {
     await pool.query(`DELETE FROM ${t} WHERE user_id = $1`, [user.id]).catch(() => {});
   }
   await pool.query("DELETE FROM shadow_replies WHERE phone = $1", [phone]);

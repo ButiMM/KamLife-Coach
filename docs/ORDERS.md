@@ -26,6 +26,10 @@ Keep the plumbing. Replace the coaching core behind it.
 
 **Capabilities that must survive the switch:** food decisions and swaps, messy retrospective logging, voice notes, adaptive training, proactive accountability.
 
+## 1b. The product
+
+`docs/TESTER-EXPERIENCE.md` defines what testers experience when Coach K is done. It is the gate's journey list and the target for lane B.
+
 ## 2. Release standard
 
 A turn is correct only when all four hold:

@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres, auditStoredTargets, auditStepsTarget, recalcTargetsForProfile, maintenanceKcal } from "../server/targets";
 import { predictTrajectory } from "../server/trajectory";
@@ -2302,7 +2302,6 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const MUST_BE_CALLED: Array<[fn: string, definedIn: string]> = [
       ["productVerdict", "server/food-swaps.ts"],           // the "can I eat this?" label verdict
       ["bodyPhotoAsk", "server/onboarding-physique.ts"],    // the day-zero physique read
-      ["hasTrialedBefore", "server/pricing-config.ts"],     // one trial per number, ever
       ["sttVocabularyPrompt", "server/foods.ts"],           // the transcription bias
       ["neverSilentLine", "server/reply-hygiene.ts"],       // the one fallback mouth
     ];
@@ -2376,42 +2375,29 @@ test("gains-fear masterclass survived the deletion — it is in the coaching pro
   assert.match(prompt, /HIGH PROTEIN/i, "the condition that makes the claim true is gone");
 });
 
-// ONE TRIAL PER NUMBER, EVER (2026-08-06, founder directive after the start→cancel→start
-// →cancel loop). The interesting part is not the rule — it is that the rule has to survive
-// the client deleting their own account, because that is the path the loop actually runs on.
+// THERE IS NO TRIAL (#275). Pay-to-start is the offer; the grant, its countdown job, the expired-
+// trial nudges and the greeting's "Free trial: N days remaining" line were leftovers of one.
 {
-  const { trialHash } = await import("../server/pricing-config");
-  test("trial hash: stable, salted, and the same number in any format hashes the same", async () => {
-    assert.equal(trialHash("whatsapp:+27821234567"), trialHash("0821234567"), "same SA number, two formats");
-    assert.equal(trialHash("+27821234567"), trialHash("27821234567"), "plus sign must not matter");
-    assert.notEqual(trialHash("0821234567"), trialHash("0821234568"), "different numbers must differ");
-    assert.equal(trialHash(""), "", "an unreadable number hashes to nothing");
-    assert.ok(!/\d{7}/.test(trialHash("0821234567")), "the hash must not contain the number");
+  test("no path grants, counts down or chases a free trial", async () => {
+    const onboarding = readFileSync("server/onboarding.ts", "utf-8");
+    assert.ok(!/subscriptionStatus:\s*"trial"/.test(onboarding), "completeOnboarding grants a trial again");
+    assert.ok(!/free trial/i.test(onboarding), "the greeting counts down a free trial again");
+    assert.ok(!existsSync("server/scheduler/jobs/trial.ts"), "the trial countdown job is back");
+    assert.ok(!/runTrialCountdown/.test(readFileSync("server/scheduler.ts", "utf-8")), "a trial countdown is scheduled again");
+    assert.ok(!/free trial ended|trial ended/i.test(readFileSync("server/scheduler/jobs/business.ts", "utf-8")),
+      "an expired-trial nudge is back — beta testers carry status 'trial' and would receive it");
   });
-  test("trial record survives account deletion — the loop runs through *delete my data*", async () => {
-    // betaBypassUntil closes cancel-and-return, but it lives on the user row and the row is
-    // deleted by the POPIA path. If trialed_numbers ever joins those transactions, a client
-    // can reset their own trial in two messages and this test is the only thing that notices.
-    for (const f of ["server/handlers/safety.ts", "server/handlers/lifecycle.ts"]) {
-      const src = readFileSync(f, "utf-8");
-      assert.ok(!/delete\((?:tx\.)?trialedNumbers\)|delete\(trialedNumbers\)/.test(src),
-        `${f} deletes the trialed-numbers record — that reopens the start-cancel-start loop`);
-    }
-  });
-  test("trial record holds a hash and nothing else — it outlives deletion, so it must be minimal", async () => {
-    const schema = readFileSync("shared/schema.ts", "utf-8");
-    const table = schema.slice(schema.indexOf('pgTable("trialed_numbers"'));
-    const body = table.slice(0, table.indexOf("});"));
-    assert.ok(/phone_hash/.test(body), "must key on the hash");
-    assert.ok(!/phone_number|\bname\b|user_id/.test(body),
-      "must not store a readable number, a name, or a user id — that would be a shadow profile");
-  });
-  test("the trial lookup fails CLOSED — an error must never hand out a free trial", async () => {
-    const src = readFileSync("server/pricing-config.ts", "utf-8");
-    const fn = src.slice(src.indexOf("export async function hasTrialedBefore"));
-    const body = fn.slice(0, fn.indexOf("\nexport "));
-    assert.ok(/catch[\s\S]{0,200}return true/.test(body), "the catch must return true (refuse the trial)");
-    assert.ok(/if \(!hash\) return true/.test(body), "an unreadable number must also be refused");
+}
+
+// "FINISHED" IS A SHOP REPORT ONLY WITH THE FOOD AS ITS SUBJECT, OR A SHOP AFTER IT (#275). "Just
+// finished dinner" is a meal to log; "Chicken finished at Shoprite" (Codex @ 0433c88) is not.
+{
+  const { UNAVAILABLE_RE } = await import("../server/food-swaps");
+  test("availability: 'finished' reads the subject and the shop", async () => {
+    for (const t of ["Chicken finished at Shoprite", "The chicken's finished", "The chicken was finished at Shoprite, what else?", "Beef finished in Checkers"])
+      assert.ok(UNAVAILABLE_RE.test(t), `"${t}" is a shop that ran out`);
+    for (const t of ["Just finished dinner, pap and wors", "I finished at 7", "We finished at the braai", "just finished at gym", "Finished my lunch"])
+      assert.ok(!UNAVAILABLE_RE.test(t), `"${t}" is not a shop report`);
   });
 }
 
