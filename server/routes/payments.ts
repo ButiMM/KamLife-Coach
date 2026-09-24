@@ -1,10 +1,12 @@
 import type { Express } from "express";
 import crypto from "crypto";
 import { db } from "../db";
-import { users, chatHistory, paymentEvents, adminEvents } from "../../shared/schema";
-import { eq, and } from "drizzle-orm";
+import { users, chatHistory, paymentEvents, adminEvents, escalations } from "../../shared/schema";
+import { escalationSLA } from "../safety-detection";
+import { sastDayKey } from "../sast";
+import { eq, and, asc } from "drizzle-orm";
 import twilio from "twilio";
-import { PRICING } from "../../shared/pricing";
+import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
 import { sendCriticalAlert } from "../scheduler/shared";
 import { deliverTwilioMessage } from "../outbound-delivery";
 import { isOptedOut } from "../health-state";
@@ -68,6 +70,76 @@ export async function cancelPayFastSubscription(token: string | null): Promise<{
   } catch (e: any) {
     return { ok: false, detail: `PayFast request failed: ${e?.message || e}`.slice(0, 200) };
   }
+}
+
+/** A date N business days from now, as the client reads it in SAST ("Wed 1 Oct"). */
+function businessDaysFromNow(n: number, from = new Date()): string {
+  const d = new Date(`${sastDayKey(from)}T12:00:00Z`); // the SAST calendar day, from its one owner
+  for (let added = 0; added < n;) { d.setUTCDate(d.getUTCDate() + 1); const wd = d.getUTCDay(); if (wd !== 0 && wd !== 6) added++; }
+  return d.toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+/**
+ * THE 14-DAY MONEY-BACK GUARANTEE, END TO END (#328). It was advertised on five surfaces while
+ * "refund" opened a manual form and told the client "your coach has been notified" — nobody was.
+ * Now, from the client's own payment record:
+ *   - within the guarantee: billing is cancelled through the same path as a client's own cancel
+ *     (#263), the refund OWED is recorded with a due date, the founder gets the exact refund to
+ *     issue, and the client is told the truth ("billing cancelled" only when PayFast confirmed it);
+ *   - outside it, or with no payment on record: the founder really is alerted, and the client is
+ *     told why this is not an automatic guarantee refund;
+ *   - asked again: the client is told the refund already owed, and nothing is recorded twice.
+ */
+export async function handleRefundRequest(user: any, phone: string): Promise<string> {
+  const name = (user.name || "").split(" ")[0] || "there";
+  // The founder's task, with a deadline, in the escalation queue the dashboard already works from.
+  // ONE task per client: the generic billing escalation ("refund" in the message) may already have
+  // opened it, so the guarantee's details are written INTO that case rather than beside it.
+  const founderTask = async (priority: "urgent" | "high" | "normal", text: string) => {
+    const [open] = await db.select({ id: escalations.id }).from(escalations)
+      .where(and(eq(escalations.userId, user.id), eq(escalations.reason, "billing"), eq(escalations.status, "open"))).limit(1);
+    const fields = { triggerMessage: text.slice(0, 500), priority, slaDeadline: escalationSLA(priority) };
+    await (open ? db.update(escalations).set(fields).where(eq(escalations.id, open.id)) : db.insert(escalations).values({ userId: user.id, reason: "billing", ...fields }))
+      .catch((e) => console.error("[REFUND] escalation write failed:", e));
+  };
+  const [owed] = await db.select({ meta: adminEvents.meta }).from(adminEvents)
+    .where(and(eq(adminEvents.targetPhone, phone), eq(adminEvents.action, "refund_guarantee_owed"))).limit(1);
+  if (owed) {
+    const due = (owed.meta as any)?.dueBy || "within 5 business days";
+    return `${name}, your refund under the ${GUARANTEE_PHRASE} is already on its way. It goes back to the card or account you paid with by ${due}.`;
+  }
+  const [first] = await db.select({ at: paymentEvents.processedAt, amount: paymentEvents.amountGross, id: paymentEvents.providerPaymentId })
+    .from(paymentEvents)
+    .where(and(eq(paymentEvents.phone, phone), eq(paymentEvents.provider, "payfast"), eq(paymentEvents.paymentStatus, "COMPLETE")))
+    .orderBy(asc(paymentEvents.processedAt)).limit(1);
+  const paidOn = first?.at ? new Date(first.at).toLocaleDateString("en-ZA", { day: "numeric", month: "long", timeZone: "Africa/Johannesburg" }) : null;
+  const withinGuarantee = !!first?.at && Date.now() - new Date(first.at).getTime() <= PRICING.guaranteeDays * 86_400_000;
+
+  if (!withinGuarantee) {
+    await db.insert(adminEvents).values({ action: "refund_requested_outside_guarantee", targetPhone: phone, reason: paidOn ? `first payment ${paidOn}` : "no payment on record", meta: { firstPaymentId: first?.id ?? null } })
+      .catch((e) => console.error("[REFUND] adminEvents insert failed:", e));
+    await founderTask("normal", `Refund asked for. ${paidOn ? `First payment ${paidOn}, outside the ${PRICING.guaranteeDays}-day guarantee.` : "No PayFast payment on record for this number."} Reply to the client within 24 hours.`);
+    return paidOn
+      ? `${name}, your first payment was on ${paidOn}, so this is outside the ${GUARANTEE_PHRASE}. I've sent your request to the founder, who will reply to you here within 24 hours.`
+      : `${name}, I can't find a payment from this number, so I've sent your request to the founder, who will reply to you here within 24 hours.`;
+  }
+
+  const amount = first!.amount ? `R${Number(first!.amount).toFixed(0)}` : `R${PRICING.monthlyPriceZAR}`;
+  const dueBy = businessDaysFromNow(5);
+  let billingOk = true;
+  let detail = "subscription already inactive";
+  if (user.subscriptionStatus === "active") {
+    const token = await latestPayFastToken(phone);
+    const billing = await cancelPayFastSubscription(token);
+    billingOk = billing.ok; detail = billing.detail;
+    await db.update(users).set({ subscriptionStatus: "inactive", cancelledAt: new Date(), subscriptionEndReason: "refund_guarantee" }).where(eq(users.phoneNumber, phone));
+  }
+  await db.insert(adminEvents).values({
+    action: "refund_guarantee_owed", targetPhone: phone, reason: detail,
+    meta: { amount, firstPaymentId: first!.id, dueBy, billingCancelConfirmed: billingOk },
+  });
+  await founderTask(billingOk ? "high" : "urgent", `Guarantee refund OWED: ${amount}, PayFast payment ${first!.id}, by ${dueBy}. Refund it in the PayFast dashboard.${billingOk ? "" : ` PayFast did NOT confirm the billing cancel (${detail}): cancel it by hand too.`}`);
+  return `${name}, you're within the ${GUARANTEE_PHRASE}, so your ${amount} is coming back to you. Your coaching is stopped ${billingOk ? "and your recurring billing is cancelled" : "and your recurring billing is being cancelled by hand today"}. The refund goes back to the card or account you paid with by ${dueBy}.`;
 }
 
 export function registerPaymentRoutes(app: Express) {
@@ -249,8 +321,9 @@ export function registerPaymentRoutes(app: Express) {
       // client's decision erased by the money taken against it. The same token they were paying
       // on when they cancelled means this is that subscription, still billing. A different token
       // is a new subscription they chose, and activates as normal.
-      if (paymentStatus === "COMPLETE" && targetUser.subscriptionEndReason === "client_cancelled" && data.token
-        && data.token === await latestPayFastToken(normalisedPhone, eventKey)) {
+      // A MINOR BLOCKED BY THE AGE GATE (#306) is never reactivated by a charge, whatever the token.
+      if (paymentStatus === "COMPLETE" && (targetUser.onboardingState === "BLOCKED_UNDERAGE" || (targetUser.subscriptionEndReason === "client_cancelled" && data.token
+        && data.token === await latestPayFastToken(normalisedPhone, eventKey)))) {
         const retry = await cancelPayFastSubscription(data.token);
         await db.insert(adminEvents).values({
           action: "charged_after_cancellation",
@@ -364,7 +437,7 @@ export function registerPaymentRoutes(app: Express) {
       } else if (paymentStatus === "CANCELLED") {
         // Our own API cancel makes PayFast send this. The client already cancelled, was already
         // told, and their cancelled_at is the moment they decided — leave all three alone.
-        if (targetUser.subscriptionEndReason === "client_cancelled" && targetUser.subscriptionStatus === "inactive") {
+        if ((targetUser.subscriptionEndReason === "client_cancelled" || targetUser.onboardingState === "BLOCKED_UNDERAGE") && targetUser.subscriptionStatus === "inactive") {
           console.log(`[PAYFAST:${itnId}] CANCELLED ITN confirms the client's own cancel — ${safePhone}`);
           return;
         }

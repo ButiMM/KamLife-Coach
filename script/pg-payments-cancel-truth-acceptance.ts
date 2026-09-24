@@ -460,6 +460,45 @@ REAL("\n10. A STALE CANCELLATION FOR AN OLD SUBSCRIPTION — the new one is unto
   void cl0;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n11. A MINOR BLOCKED BY THE AGE GATE IS NOT BILLED (#306)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+{
+  const endReason = async (phone: string) => (await pool.query("SELECT onboarding_state, subscription_status, subscription_end_reason FROM users WHERE phone_number = $1", [phone])).rows[0];
+  // PayFast does NOT confirm: cancelled on our side, told the truth, founder told to act.
+  const M = await makeClient("27820000979", "Mpho Minor");
+  await postItn(signItn(itnFields(M.digits, "COMPLETE", "tok-minor-1", "pf-minor-1", "alpha")));
+  chk((await row(M.phone)).subscription_status === "active", "control: the client is subscribed and billed");
+  pfMode = "fail";
+  const f0 = await lastShadowId();
+  const reply = await say(M, "I'm 16 and I want to lose weight", "SMpay11a");
+  const m1 = await endReason(M.phone);
+  chk(m1.onboarding_state === "BLOCKED_UNDERAGE" && m1.subscription_status === "inactive" && m1.subscription_end_reason === "underage_unconfirmed",
+    "blocking a minor ends their subscription, recorded as not yet confirmed by PayFast", JSON.stringify(m1));
+  chk(pfCalls.some(c => c.method === "PUT" && /\/subscriptions\/tok-minor-1\/cancel\b/.test(c.url)), "the cancel goes to PayFast for their subscription");
+  chk(admitsNotConfirmed(reply) && !promisesNoCharge(reply), "the minor is told honestly that billing is being stopped by hand", JSON.stringify(reply.slice(0, 300)));
+  chk((await adminActions(M.phone)).includes("subscription_cancel_unconfirmed_underage"), "the founder's admin view records it");
+  const tasks = (await pool.query("SELECT e.priority, e.trigger_message FROM escalations e JOIN users u ON u.id = e.user_id WHERE u.phone_number = $1 AND e.reason = 'billing' AND e.status = 'open'", [M.phone])).rows;
+  chk(tasks.length === 1 && tasks[0].priority === "urgent" && /by hand/.test(tasks[0].trigger_message) && /tok-minor-1/.test(tasks[0].trigger_message),
+    "the founder gets an urgent task to cancel the billing by hand", JSON.stringify(tasks));
+  chk((await shadowSince(FOUNDER, f0)).length === 0, "no new message is sent for it (the task queue carries it)");
+  // A charge that still arrives does not reactivate them, and nothing is sent to the minor.
+  const cl0 = await lastShadowId();
+  await postItn(signItn(itnFields(M.digits, "COMPLETE", "tok-minor-1", "pf-minor-2", "alpha")));
+  const m2 = await endReason(M.phone);
+  chk(m2.subscription_status === "inactive" && m2.onboarding_state === "BLOCKED_UNDERAGE", "a later charge does not reactivate a blocked minor", JSON.stringify(m2));
+  chk((await adminActions(M.phone)).includes("charged_after_cancellation"), "the charge is recorded for a refund");
+  chk((await shadowSince(M.phone, cl0)).length === 0, "no payment message reaches the minor");
+  // PayFast confirms: now, and only now, "you won't be charged again".
+  pfMode = "ok";
+  const N = await makeClient("27820000980", "Naledi Minor");
+  await postItn(signItn(itnFields(N.digits, "COMPLETE", "tok-minor-2", "pf-minor-3", "alpha")));
+  const reply2 = await say(N, "I'm 15 years old", "SMpay11b");
+  const n1 = await endReason(N.phone);
+  chk(n1.subscription_status === "inactive" && n1.subscription_end_reason === "underage", "with PayFast's confirmation the cancel is recorded as confirmed", JSON.stringify(n1));
+  chk(promisesNoCharge(reply2), "and the minor is told they won't be charged again", JSON.stringify(reply2.slice(0, 300)));
+}
+
 server.close();
 await pool.end().catch(() => {});
 REAL(`\npg-payments-cancel-truth-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}`);

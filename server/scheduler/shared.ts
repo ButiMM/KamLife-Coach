@@ -603,7 +603,7 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string, 
   // rather than re-queried inside the floor: this lookup already runs, and one read is one read.
   let recipientRow: { id: string; profileNotes: string | null; lifeSituation: string | null } | null = null;
   try {
-    const rows = await db.select({ id: users.id, profileNotes: users.profileNotes, lifeSituation: users.lifeSituation })
+    const rows = await db.select({ id: users.id, profileNotes: users.profileNotes, lifeSituation: users.lifeSituation, onboardingState: users.onboardingState })
       .from(users).where(eq(users.phoneNumber, to)).limit(1);
     recipientRow = (rows[0] as any) ?? null;
     recipientId = recipientRow?.id ?? null;
@@ -802,7 +802,7 @@ export async function sendWhatsAppTemplate(
     // the whole point of rendering it here is that this question can now be asked at all.
     let recipientRow: { id: string; profileNotes: string | null; lifeSituation: string | null } | null = null;
     try {
-      const rows = await db.select({ id: users.id, profileNotes: users.profileNotes, lifeSituation: users.lifeSituation })
+      const rows = await db.select({ id: users.id, profileNotes: users.profileNotes, lifeSituation: users.lifeSituation, onboardingState: users.onboardingState })
         .from(users).where(eq(users.phoneNumber, to)).limit(1);
       recipientRow = (rows[0] as any) ?? null;
     } catch (e: any) {

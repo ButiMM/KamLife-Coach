@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { users, chatHistory, stepLogs, escalations } from "../shared/schema";
+import { users, chatHistory, stepLogs, escalations, adminEvents } from "../shared/schema";
 import { escalationSLA } from "./safety-detection";
 import { generateReferralCode } from "./onboarding-referral";
 import { parseFoodPreferences, parseVisionAnswer, looksLikeBulkIntake, applyIntakeBrake, describeIntake, type BulkIntake } from "./onboarding-intake";
@@ -92,8 +92,40 @@ export function statedMinorAge(text: string): number | null {
 
 /** Close the account to coaching. Returns the new state so a caller can carry it forward. */
 export async function blockUnderage(phone: string): Promise<"BLOCKED_UNDERAGE"> {
+  const [u] = await db.select({ id: users.id, status: users.subscriptionStatus }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
   await db.update(users).set({ onboardingState: "BLOCKED_UNDERAGE", age: null }).where(eq(users.phoneNumber, phone));
+  // A BLOCKED MINOR IS NOT BILLED (#306). Closing coaching left a paid subscription running. The
+  // cancel goes through the same path as a client's own (#263): PayFast first, and the record says
+  // whether PayFast confirmed, so the reply never promises what the product cannot keep.
+  if (u?.status === "active") {
+    const { latestPayFastToken, cancelPayFastSubscription } = await import("./routes/payments");
+    const token = await latestPayFastToken(phone);
+    const billing = await cancelPayFastSubscription(token);
+    await db.update(users).set({
+      subscriptionStatus: "inactive", cancelledAt: new Date(),
+      subscriptionEndReason: billing.ok ? "underage" : "underage_unconfirmed",
+    }).where(eq(users.phoneNumber, phone));
+    await db.insert(adminEvents).values({
+      action: billing.ok ? "subscription_cancelled_underage" : "subscription_cancel_unconfirmed_underage",
+      targetPhone: phone, reason: billing.detail, meta: { token },
+    }).catch((e) => console.error("[AGE_GATE] adminEvents insert failed:", e));
+    if (!billing.ok) {
+      // Founder task, not a message: the escalation queue is where billing work is picked up (#328).
+      await db.insert(escalations).values({
+        userId: u.id, reason: "billing", priority: "urgent", slaDeadline: escalationSLA("urgent"),
+        triggerMessage: `A client under 18 was blocked by the age gate. PayFast did NOT confirm the cancel (${billing.detail}). Cancel their recurring billing by hand${token ? ` (token ${token})` : ""} and refund any charge.`,
+      }).catch((e) => console.error("[AGE_GATE] founder task failed:", e));
+    }
+  }
   return "BLOCKED_UNDERAGE";
+}
+
+/** The age-gate reply, with the truth about billing when a subscription was cancelled (#306). */
+export async function underageReply(phone: string): Promise<string> {
+  const [u] = await db.select({ reason: users.subscriptionEndReason }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+  if (u?.reason === "underage") return `${UNDERAGE_REPLY}\n\nYour subscription is cancelled and you won't be charged again.`;
+  if (u?.reason === "underage_unconfirmed") return `${UNDERAGE_REPLY}\n\nYour subscription is cancelled on our side, and the billing is being stopped by hand today. If you are charged, it will be refunded.`;
+  return UNDERAGE_REPLY;
 }
 
 // ============================================================
@@ -479,7 +511,7 @@ async function commitBulkIntake(user: any, bulk: BulkIntake, source: string, pho
   // UNDERAGE GATE, re-applied. A blob must not be a way around the age check.
   if (typeof bulk.age === "number" && bulk.age < 18) {
     await blockUnderage(phone);
-    return UNDERAGE_REPLY;
+    return underageReply(phone);
   }
   const set: Record<string, unknown> = {};
   if (bulk.name) set.name = bulk.name;
@@ -542,7 +574,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
 
   // ---- BLOCKED states — hard exits ----
   if (state === "BLOCKED_UNDERAGE") {
-    return UNDERAGE_REPLY;
+    return underageReply(phone);
   }
 
   // ---- PRE_ONBOARD — 1-2 conversational exchanges before formal questionnaire ----
@@ -701,7 +733,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     }
     if (age < 18) {
       await blockUnderage(phone);
-      return UNDERAGE_REPLY;
+      return underageReply(phone);
     }
     const isElderly = age >= 60;
     await db.update(users).set({

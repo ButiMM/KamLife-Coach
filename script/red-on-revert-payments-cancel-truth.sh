@@ -16,6 +16,8 @@ FILES=(
   server/handlers/lifecycle.ts
   server/scheduler/jobs/business.ts
   migrations/0014_subscription_end_reason.sql
+  server/onboarding.ts
+  server/outbound-authority.ts
 )
 
 for f in "${FILES[@]}"; do cp "$f" "$WORK_ROOT/$(printf '%s' "$f" | tr '/' '_')"; done
@@ -93,10 +95,12 @@ run_case "a charge after cancellation reactivates the client" server/routes/paym
 # 5. THE GUARD STOPS ASKING WHICH SUBSCRIPTION WAS CHARGED — so a client who comes back through a
 #    NEW subscription is refused too. The opposite defect: guarding the old money by locking out
 #    the new.
+# RE-ANCHORED (#306): the guard now also covers a blocked minor, which adds two closing brackets.
+# Same line, same mutation (the token comparison removed), same claim.
 run_case "a new subscription after a cancel is refused" server/routes/payments.ts \
   '
-        && data.token === await latestPayFastToken(normalisedPhone, eventKey)) {' \
-  ') {' || failed=$((failed + 1))
+        && data.token === await latestPayFastToken(normalisedPhone, eventKey)))) {' \
+  '))) {' || failed=$((failed + 1))
 
 # 6. THE CANCEL TARGETS THE OLDEST SUBSCRIPTION, not the one the client is paying on now.
 run_case "the cancel targets a subscription already ended" server/routes/payments.ts \
@@ -146,9 +150,19 @@ run_case "a cancellation for a superseded token ends the current subscription" s
   '        if (data.token && current && current !== data.token) {' \
   '        if (false) {' || failed=$((failed + 1))
 
+# 15. BLOCKING A MINOR LEAVES THE SUBSCRIPTION BILLING (#306) — the pre-fix age gate.
+run_case "a blocked minor stays subscribed" server/onboarding.ts \
+  '  if (u?.status === "active") {' \
+  '  if (false) {' || failed=$((failed + 1))
+
+# 16. A CHARGE REACTIVATES A BLOCKED MINOR (#306) — only a client's own cancellation was guarded.
+run_case "a charge reactivates a blocked minor" server/routes/payments.ts \
+  'targetUser.onboardingState === "BLOCKED_UNDERAGE" || (targetUser.subscriptionEndReason' \
+  'false || (targetUser.subscriptionEndReason' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-payments-cancel-truth: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-payments-cancel-truth: GREEN — 14/14 behavioral reverts caught"
+echo "red-on-revert-payments-cancel-truth: GREEN — 16/16 behavioral reverts caught"
