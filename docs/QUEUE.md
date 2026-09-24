@@ -28,9 +28,9 @@ Order, and what "done" means today:
 - [x] #268 Calorie floors (#304)
 - [ ] #264 Meal decline (PR #282), merge when green
 - [x] #275 Nags and invented facts (#290)
-- [ ] #267 Age gate (PR #305), merge when green
+- [x] #267 Age gate (#305)
 - [x] #269 POPIA deletion (#307)
-- [ ] #321 Scope in code (PR #345): the model's NO declines; an outage does not refuse a client (Codex @ c4ca8df). Merges on green
+- [x] #321 Scope in code (#345)
 - [x] #333 CI timeout (closed: superseded by #337, the 6-way split, merged)
 - [x] #339 Patch 3 high-severity dependency vulnerabilities (security: allowed despite the freeze) (#374)
 - [x] #340 AI spend cap fails open (security/cost: allowed despite the freeze) (#367)
