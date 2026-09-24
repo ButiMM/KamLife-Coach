@@ -1,5 +1,11 @@
 # Build queue
 
+**Founder, 24 Sep night (`docs/ORDERS.md` §0): the product is the goal.**
+- This queue is derived from `docs/COVERAGE.md`: live harm first, then the least complete row with the most tester impact.
+- Every item names its coverage row.
+- Nothing here starts a new foundation while an existing one sits unwired.
+- **First in lane B:** wire the existing actions into the new core (#393). Then the gate grades the new core's proposed actions against the expected stored rows.
+
 **CTO decision, 24 Sep 11:05: lane B is now the priority.** The remaining lane A items are pattern-patches on the old pipeline. Each fix spawns a new edge ("No thanks", then "Nope", then "Hayi"), because the old design reads messages by hand-written patterns. The new core fixes those by design. So: finish the harm PRs already in flight, then **all new build effort goes to lane B**. The old-pipeline items below become **gate cases the new core must pass**, not patches.
 
 ## Lane A: live billing harm, allowed despite the freeze (tonight, small PRs)

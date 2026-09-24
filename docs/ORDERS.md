@@ -8,6 +8,23 @@ Every builder and reviewer reads this before starting work. It overrides every e
 
 ---
 
+## 0. The product is the goal (founder, 24 Sep night)
+
+This section outranks the rest of this file. It exists because a broad product was built in a narrow corridor for months: every plan started from what broke, the gate became the goal, reviews went deeper into the same spot, and foundations were started and then replaced instead of finished. The founder had to find it. That must not happen again.
+
+1. **The goal is the whole product.** `docs/TESTER-EXPERIENCE.md` defines it. `docs/COVERAGE.md` maps it, one row per capability (inbound, proactive, money and trust, foundation). Gate cases, harms and attacks are how a row is proven. They are not the goal.
+2. **Work order comes from the map.** Live harm to clients, money or data still comes first. After that, the next task is the least complete row with the most tester impact, not the last failure. `docs/QUEUE.md` is derived from the rows.
+3. **Finish before you start.** Existing code for the same job is either listed in `docs/COMPONENTS.md` or found by searching the repo. While it is unfinished, nobody starts a new foundation: no new module under `server/core/`, store, table, prompt pipeline or scheduler. A PR states what it reuses or finishes in a `Reuses:` line. A new foundation needs the CTO's written reason why the existing one cannot be finished, on the PR.
+4. **Every PR names its row:** `Coverage row: A1` (several are fine; docs and ops PRs use a D row). The watch flags a PR without one.
+5. **Reviews and attacks feed the map; they never start a new plan.** Every finding maps to a row. A finding that would need a new foundation names the existing one it replaces and why that one can't be finished. Otherwise it is a task on that row.
+6. **Width check, weekly.** The sweep (`docs/CTO-SWEEP.md` §0) reports:
+   - which rows moved toward complete;
+   - which rows still have zero gate cases;
+   - which foundations are started but unwired.
+
+   If a week passes with no row reaching complete, stop and reassess, as in §5.
+7. **The founder does not audit this.** If the founder has to point out a gap across the product, the CTO and the builder have failed this section, and the fix is written into this section.
+
 ## 1. The decision
 
 Keep the plumbing. Replace the coaching core behind it.
