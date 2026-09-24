@@ -83,3 +83,26 @@ No backfill runs until the erasure check is green on `main`.
 
 Done when: the gate's `comrades-knee-memory` case passes (the facts survive six unrelated turns)
 and the deletion acceptance proves erasure.
+
+## Retires (CTO design review, 24 Sep)
+The record is the **one** place the new coach learns what a client told us. It replaces these
+stores. From now on, no new code writes to them. The #272 **switch PR** deletes their reads and
+writes, once the new composer reads the record instead:
+
+| Store | Where |
+|---|---|
+| Six regex-extracted memory fields | `server/memory.ts` |
+| `profile_notes` tokens | `users.profile_notes` (41 files touch it) |
+| `client_understanding.lifeStory` | `server/understanding/{store,state,compiler,perception}.ts` |
+| The CIP narrative | `server/scheduler/jobs/{cip-update,narrative}.ts`, `server/intelligence/profile.ts` |
+| Portion memory | `server/portion-memory.ts` |
+| Held constraints | `server/held-constraints.ts` |
+
+**Interim, also deleted by the switch PR:** the hook that feeds facts into the old Meaning Engine
+(`live.ts`, `meaning-engine.ts`).
+
+**No model call of its own (CTO, 24 Sep).** The record stores every message at the door with no model
+call (`recordAtDoor`). Facts are extracted by the new core's single understanding call (#359), which
+returns a `facts` array using `FACTS_INSTRUCTIONS` and the client's `knownFacts`. The record validates
+that answer and stores it through `applyFacts`: whole statements in the client's words only, and
+same-kind supersede. Until #359 runs, events are stored and no new facts are learned.

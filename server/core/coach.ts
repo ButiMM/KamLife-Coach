@@ -1,7 +1,8 @@
 /**
  * THE NEW COACH, IN READ-ONLY SHADOW (#272, ORDERS §4 Steps 4-5; docs/TESTER-EXPERIENCE.md).
  *
- *   understand()  proposes what the client wants from this turn, and how sure it is.
+ *   understand()  ONE call: what the client wants from this turn, how sure it is, and the durable facts it
+ *                 states for their record (#271, validated and stored by client-record.ts applyFacts).
  *   compose()     the ONE composer: one reply, from what the client told us (client_facts, #271),
  *                 their real numbers (the client snapshot), the recent conversation, and the rules
  *                 in TESTER-EXPERIENCE.md. It coaches; it never files a report.
@@ -14,23 +15,24 @@
  * on for the gate and for a measured tester sample, not by default.
  */
 import type OpenAI from "openai";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
-import { users, coreShadow, turnLedger } from "@shared/schema";
+import { users, coreShadow, turnLedger, clientEvents } from "@shared/schema";
 import { assertAiOnline } from "../ai-offline";
 
 export const CORE_MODEL = process.env.CORE_MODEL || "gpt-4o-mini";
 export const shadowOn = () => process.env.CORE_SHADOW === "on";
 
-export interface PreTurn { userId: string; name: string; facts: string; numbers: string; conversation: Array<{ role: "user" | "assistant"; content: string }> }
+export interface PreTurn { userId: string; name: string; facts: string; known: string; numbers: string; conversation: Array<{ role: "user" | "assistant"; content: string }> }
 
 /** Everything the composer may know, read BEFORE the old path runs the turn. */
 export async function readPreTurn(phone: string): Promise<PreTurn | null> {
   const [u] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
   if (!u || u.onboardingState !== "COMPLETE") return null; // onboarding is its own journey, not this composer's yet
-  const [{ factsForCoach }, { buildClientSnapshot }] = await Promise.all([import("./client-record"), import("../brain/client-snapshot")]);
-  const [facts, numbers, turns] = await Promise.all([
+  const [{ factsForCoach, knownFacts }, { buildClientSnapshot }] = await Promise.all([import("./client-record"), import("../brain/client-snapshot")]);
+  const [facts, known, numbers, turns] = await Promise.all([
     factsForCoach(u.id).catch(() => ""),
+    knownFacts(u.id).catch(() => "KNOWN FACTS: none"),
     buildClientSnapshot(u).catch(() => ""),
     db.select({ input: turnLedger.inputText, sent: turnLedger.deliveredBody, reply: turnLedger.reply })
       .from(turnLedger).where(eq(turnLedger.userId, u.id)).orderBy(desc(turnLedger.createdAt)).limit(6),
@@ -41,11 +43,11 @@ export async function readPreTurn(phone: string): Promise<PreTurn | null> {
     const said = (t.sent || t.reply || "").trim();
     if (said) conversation.push({ role: "assistant", content: said.slice(0, 500) });
   }
-  return { userId: u.id, name: (u.name || "").split(" ")[0] || "there", facts, numbers, conversation };
+  return { userId: u.id, name: (u.name || "").split(" ")[0] || "there", facts, known, numbers, conversation };
 }
 
 const UNDERSTAND_SYSTEM = `You read one WhatsApp message from a coaching client and say what they want from this turn.
-Return ONLY JSON: {"family":"report|question|plan|feeling|correction|other","wants":"<one short sentence>","one_question":"<the single question worth asking, or null>","uncertainty":<0..1>}
+Return ONLY JSON: {"family":"report|question|plan|feeling|correction|other","wants":"<one short sentence>","one_question":"<the single question worth asking, or null>","uncertainty":<0..1>,"facts":[...]}
 - report: they are telling you what they ate, did, weighed or felt, and want it noted.
 - question: they ask for advice or information.
 - plan: they want a plan (a day of eating, a session, a week).
@@ -55,17 +57,24 @@ Ask one_question ONLY if the answer would change the advice.`;
 
 export type Understanding = { family: string; wants: string; one_question: string | null; uncertainty: number };
 
-export async function understand(openai: OpenAI, message: string): Promise<Understanding | null> {
+/**
+ * ONE CALL READS THE MESSAGE (CTO, 24 Sep): what the client wants from this turn AND the durable facts
+ * it states for their record (#271). `raw` is that call's whole JSON answer; the record validates its
+ * "facts" (client-record.ts applyFacts) — the model proposes, code decides what is stored.
+ */
+export async function understand(openai: OpenAI, message: string, known = "KNOWN FACTS: none"): Promise<{ u: Understanding | null; raw: string }> {
   assertAiOnline("core_understand");
+  const { FACTS_INSTRUCTIONS } = await import("./client-record");
   const r = await openai.chat.completions.create({
-    model: CORE_MODEL, temperature: 0, max_tokens: 150, response_format: { type: "json_object" },
-    messages: [{ role: "system", content: UNDERSTAND_SYSTEM }, { role: "user", content: message.slice(0, 1500) }],
+    model: CORE_MODEL, temperature: 0, max_tokens: 500, response_format: { type: "json_object" },
+    messages: [{ role: "system", content: `${UNDERSTAND_SYSTEM}\n\n${FACTS_INSTRUCTIONS}\n\n${known}` }, { role: "user", content: message.slice(0, 1500) }],
   });
+  const raw = r.choices[0]?.message?.content || "{}";
   try {
-    const j = JSON.parse(r.choices[0]?.message?.content || "{}");
-    if (typeof j.family !== "string") return null;
-    return { family: j.family, wants: String(j.wants || ""), one_question: j.one_question ? String(j.one_question) : null, uncertainty: Number(j.uncertainty) || 0 };
-  } catch { return null; }
+    const j = JSON.parse(raw);
+    if (typeof j.family !== "string") return { u: null, raw };
+    return { u: { family: j.family, wants: String(j.wants || ""), one_question: j.one_question ? String(j.one_question) : null, uncertainty: Number(j.uncertainty) || 0 }, raw };
+  } catch { return { u: null, raw }; }
 }
 
 /** The rules of the product, in the composer's own words (docs/TESTER-EXPERIENCE.md). */
@@ -106,12 +115,19 @@ async function openaiClient(): Promise<OpenAI> {
 }
 
 /** Run the new coach beside the old one and store what it would have said. Never throws, never sends. */
-export async function runShadow(pre: PreTurn | null, message: string, rootId: string): Promise<void> {
+export async function runShadow(pre: PreTurn | null, message: string, rootId: string, sourceMessageId?: string): Promise<void> {
   if (!pre || !message?.trim()) return;
   const t0 = Date.now();
   try {
     const openai = await openaiClient();
-    const u = await understand(openai, message).catch(() => null);
+    const read = await understand(openai, message, pre.known).catch(() => null);
+    const u = read?.u ?? null;
+    // The record learns from the same call (#271): its own validation decides what is stored.
+    if (read && sourceMessageId) {
+      const [ev] = await db.select({ id: clientEvents.id }).from(clientEvents)
+        .where(and(eq(clientEvents.sourceMessageId, sourceMessageId), eq(clientEvents.userId, pre.userId))).limit(1);
+      if (ev) await (await import("./client-record")).applyFacts(ev.id, read.raw).catch(() => 0);
+    }
     const reply = await compose(openai, pre, message, u);
     await db.insert(coreShadow).values({
       userId: pre.userId, rootId, inputText: message, understanding: u, factsRead: pre.facts ? pre.facts.split("\n").length - 1 : 0,

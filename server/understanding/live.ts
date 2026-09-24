@@ -557,6 +557,7 @@ export async function runMeaningEngineLive(ctx: {
     // validation of a stated fact rather than an inference from English.
     const engineDecision = await canonicalDecision(user, message).catch(() => ({ todo: "", kind: "hold" }));
     // THE CLIENT RECORD (#271): what they have told us, in their words, from the fact store.
+    // INTERIM: this hook into the old engine is deleted in the #272 switch PR (the new composer reads the record).
     const clientFacts = user?.id ? await import("../core/client-record").then(m => m.factsForCoach(user.id)).catch(() => "") : "";
     const result = await runMeaningEngine({ openai, user, message, prior, snapshot, hungerEvidence, deficitEvidence, history: bridgeNote ? [...history, bridgeNote] : history, emitActions: actionMode !== "off" && !strategyTurn, decisionBrief: decisionBrief(engineDecision), clientFacts });
     if (!result) return null; // fail-open → existing pipeline runs

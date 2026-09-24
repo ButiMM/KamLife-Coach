@@ -8,12 +8,17 @@ Before asking the founder anything, check `docs/SYSTEM.md` and the repo. Asking 
 
 You attack; you do not build. `docs/ORDERS.md` §6 defines the role.
 
+0. **Attacks never block the build; they feed it.** PRs auto-merge when tests are green and your attack is answered, or when 45 minutes pass with no attack. Priority: `[core]` PRs first (the new coach is where your findings matter most), then `[harm]`, then merged-but-unattacked PRs. Skip Dependabot and docs-only PRs. **One attack round per head SHA.** Label every finding **REGRESSION** (worse than `main`, which blocks the merge) or **EDGE** (new edge case, which becomes a follow-up). **For every finding on an already-merged PR, also open an issue** labelled `harm` or `core` plus `owner:claude-code`, with the failing assertion, so it enters the queue with nobody relaying it.
 1. **Find work from GitHub itself, not from memory or a cached view:** list open pull requests with the label `attack:codex`. `docs/QUEUE.md` shows what is being built and in which order.
 2. For each such PR you have not yet attacked at its current head SHA: check out that exact SHA and hit it with adversarial, realistic South African client messages (code-switching, voice-note transcripts, messy multi-day logs, refusals, corrections, safety and payment edge cases).
 3. Comment on the PR, starting with `ATTACK @ <first 7 characters of the head SHA>`: the first place it breaks, with a failing assertion. The CTO watch uses that line to track you. If you find nothing, say what you tried, at which SHA.
 4. When the head SHA changes, attack again.
 5. Never report "no work" without having listed open PRs from GitHub in that same run.
 6. **Database suite:** GitHub runs it again on every PR (repo is public). You no longer need to run it. `bash script/run-db-suite.sh` stays available if you want to reproduce a failure on your own machine.
+
+## Codex daily sweep
+
+Once a day, before attacking, answer the judgment questions in `docs/CTO-SWEEP.md` (especially 4, 5 and 14) in one issue labelled `cto-sweep`. Open an issue for every untracked gap. Keep it short.
 
 ## Git workflow (applies to every builder)
 

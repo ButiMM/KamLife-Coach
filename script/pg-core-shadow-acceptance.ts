@@ -26,18 +26,23 @@ process.env.NODE_ENV = "production";
 
 const SENTINEL = "SHADOW-ONLY-7f3a"; // the new coach's reply carries this; it must never reach a client
 const composerRequests: string[] = [];
+let understandCalls = 0;
+const allRequests: string[] = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
   const url = typeof input === "string" ? input : String(input?.url || input);
   if (!url.includes("api.openai.com")) return realFetch(input, init);
   const body = typeof init?.body === "string" ? init.body : "";
+  allRequests.push(body);
   let content = "Okay, noted.";
-  if (body.includes("maintain a coaching client's record")) {
+  if (body.includes("say what they want from this turn")) {
+    // ONE understanding call returns the reading AND the facts for the record (#271).
+    understandCalls++;
     const msg = JSON.parse(body).messages.at(-1).content as string;
-    content = /comrades/i.test(msg)
-      ? JSON.stringify({ facts: [{ kind: "goal", subject: "comrades marathon", statement: "I'm training for the Comrades marathon", detail: {}, valid_until: null, corrects: null }] })
-      : JSON.stringify({ facts: [] });
-  } else if (body.includes("say what they want from this turn")) content = JSON.stringify({ family: "question", wants: "advice", one_question: null, uncertainty: 0.2 });
+    const facts = /comrades/i.test(msg)
+      ? [{ kind: "goal", subject: "comrades marathon", statement: "I'm training for the Comrades marathon", detail: {}, valid_until: null, corrects: null }] : [];
+    content = JSON.stringify({ family: /comrades/i.test(msg) ? "report" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts });
+  }
   else if (body.includes("You are Coach K, a warm, direct South African")) { composerRequests.push(body); content = `Great question. ${SENTINEL} One move today.`; }
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
   else if (body.includes("domain gate")) content = "YES";
@@ -97,6 +102,13 @@ await settle(async () => (await q("SELECT 1 FROM core_shadow WHERE root_id = $1"
 const row = (await q("SELECT reply, understanding, facts_read FROM core_shadow WHERE root_id = $1", [s2]))[0];
 chk(!!row && row.reply.includes(SENTINEL), "the new coach's would-be reply is stored against the turn", JSON.stringify(row));
 chk(row?.understanding?.family === "question", "the understanding step's reading is stored with it", JSON.stringify(row?.understanding));
+
+REAL("\n1b. ONE CALL READS THE MESSAGE — the record learns from the understanding call (#271, CTO 24 Sep)");
+const learned = await q("SELECT f.statement, e.source_message_id FROM client_facts f JOIN client_events e ON e.id = f.source_event_id WHERE f.user_id = $1", [u.id]);
+chk(learned.some((f: any) => /Comrades/.test(f.statement)), "the Comrades goal is stored from the shadow's understanding call", JSON.stringify(learned));
+chk(!allRequests.some(b => b.includes("You also maintain the client's record") && !b.includes("say what they want from this turn")),
+  "no separate model call is made for the record");
+chk(allRequests.some(b => b.includes("say what they want from this turn") && b.includes("KNOWN FACTS")), "the understanding call is shown what the record already knows");
 
 REAL("\n2. IT IS GIVEN WHAT THE CLIENT TOLD US, AND THEIR REAL NUMBERS");
 const req = composerRequests.at(-1) || "";

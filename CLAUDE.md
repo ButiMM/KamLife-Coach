@@ -1,8 +1,15 @@
 # KamLife Coach — Claude Code Instructions
 
 ## Standing orders (read first, every session)
+- **When you're blocked on the founder** (a secret, an account, a decision), post a PR comment starting `BLOCKED:` with the exact action he must take. The watch puts it at the top of the status issue. Keep working on something else meanwhile.
 - **Before asking the founder anything, check `docs/SYSTEM.md` and the repo.** Asking him for something already recorded or findable is a failure. Add anything durable you learn to `docs/SYSTEM.md`.
 - `docs/ORDERS.md` is the plan. It overrides every other doc.
+- **The watch merges for you (24 Sep).** When a PR's checks are all green, the mouth ratchet passes, and its Codex attack is answered (or 45 minutes passed with no attack), `.github/workflows/cto-watch.yml` merges it within minutes of the tests finishing. Don't wait on it. Add the label `hold` to stop a PR auto-merging. Label any PR that moves real testers onto the new coach `switch`: it then needs a real Codex attack, answered, and a green replay gate. It never merges on a timeout.
+- **Run three worktrees in parallel, all day:** **A** (attack follow-ups and security), **B1** (#270 gate, then #293 Coach Health) and **B2** (#271 client record, then #272 understanding and composer). File ownership rules in `docs/ORDERS.md` apply between them. Never let one lane wait on another.
+- **Test diet (24 Sep):** code the new core will replace gets a **minimal** failing-then-passing test, with no new red-on-revert harness. Heavy acceptances and revert harnesses are only for code that survives: plumbing, safety, billing, and the new core. For coaching behaviour, add a **gate case** (a journey in `docs/TESTER-EXPERIENCE.md`), not a handler acceptance. Script code is already 57k lines against 75k of server code.
+- **No new model calls outside the new core.** `model_call_sites` is now in the mouth ratchet.
+- **Keep PRs small** (under ~600 changed lines where possible), so a test run and an attack each take minutes, not hours.
+- **Reuse, don't rebuild; replace, don't add.** `docs/COMPONENTS.md` says what the new core calls as tools (food data, targets, day maths, programmes, vision, voice) and what each switch PR deletes. When you delete a file listed in `docs/delete-list.txt`, remove its line in the same PR.
 - **Lane B is the priority (CTO, 24 Sep).** Finish and merge the lane A PRs already open; start no new lane A work. All new effort goes to lane B in `docs/QUEUE.md`, in order. Old-pipeline bugs become gate cases for the new core, not new patterns.
 - **Your work queue is `docs/QUEUE.md`.** It has two lanes. If no other session is on lane B (no open or recent branch for #270), run lane B yourself in parallel, in a separate worktree or subagent, starting with #270. Nobody will tell you to; this line is the instruction. In each lane, take the first unchecked item, build it as one pull request, then take the next.
 - Every PR: open the description with "What testers will notice:", add the label `attack:codex`, and comment `@codex attack this PR per docs/ORDERS.md §6` with the head SHA.

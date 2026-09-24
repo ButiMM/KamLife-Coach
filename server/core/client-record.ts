@@ -11,15 +11,13 @@
  * workouts stay the owners of their writes). Failures are swallowed here on purpose: the record
  * must never be the reason a client does not get an answer.
  */
-import type OpenAI from "openai";
 import { and, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import { users, clientEvents, clientFacts } from "@shared/schema";
-import { assertAiOnline } from "../ai-offline";
 
 export const FACT_KINDS = ["goal", "injury", "constraint", "schedule", "preference", "life_event"] as const;
 export type FactKind = typeof FACT_KINDS[number];
-const EXTRACTOR = "client-record/v1 gpt-4o-mini";
+const EXTRACTOR = "client-record/v2 understanding-call";
 
 type Channel = "text" | "voice" | "photo" | "video";
 export function channelOf(mediaType?: string | null): Channel {
@@ -46,8 +44,13 @@ export async function recordInbound(p: { phone: string; rawText: string; mediaTy
   return existing?.id ?? null;
 }
 
-const EXTRACT_SYSTEM = `You maintain a coaching client's record for a South African health and fitness coach.
-From ONE client message, list the durable facts the client states ABOUT THEMSELVES that a coach must remember:
+/**
+ * NO MODEL CALL OF ITS OWN (CTO, 24 Sep): these instructions are folded into the new core's single
+ * understanding call (#359), which returns a "facts" array beside its reading of the turn. The
+ * record validates and stores what that call returns (applyFacts); it never asks a model itself.
+ */
+export const FACTS_INSTRUCTIONS = `You also maintain the client's record for their South African health and fitness coach.
+From the client's message, list the durable facts the client states ABOUT THEMSELVES that a coach must remember:
 - goal: what they are working towards (an event, a target, a date)
 - injury: a body part that hurts, is injured or limits training
 - constraint: something that limits food or training (budget, equipment, religion, allergy, shift work)
@@ -60,8 +63,8 @@ food they ate (meals are logged elsewhere), greetings, and anything you would ha
 If the message corrects or replaces one of the KNOWN FACTS listed below it, set "corrects" to that known fact's subject, exactly as listed.
 A fact that only starts later ("I start night shifts in December") gets "valid_from"; one that ends ("my knee is sore this week") gets "valid_until".
 
-Return ONLY JSON: {"facts":[{"kind":"goal|injury|constraint|schedule|preference|life_event","subject":"<2-4 words, lowercase>","statement":"<the client's own words, verbatim span>","detail":{},"valid_from":"YYYY-MM-DD or null","valid_until":"YYYY-MM-DD or null","corrects":"<known subject or null>"}]}
-Return {"facts":[]} when there is nothing.`;
+In your JSON, include "facts":[{"kind":"goal|injury|constraint|schedule|preference|life_event","subject":"<2-4 words, lowercase>","statement":"<the client's own words, verbatim span>","detail":{},"valid_from":"YYYY-MM-DD or null","valid_until":"YYYY-MM-DD or null","corrects":"<known subject or null>"}]}
+Use "facts":[] when there is nothing.`;
 
 type Extracted = { kind: string; subject: string; statement: string; detail?: Record<string, unknown>; valid_from?: string | null; valid_until?: string | null; corrects?: string | null };
 
@@ -83,26 +86,25 @@ export function parseExtraction(raw: string, message: string): Extracted[] {
   ).map((f: any) => ({ ...f, subject: f.subject.trim().toLowerCase(), statement: f.statement.trim() }));
 }
 
-/** Extract facts from one stored event and write them. Writes nothing on any failure. */
-export async function learnFrom(openai: OpenAI, eventId: string): Promise<number> {
+/** What is already known, for the understanding call: a correction can only name what it corrects if it sees it. */
+export async function knownFacts(userId: string): Promise<string> {
+  // CORRECTIONS NEED THE RECORD (Codex @ c5a521b): "actually the race is in May" names no prior subject.
+  const known = await db.select({ kind: clientFacts.kind, subject: clientFacts.subject, statement: clientFacts.statement })
+    .from(clientFacts).where(and(eq(clientFacts.userId, userId), isNull(clientFacts.supersededBy))).orderBy(desc(clientFacts.createdAt)).limit(30);
+  return known.length ? `KNOWN FACTS:\n${known.map(k => `- ${k.kind} / ${k.subject}: "${k.statement}"`).join("\n")}` : "KNOWN FACTS: none";
+}
+
+/**
+ * Validate the facts the understanding call returned for one stored event, and write them.
+ * `raw` is that call's JSON answer. Writes nothing on any failure; a retried message is not learned twice.
+ */
+export async function applyFacts(eventId: string, raw: string): Promise<number> {
   const [ev] = await db.select().from(clientEvents).where(eq(clientEvents.id, eventId)).limit(1);
   const text = (ev?.rawText?.trim() || ev?.transcriptRaw?.trim() || "");
   if (!ev || text.length < 12) return 0;
   const [done] = await db.select({ n: sql<number>`count(*)::int` }).from(clientFacts).where(eq(clientFacts.sourceEventId, eventId));
-  if ((done?.n ?? 0) > 0) return 0; // a retried message is not learned twice
-  assertAiOnline("client_record");
-  // CORRECTIONS NEED THE RECORD (Codex @ c5a521b): "actually the race is in May" names no prior
-  // subject, so the extractor is shown what is already known and names the one it corrects.
-  const known = await db.select({ kind: clientFacts.kind, subject: clientFacts.subject, statement: clientFacts.statement })
-    .from(clientFacts).where(and(eq(clientFacts.userId, ev.userId), isNull(clientFacts.supersededBy))).orderBy(desc(clientFacts.createdAt)).limit(30);
-  const knownFacts = known.length ? `\n\nKNOWN FACTS:\n${known.map(k => `- ${k.kind} / ${k.subject}: "${k.statement}"`).join("\n")}` : "\n\nKNOWN FACTS: none";
-  const resp = await openai.chat.completions.create({
-    model: "gpt-4o-mini", temperature: 0, max_tokens: 400, response_format: { type: "json_object" },
-    messages: [{ role: "system", content: EXTRACT_SYSTEM + knownFacts }, { role: "user", content: text.slice(0, 1500) }],
-  });
-  const { recordGptCost } = await import("../gpt");
-  recordGptCost({ userId: ev.userId, model: "gpt-4o-mini", feature: "client_record", promptTokens: resp.usage?.prompt_tokens ?? 0, completionTokens: resp.usage?.completion_tokens ?? 0 });
-  const facts = parseExtraction(resp.choices[0]?.message?.content || "", text);
+  if ((done?.n ?? 0) > 0) return 0;
+  const facts = parseExtraction(raw, text);
   let written = 0;
   for (const f of facts) {
     await db.transaction(async tx => {
@@ -141,15 +143,6 @@ export async function factsForCoach(userId: string): Promise<string> {
     + rows.map(r => `- ${r.kind}: "${r.statement}"`).join("\n");
 }
 
-let client: OpenAI | null = null;
-async function openaiClient(): Promise<OpenAI> {
-  if (!client) {
-    const OpenAI = (await import("openai")).default;
-    client = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY });
-  }
-  return client;
-}
-
 /** A voice note's transcript, as the turn recorded it (turn_ledger), waited for briefly. */
 async function voiceTranscript(rootId?: string): Promise<string | null> {
   if (!rootId) return null;
@@ -176,15 +169,13 @@ export async function purgeExpired(now = Date.now()): Promise<{ events: number; 
   return { events: events.length, facts: facts.length };
 }
 
-/** The transport's one call: store what was sent, then learn from it. Never throws. */
-export async function recordAndLearn(p: { phone: string; rawText: string; mediaType?: string | null; sourceMessageId?: string; rootId?: string }): Promise<void> {
+/** The transport's one call: store what was sent, exactly. No model call. Never throws. */
+export async function recordAtDoor(p: { phone: string; rawText: string; mediaType?: string | null; sourceMessageId?: string; rootId?: string }): Promise<void> {
   try {
     if (Date.now() - lastPurge > 24 * 3600_000) await purgeExpired().catch(() => {});
     const transcriptRaw = channelOf(p.mediaType) === "voice" ? await voiceTranscript(p.rootId) : null;
-    const id = await recordInbound({ ...p, transcriptRaw });
-    if (id && (p.rawText?.trim() || transcriptRaw?.trim())) await learnFrom(await openaiClient(), id);
+    await recordInbound({ ...p, transcriptRaw });
   } catch (e) {
-    const { isAiOfflineError } = await import("../ai-offline");
-    if (!isAiOfflineError(e)) console.warn("[CLIENT_RECORD]", (e as Error)?.message || e);
+    console.warn("[CLIENT_RECORD]", (e as Error)?.message || e);
   }
 }
