@@ -29,6 +29,11 @@ for p in open_prs:
     n, sha = p["number"], p["head"]["sha"]
     short = sha[:10]
     comments = api("GET", f"/issues/{n}/comments?per_page=100")
+    files = api("GET", f"/pulls/{n}/files?per_page=100")
+    adds_store = any(f["filename"].startswith("migrations/") and f["status"] == "added" for f in files)
+    if p["title"].startswith("[core]") and adds_store and "Retires:" not in (p["body"] or ""):
+        comment_once(n, f"cto-retires-{n}", "**CTO watch (layer check):** this `[core]` PR adds a new table or store. Its description needs a `Retires:` section naming which existing stores, handlers or calls it replaces, and the switch PR that deletes them. Otherwise it's another layer (docs/ORDERS.md §4c).", comments)
+        alerts.append(f"**Layer check:** #{n} adds a store without saying what it retires.")
     if "What testers will notice" not in (p["body"] or ""):
         comment_once(n, f"cto-notice-{n}", "**CTO watch:** the description must open with \"What testers will notice:\" (CLAUDE.md standing orders).", comments)
     human = [c for c in comments if not c["user"]["login"].endswith("[bot]") or "codex" in c["user"]["login"]]
