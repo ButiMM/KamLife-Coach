@@ -77,3 +77,5 @@ export function shouldAlertAiDown(now = Date.now()): boolean {
   lastAiDownAlert = now;
   return true;
 }
+/** The alert did not reach the founder: give the slot back so the next failure tries again. */
+export function releaseAiDownAlert(): void { lastAiDownAlert = 0; }

@@ -10767,6 +10767,15 @@ test("#395 an empty OpenAI balance is told apart from a rate limit, alerted once
   assert.equal(shouldAlertAiDown(t0 + 60_000), false, "the next turn a minute later does not alert again");
   assert.equal(shouldAlertAiDown(t0 + 61 * 60_000), true, "an hour later it alerts again if still down");
   assert.ok(!/30 seconds|try again/i.test(COACH_OUT_OF_CREDITS_REPLY), "no promised recovery time");
+  // Codex @ 44b007a: the alert is sent in the background and can be dropped, so the reply may not claim it.
+  assert.ok(!/alert|told|notified|team/i.test(COACH_OUT_OF_CREDITS_REPLY), "the reply claims no alert");
+  const { releaseAiDownAlert } = await import("../server/ai-offline");
+  assert.equal(shouldAlertAiDown(t0 + 62 * 60_000), false, "control: still inside the hour after the t0+61 alert");
+  releaseAiDownAlert(); // the t0+61 alert was dropped
+  assert.equal(shouldAlertAiDown(t0 + 63 * 60_000), true, "after a dropped alert the next failure tries again");
+  // The founder number is normalised to whatsapp:+digits like every other founder alert.
+  const gpt = (await import("node:fs")).readFileSync("server/gpt.ts", "utf-8");
+  assert.match(gpt, /sendCriticalAlert\(`whatsapp:\+\$\{alertPhone\.replace/);
   assert.ok(isCoachUnavailableReply(COACH_OUT_OF_CREDITS_REPLY), "the verifier knows it is not a real answer");
   const src = (await import("node:fs")).readFileSync("server/gpt.ts", "utf-8");
   assert.ok(/isQuotaExhausted\(err\)/.test(src.slice(src.indexOf("export async function askCoachK"))), "askCoachK checks for an empty balance");

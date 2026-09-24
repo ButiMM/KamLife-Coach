@@ -1012,7 +1012,8 @@ export const HONOURED_SILENCE = "You asked me to leave that one alone, so I will
  * Suffix match because the last one is prefixed with the client's first name.
  */
 /** The out-of-credits reply (#395): honest, no promised recovery time, and what still works. */
-export const COACH_OUT_OF_CREDITS_REPLY = "My coaching side is offline right now and the team has been alerted. Anything you log still saves — tell me what you ate or trained and it's recorded.";
+// It claims no alert (Codex @ 44b007a): the founder alert is sent in the background and can be dropped.
+export const COACH_OUT_OF_CREDITS_REPLY = "My coaching side is offline right now. Anything you log still saves — tell me what you ate or trained and it's recorded.";
 
 const COACH_UNAVAILABLE_REPLIES = [
   COACH_OUT_OF_CREDITS_REPLY,
