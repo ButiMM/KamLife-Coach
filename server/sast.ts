@@ -81,12 +81,6 @@ export function sastWeekStart(at?: Date | number): Date {
   return new Date(start.getTime() - daysFromMonday * 86_400_000);
 }
 
-/** Exclusive end of that SAST calendar week (next Monday 00:00). */
-export function sastWeekEnd(at?: Date | number): Date {
-  return new Date(sastWeekStart(at).getTime() + 7 * 86_400_000);
-}
-
-
 // Meal/event temporal attribution is colocated with the canonical SAST day owner.
 // Deterministic meal slot from the SAST hour — used to label a food log when the client
 // doesn't say which meal it is. Total over all 24h (no gaps): the 15:00–17:00 window
