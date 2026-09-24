@@ -131,6 +131,8 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 **Quality bar under auto-merge (24 Sep):** speed never lowers the bar. Every PR needs green tests (all six database shards) and a passing mouth ratchet. REGRESSION findings block. Hard invariants (§3) block. EDGE findings aren't dropped: each becomes an issue **and a gate case the new core must pass before its message family switches**. A PR labelled `switch`, which moves real testers onto the new coach, never merges on a timeout: it needs an actual Codex attack, answered, and a green replay gate showing it beats the old code.
 
+**If Codex is out of usage limits when a `switch` PR is ready (24 Sep evening):** the CTO performs the attack instead: a diff review against `docs/COMPONENTS.md` and `TESTER-EXPERIENCE.md`, plus the 3-run gate numbers, posted as `ATTACK @ <sha> (CTO)`. A switch never waits a night on a usage limit, and never merges without an attack. Codex attacks the merged version when its limits reset.
+
 **When the gate can decide a switch (24 Sep evening):** single-case scores move by about ±3 between runs of the same code. So a `switch` PR needs **(a) at least 5 cases for its journey, (b) the average of 3 gate runs, new coach against old code on the same cases, (c) the new coach ahead on that average, and (d) zero hard-invariant failures in any run.** Cost and reply time are reported (baseline on main: R0.009 a message, 2.3 s).
 
 **Tester-visible rule:** every PR description opens with one line, "What testers will notice:", in plain language. If the answer is nothing, it says why the PR is still needed today. Work is ordered so the changes testers feel most land first.
