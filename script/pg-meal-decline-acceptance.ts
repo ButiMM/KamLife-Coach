@@ -264,6 +264,21 @@ REAL("\n2. A GENUINE CORRECTION SUPERSEDES — the replacement lands, and the re
   const rawB = JSON.stringify(afterB.map(r => r.raw_message));
   chk(!!rb && afterB.length === 1 && !afterB.some(r => r.id === rb.id) && /chicken/i.test(rawB) && /beans/i.test(rawB) && !/\brice\b/i.test(rawB),
     "\"…instead of rice and I also had beans\" keeps the beans and drops the rice", `after=${JSON.stringify(afterB)} mutations=${JSON.stringify(tb2.mutations)}`);
+  // Codex @ 893d177: the omitted-subject continuation "and had beans" is an addition too.
+  for (const tb of ["meal_logs", "chat_history", "turn_ledger"]) await pool.query(`DELETE FROM ${tb} WHERE user_id = $1`, [user.id]);
+  await say("I had rice", "SM264-3h");
+  const rc = (await meals())[0];
+  await say("No, I had chicken breast instead of rice and had beans.", "SM264-3i");
+  const afterC = await meals();
+  const rawC = JSON.stringify(afterC.map(r => r.raw_message));
+  chk(!!rc && afterC.length === 1 && !afterC.some(r => r.id === rc.id) && /chicken/i.test(rawC) && /beans/i.test(rawC) && !/\brice\b/i.test(rawC),
+    "\"…instead of rice and had beans.\" keeps the beans and drops the rice", `after=${JSON.stringify(afterC)}`);
+  // Codex @ 893d177: same food, new slot — the slot is the correction.
+  for (const tb of ["meal_logs", "chat_history", "turn_ledger"]) await pool.query(`DELETE FROM ${tb} WHERE user_id = $1`, [user.id]);
+  await say("I had rice and chicken breast for lunch", "SM264-3j");
+  await say("No, I had rice and chicken breast for dinner", "SM264-3k");
+  const afterS = await meals();
+  chk(afterS.length === 1 && afterS[0].meal_label === "dinner", "\"No, … for dinner\" moves the same food to dinner", JSON.stringify(afterS));
   for (const tb of ["meal_logs", "chat_history", "turn_ledger"]) await pool.query(`DELETE FROM ${tb} WHERE user_id = $1`, [user.id]);
   await say("I had pap", "SM264-3c");
   const pap = (await meals())[0];

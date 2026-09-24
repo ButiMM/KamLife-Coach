@@ -148,7 +148,12 @@ run_case "a correction naming part of the plate is a repeat" server/handlers/foo
 
 # 14. A NEW AMOUNT IS A REPEAT (Codex @ a514b3a) — "No, I had 3 eggs" after 2 eggs keeps 2 eggs.
 run_case "a correction that changes only the amount is a repeat" server/handlers/food-context.ts \
-  ' && amounts(candidateSansNot) === amounts(String(target.rawMessage || ""));' \
+  ' && amounts(candidateSansNot) === amounts(String(target.rawMessage || "")) && ((slot' \
+  ' && ((slot' || failed=$((failed + 1))
+
+# 15. A NEW SLOT IS A REPEAT (Codex @ 893d177) — "No, I had rice and chicken breast for dinner" leaves it at lunch.
+run_case "a correction that changes only the meal slot is a repeat" server/handlers/food-context.ts \
+  ' && ((slot?: string) => !slot || slot === String(target.mealLabel || "").toLowerCase())(candidateSansNot.match(/\b(breakfast|lunch|dinner|supper|snack)\b/i)?.[1]?.toLowerCase());' \
   ';' || failed=$((failed + 1))
 
 restore_case
@@ -156,4 +161,4 @@ if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-meal-decline: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-meal-decline: GREEN — 13/13 behavioral reverts caught"
+echo "red-on-revert-meal-decline: GREEN — 14/14 behavioral reverts caught"
