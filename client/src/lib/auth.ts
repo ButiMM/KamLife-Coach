@@ -7,7 +7,3 @@ export function markLoggedIn(): void {
 export function markLoggedOut(): void {
   sessionStorage.removeItem(SESSION_HINT);
 }
-
-export function hasSessionHint(): boolean {
-  return !!sessionStorage.getItem(SESSION_HINT);
-}

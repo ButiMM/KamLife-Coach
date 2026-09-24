@@ -4,32 +4,10 @@ import {
   abExperiments, abAssignments,
   eq, gte, and, lt, desc, asc, sql, count,
   sendWhatsApp, sendCriticalAlert, claimDailySlot, claimProactive, claimCritical, isProactivePaused,
-  getActiveClients, isPaused, loadState, saveState,
-  deliveryStats, todaySAST, thisWeekUTC, FROM_NUMBER, PRICING, inArray,
+  getActiveClients, isPaused,
+  deliveryStats, todaySAST, thisWeekUTC, PRICING, inArray,
 } from "../shared";
 import { gptCosts } from "../../../shared/schema";
-
-export async function runMonthEndBudget(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Month-end budget mode");
-  const clients = await getActiveClients();
-  for (const client of clients) {
-    if (isPaused(client)) continue;
-    try {
-      const name = client.name || "there";
-      const budget = client.weeklyFoodBudget || "100_300";
-      let budgetMsg: string;
-      if (budget === "under_50" || budget === "50_100" || budget === "under_100") {
-        budgetMsg = `${name}, month end is coming. Your R57 emergency plan — eggs R25, pilchards R12, sugar beans R20. This covers your protein for 4 days. Shop this weekend before the money is gone.`;
-      } else if (budget === "100_300") {
-        budgetMsg = `${name}, month end approaching. Your R100 week plan — eggs 12 pack R45, pilchards 3 tins R36, cabbage R8, onions R8, pap 2kg R15. Enough for the full week. Shop at Shoprite or Boxer this weekend.`;
-      } else {
-        budgetMsg = `${name}, month end coming. Pre-cook chicken in bulk, buy oats for the week, and prep Sunday — that's what keeps the nutrition consistent when the week gets busy.`;
-      }
-      if (await claimDailySlot(client.id, "month_end_budget")) { await sendWhatsApp(client.phoneNumber, budgetMsg); }
-    } catch (err) { console.error(`[SCHEDULER] Month-end budget error — ${client.phoneNumber}:`, err); }
-  }
-}
-
 export async function runSubscriptionExpiryCheck(): Promise<void> {
   console.log("[SCHEDULER] JOB: Subscription expiry check");
   const clients = await getActiveClients({ ignorePause: true }); // billing must run even when coaching is paused
@@ -191,30 +169,6 @@ export async function runSignupNudge(): Promise<void> {
     } catch (err) { console.error(`[SCHEDULER] Trial expiry nudge error — ${client.phoneNumber}:`, err); }
   }
 }
-
-export async function runPaydayShoppingNudge(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Payday shopping nudge");
-  const clients = await getActiveClients();
-  for (const client of clients) {
-    if (isPaused(client)) continue;
-    try {
-      const name = (client.name || "there").split(" ")[0];
-      const budget = client.weeklyFoodBudget || "100_300";
-      const goal = client.goalType || "fat_loss";
-      let msg = "";
-      if (budget === "under_100" || budget === "50_100" || budget === "under_50") {
-        msg = `${name}, if today is payday — protein before anything else.\n\nBest value at Shoprite or Boxer: eggs, pilchards, sugar beans. In that order. Those three cover your protein for the week.\n\nEverything else comes after. Reply *shopping list* for the full plan.`;
-      } else if (budget === "100_300") {
-        const focus = goal === "muscle_gain" ? `Frozen chicken and eggs are your priority — you need volume.` : `Frozen chicken, oats, and sweet potato. Protein first, carbs around training.`;
-        msg = `${name}, payday — stock up before the money goes.\n\n${focus}\n\nReply *shopping list* for your full list. Reply *meal prep* for the batch cooking plan.`;
-      } else {
-        msg = `${name}, start of the pay cycle — best time to set up your kitchen for the week.\n\nBuy ${goal === "muscle_gain" ? "chicken breast, eggs, and Greek yoghurt in bulk" : "lean protein in bulk — chicken breast, tuna, eggs"}. Freeze what you won't use this week.\n\nReply *shopping list* for your personalised list.`;
-      }
-      if (await claimDailySlot(client.id, "payday_nudge")) { await sendWhatsApp(client.phoneNumber, msg); }
-    } catch (err) { console.error(`[SCHEDULER] Payday nudge error — ${client.phoneNumber}:`, err); }
-  }
-}
-
 export async function runStepLeaderboard(): Promise<void> {
   console.log("[SCHEDULER] JOB: Weekly step leaderboard broadcast");
   if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runStepLeaderboard blocked"); return; }

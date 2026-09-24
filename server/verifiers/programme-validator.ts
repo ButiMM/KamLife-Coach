@@ -83,27 +83,3 @@ export function validateProgramme(
     return { ...SAFE_RESULT };
   }
 }
-
-export interface OverloadCheck {
-  valid: boolean;
-  issue: string | null;
-}
-
-/**
- * Sanity-check a week-over-week weight progression.
- * Flags regressions (next < current) and implausible jumps (>20% increase week-on-week).
- */
-export function checkProgressiveOverload(currentKg: number, nextKg: number): OverloadCheck {
-  try {
-    if (nextKg < currentKg) {
-      return { valid: false, issue: `regression: ${nextKg}kg < ${currentKg}kg` };
-    }
-    if (nextKg > currentKg * 1.2) {
-      return { valid: false, issue: `jump too large: ${currentKg}kg → ${nextKg}kg (>20%)` };
-    }
-    return { valid: true, issue: null };
-  } catch (e) {
-    console.warn("[PROGRAMME_VALIDATOR] overload check error — treating as valid:", e instanceof Error ? e.message : e);
-    return { valid: true, issue: null };
-  }
-}

@@ -232,16 +232,8 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
     because: "Migrated 2026-08-25. The score cascade and dinner ladder are gone; recognition of the day stays, the instruction comes from canonicalNextMove." },
 
   // ── weekly.ts ─────────────────────────────────────────────────────────────────────────────
-  { job: "runFridayWeekendStrategy", file: "weekly", cls: "CANONICAL",
-    because: "Migrated 2026-08-25. The week's numbers are a report; the weekend instruction is the canonical move." },
   { job: "runSundayWeeklyReport", file: "weekly", cls: "CANONICAL",
     because: "Migrated 2026-08-25. Report card and score are recognition; `warning` and `focus` were two local ladders and are now one canonical move." },
-  { job: "runWeekendFoodAudit", file: "weekly", cls: "CANONICAL",
-    because: "Migrated 2026-08-25. The weekday/weekend pattern is a genuine observation; the rule that followed it was a local prescription." },
-  { job: "runSundayEveningCheckin", file: "weekly", cls: "RECOGNITION",
-    because: "Every branch ends in a question about their week. It asks; it never instructs." },
-  { job: "runNsvCheckin", file: "weekly", cls: "RECOGNITION",
-    because: "Four non-scale-victory prompts, all questions. The point is that it asks for nothing." },
   { job: "runSundayMealPlan", file: "weekly", cls: "RESOURCE",
     because: "Delivers generateMealPlan's artefact. The plan is the message." },
 
@@ -258,14 +250,6 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
   // ── programme.ts ──────────────────────────────────────────────────────────────────────────
   { job: "runPhaseAdvancement", file: "programme", cls: "RESOURCE",
     because: "Announces a programme phase change and offers the session. The programme is the artefact." },
-  { job: "runGoalCheck", file: "programme", cls: "RECOGNITION",
-    because: "Checkpoint questions about the goal, plus a Week 9 choice. It asks." },
-  { job: "runInjuryFollowup", file: "programme", cls: "RECOGNITION",
-    because: "Asks how the injury is; adjusts only on the answer." },
-  { job: "runWeeklyMondayCheckin", file: "programme", cls: "CANONICAL",
-    because: "Migrated 2026-09-05 (#180). What each programme week FEELS like is real phase knowledge no daily decision can produce, and it stays. Every instruction that followed it is gone — including the weigh-in demand it prepended off its own weight_logs read, a third opinion beside runWeightReminder and chooseAction's `weigh` rung. The move now comes from canonicalNextMove." },
-  { job: "runPlateauDetection", file: "programme", cls: "LEGACY_LOCAL",
-    because: "Adjudicated 2026-09-05 (#180) and DELIBERATELY LEFT. It is the one of the six that is not a daily next-move decision wearing a schedule: it is a multi-week experiment — change one lever, stamp a baseline, verify against a weigh-in seven days later, iterate or stop. canonicalNextMove answers 'what is the one thing today', which cannot express 'we changed carbs last week, so this week we change steps instead'. Converging it would delete a capability, not remove a duplicate authority. It waits on the pace owner (P0-7), and it is the LAST one." },
 
   // ── business.ts ───────────────────────────────────────────────────────────────────────────
   { job: "runSubscriptionExpiryCheck", file: "business", cls: "OPERATIONAL", because: "Billing." },
@@ -278,20 +262,12 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
     because: "Announces a target change the adaptive-targets owner made. The change is the message." },
   { job: "runStepTargetAdaptation", file: "business", cls: "OPERATIONAL",
     because: "Announces a step-target change made by targets.ts. Same reason." },
-  { job: "runMonthEndBudget", file: "business", cls: "RESOURCE",
-    because: "A costed shopping plan for the month-end squeeze. The list is the message." },
-  { job: "runPaydayShoppingNudge", file: "business", cls: "RESOURCE",
-    because: "A costed buy-list keyed to the pay cycle, pointing at the shopping-list owner." },
   { job: "runSupplementReminder", file: "business", cls: "RECOGNITION",
     because: "Adjudicated 2026-09-05 (#180). It asks — 'creatine taken yet?' — about a supplement the CLIENT chose and logged. It decides nothing from their day and prescribes nothing; a question about their own routine is the class this doctrine calls recognition." },
 
   // ── onboarding.ts ─────────────────────────────────────────────────────────────────────────
   { job: "runEarlyOnboarding", file: "onboarding", cls: "RESOURCE",
     because: "The seven-day welcome sequence. It teaches the product's surface — what to reply, what it can do — on a fixed calendar; it is not a decision about their day." },
-  { job: "runMonthlyMeasurements", file: "onboarding", cls: "RESOURCE", because: "The measurement prompt artefact." },
-  { job: "runReferralNudge", file: "onboarding", cls: "OPERATIONAL", because: "Growth ask." },
-  { job: "runGoalReassessment", file: "onboarding", cls: "RECOGNITION",
-    because: "Asks whether the stated goal still matches what they are chasing." },
   { job: "runStepSyncCatchup", file: "onboarding", cls: "RESOURCE",
     because: "Adjudicated 2026-09-05 (#180). Read the message rather than the job name: it lists the three ways to get steps into the product — type a number, send a screenshot, reply 'connect steps'. It teaches the product's surface, which is runEarlyOnboarding's reading, and never tells anyone to walk." },
 

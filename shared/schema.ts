@@ -725,27 +725,6 @@ export const abAssignmentsRelations = relations(abAssignments, ({ one }) => ({
   user: one(users, { fields: [abAssignments.userId], references: [users.id] }),
 }));
 
-// For Replit AI Integrations compatibility
-export const conversations = pgTable("conversations", {
-  id: serial("id").primaryKey(),
-  title: text("title").notNull(),
-  createdAt: timestamp("created_at")
-    .default(sql`CURRENT_TIMESTAMP`)
-    .notNull(),
-});
-
-export const messages = pgTable("messages", {
-  id: serial("id").primaryKey(),
-  conversationId: integer("conversation_id")
-    .notNull()
-    .references(() => conversations.id, { onDelete: "cascade" }),
-  role: text("role").notNull(),
-  content: text("content").notNull(),
-  createdAt: timestamp("created_at")
-    .default(sql`CURRENT_TIMESTAMP`)
-    .notNull(),
-});
-
 // === CLIENT PINNED ACTIONS ===
 // Coach-defined per-client tasks: "Call to check injury", "Review programme week 4", etc.
 // === HEALTH APP INTEGRATIONS — Google Fit / Apple Shortcuts step sync ===

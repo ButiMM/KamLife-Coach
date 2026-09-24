@@ -71,9 +71,3 @@ export function calculateTrialConversion(trialUsers: number, paidUsers: number):
   return Math.round((paidUsers / (trialUsers + paidUsers)) * 100);
 }
 
-/** Monthly churn rate */
-export function calculateChurnRate(startOfMonthPaying: number, endOfMonthPaying: number, newPaying: number): number {
-  if (startOfMonthPaying <= 0) return 0;
-  const churned = startOfMonthPaying + newPaying - endOfMonthPaying;
-  return Math.max(0, churned / startOfMonthPaying);
-}

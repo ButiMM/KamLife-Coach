@@ -155,13 +155,12 @@ const expected: Array<[string, string]> = [
   ["runDietBreakCheck", "OPERATIONAL"],
   ["runSupplementReminder", "RECOGNITION"],
   ["runStepSyncCatchup", "RESOURCE"],
-  ["runWeeklyMondayCheckin", "CANONICAL"],
-  ["runPlateauDetection", "LEGACY_LOCAL"],
 ];
 for (const [job, cls] of expected) chk(clsOf(job) === cls, `${job} → ${cls}`, `is ${clsOf(job)}`);
 const stillLegacy = PROACTIVE_SENDERS.filter(s => s.cls === "LEGACY_LOCAL").map(s => s.job);
-chk(stillLegacy.length === 1 && stillLegacy[0] === "runPlateauDetection",
-  "exactly one local decider remains, and it is the multi-week experiment", JSON.stringify(stillLegacy));
+// #334: runWeeklyMondayCheckin and runPlateauDetection were adjudicated here but never scheduled,
+// so they were deleted with the other unscheduled jobs. No local decider remains.
+chk(stillLegacy.length === 0, "no proactive sender decides the next move locally", JSON.stringify(stillLegacy));
 
 // ── §5 SCHEDULING, CAPS AND DEDUPE SURVIVE THE MIGRATION ────────────────────────────────────
 //
