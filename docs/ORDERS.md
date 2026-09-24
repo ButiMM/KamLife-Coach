@@ -98,6 +98,10 @@ For each: reproduce the failure first as a failing test, then show the changed s
 
 The failure behind every rebuild was mouths: many places that can claim a turn and speak before the coach. `script/mouth-count.py` counts them, and `docs/mouths.json` holds the current numbers. The `mouth-ratchet` check fails any PR that increases a count. A PR that removes mouths lowers the numbers in `docs/mouths.json` in the same PR. The counts can only go down. Every #272 switch PR must lower `routeMessage_exits_before_engine`.
 
+## 4c. Old-pipeline freeze (24 Sep)
+
+No new fixes on the old pattern-matching pipeline except for live harm to clients, money or data. Everything else is a gate case the new core must pass. Every pattern patch adds another mouth's worth of edges; the core removes them.
+
 ## 5. Stopping rule
 
 If, after the gate baseline and shadow core are running, the shadow core does not beat the old path on the memory and safety cases within five working days, stop and reassess the design. Don't keep cutting. This is the rule #63 lacked.
