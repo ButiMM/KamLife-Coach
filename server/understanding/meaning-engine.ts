@@ -165,7 +165,7 @@ export interface MeaningInput {
   emitActions?: boolean;
   /** The already-made coaching decision, stated to the model before it writes. */
   decisionBrief?: string;
-  /** The client record's active facts, in the client's words (#271). */
+  /** The client record's active facts, in the client's words (#271). INTERIM: deleted in the #272 switch PR. */
   clientFacts?: string;
 }
 

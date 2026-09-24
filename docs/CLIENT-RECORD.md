@@ -83,3 +83,26 @@ No backfill runs until the erasure check is green on `main`.
 
 Done when: the gate's `comrades-knee-memory` case passes (the facts survive six unrelated turns)
 and the deletion acceptance proves erasure.
+
+## Retires (CTO design review, 24 Sep)
+The record is the **one** place the new coach learns what a client told us. It replaces these
+stores. From now on, no new code writes to them. The #272 **switch PR** deletes their reads and
+writes, once the new composer reads the record instead:
+
+| Store | Where |
+|---|---|
+| Six regex-extracted memory fields | `server/memory.ts` |
+| `profile_notes` tokens | `users.profile_notes` (41 files touch it) |
+| `client_understanding.lifeStory` | `server/understanding/{store,state,compiler,perception}.ts` |
+| The CIP narrative | `server/scheduler/jobs/{cip-update,narrative}.ts`, `server/intelligence/profile.ts` |
+| Portion memory | `server/portion-memory.ts` |
+| Held constraints | `server/held-constraints.ts` |
+
+**Interim, also deleted by the switch PR:**
+- the hook that feeds facts into the old Meaning Engine (`live.ts`, `meaning-engine.ts`);
+- the separate `recordAndLearn` model call. At the switch, fact extraction folds into #359's single
+  understanding call.
+
+Until then, the call costs about R0.002 per inbound message (typical case: ~600 input and ~40 output
+tokens on gpt-4o-mini), and R0.008 at most (1,200 input and 400 output tokens). It is logged in
+`gpt_costs` as `feature = 'client_record'`, so the real figure is one query away.
