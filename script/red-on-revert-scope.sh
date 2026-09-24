@@ -67,31 +67,39 @@ echo "CONTROL: untouched scope acceptance is GREEN"
 
 failed=0
 
-# The deterministic off-domain list is not reverted here: offline, the fail-closed classifier
-# declines the same asks, so no database-level grader can tell the two apart. Its unit tests in
-# script/unit-tests.ts ("scope: …") are its graders.
-
 # 1. THE GATE FAILS OPEN AGAIN — a classifier error answers whatever it could not classify.
 run_case "a classifier error fails open to answering" server/understanding/domain-guard.ts \
   'return { classification: "out-of-domain", reasoning: "fail-closed: "' \
   'return { classification: "in-domain", reasoning: "fail-closed: "' || failed=$((failed + 1))
 
-# 2. A MEDICINE ASK IS ANSWERED — "what antibiotic should I take for a sore throat" is coached.
+# 2. NO DETERMINISTIC OFF-DOMAIN ASKS — scope is left to the model and the prompt.
+run_case "off-domain asks are left to the model" server/understanding/domain-guard.ts \
+  '  if (killswitchOff()) return null;
+  const t = (message' \
+  '  if (true) return null;
+  const t = (message' || failed=$((failed + 1))
+
+# 3. A MEDICINE ASK IS ANSWERED — "what antibiotic should I take for a sore throat" is coached.
 run_case "choosing a medicine is not an unsafe request" server/medication-context.ts \
   '    return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "choosing" };' \
   '    return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: false, reason: null };' || failed=$((failed + 1))
 
-# 3. THE GPT FALLBACK IS UNGATED — with the engine off, anything unrecognised is answered.
+# 4. THE COMMANDS ANSWER BEFORE SCOPE IS CHECKED — the supplement command answers the antibiotic.
+run_case "commands answer before scope is checked" server/routes.ts \
+  'const miscResult = offScope ? await declineOutOfScope(' \
+  'const miscResult = false ? await declineOutOfScope(' || failed=$((failed + 1))
+
+# 5. THE GPT FALLBACK IS UNGATED — with the engine off, anything unrecognised is answered.
 run_case "the gpt fallback is not gated" server/routes.ts \
   '  if (scope.redirectMessage) return tag(' \
   '  if (false) return tag(' || failed=$((failed + 1))
 
-# 4. FAILING CLOSED WITHOUT THE WIDER COACHING VOCABULARY — "lose 5kg" is declined in an outage.
+# 6. FAILING CLOSED WITHOUT THE WIDER COACHING VOCABULARY — "lose 5kg" is declined in an outage.
 run_case "coaching goals fall to a failing classifier" server/understanding/domain-guard.ts \
   '\\d\\s?kgs?\\b|\\blos(?:e|ing)\\b|' \
   '' || failed=$((failed + 1))
 
-# 5. A LIFE EVENT THAT MENTIONS AN OFF-TOPIC THING IS DECLINED — "update my CV so I skipped gym".
+# 7. A LIFE EVENT THAT MENTIONS AN OFF-TOPIC THING IS DECLINED — "update my CV so I skipped gym".
 run_case "coaching words do not outrank an off-domain mention" server/understanding/domain-guard.ts \
   'if (OFF_DOMAIN_ASK_RE.test(t) && !isObviouslyInDomain(t))' \
   'if (OFF_DOMAIN_ASK_RE.test(t))' || failed=$((failed + 1))
@@ -101,4 +109,4 @@ if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-scope: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-scope: GREEN — 5/5 behavioral reverts caught"
+echo "red-on-revert-scope: GREEN — 7/7 behavioral reverts caught"

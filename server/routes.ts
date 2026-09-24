@@ -47,7 +47,7 @@ import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor } from "./understanding/live";
-import { classifyDomain, recentlyActive, declineOutOfScope } from "./understanding/domain-guard";
+import { classifyDomain, offDomainRedirect, recentlyActive, declineOutOfScope } from "./understanding/domain-guard";
 import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains, clausesOf } from "./understanding/messy-intake";
 import { foodDayIsClosed, readTrainingDay } from "./one-action";
 import { backfillAttributedDays } from "./backfill";
@@ -1042,8 +1042,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // the engine owns coaching; educational adapters stand down after a durable write.
   const wroteThisTurn = durableDomains(turnMutations()).length > 0;
   // A one-question renderer must not claim a multi-question turn or contradict its writes.
-  // The Coach below receives the complete turn after all facts are committed.
-  const miscResult = multiQuestionTurn ? null
+  // The Coach below receives the complete turn after all facts are committed. SCOPE (#321): an
+  // off-domain ask is declined here, in the commands' own exit, before any command can answer it.
+  const offScope = offDomainRedirect(message, recentlyActive(user));
+  const miscResult = offScope ? await declineOutOfScope(user.id, message, offScope, turnEvidence) : multiQuestionTurn ? null
     : await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });
   if (miscResult !== null) return miscResult;
   // Lifecycle owns whole commands, not "the scale is not moving" inside a long account.
