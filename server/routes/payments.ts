@@ -249,8 +249,9 @@ export function registerPaymentRoutes(app: Express) {
       // client's decision erased by the money taken against it. The same token they were paying
       // on when they cancelled means this is that subscription, still billing. A different token
       // is a new subscription they chose, and activates as normal.
-      if (paymentStatus === "COMPLETE" && targetUser.subscriptionEndReason === "client_cancelled" && data.token
-        && data.token === await latestPayFastToken(normalisedPhone, eventKey)) {
+      // A MINOR BLOCKED BY THE AGE GATE (#306) is never reactivated by a charge, whatever the token.
+      if (paymentStatus === "COMPLETE" && (targetUser.onboardingState === "BLOCKED_UNDERAGE" || (targetUser.subscriptionEndReason === "client_cancelled" && data.token
+        && data.token === await latestPayFastToken(normalisedPhone, eventKey)))) {
         const retry = await cancelPayFastSubscription(data.token);
         await db.insert(adminEvents).values({
           action: "charged_after_cancellation",
@@ -364,7 +365,7 @@ export function registerPaymentRoutes(app: Express) {
       } else if (paymentStatus === "CANCELLED") {
         // Our own API cancel makes PayFast send this. The client already cancelled, was already
         // told, and their cancelled_at is the moment they decided — leave all three alone.
-        if (targetUser.subscriptionEndReason === "client_cancelled" && targetUser.subscriptionStatus === "inactive") {
+        if ((targetUser.subscriptionEndReason === "client_cancelled" || targetUser.onboardingState === "BLOCKED_UNDERAGE") && targetUser.subscriptionStatus === "inactive") {
           console.log(`[PAYFAST:${itnId}] CANCELLED ITN confirms the client's own cancel — ${safePhone}`);
           return;
         }
