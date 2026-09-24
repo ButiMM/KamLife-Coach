@@ -34,7 +34,7 @@ jobs:
           --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       DATABASE_URL: postgres://kam:kam@127.0.0.1:5432/kamlife
-      OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}  # the key the founder set for the judge first
       REPLAY_HELDOUT_JSON: ${{ secrets.REPLAY_HELDOUT_JSON }}
     steps:
       - uses: actions/checkout@v4
