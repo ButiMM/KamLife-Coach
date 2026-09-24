@@ -26,6 +26,10 @@ Keep the plumbing. Replace the coaching core behind it.
 
 **Capabilities that must survive the switch:** food decisions and swaps, messy retrospective logging, voice notes, adaptive training, proactive accountability.
 
+## 1b. The product
+
+`docs/TESTER-EXPERIENCE.md` defines what testers experience when Coach K is done. It is the gate's journey list and the target for lane B.
+
 ## 2. Release standard
 
 A turn is correct only when all four hold:
@@ -116,6 +120,8 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 | **Founder** | Product, safety-policy and commercial decisions. | Poll CI, merge PRs, or relay messages. |
 
 **Gate judge:** an OpenAI model, a different model family from the builder, called with the existing OpenAI key. The judge never sees builder reasoning, only the input, the stored state and the final WhatsApp body.
+
+**Quality bar under auto-merge (24 Sep):** speed never lowers the bar. Every PR needs green tests (all six database shards) and a passing mouth ratchet. REGRESSION findings block. Hard invariants (§3) block. EDGE findings aren't dropped: each becomes an issue **and a gate case the new core must pass before its message family switches**. A PR labelled `switch`, which moves real testers onto the new coach, never merges on a timeout: it needs an actual Codex attack, answered, and a green replay gate showing it beats the old code.
 
 **Tester-visible rule:** every PR description opens with one line, "What testers will notice:", in plain language. If the answer is nothing, it says why the PR is still needed today. Work is ordered so the changes testers feel most land first.
 

@@ -2,7 +2,7 @@
 
 **CTO decision, 24 Sep 11:05: lane B is now the priority.** The remaining lane A items are pattern-patches on the old pipeline. Each fix spawns a new edge ("No thanks", then "Nope", then "Hayi"), because the old design reads messages by hand-written patterns. The new core fixes those by design. So: finish the harm PRs already in flight, then **all new build effort goes to lane B**. The old-pipeline items below become **gate cases the new core must pass**, not patches.
 
-## Lane B: the new core (top priority, starts now)
+## Lane B: the new core (top priority). Two parallel worktrees: B1 (gate, then Coach Health) and B2 (client record, then understanding and composer)
 
 Order, and what "done" means today:
 - [ ] #270 Replay gate green, baseline recorded on main (PR #298). Needs the `OPENAI_API_KEY` repo secret for the judge. Start with the audit's 24 real failures plus every case below; add real tester threads when read-only DB access exists.
@@ -14,6 +14,8 @@ Order, and what "done" means today:
 - [ ] #293 Coach Health scores every live turn, daily tester digest
 - [ ] #330 Real voice-note path in the gate
 - [ ] #273 Carry C18's tests into the gate, close #260
+- [ ] #342 Backups: test-restore, failure alerts, POPIA window
+- [ ] #343 One schema system, not two
 - [ ] #331 Archive contradicting docs
 
 ## Lane A: finish what's in flight, then stop
@@ -27,7 +29,10 @@ Order, and what "done" means today:
 - [ ] #267 Age gate (PR #305), merge when green
 - [ ] #269 POPIA deletion (PR #307), merge when green
 - [ ] #321 Scope in code, fail closed (Meta risk, already built), merge when green
-- [ ] #333 CI timeout 90 → 150 min, merge when green
+- [ ] #333 CI timeout 90 → 150 min (superseded by #337, the 6-way split)
+- [ ] #339 Patch 3 high-severity dependency vulnerabilities (security: allowed despite the freeze)
+- [ ] #340 AI spend cap fails open (security/cost: allowed despite the freeze)
+- [ ] #341 Delivery-status webhook fails closed (security: allowed despite the freeze)
 
 ## Gate cases for the new core (not patched on the old pipeline)
 

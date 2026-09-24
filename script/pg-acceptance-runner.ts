@@ -376,6 +376,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // and two opposite-defect controls so a floor that refuses everything cannot pass.
     command: ["bash", "script/red-on-revert-cut4-stt-admission.sh"] },
 
+  { id: "popia-deletion", title: "\"Delete my data\" deletes the client, everywhere",
+    // #269. Needs the real front door, the real foreign-key cascades and every table in the
+    // catalogue that holds a user_id or a phone.
+    command: ["npx", "tsx", "script/pg-popia-deletion-acceptance.ts"] },
+
+  { id: "popia-deletion-reverts", title: "Every #269 deletion seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-popia-deletion.sh"] },
+
   { id: "proactive-template", title: "A generic check-in leaves no trace of a message it did not carry",
     // CUT 6 (2026-09-14). The window-recovery template returned "fallback", which deliveryAccepted
     // reads as true — so the morning job opened a training loop for a client who had seen only
@@ -407,6 +415,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // C17 EVENING. One mechanism per case, plus the control that refuses the cheapest way to pass
     // every "it did not arrive" assertion: sending nothing at all.
     command: ["bash", "script/red-on-revert-c17-evening-delivery.sh"] },
+
+  { id: "visible-nags", title: "Present clients are not told to log; no invented gaps, daily weigh-ins or trial",
+    // #275. Presence is read from chat_history rows the database stamps, the weigh-in cap from
+    // sent_proactive, and "Just finished dinner" must reach meal_logs through the front door.
+    command: ["npx", "tsx", "script/pg-visible-nags-acceptance.ts"] },
+
+  { id: "visible-nags-reverts", title: "Every #275 nag/gap/weigh-in seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-visible-nags.sh"] },
 
   { id: "payments-cancel-truth", title: "Cancelling stops the money, and the money tells the truth",
     // Audit P0 (2026-09-22). "yes, cancel" promised "you will not be charged again" and nothing
@@ -626,7 +642,18 @@ async function main() {
   // mutations, each re-running a whole acceptance — roughly an hour. Running all of it to re-check
   // the one cut you just changed is the single largest avoidable cost in this loop; measured, the
   // same question answered with --only took 31 seconds.
-  const entries = only.length > 0 ? ACCEPTANCES.filter(a => only.includes(a.id)) : ACCEPTANCES;
+  // --shard i/n: run every n-th acceptance starting at i, so CI can split the ~80-minute inventory
+  // across n parallel machines. Every acceptance lands in exactly one shard.
+  const shard = (() => {
+    const i = process.argv.indexOf("--shard");
+    if (i < 0) return null;
+    const m = /^(\d+)\/(\d+)$/.exec(process.argv[i + 1] || "");
+    if (!m || Number(m[1]) >= Number(m[2])) { console.error("pg-acceptance-runner: --shard expects i/n with i < n"); process.exit(2); }
+    return { i: Number(m[1]), n: Number(m[2]) };
+  })();
+  const base = only.length > 0 ? ACCEPTANCES.filter(a => only.includes(a.id)) : ACCEPTANCES;
+  const entries = shard ? base.filter((_, idx) => idx % shard.n === shard.i) : base;
+  if (shard) console.log(`pg-acceptance-runner: shard ${shard.i}/${shard.n} (${entries.length} of ${base.length} suites)`);
   if (only.length > 0) {
     const unknown = only.filter(id => !ACCEPTANCES.some(a => a.id === id));
     if (unknown.length > 0) {
