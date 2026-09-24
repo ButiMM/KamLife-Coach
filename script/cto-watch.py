@@ -54,23 +54,16 @@ for p in open_prs:
         runs = api("GET", f"/commits/{sha}/check-runs?per_page=100").get("check_runs", [])
     except Exception:
         runs = []
-    failing = sorted({r["name"] for r in runs if r["conclusion"] in ("failure", "timed_out", "cancelled")})
+    latest = {}
+    for r in sorted(runs, key=lambda r: r.get("started_at") or ""):
+        latest[r["name"]] = r          # judge each check by its most recent run only
+    runs = list(latest.values())
+    failing = sorted({r["name"] for r in runs if r["conclusion"] in ("failure", "timed_out")})
     pending = sorted({r["name"] for r in runs if r["status"] != "completed"})
     checks = "failing: " + ", ".join(failing) if failing else ("running: " + ", ".join(pending) if pending else ("green" if runs else "none"))
     if failing:
         comment_once(n, f"cto-checks-{sha}", f"**CTO watch:** checks failing at `{short}`: {', '.join(failing)}. Fix these before new work (CLAUDE.md priority order).", comments)
-    db = [c for c in human if re.match(rf"^[*_\s]*DBSUITE @ `?{sha[:7]}", c["body"])]
-    ready = any(l["name"] == "ready" for l in p["labels"])
-    if db:
-        dbs = "PASS" if "PASS" in db[-1]["body"][:60] else ("UNAVAILABLE" if "UNAVAILABLE" in db[-1]["body"][:80] else "FAIL")
-        if dbs == "UNAVAILABLE":
-            alerts.append(f"**DB suite unavailable** on #{n}: Codex can't run it. CTO decides the fallback (docs/ORDERS.md).")
-    elif ready:
-        dbs = "owed by Codex"
-        comment_once(n, f"cto-db-{sha}", f"@codex this PR is labelled `ready`. Run the database suite on head `{short}` per AGENTS.md step 6 and post `DBSUITE @ {sha[:7]}: PASS|FAIL|UNAVAILABLE`.", comments)
-    else:
-        dbs = "not ready"
-    rows.append(f"| #{n} | {p['title'][:60]} | `{short}` | {state} | {checks} | {dbs} |")
+    rows.append(f"| #{n} | {p['title'][:60]} | `{short}` | {state} | {checks} |")
 
 queue = open("docs/QUEUE.md").read()
 todo = [l[6:] for l in queue.splitlines() if l.startswith("- [ ] ")]
@@ -106,7 +99,7 @@ body = "\n".join([
     *(alerts or ["No alerts."]), "",
     mouth_line, "",
     f"**Queue:** {len(done)} done, {len(todo)} left. Next: {todo[0] if todo else 'queue empty'}", "",
-    "| PR | Title | Head | Attack | GitHub checks | DB suite (Codex) |", "|---|---|---|---|---|---|", *(rows or ["| none | | | | | |"]), "",
+    "| PR | Title | Head | Attack | GitHub checks |", "|---|---|---|---|---|", *(rows or ["| none | | | | |"]), "",
     "**Merged today (UTC):**",
     *([f"- #{p['number']} {p['title'][:70]}" for p in today] or ["- none"]),
 ])

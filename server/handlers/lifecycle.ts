@@ -455,26 +455,8 @@ export async function handleLifecycle(ctx: {
     return `⚠️ This will permanently delete all your data — workouts, food logs, weight history, everything.${sessionNote}\n\nReply *yes reset* to confirm, or anything else to go back.`;
   }
 
-  // ---- STOP (WhatsApp Business / POPIA opt-out) ----
-  // Bare "stop" is the industry-standard opt-out keyword. Must be respected
-  // even when the user hasn't cancelled — sets a 1-year messaging pause.
-  if (m === "stop" || m === "stop all" || m === "opt out" || m === "opt-out") {
-    const name = getDisplayName(user) || "there";
-    await setExplicitPause(user, 365);
-    const stopReply = `Done${name !== "there" ? `, ${name}` : ""}. No more messages from me. Your data is saved.\n\nReply *START* anytime to resume coaching.`;
-    await logChat(user.id, message, stopReply, "OPT_OUT");
-    return stopReply;
-  }
-
-  // ---- START (WhatsApp Business / POPIA opt-in / resume) ----
-  if (m === "start" || m === "unstop" || m === "opt in" || m === "opt-in") {
-    if (await clearPause(user)) {
-      const resumeReply = `Welcome back. Coaching is resumed. Tell me what you ate today and we pick up from there.`;
-      await logChat(user.id, message, resumeReply, "OPT_IN");
-      return resumeReply;
-    }
-    // Not paused — fall through (bare "start" from a new user means menu, not opt-in)
-  }
+  // STOP / START moved to handlers/safety.ts (#265) — an opt-out must be read before any handler,
+  // or "stop sending me messages" is answered by the one-action nag instead.
 
   // ---- CANCEL SAVE — handle reason (step 2 of cancel flow) ----
   if (user.awaitingInputType === "cancel_save") {

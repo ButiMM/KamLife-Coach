@@ -23,6 +23,7 @@ import { asksForExport, formatExport } from "../data-export";
 import { sastDayKey } from "../sast";
 import { logChat, turnUser } from "./chat-log";
 import { recordClientFacts } from "../memory";
+import { setOptOut, clearPause } from "../health-state";
 
 // Send a Twilio message with exponential-backoff retries. On complete failure,
 // records a row in adminEvents so the coach can find missed alerts on reload.
@@ -219,6 +220,35 @@ export async function runSafetyGuards(
       });
     }
     return acuteReply;
+  }
+
+  // ---- OPT-OUT, IN THE CLIENT'S OWN WORDS (#265, moved from lifecycle.ts) ----
+  // Only the bare keyword worked, and only late in the pipeline: "stop sending me messages" was
+  // answered by the one-action nag, "Please stop messaging me" bought a 7-day holiday pause, and
+  // "Unsubscribe me" opened the billing save-menu. A request with a length ("for 2 weeks") is
+  // still the holiday pause lifecycle.ts owns. What makes it hold is the boundary: see
+  // enforceOutboundTruth, which refuses every proactive send to a client carrying opted_out.
+  const optOut = (/^(?:stop(?:\s+all)?|opt[\s-]?out|unsubscribe(?:\s+me)?)[.!\s]*$/i.test(m)
+      || /\b(?:stop|quit)\s+(?:sending|messaging|texting|contacting|whatsapp(?:ing)?)\s+me\b|\bstop\s+(?:sending\s+)?(?:me\s+)?(?:these|the|your|all)\s+messages\b|\b(?:don'?t|do\s+not)\s+(?:want|need)\s+(?:these|your|any\s+more|anymore|any)\s+messages\b|\bno\s+more\s+messages\b|\bunsubscribe\s+me\b|\b(?:don'?t|do\s+not|never)\s+(?:contact|message|text|whatsapp)\s+me\s+(?:again|anymore|any\s+more)\b/i.test(m))
+    // A LENGTH is a pause; a TOPIC is a preference, not a channel opt-out (Codex @ 7716559): "I don't
+    // want your messages about calories, just send my workouts" asked for workouts.
+    && !/\b\d+\s*(?:days?|weeks?|months?)\b|\bfor\s+(?:a|one|two|three|a\s+few)\s+(?:days?|weeks?|months?)\b|\buntil\b|\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);
+  if (optOut) {
+    const ou = await ensureSafetyTurnUser(phone, message, context.sourceMessageId, context.boundUser);
+    // NEVER CONFIRM WHAT DID NOT PERSIST (Codex @ 0c6dbe5): no token, no "no more messages".
+    const saved = !!ou && await setOptOut(ou).then(() => true, (e) => { console.error("[OPT_OUT] could not record:", e); return false; });
+    if (!saved) return `Sorry — I couldn't save that just now. Please send *STOP* again in a minute and I'll stop messaging you.`;
+    const first = (ou?.name || "").split(" ")[0];
+    const stopReply = `Done${first ? `, ${first}` : ""}. No more messages from me. Your data is saved.${ou?.subscriptionStatus === "active" ? "\n\nYour subscription is still active — reply *cancel* if you also want to stop paying." : ""}\n\nReply *START* anytime to resume coaching.`;
+    try { await logChat(ou?.id || "unknown", message, stopReply, "OPT_OUT"); } catch (e) { console.warn("[non-fatal]", e); }
+    return stopReply;
+  }
+  // START ends an opt-out or pause. Not paused: fall through — bare "start" from a new user means menu.
+  if (/^(?:start|unstop|opt[\s-]?in)[.!\s]*$/i.test(m) && context.boundUser && await clearPause(context.boundUser, { optOut: true })) {
+    const su = bindKnownSafetyUser(context.boundUser);
+    const resumeReply = `Welcome back. Coaching is resumed. Tell me what you ate today and we pick up from there.`;
+    try { await logChat(su.id, message, resumeReply, "OPT_IN"); } catch (e) { console.warn("[non-fatal]", e); }
+    return resumeReply;
   }
 
   // ---- TERMINAL / GIT COMMAND GUARD ----
