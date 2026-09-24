@@ -54,6 +54,10 @@ export async function handleLifecycle(ctx: {
   // Cross-section variables needed by injury modifications
   const isWorkoutRelated = /\b(gym|train|workout|exercise|session|lifting|squat|bench|deadlift|push|pull|press|curl|row|cardio|hiit|running|weights)\b/i.test(m);
 
+  // A pending cancel answer is the cancel menu's before any shortcut reads "1".."4" (#315).
+  const pendingCancel = await handlePendingCancel(ctx);
+  if (pendingCancel !== null) return pendingCancel;
+
   // ---- MENU NUMBER SHORTCUTS ----
   if (m === "3" || m === "food" || m === "food coaching" || m === "log food" || m === "food log") {
     return `Send me what you ate and I will give you the calories and protein instantly.\n\nExamples:\n• "I had pap and pilchards"\n• "2 eggs and brown bread"\n• "KFC original piece"\n• "Oats for breakfast"\n\nI have ${SA_FOODS_SEED.length} SA foods in my database. Just tell me what you ate.`;
@@ -454,111 +458,6 @@ export async function handleLifecycle(ctx: {
 
   // STOP / START moved to handlers/safety.ts (#265) — an opt-out must be read before any handler,
   // or "stop sending me messages" is answered by the one-action nag instead.
-
-  // ---- CANCEL SAVE — handle reason (step 2 of cancel flow) ----
-  if (user.awaitingInputType === "cancel_save") {
-    const name = (user.name || "").split(" ")[0] || "there";
-    const choice = m.trim();
-    const goal = user.goalType || "fat_loss";
-    const cals = user.calorieTarget || 1800;
-    const protein = user.proteinTarget || 140;
-
-    if (choice === "1" || /\b(too expensive|expensive|can.?t afford|afford|price|cost|money)\b/i.test(m)) {
-      await setExplicitPause(user, 30);
-      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
-      const priceReply = `Understood, ${name}. Paused for 30 days — no check-ins, your programme and progress are saved.\n\nWhen you're ready, reply *back* and we pick up exactly where you left off.\n\n_To cancel completely, reply *cancel* again._`;
-      await logChat(user.id, message, priceReply, "CANCEL_SAVE_PAUSE_PRICE");
-      return priceReply;
-    }
-
-    if (choice === "2" || /\b(not seeing results|no results|not working|isn.?t working|not losing|not gaining|plateau|stuck)\b/i.test(m)) {
-      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
-      // Pull actual progress data to make this response concrete
-      const sessions = user.totalWorkoutsCompleted || 0;
-      const daysActive = user.createdAt
-        ? Math.max(1, Math.round((Date.now() - new Date(user.createdAt).getTime()) / 86_400_000))
-        : 0;
-      // THE SCALE COMES FROM ITS OWNER (2026-08-25, P0-5 · weight). This read weight_logs for the
-      // start figure and took `current` from users.currentWeight — a second, unchecked definition
-      // of the same fact — then printed "Weight: ↓ 1.4kg lost (83.4kg → 82.0kg)" to a client who
-      // may have asked us to stop bringing up their weight. They did not raise it here: the branch
-      // fires on "not seeing results", which is about the PROGRAMME. So no clientMessage is passed
-      // and a withheld client simply gets sessions and days, which is the honest set.
-      const wt = await getWeightTruth(user).catch(() => null);
-      const startWeight = wt?.startKg ?? null;
-      const currentWeight = wt?.currentKg ?? null;
-      const weightDelta = wt?.known ? wt.changeKg : null;
-
-      let statsLine = "";
-      if (sessions > 0 || daysActive > 7) {
-        statsLine = `\n\n*Your numbers so far:*\n• ${sessions} training session${sessions === 1 ? "" : "s"} completed\n• ${daysActive} day${daysActive === 1 ? "" : "s"} on the programme`;
-        if (weightDelta !== null) {
-          const direction = weightDelta < 0 ? `↓ ${Math.abs(weightDelta).toFixed(1)}kg lost` : weightDelta > 0 ? `↑ ${weightDelta.toFixed(1)}kg gained` : "weight unchanged";
-          statsLine += `\n• Weight: ${direction} (${startWeight?.toFixed(1)}kg → ${currentWeight?.toFixed(1)}kg)`;
-        }
-      }
-
-      const resultsReply = goal === "fat_loss"
-        ? `${name}, let me be straight with you.${statsLine}\n\nReal fat loss takes 8–12 weeks of consistent eating. The number one reason it stalls: calories are too high, or protein too low. Your targets: *${cals} kcal / ${protein}g protein daily*.\n\nBefore you go — log your food for 5 days and message me. I will audit your numbers personally and fix whatever is not working. If it is the programme's fault, I want to know. Give it 5 days.`
-        : `${name}, muscle is slow — but it compounds hard.${statsLine}\n\nThe question is: are you hitting *${cals} kcal / ${protein}g protein* and adding weight or reps each session? Those two things drive 90% of muscle gain.\n\nLog food for 5 days and message me. I will look at your actual numbers and adjust the programme. 5 days before you decide.`;
-      await logChat(user.id, message, resultsReply, "CANCEL_SAVE_RESULTS");
-      return resultsReply;
-    }
-
-    if (choice === "3" || /\b(break|need a break|taking a break|rest|holiday|vacation|pause|step away)\b/i.test(m)) {
-      await setExplicitPause(user, 30);
-      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
-      const breakReply = `Done, ${name}. Paused for 30 days — no check-ins. Programme saved.\n\nWhen you're ready, reply *back* and we go again. No restart needed.`;
-      await logChat(user.id, message, breakReply, "CANCEL_SAVE_PAUSE_BREAK");
-      return breakReply;
-    }
-
-    // Option 4 or unrecognised — route to confirm flow
-    await db.update(users).set({ awaitingInputType: "cancel_confirm" }).where(eq(users.phoneNumber, phone));
-    const confirmReply = `${name}, last check — reply *yes* to cancel completely, or anything else to keep your subscription.\n\n_Your ${PRICING.monthlyDisplay} coaching stops. Data saved 90 days._`;
-    await logChat(user.id, message, confirmReply, "CANCEL_SAVE_TO_CONFIRM");
-    return confirmReply;
-  }
-
-  // ---- CANCEL SUBSCRIPTION CONFIRMATION (step 2) ----
-  if (user.awaitingInputType === "cancel_confirm") {
-    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
-    if (/^(yes|confirm|cancel|yep|ja|yeah)$/i.test(m)) {
-      const name = getDisplayName(user) || "there";
-      // PayFast recurring billing keeps charging until the subscription is cancelled on
-      // PayFast's side — marking the user inactive locally does not stop the charge. So the
-      // cancel goes to PayFast first, and the client is promised "not charged again" ONLY when
-      // PayFast confirmed it (2026-09-22: the promise used to be made with no call at all).
-      const token = await latestPayFastToken(phone);
-      const billing = await cancelPayFastSubscription(token);
-      await db.update(users).set({
-        subscriptionStatus: "inactive",
-        cancelledAt: new Date(),
-        subscriptionEndReason: "client_cancelled",
-      }).where(eq(users.phoneNumber, phone));
-      await db.insert(adminEvents).values({
-        action: billing.ok ? "subscription_cancelled" : "subscription_cancel_unconfirmed",
-        targetPhone: phone,
-        reason: billing.detail,
-        meta: { token, paymentReference: user.paymentReference ?? null },
-      }).catch((e) => console.error("[CANCEL] adminEvents insert failed:", e));
-      const coachAlertPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
-      if (coachAlertPhone) {
-        const alertTo = `whatsapp:+${coachAlertPhone.replace(/\D/g, "")}`;
-        await sendCriticalAlert(alertTo, `[BILLING] ${name} (${phone}) cancelled their subscription. ${billing.ok ? `PayFast recurring billing cancelled (token ${token}).` : `PayFast did NOT confirm the cancel (${billing.detail}). Cancel their recurring billing by hand now${token ? ` (token ${token})` : user.paymentReference ? ` (ref: ${user.paymentReference})` : ""} so they are not charged again.`}`).catch((e) => console.error("[CANCEL] Founder alert failed:", e));
-      }
-      const appUrl2 = process.env.APP_URL || "https://kamlifecoach.co.za";
-      // "since you started" marks the count as a lifetime figure; without it the outbound truth
-      // floor reads it against the 7-day ledger and replaces this whole reply with "ask me again".
-      const confirmedCancelReply = `Done, ${name}. Your coaching is stopped ${billing.ok ? "and your recurring billing is cancelled — you will not be charged again." : "and your billing is being cancelled by hand today, because PayFast did not confirm it automatically."} If you ever see another charge, reply *refund* and we will sort it immediately.\n\nYour profile and the ${user.totalWorkoutsCompleted || 0} sessions you've done since you started are saved for 90 days. Come back anytime.\n\nIf you change your mind, reply *rejoin* or visit ${appUrl2}.`;
-      await logChat(user.id, message, confirmedCancelReply, "CANCEL_CONFIRMED");
-      return confirmedCancelReply;
-    } else {
-      const keptReply = `Got it — cancellation skipped. You're still active. Anything I can help with?`;
-      await logChat(user.id, message, keptReply, "CANCEL_ABORTED");
-      return keptReply;
-    }
-  }
 
   // ---- CANCEL SUBSCRIPTION ----
   // Natural phrasings must land here — "I'm cancelling my subscription. This is a
@@ -1565,5 +1464,121 @@ export async function handleLifecycle(ctx: {
     }
   }
 
+  return null;
+}
+
+/**
+ * THE CANCEL MENU OWNS ITS OWN ANSWERS (#315). While the client is answering "What's making you want
+ * to leave? 1–4" or "reply yes to cancel", their "1".."4" and "yes" mean THAT menu. The numbered
+ * shortcuts elsewhere ("4" = shopping list, "2" = log steps, "3" = log food) used to answer first,
+ * so "4 — Just cancel" got a shopping list and the subscription stayed active and billed.
+ * routes.ts calls this straight after the subscription gate (safety has already run).
+ */
+export async function handlePendingCancel(ctx: { phone: string; message: string; m: string; user: any }): Promise<string | null> {
+  const { phone, message, m, user } = ctx;
+  // ---- CANCEL SAVE — handle reason (step 2 of cancel flow) ----
+  if (user.awaitingInputType === "cancel_save") {
+    const name = (user.name || "").split(" ")[0] || "there";
+    const choice = m.trim();
+    const goal = user.goalType || "fat_loss";
+    const cals = user.calorieTarget || 1800;
+    const protein = user.proteinTarget || 140;
+
+    if (choice === "1" || /\b(too expensive|expensive|can.?t afford|afford|price|cost|money)\b/i.test(m)) {
+      await setExplicitPause(user, 30);
+      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+      const priceReply = `Understood, ${name}. Paused for 30 days — no check-ins, your programme and progress are saved.\n\nWhen you're ready, reply *back* and we pick up exactly where you left off.\n\n_To cancel completely, reply *cancel* again._`;
+      await logChat(user.id, message, priceReply, "CANCEL_SAVE_PAUSE_PRICE");
+      return priceReply;
+    }
+
+    if (choice === "2" || /\b(not seeing results|no results|not working|isn.?t working|not losing|not gaining|plateau|stuck)\b/i.test(m)) {
+      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+      // Pull actual progress data to make this response concrete
+      const sessions = user.totalWorkoutsCompleted || 0;
+      const daysActive = user.createdAt
+        ? Math.max(1, Math.round((Date.now() - new Date(user.createdAt).getTime()) / 86_400_000))
+        : 0;
+      // THE SCALE COMES FROM ITS OWNER (2026-08-25, P0-5 · weight). This read weight_logs for the
+      // start figure and took `current` from users.currentWeight — a second, unchecked definition
+      // of the same fact — then printed "Weight: ↓ 1.4kg lost (83.4kg → 82.0kg)" to a client who
+      // may have asked us to stop bringing up their weight. They did not raise it here: the branch
+      // fires on "not seeing results", which is about the PROGRAMME. So no clientMessage is passed
+      // and a withheld client simply gets sessions and days, which is the honest set.
+      const wt = await getWeightTruth(user).catch(() => null);
+      const startWeight = wt?.startKg ?? null;
+      const currentWeight = wt?.currentKg ?? null;
+      const weightDelta = wt?.known ? wt.changeKg : null;
+
+      let statsLine = "";
+      if (sessions > 0 || daysActive > 7) {
+        statsLine = `\n\n*Your numbers so far:*\n• ${sessions} training session${sessions === 1 ? "" : "s"} completed\n• ${daysActive} day${daysActive === 1 ? "" : "s"} on the programme`;
+        if (weightDelta !== null) {
+          const direction = weightDelta < 0 ? `↓ ${Math.abs(weightDelta).toFixed(1)}kg lost` : weightDelta > 0 ? `↑ ${weightDelta.toFixed(1)}kg gained` : "weight unchanged";
+          statsLine += `\n• Weight: ${direction} (${startWeight?.toFixed(1)}kg → ${currentWeight?.toFixed(1)}kg)`;
+        }
+      }
+
+      const resultsReply = goal === "fat_loss"
+        ? `${name}, let me be straight with you.${statsLine}\n\nReal fat loss takes 8–12 weeks of consistent eating. The number one reason it stalls: calories are too high, or protein too low. Your targets: *${cals} kcal / ${protein}g protein daily*.\n\nBefore you go — log your food for 5 days and message me. I will audit your numbers personally and fix whatever is not working. If it is the programme's fault, I want to know. Give it 5 days.`
+        : `${name}, muscle is slow — but it compounds hard.${statsLine}\n\nThe question is: are you hitting *${cals} kcal / ${protein}g protein* and adding weight or reps each session? Those two things drive 90% of muscle gain.\n\nLog food for 5 days and message me. I will look at your actual numbers and adjust the programme. 5 days before you decide.`;
+      await logChat(user.id, message, resultsReply, "CANCEL_SAVE_RESULTS");
+      return resultsReply;
+    }
+
+    if (choice === "3" || /\b(break|need a break|taking a break|rest|holiday|vacation|pause|step away)\b/i.test(m)) {
+      await setExplicitPause(user, 30);
+      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+      const breakReply = `Done, ${name}. Paused for 30 days — no check-ins. Programme saved.\n\nWhen you're ready, reply *back* and we go again. No restart needed.`;
+      await logChat(user.id, message, breakReply, "CANCEL_SAVE_PAUSE_BREAK");
+      return breakReply;
+    }
+
+    // Option 4 or unrecognised — route to confirm flow
+    await db.update(users).set({ awaitingInputType: "cancel_confirm" }).where(eq(users.phoneNumber, phone));
+    const confirmReply = `${name}, last check — reply *yes* to cancel completely, or anything else to keep your subscription.\n\n_Your ${PRICING.monthlyDisplay} coaching stops. Data saved 90 days._`;
+    await logChat(user.id, message, confirmReply, "CANCEL_SAVE_TO_CONFIRM");
+    return confirmReply;
+  }
+
+  // ---- CANCEL SUBSCRIPTION CONFIRMATION (step 2) ----
+  if (user.awaitingInputType === "cancel_confirm") {
+    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+    if (/^(yes|confirm|cancel|yep|ja|yeah)$/i.test(m)) {
+      const name = getDisplayName(user) || "there";
+      // PayFast recurring billing keeps charging until the subscription is cancelled on
+      // PayFast's side — marking the user inactive locally does not stop the charge. So the
+      // cancel goes to PayFast first, and the client is promised "not charged again" ONLY when
+      // PayFast confirmed it (2026-09-22: the promise used to be made with no call at all).
+      const token = await latestPayFastToken(phone);
+      const billing = await cancelPayFastSubscription(token);
+      await db.update(users).set({
+        subscriptionStatus: "inactive",
+        cancelledAt: new Date(),
+        subscriptionEndReason: "client_cancelled",
+      }).where(eq(users.phoneNumber, phone));
+      await db.insert(adminEvents).values({
+        action: billing.ok ? "subscription_cancelled" : "subscription_cancel_unconfirmed",
+        targetPhone: phone,
+        reason: billing.detail,
+        meta: { token, paymentReference: user.paymentReference ?? null },
+      }).catch((e) => console.error("[CANCEL] adminEvents insert failed:", e));
+      const coachAlertPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
+      if (coachAlertPhone) {
+        const alertTo = `whatsapp:+${coachAlertPhone.replace(/\D/g, "")}`;
+        await sendCriticalAlert(alertTo, `[BILLING] ${name} (${phone}) cancelled their subscription. ${billing.ok ? `PayFast recurring billing cancelled (token ${token}).` : `PayFast did NOT confirm the cancel (${billing.detail}). Cancel their recurring billing by hand now${token ? ` (token ${token})` : user.paymentReference ? ` (ref: ${user.paymentReference})` : ""} so they are not charged again.`}`).catch((e) => console.error("[CANCEL] Founder alert failed:", e));
+      }
+      const appUrl2 = process.env.APP_URL || "https://kamlifecoach.co.za";
+      // "since you started" marks the count as a lifetime figure; without it the outbound truth
+      // floor reads it against the 7-day ledger and replaces this whole reply with "ask me again".
+      const confirmedCancelReply = `Done, ${name}. Your coaching is stopped ${billing.ok ? "and your recurring billing is cancelled — you will not be charged again." : "and your billing is being cancelled by hand today, because PayFast did not confirm it automatically."} If you ever see another charge, reply *refund* and we will sort it immediately.\n\nYour profile and the ${user.totalWorkoutsCompleted || 0} sessions you've done since you started are saved for 90 days. Come back anytime.\n\nIf you change your mind, reply *rejoin* or visit ${appUrl2}.`;
+      await logChat(user.id, message, confirmedCancelReply, "CANCEL_CONFIRMED");
+      return confirmedCancelReply;
+    } else {
+      const keptReply = `Got it — cancellation skipped. You're still active. Anything I can help with?`;
+      await logChat(user.id, message, keptReply, "CANCEL_ABORTED");
+      return keptReply;
+    }
+  }
   return null;
 }
