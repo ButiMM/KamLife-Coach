@@ -77,7 +77,10 @@ const norm = (t: string) => t.toLowerCase().replace(/[\u2018\u2019\u02bc]/g, "'"
  * asked ... that"). Deterministic, so the model can propose a quote but the record never stores it.
  */
 const SPEECH = new Set(["said", "says", "saying", "asked", "asks", "wrote", "writes", "texted", "mentioned", "reckons",
-  "told me", "told us", "told her", "told him", "tells me", "tells us"]);
+  "told me", "told us", "told her", "told him", "tells me", "tells us",
+  // The languages our clients mix in (Codex @ 63f489a): Setswana/Sesotho "o re", "o rile", "o itse";
+  // isiZulu/isiXhosa "uthi", "uthe", "wathi"; Afrikaans "sê", "gesê".
+  "o re", "a re", "o rile", "o itse", "uthi", "uthe", "wathi", "sê", "gesê"]);
 /** True when the words just before a statement report someone else's speech ("she said (that)"). */
 function reported(before: string): boolean {
   const w = before.replace(/[:,\s]+$/, "").split(" ");

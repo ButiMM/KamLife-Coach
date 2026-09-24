@@ -5921,6 +5921,10 @@ test("client record: a quote or reported speech is not the client's own fact", a
   assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My sister said \u201cI\u2019m pregnant\u201d and asked if she can still train."), []);
   assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My sister told me that I'm pregnant, can she train?"), []);
   assert.deepEqual(parseExtraction(fact("I'm training for Comrades"), "My friend says I'm training for Comrades too hard."), []);
+  // Codex @ 63f489a: reported speech in the languages our clients mix in.
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My sister o re I'm pregnant, can she still train?"), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "Usisi wami uthi I'm pregnant, angaqeqesha?"), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My suster sê I'm pregnant, kan sy nog oefen?"), []);
   // CONTROLS: the client's own voice still counts, even when a quote appears elsewhere.
   assert.equal(parseExtraction(fact("I'm pregnant"), "I'm pregnant, 12 weeks.").length, 1);
   assert.equal(parseExtraction(fact("I'm pregnant"), 'I\'m pregnant and my mom said "rest more".').length, 1);
