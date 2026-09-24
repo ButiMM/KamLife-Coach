@@ -22,6 +22,7 @@ def comment_once(n, marker, text, comments):
 
 rows = []
 alerts = []
+mergeable = []
 open_prs = [p for p in api("GET", "/pulls?state=open&per_page=50")
             if any(l["name"] == "attack:codex" for l in p["labels"])]
 for p in open_prs:
@@ -63,7 +64,30 @@ for p in open_prs:
     checks = "failing: " + ", ".join(failing) if failing else ("running: " + ", ".join(pending) if pending else ("green" if runs else "none"))
     if failing:
         comment_once(n, f"cto-checks-{sha}", f"**CTO watch:** checks failing at `{short}`: {', '.join(failing)}. Fix these before new work (CLAUDE.md priority order).", comments)
+    ratchet_ok = not any(r["name"] == "ratchet" and r["conclusion"] == "failure" for r in runs)
+    is_switch = any(l["name"] == "switch" for l in p["labels"])
+    # A PR that moves real testers onto the new coach never merges on a timeout: it needs a real
+    # Codex attack, answered, and a green replay gate. Quality where it touches testers most.
+    attack_ok = state.startswith("attack answered") or (state.startswith("attack window passed") and not is_switch)
+    if is_switch and not any(r["name"] == "replay" and r["conclusion"] == "success" for r in runs):
+        attack_ok = False
+        state += " (switch: needs a green replay gate)"
+    hold = any(l["name"] == "hold" for l in p["labels"]) or p.get("draft")
+    if runs and not failing and not pending and ratchet_ok and attack_ok and not hold and n != 260:
+        mergeable.append((n, sha, p["title"]))
+        state += " → AUTO-MERGE"
     rows.append(f"| #{n} | {p['title'][:60]} | `{short}` | {state} | {checks} |")
+
+merged_now = []
+for n, sha, title in mergeable:
+    try:
+        api("PUT", f"/pulls/{n}/merge", {"merge_method": "squash", "sha": sha})
+        api("POST", f"/issues/{n}/comments", {"body": f"**CTO watch: auto-merged** at `{sha[:10]}`. Checks green, attack answered or window passed, mouth ratchet green. Codex attacks the merged version next; findings go to the top of the queue.\n\n<!-- cto-automerge-{sha} -->"})
+        merged_now.append(n)
+    except Exception as e:
+        alerts.append(f"**Auto-merge failed** on #{n}: {str(e)[:120]} (probably a conflict with main; builder: merge main in).")
+if merged_now:
+    alerts.append("**Auto-merged this run:** " + ", ".join(f"#{n}" for n in merged_now))
 
 queue = open("docs/QUEUE.md").read()
 todo = [l[6:] for l in queue.splitlines() if l.startswith("- [ ] ")]
