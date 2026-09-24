@@ -35,6 +35,19 @@ const EXTRACT: Record<string, unknown> = {
   "Actually I changed my mind, I'm doing the Two Oceans marathon instead of Comrades.": { facts: [
     { kind: "goal", subject: "two oceans marathon", statement: "I'm doing the Two Oceans marathon instead of Comrades", detail: {}, valid_until: null, corrects: "comrades marathon" },
   ] },
+  // A correction that names no prior subject: the extractor can only name it because it is shown the known facts.
+  "Actually the race is in May now, not June.": { facts: [
+    { kind: "goal", subject: "two oceans marathon", statement: "the race is in May now", detail: {}, valid_until: null, corrects: "two oceans marathon" },
+  ] },
+  // A real opening with an invented clause bolted on (Codex @ c5a521b): the whole statement must match.
+  "I'm training for a 10k race and I love it.": { facts: [
+    { kind: "goal", subject: "10k race", statement: "I'm training for a 10k race and I have a torn ACL", detail: {}, valid_until: null, corrects: null },
+  ] },
+  // Same subject, different kind: a constraint must not retire the preference.
+  "I prefer home workouts.": { facts: [{ kind: "preference", subject: "home workouts", statement: "I prefer home workouts", detail: {}, valid_until: null, corrects: null }] },
+  "I can only do home workouts because I have no gym.": { facts: [{ kind: "constraint", subject: "home workouts", statement: "I can only do home workouts because I have no gym", detail: {}, valid_until: null, corrects: null }] },
+  // A fact that starts later is not true today.
+  "I start night shifts in December.": { facts: [{ kind: "schedule", subject: "night shifts", statement: "I start night shifts in December", detail: {}, valid_from: "2099-12-01", valid_until: null, corrects: null }] },
   // The extractor "invents" a statement the client never wrote: it must be dropped, not stored.
   "My sister is pregnant and wants to know if she can squat.": { facts: [
     { kind: "life_event", subject: "pregnancy", statement: "I am pregnant", detail: {}, valid_until: null, corrects: null },
@@ -138,11 +151,53 @@ chk(after.some((f: any) => /two oceans/i.test(f.subject)) && !after.some((f: any
 chk(all.some((f: any) => /comrades/i.test(f.subject) && f.superseded_by), "the old goal is kept, marked superseded, not deleted");
 chk(after.some((f: any) => f.kind === "injury"), "the knee is untouched by a goal correction");
 
+REAL("\n4b. A CORRECTION THAT NAMES NOTHING — the extractor is shown what is known, and the right fact is superseded");
+sentToModel.length = 0;
+await say(u.phoneNumber, "Actually the race is in May now, not June.");
+await settle(async () => (await activeFacts(u.id)).some((f: any) => /may now/i.test(f.statement)));
+const extractCall = sentToModel.find(b => b.includes("maintain a coaching client's record")) || "";
+chk(/KNOWN FACTS/.test(extractCall) && /two oceans marathon/.test(extractCall), "the extractor is shown the client's known facts", extractCall.slice(0, 200));
+const goals = (await activeFacts(u.id)).filter((f: any) => f.kind === "goal");
+chk(goals.length === 1 && /may now/i.test(goals[0].statement), "exactly one active goal remains — the corrected one", JSON.stringify(goals));
+
 REAL("\n5. NOT FACTS — a statement the client never wrote is dropped");
 const v = await client(2);
 await say(v.phoneNumber, "My sister is pregnant and wants to know if she can squat.");
 await new Promise(r => setTimeout(r, 800));
 chk((await activeFacts(v.id)).length === 0, "an extracted statement that is not in the message is not stored", JSON.stringify(await activeFacts(v.id)));
+
+const w = await client(3);
+await say(w.phoneNumber, "I'm training for a 10k race and I love it.");
+await new Promise(r => setTimeout(r, 800));
+chk((await activeFacts(w.id)).length === 0, "a real opening with an invented clause bolted on is not stored", JSON.stringify(await activeFacts(w.id)));
+
+REAL("\n5b. KINDS AND TIME — a constraint never retires a preference; a future fact is not today's");
+await say(w.phoneNumber, "I prefer home workouts.");
+await settle(async () => (await activeFacts(w.id)).some((f: any) => f.kind === "preference"));
+await say(w.phoneNumber, "I can only do home workouts because I have no gym.");
+await settle(async () => (await activeFacts(w.id)).some((f: any) => f.kind === "constraint"));
+const kinds = (await activeFacts(w.id)).map((f: any) => f.kind).sort();
+chk(JSON.stringify(kinds) === JSON.stringify(["constraint", "preference"]), "the preference survives a constraint on the same subject", JSON.stringify(kinds));
+await say(w.phoneNumber, "I start night shifts in December.");
+await settle(async () => (await q("SELECT 1 FROM client_facts WHERE user_id = $1 AND kind = 'schedule'", [w.id])).length > 0);
+const { factsForCoach, purgeExpired } = await import("../server/core/client-record");
+const shown = await factsForCoach(w.id);
+chk(/home workouts/.test(shown) && !/night shifts/.test(shown), "a fact that starts in December is stored but not shown to the coach today", shown);
+
+REAL("\n5c. THE NEWEST FACTS — a long record shows the latest thirty, not the first");
+for (let i = 0; i < 35; i++) {
+  await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, extracted_by, created_at) VALUES ($1, 'preference', $2, $3, 'test', now() - ($4 || ' minutes')::interval)",
+    [w.id, `food ${i}`, `I like food number ${i}`, String(100 - i)]);
+}
+const window = await factsForCoach(w.id);
+chk(/food number 34/.test(window) && !/food number 0"/.test(window), "the newest facts are inside the thirty shown", window.slice(0, 160));
+
+REAL("\n5d. RETENTION — raw messages and superseded facts older than a year are deleted");
+await pool.query("INSERT INTO client_events (user_id, raw_text, received_at) VALUES ($1, 'an old message', now() - interval '13 months')", [w.id]);
+await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, extracted_by, superseded_at) VALUES ($1, 'goal', 'old goal', 'an old goal', 'test', now() - interval '13 months')", [w.id]);
+await purgeExpired();
+const aged = (await q("SELECT (SELECT count(*) FROM client_events WHERE user_id = $1 AND raw_text = 'an old message')::int e, (SELECT count(*) FROM client_facts WHERE user_id = $1 AND subject = 'old goal')::int f, (SELECT count(*) FROM client_events WHERE user_id = $1)::int kept", [w.id]))[0];
+chk(aged.e === 0 && aged.f === 0 && aged.kept > 0, "the year-old message and superseded fact are gone; recent ones stay", JSON.stringify(aged));
 
 REAL("\n6. ERASURE — \"delete my data\" removes the record");
 await say(u.phoneNumber, "delete my data");
