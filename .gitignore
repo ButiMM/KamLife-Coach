@@ -61,3 +61,6 @@ p2-work/
 # It must stay under the repository so the base checkout can resolve this checkout's node_modules.
 .unit-baseline-worktree-*/
 .pg-runner-controls-*/
+
+# Replit runtime state and logs: may hold phone numbers and names. Never commit (2026-09-24).
+.local/state/

@@ -1,9 +1,9 @@
 name: cto-watch
 on:
   schedule:
-    - cron: "*/30 4-20 * * *"   # every 30 min, 06:00-22:00 SAST
+    - cron: "*/15 * * * *"
   pull_request:
-    types: [opened, closed]
+    types: [opened, synchronize, closed]
   workflow_dispatch:
 permissions:
   contents: read
