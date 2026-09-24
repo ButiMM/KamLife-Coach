@@ -6,8 +6,8 @@
 
 Order, and what "done" means today:
 - [ ] #368 Replay gate hardening (Codex @ d4ddc3d on #298): check keys bound to full definitions and erasure of chat_history are done on #298 (dbbd9db); ITN and opt-out send are covered by the DB suite; still open: held-out grading in trusted base code
-- [ ] #270 Replay gate green, baseline recorded on main (PR #298): scores the 8 journeys, never-see, reply time, cost; the new coach in shadow beside the old path. **Unblocked 11:05 (key fixed).** First live run green: main's journeys 7 / 7.2 / 6.2 / **4.0** / 6.5 / 8 / 5.5 / 7.9, R0.009 per message, 2.3 s mean reply. Merges when its 45-min attack window passes. Start with the audit's 24 real failures plus every case below; add real tester threads when read-only DB access exists.
-- [ ] #334 Delete dead code (PR #352): −6,700 lines, 15 never-scheduled jobs, Replit scaffolding; modules back to 234
+- [x] #270 Replay gate green, baseline recorded on main (PR #298): scores the 8 journeys, never-see, reply time, cost; the new coach in shadow beside the old path. **Unblocked 11:05 (key fixed).** First live run green: main's journeys 7 / 7.2 / 6.2 / **4.0** / 6.5 / 8 / 5.5 / 7.9, R0.009 per message, 2.3 s mean reply. Merged 14:04 (#298). Start with the audit's 24 real failures plus every case below; add real tester threads when read-only DB access exists.
+- [x] #334 Delete dead code (PR #352): −6,700 lines, 15 never-scheduled jobs, Replit scaffolding; modules back to 234
 - [ ] #271 (PR #356) One record of the client: their words exactly as sent, and typed facts linked to them (knee, Comrades, pregnancy). Retention and erasure designed first. No model call of its own: facts come from #272's understanding call. Includes #323 (normaliser can never add facts).
 - [ ] #369 Link every piece of advice to what happened next (outcome data), built alongside #271
 - [ ] #272 (PR #359, draft, shadow) One understanding step: the AI reads each message once and writes what it means (intent, facts, corrections); code validates before saving. Replaces the ~440 patterns and the classifier call. Runs **in shadow** against the gate.
@@ -32,9 +32,9 @@ Order, and what "done" means today:
 - [x] #269 POPIA deletion (#307)
 - [ ] #321 Scope in code (PR #345): the model's NO declines; an outage does not refuse a client (Codex @ c4ca8df). Merges on green
 - [x] #333 CI timeout (closed: superseded by #337, the 6-way split, merged)
-- [ ] #339 Patch 3 high-severity dependency vulnerabilities (security: allowed despite the freeze)
-- [ ] #340 AI spend cap fails open (security/cost: allowed despite the freeze): PR #367
-- [ ] #341 Delivery-status webhook fails closed (security: allowed despite the freeze)
+- [x] #339 Patch 3 high-severity dependency vulnerabilities (security: allowed despite the freeze) (#374)
+- [x] #340 AI spend cap fails open (security/cost: allowed despite the freeze) (#367)
+- [x] #341 Delivery-status webhook fails closed (security: allowed despite the freeze) (#372)
 
 ## Gate cases for the new core (not patched on the old pipeline)
 
