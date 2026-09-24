@@ -144,7 +144,7 @@ const defOf = (k: ReplayCase, c: Check) =>
   sha(JSON.stringify({ newClient: k.newClient ?? false, seed: k.seed ?? null, before: k.before ?? [], turns: k.turns, check: c }));
 type CaseResult = { id: string; journey: Journey; heldOut: boolean; checks: CheckResult[]; hardPass: boolean; score: number | null; verdict: string; bodies: string[]; neverSeen: string[];
   /** The new coach in shadow: its would-be replies, graded on the reply checks, the never-see list and the judge. */
-  core: { replyPass: boolean; score: number | null; neverSeen: string[] } | null };
+  core: { replyPass: boolean; score: number | null; neverSeen: string[]; failing: string[] } | null };
 
 const lastShadowId = async () => Number((await pool.query("SELECT COALESCE(MAX(id),0) m FROM shadow_replies")).rows[0].m);
 async function bodyAfter(phone: string, since: number): Promise<string> {
@@ -250,6 +250,7 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
     for (const c of k.checks.filter(c => c.kind !== "sql")) replyChecks.push(await runCheck(c, userId, phone, cb));
     const j = await judge(k, userId, cb);
     core = { replyPass: replyChecks.filter(c => c.invariant).every(c => c.pass), score: j.score,
+      failing: replyChecks.filter(c => !c.pass).map(c => `${c.invariant ? "**" + c.invariant + "**: " : ""}${c.what}`),
       neverSeen: NEVER_SEE.filter(nv => cb.some(b => new RegExp(nv.pattern, nv.flags ?? "").test(b))).map(nv => nv.what) };
   }
   return { id: k.id, journey: k.journey, heldOut: isHeldOut, checks, hardPass: checks.filter(c => c.invariant).every(c => c.pass), score, verdict, bodies, neverSeen, core };
@@ -350,12 +351,14 @@ const baseJ = new Map(((baseline?.journeys || []) as typeof journeys).map(j => [
 lines.push("", "### Journeys (docs/TESTER-EXPERIENCE.md)", "| journey | cases | hard pass | score | main | never-see | new coach (shadow) |", "|---|---|---|---|---|---|---|");
 for (const j of journeys) lines.push(`| ${j.journey}. ${j.name} | ${j.cases} | ${j.hardPass}/${j.cases} | ${j.meanScore ?? "–"} | ${baseJ.get(j.journey)?.meanScore ?? "–"} | ${j.neverSee} | ${j.core ? `${j.core.meanScore ?? "–"} · reply checks ${j.core.replyPass}/${j.core.cases} · never-see ${j.core.neverSee}` : "–"} |`);
 lines.push("", `**Reply time** mean ${replyTime.meanS ?? "–"} s, p90 ${replyTime.p90S ?? "–"} s (target ~8 s) · **model cost** R${costPerMessageZar ?? "–"} per message (target ≤ R0.10)${baseline?.costPerMessageZar != null ? ` · main R${baseline.costPerMessageZar}` : ""}`);
-lines.push("", "| case | journey | hard | score | failing checks | never-see |", "|---|---|---|---|---|---|");
+// The new coach per case (#359): its score and the reply checks it fails, so a switch can be judged case by case.
+lines.push("", "| case | journey | hard | score | failing checks | never-see | new coach (shadow) |", "|---|---|---|---|---|---|---|");
 for (const r of results.filter(x => !x.heldOut)) {
   const bad = r.checks.filter(c => !c.pass).map(c => `${c.invariant ? "**" + c.invariant + "**: " : ""}${c.what}`).join("; ");
-  lines.push(`| ${r.id} | ${r.journey} | ${r.hardPass ? "pass" : "FAIL"} | ${r.score ?? "–"} | ${bad || ""} | ${r.neverSeen.join("; ")} |`);
+  const core = r.core ? [r.core.score ?? "–", ...r.core.failing, ...r.core.neverSeen.map(n => `never-see: ${n}`)].join(" · ") : "–";
+  lines.push(`| ${r.id} | ${r.journey} | ${r.hardPass ? "pass" : "FAIL"} | ${r.score ?? "–"} | ${bad || ""} | ${r.neverSeen.join("; ")} | ${core} |`);
 }
-if (heldOut.length) lines.push(`| held-out ×${heldOut.length} | – | ${results.filter(r => r.heldOut && r.hardPass).length}/${heldOut.length} pass | – | (inputs not shown) | ${results.filter(r => r.heldOut).reduce((a, r) => a + r.neverSeen.length, 0)} |`);
+if (heldOut.length) lines.push(`| held-out ×${heldOut.length} | – | ${results.filter(r => r.heldOut && r.hardPass).length}/${heldOut.length} pass | – | (inputs not shown) | ${results.filter(r => r.heldOut).reduce((a, r) => a + r.neverSeen.length, 0)} | – |`);
 const report = lines.join("\n");
 REAL(report);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + "\n");
