@@ -82,10 +82,6 @@ const openai = new OpenAI({ apiKey: openaiKey });
 // GET OR CREATE USER
 // ============================================================
 
-
-
-
-
 const getStepResponse = _getStepResponse;
 
 // Onboarding functions moved to ./onboarding (see imports above)
@@ -503,7 +499,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       : "replied";
     recordConversion(user.id, abAction).catch(() => {/* non-fatal */});
   }
-
 
   // ---- FRONT-DOOR NORMALIZER — the classifier's verdict applied BEFORE routing ----
   // The brain decides what the message IS; the deterministic handlers stay the hands.
@@ -963,7 +958,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     return handleMediaMessage({ phone, message, mediaUrl, mediaContentType, allMediaUrls, sourceMessageId, user, isCoach, openai, handleMessage });
   }
 
-
   // ---- WORKOUT COMMANDS (gym log, done, lifts, exercises, weight, programme) ----
   // COMMITS, DOES NOT CLAIM THE TURN. Returned unconditionally, so "I trained chest today and
   // had chicken and pap" logged the session and deleted the meal.
@@ -1197,7 +1191,5 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   //   routes/payments.ts  — /webhook/payfast, /webhook/status, /api/payfast/link
   //   routes/coach.ts     — /coach (HTML admin dashboard)
   // See server/routes/index.ts for the registry.
-
-
 
 }
