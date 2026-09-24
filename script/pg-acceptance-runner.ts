@@ -486,6 +486,11 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "scope-reverts", title: "Every #321 scope seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-scope.sh"] },
 
+  { id: "refund-guarantee", title: "The 14-day money-back guarantee, end to end (#328)",
+    // Eligibility from the payment record, billing cancelled, the refund owed recorded with a due
+    // date, the founder told exactly what to refund, the client told the truth; repeat and
+    // out-of-window asks; a cancelled client within 14 days gets the guarantee, not a pay link.
+    command: ["npx", "tsx", "script/pg-refund-guarantee-acceptance.ts"] },
   { id: "cancel-menu", title: "The cancel menu owns its own answers: \"4 — Just cancel\" cancels (#315)",
     // "4" got the shopping list and the client stayed billed; "2" and "3" got the step and food-log
     // prompts. Needs the real front door, the stored subscription and the post-transport bodies.
