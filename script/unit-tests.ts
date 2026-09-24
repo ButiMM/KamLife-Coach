@@ -72,7 +72,7 @@ import { enforceCoachGuardrails } from "../server/coach-guardrails";
 import { defaultUnderstanding, coerceUnderstanding, parseUnderstanding, persistableUnderstanding } from "../server/understanding/state";
 import { compileStateBlurb, compileKeyFacts } from "../server/understanding/compiler";
 import { looksLikeRefusal } from "../server/understanding/refusal";
-import { isObviouslyInDomain, offDomainRedirect } from "../server/understanding/domain-guard";
+import { isObviouslyInDomain, offDomainRedirect, classifyDomain } from "../server/understanding/domain-guard";
 import { mustStayDeterministic } from "../server/understanding/action-router";
 import { decayObservations } from "../server/understanding/state";
 import { digitizeSpokenAmounts } from "../server/utils";
@@ -5926,6 +5926,14 @@ test("scope: a mention inside coaching, or a word with a second meaning, is not 
     "Can you share some tips for sleep", "I bought stock cubes for the stew", "write me a workout plan for this week",
     "my doctor prescribed metformin, what should I eat?",
   ]) assert.equal(offDomainRedirect(m), null, `must not decline: "${m}"`);
+});
+test("scope: a classifier error fails CLOSED — an unrecognised topic is declined, not answered", async () => {
+  const broken = { chat: { completions: { create: async () => { throw new Error("timeout"); } } } } as any;
+  const v = await classifyDomain(broken, "Who do you think will win the rugby world cup this year and why?");
+  assert.equal(v.classification, "out-of-domain");
+  assert.ok(v.redirectMessage, "a decline carries the warm redirect");
+  const coaching = await classifyDomain(broken, "My lower back aches after sitting at my desk all day, what can I do?");
+  assert.equal(coaching.classification, "in-domain", "coaching never reaches the failing classifier");
 });
 test("scope: the redirect does not introduce Coach K to somebody mid-conversation", () => {
   assert.match(offDomainRedirect("write me an essay about the French Revolution please", true) || "", /outside what I can help with/);

@@ -67,10 +67,12 @@ echo "CONTROL: untouched scope acceptance is GREEN"
 
 failed=0
 
-# 1. THE GATE FAILS OPEN AGAIN — a classifier error answers whatever it could not classify.
-run_case "a classifier error fails open to answering" server/understanding/domain-guard.ts \
-  'return { classification: "out-of-domain", reasoning: "fail-closed: "' \
-  'return { classification: "in-domain", reasoning: "fail-closed: "' || failed=$((failed + 1))
+# 1. THE GATE FAILS OPEN AGAIN — a verdict the classifier was never asked for answers the message.
+# (Offline, the classifier returns no usable word, so this is the path the acceptance exercises. The
+# thrown-error path fails closed the same way and is graded by its unit test, "scope: …error…".)
+run_case "an unrecognised classifier verdict fails open to answering" server/understanding/domain-guard.ts \
+  '    return { classification: "out-of-domain", reasoning: `classifier: ${word || "empty"}`' \
+  '    return { classification: "in-domain", reasoning: `classifier: ${word || "empty"}`' || failed=$((failed + 1))
 
 # 2. NO DETERMINISTIC OFF-DOMAIN ASKS — scope is left to the model and the prompt.
 run_case "off-domain asks are left to the model" server/understanding/domain-guard.ts \
