@@ -364,6 +364,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // swallowed the client's question entirely.
     command: ["bash", "script/red-on-revert-c10-turn-reply-integrity.sh"] },
 
+  { id: "age-gate", title: "Under-18s cannot complete signup or keep being coached",
+    // #267. Needs the real front door (the onboarding state machine and the mid-conversation
+    // gate in routes.ts), users.onboarding_state and the post-transport body.
+    command: ["npx", "tsx", "script/pg-age-gate-acceptance.ts"] },
+
+  { id: "age-gate-reverts", title: "Every #267 age-gate seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-age-gate.sh"] },
+
   { id: "stt-admission", title: "A garbled transcript writes nothing, a real one writes everything",
     // CUT 4 (2026-09-12). The garble floor read `if (voiceQuality && …)` and voiceQuality is set
     // only by Whisper attempt 1 — so Scribe (which runs FIRST in production), the catch retry and
