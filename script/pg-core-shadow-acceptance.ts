@@ -41,7 +41,13 @@ globalThis.fetch = (async (input: any, init?: any) => {
     const msg = JSON.parse(body).messages.at(-1).content as string;
     const facts = /comrades/i.test(msg)
       ? [{ kind: "goal", subject: "comrades marathon", statement: "I'm training for the Comrades marathon", detail: {}, valid_until: null, corrects: null }] : [];
-    content = JSON.stringify({ family: /comrades/i.test(msg) ? "report" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts });
+    // ACTIONS (#391): the same call proposes what to DO. Two valid, two the permission gate must drop; and on a
+    // question, a wrong LOG_WEIGHT that the shadow must record but never perform.
+    const actions = /pap and chicken/i.test(msg)
+      ? [{ type: "LOG_MEAL", foodText: "pap and chicken", meal: "lunch", needsConfirmation: false }, { type: "LOG_STEPS", count: 9000 },
+         { type: "DELETE_ACCOUNT" }, { type: "LOG_MEAL", foodText: "", needsConfirmation: false }]
+      : /protein/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 70 }] : [];
+    content = JSON.stringify({ family: /comrades|pap and chicken/i.test(msg) ? "report" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts, actions });
   }
   else if (body.includes("You are Coach K, a warm, direct South African")) { composerRequests.push(body); content = `Great question. ${SENTINEL} One move today.`; }
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
@@ -110,6 +116,14 @@ chk(!allRequests.some(b => b.includes("You also maintain the client's record") &
   "no separate model call is made for the record");
 chk(allRequests.some(b => b.includes("say what they want from this turn") && b.includes("KNOWN FACTS")), "the understanding call is shown what the record already knows");
 
+REAL("\n1c. IT PROPOSES ACTIONS THROUGH THE EXISTING PERMISSION GATE (#391)");
+const s1c = await say(u.phoneNumber, "I had pap and chicken for lunch and did 9000 steps");
+await settle(async () => (await q("SELECT 1 FROM core_shadow WHERE root_id = $1", [s1c])).length > 0);
+const acts = ((await q("SELECT understanding FROM core_shadow WHERE root_id = $1", [s1c]))[0]?.understanding?.actions ?? []) as any[];
+chk(acts.some(a => a.type === "LOG_MEAL" && a.foodText === "pap and chicken") && acts.some(a => a.type === "LOG_STEPS" && a.count === 9000),
+  "the meal and the steps are recorded as proposed actions", JSON.stringify(acts));
+chk(acts.length === 2, "an invented action type and a meal with no food are dropped by validateActions", JSON.stringify(acts));
+
 REAL("\n2. IT IS GIVEN WHAT THE CLIENT TOLD US, AND THEIR REAL NUMBERS");
 const req = composerRequests.at(-1) || "";
 chk(/WHAT THIS CLIENT HAS TOLD YOU/.test(req) && /Comrades/.test(req), "the composer sees the client record", req.slice(0, 200));
@@ -125,6 +139,9 @@ const s3 = await say(u.phoneNumber, "How much protein do I need today?");
 await settle(async () => (await q("SELECT 1 FROM core_shadow WHERE root_id = $1", [s3])).length > 0);
 const after = (await q("SELECT current_weight, goal_type, profile_notes FROM users WHERE id = $1", [u.id]))[0];
 chk(after.current_weight === before.current_weight && after.goal_type === before.goal_type, "the client's row is not changed by the shadow");
+const s3acts = ((await q("SELECT understanding FROM core_shadow WHERE root_id = $1", [s3]))[0]?.understanding?.actions ?? []) as any[];
+chk(s3acts.some(a => a.type === "LOG_WEIGHT" && a.kg === 70) && String(after.current_weight) === "92",
+  "a proposed action is recorded, never performed: the shadow's LOG_WEIGHT 70 leaves the weight at 92", JSON.stringify({ s3acts, w: after.current_weight }));
 chk((await q("SELECT count(*)::int n FROM meal_logs WHERE user_id = $1", [u.id]))[0].n === meals0, "no ledger row is written by a question turn");
 
 REAL("\n4. OFF UNLESS SWITCHED ON");

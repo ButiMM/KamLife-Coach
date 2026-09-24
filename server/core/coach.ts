@@ -19,6 +19,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { users, coreShadow, turnLedger, clientEvents } from "@shared/schema";
 import { assertAiOnline } from "../ai-offline";
+import { validateActions, type CoachAction } from "../understanding/actions";
 
 export const CORE_MODEL = process.env.CORE_MODEL || "gpt-4o-mini";
 export const shadowOn = () => process.env.CORE_SHADOW === "on";
@@ -47,15 +48,21 @@ export async function readPreTurn(phone: string): Promise<PreTurn | null> {
 }
 
 const UNDERSTAND_SYSTEM = `You read one WhatsApp message from a coaching client and say what they want from this turn.
-Return ONLY JSON: {"family":"report|question|plan|feeling|correction|other","wants":"<one short sentence>","one_question":"<the single question worth asking, or null>","uncertainty":<0..1>,"facts":[...]}
+Return ONLY JSON: {"family":"report|question|plan|feeling|correction|other","wants":"<one short sentence>","one_question":"<the single question worth asking, or null>","uncertainty":<0..1>,"facts":[...],"actions":[...]}
 - report: they are telling you what they ate, did, weighed or felt, and want it noted.
 - question: they ask for advice or information.
 - plan: they want a plan (a day of eating, a session, a week).
 - feeling: the message is mostly about how they feel.
 - correction: they are correcting something said or recorded earlier.
-Ask one_question ONLY if the answer would change the advice.`;
+Ask one_question ONLY if the answer would change the advice.
+"actions": what the system should DO for a fresh transaction in this message — [] for a question, a plan, feelings, or something already recorded. One entry per transaction:
+{"type":"LOG_MEAL","foodText":"<the food in their words, no calories>","meal":"breakfast|lunch|dinner|snack or omit","retro":"<a past day as they said it, or omit>","needsConfirmation":<true if the amount is vague>}
+{"type":"LOG_STEPS","count":<n>} · {"type":"LOG_WATER","litres":<n>} · {"type":"LOG_WEIGHT","kg":<n>}
+{"type":"REMOVE_LAST_MEAL"} · {"type":"SHOW_MEALS"} · {"type":"SHOW_WORKOUT"} · {"type":"SET_SICK","days":<n>} · {"type":"END_SICK"} · {"type":"SET_REMINDER","body":"<what>","when":"<as they said it>"}`;
 
-export type Understanding = { family: string; wants: string; one_question: string | null; uncertainty: number };
+/** `actions` are what the new core WOULD do, validated by the existing permission gate (understanding/actions.ts).
+ *  In shadow they are recorded, never performed; the gate compares them with what the old path stored (#391). */
+export type Understanding = { family: string; wants: string; one_question: string | null; uncertainty: number; actions: CoachAction[] };
 
 /**
  * ONE CALL READS THE MESSAGE (CTO, 24 Sep): what the client wants from this turn AND the durable facts
@@ -73,7 +80,8 @@ export async function understand(openai: OpenAI, message: string, known = "KNOWN
   try {
     const j = JSON.parse(raw);
     if (typeof j.family !== "string") return { u: null, raw };
-    return { u: { family: j.family, wants: String(j.wants || ""), one_question: j.one_question ? String(j.one_question) : null, uncertainty: Number(j.uncertainty) || 0 }, raw };
+    return { u: { family: j.family, wants: String(j.wants || ""), one_question: j.one_question ? String(j.one_question) : null, uncertainty: Number(j.uncertainty) || 0,
+      actions: validateActions(j.actions ?? []) }, raw };
   } catch { return { u: null, raw }; }
 }
 
