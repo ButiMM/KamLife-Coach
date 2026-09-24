@@ -25,6 +25,7 @@ jobs:
         with:
           sparse-checkout: |
             docs/QUEUE.md
+            docs/delete-list.txt
             script
             server
       - run: python3 script/cto-watch.py
