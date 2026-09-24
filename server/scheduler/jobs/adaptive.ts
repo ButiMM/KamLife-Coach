@@ -48,7 +48,7 @@ export async function runAdaptiveTargets(): Promise<void> {
       // engine reasons from `baseline` (the profile number, which nothing here writes) and the
       // client's visible target is the `current` overlay this job persists.
       const s = await loadProactiveState(c);
-      const input = adaptiveInputFrom(s);
+      const input = adaptiveInputFrom(s, c);
       if (!(input.baseCalories > 0 && input.baseProtein > 0)) continue; // no baseline yet
 
       // Still read directly: the two profileNotes tokens this job WRITES and owns — its own

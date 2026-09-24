@@ -214,7 +214,7 @@ export async function runMorningCheckin(): Promise<void> {
       let adaptLine = "";
       try {
         const marked = String(client.profileNotes || "").match(/adapt_note:(\d{4}-\d{2}-\d{2})/)?.[1];
-        if (marked === todaySAST()) adaptLine = adaptTargets(adaptiveInputFrom(state)).note || "";
+        if (marked === todaySAST()) adaptLine = adaptTargets(adaptiveInputFrom(state, client)).note || "";
       } catch (e) { console.warn("[MORNING] adapt line unavailable:", (e as Error)?.message); }
 
       const name = client.name || "there";

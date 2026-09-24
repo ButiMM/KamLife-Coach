@@ -1,40 +1,39 @@
 # Build queue
 
-Two lanes. Claude Code runs both: lane A in its main session, lane B in a parallel worktree/subagent. In each lane, take the first unchecked item, one PR, tick after merge, take the next. Every finding from the reviews is in `docs/FINDINGS.md`; nothing is dropped. Maintained by the CTO.
+**CTO decision, 24 Sep 11:05: lane B is now the priority.** The remaining lane A items are pattern-patches on the old pipeline. Each fix spawns a new edge ("No thanks", then "Nope", then "Hayi"), because the old design reads messages by hand-written patterns. The new core fixes those by design. So: finish the harm PRs already in flight, then **all new build effort goes to lane B**. The old-pipeline items below become **gate cases the new core must pass**, not patches.
 
-## Lane A: harm and what testers see
+## Lane B: the new core (top priority, starts now)
 
-- [x] #263 Payments (PR #277, merged)
-- [x] #266 Pregnancy and disordered eating (PR #283, merged)
-- [ ] #264 Meal decline (PR #282: tests running, merge when green)
-- [ ] #265 Opt-out (PR #285: tests running, merge when green)
-- [ ] #275 Nags and invented facts (PR #290: tests running, merge when green)
-- [ ] #267 Age gate (PR #305: tests running, merge when green)
-- [ ] #268 Calorie floors (PR #304: tests running, merge when green)
-- [ ] #269 POPIA deletion (PR #307: tests running, merge when green)
-- [ ] #321 Scope in code, fail closed (Meta risk)
-- [ ] #286 Opt-out inside a life-context message
-- [ ] #324 Multi-day logs collapse into one row
-- [ ] #325 Post-midnight day boundary, one helper
-- [ ] #326 Same meal, same calories; corrections that work
-- [ ] #292 Multi-word negated food in a correction
-- [ ] #300 Explicitly named older meal in a correction
-- [ ] #328 14-day money-back guarantee
-- [ ] #327 Evening coaching outside 24h
-- [ ] #329 Nutrition direction from code
-
-## Lane B: the new core (kills the mouths, adds memory)
-
-- [ ] #270 Replay gate, baseline on main (PR #298: fix failing checks)
+Order, and what "done" means today:
+- [ ] #270 Replay gate green, baseline recorded on main (PR #298). Needs the `OPENAI_API_KEY` repo secret for the judge. Start with the audit's 24 real failures plus every case below; add real tester threads when read-only DB access exists.
+- [ ] #334 Delete dead code: pure deletions, early, no behaviour change
+- [ ] #271 One record of the client: their words exactly as sent, and typed facts linked to them (knee, Comrades, pregnancy). Retention and erasure designed first. Includes #323 (normaliser can never add facts).
+- [ ] #272 One understanding step: the AI reads each message once and writes what it means (intent, facts, corrections); code validates before saving. Replaces the ~440 patterns and the classifier call. Runs **in shadow** against the gate.
+- [ ] #272 One writer, one sender: the composer writes every reply from the record. Switch one message family at a time; delete that family's old handlers in the same PR (mouth ratchet enforces it). With #320 (no prompt slice) and #322 (stored conversation state).
+- [ ] #319 Every proactive send through the same writer and sender
 - [ ] #293 Coach Health scores every live turn, daily tester digest
-- [ ] #271 Event record and fact store (with #323: the client's words stored untouched)
-- [ ] #323 Normaliser can never add facts
-- [ ] #272 Understanding step and one composer, shadow, then switch family by family (with #320 prompt, #322 stored state)
-- [ ] #320 Coach prompt without the 20k slice
-- [ ] #322 Conversation state survives redeploys
-- [ ] #319 Every proactive send through one owner
 - [ ] #330 Real voice-note path in the gate
 - [ ] #273 Carry C18's tests into the gate, close #260
 - [ ] #331 Archive contradicting docs
 
-Lane B owns new files (`script/replay*`, `server/core/`, new migrations) and touches `server/routes.ts` only in #272's switch PRs.
+## Lane A: finish what's in flight, then stop
+
+- [x] #263 Payments (#277)
+- [x] #266 Pregnancy and disordered eating (#283)
+- [x] #265 Opt-out (#285)
+- [x] #268 Calorie floors (#304)
+- [ ] #264 Meal decline (PR #282), merge when green
+- [ ] #275 Nags and invented facts (PR #290), merge when green
+- [ ] #267 Age gate (PR #305), merge when green
+- [ ] #269 POPIA deletion (PR #307), merge when green
+- [ ] #321 Scope in code, fail closed (Meta risk, already built), merge when green
+- [ ] #333 CI timeout 90 → 150 min, merge when green
+
+## Gate cases for the new core (not patched on the old pipeline)
+
+The new core must pass each of these on the gate before its message family switches:
+#286 opt-out inside a life-context message · #324 multi-day logs · #325 post-midnight day · #326 same meal, same calories, and corrections · #292 and #300 correction wording · #310 portion sizes · #315 cancel menu "4" answered with a shopping list.
+
+## Parked until the core switches
+
+#327 evening template (needs a Meta-approved template; founder task) · #328 14-day refund · #329 nutrition-direction review · pricing (founder: R199–R249).

@@ -152,7 +152,7 @@ export async function runEveningAccountability(): Promise<void> {
             "Doing it tonight",
             "Swap to tomorrow",
             "Rest day today",
-          ]);
+          ], { proactive: true });
           await recordCanonicalMoveOutbound(client, move, delivery);
         }
         continue;

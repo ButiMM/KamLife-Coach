@@ -231,15 +231,51 @@ export async function setExplicitPause(
   return until;
 }
 
-/** Lift a pause. Returns whether there was one to lift. */
+/** Lift a pause. Only START (`optOut: true`) also ends an opt-out: "I'm feeling better" from a
+ *  client who opted out is not consent to be messaged again (Codex @ bbffa67), so it lifts
+ *  nothing — the 365-day pause belongs to the opt-out. Returns whether anything was lifted. */
 export async function clearPause(
   user: { id?: string; phoneNumber?: string; profileNotes?: string | null },
+  opts: { optOut?: boolean } = {},
 ): Promise<boolean> {
   const notes = String(user.profileNotes || "");
-  if (!/paused_until:\d{4}-\d{2}-\d{2}/.test(notes)) return false;
-  const cleaned = notes.replace(/\s*\|?\s*paused_until:\d{4}-\d{2}-\d{2}/g, "").trim();
+  if (isOptedOut(user) && !opts.optOut) return false;
+  if (!/(?:paused_until|opted_out):\d{4}-\d{2}-\d{2}/.test(notes)) return false;
+  const cleaned = notes.replace(/\s*\|?\s*(?:paused_until|opted_out):\d{4}-\d{2}-\d{2}/g, "").trim();
   const { db, users, eq } = await writer();
   await db.update(users).set({ profileNotes: cleaned || null })
     .where(user.id ? eq(users.id, user.id) : eq(users.phoneNumber, String(user.phoneNumber)));
   return true;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// OPT-OUT (#265) — not a pause. A pause is a hold the jobs remember to read; an opt-out is read at
+// the proactive send boundary, so no job, alert, broadcast or payment notice can forget it. It is
+// a separate token because a HEALTH hold also writes paused_until, and a client off sick has not
+// asked us to stop writing. The 365-day pause is still set beside it, so every job that already
+// skips paused clients keeps doing so. START removes both (clearPause).
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Has this client told us to stop messaging them? Read at the proactive send boundary. */
+export function isOptedOut(user: { profileNotes?: string | null } | null | undefined): boolean {
+  return /\bopted_out:\d{4}-\d{2}-\d{2}\b/.test(String(user?.profileNotes || ""));
+}
+
+/** Record an opt-out: the token, plus the 365-day pause the jobs already honour. One write. */
+export async function setOptOut(
+  user: { id?: string; phoneNumber?: string; profileNotes?: string | null },
+  today: string = sastDayKey(),
+): Promise<void> {
+  const until = new Date(Date.parse(today) + 365 * 86_400_000).toISOString().slice(0, 10);
+  const rest = String(user.profileNotes || "").replace(/\s*\|?\s*(?:paused_until|opted_out):\d{4}-\d{2}-\d{2}/g, "").trim();
+  const { db, users, eq } = await writer();
+  await db.update(users).set({ profileNotes: `${rest ? rest + " | " : ""}paused_until:${until} | opted_out:${today}` })
+    .where(user.id ? eq(users.id, user.id) : eq(users.phoneNumber, String(user.phoneNumber)));
+}
+
+/** The same question, asked by phone — for a door that holds no user row (the button sender). */
+export async function isPhoneOptedOut(phone: string): Promise<boolean> {
+  const { db, users, eq } = await writer();
+  const [row] = await db.select({ profileNotes: users.profileNotes }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+  return isOptedOut(row);
 }
