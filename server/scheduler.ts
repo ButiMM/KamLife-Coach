@@ -21,7 +21,6 @@ import { runMondayProgress, runMondayGroceries } from "./scheduler/jobs/monday";
 import { runCipUpdate } from "./scheduler/jobs/cip-update";
 import { runMonthlyNarrative } from "./scheduler/jobs/narrative";
 import { runSpendWatchdog } from "./scheduler/jobs/spend-watchdog";
-import { runTrialCountdown } from "./scheduler/jobs/trial";
 import { runBalanceCheck } from "./scheduler/jobs/balance-check";
 import { runDueReminders } from "./scheduler/jobs/reminders";
 import { runMediaJobRecovery } from "./scheduler/jobs/media-recovery";
@@ -206,7 +205,6 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("5 8 * * *",    () => safe("runSubscriptionExpiryCheck",runSubscriptionExpiryCheck, { cron: "5 8 * * *" }),  { timezone: "UTC" }); // 10am SAST
   cron.schedule("0 10 * * *",   () => safe("runPaymentFailureRecovery", runPaymentFailureRecovery, { cron: "0 10 * * *" }),   { timezone: "UTC" }); // 12pm SAST
   cron.schedule("3 9 * * *",    () => safe("runSignupNudge",            runSignupNudge, { cron: "3 9 * * *" }),              { timezone: "UTC" }); // 11am SAST
-  cron.schedule("30 7 * * *",   () => safe("runTrialCountdown",          runTrialCountdown, { cron: "30 7 * * *" }),           { timezone: "UTC" }); // 9:30am SAST — trial Day 2/5/7 conversion
 
   // ── Every 12 hours ────────────────────────────────────────────────────────
   // RECORD ONLY (2026-08-19, Cut 6) — this job no longer messages anyone. It flags a two-week

@@ -812,15 +812,13 @@ const MUST_WRITE: [string, string][] = [
     if (PRICING.guaranteeDays !== 14 || !/14-day money-back guarantee/.test(GUARANTEE_PHRASE)) {
       failures.push(`The guarantee owner says "${GUARANTEE_PHRASE}" — the locked offer is 14 days`);
     }
-    // 5. TRIAL LENGTH HAS ONE OWNER, and it is not this file. shared/pricing.ts used to declare
-    // trialDays: 7 beside a server default of 0.
+    // 3 & 5. THERE IS NO TRIAL (#275) — not a switch set to zero, no switch at all.
     if ("trialDays" in (PRICING as any)) {
-      failures.push(`shared/pricing.ts declares trialDays again — server/pricing-config.ts owns it, and two owners of one fact is how this drifted`);
+      failures.push(`shared/pricing.ts declares trialDays again — the offer has no trial`);
     }
-    const { TRIAL_DAYS, TRIALS_ENABLED } = await import("../server/pricing-config");
-    // 3. Default config grants no trial to a NEW customer...
-    if (TRIAL_DAYS !== 0 || TRIALS_ENABLED) {
-      failures.push(`Default config grants a ${TRIAL_DAYS}-day trial — the locked offer has none for new customers`);
+    const pricingConfig: Record<string, unknown> = await import("../server/pricing-config");
+    for (const k of ["TRIAL_DAYS", "TRIALS_ENABLED", "hasTrialedBefore", "recordTrialGranted"]) {
+      if (k in pricingConfig) failures.push(`server/pricing-config.ts exports ${k} again — the trial path was deleted (#275)`);
     }
 
     // 1 & 2 & 6. WHAT A PROSPECT IS ACTUALLY TOLD, through the real conversion handler.
@@ -834,6 +832,10 @@ const MUST_WRITE: [string, string][] = [
       if (/R199|R6\.63/.test(r)) {
         failures.push(`A prospect asking about ${label} is still quoted the old offer: "${r.replace(/\n/g, " ⏎ ").slice(0, 160)}"`);
       }
+    }
+    // A PRICE WE CANNOT STAND BEHIND (#275): "A personal trainer charges R250+ for one session."
+    if (/R250/.test(price)) {
+      failures.push(`A prospect asking the price is quoted a personal-trainer price nobody measured: "${price.replace(/\n/g, " ⏎ ").slice(0, 200)}"`);
     }
     if (!/R149/.test(price)) {
       failures.push(`A prospect asking the price is not told R149: "${price.replace(/\n/g, " ⏎ ").slice(0, 160)}"`);
@@ -1492,7 +1494,15 @@ const MUST_WRITE: [string, string][] = [
         const closedStill = await canonicalDecision({ ...USER }, "what should I eat?").catch(() => null);
         const reopened = await canonicalDecision({ ...USER }, "I'm eating now, what should I eat?").catch(() => null);
         delete g.__KAMLIFE_STUB_ROWS;
-        if (closedStill && reopened && closedStill.todo === reopened.todo && /eat|protein|meal/i.test(String(reopened.todo))) {
+        // GRADED ON THE KIND (#275). The only food move that differed on this fixture was the log
+        // ask, which a client at the keyboard no longer gets — both turns now reach the weigh-in,
+        // whose todo ends "before you eat" and tripped the old word match. The seam itself is held
+        // by the owner cases above and by live.ts reading the current message on both of its calls.
+        const liveSrc = (await import("node:fs")).readFileSync("server/understanding/live.ts", "utf-8");
+        if ((liveSrc.match(/foodDayClosed: foodDayClosedWith\(held\.foodDayClosed, message \|\| ""\)/g) || []).length < 2) {
+          failures.push(`live.ts no longer folds the current message into foodDayClosed on both the ladder and the gate — the engine and the meal door can decide from different facts`);
+        }
+        if (closedStill && reopened && closedStill.kind === reopened.kind && ["protein", "eat_more", "log"].includes(String(reopened.kind))) {
           failures.push(`The Meaning Engine reached the SAME food instruction whether or not the turn reopened the day ("${reopened.todo}") — the current message is not reaching its held state, so the engine and the meal door are deciding from different facts`);
         }
       }

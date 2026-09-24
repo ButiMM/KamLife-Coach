@@ -3,7 +3,7 @@ import { users, chatHistory, stepLogs, escalations } from "../shared/schema";
 import { escalationSLA } from "./safety-detection";
 import { generateReferralCode } from "./onboarding-referral";
 import { parseFoodPreferences, parseVisionAnswer, looksLikeBulkIntake, applyIntakeBrake, describeIntake, type BulkIntake } from "./onboarding-intake";
-import { TRIAL_DAYS, TRIALS_ENABLED, hasTrialedBefore, recordTrialGranted, flagSignupVelocity } from "./pricing-config";
+import { flagSignupVelocity } from "./pricing-config";
 import { buildActivationBrief } from "./activation";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { buildFullProgramme, getKamlifeProgramme } from "./programme";
@@ -93,15 +93,6 @@ export async function getMenuText(user: any, opts?: { showCommands?: boolean }):
     workoutState = await getTodayWorkoutState(user);
   }
 
-  // Trial countdown — business-critical, stays on every greeting
-  let trialLine = "";
-  if (user.subscriptionStatus === "trial" && user.betaBypassUntil) {
-    const daysLeft = Math.max(0, Math.ceil((new Date(user.betaBypassUntil).getTime() - Date.now()) / 86_400_000));
-    trialLine = daysLeft <= 3
-      ? `\n\n⏰ *${daysLeft} day${daysLeft !== 1 ? "s" : ""} left on free trial* — reply *pay* to keep coaching`
-      : `\n\n_Free trial: ${daysLeft} days remaining_`;
-  }
-
   // Full command list only when explicitly asked (menu/help) or the user is lost.
   // A greeting gets a coach, not a sitemap.
   // Gym users: surface the photograph-a-machine feature. Dumbbell/home users don't need it.
@@ -122,7 +113,7 @@ export async function getMenuText(user: any, opts?: { showCommands?: boolean }):
     ? `\n\n_Send me a meal — photo, voice note or words. Or just talk to me normally and I'll work it out._${machineLine}`
     : "";
 
-  const tail = `${commandsBlock}${trialLine}`;
+  const tail = commandsBlock;
 
   const daysSilent = user.lastActiveAt
     ? Math.floor((Date.now() - new Date(user.lastActiveAt).getTime()) / 86_400_000)
@@ -257,11 +248,6 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
 
   const referralCode = await generateReferralCode(u.name);
 
-  // ONE TRIAL PER NUMBER, EVER (2026-08-06, founder directive). Decided BEFORE the write so
-  // the grant and the record of the grant cannot disagree — computing it inside the object
-  // spread would have left no way to know afterwards whether a trial was actually handed out.
-  const grantTrial = !u.betaBypassUntil && TRIALS_ENABLED && !(await hasTrialedBefore(phone));
-
   await db.update(users).set({
     trainingDaysPerWeek: trainingDays,
     trainingExperience: exp,
@@ -276,27 +262,17 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     programmeWeek: 1,
     programmeDayInWeek: 1,
     programmeStartDate: new Date(),
-    // betaBypassUntil is null until first onboarding completes. Using it as the "already
-    // onboarded" signal is safer than subscriptionStatus (which defaults to "inactive")
-    // and closes the trial-restart exploit. PAY-TO-START by default (no free window):
-    // status stays inactive so the paywall hits right after the Day-1 taste; set
-    // TRIAL_DAYS>0 to reinstate a free trial. (2026-07-14, founder: "I hate trials".)
-    // ONE TRIAL PER NUMBER, EVER (2026-08-06). betaBypassUntil closes cancel-and-return,
-    // but it dies with the row when a client sends *delete my data* — so the number is
-    // checked against trialed_numbers, which survives deletion. See pricing-config.ts.
-    ...(!u.betaBypassUntil ? (grantTrial ? {
-      subscriptionStatus: "trial",
-      betaBypassUntil: new Date(Date.now() + TRIAL_DAYS * 86_400_000),
-    } : {
+    // betaBypassUntil is null until first onboarding completes — the "already onboarded"
+    // signal. PAY-TO-START (#275: no trial offer): status stays inactive so the paywall
+    // hits right after the Day-1 taste.
+    ...(!u.betaBypassUntil ? {
       subscriptionStatus: "inactive",
-      betaBypassUntil: new Date(), // non-null → "onboarded"; closes the restart exploit
-    }) : {}),
+      betaBypassUntil: new Date(), // non-null → "onboarded"
+    } : {}),
     onboardingState: "COMPLETE",
     ...(referralCode && !u.referralCode ? { referralCode } : {}),
   }).where(eq(users.phoneNumber, phone));
 
-  // Written AFTER the grant lands, so a failed signup never burns the client's one trial.
-  if (grantTrial) await recordTrialGranted(phone);
   // Flag, never block (directive item 5). Fire-and-forget: a signup must not wait on an alert.
   flagSignupVelocity().catch(() => {});
 

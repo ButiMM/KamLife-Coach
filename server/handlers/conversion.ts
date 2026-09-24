@@ -46,7 +46,7 @@ export function handleConversionObjection(ctx: {
 
   // ── PLAIN PRICE QUESTION — answer crisply, frame the value, redirect to goal ──
   if (PRICE_RE.test(m)) {
-    const reply = `${name}, straight up: *R${PRICING.monthlyPriceZAR} a month — that is ${PRICING.dailyDisplay.replace("/day", "")} a day.* Less than a loaf of bread, cancel anytime, no contract.\n\nFor that you get everything: your full personalised programme, daily food and calorie coaching on real SA food, workout tracking, and me checking in on you every single day. All on WhatsApp — no app to download.\n\nA personal trainer charges R250+ for *one* session. This is all-in, every day, for the price of a chocolate.\n\nReady to start? Tap here:\n${payLink}\n\nOr tell me first — what is your main goal? Fat loss, muscle, or just getting healthy? Let me show you exactly how I would get you there.`;
+    const reply = `${name}, straight up: *R${PRICING.monthlyPriceZAR} a month — that is ${PRICING.dailyDisplay.replace("/day", "")} a day.* Less than a loaf of bread, cancel anytime, no contract.\n\nFor that you get everything: your full personalised programme, daily food and calorie coaching on real SA food, workout tracking, and me checking in on you every single day. All on WhatsApp — no app to download.\n\nReady to start? Tap here:\n${payLink}\n\nOr tell me first — what is your main goal? Fat loss, muscle, or just getting healthy? Let me show you exactly how I would get you there.`;
     return { reply, intent: "CONVERSION_PRICE" };
   }
 
