@@ -32,7 +32,8 @@ import { foodConstraints } from "../food-swaps";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
 import { sendCriticalAlert } from "../scheduler/shared";
-import { cancelPayFastSubscription, latestPayFastToken } from "../routes/payments";
+import { cancelPayFastSubscription, latestPayFastToken, handleRefundRequest } from "../routes/payments";
+import { isRefundAsk } from "./conversion";
 import { isAskingNotReporting, sastToday, sastDayStart, proteinOptions , commaName, spaceName, getDisplayName, parseMealDate, isRetroactiveMeal, mealDateLabel, looksLikeQuestion, isMultiPartAsk} from "../utils";
 import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
@@ -583,10 +584,9 @@ export async function handleLifecycle(ctx: {
     return cancelSaveReply;
   }
 
-  // ---- REFUND REQUEST ----
-  if (/\b(refund|money back|money-back|want my money|give me my money|get my money|reimburse|reimbursement|charge.*back|chargeback)\b/i.test(m)) {
-    const refundName = user.name?.split(" ")[0] || "";
-    const refundReply = `${refundName}, I hear you — let me get a human on this.\n\nRefund requests go directly to the founder. Reply to this message with:\n1. What happened\n2. How much you want refunded\n3. Your payment date (if you have it)\n\nYour coach has been notified and will respond within 24 hours. If it's urgent, WhatsApp the team directly at the number on your invoice.`;
+  // ---- REFUND REQUEST — the 14-day money-back guarantee, end to end (#328) ----
+  if (isRefundAsk(m)) {
+    const refundReply = await handleRefundRequest(user, phone);
     await logChat(user.id, message, refundReply, "REFUND_REQUEST");
     return refundReply;
   }

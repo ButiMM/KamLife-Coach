@@ -481,6 +481,12 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "scope-reverts", title: "Every #321 scope seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-scope.sh"] },
 
+  { id: "refund-guarantee", title: "The 14-day money-back guarantee, end to end (#328)",
+    // Eligibility from the payment record, billing cancelled, the refund owed recorded with a due
+    // date, the founder told exactly what to refund, the client told the truth; repeat and
+    // out-of-window asks; a cancelled client within 14 days gets the guarantee, not a pay link.
+    command: ["npx", "tsx", "script/pg-refund-guarantee-acceptance.ts"] },
+
   { id: "spend-cap", title: "The AI spend cap fails safe (#340)",
     // A daily account-wide ceiling that stops model calls, an unreadable spend query that means
     // "over", and the meaning engine under the same cap. Needs gpt_costs, admin_events, the bodies.
