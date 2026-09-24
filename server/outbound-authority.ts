@@ -65,7 +65,7 @@ export async function enforceOutboundTruth(
   recipientKey: string,
   text: string,
   /** The recipient's row, when the door already holds it — carries the durable illness state. */
-  recipientUser?: { profileNotes?: string | null; lifeSituation?: string | null } | null,
+  recipientUser?: { profileNotes?: string | null; lifeSituation?: string | null; onboardingState?: string | null } | null,
   /** Which door is asking. Rules 1 and 2 are about TRUTH and apply to both; rule 3 is about
    *  CADENCE and only ever made sense for the door nobody is waiting at. Defaults to proactive so
    *  an un-migrated caller keeps the behaviour it had. */
@@ -80,6 +80,10 @@ export async function enforceOutboundTruth(
   //    A reply is not refused: a client who writes to us is talking to us.
   if (mode === "proactive" && isOptedOut(recipientUser)) {
     return { ok: false, reason: "opted_out", detail: "recipient opted out" };
+  }
+  // 0a. A MINOR CLOSED BY THE AGE GATE (#306): no payment, recovery or coaching message reaches them.
+  if (mode === "proactive" && recipientUser?.onboardingState === "BLOCKED_UNDERAGE") {
+    return { ok: false, reason: "opted_out", detail: "recipient blocked by the age gate" };
   }
 
   // 0b. NUMBERS WITHHELD (#266). A pregnant client, or one who disclosed disordered eating, was
@@ -300,7 +304,7 @@ export async function prepareOutbound(
   userId: string | null,
   recipientKey: string,
   text: string,
-  recipientUser?: { profileNotes?: string | null; lifeSituation?: string | null } | null,
+  recipientUser?: { profileNotes?: string | null; lifeSituation?: string | null; onboardingState?: string | null } | null,
 ): Promise<OutboundPrepared> {
   const { provenanceGate } = await import("./verifiers/response-gate");
   const { humanizeReply } = await import("./reply-hygiene");
