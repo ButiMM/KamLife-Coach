@@ -32,7 +32,7 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 239,
+  modules: 240,
   handlerFiles: 29,
   cronRegistrations: 26,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
@@ -239,6 +239,13 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "modules", from: 239, to: 240, date: "2026-09-24",
+    why: "THE CLIENT RECORD (#271, ORDERS §4 Step 3). server/core/client-record.ts is the new core's first owner: "
+      + "what the client sent (client_events) and what they told us (client_facts). Lane B owns new files under "
+      + "server/core/ by design (docs/QUEUE.md), and nothing existing owns this question: the six regex columns on "
+      + "users are what it replaces, one fact kind at a time, in #272. Paid back when those columns' writers go.",
+  },
   {
     key: "messageDeciders", from: 31, to: 32, date: "2026-09-04",
     why: "RELEASE CLOSURE, AFTER EXACT INVENTORY — the 31-file inventory at the last legitimate "
@@ -620,6 +627,11 @@ const NOT_CLIENT_FACING: Array<[string, string]> = [
  * delivery door as text.
  */
 const NOT_CLIENT_FACING_RETURNS: Array<[string, RegExp, string]> = [
+  [
+    "server/core/client-record.ts",
+    /^\s*return "WHAT THIS CLIENT HAS TOLD YOU/,
+    "factsForCoach renders the fact store into the meaning engine's system prompt; the model reads it, the client never does",
+  ],
   [
     "server/index.ts",
     /^\s*return \["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "ECONNRESET", "EHOSTUNREACH", "EAI_AGAIN"\]\.includes\(code\)/,

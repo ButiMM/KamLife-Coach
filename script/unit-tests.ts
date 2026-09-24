@@ -5911,6 +5911,21 @@ test("domain-guard: clearly off-topic messages are NOT fast-pathed (defer to cla
   for (const m of ambiguous) assert.ok(!isObviouslyInDomain(m), `must NOT fast-path off-topic: "${m}"`);
 });
 
+// #271: the extractor's answer is data, not truth — anything malformed or not in the client's words is dropped.
+test("client record: extracted facts must be typed and in the client's own words", async () => {
+  const { parseExtraction } = await import("../server/core/client-record");
+  const msg = "I'm training for the Comrades marathon in June and my knee gets sore on long runs.";
+  const ok = parseExtraction(JSON.stringify({ facts: [
+    { kind: "injury", subject: "Knee", statement: "my knee gets sore on long runs" },
+    { kind: "goal", subject: "comrades", statement: "I want to lose 10kg" },            // not what they said
+    { kind: "mood", subject: "happy", statement: "training for the Comrades" },         // not a kind
+    { kind: "goal", subject: "", statement: "training for the Comrades marathon" },     // no subject
+  ] }), msg);
+  assert.deepEqual(ok.map(f => [f.kind, f.subject]), [["injury", "knee"]]);
+  assert.deepEqual(parseExtraction("not json", msg), []);
+  assert.deepEqual(parseExtraction(JSON.stringify({ facts: "x" }), msg), []);
+});
+
 // A short frustrated reaction must NEVER get the cold domain redirect (2026-07-21 live miss:
 // "Read‼️‼️" got "I'm Coach K, here for your fitness journey").
 test("domain-guard: a 1-2 word reaction is always in-domain, never cold-redirected", () => {

@@ -252,6 +252,9 @@ export async function processTextAsync(
   const isImageMessage = !!(mediaUrl && mediaType?.startsWith("image/"));
   try {
     const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined, sourceMessageId, rootId);
+    // THE CLIENT RECORD (#271): what they sent, exactly, and what it tells us about them. After the
+    // turn because a first message creates the client's row; never awaited by the reply.
+    void import("../core/client-record").then(m => m.recordAndLearn({ phone, rawText: message, mediaType, sourceMessageId }));
 
     // Render bot markers: buttons → keyword prompts, media extracted for separate sends.
     const { text: rawReply, media: replyMediaUrls } = renderReplyMarkers(reply);

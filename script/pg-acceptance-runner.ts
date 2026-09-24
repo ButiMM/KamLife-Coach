@@ -440,6 +440,11 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "safety-routing-reverts", title: "Every #266 safety-routing seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-safety-routing.sh"] },
 
+  { id: "client-record", title: "The client record: what they said is kept, and the coach is told (#271)",
+    // Events stored exactly and never rewritten; typed facts in the client's words; corrections
+    // supersede; the engine's context carries the facts six turns later; deletion erases both.
+    command: ["npx", "tsx", "script/pg-client-record-acceptance.ts"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same
