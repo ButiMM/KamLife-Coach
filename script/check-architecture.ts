@@ -150,7 +150,7 @@ const BUDGET = {
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
   authorshipPoints: 417,
-  twilioCallSites: 16,
+  twilioCallSites: 6,
 };
 
 
