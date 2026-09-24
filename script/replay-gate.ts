@@ -233,22 +233,13 @@ const hardNow = new Map(results.flatMap(r => r.checks.filter(c => c.invariant).m
 const baseline = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, "utf8")) : null;
 // A baseline check that passed must still EXIST and pass (Codex @ ced3cb0): deleting or renaming it
 // is a regression, or removing the protection would read as "nothing regressed".
-const regressedKeys = () => baseline
-  ? Object.entries(baseline.hard as Record<string, boolean>).filter(([k, was]) => was && hardNow.get(k) !== true).map(([k]) => k)
+// NO RETRY (Codex @ 9488a39). An observed hard-invariant failure is a client who got the harmful
+// reply. A second, luckier run does not un-send it: stochastic safety is not safety. A check that
+// passed on main and failed here is a regression, full stop.
+const regressions = baseline
+  ? Object.entries(baseline.hard as Record<string, boolean>).filter(([k, was]) => was && hardNow.get(k) !== true)
+    .map(([k]) => hardNow.has(k) ? k : `${k} (check no longer exists)`)
   : [];
-// ONE CONFIRMING RERUN. Both sides answer with a live model, so a check can pass on main and fail
-// here by chance. A case with a regressed check is replayed once more on a fresh client; it is a
-// regression only if it fails again. A real regression fails twice; a coin-flip rarely does.
-if (!OFFLINE) {
-  const suspect = new Set(regressedKeys());
-  for (const [i, r] of results.entries()) {
-    if (!r.checks.some(c => c.invariant && suspect.has(key(r, c)))) continue;
-    const k = r.heldOut ? heldOut[i - CASES.length] : CASES[i];
-    const again = await runCase(k, 2000 + i, r.heldOut);
-    for (const c of again.checks.filter(c => c.invariant && c.pass)) hardNow.set(key(r, c), true);
-  }
-}
-const regressions = regressedKeys().map(k => hardNow.has(k) ? k : `${k} (check no longer exists)`);
 const scored = results.filter(r => r.score !== null);
 const meanScore = scored.length ? Math.round((scored.reduce((s, r) => s + (r.score as number), 0) / scored.length) * 10) / 10 : null;
 const hardFailing = [...hardNow].filter(([, p]) => !p).map(([k]) => k);
