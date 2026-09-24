@@ -5912,6 +5912,20 @@ test("client record: extracted facts must be typed and in the client's own words
   assert.deepEqual(parseExtraction(JSON.stringify({ facts: "x" }), msg), []);
 });
 
+// Codex @ 4c36554: verbatim is not enough — quoted and reported words belong to someone else.
+test("client record: a quote or reported speech is not the client's own fact", async () => {
+  const { parseExtraction } = await import("../server/core/client-record");
+  const fact = (statement: string) => JSON.stringify({ facts: [{ kind: "life_event", subject: "pregnancy", statement, detail: {}, valid_from: null, valid_until: null, corrects: null }] });
+  // The attack's exact case, and its curly-quote and unquoted-report variants.
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), 'My sister said "I\'m pregnant" and asked if she can still train.'), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My sister said \u201cI\u2019m pregnant\u201d and asked if she can still train."), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My sister told me that I'm pregnant, can she train?"), []);
+  assert.deepEqual(parseExtraction(fact("I'm training for Comrades"), "My friend says I'm training for Comrades too hard."), []);
+  // CONTROLS: the client's own voice still counts, even when a quote appears elsewhere.
+  assert.equal(parseExtraction(fact("I'm pregnant"), "I'm pregnant, 12 weeks.").length, 1);
+  assert.equal(parseExtraction(fact("I'm pregnant"), 'I\'m pregnant and my mom said "rest more".').length, 1);
+});
+
 // A short frustrated reaction must NEVER get the cold domain redirect (2026-07-21 live miss:
 // "Read‼️‼️" got "I'm Coach K, here for your fitness journey").
 test("domain-guard: a 1-2 word reaction is always in-domain, never cold-redirected", () => {

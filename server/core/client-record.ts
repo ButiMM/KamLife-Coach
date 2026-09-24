@@ -68,7 +68,30 @@ Use "facts":[] when there is nothing.`;
 
 type Extracted = { kind: string; subject: string; statement: string; detail?: Record<string, unknown>; valid_from?: string | null; valid_until?: string | null; corrects?: string | null };
 
-const norm = (t: string) => t.toLowerCase().replace(/[\u2018\u2019\u02bc]/g, "'").replace(/\s+/g, " ").trim();
+const norm = (t: string) => t.toLowerCase().replace(/[\u2018\u2019\u02bc]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, " ").trim();
+
+/**
+ * IN THE CLIENT'S OWN VOICE (Codex @ 4c36554). Verbatim is not enough: in `My sister said "I'm
+ * pregnant"` the words are in the message but they are the sister's. A statement counts only where
+ * at least one occurrence is neither inside double quotes nor reported speech ("X said / told me /
+ * asked ... that"). Deterministic, so the model can propose a quote but the record never stores it.
+ */
+const SPEECH = new Set(["said", "says", "saying", "asked", "asks", "wrote", "writes", "texted", "mentioned", "reckons",
+  "told me", "told us", "told her", "told him", "tells me", "tells us"]);
+/** True when the words just before a statement report someone else's speech ("she said (that)"). */
+function reported(before: string): boolean {
+  const w = before.replace(/[:,\s]+$/, "").split(" ");
+  if (w[w.length - 1] === "that") w.pop();
+  return SPEECH.has(w[w.length - 1] ?? "") || SPEECH.has(w.slice(-2).join(" "));
+}
+function inOwnVoice(said: string, statement: string): boolean {
+  for (let at = said.indexOf(statement); at !== -1; at = said.indexOf(statement, at + 1)) {
+    const before = said.slice(0, at);
+    const quoted = (before.match(/"/g) || []).length % 2 === 1;
+    if (!quoted && !reported(before)) return true;
+  }
+  return false;
+}
 const day = (d?: string | null) => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null);
 
 /** Parse and validate the extractor's answer. Anything malformed is dropped, never repaired. */
@@ -82,7 +105,8 @@ export function parseExtraction(raw: string, message: string): Extracted[] {
     && typeof f.statement === "string" && f.statement.trim()
     // The WHOLE statement must be the client's words (Codex @ c5a521b: a prefix check let an
     // invented clause ride on a real opening). Case, spacing and apostrophe style aside, verbatim.
-    && said.includes(norm(f.statement)),
+    && said.includes(norm(f.statement))
+    && inOwnVoice(said, norm(f.statement)),
   ).map((f: any) => ({ ...f, subject: f.subject.trim().toLowerCase(), statement: f.statement.trim() }));
 }
 
