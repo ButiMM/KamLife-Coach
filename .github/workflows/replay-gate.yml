@@ -10,8 +10,19 @@ name: Customer replay gate
 #
 # No key, no verdict: without the OpenAI secret the gate exits 2 and this job is RED, never green.
 
+# COST FIREWALL (CTO, 24 Sep): the live-model gate ran on every push of every PR, including docs-only
+# PRs, and emptied the OpenAI credits. It now runs only when a PR is labelled `ready`, `switch` or `gate`,
+# and never for docs-only changes.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - ".github/workflows/cto-watch.yml"
+      - ".github/workflows/mouth-ratchet.yml"
+      - "script/cto-watch.py"
+      - "script/mouth-count.py"
   workflow_dispatch: {}
 
 concurrency:
@@ -19,7 +30,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # every job below only runs for ready / switch / gate PRs (or a manual run)
   replay:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ready') || contains(github.event.pull_request.labels.*.name, 'switch') || contains(github.event.pull_request.labels.*.name, 'gate')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     services:
