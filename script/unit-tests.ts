@@ -5927,11 +5927,14 @@ test("scope: a mention inside coaching, or a word with a second meaning, is not 
     "my doctor prescribed metformin, what should I eat?",
   ]) assert.equal(offDomainRedirect(m), null, `must not decline: "${m}"`);
 });
-test("scope: a classifier error fails CLOSED — an unrecognised topic is declined, not answered", async () => {
+test("scope: a classifier outage is not a verdict — no client is refused because the gate is down", async () => {
   const broken = { chat: { completions: { create: async () => { throw new Error("timeout"); } } } } as any;
-  const v = await classifyDomain(broken, "Who do you think will win the rugby world cup this year and why?");
-  assert.equal(v.classification, "out-of-domain");
-  assert.ok(v.redirectMessage, "a decline carries the warm redirect");
+  // Codex @ c4ca8df: a code-switched Sesotho/English health message no vocabulary list covers.
+  const v = await classifyDomain(broken, "Ke opelwa ke tlhogo ebile ke a tsekela, what should I do?", { ongoing: true });
+  assert.equal(v.classification, "in-domain");
+  assert.equal(v.redirectMessage, undefined, "no scope refusal is carried");
+  // …while the deterministic asks are still declined with the classifier down.
+  assert.equal((await classifyDomain(broken, "Can you help me write my CV for a job application?")).classification, "out-of-domain");
   const coaching = await classifyDomain(broken, "My lower back aches after sitting at my desk all day, what can I do?");
   assert.equal(coaching.classification, "in-domain", "coaching never reaches the failing classifier");
   // Codex @ 83a96af: a health message the old list missed was declined during an outage.

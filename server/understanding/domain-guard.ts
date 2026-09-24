@@ -12,16 +12,17 @@
  *   2. Only a substantive message that matches nothing goes to a cheap classifier.
  *   3. The classifier returns IN / PARTIAL / OUT / SAFETY.
  *
- * FAIL CLOSED (#321, 2026-09-24). This used to fail OPEN: any classifier error, timeout or
- * unrecognised verdict answered the message. Scope was then only a line of prompt text, and Meta
+ * FAIL CLOSED ON THE MODEL'S VERDICT (#321, 2026-09-24). This used to answer any unrecognised
+ * verdict, and scope was otherwise prompt text. Scope was then only a line of prompt text, and Meta
  * bans general-purpose assistants on the WhatsApp Business API from 15 Jan 2026 — "write my CV"
  * answered by Coach K is a platform risk. Now:
  *   0. A deterministic OFF-DOMAIN ask (CV, crypto, essays, code) is declined before any command
  *      or model can answer it. ("What antibiotic should I take" belongs to medication-context.)
  *   1. The in-domain fast-path still answers coaching with no model call, and it is generous, so
  *      a real client is not left to the classifier's mercy.
- *   2. Only YES / PARTIALLY / SAFETY from the classifier count as in-domain. NO, anything else,
- *      and any error decline with the warm redirect — never an answer.
+ *   2. Only YES / PARTIALLY / SAFETY from the classifier count as in-domain. NO, or any word it
+ *      was not asked for, declines with the warm redirect — never an answer. A classifier ERROR is
+ *      not a verdict: the deterministic layer (0) is the scope, and the message goes on.
  * Killswitch: DOMAIN_GUARD=off.
  */
 
@@ -196,9 +197,13 @@ export async function classifyDomain(
     // NO, or a word we did not ask for: not an answer we can act on, so we do not answer.
     return { classification: "out-of-domain", reasoning: `classifier: ${word || "empty"}`, redirectMessage: opts?.ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT };
   } catch (e) {
-    // FAIL CLOSED (#321): an unrecognised message with no working gate is declined warmly, never
-    // answered. Coaching talk never gets here — the fast-path above has already let it through.
-    return { classification: "out-of-domain", reasoning: "fail-closed: " + ((e as any)?.message || "error"), redirectMessage: opts?.ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT };
+    // AN OUTAGE IS NOT A VERDICT (Codex @ c4ca8df). No vocabulary covers every language a South
+    // African client writes in: "Ke opelwa ke tlhogo ebile ke a tsekela, what should I do?" is a
+    // headache and dizziness, and declining it because a classifier timed out tells a client their
+    // symptoms are outside the coach's remit. So when the gate cannot run, scope is what the code
+    // decides deterministically (the off-domain asks above, declined on every path); the model's
+    // own NO, and any verdict it was not asked for, still decline.
+    return { classification: "in-domain", reasoning: "classifier unavailable — deterministic scope only: " + ((e as any)?.message || "error") };
   }
 }
 

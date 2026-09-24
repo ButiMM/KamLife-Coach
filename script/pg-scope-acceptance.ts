@@ -1,6 +1,6 @@
 /**
  * REAL-POSTGRESQL ACCEPTANCE — the coach stays a coach: scope is enforced in code and fails
- * closed (#321).
+ * closed on the model's verdict (#321).
  *
  * WHAT WAS BROKEN (Grok §8, audit C2): the domain guard answered anything its fast-path did not
  * recognise when the classifier errored or was unsure ("fail-open to answering"), and scope was
@@ -81,11 +81,11 @@ for (const [i, text] of offTopic.entries()) {
   chk(isScopeRedirect(body), `"${text}" is declined and steered back to coaching`, JSON.stringify(body.slice(0, 220)));
 }
 
-REAL("\n2. FAIL CLOSED — an unrecognised message with the classifier unavailable is not answered");
+REAL("\n2. AN OUTAGE IS NOT A VERDICT — the classifier being down refuses nobody (Codex @ c4ca8df)");
 {
   const u = await client(10);
-  const body = await say(u.phoneNumber, "Who do you think will win the rugby world cup this year and why?");
-  chk(isScopeRedirect(body), "the classifier erroring does not turn an unknown topic into an answer", JSON.stringify(body.slice(0, 220)));
+  const body = await say(u.phoneNumber, "Ke opelwa ke tlhogo ebile ke a tsekela, what should I do?");
+  chk(!isScopeRedirect(body), "a code-switched health message is not told it is outside the coach's remit", JSON.stringify(body.slice(0, 220)));
 }
 
 REAL("\n3. CONTROLS — coaching is never declined");
@@ -107,12 +107,12 @@ for (const [i, text] of coaching.entries()) {
   chk(!isScopeRedirect(body), `"${text}" is coached, not declined`, JSON.stringify(body.slice(0, 220)));
 }
 
-REAL("\n4. ENGINE OFF — the gpt fallback is gated too, and fails closed the same way");
+REAL("\n4. ENGINE OFF — the same scope on the gpt fallback");
 process.env.ENGINE_LIVE = "off";
 {
   const u = await client(30);
-  const body = await say(u.phoneNumber, "Who do you think will win the rugby world cup this year and why?");
-  chk(isScopeRedirect(body), "with the engine off, an unknown topic is declined, not answered", JSON.stringify(body.slice(0, 220)));
+  const body = await say(u.phoneNumber, "Should I put my savings into bitcoin this month?");
+  chk(isScopeRedirect(body), "with the engine off, an off-domain ask is still declined", JSON.stringify(body.slice(0, 220)));
   const c = await client(31);
   const coached = await say(c.phoneNumber, "My knee hurts when I do squats, what can I do instead?");
   chk(!isScopeRedirect(coached), "CONTROL — with the engine off, coaching is still coached", JSON.stringify(coached.slice(0, 220)));
