@@ -10757,6 +10757,9 @@ test("#395 an empty OpenAI balance is told apart from a rate limit, alerted once
   const tonight = Object.assign(new Error("429 You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."), { status: 429 });
   assert.equal(isQuotaExhausted(tonight), true, "tonight's error is an empty balance");
   assert.equal(isQuotaExhausted({ status: 429, code: "insufficient_quota", message: "You exceeded your current quota" }), true);
+  // Codex @ 44b007a: the reason only inside the nested error body, "429" at the top.
+  assert.equal(isQuotaExhausted({ status: 429, message: "429", error: { message: "You have no credits remaining." } }), true);
+  assert.equal(isQuotaExhausted({ status: 429, message: "429", error: { type: "insufficient_quota" } }), true);
   // CONTROL: a real rate limit still retries.
   assert.equal(isQuotaExhausted({ status: 429, message: "Rate limit reached for gpt-4o-mini" }), false);
   const t0 = 1_000_000_000_000;
