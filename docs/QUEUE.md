@@ -5,7 +5,7 @@
 ## Lane A: live billing harm, allowed despite the freeze (tonight, small PRs)
 
 - [x] #315 (PR #383) Cancel menu "4 — Just cancel" sends a shopping list and the subscription stays active: the client is still billed
-- [ ] #306 (PR #386) A minor stopped by the age gate keeps an active paid subscription
+- [x] #306 (PR #386) A minor stopped by the age gate keeps an active paid subscription
 - [x] #303 (PR #384) Terms still promise a 7-day trial: make the copy match reality (no trial; guarantee wording as implemented)
 - [x] #328 (PR #385) 14-day money-back guarantee, implemented end to end
 
