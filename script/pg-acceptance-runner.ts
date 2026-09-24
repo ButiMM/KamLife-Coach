@@ -461,6 +461,11 @@ export const ACCEPTANCES: Acceptance[] = [
     // supersede; the engine's context carries the facts six turns later; deletion erases both.
     command: ["npx", "tsx", "script/pg-client-record-acceptance.ts"] },
 
+  { id: "core-shadow", title: "The new coach runs in read-only shadow (#272)",
+    // Beside every text turn; never sends, never writes client state; sees the #271 record and the
+    // real numbers; off unless CORE_SHADOW=on; erased with the client.
+    command: ["npx", "tsx", "script/pg-core-shadow-acceptance.ts"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same
