@@ -26,6 +26,7 @@ The new coach (`server/core/`) **calls these**. It never re-implements them, and
 | Meal plans and shopping | `meal-plan.ts`, `onboarding-meal-plan.ts`, `shopping-lists.ts`, `grocery-personalize.ts` |
 | Training | `programme.ts`, `exercise-variants.ts`, `exercise-media.ts`, `workout-feedback.ts` |
 | Vision (plate, equipment, physique) | `handlers/food-scanner.ts`, `handlers/equipment-vision.ts`, `physique-analysis.ts`: consolidate behind one vision tool |
+| Actions (the new coach's hands) | `understanding/actions.ts` (the `CoachAction` contract and `validateActions`, the permission gate), `understanding/executor.ts` (performs them). Written in July and never wired to the new core; wiring them is ORDERS §0.3 |
 | Voice | speech-to-text plus `understanding/sa-transcript.ts` (cleaner), `elevenlabs.ts` |
 | Progress and outcomes | `outcomes.ts`, `progress-score.ts`, `trajectory.ts`, `weekly-recap.ts`, `hunger-evidence.ts` |
 | Education content | `education.ts` |

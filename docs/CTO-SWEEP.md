@@ -2,6 +2,12 @@
 
 **No paid service runs this.** The watch checks the countable items for free every 10 minutes: stuck PRs, blockers, the delete list, mouths, size, AI call sites, production, findings older than two days with no PR, and layers merged without a `Retires:` section. The judgment items (5 and 14 especially) are answered **once a day by Codex** (already paid for through ChatGPT), and by the CTO whenever the founder is in chat. The reviewer reads this repo cold and answers every question below **with evidence** (file and line, issue, or number). It then posts one report issue labelled `cto-sweep`, and opens a new issue (labelled `harm` or `core`, plus `owner:claude-code`) for every gap nobody is tracking. It never changes code. It never asks the founder anything already in `docs/SYSTEM.md`.
 
+## 0. Width (against `docs/COVERAGE.md`; `docs/ORDERS.md` §0). Answer this first
+0a. Which coverage rows moved toward complete since the last sweep? Which reached complete?
+0b. Which rows still have **zero** gate cases, or no live metric? Name the three with the most tester impact.
+0c. Which foundations are started but not wired or not finished (a module, store or pipeline written and not used)? Did anything merged start a new one beside them?
+0d. Is the work spread across the product, or has it narrowed to a few rows? If a week passed with no row reaching complete, say so plainly: that triggers the stop-and-reassess rule.
+
 ## Product (against `docs/TESTER-EXPERIENCE.md`)
 1. For each of the 8 journeys: which message families have switched to the new core, what does the gate score say, and what is the next journey to switch?
 2. Does anything in the never-see list still happen? Check Coach Health and the gate's failures.

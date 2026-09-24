@@ -1,6 +1,6 @@
 # Coverage map: the whole product, one row per capability
 
-**Status:** DRAFT by the builder for the CTO (#391), 24 Sep. Once the CTO agrees it, this is the single map.
+**Status:** agreed by the founder on 24 Sep night as the map of the whole product (`docs/ORDERS.md` §0). The CTO corrects rows. The builder keeps it current in the same PR that moves a row.
 - The queue is derived from its rows.
 - A message family switches to the new core only when its row is complete.
 - Every "owner today" cites the file that owns it on `main`.
