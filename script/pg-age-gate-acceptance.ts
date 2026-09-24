@@ -136,6 +136,7 @@ REAL("\n4. CONTROLS — a number that is not the client's age blocks nobody");
     [9, "I'm 17kg down since January!"],
     [10, "I'm 30 and my daughter is 16"],
     [11, "I'm 15 minutes late for gym, quick workout?"],
+    [12, "People say I'm 16, but I'm 30"],
   ];
   for (const [n, text] of cases) {
     const u = await client(n, {});

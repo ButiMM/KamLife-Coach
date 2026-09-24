@@ -103,9 +103,14 @@ run_case "the turn that states the age is coached anyway" server/routes.ts \
   '    user.onboardingState = await blockUnderage(phone);' \
   '    await blockUnderage(phone); user.onboardingState = "COMPLETE";' || failed=$((failed + 1))
 
+# 8. A CONTRADICTION CLOSES AN ADULT — "People say I'm 16, but I'm 30" (Codex @ 8a36f96).
+run_case "an adult's stated age does not outrank a minor one" server/onboarding.ts \
+  '  if (/\b(?:i'"'"'?m|i\s+am|my\s+age\s+is|i\s+(?:just\s+)?turned)\s+(?:actually\s+|really\s+)?(?:1[89]|[2-9]\d)\b' \
+  '  if (false && /\b(?:i'"'"'?m|i\s+am|my\s+age\s+is|i\s+(?:just\s+)?turned)\s+(?:actually\s+|really\s+)?(?:1[89]|[2-9]\d)\b' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-age-gate: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-age-gate: GREEN — 7/7 behavioral reverts caught"
+echo "red-on-revert-age-gate: GREEN — 8/8 behavioral reverts caught"

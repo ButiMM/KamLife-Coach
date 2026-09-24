@@ -82,7 +82,12 @@ const AGE_WORDS: Record<string, number> = { ten: 10, eleven: 11, twelve: 12, thi
 export function statedMinorAge(text: string): number | null {
   const s = String(text || "").toLowerCase().replace(/[‘’ʼ]/g, "'");
   const m = s.match(/\b(?:i'?m|i\s+am|my\s+age\s+is|i\s+(?:just\s+)?turned)\s+(?:only\s+|just\s+|a\s+)?(1[0-7]|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)(?:[\s-]*(?:years?|yrs?|y\/?o)\b(?:[\s-]*old)?|(?=\s*(?:[.,!?;)]|$|and\b|but\b|so\b|today\b)))/);
-  return m ? AGE_WORDS[m[1]] ?? Number(m[1]) : null;
+  if (!m) return null;
+  // "People say I'm 16, but I'm 30" (Codex @ 8a36f96): a first-person ADULT age anywhere in the
+  // message outranks the minor one. Closing an adult's account on a contradiction is the worse
+  // error, and the next plain "I'm 16" still blocks.
+  if (/\b(?:i'?m|i\s+am|my\s+age\s+is|i\s+(?:just\s+)?turned)\s+(?:actually\s+|really\s+)?(?:1[89]|[2-9]\d)\b(?!\s*(?:kg|kgs|cm|%|weeks?|days?|minutes?|mins?|km))/.test(s)) return null;
+  return AGE_WORDS[m[1]] ?? Number(m[1]);
 }
 
 /** Close the account to coaching. Returns the new state so a caller can carry it forward. */
