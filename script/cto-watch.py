@@ -118,10 +118,22 @@ try:
     mouth_line = "**Mouths on main:** " + ", ".join(f"{k} {v}" for k, v in mouths.items())
 except Exception:
     mouth_line = "**Mouths on main:** unavailable"
+PROD = "https://kamlife-coach-production.up.railway.app/health"
+try:
+    with urllib.request.urlopen(urllib.request.Request(PROD, headers={"User-Agent": "cto-watch"}), timeout=15) as r:
+        h = json.loads(r.read() or b"{}")
+    live = (h.get("version") or "")[:7]
+    main_sha = api("GET", "/commits/main")["sha"][:7]
+    prod_line = f"**Production:** up, running `{live}`" + ("" if live == main_sha else f" (main is `{main_sha}`)")
+    if live != main_sha and last_merge and NOW - last_merge > dt.timedelta(minutes=25):
+        alerts.append(f"**Deploy lag:** production runs `{live}` but main is `{main_sha}`, 25+ min after the last merge. Check Railway.")
+except Exception as e:
+    prod_line = "**Production: UNREACHABLE**"
+    alerts.append(f"**Production health check failed:** {str(e)[:100]}. Testers may be getting no replies. Check Railway now.")
 body = "\n".join([
     f"_Updated {NOW:%H:%M} UTC by the CTO watch. Runs every 15 minutes and on PR open/push/merge._", "",
     *(alerts or ["No alerts."]), "",
-    mouth_line, "",
+    mouth_line, prod_line, "",
     f"**Queue:** {len(done)} done, {len(todo)} left. Next: {todo[0] if todo else 'queue empty'}", "",
     "| PR | Title | Head | Attack | GitHub checks |", "|---|---|---|---|---|", *(rows or ["| none | | | | |"]), "",
     "**Merged today (UTC):**",
