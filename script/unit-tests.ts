@@ -10782,6 +10782,21 @@ test("#397 /health carries the ai block, and the observer is in place before any
   assert.match(readFileSync("server/ai-offline.ts", "utf-8"), /NODE_ENV === "production"\) installAiHealthObserver\(\)/);
 });
 
+test("#397 the watch names the cause: no credits, throttling or a bad key (Codex @ 2e83c7f)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { execFileSync } = await import("node:child_process");
+  const src = readFileSync("script/cto-watch.py", "utf-8");
+  const fn = /^def ai_reason\(code\):[\s\S]*?\n(?=\S)/m.exec(src)?.[0];
+  assert.ok(fn, "cto-watch.py defines ai_reason");
+  const say = (code: string) => execFileSync("python3", ["-c", `${fn}\nimport sys\nprint(ai_reason(sys.argv[1]))`, code], { encoding: "utf-8" }).trim();
+  assert.match(say("429 insufficient_quota"), /no credits/);
+  // The attack's exact case: a rate limit is throttling, never "add credits".
+  assert.doesNotMatch(say("429 rate_limit_exceeded"), /credits/);
+  assert.match(say("429 rate_limit_exceeded"), /rate-limiting/);
+  assert.match(say("401 invalid_api_key"), /AI_INTEGRATIONS_OPENAI_API_KEY/);
+  assert.match(say("network ECONNRESET"), /failing/);
+});
+
 // ── #395 — OUT OF CREDITS IS NOT "TRY AGAIN IN 30 SECONDS" ──────────────────────────────────
 // 24 Sep: OpenAI answered "429 You have no credits remaining". askCoachK called it a rate limit, told
 // every client to retry in 30 seconds indefinitely, retried each call three times, and never told

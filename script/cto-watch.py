@@ -175,6 +175,16 @@ try:
     mouth_line += f"\n\n**Size:** server {srv:,} lines (target ≤25,000 once the new core has switched), tests {tst:,} lines (target ≤20,000). Baseline 24 Sep: server 74,888, tests 57,037."
 except Exception:
     mouth_line = "**Mouths on main:** unavailable"
+def ai_reason(code):
+    """What an AI failure code means for the founder (#397). Only an empty balance means "add credits";
+    a plain 429 such as rate_limit_exceeded is throttling (Codex @ 2e83c7f)."""
+    if "quota" in code or "credit" in code:
+        return "OpenAI has no credits: add credits at platform.openai.com/settings/organization/billing"
+    if code.startswith("429"):
+        return "OpenAI is rate-limiting us (too many requests, not an empty balance): it usually clears; if it persists, check the account's rate limits"
+    if code.startswith("401"):
+        return "the OpenAI key is rejected: check AI_INTEGRATIONS_OPENAI_API_KEY in Railway (it wins over OPENAI_API_KEY when both are set)"
+    return "OpenAI calls are failing"
 PROD = "https://kamlife-coach-production.up.railway.app/health"
 try:
     with urllib.request.urlopen(urllib.request.Request(PROD, headers={"User-Agent": "cto-watch"}), timeout=15) as r:
@@ -190,9 +200,7 @@ try:
     # night after an outage makes no calls, and silence is not recovery.
     if err_at and (not ok_at or err_at > ok_at):
         code = ai.get("lastErrorCode") or "unknown"
-        why = ("OpenAI has no credits: add credits at platform.openai.com/settings/organization/billing" if "quota" in code or code.startswith("429")
-               else "the OpenAI key is rejected: check AI_INTEGRATIONS_OPENAI_API_KEY in Railway (it wins over OPENAI_API_KEY when both are set)" if code.startswith("401")
-               else "OpenAI calls are failing")
+        why = ai_reason(code)
         alerts.insert(0, f"**🚨 The coach can't think: {why}.** Last error `{code}` at {err_at:%H:%M} UTC, {ai.get('errorsLastHour', '?')} errors in the last hour, last success {ok_at.strftime('%H:%M') if ok_at else 'never since restart'}.")
         prod_line += f" · **AI failing** (`{code}`)"
     elif ok_at:
