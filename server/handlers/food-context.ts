@@ -262,97 +262,97 @@ export async function handleFoodContext(ctx: {
   }
 
   // ---- CORRECTION DETECTION — "no I had a burger", "actually it was chicken" ----
-  const CORRECTION_PREFIX = /^(no[,!\s]+|actually[,\s]+|i meant[,\s]+|not that[,\s]+|wait[,\s]+|no wait[,\s]+|correction[,\s]*)/i;
+  const CORRECTION_PREFIX = /^(no[,!\s]+|nope[,!\s]+|nah[,!\s]+|actually[,\s]+|i meant[,\s]+|not that[,\s]+|wait[,\s]+|no wait[,\s]+|correction[,\s]*)/i;
   // RE-IDENTIFICATION corrections: the client fixing a MIS-READ food, phrased "it's X / it is
   // not X / that's actually Y" (2026-07-22 live: "It is not vetkoek" was domain-redirected and
   // "It is stew wors" logged as a NEW snack instead of fixing the last meal — client fighting it).
   const ID_CORRECTION_PREFIX = /^(it'?s|it is|that'?s|that is|it was|this is|its)\s+/i;
-  const hasCorrectionPrefix = CORRECTION_PREFIX.test(m) || ID_CORRECTION_PREFIX.test(m);
+  // "No thanks" declines (Codex @ 7f93588) unless the correction is explicit: "actually", "instead", "I meant", or "had X, not <food>" (Codex @ 8e15426).
+  const hasCorrectionPrefix = (!/^(?:no|nope|nah)[,!\s]*(?:thanks|thank\s+you|ta)\b/i.test(m) || /\b(?:actually|instead|i\s+meant|wrong)\b/i.test(m) || (/\b(?:had|ate|eaten)\b/i.test(m) && [...m.matchAll(/\bnot\s+(?:the\s+|my\s+|a\s+)?([a-z][a-z'-]+)/gi)].some(x => scanForSAFoods(x[1]).length > 0))) && (CORRECTION_PREFIX.test(m) || ID_CORRECTION_PREFIX.test(m));
   const correctedMsgCandidate = m.replace(CORRECTION_PREFIX, "").replace(ID_CORRECTION_PREFIX, "").trim();
-  // Food detection uses the candidate with "not X" STRIPPED, so "it is not vetkoek" doesn't
+  // Food detection uses the candidate with "not X" and "instead of X" STRIPPED (Codex @ bf64579), so "it is not vetkoek" doesn't
   // look like a request to log vetkoek. A pure negation (no replacement food) must NOT re-log —
   // it routes to the "what was it?" ask below.
-  const candidateSansNot = correctedMsgCandidate.replace(/\bnot\s+[\w'-]+/gi, " ").replace(/\s+/g, " ").trim();
+  const candidateSansNot = correctedMsgCandidate.replace(/\b(?:instead\s+of|rather\s+than)\s+.*?(?=[,.!?;]|\s(?:and\s+)?(?:(?:i\s+)?(?:also\s+)?(?:had|ate)|also|plus|then)\b|$)/gi, " ").replace(/\bnot\s+[\w'-]+/gi, " ").replace(/\s+/g, " ").trim();
   const idNegationOnly = ID_CORRECTION_PREFIX.test(m) && /\bnot\b/i.test(m) && scanForSAFoods(candidateSansNot).length === 0;
-  const hasFoodTriggerAfterPrefix = /\b(had|ate|eaten|eating|breakfast|lunch|dinner|supper|meal|it was|was a|i had|i said|the above|mentioned|i'll have|i will have)\b/i.test(m);
   const hasFoodAfterPrefix = hasCorrectionPrefix && !idNegationOnly && candidateSansNot.length > 2 && scanForSAFoods(candidateSansNot).length > 0;
-  const isFoodCorrection = hasCorrectionPrefix && !idNegationOnly && (hasFoodTriggerAfterPrefix || hasFoodAfterPrefix);
+  // A DECLINE IS NOT A CORRECTION (#264, AUDIT.md Trace 1): "No … this meal" deleted the lunch. A
+  // correction names a replacement, or a meal slot and nothing else ("actually it was dinner").
+  const slotOnly = hasCorrectionPrefix && !idNegationOnly && !hasFoodAfterPrefix
+    ? candidateSansNot.replace(/\b(?:it|was|is|i|had|that|this|for|my|the|a|an|meal)\b|[,.!]/gi, " ").trim().match(/^(breakfast|lunch|dinner|supper|snack)$/i)
+    : null;
+  // An explicit eating claim replaces the entry even when the scanner cannot name the food ("No, I
+  // had injera instead" — Codex @ 238bd21); "…what I had", "had enough", "had it" are verdicts.
+  const claimsOtherFood = hasCorrectionPrefix && !idNegationOnly && (/\binstead\b/i.test(candidateSansNot)
+    || /\b(?:had|ate|eaten)\s+(?!(?:enough|it|that|this|them|what|too|plenty|lots|nothing)\b|a\s+lot\b)(?:(?:a|an|some|the|my)\s+)?[a-z]/i.test(candidateSansNot));
+  const isFoodCorrection = hasFoodAfterPrefix || claimsOtherFood || !!slotOnly;
 
   const isReferenceCorrection = /\b(go with|goes with|part of|was correcting|was part|belongs to|same meal|together with|included in|go together|read it again|read that again|i was correcting|that.?s the same|the above mentioned|above mentioned|i said i had|i said for lunch|i said for dinner|i said for breakfast)\b/i.test(m);
 
   if (isFoodCorrection || isReferenceCorrection) {
-    captureFriction("correction", { userId: user.id, phone, messageIn: message, detail: "food re-identification / correction" });
+    const friction = () => captureFriction("correction", { userId: user.id, phone, messageIn: message, detail: "food re-identification / correction" });
     if (isReferenceCorrection && !hasCorrectionPrefix) {
+      friction();
       const gptRef = await withTimeout("gpt_food_ref", 20000, () => askCoachK(message, user, "The user is referencing or correcting a previous food log. Use chat history to understand what they mean and respond helpfully. Do NOT log new food."));
       await logChat(user.id, message, gptRef, "FOOD_CORRECTION_REF");
       return gptRef;
     } else {
       const todayStartCorr = sastDayStart();
-      // Label-only correction ("that was lunch not breakfast") names a meal slot but no food.
-      // RELABEL the meal instead of deleting it, so the logged calories survive. Strip "not X"
-      // first so "lunch not breakfast" affirms lunch, not breakfast.
-      const correctedHasFood = correctedMsgCandidate.length > 2 && scanForSAFoods(correctedMsgCandidate).length > 0;
-      const relabelMatch = !correctedHasFood
-        ? correctedMsgCandidate.replace(/\bnot\s+\w+/gi, " ").match(/\b(breakfast|lunch|dinner|supper|snack)\b/i)
-        : null;
-      const relabelTo = relabelMatch ? relabelMatch[1].toLowerCase() : null;
-      let relabelDone = false;
-      try {
-        // Get the last FOOD_LOG chat entry — we need its timestamp to find the
-        // RIGHT meal log to delete. Without this, correcting breakfast after logging
-        // a snack would delete the snack (most-recent) instead of breakfast.
-        const [lastFoodLog] = await db.select({ id: chatHistory.id, createdAt: chatHistory.createdAt })
-          .from(chatHistory)
-          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStartCorr)))
-          .orderBy(desc(chatHistory.createdAt))
-          .limit(1);
-        // Find the meal log whose loggedAt is closest to (within 2 minutes of) the
-        // chatHistory entry we just found. This correctly pairs "log at 8am" with
-        // "mealLog at 8am" even when later meals exist.
-        const corrWindowStart = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() - 120_000) : todayStartCorr;
-        const corrWindowEnd   = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() + 120_000) : new Date();
-        const [lastMealLogCorr] = await db.select({ id: mealLogs.id })
-          .from(mealLogs)
-          .where(and(
-            eq(mealLogs.userId, user.id),
-            gte(mealLogs.loggedAt, corrWindowStart),
-            lt(mealLogs.loggedAt, corrWindowEnd),
-          ))
-          .orderBy(desc(mealLogs.loggedAt))
-          .limit(1);
-        // Wrap relabel/delete + recount + cache update in a transaction — all or nothing.
-        await db.transaction(async (tx) => {
-          if (relabelTo && lastMealLogCorr) {
-            // Relabel only — calories unchanged, so no recompute needed.
-            await tx.update(mealLogs).set({ mealLabel: relabelTo, corrected: true }).where(eq(mealLogs.id, lastMealLogCorr.id));
-            relabelDone = true;
-          } else {
-            if (lastFoodLog) {
-              await tx.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog.id));
-            }
-            if (lastMealLogCorr) {
-              await tx.delete(mealLogs).where(eq(mealLogs.id, lastMealLogCorr.id));
-            }
-            if (lastFoodLog || lastMealLogCorr) {
-              const recomputed = await recomputeTodayFoodTotals(user.id);
-              await tx.update(users).set({
-                todayCalories: recomputed.calories,
-                todayProteinG: recomputed.protein,
-                todayCaloriesDate: sastToday(),
-              }).where(eq(users.id, user.id));
-            }
-          }
-        });
-      } catch (e) { console.warn("[food-correction-tx]", e); }
-      if (relabelDone) {
+      const relabelTo = slotOnly ? slotOnly[1].toLowerCase() : null;
+      // The last FOOD_LOG chat entry pins the RIGHT meal: the one logged within 2 minutes of it.
+      const [lastFoodLog] = await db.select({ id: chatHistory.id, createdAt: chatHistory.createdAt }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStartCorr)))
+        .orderBy(desc(chatHistory.createdAt)).limit(1);
+      const corrWindowStart = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() - 120_000) : todayStartCorr;
+      const corrWindowEnd   = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() + 120_000) : new Date();
+      const [target] = await db.select().from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, corrWindowStart),
+        lt(mealLogs.loggedAt, corrWindowEnd))).orderBy(desc(mealLogs.loggedAt)).limit(1);
+      // NAMING WHAT IS ALREADY THERE CORRECTS NOTHING ("No, the pap and chicken were lekker" — Codex @ 7f93588).
+      const heldNames = new Set([...scanForSAFoods(String(target?.rawMessage || "")), ...(Array.isArray(target?.items) ? target!.items as any[] : [])].map(f => String(f?.name || "").toLowerCase()));
+      const namedNow = scanForSAFoods(candidateSansNot).map(f => f.name.toLowerCase());
+      // …names ALL of it ("rice and chicken breast" drops the avocado; "chicken breast, not rice" strikes the
+      // rice), and in the same amounts ("two eggs" after "one egg" — Codex @ 8e15426, @ 238bd21, @ a514b3a).
+      const amounts = (s: string) => (s.match(/\b(?:\d+(?:\.\d+)?|one|two|three|four|five|six|half|double)\b/gi) || []).map(x => x.toLowerCase()).sort().join();
+      const repeatsRecord = !!target && namedNow.length > 0 && namedNow.every(n => heldNames.has(n)) && ((r => r.length ? r : [...heldNames])(scanForSAFoods(String(target.rawMessage || "")).map(f => f.name.toLowerCase()))).every(n => namedNow.includes(n)) && amounts(candidateSansNot) === amounts(String(target.rawMessage || "")) && ((slot?: string) => !slot || slot === String(target.mealLabel || "").toLowerCase())(candidateSansNot.match(/\b(breakfast|lunch|dinner|supper|snack)\b/i)?.[1]?.toLowerCase());
+      if (relabelTo && target) {
+        friction();
+          await db.update(mealLogs).set({ mealLabel: relabelTo, corrected: true }).where(eq(mealLogs.id, target.id));
+        turnMutation(`RELABEL meal ${target.id} ${target.mealLabel || "none"}→${relabelTo}`, "[MEAL_CORRECTION]");
         await logChat(user.id, message, `Moved that to ${relabelTo}`, "FOOD_RELABEL");
         return `Moved that to *${relabelTo}* ✅`;
       }
-      if (correctedMsgCandidate && correctedMsgCandidate.length > 2 && correctedMsgCandidate !== m) {
-        // Strip "not <word>" so a corrected re-log doesn't re-add the negated item:
-        // "chicken not beef" logs chicken only, never chicken AND beef.
-        const cleaned = correctedMsgCandidate.replace(/\bnot\s+\w+/gi, " ").replace(/\s+/g, " ").trim();
-        return await handleMessage(phone, cleaned.length > 2 ? cleaned : correctedMsgCandidate);
+      if (!repeatsRecord && correctedMsgCandidate && correctedMsgCandidate.length > 2 && correctedMsgCandidate !== m) {
+        friction();
+        // SUPERSEDE, NEVER LOSE (#264). Out first so the replacement's reply reads the right day; gone for
+        // good only once a replacement lands, else restored exactly. Recorded either way.
+        // A replacement "lands" as a new row OR as an in-place amend of another row (Codex @ 7f93588).
+        const daySigs = async () => new Map((await db.select({ id: mealLogs.id, k: mealLogs.kcalInt, i: mealLogs.items }).from(mealLogs)
+          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartCorr)))).map(r => [r.id, `${r.k}|${JSON.stringify(r.i)}`]));
+        const heldSigs = await daySigs();
+        const recount = async () => { invalidateFoodTotalsCache(user.id); const t = await recomputeTodayFoodTotals(user.id);
+          await db.update(users).set({ todayCalories: t.calories, todayProteinG: t.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id)); };
+        try { // the recount runs after the commit: it reads on its own connection
+          await db.transaction(async (tx) => {
+            if (lastFoodLog) await tx.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog.id));
+            if (target) await tx.delete(mealLogs).where(eq(mealLogs.id, target.id));
+          });
+          if (lastFoodLog || target) await recount();
+        } catch (e) { console.warn("[food-correction-tx]", e); }
+        const cleaned = correctedMsgCandidate.replace(/\b(?:instead\s+of|rather\s+than)\s+.*?(?=[,.!?;]|\s(?:and\s+)?(?:(?:i\s+)?(?:also\s+)?(?:had|ate)|also|plus|then)\b|$)/gi, " ").replace(/\bnot\s+\w+/gi, " ").replace(/\s+/g, " ").trim();
+        const replyCorr = await handleMessage(phone, cleaned.length > 2 ? cleaned : correctedMsgCandidate); // "not X" stripped: never re-log X
+        if (target) {
+          const landed = [...(await daySigs())].filter(([id, sig]) => id !== target.id && heldSigs.get(id) !== sig).map(([id]) => id);
+          if (landed.length > 0) {
+            turnMutation(`SUPERSEDE meal ${target.id} kcal=${target.kcalInt} label=${target.mealLabel || "none"} raw="${String(target.rawMessage || "").slice(0, 80)}" by [${landed.join(",")}]`, "[MEAL_CORRECTION]");
+          } else {
+            const restored = await db.transaction(async (tx) => {
+              await tx.insert(mealLogs).values(target);
+              if (lastFoodLog) await tx.update(chatHistory).set({ intent: "FOOD_LOG" }).where(eq(chatHistory.id, lastFoodLog.id));
+            }).then(recount).then(() => true, e => { console.error("[food-correction-restore] FAILED", e); return false; });
+            turnMutation(`${restored ? "RESTORE" : "RESTORE_FAILED"} meal ${target.id} kcal=${target.kcalInt} raw="${String(target.rawMessage || "").slice(0, 80)}" — the correction logged no replacement`, "[MEAL_CORRECTION]");
+          }
+        }
+        return replyCorr;
       }
     }
   }

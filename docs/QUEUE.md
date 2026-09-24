@@ -2,6 +2,13 @@
 
 **CTO decision, 24 Sep 11:05: lane B is now the priority.** The remaining lane A items are pattern-patches on the old pipeline. Each fix spawns a new edge ("No thanks", then "Nope", then "Hayi"), because the old design reads messages by hand-written patterns. The new core fixes those by design. So: finish the harm PRs already in flight, then **all new build effort goes to lane B**. The old-pipeline items below become **gate cases the new core must pass**, not patches.
 
+## Lane A: live billing harm, allowed despite the freeze (tonight, small PRs)
+
+- [ ] #315 Cancel menu "4 — Just cancel" sends a shopping list and the subscription stays active: the client is still billed
+- [ ] #306 A minor stopped by the age gate keeps an active paid subscription
+- [ ] #303 Terms still promise a 7-day trial: make the copy match reality (no trial; guarantee wording as implemented)
+- [ ] #328 14-day money-back guarantee, implemented end to end
+
 ## Lane B: the new core (top priority). Two parallel worktrees: B1 (gate, then Coach Health) and B2 (client record, then understanding and composer)
 
 Order, and what "done" means today:
