@@ -14,6 +14,8 @@ Order, and what "done" means today:
 - [ ] #293 Coach Health scores every live turn, daily tester digest
 - [ ] #330 Real voice-note path in the gate
 - [ ] #273 Carry C18's tests into the gate, close #260
+- [ ] #342 Backups: test-restore, failure alerts, POPIA window
+- [ ] #343 One schema system, not two
 - [ ] #331 Archive contradicting docs
 
 ## Lane A: finish what's in flight, then stop
@@ -27,7 +29,10 @@ Order, and what "done" means today:
 - [ ] #267 Age gate (PR #305), merge when green
 - [ ] #269 POPIA deletion (PR #307), merge when green
 - [ ] #321 Scope in code, fail closed (Meta risk, already built), merge when green
-- [ ] #333 CI timeout 90 → 150 min, merge when green
+- [ ] #333 CI timeout 90 → 150 min (superseded by #337, the 6-way split)
+- [ ] #339 Patch 3 high-severity dependency vulnerabilities (security: allowed despite the freeze)
+- [ ] #340 AI spend cap fails open (security/cost: allowed despite the freeze)
+- [ ] #341 Delivery-status webhook fails closed (security: allowed despite the freeze)
 
 ## Gate cases for the new core (not patched on the old pipeline)
 
