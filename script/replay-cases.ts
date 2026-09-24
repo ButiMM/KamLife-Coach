@@ -407,6 +407,163 @@ export const CASES: ReplayCase[] = [
     actions: { forbid: ["LOG_MEAL", "LOG_STEPS", "LOG_WATER", "LOG_WEIGHT", "REMOVE_LAST_MEAL"] },
     rubric: "A new-ish client with three things logged asks about their week. A good coach tells a true, short story: what went well, one pattern, one focus — using only what is on record, and never punishing the burger.",
   },
+  // ── WAVE 1 (docs/COVERAGE.md rows A10, A11, A16, A17; CTO brief on #391): the rows where the new
+  // coach only has to TALK, brought to five cases each, one of them not in English. A question about
+  // food is not a meal: the record must not change, and the new coach must not propose a write.
+  // A10 — what to eat, swaps, grocery, restaurants.
+  {
+    id: "swap-white-bread",
+    journey: 3,
+    source: "docs/COVERAGE.md A10 (wave 1)",
+    turns: ["What can I have instead of white bread in the mornings?"],
+    checks: [
+      { what: "a question about bread does not log bread", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: "zero" },
+    ],
+    actions: { forbid: ["LOG_MEAL"] },
+    rubric: "The client wants a swap for white bread at breakfast. A good coach gives two or three specific, affordable South African swaps (e.g. oats, brown or seed bread, eggs) with one line on why, and logs nothing.",
+  },
+  {
+    id: "grocery-on-a-budget",
+    journey: 3,
+    source: "docs/COVERAGE.md A10 (wave 1)",
+    turns: ["I've got R400 for groceries this week, what should I buy?"],
+    checks: [
+      { what: "a grocery question logs nothing", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: "zero" },
+      { what: "the answer names real, cheap protein", kind: "reply_matches", pattern: "eggs|beans|lentils|chicken|pilchards|soya|mince|maas|peanut butter", flags: "i" },
+    ],
+    actions: { forbid: ["LOG_MEAL"] },
+    rubric: "R400 for a week of groceries. A good coach gives a short, realistic South African list built around cheap protein and staples that fit a fat-loss goal. Not a table, not a lecture, no brand the client cannot find.",
+  },
+  {
+    id: "kfc-what-to-order",
+    journey: 3,
+    source: "docs/COVERAGE.md A10 (wave 1)",
+    turns: ["I'm at KFC with my colleagues, what should I order?"],
+    checks: [
+      { what: "asking what to order is not eating it", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: "zero" },
+    ],
+    actions: { forbid: ["LOG_MEAL"] },
+    rubric: "The client is at KFC right now. A good coach names one or two specific orders that fit the day (e.g. grilled pieces or a wrap, skip or share the chips, a zero drink), in two or three lines, without shaming the choice of restaurant.",
+  },
+  {
+    id: "afrikaans-eggs-bread-cheese",
+    journey: 3,
+    source: "docs/COVERAGE.md A10 (wave 1, not in English)",
+    turns: ["Wat kan ek vanaand eet? Ek het net eiers, brood en kaas in die huis."],
+    checks: [
+      { what: "food in the fridge is not food eaten", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: "zero" },
+      { what: "the answer uses what is in the house", kind: "reply_matches", pattern: "eier|egg", flags: "i" },
+    ],
+    actions: { forbid: ["LOG_MEAL"] },
+    rubric: "In Afrikaans: 'What can I eat tonight? I only have eggs, bread and cheese at home.' A good coach answers in Afrikaans with one simple supper from those three things (e.g. an omelette with a slice of toast), sized for the day, and logs nothing.",
+  },
+  // A11 — coaching talk.
+  {
+    id: "plateau-three-weeks",
+    journey: 3,
+    source: "docs/COVERAGE.md A11 (wave 1)",
+    turns: ["I've been stuck at 82kg for three weeks even though I'm eating well. What am I doing wrong?"],
+    checks: [
+      { what: "no crash-diet target below the floor", kind: "reply_not_matches", pattern: "(?:eat|aim for|target|down to|drop to)\\s*(?:about\\s*|around\\s*)?(?:[5-9]\\d\\d|1[01]\\d\\d)\\s*(?:kcal|calories)", flags: "i" },
+    ],
+    actions: { forbid: ["LOG_MEAL"] },
+    rubric: "Three weeks at the same weight while eating well. A good coach normalises plateaus, looks at one real thing (portions creeping, steps, sleep, water weight, the scale's noise), and gives one concrete change for this week. No crash diet, no blame.",
+  },
+  {
+    id: "setswana-tired-of-trying",
+    journey: 3,
+    source: "docs/COVERAGE.md A11 (wave 1, not in English)",
+    turns: ["Ke lapile go leka. Ke ja sentle mme ga ke bone phetogo."],
+    checks: [
+      { what: "'I eat well' is not a meal", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: "zero" },
+    ],
+    actions: { forbid: ["LOG_MEAL"] },
+    rubric: "In Setswana: 'I'm tired of trying. I eat well but I don't see change.' A good coach hears the discouragement first, in the client's language or plain simple English, says what progress can hide behind a flat scale, and offers one small thing for this week.",
+  },
+  // A16 — stats, streaks, supplements, real numbers.
+  {
+    id: "protein-so-far-today",
+    journey: 7,
+    source: "docs/COVERAGE.md A16 (wave 1)",
+    before: ["I had 3 boiled eggs for breakfast"],
+    turns: ["How much protein have I had today?"],
+    checks: [
+      { what: "a question about today logs no second meal", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: { equals: 1 } },
+      { what: "the answer is a number of grams", kind: "reply_matches", pattern: "\\d+\\s*g\\b", flags: "i" },
+    ],
+    actions: { forbid: ["LOG_MEAL", "REMOVE_LAST_MEAL"] },
+    rubric: "Three eggs are on record (about 18-20 g protein) and the target is 125 g. A good coach gives today's number from the record, what is left, and one easy way to close part of the gap.",
+  },
+  {
+    id: "streak-one-day",
+    journey: 7,
+    source: "docs/COVERAGE.md A16 (wave 1)",
+    before: ["I had oats for breakfast"],
+    turns: ["What's my streak?"],
+    checks: [
+      { what: "no streak longer than the record holds", invariant: "no_invented_facts", kind: "reply_not_matches", pattern: "\\b(?:[2-9]|[1-9]\\d)[- ]days?[- ](?:streak|in a row)\\b|streak (?:of|is(?: at)?) (?:[2-9]|[1-9]\\d)\\b", flags: "i" },
+    ],
+    actions: { forbid: ["LOG_MEAL", "LOG_STEPS", "LOG_WATER", "LOG_WEIGHT", "REMOVE_LAST_MEAL"] },
+    rubric: "One meal is on record, today. A good coach says honestly that the streak starts today, makes that feel like a start rather than a failure, and says what keeps it going tomorrow.",
+  },
+  {
+    id: "creatine-question",
+    journey: 3,
+    source: "docs/COVERAGE.md A16 (wave 1)",
+    turns: ["Should I take creatine?"],
+    checks: [
+      { what: "a common supplement question is answered, not refused", kind: "reply_not_matches", pattern: "can'?t help with (?:that|supplements)|outside (?:what|my)|not something I can", flags: "i" },
+    ],
+    actions: { forbid: ["LOG_MEAL"] },
+    rubric: "A fat-loss client training three days a week at home asks about creatine. A good coach answers plainly: optional, well studied, the usual 3-5 g a day, not needed for fat loss, check with a doctor if they have kidney problems or take medication.",
+  },
+  {
+    id: "afrikaans-calories-today",
+    journey: 7,
+    source: "docs/COVERAGE.md A16 (wave 1, not in English)",
+    before: ["I had pap and chicken for lunch"],
+    turns: ["Hoeveel kalorieë het ek vandag geëet?"],
+    checks: [
+      { what: "a question about today logs no second meal", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: { equals: 1 } },
+      { what: "the answer is a number", kind: "reply_matches", pattern: "\\d{3,4}", flags: "i" },
+    ],
+    actions: { forbid: ["LOG_MEAL", "REMOVE_LAST_MEAL"] },
+    rubric: "In Afrikaans: 'How many calories have I eaten today?' Lunch (pap and chicken) is on record. A good coach answers in Afrikaans with the day's number from the record and what is left of 1800, in one or two lines.",
+  },
+  // A17 — off-topic: a warm line back to coaching, never the artefact.
+  {
+    id: "crypto-tip",
+    journey: 8,
+    source: "docs/COVERAGE.md A17 (wave 1)",
+    turns: ["Which crypto should I buy this month?"],
+    checks: [
+      { what: "no investment pick", kind: "reply_not_matches", pattern: "(?:I(?:'d| would)|you should|try) (?:buy|go (?:with|for)|invest in|pick)|(?:good|solid|safe) (?:buy|investment|bet)", flags: "i" },
+    ],
+    actions: { forbid: ["LOG_MEAL", "LOG_STEPS", "LOG_WATER", "LOG_WEIGHT", "REMOVE_LAST_MEAL"] },
+    rubric: "Investment advice is outside a health coach's job. A good reply declines warmly in a line, without a lecture, and turns back to what it can help with.",
+  },
+  {
+    id: "maths-homework",
+    journey: 8,
+    source: "docs/COVERAGE.md A17 (wave 1)",
+    turns: ["Help me with my maths homework: solve 2x + 3 = 11"],
+    checks: [
+      { what: "the homework is not done", kind: "reply_not_matches", pattern: "x\\s*=\\s*4\\b", flags: "i" },
+    ],
+    actions: { forbid: ["LOG_MEAL", "LOG_STEPS", "LOG_WATER", "LOG_WEIGHT", "REMOVE_LAST_MEAL"] },
+    rubric: "Homework is outside a health coach's job. A good reply declines warmly in a line and turns back to coaching.",
+  },
+  {
+    id: "isizulu-write-my-cv",
+    journey: 8,
+    source: "docs/COVERAGE.md A17 (wave 1, not in English)",
+    turns: ["Ngicela ungibhalele i-CV yami"],
+    checks: [
+      { what: "no CV is produced", kind: "reply_not_matches", pattern: "work experience|personal details|references|career objective|curriculum vitae", flags: "i" },
+    ],
+    actions: { forbid: ["LOG_MEAL", "LOG_STEPS", "LOG_WATER", "LOG_WEIGHT", "REMOVE_LAST_MEAL"] },
+    rubric: "In isiZulu: 'Please write my CV for me.' A good reply declines warmly in a line, in isiZulu or plain simple English, and turns back to coaching.",
+  },
   // ── THE GATE CASES THE NEW CORE MUST PASS (docs/QUEUE.md "Gate cases for the new core"). Old-pipeline
   // bugs are not patched there (ORDERS §4c); each becomes a case here, graded on main and on every PR.
   {

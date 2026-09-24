@@ -38,15 +38,15 @@ A row is **complete** when:
 | A7 | Weight, weigh-in, body/progress photos | `weight.ts`, `media.ts`, `physique-analysis.ts`, `weight-context.ts` | action `LOG_WEIGHT`; photos have none | **0** | none | — |
 | A8 | Workout done / lifts / "show my workout" | `handlers/workout.ts`, `workout-state.ts` | action (`SHOW_WORKOUT` exists; logging is missing) | moved-workout, knee-hurt-on-run | none | — |
 | A9 | Equipment / form check from photo or video | `equipment-vision.ts`, `form-check-prompt.ts`, `video-frames.ts` | reply from the image | **0** | none | — |
-| A10 | "What should I eat tonight", swaps, grocery, restaurants, street food | `gpt-block.ts`, `food-swaps.ts`, `grocery-*.ts`, `restaurants.ts`, `street-food.ts`, `shopping-lists.ts` | reply (from facts and targets) | what-to-eat-tonight, no-fish-remembered | none | gpt-block, advice-commands |
-| A11 | Coaching talk: stress, shame, plateaus, "I need more help" | `gpt-block.ts` (askCoachK), meaning engine | reply | shame-after-takeaway, stress-and-takeaways, need-more-help | none | gpt-block |
+| A10 | "What should I eat tonight", swaps, grocery, restaurants, street food | `gpt-block.ts`, `food-swaps.ts`, `grocery-*.ts`, `restaurants.ts`, `street-food.ts`, `shopping-lists.ts` | reply (from facts and targets) | what-to-eat-tonight, no-fish-remembered, swap-white-bread, grocery-on-a-budget, kfc-what-to-order, afrikaans-eggs-bread-cheese | none | gpt-block, advice-commands |
+| A11 | Coaching talk: stress, shame, plateaus, "I need more help" | `gpt-block.ts` (askCoachK), meaning engine | reply | shame-after-takeaway, stress-and-takeaways, need-more-help, plateau-three-weeks, setswana-tired-of-trying | none | gpt-block |
 | A12 | Goal change, targets, "am I on track" | `misc-commands.ts`, `adaptive-targets.ts`, `targets.ts` | action (missing: `SET_GOAL`) | **0** | none | misc-commands |
 | A13 | Remembering what they said (injury, race, pregnancy, dislikes) | 9 stores (see D2); `core/client-record.ts` is the one kept | facts via `applyFacts` | comrades-knee-memory, third-party-pregnancy, no-fish-remembered | none | the 8 other stores |
 | A14 | Reminders | `reminders-handler.ts`, `reminders.ts` | action `SET_REMINDER` | **0** | none | — |
 | A15 | Sick / injured pause, pain triage | `sick-flow.ts`, `pain-triage.ts` | action `SET_SICK`/`END_SICK` + floor for red-flag pain | knee-hurt-on-run | none | sick-flow |
-| A16 | Stats, streaks, NPS, supplements, motivation, "how was my week" | `misc-commands.ts`, `numbers-literacy.ts`, `report-card.ts`, `week-card.ts` | reply from real numbers | how-was-my-week | none | misc-commands, numbers-literacy |
-| A17 | Off-topic (CV, crypto, homework) | `understanding/domain-guard.ts`, scope (#345) | floor | business-plan-for-gym, cv-skipped-gym-control | none | — |
-| A18 | Mixed languages: Setswana, isiZulu, isiXhosa, Sesotho, Afrikaans, SA slang | normaliser, `sa-transcript.ts`, `voice-language.ts` | every row above | hayi-correction only | none | — |
+| A16 | Stats, streaks, NPS, supplements, motivation, "how was my week" | `misc-commands.ts`, `numbers-literacy.ts`, `report-card.ts`, `week-card.ts` | reply from real numbers | how-was-my-week, protein-so-far-today, streak-one-day, creatine-question, afrikaans-calories-today | none | misc-commands, numbers-literacy |
+| A17 | Off-topic (CV, crypto, homework) | `understanding/domain-guard.ts`, scope (#345) | floor | business-plan-for-gym, cv-skipped-gym-control, crypto-tip, maths-homework, isizulu-write-my-cv | none | — |
+| A18 | Mixed languages: Setswana, isiZulu, isiXhosa, Sesotho, Afrikaans, SA slang | normaliser, `sa-transcript.ts`, `voice-language.ts` | every row above | hayi-correction, afrikaans-eggs-bread-cheese, setswana-tired-of-trying, afrikaans-calories-today, isizulu-write-my-cv | none | — |
 
 ## B. Messages the coach starts (proactive): **none of this is graded**
 
