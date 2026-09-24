@@ -20,7 +20,9 @@ export function detectMedicationContext(message: string): MedicationContextDecis
       || /\bhow\s+much\s+(?:ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide)\b/i.test(m)) {
     return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "dosing" };
   }
-  if (/\b(titrate|titration|increase|decrease|raise|lower|double|halve|step up|step down)\b[^.!?]{0,40}\b(ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide|liraglutide|dulaglutide|saxenda|victoza|rybelsus|medication|meds?|medicine|insulin|tablets?|pills?|dose|dosage)\b/i.test(m)) {
+  // The change verb must act ON the medicine (#380 attack): "increase protein because I'm on insulin"
+  // changes protein. A clause joiner or "on"/"with"/"taking" between them breaks the bind.
+  if (/\b(titrate|titration|increase|decrease|raise|lower|double|halve|step up|step down)\b(?:(?!\b(?:because|since|as|while|when|and|but|so|if|cause|cos|coz|though|although|on|with|take|taking|after|before)\b)[^.!?]){0,40}\b(ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide|liraglutide|dulaglutide|saxenda|victoza|rybelsus|medication|meds?|medicine|insulin|tablets?|pills?|dose|dosage)\b/i.test(m)) {
     return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "titration" };
   }
   if (/\b(stop|start|skip|come off|go off|wean off|quit)\b[^.!?]{0,30}\b(ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide|liraglutide|dulaglutide|saxenda|victoza|rybelsus|medication|meds?|medicine|insulin|tablets?|pills?)\b/i.test(m)) {

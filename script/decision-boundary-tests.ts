@@ -88,6 +88,10 @@ assert.deepEqual(detectMedicationContext("Can I double my insulin tonight? My su
 assert.equal(detectMedicationContext("Should I lower my blood pressure tablets now that I'm walking?").reason, "titration");
 // Control: taking insulin is context, not an unsafe request.
 assert.equal(detectMedicationContext("I'm on insulin, what's a good breakfast?").unsafeRequest, false);
+// #380 (Codex @ bafcfc0): the change verb must act on the medicine, not sit near it.
+assert.equal(detectMedicationContext("I need to increase protein because I'm on insulin.").unsafeRequest, false);
+assert.equal(detectMedicationContext("Should I lower my carbs while on Ozempic?").unsafeRequest, false);
+assert.equal(detectMedicationContext("Can I increase the dose of my insulin?").reason, "titration");
 const stopping = detectMedicationContext("Should I stop Mounjaro?");
 assert.equal(stopping.unsafeRequest, true);
 assert.equal(stopping.reason, "stopping");
