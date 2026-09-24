@@ -16,10 +16,11 @@ export async function checkEscalation(userId: string, messageIn: string): Promis
   const esc = detectEscalation(messageIn);
   if (!esc.should) return;
   try {
-    const recent = await db.select({ id: escalations.id }).from(escalations)
-      .where(and(eq(escalations.userId, userId), eq(escalations.status, "open")))
-      .limit(1);
-    if (recent.length !== 0) return;
+    // One open case per client — except that an URGENT event is never absorbed by an unrelated
+    // open case with a slower SLA (Codex @ 8e4f231: a purge disclosure behind a "real person" ask).
+    const open = await db.select({ reason: escalations.reason }).from(escalations)
+      .where(and(eq(escalations.userId, userId), eq(escalations.status, "open")));
+    if (open.some(r => r.reason === esc.reason) || (open.length > 0 && esc.priority !== "urgent")) return;
     await db.insert(escalations).values({
       userId, reason: esc.reason, triggerMessage: messageIn.slice(0, 500),
       priority: esc.priority, slaDeadline: escalationSLA(esc.priority),

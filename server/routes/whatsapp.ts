@@ -45,9 +45,9 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   // only reactive difference is the failure policy: a client is holding their phone, so a refused
   // draft becomes a safe sentence rather than silence. P0-C below still owns the empty case.
   let userId: string | null = null;
-  let userRow: { id: string; profileNotes: string | null } | null = null;
+  let userRow: { id: string; profileNotes: string | null; lifeSituation: string | null } | null = null;
   try {
-    const rows = await db.select({ id: users.id, profileNotes: users.profileNotes })
+    const rows = await db.select({ id: users.id, profileNotes: users.profileNotes, lifeSituation: users.lifeSituation })
       .from(users).where(eq(users.phoneNumber, phone)).limit(1);
     userRow = (rows[0] as any) ?? null;
     userId = userRow?.id ?? null;

@@ -1,4 +1,4 @@
-"""Counts Coach K's "mouths": the places that can decide or send a reply outside the one coach.
+"""Counts Coach K's "mouths" (every outbound send path counts: sendWhatsApp, deliverTwilioMessage, sendCriticalAlert and raw Twilio messages.create): the places that can decide or send a reply outside the one coach.
 The mouth ratchet fails any PR that increases a count. Counts only ever go down."""
 import json, re, sys, pathlib
 root = pathlib.Path(__file__).resolve().parent.parent
@@ -7,13 +7,15 @@ start = next(i for i, l in enumerate(L) if re.search(r"async function routeMessa
 eng = next((i for i, l in enumerate(L) if i > start and "runMeaningEngineLive" in l), len(L))
 counts = {
     "routeMessage_exits_before_engine": sum(1 for i in range(start, eng) if re.search(r"\breturn\b", L[i])),
-    "sendWhatsApp_call_sites": 0,
+    "outbound_send_sites": 0,
     "files_that_send": 0,
 }
+SEND = re.compile(r"\b(?:sendWhatsApp|deliverTwilioMessage|sendCriticalAlert)\(|\.messages\.create\(")
+DEF = re.compile(r"function (?:sendWhatsApp|deliverTwilioMessage|sendCriticalAlert)\(")
 for f in (root / "server").rglob("*.ts"):
     t = f.read_text(errors="ignore")
-    n = len(re.findall(r"\bsendWhatsApp\(", t)) - len(re.findall(r"function sendWhatsApp\(", t))
-    counts["sendWhatsApp_call_sites"] += n
+    n = len(SEND.findall(t)) - len(DEF.findall(t))
+    counts["outbound_send_sites"] += n
     counts["files_that_send"] += 1 if n else 0
 if "--json" in sys.argv:
     print(json.dumps(counts)); sys.exit(0)

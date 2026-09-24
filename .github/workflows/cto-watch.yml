@@ -1,16 +1,15 @@
 name: cto-watch
 on:
   schedule:
-    - cron: "*/20 * * * *"
+    - cron: "*/30 4-20 * * *"   # every 30 min, 06:00-22:00 SAST
   pull_request:
-    types: [opened, synchronize, reopened, closed, labeled]
-  issue_comment:
-    types: [created]
+    types: [opened, closed]
   workflow_dispatch:
 permissions:
   contents: read
   issues: write
   pull-requests: write
+  checks: read
 concurrency:
   group: cto-watch
   cancel-in-progress: false

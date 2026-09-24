@@ -571,9 +571,9 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string, 
   let recipientId: string | null = null;
   // profile_notes carries the durable illness state the held-constraint rule reads. Selected here
   // rather than re-queried inside the floor: this lookup already runs, and one read is one read.
-  let recipientRow: { id: string; profileNotes: string | null } | null = null;
+  let recipientRow: { id: string; profileNotes: string | null; lifeSituation: string | null } | null = null;
   try {
-    const rows = await db.select({ id: users.id, profileNotes: users.profileNotes })
+    const rows = await db.select({ id: users.id, profileNotes: users.profileNotes, lifeSituation: users.lifeSituation })
       .from(users).where(eq(users.phoneNumber, to)).limit(1);
     recipientRow = (rows[0] as any) ?? null;
     recipientId = recipientRow?.id ?? null;
@@ -770,9 +770,9 @@ export async function sendWhatsAppTemplate(
     // Proactive policy, unchanged: nobody is waiting, so a refused message is blocked and
     // recorded rather than repaired. A template that cannot pass the floor must not be sent —
     // the whole point of rendering it here is that this question can now be asked at all.
-    let recipientRow: { id: string; profileNotes: string | null } | null = null;
+    let recipientRow: { id: string; profileNotes: string | null; lifeSituation: string | null } | null = null;
     try {
-      const rows = await db.select({ id: users.id, profileNotes: users.profileNotes })
+      const rows = await db.select({ id: users.id, profileNotes: users.profileNotes, lifeSituation: users.lifeSituation })
         .from(users).where(eq(users.phoneNumber, to)).limit(1);
       recipientRow = (rows[0] as any) ?? null;
     } catch (e: any) {
