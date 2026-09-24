@@ -58,6 +58,9 @@ process.env.ENGINE_LIVE = "on";
 process.env.NORMALIZER = "on";
 process.env.PROACTIVE_PAUSED = "true";
 process.env.SHADOW = "on";
+// THE NEW COACH IN SHADOW (#272): run it beside every turn so the gate can grade it per journey.
+// On a product without it (main before #359) nothing is stored and its column reads "–".
+process.env.CORE_SHADOW = "on";
 process.env.NODE_ENV = "production";
 process.env.TWILIO_ACCOUNT_SID ||= "ACtest00000000000000000000000000";
 process.env.TWILIO_AUTH_TOKEN ||= "test";
@@ -130,7 +133,9 @@ const versions = {
 
 // ── ONE CASE ────────────────────────────────────────────────────────────────────────────────
 type CheckResult = { what: string; invariant: string | null; pass: boolean; evidence: string };
-type CaseResult = { id: string; journey: Journey; heldOut: boolean; checks: CheckResult[]; hardPass: boolean; score: number | null; verdict: string; bodies: string[]; neverSeen: string[] };
+type CaseResult = { id: string; journey: Journey; heldOut: boolean; checks: CheckResult[]; hardPass: boolean; score: number | null; verdict: string; bodies: string[]; neverSeen: string[];
+  /** The new coach in shadow: its would-be replies, graded on the reply checks, the never-see list and the judge. */
+  core: { replyPass: boolean; score: number | null; neverSeen: string[] } | null };
 
 const lastShadowId = async () => Number((await pool.query("SELECT COALESCE(MAX(id),0) m FROM shadow_replies")).rows[0].m);
 async function bodyAfter(phone: string, since: number): Promise<string> {
@@ -141,6 +146,17 @@ async function bodyAfter(phone: string, since: number): Promise<string> {
     await new Promise(r => setTimeout(r, 1000));
   }
   return "";
+}
+/** What the new coach would have said for this turn, if it ran. Never sent; graded beside the old path. */
+async function coreReplyFor(sid: string): Promise<string | null> {
+  for (let i = 0; i < 20; i++) { // up to 10 s: the shadow runs after the reply is sent
+    try {
+      const r = (await pool.query<{ reply: string }>("SELECT reply FROM core_shadow WHERE root_id = $1 LIMIT 1", [sid])).rows[0];
+      if (r) return r.reply;
+    } catch { return null; } // no core_shadow table: this product has no new coach
+    await new Promise(res => setTimeout(res, 500));
+  }
+  return null;
 }
 const replyMs: number[] = []; // every turn, before-turns included: the client waits for all of them
 async function turn(phone: string, text: string, sid: string): Promise<string> {
@@ -206,14 +222,28 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
   } as any).returning();
   for (const [i, t] of (k.before || []).entries()) await turn(phone, t, `RP${n}b${i}`);
   const bodies: string[] = [];
-  for (const [i, t] of k.turns.entries()) bodies.push(await turn(phone, t, `RP${n}t${i}`));
+  const coreBodies: Array<string | null> = [];
+  for (const [i, t] of k.turns.entries()) {
+    bodies.push(await turn(phone, t, `RP${n}t${i}`));
+    coreBodies.push(await coreReplyFor(`RP${n}t${i}`));
+  }
   // A stranger's row is created by the front door; read it back so the checks and the judge see it.
   const userId: string = u?.id ?? (await pool.query("SELECT id FROM users WHERE phone_number = $1", [phone])).rows[0]?.id ?? "00000000-0000-0000-0000-000000000000";
   const checks: CheckResult[] = [];
   for (const c of k.checks) checks.push(await runCheck(c, userId, phone, bodies));
   const neverSeen = NEVER_SEE.filter(n => bodies.some(b => new RegExp(n.pattern, n.flags ?? "").test(b))).map(n => n.what);
   const { score, verdict } = await judge(k, userId, bodies);
-  return { id: k.id, journey: k.journey, heldOut: isHeldOut, checks, hardPass: checks.filter(c => c.invariant).every(c => c.pass), score, verdict, bodies, neverSeen };
+  let core: CaseResult["core"] = null;
+  if (coreBodies.every(b => b !== null && b.trim())) {
+    const cb = coreBodies as string[];
+    // Only the reply checks apply: the shadow writes nothing, so the stored-state checks grade the old path.
+    const replyChecks: CheckResult[] = [];
+    for (const c of k.checks.filter(c => c.kind !== "sql")) replyChecks.push(await runCheck(c, userId, phone, cb));
+    const j = await judge(k, userId, cb);
+    core = { replyPass: replyChecks.filter(c => c.invariant).every(c => c.pass), score: j.score,
+      neverSeen: NEVER_SEE.filter(nv => cb.some(b => new RegExp(nv.pattern, nv.flags ?? "").test(b))).map(nv => nv.what) };
+  }
+  return { id: k.id, journey: k.journey, heldOut: isHeldOut, checks, hardPass: checks.filter(c => c.invariant).every(c => c.pass), score, verdict, bodies, neverSeen, core };
 }
 
 // ── THE RUN ─────────────────────────────────────────────────────────────────────────────────
@@ -237,7 +267,13 @@ const journeys = (Object.keys(JOURNEYS).map(Number) as Journey[]).map(j => {
   const sc = rs.filter(r => r.score !== null);
   return { journey: j, name: JOURNEYS[j], cases: rs.length, hardPass: rs.filter(r => r.hardPass).length,
     meanScore: sc.length ? Math.round(sc.reduce((a, r) => a + (r.score as number), 0) / sc.length * 10) / 10 : null,
-    neverSee: rs.reduce((a, r) => a + r.neverSeen.length, 0) };
+    neverSee: rs.reduce((a, r) => a + r.neverSeen.length, 0),
+    core: (() => {
+      const cs = rs.filter(r => r.core); const cscored = cs.filter(r => r.core!.score !== null);
+      return cs.length ? { cases: cs.length, replyPass: cs.filter(r => r.core!.replyPass).length,
+        meanScore: cscored.length ? Math.round(cscored.reduce((a, r) => a + (r.core!.score as number), 0) / cscored.length * 10) / 10 : null,
+        neverSee: cs.reduce((a, r) => a + r.core!.neverSeen.length, 0) } : null;
+    })() };
 });
 // DID A MODEL ACTUALLY ANSWER? A run where the product recorded no model call, or every judge call
 // failed, graded the deterministic floor only. That is not a gate result, whatever the checks say
@@ -275,7 +311,7 @@ const record = {
   summary: { cases: results.length, heldOut: heldOut.length, hardChecks: hardNow.size, hardFailing: hardFailing.length, meanScore, regressions, costPerMessageZar, replyTime, journeys },
   cases: results.map(r => r.heldOut
     ? { id: "held-out", heldOut: true, hardPass: r.hardPass, score: r.score }
-    : { id: r.id, journey: r.journey, heldOut: false, hardPass: r.hardPass, score: r.score, verdict: r.verdict, checks: r.checks, neverSeen: r.neverSeen }),
+    : { id: r.id, journey: r.journey, heldOut: false, hardPass: r.hardPass, score: r.score, verdict: r.verdict, checks: r.checks, neverSeen: r.neverSeen, core: r.core }),
 };
 mkdirSync("replay-results", { recursive: true });
 writeFileSync(`replay-results/run-${versions.gitSha.slice(0, 7)}.json`, JSON.stringify(record, null, 2));
@@ -302,8 +338,8 @@ lines.push(`SHA \`${versions.gitSha.slice(0, 7)}\` · corpus \`${versions.corpus
 lines.push(`**${results.length} cases** (${heldOut.length} held out, source: ${heldOutSource}) · hard checks failing: **${hardFailing.length}/${hardNow.size}** · mean judge score **${meanScore ?? "n/a"}/10**${baseline ? ` (baseline ${baseline.meanScore ?? "n/a"})` : " · no baseline yet"}`);
 lines.push(regressions.length ? `### ❌ ${regressions.length} regression(s) against the main baseline\n${regressions.map(r => `- ${r}`).join("\n")}` : baseline ? "### ✅ No hard invariant regressed against the main baseline" : "");
 const baseJ = new Map(((baseline?.journeys || []) as typeof journeys).map(j => [j.journey, j]));
-lines.push("", "### Journeys (docs/TESTER-EXPERIENCE.md)", "| journey | cases | hard pass | score | main | never-see |", "|---|---|---|---|---|---|");
-for (const j of journeys) lines.push(`| ${j.journey}. ${j.name} | ${j.cases} | ${j.hardPass}/${j.cases} | ${j.meanScore ?? "–"} | ${baseJ.get(j.journey)?.meanScore ?? "–"} | ${j.neverSee} |`);
+lines.push("", "### Journeys (docs/TESTER-EXPERIENCE.md)", "| journey | cases | hard pass | score | main | never-see | new coach (shadow) |", "|---|---|---|---|---|---|---|");
+for (const j of journeys) lines.push(`| ${j.journey}. ${j.name} | ${j.cases} | ${j.hardPass}/${j.cases} | ${j.meanScore ?? "–"} | ${baseJ.get(j.journey)?.meanScore ?? "–"} | ${j.neverSee} | ${j.core ? `${j.core.meanScore ?? "–"} · reply checks ${j.core.replyPass}/${j.core.cases} · never-see ${j.core.neverSee}` : "–"} |`);
 lines.push("", `**Reply time** mean ${replyTime.meanS ?? "–"} s, p90 ${replyTime.p90S ?? "–"} s (target ~8 s) · **model cost** R${costPerMessageZar ?? "–"} per message (target ≤ R0.10)${baseline?.costPerMessageZar != null ? ` · main R${baseline.costPerMessageZar}` : ""}`);
 lines.push("", "| case | journey | hard | score | failing checks | never-see |", "|---|---|---|---|---|---|");
 for (const r of results.filter(x => !x.heldOut)) {
