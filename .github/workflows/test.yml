@@ -109,9 +109,10 @@ jobs:
     # Repo is public again (2026-09-24): GitHub-hosted minutes are free, so the full database suite
     # runs on every PR push again. Docs-only PRs still skip everything (paths-ignore above).
     runs-on: ubuntu-latest
-    # Measured 47m27s on 8d96f96. 90 leaves headroom for a slow runner and still fails a hang
-    # four hours before the platform default would.
-    timeout-minutes: 90
+    # Measured 47m27s on 8d96f96; 79-84 min on 2026-09-24 (#285, #305, #307) as acceptances
+    # landed, and #282 was killed at exactly 90:16. 150 leaves headroom for the suite to keep
+    # growing and still fails a hang long before the platform's six hours.
+    timeout-minutes: 150
     services:
       postgres:
         image: postgres:16
