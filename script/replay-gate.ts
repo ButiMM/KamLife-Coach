@@ -395,4 +395,15 @@ if (!OFFLINE && !baseline && !WRITE_BASELINE) {
 const corpusChange = (process.env.PR_LABELS || "").split(",").map(l => l.trim()).includes("gate-corpus");
 const blocking = corpusChange ? regressions.filter(r => !r.endsWith("(check no longer exists)")) : regressions;
 if (corpusChange && blocking.length < regressions.length) REAL(`replay-gate: ${regressions.length - blocking.length} retired or redefined check(s) accepted under the gate-corpus label.`);
+// A SWITCH IS JUDGED ON DOING (Codex @ de02852): on a PR labelled `switch`, every action the new core
+// would get wrong blocks, exactly like a hard regression. Elsewhere the core is in shadow and it is reported.
+const labels = (process.env.PR_LABELS || "").split(",").map(l => l.trim());
+// A switch PR names the journeys it moves with `journey:N` labels; only their action misses block (a wave-1
+// talk switch is not held by wave-2 logging). No journey label: every miss blocks, the safe default.
+const switched = labels.map(l => /^journey:(\d)$/.exec(l)?.[1]).filter(Boolean).map(Number);
+const actionMisses = results.filter(r => !r.heldOut && r.core?.actionPass === false && (!switched.length || switched.includes(r.journey))).map(r => r.id);
+if (labels.includes("switch") && actionMisses.length) {
+  REAL(`replay-gate: SWITCH BLOCKED — the new coach would do the wrong thing in ${actionMisses.length} case(s): ${actionMisses.join(", ")}.`);
+  process.exit(1);
+}
 process.exit(blocking.length ? 1 : 0);
