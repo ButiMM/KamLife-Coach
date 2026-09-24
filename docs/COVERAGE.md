@@ -112,3 +112,24 @@ A row is **complete** when:
 3. **Grow the corpus to at least 5 cases per row**, from real tester traffic, with one non-English case per row. Add proactive replay for section B.
 4. **Build Coach Health per turn (#293)** in parallel, so live data exists before the first switch.
 5. **Switch row by row**, deleting that row's handlers and stores in the same PR. Section C floors stay in code, ahead of the model, permanently.
+
+## D11 (added by the CTO): the cost firewall
+
+| Row | Capability | Today | Must be |
+|---|---|---|---|
+| D11 | CI and the gate can never spend production's AI budget | On 24 Sep the live-model gate ran on every push of every PR (docs included) and emptied the OpenAI credits. If production shares that account, the live coach fails too. | The gate runs only on PRs labelled `ready`, `switch` or `gate`, never on docs (CTO, 24 Sep). CI uses **its own OpenAI project and key with a hard monthly budget**, separate from production's (founder action, see SYSTEM.md). Cost per gate run is reported. |
+
+## Migration waves: every row, in order, until everything is switched and deleted
+
+This is the whole-product plan. A wave starts when the one before it has switched, and each row inside a wave switches on its own. Every row switches under the same rule: 5+ gate cases for the row, the new core ahead on a 3-run average, zero hard failures, a real attack (Codex, or the CTO when Codex is out), and that row's old files deleted in the same PR.
+
+| Wave | Rows | What it takes | Why this order |
+|---|---|---|---|
+| **1. Talk** | A10, A11, A16, A17 (with A13 memory feeding them) | reply only, no writes | The new core already does this, and it's where testers complain most (coaching 6.2, memory 4.0) |
+| **2. Do** | A1, A2, A5, A6, A7 (words), A8, A12, A14, A15 | validated actions (#393) → `executor.ts` → graded on stored state | The largest share of old handlers; needs actions wired and graded first |
+| **3. See and hear** | A3, A4, A7 (photos), A9, A18 | the shadow handles media; gate cases in each language | Needs wave 2's actions; voice re-enters as text |
+| **4. Speak first** | B1-B10, B11, B12 | every proactive send through the one writer and sender (#319) | 15 jobs and most of the 104 send sites; needs the record from waves 1-3 |
+| **5. Money and front door** | C1, C2, C3, C8 (C4-C7 are floors throughout) | onboarding and billing replies through the composer; floors stay code | Highest-risk wording; done once the core is proven |
+| **6. Foundation cleanup** | D2, D3, D4, D5, D9, D10 | the 9 stores collapse to 1, one schema, a restore drill, docs, delete list at 0 | What's left once nothing reads the old stores |
+
+Rows D1, D6, D7, D8 and D11 run alongside every wave.
