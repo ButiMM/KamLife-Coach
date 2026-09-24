@@ -17,7 +17,7 @@ Order, and what "done" means today:
 - [x] #334 Delete dead code (PR #352): −6,700 lines, 15 never-scheduled jobs, Replit scaffolding; modules back to 234
 - [ ] #271 (PR #356 merged; open until the gate shows the Comrades/knee facts surviving six turns, which needs #359) One record of the client: their words exactly as sent, and typed facts linked to them (knee, Comrades, pregnancy). Retention and erasure designed first. No model call of its own: facts come from #272's understanding call. Includes #323 (normaliser can never add facts).
 - [x] #369 Link every piece of advice to what happened next (outcome data): first cut #377 (outcome by delivered move)
-- [ ] #272 (PR #359, ready, shadow) One understanding step: the AI reads each message once and writes what it means (intent, facts, corrections); code validates before saving. Replaces the ~440 patterns and the classifier call. Runs **in shadow** against the gate.
+- [ ] #272 (PR #359 merged, shadow; switch per family after 3 gate runs) One understanding step: the AI reads each message once and writes what it means (intent, facts, corrections); code validates before saving. Replaces the ~440 patterns and the classifier call. Runs **in shadow** against the gate.
 - [ ] #272 One writer, one sender: the composer writes every reply from the record. Switch one message family at a time; delete that family's old handlers in the same PR (mouth ratchet enforces it). With #320 (no prompt slice) and #322 (stored conversation state).
 - [ ] #319 Every proactive send through the same writer and sender
 - [ ] #293 Coach Health scores every live turn, daily tester digest
