@@ -1130,14 +1130,14 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
 
     const noCredits = isQuotaExhausted(err); // #395: an empty balance is a 429 that never clears
     if (noCredits || status === 401 || code === 401 || msg.includes("401")) {
-      console.error(noCredits ? "[GPT] OpenAI has no credits left (#395):" : "[GPT] OpenAI auth error (401) — check OPENAI_API_KEY env var:", msg);
+      console.error(noCredits ? "[GPT] OpenAI has no credits left (#395):" : "[GPT] OpenAI auth error (401) — check AI_INTEGRATIONS_OPENAI_API_KEY, then OPENAI_API_KEY:", msg);
       // Alert the founder, at most once an hour: neither a dead key nor an empty balance fixes itself.
       // The number is normalised like every other founder alert (Codex @ 44b007a). A dropped alert gives the
       // hourly slot back, so the next failure tries again instead of staying silent for an hour.
       const alertPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
       if (alertPhone && shouldAlertAiDown()) {
         import("./scheduler/shared").then(({ sendCriticalAlert }) => {
-          sendCriticalAlert(`whatsapp:+${alertPhone.replace(/\D/g, "")}`, noCredits ? `[KamLife] OpenAI has NO CREDITS left. Coaching replies are down until credits are added: platform.openai.com/settings/organization/billing` : `[KamLife] OpenAI API key invalid or expired (401). GPT is down. Check OPENAI_API_KEY in Railway.`)
+          sendCriticalAlert(`whatsapp:+${alertPhone.replace(/\D/g, "")}`, noCredits ? `[KamLife] OpenAI has NO CREDITS left. Coaching replies are down until credits are added: platform.openai.com/settings/organization/billing` : `[KamLife] OpenAI API key invalid or expired (401). GPT is down. Check AI_INTEGRATIONS_OPENAI_API_KEY in Railway (it wins over OPENAI_API_KEY when both are set).`)
             .then(r => { if (r === "dropped") releaseAiDownAlert(); })
             .catch(e => { releaseAiDownAlert(); console.error("[CRITICAL_ALERT_SEND]", e?.message || e); });
         }).catch(e => { releaseAiDownAlert(); console.error("[CRITICAL_ALERT_IMPORT]", e?.message || e); });

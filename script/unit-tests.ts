@@ -10776,6 +10776,8 @@ test("#395 an empty OpenAI balance is told apart from a rate limit, alerted once
   // The founder number is normalised to whatsapp:+digits like every other founder alert.
   const gpt = (await import("node:fs")).readFileSync("server/gpt.ts", "utf-8");
   assert.match(gpt, /sendCriticalAlert\(`whatsapp:\+\$\{alertPhone\.replace/);
+  // Codex on #401: a 401 alert must name the key the live clients read first.
+  assert.match(gpt, /401\)\. GPT is down\. Check AI_INTEGRATIONS_OPENAI_API_KEY/);
   assert.ok(isCoachUnavailableReply(COACH_OUT_OF_CREDITS_REPLY), "the verifier knows it is not a real answer");
   const src = (await import("node:fs")).readFileSync("server/gpt.ts", "utf-8");
   assert.ok(/isQuotaExhausted\(err\)/.test(src.slice(src.indexOf("export async function askCoachK"))), "askCoachK checks for an empty balance");
