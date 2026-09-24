@@ -37,7 +37,8 @@ async function buildDecisionInputs(user: any): Promise<{
   const dayStart = sastDayStart();
   const weekStart = sastWeekStart();
 
-  const [ledger, lastMeal, lastWeigh, weekSessions, todaySteps, loggedDays, openTraining, held, behaviourPatterns] = await Promise.all([
+  const { readWeighAskAndPresence } = await import("../scheduler/shared");
+  const [ledger, lastMeal, lastWeigh, weekSessions, todaySteps, loggedDays, openTraining, held, behaviourPatterns, asks] = await Promise.all([
     getDayLedger(user.id, { user }),
     db.select({ at: mealLogs.loggedAt }).from(mealLogs)
       .where(eq(mealLogs.userId, user.id)).orderBy(desc(mealLogs.loggedAt)).limit(1),
@@ -59,6 +60,7 @@ async function buildDecisionInputs(user: any): Promise<{
     loadOpenTrainingLoop(user),
     readHeldConstraints(user.phoneNumber, user).catch(() => NO_CONSTRAINTS),
     getBehaviourPatternContext(user.id),
+    readWeighAskAndPresence(user.id),
   ]);
   const distinctLoggedDays = Number((loggedDays as { days: number }[])[0]?.days || 0);
 
@@ -82,6 +84,7 @@ async function buildDecisionInputs(user: any): Promise<{
       steps: { avg7d: null },
       weight: {
         daysSinceWeighIn: lastWeigh[0]?.at ? sastDaysBetween(new Date(lastWeigh[0].at)) : null,
+        daysSinceWeighAsk: asks.daysSinceWeighAsk,
         trendUsable: false,
       },
       today: {
@@ -156,6 +159,7 @@ export async function oneActionCommand(
       trainingDeclined,
       foodDayClosed,
     });
+    if (decision.action.kind === "weigh") await (await import("../scheduler/shared")).recordWeighAsk(user.id);
     return formatOneAction(decision.action, firstName);
   } catch (e: any) {
     console.error("[ONE_ACTION]", e?.message || e);
