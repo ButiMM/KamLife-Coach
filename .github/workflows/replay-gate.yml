@@ -51,8 +51,13 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin "$BASE_REF"
           git worktree add "$RUNNER_TEMP/base" FETCH_HEAD
-          # The PR's gate and corpus, main's product: the only difference between the runs is the product.
-          cp script/replay-gate.ts script/replay-cases.ts script/replay-heldout.json "$RUNNER_TEMP/base/script/"
+          # THE BASELINE'S CHECKS COME FROM MAIN (Codex @ 8e19105). Main's own gate and corpus grade
+          # main's product, so a PR that deletes or weakens a hard check finds it in the baseline and
+          # missing from its own run: a regression, never a quiet green. The PR's copy is used only
+          # while main has no gate at all (the PR that introduces it).
+          if [ ! -f "$RUNNER_TEMP/base/script/replay-gate.ts" ]; then
+            cp script/replay-gate.ts script/replay-cases.ts script/replay-heldout.json "$RUNNER_TEMP/base/script/"
+          fi
           PGPASSWORD=kam psql -h 127.0.0.1 -U kam -d kamlife -c "CREATE DATABASE kamlife_base"
           cd "$RUNNER_TEMP/base"
           npm ci --no-audit --no-fund
