@@ -65,7 +65,13 @@ for p in open_prs:
     if failing:
         comment_once(n, f"cto-checks-{sha}", f"**CTO watch:** checks failing at `{short}`: {', '.join(failing)}. Fix these before new work (CLAUDE.md priority order).", comments)
     ratchet_ok = not any(r["name"] == "ratchet" and r["conclusion"] == "failure" for r in runs)
-    attack_ok = state.startswith("attack answered") or state.startswith("attack window passed")
+    is_switch = any(l["name"] == "switch" for l in p["labels"])
+    # A PR that moves real testers onto the new coach never merges on a timeout: it needs a real
+    # Codex attack, answered, and a green replay gate. Quality where it touches testers most.
+    attack_ok = state.startswith("attack answered") or (state.startswith("attack window passed") and not is_switch)
+    if is_switch and not any(r["name"] == "replay" and r["conclusion"] == "success" for r in runs):
+        attack_ok = False
+        state += " (switch: needs a green replay gate)"
     hold = any(l["name"] == "hold" for l in p["labels"]) or p.get("draft")
     if runs and not failing and not pending and ratchet_ok and attack_ok and not hold and n != 260:
         mergeable.append((n, sha, p["title"]))
