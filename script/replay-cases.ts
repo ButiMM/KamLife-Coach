@@ -490,7 +490,8 @@ export const CASES: ReplayCase[] = [
     before: ["For lunch I had two chicken breasts and rice"],
     turns: ["Dinner was the same as lunch"],
     checks: [
-      { what: "the same meal gets the same calories", kind: "sql", query: "SELECT COUNT(DISTINCT kcal_int)::int FROM meal_logs WHERE user_id = $1 AND kcal_int > 0", expect: { equals: 1 } },
+      // One query over both rows (Codex @ 779bd9e): a dinner stored at 0 kcal must not pass as "the same".
+      { what: "the same meal gets the same calories", kind: "sql", query: "SELECT (COUNT(*) = 2 AND MIN(kcal_int) = MAX(kcal_int) AND MIN(kcal_int) > 0)::int FROM meal_logs WHERE user_id = $1", expect: { equals: 1 } },
       { what: "both meals are logged", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1", expect: { equals: 2 } },
     ],
     rubric: "Dinner repeated lunch. A good reply logs dinner as the same meal with the same numbers, briefly.",
@@ -502,7 +503,8 @@ export const CASES: ReplayCase[] = [
     before: ["I had a small burger for lunch"],
     turns: ["And a large burger for dinner"],
     checks: [
-      { what: "a large burger is counted as more than a small one", kind: "sql", query: "SELECT (MAX(kcal_int) > MIN(kcal_int))::int FROM meal_logs WHERE user_id = $1", expect: { equals: 1 } },
+      // The later row (the large dinner) must be the bigger one, and neither may be 0 kcal.
+      { what: "a large burger is counted as more than a small one", kind: "sql", query: "SELECT (COUNT(*) = 2 AND MIN(kcal_int) > 0 AND (array_agg(kcal_int ORDER BY logged_at))[2] > (array_agg(kcal_int ORDER BY logged_at))[1])::int FROM meal_logs WHERE user_id = $1", expect: { equals: 1 } },
     ],
     rubric: "The client logged a small and a large burger. A good coach counts the large one as more food.",
   },
