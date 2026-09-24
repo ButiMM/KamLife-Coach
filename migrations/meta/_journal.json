@@ -118,14 +118,21 @@
       "idx": 16,
       "version": "7",
       "when": 1790294400000,
-      "tag": "0016_client_record",
+      "tag": "0016_drop_replit_chat_tables",
       "breakpoints": true
     },
     {
       "idx": 17,
       "version": "7",
+      "when": 1790298000000,
+      "tag": "0017_client_record",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
       "when": 1790380800000,
-      "tag": "0017_core_shadow",
+      "tag": "0018_core_shadow",
       "breakpoints": true
     }
   ]

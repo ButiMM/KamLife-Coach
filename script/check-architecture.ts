@@ -32,7 +32,7 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 240,
+  modules: 236,
   handlerFiles: 29,
   cronRegistrations: 25,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
@@ -75,7 +75,9 @@ const BUDGET = {
    * a plateau nudge is a product decision, and this number is where that decision gets made
    * rather than forgotten. LOWER THIS as capabilities are wired or deleted. Never raise it.
    */
-  unreachableCapabilities: 41,
+  // 41 → 28 on 2026-09-24 (#334): the unscheduled jobs and their orphaned imports went. Some of
+  // those imports were the only "reach" of test-only helpers, so the honest figure is 28, not 23.
+  unreachableCapabilities: 28,
   /**
    * GUARD #14 — see unclassifiedSenders above. Six proactive senders still choose their own
    * behavioural instruction: monday's weigh-in reminder and diet-break restore, programme's weekly
@@ -85,11 +87,13 @@ const BUDGET = {
    * adjudicated as measurement prompts, product-surface teaching, a question about the client's
    * own routine, and a target-change announcement — none of them a next-move decision — and
    * runWeeklyMondayCheckin was migrated. The ONE that remains, runPlateauDetection, is a
-   * multi-week experiment rather than a daily decision wearing a schedule, and waits on P0-7. The senders classified RECOGNITION, RESOURCE and OPERATIONAL are not in this
+   * multi-week experiment rather than a daily decision wearing a schedule, and waits on P0-7.
+   * 1 → 0 on 2026-09-24 (#334): it was never scheduled — nor were fourteen other adjudicated jobs —
+   * so it was deleted as dead code rather than migrated. The senders classified RECOGNITION, RESOURCE and OPERATIONAL are not in this
    * number because they carry no next-move instruction at all; that is a decision recorded per
    * job in the register, not an exemption anyone can take silently.
    */
-  localDecisionSenders: 1,
+  localDecisionSenders: 0,
   /**
    * GUARD #15 — see directLedgerReads above. Client-facing reads of weight_logs that do not go
    * through getWeightTruth, and therefore cannot honour do_not_mention.
@@ -114,7 +118,7 @@ const BUDGET = {
    *
    * LOWER THIS as each of those lands. Never raise it.
    */
-  directWeightReads: 11,
+  directWeightReads: 9,
   /**
    * GUARD #16 — see handRolledDayBuckets above. SQL that decides which SAST day a ledger row
    * belongs to, written somewhere other than the owner.
@@ -149,7 +153,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 417,
+  authorshipPoints: 416,
   twilioCallSites: 6,
 };
 
@@ -238,16 +242,18 @@ const AT_RISK_BUDGET = 3;
  * The check below makes this mechanical: raise a budget without logging it here and the build
  * fails exactly as if you had never raised it.
  */
-const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+// A raise the codebase has since fallen back below is marked `paidBack`, not deleted: the reason it
+// was allowed stays on record, and the frozen-budget check below measures only the raises still owed.
+const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string; paidBack?: string }> = [
   {
-    key: "modules", from: 239, to: 240, date: "2026-09-24",
+    key: "modules", from: 235, to: 236, date: "2026-09-24",
     why: "THE NEW COACH (#272, ORDERS §4 Steps 4-5). server/core/coach.ts is the understanding step and the one "
       + "composer, running in read-only shadow. It is the module every switched message family will exit through; "
       + "each switch PR deletes that family's old handler exits (docs/mouths.json falls with it). #334 (PR #352) "
       + "pays back more than this raise on its own.",
   },
   {
-    key: "modules", from: 238, to: 239, date: "2026-09-24",
+    key: "modules", from: 234, to: 235, date: "2026-09-24",
     why: "THE CLIENT RECORD (#271, ORDERS §4 Step 3). server/core/client-record.ts is the new core's first owner: "
       + "what the client sent (client_events) and what they told us (client_facts). Lane B owns new files under "
       + "server/core/ by design (docs/QUEUE.md), and nothing existing owns this question: the six regex columns on "
@@ -322,7 +328,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "Nothing was compressed to make room and no unrelated file was touched.",
   },
   {
-    key: "modules", from: 237, to: 238, date: "2026-08-17",
+    key: "modules", from: 237, to: 238, date: "2026-08-17", paidBack: "2026-09-24 (#334): modules fell below it when the dead Replit scaffolding went",
     why: "TWO modules, TWO DISTINCT REASONS — recorded separately because collapsing them into "
       + "\"PR #46 added two files\" would lose the only thing that makes either defensible. "
       + "(1) server/understanding/reentry.ts — the canonical owner of what \"returning\" MEANS. "
@@ -348,7 +354,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "resolves a budget by the highest logged `to`.",
   },
   {
-    key: "modules", from: 236, to: 237, date: "2026-08-17",
+    key: "modules", from: 236, to: 237, date: "2026-08-17", paidBack: "2026-09-24 (#334): modules fell to 235 when the dead Replit scaffolding went",
     why: "GLP-1 MEDICATION SAFETY — ONE CAPABILITY, THREE COUPLED DIMENSIONS. server/medication-context.ts (21e8c44) is a new deterministic owner of one question: is this message about medication, and is the request unsafe? Nothing answered that question before — there was no existing owner to extend. Because the answer is derived from the client's own words, the module necessarily (a) is a module, (b) runs regexes against the message so it counts as a message-deciding owner, and (c) names those regexes as constants. modules, messageDeciders and regexLiterals therefore moved TOGETHER in a single commit. They are three measurements of one boundary, not three independent architecture decisions, and the diagnosis that established this walked every one of the 95 commits between 77fe0a7 and c52eac7 to attribute each delta. TRIED FIRST, and REJECTED: folding the detection into brain/reply-verifier.ts, which would couple CLASSIFICATION to ENFORCEMENT and leave the safety detector untestable apart from the gate that consumes it; and into handlers/early-commands.ts, which would make a safety boundary a routing concern. Both would have optimised for the counter instead of the architecture. THE GOVERNOR WAS CORRECTED BEFORE IT WAS RAISED: authorshipPoints also read over budget at 423/420, and those three points were the violation strings in medicationBoundaryViolation() — rewrite REASONS sent to the model and the admin queue, never to a client, traced through all six consumers of `.violation`. reply-verifier.ts is now excluded as the gate it is, and that counter returned to 420/420 by losing false positives rather than by moving a ceiling. Only the three deltas that survived an honest measurement are raised here. NOT PAID BACK BY DELETING SOMETHING ELSE. Compressing an unrelated file to reach 236/30/316 would be cargo-cult accounting; the governor exists to force a conscious account of complexity, and this is that account. Pay it back the day medication safety can be expressed by an owner that already exists. Evidence: all correctness suites pass on this commit, the safety boundary is required by CONSTITUTION law 4, and the whole delta traces to 21e8c44.",
   },
   {
@@ -360,7 +366,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
     why: "GLP-1 MEDICATION SAFETY — ONE CAPABILITY, THREE COUPLED DIMENSIONS. server/medication-context.ts (21e8c44) is a new deterministic owner of one question: is this message about medication, and is the request unsafe? Nothing answered that question before — there was no existing owner to extend. Because the answer is derived from the client's own words, the module necessarily (a) is a module, (b) runs regexes against the message so it counts as a message-deciding owner, and (c) names those regexes as constants. modules, messageDeciders and regexLiterals therefore moved TOGETHER in a single commit. They are three measurements of one boundary, not three independent architecture decisions, and the diagnosis that established this walked every one of the 95 commits between 77fe0a7 and c52eac7 to attribute each delta. TRIED FIRST, and REJECTED: folding the detection into brain/reply-verifier.ts, which would couple CLASSIFICATION to ENFORCEMENT and leave the safety detector untestable apart from the gate that consumes it; and into handlers/early-commands.ts, which would make a safety boundary a routing concern. Both would have optimised for the counter instead of the architecture. THE GOVERNOR WAS CORRECTED BEFORE IT WAS RAISED: authorshipPoints also read over budget at 423/420, and those three points were the violation strings in medicationBoundaryViolation() — rewrite REASONS sent to the model and the admin queue, never to a client, traced through all six consumers of `.violation`. reply-verifier.ts is now excluded as the gate it is, and that counter returned to 420/420 by losing false positives rather than by moving a ceiling. Only the three deltas that survived an honest measurement are raised here. NOT PAID BACK BY DELETING SOMETHING ELSE. Compressing an unrelated file to reach 236/30/316 would be cargo-cult accounting; the governor exists to force a conscious account of complexity, and this is that account. Pay it back the day medication safety can be expressed by an owner that already exists. Evidence: all correctness suites pass on this commit, the safety boundary is required by CONSTITUTION law 4, and the whole delta traces to 21e8c44.",
   },
   {
-    key: "modules", from: 235, to: 236, date: "2026-08-12",
+    key: "modules", from: 235, to: 236, date: "2026-08-12", paidBack: "2026-09-24 (#334): modules fell to 235 when the dead Replit scaffolding went",
     why: "ONE module: server/hunger-evidence.ts, the assembler that joins the nutrition picture "
       + "to the symptom history. The doctrine it serves is the one the prompt audit found "
       + "orphaned — persistent hunger is a signal to INVESTIGATE, not proof that protein is the "
@@ -924,7 +930,7 @@ for (const [key, budget] of Object.entries(BUDGET) as Array<[keyof typeof BUDGET
 const FROZEN = { modules: 234, handlerFiles: 29, cronRegistrations: 27, messageDeciders: 29, looksLikePredicates: 20, regexLiterals: 333, authorshipPoints: 440, twilioCallSites: 18 };
 for (const [key, frozen] of Object.entries(FROZEN) as Array<[keyof typeof BUDGET, number]>) {
   if (BUDGET[key] <= frozen) continue;
-  const logged = RAISES.filter(r => r.key === key).sort((a, b) => a.to - b.to).pop();
+  const logged = RAISES.filter(r => r.key === key && !r.paidBack).sort((a, b) => a.to - b.to).pop();
   if (!logged || logged.to !== BUDGET[key]) {
     problems.push(`  ✗ BUDGET.${key} is ${BUDGET[key]}, above the frozen ${frozen}, with no matching entry in RAISES.`);
     problems.push(`    Add one — dated, saying what you tried first and how it gets paid back — or put the budget back.`);

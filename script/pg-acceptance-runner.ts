@@ -466,6 +466,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // real numbers; off unless CORE_SHADOW=on; erased with the client.
     command: ["npx", "tsx", "script/pg-core-shadow-acceptance.ts"] },
 
+  { id: "spend-cap", title: "The AI spend cap fails safe (#340)",
+    // A daily account-wide ceiling that stops model calls, an unreadable spend query that means
+    // "over", and the meaning engine under the same cap. Needs gpt_costs, admin_events, the bodies.
+    command: ["npx", "tsx", "script/pg-spend-cap-acceptance.ts"] },
+
+  { id: "spend-cap-reverts", title: "Every #340 spend-cap seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-spend-cap.sh"] },
+
   { id: "journey-lab", title: "Six critical journeys through the real system",
     // THE SIX JOURNEYS (#170). Same database, same migrations, same front door — a second job
     // would be a second copy of this infrastructure for no gain. It is in this runner for the same

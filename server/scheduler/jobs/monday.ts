@@ -1,9 +1,9 @@
 import { calorieFloor } from "../../targets";
 import {
-  db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs,
+  db, users, chatHistory, stepLogs, workoutLogs, weightLogs,
   eq, gte, lt, and, desc, asc, count, sql,
-  sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot, claimProactive,
-  getActiveClients, isPaused, loadState, saveState,
+  sendWhatsApp, canSendProactive, claimDailySlot, claimProactive,
+  getActiveClients, isPaused,
   todaySAST, thisWeekUTC, isProactivePaused,
 } from "../shared";
 import { getGoalProfile } from "../../goal-profiles";
@@ -187,25 +187,6 @@ export async function runMondayGroceries(): Promise<void> {
   }
   console.log(`[SCHEDULER] Monday grocery lists sent: ${sent}`);
 }
-
-export async function runTrainingDataLog(): Promise<void> {
-  try {
-    const [totalRow] = await db
-      .select({ total: count() })
-      .from(mealLogs)
-      .where(eq(mealLogs.source, "photo"));
-    const [correctedRow] = await db
-      .select({ corrected: count() })
-      .from(mealLogs)
-      .where(and(eq(mealLogs.source, "photo"), eq(mealLogs.corrected, true)));
-    const total = Number(totalRow?.total ?? 0);
-    const corrected = Number(correctedRow?.corrected ?? 0);
-    console.log(`[TRAINING_DATA] Week export: ${total} photo logs, ${corrected} corrected`);
-  } catch (err) {
-    console.error("[SCHEDULER] Training data log error:", err);
-  }
-}
-
 export async function runDietBreakCheck(): Promise<void> {
   if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runDietBreakCheck blocked"); return; }
   try {
