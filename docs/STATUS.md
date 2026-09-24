@@ -16,3 +16,5 @@ One line per merged PR: `HH:MM SAST · agent · PR # · what changed · gate bef
 24 Sep 14:04 · Claude Code · #298 · Customer replay gate on main: 39 cases, 8 journeys, live model and judge, reply time and cost · gate none → main baseline 3/33 hard failing, journeys 7 / 7.2 / 6.2 / 4.0 / 6.5 / 8 / 5.5 / 7.9 · +1,107 / −0
 24 Sep 18:08 · Claude Code · #345 · Scope is enforced in code: off-domain asks declined without a model; a classifier outage does not refuse a client · gate green (no regression vs main) · +366 / −16
 24 Sep 18:12 · Claude Code · #305 · Under-18s cannot complete signup; a stated age under 18 closes coaching · gate green (no regression vs main) · +321 / −13
+24 Sep 19:13 · Claude Code · #282 · A meal decline deletes nothing; a genuine correction supersedes and is recorded · gate green (no regression vs main) · +584 / −71
+24 Sep 19:13 · Claude Code · #377 · Outcomes by move: the founder's "outcomes" text compares clients who got each delivered move with those who did not · gate green · +104 / −3

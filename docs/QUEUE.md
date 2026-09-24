@@ -16,7 +16,7 @@ Order, and what "done" means today:
 - [x] #270 Replay gate green, baseline recorded on main (PR #298): scores the 8 journeys, never-see, reply time, cost; the new coach in shadow beside the old path. **Unblocked 11:05 (key fixed).** First live run green: main's journeys 7 / 7.2 / 6.2 / **4.0** / 6.5 / 8 / 5.5 / 7.9, R0.009 per message, 2.3 s mean reply. Merged 14:04 (#298). Start with the audit's 24 real failures plus every case below; add real tester threads when read-only DB access exists.
 - [x] #334 Delete dead code (PR #352): −6,700 lines, 15 never-scheduled jobs, Replit scaffolding; modules back to 234
 - [ ] #271 (PR #356) One record of the client: their words exactly as sent, and typed facts linked to them (knee, Comrades, pregnancy). Retention and erasure designed first. No model call of its own: facts come from #272's understanding call. Includes #323 (normaliser can never add facts).
-- [ ] #369 Link every piece of advice to what happened next (outcome data), built alongside #271
+- [x] #369 Link every piece of advice to what happened next (outcome data): first cut #377 (outcome by delivered move)
 - [ ] #272 (PR #359, draft, shadow) One understanding step: the AI reads each message once and writes what it means (intent, facts, corrections); code validates before saving. Replaces the ~440 patterns and the classifier call. Runs **in shadow** against the gate.
 - [ ] #272 One writer, one sender: the composer writes every reply from the record. Switch one message family at a time; delete that family's old handlers in the same PR (mouth ratchet enforces it). With #320 (no prompt slice) and #322 (stored conversation state).
 - [ ] #319 Every proactive send through the same writer and sender
@@ -33,7 +33,7 @@ Order, and what "done" means today:
 - [x] #266 Pregnancy and disordered eating (#283)
 - [x] #265 Opt-out (#285)
 - [x] #268 Calorie floors (#304)
-- [ ] #264 Meal decline (PR #282), merge when green
+- [x] #264 Meal decline (#282)
 - [x] #275 Nags and invented facts (#290)
 - [x] #267 Age gate (#305)
 - [x] #269 POPIA deletion (#307)
