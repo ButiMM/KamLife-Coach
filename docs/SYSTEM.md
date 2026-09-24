@@ -6,10 +6,14 @@ Every builder, reviewer and the CTO reads this before asking the founder a quest
 
 | Secret | Used by | Notes |
 |---|---|---|
-| `AI_INTEGRATIONS_OPENAI_API_KEY` | replay gate, gauntlet, model-drill, reality-test | The OpenAI key. Workflows read it first, then fall back to `OPENAI_API_KEY`. **Already set (Aug 2026). Don't ask for an OpenAI key.** |
+| `AI_INTEGRATIONS_OPENAI_API_KEY` | replay gate, gauntlet, model-drill, reality-test | The OpenAI key for CI. **The value stored in GitHub is rejected by OpenAI (401, key ending `wfkA`), found 24 Sep.** It must hold the same working key production uses in Railway. Production's key is separate and works. |
 | `BACKUP_DATABASE_URL` | `db-backup.yml` | Production database, for backups |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT` | `db-backup.yml` | Cloudflare R2, where backups are stored |
 | `REPLAY_HELDOUT_JSON` | replay gate | Not set yet. Held-out cases; until it exists, split the audit's real failures into seen and held-out. |
+
+## Key rotation
+
+When the OpenAI key changes in Railway, update the GitHub secret `AI_INTEGRATIONS_OPENAI_API_KEY` the same day. They're separate copies. On 24 Sep the GitHub copy was an old revoked key (ending `wfkA`), and the replay gate failed with 401 until the founder updated it.
 
 ## Services
 
@@ -36,6 +40,8 @@ The full list of names and code defaults is in the outgoing CTO's handover (22-2
 | 24 Sep | Repo public: CI free again; the database suite runs on GitHub |
 | 24 Sep | Lane B (new core) is the priority; old pipeline frozen except live harm |
 | 24 Sep | Test phone numbers and names in old Replit logs are **not** real people |
+| 24 Sep | The founder's 10 manual clients stay on manual coaching for now; **the goal is to move everyone onto the bot** once it's accurate. The founder, his clients and testers all use the bot continuously. |
+| 24 Sep | **No new paid services, API keys or subscriptions** without a written case from the CTO and a yes from the founder. It's an MVP: free first. The nightly paid sweep was dropped for a free one. |
 | parked | Coach K price: founder wants R199-R249 (code says R149). Decide when the core works. |
 
 ## Founder checks still open (Railway, only the founder can see it)
