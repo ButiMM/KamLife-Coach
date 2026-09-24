@@ -22,7 +22,7 @@ name: Tests
 # No nightly run: every change is already gated at its PR.
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
     paths-ignore:
       - "docs/**"
       - "**/*.md"
@@ -106,11 +106,8 @@ jobs:
   # the credentials are the throwaway ones this container is created with, and no production or
   # Railway data is reachable from it.
   pg-acceptance:
-    # The expensive one (~47 min). FOUNDER DECISION 2026-09-23 (option 3): it no longer runs on GitHub
-    # minutes. Codex, the independent attacker, runs this exact suite on the exact head SHA of every PR
-    # labelled `ready`, on its own machine, and posts `DBSUITE @ <sha>: PASS|FAIL|UNAVAILABLE`
-    # (see AGENTS.md). Kept here for manual runs and as the canonical definition of the suite.
-    if: github.event_name == 'workflow_dispatch'
+    # Repo is public again (2026-09-24): GitHub-hosted minutes are free, so the full database suite
+    # runs on every PR push again. Docs-only PRs still skip everything (paths-ignore above).
     runs-on: ubuntu-latest
     # Measured 47m27s on 8d96f96. 90 leaves headroom for a slow runner and still fails a hang
     # four hours before the platform default would.
