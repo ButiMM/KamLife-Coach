@@ -478,7 +478,7 @@ export async function handleFoodContext(ctx: {
   // One owner for explicit food-report language. The batch path reuses this exact gate below so
   // a trailing status question can govern bare food names without suppressing a real "I had ..."
   // report in another clause.
-  const explicitlyReportsFood = (text: string) => /\b(ate|had|having|eating|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|added|put in|putting in)\b/i.test(text);
+  const explicitlyReportsFood = (text: string) => /\b(ate|had|having|eating|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|finished (?:my |the )?(?:breakfast|lunch|dinner|supper|brunch|meal|eating)|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|added|put in|putting in)\b/i.test(text);
   const hasLogTrigger = explicitlyReportsFood(m);
 
   // Future / planning / shopping intent — describes intended eating or shopping, NOT food consumed today.

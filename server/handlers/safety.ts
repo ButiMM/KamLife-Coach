@@ -14,7 +14,8 @@ import {
   sentProactive, clientActions, adminEvents,
   gptCosts, userIntegrations, clientIntelligenceProfiles,
 } from "../../shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
+import { latestPayFastToken, cancelPayFastSubscription } from "../routes/payments";
 import { readLifeContext, lifeContextReply, WITHHELD_SITUATION } from "../life-context";
 import { looksLikeQuitMoment, quitSaveReply, readObstacle } from "../quit-save";
 import { markLifeQuiet } from "../life-quiet";
@@ -23,6 +24,7 @@ import { asksForExport, formatExport } from "../data-export";
 import { sastDayKey } from "../sast";
 import { logChat, turnUser } from "./chat-log";
 import { recordClientFacts } from "../memory";
+import { setOptOut, clearPause } from "../health-state";
 
 // Send a Twilio message with exponential-backoff retries. On complete failure,
 // records a row in adminEvents so the coach can find missed alerts on reload.
@@ -221,6 +223,35 @@ export async function runSafetyGuards(
     return acuteReply;
   }
 
+  // ---- OPT-OUT, IN THE CLIENT'S OWN WORDS (#265, moved from lifecycle.ts) ----
+  // Only the bare keyword worked, and only late in the pipeline: "stop sending me messages" was
+  // answered by the one-action nag, "Please stop messaging me" bought a 7-day holiday pause, and
+  // "Unsubscribe me" opened the billing save-menu. A request with a length ("for 2 weeks") is
+  // still the holiday pause lifecycle.ts owns. What makes it hold is the boundary: see
+  // enforceOutboundTruth, which refuses every proactive send to a client carrying opted_out.
+  const optOut = (/^(?:stop(?:\s+all)?|opt[\s-]?out|unsubscribe(?:\s+me)?)[.!\s]*$/i.test(m)
+      || /\b(?:stop|quit)\s+(?:sending|messaging|texting|contacting|whatsapp(?:ing)?)\s+me\b|\bstop\s+(?:sending\s+)?(?:me\s+)?(?:these|the|your|all)\s+messages\b|\b(?:don'?t|do\s+not)\s+(?:want|need)\s+(?:these|your|any\s+more|anymore|any)\s+messages\b|\bno\s+more\s+messages\b|\bunsubscribe\s+me\b|\b(?:don'?t|do\s+not|never)\s+(?:contact|message|text|whatsapp)\s+me\s+(?:again|anymore|any\s+more)\b/i.test(m))
+    // A LENGTH is a pause; a TOPIC is a preference, not a channel opt-out (Codex @ 7716559): "I don't
+    // want your messages about calories, just send my workouts" asked for workouts.
+    && !/\b\d+\s*(?:days?|weeks?|months?)\b|\bfor\s+(?:a|one|two|three|a\s+few)\s+(?:days?|weeks?|months?)\b|\buntil\b|\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);
+  if (optOut) {
+    const ou = await ensureSafetyTurnUser(phone, message, context.sourceMessageId, context.boundUser);
+    // NEVER CONFIRM WHAT DID NOT PERSIST (Codex @ 0c6dbe5): no token, no "no more messages".
+    const saved = !!ou && await setOptOut(ou).then(() => true, (e) => { console.error("[OPT_OUT] could not record:", e); return false; });
+    if (!saved) return `Sorry — I couldn't save that just now. Please send *STOP* again in a minute and I'll stop messaging you.`;
+    const first = (ou?.name || "").split(" ")[0];
+    const stopReply = `Done${first ? `, ${first}` : ""}. No more messages from me. Your data is saved.${ou?.subscriptionStatus === "active" ? "\n\nYour subscription is still active — reply *cancel* if you also want to stop paying." : ""}\n\nReply *START* anytime to resume coaching.`;
+    try { await logChat(ou?.id || "unknown", message, stopReply, "OPT_OUT"); } catch (e) { console.warn("[non-fatal]", e); }
+    return stopReply;
+  }
+  // START ends an opt-out or pause. Not paused: fall through — bare "start" from a new user means menu.
+  if (/^(?:start|unstop|opt[\s-]?in)[.!\s]*$/i.test(m) && context.boundUser && await clearPause(context.boundUser, { optOut: true })) {
+    const su = bindKnownSafetyUser(context.boundUser);
+    const resumeReply = `Welcome back. Coaching is resumed. Tell me what you ate today and we pick up from there.`;
+    try { await logChat(su.id, message, resumeReply, "OPT_IN"); } catch (e) { console.warn("[non-fatal]", e); }
+    return resumeReply;
+  }
+
   // ---- TERMINAL / GIT COMMAND GUARD ----
   if (TERMINAL_PATTERNS.some(re => re.test(message))) {
     return `That looks like a terminal command — I'm your fitness coach, not a shell! Send me what you ate, your workout, or ask about your goals. 💪`;
@@ -322,57 +353,47 @@ export async function runSafetyGuards(
     const boundDeleteUser = bindKnownSafetyUser(existing[0]);
     const name = boundDeleteUser.name || "there";
     await db.update(users).set({ awaitingInputType: "delete_confirm" }).where(eq(users.phoneNumber, phone));
-    return `${name}, this will permanently delete all your data — workouts, steps, food logs, measurements, weight history, and your profile. This cannot be undone.\n\nReply *DELETE* (in capitals) to confirm, or anything else to cancel.`;
+    return `${name}, this will permanently delete your account and everything in it — your profile, messages, food logs, workouts, steps, weight history, measurements and photos — and cancel any subscription first. This cannot be undone.\n\nThe one thing we keep is your payment records, for five years, because tax law requires it. They're used for nothing else.\n\nReply *DELETE* (in capitals) to confirm, or anything else to cancel.`;
   }
 
   if (m === "delete") {
     const existing = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
     if (existing.length > 0 && existing[0].awaitingInputType === "delete_confirm") {
       const uid = bindKnownSafetyUser(existing[0]).id;
-      console.log(`[POPIA DELETE] User ${uid} (${phone}) requested data deletion at ${new Date().toISOString()}`);
+      console.log(`[POPIA DELETE] User ${uid} requested data deletion at ${new Date().toISOString()}`);
+      // BILLING FIRST (#269). A deleted client must not go on being charged. The #263 cancel, and
+      // the reply promises only what PayFast confirmed. The token lives on the payment record,
+      // which is kept, so an unconfirmed cancel can still be done by hand from the admin view.
+      const token = await latestPayFastToken(phone);
+      const billing = token ? await cancelPayFastSubscription(token) : null;
+      // THE ROW GOES, SO EVERY CASCADE FIRES (#269). This used to clear a hand-kept list of tables
+      // and UPDATE the row, so every table added since — the turn ledger with raw messages,
+      // client_understanding, daily_constraints, gpt_costs — and the row's own life story, dream
+      // goal, email and targets all survived "permanently deleted". Every user_id foreign key
+      // cascades except quality_signals (SET NULL would keep the message text); the rest below are
+      // keyed by phone. The one documented exception is payment_events: financial records, kept
+      // five years for tax law and used for nothing else.
       await db.transaction(async (tx) => {
-        await tx.delete(chatHistory).where(eq(chatHistory.userId, uid));
-        await tx.delete(stepLogs).where(eq(stepLogs.userId, uid));
-        await tx.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
-        await tx.delete(weightLogs).where(eq(weightLogs.userId, uid));
-        await tx.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
-        await tx.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
-        await tx.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
-        await tx.delete(mealLogs).where(eq(mealLogs.userId, uid));
-        await tx.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
-        await tx.delete(escalations).where(eq(escalations.userId, uid));
-        await tx.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
-        await tx.delete(clientIntelligenceProfiles).where(eq(clientIntelligenceProfiles.userId, uid));
-        await tx.delete(userIntegrations).where(eq(userIntegrations.userId, uid));
-        await tx.delete(sentProactive).where(eq(sentProactive.userId, uid));
-        await tx.delete(clientActions).where(eq(clientActions.userId, uid));
-        await tx.delete(abAssignments).where(eq(abAssignments.userId, uid));
-        await tx.update(users).set({
-          phoneNumber: `[deleted-${uid}]`,
-          name: null,
-          onboardingState: null,
-          popiConsent: false,
-          awaitingInputType: null,
-          currentWeight: null,
-          heightCm: null,
-          age: null,
-          gender: null,
-          medicalConditions: null,
-          injuries: null,
-          otherMedicalNotes: null,
-          profileNotes: null,
-          lastActiveAt: null,
-          cancelledAt: new Date(),
-        }).where(eq(users.id, uid));
+        await tx.execute(sql`DELETE FROM quality_signals WHERE user_id = ${uid}`);
+        await tx.execute(sql`DELETE FROM shadow_replies WHERE user_id = ${uid} OR phone = ${phone}`);
+        await tx.execute(sql`DELETE FROM media_jobs WHERE user_id = ${uid} OR phone_number = ${phone}`);
+        await tx.execute(sql`DELETE FROM admin_events WHERE target_phone = ${phone}`);
+        await tx.delete(users).where(eq(users.id, uid));
+        if (billing) await tx.insert(adminEvents).values({
+          action: billing.ok ? "account_deleted_subscription_cancelled" : "account_deleted_subscription_cancel_unconfirmed",
+          targetPhone: null, reason: billing.detail, meta: { token },
+        });
       });
       try {
         await pool.query("DELETE FROM memories WHERE phone = $1", [phone]);
-        console.log(`[POPIA DELETE] Vector memories cleared for ${phone}`);
       } catch (memErr: any) {
         console.warn(`[POPIA DELETE] Vector memory deletion failed (non-fatal): ${memErr.message}`);
       }
-      console.log(`[POPIA DELETE] Completed — all data deleted for ${uid}`);
-      return "Done. All your data has been permanently deleted in compliance with POPIA. If you want to start fresh, just send any message.";
+      console.log(`[POPIA DELETE] Completed for ${uid}${billing ? ` — billing: ${billing.detail}` : ""}`);
+      const billingLine = !billing ? ""
+        : billing.ok ? "Your subscription is cancelled at PayFast, so you won't be charged again. "
+        : "PayFast didn't confirm the subscription cancel automatically, so it's flagged and we'll cancel it by hand today. ";
+      return `Done. Your account is permanently deleted — profile, messages, food logs, workouts, weight history and photos. ${billingLine}Only your payment records are kept, for five years, because tax law requires it.\n\nIf you want to start fresh, just send any message.`;
     }
   }
 
@@ -400,10 +421,6 @@ export async function runSafetyGuards(
         await tx.delete(sentProactive).where(eq(sentProactive.userId, uid));
         await tx.delete(clientActions).where(eq(clientActions.userId, uid));
         await tx.delete(abAssignments).where(eq(abAssignments.userId, uid));
-        // trialed_numbers is NOT deleted here, on purpose (2026-08-06). It holds a salted
-        // one-way hash and no readable personal data, it is the record that makes "one trial
-        // per number, ever" survive this exact command, and deleting it would reopen the
-        // start-cancel-start loop through the POPIA path. Do not add it to this transaction.
         await tx.delete(users).where(eq(users.id, uid));
       }
       const [created] = await tx.insert(users).values({
@@ -461,10 +478,6 @@ export async function runSafetyGuards(
         await tx.delete(sentProactive).where(eq(sentProactive.userId, uid));
         await tx.delete(clientActions).where(eq(clientActions.userId, uid));
         await tx.delete(abAssignments).where(eq(abAssignments.userId, uid));
-        // trialed_numbers is NOT deleted here, on purpose (2026-08-06). It holds a salted
-        // one-way hash and no readable personal data, it is the record that makes "one trial
-        // per number, ever" survive this exact command, and deleting it would reopen the
-        // start-cancel-start loop through the POPIA path. Do not add it to this transaction.
         await tx.delete(users).where(eq(users.id, uid));
       }
       const [created] = await tx.insert(users).values({

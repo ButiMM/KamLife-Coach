@@ -1695,15 +1695,22 @@ function lc(message: string, overrides: Partial<typeof LC_USER> = {}) {
 }
 
 // ---- STOP (opt-out) ----
+// The opt-out owner moved to the safety pre-router (#265): it must be read before any handler, or
+// "stop sending me messages" is answered by the one-action nag. Same assertions, new owner.
+const optGuard = async (message: string, overrides: Partial<typeof LC_USER> = {}) => {
+  const { runSafetyGuards } = await import("../server/handlers/safety");
+  const c = lc(message, overrides);
+  return runSafetyGuards(c.phone, c.message, c.m, { boundUser: c.user });
+};
 test("lifecycle STOP: 'stop' → returns opt-out confirmation, not null", async () => {
-  const r = await handleLifecycle(lc("STOP"));
+  const r = await optGuard("STOP");
   assert.ok(r !== null, "should handle STOP");
   assert.ok(r!.toLowerCase().includes("no more messages") || r!.toLowerCase().includes("start") || r!.toLowerCase().includes("resume"),
     `unexpected: ${r?.slice(0, 100)}`);
 });
 
 test("lifecycle STOP: 'opt out' → also handled", async () => {
-  const r = await handleLifecycle(lc("opt out"));
+  const r = await optGuard("opt out");
   assert.ok(r !== null, "should handle 'opt out'");
 });
 
@@ -1783,7 +1790,7 @@ test("lifecycle RESCUE: 'start over' from COMPLETE user → wipe confirmation", 
 // ---- START (opt-in after stop) ----
 test("lifecycle START: 'start' with paused user → resumes coaching", async () => {
   const pausedUntil = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
-  const r = await handleLifecycle(lc("start", { profileNotes: `paused_until:${pausedUntil}` }));
+  const r = await optGuard("start", { profileNotes: `paused_until:${pausedUntil}` });
   assert.ok(r !== null, "should handle START for paused user");
   assert.ok(
     r!.toLowerCase().includes("welcome back") || r!.toLowerCase().includes("resume") || r!.toLowerCase().includes("coaching"),
@@ -3038,8 +3045,8 @@ test("proactive budget: adaptive does not speak, and its line is not lost", () =
   // until its behaviour is accounted for by the new owner.
   assert.ok(/adapt_note:\$\{today\}/.test(adaptive), "adaptive marks the day it produced a line");
   assert.ok(/adapt_note:\(/.test(morning), "morning looks for that marker");
-  assert.ok(/adaptTargets\(adaptiveInputFrom\(state\)\)\.note/.test(morning),
-    "morning asks the SAME pure engine for the line — no second copy of the words to drift");
+  assert.ok(/adaptTargets\(adaptiveInputFrom\(state, client\)\)\.note/.test(morning),
+    "morning asks the SAME pure engine, with the same client demographics (#268), for the line — no second copy of the words to drift");
   assert.ok(/marked === todaySAST\(\)/.test(morning), "a marker from another day is stale");
 
   // It must reach the stalled_unlogged client, who is stalled BECAUSE they barely log — so their
@@ -3347,13 +3354,14 @@ test("sweep: the >7-day client's decision is used, not computed and discarded", 
   assert.ok(!/if \(daysSilent > 7\) continue;/.test(morning), "the client is no longer discarded");
   assert.ok(/const decision = decideProactive\(state, profile/.test(morning),
     "morning asks the decision owner for the client it used to drop");
-  assert.ok(/return formatOneAction\(decision\.action, firstName\)/.test(morning),
+  // #275: returned with a flag so the send can record a weigh-in ask — the text is still the answer.
+  assert.ok(/text: formatOneAction\(decision\.action, firstName\)/.test(morning),
     "…and the message IS its answer, not a second wording of it");
   // The degraded fallback still SPEAKS — and since 2026-08-21 it speaks under the same policy
   // contract as the gate, so a ledger failure can no longer turn into a prescription the gate
   // would have refused. Verified live: the silence rung is come_back (investigative), so
   // underPolicy passes it through unchanged and the drifting client still hears something.
-  assert.ok(/return formatOneAction\(underPolicy\(chooseAction\(\{/.test(morning),
+  assert.ok(/text: formatOneAction\(underPolicy\(chooseAction\(\{/.test(morning),
     "a drifting client must not get silence because a ledger read timed out — and the fallback "
     + "must reach the decision owner through the policy contract, not around it");
   // The shape changed on 2026-08-28 when the gate stopped taking a pre-computed verdict and

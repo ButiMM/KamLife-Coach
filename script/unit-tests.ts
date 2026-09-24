@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres, auditStoredTargets, auditStepsTarget, recalcTargetsForProfile, maintenanceKcal } from "../server/targets";
 import { predictTrajectory } from "../server/trajectory";
@@ -2302,7 +2302,6 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const MUST_BE_CALLED: Array<[fn: string, definedIn: string]> = [
       ["productVerdict", "server/food-swaps.ts"],           // the "can I eat this?" label verdict
       ["bodyPhotoAsk", "server/onboarding-physique.ts"],    // the day-zero physique read
-      ["hasTrialedBefore", "server/pricing-config.ts"],     // one trial per number, ever
       ["sttVocabularyPrompt", "server/foods.ts"],           // the transcription bias
       ["neverSilentLine", "server/reply-hygiene.ts"],       // the one fallback mouth
     ];
@@ -2376,42 +2375,90 @@ test("gains-fear masterclass survived the deletion — it is in the coaching pro
   assert.match(prompt, /HIGH PROTEIN/i, "the condition that makes the claim true is gone");
 });
 
-// ONE TRIAL PER NUMBER, EVER (2026-08-06, founder directive after the start→cancel→start
-// →cancel loop). The interesting part is not the rule — it is that the rule has to survive
-// the client deleting their own account, because that is the path the loop actually runs on.
+// THERE IS NO TRIAL (#275). Pay-to-start is the offer; the grant, its countdown job, the expired-
+// trial nudges and the greeting's "Free trial: N days remaining" line were leftovers of one.
 {
-  const { trialHash } = await import("../server/pricing-config");
-  test("trial hash: stable, salted, and the same number in any format hashes the same", async () => {
-    assert.equal(trialHash("whatsapp:+27821234567"), trialHash("0821234567"), "same SA number, two formats");
-    assert.equal(trialHash("+27821234567"), trialHash("27821234567"), "plus sign must not matter");
-    assert.notEqual(trialHash("0821234567"), trialHash("0821234568"), "different numbers must differ");
-    assert.equal(trialHash(""), "", "an unreadable number hashes to nothing");
-    assert.ok(!/\d{7}/.test(trialHash("0821234567")), "the hash must not contain the number");
+  test("no path grants, counts down or chases a free trial", async () => {
+    const onboarding = readFileSync("server/onboarding.ts", "utf-8");
+    assert.ok(!/subscriptionStatus:\s*"trial"/.test(onboarding), "completeOnboarding grants a trial again");
+    assert.ok(!/free trial/i.test(onboarding), "the greeting counts down a free trial again");
+    assert.ok(!existsSync("server/scheduler/jobs/trial.ts"), "the trial countdown job is back");
+    assert.ok(!/runTrialCountdown/.test(readFileSync("server/scheduler.ts", "utf-8")), "a trial countdown is scheduled again");
+    assert.ok(!/free trial ended|trial ended/i.test(readFileSync("server/scheduler/jobs/business.ts", "utf-8")),
+      "an expired-trial nudge is back — beta testers carry status 'trial' and would receive it");
   });
-  test("trial record survives account deletion — the loop runs through *delete my data*", async () => {
-    // betaBypassUntil closes cancel-and-return, but it lives on the user row and the row is
-    // deleted by the POPIA path. If trialed_numbers ever joins those transactions, a client
-    // can reset their own trial in two messages and this test is the only thing that notices.
-    for (const f of ["server/handlers/safety.ts", "server/handlers/lifecycle.ts"]) {
-      const src = readFileSync(f, "utf-8");
-      assert.ok(!/delete\((?:tx\.)?trialedNumbers\)|delete\(trialedNumbers\)/.test(src),
-        `${f} deletes the trialed-numbers record — that reopens the start-cancel-start loop`);
+}
+
+// "FINISHED" IS A SHOP REPORT ONLY WITH THE FOOD AS ITS SUBJECT, OR A SHOP AFTER IT (#275). "Just
+// finished dinner" is a meal to log; "Chicken finished at Shoprite" (Codex @ 0433c88) is not.
+{
+  const { UNAVAILABLE_RE } = await import("../server/food-swaps");
+  test("availability: 'finished' reads the subject and the shop", async () => {
+    for (const t of ["Chicken finished at Shoprite", "The chicken's finished", "The chicken was finished at Shoprite, what else?", "Beef finished in Checkers"])
+      assert.ok(UNAVAILABLE_RE.test(t), `"${t}" is a shop that ran out`);
+    for (const t of ["Just finished dinner, pap and wors", "I finished at 7", "We finished at the braai", "just finished at gym", "Finished my lunch"])
+      assert.ok(!UNAVAILABLE_RE.test(t), `"${t}" is not a shop report`);
+  });
+}
+
+// ONE CALORIE FLOOR (#268). Five floors disagreed; the weigh-in auto-adjust clamped a man at a
+// sex-blind 1200 and the adaptive overlay at a sex-blind 1400, both under the 1500 every other path
+// held him to. One table now, and no writer below it.
+{
+  const { calorieFloor, calculateTargets } = await import("../server/targets");
+  const { adaptTargets } = await import("../server/adaptive-targets");
+  test("calorie floor: one sex- and age-aware table", async () => {
+    assert.equal(calorieFloor({ gender: "male", age: 35 }), 1500);
+    assert.equal(calorieFloor({ gender: "female", age: 35 }), 1300);
+    assert.equal(calorieFloor({ gender: "female", age: 16 }), 1600);
+    assert.equal(calorieFloor({ gender: "male", age: 16 }), 1800);
+    assert.equal(calorieFloor({ gender: "female", age: 65 }), 1400);
+    assert.equal(calorieFloor({ gender: "male", age: 65 }), 1600);
+    assert.equal(calorieFloor({ gender: "female", age: 30, lifeSituation: "postpartum_breastfeeding" }), 1800);
+  });
+  test("calorie floor: the profile target never goes below it", async () => {
+    for (const [sex, age, life] of [["male", 55, "office"], ["female", 55, "office"], ["female", 16, "office"],
+      ["male", 70, "office"], ["female", 30, "postpartum_breastfeeding"]] as const) {
+      const { calorieTarget } = calculateTargets(45, "fat_loss", life, 0, sex, age, 150);
+      assert.ok(calorieTarget >= calorieFloor({ gender: sex, age, lifeSituation: life }),
+        `${sex} ${age} ${life}: ${calorieTarget} is under the floor`);
     }
   });
-  test("trial record holds a hash and nothing else — it outlives deletion, so it must be minimal", async () => {
-    const schema = readFileSync("shared/schema.ts", "utf-8");
-    const table = schema.slice(schema.indexOf('pgTable("trialed_numbers"'));
-    const body = table.slice(0, table.indexOf("});"));
-    assert.ok(/phone_hash/.test(body), "must key on the hash");
-    assert.ok(!/phone_number|\bname\b|user_id/.test(body),
-      "must not store a readable number, a name, or a user id — that would be a shadow profile");
+  test("calorie floor: the adaptive overlay never cuts a man under 1500", async () => {
+    const stalledMan = { baseCalories: 1500, baseProtein: 100, baseSteps: 6000, goalType: "fat_loss", weightKg: 50,
+      sick: false, stalledWeeks: 3, avgKcal7d: 1500, loggedDays7d: 6, gender: "male", age: 55 } as any;
+    const out = adaptTargets(stalledMan);
+    assert.ok(out.calorieTarget >= 1500, `a stalled 50kg man was cut to ${out.calorieTarget}`);
+    const stalledWoman = { ...stalledMan, gender: "female", baseCalories: 1500 };
+    assert.ok(adaptTargets(stalledWoman).calorieTarget >= 1400, "the overlay's own 1400 hold still applies to women");
   });
-  test("the trial lookup fails CLOSED — an error must never hand out a free trial", async () => {
-    const src = readFileSync("server/pricing-config.ts", "utf-8");
-    const fn = src.slice(src.indexOf("export async function hasTrialedBefore"));
-    const body = fn.slice(0, fn.indexOf("\nexport "));
-    assert.ok(/catch[\s\S]{0,200}return true/.test(body), "the catch must return true (refuse the trial)");
-    assert.ok(/if \(!hash\) return true/.test(body), "an unreadable number must also be refused");
+  test("calorie floor: the morning line replays the writer's answer, demographics included", async () => {
+    // Codex @ ec5dcf4: the 05:45 writer passed gender/age/life situation and the 06:00 replay did
+    // not, so a breastfeeding client was stored at 1800 and told 1770.
+    const { adaptiveInputFrom } = await import("../server/adaptive-targets");
+    const state = { goalType: "fat_loss", weightKg: 70, baseline: { calories: 1900, protein: 120, steps: 7000 },
+      health: { sick: false, recovering: false, daysSick: 0 }, food: { avgKcal7d: 1900, loggedDays7d: 6 },
+      steps: { avg7d: 7000 }, weight: { weeklyKgChange: 0, stalledWeeks: 3 } };
+    const who = { gender: "female", age: 30, lifeSituation: "postpartum_breastfeeding" };
+    const writer = adaptTargets(adaptiveInputFrom(state, who));
+    assert.ok(writer.calorieTarget >= 1800, `a breastfeeding client was cut to ${writer.calorieTarget}`);
+    assert.equal(adaptTargets(adaptiveInputFrom(state, who)).note, writer.note);
+    for (const f of ["server/scheduler/jobs/adaptive.ts", "server/scheduler/jobs/morning.ts"]) {
+      assert.ok(/adaptiveInputFrom\(\w+, \w+\)/.test(readFileSync(f, "utf-8")), `${f} derives the adaptive input without the client`);
+    }
+  });
+  test("calorie floor: every raise in the three-week re-evaluation starts from the floor", async () => {
+    // Codex @ f5a4470: a legacy 1200 baseline + 150 was written and announced as 1350 for a man.
+    const src = readFileSync("server/scheduler/jobs/business.ts", "utf-8");
+    assert.ok(!/newCal\s*=\s*(?:Math\.min\(3500, )?currentCal \+ 1[05]0/.test(src), "a raise can still land under the floor");
+  });
+  test("calorie floor: every writer reads the one table", async () => {
+    for (const [f, needle] of [["server/handlers/weight.ts", "calorieFloor(user)"], ["server/scheduler/jobs/business.ts", "calorieFloor(client)"],
+      ["server/scheduler/jobs/monday.ts", "calorieFloor(client)"], ["server/adaptive-targets.ts", "calorieFloor({"]] as const) {
+      const src = readFileSync(f, "utf-8");
+      assert.ok(src.includes(needle), `${f} no longer reads the one calorie floor`);
+      assert.ok(!/Math\.max\(\s*1[2-5]00\s*,/.test(src), `${f} clamps at a literal calorie floor again`);
+    }
   });
 }
 

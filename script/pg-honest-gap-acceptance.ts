@@ -301,7 +301,8 @@ REAL(`    EXACT FAILING BODY ON 0deb7f8: ${JSON.stringify(MEASURED_FAKE)}`);
   const body = await say(19, "what should I do today?", "SMc14a1");
   chk(!speaksAbsenceWeeks(body), "no week count is spoken to a client who has been here five days", JSON.stringify(body));
   chk(!talksToSomeoneWhoLeft(body), "they are not addressed as somebody returning from an absence", JSON.stringify(body));
-  chk(asksToLogFood(body), "they get the one thing that would actually help: report today's food", JSON.stringify(body));
+  // #275: a client who is talking to us is not handed "tell me what you ate" — reversed from C14.
+  chk(!asksToLogFood(body), "and a client who is talking to us is not told to log", JSON.stringify(body));
   chk((await meals()).length === 0, "STORED TRUTH — no meal row was invented to make the day look logged");
 }
 
@@ -312,7 +313,7 @@ REAL(`    EXACT FAILING BODY ON 0deb7f8: ${JSON.stringify(MEASURED_THEATRE)}`);
 {
   await seed(19, { mealDaysAgo: [1, 2], weighDaysAgo: 1, activeDaysAgo: 0 });
   const body = await say(19, "what should I do today?", "SMc14a2");
-  chk(asksToLogFood(body), "the ask survives — this cut deletes a reason, not the request", JSON.stringify(body));
+  chk(!asksToLogFood(body), "a present client is not told to log (#275 — the proactive ask is graded in §7)", JSON.stringify(body));
   chk(!speaksTheatreLine(body), "the day we cannot see is not complained about at the client", JSON.stringify(body));
   chk(!hasEmptyReasonSlot(body), "deleting the reason leaves no empty italics behind it", JSON.stringify(body));
   chk(!speaksAbsenceWeeks(body) && !talksToSomeoneWhoLeft(body),
@@ -328,7 +329,7 @@ REAL("\n3. THE SAME LINE ON AN ORDINARY TURN — the close, not only the one-thi
 {
   await seed(19, { mealDaysAgo: [1, 2], weighDaysAgo: 1, activeDaysAgo: 0 });
   const body = await say(19, "I'm shattered today", "SMc14a3");
-  chk(asksToLogFood(body), "the close still asks for the day's food", JSON.stringify(body));
+  chk(!asksToLogFood(body), "the close does not ask a present client for the day's food (#275)", JSON.stringify(body));
   chk(!speaksTheatreLine(body), "and does not close the turn by complaining it cannot see", JSON.stringify(body));
   chk(!hasEmptyReasonSlot(body), "no empty reason slot on the close path either", JSON.stringify(body));
 }
@@ -425,8 +426,9 @@ REAL("\n7. THE PROJECTION AND THE LADDER — what a missing gap means, asked of 
   const gapFor = (weeks: number, gap: number | null) =>
     dayStateFrom(state(weeks, gap) as any, profile(weeks) as any).daysSinceAnyLog;
 
-  chk(gapFor(0, null) === 0, "never logged, here five days → a gap of zero, not ninety-nine", String(gapFor(0, null)));
-  chk(gapFor(10, null) === 70, "never logged, here ten weeks → seventy days, their real tenure", String(gapFor(10, null)));
+  // #275: not their tenure either — a gap nobody measured is unknown, and says so.
+  chk(gapFor(0, null) === null, "never logged, here five days → unknown, not zero and not ninety-nine", String(gapFor(0, null)));
+  chk(gapFor(10, null) === null, "never logged, here ten weeks → unknown, not their tenure", String(gapFor(10, null)));
   chk(gapFor(17, null) !== 99, "99 is gone as a value this projection can produce", String(gapFor(17, null)));
   chk(gapFor(4, 5) === 5, "a measured gap passes through untouched", String(gapFor(4, 5)));
 
@@ -455,9 +457,12 @@ REAL("\n7. THE PROJECTION AND THE LADDER — what a missing gap means, asked of 
     "CONTROL — with the day still open the meal ask is unchanged", JSON.stringify(open21.todo));
 
   // AND THE ASK ITSELF — no reason, and no empty wrapper where one used to be.
-  const lateEmptyDay = day(1, true);
+  // Not at the keyboard: a client at the keyboard is not asked to log at all (#275).
+  const lateEmptyDay = day(1, false);
   const ask = chooseAction({ ...lateEmptyDay, daysSinceWeighIn: 1, loggedToday: false, hour: 21 } as any);
-  chk(ask.kind === "log", "a late empty day still reaches the log ask", ask.kind);
+  chk(ask.kind === "log", "a late empty day still reaches the log ask when we write first", ask.kind);
+  const atKeyboard = chooseAction({ ...day(1, true), daysSinceWeighIn: 1, loggedToday: false, hour: 21 } as any);
+  chk(atKeyboard.kind !== "log", "…and never when they are the one typing", atKeyboard.kind);
   chk(ask.why === "", "and it carries no reason at all", JSON.stringify(ask.why));
   chk(!speaksTheatreLine(formatOneAction(ask, "Thandi")) && !hasEmptyReasonSlot(formatOneAction(ask, "Thandi")),
     "rendered, it is the ask and nothing else", JSON.stringify(formatOneAction(ask, "Thandi")));

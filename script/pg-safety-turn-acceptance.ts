@@ -142,9 +142,12 @@ const deletePromptResponse = await handleMessage(phones.delete, deletePrompt);
 await awaitOneTurn(deleteUser.id, deletePrompt);
 check(/Reply \*DELETE\*/.test(deletePromptResponse), "POPIA confirmation behavior is unchanged");
 const deleteResponse = await handleMessage(phones.delete, "DELETE");
-const deleteTurn = await awaitOneTurn(deleteUser.id, "DELETE");
+await new Promise(resolve => setTimeout(resolve, 2000)); // let any late ledger write land, or fail
 check(/permanently deleted/i.test(deleteResponse), "confirmed POPIA deletion still completes");
-check(deleteTurn.userId === deleteUser.id && deleteTurn.version === "issue-175-safety", "confirmed deletion retains an attributable audit turn on the pseudonymised user id");
+// #269: a confirmed deletion deletes the client row, and every turn row with it (the ledger holds
+// the client's own words). The old pseudonymised-row audit turn was the thing #269 removed.
+const deletedLeft = await pool.query("SELECT (SELECT COUNT(*) FROM users WHERE id = $1)::int u, (SELECT COUNT(*) FROM turn_ledger WHERE user_id = $1)::int t", [deleteUser.id]);
+check(deletedLeft.rows[0].u === 0 && deletedLeft.rows[0].t === 0, "confirmed deletion leaves neither the client row nor any turn carrying their words");
 const originalDeletePhone = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.phoneNumber, phones.delete));
 check(originalDeletePhone.length === 0, "confirmed deletion does not recreate the original phone identity");
 

@@ -32,9 +32,9 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 239,
+  modules: 238,
   handlerFiles: 29,
-  cronRegistrations: 26,
+  cronRegistrations: 25,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
   messageDeciders: 32,
   /** `looksLikeX` predicates: hand-written guesses at intent. */
@@ -150,7 +150,7 @@ const BUDGET = {
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
   authorshipPoints: 417,
-  twilioCallSites: 16,
+  twilioCallSites: 6,
 };
 
 
@@ -308,7 +308,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "Nothing was compressed to make room and no unrelated file was touched.",
   },
   {
-    key: "modules", from: 237, to: 239, date: "2026-08-17",
+    key: "modules", from: 237, to: 238, date: "2026-08-17",
     why: "TWO modules, TWO DISTINCT REASONS — recorded separately because collapsing them into "
       + "\"PR #46 added two files\" would lose the only thing that makes either defensible. "
       + "(1) server/understanding/reentry.ts — the canonical owner of what \"returning\" MEANS. "
@@ -328,7 +328,10 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "rather than assumed. PAY THIS BACK if a future reader can show the boundary is unreachable "
       + "by mistake without it — i.e. once nothing in the codebase can name a second last-contact "
       + "field. Evidence: all correctness suites pass on this commit, including 35 resolver and 44 "
-      + "bridge assertions, both now wired into the gate.",
+      + "bridge assertions, both now wired into the gate. "
+      + "AND IT FELL: 239 -> 238 on 2026-09-23 (#275). server/scheduler/jobs/trial.ts deleted — a "
+      + "free-trial countdown for an offer that has no trial. Recorded here because the guard "
+      + "resolves a budget by the highest logged `to`.",
   },
   {
     key: "modules", from: 236, to: 237, date: "2026-08-17",

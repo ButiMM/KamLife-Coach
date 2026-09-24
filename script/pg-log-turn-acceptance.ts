@@ -140,16 +140,19 @@ REAL("\n=== ONE COACH SPEAKING, NOT ACK + STAPLED RUNG ===");
     JSON.stringify(weight.reply));
 }
 
-// ── §2 A SPARSE CLIENT IS ASKED ONCE, NOT EVERY TURN (#203 and #207 together) ────────────────
+// ── §2 A SPARSE CLIENT AT THE KEYBOARD IS NOT ASKED TO LOG (#203 and #207, amended by #275) ──
 {
   _resetOutboundDedupe();
   const c = await client({}, { meals: [1], weights: [0, 4] });
   const steps = await say(c.phone, "walked 8000 steps today");
   const weight = await say(c.phone, "87.4kg this morning");
 
-  chk(/tell me what you ate today/i.test(steps.reply),
-    "a sparse client is still asked the one measurement that would unlock coaching (#203 holds)",
+  // #275 REVERSES THE FIRST HALF: a client reporting steps is talking to us, and is no longer
+  // handed "tell me what you ate" on the reply. The receipt still stands on its own.
+  chk(!/tell me what you ate today/i.test(steps.reply),
+    "a sparse client reporting steps is not told to log (#275)",
     JSON.stringify(steps.reply));
+  chk(steps.reply.trim().length > 0, "…and the step report is acknowledged", JSON.stringify(steps.reply));
   chk(!/tell me what you ate today/i.test(weight.reply),
     "…and is not asked the identical question again on the very next durable event",
     JSON.stringify(weight.reply));

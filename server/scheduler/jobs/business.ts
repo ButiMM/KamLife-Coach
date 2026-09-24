@@ -1,3 +1,4 @@
+import { calorieFloor } from "../../targets";
 import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations,
   abExperiments, abAssignments,
@@ -149,45 +150,6 @@ export async function runSignupNudge(): Promise<void> {
         }
       }
     } catch (err) { console.error(`[SCHEDULER] Signup/win-back error — ${client.phoneNumber}:`, err); }
-  }
-
-  // Expired trial users — they experienced the product but never converted.
-  // runSignupNudge only queries "inactive"; trial users keep status="trial" after
-  // betaBypassUntil passes, so they fall through with zero conversion follow-up.
-  const expiredTrialClients = await db.select().from(users).where(
-    and(
-      eq(users.subscriptionStatus, "trial"),
-      eq(users.onboardingState, "COMPLETE"),
-      lt(users.betaBypassUntil, new Date()),
-    )
-  );
-  for (const client of expiredTrialClients) {
-    try {
-      const expiredAt = client.betaBypassUntil ? new Date(client.betaBypassUntil) : null;
-      if (!expiredAt) continue;
-      const daysSinceExpiry = Math.floor((Date.now() - expiredAt.getTime()) / 86_400_000);
-      if (daysSinceExpiry !== 1 && daysSinceExpiry !== 3 && daysSinceExpiry !== 7) continue;
-      const name = client.name || "there";
-      const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "");
-      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
-      const workouts = client.totalWorkoutsCompleted || 0;
-      const hasProgress = workouts > 0;
-      let msg: string;
-      if (daysSinceExpiry === 1) {
-        msg = hasProgress
-          ? `${name}, your free trial ended yesterday.\n\n${workouts} session${workouts !== 1 ? "s" : ""} logged — all saved.\n\nActivate for ${PRICING.monthlyDisplay} to continue exactly where you left off:\n${payLink}\n\n${PRICING.dailyDisplay}. Cancel anytime.`
-          : `${name}, your free trial ended yesterday. Your personalised programme is ready and waiting.\n\nActivate for ${PRICING.monthlyDisplay}:\n${payLink}\n\n${PRICING.dailyDisplay}. Cancel anytime.`;
-      } else if (daysSinceExpiry === 3) {
-        msg = hasProgress
-          ? `${name} — ${workouts} session${workouts !== 1 ? "s" : ""} saved and waiting. 3 days since your trial ended.\n\n${PRICING.monthlyDisplay} — your programme, food coaching, and progress all pick up immediately:\n${payLink}`
-          : `${name}, 3 days since your trial ended. Your programme is still here.\n\n${PRICING.monthlyDisplay} — ${PRICING.dailyDisplay}:\n${payLink}`;
-      } else {
-        msg = `${name}, last nudge — your trial ended a week ago.\n\n${hasProgress ? `${workouts} sessions and all your data are saved.` : "Your programme is still ready."}\n\nWhen you are ready — ${PRICING.monthlyDisplay}:\n${payLink}\n\nIf you have decided not to continue, reply STOP.`;
-      }
-      if (await claimCritical(client.id, "trial_expiry_nudge", todaySAST())) {
-        await sendCriticalAlert(client.phoneNumber, msg);
-      }
-    } catch (err) { console.error(`[SCHEDULER] Trial expiry nudge error — ${client.phoneNumber}:`, err); }
   }
 }
 
@@ -452,7 +414,7 @@ export async function runAutoCalAdjust(): Promise<void> {
         const name        = (client.name || "").split(" ")[0] || "there";
         const goal        = client.goalType || "fat_loss";
         const isFemale    = client.gender === "female";
-        const calFloor    = isFemale ? 1300 : 1500;
+        const calFloor    = calorieFloor(client);
 
         let newCal:  number | null = null;
         let newProt: number | null = null;
@@ -466,7 +428,7 @@ export async function runAutoCalAdjust(): Promise<void> {
           // guard below; without this, only plateaus got corrected, never over-shooting.
           const tooFastKg = Math.max(1.8, last * 0.03);
           if (change <= -tooFastKg && currentCal < 3500) {
-            newCal  = currentCal + 150;
+            newCal  = Math.max(calFloor, currentCal + 150);
             newProt = Math.min(currentProt + 10, 220);
             msg = `${name}, you're down ${Math.abs(change).toFixed(1)}kg in 3 weeks — faster than the safe lane, and losing that quick starts costing you muscle, not just fat. Adjustments:\n\n📈 Calories: *${currentCal} → ${newCal} kcal/day*\n🥩 Protein: *${currentProt} → ${newProt}g/day* (muscle shield)\n\nThe scale slowing down slightly is the plan working, not stalling. Keep training.`;
           } else
@@ -494,7 +456,7 @@ export async function runAutoCalAdjust(): Promise<void> {
           // change <= 0.3 incorrectly fired when someone was losing weight significantly,
           // sending "weight hasn't moved" when they were actually down 2kg.
           if (change < 0.1 && currentCal < 3500) {
-            newCal = Math.min(3500, currentCal + 150);
+            newCal = Math.max(calFloor, Math.min(3500, currentCal + 150));
             if (change < -0.3) {
               // Losing weight on a muscle-gain programme — clearer message than "hasn't moved"
               msg = `${name}, you are losing weight on a muscle-building programme — down ${Math.abs(change).toFixed(1)}kg in 3 weeks. That is the wrong direction. Calories bumped: *${currentCal} → ${newCal} kcal/day*.\n\nAdd carbs around training: rice, oats, sweet potato, banana before gym. Protein stays at ${currentProt}g.`;
@@ -509,7 +471,7 @@ export async function runAutoCalAdjust(): Promise<void> {
             msg = `${name}, your weight has gone up ${change.toFixed(1)}kg in 3 weeks. For body recomp we want steady, not gaining. Pulling calories back slightly: *${currentCal} → ${newCal} kcal/day*.\n\nProtein stays at ${currentProt}g. Keep the training consistent — that is where the muscle comes from.`;
           } else if (change < -1.5) {
             // Losing too fast — risking muscle loss
-            newCal = Math.min(3500, currentCal + 100);
+            newCal = Math.max(calFloor, Math.min(3500, currentCal + 100));
             msg = `${name}, you are losing faster than expected for recomp — ${Math.abs(change).toFixed(1)}kg in 3 weeks. That is too fast and we risk losing muscle with the fat. Adding calories back: *${currentCal} → ${newCal} kcal/day*.\n\nProtein stays at ${currentProt}g. Recomp is a slow game — the goal is body composition, not just the scale.`;
           }
           // ±0.5kg: perfect recomp — no adjustment needed

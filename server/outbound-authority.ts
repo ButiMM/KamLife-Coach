@@ -41,12 +41,13 @@ import { isDuplicateOutbound } from "./reply-hygiene";
 import { readHeldConstraints, asksForFoodToday, asksForTrainingToday } from "./held-constraints";
 import { adjudicableSessionCounts } from "./brain/reply-verifier";
 import { withheldContext, lifeContextReply, NUMBERS_PAUSED } from "./life-context";
+import { isOptedOut } from "./health-state";
 
 export interface OutboundVerdict {
   /** May this leave the building? */
   ok: boolean;
   /** Machine-readable cause, for the counters. */
-  reason?: "session_count_contradicts_record" | "duplicate" | "contradicts_held_constraint" | "numbers_withheld";
+  reason?: "session_count_contradicts_record" | "duplicate" | "contradicts_held_constraint" | "numbers_withheld" | "opted_out";
   detail?: string;
   /** What a waiting client hears instead, when the refusal has a better answer than the stall. */
   repair?: string;
@@ -73,7 +74,15 @@ export async function enforceOutboundTruth(
   const body = String(text || "");
   if (!body.trim()) return { ok: true };
 
-  // 0. NUMBERS WITHHELD (#266). A pregnant client, or one who disclosed disordered eating, was
+  // 0. THE CLIENT SAID STOP (#265). Read here, at the one door every proactive send passes —
+  //    jobs, templates, critical alerts, payment recovery, broadcasts — rather than in each job,
+  //    which is how payment recovery and sendCriticalAlert came to message people who opted out.
+  //    A reply is not refused: a client who writes to us is talking to us.
+  if (mode === "proactive" && isOptedOut(recipientUser)) {
+    return { ok: false, reason: "opted_out", detail: "recipient opted out" };
+  }
+
+  // 0b. NUMBERS WITHHELD (#266). A pregnant client, or one who disclosed disordered eating, was
   //    told "no calorie targets, no weigh-ins from me" — and every brief, card and model reply
   //    carried on sending both. Enforced HERE because both doors pass through here: one rule, every
   //    path. The promise sentence itself is exempt, or the refusal could never be delivered.

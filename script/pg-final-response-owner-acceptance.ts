@@ -150,7 +150,7 @@ const [user] = await db.insert(schema.users).values({
 } as any).returning();
 
 const clear = async () => {
-  for (const t of ["meal_logs", "step_logs", "chat_history", "turn_ledger", "workout_logs"]) {
+  for (const t of ["meal_logs", "step_logs", "chat_history", "turn_ledger", "workout_logs", "sent_proactive"]) {
     await pool.query(`DELETE FROM ${t} WHERE user_id = $1`, [user.id]);
   }
   await pool.query("DELETE FROM shadow_replies WHERE phone = $1", [phone]);

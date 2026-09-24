@@ -4,7 +4,7 @@ import {
   sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot, claimProactive, pauseReason,
   getActiveClients, isPaused, dayStart, getYesterdayLogs,
   TRAINING_SCHEDULES, programmeDaysSince, loadProactiveState,
-  todaySAST,
+  todaySAST, recordWeighAsk,
 } from "../shared";
 import { auditStoredTargets, auditStepsTarget } from "../../targets";
 import { getNumbersMode } from "../../numbers-mode";
@@ -35,7 +35,7 @@ import { getBehaviourPatternContext } from "../../intelligence/profile";
  * function from the one fact we already hold. A client who is drifting must not get silence
  * because a query timed out, and they must not get a sixth hand-written string either.
  */
-async function silenceAsk(client: any, daysSilent: number): Promise<string> {
+async function silenceAsk(client: any, daysSilent: number): Promise<{ text: string; weigh: boolean }> {
   const firstName = client.name?.split(" ")[0] || undefined;
   const behaviourPatterns = await getBehaviourPatternContext(client.id);
   const profile = {
@@ -53,9 +53,12 @@ async function silenceAsk(client: any, daysSilent: number): Promise<string> {
   };
   try {
     const state = await loadProactiveState(client);
+    // NO MEAL ROW IS NOT A GAP (#275) — but this client's silence IS measured, from their last
+    // message, and that is the absence this job exists to answer.
+    if (state.food.daysSinceAnyLog === null) state.food.daysSinceAnyLog = daysSilent;
     const decision = decideProactive(state, profile, { hour: 7 });
     console.log(`[MORNING] ${client.id.slice(-6)} silent=${daysSilent}d decision=${decision.state} action=${decision.action.kind}`);
-    return formatOneAction(decision.action, firstName);
+    return { text: formatOneAction(decision.action, firstName), weigh: decision.action.kind === "weigh" };
   } catch (e) {
     console.warn(`[MORNING] silence decision unavailable for ${client.id?.slice(-6)}:`, (e as Error)?.message);
     // Only the silence rung is reachable from here — `daysSinceAnyLog >= 3` is the first branch
@@ -66,7 +69,7 @@ async function silenceAsk(client: any, daysSilent: number): Promise<string> {
     // for lack of evidence — one decision function, two policies, chosen by which branch ran.
     // We cannot build a ProactiveState here (that is what just failed), so we apply the contract
     // directly: no evidence, no prescription.
-    return formatOneAction(underPolicy(chooseAction({
+    return { weigh: false, text: formatOneAction(underPolicy(chooseAction({
       firstName, goal: (client.goalType as any) || "general",
       dreamGoal: client.dreamGoal, biggestStruggle: client.biggestStruggle,
       lifeContext: client.lifeContext, doNotMention: client.doNotMention,
@@ -77,7 +80,7 @@ async function silenceAsk(client: any, daysSilent: number): Promise<string> {
       // NO INVESTIGATION CONTEXT ON PURPOSE (#203). `loggedToday` and `daysSinceWeighIn` above are
       // placeholders for a ledger read that just FAILED, not facts. Handing them to the downgrade
       // would ask a client to log off a value we invented, so this keeps the gate's default: hold.
-    }), { foodSufficient: false, weightSufficient: false, dreamGoal: client.dreamGoal }), firstName);
+    }), { foodSufficient: false, weightSufficient: false, dreamGoal: client.dreamGoal }), firstName) };
   }
 }
 
@@ -187,7 +190,9 @@ export async function runMorningCheckin(): Promise<void> {
       const rung = Math.min(4, Math.floor(daysSilent / 7));
       const absence = new Date(client.lastActiveAt as any).toISOString().slice(0, 10);
       if (await claimProactive(client.id, `silence_w${rung}`, absence)) {
-        await sendWhatsApp(client.phoneNumber, await silenceAsk(client, daysSilent));
+        const ask = await silenceAsk(client, daysSilent);
+        const sent = await sendWhatsApp(client.phoneNumber, ask.text);
+        if (ask.weigh && deliveryAccepted(sent)) await recordWeighAsk(client.id);
       }
       continue;
     }
@@ -214,7 +219,7 @@ export async function runMorningCheckin(): Promise<void> {
       let adaptLine = "";
       try {
         const marked = String(client.profileNotes || "").match(/adapt_note:(\d{4}-\d{2}-\d{2})/)?.[1];
-        if (marked === todaySAST()) adaptLine = adaptTargets(adaptiveInputFrom(state)).note || "";
+        if (marked === todaySAST()) adaptLine = adaptTargets(adaptiveInputFrom(state, client)).note || "";
       } catch (e) { console.warn("[MORNING] adapt line unavailable:", (e as Error)?.message); }
 
       const name = client.name || "there";
@@ -486,6 +491,7 @@ export async function runMorningCheckin(): Promise<void> {
         const breakfastAsk = `🍳 What's for breakfast?${repeatSuggestion || ""}`;
         let decisionLine = "";
         let selectedTrainingMove = false;
+        let selectedWeigh = false;
         let selectedTrainingIntervention: "standard" | "minimum" = "standard";
         try {
           // ONE READER FOR BOTH CONSTRAINTS (2026-08-25, P0-4b). This was an inline copy of the
@@ -515,6 +521,7 @@ export async function runMorningCheckin(): Promise<void> {
           });
           decisionLine = decision.line;
           selectedTrainingMove = decision.action.kind === "train";
+          selectedWeigh = decision.action.kind === "weigh";
           selectedTrainingIntervention = decision.action.intervention === "minimum_training" ? "minimum" : "standard";
           console.log(`[MORNING] ${client.id.slice(-6)} decision=${decision.state} evidence=${decision.evidence} action=${decision.action.kind}`);
         } catch (e) {
@@ -548,6 +555,7 @@ export async function runMorningCheckin(): Promise<void> {
           situationLine: await loadSituationFrame(phone).catch(() => ""),
           sickYesterday: state.health.sickYesterday,
         }), undefined, dailyTemplate);
+        if (selectedWeigh && deliveryAccepted(delivery)) await recordWeighAsk(client.id);
         if (selectedTrainingMove && deliveryAccepted(delivery)) {
           await ensureOpenTrainingLoop(client, todaySAST(), "proactive", Date.now(), selectedTrainingIntervention);
         }
