@@ -186,10 +186,12 @@ try:
     ai = h.get("ai") or {}
     err_at = ts(ai["lastErrorAt"]) if ai.get("lastErrorAt") else None
     ok_at = ts(ai["lastSuccessAt"]) if ai.get("lastSuccessAt") else None
-    if err_at and (not ok_at or err_at > ok_at) and NOW - err_at < dt.timedelta(minutes=30):
+    # Failing until a NEWER success proves otherwise, however old the error (Codex @ 124895c): a quiet
+    # night after an outage makes no calls, and silence is not recovery.
+    if err_at and (not ok_at or err_at > ok_at):
         code = ai.get("lastErrorCode") or "unknown"
         why = ("OpenAI has no credits: add credits at platform.openai.com/settings/organization/billing" if "quota" in code or code.startswith("429")
-               else "the OpenAI key is rejected: check OPENAI_API_KEY in Railway" if code.startswith("401")
+               else "the OpenAI key is rejected: check AI_INTEGRATIONS_OPENAI_API_KEY in Railway (it wins over OPENAI_API_KEY when both are set)" if code.startswith("401")
                else "OpenAI calls are failing")
         alerts.insert(0, f"**🚨 The coach can't think: {why}.** Last error `{code}` at {err_at:%H:%M} UTC, {ai.get('errorsLastHour', '?')} errors in the last hour, last success {ok_at.strftime('%H:%M') if ok_at else 'never since restart'}.")
         prod_line += f" · **AI failing** (`{code}`)"

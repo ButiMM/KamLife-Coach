@@ -10782,6 +10782,28 @@ test("#397 /health carries the ai block, and the observer is in place before any
   assert.match(readFileSync("server/ai-offline.ts", "utf-8"), /NODE_ENV === "production"\) installAiHealthObserver\(\)/);
 });
 
+// ── #395 — OUT OF CREDITS IS NOT "TRY AGAIN IN 30 SECONDS" ──────────────────────────────────
+// 24 Sep: OpenAI answered "429 You have no credits remaining". askCoachK called it a rate limit, told
+// every client to retry in 30 seconds indefinitely, retried each call three times, and never told
+// the founder. The exact error body from that night is the test input.
+test("#395 an empty OpenAI balance is told apart from a rate limit, alerted once, and answered honestly", async () => {
+  const { isQuotaExhausted, shouldAlertAiDown } = await import("../server/ai-offline");
+  const { isCoachUnavailableReply, COACH_OUT_OF_CREDITS_REPLY } = await import("../server/brain/reply-verifier");
+  const tonight = Object.assign(new Error("429 You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."), { status: 429 });
+  assert.equal(isQuotaExhausted(tonight), true, "tonight's error is an empty balance");
+  assert.equal(isQuotaExhausted({ status: 429, code: "insufficient_quota", message: "You exceeded your current quota" }), true);
+  // CONTROL: a real rate limit still retries.
+  assert.equal(isQuotaExhausted({ status: 429, message: "Rate limit reached for gpt-4o-mini" }), false);
+  const t0 = 1_000_000_000_000;
+  assert.equal(shouldAlertAiDown(t0), true, "the first failure alerts the founder");
+  assert.equal(shouldAlertAiDown(t0 + 60_000), false, "the next turn a minute later does not alert again");
+  assert.equal(shouldAlertAiDown(t0 + 61 * 60_000), true, "an hour later it alerts again if still down");
+  assert.ok(!/30 seconds|try again/i.test(COACH_OUT_OF_CREDITS_REPLY), "no promised recovery time");
+  assert.ok(isCoachUnavailableReply(COACH_OUT_OF_CREDITS_REPLY), "the verifier knows it is not a real answer");
+  const src = (await import("node:fs")).readFileSync("server/gpt.ts", "utf-8");
+  assert.ok(/isQuotaExhausted\(err\)/.test(src.slice(src.indexOf("export async function askCoachK"))), "askCoachK checks for an empty balance");
+});
+
 // ── #92 — THE UNAVAILABLE-MOUTH LIST MAY NOT GO STALE ────────────────────────────────────────
 //
 // isCoachUnavailableReply lives in brain/reply-verifier.ts because gpt.ts sits on its line
