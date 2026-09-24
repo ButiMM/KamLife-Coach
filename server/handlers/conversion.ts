@@ -55,6 +55,11 @@ export function handleConversionObjection(ctx: {
 
 
 /** The inactive-subscription gate, kept ahead of all ordinary coaching claimants. */
+/** A request for money back, in any of the ways clients ask. One definition for every door (#328). */
+export function isRefundAsk(m: string): boolean {
+  return /\b(refund|money back|money-back|want my money|give me my money|get my money|reimburse|reimbursement|charge.*back|chargeback)\b/i.test(m);
+}
+
 export async function handleSubscriptionGate(ctx: {
   phone: string;
   message: string;
@@ -70,6 +75,16 @@ export async function handleSubscriptionGate(ctx: {
 
   const isSafety = /\b(chest pain|chest hurts?|chest is (tight|sore|aching|burning)|pain in my chest|chest tightness|can.?t breathe|shortness of breath|can.?t catch my breath|heart racing|heart pounding|dizziness|feeling faint|emergency|hospital|ambulance|crisis|suicid|hurt myself)\b/i.test(m);
   if (isSafety) return null;
+
+  // THE GUARANTEE OUTRANKS THE SALES PITCH (#328). A client who cancelled and asks for their money
+  // back is owed an answer about the 14-day guarantee, not a payment link.
+  if (isRefundAsk(m)) {
+    const { handleRefundRequest } = await import("../routes/payments");
+    const reply = await handleRefundRequest(user, phone);
+    const { logChat } = await import("./chat-log");
+    await logChat(user.id, message, reply, "REFUND_REQUEST");
+    return reply;
+  }
 
   const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
   const merchantId = process.env.PAYFAST_MERCHANT_ID;

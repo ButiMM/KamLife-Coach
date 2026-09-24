@@ -1,11 +1,14 @@
 import { Link } from "wouter";
 import { ArrowLeft } from "lucide-react";
+import { PRICING, GUARANTEE_PHRASE } from "@shared/pricing";
 
 const EFFECTIVE_DATE = "1 June 2026";
 const BUSINESS_NAME = "KamLife Lifestyle Coach";
 const BUSINESS_EMAIL = "support@kamlifecoach.co.za";
-const PRICE = "R199";
-const TRIAL_DAYS = 7;
+// The price and the guarantee come from shared/pricing.ts, so these pages cannot drift from the
+// product again (#303: they promised a free trial and an old price while the service was pay-to-start).
+const PRICE = `R${PRICING.monthlyPriceZAR}`;
+const GUARANTEE_DAYS = PRICING.guaranteeDays;
 
 export default function TermsOfService() {
   return (
@@ -29,7 +32,7 @@ export default function TermsOfService() {
           <section>
             <h2 className="text-xl font-bold mb-3">1. Who we are and what this is</h2>
             <p>{BUSINESS_NAME} ("<strong>KamLife</strong>", "<strong>we</strong>", "<strong>us</strong>") operates an AI-powered fitness and nutrition coaching service delivered via WhatsApp ("<strong>Coach K</strong>").</p>
-            <p className="mt-3 text-muted-foreground">By starting a trial, subscribing, or sending a message to Coach K, you agree to these Terms. If you do not agree, please do not use the service.</p>
+            <p className="mt-3 text-muted-foreground">By subscribing, or sending a message to Coach K, you agree to these Terms. If you do not agree, please do not use the service.</p>
           </section>
 
           <section>
@@ -46,17 +49,15 @@ export default function TermsOfService() {
             <ul className="space-y-2 list-disc pl-5 text-muted-foreground">
               <li>You must be at least <strong>18 years old</strong> to subscribe.</li>
               <li>You must have a valid South African phone number and WhatsApp account.</li>
-              <li>You may only hold one active account. Creating multiple accounts to extend trial periods is prohibited.</li>
+              <li>You may only hold one active account.</li>
             </ul>
           </section>
 
           <section>
-            <h2 className="text-xl font-bold mb-3">4. Free trial</h2>
+            <h2 className="text-xl font-bold mb-3">4. No free trial: the {GUARANTEE_PHRASE}</h2>
             <ul className="space-y-2 list-disc pl-5 text-muted-foreground">
-              <li>New subscribers receive a <strong>{TRIAL_DAYS}-day free trial</strong>. No payment is taken during the trial.</li>
-              <li>If you cancel before the trial ends (reply "<em>cancel</em>" to Coach K), you will not be charged.</li>
-              <li>If you do not cancel before the trial ends, your subscription begins automatically and your first payment of <strong>{PRICE}/month</strong> is processed.</li>
-              <li>One free trial per person. We reserve the right to refuse a trial if we reasonably believe it is being claimed fraudulently.</li>
+              <li>There is <strong>no free trial</strong>. Your subscription starts, and your first payment of <strong>{PRICE}</strong> is taken, when you subscribe.</li>
+              <li>Instead, you have a <strong>{GUARANTEE_PHRASE}</strong>: if you are not happy within {GUARANTEE_DAYS} days of your first payment, reply "<em>refund</em>" to Coach K or email us, and we will refund that first payment in full.</li>
             </ul>
           </section>
 
@@ -65,7 +66,7 @@ export default function TermsOfService() {
             <ul className="space-y-2 list-disc pl-5 text-muted-foreground">
               <li>The subscription fee is <strong>{PRICE} per month</strong>, billed monthly.</li>
               <li>Payment is processed via <strong>PayFast</strong>. We do not store your card or banking details.</li>
-              <li>Your subscription renews automatically each month on the same date your trial ended, unless you cancel.</li>
+              <li>Your subscription renews automatically each month on the date of your first payment, unless you cancel.</li>
               <li>We may change the subscription price with <strong>30 days' notice</strong> via WhatsApp. Continued use after the notice period constitutes acceptance of the new price.</li>
               <li>If a payment fails, we will retry and notify you. If payment cannot be collected, your access will be suspended until payment is resolved.</li>
             </ul>
@@ -75,7 +76,7 @@ export default function TermsOfService() {
             <h2 className="text-xl font-bold mb-3">6. Cancellation</h2>
             <ul className="space-y-2 list-disc pl-5 text-muted-foreground">
               <li>You may cancel at any time by replying "<strong>cancel</strong>" to Coach K on WhatsApp, or by emailing us at <a href={`mailto:${BUSINESS_EMAIL}`} className="text-primary underline">{BUSINESS_EMAIL}</a>.</li>
-              <li>Cancellation takes effect at the end of your current billing period. You retain full access until then.</li>
+              <li>Cancelling stops your coaching and your recurring billing straight away. If you are charged after you cancel, we refund that charge in full.</li>
               <li>For our refund policy, see the <Link href="/cancellation" className="text-primary underline">Refund &amp; Cancellation Policy</Link>.</li>
             </ul>
           </section>
