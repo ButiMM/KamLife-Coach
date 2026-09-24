@@ -72,7 +72,7 @@ import { enforceCoachGuardrails } from "../server/coach-guardrails";
 import { defaultUnderstanding, coerceUnderstanding, parseUnderstanding, persistableUnderstanding } from "../server/understanding/state";
 import { compileStateBlurb, compileKeyFacts } from "../server/understanding/compiler";
 import { looksLikeRefusal } from "../server/understanding/refusal";
-import { isObviouslyInDomain } from "../server/understanding/domain-guard";
+import { isObviouslyInDomain, offDomainRedirect, classifyDomain } from "../server/understanding/domain-guard";
 import { mustStayDeterministic } from "../server/understanding/action-router";
 import { decayObservations } from "../server/understanding/state";
 import { digitizeSpokenAmounts } from "../server/utils";
@@ -5895,6 +5895,43 @@ test("domain-guard: clearly off-topic messages are NOT fast-pathed (defer to cla
     "who is going to win the elections next year in the country",
   ];
   for (const m of ambiguous) assert.ok(!isObviouslyInDomain(m), `must NOT fast-path off-topic: "${m}"`);
+});
+
+// #321: scope is enforced in code. An ask FOR an off-domain thing is declined without a model;
+// a mention of one inside a coaching message is not an ask.
+test("scope: off-domain asks are declined without a model", () => {
+  for (const m of [
+    "Can you help me write my CV for a job application?", "Should I put my savings into bitcoin this month?",
+    "Please write me an essay about the history of Soweto for school", "can you help me fix this python code that keeps crashing",
+    "give me betting tips for the weekend", "help me with my homework please",
+  ]) assert.ok(offDomainRedirect(m), `must decline: "${m}"`);
+});
+test("scope: a mention inside coaching, or a word with a second meaning, is not an off-domain ask", () => {
+  for (const m of [
+    "I lost money on crypto and can't afford the gym", "I need to update my CV so I skipped gym today",
+    "Can you share some tips for sleep", "I bought stock cubes for the stew", "write me a workout plan for this week",
+    "my doctor prescribed metformin, what should I eat?",
+  ]) assert.equal(offDomainRedirect(m), null, `must not decline: "${m}"`);
+});
+test("scope: a classifier outage is not a verdict — no client is refused because the gate is down", async () => {
+  const broken = { chat: { completions: { create: async () => { throw new Error("timeout"); } } } } as any;
+  // Codex @ c4ca8df: a code-switched Sesotho/English health message no vocabulary list covers.
+  const v = await classifyDomain(broken, "Ke opelwa ke tlhogo ebile ke a tsekela, what should I do?", { ongoing: true });
+  assert.equal(v.classification, "in-domain");
+  assert.equal(v.redirectMessage, undefined, "no scope refusal is carried");
+  // …while the deterministic asks are still declined with the classifier down.
+  assert.equal((await classifyDomain(broken, "Can you help me write my CV for a job application?")).classification, "out-of-domain");
+  const coaching = await classifyDomain(broken, "My lower back aches after sitting at my desk all day, what can I do?");
+  assert.equal(coaching.classification, "in-domain", "coaching never reaches the failing classifier");
+  // Codex @ 83a96af: a health message the old list missed was declined during an outage.
+  for (const m of ["My ankle is swollen after I fell yesterday, what should I do?", "I get dizzy when I stand up after squats",
+                   "My shoulder clicks when I lift my arm above my head"]) {
+    assert.equal((await classifyDomain(broken, m, { ongoing: true })).classification, "in-domain", `outage must not decline: "${m}"`);
+  }
+});
+test("scope: the redirect does not introduce Coach K to somebody mid-conversation", () => {
+  assert.match(offDomainRedirect("write me an essay about the French Revolution please", true) || "", /outside what I can help with/);
+  assert.match(offDomainRedirect("write me an essay about the French Revolution please", false) || "", /I'm Coach K/);
 });
 
 // A short frustrated reaction must NEVER get the cold domain redirect (2026-07-21 live miss:

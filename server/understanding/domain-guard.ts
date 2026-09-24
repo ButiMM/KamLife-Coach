@@ -12,8 +12,18 @@
  *   2. Only a substantive message that matches nothing goes to a cheap classifier.
  *   3. The classifier returns IN / PARTIAL / OUT / SAFETY.
  *
- * FAIL-OPEN TO ANSWERING: refusing a real client is a worse trust breach than replying, so
- * any error, timeout, or uncertainty defaults to in-domain. Killswitch: DOMAIN_GUARD=off.
+ * FAIL CLOSED ON THE MODEL'S VERDICT (#321, 2026-09-24). This used to answer any unrecognised
+ * verdict, and scope was otherwise prompt text. Scope was then only a line of prompt text, and Meta
+ * bans general-purpose assistants on the WhatsApp Business API from 15 Jan 2026 — "write my CV"
+ * answered by Coach K is a platform risk. Now:
+ *   0. A deterministic OFF-DOMAIN ask (CV, crypto, essays, code) is declined before any command
+ *      or model can answer it. ("What antibiotic should I take" belongs to medication-context.)
+ *   1. The in-domain fast-path still answers coaching with no model call, and it is generous, so
+ *      a real client is not left to the classifier's mercy.
+ *   2. Only YES / PARTIALLY / SAFETY from the classifier count as in-domain. NO, or any word it
+ *      was not asked for, declines with the warm redirect — never an answer. A classifier ERROR is
+ *      not a verdict: the deterministic layer (0) is the scope, and the message goes on.
+ * Killswitch: DOMAIN_GUARD=off.
  */
 
 import type OpenAI from "openai";
@@ -47,12 +57,48 @@ const REDIRECT =
 const REDIRECT_IN_CONVERSATION =
   "That one's outside what I can help with — but I'm still here on the training, food and how you're going. What did you need?";
 
+/**
+ * OFF-DOMAIN ASKS, DECIDED WITHOUT A MODEL (#321). Every pattern is ASK-SHAPED — a request for the
+ * thing, not a mention of it — so "I lost money on crypto and can't afford the gym" (a life event
+ * a coach bridges) and "my doctor prescribed metformin, what should I eat?" stay in the lane.
+ */
+const OFF_DOMAIN_ASK_RE = new RegExp(
+  [
+    // CVs, essays, homework, creative writing, emails
+    "\\b(?:write|update|fix|improve|redo|help (?:me )?(?:with|write))\\b[^.?!]{0,25}\\b(?:cv|curriculum vitae|cover letter|motivation letter)\\b",
+    "\\bwrite (?:me |us )?(?:an? |my |the )?(?:essay|poem|song|story|speech|assignment|business plan|email|letter)\\b",
+    "\\b(?:help me with|do|finish) my (?:homework|assignment|essay|thesis|dissertation)\\b",
+    // money: investing and betting asks
+    "\\b(?:invest|buy|sell|trade|trading|put)\\b[^.?!]{0,40}\\b(?:bitcoin|crypto\\w*|forex|shares|stocks|stock market|ethereum)\\b",
+    // (never bare "stock" or "share": stock cubes, "share some tips")
+    "\\b(?:bitcoin|crypto\\w*|forex|stock market)\\b[^.?!]{0,20}\\b(?:tips?|price|prediction|picks?|advice)\\b",
+    "\\b(?:betting|lotto|powerball) (?:tips|numbers|picks)\\b",
+    // code
+    "\\b(?:write|fix|debug)\\b[^.?!]{0,30}\\b(?:code|script|python|javascript|java|sql|html|excel formula)\\b",
+  ].join("|"),
+  "i",
+);
+
+/**
+ * A deterministic off-domain ask, or null. No model, no database: safe on every path. A medicine
+ * ask is not decided here: detectMedicationContext owns it ("choosing" is an unsafe request) and
+ * the reply verifier answers it with the clinical referral, whichever handler drafted the reply.
+ */
+export function offDomainRedirect(message: string, ongoing = false): string | null {
+  if (killswitchOff()) return null;
+  const t = (message || "").replace(/[\u2018\u2019]/g, "'");
+  // "I had to update my CV so I skipped gym" is a life event, not an ask: coaching words win.
+  if (OFF_DOMAIN_ASK_RE.test(t) && !isObviouslyInDomain(t)) return ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT;
+  return null;
+}
+
 // Broad IN-DOMAIN vocabulary. Generous on purpose: a false "out-of-domain" refuses a paying
 // client, which is the worst outcome. Anything health/body/food/feeling/life/logging/social
 // pleasantry stays in-domain with NO model call.
 // Clear domain signals only — NOT generic filler ("please/help/work/okay"), which also
-// appears in off-topic requests. A miss here is harmless: it just falls to the classifier,
-// which leans in-domain, so no client is ever refused — the fast-path only saves a call.
+// appears in off-topic requests. A miss here falls to the classifier, which leans in-domain —
+// but since #321 the classifier FAILS CLOSED, so a miss during a model outage is a decline.
+// Coaching vocabulary belongs here.
 const IN_DOMAIN_RE = new RegExp(
   [
     // training / movement (incl. exercise NAMES — 2026-07-16: 'show me a shoulder press'
@@ -61,7 +107,7 @@ const IN_DOMAIN_RE = new RegExp(
     // nutrition / food
     "\\beat|\\bate\\b|\\beating|food|meal|breakfast|lunch|dinner|supper|snack|protein|carbs?|calorie|kilojoule|\\bkj\\b|diet|nutrition|water|hydrate|shake|supplement|creatine|vitamin|\\bpap\\b|samp|morogo|pilchard|wors|braai|veg|fruit|sugar|craving|hungry|portion|shopping list|grocer|chicken|beef|mince|\\bfish\\b|\\begg|bread|rice|potato|afford|cheap",
     // body / health / state
-    "weight|\\bkg\\b|scale|\\bbody\\b|\\bfat\\b|muscle|slim|belly|tummy|health|healthy|sick|\\bill\\b|\\bflu\\b|fever|exhaust|energy|sleep|stress|anxious|anxiety|mood|motivat|discourag|struggl|progress|result|goal|habit|consistent|consistency|streak|check.?in|measure|recomp",
+    "weight|\\bkg\\b|\\d\\s?kgs?\\b|\\blos(?:e|ing)\\b|\\bgain(?:ing)?\\b|\\btoned?\\b|fitness|\\bin shape\\b|diabet|blood pressure|cholesterol|pregnan|\\bknee|\\bback\\b|\\bhurts?\\b|\\baches?\\b|ankle|wrist|shoulder|\\bhips?\\b|\\bneck\\b|elbow|\\bfoot\\b|\\bfeet\\b|\\blegs?\\b|\\barms?\\b|chest|headache|migraine|swell|swollen|sprain|bruis|\\bfell\\b|\\bfall(?:en)?\\b|dizz|faint|nause|vomit|cramp|\\bperiod\\b|\\bblood\\b|heart|breath|asthma|medic|doctor|clinic|hospital|symptom|scale|\\bbody\\b|\\bfat\\b|muscle|slim|belly|tummy|health|healthy|sick|\\bill\\b|\\bflu\\b|fever|exhaust|energy|sleep|stress|anxious|anxiety|mood|motivat|discourag|struggl|progress|result|goal|habit|consistent|consistency|streak|check.?in|measure|recomp",
     // coaching relationship / commands / journey pleasantries
     "coach\\b|how am i doing|how do i|feeling (?:down|low|sick|tired|good|great|better|worse|off)|hi\\b|hello|\\bhey\\b|yebo|sawubona|molo|dumela|avuxeni|thank|ngiyabonga|enkosi|dankie|good morning|log\\b|track\\b|\\bpay\\b|subscri|price|plan\\b|schedule|remind|programme",
     // budget / life situation (affects food + training, so always in-domain — a broke client's
@@ -126,6 +172,8 @@ Lean YES/PARTIALLY when unsure — this is a coaching client, not a search engin
 export async function classifyDomain(
   openai: OpenAI, message: string, opts?: { ongoing?: boolean },
 ): Promise<DomainVerdict> {
+  const ask = offDomainRedirect(message, opts?.ongoing);
+  if (ask) return { classification: "out-of-domain", reasoning: "deterministic off-domain ask", redirectMessage: ask };
   if (killswitchOff() || isObviouslyInDomain(message)) {
     return { classification: "in-domain", reasoning: "fast-path / killswitch" };
   }
@@ -143,12 +191,37 @@ export async function classifyDomain(
     const { recordGptCost } = await import("../gpt"); // lazy — keeps the pure fast-path db-free
     recordGptCost({ userId: null, model: "gpt-4o-mini", feature: "domain_guard", promptTokens: resp.usage?.prompt_tokens ?? 0, completionTokens: resp.usage?.completion_tokens ?? 0 });
     const word = (resp.choices[0]?.message?.content || "").trim().toUpperCase();
-    if (word.startsWith("NO")) return { classification: "out-of-domain", reasoning: "classifier: NO", redirectMessage: opts?.ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT };
     if (word.startsWith("SAFETY")) return { classification: "safety", reasoning: "classifier: SAFETY" };
     if (word.startsWith("PART")) return { classification: "partially-related", reasoning: "classifier: PARTIALLY" };
-    return { classification: "in-domain", reasoning: "classifier: YES" };
+    if (word.startsWith("YES")) return { classification: "in-domain", reasoning: "classifier: YES" };
+    // NO, or a word we did not ask for: not an answer we can act on, so we do not answer.
+    return { classification: "out-of-domain", reasoning: `classifier: ${word || "empty"}`, redirectMessage: opts?.ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT };
   } catch (e) {
-    // Fail-open to answering — never refuse a client because the gate hiccuped.
-    return { classification: "in-domain", reasoning: "fail-open: " + ((e as any)?.message || "error") };
+    // AN OUTAGE IS NOT A VERDICT (Codex @ c4ca8df). No vocabulary covers every language a South
+    // African client writes in: "Ke opelwa ke tlhogo ebile ke a tsekela, what should I do?" is a
+    // headache and dizziness, and declining it because a classifier timed out tells a client their
+    // symptoms are outside the coach's remit. So when the gate cannot run, scope is what the code
+    // decides deterministically (the off-domain asks above, declined on every path); the model's
+    // own NO, and any verdict it was not asked for, still decline.
+    return { classification: "in-domain", reasoning: "classifier unavailable — deterministic scope only: " + ((e as any)?.message || "error") };
   }
+}
+
+/** Spoke to us within the last day — the redirect must not introduce Coach K to them again. */
+export function recentlyActive(user: { lastActiveAt?: Date | string | null } | null | undefined): boolean {
+  const at = user?.lastActiveAt ? new Date(user.lastActiveAt).getTime() : NaN;
+  return Number.isFinite(at) && Date.now() - at < 24 * 3600_000;
+}
+
+/**
+ * THE ONE WAY A SCOPE DECLINE LEAVES (#321). Logged like the engine's own redirect, and marked
+ * conversational so no coaching instruction is stapled under "that's outside what I can help with".
+ */
+export async function declineOutOfScope(
+  userId: string, message: string, reply: string, evidence: (f: { conversationalOnly: true }) => void,
+): Promise<string> {
+  const { logChat } = await import("../handlers/chat-log"); // lazy — keeps the pure fast-path db-free
+  await logChat(userId, message, reply, "DOMAIN_REDIRECT").catch(() => {});
+  evidence({ conversationalOnly: true });
+  return reply;
 }
