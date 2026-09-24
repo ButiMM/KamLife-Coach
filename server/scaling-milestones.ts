@@ -141,7 +141,3 @@ export function evaluateScaling(activeClients: number): EvaluatedMilestone[] {
   });
 }
 
-/** The first not-yet-passed milestone — what the dashboard's progress bar points at. */
-export function nextMilestone(activeClients: number): EvaluatedMilestone | null {
-  return evaluateScaling(activeClients).find(mm => mm.status !== "passed") || null;
-}

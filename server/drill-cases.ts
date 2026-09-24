@@ -20,8 +20,6 @@
 import type OpenAI from "openai";
 import { BRAIN_SYSTEM, TOOLS } from "./brain/coach-brain";
 import { looksLikeWorkoutRequest, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, looksLikeSurplusDeficitQuestion } from "./utils";
-import { runMeaningEngine } from "./understanding/meaning-engine";
-import { seedUnderstanding } from "./understanding/seed";
 
 // HONEST CANARY: this battery drills the RAW brain in isolation. But in production many of
 // these inputs never reach the raw brain — a deterministic handler claims them first (the
@@ -239,30 +237,3 @@ export async function runDrillCase(openai: OpenAI, c: DrillCase): Promise<DrillR
   return { pass: failures.length === 0 && reply !== "" && !reply.startsWith("[DEFERRED"), warns: [...failures, ...warns], reply, protection: prodProtection(c.user) };
 }
 
-// THE FRONT DOOR DRILL (2026-07-17): with ENGINE_LIVE=on, Coach K's Meaning Engine —
-// not the retiring coach-brain — is what most open messages actually meet. Drilling
-// only the old brain tested the backstop while the front door went untested. This
-// runs the same case through the REAL engine (same prompts, seeded understanding,
-// same snapshot) and applies the same mustNot/should checks. A null engine result
-// means production would fail open to the old pipeline — that's a routing fact, not
-// a reply failure, so it passes here and the raw-brain drill covers that path.
-export async function runDrillCaseEngine(openai: OpenAI, c: DrillCase): Promise<DrillResult> {
-  const snapshot = c.snapshot || MORNING_SNAPSHOT;
-  const drillUser = {
-    id: "00000000-0000-0000-0000-00000000dr11", name: "Kam", goalType: "muscle_gain",
-    calorieTarget: 2996, proteinTarget: 199, stepsTarget: 11000, trainingMode: "gym",
-    trainingDaysPerWeek: 4, profileNotes: "", injuries: "none",
-  };
-  const prior = seedUnderstanding(drillUser, snapshot);
-  const res = await runMeaningEngine({
-    openai, user: drillUser, message: c.user, prior, snapshot,
-    history: c.history || [],
-  });
-  if (!res) {
-    return { pass: true, warns: ["engine deferred (fail-open) — covered by the raw-brain drill"], reply: "[ENGINE DEFERRED]", protection: prodProtection(c.user) };
-  }
-  const reply = res.reply;
-  const failures = c.mustNot.filter(re => re.test(reply)).map(re => `mustNot hit: ${re}`);
-  const warns = (c.should || []).filter(re => !re.test(reply)).map(re => `should missed: ${re}`);
-  return { pass: failures.length === 0 && reply !== "", warns: [...failures, ...warns], reply, protection: prodProtection(c.user) };
-}

@@ -116,18 +116,6 @@ export async function sendWhatsAppButtons(
 }
 
 /**
- * Send a WhatsApp button message for a yes/no or binary choice.
- */
-export async function sendWhatsAppYesNo(
-  to: string,
-  body: string,
-  yesLabel = "Yes, done ✅",
-  noLabel = "Not yet"
-): Promise<DeliveryResult> {
-  return sendWhatsAppButtons(to, body, [yesLabel, noLabel]);
-}
-
-/**
  * Encode a button reply for use in webhook reply handlers.
  * Returns a [BUTTONS:...] marker that whatsapp.ts strips and sends via REST API.
  */

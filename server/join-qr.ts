@@ -19,7 +19,6 @@ import { buildJoinLink, sanitiseSourceTag } from "./signup-source";
 import { PRICING, GUARANTEE_PHRASE } from "../shared/pricing";
 
 const FONT = "KamLife Sans";
-let fontReady = false;
 (() => {
   const dirs = [join(process.cwd(), "server", "assets")];
   if (typeof __dirname !== "undefined") {
@@ -32,7 +31,6 @@ let fontReady = false;
       GlobalFonts.registerFromPath(reg, FONT);
       const bold = join(dir, "LiberationSans-Bold.ttf");
       if (existsSync(bold)) GlobalFonts.registerFromPath(bold, FONT);
-      fontReady = true;
       break;
     } catch { /* try next; never crash */ }
   }
@@ -200,5 +198,3 @@ export function renderJoinCard(opts: JoinCardOpts = {}): Buffer {
 
   return canvas.toBuffer("image/png");
 }
-
-export const joinQrFontReady = () => fontReady;

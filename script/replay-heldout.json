@@ -1,0 +1,264 @@
+[
+  {
+    "id": "weight-trend-mixed",
+    "source": "AUDIT.md §2.1 #10 (#92)",
+    "seed": {
+      "currentWeight": "83",
+      "startWeight": "82"
+    },
+    "before": [
+      "82kg"
+    ],
+    "turns": [
+      "Why is my weight going up?"
+    ],
+    "checks": [
+      {
+        "what": "one reply does not both hold and push to keep fuelling",
+        "kind": "reply_not_matches",
+        "pattern": "keep fuel",
+        "flags": "i"
+      }
+    ],
+    "rubric": "The client's weight went up and they ask why. A good coach gives one coherent explanation grounded in what is logged, with one next step, not two contradictory instructions.",
+    "journey": 7
+  },
+  {
+    "id": "weigh-in-protein-instruction",
+    "source": "AUDIT.md §2.1 #11 (#93)",
+    "turns": [
+      "81.5kg this morning"
+    ],
+    "checks": [
+      {
+        "what": "the weigh-in is stored",
+        "invariant": "no_false_writes",
+        "kind": "sql",
+        "query": "SELECT COUNT(*)::int FROM weight_logs WHERE user_id = $1",
+        "expect": "nonzero"
+      },
+      {
+        "what": "a weigh-in is not answered with a protein instruction",
+        "kind": "reply_not_matches",
+        "pattern": "protein",
+        "flags": "i"
+      }
+    ],
+    "rubric": "The client reported a weigh-in. A good reply records it and reflects on the trend briefly, without bolting on an unrelated instruction.",
+    "journey": 3
+  },
+  {
+    "id": "session-count-invented",
+    "source": "AUDIT.md §2.1 #12 (#113)",
+    "turns": [
+      "How many sessions have I done so far?"
+    ],
+    "checks": [
+      {
+        "what": "no session count is invented for a client with no workouts",
+        "invariant": "no_invented_facts",
+        "kind": "reply_not_matches",
+        "pattern": "session \\d{2}|\\b\\d{2}\\s+sessions|\\b[1-9]\\d*\\s+sessions? (?:done|completed|so far)",
+        "flags": "i"
+      }
+    ],
+    "rubric": "The client has logged no workouts. A good reply says so honestly and invites them to log or start the first session.",
+    "journey": 4
+  },
+  {
+    "id": "do-better-plate",
+    "source": "AUDIT.md §2.1 #13 (#111)",
+    "before": [
+      "What should I eat for dinner tonight?"
+    ],
+    "turns": [
+      "Do better."
+    ],
+    "checks": [
+      {
+        "what": "the pushback gets a different plate, not the same one",
+        "kind": "reply_not_matches",
+        "pattern": "3 eggs",
+        "flags": "i"
+      }
+    ],
+    "rubric": "The client rejected the suggested dinner with 'Do better.' A good coach takes the feedback and offers a genuinely better, specific South African dinner.",
+    "journey": 3
+  },
+  {
+    "id": "stale-cached-totals",
+    "source": "AUDIT.md §2.1 #14 (#127)",
+    "seed": {
+      "todayProteinG": 124,
+      "todayCalories": 1100,
+      "todayCaloriesDate": "2020-01-01"
+    },
+    "turns": [
+      "How much protein do I have left today?"
+    ],
+    "checks": [
+      {
+        "what": "remaining protein is not read from a stale cache",
+        "invariant": "no_invented_facts",
+        "kind": "reply_not_matches",
+        "pattern": "~?\\b1\\s?g\\b[^.]{0,20}(?:left|to go)|\\b1g protein",
+        "flags": "i"
+      }
+    ],
+    "rubric": "Nothing is logged today. A good reply says the full protein target is still to go, and does not claim almost all of it is done.",
+    "journey": 4
+  },
+  {
+    "id": "lunch-again-for-dinner",
+    "source": "AUDIT.md §2.1 #15 (DEFECTS)",
+    "before": [
+      "I had chicken and rice for lunch"
+    ],
+    "turns": [
+      "What should I have for dinner?"
+    ],
+    "checks": [
+      {
+        "what": "dinner is not the lunch they already ate",
+        "kind": "reply_not_matches",
+        "pattern": "chicken and rice|rice and chicken",
+        "flags": "i"
+      }
+    ],
+    "rubric": "The client already had chicken and rice for lunch. A good coach suggests a different, balanced dinner that fits what is left today.",
+    "journey": 3
+  },
+  {
+    "id": "day-zero-old-client",
+    "source": "AUDIT.md §2.1 #16 (DEFECTS)",
+    "seed": {
+      "createdAt": "2026-05-27"
+    },
+    "turns": [
+      "Hi coach, I'm back"
+    ],
+    "checks": [
+      {
+        "what": "a months-old client is not told it is day 0",
+        "invariant": "no_invented_facts",
+        "kind": "reply_not_matches",
+        "pattern": "day 0|day zero|baseline photo",
+        "flags": "i"
+      }
+    ],
+    "rubric": "The client joined four months ago and is returning. A good reply welcomes them back without restarting them at day zero.",
+    "journey": 5
+  },
+  {
+    "id": "past-sick-not-sick",
+    "source": "AUDIT.md §2.1 #17 (DEFECTS)",
+    "turns": [
+      "I was sick last month but I'm fine now and ready to train"
+    ],
+    "checks": [
+      {
+        "what": "a recovered client is not put into sick mode",
+        "invariant": "no_false_writes",
+        "kind": "sql",
+        "query": "SELECT COALESCE(life_situation,'') FROM users WHERE id = $1",
+        "expect": {
+          "equals": "office"
+        }
+      },
+      {
+        "what": "the reply trains them, not rests them",
+        "kind": "reply_not_matches",
+        "pattern": "rest up|get well|feel better soon",
+        "flags": "i"
+      }
+    ],
+    "rubric": "The client was sick in the past and is ready now. A good reply welcomes them back to training with a sensible first session.",
+    "journey": 4
+  },
+  {
+    "id": "rice-not-brown-rice",
+    "source": "AUDIT.md §2.1 #19 (DEFECTS)",
+    "turns": [
+      "I had rice and tin fish for lunch"
+    ],
+    "checks": [
+      {
+        "what": "the food stored is the food named, not an upgrade of it",
+        "invariant": "no_false_writes",
+        "kind": "sql",
+        "query": "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND (COALESCE(raw_message,'') || COALESCE(items::text,'')) ~* 'brown rice|in tomato sauce'",
+        "expect": "zero"
+      }
+    ],
+    "rubric": "The client had rice and tin fish. A good reply logs exactly that.",
+    "journey": 2
+  },
+  {
+    "id": "teach-me-not-peach",
+    "source": "AUDIT.md §2.1 #20 (DEFECTS)",
+    "turns": [
+      "Teach me how to count my protein"
+    ],
+    "checks": [
+      {
+        "what": "no food is logged from a request to learn",
+        "invariant": "no_false_writes",
+        "kind": "sql",
+        "query": "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1",
+        "expect": "zero"
+      },
+      {
+        "what": "'teach' is not read as 'peach'",
+        "kind": "reply_not_matches",
+        "pattern": "peach",
+        "flags": "i"
+      }
+    ],
+    "rubric": "The client wants to learn to count protein. A good reply teaches a simple method with South African foods.",
+    "journey": 2
+  },
+  {
+    "id": "meal-log-not-menu",
+    "source": "AUDIT.md §2.1 #22 (DEFECTS)",
+    "turns": [
+      "I had a Nando's quarter chicken and chips for lunch"
+    ],
+    "checks": [
+      {
+        "what": "the meal is logged",
+        "kind": "sql",
+        "query": "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1",
+        "expect": "nonzero"
+      },
+      {
+        "what": "a meal report is not answered with menu options",
+        "kind": "reply_not_matches",
+        "pattern": "\\bmenu\\b|options at|next time (?:you )?order",
+        "flags": "i"
+      }
+    ],
+    "rubric": "The client reported what they ate. A good reply logs it and confirms it, without a restaurant menu.",
+    "journey": 2
+  },
+  {
+    "id": "protein-box-ticked",
+    "source": "AUDIT.md §2.1 #24 (DEFECTS)",
+    "before": [
+      "I had 3 eggs for breakfast"
+    ],
+    "turns": [
+      "I had a chicken breast for lunch"
+    ],
+    "checks": [
+      {
+        "what": "no 'box ticked' that is then contradicted by grams still to go",
+        "invariant": "no_invented_facts",
+        "kind": "reply_not_matches",
+        "pattern": "ticked[^.]*\\.[^.]*\\d+\\s?g (?:more )?to go",
+        "flags": "i"
+      }
+    ],
+    "rubric": "The client logged lunch. A good reply states the protein position once, consistently.",
+    "journey": 3
+  }
+]
