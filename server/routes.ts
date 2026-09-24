@@ -13,7 +13,7 @@ import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide } from "./e
 import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, getDayType } from "./programme";
 import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, classifyIntent, type ClassifiedIntent, type IntentClassification } from "./gpt";
 import { calculateTargets, getDailyStepContext } from "./targets";
-import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
+import { handleOnboarding, getMenuText, getOnboardingMealPlan, statedMinorAge, blockUnderage } from "./onboarding";
 import { saysNotWorking } from "./despair";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
@@ -42,11 +42,12 @@ import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaT
 import { handleWorkoutCommands, resumeOpenTrainingLoopOutcome, resumeWorkoutFeedbackExpectation } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
 import { handleMiscCommands } from "./handlers/misc-commands";
-import { handleLifecycle } from "./handlers/lifecycle";
+import { handleLifecycle, handlePendingCancel } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor } from "./understanding/live";
+import { classifyDomain, offDomainRedirect, recentlyActive, declineOutOfScope } from "./understanding/domain-guard";
 import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains, clausesOf } from "./understanding/messy-intake";
 import { foodDayIsClosed, readTrainingDay } from "./one-action";
 import { backfillAttributedDays } from "./backfill";
@@ -80,10 +81,6 @@ const openai = new OpenAI({ apiKey: openaiKey });
 // ============================================================
 // GET OR CREATE USER
 // ============================================================
-
-
-
-
 
 const getStepResponse = _getStepResponse;
 
@@ -163,6 +160,11 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
 
   // ---- ONBOARDING ----
   const ONBOARDING_DONE = ["COMPLETE", "COMPLETED"];
+  // AGE GATE (#267): under 18, said or on record, closes coaching; onboarding answers every turn.
+  if (user.onboardingState !== "BLOCKED_UNDERAGE" && (statedMinorAge(message) !== null
+      || (ONBOARDING_DONE.includes(user.onboardingState) && Number(user.age) > 0 && Number(user.age) < 18))) {
+    user.onboardingState = await blockUnderage(phone);
+  }
   if (user.onboardingState && !ONBOARDING_DONE.includes(user.onboardingState)) {
     return handleOnboarding(user, message, phone);
   }
@@ -350,7 +352,9 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
       return tag(confirmReply, "🧠 new engine");
     }
   }
-  const subscriptionReply = await handleSubscriptionGate({ phone, message, m, user, isCoach, isBetaTester });
+  // Billing's one exit. #315: a pending cancel answer ("1".."4", "yes") is the cancel menu's, not the numbered shortcuts' below.
+  const subscriptionReply = await handleSubscriptionGate({ phone, message, m, user, isCoach, isBetaTester })
+    ?? (["cancel_save", "cancel_confirm"].includes(user.awaitingInputType) ? await handlePendingCancel({ phone, message, m, user }) : null);
   if (subscriptionReply !== null) return subscriptionReply;
   const mediaReceiptReply = await handleMediaReceiptFollowup({ mediaUrl, m, user });
   if (mediaReceiptReply !== null) return mediaReceiptReply;
@@ -497,7 +501,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       : "replied";
     recordConversion(user.id, abAction).catch(() => {/* non-fatal */});
   }
-
 
   // ---- FRONT-DOOR NORMALIZER — the classifier's verdict applied BEFORE routing ----
   // The brain decides what the message IS; the deterministic handlers stay the hands.
@@ -957,7 +960,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     return handleMediaMessage({ phone, message, mediaUrl, mediaContentType, allMediaUrls, sourceMessageId, user, isCoach, openai, handleMessage });
   }
 
-
   // ---- WORKOUT COMMANDS (gym log, done, lifts, exercises, weight, programme) ----
   // COMMITS, DOES NOT CLAIM THE TURN. Returned unconditionally, so "I trained chest today and
   // had chicken and pap" logged the session and deleted the meal.
@@ -1041,8 +1043,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // the engine owns coaching; educational adapters stand down after a durable write.
   const wroteThisTurn = durableDomains(turnMutations()).length > 0;
   // A one-question renderer must not claim a multi-question turn or contradict its writes.
-  // The Coach below receives the complete turn after all facts are committed.
-  const miscResult = multiQuestionTurn ? null
+  // The Coach below receives the complete turn after all facts are committed. SCOPE (#321): an
+  // off-domain ask is declined here, in the commands' own exit, before any command can answer it.
+  const offScope = offDomainRedirect(message, recentlyActive(user));
+  const miscResult = offScope ? await declineOutOfScope(user.id, message, offScope, turnEvidence) : multiQuestionTurn ? null
     : await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion, wroteThisTurn });
   if (miscResult !== null) return miscResult;
   // Lifecycle owns whole commands, not "the scale is not moving" inside a long account.
@@ -1080,9 +1084,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     return tag(clarify, "food force-clarify");
   }
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
+  const scope = await classifyDomain(openai, message, { ongoing: recentlyActive(user) }); // #321: fails closed
+  if (scope.redirectMessage) return tag(await declineOutOfScope(user.id, message, scope.redirectMessage, turnEvidence), "scope");
   const gptReply = await handleGptBlock({ phone, message, m, user, intentPromise });
   return tag(gptReply, "gpt fallback");
-
 
   } catch (err: any) {
     console.error("[handleMessage FATAL]", JSON.stringify({
@@ -1188,7 +1193,5 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   //   routes/payments.ts  — /webhook/payfast, /webhook/status, /api/payfast/link
   //   routes/coach.ts     — /coach (HTML admin dashboard)
   // See server/routes/index.ts for the registry.
-
-
 
 }

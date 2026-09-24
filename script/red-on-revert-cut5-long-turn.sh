@@ -68,8 +68,10 @@ run_case "meal clauses stop reaching the food owner" server/routes.ts \
   'const foodMessage = message;' || failed=$((failed + 1))
 run_case "workout correction stops replacing the earlier belief" server/backfill.ts \
   'if (workoutMove) {' 'if (false && workoutMove) {' || failed=$((failed + 1))
+# RE-ANCHORED (#345, 2026-09-24): the out-of-scope decline now sits in front of this branch on the
+# same line. Same file, same branch, same mutation, same claim.
 run_case "single-question renderer reclaims the complete turn" server/routes.ts \
-  'const miscResult = multiQuestionTurn ? null' 'const miscResult = false ? null' || failed=$((failed + 1))
+  ': multiQuestionTurn ? null' ': false ? null' || failed=$((failed + 1))
 # THE SEAM MOVED, THE MECHANISM DID NOT (#92, 2026-09-15). This branch is still the one that asks
 # the Coach mouth for context on a decision turn and lets the composer append the canonical action;
 # only the gate in front of it was renamed, from isMultiPartAsk to the owner routes.ts already uses.

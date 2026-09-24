@@ -364,6 +364,14 @@ export const ACCEPTANCES: Acceptance[] = [
     // swallowed the client's question entirely.
     command: ["bash", "script/red-on-revert-c10-turn-reply-integrity.sh"] },
 
+  { id: "age-gate", title: "Under-18s cannot complete signup or keep being coached",
+    // #267. Needs the real front door (the onboarding state machine and the mid-conversation
+    // gate in routes.ts), users.onboarding_state and the post-transport body.
+    command: ["npx", "tsx", "script/pg-age-gate-acceptance.ts"] },
+
+  { id: "age-gate-reverts", title: "Every #267 age-gate seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-age-gate.sh"] },
+
   { id: "stt-admission", title: "A garbled transcript writes nothing, a real one writes everything",
     // CUT 4 (2026-09-12). The garble floor read `if (voiceQuality && …)` and voiceQuality is set
     // only by Whisper attempt 1 — so Scribe (which runs FIRST in production), the catch retry and
@@ -460,6 +468,28 @@ export const ACCEPTANCES: Acceptance[] = [
     // Events stored exactly and never rewritten; typed facts in the client's words; corrections
     // supersede; the engine's context carries the facts six turns later; deletion erases both.
     command: ["npx", "tsx", "script/pg-client-record-acceptance.ts"] },
+
+  { id: "meal-decline", title: "Declining a suggestion deletes nothing; a correction supersedes",
+    // #264 (AUDIT.md Trace 1). "No I'm just fine with this meal" was a CORRECTION — a leading "No"
+    // plus the word "meal" — and the lunch logged a minute earlier was deleted, unrecorded. Needs
+    // the real front door, meal_logs, turn_ledger.mutations and the post-transport body.
+    command: ["npx", "tsx", "script/pg-meal-decline-acceptance.ts"] },
+
+  { id: "meal-decline-reverts", title: "Every #264 decline/supersede seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-meal-decline.sh"] },
+
+  { id: "scope", title: "The coach stays a coach: scope is enforced in code and fails closed",
+    // #321 (Grok §8, audit C2). "Write my CV", crypto and antibiotic asks were answered, and a
+    // classifier error failed OPEN. Needs the real front door and the post-transport bodies.
+    command: ["npx", "tsx", "script/pg-scope-acceptance.ts"] },
+
+  { id: "scope-reverts", title: "Every #321 scope seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-scope.sh"] },
+
+  { id: "cancel-menu", title: "The cancel menu owns its own answers: \"4 — Just cancel\" cancels (#315)",
+    // "4" got the shopping list and the client stayed billed; "2" and "3" got the step and food-log
+    // prompts. Needs the real front door, the stored subscription and the post-transport bodies.
+    command: ["npx", "tsx", "script/pg-cancel-menu-acceptance.ts"] },
 
   { id: "core-shadow", title: "The new coach runs in read-only shadow (#272)",
     // Beside every text turn; never sends, never writes client state; sees the #271 record and the

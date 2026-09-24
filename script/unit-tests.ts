@@ -72,7 +72,7 @@ import { enforceCoachGuardrails } from "../server/coach-guardrails";
 import { defaultUnderstanding, coerceUnderstanding, parseUnderstanding, persistableUnderstanding } from "../server/understanding/state";
 import { compileStateBlurb, compileKeyFacts } from "../server/understanding/compiler";
 import { looksLikeRefusal } from "../server/understanding/refusal";
-import { isObviouslyInDomain } from "../server/understanding/domain-guard";
+import { isObviouslyInDomain, offDomainRedirect, classifyDomain } from "../server/understanding/domain-guard";
 import { mustStayDeterministic } from "../server/understanding/action-router";
 import { decayObservations } from "../server/understanding/state";
 import { digitizeSpokenAmounts } from "../server/utils";
@@ -5912,6 +5912,61 @@ test("client record: extracted facts must be typed and in the client's own words
   assert.deepEqual(parseExtraction(JSON.stringify({ facts: "x" }), msg), []);
 });
 
+// Codex @ 4c36554: verbatim is not enough — quoted and reported words belong to someone else.
+test("client record: a quote or reported speech is not the client's own fact", async () => {
+  const { parseExtraction } = await import("../server/core/client-record");
+  const fact = (statement: string) => JSON.stringify({ facts: [{ kind: "life_event", subject: "pregnancy", statement, detail: {}, valid_from: null, valid_until: null, corrects: null }] });
+  // The attack's exact case, and its curly-quote and unquoted-report variants.
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), 'My sister said "I\'m pregnant" and asked if she can still train.'), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My sister said \u201cI\u2019m pregnant\u201d and asked if she can still train."), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My sister told me that I'm pregnant, can she train?"), []);
+  assert.deepEqual(parseExtraction(fact("I'm training for Comrades"), "My friend says I'm training for Comrades too hard."), []);
+  // Codex @ 63f489a: reported speech in the languages our clients mix in.
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My sister o re I'm pregnant, can she still train?"), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "Usisi wami uthi I'm pregnant, angaqeqesha?"), []);
+  assert.deepEqual(parseExtraction(fact("I'm pregnant"), "My suster sê I'm pregnant, kan sy nog oefen?"), []);
+  // CONTROLS: the client's own voice still counts, even when a quote appears elsewhere.
+  assert.equal(parseExtraction(fact("I'm pregnant"), "I'm pregnant, 12 weeks.").length, 1);
+  assert.equal(parseExtraction(fact("I'm pregnant"), 'I\'m pregnant and my mom said "rest more".').length, 1);
+});
+
+// #321: scope is enforced in code. An ask FOR an off-domain thing is declined without a model;
+// a mention of one inside a coaching message is not an ask.
+test("scope: off-domain asks are declined without a model", () => {
+  for (const m of [
+    "Can you help me write my CV for a job application?", "Should I put my savings into bitcoin this month?",
+    "Please write me an essay about the history of Soweto for school", "can you help me fix this python code that keeps crashing",
+    "give me betting tips for the weekend", "help me with my homework please",
+  ]) assert.ok(offDomainRedirect(m), `must decline: "${m}"`);
+});
+test("scope: a mention inside coaching, or a word with a second meaning, is not an off-domain ask", () => {
+  for (const m of [
+    "I lost money on crypto and can't afford the gym", "I need to update my CV so I skipped gym today",
+    "Can you share some tips for sleep", "I bought stock cubes for the stew", "write me a workout plan for this week",
+    "my doctor prescribed metformin, what should I eat?",
+  ]) assert.equal(offDomainRedirect(m), null, `must not decline: "${m}"`);
+});
+test("scope: a classifier outage is not a verdict — no client is refused because the gate is down", async () => {
+  const broken = { chat: { completions: { create: async () => { throw new Error("timeout"); } } } } as any;
+  // Codex @ c4ca8df: a code-switched Sesotho/English health message no vocabulary list covers.
+  const v = await classifyDomain(broken, "Ke opelwa ke tlhogo ebile ke a tsekela, what should I do?", { ongoing: true });
+  assert.equal(v.classification, "in-domain");
+  assert.equal(v.redirectMessage, undefined, "no scope refusal is carried");
+  // …while the deterministic asks are still declined with the classifier down.
+  assert.equal((await classifyDomain(broken, "Can you help me write my CV for a job application?")).classification, "out-of-domain");
+  const coaching = await classifyDomain(broken, "My lower back aches after sitting at my desk all day, what can I do?");
+  assert.equal(coaching.classification, "in-domain", "coaching never reaches the failing classifier");
+  // Codex @ 83a96af: a health message the old list missed was declined during an outage.
+  for (const m of ["My ankle is swollen after I fell yesterday, what should I do?", "I get dizzy when I stand up after squats",
+                   "My shoulder clicks when I lift my arm above my head"]) {
+    assert.equal((await classifyDomain(broken, m, { ongoing: true })).classification, "in-domain", `outage must not decline: "${m}"`);
+  }
+});
+test("scope: the redirect does not introduce Coach K to somebody mid-conversation", () => {
+  assert.match(offDomainRedirect("write me an essay about the French Revolution please", true) || "", /outside what I can help with/);
+  assert.match(offDomainRedirect("write me an essay about the French Revolution please", false) || "", /I'm Coach K/);
+});
+
 // A short frustrated reaction must NEVER get the cold domain redirect (2026-07-21 live miss:
 // "Read‼️‼️" got "I'm Coach K, here for your fitness journey").
 test("domain-guard: a 1-2 word reaction is always in-domain, never cold-redirected", () => {
@@ -6670,6 +6725,36 @@ test("outcomes: every query renders to real SQL with bound parameters", async ()
   assert.deepEqual(rendered.map(r => r.params.length), [2, 2, 2, 0]);
   assert.match(rendered[0].sql, /"weight_logs"\."user_id" in \(\$1, \$2\)/);
   assert.match(rendered[1].sql, /interval '2 hours'/, "food days must be counted in SAST, not UTC");
+});
+
+test("outcomes by move (#369): clients who got a move are compared with those who did not, honestly", async () => {
+  const { compareByMove, formatMoveComparison } = await import("../server/outcomes");
+  const c = (id: string, start: number, latest: number) => ({ userId: id, signupDay: "2026-05-01", goal: "fat_loss" as any,
+    weeksOnProgramme: 8, startWeightKg: start, latestWeightKg: latest, weighIns: 2, foodLogDays: 40, sessions: 16, referrals: 0 });
+  const got = ["a1", "a2", "a3", "a4", "a5"].map(id => c(id, 90, 87));            // all lost 3kg
+  const not = ["b1", "b2", "b3", "b4", "b5"].map((id, i) => c(id, 90, i < 1 ? 87 : 90)); // one of five
+  const moves = new Map<string, Set<string>>(got.map(o => [o.userId, new Set(["protein_first"])]));
+  const [row] = compareByMove([...got, ...not], moves, 8);
+  assert.equal(row.kind, "protein_first");
+  assert.equal(row.got.successRate, 1);
+  assert.equal(row.didnt.successRate, 0.2);
+  assert.equal(row.verdict, "better");
+  assert.match(formatMoveComparison([row], 8), /protein_first: 5\/5 vs 1\/5 — ✅ did better/);
+  // THREE CLIENTS ARE AN ANECDOTE: no verdict either way, whatever the rates.
+  const few = compareByMove([...got.slice(0, 3), ...not], new Map(got.slice(0, 3).map(o => [o.userId, new Set(["walk"])])), 8);
+  assert.equal(few[0].verdict, "too_few");
+  // Advice nobody got produces no row; nobody at the week mark produces no row either.
+  assert.deepEqual(compareByMove([...got, ...not], new Map(), 8), []);
+  assert.match(formatMoveComparison([], 8), /no delivered advice/);
+});
+
+test("outcomes by move (#369): only advice that was recommended AND delivered counts", async () => {
+  const { drizzle } = await import("drizzle-orm/node-postgres");
+  const { movesQuery } = await import("../server/audit/outcomes-command");
+  const { sql: text } = movesQuery(drizzle({} as any) as any).toSQL();
+  assert.match(text, /->>'disposition' = 'instructed'/);
+  assert.match(text, /"delivered_body"/);
+  assert.match(text, /group by/i);
 });
 
 test("outcomes: the founder's phrasings all reach the command", () => {

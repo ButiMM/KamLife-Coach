@@ -62,7 +62,7 @@ const BUDGET = {
    * to the true figure in one deliberate commit. Until then this red line is the marker, and it is
    * the ONLY thing in this guard that is red — one red line means something, four never did.
    */
-  regexLiterals: 441,
+  regexLiterals: 440,
   /**
    * GUARD #13 — see unreachableExports above. Sixty-two capabilities cannot be reached by a
    * client message today. This budget is deliberately set THREE BELOW that, so this guard is RED
@@ -153,7 +153,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 416,
+  authorshipPoints: 412,
   twilioCallSites: 6,
 };
 
@@ -253,6 +253,13 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "pays back more than this raise on its own.",
   },
   {
+    key: "unreachableCapabilities", from: 28, to: 29, date: "2026-09-24",
+    why: "THE CLIENT RECORD LEARNS NOTHING ON ITS OWN (#271, CTO 24 Sep: no extra model call). applyFacts is the "
+      + "record's validated door for the facts the new core's single understanding call returns; that call is #359, "
+      + "stacked on this PR. Until it lands, only the acceptance calls applyFacts. Paid back by #359 wiring it.",
+    paidBack: "2026-09-24, #359 wires applyFacts to the understanding call in production (runShadow).",
+  },
+  {
     key: "modules", from: 234, to: 235, date: "2026-09-24",
     why: "THE CLIENT RECORD (#271, ORDERS §4 Step 3). server/core/client-record.ts is the new core's first owner: "
       + "what the client sent (client_events) and what they told us (client_facts). Lane B owns new files under "
@@ -293,7 +300,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "so 21 is the smallest truthful current baseline. FROM HERE IT FALLS ONLY.",
   },
   {
-    key: "regexLiterals", from: 318, to: 441, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12, to 441 on 2026-09-15)",
+    key: "regexLiterals", from: 318, to: 440, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12, to 441 on 2026-09-15, to 440 on 2026-09-23)",
     why: "NOT A RAISE — A CORRECTED MEASUREMENT, and the follow-up this budget's own comment "
       + "declared owed on 2026-08-17: \"repair the matcher to see multi-line assignments and "
       + "re-baseline to the true figure in one deliberate commit.\" This is that commit. The "
@@ -647,6 +654,11 @@ const NOT_CLIENT_FACING_RETURNS: Array<[string, RegExp, string]> = [
     "server/core/client-record.ts",
     /^\s*return "WHAT THIS CLIENT HAS TOLD YOU/,
     "factsForCoach renders the fact store into the meaning engine's system prompt; the model reads it, the client never does",
+  ],
+  [
+    "server/outcomes.ts",
+    /^\s*return `\\n\\n\*By move\* \(clients who got it/,
+    "formatMoveComparison (#369) is the founder's coach-only outcomes report, reached only by the outcomes command; never sent to a client",
   ],
   [
     "server/index.ts",
