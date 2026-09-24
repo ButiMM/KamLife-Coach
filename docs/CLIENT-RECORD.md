@@ -98,11 +98,11 @@ writes, once the new composer reads the record instead:
 | Portion memory | `server/portion-memory.ts` |
 | Held constraints | `server/held-constraints.ts` |
 
-**Interim, also deleted by the switch PR:**
-- the hook that feeds facts into the old Meaning Engine (`live.ts`, `meaning-engine.ts`);
-- the separate `recordAndLearn` model call. At the switch, fact extraction folds into #359's single
-  understanding call.
+**Interim, also deleted by the switch PR:** the hook that feeds facts into the old Meaning Engine
+(`live.ts`, `meaning-engine.ts`).
 
-Until then, the call costs about R0.002 per inbound message (typical case: ~600 input and ~40 output
-tokens on gpt-4o-mini), and R0.008 at most (1,200 input and 400 output tokens). It is logged in
-`gpt_costs` as `feature = 'client_record'`, so the real figure is one query away.
+**No model call of its own (CTO, 24 Sep).** The record stores every message at the door with no model
+call (`recordAtDoor`). Facts are extracted by the new core's single understanding call (#359), which
+returns a `facts` array using `FACTS_INSTRUCTIONS` and the client's `knownFacts`. The record validates
+that answer and stores it through `applyFacts`: whole statements in the client's words only, and
+same-kind supersede. Until #359 runs, events are stored and no new facts are learned.

@@ -286,9 +286,9 @@ export async function processTextAsync(
   } finally {
     // Media crash-safety net: the client was replied to (or got a handled error) → close the job.
     if (mediaUrl) await completeMediaJob(sourceMessageId).catch(() => {});
-    // THE CLIENT RECORD (#271): what they sent, exactly, and what it tells us about them — on a
+    // THE CLIENT RECORD (#271): what they sent, exactly — on a
     // failed turn too. After the turn because a first message creates the client's row.
-    void import("../core/client-record").then(m => m.recordAndLearn({ phone, rawText: message, mediaType, sourceMessageId, rootId }));
+    void import("../core/client-record").then(m => m.recordAtDoor({ phone, rawText: message, mediaType, sourceMessageId, rootId }));
   }
 }
 
@@ -320,8 +320,8 @@ async function processVoiceAsync(
     await sendParts(phone, ["I got your voice note but had a moment — please send it again or type your message."], null).catch(() => {});
   } finally {
     await completeMediaJob(sourceMessageId).catch(() => {});
-    // THE CLIENT RECORD (#271) — a voice note is an inbound message too; its transcript is learned from.
-    void import("../core/client-record").then(m => m.recordAndLearn({ phone, rawText: message, mediaType, sourceMessageId, rootId }));
+    // THE CLIENT RECORD (#271) — a voice note is an inbound message too; its transcript is stored.
+    void import("../core/client-record").then(m => m.recordAtDoor({ phone, rawText: message, mediaType, sourceMessageId, rootId }));
   }
 }
 

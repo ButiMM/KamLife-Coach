@@ -7,7 +7,8 @@
  *
  * The model is stubbed at the network edge (as the replay gate's --offline mode does), so this
  * proves the PLUMBING deterministically: what is stored, what supersedes, what is dropped, what the
- * engine is sent, and what deletion erases. Whether a live model extracts well is the gate's job.
+ * engine is sent, and what deletion erases. The facts come from #359's single understanding call;
+ * here they are scripted and fed through applyFacts, the same door. Extraction quality is the gate's job.
  */
 if (!process.env.DATABASE_URL) {
   console.log("pg-client-record-acceptance: SKIPPED — no DATABASE_URL. This proof needs a real database.");
@@ -25,7 +26,8 @@ process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
 
 // ── THE MODEL, STUBBED AT THE NETWORK EDGE ─────────────────────────────────────────────────────
-// The extractor gets a scripted answer per message; every other model call gets a plain reply.
+// The facts the new core's understanding call (#359) would return per message, fed to applyFacts
+// exactly as that call will. This PR adds no model call; every model call here gets a plain reply.
 // Every request body is kept, so the test can read what the engine was actually sent.
 const EXTRACT: Record<string, unknown> = {
   "I'm training for the Comrades marathon in June and my knee gets sore on long runs.": { facts: [
@@ -61,10 +63,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
   const body = typeof init?.body === "string" ? init.body : "";
   sentToModel.push(body);
   let content = "Okay, noted.";
-  if (body.includes("maintain a coaching client's record")) {
-    const msg = JSON.parse(body).messages.at(-1).content as string;
-    content = JSON.stringify(EXTRACT[msg] ?? { facts: [] });
-  } else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
+  if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
   else if (body.includes("domain gate")) content = "YES";
   if (url.includes("/embeddings")) {
     return new Response(JSON.stringify({ object: "list", data: [{ object: "embedding", index: 0, embedding: Array(1536).fill(0) }], model: "stub", usage: { prompt_tokens: 1, total_tokens: 1 } }), { status: 200, headers: { "content-type": "application/json" } });
@@ -83,6 +82,7 @@ const { handleMessage } = await import("../server/routes");
 const { processTextAsync } = await import("../server/routes/whatsapp");
 const { _resetOutboundDedupe } = await import("../server/reply-hygiene");
 const { _resetInteractionCorrelation } = await import("../server/handlers/chat-log");
+const { applyFacts, knownFacts } = await import("../server/core/client-record");
 
 let failed = 0;
 const chk = (ok: boolean, msg: string, evidence = "") => {
@@ -97,7 +97,8 @@ async function say(phone: string, text: string, messageSid = `SM271${RUN}${++sid
   _resetOutboundDedupe(); _resetInteractionCorrelation();
   await processTextAsync(phone, text, null, null, [], handleMessage as any, messageSid);
   await settle(async () => (await q("SELECT 1 FROM client_events WHERE source_message_id = $1", [messageSid])).length > 0);
-  await new Promise(r => setTimeout(r, 400)); // the background extraction after the event
+  const [ev] = await q("SELECT id FROM client_events WHERE source_message_id = $1", [messageSid]);
+  if (ev) await applyFacts(ev.id, JSON.stringify(EXTRACT[text] ?? { facts: [] })); // what #359's understanding call returns
   return messageSid;
 }
 async function client(n: number) {
@@ -151,14 +152,17 @@ chk(after.some((f: any) => /two oceans/i.test(f.subject)) && !after.some((f: any
 chk(all.some((f: any) => /comrades/i.test(f.subject) && f.superseded_by), "the old goal is kept, marked superseded, not deleted");
 chk(after.some((f: any) => f.kind === "injury"), "the knee is untouched by a goal correction");
 
-REAL("\n4b. A CORRECTION THAT NAMES NOTHING — the extractor is shown what is known, and the right fact is superseded");
-sentToModel.length = 0;
+REAL("\n4b. A CORRECTION THAT NAMES NOTHING — the understanding call is given what is known, and the right fact is superseded");
+const known = await knownFacts(u.id);
+chk(/KNOWN FACTS/.test(known) && /two oceans marathon/.test(known), "the known facts the understanding call is given include the current goal", known.slice(0, 200));
 await say(u.phoneNumber, "Actually the race is in May now, not June.");
-await settle(async () => (await activeFacts(u.id)).some((f: any) => /may now/i.test(f.statement)));
-const extractCall = sentToModel.find(b => b.includes("maintain a coaching client's record")) || "";
-chk(/KNOWN FACTS/.test(extractCall) && /two oceans marathon/.test(extractCall), "the extractor is shown the client's known facts", extractCall.slice(0, 200));
 const goals = (await activeFacts(u.id)).filter((f: any) => f.kind === "goal");
 chk(goals.length === 1 && /may now/i.test(goals[0].statement), "exactly one active goal remains — the corrected one", JSON.stringify(goals));
+
+REAL("\n4c. NO MODEL CALL OF ITS OWN — the record adds no call per message (CTO, 24 Sep)");
+sentToModel.length = 0;
+await say(u.phoneNumber, "I'm training for the Comrades marathon in June and my knee gets sore on long runs.", `SM271${RUN}nocall`);
+chk(!sentToModel.some(b => /client's record|KNOWN FACTS/.test(b)), "storing a message sends nothing to a model on the record's behalf", `${sentToModel.length} model calls`);
 
 REAL("\n5. NOT FACTS — a statement the client never wrote is dropped");
 const v = await client(2);

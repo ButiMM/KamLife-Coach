@@ -75,7 +75,7 @@ const BUDGET = {
    * a plateau nudge is a product decision, and this number is where that decision gets made
    * rather than forgotten. LOWER THIS as capabilities are wired or deleted. Never raise it.
    */
-  unreachableCapabilities: 41,
+  unreachableCapabilities: 42,
   /**
    * GUARD #14 — see unclassifiedSenders above. Six proactive senders still choose their own
    * behavioural instruction: monday's weigh-in reminder and diet-break restore, programme's weekly
@@ -239,6 +239,12 @@ const AT_RISK_BUDGET = 3;
  * fails exactly as if you had never raised it.
  */
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string }> = [
+  {
+    key: "unreachableCapabilities", from: 41, to: 42, date: "2026-09-24",
+    why: "THE CLIENT RECORD LEARNS NOTHING ON ITS OWN (#271, CTO 24 Sep: no extra model call). applyFacts is the "
+      + "record's validated door for the facts the new core's single understanding call returns; that call is #359, "
+      + "stacked on this PR. Until it lands, only the acceptance calls applyFacts. Paid back by #359 wiring it.",
+  },
   {
     key: "modules", from: 238, to: 239, date: "2026-09-24",
     why: "THE CLIENT RECORD (#271, ORDERS §4 Step 3). server/core/client-record.ts is the new core's first owner: "
