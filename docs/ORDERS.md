@@ -121,6 +121,8 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 **Gate judge:** an OpenAI model, a different model family from the builder, called with the existing OpenAI key. The judge never sees builder reasoning, only the input, the stored state and the final WhatsApp body.
 
+**Quality bar under auto-merge (24 Sep):** speed never lowers the bar. Every PR needs green tests (all six database shards) and a passing mouth ratchet. REGRESSION findings block. Hard invariants (§3) block. EDGE findings aren't dropped: each becomes an issue **and a gate case the new core must pass before its message family switches**. A PR labelled `switch`, which moves real testers onto the new coach, never merges on a timeout: it needs an actual Codex attack, answered, and a green replay gate showing it beats the old code.
+
 **Tester-visible rule:** every PR description opens with one line, "What testers will notice:", in plain language. If the answer is nothing, it says why the PR is still needed today. Work is ordered so the changes testers feel most land first.
 
 **Merge standard (how a PR finishes):** a PR merges when (1) the failure its issue describes is reproduced and fixed, (2) checks pass, and (3) nothing is worse than current `main` on a hard invariant. A Codex finding that is a new edge case, not a regression against `main`, becomes a follow-up issue at the top of `docs/QUEUE.md` and does not block the merge. After two attack rounds on one PR, all remaining non-regression findings become follow-ups. Better than `main` ships; perfect doesn't wait.
