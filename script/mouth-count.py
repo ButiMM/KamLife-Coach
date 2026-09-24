@@ -9,7 +9,9 @@ counts = {
     "routeMessage_exits_before_engine": sum(1 for i in range(start, eng) if re.search(r"\breturn\b", L[i])),
     "outbound_send_sites": 0,
     "files_that_send": 0,
+    "model_call_sites": 0,
 }
+MODEL = re.compile(r"\.(?:chat\.completions|responses|audio\.transcriptions|audio\.speech|embeddings)\.create\(")
 SEND = re.compile(r"\b(?:sendWhatsApp|deliverTwilioMessage|sendCriticalAlert)\(|\.messages\.create\(")
 DEF = re.compile(r"function (?:sendWhatsApp|deliverTwilioMessage|sendCriticalAlert)\(")
 for f in (root / "server").rglob("*.ts"):
@@ -17,6 +19,7 @@ for f in (root / "server").rglob("*.ts"):
     n = len(SEND.findall(t)) - len(DEF.findall(t))
     counts["outbound_send_sites"] += n
     counts["files_that_send"] += 1 if n else 0
+    counts["model_call_sites"] += len(MODEL.findall(t))
 if "--json" in sys.argv:
     print(json.dumps(counts)); sys.exit(0)
 base = json.loads((root / "docs/mouths.json").read_text())

@@ -16,6 +16,10 @@ You attack; you do not build. `docs/ORDERS.md` §6 defines the role.
 5. Never report "no work" without having listed open PRs from GitHub in that same run.
 6. **Database suite:** GitHub runs it again on every PR (repo is public). You no longer need to run it. `bash script/run-db-suite.sh` stays available if you want to reproduce a failure on your own machine.
 
+## Codex daily sweep
+
+Once a day, before attacking, answer the judgment questions in `docs/CTO-SWEEP.md` (especially 4, 5 and 14) in one issue labelled `cto-sweep`. Open an issue for every untracked gap. Keep it short.
+
 ## Git workflow (applies to every builder)
 
 Never push to `main`; it deploys to production. Work on a branch, open a pull request, one task per pull request. Do not merge your own pull request until tests pass and the other builder has reviewed it. See `CLAUDE.md` for the full rules.
