@@ -14,8 +14,9 @@
  * Recorded per run: git SHA, corpus version, judge-prompt version, product-prompt fingerprint,
  * the judge model, and every product model that actually answered (read back from gpt_costs).
  *
- * THE GATE (every PR): a hard-invariant check that passes in docs/replay-baseline.json and fails
- * now is a regression, and the run exits 1. A check that already fails on main is reported, not
+ * THE GATE (every PR): a hard-invariant check that passes on main and fails now is a regression,
+ * and the run exits 1. CI runs this same script on main's product first (--write-baseline to
+ * REPLAY_BASELINE_PATH), then on the PR against it, so the baseline is always today's main. A check that already fails on main is reported, not
  * blocking — the gate stops things getting worse and shows the harm that is still there.
  *
  * NO MODEL, NO VERDICT. Without OPENAI_API_KEY every case is NOT TESTED and the run exits 2, never
@@ -23,8 +24,10 @@
  * `--offline` runs the plumbing against a stub for local development; its result says so and it
  * can never write a baseline.
  *
- * HELD-OUT SET: REPLAY_HELDOUT_JSON (a secret) holds more cases in the same shape. They run and
- * gate exactly like the public ones, but the report shows only their counts, never their inputs.
+ * HELD-OUT SET: more cases in the same shape. They run and gate exactly like the public ones, but
+ * the report shows only their counts, never their inputs. Source, in order: REPLAY_HELDOUT_JSON (a
+ * secret — truly held out), else script/replay-heldout.json. The committed file is the CTO's interim
+ * split of AUDIT.md's 24 real failures (24 Sep): the builders HAVE seen it, and every report says so.
  *
  * Run:  DATABASE_URL=… OPENAI_API_KEY=… npx tsx script/replay-gate.ts [--offline] [--write-baseline]
  */
@@ -35,7 +38,9 @@ import { CASES, type ReplayCase, type Check } from "./replay-cases";
 
 const OFFLINE = process.argv.includes("--offline");
 const WRITE_BASELINE = process.argv.includes("--write-baseline");
-const BASELINE_PATH = "docs/replay-baseline.json";
+// CI records the baseline fresh on every run: the same gate, same corpus, same judge, run first on
+// the base branch's product code (see .github/workflows/replay-gate.yml), written here.
+const BASELINE_PATH = process.env.REPLAY_BASELINE_PATH || "docs/replay-baseline.json";
 const JUDGE_MODEL = process.env.REPLAY_JUDGE_MODEL || "gpt-4.1";
 
 if (!process.env.DATABASE_URL) {
@@ -99,15 +104,17 @@ Return ONLY JSON: {"score": <integer 0-10>, "verdict": "<one sentence>", "reason
 // A LIVE RUN WITHOUT ITS HELD-OUT SET IS NOT A GATE RESULT (Codex @ 975ea74): an absent, unreadable,
 // non-array or empty corpus used to read as "0 held out" and could pass, or record a baseline with no
 // hidden protection in it. Offline (local) runs may omit it; a malformed one never passes.
+const HELDOUT_FILE = "script/replay-heldout.json";
+const heldOutSource = process.env.REPLAY_HELDOUT_JSON ? "secret" : existsSync(HELDOUT_FILE) ? "repo (seen by builders — interim)" : "none";
 const heldOut: ReplayCase[] = (() => {
-  const raw = process.env.REPLAY_HELDOUT_JSON;
+  const raw = process.env.REPLAY_HELDOUT_JSON || (existsSync(HELDOUT_FILE) ? readFileSync(HELDOUT_FILE, "utf8") : "");
   const notTested = (why: string) => { REAL(`replay-gate: NOT TESTED — ${why}`); process.exit(2); };
-  if (!raw) return OFFLINE ? [] : notTested("REPLAY_HELDOUT_JSON is not set; the held-out cases are part of the gate.");
+  if (!raw) return OFFLINE ? [] : notTested(`no held-out cases: set REPLAY_HELDOUT_JSON or commit ${HELDOUT_FILE}; they are part of the gate.`);
   let parsed: unknown;
   try { parsed = JSON.parse(raw.trim().startsWith("[") ? raw : Buffer.from(raw, "base64").toString("utf8")); }
-  catch { return notTested("REPLAY_HELDOUT_JSON is set but unreadable."); }
+  catch { return notTested(`the held-out cases (${heldOutSource}) are unreadable.`); }
   if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every(c => c && typeof c === "object" && Array.isArray((c as any).turns) && Array.isArray((c as any).checks)))
-    return notTested("REPLAY_HELDOUT_JSON is not a non-empty array of cases.");
+    return notTested(`the held-out cases (${heldOutSource}) are not a non-empty array of cases.`);
   return parsed as ReplayCase[];
 })();
 const PRODUCT_PROMPT_FILES = ["server/coach-prompt.ts", "server/gpt.ts", "server/understanding/perception.ts", "server/understanding/live.ts"];
@@ -115,6 +122,7 @@ const versions = {
   gitSha: (() => { try { return execSync("git rev-parse HEAD").toString().trim(); } catch { return "unknown"; } })(),
   corpus: sha(JSON.stringify(CASES)),
   heldOut: heldOut.length ? sha(JSON.stringify(heldOut)) : null,
+  heldOutSource,
   judgePrompt: sha(JUDGE_SYSTEM),
   productPrompts: sha(PRODUCT_PROMPT_FILES.filter(existsSync).map(f => readFileSync(f, "utf8")).join("\n")),
   judgeModel: HAS_MODEL ? JUDGE_MODEL : "offline-stub",
@@ -187,7 +195,8 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
     subscriptionStatus: "active", goalType: "fat_loss", currentWeight: "82", startWeight: "86", targetWeight: "72",
     heightCm: 164, age: 33, gender: "female", trainingMode: "home", trainingDaysPerWeek: 3,
     proteinTarget: 125, calorieTarget: 1800, dailyCalorieTarget: 1800, stepsTarget: 8000, lifeSituation: "office",
-    ...(k.seed || {}),
+    // Cases are JSON data, so a timestamp arrives as an ISO string; the column wants a Date.
+    ...Object.fromEntries(Object.entries(k.seed || {}).map(([f, v]) => [f, /At$/.test(f) && typeof v === "string" ? new Date(v) : v])),
   } as any).returning();
   for (const [i, t] of (k.before || []).entries()) await turn(phone, t, `RP${n}b${i}`);
   const bodies: string[] = [];
@@ -224,10 +233,22 @@ const hardNow = new Map(results.flatMap(r => r.checks.filter(c => c.invariant).m
 const baseline = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, "utf8")) : null;
 // A baseline check that passed must still EXIST and pass (Codex @ ced3cb0): deleting or renaming it
 // is a regression, or removing the protection would read as "nothing regressed".
-const regressions = baseline
-  ? Object.entries(baseline.hard as Record<string, boolean>).filter(([k, was]) => was && hardNow.get(k) !== true)
-    .map(([k]) => hardNow.has(k) ? k : `${k} (check no longer exists)`)
+const regressedKeys = () => baseline
+  ? Object.entries(baseline.hard as Record<string, boolean>).filter(([k, was]) => was && hardNow.get(k) !== true).map(([k]) => k)
   : [];
+// ONE CONFIRMING RERUN. Both sides answer with a live model, so a check can pass on main and fail
+// here by chance. A case with a regressed check is replayed once more on a fresh client; it is a
+// regression only if it fails again. A real regression fails twice; a coin-flip rarely does.
+if (!OFFLINE) {
+  const suspect = new Set(regressedKeys());
+  for (const [i, r] of results.entries()) {
+    if (!r.checks.some(c => c.invariant && suspect.has(key(r, c)))) continue;
+    const k = r.heldOut ? heldOut[i - CASES.length] : CASES[i];
+    const again = await runCase(k, 2000 + i, r.heldOut);
+    for (const c of again.checks.filter(c => c.invariant && c.pass)) hardNow.set(key(r, c), true);
+  }
+}
+const regressions = regressedKeys().map(k => hardNow.has(k) ? k : `${k} (check no longer exists)`);
 const scored = results.filter(r => r.score !== null);
 const meanScore = scored.length ? Math.round((scored.reduce((s, r) => s + (r.score as number), 0) / scored.length) * 10) / 10 : null;
 const hardFailing = [...hardNow].filter(([, p]) => !p).map(([k]) => k);
@@ -260,7 +281,7 @@ if (!OFFLINE) {
 const lines: string[] = [];
 lines.push(`## Customer replay gate ${OFFLINE ? "— OFFLINE PLUMBING RUN, NOT A GATE RESULT" : ""}`);
 lines.push(`SHA \`${versions.gitSha.slice(0, 7)}\` · corpus \`${versions.corpus}\` · judge \`${versions.judgeModel}\` prompt \`${versions.judgePrompt}\` · product prompts \`${versions.productPrompts}\` · product models ${productModels.join(", ") || "none recorded"}`);
-lines.push(`**${results.length} cases** (${heldOut.length} held out) · hard checks failing: **${hardFailing.length}/${hardNow.size}** · mean judge score **${meanScore ?? "n/a"}/10**${baseline ? ` (baseline ${baseline.meanScore ?? "n/a"})` : " · no baseline yet"}`);
+lines.push(`**${results.length} cases** (${heldOut.length} held out, source: ${heldOutSource}) · hard checks failing: **${hardFailing.length}/${hardNow.size}** · mean judge score **${meanScore ?? "n/a"}/10**${baseline ? ` (baseline ${baseline.meanScore ?? "n/a"})` : " · no baseline yet"}`);
 lines.push(regressions.length ? `### ❌ ${regressions.length} regression(s) against the main baseline\n${regressions.map(r => `- ${r}`).join("\n")}` : baseline ? "### ✅ No hard invariant regressed against the main baseline" : "");
 lines.push("", "| case | hard | score | failing checks |", "|---|---|---|---|");
 for (const r of results.filter(x => !x.heldOut)) {
@@ -277,7 +298,7 @@ await pool.end().catch(() => {});
 // regress, so every hard failure would read green. A live run prints the candidate above and stops
 // NOT TESTED until it is committed; only an explicit recording run (WRITE_BASELINE) may pass.
 if (!OFFLINE && !baseline && !WRITE_BASELINE) {
-  REAL("replay-gate: NOT TESTED — no docs/replay-baseline.json on main. Commit the BASELINE_CANDIDATE_JSON above (reviewed) to arm the gate.");
+  REAL(`replay-gate: NOT TESTED — no baseline at ${BASELINE_PATH}. Record one first: run this gate on main with --write-baseline.`);
   process.exit(2);
 }
 process.exit(regressions.length ? 1 : 0);

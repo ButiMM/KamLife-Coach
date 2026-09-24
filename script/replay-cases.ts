@@ -196,4 +196,78 @@ export const CASES: ReplayCase[] = [
     ],
     rubric: "The client confirmed deletion. A good reply confirms that everything is deleted, and it must be true.",
   },
+  // ── AUDIT.md §2.1, the twenty-four real failures: the SEEN half (CTO, 24 Sep: "split the audit's
+  // 24 real failures into seen and held-out"). The other half is script/replay-heldout.json.
+  {
+    id: "moved-workout",
+    source: "AUDIT.md §2.1 #1 (#63)",
+    turns: ["No I moved yesterdays workout to today"],
+    checks: [
+      { what: "a moved session is not answered with a rest day", kind: "reply_not_matches", pattern: "rest today|hit it fresh tomorrow", flags: "i" },
+    ],
+    rubric: "The client moved yesterday's workout to today. A good reply accepts that and helps them do today's session. Telling them to rest ignores what they said.",
+  },
+  {
+    id: "dinner-same-as-last-meal",
+    source: "AUDIT.md §2.1 #2 (#63)",
+    before: ["I had pap and chicken for lunch"],
+    turns: ["My dinner is the same as the last meal"],
+    checks: [
+      { what: "tonight's dinner is not stored on an earlier day", invariant: "no_false_writes", kind: "sql",
+        query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND logged_at < now() - interval '20 hours'", expect: "zero" },
+      { what: "the dinner is logged", kind: "sql", query: MEAL_COUNT, expect: { equals: 2 } },
+    ],
+    rubric: "The client had the same meal for dinner as for lunch. A good coach logs today's dinner as pap and chicken and says so briefly.",
+  },
+  {
+    id: "steps-10k",
+    source: "AUDIT.md §2.1 #4 (#63)",
+    turns: ["My steps are 10k today"],
+    checks: [
+      { what: "the 10k steps are stored", invariant: "no_false_writes", kind: "sql", query: "SELECT COALESCE(MAX(steps), 0) FROM step_logs WHERE user_id = $1", expect: { equals: 10000 } },
+      { what: "a client who walked 10k is not told to go for a walk", kind: "reply_not_matches", pattern: "20-minute walk|go for a walk", flags: "i" },
+    ],
+    rubric: "The client already walked 10,000 steps today. A good reply records it and credits it; it does not prescribe a walk.",
+  },
+  {
+    id: "three-days-one-message",
+    source: "AUDIT.md §2.1 #5, Trace 4 (#63, #324)",
+    turns: ["Monday I had pap and chicken, eggs and bread for breakfast and rice with beef stew for dinner. Tuesday oats and a chicken salad. Wednesday a burger and chips."],
+    checks: [
+      { what: "no single day carries all three days' food", invariant: "no_false_writes", kind: "sql",
+        query: "SELECT COALESCE(MAX(k), 0) > 2500 FROM (SELECT SUM(kcal_int) k FROM meal_logs WHERE user_id = $1 GROUP BY (logged_at AT TIME ZONE 'Africa/Johannesburg')::date) d", expect: { equals: false } },
+      { what: "breakfast and dinner are not one row", kind: "sql",
+        query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(raw_message,'') ~* 'breakfast' AND COALESCE(raw_message,'') ~* 'dinner'", expect: "zero" },
+    ],
+    rubric: "The client reported three days in one message. A good coach logs each day on its own day, keeps breakfast and dinner separate, and notices the pattern rather than ending with a generic instruction.",
+  },
+  {
+    id: "a-pear",
+    source: "AUDIT.md §2.1 #7 (#234)",
+    turns: ["I had a pear"],
+    checks: [
+      { what: "no meal slot the client never said is stored", invariant: "no_false_writes", kind: "sql",
+        query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND meal_label IN ('breakfast','lunch','dinner')", expect: "zero" },
+    ],
+    rubric: "The client had a pear. A good reply logs a pear, as a snack or with no slot, and does not decide it was breakfast.",
+  },
+  {
+    id: "dinner-logged-room-for-dinner",
+    source: "AUDIT.md §2.1 #21 (DEFECTS)",
+    before: ["I had oats for breakfast", "I had pap and chicken for lunch"],
+    turns: ["I had beef stew and rice for dinner"],
+    checks: [
+      { what: "the reply that logs dinner does not offer room for dinner", invariant: "no_invented_facts", kind: "reply_not_matches", pattern: "room for (?:a )?(?:full |big )?dinner", flags: "i" },
+    ],
+    rubric: "The client logged dinner. A good reply confirms it and does not talk about dinner as if it were still to come.",
+  },
+  {
+    id: "need-more-help",
+    source: "AUDIT.md §2.1 #23 (DEFECTS)",
+    turns: ["I need more help"],
+    checks: [
+      { what: "a request for help is not thrown into programme setup", kind: "reply_not_matches", pattern: "how many days (?:a|per) week|what equipment|let'?s set up your (?:programme|program)", flags: "i" },
+    ],
+    rubric: "An onboarded client says they need more help. A good coach asks, warmly and briefly, what they are struggling with.",
+  },
 ];

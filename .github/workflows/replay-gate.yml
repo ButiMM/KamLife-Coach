@@ -2,8 +2,11 @@ name: Customer replay gate
 
 # #270, docs/ORDERS.md §4 Step 2. Real failures replayed through the production-shaped path —
 # real PostgreSQL, the live model, ENGINE_LIVE=on, the live normaliser — and graded on stored rows
-# and the post-transport WhatsApp body. A hard invariant (ORDERS §3) that passes in
-# docs/replay-baseline.json and fails on this PR fails the job. The judge is an OpenAI model.
+# and the post-transport WhatsApp body. The judge is an OpenAI model.
+#
+# BASELINE ON MAIN, EVERY RUN: the same gate, corpus and judge run first on the base branch's product
+# code, and that run is the baseline. A hard invariant (ORDERS §3) that passes on main and fails on
+# this PR fails the job. A check that already fails on main is reported, not blocking.
 #
 # No key, no verdict: without the OpenAI secret the gate exits 2 and this job is RED, never green.
 
@@ -18,7 +21,7 @@ concurrency:
 jobs:
   replay:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     services:
       postgres:
         image: postgres:16
@@ -42,8 +45,25 @@ jobs:
       - run: npm ci
       - name: Apply committed migrations to the ephemeral database
         run: npm run db:migrate
-      - name: Replay the corpus through the production path and grade it
-        run: npx tsx script/replay-gate.ts
+      - name: Record the baseline — this gate on the base branch's product code
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          git worktree add "$RUNNER_TEMP/base" FETCH_HEAD
+          # The PR's gate and corpus, main's product: the only difference between the runs is the product.
+          cp script/replay-gate.ts script/replay-cases.ts script/replay-heldout.json "$RUNNER_TEMP/base/script/"
+          PGPASSWORD=kam psql -h 127.0.0.1 -U kam -d kamlife -c "CREATE DATABASE kamlife_base"
+          cd "$RUNNER_TEMP/base"
+          npm ci --no-audit --no-fund
+          DATABASE_URL=postgres://kam:kam@127.0.0.1:5432/kamlife_base npm run db:migrate
+          DATABASE_URL=postgres://kam:kam@127.0.0.1:5432/kamlife_base REPLAY_BASELINE_PATH="$RUNNER_TEMP/base-baseline.json" \
+            npx tsx script/replay-gate.ts --write-baseline
+          mkdir -p "$GITHUB_WORKSPACE/replay-results"
+          cp "$RUNNER_TEMP/base-baseline.json" "$GITHUB_WORKSPACE/replay-results/baseline-${BASE_REF}.json"
+          cp replay-results/*.json "$GITHUB_WORKSPACE/replay-results/" 2>/dev/null || true
+      - name: Replay the corpus on this PR and grade it against the baseline
+        run: REPLAY_BASELINE_PATH="$RUNNER_TEMP/base-baseline.json" npx tsx script/replay-gate.ts
       - name: Keep the run record
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
