@@ -1695,15 +1695,22 @@ function lc(message: string, overrides: Partial<typeof LC_USER> = {}) {
 }
 
 // ---- STOP (opt-out) ----
+// The opt-out owner moved to the safety pre-router (#265): it must be read before any handler, or
+// "stop sending me messages" is answered by the one-action nag. Same assertions, new owner.
+const optGuard = async (message: string, overrides: Partial<typeof LC_USER> = {}) => {
+  const { runSafetyGuards } = await import("../server/handlers/safety");
+  const c = lc(message, overrides);
+  return runSafetyGuards(c.phone, c.message, c.m, { boundUser: c.user });
+};
 test("lifecycle STOP: 'stop' → returns opt-out confirmation, not null", async () => {
-  const r = await handleLifecycle(lc("STOP"));
+  const r = await optGuard("STOP");
   assert.ok(r !== null, "should handle STOP");
   assert.ok(r!.toLowerCase().includes("no more messages") || r!.toLowerCase().includes("start") || r!.toLowerCase().includes("resume"),
     `unexpected: ${r?.slice(0, 100)}`);
 });
 
 test("lifecycle STOP: 'opt out' → also handled", async () => {
-  const r = await handleLifecycle(lc("opt out"));
+  const r = await optGuard("opt out");
   assert.ok(r !== null, "should handle 'opt out'");
 });
 
@@ -1783,7 +1790,7 @@ test("lifecycle RESCUE: 'start over' from COMPLETE user → wipe confirmation", 
 // ---- START (opt-in after stop) ----
 test("lifecycle START: 'start' with paused user → resumes coaching", async () => {
   const pausedUntil = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
-  const r = await handleLifecycle(lc("start", { profileNotes: `paused_until:${pausedUntil}` }));
+  const r = await optGuard("start", { profileNotes: `paused_until:${pausedUntil}` });
   assert.ok(r !== null, "should handle START for paused user");
   assert.ok(
     r!.toLowerCase().includes("welcome back") || r!.toLowerCase().includes("resume") || r!.toLowerCase().includes("coaching"),

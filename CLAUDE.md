@@ -1,7 +1,9 @@
 # KamLife Coach — Claude Code Instructions
 
 ## Standing orders (read first, every session)
+- **Before asking the founder anything, check `docs/SYSTEM.md` and the repo.** Asking him for something already recorded or findable is a failure. Add anything durable you learn to `docs/SYSTEM.md`.
 - `docs/ORDERS.md` is the plan. It overrides every other doc.
+- **Lane B is the priority (CTO, 24 Sep).** Finish and merge the lane A PRs already open; start no new lane A work. All new effort goes to lane B in `docs/QUEUE.md`, in order. Old-pipeline bugs become gate cases for the new core, not new patterns.
 - **Your work queue is `docs/QUEUE.md`.** It has two lanes. If no other session is on lane B (no open or recent branch for #270), run lane B yourself in parallel, in a separate worktree or subagent, starting with #270. Nobody will tell you to; this line is the instruction. In each lane, take the first unchecked item, build it as one pull request, then take the next.
 - Every PR: open the description with "What testers will notice:", add the label `attack:codex`, and comment `@codex attack this PR per docs/ORDERS.md §6` with the head SHA.
 - **CI is free again (public repo).** GitHub runs the full suite, including the database suite, on every PR push. **Merge when GitHub checks are green**, attacks are answered under the merge standard, and the mouth ratchet passes. Batch fixes into one push anyway: every push restarts the ~47-minute run.

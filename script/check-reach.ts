@@ -67,18 +67,6 @@ const SENDERS: Array<{ file: string; shaping: Shaping; why: string }> = [
     file: "server/handlers/chat-log.ts", shaping: "not-client-facing",
     why: "Conversation logging and coach-facing echoes.",
   },
-  {
-    file: "server/routes/payments.ts", shaping: "not-client-facing",
-    why: "Billing webhooks — transactional receipts and failure alerts, not coaching.",
-  },
-  {
-    file: "server/routes/admin.ts", shaping: "not-client-facing",
-    why: "Admin console actions, sent by the founder deliberately.",
-  },
-  {
-    file: "server/routes/dashboard.ts", shaping: "not-client-facing",
-    why: "Admin dashboard actions.",
-  },
 ];
 
 function walk(dir: string, out: string[] = []): string[] {
