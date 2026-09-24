@@ -42,6 +42,7 @@ let captured: string[] = [];
 console.log = console.warn = console.error =
   (...a: any[]) => { captured.push(a.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(" ")); };
 
+await import("./sast-noon-clock"); // #404: run at midday SAST whatever the hour, before the product loads
 const { pool, db } = await import("../server/db");
 const schema = await import("../shared/schema");
 const { handleMessage } = await import("../server/routes");
