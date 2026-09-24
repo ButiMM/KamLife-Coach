@@ -32,7 +32,7 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 235,
+  modules: 236,
   handlerFiles: 29,
   cronRegistrations: 25,
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
@@ -77,7 +77,7 @@ const BUDGET = {
    */
   // 41 → 28 on 2026-09-24 (#334): the unscheduled jobs and their orphaned imports went. Some of
   // those imports were the only "reach" of test-only helpers, so the honest figure is 28, not 23.
-  unreachableCapabilities: 29,
+  unreachableCapabilities: 28,
   /**
    * GUARD #14 — see unclassifiedSenders above. Six proactive senders still choose their own
    * behavioural instruction: monday's weigh-in reminder and diet-break restore, programme's weekly
@@ -246,10 +246,18 @@ const AT_RISK_BUDGET = 3;
 // was allowed stays on record, and the frozen-budget check below measures only the raises still owed.
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string; paidBack?: string }> = [
   {
+    key: "modules", from: 235, to: 236, date: "2026-09-24",
+    why: "THE NEW COACH (#272, ORDERS §4 Steps 4-5). server/core/coach.ts is the understanding step and the one "
+      + "composer, running in read-only shadow. It is the module every switched message family will exit through; "
+      + "each switch PR deletes that family's old handler exits (docs/mouths.json falls with it). #334 (PR #352) "
+      + "pays back more than this raise on its own.",
+  },
+  {
     key: "unreachableCapabilities", from: 28, to: 29, date: "2026-09-24",
     why: "THE CLIENT RECORD LEARNS NOTHING ON ITS OWN (#271, CTO 24 Sep: no extra model call). applyFacts is the "
       + "record's validated door for the facts the new core's single understanding call returns; that call is #359, "
       + "stacked on this PR. Until it lands, only the acceptance calls applyFacts. Paid back by #359 wiring it.",
+    paidBack: "2026-09-24, #359 wires applyFacts to the understanding call in production (runShadow).",
   },
   {
     key: "modules", from: 234, to: 235, date: "2026-09-24",

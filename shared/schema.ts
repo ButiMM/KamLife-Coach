@@ -327,6 +327,20 @@ export const clientFacts = pgTable("client_facts", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// THE NEW COACH IN SHADOW (#272): what the new core would have said. Never sent.
+export const coreShadow = pgTable("core_shadow", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  rootId: text("root_id"),
+  inputText: text("input_text").notNull(),
+  understanding: jsonb("understanding"),
+  factsRead: integer("facts_read").notNull().default(0),
+  reply: text("reply").notNull(),
+  model: text("model").notNull(),
+  ms: integer("ms"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const turnLedger = pgTable("turn_ledger", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
