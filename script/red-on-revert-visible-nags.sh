@@ -102,7 +102,7 @@ run_case "a delivered weigh-in ask is not recorded" server/scheduler/proactive-d
 
 # 7. "JUST FINISHED DINNER" IS THE SHOP BEING OUT OF STOCK AGAIN.
 run_case "a bare \"finished\" reads as the shop being out" server/food-swaps.ts \
-  '|(?:was|were|is|are|all|got)\s+finished|' \
+  '|(?:was|were|is|are|all|got|'"'"'s)\s+finished|(?<!\b(?:i|we|just|already)\s)finished\s+(?:at|in|from|by)\s+(?!\d)|' \
   '|finished|' || failed=$((failed + 1))
 
 # 8. …AND THE FOOD LOGGER DOES NOT HEAR "FINISHED DINNER" AS EATING.
