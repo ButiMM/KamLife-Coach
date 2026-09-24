@@ -1,6 +1,6 @@
 # Nightly CTO sweep: the checklist that runs without anyone asking
 
-Run every night by `.github/workflows/cto-sweep.yml`. The reviewer reads this repo cold and answers every question below **with evidence** (file and line, issue, or number). It then posts one report issue labelled `cto-sweep`, and opens a new issue (labelled `harm` or `core`, plus `owner:claude-code`) for every gap nobody is tracking. It never changes code. It never asks the founder anything already in `docs/SYSTEM.md`.
+**No paid service runs this.** The watch checks the countable items for free every 10 minutes: stuck PRs, blockers, the delete list, mouths, size, AI call sites, production, findings older than two days with no PR, and layers merged without a `Retires:` section. The judgment items (5 and 14 especially) are answered **once a day by Codex** (already paid for through ChatGPT), and by the CTO whenever the founder is in chat. The reviewer reads this repo cold and answers every question below **with evidence** (file and line, issue, or number). It then posts one report issue labelled `cto-sweep`, and opens a new issue (labelled `harm` or `core`, plus `owner:claude-code`) for every gap nobody is tracking. It never changes code. It never asks the founder anything already in `docs/SYSTEM.md`.
 
 ## Product (against `docs/TESTER-EXPERIENCE.md`)
 1. For each of the 8 journeys: which message families have switched to the new core, what does the gate score say, and what is the next journey to switch?

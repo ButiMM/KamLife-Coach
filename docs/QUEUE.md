@@ -5,11 +5,19 @@
 ## Lane B: the new core (top priority). Two parallel worktrees: B1 (gate, then Coach Health) and B2 (client record, then understanding and composer)
 
 Order, and what "done" means today:
+<<<<<<< HEAD
 - [ ] #368 Replay gate hardening (Codex @ d4ddc3d on #298): bind check keys to their full definitions; held-out grading in trusted base code; erasure checks chat_history; post-cancel PayFast ITN; opt-out at the send boundary
-- [ ] #270 Replay gate green, baseline recorded on main (PR #298): scores the 8 journeys, never-see, reply time, cost; the new coach in shadow beside the old path. **Blocked: the GitHub Actions secret holds a revoked key (`…wfkA`, 401).** The founder copies Railway's working key into the `OPENAI_API_KEY` Actions secret (BLOCKED comment on #298). Start with the audit's 24 real failures plus every case below; add real tester threads when read-only DB access exists.
+- [ ] #270 Replay gate green, baseline recorded on main (PR #298): scores the 8 journeys, never-see, reply time, cost; the new coach in shadow beside the old path. **Unblocked 11:05 (key fixed).** First live run green: main's journeys 7 / 7.2 / 6.2 / **4.0** / 6.5 / 8 / 5.5 / 7.9, R0.009 per message, 2.3 s mean reply. Merges when its 45-min attack window passes. Start with the audit's 24 real failures plus every case below; add real tester threads when read-only DB access exists.
 - [ ] #334 Delete dead code (PR #352): −7,000 lines, 15 never-scheduled jobs, Replit scaffolding; modules back to 234
 - [ ] #271 (PR #356) One record of the client: their words exactly as sent, and typed facts linked to them (knee, Comrades, pregnancy). Retention and erasure designed first. Includes #323 (normaliser can never add facts).
 - [ ] #272 (PR #359, draft, shadow) One understanding step: the AI reads each message once and writes what it means (intent, facts, corrections); code validates before saving. Replaces the ~440 patterns and the classifier call. Runs **in shadow** against the gate.
+=======
+- [ ] #270 Replay gate green, baseline recorded on main (PR #298). Needs the `OPENAI_API_KEY` repo secret for the judge. Start with the audit's 24 real failures plus every case below; add real tester threads when read-only DB access exists.
+- [ ] #334 Delete dead code: pure deletions, early, no behaviour change
+- [ ] #271 One record of the client: their words exactly as sent, and typed facts linked to them (knee, Comrades, pregnancy). Retention and erasure designed first. Includes #323 (normaliser can never add facts).
+- [ ] #369 Link every piece of advice to what happened next (outcome data), built alongside #271
+- [ ] #272 One understanding step: the AI reads each message once and writes what it means (intent, facts, corrections); code validates before saving. Replaces the ~440 patterns and the classifier call. Runs **in shadow** against the gate.
+>>>>>>> origin/main
 - [ ] #272 One writer, one sender: the composer writes every reply from the record. Switch one message family at a time; delete that family's old handlers in the same PR (mouth ratchet enforces it). With #320 (no prompt slice) and #322 (stored conversation state).
 - [ ] #319 Every proactive send through the same writer and sender
 - [ ] #293 Coach Health scores every live turn, daily tester digest
