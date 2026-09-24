@@ -6724,6 +6724,19 @@ test("outcomes by move (#369): only advice that was recommended AND delivered co
   assert.match(text, /group by/i);
 });
 
+// #303: the legal pages must describe the product that exists — pay-to-start, the real price, the
+// 14-day money-back guarantee, and a cancel that stops coaching and billing at once.
+test("legal pages: no free trial, the real price, the guarantee, immediate cancellation (#303)", async () => {
+  const { readFileSync } = await import("node:fs");
+  for (const f of ["client/src/pages/terms.tsx", "client/src/pages/cancellation.tsx"]) {
+    const page = readFileSync(f, "utf8");
+    assert.doesNotMatch(page, /\d+-day free trial|TRIAL_DAYS|before day \d|day \{TRIAL|reminder on day 6/i, `${f} still promises a trial`);
+    assert.doesNotMatch(page, /R199|until (?:the|your) billing (?:period|date)/i, `${f} contradicts the price or the cancel`);
+    assert.match(page, /PRICING\.monthlyPriceZAR/, `${f} must read the price from shared/pricing.ts`);
+    assert.match(page, /GUARANTEE_PHRASE/, `${f} must state the guarantee`);
+  }
+});
+
 test("outcomes: the founder's phrasings all reach the command", () => {
   // Coach-only, so routing-audit (which runs as a client) is the wrong harness — this pins the
   // gate itself. Kam will type whichever of these comes to mind at 6am.

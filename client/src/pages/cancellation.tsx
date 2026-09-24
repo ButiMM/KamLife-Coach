@@ -1,11 +1,13 @@
 import { Link } from "wouter";
 import { ArrowLeft } from "lucide-react";
+import { PRICING, GUARANTEE_PHRASE } from "@shared/pricing";
 
 const EFFECTIVE_DATE = "1 June 2026";
 const BUSINESS_NAME = "KamLife Lifestyle Coach";
 const BUSINESS_EMAIL = "support@kamlifecoach.co.za";
-const PRICE = "R199";
-const TRIAL_DAYS = 7;
+// Price and guarantee from shared/pricing.ts (#303), so this page matches the product.
+const PRICE = `R${PRICING.monthlyPriceZAR}`;
+const GUARANTEE_DAYS = PRICING.guaranteeDays;
 
 export default function CancellationPolicy() {
   return (
@@ -31,8 +33,8 @@ export default function CancellationPolicy() {
             <p className="font-semibold text-base">The short version</p>
             <ul className="space-y-1.5 text-muted-foreground">
               <li>✅ <strong>Cancel anytime</strong> — reply "<em>cancel</em>" to Coach K on WhatsApp</li>
-              <li>✅ <strong>Free trial: no charge</strong> if you cancel before day {TRIAL_DAYS + 1}</li>
-              <li>✅ <strong>Access until billing period ends</strong> after you cancel</li>
+              <li>✅ <strong>{GUARANTEE_PHRASE}</strong> on your first payment</li>
+              <li>✅ <strong>Cancelling stops coaching and billing straight away</strong></li>
               <li>❌ <strong>No partial-month refunds</strong> for paid months (see below for exceptions)</li>
             </ul>
           </div>
@@ -50,16 +52,14 @@ export default function CancellationPolicy() {
                 <p className="text-muted-foreground text-sm mt-1">Email <a href={`mailto:${BUSINESS_EMAIL}`} className="text-primary underline">{BUSINESS_EMAIL}</a> with your WhatsApp number. We'll process your cancellation within 24 hours and confirm by reply.</p>
               </div>
             </div>
-            <p className="mt-4 text-muted-foreground">Cancellation takes effect at the end of your current billing period. You keep full coaching access until then — Coach K stays active, your programme continues, nothing changes until the billing date.</p>
+            <p className="mt-4 text-muted-foreground">Cancelling stops your coaching and your recurring billing straight away. Your profile and progress are kept for 90 days in case you come back. If you are charged after you cancel, we refund that charge in full.</p>
           </section>
 
           <section>
-            <h2 className="text-xl font-bold mb-3">2. Free trial cancellation</h2>
+            <h2 className="text-xl font-bold mb-3">2. The {GUARANTEE_PHRASE}</h2>
             <ul className="space-y-2 list-disc pl-5 text-muted-foreground">
-              <li>Your {TRIAL_DAYS}-day free trial begins the moment you complete onboarding with Coach K.</li>
-              <li><strong>Cancel any time before day {TRIAL_DAYS + 1}</strong> and you will <strong>not be charged</strong>.</li>
-              <li>If you let the trial expire without cancelling, your subscription starts and your card is charged <strong>{PRICE}</strong>.</li>
-              <li>We send a reminder on day 6 of your trial to let you know it's about to end.</li>
+              <li>There is no free trial: your first payment of <strong>{PRICE}</strong> is taken when you subscribe.</li>
+              <li>If you are not happy within <strong>{GUARANTEE_DAYS} days of your first payment</strong>, reply "<em>refund</em>" to Coach K or email us, and we will refund that first payment in full.</li>
             </ul>
           </section>
 
