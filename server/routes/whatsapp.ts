@@ -250,6 +250,9 @@ export async function processTextAsync(
   rootId: string = sourceMessageId || `wa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
 ): Promise<void> {
   const isImageMessage = !!(mediaUrl && mediaType?.startsWith("image/"));
+  // THE NEW COACH IN SHADOW (#272): read the client's state BEFORE the old path runs the turn.
+  const shadowPre = process.env.CORE_SHADOW === "on" && !mediaUrl
+    ? import("../core/coach").then(m => m.readPreTurn(phone)).catch(() => null) : null;
   try {
     const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined, sourceMessageId, rootId);
 
@@ -288,7 +291,14 @@ export async function processTextAsync(
     if (mediaUrl) await completeMediaJob(sourceMessageId).catch(() => {});
     // THE CLIENT RECORD (#271): what they sent, exactly — on a
     // failed turn too. After the turn because a first message creates the client's row.
-    void import("../core/client-record").then(m => m.recordAtDoor({ phone, rawText: message, mediaType, sourceMessageId, rootId }));
+    // Then the new coach in shadow (#272), which learns facts for the record from the same message.
+    void (async () => {
+      await (await import("../core/client-record")).recordAtDoor({ phone, rawText: message, mediaType, sourceMessageId, rootId });
+      if (shadowPre) {
+        const [pre, m] = await Promise.all([shadowPre, import("../core/coach")]);
+        await m.runShadow(pre, message, rootId, sourceMessageId);
+      }
+    })().catch(() => {});
   }
 }
 

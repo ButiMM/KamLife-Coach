@@ -496,6 +496,11 @@ export const ACCEPTANCES: Acceptance[] = [
     // prompts. Needs the real front door, the stored subscription and the post-transport bodies.
     command: ["npx", "tsx", "script/pg-cancel-menu-acceptance.ts"] },
 
+  { id: "core-shadow", title: "The new coach runs in read-only shadow (#272)",
+    // Beside every text turn; never sends, never writes client state; sees the #271 record and the
+    // real numbers; off unless CORE_SHADOW=on; erased with the client.
+    command: ["npx", "tsx", "script/pg-core-shadow-acceptance.ts"] },
+
   { id: "spend-cap", title: "The AI spend cap fails safe (#340)",
     // A daily account-wide ceiling that stops model calls, an unreadable spend query that means
     // "over", and the meaning engine under the same cap. Needs gpt_costs, admin_events, the bodies.
