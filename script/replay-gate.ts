@@ -208,8 +208,10 @@ const productModels = (await pool.query<{ model: string }>("SELECT DISTINCT mode
 // failed, graded the deterministic floor only. That is not a gate result, whatever the checks say
 // (the first CI run of this gate passed exactly that way: key present, no model reached).
 const judgeErrors = results.map(r => r.verdict).filter(v => v.startsWith("judge unavailable"));
-if (!OFFLINE && (productModels.length === 0 || judgeErrors.length === results.length)) {
-  REAL(`replay-gate: NOT TESTED — no model answered (product models recorded: ${productModels.length}; judge failures: ${judgeErrors.length}/${results.length}).`);
+// ANY unanswered judge call voids the run (Codex @ 975ea74): a case with no score drops out of the
+// mean, so a partly-judged run could read better than a fully-judged one.
+if (!OFFLINE && (productModels.length === 0 || judgeErrors.length > 0)) {
+  REAL(`replay-gate: NOT TESTED — not every model call answered (product models recorded: ${productModels.length}; judge failures: ${judgeErrors.length}/${results.length}).`);
   if (judgeErrors[0]) REAL(`first judge error: ${judgeErrors[0].slice(0, 300)}`);
   await pool.end().catch(() => {});
   process.exit(2);
@@ -271,4 +273,11 @@ REAL(report);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + "\n");
 
 await pool.end().catch(() => {});
+// NO BASELINE, NO GATE (Codex @ 975ea74): with nothing on main to compare against, nothing can
+// regress, so every hard failure would read green. A live run prints the candidate above and stops
+// NOT TESTED until it is committed; only an explicit recording run (WRITE_BASELINE) may pass.
+if (!OFFLINE && !baseline && !WRITE_BASELINE) {
+  REAL("replay-gate: NOT TESTED — no docs/replay-baseline.json on main. Commit the BASELINE_CANDIDATE_JSON above (reviewed) to arm the gate.");
+  process.exit(2);
+}
 process.exit(regressions.length ? 1 : 0);
