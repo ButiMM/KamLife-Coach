@@ -618,7 +618,18 @@ async function main() {
   // mutations, each re-running a whole acceptance — roughly an hour. Running all of it to re-check
   // the one cut you just changed is the single largest avoidable cost in this loop; measured, the
   // same question answered with --only took 31 seconds.
-  const entries = only.length > 0 ? ACCEPTANCES.filter(a => only.includes(a.id)) : ACCEPTANCES;
+  // --shard i/n: run every n-th acceptance starting at i, so CI can split the ~80-minute inventory
+  // across n parallel machines. Every acceptance lands in exactly one shard.
+  const shard = (() => {
+    const i = process.argv.indexOf("--shard");
+    if (i < 0) return null;
+    const m = /^(\d+)\/(\d+)$/.exec(process.argv[i + 1] || "");
+    if (!m || Number(m[1]) >= Number(m[2])) { console.error("pg-acceptance-runner: --shard expects i/n with i < n"); process.exit(2); }
+    return { i: Number(m[1]), n: Number(m[2]) };
+  })();
+  const base = only.length > 0 ? ACCEPTANCES.filter(a => only.includes(a.id)) : ACCEPTANCES;
+  const entries = shard ? base.filter((_, idx) => idx % shard.n === shard.i) : base;
+  if (shard) console.log(`pg-acceptance-runner: shard ${shard.i}/${shard.n} (${entries.length} of ${base.length} suites)`);
   if (only.length > 0) {
     const unknown = only.filter(id => !ACCEPTANCES.some(a => a.id === id));
     if (unknown.length > 0) {
