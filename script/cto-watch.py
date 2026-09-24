@@ -182,6 +182,19 @@ try:
     live = (h.get("version") or "")[:7]
     main_sha = api("GET", "/commits/main")["sha"][:7]
     prod_line = f"**Production:** up, running `{live}`" + ("" if live == main_sha else f" (main is `{main_sha}`)")
+    # #397: CAN THE COACH THINK? The last OpenAI error is newer than the last success, and recent.
+    ai = h.get("ai") or {}
+    err_at = ts(ai["lastErrorAt"]) if ai.get("lastErrorAt") else None
+    ok_at = ts(ai["lastSuccessAt"]) if ai.get("lastSuccessAt") else None
+    if err_at and (not ok_at or err_at > ok_at) and NOW - err_at < dt.timedelta(minutes=30):
+        code = ai.get("lastErrorCode") or "unknown"
+        why = ("OpenAI has no credits: add credits at platform.openai.com/settings/organization/billing" if "quota" in code or code.startswith("429")
+               else "the OpenAI key is rejected: check OPENAI_API_KEY in Railway" if code.startswith("401")
+               else "OpenAI calls are failing")
+        alerts.insert(0, f"**🚨 The coach can't think: {why}.** Last error `{code}` at {err_at:%H:%M} UTC, {ai.get('errorsLastHour', '?')} errors in the last hour, last success {ok_at.strftime('%H:%M') if ok_at else 'never since restart'}.")
+        prod_line += f" · **AI failing** (`{code}`)"
+    elif ok_at:
+        prod_line += f" · AI ok (last success {ok_at:%H:%M} UTC)"
     if live != main_sha and last_merge and NOW - last_merge > dt.timedelta(minutes=25):
         alerts.append(f"**Deploy lag:** production runs `{live}` but main is `{main_sha}`, 25+ min after the last merge. Check Railway.")
 except Exception as e:
