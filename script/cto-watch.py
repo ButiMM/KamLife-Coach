@@ -132,6 +132,13 @@ try:
     import pathlib
     srv = sum(len(f.read_text(errors="ignore").splitlines()) for f in pathlib.Path("server").rglob("*.ts"))
     tst = sum(len(f.read_text(errors="ignore").splitlines()) for f in pathlib.Path("script").rglob("*") if f.is_file() and f.suffix in (".ts", ".sh", ".mjs", ".py"))
+    try:
+        dl = [l.strip() for l in open("docs/delete-list.txt") if l.strip() and not l.startswith("#")]
+        alive = [f for f in dl if pathlib.Path(f).exists()]
+        alive_lines = sum(len(pathlib.Path(f).read_text(errors="ignore").splitlines()) for f in alive)
+        mouth_line += f"\n\n**Old components still alive:** {len(alive)} of {len(dl)} files marked for deletion ({alive_lines:,} lines). Target: 0. See docs/COMPONENTS.md."
+    except Exception:
+        pass
     mouth_line += f"\n\n**Size:** server {srv:,} lines (target ≤25,000 once the new core has switched), tests {tst:,} lines (target ≤20,000). Baseline 24 Sep: server 74,888, tests 57,037."
 except Exception:
     mouth_line = "**Mouths on main:** unavailable"
