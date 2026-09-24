@@ -4,10 +4,10 @@
 
 ## Lane A: live billing harm, allowed despite the freeze (tonight, small PRs)
 
-- [ ] #315 Cancel menu "4 — Just cancel" sends a shopping list and the subscription stays active: the client is still billed
-- [ ] #306 A minor stopped by the age gate keeps an active paid subscription
-- [ ] #303 Terms still promise a 7-day trial: make the copy match reality (no trial; guarantee wording as implemented)
-- [ ] #328 14-day money-back guarantee, implemented end to end
+- [x] #315 (PR #383) Cancel menu "4 — Just cancel" sends a shopping list and the subscription stays active: the client is still billed
+- [ ] #306 (PR #386) A minor stopped by the age gate keeps an active paid subscription
+- [x] #303 (PR #384) Terms still promise a 7-day trial: make the copy match reality (no trial; guarantee wording as implemented)
+- [ ] #328 (PR #385) 14-day money-back guarantee, implemented end to end
 
 ## Lane B: the new core (top priority). Two parallel worktrees: B1 (gate, then Coach Health) and B2 (client record, then understanding and composer)
 
@@ -15,9 +15,9 @@ Order, and what "done" means today:
 - [ ] #368 Replay gate hardening (Codex @ d4ddc3d on #298): check keys bound to full definitions and erasure of chat_history are done on #298 (dbbd9db); ITN and opt-out send are covered by the DB suite; still open: held-out grading in trusted base code
 - [x] #270 Replay gate green, baseline recorded on main (PR #298): scores the 8 journeys, never-see, reply time, cost; the new coach in shadow beside the old path. **Unblocked 11:05 (key fixed).** First live run green: main's journeys 7 / 7.2 / 6.2 / **4.0** / 6.5 / 8 / 5.5 / 7.9, R0.009 per message, 2.3 s mean reply. Merged 14:04 (#298). Start with the audit's 24 real failures plus every case below; add real tester threads when read-only DB access exists.
 - [x] #334 Delete dead code (PR #352): −6,700 lines, 15 never-scheduled jobs, Replit scaffolding; modules back to 234
-- [ ] #271 (PR #356) One record of the client: their words exactly as sent, and typed facts linked to them (knee, Comrades, pregnancy). Retention and erasure designed first. No model call of its own: facts come from #272's understanding call. Includes #323 (normaliser can never add facts).
+- [x] #271 (PR #356, merged; facts learned once #359 lands) One record of the client: their words exactly as sent, and typed facts linked to them (knee, Comrades, pregnancy). Retention and erasure designed first. No model call of its own: facts come from #272's understanding call. Includes #323 (normaliser can never add facts).
 - [x] #369 Link every piece of advice to what happened next (outcome data): first cut #377 (outcome by delivered move)
-- [ ] #272 (PR #359, draft, shadow) One understanding step: the AI reads each message once and writes what it means (intent, facts, corrections); code validates before saving. Replaces the ~440 patterns and the classifier call. Runs **in shadow** against the gate.
+- [ ] #272 (PR #359, ready, shadow) One understanding step: the AI reads each message once and writes what it means (intent, facts, corrections); code validates before saving. Replaces the ~440 patterns and the classifier call. Runs **in shadow** against the gate.
 - [ ] #272 One writer, one sender: the composer writes every reply from the record. Switch one message family at a time; delete that family's old handlers in the same PR (mouth ratchet enforces it). With #320 (no prompt slice) and #322 (stored conversation state).
 - [ ] #319 Every proactive send through the same writer and sender
 - [ ] #293 Coach Health scores every live turn, daily tester digest

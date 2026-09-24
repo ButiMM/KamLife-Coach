@@ -18,3 +18,6 @@ One line per merged PR: `HH:MM SAST · agent · PR # · what changed · gate bef
 24 Sep 18:12 · Claude Code · #305 · Under-18s cannot complete signup; a stated age under 18 closes coaching · gate green (no regression vs main) · +321 / −13
 24 Sep 19:13 · Claude Code · #282 · A meal decline deletes nothing; a genuine correction supersedes and is recorded · gate green (no regression vs main) · +584 / −71
 24 Sep 19:13 · Claude Code · #377 · Outcomes by move: the founder's "outcomes" text compares clients who got each delivered move with those who did not · gate green · +104 / −3
+24 Sep 20:14 · Claude Code · #383 · "4 — Just cancel" cancels: while a cancel answer is pending, the cancel menu owns "1".."4" and "yes" (closes #315) · gate green (no regression vs main) · +236 / −107
+24 Sep 20:19 · Claude Code · #356 · The client record: every inbound message stored as sent; typed facts in the client's own voice, validated, superseded on correction; 12-month retention; erased with the client. No model call of its own · gate green (no regression vs main) · +688 / −3
+24 Sep 20:24 · Claude Code · #384 · Terms and cancellation pages match the product: no trial, the price and guarantee from the same constants the product uses (closes #303) · gate green (no regression vs main) · +35 / −21
