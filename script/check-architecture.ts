@@ -630,6 +630,11 @@ const NOT_CLIENT_FACING: Array<[string, string]> = [
  */
 const NOT_CLIENT_FACING_RETURNS: Array<[string, RegExp, string]> = [
   [
+    "server/outcomes.ts",
+    /^\s*return `\\n\\n\*By move\* \(clients who got it/,
+    "formatMoveComparison (#369) is the founder's coach-only outcomes report, reached only by the outcomes command; never sent to a client",
+  ],
+  [
     "server/index.ts",
     /^\s*return \["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "ECONNRESET", "EHOSTUNREACH", "EAI_AGAIN"\]\.includes\(code\)/,
     "isConnectionError returns a boolean to startup classification; the error-code literals are never returned",
