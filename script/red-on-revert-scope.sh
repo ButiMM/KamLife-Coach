@@ -67,12 +67,10 @@ echo "CONTROL: untouched scope acceptance is GREEN"
 
 failed=0
 
-# 1. THE GATE FAILS OPEN AGAIN — a verdict the classifier was never asked for answers the message.
-# (Offline, the classifier returns no usable word, so this is the path the acceptance exercises. The
-# thrown-error path fails closed the same way and is graded by its unit test, "scope: …error…".)
-run_case "an unrecognised classifier verdict fails open to answering" server/understanding/domain-guard.ts \
-  '    return { classification: "out-of-domain", reasoning: `classifier: ${word || "empty"}`' \
-  '    return { classification: "in-domain", reasoning: `classifier: ${word || "empty"}`' || failed=$((failed + 1))
+# 1. THE GATE FAILS OPEN AGAIN — main's exact catch: a classifier error answers the message.
+run_case "a classifier error fails open to answering" server/understanding/domain-guard.ts \
+  '    return { classification: "out-of-domain", reasoning: "fail-closed: " + ((e as any)?.message || "error"), redirectMessage: opts?.ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT };' \
+  '    return { classification: "in-domain", reasoning: "fail-open: " + ((e as any)?.message || "error") };' || failed=$((failed + 1))
 
 # 2. NO DETERMINISTIC OFF-DOMAIN ASKS — scope is left to the model and the prompt.
 run_case "off-domain asks are left to the model" server/understanding/domain-guard.ts \
@@ -96,9 +94,9 @@ run_case "the gpt fallback is not gated" server/routes.ts \
   '  if (scope.redirectMessage) return tag(' \
   '  if (false) return tag(' || failed=$((failed + 1))
 
-# 6. FAILING CLOSED WITHOUT THE WIDER COACHING VOCABULARY — "lose 5kg" is declined in an outage.
-run_case "coaching goals fall to a failing classifier" server/understanding/domain-guard.ts \
-  '\\d\\s?kgs?\\b|\\blos(?:e|ing)\\b|' \
+# 6. FAILING CLOSED WITHOUT THE WIDER COACHING VOCABULARY — main's list: a back ache is declined in an outage.
+run_case "coaching words the old list missed fall to a failing classifier" server/understanding/domain-guard.ts \
+  '\\d\\s?kgs?\\b|\\blos(?:e|ing)\\b|\\bgain(?:ing)?\\b|\\btoned?\\b|fitness|\\bin shape\\b|diabet|blood pressure|cholesterol|pregnan|\\bknee|\\bback\\b|\\bhurts?\\b|\\baches?\\b|' \
   '' || failed=$((failed + 1))
 
 # 7. A LIFE EVENT THAT MENTIONS AN OFF-TOPIC THING IS DECLINED — "update my CV so I skipped gym".
