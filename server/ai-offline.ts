@@ -57,3 +57,22 @@ export function assertAiOnline(label: string): void {
 export function isAiOfflineError(err: unknown): boolean {
   return !!(err && (err as any)[AI_OFFLINE_MARKER]);
 }
+
+/**
+ * OUT OF CREDITS IS NOT A RATE LIMIT (#395). OpenAI answers an empty balance with a 429 too, but
+ * `insufficient_quota` never clears on retry: until someone adds credits, every call fails. Tell the
+ * two apart so the client is not told "30 seconds" forever and the founder is alerted.
+ */
+export function isQuotaExhausted(err: unknown): boolean {
+  const e = err as any;
+  const text = `${e?.code ?? ""} ${e?.error?.code ?? ""} ${e?.message ?? ""}`.toLowerCase();
+  return text.includes("insufficient_quota") || text.includes("no credits remaining") || text.includes("exceeded your current quota");
+}
+
+/** A dead key or an empty balance does not fix itself: alert the founder at most once an hour, not on every turn. */
+let lastAiDownAlert = 0;
+export function shouldAlertAiDown(now = Date.now()): boolean {
+  if (now - lastAiDownAlert < 60 * 60 * 1000) return false;
+  lastAiDownAlert = now;
+  return true;
+}
