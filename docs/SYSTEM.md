@@ -6,7 +6,7 @@ Every builder, reviewer and the CTO reads this before asking the founder a quest
 
 | Secret | Used by | Notes |
 |---|---|---|
-| `AI_INTEGRATIONS_OPENAI_API_KEY` | replay gate, gauntlet, model-drill, reality-test | The OpenAI key. Workflows read it first, then fall back to `OPENAI_API_KEY`. **Already set (Aug 2026). Don't ask for an OpenAI key.** |
+| `AI_INTEGRATIONS_OPENAI_API_KEY` | replay gate, gauntlet, model-drill, reality-test | The OpenAI key for CI. **The value stored in GitHub is rejected by OpenAI (401, key ending `wfkA`), found 24 Sep.** It must hold the same working key production uses in Railway. Production's key is separate and works. |
 | `BACKUP_DATABASE_URL` | `db-backup.yml` | Production database, for backups |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT` | `db-backup.yml` | Cloudflare R2, where backups are stored |
 | `REPLAY_HELDOUT_JSON` | replay gate | Not set yet. Held-out cases; until it exists, split the audit's real failures into seen and held-out. |

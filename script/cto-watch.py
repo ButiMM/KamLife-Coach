@@ -34,6 +34,14 @@ for p in open_prs:
     if p["title"].startswith("[core]") and adds_store and "Retires:" not in (p["body"] or ""):
         comment_once(n, f"cto-retires-{n}", "**CTO watch (layer check):** this `[core]` PR adds a new table or store. Its description needs a `Retires:` section naming which existing stores, handlers or calls it replaces, and the switch PR that deletes them. Otherwise it's another layer (docs/ORDERS.md §4c).", comments)
         alerts.append(f"**Layer check:** #{n} adds a store without saying what it retires.")
+    for c in comments[-15:]:
+        body = c["body"].lstrip()
+        if "<!-- cto-" in body or c["user"]["login"].endswith("[bot]"):
+            continue
+        if re.match(r"^[*_\s]*(BLOCKED|FOUNDER[- ]ACTION)", body) or re.search(r"\b401\b|Incorrect API key|needs? the founder|founder must", body[:400]):
+            if NOW - ts(c["created_at"]) < dt.timedelta(hours=12):
+                alerts.insert(0, f"**🚨 BLOCKED, needs the founder:** #{n}: {body[:160].replace(chr(10), ' ')}")
+                break
     if "What testers will notice" not in (p["body"] or ""):
         comment_once(n, f"cto-notice-{n}", "**CTO watch:** the description must open with \"What testers will notice:\" (CLAUDE.md standing orders).", comments)
     human = [c for c in comments if not c["user"]["login"].endswith("[bot]") or "codex" in c["user"]["login"]]
