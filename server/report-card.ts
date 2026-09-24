@@ -10,9 +10,6 @@
  * Fail-open: any missing config/data returns "" so nothing breaks. The pure pieces are unit-tested.
  */
 
-import { db } from "./db";
-import { mealLogs, workoutLogs, stepLogs, weightLogs } from "../shared/schema";
-import { eq, and, gte, sql } from "drizzle-orm";
 import { getGoalProfile } from "./goal-profiles";
 import { renderReportCard, type ReportStat } from "./macro-card";
 import { putCard } from "./card-store";
@@ -51,7 +48,6 @@ export {
   type ItemOrigin, type FoodDataConfidence, type FoodProvenance,
 } from "./day-ledger-core";
 import type { FoodProvenance } from "./day-ledger-core";
-
 
 export interface ReportData {
   days: number;

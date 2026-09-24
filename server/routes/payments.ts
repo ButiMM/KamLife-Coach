@@ -75,15 +75,20 @@ export function registerPaymentRoutes(app: Express) {
   // ── Twilio delivery status webhook ──
   app.post("/webhook/status", (req: any, res: any) => {
     // Validate Twilio signature — prevents forged delivery status poisoning our logs.
+    // FAILS CLOSED (#341): with no token there is nothing to check a signature against, so every
+    // request is refused, in every environment. The repo is public and the path is known; only
+    // Twilio sends here, and Twilio only sends when the token is configured.
     const authToken = process.env.TWILIO_AUTH_TOKEN || "";
-    if (authToken) {
-      const sig = (req.headers["x-twilio-signature"] as string) || "";
-      const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol;
-      const fullUrl = `${proto}://${req.get("host")}${req.originalUrl}`;
-      if (!twilio.validateRequest(authToken, sig, fullUrl, req.body)) {
-        console.warn(`[SECURITY] Delivery status — invalid Twilio signature from ${req.ip}`);
-        return res.status(403).end();
-      }
+    if (!authToken) {
+      console.error("[SECURITY] Delivery status — TWILIO_AUTH_TOKEN not set; rejecting request");
+      return res.status(503).end();
+    }
+    const sig = (req.headers["x-twilio-signature"] as string) || "";
+    const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol;
+    const fullUrl = `${proto}://${req.get("host")}${req.originalUrl}`;
+    if (!twilio.validateRequest(authToken, sig, fullUrl, req.body)) {
+      console.warn(`[SECURITY] Delivery status — invalid Twilio signature from ${req.ip}`);
+      return res.status(403).end();
     }
     res.sendStatus(200);
     try {

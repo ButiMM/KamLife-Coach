@@ -25,14 +25,12 @@ Always follow these guidelines when building a full-stack JavaScript application
 
 ## Storage
 
-- Make sure to update `IStorage` in `server/storage.ts` to accommodate any storage CRUD operations you need in the application.
-- Ensure that storage interface uses the types from `@shared/schema.ts`.
+- KamLife has no storage interface: query through Drizzle (`db` from `server/db.ts`) with the types from `@shared/schema.ts`. `server/storage.ts` was deleted in #352.
 
 ## Backend
 
-- After writing the storage interface, write the API routes in the `server/routes.ts` file.
-- Always use the storage interface to do any CRUD operations. Keep the routes as thin as possible.
-- Validate the request body using Zod schemas from `drizzle-zod` before passing it to the storage interface.
+- Write the API routes in the `server/routes/` modules. Keep the routes as thin as possible.
+- Validate the request body using Zod schemas from `drizzle-zod` before writing to the database.
 
 ## Frontend
 

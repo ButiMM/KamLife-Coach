@@ -16,7 +16,7 @@ import { db } from "./db";
 import { workoutLogs } from "../shared/schema";
 import { eq, and, gte } from "drizzle-orm";
 import { sastDayStart } from "./utils";
-import { sastDayKey, sastWeekStart } from "./sast";
+import { sastWeekStart } from "./sast";
 
 const DOW_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -77,11 +77,6 @@ export function attributableWeekSessionDates(opts: {
   }
   if (dates.length !== opts.claimed) return null;
   return dates;
-}
-
-/** SAST day keys for those dates — the write record and the existing-row check use the same key. */
-export function weekSessionDayKeys(dates: Date[]): string[] {
-  return dates.map(d => sastDayKey(d));
 }
 
 export type WorkoutStateType = "REST" | "NORMAL" | "MISSED" | "ALREADY_DONE";

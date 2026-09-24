@@ -6,7 +6,6 @@ import * as Sentry from "@sentry/node";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setStartupPhase, registerStartupGate } from "./routes/health";
-import { registerAudioRoutes } from "./replit_integrations/audio/routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initScheduler } from "./scheduler";
@@ -296,20 +295,6 @@ async function runMigrations(): Promise<void> {
     `CREATE UNIQUE INDEX IF NOT EXISTS sent_proactive_uniq_idx ON sent_proactive(user_id, message_key, dedupe_window)`,
     `CREATE INDEX IF NOT EXISTS sent_proactive_user_idx ON sent_proactive(user_id)`,
     `CREATE INDEX IF NOT EXISTS sent_proactive_sent_at_idx ON sent_proactive(sent_at)`,
-
-    `CREATE TABLE IF NOT EXISTS conversations (
-      id SERIAL PRIMARY KEY,
-      title TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-    )`,
-
-    `CREATE TABLE IF NOT EXISTS messages (
-      id SERIAL PRIMARY KEY,
-      conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-    )`,
 
     `CREATE TABLE IF NOT EXISTS rate_limits (
       phone TEXT PRIMARY KEY,
@@ -808,7 +793,6 @@ async function verifySchemaThenServe(): Promise<void> {
   // FIRST. Express matches in registration order, so this must precede every other route or it
   // only guards what comes after it.
   registerStartupGate(app);
-  registerAudioRoutes(app);
   await registerRoutes(httpServer, app);
   // Kicked off, not awaited: the listen() below must happen regardless of how this goes.
   void verifySchemaThenServe();

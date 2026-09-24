@@ -50,7 +50,7 @@ export const SUITES = [
   "decision-state-tests", "decision-runtime-tests", "reply-context-verifier-tests", "decision-doctrine-guard",
   "turn-triage-tests", "normalizer-replay-tests", "tracking-contract-tests",
   "expectation-continuity-tests", "voice-provenance-tests", "proactive-template-tests",
-  "production-parity", "cut-a-regression-tests", "check-architecture",
+  "production-parity", "cut-a-regression-tests", "status-webhook-auth-tests", "check-architecture",
 ];
 
 const PER_SUITE_TIMEOUT_MS = 10 * 60_000;
