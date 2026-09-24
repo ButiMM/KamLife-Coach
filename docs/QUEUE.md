@@ -8,6 +8,7 @@ Order, and what "done" means today:
 - [ ] #270 Replay gate green, baseline recorded on main (PR #298). Needs the `OPENAI_API_KEY` repo secret for the judge. Start with the audit's 24 real failures plus every case below; add real tester threads when read-only DB access exists.
 - [ ] #334 Delete dead code: pure deletions, early, no behaviour change
 - [ ] #271 One record of the client: their words exactly as sent, and typed facts linked to them (knee, Comrades, pregnancy). Retention and erasure designed first. Includes #323 (normaliser can never add facts).
+- [ ] #369 Link every piece of advice to what happened next (outcome data), built alongside #271
 - [ ] #272 One understanding step: the AI reads each message once and writes what it means (intent, facts, corrections); code validates before saving. Replaces the ~440 patterns and the classifier call. Runs **in shadow** against the gate.
 - [ ] #272 One writer, one sender: the composer writes every reply from the record. Switch one message family at a time; delete that family's old handlers in the same PR (mouth ratchet enforces it). With #320 (no prompt slice) and #322 (stored conversation state).
 - [ ] #319 Every proactive send through the same writer and sender
