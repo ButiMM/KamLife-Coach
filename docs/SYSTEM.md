@@ -38,6 +38,11 @@ The full list of names and code defaults is in the outgoing CTO's handover (22-2
 | 24 Sep | Test phone numbers and names in old Replit logs are **not** real people |
 | parked | Coach K price: founder wants R199-R249 (code says R149). Decide when the core works. |
 
+## Founder checks still open (Railway, only the founder can see it)
+
+- `COACH_ALERT_PHONE` is set to the founder's WhatsApp number. Safety escalations go nowhere without it.
+- `COACH_DASHBOARD_KEY` is a long random value.
+
 ## Where the plan lives
 
-`docs/ORDERS.md` (the plan), `docs/QUEUE.md` (the order of work), `docs/FINDINGS.md` (every review finding, mapped to an issue), issue #280 (live status).
+`docs/ORDERS.md` (the plan), `docs/QUEUE.md` (the order of work), `docs/FINDINGS.md` (every review finding, mapped to an issue), `docs/RISKS.md` (risk register), issue #280 (live status).
