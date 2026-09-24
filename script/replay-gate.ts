@@ -34,7 +34,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { CASES, type ReplayCase, type Check } from "./replay-cases";
+import { CASES, JOURNEYS, NEVER_SEE, type ReplayCase, type Check, type Journey } from "./replay-cases";
 
 const OFFLINE = process.argv.includes("--offline");
 const WRITE_BASELINE = process.argv.includes("--write-baseline");
@@ -130,7 +130,7 @@ const versions = {
 
 // ── ONE CASE ────────────────────────────────────────────────────────────────────────────────
 type CheckResult = { what: string; invariant: string | null; pass: boolean; evidence: string };
-type CaseResult = { id: string; heldOut: boolean; checks: CheckResult[]; hardPass: boolean; score: number | null; verdict: string; bodies: string[] };
+type CaseResult = { id: string; journey: Journey; heldOut: boolean; checks: CheckResult[]; hardPass: boolean; score: number | null; verdict: string; bodies: string[]; neverSeen: string[] };
 
 const lastShadowId = async () => Number((await pool.query("SELECT COALESCE(MAX(id),0) m FROM shadow_replies")).rows[0].m);
 async function bodyAfter(phone: string, since: number): Promise<string> {
@@ -142,19 +142,25 @@ async function bodyAfter(phone: string, since: number): Promise<string> {
   }
   return "";
 }
+const replyMs: number[] = []; // every turn, before-turns included: the client waits for all of them
 async function turn(phone: string, text: string, sid: string): Promise<string> {
   _resetOutboundDedupe();
   _resetInteractionCorrelation();
   const s0 = await lastShadowId();
+  const t0 = Date.now();
   await processTextAsync(phone, text, null, null, [], handleMessage as any, sid);
-  return bodyAfter(phone, s0);
+  const body = await bodyAfter(phone, s0);
+  replyMs.push(Date.now() - t0);
+  return body;
 }
 
 async function runCheck(c: Check, userId: string, phone: string, bodies: string[]): Promise<CheckResult> {
   const base = { what: c.what, invariant: c.invariant ?? null };
   if (c.kind === "sql") {
     // The user row may have been renamed by a deletion; the id is stable.
-    const row = (await pool.query(c.query, c.query.includes("$2") ? [userId, phone] : [userId])).rows[0];
+    let row: any;
+    try { row = (await pool.query(c.query, c.query.includes("$2") ? [userId, phone] : [userId])).rows[0]; }
+    catch (e) { return { ...base, pass: false, evidence: `query failed: ${(e as Error).message}` }; } // e.g. a table main does not have yet
     const v = row ? Object.values(row)[0] : null;
     const n = typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v;
     const pass = c.expect === "zero" ? Number(n) === 0 : c.expect === "nonzero" ? Number(n) > 0 : n === c.expect.equals;
@@ -190,7 +196,7 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
   const phone = `whatsapp:+2782${String(9000000 + n).padStart(7, "0")}`;
   await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
   await pool.query("DELETE FROM shadow_replies WHERE phone = $1", [phone]);
-  const [u] = await db.insert(schema.users).values({
+  const [u] = k.newClient ? [null as any] : await db.insert(schema.users).values({
     phoneNumber: phone, name: "Lerato Replay", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
     subscriptionStatus: "active", goalType: "fat_loss", currentWeight: "82", startWeight: "86", targetWeight: "72",
     heightCm: 164, age: 33, gender: "female", trainingMode: "home", trainingDaysPerWeek: 3,
@@ -201,10 +207,13 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
   for (const [i, t] of (k.before || []).entries()) await turn(phone, t, `RP${n}b${i}`);
   const bodies: string[] = [];
   for (const [i, t] of k.turns.entries()) bodies.push(await turn(phone, t, `RP${n}t${i}`));
+  // A stranger's row is created by the front door; read it back so the checks and the judge see it.
+  const userId: string = u?.id ?? (await pool.query("SELECT id FROM users WHERE phone_number = $1", [phone])).rows[0]?.id ?? "00000000-0000-0000-0000-000000000000";
   const checks: CheckResult[] = [];
-  for (const c of k.checks) checks.push(await runCheck(c, u.id, phone, bodies));
-  const { score, verdict } = await judge(k, u.id, bodies);
-  return { id: k.id, heldOut: isHeldOut, checks, hardPass: checks.filter(c => c.invariant).every(c => c.pass), score, verdict, bodies };
+  for (const c of k.checks) checks.push(await runCheck(c, userId, phone, bodies));
+  const neverSeen = NEVER_SEE.filter(n => bodies.some(b => new RegExp(n.pattern, n.flags ?? "").test(b))).map(n => n.what);
+  const { score, verdict } = await judge(k, userId, bodies);
+  return { id: k.id, journey: k.journey, heldOut: isHeldOut, checks, hardPass: checks.filter(c => c.invariant).every(c => c.pass), score, verdict, bodies, neverSeen };
 }
 
 // ── THE RUN ─────────────────────────────────────────────────────────────────────────────────
@@ -213,6 +222,23 @@ const results: CaseResult[] = [];
 for (const [i, k] of CASES.entries()) results.push(await runCase(k, i, false));
 for (const [i, k] of heldOut.entries()) results.push(await runCase(k, 1000 + i, true));
 const productModels = (await pool.query<{ model: string }>("SELECT DISTINCT model FROM gpt_costs WHERE created_at >= $1 ORDER BY model", [runStart])).rows.map(r => r.model);
+// COST AND SPEED (docs/TESTER-EXPERIENCE.md rule 8: ~8 s a reply, at most R0.10 a message). The
+// product's model spend for this run (the judge is not the product and is not in gpt_costs),
+// over every client message sent.
+const { USD_ZAR } = await import("../server/cost-tracking");
+const usd = Number((await pool.query("SELECT COALESCE(SUM(cost_usd), 0) s FROM gpt_costs WHERE created_at >= $1", [runStart])).rows[0].s);
+const messagesSent = replyMs.length;
+const costPerMessageZar = messagesSent ? Math.round((usd * USD_ZAR / messagesSent) * 1000) / 1000 : null;
+const sortedMs = [...replyMs].sort((a, b) => a - b);
+const replyTime = { meanS: sortedMs.length ? Math.round(sortedMs.reduce((a, b) => a + b, 0) / sortedMs.length / 100) / 10 : null,
+  p90S: sortedMs.length ? Math.round(sortedMs[Math.floor(sortedMs.length * 0.9)] / 100) / 10 : null };
+const journeys = (Object.keys(JOURNEYS).map(Number) as Journey[]).map(j => {
+  const rs = results.filter(r => r.journey === j);
+  const sc = rs.filter(r => r.score !== null);
+  return { journey: j, name: JOURNEYS[j], cases: rs.length, hardPass: rs.filter(r => r.hardPass).length,
+    meanScore: sc.length ? Math.round(sc.reduce((a, r) => a + (r.score as number), 0) / sc.length * 10) / 10 : null,
+    neverSee: rs.reduce((a, r) => a + r.neverSeen.length, 0) };
+});
 // DID A MODEL ACTUALLY ANSWER? A run where the product recorded no model call, or every judge call
 // failed, graded the deterministic floor only. That is not a gate result, whatever the checks say
 // (the first CI run of this gate passed exactly that way: key present, no model reached).
@@ -246,10 +272,10 @@ const hardFailing = [...hardNow].filter(([, p]) => !p).map(([k]) => k);
 
 const record = {
   runAt: new Date().toISOString(), offline: OFFLINE, versions, productModels,
-  summary: { cases: results.length, heldOut: heldOut.length, hardChecks: hardNow.size, hardFailing: hardFailing.length, meanScore, regressions },
+  summary: { cases: results.length, heldOut: heldOut.length, hardChecks: hardNow.size, hardFailing: hardFailing.length, meanScore, regressions, costPerMessageZar, replyTime, journeys },
   cases: results.map(r => r.heldOut
     ? { id: "held-out", heldOut: true, hardPass: r.hardPass, score: r.score }
-    : { id: r.id, heldOut: false, hardPass: r.hardPass, score: r.score, verdict: r.verdict, checks: r.checks }),
+    : { id: r.id, journey: r.journey, heldOut: false, hardPass: r.hardPass, score: r.score, verdict: r.verdict, checks: r.checks, neverSeen: r.neverSeen }),
 };
 mkdirSync("replay-results", { recursive: true });
 writeFileSync(`replay-results/run-${versions.gitSha.slice(0, 7)}.json`, JSON.stringify(record, null, 2));
@@ -259,6 +285,7 @@ const candidate = {
   recordedAt: record.runAt, gitSha: versions.gitSha, versions, productModels, meanScore,
   hard: Object.fromEntries(hardNow),
   scores: Object.fromEntries(results.filter(r => !r.heldOut).map(r => [r.id, r.score])),
+  journeys, costPerMessageZar, replyTime,
 };
 if (!OFFLINE) {
   // Printed so the run that sets the baseline can be read back from the job log and committed.
@@ -274,12 +301,16 @@ lines.push(`## Customer replay gate ${OFFLINE ? "— OFFLINE PLUMBING RUN, NOT A
 lines.push(`SHA \`${versions.gitSha.slice(0, 7)}\` · corpus \`${versions.corpus}\` · judge \`${versions.judgeModel}\` prompt \`${versions.judgePrompt}\` · product prompts \`${versions.productPrompts}\` · product models ${productModels.join(", ") || "none recorded"}`);
 lines.push(`**${results.length} cases** (${heldOut.length} held out, source: ${heldOutSource}) · hard checks failing: **${hardFailing.length}/${hardNow.size}** · mean judge score **${meanScore ?? "n/a"}/10**${baseline ? ` (baseline ${baseline.meanScore ?? "n/a"})` : " · no baseline yet"}`);
 lines.push(regressions.length ? `### ❌ ${regressions.length} regression(s) against the main baseline\n${regressions.map(r => `- ${r}`).join("\n")}` : baseline ? "### ✅ No hard invariant regressed against the main baseline" : "");
-lines.push("", "| case | hard | score | failing checks |", "|---|---|---|---|");
+const baseJ = new Map(((baseline?.journeys || []) as typeof journeys).map(j => [j.journey, j]));
+lines.push("", "### Journeys (docs/TESTER-EXPERIENCE.md)", "| journey | cases | hard pass | score | main | never-see |", "|---|---|---|---|---|---|");
+for (const j of journeys) lines.push(`| ${j.journey}. ${j.name} | ${j.cases} | ${j.hardPass}/${j.cases} | ${j.meanScore ?? "–"} | ${baseJ.get(j.journey)?.meanScore ?? "–"} | ${j.neverSee} |`);
+lines.push("", `**Reply time** mean ${replyTime.meanS ?? "–"} s, p90 ${replyTime.p90S ?? "–"} s (target ~8 s) · **model cost** R${costPerMessageZar ?? "–"} per message (target ≤ R0.10)${baseline?.costPerMessageZar != null ? ` · main R${baseline.costPerMessageZar}` : ""}`);
+lines.push("", "| case | journey | hard | score | failing checks | never-see |", "|---|---|---|---|---|---|");
 for (const r of results.filter(x => !x.heldOut)) {
   const bad = r.checks.filter(c => !c.pass).map(c => `${c.invariant ? "**" + c.invariant + "**: " : ""}${c.what}`).join("; ");
-  lines.push(`| ${r.id} | ${r.hardPass ? "pass" : "FAIL"} | ${r.score ?? "–"} | ${bad || ""} |`);
+  lines.push(`| ${r.id} | ${r.journey} | ${r.hardPass ? "pass" : "FAIL"} | ${r.score ?? "–"} | ${bad || ""} | ${r.neverSeen.join("; ")} |`);
 }
-if (heldOut.length) lines.push(`| held-out ×${heldOut.length} | ${results.filter(r => r.heldOut && r.hardPass).length}/${heldOut.length} pass | – | (inputs not shown) |`);
+if (heldOut.length) lines.push(`| held-out ×${heldOut.length} | – | ${results.filter(r => r.heldOut && r.hardPass).length}/${heldOut.length} pass | – | (inputs not shown) | ${results.filter(r => r.heldOut).reduce((a, r) => a + r.neverSeen.length, 0)} |`);
 const report = lines.join("\n");
 REAL(report);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + "\n");

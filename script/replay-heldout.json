@@ -20,7 +20,8 @@
         "flags": "i"
       }
     ],
-    "rubric": "The client's weight went up and they ask why. A good coach gives one coherent explanation grounded in what is logged, with one next step, not two contradictory instructions."
+    "rubric": "The client's weight went up and they ask why. A good coach gives one coherent explanation grounded in what is logged, with one next step, not two contradictory instructions.",
+    "journey": 7
   },
   {
     "id": "weigh-in-protein-instruction",
@@ -43,7 +44,8 @@
         "flags": "i"
       }
     ],
-    "rubric": "The client reported a weigh-in. A good reply records it and reflects on the trend briefly, without bolting on an unrelated instruction."
+    "rubric": "The client reported a weigh-in. A good reply records it and reflects on the trend briefly, without bolting on an unrelated instruction.",
+    "journey": 3
   },
   {
     "id": "session-count-invented",
@@ -60,7 +62,8 @@
         "flags": "i"
       }
     ],
-    "rubric": "The client has logged no workouts. A good reply says so honestly and invites them to log or start the first session."
+    "rubric": "The client has logged no workouts. A good reply says so honestly and invites them to log or start the first session.",
+    "journey": 4
   },
   {
     "id": "do-better-plate",
@@ -79,7 +82,8 @@
         "flags": "i"
       }
     ],
-    "rubric": "The client rejected the suggested dinner with 'Do better.' A good coach takes the feedback and offers a genuinely better, specific South African dinner."
+    "rubric": "The client rejected the suggested dinner with 'Do better.' A good coach takes the feedback and offers a genuinely better, specific South African dinner.",
+    "journey": 3
   },
   {
     "id": "stale-cached-totals",
@@ -101,7 +105,8 @@
         "flags": "i"
       }
     ],
-    "rubric": "Nothing is logged today. A good reply says the full protein target is still to go, and does not claim almost all of it is done."
+    "rubric": "Nothing is logged today. A good reply says the full protein target is still to go, and does not claim almost all of it is done.",
+    "journey": 4
   },
   {
     "id": "lunch-again-for-dinner",
@@ -120,7 +125,8 @@
         "flags": "i"
       }
     ],
-    "rubric": "The client already had chicken and rice for lunch. A good coach suggests a different, balanced dinner that fits what is left today."
+    "rubric": "The client already had chicken and rice for lunch. A good coach suggests a different, balanced dinner that fits what is left today.",
+    "journey": 3
   },
   {
     "id": "day-zero-old-client",
@@ -140,7 +146,8 @@
         "flags": "i"
       }
     ],
-    "rubric": "The client joined four months ago and is returning. A good reply welcomes them back without restarting them at day zero."
+    "rubric": "The client joined four months ago and is returning. A good reply welcomes them back without restarting them at day zero.",
+    "journey": 5
   },
   {
     "id": "past-sick-not-sick",
@@ -165,7 +172,8 @@
         "flags": "i"
       }
     ],
-    "rubric": "The client was sick in the past and is ready now. A good reply welcomes them back to training with a sensible first session."
+    "rubric": "The client was sick in the past and is ready now. A good reply welcomes them back to training with a sensible first session.",
+    "journey": 4
   },
   {
     "id": "rice-not-brown-rice",
@@ -182,7 +190,8 @@
         "expect": "zero"
       }
     ],
-    "rubric": "The client had rice and tin fish. A good reply logs exactly that."
+    "rubric": "The client had rice and tin fish. A good reply logs exactly that.",
+    "journey": 2
   },
   {
     "id": "teach-me-not-peach",
@@ -205,7 +214,8 @@
         "flags": "i"
       }
     ],
-    "rubric": "The client wants to learn to count protein. A good reply teaches a simple method with South African foods."
+    "rubric": "The client wants to learn to count protein. A good reply teaches a simple method with South African foods.",
+    "journey": 2
   },
   {
     "id": "meal-log-not-menu",
@@ -227,7 +237,8 @@
         "flags": "i"
       }
     ],
-    "rubric": "The client reported what they ate. A good reply logs it and confirms it, without a restaurant menu."
+    "rubric": "The client reported what they ate. A good reply logs it and confirms it, without a restaurant menu.",
+    "journey": 2
   },
   {
     "id": "protein-box-ticked",
@@ -247,6 +258,7 @@
         "flags": "i"
       }
     ],
-    "rubric": "The client logged lunch. A good reply states the protein position once, consistently."
+    "rubric": "The client logged lunch. A good reply states the protein position once, consistently.",
+    "journey": 3
   }
 ]
