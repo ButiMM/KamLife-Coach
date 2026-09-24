@@ -6727,6 +6727,36 @@ test("outcomes: every query renders to real SQL with bound parameters", async ()
   assert.match(rendered[1].sql, /interval '2 hours'/, "food days must be counted in SAST, not UTC");
 });
 
+test("outcomes by move (#369): clients who got a move are compared with those who did not, honestly", async () => {
+  const { compareByMove, formatMoveComparison } = await import("../server/outcomes");
+  const c = (id: string, start: number, latest: number) => ({ userId: id, signupDay: "2026-05-01", goal: "fat_loss" as any,
+    weeksOnProgramme: 8, startWeightKg: start, latestWeightKg: latest, weighIns: 2, foodLogDays: 40, sessions: 16, referrals: 0 });
+  const got = ["a1", "a2", "a3", "a4", "a5"].map(id => c(id, 90, 87));            // all lost 3kg
+  const not = ["b1", "b2", "b3", "b4", "b5"].map((id, i) => c(id, 90, i < 1 ? 87 : 90)); // one of five
+  const moves = new Map<string, Set<string>>(got.map(o => [o.userId, new Set(["protein_first"])]));
+  const [row] = compareByMove([...got, ...not], moves, 8);
+  assert.equal(row.kind, "protein_first");
+  assert.equal(row.got.successRate, 1);
+  assert.equal(row.didnt.successRate, 0.2);
+  assert.equal(row.verdict, "better");
+  assert.match(formatMoveComparison([row], 8), /protein_first: 5\/5 vs 1\/5 — ✅ did better/);
+  // THREE CLIENTS ARE AN ANECDOTE: no verdict either way, whatever the rates.
+  const few = compareByMove([...got.slice(0, 3), ...not], new Map(got.slice(0, 3).map(o => [o.userId, new Set(["walk"])])), 8);
+  assert.equal(few[0].verdict, "too_few");
+  // Advice nobody got produces no row; nobody at the week mark produces no row either.
+  assert.deepEqual(compareByMove([...got, ...not], new Map(), 8), []);
+  assert.match(formatMoveComparison([], 8), /no delivered advice/);
+});
+
+test("outcomes by move (#369): only advice that was recommended AND delivered counts", async () => {
+  const { drizzle } = await import("drizzle-orm/node-postgres");
+  const { movesQuery } = await import("../server/audit/outcomes-command");
+  const { sql: text } = movesQuery(drizzle({} as any) as any).toSQL();
+  assert.match(text, /->>'disposition' = 'instructed'/);
+  assert.match(text, /"delivered_body"/);
+  assert.match(text, /group by/i);
+});
+
 test("outcomes: the founder's phrasings all reach the command", () => {
   // Coach-only, so routing-audit (which runs as a client) is the wrong harness — this pins the
   // gate itself. Kam will type whichever of these comes to mind at 6am.
