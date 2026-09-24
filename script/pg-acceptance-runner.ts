@@ -464,6 +464,15 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "safety-routing-reverts", title: "Every #266 safety-routing seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-safety-routing.sh"] },
 
+  { id: "meal-decline", title: "Declining a suggestion deletes nothing; a correction supersedes",
+    // #264 (AUDIT.md Trace 1). "No I'm just fine with this meal" was a CORRECTION — a leading "No"
+    // plus the word "meal" — and the lunch logged a minute earlier was deleted, unrecorded. Needs
+    // the real front door, meal_logs, turn_ledger.mutations and the post-transport body.
+    command: ["npx", "tsx", "script/pg-meal-decline-acceptance.ts"] },
+
+  { id: "meal-decline-reverts", title: "Every #264 decline/supersede seam turns the acceptance red",
+    command: ["bash", "script/red-on-revert-meal-decline.sh"] },
+
   { id: "scope", title: "The coach stays a coach: scope is enforced in code and fails closed",
     // #321 (Grok §8, audit C2). "Write my CV", crypto and antibiotic asks were answered, and a
     // classifier error failed OPEN. Needs the real front door and the post-transport bodies.
