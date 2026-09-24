@@ -1,9 +1,9 @@
 import {
-  db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs,
-  eq, gte, and, lt, asc, isNotNull,
-  sendWhatsApp, canSendProactive, recordProactiveSend, claimProactive, claimDailySlot,
-  getActiveClients, isPaused, loadState, saveState,
-  todaySAST, thisWeekUTC,
+  db, users, chatHistory, stepLogs, workoutLogs, weightLogs,
+  eq, gte, and, asc, isNotNull,
+  sendWhatsApp, canSendProactive, claimProactive,
+  getActiveClients, isPaused,
+  thisWeekUTC,
 } from "../shared";
 import { getShoppingList, formatShoppingList } from "../../shopping-lists";
 import { getGoalProfile } from "../../goal-profiles";
@@ -15,78 +15,6 @@ import { runWeeklyRecaps } from "../../weekly-recap";
 import { generateMealPlan } from "../../meal-plan";
 import { mentionsForbidden } from "../../brain/reply-verifier";
 import { canonicalNextMove, recordCanonicalMoveOutbound } from "../proactive-decision";
-
-export async function runFridayWeekendStrategy(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Friday weekend strategy");
-  const clients = await getActiveClients();
-  const MESSAGE_KEY = "friday_weekend";
-  const dedupeWindow = thisWeekUTC();
-  let sent = 0, skippedPaused = 0, skippedSilent = 0, skippedDup = 0, skippedBudget = 0;
-
-  const weekAgo = new Date(Date.now() - 7 * 86_400_000);
-  for (const client of clients) {
-    if (isPaused(client)) { skippedPaused++; continue; }
-    const daysSilent = client.lastActiveAt
-      ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
-      : Math.floor((Date.now() - new Date(client.createdAt || Date.now()).getTime()) / 86_400_000);
-    if (daysSilent > 10) { skippedSilent++; continue; }
-    if (!canSendProactive(client.id)) { skippedBudget++; continue; }
-    const claimed = await claimProactive(client.id, MESSAGE_KEY, dedupeWindow);
-    if (!claimed) { skippedDup++; continue; }
-    try {
-      const name = client.name || "there";
-      const week = client.programmeWeek || 1;
-
-      const [weekWorkouts, weekWeights, weekSteps, weekFoodDays] = await Promise.all([
-        db.select({ id: workoutLogs.id }).from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, weekAgo))),
-        db.select({ weight: weightLogs.weight }).from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, weekAgo))).orderBy(asc(weightLogs.loggedAt)),
-        db.select({ steps: stepLogs.steps }).from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, weekAgo))),
-        db.select({ id: mealLogs.id, loggedAt: mealLogs.loggedAt }).from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, weekAgo))),
-      ]);
-
-      const sessions = weekWorkouts.length;
-      const foodDays = new Set(weekFoodDays.map(f => new Date(f.loggedAt!).toDateString())).size;
-      const avgSteps = weekSteps.length > 0 ? Math.round(weekSteps.reduce((s, l) => s + (l.steps || 0), 0) / weekSteps.length) : 0;
-      const weightChange = weekWeights.length >= 2
-        ? parseFloat(String(weekWeights[weekWeights.length - 1].weight)) - parseFloat(String(weekWeights[0].weight))
-        : null;
-
-      // THE LINE STANDS DOWN, NOT THE REPORT (2026-08-19, Cut 9). Unlike the Monday weigh-in
-      // reminder — which IS the scale and is withheld whole — this wrap-up is mostly sessions,
-      // food days and steps: real progress that must still reach them. Cut 8 bound
-      // do_not_mention to the reactive mouth and the decision; a proactive report reaches
-      // neither, which is the hole this closes.
-      const scaleOffLimits = mentionsForbidden("weight scale weigh", (client as any).doNotMention);
-      const weightLine = scaleOffLimits || weightChange === null ? ""
-        : weightChange < -0.2 ? `⬇️ Down ${Math.abs(weightChange).toFixed(1)}kg`
-        : weightChange > 0.2 ? `⬆️ Up ${weightChange.toFixed(1)}kg`
-        : `➡️ Weight holding`;
-
-      // THE WRAP-UP REPORTS; IT DOES NOT PRESCRIBE (2026-08-25, P0-4b). The four closings this
-      // replaces were a local ladder over (sessions, foodDays, account age) that always landed on
-      // the same two rules — "protein at every meal and one session before Sunday night" — and one
-      // of them said "Reply *1* right now" to a client who might have told us that morning they
-      // were not training. The numbers above are a real report and stay; the instruction is the
-      // canonical one, which has read what they said.
-      const move = await canonicalNextMove(client);
-      const lines = [
-        `*${name} — Week ${week} wrap-up:*`,
-        ``,
-        `💪 ${sessions} workout${sessions !== 1 ? "s" : ""} done`,
-        `📋 ${foodDays} day${foodDays !== 1 ? "s" : ""} food logged`,
-        avgSteps > 0 ? `👟 ${avgSteps.toLocaleString()} avg steps` : "",
-        weightLine,
-      ].filter(Boolean);
-      if (move.line) lines.push(``, move.line);
-
-      const delivery = await sendWhatsApp(client.phoneNumber, lines.join("\n"));
-      await recordCanonicalMoveOutbound(client, move, delivery);
-      sent++;
-    } catch (err) { console.error(`[SCHEDULER] Friday strategy error — ${client.phoneNumber}:`, err); }
-  }
-  console.log(`[SCHEDULER] Friday weekend — sent:${sent} paused:${skippedPaused} silent:${skippedSilent} dup:${skippedDup} budget:${skippedBudget}`);
-}
-
 export async function runSundayWeeklyReport(): Promise<void> {
   console.log("[SCHEDULER] JOB: Sunday weekly report");
   const clients = await getActiveClients();
@@ -329,120 +257,6 @@ export async function runSundayWeeklyReport(): Promise<void> {
   }
 }
 
-export async function runSundayEveningCheckin(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Sunday evening check-in");
-  const clients = await getActiveClients();
-  const weekAgo = new Date(Date.now() - 7 * 86_400_000);
-
-  for (const client of clients) {
-    if (isPaused(client)) continue;
-    try {
-      const name = client.name || "there";
-      const plannedSessions = client.trainingDaysPerWeek || 3;
-      const [weekWorkouts, weekSteps, weekFoodLogs] = await Promise.all([
-        db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, weekAgo))),
-        db.select().from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, weekAgo))),
-        db.select().from(chatHistory).where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, weekAgo))),
-      ]);
-      const completedSessions = weekWorkouts.length;
-      const avgSteps = weekSteps.length > 0 ? Math.round(weekSteps.reduce((s, l) => s + (l.steps || 0), 0) / weekSteps.length) : 0;
-      const sundayGoal = client.goalType || "fat_loss";
-      const isMuscleGainSunday = sundayGoal === "muscle_gain";
-      const isRecompSunday = sundayGoal === "recomposition";
-      const distinctFoodDays = new Set(weekFoodLogs.flatMap(l => {
-        if (!l.createdAt) return [];
-        const d = new Date(l.createdAt.getTime() + 2 * 3_600_000);
-        return [`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`];
-      })).size;
-      let question: string;
-      if (completedSessions === 0 && distinctFoodDays === 0) {
-        question = `${name}, this week was quiet. One question — what got in the way?`;
-      } else if (completedSessions >= plannedSessions && distinctFoodDays >= 5) {
-        // NAME WHAT IT COUNTS (#221 journey 4). `distinctFoodDays` is days carrying a MEAL, and
-        // it sat beside a session count reading bare "days logged" — so a client who trained
-        // four times and logged no food was told "4 sessions, 0 days logged" in one sentence.
-        // The variable was always named honestly; only the sentence was not.
-        question = isMuscleGainSunday
-          ? `${name}, ${completedSessions} sessions done and food tracked all week. Solid. One question — what did you eat that gave you the most energy in the gym this week?`
-          : isRecompSunday
-          ? `${name}, ${completedSessions} sessions done and food tracked all week. Solid recomp week. One question — where did you feel the most change this week?`
-          : `${name}, ${completedSessions} sessions done this week and food tracked. Solid week. What was the hardest part?`;
-      } else if (completedSessions < Math.ceil(plannedSessions * 0.5)) {
-        question = `${name}, ${completedSessions} of ${plannedSessions} sessions this week. What kept you from the other ${plannedSessions - completedSessions}?`;
-      } else if (distinctFoodDays < 3) {
-        question = isMuscleGainSunday
-          ? `${name}, ${completedSessions} sessions done — but food tracking was light. For muscle gain I need to see your intake. What makes it hard to log?`
-          : isRecompSunday
-          ? `${name}, ${completedSessions} sessions done — but food tracking was thin. Recomp requires seeing your intake to balance the cut and build. What makes it hard to log?`
-          : `${name}, ${completedSessions} sessions done. Food tracking was thin this week. What makes it hard to log?`;
-      } else if (avgSteps > 0 && avgSteps < (client.stepsTarget || 8500) * 0.6) {
-        question = isMuscleGainSunday
-          ? `${name}, average steps this week: ${avgSteps.toLocaleString()}. Light movement helps recovery on rest days — what's the real barrier to getting outside?`
-          : isRecompSunday
-          ? `${name}, average steps this week: ${avgSteps.toLocaleString()}. Daily walking is your recomp engine outside the gym — what's the real barrier to moving more?`
-          : `${name}, average steps this week: ${avgSteps.toLocaleString()}. Steps are your daily fat-burning base. What is the real barrier to walking more?`;
-      } else {
-        question = isMuscleGainSunday
-          ? `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days of food logged. One sentence — what felt strongest this week in the gym?`
-          : isRecompSunday
-          ? `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days of food logged. One sentence — what did you notice changing this week?`
-          : `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days of food logged. One sentence — what do you want to be different next week?`;
-      }
-      if (await claimDailySlot(client.id, "sunday_evening")) { await sendWhatsApp(client.phoneNumber, question); }
-    } catch (err) { console.error(`[SCHEDULER] Sunday check-in error — ${client.phoneNumber}:`, err); }
-  }
-}
-
-export async function runWeekendFoodAudit(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Weekend food pattern audit");
-  const clients = await getActiveClients();
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-
-  for (const client of clients) {
-    if (isPaused(client)) continue;
-    try {
-      const foodLogs = await db.select({ messageIn: chatHistory.messageIn, createdAt: chatHistory.createdAt })
-        .from(chatHistory).where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sevenDaysAgo))).orderBy(asc(chatHistory.createdAt));
-      if (foodLogs.length < 5) continue;
-
-      const weekdayLogs = foodLogs.filter(l => { const d = new Date(new Date(l.createdAt!).getTime() + 2 * 3_600_000).getUTCDay(); return d !== 0 && d !== 6; });
-      const weekendLogs = foodLogs.filter(l => { const d = new Date(new Date(l.createdAt!).getTime() + 2 * 3_600_000).getUTCDay(); return d === 0 || d === 6; });
-      if (weekendLogs.length === 0 || weekdayLogs.length === 0) continue;
-
-      const HIGH_CAL = ["kfc", "mcdonalds", "nandos", "pizza", "kotas", "vetkoek", "beer", "wine", "chips", "cake", "chocolate", "dessert", "ice cream", "takeaway", "takeaways", "cool drink", "coke", "fanta", "sprite"];
-      const GOOD_PROTEIN = ["chicken breast", "pilchards", "eggs", "tuna", "beef mince", "greek yogurt", "cottage cheese"];
-
-      const weekdayJunk = weekdayLogs.filter(l => HIGH_CAL.some(k => (l.messageIn || "").toLowerCase().includes(k))).length;
-      const weekendJunk = weekendLogs.filter(l => HIGH_CAL.some(k => (l.messageIn || "").toLowerCase().includes(k))).length;
-      const weekdayProtein = weekdayLogs.filter(l => GOOD_PROTEIN.some(k => (l.messageIn || "").toLowerCase().includes(k))).length;
-      const weekendProtein = weekendLogs.filter(l => GOOD_PROTEIN.some(k => (l.messageIn || "").toLowerCase().includes(k))).length;
-
-      const weekdayJunkRate = weekdayLogs.length > 0 ? weekdayJunk / weekdayLogs.length : 0;
-      const weekendJunkRate = weekendLogs.length > 0 ? weekendJunk / weekendLogs.length : 0;
-      const weekdayProteinRate = weekdayLogs.length > 0 ? weekdayProtein / weekdayLogs.length : 0;
-      const weekendProteinRate = weekendLogs.length > 0 ? weekendProtein / weekendLogs.length : 0;
-      const name = client.name || "there";
-
-      // THE PATTERN IS OURS TO SEE; THE MOVE IS NOT OURS TO INVENT (2026-08-25, P0-4b). The
-      // weekday-versus-weekend comparison is a genuine observation nothing else in the product
-      // makes, and it stays. Both branches then ended in the same locally-chosen prescription —
-      // "protein first at every meal" — which is chooseAction's rung 5, written a seventh time and
-      // sent without ever asking whether the client had closed food or was ill.
-      const pattern = weekendJunkRate > weekdayJunkRate + 0.3
-        ? `${name} — pattern spotted. Your weekday eating is solid. But ${weekendJunk > 0 ? `${weekendJunk} weekend meal${weekendJunk !== 1 ? "s" : ""}` : "your weekends"} this week looked different from your weekdays.`
-        : weekendProteinRate < weekdayProteinRate - 0.3
-        ? `${name} — you are hitting protein well during the week. But weekends your protein drops.`
-        : "";
-      if (!pattern) continue;
-      // Claim only when there is actually a pattern to flag — DB-backed weekly dedup.
-      if (!(await claimProactive(client.id, "weekend_food_audit", thisWeekUTC()))) continue;
-      const audit = await canonicalNextMove(client);
-      const delivery = await sendWhatsApp(client.phoneNumber, audit.line ? `${pattern}\n\n${audit.line}` : pattern);
-      await recordCanonicalMoveOutbound(client, audit, delivery);
-    } catch (err) { console.error(`[SCHEDULER] Weekend food audit error — ${client.phoneNumber}:`, err); }
-  }
-}
-
 export async function runSundayMealPlan(): Promise<void> {
   console.log("[SCHEDULER] JOB: Sunday proactive meal plan");
   const clients = await getActiveClients();
@@ -488,60 +302,4 @@ export async function runSundayMealPlan(): Promise<void> {
     } catch (err) { console.error(`[SCHEDULER] Sunday meal plan error — ${client.phoneNumber}:`, err); }
   }
   console.log(`[SCHEDULER] Sunday meal plans sent: ${sent}`);
-}
-
-export async function runComplianceLevelUpdate(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Weekly compliance level update");
-  const clients = await getActiveClients();
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-  const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
-
-  for (const client of clients) {
-    if (isPaused(client)) continue;
-    try {
-      const plannedSessions = client.trainingDaysPerWeek || 3;
-      const [thisWeekWorkouts, lastWeekWorkouts] = await Promise.all([
-        db.select({ id: workoutLogs.id }).from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
-        db.select({ id: workoutLogs.id }).from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, fourteenDaysAgo), lt(workoutLogs.loggedAt, sevenDaysAgo))),
-      ]);
-      const thisWeekCount = thisWeekWorkouts.length;
-      const lastWeekCount = lastWeekWorkouts.length;
-      const weeklyScore = Math.min(100, Math.round((thisWeekCount / plannedSessions) * 100));
-      let complianceLevel: string;
-      if (thisWeekCount === 0) complianceLevel = "RESET";
-      else if (thisWeekCount < Math.ceil(plannedSessions * 0.5)) complianceLevel = "BUILDING";
-      else if (thisWeekCount >= plannedSessions && lastWeekCount >= plannedSessions) complianceLevel = "LOCKED IN";
-      else if (thisWeekCount >= Math.ceil(plannedSessions * 0.75)) complianceLevel = "CONSISTENT";
-      else complianceLevel = "BUILDING";
-      await db.update(users).set({ weeklyScore, complianceLevel }).where(eq(users.id, client.id));
-    } catch (err) { console.error(`[SCHEDULER] Compliance update error — ${client.phoneNumber}:`, err); }
-  }
-}
-
-export async function runNsvCheckin(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Weekly NSV check-in");
-  const clients = await getActiveClients();
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-
-  for (const client of clients) {
-    if (isPaused(client)) continue;
-    try {
-      // Require a real client message (messageIn present) — outbound-only proactive
-      // rows must not count as engagement, or this check-in goes to silent clients.
-      const recentActivity = await db.select({ id: chatHistory.id }).from(chatHistory)
-        .where(and(eq(chatHistory.userId, client.id), isNotNull(chatHistory.messageIn), gte(chatHistory.createdAt, sevenDaysAgo))).limit(1);
-      if (recentActivity.length === 0) continue;
-      const name = client.name || "there";
-      const week = client.programmeWeek || 1;
-      const nsvPrompts = [
-        `${name}, Week ${week} done.\n\nOne question: what can your body do now that it couldn't when you started?\n\nLift more? Walk further? Climb stairs without stopping? Move without pain?\n\nThat is your real progress. Tell me one thing.`,
-        `${name} — end of week check-in.\n\nScale aside — how were your energy levels this week? Did you sleep better? Less afternoon crashes? Wake up feeling less wrecked?\n\nEnergy is the first thing that changes before the scale moves. Tell me what you noticed.`,
-        `${name}, Week ${week}.\n\nForget the numbers for a second. Did you make any food choice this week that you wouldn't have made 3 months ago? Less junk automatically? Didn't finish the whole takeaway? Chose water over a cool drink?\n\nSmall shifts like that are what compound into big change. Tell me one.`,
-        `${name} — Saturday check-in.\n\nNon-scale question: what habit stuck this week that didn't exist before you started?\n\nCould be logging meals, hitting your steps, not skipping breakfast, sleeping earlier. Behaviour change is harder than weight loss — and it lasts longer.\n\nTell me one habit that's starting to feel automatic.`,
-      ];
-      // DB claim (weekly window) replaces the state-file flag that a recycle would wipe.
-      if (!(await claimProactive(client.id, "nsv_checkin", thisWeekUTC()))) continue;
-      await sendWhatsApp(client.phoneNumber, nsvPrompts[(week - 1) % nsvPrompts.length]);
-    } catch (err) { console.error(`[SCHEDULER] NSV check-in error — ${client.phoneNumber}:`, err); }
-  }
 }

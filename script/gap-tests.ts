@@ -4580,8 +4580,9 @@ test("cut9: the weight reports honour do_not_mention, each in the right way", ()
     "the Monday weigh-in reminder is bound");
   assert.ok(/weigh-in reminder withheld, they asked/.test(monday),
     "…and withheld WHOLE — a weigh-in reminder is the scale, there is no paragraph to strip");
-  assert.equal((weekly.match(/mentionsForbidden\("weight scale weigh"/g) || []).length, 2,
-    "both weekly reports are bound");
+  // Was 2: the second weekly report (runSundayEveningCheckin) was never scheduled and went in #334.
+  assert.equal((weekly.match(/mentionsForbidden\("weight scale weigh"/g) || []).length, 1,
+    "the weekly report is bound");
   // The wrap-up is mostly sessions, food days and steps — real progress that must still arrive.
   assert.ok(/weightLine \? `\$\{weightEmoji\} Weight: \$\{weightLine\}` : ""/.test(weekly),
     "the weight LINE stands down, not the report");
@@ -4845,13 +4846,13 @@ test("startup: the process binds before it proves the schema", () => {
 test("startup: the gate is registered before every other route", () => {
   const index = readFileSync("server/index.ts", "utf-8");
   const code = index.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
-  // Express matches in registration order. Auth and audio routes are registered before
-  // registerRoutes() runs, so a gate living inside it would have let them through against an
-  // unverified schema.
+  // Express matches in registration order. Auth routes are registered before registerRoutes()
+  // runs, so a gate living inside it would have let them through against an unverified schema.
+  // (The Replit audio routes that also sat here were deleted in #334.)
   const gate = code.indexOf("registerStartupGate(app)");
-  const audio = code.indexOf("registerAudioRoutes(app)");
   const routes = code.indexOf("await registerRoutes(httpServer, app)");
-  assert.ok(gate < audio && gate < routes, "nothing is registered ahead of the gate");
+  assert.ok(gate > -1 && gate < routes, "nothing is registered ahead of the gate");
+  assert.ok(!code.includes("registerAudioRoutes(app)"), "the deleted audio routes are not re-registered ahead of it");
 });
 
 test("startup: the schema guarantee survives binding early", () => {

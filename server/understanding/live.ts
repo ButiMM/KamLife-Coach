@@ -293,6 +293,7 @@ export function decisionBrief(d: { todo: string; kind: string }): string {
       + `Write CONTEXT only. Do NOT tell them to train, rest, walk, weigh, eat a specific plate, or change any target.`;
 }
 import { classifyDomain } from "./domain-guard";
+import { isUnderGPTCallLimit } from "../cost-tracking";
 import { captureFriction } from "../friction";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { sanitizeCoachReply } from "../handlers/food-scanner";
@@ -443,6 +444,9 @@ export async function runMeaningEngineLive(ctx: {
   actionsLive?: boolean;
 }): Promise<string | null> {
   const { message, m, user, openai } = ctx;
+  // THE SPEND CAP COVERS THE ENGINE TOO (#340): over the ceiling, or unable to read spend, the
+  // engine stands down and gpt-block gives the short degraded reply the cap already owns.
+  if (user?.id && !(await isUnderGPTCallLimit(user.id))) return null;
   try {
     const snapshot = await buildClientSnapshot(user).catch(() => undefined);
     const prior = user?.id
