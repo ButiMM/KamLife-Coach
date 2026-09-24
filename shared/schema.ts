@@ -298,6 +298,35 @@ export const chatHistory = pgTable("chat_history", {
  * Everything except the user, the input and the reply is nullable on purpose: a turn that fails
  * early must still leave a record, and a half-written ledger row is worth more than none.
  */
+// THE CLIENT RECORD (#271) — docs/CLIENT-RECORD.md. What the client sent, never rewritten (a
+// trigger rejects edits to raw_text/transcript_raw), and what they told us, typed and sourced.
+export const clientEvents = pgTable("client_events", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sourceMessageId: text("source_message_id").unique(),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  channel: text("channel").notNull().default("text"),
+  rawText: text("raw_text").notNull(),
+  transcriptRaw: text("transcript_raw"),
+  normalisedText: text("normalised_text"),
+});
+
+export const clientFacts = pgTable("client_facts", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  subject: text("subject").notNull(),
+  statement: text("statement").notNull(),
+  detail: jsonb("detail"),
+  sourceEventId: uuid("source_event_id").references(() => clientEvents.id, { onDelete: "set null" }),
+  validFrom: timestamp("valid_from", { withTimezone: true }).notNull().defaultNow(),
+  validUntil: timestamp("valid_until", { withTimezone: true }),
+  supersededBy: uuid("superseded_by"),
+  supersededAt: timestamp("superseded_at", { withTimezone: true }),
+  extractedBy: text("extracted_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const turnLedger = pgTable("turn_ledger", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

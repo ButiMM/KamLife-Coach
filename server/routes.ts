@@ -42,7 +42,7 @@ import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaT
 import { handleWorkoutCommands, resumeOpenTrainingLoopOutcome, resumeWorkoutFeedbackExpectation } from "./handlers/workout";
 import { getTodayWorkoutState } from "./workout-state";
 import { handleMiscCommands } from "./handlers/misc-commands";
-import { handleLifecycle } from "./handlers/lifecycle";
+import { handleLifecycle, handlePendingCancel } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
 import { handleGptBlock } from "./handlers/gpt-block";
@@ -352,7 +352,9 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
       return tag(confirmReply, "🧠 new engine");
     }
   }
-  const subscriptionReply = await handleSubscriptionGate({ phone, message, m, user, isCoach, isBetaTester });
+  // Billing's one exit. #315: a pending cancel answer ("1".."4", "yes") is the cancel menu's, not the numbered shortcuts' below.
+  const subscriptionReply = await handleSubscriptionGate({ phone, message, m, user, isCoach, isBetaTester })
+    ?? (["cancel_save", "cancel_confirm"].includes(user.awaitingInputType) ? await handlePendingCancel({ phone, message, m, user }) : null);
   if (subscriptionReply !== null) return subscriptionReply;
   const mediaReceiptReply = await handleMediaReceiptFollowup({ mediaUrl, m, user });
   if (mediaReceiptReply !== null) return mediaReceiptReply;

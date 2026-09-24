@@ -464,6 +464,11 @@ export const ACCEPTANCES: Acceptance[] = [
   { id: "safety-routing-reverts", title: "Every #266 safety-routing seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-safety-routing.sh"] },
 
+  { id: "client-record", title: "The client record: what they said is kept, and the coach is told (#271)",
+    // Events stored exactly and never rewritten; typed facts in the client's words; corrections
+    // supersede; the engine's context carries the facts six turns later; deletion erases both.
+    command: ["npx", "tsx", "script/pg-client-record-acceptance.ts"] },
+
   { id: "meal-decline", title: "Declining a suggestion deletes nothing; a correction supersedes",
     // #264 (AUDIT.md Trace 1). "No I'm just fine with this meal" was a CORRECTION — a leading "No"
     // plus the word "meal" — and the lunch logged a minute earlier was deleted, unrecorded. Needs
@@ -480,6 +485,11 @@ export const ACCEPTANCES: Acceptance[] = [
 
   { id: "scope-reverts", title: "Every #321 scope seam turns the acceptance red",
     command: ["bash", "script/red-on-revert-scope.sh"] },
+
+  { id: "cancel-menu", title: "The cancel menu owns its own answers: \"4 — Just cancel\" cancels (#315)",
+    // "4" got the shopping list and the client stayed billed; "2" and "3" got the step and food-log
+    // prompts. Needs the real front door, the stored subscription and the post-transport bodies.
+    command: ["npx", "tsx", "script/pg-cancel-menu-acceptance.ts"] },
 
   { id: "spend-cap", title: "The AI spend cap fails safe (#340)",
     // A daily account-wide ceiling that stops model calls, an unreadable spend query that means
