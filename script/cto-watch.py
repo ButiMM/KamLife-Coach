@@ -102,7 +102,7 @@ try:
 except Exception:
     mouth_line = "**Mouths on main:** unavailable"
 body = "\n".join([
-    f"_Updated {NOW:%H:%M} UTC by the CTO watch. Runs every 30 minutes (06:00-22:00 SAST) and when PRs open or merge._", "",
+    f"_Updated {NOW:%H:%M} UTC by the CTO watch. Runs every 15 minutes and on PR open/push/merge._", "",
     *(alerts or ["No alerts."]), "",
     mouth_line, "",
     f"**Queue:** {len(done)} done, {len(todo)} left. Next: {todo[0] if todo else 'queue empty'}", "",
