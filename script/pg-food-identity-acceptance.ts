@@ -42,6 +42,7 @@ process.env.NODE_ENV = "production";
 const REAL = console.log.bind(console);
 console.log = console.warn = console.error = () => {};
 
+await import("./sast-noon-clock"); // #404: run at midday SAST whatever the hour, before the product loads
 const { pool, db } = await import("../server/db");
 const schema = await import("../shared/schema");
 const { handleMessage } = await import("../server/routes");
