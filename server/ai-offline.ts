@@ -65,7 +65,8 @@ export function isAiOfflineError(err: unknown): boolean {
  */
 export function isQuotaExhausted(err: unknown): boolean {
   const e = err as any;
-  const text = `${e?.code ?? ""} ${e?.error?.code ?? ""} ${e?.message ?? ""}`.toLowerCase();
+  // The SDK may expose only "429" at the top and keep the reason inside `error` (Codex @ 44b007a).
+  const text = `${e?.code ?? ""} ${e?.error?.code ?? ""} ${e?.error?.type ?? ""} ${e?.message ?? ""} ${e?.error?.message ?? ""}`.toLowerCase();
   return text.includes("insufficient_quota") || text.includes("no credits remaining") || text.includes("exceeded your current quota");
 }
 
@@ -76,3 +77,5 @@ export function shouldAlertAiDown(now = Date.now()): boolean {
   lastAiDownAlert = now;
   return true;
 }
+/** The alert did not reach the founder: give the slot back so the next failure tries again. */
+export function releaseAiDownAlert(): void { lastAiDownAlert = 0; }
