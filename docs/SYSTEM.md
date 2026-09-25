@@ -56,7 +56,7 @@ The full list of names and code defaults is in the outgoing CTO's handover (22-2
 
 ## Founder checks still open (Railway, only the founder can see it)
 
-- `COACH_ALERT_PHONE` is set to the founder's WhatsApp number. Safety escalations go nowhere without it.
+- ✅ `COACH_ALERT_PHONE` is set to the founder's own number (confirmed 25 Sep). Don't ask again.
 - `COACH_DASHBOARD_KEY` is a long random value.
 
 ## Where the plan lives
