@@ -272,6 +272,12 @@ export const CASES: ReplayCase[] = [
         query: "SELECT (SELECT COUNT(*) FROM turn_ledger WHERE user_id = $1) + (SELECT COUNT(*) FROM client_understanding WHERE user_id = $1) + (SELECT COUNT(*) FROM daily_constraints WHERE user_id = $1)", expect: "zero" },
       // The journey itself writes the client's words to chat_history (Codex @ d4ddc3d).
       { what: "no chat history survives deletion", invariant: "deletion", kind: "sql", query: "SELECT COUNT(*)::int FROM chat_history WHERE user_id = $1", expect: "zero" },
+      // The client record (#356) stores every inbound message as sent; erasure must reach it too (#368).
+      { what: "no client record (messages or facts) survives deletion", invariant: "deletion", kind: "sql",
+        query: "SELECT (SELECT COUNT(*) FROM client_events WHERE user_id = $1) + (SELECT COUNT(*) FROM client_facts WHERE user_id = $1)", expect: "zero" },
+      // The new coach's shadow log (#359) keeps the client's words and its would-be replies.
+      { what: "no new-coach shadow row survives deletion", invariant: "deletion", kind: "sql",
+        query: "SELECT COUNT(*)::int FROM core_shadow WHERE user_id = $1", expect: "zero" },
     ],
     rubric: "The client confirmed deletion. A good reply confirms that everything is deleted, and it must be true.",
   },
