@@ -42,6 +42,29 @@ export const NEVER_SEE: Array<{ what: string; pattern: string; flags?: string }>
   { what: "a generic check-in", pattern: "coach k checking in|just checking in", flags: "i" },
 ];
 
+/**
+ * One action the new core must propose. A bare type is "at least one of these"; an object also names
+ * fields its arguments must match (a case-insensitive pattern per field). REPEAT an entry to require
+ * several: each entry must be met by a DIFFERENT proposed action (Codex @ de02852: one LOG_MEAL must not
+ * pass a three-day log, and a wrong food, slot or day must not pass at all).
+ */
+export type ActionExpect = string | { type: string; match?: Record<string, string> };
+export type ProposedAction = { type: string; [field: string]: unknown };
+
+/** Grade the new core's proposed actions against a case's `actions`. Pure, so the unit suite tests it. */
+export function gradeActions(spec: NonNullable<ReplayCase["actions"]>, proposed: ProposedAction[]): { pass: boolean; misses: string[] } {
+  const misses: string[] = [];
+  const free = [...proposed];
+  for (const e of spec.expect ?? []) {
+    const want = typeof e === "string" ? { type: e, match: {} as Record<string, string> } : { type: e.type, match: e.match ?? {} };
+    const i = free.findIndex(a => a.type === want.type && Object.entries(want.match).every(([f, pat]) => new RegExp(pat, "i").test(String(a[f] ?? ""))));
+    if (i === -1) misses.push(`would not ${want.type}${Object.keys(want.match).length ? ` ${JSON.stringify(want.match)}` : ""}`);
+    else free.splice(i, 1);
+  }
+  for (const t of spec.forbid ?? []) if (proposed.some(a => a.type === t)) misses.push(`would wrongly ${t}`);
+  return { pass: misses.length === 0, misses };
+}
+
 export interface ReplayCase {
   id: string;
   journey: Journey;
@@ -62,7 +85,7 @@ export interface ReplayCase {
    * graded turns: every `expect` type must be proposed, no `forbid` type may be. The old path is
    * graded on its stored rows by `checks`; this grades whether the new coach would DO the same.
    */
-  actions?: { expect?: string[]; forbid?: string[] };
+  actions?: { expect?: ActionExpect[]; forbid?: string[] };
   /** What a good coach does here. The judge sees this, the turns, the stored state and the bodies. */
   rubric: string;
 }
@@ -186,7 +209,7 @@ export const CASES: ReplayCase[] = [
       { what: "the dinner is logged", kind: "sql", query: MEAL_COUNT, expect: "nonzero" },
       { what: "it is not answered as an out-of-stock substitution", kind: "reply_not_matches", pattern: "No stress — \\*", flags: "" },
     ],
-    actions: { expect: ["LOG_MEAL"] },
+    actions: { expect: [{ type: "LOG_MEAL", match: { foodText: "pap", meal: "dinner" } }] },
     rubric: "The client reported dinner. A good reply logs it and says so briefly.",
   },
   {
@@ -210,7 +233,7 @@ export const CASES: ReplayCase[] = [
     checks: [
       { what: "no weigh-in instruction to a client in shame", kind: "reply_not_matches", pattern: "stand on a scale|weigh (?:yourself|in)", flags: "i" },
     ],
-    actions: { expect: ["LOG_MEAL"] },
+    actions: { expect: [{ type: "LOG_MEAL", match: { foodText: "burger" } }] },
     rubric: "The client feels they ruined everything. A good coach logs it without judgement, says one meal changes nothing, and gives one easy next step. No lecture, no scale.",
   },
   {
@@ -221,7 +244,7 @@ export const CASES: ReplayCase[] = [
     checks: [
       { what: "the stress is acknowledged, not deleted", kind: "reply_matches", pattern: "stress|work|tough|hard day", flags: "i" },
     ],
-    actions: { expect: ["LOG_MEAL"] },
+    actions: { expect: [{ type: "LOG_MEAL", match: { foodText: "takeaway" } }] },
     rubric: "The client is stressed and ate takeaways. A good reply acknowledges the stress in one line, logs or asks for the food once, and offers one small next step.",
   },
   {
@@ -275,7 +298,7 @@ export const CASES: ReplayCase[] = [
         query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND logged_at < now() - interval '20 hours'", expect: "zero" },
       { what: "the dinner is logged", kind: "sql", query: MEAL_COUNT, expect: { equals: 2 } },
     ],
-    actions: { expect: ["LOG_MEAL"] },
+    actions: { expect: [{ type: "LOG_MEAL", match: { meal: "dinner" } }] },
     rubric: "The client had the same meal for dinner as for lunch. A good coach logs today's dinner as pap and chicken and says so briefly.",
   },
   {
@@ -287,7 +310,7 @@ export const CASES: ReplayCase[] = [
       { what: "the 10k steps are stored", invariant: "no_false_writes", kind: "sql", query: "SELECT COALESCE(MAX(steps), 0) FROM step_logs WHERE user_id = $1", expect: { equals: 10000 } },
       { what: "a client who walked 10k is not told to go for a walk", kind: "reply_not_matches", pattern: "20-minute walk|go for a walk", flags: "i" },
     ],
-    actions: { expect: ["LOG_STEPS"] },
+    actions: { expect: [{ type: "LOG_STEPS", match: { count: "^10000$" } }] },
     rubric: "The client already walked 10,000 steps today. A good reply records it and credits it; it does not prescribe a walk.",
   },
   {
@@ -301,7 +324,7 @@ export const CASES: ReplayCase[] = [
       { what: "breakfast and dinner are not one row", kind: "sql",
         query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(raw_message,'') ~* 'breakfast' AND COALESCE(raw_message,'') ~* 'dinner'", expect: "zero" },
     ],
-    actions: { expect: ["LOG_MEAL"] },
+    actions: { expect: [{ type: "LOG_MEAL", match: { retro: "mon" } }, { type: "LOG_MEAL", match: { retro: "tue" } }, { type: "LOG_MEAL", match: { retro: "wed" } }] },
     rubric: "The client reported three days in one message. A good coach logs each day on its own day, keeps breakfast and dinner separate, and notices the pattern rather than ending with a generic instruction.",
   },
   {
@@ -313,7 +336,7 @@ export const CASES: ReplayCase[] = [
       { what: "no meal slot the client never said is stored", invariant: "no_false_writes", kind: "sql",
         query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND meal_label IN ('breakfast','lunch','dinner')", expect: "zero" },
     ],
-    actions: { expect: ["LOG_MEAL"] },
+    actions: { expect: [{ type: "LOG_MEAL", match: { foodText: "pear" } }] },
     rubric: "The client had a pear. A good reply logs a pear, as a snack or with no slot, and does not decide it was breakfast.",
   },
   {
@@ -325,7 +348,7 @@ export const CASES: ReplayCase[] = [
     checks: [
       { what: "the reply that logs dinner does not offer room for dinner", invariant: "no_invented_facts", kind: "reply_not_matches", pattern: "room for (?:a )?(?:full |big )?dinner", flags: "i" },
     ],
-    actions: { expect: ["LOG_MEAL"] },
+    actions: { expect: [{ type: "LOG_MEAL", match: { foodText: "stew", meal: "dinner" } }] },
     rubric: "The client logged dinner. A good reply confirms it and does not talk about dinner as if it were still to come.",
   },
   {
@@ -678,7 +701,7 @@ export const CASES: ReplayCase[] = [
       { what: "the same meal gets the same calories", kind: "sql", query: "SELECT (COUNT(*) = 2 AND MIN(kcal_int) = MAX(kcal_int) AND MIN(kcal_int) > 0)::int FROM meal_logs WHERE user_id = $1", expect: { equals: 1 } },
       { what: "both meals are logged", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1", expect: { equals: 2 } },
     ],
-    actions: { expect: ["LOG_MEAL"] },
+    actions: { expect: [{ type: "LOG_MEAL", match: { meal: "dinner" } }] },
     rubric: "Dinner repeated lunch. A good reply logs dinner as the same meal with the same numbers, briefly.",
   },
   {
@@ -691,7 +714,7 @@ export const CASES: ReplayCase[] = [
       // The later row (the large dinner) must be the bigger one, and neither may be 0 kcal.
       { what: "a large burger is counted as more than a small one", kind: "sql", query: "SELECT (COUNT(*) = 2 AND MIN(kcal_int) > 0 AND (array_agg(kcal_int ORDER BY logged_at))[2] > (array_agg(kcal_int ORDER BY logged_at))[1])::int FROM meal_logs WHERE user_id = $1", expect: { equals: 1 } },
     ],
-    actions: { expect: ["LOG_MEAL"] },
+    actions: { expect: [{ type: "LOG_MEAL", match: { foodText: "large.*burger|burger.*large", meal: "dinner" } }] },
     rubric: "The client logged a small and a large burger. A good coach counts the large one as more food.",
   },
 ];

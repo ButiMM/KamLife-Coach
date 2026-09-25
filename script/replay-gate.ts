@@ -34,7 +34,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { CASES, JOURNEYS, NEVER_SEE, type ReplayCase, type Check, type Journey } from "./replay-cases";
+import { CASES, JOURNEYS, NEVER_SEE, gradeActions, type ReplayCase, type Check, type Journey, type ProposedAction } from "./replay-cases";
 
 const OFFLINE = process.argv.includes("--offline");
 const WRITE_BASELINE = process.argv.includes("--write-baseline");
@@ -146,7 +146,7 @@ type CaseResult = { id: string; journey: Journey; heldOut: boolean; checks: Chec
   /** The new coach in shadow: its would-be replies, graded on the reply checks, the never-see list and the judge. */
   core: { replyPass: boolean; score: number | null; neverSeen: string[]; failing: string[];
     /** The actions the new core proposed across the graded turns, and whether they meet the case's `actions` (null: none set). */
-    proposed: string[]; actionPass: boolean | null } | null };
+    proposed: ProposedAction[]; actionPass: boolean | null } | null };
 
 const lastShadowId = async () => Number((await pool.query("SELECT COALESCE(MAX(id),0) m FROM shadow_replies")).rows[0].m);
 async function bodyAfter(phone: string, since: number): Promise<string> {
@@ -169,11 +169,11 @@ async function coreReplyFor(sid: string): Promise<string | null> {
   }
   return null;
 }
-/** The action types the new core proposed for this turn (#391), or null when it did not run. */
-async function coreActionsFor(sid: string): Promise<string[] | null> {
+/** The actions the new core proposed for this turn, with their arguments (#391), or null when it did not run. */
+async function coreActionsFor(sid: string): Promise<ProposedAction[] | null> {
   try {
     const r = (await pool.query<{ a: any }>("SELECT understanding->'actions' a FROM core_shadow WHERE root_id = $1 LIMIT 1", [sid])).rows[0];
-    return r ? (Array.isArray(r.a) ? r.a.map((x: any) => String(x?.type)) : []) : null;
+    return r ? (Array.isArray(r.a) ? r.a.filter((x: any) => x && typeof x.type === "string") : []) : null;
   } catch { return null; }
 }
 const replyMs: number[] = []; // every turn, before-turns included: the client waits for all of them
@@ -241,7 +241,7 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
   for (const [i, t] of (k.before || []).entries()) await turn(phone, t, `RP${n}b${i}`);
   const bodies: string[] = [];
   const coreBodies: Array<string | null> = [];
-  const coreActions: Array<string[] | null> = [];
+  const coreActions: Array<ProposedAction[] | null> = [];
   for (const [i, t] of k.turns.entries()) {
     bodies.push(await turn(phone, t, `RP${n}t${i}`));
     coreBodies.push(await coreReplyFor(`RP${n}t${i}`));
@@ -261,13 +261,12 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
     for (const c of k.checks.filter(c => c.kind !== "sql")) replyChecks.push(await runCheck(c, userId, phone, cb));
     const j = await judge(k, userId, cb);
     // WHAT IT WOULD DO (#391): the proposed actions against the case's expectation.
-    const proposed = [...new Set(coreActions.flatMap(a => a ?? []))];
-    const missing = (k.actions?.expect ?? []).filter(t => !proposed.includes(t));
-    const forbidden = (k.actions?.forbid ?? []).filter(t => proposed.includes(t));
-    const actionPass = k.actions ? missing.length === 0 && forbidden.length === 0 : null;
+    const proposed = coreActions.flatMap(a => a ?? []);
+    const graded = k.actions ? gradeActions(k.actions, proposed) : null;
+    const actionPass = graded ? graded.pass : null;
     core = { replyPass: replyChecks.filter(c => c.invariant).every(c => c.pass), score: j.score, proposed, actionPass,
       failing: [...replyChecks.filter(c => !c.pass).map(c => `${c.invariant ? "**" + c.invariant + "**: " : ""}${c.what}`),
-        ...missing.map(t => `action: would not ${t}`), ...forbidden.map(t => `action: would wrongly ${t}`)],
+        ...(graded?.misses ?? []).map(m => `action: ${m}`)],
       neverSeen: NEVER_SEE.filter(nv => cb.some(b => new RegExp(nv.pattern, nv.flags ?? "").test(b))).map(nv => nv.what) };
   }
   return { id: k.id, journey: k.journey, heldOut: isHeldOut, checks, hardPass: checks.filter(c => c.invariant).every(c => c.pass), score, verdict, bodies, neverSeen, core };
@@ -396,4 +395,15 @@ if (!OFFLINE && !baseline && !WRITE_BASELINE) {
 const corpusChange = (process.env.PR_LABELS || "").split(",").map(l => l.trim()).includes("gate-corpus");
 const blocking = corpusChange ? regressions.filter(r => !r.endsWith("(check no longer exists)")) : regressions;
 if (corpusChange && blocking.length < regressions.length) REAL(`replay-gate: ${regressions.length - blocking.length} retired or redefined check(s) accepted under the gate-corpus label.`);
+// A SWITCH IS JUDGED ON DOING (Codex @ de02852): on a PR labelled `switch`, every action the new core
+// would get wrong blocks, exactly like a hard regression. Elsewhere the core is in shadow and it is reported.
+const labels = (process.env.PR_LABELS || "").split(",").map(l => l.trim());
+// A switch PR names the journeys it moves with `journey:N` labels; only their action misses block (a wave-1
+// talk switch is not held by wave-2 logging). No journey label: every miss blocks, the safe default.
+const switched = labels.map(l => /^journey:(\d)$/.exec(l)?.[1]).filter(Boolean).map(Number);
+const actionMisses = results.filter(r => !r.heldOut && r.core?.actionPass === false && (!switched.length || switched.includes(r.journey))).map(r => r.id);
+if (labels.includes("switch") && actionMisses.length) {
+  REAL(`replay-gate: SWITCH BLOCKED — the new coach would do the wrong thing in ${actionMisses.length} case(s): ${actionMisses.join(", ")}.`);
+  process.exit(1);
+}
 process.exit(blocking.length ? 1 : 0);

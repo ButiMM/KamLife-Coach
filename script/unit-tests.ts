@@ -10747,6 +10747,56 @@ test("#217 behavioural patterns require attributable repetition, decay, and reac
     "pre-#217 open loops remain readable");
 });
 
+// ── #397 — /health SAYS WHETHER THE COACH CAN THINK ─────────────────────────────────────────
+test("#397 the AI health observer records OpenAI outcomes from the global fetch, and nothing else", async () => {
+  const { installAiHealthObserver, aiHealth } = await import("../server/ai-offline");
+  const real = globalThis.fetch;
+  let next: Response = new Response("{}", { status: 200 });
+  globalThis.fetch = (async () => next) as typeof fetch;
+  try {
+    installAiHealthObserver();
+    const before = aiHealth();
+    next = new Response(JSON.stringify({ error: { code: "insufficient_quota", message: "You have no credits remaining." } }), { status: 429 });
+    const r = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST" });
+    assert.equal(r.status, 429, "the response reaches the caller unchanged");
+    const h = aiHealth();
+    assert.equal(h.lastErrorCode, "429 insufficient_quota", "tonight's failure is named");
+    assert.equal(h.errorsLastHour, before.errorsLastHour + 1);
+    next = new Response("{}", { status: 200 });
+    await fetch("https://api.twilio.com/2010-04-01/x");
+    assert.equal(aiHealth().lastSuccessAt, h.lastSuccessAt, "a non-OpenAI call is not counted");
+    await fetch("https://api.openai.com/v1/chat/completions", { method: "POST" });
+    assert.ok(aiHealth().lastSuccessAt && aiHealth().lastSuccessAt! >= h.lastErrorAt!, "a success after the error is recorded");
+  } finally { globalThis.fetch = real; }
+});
+test("#397 /health carries the ai block, and the observer is in place before any OpenAI client exists", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync("server/routes/health.ts", "utf-8");
+  assert.match(src, /installAiHealthObserver\(\)/);
+  assert.match(src, /ai: aiHealth\(\)/);
+  // The SDK captures fetch when a client is built (verified against openai 6.21), so a client made before
+  // the observer is invisible to it. index.ts must import ai-offline before ./routes, which builds them.
+  const idx = readFileSync("server/index.ts", "utf-8");
+  assert.ok(idx.indexOf('import "./ai-offline"') > -1 && idx.indexOf('import "./ai-offline"') < idx.indexOf('from "./routes"'),
+    "index.ts loads ai-offline before routes");
+  assert.match(readFileSync("server/ai-offline.ts", "utf-8"), /NODE_ENV === "production"\) installAiHealthObserver\(\)/);
+});
+
+test("#397 the watch names the cause: no credits, throttling or a bad key (Codex @ 2e83c7f)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { execFileSync } = await import("node:child_process");
+  const src = readFileSync("script/cto-watch.py", "utf-8");
+  const fn = /^def ai_reason\(code\):[\s\S]*?\n(?=\S)/m.exec(src)?.[0];
+  assert.ok(fn, "cto-watch.py defines ai_reason");
+  const say = (code: string) => execFileSync("python3", ["-c", `${fn}\nimport sys\nprint(ai_reason(sys.argv[1]))`, code], { encoding: "utf-8" }).trim();
+  assert.match(say("429 insufficient_quota"), /no credits/);
+  // The attack's exact case: a rate limit is throttling, never "add credits".
+  assert.doesNotMatch(say("429 rate_limit_exceeded"), /credits/);
+  assert.match(say("429 rate_limit_exceeded"), /rate-limiting/);
+  assert.match(say("401 invalid_api_key"), /AI_INTEGRATIONS_OPENAI_API_KEY/);
+  assert.match(say("network ECONNRESET"), /failing/);
+});
+
 // ── #395 — OUT OF CREDITS IS NOT "TRY AGAIN IN 30 SECONDS" ──────────────────────────────────
 // 24 Sep: OpenAI answered "429 You have no credits remaining". askCoachK called it a rate limit, told
 // every client to retry in 30 seconds indefinitely, retried each call three times, and never told
@@ -10757,6 +10807,9 @@ test("#395 an empty OpenAI balance is told apart from a rate limit, alerted once
   const tonight = Object.assign(new Error("429 You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."), { status: 429 });
   assert.equal(isQuotaExhausted(tonight), true, "tonight's error is an empty balance");
   assert.equal(isQuotaExhausted({ status: 429, code: "insufficient_quota", message: "You exceeded your current quota" }), true);
+  // Codex @ 44b007a: the reason only inside the nested error body, "429" at the top.
+  assert.equal(isQuotaExhausted({ status: 429, message: "429", error: { message: "You have no credits remaining." } }), true);
+  assert.equal(isQuotaExhausted({ status: 429, message: "429", error: { type: "insufficient_quota" } }), true);
   // CONTROL: a real rate limit still retries.
   assert.equal(isQuotaExhausted({ status: 429, message: "Rate limit reached for gpt-4o-mini" }), false);
   const t0 = 1_000_000_000_000;
@@ -10764,9 +10817,38 @@ test("#395 an empty OpenAI balance is told apart from a rate limit, alerted once
   assert.equal(shouldAlertAiDown(t0 + 60_000), false, "the next turn a minute later does not alert again");
   assert.equal(shouldAlertAiDown(t0 + 61 * 60_000), true, "an hour later it alerts again if still down");
   assert.ok(!/30 seconds|try again/i.test(COACH_OUT_OF_CREDITS_REPLY), "no promised recovery time");
+  // Codex @ 44b007a: the alert is sent in the background and can be dropped, so the reply may not claim it.
+  assert.ok(!/alert|told|notified|team/i.test(COACH_OUT_OF_CREDITS_REPLY), "the reply claims no alert");
+  const { releaseAiDownAlert } = await import("../server/ai-offline");
+  assert.equal(shouldAlertAiDown(t0 + 62 * 60_000), false, "control: still inside the hour after the t0+61 alert");
+  releaseAiDownAlert(); // the t0+61 alert was dropped
+  assert.equal(shouldAlertAiDown(t0 + 63 * 60_000), true, "after a dropped alert the next failure tries again");
+  // The founder number is normalised to whatsapp:+digits like every other founder alert.
+  const gpt = (await import("node:fs")).readFileSync("server/gpt.ts", "utf-8");
+  assert.match(gpt, /sendCriticalAlert\(`whatsapp:\+\$\{alertPhone\.replace/);
+  // Codex on #401: a 401 alert must name the key the live clients read first.
+  assert.match(gpt, /401\)\. GPT is down\. Check AI_INTEGRATIONS_OPENAI_API_KEY/);
   assert.ok(isCoachUnavailableReply(COACH_OUT_OF_CREDITS_REPLY), "the verifier knows it is not a real answer");
   const src = (await import("node:fs")).readFileSync("server/gpt.ts", "utf-8");
   assert.ok(/isQuotaExhausted\(err\)/.test(src.slice(src.indexOf("export async function askCoachK"))), "askCoachK checks for an empty balance");
+});
+
+// ── #399 — THE GATE GRADES WHAT THE NEW COACH WOULD DO: COUNT AND CONTENT, NOT JUST TYPE ─────────
+test("#399 action grading counts actions and checks their arguments (Codex @ de02852)", async () => {
+  const { gradeActions, CASES } = await import("./replay-cases");
+  const three = { expect: [{ type: "LOG_MEAL", match: { retro: "Monday" } }, { type: "LOG_MEAL", match: { retro: "Tuesday" } }, { type: "LOG_MEAL", match: { retro: "Wednesday" } }] };
+  // The attack's exact assertion: one Monday meal must not pass a three-day log.
+  assert.equal(gradeActions(three, [{ type: "LOG_MEAL", foodText: "pap", retro: "Monday" }]).pass, false);
+  // The same action twice cannot stand in for two different days.
+  assert.equal(gradeActions(three, [{ type: "LOG_MEAL", retro: "Monday" }, { type: "LOG_MEAL", retro: "Monday" }, { type: "LOG_MEAL", retro: "Tuesday" }]).pass, false);
+  assert.equal(gradeActions(three, [{ type: "LOG_MEAL", retro: "Monday" }, { type: "LOG_MEAL", retro: "Tuesday" }, { type: "LOG_MEAL", retro: "Wednesday" }]).pass, true, "control");
+  // A wrong food, slot or number fails; forbid still applies.
+  assert.equal(gradeActions({ expect: [{ type: "LOG_MEAL", match: { foodText: "pear" } }] }, [{ type: "LOG_MEAL", foodText: "apple" }]).pass, false);
+  assert.equal(gradeActions({ expect: [{ type: "LOG_STEPS", match: { count: "^10000$" } }] }, [{ type: "LOG_STEPS", count: 1000 }]).pass, false);
+  assert.deepEqual(gradeActions({ forbid: ["LOG_MEAL"] }, [{ type: "LOG_MEAL", foodText: "rice" }]).misses, ["would wrongly LOG_MEAL"]);
+  // The corpus itself: the three-day case asks for three separate days.
+  const td = CASES.find(k => k.id === "three-days-one-message")!;
+  assert.equal(td.actions?.expect?.length, 3, "three-days-one-message expects three logs");
 });
 
 // ── #92 — THE UNAVAILABLE-MOUTH LIST MAY NOT GO STALE ────────────────────────────────────────

@@ -1,3 +1,4 @@
+import { installAiHealthObserver, aiHealth } from "../ai-offline";
 import type { Express } from "express";
 import path from "path";
 import { db, pool } from "../db";
@@ -109,6 +110,7 @@ export function registerStartupGate(app: Express) {
 }
 
 export function registerHealthRoutes(app: Express) {
+  installAiHealthObserver(); // #397: /health says whether the coach's model calls are succeeding
   // ── Simple health check — includes DB ping so Railway stops routing to dead instances ──
   app.get("/health", async (_req, res) => {
     const startupState = startupSnapshot();
@@ -124,7 +126,7 @@ export function registerHealthRoutes(app: Express) {
     }
     try {
       await db.execute(sql`SELECT 1`);
-      res.json({ status: "ok", service: "KamLife Coach", ...runningBuild(), startup: startupState, timestamp: new Date().toISOString() });
+      res.json({ status: "ok", service: "KamLife Coach", ...runningBuild(), startup: startupState, ai: aiHealth(), timestamp: new Date().toISOString() });
     } catch (e: any) {
       console.error("[HEALTH] DB check failed:", e.message);
       // The build still answers on a 503 — "which code is failing" is the question you ask FIRST
