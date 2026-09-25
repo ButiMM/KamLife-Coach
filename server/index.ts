@@ -1,4 +1,6 @@
 import "dotenv/config";
+// FIRST, before any module builds an OpenAI client: /health must see every model call (#397).
+import "./ai-offline";
 import { readdirSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
 import helmet from "helmet";

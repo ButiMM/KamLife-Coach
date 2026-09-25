@@ -10747,6 +10747,56 @@ test("#217 behavioural patterns require attributable repetition, decay, and reac
     "pre-#217 open loops remain readable");
 });
 
+// ── #397 — /health SAYS WHETHER THE COACH CAN THINK ─────────────────────────────────────────
+test("#397 the AI health observer records OpenAI outcomes from the global fetch, and nothing else", async () => {
+  const { installAiHealthObserver, aiHealth } = await import("../server/ai-offline");
+  const real = globalThis.fetch;
+  let next: Response = new Response("{}", { status: 200 });
+  globalThis.fetch = (async () => next) as typeof fetch;
+  try {
+    installAiHealthObserver();
+    const before = aiHealth();
+    next = new Response(JSON.stringify({ error: { code: "insufficient_quota", message: "You have no credits remaining." } }), { status: 429 });
+    const r = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST" });
+    assert.equal(r.status, 429, "the response reaches the caller unchanged");
+    const h = aiHealth();
+    assert.equal(h.lastErrorCode, "429 insufficient_quota", "tonight's failure is named");
+    assert.equal(h.errorsLastHour, before.errorsLastHour + 1);
+    next = new Response("{}", { status: 200 });
+    await fetch("https://api.twilio.com/2010-04-01/x");
+    assert.equal(aiHealth().lastSuccessAt, h.lastSuccessAt, "a non-OpenAI call is not counted");
+    await fetch("https://api.openai.com/v1/chat/completions", { method: "POST" });
+    assert.ok(aiHealth().lastSuccessAt && aiHealth().lastSuccessAt! >= h.lastErrorAt!, "a success after the error is recorded");
+  } finally { globalThis.fetch = real; }
+});
+test("#397 /health carries the ai block, and the observer is in place before any OpenAI client exists", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync("server/routes/health.ts", "utf-8");
+  assert.match(src, /installAiHealthObserver\(\)/);
+  assert.match(src, /ai: aiHealth\(\)/);
+  // The SDK captures fetch when a client is built (verified against openai 6.21), so a client made before
+  // the observer is invisible to it. index.ts must import ai-offline before ./routes, which builds them.
+  const idx = readFileSync("server/index.ts", "utf-8");
+  assert.ok(idx.indexOf('import "./ai-offline"') > -1 && idx.indexOf('import "./ai-offline"') < idx.indexOf('from "./routes"'),
+    "index.ts loads ai-offline before routes");
+  assert.match(readFileSync("server/ai-offline.ts", "utf-8"), /NODE_ENV === "production"\) installAiHealthObserver\(\)/);
+});
+
+test("#397 the watch names the cause: no credits, throttling or a bad key (Codex @ 2e83c7f)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { execFileSync } = await import("node:child_process");
+  const src = readFileSync("script/cto-watch.py", "utf-8");
+  const fn = /^def ai_reason\(code\):[\s\S]*?\n(?=\S)/m.exec(src)?.[0];
+  assert.ok(fn, "cto-watch.py defines ai_reason");
+  const say = (code: string) => execFileSync("python3", ["-c", `${fn}\nimport sys\nprint(ai_reason(sys.argv[1]))`, code], { encoding: "utf-8" }).trim();
+  assert.match(say("429 insufficient_quota"), /no credits/);
+  // The attack's exact case: a rate limit is throttling, never "add credits".
+  assert.doesNotMatch(say("429 rate_limit_exceeded"), /credits/);
+  assert.match(say("429 rate_limit_exceeded"), /rate-limiting/);
+  assert.match(say("401 invalid_api_key"), /AI_INTEGRATIONS_OPENAI_API_KEY/);
+  assert.match(say("network ECONNRESET"), /failing/);
+});
+
 // ── #395 — OUT OF CREDITS IS NOT "TRY AGAIN IN 30 SECONDS" ──────────────────────────────────
 // 24 Sep: OpenAI answered "429 You have no credits remaining". askCoachK called it a rate limit, told
 // every client to retry in 30 seconds indefinitely, retried each call three times, and never told

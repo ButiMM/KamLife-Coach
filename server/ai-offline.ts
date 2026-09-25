@@ -59,6 +59,56 @@ export function isAiOfflineError(err: unknown): boolean {
 }
 
 /**
+ * CAN THE COACH THINK? (#397). On 24 Sep the OpenAI credits ran out and /health still said "ok": it
+ * checked the database and the commit, not the model. Every OpenAI client in the server (11 of them)
+ * goes through the global fetch, so one observer there records every model call's outcome, with no
+ * change at any call site. /health reports it; the CTO watch alerts the founder from it.
+ */
+type AiHealth = { lastSuccessAt: string | null; lastErrorAt: string | null; lastErrorCode: string | null; errorsLastHour: number };
+const aiState = { lastSuccessAt: 0, lastErrorAt: 0, lastErrorCode: null as string | null, errors: [] as number[] };
+let aiObserverInstalled = false;
+
+export function recordAiOutcome(status: number, code: string | null, now = Date.now()): void {
+  if (status > 0 && status < 400) { aiState.lastSuccessAt = now; return; }
+  aiState.lastErrorAt = now;
+  aiState.lastErrorCode = `${status || "network"}${code ? ` ${code}` : ""}`;
+  aiState.errors = [...aiState.errors.filter(t => now - t < 60 * 60 * 1000), now];
+}
+
+export function aiHealth(now = Date.now()): AiHealth {
+  const iso = (t: number) => (t ? new Date(t).toISOString() : null);
+  return { lastSuccessAt: iso(aiState.lastSuccessAt), lastErrorAt: iso(aiState.lastErrorAt), lastErrorCode: aiState.lastErrorCode,
+    errorsLastHour: aiState.errors.filter(t => now - t < 60 * 60 * 1000).length };
+}
+
+/** Wrap the global fetch once. Only api.openai.com calls are recorded; nothing is changed about any request. */
+export function installAiHealthObserver(): void {
+  if (aiObserverInstalled || typeof globalThis.fetch !== "function") return;
+  aiObserverInstalled = true;
+  const inner = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const url = typeof input === "string" ? input : String(input?.url ?? input);
+    if (!url.includes("api.openai.com")) return inner(input, init);
+    try {
+      const res = await inner(input, init);
+      let code: string | null = null;
+      if (res.status >= 400) {
+        try { const b: any = await res.clone().json(); code = b?.error?.code || b?.error?.type || null; } catch { /* body not JSON */ }
+      }
+      recordAiOutcome(res.status, code);
+      return res;
+    } catch (e) {
+      recordAiOutcome(0, (e as any)?.code || null);
+      throw e;
+    }
+  }) as typeof fetch;
+}
+
+// Installed at load in production, and index.ts imports this module before anything that builds an
+// OpenAI client: the SDK captures fetch when a client is constructed, so a later install sees nothing.
+if (process.env.NODE_ENV === "production") installAiHealthObserver();
+
+/**
  * OUT OF CREDITS IS NOT A RATE LIMIT (#395). OpenAI answers an empty balance with a 429 too, but
  * `insufficient_quota` never clears on retry: until someone adds credits, every call fails. Tell the
  * two apart so the client is not told "30 seconds" forever and the founder is alerted.
