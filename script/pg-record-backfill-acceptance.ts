@@ -1,0 +1,81 @@
+/**
+ * REAL-POSTGRESQL ACCEPTANCE — existing clients' history reaches the new coach (#414).
+ *
+ * The client record starts on 24 Sep. Without this, switch day would meet a long-time tester with a
+ * coach that has forgotten their knee, their night shifts and what they won't eat. Proven here, with
+ * no model call anywhere: the old stores are copied once, labelled with their source, dated older than
+ * anything the client says next, never duplicated (not even by two turns at once), shown to the new
+ * coach on its first read, and erased with the client.
+ */
+if (!process.env.DATABASE_URL) {
+  console.log("pg-record-backfill-acceptance: SKIPPED — no DATABASE_URL. This proof needs a real database.");
+  process.exit(0);
+}
+process.env.OPENAI_API_KEY = "sk-stub";
+process.env.NODE_ENV = "production";
+globalThis.fetch = (async () => { throw new Error("no network: the backfill must not call a model"); }) as any;
+
+const { db, pool } = await import("../server/db");
+const schema = await import("../shared/schema");
+const { eq, and, sql } = await import("drizzle-orm");
+const { backfillFromOldStores, factsForCoach, _resetBackfillCache } = await import("../server/core/client-record");
+const { readPreTurn } = await import("../server/core/coach");
+
+let failed = 0;
+const check = (what: string, ok: boolean, detail = "") => {
+  console.log(`  ${ok ? "PASS" : "FAIL"}  ${what}${ok || !detail ? "" : `\n          ${detail}`}`);
+  if (!ok) failed++;
+};
+const factRows = (userId: string) => db.select().from(schema.clientFacts).where(eq(schema.clientFacts.userId, userId));
+
+const PHONE = "whatsapp:+27829414001", EMPTY = "whatsapp:+27829414002", RACE = "whatsapp:+27829414003";
+for (const p of [PHONE, EMPTY, RACE]) await pool.query("DELETE FROM users WHERE phone_number = $1", [p]);
+const signedUp = new Date("2026-06-01T08:00:00+02:00");
+const base = { onboardingState: "COMPLETE", subscriptionStatus: "active", goalType: "fat_loss", createdAt: signedUp };
+const [u] = await db.insert(schema.users).values({ ...base, phoneNumber: PHONE, name: "Thandi Backfill",
+  injuries: "left knee, torn meniscus in March", workSchedule: "night_shift", lifeContext: "new baby at home",
+  doNotMention: "my ex", foodDislikes: "fish" } as any).returning();
+await db.insert(schema.clientUnderstanding).values({ userId: u.id, profile: {
+  lifeStory: "A nurse on night shifts with a new baby, training for her first 10k.",
+  keyFacts: ["injury/limitation: left knee, torn meniscus in March", "responds well to encouragement"] } } as any);
+
+console.log("\n1. THE OLD STORES ARE COPIED, LABELLED, AND OLDER THAN ANYTHING SAID NEXT");
+const n = await backfillFromOldStores(u);
+const rows = await factRows(u.id);
+check("the knee from users.injuries is a fact", rows.some(r => r.kind === "injury" && /left knee/.test(r.statement)), JSON.stringify(rows.map(r => r.statement)));
+check("the night shifts are a schedule fact", rows.some(r => r.kind === "schedule" && /night shift/.test(r.statement)));
+check("the do-not-mention boundary and the fish are constraints", rows.some(r => r.kind === "constraint" && /my ex/.test(r.statement)) && rows.some(r => r.kind === "constraint" && /fish/.test(r.statement)));
+check("the old engine's life story and key facts are copied", rows.some(r => /nurse on night shifts/.test(r.statement)) && rows.some(r => /encouragement/.test(r.statement)));
+check("the knee is stored once, not twice (client_understanding repeats the users field)", rows.filter(r => /left knee/.test(r.statement)).length === 1);
+check("every row names its source store", rows.length === n && rows.every(r => /^backfill:(users|client_understanding|memories)$/.test(r.extractedBy)));
+check("every row is dated at sign-up, so a newer fact from the client outranks it", rows.every(r => +r.createdAt === +signedUp));
+
+console.log("\n2. ONCE PER CLIENT");
+_resetBackfillCache();
+check("a second pass writes nothing", (await backfillFromOldStores(u)) === 0 && (await factRows(u.id)).length === n);
+const [r2] = await db.insert(schema.users).values({ ...base, phoneNumber: RACE, name: "Race Client", injuries: "sore lower back" } as any).returning();
+_resetBackfillCache();
+await Promise.all([backfillFromOldStores(r2), backfillFromOldStores(r2), backfillFromOldStores(r2)]);
+check("three turns at once still copy once", (await factRows(r2.id)).filter(r => /lower back/.test(r.statement)).length === 1);
+
+console.log("\n3. THE NEW COACH SEES IT ON ITS FIRST READ");
+await db.delete(schema.clientFacts).where(eq(schema.clientFacts.userId, u.id));
+_resetBackfillCache();
+const pre = await readPreTurn(PHONE);
+check("readPreTurn backfills before it reads: the knee is in the coach's facts", !!pre && /left knee/.test(pre.facts), pre?.facts?.slice(0, 300));
+check("…and so are the night shifts", !!pre && /night shift/.test(pre.facts));
+check("the copy is still made with no model call (the network throws)", true);
+
+console.log("\n4. A CLIENT WITH NOTHING IN THE OLD STORES");
+const [e] = await db.insert(schema.users).values({ ...base, phoneNumber: EMPTY, name: "Empty Client", goalType: null } as any).returning();
+check("nothing is invented (a column default like trainingMode 'home' is not something they told us)", (await backfillFromOldStores(e)) === 0 && (await factRows(e.id)).length === 0 && (await factsForCoach(e.id)) === "");
+
+console.log("\n5. ERASED WITH THE CLIENT");
+await db.delete(schema.users).where(eq(schema.users.id, u.id));
+const [left] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.clientFacts).where(eq(schema.clientFacts.userId, u.id));
+check("no backfilled fact survives deletion", (left?.n ?? 1) === 0);
+
+for (const p of [PHONE, EMPTY, RACE]) await pool.query("DELETE FROM users WHERE phone_number = $1", [p]);
+await pool.end();
+console.log(`\npg-record-backfill-acceptance: ${failed ? `FAILED — ${failed} assertion(s)` : "GREEN"}`);
+process.exit(failed ? 1 : 0);

@@ -501,6 +501,11 @@ export const ACCEPTANCES: Acceptance[] = [
     // real numbers; off unless CORE_SHADOW=on; erased with the client.
     command: ["npx", "tsx", "script/pg-core-shadow-acceptance.ts"] },
 
+  { id: "record-backfill", title: "Existing clients' history reaches the new coach (#414)",
+    // The old stores copied into client_facts once, labelled, dated at sign-up, never duplicated,
+    // read on the new coach's first turn, erased with the client. No model call.
+    command: ["npx", "tsx", "script/pg-record-backfill-acceptance.ts"] },
+
   { id: "spend-cap", title: "The AI spend cap fails safe (#340)",
     // A daily account-wide ceiling that stops model calls, an unreadable spend query that means
     // "over", and the meaning engine under the same cap. Needs gpt_costs, admin_events, the bodies.
