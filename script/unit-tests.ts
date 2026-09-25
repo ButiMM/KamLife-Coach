@@ -10783,6 +10783,24 @@ test("#395 an empty OpenAI balance is told apart from a rate limit, alerted once
   assert.ok(/isQuotaExhausted\(err\)/.test(src.slice(src.indexOf("export async function askCoachK"))), "askCoachK checks for an empty balance");
 });
 
+// ── #399 — THE GATE GRADES WHAT THE NEW COACH WOULD DO: COUNT AND CONTENT, NOT JUST TYPE ─────────
+test("#399 action grading counts actions and checks their arguments (Codex @ de02852)", async () => {
+  const { gradeActions, CASES } = await import("./replay-cases");
+  const three = { expect: [{ type: "LOG_MEAL", match: { retro: "Monday" } }, { type: "LOG_MEAL", match: { retro: "Tuesday" } }, { type: "LOG_MEAL", match: { retro: "Wednesday" } }] };
+  // The attack's exact assertion: one Monday meal must not pass a three-day log.
+  assert.equal(gradeActions(three, [{ type: "LOG_MEAL", foodText: "pap", retro: "Monday" }]).pass, false);
+  // The same action twice cannot stand in for two different days.
+  assert.equal(gradeActions(three, [{ type: "LOG_MEAL", retro: "Monday" }, { type: "LOG_MEAL", retro: "Monday" }, { type: "LOG_MEAL", retro: "Tuesday" }]).pass, false);
+  assert.equal(gradeActions(three, [{ type: "LOG_MEAL", retro: "Monday" }, { type: "LOG_MEAL", retro: "Tuesday" }, { type: "LOG_MEAL", retro: "Wednesday" }]).pass, true, "control");
+  // A wrong food, slot or number fails; forbid still applies.
+  assert.equal(gradeActions({ expect: [{ type: "LOG_MEAL", match: { foodText: "pear" } }] }, [{ type: "LOG_MEAL", foodText: "apple" }]).pass, false);
+  assert.equal(gradeActions({ expect: [{ type: "LOG_STEPS", match: { count: "^10000$" } }] }, [{ type: "LOG_STEPS", count: 1000 }]).pass, false);
+  assert.deepEqual(gradeActions({ forbid: ["LOG_MEAL"] }, [{ type: "LOG_MEAL", foodText: "rice" }]).misses, ["would wrongly LOG_MEAL"]);
+  // The corpus itself: the three-day case asks for three separate days.
+  const td = CASES.find(k => k.id === "three-days-one-message")!;
+  assert.equal(td.actions?.expect?.length, 3, "three-days-one-message expects three logs");
+});
+
 // ── #92 — THE UNAVAILABLE-MOUTH LIST MAY NOT GO STALE ────────────────────────────────────────
 //
 // isCoachUnavailableReply lives in brain/reply-verifier.ts because gpt.ts sits on its line
