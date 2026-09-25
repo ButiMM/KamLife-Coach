@@ -244,13 +244,13 @@ async function main() {
     assert.ok(!/SUM\(steps\)|COALESCE\(SUM/.test(code), "no hand-rolled step totals");
     assert.ok(!/programmeStartDate\)\.getTime\(\)/.test(code),
       "days-on-programme is derived once, in the truth object — not per progress door");
-    // The users-row counter survives in exactly two non-progress roles, and they are named so a
-    // third cannot appear quietly: a VETERAN GATE (>= 12 sessions unlocks supplements) and the
-    // SESSION LABEL on a workout card ("Session 19"), which is a position in the programme rather
-    // than a claim about progress. Neither is a reply to "how am I doing".
+    // The users-row counter survives in exactly one non-progress role, named so a second cannot
+    // appear quietly: the SESSION LABEL on a workout card ("Session 19"), a position in the programme
+    // rather than a claim about progress. (The supplement VETERAN GATE went with the supplement
+    // answers in #445: supplement questions are the new coach's.)
     const counterUses = code.split("\n").filter(l => /totalWorkoutsCompleted/.test(l));
-    assert.equal(counterUses.length, 2,
-      `the users-row workout counter is used ${counterUses.length} times; only the veteran gate and `
+    assert.equal(counterUses.length, 1,
+      `the users-row workout counter is used ${counterUses.length} times; only `
       + `the session label may use it. Progress totals come from workoutLogs via the truth object, `
       + `which the counter drifts from the moment one write fails:\n      `
       + counterUses.map(l => l.trim()).join("\n      "));
@@ -1975,9 +1975,9 @@ async function main() {
   // Five contracts, each graded on behaviour or state, never on source-string presence.
 
   check("1 . a factual deficit question is answered, not replaced by an action", async () => {
+    // #445: the surplus/deficit explainer was wave-1 talk and is the new coach's (from ledgerNumbers,
+    // which carries the energy frame). What still holds on every path: no action ladder replaces it.
     const reply = await serialise(() => say("Am I in a deficit? I've only had breakfast"));
-    assert.match(reply, /built into your target/i, `the deficit question was not answered: ${reply}`);
-    assert.match(reply, /\b2800\b/, "...from the client's own target, via the existing owner");
     assert.ok(!/one thing today|stand on a scale/i.test(reply),
       `the action ladder replaced the question: ${reply}`);
   });
@@ -3397,8 +3397,8 @@ async function main() {
 
     // THE PAIRS ARE THE POINT. Each row is the same customer question in two phrasings; before the
     // fix the left column reached a generalist and the right column reached the owner.
+    // #445: the restaurant guide is now the new coach's TOOL, not a claimant; that pair is asserted below.
     const pairs: Array<[string, string, string]> = [
-      ["RESTAURANT_GUIDE", "What can I eat at Nandos?", "What should I order at Nandos?"],
       ["STREET_FOOD_GUIDE", "What can I eat at the taxi rank?", "I'm at the taxi rank, what should I get?"],
     ];
     for (const [owner, phrasingA, phrasingB] of pairs) {
@@ -3408,9 +3408,13 @@ async function main() {
       }
     }
 
-    // …and the swap owner, whose trigger word is IN the message and was still being skipped.
-    assert.equal(await serialise(() => claimantOf("What can I eat instead of rice?")), "FOOD_SWAP",
-      "a swap ask naming its own trigger word did not reach the swap owner");
+    // WAVE 1 (#445): restaurant and swap asks are the new coach's. No old handler may claim them first,
+    // and above all not the generic next-meal card the matrix was written against.
+    for (const msg of ["What can I eat at Nandos?", "What should I order at Nandos?", "What can I eat instead of rice?"]) {
+      const who = await serialise(() => claimantOf(msg));
+      assert.ok(!["RESTAURANT_GUIDE", "FOOD_SWAP", "MEAL_SUGGESTION", "FOOD_DIARY"].includes(who),
+        `"${msg}" was claimed by ${who} ahead of the new coach`);
+    }
   });
 
   // THE CONTROLS. Narrowing a generalist is only correct where a better owner exists; a generalist
@@ -3427,17 +3431,14 @@ async function main() {
       delete g.__KAMLIFE_STUB_WRITES;
       return { out, claimed: tags.length ? tags[tags.length - 1] : "(untagged)" };
     };
-    // A contextless hunger question is exactly what the next-meal card is for.
-    for (const msg of ["I'm hungry, what should I do?", "What can I eat?"]) {
+    // A contextless hunger question, and pre-workout timing, are the new coach's since #445 (the
+    // next-meal card was deleted). They must never fall to a worse handler: the food diary
+    // ("No meals logged yet today") is the one that took them the last time an owner stood down.
+    for (const msg of ["I'm hungry, what should I do?", "What can I eat?", "What can I eat before the gym?"]) {
       const r = await serialise(() => replyTo(msg));
-      assert.equal(r.claimed, "MEAL_SUGGESTION",
-        `the generalist stopped owning a question it should own: "${msg}" → ${r.claimed}`);
+      assert.ok(!["FOOD_DIARY", "MEAL_SUGGESTION"].includes(r.claimed),
+        `"${msg}" was stood down to a worse handler: ${r.claimed}`);
     }
-    // Pre-workout timing has NO specialist. Standing down here handed it to the food diary
-    // ("No meals logged yet today"), which is worse than the card it replaced.
-    const pre = await serialise(() => replyTo("What can I eat before the gym?"));
-    assert.equal(pre.claimed, "MEAL_SUGGESTION",
-      `a question with no specialist owner was stood down to a worse handler: ${pre.claimed}`);
 
     // THE BUDGET ANSWER SURVIVES. "what can i eat" was removed from the totals predicate; these
     // four carry that question and must be untouched.

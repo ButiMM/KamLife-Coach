@@ -229,9 +229,8 @@ REAL("\n4. \"JUST FINISHED DINNER\" LOGS DINNER");
   chk(rows.some(r => /dinner/i.test(r.meal_label || "")), "and it is dinner", JSON.stringify(rows));
   chk(!SUBSTITUTION.test(reply), "the reply is not a shop substitution", JSON.stringify(reply));
 
-  const shop = await client(6);
-  const sub = await say(shop, "The chicken was finished at Shoprite, what else?", "SM275d2");
-  chk(SUBSTITUTION.test(sub), "CONTROL — \"the chicken was finished\" still gets the substitution", JSON.stringify(sub));
+  // The "chicken was finished" control retired with #445: the substitution table is now the new
+  // coach's tool (core/coach.ts foodTools), not a reply of its own.
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════

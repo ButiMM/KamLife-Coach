@@ -303,34 +303,7 @@ export async function handleLifecycle(ctx: {
     }
   }
 
-  // ---- PORTION SIZE GUIDE (Item 7) — no GPT ----
-  // "how much should I be GAINING per week" is a rate question, not a portion one —
-  // the blanket "how much" clause sent the portion guide twice to a furious tester
-  // (2026-07-03). Portions need food context; weight/rate words always exclude.
-  const switchedTalk = (await import("../core/coach")).coreWave1For(String(user?.phoneNumber || "")); // wave 1 (#445): portion, trolley and "what should I eat" are the new coach's
-  if (!switchedTalk && (/\b(portion|how many grams|serving size|how big|how large|right amount|right portion|portion size|right size|how do i measure)\b/i.test(m)
-      || (/\bhow much\b.{0,30}\b(eat|food|rice|pap|meat|chicken|fish|protein|carbs?|per meal|on my plate)\b/i.test(m)))
-    && !/\b(weight|gain(?:ing)?|los(?:e|ing)|per week|kg|steps?)\b/i.test(m)) {
-    await logChat(user.id, message, PORTION_GUIDE, "PORTION_GUIDE");
-    return PORTION_GUIDE;
-  }
-
-  // ---- THE TROLLEY, NOT THE STORE DIRECTORY (2026-08-07, live-model gauntlet) ----
-  // "I'm at Shoprite with about R300 and I need food for the week, I've got rice and pap at
-  // home already, what should I put in the trolley?" matched on the word "Shoprite" and got
-  // back the whole STORE_ADVICE price list — eleven sentences of a shop's inventory to a man
-  // standing in the aisle. He asked WHAT TO BUY, not WHICH SHOP. Different questions.
-  const asksTrolley = /\b(trolley|basket|what (?:should|must|do) i (?:buy|get|put)|what to buy|shopping list|buy for the week|food for the week)\b/i.test(m);
-  if (asksTrolley && !switchedTalk) {
-    // One pattern: "I've got / already have …" followed by a starch, within one clause.
-    const skipStarch = /\b(?:i(?:'ve| have)\s+(?:got|already)|already (?:have|got))\b[^.?!]{0,60}?\b(?:rice|pap|maize|samp|bread|potato)\b/i.test(m);
-    const trolley = skipStarch
-      ? "eggs, pilchards, chicken pieces, sugar beans, cabbage, spinach, butternut, bananas"
-      : "eggs, pilchards, chicken pieces, sugar beans, pap, rice, cabbage, spinach, bananas";
-    const reply = `Trolley: *${trolley}*.${skipStarch ? " You've got the starch covered, so spend it on protein and veg." : ""}\n\nProtein in every trolley first — that's the whole rule. Chicken is cheapest frozen and marked down Tuesday and Thursday afternoons.`;
-    await logChat(user.id, message, reply, "TROLLEY");
-    return reply;
-  }
+  // WAVE 1 IS THE NEW COACH'S (#445, CTO order on #391): "how much rice should I eat?" and "what should I put in the trolley?" is answered by core/coach.ts, not here.
 
   // ---- STORE ADVICE (Item 8) — no GPT. Only for "WHICH shop", never "what do I buy". ----
   const storeMatch = Object.keys(STORE_ADVICE).find(store => m.includes(store));
@@ -845,7 +818,9 @@ export async function handleLifecycle(ctx: {
   // ---- "WHAT SHOULD I DO NEXT WEEK / COACHING ADVICE?" — no GPT, data-driven ----
 
   // ---- FOOD DIARY SUMMARY — "what did I eat today?" / "today's calories?" — no GPT ----
-  if (!(switchedTalk && /\bwhat (?:should|can|must|do) i (?:eat|have)\b|\bhow (?:much|many)\b/i.test(m)) && /\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meal log|meal logs|today.?s?\s*meal\s*logs?|meals today|melas today|melas|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
+  // THE DIARY ON REQUEST (#445). "What should I EAT tonight?" matched `what.*i eat` and got the day's list;
+  // numbers questions ("how much protein today?") are the new coach's. Asking to SEE the log stays here.
+  if (/\b(what (?:did|have) i (?:eat|ate|eaten|had)|what i (?:ate|had|have eaten)|my food|food diary|food log|meal log|meal logs|today.?s?\s*meal\s*logs?|meals today|melas today|melas|ate today|eaten today|log today|today.?s?\s*food|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
     // THE DAY THEY NAMED (2026-08-10 directive, P0.1). "What did I eat yesterday?" read TODAY,
     // so a client checking yesterday was shown today's plate and told it was theirs. The date
     // is resolved ONCE, here, by the same parseMealDate that resolves it at write time — one

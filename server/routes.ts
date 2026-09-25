@@ -1065,7 +1065,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // missing a fact the client stated in this very message (2026-08-22).
   const core = await import("./core/coach"), switched = core.coreWave1For(phone); let w1Read = false; // wave-1 switch: core/coach.ts wave1Turn
   if ((engineLive() || switched) && !multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const w1 = switched ? await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), evidence: turnEvidence }) : null; w1Read = switched; // #451: read once
+    const w1 = switched ? await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), evidence: turnEvidence }) : null;
+    w1Read = switched; // #451: the new coach already read this turn; the second door must not read it again
     const engineReply = w1?.reply ?? (engineLive() ? await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester }) : null);
     if (engineReply !== null) return tag(engineReply, w1?.src ?? "🧠 new engine");
   }

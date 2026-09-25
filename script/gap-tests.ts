@@ -2090,15 +2090,10 @@ function mc(message: string, overrides: Partial<typeof LC_USER> = {}) {
   return { phone: user.phoneNumber, message, m: message.toLowerCase().trim(), user };
 }
 
-test("misc-commands: 'creatine' → supplement guide returned", async () => {
-  const r = await handleMiscCommands(mc("creatine"));
-  assert.ok(r !== null, "should handle creatine query");
-  assert.ok(r!.toLowerCase().includes("creatine"), `should mention creatine: ${r?.slice(0, 100)}`);
-});
-
-test("misc-commands: 'should I take protein powder' → supplement guide", async () => {
-  const r = await handleMiscCommands(mc("should I take protein powder"));
-  assert.ok(r !== null, "should handle protein powder query");
+// WAVE 1 (#445): supplement QUESTIONS are the new coach's; misc-commands no longer claims them.
+test("misc-commands: 'should I take creatine' is left for the new coach", async () => {
+  assert.equal(await handleMiscCommands(mc("should I take creatine")), null);
+  assert.equal(await handleMiscCommands(mc("should I take protein powder")), null);
 });
 
 test("misc-commands: week9_choice '1' → maintenance phase response", async () => {
@@ -4592,19 +4587,10 @@ test("cut9: the weight reports honour do_not_mention, each in the right way", ()
 
 // ── CUT 10: ONE FOOD PIPE FOR THE ASK ───────────────────────────────────────────────────────
 
-test("cut10: the permission ask is answered where the question is already known", () => {
+test("cut10 retired by #445: \"can I have X?\" reaches the new coach, not a food-context answer", () => {
   const fc = readFileSync("server/handlers/food-context.ts", "utf-8");
   const code = fc.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
-  // It hooks at the point that has ALREADY decided this is a question about a priced food —
-  // no second detector, no new handler stage, no route added to the pipeline.
-  assert.ok(/hasActualFood && hasSubstantiveQuestion && !isFuturePlanning && PERMISSION_ASK\.test\(m\)/.test(code),
-    "the hook reuses the gate that already ran");
-  assert.ok(/answerFoodPermissionAsk\(user, message, foodsInMsg\)/.test(code));
-  // And it must sit ABOVE the retro/scanner paths, or the question falls through to the model
-  // exactly as it did before.
-  const hook = code.indexOf("answerFoodPermissionAsk(user, message, foodsInMsg)");
-  const retro = code.indexOf("const isRetroDietAudit");
-  assert.ok(hook > 0 && retro > 0 && hook < retro, "answered before the logging paths, not after");
+  assert.ok(!/answerFoodPermissionAsk\(user, message, foodsInMsg\)/.test(code), "the old permission answer is back in front of the new coach");
 });
 
 test("cut10: the answer reads the ledger, and the verdict stays pure", () => {
