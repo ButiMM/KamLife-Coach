@@ -30,7 +30,8 @@ export interface PreTurn { userId: string; name: string; facts: string; known: s
 export async function readPreTurn(phone: string): Promise<PreTurn | null> {
   const [u] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
   if (!u || u.onboardingState !== "COMPLETE") return null; // onboarding is its own journey, not this composer's yet
-  const [{ factsForCoach, knownFacts }, { buildClientSnapshot }] = await Promise.all([import("./client-record"), import("../brain/client-snapshot")]);
+  const [{ factsForCoach, knownFacts, backfillFromOldStores }, { buildClientSnapshot }] = await Promise.all([import("./client-record"), import("../brain/client-snapshot")]);
+  await backfillFromOldStores(u).catch(e => console.warn("[RECORD] backfill skipped:", (e as Error).message)); // #414: before the first read
   const [facts, known, numbers, turns] = await Promise.all([
     factsForCoach(u.id).catch(() => ""),
     knownFacts(u.id).catch(() => "KNOWN FACTS: none"),

@@ -170,6 +170,65 @@ export async function factsForCoach(userId: string): Promise<string> {
     + rows.map(r => `- ${r.kind}: "${r.statement}"`).join("\n");
 }
 
+/**
+ * WHAT THE OLD COACH ALREADY KNEW (#414). The record starts on 24 Sep; a client who told the old
+ * coach about their knee, their night shifts or their dislikes weeks ago must not meet a new coach
+ * that knows none of it. Once per client, before the new coach first reads their facts, this copies
+ * the users profile into client_facts: the fields the client typed at onboarding and the ones set by
+ * deterministic rules from their own messages (the same labels seed.ts has always given the old
+ * engine), plus their dream goal and biggest struggle. NEVER the model-written stores (CTO on #426):
+ * client_understanding's life story and key facts, the CIP narrative and memories were written by
+ * the old model, unvalidated, and would import its inventions as "what the client told us".
+ * Deterministic: no model call. Each row says where it came from
+ * (extracted_by "backfill:<store>"), is dated at the client's sign-up so anything they tell the new
+ * coach is newer and wins, and is erased with the client by the users cascade. Held constraints are
+ * today-only states (sick today, food closed), not durable facts, so they are not copied.
+ */
+const BACKFILL_KIND: Array<[RegExp, FactKind]> = [
+  [/^injury/i, "injury"],
+  [/^(dietary restriction|medical|do not mention|won't eat)/i, "constraint"],
+  [/^work pattern/i, "schedule"],
+  [/^(their staple foods|food budget)/i, "preference"],
+];
+const backfilled = new Set<string>();
+export function _resetBackfillCache(): void { backfilled.clear(); }
+
+export async function backfillFromOldStores(user: any): Promise<number> {
+  if (!user?.id || backfilled.has(user.id)) return 0;
+  const { keyFactsFromUser } = await import("../understanding/seed");
+  const found: Array<{ kind: FactKind; subject: string; statement: string; store: string }> = [];
+  if (String(user.dreamGoal || "").trim()) found.push({ kind: "goal", subject: "dream goal", statement: `their 3-month dream: ${String(user.dreamGoal).trim().slice(0, 200)}`, store: "users" });
+  if (String(user.biggestStruggle || "").trim()) found.push({ kind: "constraint", subject: "biggest struggle", statement: `their biggest struggle: ${String(user.biggestStruggle).trim().slice(0, 200)}`, store: "users" });
+  for (const line of keyFactsFromUser(user)) {
+    const label = line.split(":")[0].trim().toLowerCase();
+    // Goal and training setup are settings the snapshot already gives the coach, and they have
+    // column defaults ("trains: home"): copying them would record something the client never said.
+    if (label === "goal" || label === "trains") continue;
+    found.push({ kind: BACKFILL_KIND.find(([re]) => re.test(label))?.[1] ?? "life_event", subject: label, statement: line, store: "users" });
+  }
+  const since = user.createdAt ? new Date(user.createdAt) : new Date(Date.now() - 365 * 24 * 3600_000);
+  let written = 0;
+  await db.transaction(async tx => {
+    // One copy per client, even when two turns arrive at once.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${"backfill:" + user.id}))`);
+    const [done] = await tx.select({ n: sql<number>`count(*)::int` }).from(clientFacts)
+      .where(and(eq(clientFacts.userId, user.id), sql`${clientFacts.extractedBy} LIKE 'backfill:%'`));
+    if ((done?.n ?? 0) > 0) return;
+    const seen = new Set<string>();
+    for (const f of found) {
+      const key = norm(f.statement.replace(/^[^:]{1,40}:\s*/, ""));
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      await tx.insert(clientFacts).values({ userId: user.id, kind: f.kind, subject: f.subject, statement: f.statement,
+        validFrom: since, createdAt: since, extractedBy: `backfill:${f.store}` });
+      written++;
+    }
+  });
+  backfilled.add(user.id);
+  if (written) console.log(`[RECORD] backfilled ${written} fact(s) from the old stores for ...${String(user.phoneNumber || "").slice(-6)}`);
+  return written;
+}
+
 /** A voice note's transcript, as the turn recorded it (turn_ledger), waited for briefly. */
 async function voiceTranscript(rootId?: string): Promise<string | null> {
   if (!rootId) return null;
