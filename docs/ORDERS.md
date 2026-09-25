@@ -172,7 +172,7 @@ Every one of the rows in `docs/COVERAGE.md` goes to the new coach under the swit
 - A switch PR may delete `routeMessage` exits for **its own rows only**, and merges `main` in right before merging.
 - **Measurement is width-first for everyone:** every row has cases and a score by Sun 27 Sep (#433).
 - If only one builder session is running (the default while the founder's Claude capacity is limited), it works lane 1, then 2, then 3, in that order, and never parks a row as "later".
-- **Every switch goes to the founder's number first, then to everyone (#438).**
+- **Wave 1 goes straight to everyone (founder decision, 25 Sep)**, with its intercepting handlers deleted in the same PR and the gate run on that exact change. Founder-first (#438) remains available for riskier later rows (money, onboarding).
 
 **Reuse is mandatory (25 Sep):** the new coach is a thin brain (`server/core/`, 359 lines today) on top of the existing product. About 51,000 of the 74,000 server lines are kept or reused (`docs/COMPONENTS.md` §1-2); about 22,000 are replaced. Every switch PR must show which existing tools its rows call (food data, targets, day ledger, meal plans, programmes, actions and executor, outcomes, safety and medication rules). A new module that re-implements any of them is rejected. The watch shows how many tools the new coach reuses.
 
