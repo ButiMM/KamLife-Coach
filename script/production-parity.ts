@@ -35,6 +35,7 @@ process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+270
 process.env.APP_URL = process.env.APP_URL || "https://kamlife-coach-production.up.railway.app";
 process.env.NODE_ENV = "production";
 
+import "./sast-noon-clock"; // #404: run at midday SAST whatever the hour
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
