@@ -171,7 +171,16 @@ export type CoachAction =
   // The client asks to be reminded of something later ("remind me to take creatine at 8pm").
   // body = what to remind them; when = the natural-language time. The deterministic reminder
   // parser owns the actual clock maths, so the LLM never has to compute a fire time.
-  | { type: "SET_REMINDER"; body: string; when: string };
+  | { type: "SET_REMINDER"; body: string; when: string }
+  // WAVE 2 (docs/COVERAGE.md A2, A8, A12). Proposed by the NEW core only: they are not in
+  // COACH_ACTION_TOOLS or the name map below, so the live meaning engine can never emit them.
+  // A named meal was wrong: `from` is what the record holds that they rejected ("rice"), `to` what it
+  // really was ("pap"), either may be empty ("there was no rice"). Their words; the scanner prices it.
+  | { type: "CORRECT_MEAL"; from: string; to: string; meal?: string; retro?: string }
+  // A training session they DID (not planned, not missed). `what` in their words; `retro` a past day.
+  | { type: "LOG_WORKOUT"; what?: string; retro?: string }
+  // They want a different goal. Only the goals the product stores; lifecycle.ts confirms first.
+  | { type: "SET_GOAL"; goal: "fat_loss" | "muscle_gain" | "recomposition" };
 
 export type CoachActionType = CoachAction["type"];
 
@@ -375,6 +384,23 @@ export function validateAction(raw: any): CoachAction {
       const retro = typeof a.retro === "string" && a.retro.trim() ? a.retro.trim().slice(0, 20) : undefined;
       return { type: "LOG_MEAL", foodText, meal, retro, needsConfirmation: !!(a.needs_confirmation ?? a.needsConfirmation) };
     }
+    case "CORRECT_MEAL": {
+      const clean = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+      const from = clean(a.from), to = clean(a.to);
+      if (from.length < 2 && to.length < 2) return { type: "JUST_REPLY" };  // names nothing to change
+      const mealRaw = String(a.meal || "").toLowerCase().trim();
+      const retro = typeof a.retro === "string" && a.retro.trim() ? a.retro.trim().slice(0, 20) : undefined;
+      return { type: "CORRECT_MEAL", from, to, meal: MEAL_SLOTS.has(mealRaw) ? mealRaw : undefined, retro };
+    }
+    case "LOG_WORKOUT": {
+      const what = String(a.what ?? "").replace(/\s+/g, " ").trim().slice(0, 120) || undefined;
+      const retro = typeof a.retro === "string" && a.retro.trim() ? a.retro.trim().slice(0, 20) : undefined;
+      return { type: "LOG_WORKOUT", what, retro };
+    }
+    case "SET_GOAL": {
+      const goal = String(a.goal ?? "").toLowerCase().trim();
+      return goal === "fat_loss" || goal === "muscle_gain" || goal === "recomposition" ? { type: "SET_GOAL", goal } : { type: "JUST_REPLY" };
+    }
     default:
       return { type: "JUST_REPLY" };
   }
@@ -437,6 +463,7 @@ export const CONFIDENCE_TO_EXECUTE = 0.75;
 const WRITES_STATE = new Set<CoachActionType>([
   "LOG_MEAL", "LOG_STEPS", "LOG_WATER", "LOG_WEIGHT", "REMOVE_LAST_MEAL", "SET_SICK", "END_SICK",
   "SET_REMINDER", // creates a row; idempotency stops a retry from double-scheduling the ping
+  "CORRECT_MEAL", "LOG_WORKOUT", "SET_GOAL",
 ]);
 
 /** True if performing this action changes stored state (a wrong auto-run would corrupt). */
@@ -587,5 +614,8 @@ export function describeAction(action: CoachAction): string {
     case "SET_SICK": return `set sick for ${action.days} day(s)`;
     case "END_SICK": return "end sick / resume";
     case "SET_REMINDER": return `remind to "${action.body}"${action.when ? ` (${action.when})` : ""}`;
+    case "CORRECT_MEAL": return `correct ${action.meal || "the meal"}${action.retro ? ` (${action.retro})` : ""}: "${action.from}" → "${action.to}"`;
+    case "LOG_WORKOUT": return `log a session done${action.what ? `: ${action.what}` : ""}${action.retro ? ` (${action.retro})` : ""}`;
+    case "SET_GOAL": return `change goal to ${action.goal}`;
   }
 }
