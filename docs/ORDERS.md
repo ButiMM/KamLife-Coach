@@ -159,6 +159,21 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 **If Codex is out of usage limits when a `switch` PR is ready (24 Sep evening):** the CTO performs the attack instead: a diff review against `docs/COMPONENTS.md` and `TESTER-EXPERIENCE.md`, plus the 3-run gate numbers, posted as `ATTACK @ <sha> (CTO)`. A switch never waits a night on a usage limit, and never merges without an attack. Codex attacks the merged version when its limits reset.
 
+**LAUNCH SCOPE (founder: "I need a working product ASAP", 25 Sep). This outranks the wave order below.**
+A *working product* = what testers use every day, done on the new coach at the switch standard. Everything else keeps running on today's code (it works, with its harm fixed) and moves over **after** launch.
+
+| Launch area | Rows | Target |
+|---|---|---|
+| Talk, coaching, memory | A10, A11, A13, A16, A17 | **Sat 26 Sep** (wave-1 switch) |
+| Every row scored | all | **Sun 27 Sep** (#433) |
+| Food and steps in plain words, corrections, workouts | A1, A2, A5, A8 | **Tue 29 Sep** |
+| Live scoring of real conversations | D7 (#293) | **Tue 29 Sep** |
+| The messages the coach sends first: morning, evening, weekly, back-after-a-break | B1, B2, B4, B6 | **Fri 2 Oct** |
+| Fix what live scores show; founder and testers sign off | all launch rows | **Mon 5 Oct: working product** |
+
+**After launch (the old code keeps serving these meanwhile):** photos and voice (wave 3), onboarding and payment wording (wave 5), the remaining proactive jobs, admin, cleanup (wave 6). Safety floors, opt-out, payments and deletion stay code and are already fixed.
+**Rule:** every launch switch still meets the switch standard and deletes its old code. Speed comes from the scope, not from skipping checks.
+
 **Measure width-first, build wave by wave (CTO, 25 Sep):** every `COVERAGE.md` row gets gate cases and a score within 48 hours, so no part of the product is invisible (see the full-product scoreboard issue). Switching still goes one wave at a time. Live scoring of real conversations (#293) comes straight after the wave-1 switch.
 
 **Focus until the first switch (CTO, after the Grok review, 25 Sep):** wave 1 only. Finish #414, #421, #422, then the wave-1 head-to-head and **one** switch PR that deletes wave 1's old speakers. Already-built wave-2 PRs may merge, but no new wave-2 work starts until wave 1 has switched.
