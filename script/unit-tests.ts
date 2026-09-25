@@ -540,6 +540,26 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal((validateAction({ name: "set_sick", args: { days: 2 } }) as any).days, 2);
     assert.match(describeAction(validateAction({ name: "log_steps", args: { count: 8000 } })), /8000 steps/);
   });
+  // WAVE 2 (COVERAGE A2, A8, A12): the new core may propose these; the live engine never can.
+  test("action gate: CORRECT_MEAL, LOG_WORKOUT and SET_GOAL validate, and a malformed one never becomes a write", () => {
+    const c = validateAction({ type: "CORRECT_MEAL", from: "pap", to: "a burger", meal: "lunch" }) as any;
+    assert.deepEqual([c.type, c.from, c.to, c.meal], ["CORRECT_MEAL", "pap", "a burger", "lunch"]);
+    assert.equal((validateAction({ type: "CORRECT_MEAL", from: "rice", to: "" }) as any).from, "rice", "a removal-only correction is kept");
+    assert.equal(validateAction({ type: "CORRECT_MEAL", from: "", to: "" }).type, "JUST_REPLY", "a correction naming nothing is not a write");
+    assert.equal((validateAction({ type: "CORRECT_MEAL", to: "chicken", meal: "brunchtime" }) as any).meal, undefined);
+    assert.equal((validateAction({ type: "LOG_WORKOUT", what: "leg day", retro: "yesterday" }) as any).retro, "yesterday");
+    assert.equal((validateAction({ type: "SET_GOAL", goal: "muscle_gain" }) as any).goal, "muscle_gain");
+    for (const goal of ["", "bulk", "lose_everything", 7]) assert.equal(validateAction({ type: "SET_GOAL", goal }).type, "JUST_REPLY", `goal ${JSON.stringify(goal)} is not one the product stores`);
+    assert.match(describeAction(c), /correct lunch: "pap" → "a burger"/);
+  });
+  test("action gate: the live meaning engine cannot emit the wave-2 actions (not offered, and a tool-call name never maps to them)", async () => {
+    const { COACH_ACTION_TOOLS } = await import("../server/understanding/actions");
+    const offered = COACH_ACTION_TOOLS.map((t: any) => t.function.name);
+    for (const name of ["correct_meal", "log_workout", "set_goal"]) {
+      assert.ok(!offered.includes(name), `${name} must not be offered to the live engine before its row switches`);
+      assert.equal(validateAction({ name, args: { from: "rice", to: "pap", goal: "muscle_gain" } }).type, "JUST_REPLY");
+    }
+  });
 }
 
 // MEMORY-GRIEVANCE GUARD — the deterministic net that keeps the ONE false-write at the gate
@@ -10849,6 +10869,14 @@ test("#399 action grading counts actions and checks their arguments (Codex @ de0
   // The corpus itself: the three-day case asks for three separate days.
   const td = CASES.find(k => k.id === "three-days-one-message")!;
   assert.equal(td.actions?.expect?.length, 3, "three-days-one-message expects three logs");
+});
+test("every action type a gate case names is one the action gate knows (a typo would pass every forbid)", async () => {
+  const { CASES } = await import("./replay-cases");
+  const { describeAction } = await import("../server/understanding/actions");
+  const named = CASES.flatMap(k => [...(k.actions?.expect ?? []).map(e => typeof e === "string" ? e : e.type), ...(k.actions?.forbid ?? [])]);
+  const unknown = [...new Set(named)].filter(t => typeof describeAction({ type: t } as any) !== "string");
+  assert.deepEqual(unknown, [], `unknown action types in the corpus: ${unknown.join(", ")}`);
+  assert.ok(unknown.length === 0 && typeof describeAction({ type: "LOG_WORKOUTS" } as any) !== "string", "control: a misspelt type is caught");
 });
 
 // ── #92 — THE UNAVAILABLE-MOUTH LIST MAY NOT GO STALE ────────────────────────────────────────

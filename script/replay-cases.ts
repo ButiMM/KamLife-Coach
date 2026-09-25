@@ -223,6 +223,7 @@ export const CASES: ReplayCase[] = [
         query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND (COALESCE(raw_message,'') || COALESCE(items::text,'')) ~* 'tin fish|pilchard|mixed veg'", expect: "zero" },
       { what: "no rice is left on the record", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(items::text, raw_message, '') ~* '\\mrice\\M'", expect: "zero" },
     ],
+    actions: { expect: [{ type: "CORRECT_MEAL", match: { to: "pap" } }], forbid: ["REMOVE_LAST_MEAL"] },
     rubric: "Three corrections in one message: the meal was yesterday, it was pap not rice, and spinach was added. A good reply confirms the corrected meal briefly, without inventing food.",
   },
   {
@@ -291,6 +292,7 @@ export const CASES: ReplayCase[] = [
     checks: [
       { what: "a moved session is not answered with a rest day", kind: "reply_not_matches", pattern: "rest today|hit it fresh tomorrow", flags: "i" },
     ],
+    actions: { forbid: ["LOG_WORKOUT", "LOG_MEAL"] },
     rubric: "The client moved yesterday's workout to today. A good reply accepts that and helps them do today's session. Telling them to rest ignores what they said.",
   },
   {
@@ -682,6 +684,7 @@ export const CASES: ReplayCase[] = [
       { what: "the burger is logged", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND (COALESCE(items::text,'') || COALESCE(raw_message,'')) ~* 'burger'", expect: "nonzero" },
       { what: "the pap the client corrected is not still counted", invariant: "no_false_writes", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(items::text,'') ~* '\"pap'", expect: "zero" },
     ],
+    actions: { expect: [{ type: "CORRECT_MEAL", match: { to: "burger" } }], forbid: ["LOG_MEAL"] },
     rubric: "The client corrected their lunch in isiXhosa/isiZulu style ('Hayi'). A good reply swaps pap for the burger and says so briefly.",
   },
   {
@@ -694,6 +697,7 @@ export const CASES: ReplayCase[] = [
       { what: "the retracted beef stew is not stored", invariant: "no_false_writes", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(items::text,'') ~* 'stew'", expect: "zero" },
       { what: "the chicken is stored", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(items::text,'') ~* 'chicken'", expect: "nonzero" },
     ],
+    actions: { expect: [{ type: "CORRECT_MEAL", match: { to: "chicken" } }], forbid: ["LOG_MEAL"] },
     rubric: "The client corrected lunch from beef stew to chicken. A good reply records chicken only.",
   },
   {
@@ -722,5 +726,107 @@ export const CASES: ReplayCase[] = [
     ],
     actions: { expect: [{ type: "LOG_MEAL", match: { foodText: "large.*burger|burger.*large", meal: "dinner" } }] },
     rubric: "The client logged a small and a large burger. A good coach counts the large one as more food.",
+  },
+  // ── WAVE 2 (docs/COVERAGE.md A12 goals and targets, which had no case; A8 a session done). The new
+  // core proposes SET_GOAL / LOG_WORKOUT; a question about the goal, or a session skipped, proposes neither.
+  {
+    id: "building-phase-goal",
+    journey: 6,
+    source: "docs/COVERAGE.md A12 (the normaliser's own GOAL_CHANGE example, gpt.ts)",
+    turns: ["Also, I want to go into a building phase. I want to change the muscle composition."],
+    checks: [
+      { what: "the goal change is taken up, not answered with a fat-loss plate", kind: "reply_matches", pattern: "muscle|build|gain", flags: "i" },
+    ],
+    actions: { expect: [{ type: "SET_GOAL", match: { goal: "^muscle_gain$" } }], forbid: ["LOG_MEAL"] },
+    rubric: "A fat-loss client wants to move to building muscle. A good coach takes it seriously, checks once that they mean it (it changes their targets), and says what changes: more food, protein kept high, training for strength.",
+  },
+  {
+    id: "time-to-cut",
+    journey: 6,
+    source: "docs/COVERAGE.md A12",
+    seed: { goalType: "muscle_gain", calorieTarget: 2400, dailyCalorieTarget: 2400, proteinTarget: 140 },
+    turns: ["Time to cut, I want to lean out before December"],
+    checks: [
+      { what: "the cut is taken up", kind: "reply_matches", pattern: "cut|lean|fat|deficit|december", flags: "i" },
+    ],
+    actions: { expect: [{ type: "SET_GOAL", match: { goal: "^fat_loss$" } }], forbid: ["LOG_MEAL"] },
+    rubric: "A muscle-gain client wants to lean out before December. A good coach confirms the switch, says the target will come down sensibly (not a crash), and keeps protein and training.",
+  },
+  {
+    id: "should-i-change-goal-question",
+    journey: 6,
+    source: "docs/COVERAGE.md A12 (workout.ts: 'should I change my goal' is asking)",
+    turns: ["Should I change my goal to muscle gain?"],
+    checks: [
+      { what: "asking about a goal does not change it", invariant: "no_false_writes", kind: "sql", query: "SELECT (goal_type = 'fat_loss')::int FROM users WHERE id = $1", expect: { equals: 1 } },
+    ],
+    actions: { forbid: ["SET_GOAL"] },
+    rubric: "The client is ASKING whether to switch. A good coach answers honestly from where they are (82kg, aiming for 72kg on fat loss), says what each goal would mean, and lets them decide. Nothing changes yet.",
+  },
+  {
+    id: "what-are-my-targets",
+    journey: 7,
+    source: "docs/COVERAGE.md A12",
+    turns: ["What are my calorie and protein targets?"],
+    checks: [
+      { what: "the targets on record are quoted", kind: "reply_matches", pattern: "1[\\s,]?800[\\s\\S]*125|125[\\s\\S]*1[\\s,]?800", flags: "i" },
+    ],
+    actions: { forbid: ["SET_GOAL", "LOG_MEAL"] },
+    rubric: "The targets are 1800 kcal and 125 g protein. A good coach states both plainly and, in a line, why they are set there for this goal.",
+  },
+  {
+    id: "am-i-on-track",
+    journey: 7,
+    source: "docs/COVERAGE.md A12",
+    turns: ["Am I on track for my goal?"],
+    checks: [
+      { what: "no weigh-in is invented", invariant: "no_false_writes", kind: "sql", query: "SELECT COUNT(*)::int FROM weight_logs WHERE user_id = $1", expect: "zero" },
+    ],
+    actions: { forbid: ["LOG_MEAL", "LOG_STEPS", "LOG_WATER", "LOG_WEIGHT", "REMOVE_LAST_MEAL", "CORRECT_MEAL", "LOG_WORKOUT", "SET_GOAL"] },
+    rubric: "Started at 86 kg, now 82 kg, aiming for 72 kg, with nothing else on record this week. A good coach gives a true, short answer from those numbers and one thing for this week. No invented sessions or streaks.",
+  },
+  {
+    id: "afrikaans-build-muscle-goal",
+    journey: 6,
+    source: "docs/COVERAGE.md A12 (not in English)",
+    turns: ["Ek wil nou eerder spiere bou in plaas van gewig verloor."],
+    checks: [
+      { what: "a goal change in Afrikaans is not read as food", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: "zero" },
+    ],
+    actions: { expect: [{ type: "SET_GOAL", match: { goal: "^muscle_gain$" } }], forbid: ["LOG_MEAL"] },
+    rubric: "In Afrikaans: 'I would now rather build muscle instead of losing weight.' A good coach answers in Afrikaans, confirms the switch once, and says what changes.",
+  },
+  {
+    id: "finished-leg-day",
+    journey: 6,
+    source: "docs/COVERAGE.md A8",
+    turns: ["Just finished leg day 💪"],
+    checks: [
+      { what: "a session done is recorded", kind: "sql", query: "SELECT COUNT(*)::int FROM workout_logs WHERE user_id = $1", expect: "nonzero" },
+    ],
+    actions: { expect: [{ type: "LOG_WORKOUT" }], forbid: ["LOG_MEAL"] },
+    rubric: "The client just trained legs. A good coach records it, says one specific thing about recovery or protein after legs, and does not ask a list of questions.",
+  },
+  {
+    id: "skipped-gym-not-done",
+    journey: 6,
+    source: "docs/COVERAGE.md A8",
+    turns: ["I didn't make it to gym today, work ran late"],
+    checks: [
+      { what: "a missed session is never recorded as done", invariant: "no_false_writes", kind: "sql", query: "SELECT COUNT(*)::int FROM workout_logs WHERE user_id = $1", expect: "zero" },
+    ],
+    actions: { forbid: ["LOG_WORKOUT", "LOG_MEAL"] },
+    rubric: "Work ran late and they missed the gym. A good coach says it is fine, offers one small option (a 15-minute home session or moving it to tomorrow), and records nothing as done.",
+  },
+  {
+    id: "setswana-gym-yesterday",
+    journey: 6,
+    source: "docs/COVERAGE.md A8 (not in English)",
+    turns: ["Ke ile gym maabane, ke dirile leg day."],
+    checks: [
+      { what: "a Setswana session report is not read as food", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: "zero" },
+    ],
+    actions: { expect: [{ type: "LOG_WORKOUT", match: { retro: "yesterday|maabane" } }], forbid: ["LOG_MEAL"] },
+    rubric: "In Setswana: 'I went to gym yesterday, I did leg day.' A good coach records yesterday's session, in the client's language or plain simple English, and says one thing about today.",
   },
 ];

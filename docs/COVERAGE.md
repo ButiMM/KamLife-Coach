@@ -30,17 +30,17 @@ A row is **complete** when:
 | # | Capability | Owner today | New core must | Gate | Live | Retires |
 |---|---|---|---|---|---|---|
 | A1 | Log food in words ("pap and chicken for lunch") | `handlers/food-context.ts`, `food-commands.ts`, `referent-log.ts`, `meal-repeat.ts`, meaning engine | action `LOG_MEAL` | finished-dinner, a-pear, dinner-same-as-last-meal, three-days-one-message, steps-10k, same-as-lunch-same-calories, portion-size-changes-calories | none | food-commands, food-context, meal-repeat, referent-log |
-| A2 | Correct / remove a named meal ("hayi, it was chicken") | `food-log-mgmt.ts`, `food-context.ts` | action (missing: `CORRECT_MEAL` naming the meal) | decline-deletes-lunch, normaliser-j5-correction, hayi-correction, negated-multiword-food | none | food-log-mgmt |
+| A2 | Correct / remove a named meal ("hayi, it was chicken") | `food-log-mgmt.ts`, `food-context.ts` | action `CORRECT_MEAL` (proposed in shadow; executor wiring comes with the switch) | decline-deletes-lunch, normaliser-j5-correction, hayi-correction, negated-multiword-food | none | food-log-mgmt |
 | A3 | Photo of food / label / menu | `handlers/media.ts`, `food-scanner.ts`, `food-vision-prompt.ts` | action from the image (the shadow skips media today) | **0** | none | — |
 | A4 | Voice note (any language) | `routes/whatsapp.ts` → transcription → re-enters as text | same as its text family | **0** (#330) | none | — |
 | A5 | Steps, distance screenshot, health sync | `steps.ts`, `distance-log.ts`, `routes/health-sync.ts` | action `LOG_STEPS` | steps-10k | none | — |
 | A6 | Water, sleep | `water.ts`, `sleep.ts` | action `LOG_WATER`; sleep has none | **0** | none | water, sleep |
 | A7 | Weight, weigh-in, body/progress photos | `weight.ts`, `media.ts`, `physique-analysis.ts`, `weight-context.ts` | action `LOG_WEIGHT`; photos have none | **0** | none | — |
-| A8 | Workout done / lifts / "show my workout" | `handlers/workout.ts`, `workout-state.ts` | action (`SHOW_WORKOUT` exists; logging is missing) | moved-workout, knee-hurt-on-run | none | — |
+| A8 | Workout done / lifts / "show my workout" | `handlers/workout.ts`, `workout-state.ts` | action `SHOW_WORKOUT`, `LOG_WORKOUT` (proposed in shadow) | moved-workout, knee-hurt-on-run, finished-leg-day, skipped-gym-not-done, setswana-gym-yesterday | none | — |
 | A9 | Equipment / form check from photo or video | `equipment-vision.ts`, `form-check-prompt.ts`, `video-frames.ts` | reply from the image | **0** | none | — |
 | A10 | "What should I eat tonight", swaps, grocery, restaurants, street food | `gpt-block.ts`, `food-swaps.ts`, `grocery-*.ts`, `restaurants.ts`, `street-food.ts`, `shopping-lists.ts` | reply (from facts and targets) | what-to-eat-tonight, no-fish-remembered, swap-white-bread, grocery-on-a-budget, kfc-what-to-order, afrikaans-eggs-bread-cheese | none | gpt-block, advice-commands |
 | A11 | Coaching talk: stress, shame, plateaus, "I need more help" | `gpt-block.ts` (askCoachK), meaning engine | reply | shame-after-takeaway, stress-and-takeaways, need-more-help, plateau-three-weeks, setswana-tired-of-trying | none | gpt-block |
-| A12 | Goal change, targets, "am I on track" | `misc-commands.ts`, `adaptive-targets.ts`, `targets.ts` | action (missing: `SET_GOAL`) | **0** | none | misc-commands |
+| A12 | Goal change, targets, "am I on track" | `misc-commands.ts`, `adaptive-targets.ts`, `targets.ts` | action `SET_GOAL` (proposed in shadow; `lifecycle.ts` confirms first) | building-phase-goal, time-to-cut, should-i-change-goal-question, what-are-my-targets, am-i-on-track, afrikaans-build-muscle-goal | none | misc-commands |
 | A13 | Remembering what they said (injury, race, pregnancy, dislikes) | 9 stores (see D2); `core/client-record.ts` is the one kept | facts via `applyFacts` | comrades-knee-memory, third-party-pregnancy, no-fish-remembered | none | the 8 other stores |
 | A14 | Reminders | `reminders-handler.ts`, `reminders.ts` | action `SET_REMINDER` | **0** | none | — |
 | A15 | Sick / injured pause, pain triage | `sick-flow.ts`, `pain-triage.ts` | action `SET_SICK`/`END_SICK` + floor for red-flag pain | knee-hurt-on-run | none | sick-flow |
