@@ -13,7 +13,7 @@
 |---|---|
 | **Owner today** | the file(s) that answer or act for this capability on `main` now |
 | **New core must** | `reply`: the composer only. `action`: understand emits a validated `CoachAction` (`understanding/actions.ts`), the executor (`understanding/executor.ts`) performs it, then compose. `proactive`: a scheduled send goes through the same writer. `floor`: a deterministic rule in code in front of the model; never left to the model |
-| **Gate** | seen case ids in `script/replay-cases.ts`. **0** means nothing grades it |
+| **Gate** | seen case ids in `script/replay-cases.ts`. **0** means nothing grades it. Every gate run reads this column and prints the per-row scoreboard (cases, hard pass, old-path and new-coach score) in its summary (#433). A `(scheduled)` case grades the message the real job would send |
 | **Live** | how we know it works for real testers. Coach Health (#293) today is an hourly sweep only |
 | **Retires** | what the switch PR deletes (see `docs/delete-list.txt`) |
 
@@ -34,15 +34,15 @@ A row is **complete** when:
 | A3 | Photo of food / label / menu | `handlers/media.ts`, `food-scanner.ts`, `food-vision-prompt.ts` | action from the image (the shadow skips media today) | **0** | none | — |
 | A4 | Voice note (any language) | `routes/whatsapp.ts` → transcription → re-enters as text | same as its text family | **0** (#330) | none | — |
 | A5 | Steps, distance screenshot, health sync | `steps.ts`, `distance-log.ts`, `routes/health-sync.ts` | action `LOG_STEPS` | steps-10k | none | — |
-| A6 | Water, sleep | `water.ts`, `sleep.ts` | action `LOG_WATER`; sleep has none | **0** | none | water, sleep |
-| A7 | Weight, weigh-in, body/progress photos | `weight.ts`, `media.ts`, `physique-analysis.ts`, `weight-context.ts` | action `LOG_WEIGHT`; photos have none | **0** | none | — |
+| A6 | Water, sleep | `water.ts`, `sleep.ts` | action `LOG_WATER`; sleep has none | water-two-litres | none | water, sleep |
+| A7 | Weight, weigh-in, body/progress photos | `weight.ts`, `media.ts`, `physique-analysis.ts`, `weight-context.ts` | action `LOG_WEIGHT`; photos have none | weigh-in-in-words | none | — |
 | A8 | Workout done / lifts / "show my workout" | `handlers/workout.ts`, `workout-state.ts` | action `SHOW_WORKOUT`, `LOG_WORKOUT` (proposed in shadow) | moved-workout, knee-hurt-on-run, finished-leg-day, skipped-gym-not-done, setswana-gym-yesterday | none | — |
 | A9 | Equipment / form check from photo or video | `equipment-vision.ts`, `form-check-prompt.ts`, `video-frames.ts` | reply from the image | **0** | none | — |
 | A10 | "What should I eat tonight", swaps, grocery, restaurants, street food | `gpt-block.ts`, `food-swaps.ts`, `grocery-*.ts`, `restaurants.ts`, `street-food.ts`, `shopping-lists.ts` | reply (from facts and targets) | what-to-eat-tonight, no-fish-remembered, swap-white-bread, grocery-on-a-budget, kfc-what-to-order, afrikaans-eggs-bread-cheese, night-shift-what-to-eat | none | gpt-block, advice-commands |
 | A11 | Coaching talk: stress, shame, plateaus, "I need more help" | `gpt-block.ts` (askCoachK), meaning engine | reply | shame-after-takeaway, stress-and-takeaways, need-more-help, plateau-three-weeks, setswana-tired-of-trying, shop-owner-no-time | none | gpt-block |
 | A12 | Goal change, targets, "am I on track" | `misc-commands.ts`, `adaptive-targets.ts`, `targets.ts` | action `SET_GOAL` (proposed in shadow; `lifecycle.ts` confirms first) | building-phase-goal, time-to-cut, should-i-change-goal-question, what-are-my-targets, am-i-on-track, afrikaans-build-muscle-goal | none | misc-commands |
 | A13 | Remembering what they said (injury, race, pregnancy, dislikes) | 9 stores (see D2); `core/client-record.ts` is the one kept | facts via `applyFacts`; the old stores backfilled on the first read (#414) | comrades-knee-memory, third-party-pregnancy, no-fish-remembered, old-knee-on-switch-day | none | the 8 other stores |
-| A14 | Reminders | `reminders-handler.ts`, `reminders.ts` | action `SET_REMINDER` | **0** | none | — |
+| A14 | Reminders | `reminders-handler.ts`, `reminders.ts` | action `SET_REMINDER` | remind-me-vitamins | none | — |
 | A15 | Sick / injured pause, pain triage | `sick-flow.ts`, `pain-triage.ts` | action `SET_SICK`/`END_SICK` + floor for red-flag pain | knee-hurt-on-run | none | sick-flow |
 | A16 | Stats, streaks, NPS, supplements, motivation, "how was my week" | `misc-commands.ts`, `numbers-literacy.ts`, `report-card.ts`, `week-card.ts` | reply from real numbers | how-was-my-week, protein-so-far-today, streak-one-day, creatine-question, afrikaans-calories-today, travel-week-how-am-i-doing | none | misc-commands, numbers-literacy |
 | A17 | Off-topic (CV, crypto, homework) | `understanding/domain-guard.ts`, scope (#345) | floor | business-plan-for-gym, cv-skipped-gym-control, crypto-tip, maths-homework, isizulu-write-my-cv, roster-request-offtopic | none | — |
@@ -52,31 +52,31 @@ A row is **complete** when:
 
 | # | Capability | Owner today | New core must | Gate | Live |
 |---|---|---|---|---|---|
-| B1 | Morning message | `scheduler/jobs/morning.ts`, `morning-message.ts` | proactive via one writer (#319) | **0** | none |
-| B2 | Evening "what happened today" | `jobs/evening.ts` | proactive | **0** | none |
-| B3 | Monday weigh-in | `jobs/monday.ts` | proactive | **0** | none |
-| B4 | Weekly report, shopping-list card | `jobs/weekly.ts`, `weekly-recap.ts` | proactive (journey 7) | how-was-my-week (inbound only) | none |
+| B1 | Morning message | `scheduler/jobs/morning.ts`, `morning-message.ts` | proactive via one writer (#319) | morning-after-a-logged-day | none |
+| B2 | Evening "what happened today" | `jobs/evening.ts` | proactive | evening-after-lunch-logged | none |
+| B3 | Monday weigh-in | `jobs/monday.ts` | proactive | monday-weigh-in, monday-weigh-in-withheld | none |
+| B4 | Weekly report, shopping-list card | `jobs/weekly.ts`, `weekly-recap.ts` | proactive (journey 7) | how-was-my-week, weekly-report-with-logs (scheduled) | none |
 | B5 | Programme advance / today's workout | `jobs/programme.ts`, `programme.ts` | proactive | **0** | none |
-| B6 | Re-engagement / back after a week | `morning.ts` (A/B), `engagement.ts` | proactive | back-after-a-week (inbound only) | none |
+| B6 | Re-engagement / back after a week | `morning.ts` (A/B), `engagement.ts` | proactive | back-after-a-week, morning-after-nine-silent-days (scheduled) | none |
 | B7 | Reminders firing | `jobs/reminders.ts` | proactive | **0** | none |
 | B8 | Monthly narrative, CIP update | `jobs/narrative.ts`, `jobs/cip-update.ts` | retire into the record, or proactive | **0** | none |
 | B9 | Onboarding catch-ups | `jobs/onboarding.ts` | proactive | **0** | none |
 | B10 | Voice broadcasts, recaps (ElevenLabs) | `routes/voice-broadcast.ts`, `tts.ts` | proactive | **0** | none |
 | B11 | The WhatsApp 24-hour window; templates outside it | `whatsapp-templates.ts`, `outbound-authority.ts` | floor | **0** (#327) | none |
-| B12 | Opt-out honoured on every send path | `outbound-authority.ts` | floor | opt-out-natural-language, opt-out-with-diagnosis | none |
+| B12 | Opt-out honoured on every send path | `outbound-authority.ts` | floor | opt-out-natural-language, opt-out-with-diagnosis, opted-out-gets-no-morning | none |
 
 ## C. Money, account, trust
 
 | # | Capability | Owner today | New core must | Gate | Live |
 |---|---|---|---|---|---|
 | C1 | Signup, first day, onboarding questions | `onboarding*.ts` (6 files) | action + reply (the gate has no shadow score for it today) | first-day-no-forms, minor-onboarding | none |
-| C2 | Pay, pay link, failed payment, grace | `routes/payments.ts`, `jobs/business.ts`, `conversion.ts` | floor + reply | **0** | none |
+| C2 | Pay, pay link, failed payment, grace | `routes/payments.ts`, `jobs/business.ts`, `conversion.ts` | floor + reply | how-do-i-pay | none |
 | C3 | Cancel, save menu, refund guarantee | `lifecycle.ts`, `payments.ts` | floor + action (missing: `CANCEL`, `REFUND`) | cancel-stops-billing | none |
 | C4 | Delete my data (POPIA) | `handlers/safety.ts`, `data-export.ts` | floor | popia-delete | none |
 | C5 | Under 18 | `onboarding.ts` | floor | minor-onboarding, age-nine-mid-conversation | none |
 | C6 | Pregnancy, eating disorders, medication, crisis | `safety-detection.ts`, `medication-context.ts`, `crisis-reply.ts`, `despair.ts` | floor | pregnancy-target, purging-disclosure, insulin-omission, insulin-double, antibiotic-choice, antibiotics-train-control | none |
 | C7 | Escalation to the founder | `chat-log.ts`, the escalations table | floor | **0** (asserted inside some cases) | dashboard only |
-| C8 | Referrals, QR joins | `onboarding-referral.ts`, `join-qr.ts` | action | **0** | none |
+| C8 | Referrals, QR joins | `onboarding-referral.ts`, `join-qr.ts` | action | invite-a-friend | none |
 
 ## D. Foundation (not client-facing, but everything rests on it)
 

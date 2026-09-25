@@ -74,6 +74,11 @@ export interface ReplayCase {
   source: string;
   /** Columns on the seeded client row, over the gate's defaults (an onboarded fat-loss client). */
   seed?: Record<string, unknown>;
+  /**
+   * A SCHEDULED MESSAGE, NOT A REPLY (#433): after `before`, the real job runs for this one client and
+   * what it would send is graded as the case's only body. `turns` stays empty. An empty body is "nothing sent".
+   */
+  proactive?: "morning" | "evening" | "weekly" | "monday";
   /** Turns sent first and not graded — the state the failure needs. */
   before?: string[];
   /** The graded turns, in order. */
@@ -909,5 +914,151 @@ export const CASES: ReplayCase[] = [
     ],
     actions: { expect: [{ type: "LOG_WORKOUT", match: { retro: "yesterday|maabane" } }], forbid: ["LOG_MEAL"] },
     rubric: "In Setswana: 'I went to gym yesterday, I did leg day.' A good coach records yesterday's session, in the client's language or plain simple English, and says one thing about today.",
+  },
+  // ── EVERY ROW SCORED (#433): the rows that had no case. Scheduled messages first (B1, B2, B4, B6, B3). ──
+  {
+    id: "morning-after-a-logged-day",
+    journey: 5,
+    source: "docs/COVERAGE.md B1",
+    before: ["Had oats for breakfast and pap with chicken for lunch"],
+    proactive: "morning",
+    turns: [],
+    checks: [
+      { what: "a morning message is sent", kind: "reply_matches", pattern: "\\S" },
+      { what: "no welcome-back for a client who was here yesterday", kind: "reply_not_matches", pattern: "good to have you back|welcome back|missed you|been a while", flags: "i" },
+    ],
+    rubric: "A scheduled morning message to a client who logged breakfast and lunch yesterday. A good one is short, personal, uses something real from yesterday, and gives one clear thing to do today. No welcome-back, no generic list.",
+  },
+  {
+    id: "evening-after-lunch-logged",
+    journey: 5,
+    source: "docs/COVERAGE.md B2",
+    before: ["Pap and chicken for lunch"],
+    proactive: "evening",
+    turns: [],
+    checks: [
+      { what: "an evening message is sent", kind: "reply_matches", pattern: "\\S" },
+      { what: "it does not say nothing was logged", kind: "reply_not_matches", pattern: "nothing logged|haven'?t logged|no meals? (?:logged|today)|log one meal", flags: "i" },
+    ],
+    rubric: "A scheduled evening message to a client who logged lunch today. A good one knows lunch is in, asks about dinner or the day in one line, and does not nag.",
+  },
+  {
+    id: "weekly-report-with-logs",
+    journey: 7,
+    source: "docs/COVERAGE.md B4",
+    before: ["Oats for breakfast", "Chicken and rice for lunch"],
+    proactive: "weekly",
+    turns: [],
+    checks: [
+      { what: "a weekly report is sent", kind: "reply_matches", pattern: "\\S" },
+      { what: "the report does not say nothing was logged", kind: "reply_not_matches", pattern: "nothing logged", flags: "i" },
+    ],
+    rubric: "The scheduled weekly report for a client who logged two meals this week. A good report tells the week truthfully from what was logged, uses the client's first name, and ends with one focus for next week.",
+  },
+  {
+    id: "morning-after-nine-silent-days",
+    journey: 5,
+    source: "docs/COVERAGE.md B6",
+    seed: { lastActiveAt: "-9d", createdAt: "-40d" },
+    proactive: "morning",
+    turns: [],
+    checks: [
+      { what: "a re-engagement message is sent", kind: "reply_matches", pattern: "\\S" },
+      { what: "no guilt and no restart script", kind: "reply_not_matches", pattern: "where have you been|you disappeared|start (?:again|over) from|day 0|day zero", flags: "i" },
+    ],
+    rubric: "A scheduled message to a client silent for nine days. A good one is warm, one or two lines, no guilt, and asks for one tiny thing that restarts the habit.",
+  },
+  {
+    id: "opted-out-gets-no-morning",
+    journey: 8,
+    source: "docs/COVERAGE.md B12",
+    seed: { lastActiveAt: "-9d", profileNotes: "opted_out:2026-09-20" },
+    proactive: "morning",
+    turns: [],
+    checks: [
+      { what: "nothing is sent to a client who opted out", invariant: "opt_out", kind: "reply_not_matches", pattern: "\\S" },
+    ],
+    rubric: "The client opted out of messages. The right outcome is that nothing is sent at all.",
+  },
+  {
+    id: "monday-weigh-in",
+    journey: 5,
+    source: "docs/COVERAGE.md B3",
+    seed: { lastActiveAt: "-1d" },
+    proactive: "monday",
+    turns: [],
+    checks: [
+      { what: "a weigh-in reminder is sent", kind: "reply_matches", pattern: "weigh|scale", flags: "i" },
+    ],
+    rubric: "The scheduled Monday weigh-in reminder. A good one is short, explains how to weigh consistently in one line, and frames the scale as data, not judgment.",
+  },
+  {
+    id: "monday-weigh-in-withheld",
+    journey: 5,
+    source: "docs/COVERAGE.md B3",
+    seed: { lastActiveAt: "-1d", doNotMention: "weight, the scale" },
+    proactive: "monday",
+    turns: [],
+    checks: [
+      { what: "no weigh-in reminder for a client who asked us to drop the scale", kind: "reply_not_matches", pattern: "weigh|scale", flags: "i" },
+    ],
+    rubric: "The client asked the coach not to talk about weight or the scale. The right outcome is no weigh-in reminder.",
+  },
+  // Inbound rows with no case (A6, A7, A14, C2, C8).
+  {
+    id: "water-two-litres",
+    journey: 2,
+    source: "docs/COVERAGE.md A6",
+    turns: ["I've had 2 litres of water today"],
+    checks: [
+      { what: "the water is stored", kind: "sql", query: "SELECT (COALESCE(today_water, 0)::numeric >= 2)::int FROM users WHERE id = $1", expect: { equals: 1 } },
+      { what: "water is not logged as food", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: "zero" },
+    ],
+    actions: { expect: ["LOG_WATER"], forbid: ["LOG_MEAL"] },
+    rubric: "The client reports two litres of water today. A good coach records it and says one short thing about it.",
+  },
+  {
+    id: "weigh-in-in-words",
+    journey: 2,
+    source: "docs/COVERAGE.md A7",
+    turns: ["Weighed in at 81.4 this morning"],
+    checks: [
+      { what: "the weigh-in is stored", kind: "sql", query: "SELECT COUNT(*)::int FROM weight_logs WHERE user_id = $1 AND weight::numeric BETWEEN 81.3 AND 81.5", expect: "nonzero" },
+    ],
+    actions: { expect: ["LOG_WEIGHT"], forbid: ["LOG_MEAL"] },
+    rubric: "The client weighed 81.4 kg this morning (they started at 86). A good coach records it and puts it in context calmly, without over-reading one number.",
+  },
+  {
+    id: "remind-me-vitamins",
+    journey: 5,
+    source: "docs/COVERAGE.md A14",
+    turns: ["Remind me to take my vitamins at 8pm every day"],
+    checks: [
+      { what: "the reminder is stored", kind: "sql", query: "SELECT COUNT(*)::int FROM reminders WHERE user_id = $1", expect: "nonzero" },
+    ],
+    actions: { expect: ["SET_REMINDER"], forbid: ["LOG_MEAL"] },
+    rubric: "The client wants a daily 8pm vitamin reminder. A good coach sets it and confirms the time in one line.",
+  },
+  {
+    id: "how-do-i-pay",
+    journey: 8,
+    source: "docs/COVERAGE.md C2",
+    seed: { subscriptionStatus: "trial" },
+    turns: ["How do I pay for my subscription?"],
+    checks: [
+      { what: "the answer is about paying", kind: "reply_matches", pattern: "pay|link|subscri|R\\s?\\d", flags: "i" },
+    ],
+    rubric: "A trial client asks how to pay. A good coach gives the price and the way to pay (a link) plainly, in two or three lines, without pressure.",
+  },
+  {
+    id: "invite-a-friend",
+    journey: 1,
+    source: "docs/COVERAGE.md C8",
+    turns: ["My friend wants to join, how does she sign up?"],
+    checks: [
+      { what: "the answer tells them how a friend joins", kind: "reply_matches", pattern: "refer|link|invite|share|number|sign up|join", flags: "i" },
+      { what: "nothing is logged", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: "zero" },
+    ],
+    rubric: "The client's friend wants to join. A good coach explains in one or two lines how the friend signs up (a link or the number to message).",
   },
 ];

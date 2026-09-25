@@ -211,7 +211,8 @@ async function judge(k: ReplayCase, userId: string, bodies: string[]): Promise<{
   const [u] = (await pool.query(
     `SELECT goal_type, age, onboarding_state, life_situation, injuries, life_context, profile_notes, calorie_target FROM users WHERE id = $1`, [userId])).rows;
   const meals = (await pool.query("SELECT meal_label, raw_message, kcal_int, logged_at FROM meal_logs WHERE user_id = $1 ORDER BY logged_at", [userId])).rows;
-  const exchange = k.turns.map((t, i) => `CLIENT: ${t}\nCOACH: ${bodies[i] || "(no reply)"}`).join("\n\n");
+  const exchange = k.proactive ? `COACH (scheduled ${k.proactive} message, not a reply to anything): ${bodies[0] || "(nothing sent)"}`
+    : k.turns.map((t, i) => `CLIENT: ${t}\nCOACH: ${bodies[i] || "(no reply)"}`).join("\n\n");
   try {
     const resp = await openai.chat.completions.create({
       model: JUDGE_MODEL, temperature: 0, response_format: { type: "json_object" },
@@ -227,6 +228,25 @@ async function judge(k: ReplayCase, userId: string, bodies: string[]): Promise<{
   }
 }
 
+// THE SCHEDULED JOBS (#433): the production job, run for one seeded client, graded on what it would send.
+const JOBS: Record<NonNullable<ReplayCase["proactive"]>, () => Promise<unknown>> = {
+  morning: async () => (await import("../server/scheduler/jobs/morning")).runMorningCheckin(),
+  evening: async () => (await import("../server/scheduler/jobs/evening")).runEveningAccountability(),
+  weekly: async () => (await import("../server/scheduler/jobs/weekly")).runSundayWeeklyReport(),
+  monday: async () => (await import("../server/scheduler/jobs/monday")).runWeightReminder(),
+};
+async function scheduled(job: NonNullable<ReplayCase["proactive"]>, phone: string, userId: string): Promise<string> {
+  // Only this client is subscribed while the job runs: every earlier case is already graded.
+  await pool.query("UPDATE users SET subscription_status = 'replay_idle' WHERE id <> $1 AND subscription_status IN ('active', 'trial')", [userId]);
+  const s0 = await lastShadowId();
+  process.env.PROACTIVE_PAUSED = "false";
+  try { await JOBS[job](); } catch (e) { REAL(`replay-gate: the ${job} job threw: ${(e as Error)?.message || e}`); }
+  finally { process.env.PROACTIVE_PAUSED = "true"; }
+  return (await pool.query<{ body: string }>("SELECT body FROM shadow_replies WHERE phone = $1 AND id > $2 ORDER BY id", [phone, s0])).rows.map(r => r.body).join("\n");
+}
+/** A seed date is an ISO string, or relative to now: "-9d" is nine days ago. */
+const seedDate = (v: string) => /^-\d+d$/.test(v) ? new Date(Date.now() - Number(v.slice(1, -1)) * 86_400_000) : new Date(v);
+
 async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<CaseResult> {
   const phone = `whatsapp:+2782${String(9000000 + n).padStart(7, "0")}`;
   await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
@@ -237,12 +257,13 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
     heightCm: 164, age: 33, gender: "female", trainingMode: "home", trainingDaysPerWeek: 3,
     proteinTarget: 125, calorieTarget: 1800, dailyCalorieTarget: 1800, stepsTarget: 8000, lifeSituation: "office",
     // Cases are JSON data, so a timestamp arrives as an ISO string; the column wants a Date.
-    ...Object.fromEntries(Object.entries(k.seed || {}).map(([f, v]) => [f, /At$/.test(f) && typeof v === "string" ? new Date(v) : v])),
+    ...Object.fromEntries(Object.entries(k.seed || {}).map(([f, v]) => [f, /(?:At|Until)$/.test(f) && typeof v === "string" ? seedDate(v) : v])),
   } as any).returning();
   for (const [i, t] of (k.before || []).entries()) await turn(phone, t, `RP${n}b${i}`);
   const bodies: string[] = [];
   const coreBodies: Array<string | null> = [];
   const coreActions: Array<ProposedAction[] | null> = [];
+  if (k.proactive) bodies.push(await scheduled(k.proactive, phone, u.id));
   for (const [i, t] of k.turns.entries()) {
     bodies.push(await turn(phone, t, `RP${n}t${i}`));
     coreBodies.push(await coreReplyFor(`RP${n}t${i}`));
@@ -257,7 +278,8 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
   let core: CaseResult["core"] = null;
   // A RECORDED EMPTY REPLY IS A FAILURE, NOT A SKIP (#421). The shadow stores "" when its understanding
   // failed; a missing row (null) still means the new coach did not run here and is not scored.
-  if (coreBodies.every(b => b !== null) && coreBodies.some(b => !b!.trim())) {
+  if (!coreBodies.length) { /* a scheduled message: the new coach does not send these yet */ }
+  else if (coreBodies.every(b => b !== null) && coreBodies.some(b => !b!.trim())) {
     core = { replyPass: false, score: 0, proposed: coreActions.flatMap(a => a ?? []), actionPass: k.actions ? false : null,
       failing: ["understanding failed: the new coach had no reply"], neverSeen: [] };
   } else if (coreBodies.every(b => b !== null && b.trim())) {
@@ -281,7 +303,9 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
 // ── THE RUN ─────────────────────────────────────────────────────────────────────────────────
 const runStart = new Date();
 const results: CaseResult[] = [];
-for (const [i, k] of CASES.entries()) results.push(await runCase(k, i, false));
+// REPLAY_ONLY=id,id narrows a LOCAL offline run to some cases; a live run always replays every case.
+const only = OFFLINE && process.env.REPLAY_ONLY ? new Set(process.env.REPLAY_ONLY.split(",")) : null;
+for (const [i, k] of CASES.entries()) if (!only || only.has(k.id)) results.push(await runCase(k, i, false));
 for (const [i, k] of heldOut.entries()) results.push(await runCase(k, 1000 + i, true));
 const productModels = (await pool.query<{ model: string }>("SELECT DISTINCT model FROM gpt_costs WHERE created_at >= $1 ORDER BY model", [runStart])).rows.map(r => r.model);
 // COST AND SPEED (docs/TESTER-EXPERIENCE.md rule 8: ~8 s a reply, at most R0.10 a message). The
@@ -383,6 +407,18 @@ for (const r of results.filter(x => !x.heldOut)) {
   lines.push(`| ${r.id} | ${r.journey} | ${r.hardPass ? "pass" : "FAIL"} | ${r.score ?? "–"} | ${bad || ""} | ${r.neverSeen.join("; ")} | ${core} |`);
 }
 if (heldOut.length) lines.push(`| held-out ×${heldOut.length} | – | ${results.filter(r => r.heldOut && r.hardPass).length}/${heldOut.length} pass | – | (inputs not shown) | ${results.filter(r => r.heldOut).reduce((a, r) => a + r.neverSeen.length, 0)} | – |`);
+// THE SCOREBOARD (#433): one line per docs/COVERAGE.md row, from the case ids its Gate column names.
+// A row with no case reads 0, so the parts of the product nothing grades stay visible.
+const avg = (xs: Array<number | null | undefined>) => { const v = xs.filter((x): x is number => typeof x === "number"); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length * 10) / 10 : "–"; };
+const coverageRows = existsSync("docs/COVERAGE.md") ? readFileSync("docs/COVERAGE.md", "utf8").split("\n").filter(l => /^\| [ABC]\d+ \|/.test(l)) : [];
+if (coverageRows.length) {
+  lines.push("", "### Rows (docs/COVERAGE.md)", "| row | capability | cases | hard pass | old path | new coach |", "|---|---|---|---|---|---|");
+  for (const l of coverageRows) {
+    const [, row, capability] = l.split("|").map(c => c.trim());
+    const rs = results.filter(r => !r.heldOut && new RegExp(`(?:^|[\\s,(])${r.id}(?:$|[\\s,)])`).test(l));
+    lines.push(`| ${row} | ${capability.slice(0, 48)} | ${rs.length || "**0**"} | ${rs.length ? `${rs.filter(r => r.hardPass).length}/${rs.length}` : "–"} | ${avg(rs.map(r => r.score))} | ${avg(rs.map(r => r.core?.score))} |`);
+  }
+}
 const report = lines.join("\n");
 REAL(report);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + "\n");
