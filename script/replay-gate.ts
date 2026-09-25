@@ -41,7 +41,8 @@ const WRITE_BASELINE = process.argv.includes("--write-baseline");
 // CI records the baseline fresh on every run: the same gate, same corpus, same judge, run first on
 // the base branch's product code (see .github/workflows/replay-gate.yml), written here.
 const BASELINE_PATH = process.env.REPLAY_BASELINE_PATH || "docs/replay-baseline.json";
-const JUDGE_MODEL = process.env.REPLAY_JUDGE_MODEL || "gpt-4.1";
+// Cost (CTO, 25 Sep): the judge only checks a rubric. gpt-4.1-mini costs about a fifth of gpt-4.1.
+const JUDGE_MODEL = process.env.REPLAY_JUDGE_MODEL || "gpt-4.1-mini";
 
 if (!process.env.DATABASE_URL) {
   console.error("replay-gate: DATABASE_URL is not set. The gate grades stored rows; without a database it grades nothing.");
