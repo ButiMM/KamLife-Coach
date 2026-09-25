@@ -159,20 +159,19 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 **If Codex is out of usage limits when a `switch` PR is ready (24 Sep evening):** the CTO performs the attack instead: a diff review against `docs/COMPONENTS.md` and `TESTER-EXPERIENCE.md`, plus the 3-run gate numbers, posted as `ATTACK @ <sha> (CTO)`. A switch never waits a night on a usage limit, and never merges without an attack. Codex attacks the merged version when its limits reset.
 
-**LAUNCH SCOPE (founder: "I need a working product ASAP", 25 Sep). This outranks the wave order below.**
-A *working product* = what testers use every day, done on the new coach at the switch standard. Everything else keeps running on today's code (it works, with its harm fixed) and moves over **after** launch.
+**FULL PRODUCT, IN PARALLEL: no MVP cut (founder decision, 25 Sep; replaces the launch-scope cut from earlier today).**
+Every one of the rows in `docs/COVERAGE.md` goes to the new coach under the switch standard. Nothing is parked "for after launch": parked work never gets built. Speed comes from **three builder lanes working at the same time**, not from dropping scope.
 
-| Launch area | Rows | Target |
+| Lane | Owns (COVERAGE rows) | Main files |
 |---|---|---|
-| Talk, coaching, memory | A10, A11, A13, A16, A17 | **Sat 26 Sep** (wave-1 switch) |
-| Every row scored | all | **Sun 27 Sep** (#433) |
-| Food and steps in plain words, corrections, workouts | A1, A2, A5, A8 | **Tue 29 Sep** |
-| Live scoring of real conversations | D7 (#293) | **Tue 29 Sep** |
-| The messages the coach sends first: morning, evening, weekly, back-after-a-break | B1, B2, B4, B6 | **Fri 2 Oct** |
-| Fix what live scores show; founder and testers sign off | all launch rows | **Mon 5 Oct: working product** |
+| **Lane 1: talk and do** | Wave 1 (A10, A11, A13, A16, A17), then wave 2 (A1, A2, A5, A6, A7 in words, A8, A12, A14, A15, A19) | `server/core/`, `understanding/executor.ts`, `understanding/actions.ts` |
+| **Lane 2: speak first** | Wave 4 (B1-B12): every message the coach sends first, through one writer and one sender (#319), templates and the 24 h window | `server/scheduler/`, `core/` proactive entry |
+| **Lane 3: see and hear, money and front door, foundation** | Wave 3 (A3, A4, A7 photos, A9, A18), wave 5 (C1-C8), wave 6 (D2-D12), plus the scoreboard (#433) and live scoring (#293) | media, onboarding, payments, schema, backups, Coach Health |
 
-**After launch (the old code keeps serving these meanwhile):** photos and voice (wave 3), onboarding and payment wording (wave 5), the remaining proactive jobs, admin, cleanup (wave 6). Safety floors, opt-out, payments and deletion stay code and are already fixed.
-**Rule:** every launch switch still meets the switch standard and deletes its old code. Speed comes from the scope, not from skipping checks.
+- Each lane runs its rows in wave order and switches each row as soon as it meets the standard.
+- A switch PR may delete `routeMessage` exits for **its own rows only**, and merges `main` in right before merging.
+- **Measurement is width-first for everyone:** every row has cases and a score by Sun 27 Sep (#433).
+- If only one builder session is running, it works lane 1, then 2, then 3, in that order, and never parks a row as "later".
 
 **Measure width-first, build wave by wave (CTO, 25 Sep):** every `COVERAGE.md` row gets gate cases and a score within 48 hours, so no part of the product is invisible (see the full-product scoreboard issue). Switching still goes one wave at a time. Live scoring of real conversations (#293) comes straight after the wave-1 switch.
 
