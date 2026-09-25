@@ -69,3 +69,15 @@ Pregnancy, purging, crisis and medical escalations alert the founder through the
 - **General-purpose assistant ban:** scope enforced in code (#321).
 - **Evening coaching outside 24h:** needs a Meta-approved template (#327). **FOUNDER TASK** when the core switches.
 - **Messages outside the 24-hour window cost money per template.** Proactive sends go through one owner (#319), so they can be budgeted.
+
+## 8. Company-wide blind spots (CTO sweep, 25 Sep)
+
+| Blind spot | Issue | Owner |
+|---|---|---|
+| The switch would make the new coach forget existing clients (the record starts on 24 Sep) | #414 (blocks every switch) | builder |
+| WhatsApp messaging tier, Meta verification and template approvals cap how many clients the bot can message first | #415 | founder |
+| POPIA: health data is special personal information: Information Officer, privacy policy, consent wording | #416 | founder (legal) |
+| `COACH_ALERT_PHONE` and `COACH_DASHBOARD_KEY` never confirmed; every founder alert depends on the first | #417 | founder (5 min) |
+| The CTO's GitHub token expires about 30 Sep | #418 | founder (2 min) |
+
+Any agent that notices something nobody asked about files it with the `blind-spot` label. The CTO reviews that label every session.

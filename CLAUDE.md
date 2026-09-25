@@ -8,6 +8,7 @@
   - Before writing anything new, search the repo for code that already does the job, and finish or reuse it. Never start a foundation while one for the same job sits unwired.
   - Answering attacks deeper and deeper in one spot is not progress. Map each finding to a row, and move the product forward across the map.
 - **When you're blocked on the founder** (a secret, an account, a decision), post a PR comment starting `BLOCKED:` with the exact action he must take. The watch puts it at the top of the status issue. Keep working on something else meanwhile.
+- **See a blind spot? File it.** Anything that could hurt the product or company and that nobody asked about gets an issue labelled `blind-spot`, one line of evidence, and the row it touches. That's part of your job, not a distraction from it.
 - **Before asking the founder anything, check `docs/SYSTEM.md` and the repo.** Asking him for something already recorded or findable is a failure. Add anything durable you learn to `docs/SYSTEM.md`.
 - `docs/ORDERS.md` is the plan. It overrides every other doc.
 - **The watch merges for you (24 Sep).** When a PR's checks are all green, the mouth ratchet passes, and its Codex attack is answered (or 45 minutes passed with no attack), `.github/workflows/cto-watch.yml` merges it within minutes of the tests finishing. Don't wait on it. Add the label `hold` to stop a PR auto-merging. Label any PR that moves real testers onto the new coach `switch`: it then needs a real Codex attack, answered, and a green replay gate. It never merges on a timeout.

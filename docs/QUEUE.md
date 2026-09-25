@@ -23,6 +23,10 @@
 
 - [x] #395 (PR #398, Codex follow-ups #402) OpenAI out of credits: the founder is alerted, and clients get an honest line, not "30 seconds" forever (D11, C7)
 
+## Before the first switch (blocking)
+
+- [ ] #414 Backfill the client record from the old stores, so existing clients' history reaches the new coach. **No `switch` PR merges before this.**
+
 ## Wave 1: talk (reply only, no writes). The new core already does this
 
 | Row | Capability | Gate cases today | Next |
