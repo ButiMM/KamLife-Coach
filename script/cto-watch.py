@@ -118,7 +118,11 @@ for p in open_prs:
     is_switch = any(l["name"] == "switch" for l in p["labels"])
     # A PR that moves real testers onto the new coach never merges on a timeout: it needs a real
     # Codex attack, answered, and a green replay gate. Quality where it touches testers most.
-    attack_ok = state.startswith("attack answered") or state.startswith("docs only") or state.startswith("no attack needed") or (state.startswith("attack window passed") and not is_switch)
+    founder_only = any(l["name"] == "founder-only" for l in p["labels"])
+    # Overnight rule (CTO, 25 Sep): a switch PR whose flag defaults to founder-only may merge on a green
+    # gate (with the reach check) without an attack. Testers are untouched until the CTO attacks it
+    # and a follow-up turns it on for everyone.
+    attack_ok = state.startswith("attack answered") or state.startswith("docs only") or state.startswith("no attack needed") or (state.startswith("attack window passed") and (not is_switch or founder_only))
     if is_switch and not any(r["name"] == "replay" and r["conclusion"] == "success" for r in runs):
         attack_ok = False
         state += " (switch: needs a green replay gate)"
