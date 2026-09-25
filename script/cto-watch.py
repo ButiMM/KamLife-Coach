@@ -202,6 +202,13 @@ try:
         mouth_line += f"\n\n**Old components still alive:** {len(alive)} of {len(dl)} files marked for deletion ({alive_lines:,} lines). Target: 0. See docs/COMPONENTS.md."
     except Exception:
         pass
+    REUSE = ["foods", "serving-units", "food-swaps", "targets", "adaptive-targets", "day-ledger", "meal-plan",
+             "shopping-lists", "grocery-personalize", "programme", "exercise-variants", "workout-feedback",
+             "understanding/actions", "understanding/executor", "outcomes", "trajectory", "weekly-recap", "education",
+             "handlers/safety", "medication-context", "understanding/domain-guard", "understanding/sa-transcript"]
+    core_src = " ".join(f.read_text(errors="ignore") for f in pathlib.Path("server/core").rglob("*.ts"))
+    used = [r for r in REUSE if re.search(r'from ["\'](?:\.\./|\./)' + re.escape(r) + r'["\']', core_src)]
+    mouth_line += f"\n\n**New coach reuses existing tools:** {len(used)} of {len(REUSE)} ({', '.join(used) or 'none yet'}). Target: every tool its switched rows need. The new coach must call these, never rebuild them."
     mouth_line += f"\n\n**Size:** server {srv:,} lines (target ≤25,000 once the new core has switched), tests {tst:,} lines (target ≤20,000). Baseline 24 Sep: server 74,888, tests 57,037."
 except Exception:
     mouth_line = "**Mouths on main:** unavailable"
