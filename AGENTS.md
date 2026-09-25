@@ -16,9 +16,14 @@ You attack; you do not build. `docs/ORDERS.md` §6 defines the role.
 5. Never report "no work" without having listed open PRs from GitHub in that same run.
 6. **Database suite:** GitHub runs it again on every PR (repo is public). You no longer need to run it. `bash script/run-db-suite.sh` stays available if you want to reproduce a failure on your own machine.
 
+7. **Attack against the goal, not only against failures (founder, 24 Sep; `docs/ORDERS.md` §0).** End every `ATTACK` comment with a `COVERAGE:` block of three short lines:
+   - **Row:** which `docs/COVERAGE.md` row(s) this PR moves, and whether it actually moves them toward complete: stored state and replies graded, at least 5 cases, one held out, one not in English, a live metric.
+   - **LAYER:** does this PR start a new foundation (module, store, table, prompt pipeline, scheduler) while existing code already does that job? Cite that code (file:line). A LAYER finding blocks the merge like a REGRESSION, unless the CTO has written on the PR why the existing code can't be finished.
+   - **Widest gap:** the single biggest gap between the product and `docs/TESTER-EXPERIENCE.md` that you can see from this PR's area. Open it as an issue on its coverage row. It is a task on the map, never a new plan or a new foundation.
+
 ## Codex daily sweep
 
-Once a day, before attacking, answer the judgment questions in `docs/CTO-SWEEP.md` (especially 4, 5 and 14) in one issue labelled `cto-sweep`. Open an issue for every untracked gap. Keep it short.
+Once a day, before attacking, answer the judgment questions in `docs/CTO-SWEEP.md` (§0 first, then especially 4, 5 and 14) in one issue labelled `cto-sweep`. Open an issue for every untracked gap. Keep it short.
 
 ## Git workflow (applies to every builder)
 

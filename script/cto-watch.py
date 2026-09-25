@@ -45,6 +45,10 @@ for p in open_prs:
             if NOW - ts(c["created_at"]) < dt.timedelta(hours=12):
                 alerts.insert(0, f"**🚨 BLOCKED, needs the founder:** #{n}: {body[:160].replace(chr(10), ' ')}")
                 break
+    # ORDERS §0 (founder, 24 Sep night): every PR says which part of the product it moves, and what it reuses.
+    if not re.search(r"Coverage rows?:", p["body"] or ""):
+        comment_once(n, f"cto-coverage-{n}", "**CTO watch (width check):** the description needs a `Coverage row:` line naming the `docs/COVERAGE.md` row(s) this PR moves, and a `Reuses:` line naming the existing code it finishes or reuses (docs/ORDERS.md §0).", comments)
+        alerts.append(f"**Width check:** #{n} doesn't say which coverage row it moves.")
     if "What testers will notice" not in (p["body"] or ""):
         comment_once(n, f"cto-notice-{n}", "**CTO watch:** the description must open with \"What testers will notice:\" (CLAUDE.md standing orders).", comments)
     human = [c for c in comments if not c["user"]["login"].endswith("[bot]") or "codex" in c["user"]["login"]]
@@ -76,6 +80,12 @@ for p in open_prs:
         latest[r["name"]] = r          # judge each check by its most recent run only
     runs = list(latest.values())
     failing = sorted({r["name"] for r in runs if r["conclusion"] in ("failure", "timed_out")})
+    for r in runs:
+        out = (r.get("output") or {})
+        txt = " ".join(str(out.get(k) or "") for k in ("title", "summary", "text")).lower()
+        if r["conclusion"] in ("failure", "timed_out") and any(w in txt for w in ("429", "no credits", "insufficient_quota", "incorrect api key", "401")):
+            alerts.insert(0, f"**🚨 AI ACCOUNT PROBLEM (founder):** check `{r['name']}` on #{n} reports an OpenAI credits or key error. Top up or fix the key at platform.openai.com. If production shares the account, the live coach may be failing too.")
+            break
     pending = sorted({r["name"] for r in runs if r["status"] != "completed"})
     checks = "failing: " + ", ".join(failing) if failing else ("running: " + ", ".join(pending) if pending else ("green" if runs else "none"))
     if failing:

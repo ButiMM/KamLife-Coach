@@ -11,6 +11,14 @@ Every builder, reviewer and the CTO reads this before asking the founder a quest
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT` | `db-backup.yml` | Cloudflare R2, where backups are stored |
 | `REPLAY_HELDOUT_JSON` | replay gate | Not set yet. Held-out cases; until it exists, split the audit's real failures into seen and held-out. |
 
+## AI budget firewall (founder action, 24 Sep)
+
+The OpenAI credits ran out on 24 Sep because the live-model gate ran on every PR push. Fix, done once in the OpenAI dashboard:
+1. Create a separate **project** for CI (Settings → Projects → Create), for example "kamlife-ci".
+2. Set a **monthly budget** on that project (Limits → Budget), for example $10, with a hard stop.
+3. Create a key in that project, and put it in GitHub as the `AI_INTEGRATIONS_OPENAI_API_KEY` secret.
+4. Production (Railway) keeps its own key in its own project. CI can then never spend the live coach's money.
+
 ## Key rotation
 
 When the OpenAI key changes in Railway, update the GitHub secret `AI_INTEGRATIONS_OPENAI_API_KEY` the same day. They're separate copies. On 24 Sep the GitHub copy was an old revoked key (ending `wfkA`), and the replay gate failed with 401 until the founder updated it.

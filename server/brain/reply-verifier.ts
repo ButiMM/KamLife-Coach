@@ -1011,7 +1011,11 @@ export const HONOURED_SILENCE = "You asked me to leave that one alone, so I will
  *
  * Suffix match because the last one is prefixed with the client's first name.
  */
+/** The out-of-credits reply (#395): honest, no promised recovery time, and what still works. */
+export const COACH_OUT_OF_CREDITS_REPLY = "My coaching side is offline right now and the team has been alerted. Anything you log still saves — tell me what you ate or trained and it's recorded.";
+
 const COACH_UNAVAILABLE_REPLIES = [
+  COACH_OUT_OF_CREDITS_REPLY,
   "Eish Coach K had a moment. Try that again.",
   "I'm having a technical issue on my end — give me a few minutes and try again. Your programme and targets are all saved.",
   "Coach K is a bit busy right now. Give it 30 seconds and try again.",
