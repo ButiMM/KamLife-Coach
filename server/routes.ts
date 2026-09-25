@@ -1063,9 +1063,21 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // THE ENGINE IS A MOUTH ABOVE THE WRITERS, so it stands down on an owed fact for the same
   // reason every other handler does: a freeform reply must never be composed from state that is
   // missing a fact the client stated in this very message (2026-08-22).
-  if (engineLive() && !multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
-    if (engineReply !== null) return tag(engineReply, "🧠 new engine");
+  // THE WAVE-1 SWITCH (A10, A11, A13, A16, A17): for a switched client the new coach answers the turns
+  // the engine would have, under the same conditions and behind the same scope floor. When it cannot
+  // read the message or the turn needs a write, the engine answers as before. No new exit is added.
+  const core = await import("./core/coach");
+  const switched = core.coreWave1For(phone);
+  if ((engineLive() || switched) && !multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+    let engineReply: string | null = null;
+    let src = "🧠 new engine";
+    if (switched) {
+      const scope1 = await classifyDomain(openai, message, { ongoing: recentlyActive(user) });
+      if (scope1.redirectMessage) { engineReply = await declineOutOfScope(user.id, message, scope1.redirectMessage, turnEvidence); src = "scope"; }
+      else { engineReply = await core.answerLive(phone, message).catch((e: Error) => (console.warn("[CORE_WAVE1] fell back:", e?.message), null)); src = "new coach"; }
+    }
+    if (engineReply === null && engineLive()) { engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester }); src = "🧠 new engine"; }
+    if (engineReply !== null) return tag(engineReply, src);
   }
 
   // MODEL_BRAIN path deleted 2026-07-30. Two paths answer a client: the engine, then gpt-block.
@@ -1086,8 +1098,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
   const scope = await classifyDomain(openai, message, { ongoing: recentlyActive(user) }); // #321: fails closed
   if (scope.redirectMessage) return tag(await declineOutOfScope(user.id, message, scope.redirectMessage, turnEvidence), "scope");
-  const gptReply = await handleGptBlock({ phone, message, m, user, intentPromise });
-  return tag(gptReply, "gpt fallback");
+  // THE WAVE-1 SWITCH, second door: turns the engine does not take reach here; same rule, same return.
+  const coreReply = switched ? await core.answerLive(phone, message).catch(e => { console.warn("[CORE_WAVE1] fell back:", (e as Error)?.message); return null; }) : null;
+  const gptReply = coreReply ?? await handleGptBlock({ phone, message, m, user, intentPromise });
+  return tag(gptReply, coreReply ? "new coach" : "gpt fallback");
 
   } catch (err: any) {
     console.error("[handleMessage FATAL]", JSON.stringify({

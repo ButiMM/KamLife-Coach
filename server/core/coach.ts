@@ -163,6 +163,39 @@ async function openaiClient(): Promise<OpenAI> {
   return client;
 }
 
+/**
+ * THE WAVE-1 SWITCH (COVERAGE A10, A11, A13, A16, A17). CORE_WAVE1 = off | founder | on.
+ * "founder" is the per-client rollout of #438: only COACH_ALERT_PHONE meets the new coach, everyone
+ * else keeps the old one. Rollback is instant: set CORE_WAVE1=off, no deploy.
+ */
+export function coreWave1For(phone: string): boolean {
+  const mode = String(process.env.CORE_WAVE1 || "off").toLowerCase();
+  if (mode === "on") return true;
+  if (mode !== "founder") return false;
+  const digits = (p: string) => (p || "").replace(/\D/g, "").replace(/^0/, "27");
+  const founder = digits(process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE || "");
+  return !!founder && digits(phone) === founder;
+}
+
+/**
+ * The new coach answering for real, at the one place the old gpt-block answered (behind the scope
+ * floor in routes.ts). Returns null when it cannot answer honestly: no reading of the message (#421)
+ * or no reply. The caller then falls back to the old reply, so a failure is never silence.
+ */
+export async function answerLive(phone: string, message: string): Promise<string | null> {
+  const pre = await readPreTurn(phone);
+  if (!pre) return null;
+  const openai = await openaiClient();
+  const read = await understand(openai, message, pre.known);
+  if (!read.u) return null;
+  // Wave 1 only talks. A turn that needs a write (a meal, steps, a goal) stays with the old path until
+  // its wave-2 row switches, so nothing the client reports is ever dropped.
+  const { writesState } = await import("../understanding/actions");
+  if ((read.u.actions ?? []).some(a => writesState(a.type))) return null;
+  const reply = (await compose(openai, pre, message, read.u))?.trim();
+  return reply || null;
+}
+
 /** Run the new coach beside the old one and store what it would have said. Never throws, never sends. */
 export async function runShadow(pre: PreTurn | null, message: string, rootId: string, sourceMessageId?: string): Promise<void> {
   if (!pre || !message?.trim()) return;
