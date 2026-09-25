@@ -123,7 +123,13 @@ for p in open_prs:
         attack_ok = False
         state += " (switch: needs a green replay gate)"
     hold = any(l["name"] == "hold" for l in p["labels"]) or p.get("draft")
-    if runs and not failing and not pending and ratchet_ok and attack_ok and not hold and n != 260:
+    # A PR labelled ready/switch/gate must show a replay check that succeeded. A missing replay run is
+    # NOT "green" (25 Sep: a broken workflow ran no gate and #393 merged as if it had passed).
+    wants_gate = any(l["name"] in ("ready", "switch", "gate") for l in p["labels"])
+    gate_ok = (not wants_gate) or any(r["name"] == "replay" and r["conclusion"] == "success" for r in runs)
+    if wants_gate and not gate_ok:
+        state += " (needs a successful replay gate run)"
+    if runs and not failing and not pending and ratchet_ok and attack_ok and gate_ok and not hold and n != 260:
         mergeable.append((n, sha, p["title"]))
         state += " → AUTO-MERGE"
     rows.append(f"| #{n} | {p['title'][:60]} | `{short}` | {state} | {checks} |")
