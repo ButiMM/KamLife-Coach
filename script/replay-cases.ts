@@ -422,6 +422,20 @@ export const CASES: ReplayCase[] = [
     rubric: "The client has been away for two weeks. A good coach welcomes them back warmly, without guilt or a restart, and offers to pick up where they left off.",
   },
   {
+    // IN-FLIGHT STATE AT THE SWITCH (#440). The old comeback menu asked "1 / 2 / 3"; the client's
+    // answer must finish that flow, whichever coach owns talk, not be read as a fresh message.
+    id: "comeback-menu-answered-mid-switch",
+    journey: 5,
+    source: "#440 blind spot: conversations in progress at the switch",
+    seed: { awaitingInputType: "comeback", lastActiveAt: "2026-09-10T08:00:00+02:00", createdAt: "2026-08-01T08:00:00+02:00" },
+    turns: ["2"],
+    checks: [
+      { what: "the menu answer finishes the old flow", kind: "reply_matches", pattern: "2 meals|two meals|simpl", flags: "i" },
+      { what: "the pending question is cleared", kind: "sql", query: "SELECT COUNT(*)::int FROM users WHERE id = $1 AND awaiting_input_type IS NULL", expect: { equals: 1 } },
+    ],
+    rubric: "The coach had asked a returning client to pick 1 (I'm back), 2 (a simpler plan) or 3 (just busy). The client answered 2. A good coach gives the simpler plan (log two meals a day for a few days) and does not treat \"2\" as a number to log or a new question.",
+  },
+  {
     id: "knee-hurt-on-run",
     journey: 6,
     source: "docs/TESTER-EXPERIENCE.md journey 6",

@@ -1063,9 +1063,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // THE ENGINE IS A MOUTH ABOVE THE WRITERS, so it stands down on an owed fact for the same
   // reason every other handler does: a freeform reply must never be composed from state that is
   // missing a fact the client stated in this very message (2026-08-22).
-  if (engineLive() && !multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
-    if (engineReply !== null) return tag(engineReply, "🧠 new engine");
+  const core = await import("./core/coach"), switched = core.coreWave1For(phone); // wave-1 switch: core/coach.ts wave1Turn
+  if ((engineLive() || switched) && !multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+    const w1 = switched ? await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), evidence: turnEvidence }) : null;
+    const engineReply = w1?.reply ?? (engineLive() ? await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester }) : null);
+    if (engineReply !== null) return tag(engineReply, w1?.src ?? "🧠 new engine");
   }
 
   // MODEL_BRAIN path deleted 2026-07-30. Two paths answer a client: the engine, then gpt-block.
@@ -1086,8 +1088,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
   const scope = await classifyDomain(openai, message, { ongoing: recentlyActive(user) }); // #321: fails closed
   if (scope.redirectMessage) return tag(await declineOutOfScope(user.id, message, scope.redirectMessage, turnEvidence), "scope");
-  const gptReply = await handleGptBlock({ phone, message, m, user, intentPromise });
-  return tag(gptReply, "gpt fallback");
+  const coreReply = switched ? await core.answerLive(phone, message).catch(() => null) : null; // wave-1 switch, second door
+  return tag(coreReply ?? await handleGptBlock({ phone, message, m, user, intentPromise }), coreReply ? "new coach" : "gpt fallback");
 
   } catch (err: any) {
     console.error("[handleMessage FATAL]", JSON.stringify({

@@ -54,6 +54,9 @@ jobs:
       # silently stopped running; the watch then merged `ready` PRs with no gate at all.
       # Cost/quality (CTO, 25 Sep): the cheap judge by default; the strong judge only when a PR moves testers.
       REPLAY_JUDGE_MODEL: ${{ contains(github.event.pull_request.labels.*.name, 'switch') && 'gpt-4.1' || 'gpt-4.1-mini' }}
+      # A switch PR is graded on the SWITCHED path: its wave's new coach answers live, and the gate's
+      # stored-row and reply checks grade what testers would get. Main's baseline has no such flag.
+      CORE_WAVE1: ${{ contains(github.event.pull_request.labels.*.name, 'switch') && 'on' || 'off' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -66,6 +69,9 @@ jobs:
       - name: Record the baseline — this gate on the base branch's product code
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
+          # The baseline RECORDS main; it never judges. With this PR's `switch` label, main's gate blocked
+          # on main's own new-coach misses and the PR's run never started (#445). Labels judge the PR only.
+          PR_LABELS: ""
         run: |
           git fetch --no-tags --depth=1 origin "$BASE_REF"
           git worktree add "$RUNNER_TEMP/base" FETCH_HEAD

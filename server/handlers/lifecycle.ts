@@ -59,16 +59,21 @@ export async function handleLifecycle(ctx: {
   if (pendingCancel !== null) return pendingCancel;
 
   // ---- MENU NUMBER SHORTCUTS ----
-  if (m === "3" || m === "food" || m === "food coaching" || m === "log food" || m === "food log") {
+  // Same rule for the comeback and goal-transition menus (#440): their "1"/"2"/"3" is the menu's
+  // answer, not "2 = log steps". The shortcuts used to run first, so a returning client who picked
+  // "2 — a simpler plan" was asked for a step count and the menu stayed open.
+  const menuPending = ["comeback", "goal_transition"].includes(user.awaitingInputType);
+  const digit = (d: string) => m === d && !menuPending;
+  if (digit("3") || m === "food" || m === "food coaching" || m === "log food" || m === "food log") {
     return `Send me what you ate and I will give you the calories and protein instantly.\n\nExamples:\n• "I had pap and pilchards"\n• "2 eggs and brown bread"\n• "KFC original piece"\n• "Oats for breakfast"\n\nI have ${SA_FOODS_SEED.length} SA foods in my database. Just tell me what you ate.`;
   }
-  if (m === "2" || m === "log steps" || m === "step log") {
+  if (digit("2") || m === "log steps" || m === "step log") {
     return `Send me your step count and I will log it.\n\nExamples:\n• "8500 steps"\n• "I walked 5km"\n• "10,000 steps done"\n\nYour daily target: ${(user.stepsTarget || 8500).toLocaleString()} steps.`;
   }
   if (m === "log sleep" || m === "sleep log") {
     return `Send me how many hours you slept.\n\nExamples:\n• "I slept 6 hours"\n• "7 hours sleep"\n• "bad sleep, maybe 5 hours"\n\nTarget: 7–9 hours for full recovery and fat loss.`;
   }
-  if (m === "7" || m === "log weight" || m === "weight log") {
+  if (digit("7") || m === "log weight" || m === "weight log") {
     return `Send me your weight and I will log it.\n\nExamples:\n• "84.5kg"\n• "I weigh 91kg"\n• "weighed in at 78kg this morning"\n\nWeigh in first thing in the morning, after toilet, before food. Same conditions every time.`;
   }
   if (m === "measurements" || m === "check in" || m === "measurement check in" || m === "measurements check in") {
@@ -77,7 +82,7 @@ export async function handleLifecycle(ctx: {
 
 
   // ---- CLOTHING CHECK-IN (Non-Scale Victory) — option 8 ----
-  const isClothingTrigger = m === "8" || m === "non scale" || m === "nsc" || m === "non-scale" || m === "clothing" || m === "clothing check" || m === "clothing check in" || m === "non scale victory";
+  const isClothingTrigger = digit("8") || m === "non scale" || m === "nsc" || m === "non-scale" || m === "clothing" || m === "clothing check" || m === "clothing check in" || m === "non scale victory";
   if (isClothingTrigger) {
     await db.update(users).set({ awaitingInputType: "clothing_checkin" }).where(eq(users.phoneNumber, phone));
     return `*Non-Scale Victory Check-In*\n\nThe scale lies. Your clothes never do. Answer these 4 in one message:\n\n1. *Jeans* — Looser / Same / Tighter\n2. *Energy* — High / Medium / Low\n3. *Stomach* — Flatter / Same / Bloated\n4. *Overall feel* — Great / Good / Okay / Bad\n\nExample: "Looser, High, Flatter, Great"`;

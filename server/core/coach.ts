@@ -94,7 +94,7 @@ Return ONLY JSON: {"family":"report|question|plan|feeling|correction|other","wan
 - feeling: the message is mostly about how they feel.
 - correction: they are correcting something said or recorded earlier.
 Ask one_question ONLY if the answer would change the advice.
-"actions": what the system should DO for a fresh transaction in this message — [] for a question, a plan, feelings, or something already recorded. One entry per transaction:
+"actions": what the system should DO for a fresh transaction in this message — [] for a question, a plan, pure feelings, or something already recorded. Food, training or numbers the client says they HAD or DID are a report even inside a feeling ("I had a burger last night and feel I ruined everything" logs the burger). One entry per transaction:
 {"type":"LOG_MEAL","foodText":"<the food in their words, no calories>","meal":"breakfast|lunch|dinner|snack or omit","retro":"<a past day as they said it, or omit>","needsConfirmation":<true if the amount is vague>}
 {"type":"LOG_STEPS","count":<n>} · {"type":"LOG_WATER","litres":<n>} · {"type":"LOG_WEIGHT","kg":<n>}
 {"type":"REMOVE_LAST_MEAL"} · {"type":"SHOW_MEALS"} · {"type":"SHOW_WORKOUT"} · {"type":"SET_SICK","days":<n>} · {"type":"END_SICK"} · {"type":"SET_REMINDER","body":"<what>","when":"<as they said it>"}
@@ -162,6 +162,48 @@ async function openaiClient(): Promise<OpenAI> {
     client = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY });
   }
   return client;
+}
+
+/**
+ * THE WAVE-1 SWITCH (COVERAGE A10, A11, A13, A16, A17). CORE_WAVE1 = off | founder | on.
+ * "founder" is the per-client rollout of #438: only COACH_ALERT_PHONE meets the new coach, everyone
+ * else keeps the old one. Rollback is instant: set CORE_WAVE1=off, no deploy.
+ */
+export function coreWave1For(phone: string): boolean {
+  const mode = String(process.env.CORE_WAVE1 || "off").toLowerCase();
+  if (mode === "on") return true;
+  if (mode !== "founder") return false;
+  const digits = (p: string) => (p || "").replace(/\D/g, "").replace(/^0/, "27");
+  const founder = digits(process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE || "");
+  return !!founder && digits(phone) === founder;
+}
+
+/**
+ * The new coach answering for real, at the one place the old gpt-block answered (behind the scope
+ * floor in routes.ts). Returns null when it cannot answer honestly: no reading of the message (#421)
+ * or no reply. The caller then falls back to the old reply, so a failure is never silence.
+ */
+export async function answerLive(phone: string, message: string): Promise<string | null> {
+  const pre = await readPreTurn(phone);
+  if (!pre) return null;
+  const openai = await openaiClient();
+  const read = await understand(openai, message, pre.known);
+  if (!read.u) return null;
+  // Wave 1 only talks. A turn that needs a write (a meal, steps, a goal) stays with the old path until
+  // its wave-2 row switches, so nothing the client reports is ever dropped.
+  const { writesState } = await import("../understanding/actions");
+  if ((read.u.actions ?? []).some(a => writesState(a.type))) return null;
+  const reply = (await compose(openai, pre, message, read.u))?.trim();
+  return reply || null;
+}
+
+/** One switched turn: the scope floor first, then the new coach. null = let the old engine answer. */
+export async function wave1Turn(p: { phone: string; message: string; userId: string; ongoing: boolean; evidence: (f: { conversationalOnly: true }) => void }): Promise<{ reply: string; src: string } | null> {
+  const { classifyDomain, declineOutOfScope } = await import("../understanding/domain-guard");
+  const scope = await classifyDomain(await openaiClient(), p.message, { ongoing: p.ongoing });
+  if (scope.redirectMessage) return { reply: await declineOutOfScope(p.userId, p.message, scope.redirectMessage, p.evidence), src: "scope" };
+  const reply = await answerLive(p.phone, p.message).catch(e => { console.warn("[CORE_WAVE1] fell back:", (e as Error)?.message); return null; });
+  return reply ? { reply, src: "new coach" } : null;
 }
 
 /**

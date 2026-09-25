@@ -24,6 +24,8 @@ import { engineLive } from "../understanding/live";
 // with today's remaining kcal instead; now the answer is computed, never generated.
 export async function handleSurplusDeficitQuestion(ctx: { message: string; m: string; user: any }): Promise<string | null> {
   const { message, m, user } = ctx;
+  // WAVE-1 SWITCH: for a switched client the new coach explains the numbers (A16), from the ledger.
+  if ((await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""))) return null;
   // C16: a pure meaning question is education, not a request to log today's meals. Keep it in
   // the existing numbers-literacy owner on the live path; the engine-off model tests retain
   // their established question/answer path. No calorie estimate or target change is implied.
@@ -113,6 +115,8 @@ export async function handleToneSignal(ctx: { message: string; m: string; user: 
 
 export async function handleNumbersLiteracy(ctx: { message: string; m: string; user: any; capName: string; phone: string }): Promise<string | null> {
   const { message, m, user, capName, phone } = ctx;
+  // WAVE-1 SWITCH: for a switched client the new coach explains the numbers (A16), from the ledger.
+  if ((await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""))) return null;
   // Default is number-free (numbers:low or absent); numbers:full = opted into figures.
   const isFull = /\bnumbers:full\b/i.test(user.profileNotes || "");
 
