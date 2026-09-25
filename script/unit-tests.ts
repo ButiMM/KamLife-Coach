@@ -10886,6 +10886,15 @@ test("server/core does not read buildClientSnapshot (#422: numbers come from day
   assert.deepEqual(hits, [], `server/core still reads the old snapshot: ${hits.join(", ")}`);
 });
 
+// ── ONE VOICE (#439): every talk path carries the same style block ──────────────────────────────
+test("ONE_VOICE rides in the new composer, askCoachK and the meaning engine", async () => {
+  const { readFileSync } = await import("node:fs");
+  for (const f of ["server/core/coach.ts", "server/gpt.ts", "server/understanding/meaning-engine.ts"])
+    assert.ok(/\$\{ONE_VOICE\}|\bONE_VOICE,/.test(readFileSync(f, "utf8")), `${f} does not use ONE_VOICE`);
+  const { ONE_VOICE } = await import("../server/coach-prompt");
+  assert.match(ONE_VOICE, /at most 3 short sentences and 60 words/);
+});
+
 // ── EVERY WORKFLOW FILE IS VALID YAML (25 Sep) ────────────────────────────────────────────────
 // A second `env:` key on the replay job made replay-gate.yml invalid. GitHub then ran no gate at
 // all, and the watch merged `ready` PRs as if it had passed. A duplicate key is now a red test.
