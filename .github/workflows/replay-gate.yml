@@ -69,6 +69,9 @@ jobs:
       - name: Record the baseline — this gate on the base branch's product code
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
+          # The baseline RECORDS main; it never judges. With this PR's `switch` label, main's gate blocked
+          # on main's own new-coach misses and the PR's run never started (#445). Labels judge the PR only.
+          PR_LABELS: ""
         run: |
           git fetch --no-tags --depth=1 origin "$BASE_REF"
           git worktree add "$RUNNER_TEMP/base" FETCH_HEAD

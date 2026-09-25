@@ -408,7 +408,7 @@ const labels = (process.env.PR_LABELS || "").split(",").map(l => l.trim());
 // talk switch is not held by wave-2 logging). No journey label: every miss blocks, the safe default.
 const switched = labels.map(l => /^journey:(\d)$/.exec(l)?.[1]).filter(Boolean).map(Number);
 const actionMisses = results.filter(r => !r.heldOut && r.core?.actionPass === false && (!switched.length || switched.includes(r.journey))).map(r => r.id);
-if (labels.includes("switch") && actionMisses.length) {
+if (labels.includes("switch") && actionMisses.length && !WRITE_BASELINE) { // a baseline records main, never judges it
   REAL(`replay-gate: SWITCH BLOCKED — the new coach would do the wrong thing in ${actionMisses.length} case(s): ${actionMisses.join(", ")}.`);
   process.exit(1);
 }
