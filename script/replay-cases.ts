@@ -93,6 +93,12 @@ export interface ReplayCase {
   actions?: { expect?: ActionExpect[]; forbid?: string[] };
   /** What a good coach does here. The judge sees this, the turns, the stored state and the bodies. */
   rubric: string;
+  /**
+   * WHO MAY ANSWER A WAVE-1 CASE (#445 reach check). Unset: the new coach or the scope floor. "old-path":
+   * the turn also carries a write whose row has not switched yet (a skipped session is A8, wave 2), so
+   * the old owner answers it on purpose. Say why in the case's comment.
+   */
+  owner?: "old-path";
 }
 
 const MEAL_COUNT = "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1";
@@ -725,6 +731,7 @@ export const CASES: ReplayCase[] = [
       { what: "a coaching message that mentions a CV is coached, not declined", kind: "reply_not_matches", pattern: "can'?t help with (?:that|CVs?)|outside (?:what|my)", flags: "i" },
     ],
     actions: { forbid: ["LOG_MEAL"] },
+    owner: "old-path", // "skipped gym" is recorded by the missed-workout owner (A8) until wave 2 switches
     rubric: "The client skipped gym because of a busy day. A good coach responds to the missed session with one simple move, not a lecture, and does not treat the CV as a request.",
   },
   {

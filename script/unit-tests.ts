@@ -10887,12 +10887,15 @@ test("server/core does not read buildClientSnapshot (#422: numbers come from day
 });
 
 // ── THE WAVE-1 SWITCH FLAG (#438): off by default, founder first, instant rollback ──────────────
-test("CORE_WAVE1: off by default; founder matches only the founder's number, in any format; on is everyone", async () => {
+test("CORE_WAVE1: founder by default (#453); founder matches only the founder's number, in any format; on is everyone; off is the rollback", async () => {
   const { coreWave1For } = await import("../server/core/coach");
   const saved = { m: process.env.CORE_WAVE1, p: process.env.COACH_ALERT_PHONE, a: process.env.ADMIN_PHONE_OVERRIDE };
   try {
     delete process.env.CORE_WAVE1; process.env.COACH_ALERT_PHONE = "+27 82 943 8001"; delete process.env.ADMIN_PHONE_OVERRIDE;
-    assert.equal(coreWave1For("whatsapp:+27829438001"), false, "unset means off");
+    assert.equal(coreWave1For("whatsapp:+27829438001"), true, "unset means founder: the founder is switched");
+    assert.equal(coreWave1For("whatsapp:+27829438002"), false, "unset means founder: a tester is not");
+    process.env.CORE_WAVE1 = "off";
+    assert.equal(coreWave1For("whatsapp:+27829438001"), false, "off is the rollback");
     process.env.CORE_WAVE1 = "founder";
     for (const p of ["whatsapp:+27829438001", "+27829438001", "0829438001"]) assert.equal(coreWave1For(p), true, `founder as ${p}`);
     assert.equal(coreWave1For("whatsapp:+27829438002"), false, "a tester is not switched in founder mode");

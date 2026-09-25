@@ -183,6 +183,8 @@ interface TurnScope {
      * today" is the coach talking over the question it just asked.
      */
     conversationalOnly?: boolean;
+    /** Which reply path answered (the `tag` source in routes.ts): the gate's reach check reads it (#445). */
+    replySource?: string | null;
     /** The CoachAction the meaning engine emitted this turn, when it emitted one. Structured
      *  provenance — checked BEFORE the prose backstop. */
     structuredAction?: string | null;
@@ -926,6 +928,7 @@ export async function recordTurn(reply: string): Promise<void> {
       disposition: ev.conversationalOnly ? "conversational"
         : String(ev.canonicalTodo || "").trim() ? "instructed" : "hold",
       modelAuthored: !!ev.modelAuthored,
+      source: ev.replySource ?? null,
     };
     // THE THREE VOICE TEXTS (2026-09-10). `cleaned` and `condensed` say whether that STAGE CHANGED
     // the text, which is not the same question as whether it ran: both fail open and return their

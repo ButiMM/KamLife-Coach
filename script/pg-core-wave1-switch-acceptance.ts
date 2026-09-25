@@ -59,6 +59,14 @@ chk(f1.includes(NEW), "the founder's wave-1 question is answered by the new coac
 const t1 = await say(TESTER, ASK);
 chk(!t1.includes(NEW) && t1.trim().length > 0, "a tester still meets the old coach", t1);
 
+REAL("\n1b. REACH (CTO attack on #445): the old wave-1 handlers stand aside for the switched client");
+for (const q of ["What should I eat tonight?", "How was my week?", "What should I order at KFC?", "Should I take creatine?"]) {
+  const fr = await say(FOUNDER, q);
+  chk(fr.includes(NEW), `the founder's "${q}" reaches the new coach, not an old handler`, fr.slice(0, 160));
+}
+const tr = await say(TESTER, "What should I order at KFC?");
+chk(!tr.includes(NEW) && tr.trim().length > 0, "a tester's KFC question still meets the old restaurant guide", tr.slice(0, 160));
+
 REAL("\n2. THE SCOPE FLOOR STAYS IN FRONT (A17)");
 const f2 = await say(FOUNDER, "Can you help me with my maths homework tonight?");
 chk(!f2.includes(NEW) && f2.trim().length > 0, "an off-topic ask is declined by the floor, not composed", f2);

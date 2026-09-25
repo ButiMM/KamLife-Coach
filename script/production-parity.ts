@@ -681,7 +681,7 @@ async function main() {
         `a model reply composes the coach suffix outside tag(), so it never marks the turn `
         + `model-authored and the boundary never sees it: ${line.trim().slice(0, 90)}`);
     }
-    assert.ok(/turnEvidence\(\{ modelAuthored: true \}\)/.test(code), "tag() marks the turn");
+    assert.ok(/turnEvidence\(\{ modelAuthored: true[,}]/.test(code), "tag() marks the turn");
     // tag() must be in scope for the FIRST model exit, not only the last ones.
     const tagAt = code.indexOf("const tag = ");
     const firstExit = code.indexOf("resumeEngineConfirm(");
