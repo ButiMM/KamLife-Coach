@@ -9,7 +9,7 @@ Every builder, reviewer and the CTO reads this before asking the founder a quest
 | `AI_INTEGRATIONS_OPENAI_API_KEY` | replay gate, gauntlet, model-drill, reality-test | The OpenAI key for CI. **The value stored in GitHub is rejected by OpenAI (401, key ending `wfkA`), found 24 Sep.** It must hold the same working key production uses in Railway. Production's key is separate and works. |
 | `BACKUP_DATABASE_URL` | `db-backup.yml` | Production database, for backups |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT` | `db-backup.yml` | Cloudflare R2, where backups are stored |
-| `REPLAY_HELDOUT_JSON` | replay gate | Not set yet. Held-out cases; until it exists, split the audit's real failures into seen and held-out. |
+| `REPLAY_HELDOUT_JSON` | replay gate | **Set 25 Sep by the CTO:** 8 hidden cases, 2 per wave-1 row. Maintained by the CTO only; the builder never sees it. |
 
 ## AI budget firewall (founder action, 24 Sep)
 
@@ -56,7 +56,7 @@ The full list of names and code defaults is in the outgoing CTO's handover (22-2
 
 ## Founder checks still open (Railway, only the founder can see it)
 
-- `COACH_ALERT_PHONE` is set to the founder's WhatsApp number. Safety escalations go nowhere without it.
+- ✅ `COACH_ALERT_PHONE` is set to the founder's own number (confirmed 25 Sep). Don't ask again.
 - `COACH_DASHBOARD_KEY` is a long random value.
 
 ## Where the plan lives
