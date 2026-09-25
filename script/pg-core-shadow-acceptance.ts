@@ -47,7 +47,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
       ? [{ type: "LOG_MEAL", foodText: "pap and chicken", meal: "lunch", needsConfirmation: false }, { type: "LOG_STEPS", count: 9000 },
          { type: "DELETE_ACCOUNT" }, { type: "LOG_MEAL", foodText: "", needsConfirmation: false }]
       : /protein/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 70 }] : [];
-    content = JSON.stringify({ family: /comrades|pap and chicken/i.test(msg) ? "report" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts, actions });
+    content = /garbled/i.test(msg) ? "not json at all" // #421: the reading fails
+      : JSON.stringify({ family: /comrades|pap and chicken/i.test(msg) ? "report" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts, actions });
   }
   else if (body.includes("You are Coach K, a warm, direct South African")) { composerRequests.push(body); content = `Great question. ${SENTINEL} One move today.`; }
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
@@ -128,6 +129,8 @@ REAL("\n2. IT IS GIVEN WHAT THE CLIENT TOLD US, AND THEIR REAL NUMBERS");
 const req = composerRequests.at(-1) || "";
 chk(/WHAT THIS CLIENT HAS TOLD YOU/.test(req) && /Comrades/.test(req), "the composer sees the client record", req.slice(0, 200));
 chk(/THEIR REAL NUMBERS/.test(req), "the composer sees their real numbers");
+chk(/Daily targets: 2200 kcal, 150g protein/.test(req) && /Last 7 days: food logged on \d/.test(req) && !/Current streak:/.test(req),
+  "the numbers come from the targets and the day ledger's 7-day window, not the old snapshot (#422)", (req.match(/THEIR REAL NUMBERS( \(authoritative|: none).{0,700}/) || [""])[0]);
 chk((row?.facts_read ?? 0) >= 1, "facts read are counted", String(row?.facts_read));
 
 REAL("\n3. IT NEVER SENDS, AND NEVER WRITES CLIENT STATE");
@@ -137,6 +140,9 @@ const before = (await q("SELECT current_weight, goal_type, profile_notes FROM us
 const meals0 = (await q("SELECT count(*)::int n FROM meal_logs WHERE user_id = $1", [u.id]))[0].n;
 const s3 = await say(u.phoneNumber, "How much protein do I need today?");
 await settle(async () => (await q("SELECT 1 FROM core_shadow WHERE root_id = $1", [s3])).length > 0);
+const numbersAfterMeal = (composerRequests.at(-1) || "").match(/THEIR REAL NUMBERS \(authoritative.{0,900}/)?.[0] ?? "";
+chk(/Food today: .{0,200}?(pap|chicken)/i.test(numbersAfterMeal) && /food logged on 1 day/.test(numbersAfterMeal),
+  "the next turn's numbers carry the logged pap and chicken from the day ledger (#422)", numbersAfterMeal.slice(0, 600));
 const after = (await q("SELECT current_weight, goal_type, profile_notes FROM users WHERE id = $1", [u.id]))[0];
 chk(after.current_weight === before.current_weight && after.goal_type === before.goal_type, "the client's row is not changed by the shadow");
 const s3acts = ((await q("SELECT understanding FROM core_shadow WHERE root_id = $1", [s3]))[0]?.understanding?.actions ?? []) as any[];
@@ -156,6 +162,14 @@ chk(scopedRow?.understanding?.floor === "scope", "the row says a floor answered,
 const s3c = await say(u.phoneNumber, "What should I have for lunch tomorrow?");
 await settle(async () => (await q("SELECT 1 FROM core_shadow WHERE root_id = $1", [s3c])).length > 0);
 chk(String((await q("SELECT reply FROM core_shadow WHERE root_id = $1", [s3c]))[0]?.reply).includes(SENTINEL), "CONTROL: the next in-scope turn is composed as usual");
+
+REAL("\n3c. NO CONFIDENT REPLY WITHOUT UNDERSTANDING (#421)");
+const composedBefore = composerRequests.length;
+const s3d = await say(u.phoneNumber, "garbled words that the reading cannot parse");
+await settle(async () => (await q("SELECT 1 FROM core_shadow WHERE root_id = $1", [s3d])).length > 0);
+const failedRow = (await q("SELECT reply, understanding FROM core_shadow WHERE root_id = $1", [s3d]))[0];
+chk(failedRow?.reply === "" && failedRow?.understanding?.failed === "understanding_failed", "a failed reading is recorded with no reply", JSON.stringify(failedRow));
+chk(composerRequests.length === composedBefore, "the composer is not asked to guess");
 
 REAL("\n4. OFF UNLESS SWITCHED ON");
 process.env.CORE_SHADOW = "off";

@@ -255,7 +255,12 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
   const neverSeen = NEVER_SEE.filter(n => bodies.some(b => new RegExp(n.pattern, n.flags ?? "").test(b))).map(n => n.what);
   const { score, verdict } = await judge(k, userId, bodies);
   let core: CaseResult["core"] = null;
-  if (coreBodies.every(b => b !== null && b.trim())) {
+  // A RECORDED EMPTY REPLY IS A FAILURE, NOT A SKIP (#421). The shadow stores "" when its understanding
+  // failed; a missing row (null) still means the new coach did not run here and is not scored.
+  if (coreBodies.every(b => b !== null) && coreBodies.some(b => !b!.trim())) {
+    core = { replyPass: false, score: 0, proposed: coreActions.flatMap(a => a ?? []), actionPass: k.actions ? false : null,
+      failing: ["understanding failed: the new coach had no reply"], neverSeen: [] };
+  } else if (coreBodies.every(b => b !== null && b.trim())) {
     const cb = coreBodies as string[];
     // Only the reply checks apply: the shadow writes nothing, so the stored-state checks grade the old path.
     const replyChecks: CheckResult[] = [];

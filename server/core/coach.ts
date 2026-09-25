@@ -26,16 +26,53 @@ export const shadowOn = () => process.env.CORE_SHADOW === "on";
 
 export interface PreTurn { userId: string; name: string; facts: string; known: string; numbers: string; conversation: Array<{ role: "user" | "assistant"; content: string }> }
 
+/**
+ * THEIR REAL NUMBERS, FROM THE LEDGER (#422). Every figure comes from the owners the product keeps:
+ * day-ledger (today, the 7-day window, sessions, steps, weight) and the targets on the client's row.
+ * The goal profile, energy frame, health hold and food constraints come from their own owners too.
+ * Nothing here is computed a second way, and the old 7-day brain snapshot is not read.
+ */
+async function ledgerNumbers(user: any): Promise<string> {
+  const [{ getProgressTruth }, { getGoalProfile }, { energyFrameLine, waterTargetLitres }, { readHealthState }, { foodConstraints }] = await Promise.all([
+    import("../day-ledger"), import("../goal-profiles"), import("../targets"), import("../health-state"), import("../food-swaps")]);
+  const t = await getProgressTruth(user, { days: 7 });
+  const sa = (o: Intl.DateTimeFormatOptions) => new Date().toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", ...o });
+  const lines = [`Time now: ${sa({ weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false })} (SA). Today's numbers are a running count, not a finished day.`];
+  const profile = getGoalProfile(user.goalType);
+  lines.push(profile.usesMacros
+    ? `Goal: ${String(user.goalType || "fat_loss").replace(/_/g, " ")}. Daily targets: ${user.calorieTarget ?? "?"} kcal, ${user.proteinTarget ?? "?"}g protein.`
+    : `Goal: ${profile.label}. This client is not chasing numbers: never push a kcal or protein target.`);
+  const frame = energyFrameLine(user.goalType, user.calorieTarget);
+  if (frame) lines.push(frame);
+  const health = readHealthState(user);
+  if (health.isSick) lines.push(`Sick: resting until about ${(health as any).sickUntil ?? "they say they're better"}. Care first; no training or calorie pressure.`);
+  const constraint = foodConstraints(user).line;
+  if (constraint) lines.push(constraint);
+  const d = t.today;
+  const cal = Number(user.calorieTarget) || 0;
+  lines.push(d.meals.length
+    ? `Food today: ${d.meals.map(m => `${m.label || "meal"}: ${m.foods}`).join("; ")}. About ${Math.round(d.kcal)} kcal and ${Math.round(d.protein)}g protein so far${cal && profile.usesMacros ? `; about ${Math.max(0, cal - Math.round(d.kcal))} kcal left in the day` : ""}.`
+    : "Food today: nothing logged yet. Don't scold, don't invent intake.");
+  lines.push(`Water today: ${d.water}L of ${waterTargetLitres(user.currentWeight)}L. Steps today: ${d.steps ? d.steps.toLocaleString("en-ZA") : "none logged"}.`);
+  const w = t.window;
+  lines.push(`Last ${w.days} days: food logged on ${w.daysLogged} day(s)${w.daysLogged ? `, averaging ${Math.round(w.avgKcal)} kcal and ${Math.round(w.avgProtein)}g protein per logged day` : ""}; ${t.sessions} training session(s); steps averaging ${Math.round(t.avgSteps).toLocaleString("en-ZA")} a day. Any streak or count must come from these numbers.`);
+  const wt = t.weight;
+  lines.push(wt.withheld ? "Weight: they asked us not to raise it. Never mention the scale."
+    : wt.currentKg != null ? `Weight: now ${wt.currentKg}kg${wt.startKg != null && wt.startKg !== wt.currentKg ? `, started at ${wt.startKg}kg` : ""}${wt.toGoalKg != null ? `, ${Math.abs(wt.toGoalKg)}kg still to ${wt.toGoalKg < 0 ? "lose" : "gain"}` : ""}.`
+    : "Weight: no weigh-in on record. Never quote a weight.");
+  return lines.join("\n");
+}
+
 /** Everything the composer may know, read BEFORE the old path runs the turn. */
 export async function readPreTurn(phone: string): Promise<PreTurn | null> {
   const [u] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
   if (!u || u.onboardingState !== "COMPLETE") return null; // onboarding is its own journey, not this composer's yet
-  const [{ factsForCoach, knownFacts, backfillFromOldStores }, { buildClientSnapshot }] = await Promise.all([import("./client-record"), import("../brain/client-snapshot")]);
+  const { factsForCoach, knownFacts, backfillFromOldStores } = await import("./client-record");
   await backfillFromOldStores(u).catch(e => console.warn("[RECORD] backfill skipped:", (e as Error).message)); // #414: before the first read
   const [facts, known, numbers, turns] = await Promise.all([
     factsForCoach(u.id).catch(() => ""),
     knownFacts(u.id).catch(() => "KNOWN FACTS: none"),
-    buildClientSnapshot(u).catch(() => ""),
+    ledgerNumbers(u).catch(() => ""),
     db.select({ input: turnLedger.inputText, sent: turnLedger.deliveredBody, reply: turnLedger.reply })
       .from(turnLedger).where(eq(turnLedger.userId, u.id)).orderBy(desc(turnLedger.createdAt)).limit(6),
   ]);
@@ -132,7 +169,10 @@ export async function runShadow(pre: PreTurn | null, message: string, rootId: st
   const t0 = Date.now();
   try {
     const openai = await openaiClient();
-    const read = await understand(openai, message, pre.known).catch(() => null);
+    const read = await understand(openai, message, pre.known).catch(async e => {
+      if ((await import("../ai-offline")).isAiOfflineError(e)) throw e; // an outage is not a verdict: no row
+      return null;
+    });
     const u = read?.u ?? null;
     // The record learns from the same call (#271): its own validation decides what is stored.
     if (read && sourceMessageId) {
@@ -149,9 +189,15 @@ export async function runShadow(pre: PreTurn | null, message: string, rootId: st
       .where(and(eq(chatHistory.userId, pre.userId), sql`${chatHistory.createdAt} > now() - interval '2 minutes'`))
       .orderBy(desc(chatHistory.createdAt)).limit(1);
     const scoped = last?.intent === "DOMAIN_REDIRECT" && !!last.out;
-    const reply = scoped ? last!.out : await compose(openai, pre, message, u);
+    // NO CONFIDENT REPLY WITHOUT UNDERSTANDING (#421, ORDERS §4 step 4). When the reading failed, the
+    // composer would be guessing what the client meant. Record the failure with no reply; the gate
+    // counts it against the new coach instead of grading a guess.
+    const failed = !scoped && !u;
+    const reply = scoped ? last!.out : failed ? "" : await compose(openai, pre, message, u);
     await db.insert(coreShadow).values({
-      userId: pre.userId, rootId, inputText: message, understanding: scoped ? { ...(u ?? {}), floor: "scope" } as any : u, factsRead: pre.facts ? pre.facts.split("\n").length - 1 : 0,
+      userId: pre.userId, rootId, inputText: message,
+      understanding: scoped ? { ...(u ?? {}), floor: "scope" } as any : failed ? { failed: "understanding_failed" } as any : u,
+      factsRead: pre.facts ? pre.facts.split("\n").length - 1 : 0,
       reply: reply ?? "", model: CORE_MODEL, ms: Date.now() - t0,
     });
   } catch (e) {
