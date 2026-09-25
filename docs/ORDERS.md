@@ -159,6 +159,8 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 **If Codex is out of usage limits when a `switch` PR is ready (24 Sep evening):** the CTO performs the attack instead: a diff review against `docs/COMPONENTS.md` and `TESTER-EXPERIENCE.md`, plus the 3-run gate numbers, posted as `ATTACK @ <sha> (CTO)`. A switch never waits a night on a usage limit, and never merges without an attack. Codex attacks the merged version when its limits reset.
 
+**Measure width-first, build wave by wave (CTO, 25 Sep):** every `COVERAGE.md` row gets gate cases and a score within 48 hours, so no part of the product is invisible (see the full-product scoreboard issue). Switching still goes one wave at a time. Live scoring of real conversations (#293) comes straight after the wave-1 switch.
+
 **Focus until the first switch (CTO, after the Grok review, 25 Sep):** wave 1 only. Finish #414, #421, #422, then the wave-1 head-to-head and **one** switch PR that deletes wave 1's old speakers. Already-built wave-2 PRs may merge, but no new wave-2 work starts until wave 1 has switched.
 
 **Before the first switch (CTO, 25 Sep):** existing clients' history must be in the client record (#414). Otherwise the switch itself makes the coach forget long-time testers.
