@@ -156,6 +156,8 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 **If Codex is out of usage limits when a `switch` PR is ready (24 Sep evening):** the CTO performs the attack instead: a diff review against `docs/COMPONENTS.md` and `TESTER-EXPERIENCE.md`, plus the 3-run gate numbers, posted as `ATTACK @ <sha> (CTO)`. A switch never waits a night on a usage limit, and never merges without an attack. Codex attacks the merged version when its limits reset.
 
+**Before the first switch (CTO, 25 Sep):** existing clients' history must be in the client record (#414). Otherwise the switch itself makes the coach forget long-time testers.
+
 **When the gate can decide a switch (24 Sep evening):** single-case scores move by about ±3 between runs of the same code. So a `switch` PR needs **(a) at least 5 cases for its journey, (b) the average of 3 gate runs, new coach against old code on the same cases, (c) the new coach ahead on that average, and (d) zero hard-invariant failures in any run.** Cost and reply time are reported (baseline on main: R0.009 a message, 2.3 s).
 
 **Tester-visible rule:** every PR description opens with one line, "What testers will notice:", in plain language. If the answer is nothing, it says why the PR is still needed today. Work is ordered so the changes testers feel most land first.
