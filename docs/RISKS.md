@@ -81,3 +81,15 @@ Pregnancy, purging, crisis and medical escalations alert the founder through the
 | The CTO's GitHub token expires about 30 Sep | #418 | founder (2 min) |
 
 Any agent that notices something nobody asked about files it with the `blind-spot` label. The CTO reviews that label every session.
+
+## 9. Blind spots, second sweep (25 Sep)
+
+| Blind spot | Issue |
+|---|---|
+| The backfill could import the old coach's invented facts (lifeStory, CIP) into the new memory | comment on #426: only facts traceable to the client's own words |
+| A switch hits every tester at once | #438: the founder first, then everyone |
+| Two personalities while old and new coach coexist | #439: one shared voice |
+| Conversations in progress at the moment of a switch | #440 |
+| OpenAI down or slow means silence | #441: an honest fixed reply, a timeout, a founder alert |
+| Testers can't see progress | #442: a short "what changed" message after each switch |
+| The build runs on the founder's weekly Claude capacity | CLAUDE.md: capacity rules, one session |

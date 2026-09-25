@@ -1,6 +1,14 @@
 # KamLife Coach — Claude Code Instructions
 
 ## Standing orders (read first, every session)
+- **The founder's Claude capacity is the scarcest resource (25 Sep: about half the week left). Spend it only on moving rows:**
+  - one builder session only (lanes 2 and 3 run *after* lane 1 in the same session, unless the founder opens more)
+  - status comments of 10 lines or fewer, with no long narration
+  - don't re-run full suites locally when CI will run them
+  - read only the files the row needs
+  - batch fixes into one push
+  - don't re-explain the plan back
+  - if a task can wait for CI, wait with a scheduled check-in, not by exploring
 - **Never go idle while there's work (25 Sep).** Nothing outside this session can wake you. The watch and the CTO can only write in GitHub. So before you ever end a turn:
   1. Re-read the latest comments on #391 and the top of #280 (CTO orders and alerts land there).
   2. If the queue has an item you can work, start it now.
