@@ -137,7 +137,10 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 ## 6. Roles
 
-**From 25 Sep, the attacker is a separate Claude Code session** (`docs/ATTACKER.md`). Codex is out of capacity for the week and returns as an extra attacker when it's back. The CTO still attacks `switch` PRs whenever the attacker hasn't.
+**Lean verification (founder decision, 25 Sep): the builder's capacity comes first.**
+- **Every PR:** tests, the mouth ratchet, and, on `ready`/`switch`/`gate` PRs, the live replay gate. The gate's judge is an OpenAI model grading real tester journeys, which makes it independent of the Claude builder. It is the main check.
+- **Attacks only where a mistake reaches people or money:** `switch` PRs (testers meet the new coach) and `[harm]` PRs (payments, safety, data). **The CTO does these attacks.** Codex joins when it has capacity. No separate attacker session runs by default (`docs/ATTACKER.md` stays available).
+- **Real testers are the final attacker.** After each switch, the founder and testers use the bot; one-tap 👎 (#360) turns a bad reply into a gate case.
 
 
 | Who | Owns | Doesn't |

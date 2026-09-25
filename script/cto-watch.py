@@ -67,8 +67,15 @@ for p in open_prs:
     attacks = [c for c in human if _is_codex_review(c) and (sha[:7] in c["body"] or ts(c["created_at"]) >= head_since)]
     answers = [c for c in human if re.match(r"^[*_\s]*ANSWER", c["body"])]
     code_files = [f for f in api("GET", f"/pulls/{n}/files?per_page=100") if not (f["filename"].startswith("docs/") or f["filename"].endswith(".md"))]
+    needs_attack = any(l["name"] == "switch" for l in p["labels"]) or p["title"].startswith("[harm]")
     if not code_files:
         state = "docs only: no attack needed"
+        attack_ok_docs = True
+    elif not needs_attack:
+        # Lean verification (CTO, 25 Sep): only switch and harm PRs need an attack. Everything else is
+        # judged by the tests, the live replay gate (an OpenAI judge, independent of the Claude builder)
+        # and the mouth ratchet.
+        state = "no attack needed (tests + gate + ratchet)"
         attack_ok_docs = True
     else:
         attack_ok_docs = False
@@ -111,7 +118,7 @@ for p in open_prs:
     is_switch = any(l["name"] == "switch" for l in p["labels"])
     # A PR that moves real testers onto the new coach never merges on a timeout: it needs a real
     # Codex attack, answered, and a green replay gate. Quality where it touches testers most.
-    attack_ok = state.startswith("attack answered") or state.startswith("docs only") or (state.startswith("attack window passed") and not is_switch)
+    attack_ok = state.startswith("attack answered") or state.startswith("docs only") or state.startswith("no attack needed") or (state.startswith("attack window passed") and not is_switch)
     if is_switch and not any(r["name"] == "replay" and r["conclusion"] == "success" for r in runs):
         attack_ok = False
         state += " (switch: needs a green replay gate)"
@@ -160,7 +167,7 @@ today = [p for p in merged if ts(p["merged_at"]).date() == NOW.date()]
 last_merge = max((ts(p["merged_at"]) for p in merged), default=None)
 post_merge_pending = []
 for p in merged:
-    if not any(l["name"] == "attack:codex" for l in p["labels"]) or NOW - ts(p["merged_at"]) > dt.timedelta(days=2):
+    if not (p["title"].startswith("[harm]") or any(l["name"] == "switch" for l in p["labels"])) or NOW - ts(p["merged_at"]) > dt.timedelta(days=2):
         continue
     sha = p["head"]["sha"]
     pcs = api("GET", f"/issues/{p['number']}/comments?per_page=100")
