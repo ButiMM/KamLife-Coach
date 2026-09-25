@@ -13,7 +13,7 @@
  */
 import { and, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { db } from "../db";
-import { users, clientEvents, clientFacts } from "@shared/schema";
+import { users, clientEvents, clientFacts, clientUnderstanding } from "@shared/schema";
 
 export const FACT_KINDS = ["goal", "injury", "constraint", "schedule", "preference", "life_event"] as const;
 export type FactKind = typeof FACT_KINDS[number];
@@ -168,6 +168,72 @@ export async function factsForCoach(userId: string): Promise<string> {
   if (!rows.length) return "";
   return "WHAT THIS CLIENT HAS TOLD YOU (their own words; use it, never contradict it):\n"
     + rows.map(r => `- ${r.kind}: "${r.statement}"`).join("\n");
+}
+
+/**
+ * WHAT THE OLD COACH ALREADY KNEW (#414). The record starts on 24 Sep; a client who told the old
+ * coach about their knee, their night shifts or their dislikes weeks ago must not meet a new coach
+ * that knows none of it. Once per client, before the new coach first reads their facts, this copies
+ * the durable old stores into client_facts: the users profile (the same labels seed.ts has always
+ * given the old engine), the old engine's key facts and life story (client_understanding), and the
+ * high-importance memories. Deterministic: no model call. Each row says where it came from
+ * (extracted_by "backfill:<store>"), is dated at the client's sign-up so anything they tell the new
+ * coach is newer and wins, and is erased with the client by the users cascade. Held constraints are
+ * today-only states (sick today, food closed), not durable facts, so they are not copied.
+ */
+const BACKFILL_KIND: Array<[RegExp, FactKind]> = [
+  [/^injury/i, "injury"],
+  [/^(dietary restriction|medical|do not mention|won't eat)/i, "constraint"],
+  [/^work pattern/i, "schedule"],
+  [/^(their staple foods|food budget)/i, "preference"],
+];
+const backfilled = new Set<string>();
+export function _resetBackfillCache(): void { backfilled.clear(); }
+
+export async function backfillFromOldStores(user: any): Promise<number> {
+  if (!user?.id || backfilled.has(user.id)) return 0;
+  const { keyFactsFromUser } = await import("../understanding/seed");
+  const found: Array<{ kind: FactKind; subject: string; statement: string; store: string }> = [];
+  for (const line of keyFactsFromUser(user)) {
+    const label = line.split(":")[0].trim().toLowerCase();
+    // Goal and training setup are settings the snapshot already gives the coach, and they have
+    // column defaults ("trains: home"): copying them would record something the client never said.
+    if (label === "goal" || label === "trains") continue;
+    found.push({ kind: BACKFILL_KIND.find(([re]) => re.test(label))?.[1] ?? "life_event", subject: label, statement: line, store: "users" });
+  }
+  const [cu] = await db.select({ profile: clientUnderstanding.profile }).from(clientUnderstanding).where(eq(clientUnderstanding.userId, user.id)).limit(1);
+  const profile: any = cu?.profile || {};
+  if (typeof profile.lifeStory === "string" && profile.lifeStory.trim()) found.push({ kind: "life_event", subject: "life story", statement: profile.lifeStory.trim().slice(0, 400), store: "client_understanding" });
+  for (const k of Array.isArray(profile.keyFacts) ? profile.keyFacts : []) {
+    if (typeof k === "string" && k.trim()) found.push({ kind: "life_event", subject: k.trim().toLowerCase().split(/\s+/).slice(0, 4).join(" "), statement: k.trim().slice(0, 300), store: "client_understanding" });
+  }
+  try { // memories is created by initMemoryTable at boot; a database without it has nothing to copy
+    const r = await db.execute(sql`SELECT content, category FROM memories WHERE phone = ${user.phoneNumber} AND importance >= 4 ORDER BY created_at DESC LIMIT 20`);
+    for (const m of ((r as any).rows || []) as Array<{ content: string; category: string }>) {
+      if (m.content?.trim()) found.push({ kind: m.category === "medical" ? "constraint" : m.category === "preference" ? "preference" : "life_event", subject: `memory: ${m.category}`, statement: m.content.trim().slice(0, 300), store: "memories" });
+    }
+  } catch { /* no memories table */ }
+  const since = user.createdAt ? new Date(user.createdAt) : new Date(Date.now() - 365 * 24 * 3600_000);
+  let written = 0;
+  await db.transaction(async tx => {
+    // One copy per client, even when two turns arrive at once.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${"backfill:" + user.id}))`);
+    const [done] = await tx.select({ n: sql<number>`count(*)::int` }).from(clientFacts)
+      .where(and(eq(clientFacts.userId, user.id), sql`${clientFacts.extractedBy} LIKE 'backfill:%'`));
+    if ((done?.n ?? 0) > 0) return;
+    const seen = new Set<string>();
+    for (const f of found) {
+      const key = norm(f.statement.replace(/^[^:]{1,40}:\s*/, ""));
+      if (!key || seen.has(key)) continue; // client_understanding was seeded from the same users fields
+      seen.add(key);
+      await tx.insert(clientFacts).values({ userId: user.id, kind: f.kind, subject: f.subject, statement: f.statement,
+        validFrom: since, createdAt: since, extractedBy: `backfill:${f.store}` });
+      written++;
+    }
+  });
+  backfilled.add(user.id);
+  if (written) console.log(`[RECORD] backfilled ${written} fact(s) from the old stores for ...${String(user.phoneNumber || "").slice(-6)}`);
+  return written;
 }
 
 /** A voice note's transcript, as the turn recorded it (turn_ledger), waited for briefly. */

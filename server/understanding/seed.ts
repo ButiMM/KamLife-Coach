@@ -35,7 +35,7 @@ function statsFromSnapshot(snapshot?: string): Partial<UnderstandingState["stats
   return out;
 }
 
-function keyFactsFromUser(user: any): string[] {
+export function keyFactsFromUser(user: any): string[] {
   const facts: string[] = [];
   const inj = (user?.injuries || "").trim();
   if (inj && inj.toLowerCase() !== "none") facts.push(`injury/limitation: ${inj}`);
