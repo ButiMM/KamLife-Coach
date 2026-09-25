@@ -138,6 +138,8 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 ## 6. Roles
 
+**Grok (independent reviewer, fixed rhythm):** a daily product review at ~07:00, plus a switch review whenever a `switch` PR opens. Prompts and rhythm are in `docs/GROK.md`. The CTO triages every review into the three piles and files the gaps onto `COVERAGE.md` rows.
+
 **Lean verification (founder decision, 25 Sep): the builder's capacity comes first.**
 - **Every PR:** tests, the mouth ratchet, and, on `ready`/`switch`/`gate` PRs, the live replay gate. The gate's judge is an OpenAI model grading real tester journeys, which makes it independent of the Claude builder. It is the main check.
 - **Attacks only where a mistake reaches people or money:** `switch` PRs (testers meet the new coach) and `[harm]` PRs (payments, safety, data). **The CTO does these attacks.** Codex joins when it has capacity. No separate attacker session runs by default (`docs/ATTACKER.md` stays available).

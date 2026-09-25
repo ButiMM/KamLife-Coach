@@ -59,6 +59,10 @@ The full list of names and code defaults is in the outgoing CTO's handover (22-2
 - ✅ `COACH_ALERT_PHONE` is set to the founder's own number (confirmed 25 Sep). Don't ask again.
 - `COACH_DASHBOARD_KEY` is a long random value.
 
+## Reviewers
+
+Grok reviews on a fixed rhythm (`docs/GROK.md`): daily at ~07:00, and on every `switch` PR. Codex is out of capacity this week.
+
 ## Where the plan lives
 
 `docs/ORDERS.md` (the plan), `docs/QUEUE.md` (the order of work), `docs/FINDINGS.md` (every review finding, mapped to an issue), `docs/RISKS.md` (risk register), issue #280 (live status).
