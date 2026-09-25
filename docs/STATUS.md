@@ -33,3 +33,10 @@ One line per merged PR: `HH:MM SAST · agent · PR # · what changed · gate bef
 25 Sep 06:09 · Claude Code · #403 · Gate: action grading counts actions and checks their food, slot, day and numbers (Codex on #399) · tests green; gate NOT TESTED (no CI credits) · +73 / −22
 25 Sep 06:12 · Claude Code · #401 · /health says whether the coach's AI calls succeed; the watch alerts the founder when they fail (closes #397) · tests green · +128 / −1
 25 Sep 06:15 · Claude Code · #405 · Tests run at midday SAST whatever the hour: production-parity, log-turn, thin-evidence and food-identity stop failing after midnight (part of #404; meal-decline still clock-sensitive) · tests green · +29 / −0
+25 Sep 07:08 · Claude Code · #406 · Gate: wave-1 rows A10, A11, A16, A17 reach five cases each, one per row not in English · tests green · +162 / −5
+25 Sep 07:39 · Claude Code · #387 · Gate: a POPIA deletion must also erase the client record and the shadow log (#368) · tests green · +6 / −0
+25 Sep 08:23 · Claude Code · #393 · The new coach proposes actions in shadow: recorded, validated, never performed; includes #408 (CORRECT_MEAL, LOG_WORKOUT, SET_GOAL) · tests green; gate NOT RUN (workflow invalid, fixed by #428) · +201 / −9
+25 Sep 11:43 · Claude Code · #428 · The replay gate runs again: one env block, and a red test for any invalid workflow · tests green · +17 / −1
+25 Sep 12:55 · Claude Code · #430 · The new coach's shadow keeps the scope floor in front (A17) · tests green · +27 / −5
+25 Sep 13:59 · Claude Code · #426 · The new coach knows what the client told the old one: client record backfilled from the users profile (#414) · tests green; gate green · +223 / −7
+25 Sep 17:16 · Claude Code · #444 · New coach: no reply without understanding (#421); its numbers come from the day ledger (#422) · tests green; gate green · +79 / −7

@@ -16,8 +16,8 @@
 1. [x] Rebuild this queue from the waves (this PR).
 2. [x] #397 `/health` reports whether AI calls are succeeding (D8, D11) (#401, merged 25 Sep 06:12)
 3. [x] Label #393 and #387 `ready`, so the gate grades them once credits are back (done 24 Sep 21:05)
-4. [ ] Wave-1 gate cases: A10, A11, A16 and A17 up to **5+ each** (A17 and A11 first; any row at 0 gets cases first)
-5. [ ] When credits are back: the 3-run head-to-head on wave 1, then the first `switch` PR (the CTO attacks if Codex is out)
+4. [x] Wave-1 gate cases: A10, A11, A16 and A17 up to **5+ each** (#406, merged 25 Sep 07:08)
+5. [ ] When credits are back: the 3-run head-to-head on wave 1, then the first `switch` PR (the CTO attacks if Codex is out). Switch PR #445 open: founder first behind `CORE_WAVE1`
 
 ## Live harm (always first)
 
@@ -25,7 +25,8 @@
 
 ## Before the first switch (blocking)
 
-- [ ] #414 Backfill the client record from the old stores, so existing clients' history reaches the new coach. **No `switch` PR merges before this.**
+- [x] #414 Backfill the client record from the old stores (#426, merged 25 Sep 13:59: users profile only; the capped chat-history pass is still open on #414)
+- [x] #421 No new-coach reply without understanding; #422 its numbers come from the day ledger (#444, merged 25 Sep 17:16)
 
 ## Wave 1: talk (reply only, no writes). The new core already does this
 
@@ -39,9 +40,9 @@
 
 ## Wave 2: do (validated actions → `understanding/executor.ts` → graded on stored state)
 
-- [ ] #393 The new core proposes validated actions, in shadow (the foundation for this wave; runs in parallel with wave 1)
+- [x] #393 The new core proposes validated actions, in shadow (merged 25 Sep 08:23) (the foundation for this wave; runs in parallel with wave 1)
 - [x] #399 The gate grades the new core's proposed actions against each case's expected actions (#399; food, slot, day and numbers checked since #403)
-- [ ] Missing action types: `CORRECT_MEAL` (A2), workout done (A8), `SET_GOAL` (A12)
+- [x] Missing action types: `CORRECT_MEAL` (A2), workout done (A8), `SET_GOAL` (A12) (#408, merged with #393; validated and recorded, not yet performed)
 - Rows: A1, A2, A5, A6, A7 (words), A8, A12, A14, A15. Gate cases already written for A1/A2: #324 multi-day, #325 post-midnight, #326 same meal, #292/#300 corrections, #310 portions.
 
 ## Wave 3: see and hear
