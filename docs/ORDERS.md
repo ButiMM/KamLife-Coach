@@ -137,6 +137,9 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 ## 6. Roles
 
+**From 25 Sep, the attacker is a separate Claude Code session** (`docs/ATTACKER.md`). Codex is out of capacity for the week and returns as an extra attacker when it's back. The CTO still attacks `switch` PRs whenever the attacker hasn't.
+
+
 | Who | Owns | Doesn't |
 |---|---|---|
 | **Claude Code** | All building: every `harm` and `core` issue, the merge and the deploy path. | Review its own PRs as independent. Merge a PR before Codex has attacked it. |
