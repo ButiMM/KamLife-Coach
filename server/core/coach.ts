@@ -69,6 +69,7 @@ export async function readPreTurn(phone: string): Promise<PreTurn | null> {
   if (!u || u.onboardingState !== "COMPLETE") return null; // onboarding is its own journey, not this composer's yet
   const { factsForCoach, knownFacts, backfillFromOldStores } = await import("./client-record");
   await backfillFromOldStores(u).catch(e => console.warn("[RECORD] backfill skipped:", (e as Error).message)); // #414: before the first read
+  void learnFromHistory(u.id); // #414: what they said in chat, in the background; the next turn reads it
   const [facts, known, numbers, turns] = await Promise.all([
     factsForCoach(u.id).catch(() => ""),
     knownFacts(u.id).catch(() => "KNOWN FACTS: none"),
@@ -110,12 +111,12 @@ export type Understanding = { family: string; wants: string; one_question: strin
  * it states for their record (#271). `raw` is that call's whole JSON answer; the record validates its
  * "facts" (client-record.ts applyFacts) — the model proposes, code decides what is stored.
  */
-export async function understand(openai: OpenAI, message: string, known = "KNOWN FACTS: none"): Promise<{ u: Understanding | null; raw: string }> {
+export async function understand(openai: OpenAI, message: string, known = "KNOWN FACTS: none", cap = 1500): Promise<{ u: Understanding | null; raw: string }> {
   assertAiOnline("core_understand");
   const { FACTS_INSTRUCTIONS } = await import("./client-record");
   const r = await openai.chat.completions.create({
     model: CORE_MODEL, temperature: 0, max_tokens: 500, response_format: { type: "json_object" },
-    messages: [{ role: "system", content: `${UNDERSTAND_SYSTEM}\n\n${FACTS_INSTRUCTIONS}\n\n${known}` }, { role: "user", content: message.slice(0, 1500) }],
+    messages: [{ role: "system", content: `${UNDERSTAND_SYSTEM}\n\n${FACTS_INSTRUCTIONS}\n\n${known}` }, { role: "user", content: message.slice(0, cap) }],
   });
   const raw = r.choices[0]?.message?.content || "{}";
   try {
@@ -161,6 +162,30 @@ async function openaiClient(): Promise<OpenAI> {
     client = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY });
   }
   return client;
+}
+
+/**
+ * THEIR EARLIER MESSAGES, READ ONCE (#414). The same understanding call, over the client's recent
+ * messages as one block; client-record writeHistoryFacts keeps only verbatim, own-voice facts. One call
+ * per client per process at most, none when there is no history or it was already learned. Never throws.
+ */
+const historyTried = new Set<string>();
+export function _resetHistoryTried(): void { historyTried.clear(); }
+export async function learnFromHistory(userId: string): Promise<number> {
+  if (historyTried.has(userId)) return 0;
+  historyTried.add(userId);
+  try {
+    const rec = await import("./client-record");
+    const msgs = await rec.historyToLearn(userId);
+    if (!msgs.length) return 0;
+    const block = `EARLIER MESSAGES FROM THIS CLIENT, oldest first, one per line. Read them together and list the durable facts they state about themselves:\n${msgs.map(m => m.text.replace(/\s+/g, " ")).join("\n")}`;
+    const read = await understand(await openaiClient(), block, "KNOWN FACTS: none", 6000);
+    return await rec.writeHistoryFacts(userId, read.raw, msgs);
+  } catch (e) {
+    historyTried.delete(userId); // an outage is not an answer: try again on a later turn
+    console.warn("[RECORD] history skipped:", (e as Error)?.message || e);
+    return 0;
+  }
 }
 
 /** Run the new coach beside the old one and store what it would have said. Never throws, never sends. */
