@@ -173,6 +173,8 @@ Every one of the rows in `docs/COVERAGE.md` goes to the new coach under the swit
 - **Measurement is width-first for everyone:** every row has cases and a score by Sun 27 Sep (#433).
 - If only one builder session is running, it works lane 1, then 2, then 3, in that order, and never parks a row as "later".
 
+**Reuse is mandatory (25 Sep):** the new coach is a thin brain (`server/core/`, 359 lines today) on top of the existing product. About 51,000 of the 74,000 server lines are kept or reused (`docs/COMPONENTS.md` §1-2); about 22,000 are replaced. Every switch PR must show which existing tools its rows call (food data, targets, day ledger, meal plans, programmes, actions and executor, outcomes, safety and medication rules). A new module that re-implements any of them is rejected. The watch shows how many tools the new coach reuses.
+
 **Measure width-first, build wave by wave (CTO, 25 Sep):** every `COVERAGE.md` row gets gate cases and a score within 48 hours, so no part of the product is invisible (see the full-product scoreboard issue). Switching still goes one wave at a time. Live scoring of real conversations (#293) comes straight after the wave-1 switch.
 
 **Focus until the first switch (CTO, after the Grok review, 25 Sep):** wave 1 only. Finish #414, #421, #422, then the wave-1 head-to-head and **one** switch PR that deletes wave 1's old speakers. Already-built wave-2 PRs may merge, but no new wave-2 work starts until wave 1 has switched.
