@@ -1,6 +1,7 @@
 # KamLife Coach — Claude Code Instructions
 
 ## Standing orders (read first, every session)
+- **Two roles share this file.** If this session was started as the **attacker**, follow `docs/ATTACKER.md` only: never build, fix or merge. Otherwise you are the **builder**, and everything below applies. Since 25 Sep, attacks come from the attacker session (Codex is out for the week). Treat its `ATTACK @` comments exactly like Codex's.
 - **The product is the goal (`docs/ORDERS.md` §0, founder 24 Sep night).**
   - Pick work from `docs/COVERAGE.md`: live harm first, then the least complete row with the most tester impact.
   - Every PR description carries `Coverage row:` and `Reuses:` lines.

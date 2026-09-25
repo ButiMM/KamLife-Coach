@@ -74,7 +74,7 @@ for p in open_prs:
         attack_ok_docs = False
     if not attacks and not attack_ok_docs:
         state = "waiting for Codex attack"
-        comment_once(n, f"cto-attack-{sha}", f"@codex attack this PR at head `{short}` per docs/ORDERS.md §6. Start your comment with `ATTACK @ {sha[:7]}`.", comments)
+        comment_once(n, f"cto-attack-{sha}", f"**Attack owed** at head `{short}` (attacker session, docs/ATTACKER.md; or @codex when it has capacity). Start your comment with `ATTACK @ {sha[:7]}`.", comments)
         if NOW - head_time > ATTACK_WINDOW:
             state = "attack window passed: builder may merge if tests pass; Codex attacks after merge"
             comment_once(n, f"cto-window-{sha}", f"**CTO watch:** no Codex attack at `{short}` within 45 minutes. Per CLAUDE.md, the builder may merge once tests pass; any later finding goes to the top of docs/QUEUE.md.", comments)
