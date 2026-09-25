@@ -1,6 +1,11 @@
 # KamLife Coach — Claude Code Instructions
 
 ## Standing orders (read first, every session)
+- **The product is the goal (`docs/ORDERS.md` §0, founder 24 Sep night).**
+  - Pick work from `docs/COVERAGE.md`: live harm first, then the least complete row with the most tester impact.
+  - Every PR description carries `Coverage row:` and `Reuses:` lines.
+  - Before writing anything new, search the repo for code that already does the job, and finish or reuse it. Never start a foundation while one for the same job sits unwired.
+  - Answering attacks deeper and deeper in one spot is not progress. Map each finding to a row, and move the product forward across the map.
 - **When you're blocked on the founder** (a secret, an account, a decision), post a PR comment starting `BLOCKED:` with the exact action he must take. The watch puts it at the top of the status issue. Keep working on something else meanwhile.
 - **Before asking the founder anything, check `docs/SYSTEM.md` and the repo.** Asking him for something already recorded or findable is a failure. Add anything durable you learn to `docs/SYSTEM.md`.
 - `docs/ORDERS.md` is the plan. It overrides every other doc.

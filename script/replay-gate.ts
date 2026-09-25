@@ -144,7 +144,9 @@ const defOf = (k: ReplayCase, c: Check) =>
   sha(JSON.stringify({ newClient: k.newClient ?? false, seed: k.seed ?? null, before: k.before ?? [], turns: k.turns, check: c }));
 type CaseResult = { id: string; journey: Journey; heldOut: boolean; checks: CheckResult[]; hardPass: boolean; score: number | null; verdict: string; bodies: string[]; neverSeen: string[];
   /** The new coach in shadow: its would-be replies, graded on the reply checks, the never-see list and the judge. */
-  core: { replyPass: boolean; score: number | null; neverSeen: string[] } | null };
+  core: { replyPass: boolean; score: number | null; neverSeen: string[]; failing: string[];
+    /** The actions the new core proposed across the graded turns, and whether they meet the case's `actions` (null: none set). */
+    proposed: string[]; actionPass: boolean | null } | null };
 
 const lastShadowId = async () => Number((await pool.query("SELECT COALESCE(MAX(id),0) m FROM shadow_replies")).rows[0].m);
 async function bodyAfter(phone: string, since: number): Promise<string> {
@@ -166,6 +168,13 @@ async function coreReplyFor(sid: string): Promise<string | null> {
     await new Promise(res => setTimeout(res, 500));
   }
   return null;
+}
+/** The action types the new core proposed for this turn (#391), or null when it did not run. */
+async function coreActionsFor(sid: string): Promise<string[] | null> {
+  try {
+    const r = (await pool.query<{ a: any }>("SELECT understanding->'actions' a FROM core_shadow WHERE root_id = $1 LIMIT 1", [sid])).rows[0];
+    return r ? (Array.isArray(r.a) ? r.a.map((x: any) => String(x?.type)) : []) : null;
+  } catch { return null; }
 }
 const replyMs: number[] = []; // every turn, before-turns included: the client waits for all of them
 async function turn(phone: string, text: string, sid: string): Promise<string> {
@@ -232,9 +241,11 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
   for (const [i, t] of (k.before || []).entries()) await turn(phone, t, `RP${n}b${i}`);
   const bodies: string[] = [];
   const coreBodies: Array<string | null> = [];
+  const coreActions: Array<string[] | null> = [];
   for (const [i, t] of k.turns.entries()) {
     bodies.push(await turn(phone, t, `RP${n}t${i}`));
     coreBodies.push(await coreReplyFor(`RP${n}t${i}`));
+    coreActions.push(await coreActionsFor(`RP${n}t${i}`));
   }
   // A stranger's row is created by the front door; read it back so the checks and the judge see it.
   const userId: string = u?.id ?? (await pool.query("SELECT id FROM users WHERE phone_number = $1", [phone])).rows[0]?.id ?? "00000000-0000-0000-0000-000000000000";
@@ -249,7 +260,14 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
     const replyChecks: CheckResult[] = [];
     for (const c of k.checks.filter(c => c.kind !== "sql")) replyChecks.push(await runCheck(c, userId, phone, cb));
     const j = await judge(k, userId, cb);
-    core = { replyPass: replyChecks.filter(c => c.invariant).every(c => c.pass), score: j.score,
+    // WHAT IT WOULD DO (#391): the proposed actions against the case's expectation.
+    const proposed = [...new Set(coreActions.flatMap(a => a ?? []))];
+    const missing = (k.actions?.expect ?? []).filter(t => !proposed.includes(t));
+    const forbidden = (k.actions?.forbid ?? []).filter(t => proposed.includes(t));
+    const actionPass = k.actions ? missing.length === 0 && forbidden.length === 0 : null;
+    core = { replyPass: replyChecks.filter(c => c.invariant).every(c => c.pass), score: j.score, proposed, actionPass,
+      failing: [...replyChecks.filter(c => !c.pass).map(c => `${c.invariant ? "**" + c.invariant + "**: " : ""}${c.what}`),
+        ...missing.map(t => `action: would not ${t}`), ...forbidden.map(t => `action: would wrongly ${t}`)],
       neverSeen: NEVER_SEE.filter(nv => cb.some(b => new RegExp(nv.pattern, nv.flags ?? "").test(b))).map(nv => nv.what) };
   }
   return { id: k.id, journey: k.journey, heldOut: isHeldOut, checks, hardPass: checks.filter(c => c.invariant).every(c => c.pass), score, verdict, bodies, neverSeen, core };
@@ -279,7 +297,9 @@ const journeys = (Object.keys(JOURNEYS).map(Number) as Journey[]).map(j => {
     neverSee: rs.reduce((a, r) => a + r.neverSeen.length, 0),
     core: (() => {
       const cs = rs.filter(r => r.core); const cscored = cs.filter(r => r.core!.score !== null);
+      const graded = cs.filter(r => r.core!.actionPass !== null);
       return cs.length ? { cases: cs.length, replyPass: cs.filter(r => r.core!.replyPass).length,
+        actionCases: graded.length, actionPass: graded.filter(r => r.core!.actionPass).length,
         meanScore: cscored.length ? Math.round(cscored.reduce((a, r) => a + (r.core!.score as number), 0) / cscored.length * 10) / 10 : null,
         neverSee: cs.reduce((a, r) => a + r.core!.neverSeen.length, 0) } : null;
     })() };
@@ -348,14 +368,16 @@ lines.push(`**${results.length} cases** (${heldOut.length} held out, source: ${h
 lines.push(regressions.length ? `### ❌ ${regressions.length} regression(s) against the main baseline\n${regressions.map(r => `- ${r}`).join("\n")}` : baseline ? "### ✅ No hard invariant regressed against the main baseline" : "");
 const baseJ = new Map(((baseline?.journeys || []) as typeof journeys).map(j => [j.journey, j]));
 lines.push("", "### Journeys (docs/TESTER-EXPERIENCE.md)", "| journey | cases | hard pass | score | main | never-see | new coach (shadow) |", "|---|---|---|---|---|---|---|");
-for (const j of journeys) lines.push(`| ${j.journey}. ${j.name} | ${j.cases} | ${j.hardPass}/${j.cases} | ${j.meanScore ?? "–"} | ${baseJ.get(j.journey)?.meanScore ?? "–"} | ${j.neverSee} | ${j.core ? `${j.core.meanScore ?? "–"} · reply checks ${j.core.replyPass}/${j.core.cases} · never-see ${j.core.neverSee}` : "–"} |`);
+for (const j of journeys) lines.push(`| ${j.journey}. ${j.name} | ${j.cases} | ${j.hardPass}/${j.cases} | ${j.meanScore ?? "–"} | ${baseJ.get(j.journey)?.meanScore ?? "–"} | ${j.neverSee} | ${j.core ? `${j.core.meanScore ?? "–"} · reply checks ${j.core.replyPass}/${j.core.cases}${j.core.actionCases ? ` · actions ${j.core.actionPass}/${j.core.actionCases}` : ""} · never-see ${j.core.neverSee}` : "–"} |`);
 lines.push("", `**Reply time** mean ${replyTime.meanS ?? "–"} s, p90 ${replyTime.p90S ?? "–"} s (target ~8 s) · **model cost** R${costPerMessageZar ?? "–"} per message (target ≤ R0.10)${baseline?.costPerMessageZar != null ? ` · main R${baseline.costPerMessageZar}` : ""}`);
-lines.push("", "| case | journey | hard | score | failing checks | never-see |", "|---|---|---|---|---|---|");
+// The new coach per case (#359): its score and the reply checks it fails, so a switch can be judged case by case.
+lines.push("", "| case | journey | hard | score | failing checks | never-see | new coach (shadow) |", "|---|---|---|---|---|---|---|");
 for (const r of results.filter(x => !x.heldOut)) {
   const bad = r.checks.filter(c => !c.pass).map(c => `${c.invariant ? "**" + c.invariant + "**: " : ""}${c.what}`).join("; ");
-  lines.push(`| ${r.id} | ${r.journey} | ${r.hardPass ? "pass" : "FAIL"} | ${r.score ?? "–"} | ${bad || ""} | ${r.neverSeen.join("; ")} |`);
+  const core = r.core ? [r.core.score ?? "–", ...r.core.failing, ...r.core.neverSeen.map(n => `never-see: ${n}`)].join(" · ") : "–";
+  lines.push(`| ${r.id} | ${r.journey} | ${r.hardPass ? "pass" : "FAIL"} | ${r.score ?? "–"} | ${bad || ""} | ${r.neverSeen.join("; ")} | ${core} |`);
 }
-if (heldOut.length) lines.push(`| held-out ×${heldOut.length} | – | ${results.filter(r => r.heldOut && r.hardPass).length}/${heldOut.length} pass | – | (inputs not shown) | ${results.filter(r => r.heldOut).reduce((a, r) => a + r.neverSeen.length, 0)} |`);
+if (heldOut.length) lines.push(`| held-out ×${heldOut.length} | – | ${results.filter(r => r.heldOut && r.hardPass).length}/${heldOut.length} pass | – | (inputs not shown) | ${results.filter(r => r.heldOut).reduce((a, r) => a + r.neverSeen.length, 0)} | – |`);
 const report = lines.join("\n");
 REAL(report);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + "\n");

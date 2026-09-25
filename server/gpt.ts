@@ -10,12 +10,12 @@ import { calculateTargets } from "./targets";
 import { getDisplayName, sastDayStart, findFabricatedComposites, findUngroundedFoodItems } from "./utils";
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
-import { verifyBrainReply } from "./brain/reply-verifier";
+import { verifyBrainReply, COACH_OUT_OF_CREDITS_REPLY } from "./brain/reply-verifier";
 import { weightInContextLine } from "./weight-context";
 import { getWeightTruth, sastDayBucketSql, readTrustedStepDays } from "./day-ledger";
 import { captureQualitySignal } from "./quality-signals";
 import { verifyMealEstimate } from "./verifiers/meal-verifier";
-import { assertAiOnline, isAiOfflineError } from "./ai-offline";
+import { assertAiOnline, isAiOfflineError, isQuotaExhausted, shouldAlertAiDown } from "./ai-offline";
 import type { VoiceEmotion } from "./elevenlabs";
 
 // ============================================================
@@ -49,7 +49,7 @@ async function withOpenAIRetry<T>(fn: () => Promise<T>, label = "openai"): Promi
       } catch (err: any) {
         const status = err?.status ?? err?.statusCode ?? 0;
         const msg = (err?.message ?? "").toLowerCase();
-        const isRateLimit = status === 429 || msg.includes("rate limit") || msg.includes("quota");
+        const isRateLimit = (status === 429 || msg.includes("rate limit") || msg.includes("quota")) && !isQuotaExhausted(err);
         if (!isRateLimit || attempt === MAX_RETRIES) throw err;
         const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
         console.warn(`[${label}] rate-limited — retry ${attempt + 1}/${MAX_RETRIES} in ${delayMs}ms`);
@@ -1128,15 +1128,17 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
     const code = err?.code ?? "";
     const msg = err?.message ?? "";
 
-    if (status === 401 || code === 401 || msg.includes("401")) {
-      console.error("[GPT] OpenAI auth error (401) — check OPENAI_API_KEY env var:", msg);
-      // Alert coach via SMS if configured
+    const noCredits = isQuotaExhausted(err); // #395: an empty balance is a 429 that never clears
+    if (noCredits || status === 401 || code === 401 || msg.includes("401")) {
+      console.error(noCredits ? "[GPT] OpenAI has no credits left (#395):" : "[GPT] OpenAI auth error (401) — check OPENAI_API_KEY env var:", msg);
+      // Alert the founder, at most once an hour: neither a dead key nor an empty balance fixes itself.
       const alertPhone = process.env.COACH_ALERT_PHONE;
-      if (alertPhone) {
+      if (alertPhone && shouldAlertAiDown()) {
         import("./scheduler/shared").then(({ sendCriticalAlert }) => {
-          sendCriticalAlert(alertPhone, `[KamLife] OpenAI API key invalid or expired (401). GPT is down. Check OPENAI_API_KEY in Railway.`).catch(e => console.error("[CRITICAL_ALERT_SEND]", e?.message || e));
+          sendCriticalAlert(alertPhone, noCredits ? `[KamLife] OpenAI has NO CREDITS left. Coaching replies are down until credits are added: platform.openai.com/settings/organization/billing` : `[KamLife] OpenAI API key invalid or expired (401). GPT is down. Check OPENAI_API_KEY in Railway.`).catch(e => console.error("[CRITICAL_ALERT_SEND]", e?.message || e));
         }).catch(e => console.error("[CRITICAL_ALERT_IMPORT]", e?.message || e));
       }
+      if (noCredits) return COACH_OUT_OF_CREDITS_REPLY;
       return "I'm having a technical issue on my end — give me a few minutes and try again. Your programme and targets are all saved.";
     }
     if (status === 429 || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("quota")) {
