@@ -51,7 +51,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
   }
   else if (body.includes("You are Coach K, a warm, direct South African")) { composerRequests.push(body); content = `Great question. ${SENTINEL} One move today.`; }
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
-  else if (body.includes("domain gate")) content = "YES";
+  else if (body.includes("domain gate")) content = /homework/i.test(body) ? "NO" : "YES"; // the scope classifier declines homework
   if (url.includes("/embeddings")) {
     return new Response(JSON.stringify({ object: "list", data: [{ object: "embedding", index: 0, embedding: Array(1536).fill(0) }], model: "stub", usage: { prompt_tokens: 1, total_tokens: 1 } }), { status: 200, headers: { "content-type": "application/json" } });
   }
@@ -143,6 +143,19 @@ const s3acts = ((await q("SELECT understanding FROM core_shadow WHERE root_id = 
 chk(s3acts.some(a => a.type === "LOG_WEIGHT" && a.kg === 70) && String(after.current_weight) === "92",
   "a proposed action is recorded, never performed: the shadow's LOG_WEIGHT 70 leaves the weight at 92", JSON.stringify({ s3acts, w: after.current_weight }));
 chk((await q("SELECT count(*)::int n FROM meal_logs WHERE user_id = $1", [u.id]))[0].n === meals0, "no ledger row is written by a question turn");
+
+REAL("\n3b. THE SCOPE FLOOR STAYS IN FRONT (COVERAGE A17): a turn the old path declined for scope is not composed");
+const composed0 = composerRequests.length;
+const s3b = await say(u.phoneNumber, "Can you help me with my maths homework tonight?");
+await settle(async () => (await q("SELECT 1 FROM core_shadow WHERE root_id = $1", [s3b])).length > 0);
+const scopedRow = (await q("SELECT reply, understanding FROM core_shadow WHERE root_id = $1", [s3b]))[0];
+const decline = (await q("SELECT message_out FROM chat_history WHERE user_id = $1 AND intent = 'DOMAIN_REDIRECT' ORDER BY created_at DESC LIMIT 1", [u.id]))[0]?.message_out;
+chk(!!decline && scopedRow?.reply === decline, "the shadow records the old path's own scope decline, word for word", JSON.stringify({ decline, reply: scopedRow?.reply }));
+chk(composerRequests.length === composed0 && !String(scopedRow?.reply).includes(SENTINEL), "the composer is not asked to answer an out-of-scope ask");
+chk(scopedRow?.understanding?.floor === "scope", "the row says a floor answered, so the gate can tell", JSON.stringify(scopedRow?.understanding));
+const s3c = await say(u.phoneNumber, "What should I have for lunch tomorrow?");
+await settle(async () => (await q("SELECT 1 FROM core_shadow WHERE root_id = $1", [s3c])).length > 0);
+chk(String((await q("SELECT reply FROM core_shadow WHERE root_id = $1", [s3c]))[0]?.reply).includes(SENTINEL), "CONTROL: the next in-scope turn is composed as usual");
 
 REAL("\n4. OFF UNLESS SWITCHED ON");
 process.env.CORE_SHADOW = "off";
