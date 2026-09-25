@@ -26,7 +26,7 @@ The new coach (`server/core/`) **calls these**. It never re-implements them, and
 | Meal plans and shopping | `meal-plan.ts`, `onboarding-meal-plan.ts`, `shopping-lists.ts`, `grocery-personalize.ts` |
 | Training | `programme.ts`, `exercise-variants.ts`, `exercise-media.ts`, `workout-feedback.ts` |
 | Vision (plate, equipment, physique) | `handlers/food-scanner.ts`, `handlers/equipment-vision.ts`, `physique-analysis.ts`: consolidate behind one vision tool |
-| Actions (the new coach's hands) | `understanding/actions.ts` (the `CoachAction` contract and `validateActions`, the permission gate), `understanding/executor.ts` (performs them). Written in July and never wired to the new core; wiring them is ORDERS §0.3 |
+| Actions (the new coach's hands). **Kept, not deleted** (Grok review 25 Sep: this row and §3 contradicted each other) | `understanding/actions.ts` (the `CoachAction` contract and `validateActions`, the permission gate), `understanding/executor.ts` (performs them). Written in July and never wired to the new core; wiring them is ORDERS §0.3 |
 | Voice | speech-to-text plus `understanding/sa-transcript.ts` (cleaner), `elevenlabs.ts` |
 | Progress and outcomes | `outcomes.ts`, `progress-score.ts`, `trajectory.ts`, `weekly-recap.ts`, `hunger-evidence.ts` |
 | Education content | `education.ts` |
@@ -41,7 +41,7 @@ The new coach (`server/core/`) **calls these**. It never re-implements them, and
 | Reply text in `handlers/weight.ts`, `steps.ts`, `water.ts`, `workout.ts`, `media.ts` | composer (their ledger writes stay) | #272 switch PRs |
 | `gpt.ts` (`askCoachK`, the intent classifier, `selectModel`) | `core/coach.ts` | the last #272 switch |
 | `one-action.ts`, `scheduler/proactive-decision.ts` | one decision authority in the core | #272 / #319 |
-| Old Meaning Engine: `understanding/live.ts`, `meaning-engine.ts`, `perception.ts`, `actions.ts`, `executor.ts`, `messy-intake.ts`, `reentry.ts` | `core/coach.ts` | the last #272 switch |
+| Old Meaning Engine: `understanding/live.ts`, `meaning-engine.ts`, `perception.ts`, `messy-intake.ts`, `reentry.ts` | `core/coach.ts` | the last #272 switch |
 | `brain/coach-brain.ts`, `brain/client-snapshot.ts`, `brain/reply-verifier.ts` | core composer + client record | #272 |
 | Memory stores: `memory.ts` (six regex fields), `portion-memory.ts`, `held-constraints.ts`, `life-context.ts`, `health-state.ts`, `intelligence/profile.ts`, `client_understanding` | the client record (#271): one store | #272, as reads move |
 | `coach-prompt.ts` (69k characters, sliced) | a short core prompt plus doctrine selected per turn | #320 |

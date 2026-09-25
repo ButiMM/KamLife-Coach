@@ -133,3 +133,11 @@ This is the whole-product plan. A wave starts when the one before it has switche
 | **6. Foundation cleanup** | D2, D3, D4, D5, D9, D10 | the 9 stores collapse to 1, one schema, a restore drill, docs, delete list at 0 | What's left once nothing reads the old stores |
 
 Rows D1, D6, D7, D8 and D11 run alongside every wave.
+
+## Rows added after the Grok review (25 Sep), #423
+
+| Row | Capability | Today | Must be |
+|---|---|---|---|
+| A19 | Promises and follow-through ("I'll train Thursday", "no takeaways this week") | Neither a fact nor a reminder | The new coach remembers the promise, checks once, kindly, and responds to a miss without shame. 5 cases (wave 1 talk, wave 4 check-in) |
+| D12 | Retention: is the client still here after 14 and 30 days? | Not measured anywhere | A live number on the founder's daily digest (#293, #377) |
+| C7 (cases) | Escalation to the founder is created **and delivered** | 0 cases | 3 cases, including a visible failure when `COACH_ALERT_PHONE` is unset (#417) |
