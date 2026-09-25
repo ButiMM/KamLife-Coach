@@ -229,6 +229,61 @@ export async function backfillFromOldStores(user: any): Promise<number> {
   return written;
 }
 
+/**
+ * WHAT THEY TOLD THE OLD COACH IN THEIR OWN MESSAGES (#414, second half). The profile copy above misses
+ * what a client only ever said in chat ("my knee flares up on the stairs", "I work nights at Bara").
+ * Once per client, their most recent messages (capped at about 5,500 characters) go through the new
+ * core's same understanding call (core/coach.ts learnFromHistory: no new model call site). The model
+ * proposes; this code keeps a fact only if it is verbatim, in the client's own voice, inside ONE of
+ * those messages (parseExtraction, the rule every live fact meets), and dates it at that message, so
+ * whatever the client says next is newer and wins. Nothing the old coach SAID is read: only what came in.
+ */
+const HISTORY = "backfill:history";
+export async function historyToLearn(userId: string): Promise<Array<{ text: string; at: Date }>> {
+  const [done] = await db.select({ n: sql<number>`count(*)::int` }).from(clientFacts)
+    .where(and(eq(clientFacts.userId, userId), eq(clientFacts.extractedBy, HISTORY)));
+  if ((done?.n ?? 0) > 0) return [];
+  const { chatHistory } = await import("@shared/schema");
+  const rows = await db.select({ text: chatHistory.messageIn, at: chatHistory.createdAt }).from(chatHistory)
+    .where(and(eq(chatHistory.userId, userId), sql`length(trim(${chatHistory.messageIn})) >= 12`))
+    .orderBy(desc(chatHistory.createdAt)).limit(60);
+  const out: Array<{ text: string; at: Date }> = [];
+  let chars = 0;
+  for (const r of rows) {
+    const text = String(r.text).trim().slice(0, 300);
+    if (chars + text.length > 5500) break;
+    chars += text.length + 1;
+    out.push({ text, at: new Date(r.at as any) });
+  }
+  return out.reverse(); // oldest first
+}
+
+export async function writeHistoryFacts(userId: string, raw: string, msgs: Array<{ text: string; at: Date }>): Promise<number> {
+  const placed = parseExtraction(raw, msgs.map(m => m.text).join("\n")).slice(0, 15)
+    // One message must hold the whole statement in the client's voice; the newest such message dates it.
+    .map(f => ({ f, m: [...msgs].reverse().find(m => parseExtraction(JSON.stringify({ facts: [f] }), m.text).length > 0) }))
+    .filter((x): x is { f: Extracted; m: { text: string; at: Date } } => !!x.m)
+    .sort((a, b) => +a.m.at - +b.m.at);
+  let written = 0;
+  await db.transaction(async tx => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${HISTORY + ":" + userId}))`);
+    const [done] = await tx.select({ n: sql<number>`count(*)::int` }).from(clientFacts)
+      .where(and(eq(clientFacts.userId, userId), eq(clientFacts.extractedBy, HISTORY)));
+    if ((done?.n ?? 0) > 0) return;
+    for (const { f, m } of placed) {
+      const [row] = await tx.insert(clientFacts).values({ userId, kind: f.kind, subject: f.subject, statement: f.statement,
+        detail: f.detail ?? null, validFrom: m.at, createdAt: m.at, extractedBy: HISTORY }).returning({ id: clientFacts.id });
+      // The newer statement of the same thing wins, exactly as a live correction does (same kind only).
+      await tx.update(clientFacts).set({ supersededBy: row.id, supersededAt: new Date() }).where(and(
+        eq(clientFacts.userId, userId), isNull(clientFacts.supersededBy), ne(clientFacts.id, row.id),
+        eq(clientFacts.kind, f.kind), eq(clientFacts.subject, f.subject), lt(clientFacts.createdAt, m.at)));
+      written++;
+    }
+  });
+  if (written) console.log(`[RECORD] learned ${written} fact(s) from earlier messages for ...${userId.slice(-6)}`);
+  return written;
+}
+
 /** A voice note's transcript, as the turn recorded it (turn_ledger), waited for briefly. */
 async function voiceTranscript(rootId?: string): Promise<string | null> {
   if (!rootId) return null;

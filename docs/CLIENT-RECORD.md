@@ -73,6 +73,18 @@ Both tables hang off `users.id` with `ON DELETE CASCADE`, so the confirmed delet
 
 No backfill runs until the erasure check is green on `main`.
 
+## Backfill of existing clients (#414)
+
+Once per client, on the new coach's first read (`core/coach.ts` readPreTurn):
+1. **The users profile** (`backfillFromOldStores`, `extracted_by = 'backfill:users'`). This covers the fields the client typed, plus the deterministic labels. No model call. The old model's own writing (life story, CIP, memories) is never copied.
+2. **What they said in chat** (`learnFromHistory` → `writeHistoryFacts`, `extracted_by = 'backfill:history'`).
+   - Their most recent inbound messages, up to about 5,500 characters, go through the new core's same understanding call, run once in the background.
+   - The old coach's replies are never read.
+   - A fact is kept only when it is verbatim and in the client's own voice inside one message.
+   - It is dated at that message, so anything they say next is newer and wins.
+
+Both are erased with the client by the `users` cascade.
+
 ## How it is used (this PR's scope)
 
 1. **Write events** at the transport door (`processTextAsync`), for every inbound message, never awaited by the reply.
