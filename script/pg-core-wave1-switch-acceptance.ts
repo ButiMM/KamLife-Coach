@@ -5,6 +5,7 @@
  *   - CORE_WAVE1=founder: only the founder's number (COACH_ALERT_PHONE) meets the new coach;
  *   - the new coach answers where gpt-block did, BEHIND the scope floor (an off-topic ask is still declined);
  *   - a message the new coach cannot read falls back to the old reply: never silence, never a guess (#421);
+ *   - a client midway through an old flow (a menu awaiting "1/2/3") finishes it there (#440);
  *   - CORE_WAVE1=off is the instant rollback.
  */
 if (!process.env.DATABASE_URL) { console.log("pg-core-wave1-switch-acceptance: SKIPPED — no DATABASE_URL."); process.exit(0); }
@@ -66,7 +67,13 @@ REAL("\n3. NO READING, NO GUESS: FALL BACK, NEVER SILENCE (#421)");
 const f3 = await say(FOUNDER, "garbled words the reading cannot parse at all");
 chk(!f3.includes(NEW) && f3.trim().length > 0, "a message the new coach cannot read gets the old reply", f3);
 
-REAL("\n4. INSTANT ROLLBACK");
+REAL("\n4. IN-FLIGHT STATE: AN OLD MENU'S ANSWER FINISHES THE OLD FLOW (#440)");
+await pool.query("UPDATE users SET awaiting_input_type = 'comeback' WHERE phone_number = $1", [FOUNDER]);
+const f5 = await say(FOUNDER, "2");
+const left = (await pool.query("SELECT awaiting_input_type FROM users WHERE phone_number = $1", [FOUNDER])).rows[0]?.awaiting_input_type;
+chk(/2 meals/i.test(f5) && !f5.includes(NEW) && left === null, "the comeback menu's \"2\" gets the simpler plan and the pending question clears", `${f5} | pending=${left}`);
+
+REAL("\n5. INSTANT ROLLBACK");
 process.env.CORE_WAVE1 = "off";
 const f4 = await say(FOUNDER, ASK);
 chk(!f4.includes(NEW), "CORE_WAVE1=off: the founder is back on the old coach, with no deploy", f4);
