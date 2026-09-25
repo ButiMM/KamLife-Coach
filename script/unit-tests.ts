@@ -10879,6 +10879,21 @@ test("every action type a gate case names is one the action gate knows (a typo w
   assert.ok(unknown.length === 0 && typeof describeAction({ type: "LOG_WORKOUTS" } as any) !== "string", "control: a misspelt type is caught");
 });
 
+// ── EVERY WORKFLOW FILE IS VALID YAML (25 Sep) ────────────────────────────────────────────────
+// A second `env:` key on the replay job made replay-gate.yml invalid. GitHub then ran no gate at
+// all, and the watch merged `ready` PRs as if it had passed. A duplicate key is now a red test.
+test("every .github/workflows file parses with unique keys (an invalid workflow silently runs nothing)", async () => {
+  const { parse } = await import("yaml");
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const bad: string[] = [];
+  for (const f of readdirSync(".github/workflows").filter(n => /\.ya?ml$/.test(n))) {
+    try { parse(readFileSync(`.github/workflows/${f}`, "utf8"), { uniqueKeys: true }); }
+    catch (e) { bad.push(`${f}: ${(e as Error).message.split("\n")[0]}`); }
+  }
+  assert.deepEqual(bad, [], bad.join("; "));
+  assert.throws(() => parse("jobs:\n  a:\n    env: {x: 1}\n    env: {y: 2}\n", { uniqueKeys: true }), "control: a duplicate key is caught");
+});
+
 // ── #92 — THE UNAVAILABLE-MOUTH LIST MAY NOT GO STALE ────────────────────────────────────────
 //
 // isCoachUnavailableReply lives in brain/reply-verifier.ts because gpt.ts sits on its line

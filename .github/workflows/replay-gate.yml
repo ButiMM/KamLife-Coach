@@ -50,7 +50,8 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}  # the key the founder set for the judge first
       REPLAY_HELDOUT_JSON: ${{ secrets.REPLAY_HELDOUT_JSON }}
       PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-    env:
+      # ONE env block (25 Sep): a second `env:` key on this job made the workflow invalid, and the gate
+      # silently stopped running; the watch then merged `ready` PRs with no gate at all.
       # Cost/quality (CTO, 25 Sep): the cheap judge by default; the strong judge only when a PR moves testers.
       REPLAY_JUDGE_MODEL: ${{ contains(github.event.pull_request.labels.*.name, 'switch') && 'gpt-4.1' || 'gpt-4.1-mini' }}
     steps:
