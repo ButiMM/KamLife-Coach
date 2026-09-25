@@ -201,9 +201,6 @@ export async function backfillFromOldStores(user: any): Promise<number> {
     if (label === "goal" || label === "trains") continue;
     found.push({ kind: BACKFILL_KIND.find(([re]) => re.test(label))?.[1] ?? "life_event", subject: label, statement: line, store: "users" });
   }
-  // Their own words from onboarding: the dream and the struggle, which only the old snapshot carried.
-  if (String(user.dreamGoal || "").trim()) found.push({ kind: "goal", subject: "dream goal", statement: `their 3-month dream: ${String(user.dreamGoal).trim().slice(0, 200)}`, store: "users" });
-  if (String(user.biggestStruggle || "").trim()) found.push({ kind: "constraint", subject: "biggest struggle", statement: `their biggest struggle: ${String(user.biggestStruggle).trim().slice(0, 200)}`, store: "users" });
   const [cu] = await db.select({ profile: clientUnderstanding.profile }).from(clientUnderstanding).where(eq(clientUnderstanding.userId, user.id)).limit(1);
   const profile: any = cu?.profile || {};
   if (typeof profile.lifeStory === "string" && profile.lifeStory.trim()) found.push({ kind: "life_event", subject: "life story", statement: profile.lifeStory.trim().slice(0, 400), store: "client_understanding" });
