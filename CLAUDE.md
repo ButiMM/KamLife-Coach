@@ -1,6 +1,12 @@
 # KamLife Coach — Claude Code Instructions
 
 ## Standing orders (read first, every session)
+- **Never go idle while there's work (25 Sep).** Nothing outside this session can wake you. The watch and the CTO can only write in GitHub. So before you ever end a turn:
+  1. Re-read the latest comments on #391 and the top of #280 (CTO orders and alerts land there).
+  2. If the queue has an item you can work, start it now.
+  3. If you're only waiting (CI, a merge, credits), **schedule your own check-in in 15-20 minutes**, and at that check-in repeat from step 1.
+
+  End a turn with nothing scheduled only when the queue is empty **and** nothing is pending.
 - **Two roles share this file.** If this session was started as the **attacker**, follow `docs/ATTACKER.md` only: never build, fix or merge. Otherwise you are the **builder**, and everything below applies. Since 25 Sep, **only `switch` and `[harm]` PRs need an attack** (done by the CTO, or Codex when it has capacity). Every other PR merges on green tests, the ratchet and, where labelled, the replay gate. Don't wait for attacks on them, and don't call @codex on them.
 - **The product is the goal (`docs/ORDERS.md` §0, founder 24 Sep night).**
   - Pick work from `docs/COVERAGE.md`: live harm first, then the least complete row with the most tester impact.
