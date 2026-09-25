@@ -15,9 +15,9 @@
  * on for the gate and for a measured tester sample, not by default.
  */
 import type OpenAI from "openai";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db";
-import { users, coreShadow, turnLedger, clientEvents } from "@shared/schema";
+import { users, coreShadow, turnLedger, clientEvents, chatHistory } from "@shared/schema";
 import { assertAiOnline } from "../ai-offline";
 import { validateActions, type CoachAction } from "../understanding/actions";
 
@@ -139,9 +139,18 @@ export async function runShadow(pre: PreTurn | null, message: string, rootId: st
         .where(and(eq(clientEvents.sourceMessageId, sourceMessageId), eq(clientEvents.userId, pre.userId))).limit(1);
       if (ev) await (await import("./client-record")).applyFacts(ev.id, read.raw).catch(() => 0);
     }
-    const reply = await compose(openai, pre, message, u);
+    // THE SCOPE FLOOR STAYS IN FRONT (docs/COVERAGE.md A17: floor). At the switch the new coach takes
+    // the place of handleGptBlock, which sits BEHIND classifyDomain in routes.ts: a scope decline never
+    // reaches it. So when this turn's own last exchange was that decline, the shadow records the decline
+    // instead of composing. Otherwise the gate grades a coach that answers maths homework, which is not
+    // the coach testers would meet.
+    const [last] = await db.select({ intent: chatHistory.intent, out: chatHistory.messageOut }).from(chatHistory)
+      .where(and(eq(chatHistory.userId, pre.userId), sql`${chatHistory.createdAt} > now() - interval '2 minutes'`))
+      .orderBy(desc(chatHistory.createdAt)).limit(1);
+    const scoped = last?.intent === "DOMAIN_REDIRECT" && !!last.out;
+    const reply = scoped ? last!.out : await compose(openai, pre, message, u);
     await db.insert(coreShadow).values({
-      userId: pre.userId, rootId, inputText: message, understanding: u, factsRead: pre.facts ? pre.facts.split("\n").length - 1 : 0,
+      userId: pre.userId, rootId, inputText: message, understanding: scoped ? { ...(u ?? {}), floor: "scope" } as any : u, factsRead: pre.facts ? pre.facts.split("\n").length - 1 : 0,
       reply: reply ?? "", model: CORE_MODEL, ms: Date.now() - t0,
     });
   } catch (e) {
