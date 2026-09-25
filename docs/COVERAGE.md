@@ -38,15 +38,15 @@ A row is **complete** when:
 | A7 | Weight, weigh-in, body/progress photos | `weight.ts`, `media.ts`, `physique-analysis.ts`, `weight-context.ts` | action `LOG_WEIGHT`; photos have none | **0** | none | — |
 | A8 | Workout done / lifts / "show my workout" | `handlers/workout.ts`, `workout-state.ts` | action `SHOW_WORKOUT`, `LOG_WORKOUT` (proposed in shadow) | moved-workout, knee-hurt-on-run, finished-leg-day, skipped-gym-not-done, setswana-gym-yesterday | none | — |
 | A9 | Equipment / form check from photo or video | `equipment-vision.ts`, `form-check-prompt.ts`, `video-frames.ts` | reply from the image | **0** | none | — |
-| A10 | "What should I eat tonight", swaps, grocery, restaurants, street food | `gpt-block.ts`, `food-swaps.ts`, `grocery-*.ts`, `restaurants.ts`, `street-food.ts`, `shopping-lists.ts` | reply (from facts and targets) | what-to-eat-tonight, no-fish-remembered | none | gpt-block, advice-commands |
-| A11 | Coaching talk: stress, shame, plateaus, "I need more help" | `gpt-block.ts` (askCoachK), meaning engine | reply | shame-after-takeaway, stress-and-takeaways, need-more-help | none | gpt-block |
+| A10 | "What should I eat tonight", swaps, grocery, restaurants, street food | `gpt-block.ts`, `food-swaps.ts`, `grocery-*.ts`, `restaurants.ts`, `street-food.ts`, `shopping-lists.ts` | reply (from facts and targets) | what-to-eat-tonight, no-fish-remembered, swap-white-bread, grocery-on-a-budget, kfc-what-to-order, afrikaans-eggs-bread-cheese | none | gpt-block, advice-commands |
+| A11 | Coaching talk: stress, shame, plateaus, "I need more help" | `gpt-block.ts` (askCoachK), meaning engine | reply | shame-after-takeaway, stress-and-takeaways, need-more-help, plateau-three-weeks, setswana-tired-of-trying | none | gpt-block |
 | A12 | Goal change, targets, "am I on track" | `misc-commands.ts`, `adaptive-targets.ts`, `targets.ts` | action `SET_GOAL` (proposed in shadow; `lifecycle.ts` confirms first) | building-phase-goal, time-to-cut, should-i-change-goal-question, what-are-my-targets, am-i-on-track, afrikaans-build-muscle-goal | none | misc-commands |
 | A13 | Remembering what they said (injury, race, pregnancy, dislikes) | 9 stores (see D2); `core/client-record.ts` is the one kept | facts via `applyFacts` | comrades-knee-memory, third-party-pregnancy, no-fish-remembered | none | the 8 other stores |
 | A14 | Reminders | `reminders-handler.ts`, `reminders.ts` | action `SET_REMINDER` | **0** | none | — |
 | A15 | Sick / injured pause, pain triage | `sick-flow.ts`, `pain-triage.ts` | action `SET_SICK`/`END_SICK` + floor for red-flag pain | knee-hurt-on-run | none | sick-flow |
-| A16 | Stats, streaks, NPS, supplements, motivation, "how was my week" | `misc-commands.ts`, `numbers-literacy.ts`, `report-card.ts`, `week-card.ts` | reply from real numbers | how-was-my-week | none | misc-commands, numbers-literacy |
-| A17 | Off-topic (CV, crypto, homework) | `understanding/domain-guard.ts`, scope (#345) | floor | business-plan-for-gym, cv-skipped-gym-control | none | — |
-| A18 | Mixed languages: Setswana, isiZulu, isiXhosa, Sesotho, Afrikaans, SA slang | normaliser, `sa-transcript.ts`, `voice-language.ts` | every row above | hayi-correction only | none | — |
+| A16 | Stats, streaks, NPS, supplements, motivation, "how was my week" | `misc-commands.ts`, `numbers-literacy.ts`, `report-card.ts`, `week-card.ts` | reply from real numbers | how-was-my-week, protein-so-far-today, streak-one-day, creatine-question, afrikaans-calories-today | none | misc-commands, numbers-literacy |
+| A17 | Off-topic (CV, crypto, homework) | `understanding/domain-guard.ts`, scope (#345) | floor | business-plan-for-gym, cv-skipped-gym-control, crypto-tip, maths-homework, isizulu-write-my-cv | none | — |
+| A18 | Mixed languages: Setswana, isiZulu, isiXhosa, Sesotho, Afrikaans, SA slang | normaliser, `sa-transcript.ts`, `voice-language.ts` | every row above | hayi-correction, afrikaans-eggs-bread-cheese, setswana-tired-of-trying, afrikaans-calories-today, isizulu-write-my-cv | none | — |
 
 ## B. Messages the coach starts (proactive): **none of this is graded**
 
@@ -133,3 +133,11 @@ This is the whole-product plan. A wave starts when the one before it has switche
 | **6. Foundation cleanup** | D2, D3, D4, D5, D9, D10 | the 9 stores collapse to 1, one schema, a restore drill, docs, delete list at 0 | What's left once nothing reads the old stores |
 
 Rows D1, D6, D7, D8 and D11 run alongside every wave.
+
+## Rows added after the Grok review (25 Sep), #423
+
+| Row | Capability | Today | Must be |
+|---|---|---|---|
+| A19 | Promises and follow-through ("I'll train Thursday", "no takeaways this week") | Neither a fact nor a reminder | The new coach remembers the promise, checks once, kindly, and responds to a miss without shame. 5 cases (wave 1 talk, wave 4 check-in) |
+| D12 | Retention: is the client still here after 14 and 30 days? | Not measured anywhere | A live number on the founder's daily digest (#293, #377) |
+| C7 (cases) | Escalation to the founder is created **and delivered** | 0 cases | 3 cases, including a visible failure when `COACH_ALERT_PHONE` is unset (#417) |

@@ -15,8 +15,6 @@ server/scheduler/proactive-decision.ts
 server/understanding/live.ts
 server/understanding/meaning-engine.ts
 server/understanding/perception.ts
-server/understanding/actions.ts
-server/understanding/executor.ts
 server/understanding/messy-intake.ts
 server/understanding/reentry.ts
 server/brain/coach-brain.ts

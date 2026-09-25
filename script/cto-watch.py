@@ -53,16 +53,40 @@ for p in open_prs:
         comment_once(n, f"cto-notice-{n}", "**CTO watch:** the description must open with \"What testers will notice:\" (CLAUDE.md standing orders).", comments)
     human = [c for c in comments if not c["user"]["login"].endswith("[bot]") or "codex" in c["user"]["login"]]
     human = [c for c in human if "<!-- cto-" not in c["body"]]
-    attacks = [c for c in human if re.match(rf"^[*_\s]*ATTACK @ `?{sha[:7]}", c["body"])]
-    answers = [c for c in human if re.match(r"^[*_\s]*ANSWER", c["body"])]
     commits = api("GET", f"/pulls/{n}/commits?per_page=100")
     head_time = ts(commits[-1]["commit"]["committer"]["date"]) if commits else ts(p["created_at"])
-    if not attacks:
+    def _is_codex_review(c):
+        b = c["body"]
+        if "usage limit" in b.lower():
+            return False  # a usage-limit notice is not an attack
+        if c["user"]["login"].startswith("chatgpt-codex"):
+            return True   # any real Codex review counts, whatever its heading (CTO decision, #391)
+        return bool(re.match(r"^[*_#\s]*ATTACK @ ", b))
+    commit_times = [ts(x["commit"]["committer"]["date"]) for x in commits] if commits else []
+    head_since = head_time
+    attacks = [c for c in human if _is_codex_review(c) and (sha[:7] in c["body"] or ts(c["created_at"]) >= head_since)]
+    answers = [c for c in human if re.match(r"^[*_\s]*ANSWER", c["body"])]
+    code_files = [f for f in api("GET", f"/pulls/{n}/files?per_page=100") if not (f["filename"].startswith("docs/") or f["filename"].endswith(".md"))]
+    needs_attack = any(l["name"] == "switch" for l in p["labels"]) or p["title"].startswith("[harm]")
+    if not code_files:
+        state = "docs only: no attack needed"
+        attack_ok_docs = True
+    elif not needs_attack:
+        # Lean verification (CTO, 25 Sep): only switch and harm PRs need an attack. Everything else is
+        # judged by the tests, the live replay gate (an OpenAI judge, independent of the Claude builder)
+        # and the mouth ratchet.
+        state = "no attack needed (tests + gate + ratchet)"
+        attack_ok_docs = True
+    else:
+        attack_ok_docs = False
+    if not attacks and not attack_ok_docs:
         state = "waiting for Codex attack"
-        comment_once(n, f"cto-attack-{sha}", f"@codex attack this PR at head `{short}` per docs/ORDERS.md §6. Start your comment with `ATTACK @ {sha[:7]}`.", comments)
+        comment_once(n, f"cto-attack-{sha}", f"**Attack owed** at head `{short}` (attacker session, docs/ATTACKER.md; or @codex when it has capacity). Start your comment with `ATTACK @ {sha[:7]}`.", comments)
         if NOW - head_time > ATTACK_WINDOW:
             state = "attack window passed: builder may merge if tests pass; Codex attacks after merge"
             comment_once(n, f"cto-window-{sha}", f"**CTO watch:** no Codex attack at `{short}` within 45 minutes. Per CLAUDE.md, the builder may merge once tests pass; any later finding goes to the top of docs/QUEUE.md.", comments)
+    elif attack_ok_docs and not attacks:
+        pass  # docs-only PR: state already says no attack is needed
     elif answers and ts(answers[-1]["created_at"]) > ts(attacks[-1]["created_at"]):
         state = "attack answered: ready to merge when tests pass"
     else:
@@ -94,7 +118,7 @@ for p in open_prs:
     is_switch = any(l["name"] == "switch" for l in p["labels"])
     # A PR that moves real testers onto the new coach never merges on a timeout: it needs a real
     # Codex attack, answered, and a green replay gate. Quality where it touches testers most.
-    attack_ok = state.startswith("attack answered") or (state.startswith("attack window passed") and not is_switch)
+    attack_ok = state.startswith("attack answered") or state.startswith("docs only") or state.startswith("no attack needed") or (state.startswith("attack window passed") and not is_switch)
     if is_switch and not any(r["name"] == "replay" and r["conclusion"] == "success" for r in runs):
         attack_ok = False
         state += " (switch: needs a green replay gate)"
@@ -143,7 +167,7 @@ today = [p for p in merged if ts(p["merged_at"]).date() == NOW.date()]
 last_merge = max((ts(p["merged_at"]) for p in merged), default=None)
 post_merge_pending = []
 for p in merged:
-    if not any(l["name"] == "attack:codex" for l in p["labels"]) or NOW - ts(p["merged_at"]) > dt.timedelta(days=2):
+    if not (p["title"].startswith("[harm]") or any(l["name"] == "switch" for l in p["labels"])) or NOW - ts(p["merged_at"]) > dt.timedelta(days=2):
         continue
     sha = p["head"]["sha"]
     pcs = api("GET", f"/issues/{p['number']}/comments?per_page=100")

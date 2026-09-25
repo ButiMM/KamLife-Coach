@@ -109,7 +109,8 @@ For each: reproduce the failure first as a failing test, then show the changed s
 - **On model failure,** the bot does not manufacture a confident coaching action.
 
 ### Step 5 — Shadow, switch, remove
-- **Shadow is read-only.** The new core runs beside the old one on the same raw input and the same pre-turn client state. It never writes client state and never sends.
+- **Shadow is read-only for coaching state.** The new core runs beside the old one on the same raw input and the same pre-turn client state. It never writes the `users` row or the ledgers, and never sends. **One exception, deliberately:** the client record (`core/client-record.ts`) may store what the client said and the facts in it, through its own validation. That is the one memory being kept, not a second one; the old stores are retired by #414 and the switch PRs. (Clarified after the Grok review, 25 Sep.)
+- **If understanding fails, the new core composes nothing** (#421). No confident move without a reading of the turn.
 - **Instrumented:** which path claimed the turn, what facts were read, what would have been written, and the body that would have been sent.
 - **Switching:** a bounded message family switches only when it beats the old path on the gate with no new hard failure.
 - **Every switch names:** the old path deleted in the same PR, and the rollback condition.
@@ -137,6 +138,12 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 ## 6. Roles
 
+**Lean verification (founder decision, 25 Sep): the builder's capacity comes first.**
+- **Every PR:** tests, the mouth ratchet, and, on `ready`/`switch`/`gate` PRs, the live replay gate. The gate's judge is an OpenAI model grading real tester journeys, which makes it independent of the Claude builder. It is the main check.
+- **Attacks only where a mistake reaches people or money:** `switch` PRs (testers meet the new coach) and `[harm]` PRs (payments, safety, data). **The CTO does these attacks.** Codex joins when it has capacity. No separate attacker session runs by default (`docs/ATTACKER.md` stays available).
+- **Real testers are the final attacker.** After each switch, the founder and testers use the bot; one-tap 👎 (#360) turns a bad reply into a gate case.
+
+
 | Who | Owns | Doesn't |
 |---|---|---|
 | **Claude Code** | All building: every `harm` and `core` issue, the merge and the deploy path. | Review its own PRs as independent. Merge a PR before Codex has attacked it. |
@@ -149,6 +156,10 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 **Quality bar under auto-merge (24 Sep):** speed never lowers the bar. Every PR needs green tests (all six database shards) and a passing mouth ratchet. REGRESSION findings block. Hard invariants (§3) block. EDGE findings aren't dropped: each becomes an issue **and a gate case the new core must pass before its message family switches**. A PR labelled `switch`, which moves real testers onto the new coach, never merges on a timeout: it needs an actual Codex attack, answered, and a green replay gate showing it beats the old code.
 
 **If Codex is out of usage limits when a `switch` PR is ready (24 Sep evening):** the CTO performs the attack instead: a diff review against `docs/COMPONENTS.md` and `TESTER-EXPERIENCE.md`, plus the 3-run gate numbers, posted as `ATTACK @ <sha> (CTO)`. A switch never waits a night on a usage limit, and never merges without an attack. Codex attacks the merged version when its limits reset.
+
+**Focus until the first switch (CTO, after the Grok review, 25 Sep):** wave 1 only. Finish #414, #421, #422, then the wave-1 head-to-head and **one** switch PR that deletes wave 1's old speakers. Already-built wave-2 PRs may merge, but no new wave-2 work starts until wave 1 has switched.
+
+**Before the first switch (CTO, 25 Sep):** existing clients' history must be in the client record (#414). Otherwise the switch itself makes the coach forget long-time testers.
 
 **When the gate can decide a switch (24 Sep evening):** single-case scores move by about ±3 between runs of the same code. So a `switch` PR needs **(a) at least 5 cases for its journey, (b) the average of 3 gate runs, new coach against old code on the same cases, (c) the new coach ahead on that average, and (d) zero hard-invariant failures in any run.** Cost and reply time are reported (baseline on main: R0.009 a message, 2.3 s).
 

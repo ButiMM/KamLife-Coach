@@ -1,3 +1,5 @@
+> **Superseded on 25 Sep by `docs/COVERAGE.md`**, the live map of the whole product, one row per capability. This file is kept as the record of the original review findings and their issues. For current status, use `COVERAGE.md` and issue #280. (Grok review: this file had gone stale.)
+
 # Every finding, and where it lives
 
 Nothing from the Grok review, the Claude Code audit (`AUDIT.md`) or the outgoing CTO's handover is dropped. Every finding maps to an issue. Maintained by the CTO. Status as of 24 Sep 09:50 SAST.

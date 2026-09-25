@@ -1,15 +1,24 @@
 # KamLife Coach — Claude Code Instructions
 
 ## Standing orders (read first, every session)
+- **Never go idle while there's work (25 Sep).** Nothing outside this session can wake you. The watch and the CTO can only write in GitHub. So before you ever end a turn:
+  1. Re-read the latest comments on #391 and the top of #280 (CTO orders and alerts land there).
+  2. If the queue has an item you can work, start it now.
+  3. If you're only waiting (CI, a merge, credits), **schedule your own check-in in 15-20 minutes**, and at that check-in repeat from step 1.
+
+  End a turn with nothing scheduled only when the queue is empty **and** nothing is pending.
+- **Two roles share this file.** If this session was started as the **attacker**, follow `docs/ATTACKER.md` only: never build, fix or merge. Otherwise you are the **builder**, and everything below applies. Since 25 Sep, **only `switch` and `[harm]` PRs need an attack** (done by the CTO, or Codex when it has capacity). Every other PR merges on green tests, the ratchet and, where labelled, the replay gate. Don't wait for attacks on them, and don't call @codex on them.
 - **The product is the goal (`docs/ORDERS.md` §0, founder 24 Sep night).**
   - Pick work from `docs/COVERAGE.md`: live harm first, then the least complete row with the most tester impact.
   - Every PR description carries `Coverage row:` and `Reuses:` lines.
   - Before writing anything new, search the repo for code that already does the job, and finish or reuse it. Never start a foundation while one for the same job sits unwired.
   - Answering attacks deeper and deeper in one spot is not progress. Map each finding to a row, and move the product forward across the map.
 - **When you're blocked on the founder** (a secret, an account, a decision), post a PR comment starting `BLOCKED:` with the exact action he must take. The watch puts it at the top of the status issue. Keep working on something else meanwhile.
+- **See a blind spot? File it.** Anything that could hurt the product or company and that nobody asked about gets an issue labelled `blind-spot`, one line of evidence, and the row it touches. That's part of your job, not a distraction from it.
 - **Before asking the founder anything, check `docs/SYSTEM.md` and the repo.** Asking him for something already recorded or findable is a failure. Add anything durable you learn to `docs/SYSTEM.md`.
 - `docs/ORDERS.md` is the plan. It overrides every other doc.
 - **The watch merges for you (24 Sep).** When a PR's checks are all green, the mouth ratchet passes, and its Codex attack is answered (or 45 minutes passed with no attack), `.github/workflows/cto-watch.yml` merges it within minutes of the tests finishing. Don't wait on it. Add the label `hold` to stop a PR auto-merging. Label any PR that moves real testers onto the new coach `switch`: it then needs a real Codex attack, answered, and a green replay gate. It never merges on a timeout.
+- **Don't call Codex on docs-only PRs** (status, queue, docs). The watch merges those without an attack. Codex's review capacity is limited; spend it on `[core]`, `[harm]` and `switch` PRs.
 - **Run three worktrees in parallel, all day:** **A** (attack follow-ups and security), **B1** (#270 gate, then #293 Coach Health) and **B2** (#271 client record, then #272 understanding and composer). File ownership rules in `docs/ORDERS.md` apply between them. Never let one lane wait on another.
 - **Test diet (24 Sep):** code the new core will replace gets a **minimal** failing-then-passing test, with no new red-on-revert harness. Heavy acceptances and revert harnesses are only for code that survives: plumbing, safety, billing, and the new core. For coaching behaviour, add a **gate case** (a journey in `docs/TESTER-EXPERIENCE.md`), not a handler acceptance. Script code is already 57k lines against 75k of server code.
 - **No new model calls outside the new core.** `model_call_sites` is now in the mouth ratchet.
