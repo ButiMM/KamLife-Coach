@@ -234,8 +234,8 @@ ${ADVISOR_LIMIT}`;
   try {
     assertAiOnline("agent");
     const response = await openai.chat.completions.create({
-      // A person who opened up deserves the better model + room to answer properly.
-      model: deep ? "gpt-4o" : "gpt-4o-mini",
+      // A person who opened up gets room to answer properly (#412: the small model; gpt-4o is crisis and photos).
+      model: "gpt-4o-mini",
       max_tokens: deep ? 400 : 150,
       messages: [
         { role: "system", content: systemPrompt },
