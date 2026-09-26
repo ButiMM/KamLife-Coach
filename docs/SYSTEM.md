@@ -10,6 +10,7 @@ Every builder, reviewer and the CTO reads this before asking the founder a quest
 | `BACKUP_DATABASE_URL` | `db-backup.yml` | Production database, for backups |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT` | `db-backup.yml` | Cloudflare R2, where backups are stored |
 | `REPLAY_HELDOUT_JSON` | replay gate | **Set 25 Sep by the CTO:** 8 hidden cases, 2 per wave-1 row. Maintained by the CTO only; the builder never sees it. |
+| `APP_URL`, `COACH_DASHBOARD_KEY` | `whats-new.yml` | **Not yet confirmed in GitHub (26 Sep).** Same values as in Railway. Used to post the testers' what's-new note through `/api/dashboard/broadcast` after each switch (#442). Missing: the note is not sent and the PR gets a `BLOCKED:` comment. |
 
 ## AI budget firewall (founder action, 24 Sep)
 
