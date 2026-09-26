@@ -781,6 +781,33 @@ export const CASES: ReplayCase[] = [
     rubric: "The client corrected their lunch in isiXhosa/isiZulu style ('Hayi'). A good reply swaps pap for the burger and says so briefly.",
   },
   {
+    id: "aowa-correction",
+    journey: 2,
+    source: "#309 (Setswana/Sepedi refusal; 'Hayi' has its own case)",
+    before: ["I had rice and chicken for dinner"],
+    turns: ["Aowa, it was pap and chicken, not rice."],
+    checks: [
+      { what: "the pap is logged", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(items::text,'') ~* 'pap'", expect: "nonzero" },
+      { what: "the rice the client corrected is not still counted", invariant: "no_false_writes", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(items::text,'') ~* 'rice'", expect: "zero" },
+    ],
+    actions: { expect: [{ type: "CORRECT_MEAL", match: { to: "pap" } }], forbid: ["LOG_MEAL"] },
+    rubric: "The client corrected dinner with 'Aowa' (no). A good reply swaps the rice for pap and keeps the chicken, briefly.",
+  },
+  {
+    id: "named-older-meal-correction",
+    journey: 2,
+    source: "#300 (a correction that names an earlier meal, not the last one)",
+    before: ["I had oats for breakfast", "I had a chicken wrap for lunch"],
+    turns: ["Breakfast wasn't oats, it was two eggs and toast."],
+    checks: [
+      { what: "the eggs are stored", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(items::text,'') ~* 'egg'", expect: "nonzero" },
+      { what: "the oats the client corrected are not still counted", invariant: "no_false_writes", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(items::text,'') ~* 'oat'", expect: "zero" },
+      { what: "lunch, the last meal, is untouched", invariant: "no_false_writes", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(items::text,'') ~* 'wrap'", expect: "nonzero" },
+    ],
+    actions: { expect: [{ type: "CORRECT_MEAL", match: { to: "egg" } }], forbid: ["LOG_MEAL", "REMOVE_LAST_MEAL"] },
+    rubric: "The client corrected breakfast, which is not the last meal logged. A good reply swaps oats for eggs and toast and leaves lunch alone.",
+  },
+  {
     id: "negated-multiword-food",
     journey: 2,
     source: "#292 (Codex @ 73f4897 on #282)",
