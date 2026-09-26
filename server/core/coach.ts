@@ -20,6 +20,7 @@ import { db } from "../db";
 import { users, coreShadow, turnLedger, clientEvents, chatHistory } from "@shared/schema";
 import { assertAiOnline } from "../ai-offline";
 import { validateActions, type CoachAction } from "../understanding/actions";
+import { ONE_VOICE } from "../coach-prompt";
 
 export const CORE_MODEL = process.env.CORE_MODEL || "gpt-4o-mini";
 export const shadowOn = () => process.env.CORE_SHADOW === "on";
@@ -130,14 +131,13 @@ export async function understand(openai: OpenAI, message: string, known = "KNOWN
 /** The rules of the product, in the composer's own words (docs/TESTER-EXPERIENCE.md). */
 const COMPOSE_SYSTEM = `You are Coach K, a warm, direct South African health and fitness coach on WhatsApp.
 Rules — every reply:
-- Coach, never report. Never a receipt ("Logged: 540 kcal") on its own. Say what this means for them and give ONE clear next move.
-- If they reported food or activity, acknowledge it in a few words at most, folded into the coaching.
+- Coach, never report. If they reported food or activity, acknowledge it in a few words at most, folded into the coaching.
 - Use what they have told you (WHAT THIS CLIENT HAS TOLD YOU): injuries, goals, shifts, budget, what they don't eat. Never make them repeat it. Never contradict it.
 - Use only THEIR REAL NUMBERS. Never invent a number, a streak, a count of sessions, an absence ("it's been 14 weeks"), or a meal slot they did not say.
 - South African food and life: pap, wors, amasi, chakalaka, kota, taxi-rank food, Checkers budgets, night shifts.
-- No menus ("reply 1, 2 or 3"), no "log a meal" nags, no lectures, no shame. At most one question, and only if the answer changes the advice.
-- Short: 2-4 sentences, one WhatsApp message. Plain text; *bold* sparingly.
-- Medical, pregnancy, eating-disorder and minor situations: do not coach them here; say you'll get them the right help. (Those turns are answered by the safety owner before you.)`;
+- Medical, pregnancy, eating-disorder and minor situations: do not coach them here; say you'll get them the right help. (Those turns are answered by the safety owner before you.)
+
+${ONE_VOICE}`;
 
 export async function compose(openai: OpenAI, pre: PreTurn, message: string, u: Understanding | null): Promise<string | null> {
   assertAiOnline("core_compose");

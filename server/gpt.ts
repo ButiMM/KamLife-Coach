@@ -4,7 +4,7 @@ import { readHealthState } from "./health-state";
 import { db, recordedIntent } from "./db";
 import { users, chatHistory, weightLogs, stepLogs, workoutLogs, mealLogs, gptCosts } from "../shared/schema";
 import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
-import { COACH_K_SYSTEM } from "./coach-prompt";
+import { COACH_K_SYSTEM, ONE_VOICE } from "./coach-prompt";
 import { getPhaseNames } from "./programme";
 import { calculateTargets } from "./targets";
 import { getDisplayName, sastDayStart, findFabricatedComposites, findUngroundedFoodItems } from "./utils";
@@ -969,7 +969,8 @@ export { isUnderGPTCallLimit, isUnderGlobalDailyCap, _resetSpendCapCache } from 
 // the CLAUDE.md-protected goal-aware food logic (ends ~18.4k chars), excluding the
 // bulky reference tables (~33.8k+) the specialist agents own. FIXED boundary (never
 // tail-dependent) — that is what makes the prefix byte-identical and cacheable.
-const STATIC_HOT_BRAIN = COACH_K_SYSTEM.slice(0, 20_000);
+// ONE_VOICE (#439) rides in the static prefix too, so it stays byte-identical and cacheable.
+const STATIC_HOT_BRAIN = `${COACH_K_SYSTEM.slice(0, 20_000)}\n\n${ONE_VOICE}`;
 
 export async function askCoachK(userMessage: string, user: any, extraInstruction?: string, memoryContext?: string, staticGuide?: string): Promise<string> {
   const context = await buildContext(user);

@@ -10886,6 +10886,15 @@ test("server/core does not read buildClientSnapshot (#422: numbers come from day
   assert.deepEqual(hits, [], `server/core still reads the old snapshot: ${hits.join(", ")}`);
 });
 
+// ── ONE VOICE (#439): every talk path carries the same style block ──────────────────────────────
+test("ONE_VOICE rides in the new composer, askCoachK and the meaning engine", async () => {
+  const { readFileSync } = await import("node:fs");
+  for (const f of ["server/core/coach.ts", "server/gpt.ts", "server/understanding/meaning-engine.ts"])
+    assert.ok(/\$\{ONE_VOICE\}|\bONE_VOICE,/.test(readFileSync(f, "utf8")), `${f} does not use ONE_VOICE`);
+  const { ONE_VOICE } = await import("../server/coach-prompt");
+  assert.match(ONE_VOICE, /at most 3 short sentences and 60 words/);
+});
+
 // ── THE WAVE-1 SWITCH FLAG (#438): off by default, founder first, instant rollback ──────────────
 test("CORE_WAVE1: off by default; founder matches only the founder's number, in any format; on is everyone", async () => {
   const { coreWave1For } = await import("../server/core/coach");

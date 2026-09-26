@@ -23,6 +23,7 @@ import type OpenAI from "openai";
 import { assertAiOnline, isAiOfflineError } from "../ai-offline";
 import { recordGptCost } from "../gpt";
 import { BRAIN_SYSTEM } from "../brain/coach-brain";
+import { ONE_VOICE } from "../coach-prompt";
 import { type UnderstandingState } from "./state";
 import { compileStateBlurb, compileKeyFacts } from "./compiler";
 import { runPerception } from "./perception";
@@ -249,6 +250,7 @@ Rules: CONTINUE means do not invent a change merely to create novelty. INVESTIGA
       moodDirective,
       decisionDirective,
       BRAIN_SYSTEM,
+      ONE_VOICE, // #439: the same style block as the new coach and askCoachK
       THINK_HEADER,
       `WHAT YOU KNOW ABOUT THIS CLIENT RIGHT NOW:\n${blurb}`,
       keyFacts,
