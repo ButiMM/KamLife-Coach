@@ -228,6 +228,41 @@ export async function answerLive(phone: string, message: string): Promise<string
   return reply || null;
 }
 
+/**
+ * WAVE 2, ROW A1 — FOOD IN WORDS (on for everyone, ship as finished #459; CORE_WAVE2 = off | founder | on).
+ * The WRITE stays with the proven owner (food-context: the scanner owns the numbers, the slot, the
+ * day), exactly the tool the executor's LOG_MEAL already calls. What moves is the REPLY: after the
+ * meal is on the ledger, the new coach composes from the ledger that now holds it, instead of the
+ * old receipt. The write is graded on stored state as before; the reply by the gate's judge.
+ */
+export function coreWave2For(phone: string): boolean {
+  const mode = String(process.env.CORE_WAVE2 || "on").toLowerCase();
+  if (mode === "on") return true;
+  if (mode !== "founder") return false;
+  const digits = (p: string) => (p || "").replace(/\D/g, "").replace(/^0/, "27");
+  const founder = digits(process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE || "");
+  return !!founder && digits(phone) === founder;
+}
+
+/** The new coach's reply to a turn whose meal the old owner just wrote. null = keep the old receipt. */
+export async function afterMealReply(phone: string, message: string, receipt: string): Promise<string | null> {
+  if (!coreWave2For(phone)) return null;
+  try {
+    const pre = await readPreTurn(phone, message);
+    if (!pre) return null;
+    pre.numbers += `\nJUST SAVED THIS TURN (already on the ledger above; never ask them to log it again): ${receipt.replace(/\[[A-Z]+:[^\]]*\]/g, "").replace(/\s+/g, " ").slice(0, 300)}`;
+    const u: Understanding = { family: "report", wants: "they told you what they ate; acknowledge it in a few words and coach the next move from today's real numbers", one_question: null, uncertainty: 0, actions: [] };
+    const reply = (await compose(await openaiClient(), pre, message, u))?.trim();
+    if (!reply) return null;
+    // The meal card the old owner attached (a [MEDIA:…] marker) still rides with the new words.
+    const media = (receipt.match(/\[MEDIA:[^\]]+\]/g) || []).join("");
+    return media ? `${reply}\n${media}` : reply;
+  } catch (e) {
+    console.warn("[CORE_WAVE2] kept the receipt:", (e as Error)?.message || e);
+    return null;
+  }
+}
+
 /** One switched turn: the scope floor first, then the new coach. null = let the old engine answer. */
 export async function wave1Turn(p: { phone: string; message: string; userId: string; ongoing: boolean; evidence: (f: { conversationalOnly: true }) => void }): Promise<{ reply: string; src: string } | null> {
   const { classifyDomain, declineOutOfScope } = await import("../understanding/domain-guard");
