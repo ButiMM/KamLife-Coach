@@ -25,7 +25,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
   let content = "Old coach here, noted.";
   if (body.includes("say what they want from this turn")) {
     const msg = JSON.parse(body).messages.at(-1).content as string;
-    content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ family: "question", wants: "advice", one_question: null, uncertainty: 0.2, facts: [], actions: [] });
+    const fix = /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : [];
+    content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ family: fix.length ? "correction" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts: [], actions: fix });
   } else if (body.includes("You are Coach K, a warm, direct South African")) content = `Try pap with beans tonight. ${NEW}`;
   else if (body.includes("domain gate")) content = /homework/i.test(body) ? "NO" : "YES";
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
@@ -91,6 +92,21 @@ await pool.query("UPDATE users SET awaiting_input_type = 'comeback' WHERE phone_
 const f5 = await say(FOUNDER, "2");
 const left = (await pool.query("SELECT awaiting_input_type FROM users WHERE phone_number = $1", [FOUNDER])).rows[0]?.awaiting_input_type;
 chk(/2 meals/i.test(f5) && !f5.includes(NEW) && left === null, "the comeback menu's \"2\" gets the simpler plan and the pending question clears", `${f5} | pending=${left}`);
+
+REAL("\n4c. WAVE 2, A2 — THE NEW COACH READS THE CORRECTION, THE PROVEN ENGINE WRITES IT");
+{
+  const T = "whatsapp:+27829438003";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Hayi Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  process.env.CORE_WAVE2 = "on";
+  await say(T, "I had pap for lunch");
+  await say(T, "Hayi, I had a burger, not pap.");
+  const rows = (await pool.query("SELECT items::text i FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows.map(r => String(r.i));
+  chk(rows.length === 1 && /burger/i.test(rows[0]) && !/"pap/i.test(rows[0]), "\"Hayi, I had a burger, not pap\" changes lunch in place: one meal, the burger, no pap", JSON.stringify(rows).slice(0, 300));
+  delete process.env.CORE_WAVE2;
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
 
 REAL("\n4b. WAVE 2, A1 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on for everyone)");
 {
