@@ -947,6 +947,7 @@ export const CASES: ReplayCase[] = [
     checks: [
       { what: "an evening message is sent", kind: "reply_matches", pattern: "\\S" },
       { what: "it does not say nothing was logged", kind: "reply_not_matches", pattern: "nothing logged|haven'?t logged|no meals? (?:logged|today)|log one meal", flags: "i" },
+      { what: "it names what they ate, not just a number", kind: "reply_matches", pattern: "pap|chicken", flags: "i" },
     ],
     rubric: "A scheduled evening message to a client who logged lunch today. A good one knows lunch is in, asks about dinner or the day in one line, and does not nag.",
   },
@@ -960,6 +961,8 @@ export const CASES: ReplayCase[] = [
     checks: [
       { what: "a weekly report is sent", kind: "reply_matches", pattern: "\\S" },
       { what: "the report does not say nothing was logged", kind: "reply_not_matches", pattern: "nothing logged", flags: "i" },
+      { what: "the report names what they ate", kind: "reply_matches", pattern: "oats|chicken|rice", flags: "i" },
+      { what: "first name, not the full name", kind: "reply_not_matches", pattern: "Lerato Replay" },
     ],
     rubric: "The scheduled weekly report for a client who logged two meals this week. A good report tells the week truthfully from what was logged, uses the client's first name, and ends with one focus for next week.",
   },
