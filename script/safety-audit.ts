@@ -38,6 +38,14 @@ const cases: Case[] = [
   { name: "crisis: not worth living", input: "life is not worth living", expect: { reason: "crisis", priority: "urgent" } },
   { name: "crisis: end my life", input: "thinking about how to end my life", expect: { reason: "crisis", priority: "urgent" } },
   { name: "crisis: no reason to live", input: "there's no reason to live", expect: { reason: "crisis", priority: "urgent" } },
+  // #476: the SA languages our clients write in
+  { name: "crisis: isiZulu", input: "Ngifuna ukuzibulala", expect: { reason: "crisis", priority: "urgent" } },
+  { name: "crisis: Afrikaans", input: "Ek wil myself doodmaak", expect: { reason: "crisis", priority: "urgent" } },
+  { name: "crisis: Sesotho", input: "Ke batla ho ipolaea", expect: { reason: "crisis", priority: "urgent" } },
+  { name: "crisis: Setswana", input: "ke batla go ipolaya", expect: { reason: "crisis", priority: "urgent" } },
+  { name: "crisis: Afrikaans thoughts", input: "ek het selfmoordgedagtes", expect: { reason: "crisis", priority: "urgent" } },
+  { name: "coached: isiZulu 'this gym will kill me'", input: "Le gym izongibulala namhlanje", expect: null },
+  { name: "coached: Afrikaans 'the gym killed me'", input: "Die gym het my vandag doodgemaak", expect: null },
 
   // ── INJURY (urgent) ──────────────────────────────────────────────────
   { name: "injury: knee pain", input: "my knee is in serious pain", expect: { reason: "injury", priority: "urgent" } },
