@@ -116,7 +116,6 @@ export async function handleToneSignal(ctx: { message: string; m: string; user: 
 export async function handleNumbersLiteracy(ctx: { message: string; m: string; user: any; capName: string; phone: string }): Promise<string | null> {
   const { message, m, user, capName, phone } = ctx;
   // WAVE-1 SWITCH: for a switched client the new coach explains the numbers (A16), from the ledger.
-  if ((await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""))) return null;
   // Default is number-free (numbers:low or absent); numbers:full = opted into figures.
   const isFull = /\bnumbers:full\b/i.test(user.profileNotes || "");
 
@@ -183,12 +182,15 @@ export async function handleNumbersLiteracy(ctx: { message: string; m: string; u
   const isCalorieConfusion = /\b(what(?:'?s| is| are)?\s+(?:a |the )?calories?\b|don.?t (understand|get|know)( what)? (calories|kcal|this number|these numbers|the numbers)|calories?.*confus|confus.*calories?|too many numbers|what does (the number|the numbers|kcal|calories?) mean|what(?:'?s| is)?\s+a?\s*kcal|explain (the )?calories?|i don.?t count calories|never counted calories)\b/i.test(m)
     || (/\bcalor|kcal\b/i.test(m) && /\b(confused|lost|don.?t understand|makes? no sense|too complicated|i.?m not good with numbers)\b/i.test(m));
   if (isCalorieConfusion) {
+    // WAVE 1 (#445): a switched client's explanation is the new coach's; the preference write below stays.
+    const switchedTalk = (await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""));
     if (isFull) {
       try {
         const base = (user.profileNotes || "").replace(/\s*\bnumbers:(low|full)\b/gi, "").trim();
         await db.update(users).set({ profileNotes: base || null }).where(eq(users.phoneNumber, phone));
       } catch (e) { console.error("[NUMBERS_MODE] confusion → plain failed:", e); }
     }
+    if (switchedTalk) return null;
     const goal = user.goalType || "fat_loss";
     const goalLine = goal === "muscle_gain"
       ? `Yours is set a little *above* what your body burns, so there's extra to build muscle with.`

@@ -144,6 +144,8 @@ type CheckResult = { what: string; invariant: string | null; pass: boolean; evid
 const defOf = (k: ReplayCase, c: Check) =>
   sha(JSON.stringify({ newClient: k.newClient ?? false, seed: k.seed ?? null, before: k.before ?? [], turns: k.turns, check: c }));
 type CaseResult = { id: string; journey: Journey; heldOut: boolean; checks: CheckResult[]; hardPass: boolean; score: number | null; verdict: string; bodies: string[]; neverSeen: string[];
+  /** Which reply path answered each graded turn (turn_ledger decision.source; null = an old handler that is not tagged). */
+  sources?: Array<string | null>;
   /** The new coach in shadow: its would-be replies, graded on the reply checks, the never-see list and the judge. */
   core: { replyPass: boolean; score: number | null; neverSeen: string[]; failing: string[];
     /** The actions the new core proposed across the graded turns, and whether they meet the case's `actions` (null: none set). */
@@ -176,6 +178,17 @@ async function coreActionsFor(sid: string): Promise<ProposedAction[] | null> {
     const r = (await pool.query<{ a: any }>("SELECT understanding->'actions' a FROM core_shadow WHERE root_id = $1 LIMIT 1", [sid])).rows[0];
     return r ? (Array.isArray(r.a) ? r.a.filter((x: any) => x && typeof x.type === "string") : []) : null;
   } catch { return null; }
+}
+/** The reply path that answered this turn (#445 reach check): the `tag` source routes.ts records, or null. */
+async function sourceOf(sid: string): Promise<string | null> {
+  for (let i = 0; i < 10; i++) {
+    try {
+      const r = (await pool.query<{ s: string | null; n: number }>("SELECT decision->>'source' s, 1 n FROM turn_ledger WHERE root_id = $1 ORDER BY created_at DESC LIMIT 1", [sid])).rows[0];
+      if (r) return r.s;
+    } catch { return null; }
+    await new Promise(res => setTimeout(res, 500));
+  }
+  return null;
 }
 const replyMs: number[] = []; // every turn, before-turns included: the client waits for all of them
 async function turn(phone: string, text: string, sid: string): Promise<string> {
@@ -267,9 +280,11 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
   const bodies: string[] = [];
   const coreBodies: Array<string | null> = [];
   const coreActions: Array<ProposedAction[] | null> = [];
+  const sources: Array<string | null> = [];
   if (k.proactive) bodies.push(await scheduled(k.proactive, phone, u.id));
   for (const [i, t] of k.turns.entries()) {
     bodies.push(await turn(phone, t, `RP${n}t${i}`));
+    sources.push(await sourceOf(`RP${n}t${i}`));
     coreBodies.push(await coreReplyFor(`RP${n}t${i}`));
     coreActions.push(await coreActionsFor(`RP${n}t${i}`));
   }
@@ -301,7 +316,7 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
         ...(graded?.misses ?? []).map(m => `action: ${m}`)],
       neverSeen: NEVER_SEE.filter(nv => cb.some(b => new RegExp(nv.pattern, nv.flags ?? "").test(b))).map(nv => nv.what) };
   }
-  return { id: k.id, journey: k.journey, heldOut: isHeldOut, checks, hardPass: checks.filter(c => c.invariant).every(c => c.pass), score, verdict, bodies, neverSeen, core };
+  return { id: k.id, journey: k.journey, heldOut: isHeldOut, checks, hardPass: checks.filter(c => c.invariant).every(c => c.pass), score, verdict, bodies, neverSeen, core, sources };
 }
 
 // ── THE RUN ─────────────────────────────────────────────────────────────────────────────────
@@ -423,6 +438,20 @@ if (coverageRows.length) {
     lines.push(`| ${row} | ${capability.slice(0, 48)} | ${rs.length || "**0**"} | ${rs.length ? `${rs.filter(r => r.hardPass).length}/${rs.length}` : "–"} | ${avg(rs.map(r => r.score))} | ${avg(rs.map(r => r.core?.score))} |`);
   }
 }
+// ── REACH (#445, CTO attack finding 1): with wave 1 switched on, every wave-1 case must be answered by
+// the new coach or the scope floor, never by an old handler that got there first. A case that expects a
+// write (a meal inside a feeling) is handed back to the old path on purpose and is not counted.
+const { writesState } = await import("../server/understanding/actions");
+const wave1Ids = new Set((existsSync("docs/COVERAGE.md") ? readFileSync("docs/COVERAGE.md", "utf8").split("\n").filter(l => /^\| A1[0167] \|/.test(l)) : [])
+  .flatMap(l => CASES.filter(k => new RegExp(`(?:^|[\\s,(])${k.id}(?:$|[\\s,)])`).test(l.split("|")[5] || "")).map(k => k.id)));
+const reachOn = String(process.env.CORE_WAVE1 || "on").toLowerCase() !== "off";
+const reachCases = results.filter(r => wave1Ids.has(r.id) && CASES.find(k => k.id === r.id)?.owner !== "old-path" && !(CASES.find(k => k.id === r.id)?.actions?.expect ?? [])
+  .some(e => writesState(typeof e === "string" ? e : e.type)));
+const reachMisses = reachOn ? reachCases.filter(r => (r.sources ?? []).some(src => src !== "new coach" && src !== "scope")) : [];
+if (reachOn && reachCases.length) {
+  lines.push("", `### Reach (wave 1): ${reachCases.length - reachMisses.length}/${reachCases.length} answered by the new coach or the scope floor`);
+  for (const r of reachMisses) lines.push(`- ${r.id}: answered by ${(r.sources ?? []).map(x => x ?? "an untagged old handler").join(", ")}`);
+}
 const report = lines.join("\n");
 REAL(report);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + "\n");
@@ -448,6 +477,10 @@ const labels = (process.env.PR_LABELS || "").split(",").map(l => l.trim());
 // talk switch is not held by wave-2 logging). No journey label: every miss blocks, the safe default.
 const switched = labels.map(l => /^journey:(\d)$/.exec(l)?.[1]).filter(Boolean).map(Number);
 const actionMisses = results.filter(r => !r.heldOut && r.core?.actionPass === false && (!switched.length || switched.includes(r.journey))).map(r => r.id);
+if (labels.includes("switch") && reachMisses.length && !WRITE_BASELINE) {
+  REAL(`replay-gate: SWITCH BLOCKED — wave 1 not reached in ${reachMisses.length} case(s): ${reachMisses.map(r => r.id).join(", ")}.`);
+  process.exit(1);
+}
 if (labels.includes("switch") && actionMisses.length && !WRITE_BASELINE) { // a baseline records main, never judges it
   REAL(`replay-gate: SWITCH BLOCKED — the new coach would do the wrong thing in ${actionMisses.length} case(s): ${actionMisses.join(", ")}.`);
   process.exit(1);

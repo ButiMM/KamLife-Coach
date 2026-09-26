@@ -640,9 +640,9 @@ export async function handleFoodContext(ctx: {
 
   // ---- CUT 10: THE ASK GETS AN ANSWER, NOT A HANDOFF ----------------------------------------
   // Everything above has just worked out that this is a QUESTION about a food we can price. Until
-  // now that was the end of the deterministic road: every handler declined and the model answered
-  // without the day's ledger in front of it. This is the one place that already knows both.
+  // now every handler declined and the model answered without the ledger; this place knows both.
   if (hasActualFood && hasSubstantiveQuestion && !isFuturePlanning && PERMISSION_ASK.test(m)) {
+    if ((await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""))) return null; // a question, never a log: the new coach answers (#445)
     const answered = await answerFoodPermissionAsk(user, message, foodsInMsg);
     if (answered) { await logChat(user.id, message, answered, "FOOD_PERMISSION"); return answered; }
   }
@@ -1324,7 +1324,7 @@ export async function handleFoodContext(ctx: {
   // to freeform coach → "I don't have a meal logged / what did you eat?" + invented macros.
   // Cause: SA scanner missed branded meal; path must still attempt GPT log (or one clarify),
   // never hand a clear "I had … breakfast" turn to the chat coach.
-  const hasStrongFoodTrigger = /\b(i ate|i had|i've had|ive had|just had|just ate|just finished eating|for breakfast|for lunch|for dinner|for supper|for brunch|for snack|breakfast was|lunch was|dinner was|supper was|brunch was|meal was|meal is|food was|i'm eating|im eating|i am eating|i'll have|gonna have|going to have|pre.?workout meal|post.?workout meal|had a\b|had some\b|had the\b|had my\b|ate a\b|ate some\b|ate the\b|ate my\b|having a\b|having some\b|having my\b)\b/i.test(m);
+  const hasStrongFoodTrigger = /\b(i ate|i had(?!\s+to\b)|i've had|ive had|just had|just ate|just finished eating|for breakfast|for lunch|for dinner|for supper|for brunch|for snack|breakfast was|lunch was|dinner was|supper was|brunch was|meal was|meal is|food was|(?:i'm|im|i am) eating(?!\s+(?:well|healthy|clean|right|good|better|badly|less|more)\b)|i'll have|gonna have|going to have|pre.?workout meal|post.?workout meal|had a\b|had some\b|had the\b|had my\b|ate a\b|ate some\b|ate the\b|ate my\b|having a\b|having some\b|having my\b)\b/i.test(m);
   // Branded / takeaway meal with an eating verb — treat as log intent even when DB has no row.
   const hasNamedMealIntent = hasLogTrigger && /\b(mcdonald'?s?|kfc|spur|nando'?s?|steers|wimpy|burger\s*king|pizza\s*hut|domino'?s?|takeaways?|takeaway|take\s*away|drive\s*thru|mocha|cappuccino|latte|flat white|breakfast|lunch|dinner|supper|brunch)\b/i.test(m);
   // Word-count ceiling only applies to bare statements without a strong eating trigger.
@@ -1436,7 +1436,7 @@ export async function handleFoodContext(ctx: {
   // reportedInSomeClause is the floor C9 used one axis over: per-clause asking/intent tests with
   // a domain-only predicate, so "I had chicken for dinner, is that ok?" still reports eating and
   // still clarifies, while a pure question reaches the Coach. forceLog keeps its override.
-  const reportsEatingSomewhere = !!reportedInSomeClause(message, c => /\b(?:had|ate|eaten|eating|having)\b/i.test(c));
+  const reportsEatingSomewhere = !!reportedInSomeClause(message, c => /\b(?:had(?!\s+to\b)|ate|eaten|eating(?!\s+(?:well|healthy|clean|right|good|better|badly|less|more)\b)|having(?!\s+to\b))\b/i.test(c)); // not "had to" / "I'm eating well" (#445)
   if ((hasStrongFoodTrigger || hasNamedMealIntent || forceLog) && !isFuturePlanning && !isEmotionalOnly
       && (reportsEatingSomewhere || forceLog)) {
     console.warn(`[FOOD_GATE] strong meal signal fell through — forcing clarify: "${message.slice(0, 80)}"`);

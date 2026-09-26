@@ -54,7 +54,8 @@ export interface MessyIntakeResult {
 }
 
 const FOOD_VERB =
-  /\b(i\s+)?(ate|eaten|had|having|just\s+had|just\s+ate|for\s+breakfast|for\s+lunch|for\s+dinner|for\s+supper|breakfast\s+was|lunch\s+was|dinner\s+was)\b/i;
+  // "had to" / "having to" is obligation, not eating: "I had to update my CV so I skipped gym" (#445).
+  /\b(i\s+)?(ate|eaten|had(?!\s+to\b)|having(?!\s+to\b)|just\s+had|just\s+ate|for\s+breakfast|for\s+lunch|for\s+dinner|for\s+supper|breakfast\s+was|lunch\s+was|dinner\s+was)\b/i;
 const FOOD_NOUN =
   /\b(breakfast|lunch|dinner|supper|brunch|snack|meal|mcdonald'?s?|kfc|nando'?s?|spur|steers|wimpy|takeaways?|take\s*away|pap|chicken|eggs?|mocha|coffee|bread|toast|rice|mince|wors|boerewors|pizza|burger|chips)\b/i;
 const STEPS =

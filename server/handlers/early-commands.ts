@@ -111,7 +111,10 @@ export async function handleEarlyCommands(ctx: {
   if (surplusReply !== null) return surplusReply;
 
   // ---- SWAP ASKS ("instead of mayo?") — the swap table answers; before the totals card ----
-  const swapAnswer = answerSwapAsk(m, user.goalType, foodConstraints(user as any));
+  // WAVE 1 (#445): for a switched client the swap and substitution tables are the new coach's TOOLS
+  // (core/coach.ts foodTools), not replies of their own.
+  const switchedTalk = (await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""));
+  const swapAnswer = switchedTalk ? null : answerSwapAsk(m, user.goalType, foodConstraints(user as any));
   if (swapAnswer !== null) { await logChat(user.id, message, swapAnswer, "SWAP_ASK"); return swapAnswer; }
 
   // ---- "THE SHOP DIDN'T HAVE IT" — a different question from the swap above (2026-08-05).
@@ -120,7 +123,7 @@ export async function handleEarlyCommands(ctx: {
   // Shoprite aisle, needing an answer in one second. Deterministic: substitution is a lookup,
   // not a judgement, and it costs nothing. Checked AFTER the goal swap so an ordinary
   // "instead of X" still gets the health answer it always did.
-  const subAnswer = answerUnavailable(message, foodConstraints(user as any));
+  const subAnswer = switchedTalk ? null : answerUnavailable(message, foodConstraints(user as any));
   if (subAnswer !== null) { await logChat(user.id, message, subAnswer, "SUBSTITUTION"); return subAnswer; }
 
   // ---- A LOCAL CHANGE TO A LIST WE ALREADY SENT (Work Order B, 2026-08-12) ----
@@ -138,8 +141,10 @@ export async function handleEarlyCommands(ctx: {
   // calorie block so "my week"/"my month" don't get read as a calorie query. Question-safe: it's a
   // read-only summary, so it fires even when the classifier flags a question.
   if (
-    /\b(my week|weekly (report|scorecard|card|summary|recap)|week (report|card|scorecard)|this week.?s? (report|card|scorecard|summary))\b/i.test(m) ||
-    /\b(my month|monthly (report|scorecard|card|summary|recap)|month (report|card|scorecard)|report card|scorecard|my (monthly )?scorecard)\b/i.test(m)
+    // A switched client gets the card on request only; "how was my week?" is the new coach's (#445).
+    (switchedTalk ? /^(?:my week|my month)[.!]?$/i.test(m.trim()) : /\b(my week|my month)\b/i.test(m)) ||
+    /\b(weekly (report|scorecard|card|summary|recap)|week (report|card|scorecard)|this week.?s? (report|card|scorecard|summary))\b/i.test(m) ||
+    /\b(monthly (report|scorecard|card|summary|recap)|month (report|card|scorecard)|report card|scorecard|my (monthly )?scorecard)\b/i.test(m)
   ) {
     const isMonth = /\bmonth|report card\b/i.test(m);
     const first = user.name ? `${user.name.split(" ")[0]}, ` : "";
@@ -156,7 +161,7 @@ export async function handleEarlyCommands(ctx: {
   // answered from the card's own rows, never the model (2026-07-23 live: card said Fat 88/86g
   // OVER, engine said "~100g, within a reasonable range" — wrong number AND wrong verdict).
   {
-    const which = whichMacroAsked(m);
+    const which = switchedTalk ? null : whichMacroAsked(m); // "how are my fats looking?" is the new coach's when switched (#445)
     if (which) {
       const { todayRows } = await import("../macro-card-attach");
       const { getGoalProfile } = await import("../goal-profiles");
@@ -742,7 +747,8 @@ export async function handleEarlyCommands(ctx: {
   // Guard: if message contains quit/frustration signal, do NOT put them in programme setup
   const isQuitOrFrustrated = /\b(quit|giving up|not doing this|done with this|cancel|i.?m out|too hard|not worth|hate this|this (sucks|is shit|doesn.?t work|is useless|is a waste))\b/i.test(m);
   const isNewProgrammeRequest = !isQuitOrFrustrated && (
-    /\b(new|change|different|update|rebuild|swap|switch|give me a new|i need a new|want a new)\b.{0,30}\b(programme|program|workout|training plan|plan|gym|home)\b/i.test(m) ||
+    // Not bare "gym"/"home": "I had to UPDATE my CV today so I skipped GYM" started programme setup (#445).
+    /\b(new|change|different|update|rebuild|swap|switch|give me a new|i need a new|want a new)\b.{0,30}\b(programme|program|workout|training plan|plan)\b/i.test(m) ||
     /\b(programme|program|workout|training)\b.{0,30}\b(new|change|different|update|rebuild)\b/i.test(m) ||
     /\b(a new one|different one|another one|new gym|new home|new workout|new training)\b/i.test(m) ||
     /\bi want to train\s+[2-6]\s*days?\b/i.test(m) ||
@@ -900,8 +906,10 @@ export async function handleEarlyCommands(ctx: {
   // silently skipping the food logger. Meal words / eating verbs route to food logging.
   const isMealStatement = /\b(breakfast|lunch|dinner|supper|snack|brunch|i\s+had|i\s+ate|just\s+had|just\s+ate|\bhad\b|\bate\b|having|eating|i.?ll\s+have|gonna\s+have|going\s+to\s+have)\b/i.test(m);
   const isRawFoodList = !isMealStatement && m.includes(",") && (m.match(FOOD_WORDS) || []).length >= 3 && !m.includes("?") && m.split(/\s+/).length <= 25;
+  // For a switched client only a PASTED list is rebuilt: the worded trigger ("…i buy…") also caught
+  // "Which crypto should I buy?" and grocery questions, which are the new coach's (#445).
   const isClientList = (
-    (/\b(adjust|fix|check|improve|optimize|look at|review|here.?s|heres|this is what i|what i normally|my.*grocery|my.*shopping|i usually buy|i always buy|every week i buy|i buy)\b/i.test(m)
+    (!switchedTalk && /\b(adjust|fix|check|improve|optimize|look at|review|here.?s|heres|this is what i|what i normally|my.*grocery|my.*shopping|i usually buy|i always buy|every week i buy|i buy)\b/i.test(m)
     && /\b(list|buy|shop|grocery|groceries|shopping|trolley|basket)\b/i.test(m)
     && m.split(/\s+/).length >= 5)
     || isRawFoodList

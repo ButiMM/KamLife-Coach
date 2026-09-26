@@ -3,6 +3,7 @@
  * Returns string if handled, null to fall through.
  */
 
+import { coreWave1For } from "../core/coach";
 import { db } from "../db";
 import { assessWeightRate } from "./weight";
 import {
@@ -232,7 +233,7 @@ export async function handleMiscCommands(ctx: {
   // returns "soreness" for that sentence, and the triage owner is THIS FILE, further down: the
   // supplement branch simply sits above it. Only this branch stands down, so the turn reaches the
   // triage below rather than leaving the handler entirely. No new mouth.
-  if (classifyPainReport(m) === null && (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take"))) {
+  if (!coreWave1For(String(user?.phoneNumber || "")) && classifyPainReport(m) === null && (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take"))) {
     // ALREADY TAKING IT (2026-07-16 live: 'But I'm already taking creatine daily' was
     // first week-gated, then SOLD the full creatine pitch — contradiction + deaf). A
     // client already on a supplement gets acknowledgment + usage guidance, no gate, no sell.
@@ -341,7 +342,8 @@ export async function handleMiscCommands(ctx: {
   // fallback's established ownership, and do not price a future meal from today's ledger.
   // "Have" needs meal context; "what should I have done" is not a food question.
   const namesOneMeal = ["breakfast", "lunch", "dinner", "supper"].some(meal => m.includes(meal));
-  if (/\b(what should i eat|what should i have\s+for\s+(?:breakfast|lunch|dinner|supper)|next meal|(?:suggest|give|send|show|recommend)(?:\s+me)?\s*a?n?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(braai|social|tomorrow|next\s+(?:week|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i.test(m) && (engineLive() || !namesOneMeal)) {
+  // WAVE 1 (#445): a switched client's plate-ask is the new coach's (core/coach.ts).
+  if (!coreWave1For(String(user?.phoneNumber || "")) && /\b(what should i eat|what should i have\s+for\s+(?:breakfast|lunch|dinner|supper)|next meal|(?:suggest|give|send|show|recommend)(?:\s+me)?\s*a?n?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(braai|social|tomorrow|next\s+(?:week|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i.test(m) && (engineLive() || !namesOneMeal)) {
     const ledger = await getDayLedger(user.id, { user });
     const todayCals = ledger.kcal;
     const todayProt = ledger.protein;
@@ -653,7 +655,7 @@ export async function handleMiscCommands(ctx: {
   // which the shareable report card in early-commands.ts:135 matches and answers first. Four dead
   // phrases in a block that looked like an owner. The words it can actually win are left here;
   // the numbers now come from the one source.
-  if (m === "transformation" || m === "monthly" || /\b(this month|my transformation|30.?day\s*report)\b/i.test(m)) {
+  if (m === "transformation" || m === "monthly" || /\b(my transformation|30.?day\s*report)\b/i.test(m) || (!coreWave1For(String(user?.phoneNumber || "")) && /\bthis month\b/i.test(m))) { // bare "this month" caught "Which crypto should I buy this month?" (#445)
     try {
       const { getProgressTruth } = await import("../day-ledger");
       const truth = await getProgressTruth(user, { days: 30, weightWindowDays: 30, clientMessage: message });
@@ -885,7 +887,8 @@ export async function handleMiscCommands(ctx: {
   // And it advertised "Send *this week*" — a command NO handler owned, so it fell to the model,
   // which improvised averages and handed the next move back to the client. Both doors are owned
   // here now, from the same truth.
-  const wantsToday = ["progress", "my progress", "how am i doing"].includes(m);
+  const switchedTalk = coreWave1For(String(user?.phoneNumber || "")); // "how am I doing (this week)?" is the new coach's (#445)
+  const wantsToday = ["progress", "my progress", ...(switchedTalk ? [] : ["how am i doing"])].includes(m);
   // The weekly doors this handler can actually WIN, and no others. The deleted WEEKLY PROGRESS
   // CARD block also listed "my week", "week report", "week card" and "weekly card" — but the
   // shareable report card in early-commands.ts:135 matches those and runs earlier, so that block
@@ -893,7 +896,8 @@ export async function handleMiscCommands(ctx: {
   // file to the left: code that looks like it owns a question and only loses on chain order.
   // Those four belong to the report card; production-parity asserts they still reach it.
   const wantsWeek = ["this week", "week", "weekly", "this weeks progress", "this week's progress"].includes(m)
-    || /\b(?:weekly stats|progress card|how.*i doing this week|weekly progress|my weekly|my stats this week|progress this week)\b/i.test(m);
+    || /\b(?:weekly stats|progress card|weekly progress|my weekly|my stats this week|progress this week)\b/i.test(m)
+    || (!switchedTalk && /\bhow.*i doing this week\b/i.test(m));
   if (wantsToday || wantsWeek) {
     const name = getDisplayName(user) || "there";
     try {
@@ -1706,7 +1710,8 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- PORTION SIZE GUIDE — "portions", "how much should I eat", "serving size" ----
-  if (!wroteThisTurn && (m === "portions" || m === "portion guide" || m === "serving size" || /\b(portion\s*(?:size|guide|control)|serving\s*size|how\s*much\s*(?:should|must|do)\s*i\s*eat|plate\s*size|hand\s*portion)\b/i.test(m))
+  if (!wroteThisTurn && (m === "portions" || m === "portion guide" || m === "serving size" || /\b(portion\s*(?:size|guide|control)|serving\s*size|plate\s*size|hand\s*portion)\b/i.test(m)
+    || (!coreWave1For(String(user?.phoneNumber || "")) && /\bhow\s*much\s*(?:should|must|do)\s*i\s*eat\b/i.test(m)))
     && !/\b(weight|gain(?:ing)?|los(?:e|ing)|per week|kg)\b/i.test(m)) {
     const goal = user.goalType || "fat_loss";
     const name = user.name?.split(" ")[0] || "";

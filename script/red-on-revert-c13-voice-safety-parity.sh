@@ -72,8 +72,8 @@ failed=0
 #    report, so "should i take" pulls a medication question about a painful knee back into the
 #    supplement pitch — and /\bi take\b/ inside "should i take" reads it as already taking.
 run_case "a supplement pitch answers a painful joint" server/handlers/misc-commands.ts \
-  '  if (classifyPainReport(m) === null && (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take"))) {' \
-  '  if (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take")) {' || failed=$((failed + 1))
+  '  if (!coreWave1For(String(user?.phoneNumber || "")) && classifyPainReport(m) === null && (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take"))) {' \
+  '  if (!coreWave1For(String(user?.phoneNumber || "")) && (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take"))) {' || failed=$((failed + 1))
 
 # 2. A JOINT SYMPTOM WITHOUT THE WORD PAIN REACHES NOBODY AGAIN. The joint-mechanical words come
 #    out of classifyPainReport, so "my knee is clicking after the squats" returns null and the

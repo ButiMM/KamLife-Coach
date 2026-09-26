@@ -25,7 +25,25 @@ import { ONE_VOICE } from "../coach-prompt";
 export const CORE_MODEL = process.env.CORE_MODEL || "gpt-4o-mini";
 export const shadowOn = () => process.env.CORE_SHADOW === "on";
 
-export interface PreTurn { userId: string; name: string; facts: string; known: string; numbers: string; conversation: Array<{ role: "user" | "assistant"; content: string }> }
+export interface PreTurn { userId: string; name: string; facts: string; known: string; numbers: string; conversation: Array<{ role: "user" | "assistant"; content: string }>; tools?: string }
+
+/**
+ * THE PRODUCT'S FOOD TOOLS, READ FOR THIS MESSAGE (#437 reuse; #445 deleted the handlers that used to
+ * answer with them). The restaurant guide's exact macros and the swap / "the shop didn't have it"
+ * tables are deterministic and correct; the composer quotes them instead of inventing numbers.
+ */
+async function foodTools(user: any, message: string): Promise<string> {
+  const m = message.toLowerCase();
+  const [{ matchRestaurant, formatRestaurantGuide }, { answerSwapAsk, answerUnavailable, foodConstraints }] =
+    await Promise.all([import("../restaurants"), import("../food-swaps")]);
+  const out: string[] = [];
+  const hit = matchRestaurant(m);
+  if (hit) out.push(`FROM THE RESTAURANT GUIDE (exact; use these items and numbers, no others):\n${formatRestaurantGuide(hit, user.goalType || "fat_loss")}`);
+  const c = foodConstraints(user);
+  const swap = answerSwapAsk(m, user.goalType, c) ?? answerUnavailable(message, c);
+  if (swap) out.push(`FROM THE SWAP TABLE (already fits their goal and what they don't eat):\n${swap}`);
+  return out.join("\n\n");
+}
 
 /**
  * THEIR REAL NUMBERS, FROM THE LEDGER (#422). Every figure comes from the owners the product keeps:
@@ -33,7 +51,7 @@ export interface PreTurn { userId: string; name: string; facts: string; known: s
  * The goal profile, energy frame, health hold and food constraints come from their own owners too.
  * Nothing here is computed a second way, and the old 7-day brain snapshot is not read.
  */
-async function ledgerNumbers(user: any): Promise<string> {
+export async function ledgerNumbers(user: any, message = ""): Promise<string> {
   const [{ getProgressTruth }, { getGoalProfile }, { energyFrameLine, waterTargetLitres }, { readHealthState }, { foodConstraints }] = await Promise.all([
     import("../day-ledger"), import("../goal-profiles"), import("../targets"), import("../health-state"), import("../food-swaps")]);
   const t = await getProgressTruth(user, { days: 7 });
@@ -49,6 +67,13 @@ async function ledgerNumbers(user: any): Promise<string> {
   if (health.isSick) lines.push(`Sick: resting until about ${(health as any).sickUntil ?? "they say they're better"}. Care first; no training or calorie pressure.`);
   const constraint = foodConstraints(user).line;
   if (constraint) lines.push(constraint);
+  // WHAT TODAY'S OWN WORDS SETTLED (held-constraints.ts, the owner the outbound floor also reads):
+  // "I'm done eating today" closes the food day, and this message can reopen it. The next-meal door
+  // that honoured it was deleted with #445, so the composer is told, not trusted to remember.
+  const { readHeldConstraints, foodDayClosedWith } = await import("../held-constraints");
+  const held = await readHeldConstraints(user.phoneNumber, user).catch(() => null);
+  if (held && foodDayClosedWith(held.foodDayClosed, message)) lines.push("Food day: CLOSED. They said they are done eating today. Suggest no more food for today; if they ask, plan tomorrow.");
+  if (held?.trainingDeclined) lines.push("Training: they said they are not training today. Do not push a session.");
   const d = t.today;
   const cal = Number(user.calorieTarget) || 0;
   lines.push(d.meals.length
@@ -65,7 +90,7 @@ async function ledgerNumbers(user: any): Promise<string> {
 }
 
 /** Everything the composer may know, read BEFORE the old path runs the turn. */
-export async function readPreTurn(phone: string): Promise<PreTurn | null> {
+export async function readPreTurn(phone: string, message?: string): Promise<PreTurn | null> {
   const [u] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
   if (!u || u.onboardingState !== "COMPLETE") return null; // onboarding is its own journey, not this composer's yet
   const { factsForCoach, knownFacts, backfillFromOldStores } = await import("./client-record");
@@ -74,7 +99,7 @@ export async function readPreTurn(phone: string): Promise<PreTurn | null> {
   const [facts, known, numbers, turns] = await Promise.all([
     factsForCoach(u.id).catch(() => ""),
     knownFacts(u.id).catch(() => "KNOWN FACTS: none"),
-    ledgerNumbers(u).catch(() => ""),
+    ledgerNumbers(u, message).catch(() => ""),
     db.select({ input: turnLedger.inputText, sent: turnLedger.deliveredBody, reply: turnLedger.reply })
       .from(turnLedger).where(eq(turnLedger.userId, u.id)).orderBy(desc(turnLedger.createdAt)).limit(6),
   ]);
@@ -84,7 +109,8 @@ export async function readPreTurn(phone: string): Promise<PreTurn | null> {
     const said = (t.sent || t.reply || "").trim();
     if (said) conversation.push({ role: "assistant", content: said.slice(0, 500) });
   }
-  return { userId: u.id, name: (u.name || "").split(" ")[0] || "there", facts, known, numbers, conversation };
+  const tools = message ? await foodTools(u, message).catch(() => "") : "";
+  return { userId: u.id, name: (u.name || "").split(" ")[0] || "there", facts, known, numbers, conversation, tools };
 }
 
 const UNDERSTAND_SYSTEM = `You read one WhatsApp message from a coaching client and say what they want from this turn.
@@ -145,6 +171,7 @@ export async function compose(openai: OpenAI, pre: PreTurn, message: string, u: 
     `CLIENT: ${pre.name}`,
     pre.facts || "WHAT THIS CLIENT HAS TOLD YOU: nothing yet.",
     pre.numbers ? `THEIR REAL NUMBERS (authoritative — quote these, never invent):\n${pre.numbers}` : "THEIR REAL NUMBERS: none on record.",
+    pre.tools || "",
     u ? `THIS TURN: ${u.family} — they want: ${u.wants}${u.one_question ? `\nIf you need one thing, ask: ${u.one_question}` : ""}` : "",
   ].filter(Boolean).join("\n\n");
   const r = await openai.chat.completions.create({
@@ -170,7 +197,10 @@ async function openaiClient(): Promise<OpenAI> {
  * else keeps the old one. Rollback is instant: set CORE_WAVE1=off, no deploy.
  */
 export function coreWave1For(phone: string): boolean {
-  const mode = String(process.env.CORE_WAVE1 || "off").toLowerCase();
+  // FOUNDER BY DEFAULT (#453, the overnight rule): the founder's number meets the new coach; every tester
+  // keeps the old one until the CTO attacks this and a follow-up turns it on with the deletions.
+  // `on` is everyone; `off` is the rollback.
+  const mode = String(process.env.CORE_WAVE1 || "founder").toLowerCase();
   if (mode === "on") return true;
   if (mode !== "founder") return false;
   const digits = (p: string) => (p || "").replace(/\D/g, "").replace(/^0/, "27");
@@ -184,7 +214,7 @@ export function coreWave1For(phone: string): boolean {
  * or no reply. The caller then falls back to the old reply, so a failure is never silence.
  */
 export async function answerLive(phone: string, message: string): Promise<string | null> {
-  const pre = await readPreTurn(phone);
+  const pre = await readPreTurn(phone, message);
   if (!pre) return null;
   const openai = await openaiClient();
   const read = await understand(openai, message, pre.known);

@@ -248,7 +248,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // reply that never calls this is a reply the boundary never sees.
   const tag = (reply: string, src: string) => {
     recordReplyPath(src);
-    turnEvidence({ modelAuthored: true });
+    turnEvidence({ modelAuthored: true, replySource: src });
     return isCoach ? `${reply}\n\n_· ${src} ·_` : reply;
   };
   if (isCoach && (user.subscriptionStatus === "inactive" || user.subscriptionStatus === "trial")) {
@@ -1063,9 +1063,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // THE ENGINE IS A MOUTH ABOVE THE WRITERS, so it stands down on an owed fact for the same
   // reason every other handler does: a freeform reply must never be composed from state that is
   // missing a fact the client stated in this very message (2026-08-22).
-  const core = await import("./core/coach"), switched = core.coreWave1For(phone); // wave-1 switch: core/coach.ts wave1Turn
+  const core = await import("./core/coach"), switched = core.coreWave1For(phone); let w1Read = false; // wave-1 switch: core/coach.ts wave1Turn
   if ((engineLive() || switched) && !multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const w1 = switched ? await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), evidence: turnEvidence }) : null;
+    const w1 = switched ? await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), evidence: turnEvidence }) : null; w1Read = switched; // #451: read once
     const engineReply = w1?.reply ?? (engineLive() ? await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester }) : null);
     if (engineReply !== null) return tag(engineReply, w1?.src ?? "🧠 new engine");
   }
@@ -1088,7 +1088,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
   const scope = await classifyDomain(openai, message, { ongoing: recentlyActive(user) }); // #321: fails closed
   if (scope.redirectMessage) return tag(await declineOutOfScope(user.id, message, scope.redirectMessage, turnEvidence), "scope");
-  const coreReply = switched ? await core.answerLive(phone, message).catch(() => null) : null; // wave-1 switch, second door
+  const coreReply = switched && !w1Read ? await core.answerLive(phone, message).catch(() => null) : null; // wave-1 switch, second door (#451: once per turn)
   return tag(coreReply ?? await handleGptBlock({ phone, message, m, user, intentPromise }), coreReply ? "new coach" : "gpt fallback");
 
   } catch (err: any) {

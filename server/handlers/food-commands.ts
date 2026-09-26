@@ -39,7 +39,9 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
     await logChat(user.id, message, discReply, "RESTAURANT_LIST");
     return discReply;
   }
-  const restaurantHit = matchRestaurant(m);
+  // WAVE 1 (#445): for a switched client the restaurant guide is the new coach's TOOL (foodTools).
+  const switchedTalk = (await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""));
+  const restaurantHit = switchedTalk ? null : matchRestaurant(m);
   const isRestaurantQ = restaurantHit && /\b(order|eat|eating|have|get|getting|menu|what.*should|best|healthy|smartest|good choice|low cal|protein|going to|i'?m at|at the)\b/i.test(m);
   if (isRestaurantQ && restaurantHit) {
     const guide = formatRestaurantGuide(restaurantHit, user.goalType || "fat_loss");
@@ -191,12 +193,12 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
   // The real question underneath the swap bug above, and it had no handler: the chronic
   // under-eating path in advice-commands needs "I only eat once a day" phrasing, so a
   // single honest day of coming up short matched nothing at all.
-  if (isFullNotFussy && /\b(what does that mean|does that matter|is that (ok|okay|bad|fine)|for my goal|teach me|explain|will that affect|affect my)\b/i.test(m)) {
+  if (!switchedTalk && isFullNotFussy && /\b(what does that mean|does that matter|is that (ok|okay|bad|fine)|for my goal|teach me|explain|will that affect|affect my)\b/i.test(m)) {
     const undereatReply = await fullForTodayReply(user);
     await logChat(user.id, message, undereatReply, "UNDEREATING_TODAY");
     return undereatReply;
   }
-  if (isSwapRequest) {
+  if (isSwapRequest && !switchedTalk) {
     const foods = scanForSAFoods(m);
     const foodName = foods[0].name;
     const category = foods[0].category;
@@ -367,6 +369,10 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
       const waterCombined = await tryLogWater({ phone, message, m, user });
       return waterCombined ? `${waterCombined}\n\n---\n\n${suppReply}` : suppReply;
     }
+
+    // A switched client's supplement QUESTION is the new coach's (#445); the log above and the
+    // explicit "supplements" command stay here.
+    if (switchedTalk && !["supplements", "supps", "my supplements", "vitamins", "my vitamins"].includes(m)) return null;
 
     // Specific supplement question — give a targeted answer, not the whole guide
     const isCreatine = /\bcreatine\b/i.test(m);

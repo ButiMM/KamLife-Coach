@@ -307,7 +307,8 @@ export async function handleLifecycle(ctx: {
   // "how much should I be GAINING per week" is a rate question, not a portion one —
   // the blanket "how much" clause sent the portion guide twice to a furious tester
   // (2026-07-03). Portions need food context; weight/rate words always exclude.
-  if ((/\b(portion|how many grams|serving size|how big|how large|right amount|right portion|portion size|right size|how do i measure)\b/i.test(m)
+  const switchedTalk = (await import("../core/coach")).coreWave1For(String(user?.phoneNumber || "")); // wave 1 (#445): portion, trolley and "what should I eat" are the new coach's
+  if (!switchedTalk && (/\b(portion|how many grams|serving size|how big|how large|right amount|right portion|portion size|right size|how do i measure)\b/i.test(m)
       || (/\bhow much\b.{0,30}\b(eat|food|rice|pap|meat|chicken|fish|protein|carbs?|per meal|on my plate)\b/i.test(m)))
     && !/\b(weight|gain(?:ing)?|los(?:e|ing)|per week|kg|steps?)\b/i.test(m)) {
     await logChat(user.id, message, PORTION_GUIDE, "PORTION_GUIDE");
@@ -320,7 +321,7 @@ export async function handleLifecycle(ctx: {
   // back the whole STORE_ADVICE price list — eleven sentences of a shop's inventory to a man
   // standing in the aisle. He asked WHAT TO BUY, not WHICH SHOP. Different questions.
   const asksTrolley = /\b(trolley|basket|what (?:should|must|do) i (?:buy|get|put)|what to buy|shopping list|buy for the week|food for the week)\b/i.test(m);
-  if (asksTrolley) {
+  if (asksTrolley && !switchedTalk) {
     // One pattern: "I've got / already have …" followed by a starch, within one clause.
     const skipStarch = /\b(?:i(?:'ve| have)\s+(?:got|already)|already (?:have|got))\b[^.?!]{0,60}?\b(?:rice|pap|maize|samp|bread|potato)\b/i.test(m);
     const trolley = skipStarch
@@ -411,7 +412,8 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- RESCUE / RESET — for stuck users ----
-  if (/\b(restart|reset|start over|start again|stuck|help me start|beginning|begin again|onboard again)\b/i.test(m) ||
+  // "stuck" and "beginning" only when they are the whole message: "stuck at 82kg for three weeks" is a plateau, not a reset.
+  if (/\b(restart|reset|start over|start again|help me start|begin again|onboard again)\b|^(?:i'?m |im )?(?:so )?stuck[.!?]*$|^beginning[.!?]*$/i.test(m.trim()) ||
       m === "restart" || m === "reset" || m === "start over") {
     const currentState = user.onboardingState;
     const wantsFullReset = /start over|start again|begin again|onboard again/i.test(m);
@@ -843,7 +845,7 @@ export async function handleLifecycle(ctx: {
   // ---- "WHAT SHOULD I DO NEXT WEEK / COACHING ADVICE?" — no GPT, data-driven ----
 
   // ---- FOOD DIARY SUMMARY — "what did I eat today?" / "today's calories?" — no GPT ----
-  if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meal log|meal logs|today.?s?\s*meal\s*logs?|meals today|melas today|melas|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
+  if (!(switchedTalk && /\bwhat (?:should|can|must|do) i (?:eat|have)\b|\bhow (?:much|many)\b/i.test(m)) && /\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meal log|meal logs|today.?s?\s*meal\s*logs?|meals today|melas today|melas|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
     // THE DAY THEY NAMED (2026-08-10 directive, P0.1). "What did I eat yesterday?" read TODAY,
     // so a client checking yesterday was shown today's plate and told it was theirs. The date
     // is resolved ONCE, here, by the same parseMealDate that resolves it at write time — one
