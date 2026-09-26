@@ -186,7 +186,8 @@ let client: OpenAI | null = null;
 async function openaiClient(): Promise<OpenAI> {
   if (!client) {
     const OpenAI = (await import("openai")).default;
-    client = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY });
+    // #441: never hang a WhatsApp turn on a slow model (the SDK default is ten minutes and two retries).
+    client = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY, timeout: 20_000, maxRetries: 1 });
   }
   return client;
 }
@@ -232,7 +233,14 @@ export async function wave1Turn(p: { phone: string; message: string; userId: str
   const { classifyDomain, declineOutOfScope } = await import("../understanding/domain-guard");
   const scope = await classifyDomain(await openaiClient(), p.message, { ongoing: p.ongoing });
   if (scope.redirectMessage) return { reply: await declineOutOfScope(p.userId, p.message, scope.redirectMessage, p.evidence), src: "scope" };
-  const reply = await answerLive(p.phone, p.message).catch(e => { console.warn("[CORE_WAVE1] fell back:", (e as Error)?.message); return null; });
+  let down: string | null = null;
+  const reply = await answerLive(p.phone, p.message).catch(async e => {
+    console.warn("[CORE_WAVE1] fell back:", (e as Error)?.message);
+    // #441: slow or unreachable, answer honestly now; a dead key or no credits falls through to the engine that alerts.
+    if ((await import("../ai-offline")).isModelSlowOrUnreachable(e)) down = (await import("../brain/reply-verifier")).COACH_NETWORK_HICCUP_REPLY;
+    return null;
+  });
+  if (down) return { reply: down, src: "model down" };
   return reply ? { reply, src: "new coach" } : null;
 }
 

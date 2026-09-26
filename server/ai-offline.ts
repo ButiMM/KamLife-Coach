@@ -120,6 +120,17 @@ export function isQuotaExhausted(err: unknown): boolean {
   return text.includes("insufficient_quota") || text.includes("no credits remaining") || text.includes("exceeded your current quota");
 }
 
+/**
+ * SLOW OR UNREACHABLE, NOT BROKEN (#441). A timeout, a dropped connection or a 5xx: the client is told
+ * honestly at once (reply-verifier's COACH_NETWORK_HICCUP_REPLY) instead of waiting on the model twice.
+ * A dead key or an empty balance is not this: those fall through to askCoachK, which alerts the founder.
+ */
+export function isModelSlowOrUnreachable(err: unknown): boolean {
+  const e = err as any;
+  const text = `${e?.constructor?.name || e?.name || ""} ${e?.code || ""} ${e?.message || ""}`;
+  return Number(e?.status ?? e?.statusCode ?? 0) >= 500 || /APIConnection|timed? ?out|ETIMEDOUT|ECONNRESET|ECONNREFUSED/i.test(text);
+}
+
 /** A dead key or an empty balance does not fix itself: alert the founder at most once an hour, not on every turn. */
 let lastAiDownAlert = 0;
 export function shouldAlertAiDown(now = Date.now()): boolean {

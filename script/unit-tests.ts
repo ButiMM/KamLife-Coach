@@ -10896,6 +10896,22 @@ test("ONE_VOICE rides in the new composer, askCoachK and the meaning engine", as
 });
 
 // ── THE WAVE-1 SWITCH FLAG (#438): off by default, founder first, instant rollback ──────────────
+// ── #441: a slow or unreachable model gets the honest line at once; a dead key falls through to the alerting engine ──
+test("#441 isModelSlowOrUnreachable: timeout, dropped connection and 5xx answer honestly; 401/credits/bad JSON fall through", async () => {
+  const { isModelSlowOrUnreachable } = await import("../server/ai-offline");
+  const { isCoachUnavailableReply, COACH_NETWORK_HICCUP_REPLY } = await import("../server/brain/reply-verifier");
+  assert.ok(isCoachUnavailableReply(COACH_NETWORK_HICCUP_REPLY), "the honest line is recognised as an unanswered turn");
+  const OpenAI = (await import("openai")).default as any;
+  const timeout = new OpenAI.APIConnectionTimeoutError();
+  const dropped = new OpenAI.APIConnectionError({ message: "Connection error." });
+  for (const e of [timeout, dropped, { status: 503, message: "Service Unavailable" }, Object.assign(new Error("read ETIMEDOUT"), { code: "ETIMEDOUT" })]) {
+    assert.ok(isModelSlowOrUnreachable(e), `answered honestly: ${String((e as any)?.message)}`);
+  }
+  for (const e of [{ status: 401, message: "Incorrect API key" }, { status: 429, code: "insufficient_quota", message: "quota" }, new SyntaxError("Unexpected token")]) {
+    assert.equal(isModelSlowOrUnreachable(e), false, `falls through to the engine that alerts: ${String((e as any)?.message)}`);
+  }
+});
+
 test("CORE_WAVE1: founder by default (#453); founder matches only the founder's number, in any format; on is everyone; off is the rollback", async () => {
   const { coreWave1For } = await import("../server/core/coach");
   const saved = { m: process.env.CORE_WAVE1, p: process.env.COACH_ALERT_PHONE, a: process.env.ADMIN_PHONE_OVERRIDE };
