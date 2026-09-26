@@ -580,20 +580,9 @@ export function selectModel(instruction: string, userMessage: string): { model: 
     return { model: "gpt-4o", maxTokens: 400, reason: "crisis" };
   }
 
-  // gpt-4o reserved for topics where a WRONG answer is unsafe (injuries/pain, medical, pregnancy); routine coaching answers as well on mini (~1/17th cost).
-  const COMPLEX_SIGNALS = [
-    "injury", "hurt my", "pain in", "hurts when", "sore knee", "sore shoulder", "sore back",
-    "is it safe to",
-    "diabetes", "hypertension", "blood pressure", "thyroid", "pcos",
-    "doctor said", "medical", "chronic",
-    "pregnant", "postpartum",
-    "ozempic", "wegovy", "saxenda", "mounjaro", "glp-1", "glp1",
-  ];
-  const isComplex = COMPLEX_SIGNALS.some(s => msgLower.includes(s));
-  if (isComplex) {
-    console.log(`[MODEL] gpt-4o (complex coaching) | msg: "${userMessage.slice(0, 60)}"`);
-    return { model: "gpt-4o", maxTokens: 350, reason: "complex" };
-  }
+  // COST (#412, CTO): gpt-4o (~16x mini) is kept for crisis above and for photo reading only. The
+  // "complex" keyword route is gone: "pain in" on a food story qualified, and medical, pregnancy and
+  // injury turns are answered by the safety owner before this reply engine is reached.
 
   // LONG-FORM ASKS NEED ROOM TO FINISH (Work Order D, 2026-08-12: "*Week total: ~R199–R*" — a list
   // cut off mid-price). 160 stays the default for conversation; it was never right for a caller
