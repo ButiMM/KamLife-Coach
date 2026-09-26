@@ -93,6 +93,7 @@ export const users = pgTable(
     laggingAreas: text("lagging_areas"),
     dominantAreas: text("dominant_areas"),
     physiqueAnalysedAt: timestamp("physique_analysed_at"),
+    historyLearnedAt: timestamp("history_learned_at", { withTimezone: true }), // #467: chat history read once, ever
     baselineWeekActive: boolean("baseline_week_active").default(false),
     baselineWeekComplete: boolean("baseline_week_complete").default(false),
     profileNotes: text("profile_notes"),

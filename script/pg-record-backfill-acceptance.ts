@@ -112,7 +112,29 @@ check("learned once: a later process makes no second call", (await learnFromHist
 await db.delete(schema.users).where(eq(schema.users.id, h.id));
 check("erased with the client", ((await db.select({ n: sql<number>`count(*)::int` }).from(schema.clientFacts).where(eq(schema.clientFacts.userId, h.id)))[0]?.n ?? 1) === 0);
 
-for (const p of [PHONE, EMPTY, RACE, HIST]) await pool.query("DELETE FROM users WHERE phone_number = $1", [p]);
+console.log("\n7. #467 A HISTORY WITH NO FACTS IS STILL READ ONCE, EVER: A DEPLOY DOES NOT PAY FOR IT AGAIN");
+const NOFACT = "whatsapp:+27829414005";
+await pool.query("DELETE FROM users WHERE phone_number = $1", [NOFACT]);
+const [nf] = await db.insert(schema.users).values({ ...base, phoneNumber: NOFACT, name: "Quiet Logger" } as any).returning();
+await db.insert(schema.chatHistory).values({ userId: nf.id, intent: "GPT", messageIn: "two eggs and toast for breakfast", messageOut: "ok" } as any);
+// The same stub as section 6 (the SDK keeps the fetch it was built with): none of its facts is in this
+// client's words, so nothing is learned, which is exactly the client the in-memory guard used to re-read.
+const before = calls;
+const nfLearned = await learnFromHistory(nf.id);
+_resetHistoryTried(); // a deploy: the in-memory set is gone
+await learnFromHistory(nf.id);
+const nfCalls = calls - before;
+check("one call, and none after the restart, although nothing was learned", nfLearned === 0 && nfCalls === 1, `calls=${nfCalls} learned=${nfLearned}`);
+await pool.query("UPDATE users SET history_learned_at = NULL WHERE id = $1", [nf.id]);
+_resetHistoryTried();
+process.env.HISTORY_DAILY_CAP = "0";
+await learnFromHistory(nf.id);
+check("the daily cap is spent: no call, and the client is not marked learned", calls - before === 1
+  && (await pool.query("SELECT history_learned_at FROM users WHERE id = $1", [nf.id])).rows[0].history_learned_at === null);
+delete process.env.HISTORY_DAILY_CAP;
+await pool.query("DELETE FROM users WHERE phone_number = $1", [NOFACT]);
+
+for (const p of [PHONE, EMPTY, RACE, HIST])await pool.query("DELETE FROM users WHERE phone_number = $1", [p]);
 await pool.end();
 console.log(`\npg-record-backfill-acceptance: ${failed ? `FAILED — ${failed} assertion(s)` : "GREEN"}`);
 process.exit(failed ? 1 : 0);
