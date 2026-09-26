@@ -30,9 +30,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # every job below only runs for ready / switch / gate PRs (or a manual run)
+  # every job below only runs for ready / switch / gate PRs (or a manual run). Adding any OTHER label
+  # (attack:codex, journey:N, hold...) starts no run (#467): #460 carries seven labels, and each one
+  # added used to start a full paid run.
   replay:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ready') || contains(github.event.pull_request.labels.*.name, 'switch') || contains(github.event.pull_request.labels.*.name, 'gate')
+    if: (github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ready') || contains(github.event.pull_request.labels.*.name, 'switch') || contains(github.event.pull_request.labels.*.name, 'gate')) && (github.event.action != 'labeled' || contains(fromJSON('["ready","switch","gate","final"]'), github.event.label.name))
     runs-on: ubuntu-latest
     timeout-minutes: 90
     services:
@@ -52,8 +54,10 @@ jobs:
       PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
       # ONE env block (25 Sep): a second `env:` key on this job made the workflow invalid, and the gate
       # silently stopped running; the watch then merged `ready` PRs with no gate at all.
-      # Cost/quality (CTO, 25 Sep): the cheap judge by default; the strong judge only when a PR moves testers.
-      REPLAY_JUDGE_MODEL: ${{ contains(github.event.pull_request.labels.*.name, 'switch') && 'gpt-4.1' || 'gpt-4.1-mini' }}
+      # Cost/quality (CTO, 25 Sep): the cheap judge by default; the strong judge only when a PR moves testers,
+      # and ONCE, on its final head (#467): a `switch` PR is judged cheaply on every push until it is
+      # labelled `final`. The watch merges a switch PR only on a green run with `final` on it.
+      REPLAY_JUDGE_MODEL: ${{ contains(github.event.pull_request.labels.*.name, 'switch') && contains(github.event.pull_request.labels.*.name, 'final') && 'gpt-4.1' || 'gpt-4.1-mini' }}
       # A switch PR is graded on the SWITCHED path: its wave's new coach answers live, and the gate's
       # stored-row and reply checks grade what testers would get. Main's baseline has no such flag.
       CORE_WAVE1: ${{ contains(github.event.pull_request.labels.*.name, 'switch') && 'on' || 'off' }}

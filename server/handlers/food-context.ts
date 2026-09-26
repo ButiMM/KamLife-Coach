@@ -27,7 +27,7 @@ import { logChat, withTimeout, turnMutation } from "./chat-log";
 import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting, reportedInSomeClause, mentionsNotDone } from "../utils";
-import { explicitMealSlot } from "../understanding/actions";
+import { explicitMealSlot, forMealSegments, MEAL_BOUNDARY_RE } from "../understanding/actions";
 // The canonical item shape — the nutritional ledger's own definition (C11).
 import { itemsFromAdjusted } from "../day-ledger-core";
 import { getPortionMemory, adjustFoodsForSegment, basisConflict } from "../portion-memory";
@@ -105,7 +105,7 @@ const TREAT_WORDS = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|c
 // SAYS_TODAY_RE moved to ../utils (2026-08-22) — the temporal classifier needs the same answer.
 export { SAYS_TODAY_RE } from "../utils";
 
-export const MEAL_BOUNDARY_RE = /\b(?:for|in|at|during|as)\s+(?:a\s+|my\s+|the\s+)?(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b/gi;
+export { MEAL_BOUNDARY_RE } from "../understanding/actions"; // moved beside explicitMealSlot, its owner
 
 /**
  * Check if the message likely has food items beyond what the SA scanner matched.
@@ -795,8 +795,10 @@ export async function handleFoodContext(ctx: {
     const questionGovernsBatch = isAskingNotReporting(m);
 
     // Collect planned inserts first — only write if 2+ days have food hits
-    const multiPlan: Array<{ label: string; foods: SAFood[]; kcal: number; prot: number; date: Date; raw: string }> = [];
-    for (const seg of daySegs) {
+    const multiPlan: Array<{ label: string; foods: SAFood[]; kcal: number; prot: number; date: Date; raw: string; slot?: string }> = [];
+    // A DAY'S MEALS ARE SEPARATE ROWS (gate three-days-one-message): "Monday … eggs and bread for breakfast and rice
+    // with beef stew for dinner" was one 1576 kcal "breakfast" row. Each day is split by meal first, as the single-day scanner does.
+    for (const seg of daySegs.flatMap(d => { const parts = forMealSegments(d.text); return parts.length ? parts.map(p => ({ day: d.day, text: p.text, slot: p.label.toLowerCase() })) : [{ ...d, slot: undefined as string | undefined }]; })) {
       if (questionGovernsBatch && !explicitlyReportsFood(seg.text)) continue;
       // A question in the same bubble cannot erase a reported meal on another day. Equally, a
       // food question is not a log. The existing clause-level fact owner makes that distinction.
@@ -811,10 +813,11 @@ export async function handleFoodContext(ctx: {
       const adjMulti = adjustFoodsForSegment(segFoods, seg.text, await getPortionMemory(user.id));
       let segKcal = 0, segProt = 0;
       for (const f of adjMulti) { segKcal += f.adjustedCalories || 0; segProt += f.adjustedProtein || 0; }
-      multiPlan.push({ label: mealDateLabel(segDate), foods: adjMulti, kcal: segKcal, prot: segProt, date: segDate, raw: seg.day + ": " + seg.text });
+      multiPlan.push({ label: mealDateLabel(segDate) + (seg.slot ? ` ${seg.slot}` : ""), foods: adjMulti, kcal: segKcal, prot: segProt, date: segDate, raw: seg.day + ": " + seg.text + (seg.slot ? ` for ${seg.slot}` : ""), slot: seg.slot });
     }
 
-    if (multiPlan.length >= 2) {
+    const multiDays = new Set(multiPlan.map(p => p.date.toDateString())).size;
+    if (multiDays >= 2) {
       // Through the one write door — one per day, sequential so today's recompute doesn't race.
       let recomp = { calories: 0, protein: 0 };
       for (const p of multiPlan) {
@@ -829,7 +832,7 @@ export async function handleFoodContext(ctx: {
           // and event-bucket rows already use.
           kcalInt: p.kcal, proteinInt: p.prot, carbsInt: 0, fatInt: 0,
           items: itemsFromAdjusted(p.foods),
-          mealLabel: explicitMealSlot(p.raw),
+          mealLabel: (p.slot as any) || explicitMealSlot(p.raw),
           loggedAt: p.date, sourceMessageId: eventGroupId,
         });
         recomp = { calories: c.runningCals, protein: c.runningProtein };
@@ -841,7 +844,7 @@ export async function handleFoodContext(ctx: {
         return `*${cap}:* ${p.foods.map(f => f.name).join(", ")} — ${p.kcal} kcal | ${p.prot}g protein`;
       });
       const todayNote = recomp.calories > 0 ? `\n\n_Today's running total: ${recomp.calories} kcal | ${recomp.protein}g protein._` : "";
-      return `Logged ${multiPlan.length} days. ✅\n\n${lines.join("\n")}${todayNote}`;
+      return `Logged ${multiDays} days. ✅\n\n${lines.join("\n")}${todayNote}`;
     }
     // Fewer than 2 days had recognised food — fall through to single-day scanner
   }
@@ -857,17 +860,7 @@ export async function handleFoodContext(ctx: {
     const forMealMatches = [...m.matchAll(new RegExp(MEAL_BOUNDARY_RE.source, "gi"))];
 
     if (forMealMatches.length >= 2) {
-      for (let i = 0; i < forMealMatches.length; i++) {
-        const label = forMealMatches[i][1].charAt(0).toUpperCase() + forMealMatches[i][1].slice(1);
-        const prevEnd = i > 0 ? (forMealMatches[i - 1].index! + forMealMatches[i - 1][0].length) : 0;
-        const segText = m.slice(prevEnd, forMealMatches[i].index!).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
-        if (segText) mealSegments.push({ label, text: segText });
-      }
-      const lastEnd = forMealMatches[forMealMatches.length - 1].index! + forMealMatches[forMealMatches.length - 1][0].length;
-      const trailing = m.slice(lastEnd).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
-      if (trailing && mealSegments.length > 0) {
-        mealSegments[mealSegments.length - 1].text += " " + trailing;
-      }
+      mealSegments.push(...forMealSegments(m));
     } else if (forMealMatches.length === 1) {
       const KEYWORD_BEFORE_RE = /\b(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b[:\s]+/gi;
       const beforeMatches = [...m.matchAll(KEYWORD_BEFORE_RE)].filter(
