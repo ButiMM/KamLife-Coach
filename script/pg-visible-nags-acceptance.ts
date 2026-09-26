@@ -229,8 +229,13 @@ REAL("\n4. \"JUST FINISHED DINNER\" LOGS DINNER");
   chk(rows.some(r => /dinner/i.test(r.meal_label || "")), "and it is dinner", JSON.stringify(rows));
   chk(!SUBSTITUTION.test(reply), "the reply is not a shop substitution", JSON.stringify(reply));
 
-  // The "chicken was finished" control retired with #445: the substitution table is now the new
-  // coach's tool (core/coach.ts foodTools), not a reply of its own.
+  // #445: the substitution table is now the new coach's TOOL (core/coach.ts foodTools), so the same
+  // guard is read where it now acts: what the new coach is given for the message.
+  const { readPreTurn } = await import("../server/core/coach");
+  const toolsFor = async (text: string) => (await readPreTurn(u.phoneNumber, text))?.tools || "";
+  chk(!/SWAP TABLE/.test(await toolsFor("Just finished dinner, pap and wors")), "…and the new coach is not handed a shop substitution for it");
+  chk(/SWAP TABLE/.test(await toolsFor("The chicken was finished at the shop, what can I get instead?")),
+    "CONTROL: \"the chicken was finished\" does hand it one");
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
