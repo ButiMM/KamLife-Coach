@@ -23,8 +23,10 @@ def comment_once(n, marker, text, comments):
 rows = []
 alerts = []
 mergeable = []
+# Every open build PR is tracked, not only attack:codex ones (26 Sep: #454 sat green for 5 h unwatched).
 open_prs = [p for p in api("GET", "/pulls?state=open&per_page=50")
-            if any(l["name"] == "attack:codex" for l in p["labels"])]
+            if not p["user"]["login"].startswith("dependabot") and p["number"] != 260 and not p.get("draft")
+            and not p["head"]["ref"].startswith("cto/")]
 for p in open_prs:
     n, sha = p["number"], p["head"]["sha"]
     short = sha[:10]
