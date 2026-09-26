@@ -687,6 +687,9 @@ function dirtyServerFiles(): string[] | null {
 }
 
 async function main() {
+  // These acceptances stub the model: after a meal is written they keep the old receipt. The new coach's
+  // after-meal words are graded by the replay gate with a real model, and by pg-core-wave1-switch §4b.
+  process.env.CORE_WAVE2 ??= "off";
   const only = (() => {
     const i = process.argv.indexOf("--only");
     return i >= 0 ? (process.argv[i + 1] || "").split(",").map(x => x.trim()).filter(Boolean) : [];

@@ -10935,15 +10935,16 @@ test("CORE_WAVE1: founder by default (#453); founder matches only the founder's 
   }
 });
 
-// ── WAVE 2, A1 (#453): founder-only by default, on is everyone, off is the rollback ──────────────
-test("CORE_WAVE2: founder by default; on is everyone; off rolls back", async () => {
+// ── WAVE 2, A1 (#459 ship as finished): on for everyone by default, founder is one number, off is the rollback ──
+test("CORE_WAVE2: on by default; founder is one number; off rolls back", async () => {
   const { coreWave2For } = await import("../server/core/coach");
   const saved = { m: process.env.CORE_WAVE2, p: process.env.COACH_ALERT_PHONE };
   try {
     delete process.env.CORE_WAVE2; process.env.COACH_ALERT_PHONE = "+27829438001";
+    assert.equal(coreWave2For("whatsapp:+27829438002"), true, "unset means on, for everyone");
+    process.env.CORE_WAVE2 = "founder";
     assert.equal(coreWave2For("whatsapp:+27829438001"), true);
     assert.equal(coreWave2For("whatsapp:+27829438002"), false);
-    process.env.CORE_WAVE2 = "on"; assert.equal(coreWave2For("whatsapp:+27829438002"), true);
     process.env.CORE_WAVE2 = "off"; assert.equal(coreWave2For("whatsapp:+27829438001"), false);
   } finally {
     if (saved.m === undefined) delete process.env.CORE_WAVE2; else process.env.CORE_WAVE2 = saved.m;

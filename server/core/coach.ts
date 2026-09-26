@@ -229,14 +229,14 @@ export async function answerLive(phone: string, message: string): Promise<string
 }
 
 /**
- * WAVE 2, ROW A1 — FOOD IN WORDS (founder-only by default, CORE_WAVE2 = off | founder | on; #453).
+ * WAVE 2, ROW A1 — FOOD IN WORDS (on for everyone, ship as finished #459; CORE_WAVE2 = off | founder | on).
  * The WRITE stays with the proven owner (food-context: the scanner owns the numbers, the slot, the
  * day), exactly the tool the executor's LOG_MEAL already calls. What moves is the REPLY: after the
  * meal is on the ledger, the new coach composes from the ledger that now holds it, instead of the
  * old receipt. The write is graded on stored state as before; the reply by the gate's judge.
  */
 export function coreWave2For(phone: string): boolean {
-  const mode = String(process.env.CORE_WAVE2 || "founder").toLowerCase();
+  const mode = String(process.env.CORE_WAVE2 || "on").toLowerCase();
   if (mode === "on") return true;
   if (mode !== "founder") return false;
   const digits = (p: string) => (p || "").replace(/\D/g, "").replace(/^0/, "27");
