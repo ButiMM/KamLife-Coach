@@ -158,6 +158,7 @@ const PHRASES = [
   "I don't want these messages anymore",
   "no more messages please",
   "Please don't contact me again",   // Codex @ 5c0cd6d
+  "I've just been diagnosed with cancer. Please stop messaging me.",   // #286: the illness comfort used to swallow it
 ];
 const OPTED: Array<{ id: string; phone: string }> = [];
 for (const text of PHRASES) {
@@ -166,6 +167,8 @@ for (const text of PHRASES) {
   const reached = await proactiveReaches(c);
   chk(reached.length === 0, `after "${text}", no proactive message reaches them`, `reply=${JSON.stringify(reply)} reached=${JSON.stringify(reached)}`);
   if (text === "stop sending me messages") REAL(`        final body: ${JSON.stringify(reply)}`);
+  if (/diagnosed/.test(text)) chk(/sorry/i.test(reply) && /no more messages/i.test(reply),
+    "the diagnosis is heard AND the stop is confirmed", JSON.stringify(reply));
   OPTED.push(c);
 }
 

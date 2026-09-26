@@ -114,6 +114,26 @@ async function ensureSafetyTurnUser(
   }
 }
 
+/**
+ * OPT-OUT, IN THE CLIENT'S OWN WORDS (#265). A request with a length ("for 2 weeks") is still the
+ * holiday pause lifecycle.ts owns; a TOPIC is a preference, not a channel opt-out (Codex @ 7716559).
+ */
+function asksToOptOut(m: string): boolean {
+  return (/^(?:stop(?:\s+all)?|opt[\s-]?out|unsubscribe(?:\s+me)?)[.!\s]*$/i.test(m)
+      || /\b(?:stop|quit)\s+(?:sending|messaging|texting|contacting|whatsapp(?:ing)?)\s+me\b|\bstop\s+(?:sending\s+)?(?:me\s+)?(?:these|the|your|all)\s+messages\b|\b(?:don'?t|do\s+not)\s+(?:want|need)\s+(?:these|your|any\s+more|anymore|any)\s+messages\b|\bno\s+more\s+messages\b|\bunsubscribe\s+me\b|\b(?:don'?t|do\s+not|never)\s+(?:contact|message|text|whatsapp)\s+me\s+(?:again|anymore|any\s+more)\b/i.test(m))
+    // A LENGTH is a pause; a TOPIC is a preference, not a channel opt-out (Codex @ 7716559): "I don't
+    // want your messages about calories, just send my workouts" asked for workouts.
+    && !/\b\d+\s*(?:days?|weeks?|months?)\b|\bfor\s+(?:a|one|two|three|a\s+few)\s+(?:days?|weeks?|months?)\b|\buntil\b|\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);
+}
+
+/** Record the opt-out and say so. NEVER CONFIRM WHAT DID NOT PERSIST (Codex @ 0c6dbe5). */
+async function recordOptOut(ou: any, named: boolean): Promise<string> {
+  const saved = !!ou && await setOptOut(ou).then(() => true, (e) => { console.error("[OPT_OUT] could not record:", e); return false; });
+  const first = named ? (ou?.name || "").split(" ")[0] : "";
+  return !saved ? `Sorry — I couldn't save that just now. Please send *STOP* again in a minute and I'll stop messaging you.`
+    : `Done${first ? `, ${first}` : ""}. No more messages from me. Your data is saved.${ou?.subscriptionStatus === "active" ? "\n\nYour subscription is still active — reply *cancel* if you also want to stop paying." : ""}\n\nReply *START* anytime to resume coaching.`;
+}
+
 export async function runSafetyGuards(
   phone: string,
   message: string,
@@ -153,7 +173,10 @@ export async function runSafetyGuards(
   const life = readLifeContext(message);
   if (life && !isCrisisMessage(m)) {
     const lifeUser = await ensureSafetyTurnUser(phone, message, context.sourceMessageId, context.boundUser);
-    const reply = lifeContextReply(life, (lifeUser?.name || "").split(" ")[0]);
+    let reply = lifeContextReply(life, (lifeUser?.name || "").split(" ")[0]);
+    // "I've just been diagnosed with cancer. Please stop messaging me." (#286): the comfort, then the
+    // opt-out they asked for. It used to be comfort only, and the messages kept coming.
+    if (asksToOptOut(m)) reply = `${reply.split("\n\n")[0]}\n\n${await recordOptOut(lifeUser, false)}`;
     // Comfort that isn't followed by silence is just a nice sentence — go quiet on nudges too.
     if (lifeUser?.id) markLifeQuiet(lifeUser.id, life).catch(() => {});
     // …and a withheld context is DURABLE (#266). A 7-day quiet window was all pregnancy and
@@ -229,18 +252,10 @@ export async function runSafetyGuards(
   // "Unsubscribe me" opened the billing save-menu. A request with a length ("for 2 weeks") is
   // still the holiday pause lifecycle.ts owns. What makes it hold is the boundary: see
   // enforceOutboundTruth, which refuses every proactive send to a client carrying opted_out.
-  const optOut = (/^(?:stop(?:\s+all)?|opt[\s-]?out|unsubscribe(?:\s+me)?)[.!\s]*$/i.test(m)
-      || /\b(?:stop|quit)\s+(?:sending|messaging|texting|contacting|whatsapp(?:ing)?)\s+me\b|\bstop\s+(?:sending\s+)?(?:me\s+)?(?:these|the|your|all)\s+messages\b|\b(?:don'?t|do\s+not)\s+(?:want|need)\s+(?:these|your|any\s+more|anymore|any)\s+messages\b|\bno\s+more\s+messages\b|\bunsubscribe\s+me\b|\b(?:don'?t|do\s+not|never)\s+(?:contact|message|text|whatsapp)\s+me\s+(?:again|anymore|any\s+more)\b/i.test(m))
-    // A LENGTH is a pause; a TOPIC is a preference, not a channel opt-out (Codex @ 7716559): "I don't
-    // want your messages about calories, just send my workouts" asked for workouts.
-    && !/\b\d+\s*(?:days?|weeks?|months?)\b|\bfor\s+(?:a|one|two|three|a\s+few)\s+(?:days?|weeks?|months?)\b|\buntil\b|\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);
+  const optOut = asksToOptOut(m);
   if (optOut) {
     const ou = await ensureSafetyTurnUser(phone, message, context.sourceMessageId, context.boundUser);
-    // NEVER CONFIRM WHAT DID NOT PERSIST (Codex @ 0c6dbe5): no token, no "no more messages".
-    const saved = !!ou && await setOptOut(ou).then(() => true, (e) => { console.error("[OPT_OUT] could not record:", e); return false; });
-    if (!saved) return `Sorry — I couldn't save that just now. Please send *STOP* again in a minute and I'll stop messaging you.`;
-    const first = (ou?.name || "").split(" ")[0];
-    const stopReply = `Done${first ? `, ${first}` : ""}. No more messages from me. Your data is saved.${ou?.subscriptionStatus === "active" ? "\n\nYour subscription is still active — reply *cancel* if you also want to stop paying." : ""}\n\nReply *START* anytime to resume coaching.`;
+    const stopReply = await recordOptOut(ou, true);
     try { await logChat(ou?.id || "unknown", message, stopReply, "OPT_OUT"); } catch (e) { console.warn("[non-fatal]", e); }
     return stopReply;
   }
