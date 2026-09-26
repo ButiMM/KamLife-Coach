@@ -246,15 +246,24 @@ export async function wave1Turn(p: { phone: string; message: string; userId: str
 
 /**
  * THEIR EARLIER MESSAGES, READ ONCE (#414). The same understanding call, over the client's recent
- * messages as one block; client-record writeHistoryFacts keeps only verbatim, own-voice facts. One call
- * per client per process at most, none when there is no history or it was already learned. Never throws.
+ * messages as one block; client-record writeHistoryFacts keeps only verbatim, own-voice facts. Never throws.
+ * ONCE PER CLIENT EVER (#467): users.history_learned_at is claimed in the database BEFORE the call, so a
+ * deploy (which empties historyTried) never re-runs it, even for a client whose history held no facts.
+ * At most HISTORY_DAILY_CAP clients (default 40) are read per 24 hours. A failed call releases the claim,
+ * so a later turn tries again.
  */
 const historyTried = new Set<string>();
 export function _resetHistoryTried(): void { historyTried.clear(); }
 export async function learnFromHistory(userId: string): Promise<number> {
   if (historyTried.has(userId)) return 0;
   historyTried.add(userId);
+  const cap = Number(process.env.HISTORY_DAILY_CAP ?? 40);
+  let claimed = false;
   try {
+    const won = await db.execute(sql`UPDATE users SET history_learned_at = now() WHERE id = ${userId} AND history_learned_at IS NULL
+      AND (SELECT count(*) FROM users WHERE history_learned_at > now() - interval '24 hours') < ${cap} RETURNING id`);
+    if (!(won as any).rows?.length) return 0; // learned before, by any process, or today's cap is spent
+    claimed = true;
     const rec = await import("./client-record");
     const msgs = await rec.historyToLearn(userId);
     if (!msgs.length) return 0;
@@ -262,7 +271,9 @@ export async function learnFromHistory(userId: string): Promise<number> {
     const read = await understand(await openaiClient(), block, "KNOWN FACTS: none", 6000);
     return await rec.writeHistoryFacts(userId, read.raw, msgs);
   } catch (e) {
-    historyTried.delete(userId); // an outage is not an answer: try again on a later turn
+    // An outage is not an answer: release the claim so a later turn tries again (#472 attack).
+    historyTried.delete(userId);
+    if (claimed) await db.execute(sql`UPDATE users SET history_learned_at = NULL WHERE id = ${userId}`).catch(() => {});
     console.warn("[RECORD] history skipped:", (e as Error)?.message || e);
     return 0;
   }
