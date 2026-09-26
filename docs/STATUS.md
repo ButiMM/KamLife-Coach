@@ -40,3 +40,5 @@ One line per merged PR: `HH:MM SAST · agent · PR # · what changed · gate bef
 25 Sep 12:55 · Claude Code · #430 · The new coach's shadow keeps the scope floor in front (A17) · tests green · +27 / −5
 25 Sep 13:59 · Claude Code · #426 · The new coach knows what the client told the old one: client record backfilled from the users profile (#414) · tests green; gate green · +223 / −7
 25 Sep 17:16 · Claude Code · #444 · New coach: no reply without understanding (#421); its numbers come from the day ledger (#422) · tests green; gate green · +79 / −7
+26 Sep 07:58 · Claude Code · #449 · One voice during the transition: a shared style block on every talk path (#439) · tests green; merged on the 45-min rule (Codex out of credits) · see PR
+26 Sep 08:52 · Claude Code · #454 · Wave 1 founder-only: old handlers stand aside, the gate proves reach (22/22); "stuck at 82kg" no longer opens the restart menu for anyone · tests green; gate green · see PR

@@ -17,7 +17,7 @@
 2. [x] #397 `/health` reports whether AI calls are succeeding (D8, D11) (#401, merged 25 Sep 06:12)
 3. [x] Label #393 and #387 `ready`, so the gate grades them once credits are back (done 24 Sep 21:05)
 4. [x] Wave-1 gate cases: A10, A11, A16 and A17 up to **5+ each** (#406, merged 25 Sep 07:08)
-5. [ ] When credits are back: the 3-run head-to-head on wave 1, then the first `switch` PR (the CTO attacks if Codex is out). Switch PR #445 open: founder first behind `CORE_WAVE1`
+5. [x] The first `switch` PR: #454 merged 26 Sep (founder, reach 22/22). #460 turns wave 1 on for everyone with the deletions (ship as finished, #459)
 
 ## Live harm (always first)
 
