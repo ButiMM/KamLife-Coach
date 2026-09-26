@@ -138,7 +138,10 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   // left to applyIdentityCorrection below, which already scales servings properly; this owns
   // compositions and every date move. See food-identity-correction.ts for the semantics.
   const movesDay = isMealDateMove(m, isRetroactiveMeal(m));
-  const plan = looksLikeQuestion(m) ? null : planCorrection(m, movesDay);
+  let plan = looksLikeQuestion(m) ? null : planCorrection(m, movesDay);
+  // WAVE 2, A2 (#459): the new coach names from → to; this engine still does the write. The parse stands if it can't.
+  const read = plan?.isCorrection && !plan.moves ? await (await import("../core/coach")).correctionRead(String(user?.phoneNumber || ""), m) : null;
+  if (plan && read) plan = { ...plan, remove: [read.from], add: [read.to] };
   if (plan?.isCorrection && (plan.moves || plan.remove.length + plan.add.length >= 2)) {
     // THE DAY THEY NAMED CONSTRAINS THE CANDIDATE (#164). This took the globally newest meal and
     // consulted parseMealDate only for `target`, and only when the plan MOVES a meal. So

@@ -244,6 +244,25 @@ export function coreWave2For(phone: string): boolean {
   return !!founder && digits(phone) === founder;
 }
 
+/**
+ * WAVE 2, ROW A2 — CORRECT A MEAL. The new coach reads WHAT was wrong and WHAT it really was ("Hayi, I had a
+ * burger, not pap" → pap → burger); the proven correction engine (food-log-mgmt applyCorrection, priced by the
+ * quantity authority) does the write. null = the deterministic parse stands, exactly as before.
+ */
+export async function correctionRead(phone: string, message: string): Promise<{ from: string; to: string } | null> {
+  if (!coreWave2For(phone)) return null;
+  try {
+    const pre = await readPreTurn(phone, message);
+    if (!pre) return null;
+    const read = await understand(await openaiClient(), message, pre.known);
+    const a = (read.u?.actions ?? []).find(x => x.type === "CORRECT_MEAL") as { from?: string; to?: string } | undefined;
+    return a?.from && a?.to ? { from: a.from.toLowerCase(), to: a.to.toLowerCase() } : null;
+  } catch (e) {
+    console.warn("[CORE_WAVE2] correction read failed, the parser stands:", (e as Error)?.message || e);
+    return null;
+  }
+}
+
 /** The new coach's reply to a turn whose meal the old owner just wrote. null = keep the old receipt. */
 export async function afterMealReply(phone: string, message: string, receipt: string): Promise<string | null> {
   if (!coreWave2For(phone)) return null;
