@@ -71,8 +71,14 @@ check("…and so are the night shifts", !!pre && /night shift/.test(pre.facts));
 check("the copy is still made with no model call (the network throws)", true);
 
 console.log("\n4. A CLIENT WITH NOTHING IN THE OLD STORES");
-const [e] = await db.insert(schema.users).values({ ...base, phoneNumber: EMPTY, name: "Empty Client", goalType: null } as any).returning();
-check("nothing is invented (a column default like trainingMode 'home' is not something they told us)", (await backfillFromOldStores(e)) === 0 && (await factRows(e.id)).length === 0 && (await factsForCoach(e.id)) === "");
+// What onboarding writes for a client who never answered (#456): "office" and "standard" are code's stand-ins.
+const [e] = await db.insert(schema.users).values({ ...base, phoneNumber: EMPTY, name: "Empty Client", goalType: null, lifeSituation: "office", workSchedule: "standard" } as any).returning();
+check("nothing is invented (a column default like trainingMode 'home', or onboarding's 'office', is not something they told us)", (await backfillFromOldStores(e)) === 0 && (await factRows(e.id)).length === 0 && (await factsForCoach(e.id)) === "", JSON.stringify((await factRows(e.id)).map(r => r.statement)));
+// A withheld state (safety.ts writes it to users.life_situation) is the safety owner's, never a "life/work" fact.
+await pool.query("DELETE FROM client_facts WHERE user_id = $1", [e.id]); _resetBackfillCache();
+await pool.query("UPDATE users SET life_situation = 'disordered_eating' WHERE id = $1", [e.id]);
+const [e2] = await db.select().from(schema.users).where(eq(schema.users.id, e.id));
+check("a withheld state in life_situation is not copied as something they told us", (await backfillFromOldStores(e2)) === 0 && !(await factsForCoach(e.id)).includes("disordered"));
 
 console.log("\n5. ERASED WITH THE CLIENT");
 await db.delete(schema.users).where(eq(schema.users.id, u.id));

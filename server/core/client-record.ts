@@ -203,7 +203,10 @@ export async function backfillFromOldStores(user: any): Promise<number> {
     const label = line.split(":")[0].trim().toLowerCase();
     // Goal and training setup are settings the snapshot already gives the coach, and they have
     // column defaults ("trains: home"): copying them would record something the client never said.
-    if (label === "goal" || label === "trains") continue;
+    // "life/work" is users.life_situation, which code writes: onboarding's "office" stand-in for a client
+    // who never answered, and safety's withheld states ("pregnant", "disordered_eating"), which the
+    // safety owner and ledgerNumbers carry. None is in the client's words (#456).
+    if (label === "goal" || label === "trains" || label === "life/work") continue;
     found.push({ kind: BACKFILL_KIND.find(([re]) => re.test(label))?.[1] ?? "life_event", subject: label, statement: line, store: "users" });
   }
   const since = user.createdAt ? new Date(user.createdAt) : new Date(Date.now() - 365 * 24 * 3600_000);
