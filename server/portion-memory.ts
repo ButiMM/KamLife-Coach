@@ -362,12 +362,14 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal
   const soleBasis = foods.length === 1 && segPreps.size === 1 ? statedBasis(segText) : null;
 
   // Portion-size modifier — "big plate of pap" → 1.5×, "half a portion" → 0.5×
-  // Applied globally across all foods in the segment (whole meal was described as big/small)
+  // Applied globally across all foods in the segment (whole meal was described as big/small).
+  // A size word right before the FOOD counts too (#310, gate: "a large burger" was the same 650 kcal as "a small
+  // burger"); "Big Mac" is a product and "large eggs" a grade, not a size.
   let sizeMultiplier = 1;
-  if (/(big|large|huge|heaped|extra\s*large|xl|full\s*plate|loaded)\s+(?:plate|bowl|portion|serving|of\b)/i.test(normText)
+  if (/\b(big|large|huge|heaped|extra\s*large|xl|full\s*plate|loaded)\s+(?:plate|bowl|portion|serving|of\b|(?!mac\b|eggs?\b)[a-z])/i.test(normText)
     || /\b(double|extra\s+helping|extra\s+large\b)/i.test(normText)) {
     sizeMultiplier = 1.5;
-  } else if (/(small|tiny|little|mini|quarter)\s+(?:plate|bowl|portion|serving)/i.test(normText)
+  } else if (/\b(small|tiny|little|mini|quarter)\s+(?:plate|bowl|portion|serving|(?!bit\b|while\b|later\b)[a-z])/i.test(normText)
     || /\ba\s+(?:small|tiny|little)\s+bit\s+of\b/i.test(normText)
     || /\bsmall\s+amount\s+of\b/i.test(normText)) {
     sizeMultiplier = 0.7;
