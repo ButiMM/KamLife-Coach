@@ -42,3 +42,12 @@ One line per merged PR: `HH:MM SAST · agent · PR # · what changed · gate bef
 25 Sep 17:16 · Claude Code · #444 · New coach: no reply without understanding (#421); its numbers come from the day ledger (#422) · tests green; gate green · +79 / −7
 26 Sep 07:58 · Claude Code · #449 · One voice during the transition: a shared style block on every talk path (#439) · tests green; merged on the 45-min rule (Codex out of credits) · see PR
 26 Sep 08:52 · Claude Code · #454 · Wave 1 founder-only: old handlers stand aside, the gate proves reach (22/22); "stuck at 82kg" no longer opens the restart menu for anyone · tests green; gate green · see PR
+26 Sep 12:23 UTC · Claude Code · #461 · What's new after every switch: the testers' note goes out through the broadcast route (#442) · tests green · see PR
+26 Sep 12:52 UTC · Claude Code · #462 · When the model is slow or down, the client still gets an answer (#441) · tests green · see PR
+26 Sep 12:56 UTC · Claude Code · #457 · Morning message: no welcome-back to someone here yesterday, first name only · tests green · see PR
+26 Sep 13:08 UTC · Claude Code · #463 · A child who says "I'm 9 years old" is not coached (#338) · tests green · see PR
+26 Sep 13:26 UTC · Claude Code · #464 · "Diagnosed with cancer, please stop messaging me" is an opt-out too (#286) · tests green · see PR
+26 Sep 18:38 UTC · Claude Code · #468 · Evening and weekly messages name the day: what they ate, first name, one light ask · tests green · see PR
+26 Sep 18:50 UTC · Claude Code · #469 · A large burger counts as more than a small one; dinner is not swallowed as a retry of lunch (#310) · tests green · see PR
+26 Sep 18:50 UTC · Claude Code · #470 · A multi-day catch-up keeps each day's breakfast and dinner as separate meals (#324) · tests green · see PR
+26 Sep 19:29 UTC · Claude Code · #473 · The replay gate's strong judge runs once per switch PR, on its final head (#467) · tests green · see PR
