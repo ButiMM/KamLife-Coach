@@ -41,6 +41,11 @@ export interface DomainVerdict {
 const REDIRECT =
   "I'm Coach K — I'm here for your health and fitness journey. If it's about your training, food, sleep, stress, habits or progress, I'm all in. What's going on with you today?";
 
+/** "Can I speak to a real person?" is not off-topic (C7, gate asks-for-a-real-person): chat-log already escalates
+ *  it to the founder's inbox (detectEscalation → human_requested), so the client is told that, honestly. */
+const HUMAN_HANDOFF =
+  "You're chatting with Coach K, an AI coach. I've passed this to a person on our team and they'll get back to you here. What's it about, so they have the full picture?";
+
 /**
  * THE SAME REDIRECT, TO SOMEBODY ALREADY TALKING TO US (2026-08-20, phone P0).
  *
@@ -172,6 +177,10 @@ Lean YES/PARTIALLY when unsure — this is a coaching client, not a search engin
 export async function classifyDomain(
   openai: OpenAI, message: string, opts?: { ongoing?: boolean },
 ): Promise<DomainVerdict> {
+  // A REQUEST, not a report that mentions a manager ("my manager is stressing me out" is coached, not handed off).
+  if ((await import("../safety-detection")).detectEscalation(message).reason === "human_requested" && (await import("../utils")).isAskingNotReporting(message)) {
+    return { classification: "out-of-domain", reasoning: "human requested: escalated by chat-log", redirectMessage: HUMAN_HANDOFF };
+  }
   const ask = offDomainRedirect(message, opts?.ongoing);
   if (ask) return { classification: "out-of-domain", reasoning: "deterministic off-domain ask", redirectMessage: ask };
   if (killswitchOff() || isObviouslyInDomain(message)) {
