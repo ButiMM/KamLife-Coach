@@ -96,7 +96,9 @@ const dayOf = (r: Row) => sastDayKey(new Date(r.logged_at));
  * WAITS for the row — bounded, and a timeout is still a hard failure, because a turn that never
  * reaches the ledger is a turn nobody can audit afterwards.
  */
-async function say(uid: string, phone: string, message: string): Promise<{ reply: string; parts: number; ledgerRow: Row | null }> {
+// `wave1`: a talk turn the new coach owns (#445). This lab runs with CORE_WAVE1=off (the runner's default),
+// where the old path has no owner for it by design, so only the owner check is skipped; the gate grades its words.
+async function say(uid: string, phone: string, message: string, opts: { wave1?: boolean } = {}): Promise<{ reply: string; parts: number; ledgerRow: Row | null }> {
   LOG = [];
   const before = (await ledger(uid)).length;
   const reply = String(await handleMessage(phone, message).catch((e: any) => `__THREW__ ${e?.message}`) ?? "");
@@ -109,7 +111,7 @@ async function say(uid: string, phone: string, message: string): Promise<{ reply
   // to weigh, and in a release lane every one of these sentences is a client who said something
   // ordinary and got nothing. Each journey turn below is deliberately ordinary, so there is no
   // "genuinely unparseable message" defence available to any of them.
-  ok(!FALLBACK_REPLY.test(reply),
+  if (!opts.wave1) ok(!FALLBACK_REPLY.test(reply),
     `an owner claimed the message — "${message.slice(0, 46)}"`, reply.slice(0, 160));
   let rows = await ledger(uid);
   for (let i = 0; i < 60 && rows.length === before; i++) {
@@ -449,20 +451,26 @@ await journey("4 · GROCERY / SWAP — a local substitution must not rewrite the
 
   // THE SAME CONSTRAINT, ONE DOOR FURTHER IN. A substitution is the coach telling a client to buy
   // something, so it is bound by exactly the constraint the list just honoured. Control first.
-  const c2 = await say(free.id, free.phone, "They didn't have chicken at the shop");
-  ok(EGG.test(c2.reply),
-     `CONTROL: the unconstrained client IS offered eggs as the substitute`, c2.reply.slice(0, 200));
+  // WAVE 1 (#445): "the shop didn't have it" is the new coach's. What it is GIVEN is the substitution
+  // table's answer (readPreTurn → tools), so that is what is proved here; its words are graded by the gate.
+  const { readPreTurn } = await import("../server/core/coach");
+  const toolsFor = async (phone: string, msg: string) => (await readPreTurn(phone, msg))?.tools || "";
+  await say(free.id, free.phone, "They didn't have chicken at the shop", { wave1: true });
+  const c2 = await toolsFor(free.phone, "They didn't have chicken at the shop");
+  ok(EGG.test(c2),
+     `CONTROL: the unconstrained client's coach IS given eggs as the substitute`, c2.slice(0, 200));
 
   const quiet = await everything(u.id);
-  const t2 = await say(u.id, u.phone, "They didn't have chicken at the shop");
+  const t2 = await say(u.id, u.phone, "They didn't have chicken at the shop", { wave1: true });
   ok(t2.reply !== listReply, `a substitution ask did not re-send the whole list`);
   ok(t2.reply.length < listReply.length, `the answer is narrower than the list`,
      `${t2.reply.length} vs ${listReply.length} chars`);
-  ok(/\b(mince|fish|pilchard|tuna|eggs?|beans?|lentils?|beef|tin fish|soya|mutton|lamb)\b/i.test(t2.reply),
-     `it named a substitute that does the same job`, t2.reply.slice(0, 200));
-  ok(!EGG.test(t2.reply),
-     `the substitute honours the SAME constraint the list honoured`, t2.reply.slice(0, 200));
-  ok(!PORK.test(t2.reply), `and does not reach for pork either`, t2.reply.slice(0, 200));
+  const t2t = await toolsFor(u.phone, "They didn't have chicken at the shop");
+  ok(/\b(mince|fish|pilchard|tuna|eggs?|beans?|lentils?|beef|tin fish|soya|mutton|lamb)\b/i.test(t2t),
+     `its coach is given a substitute that does the same job`, t2t.slice(0, 200));
+  ok(!EGG.test(t2t),
+     `the substitute honours the SAME constraint the list honoured`, t2t.slice(0, 200));
+  ok(!PORK.test(t2t), `and does not reach for pork either`, t2t.slice(0, 200));
   ok(await everything(u.id) === quiet, `a substitution ask mutated nothing`);
 
   const t3 = await say(u.id, u.phone, "I already have rice");
@@ -563,9 +571,11 @@ await journey("6 · MESSY REAL LIFE — SA phrasing, several facts in one breath
   ok(n2.some(n => /pap/i.test(n)), `the food they did NOT deny is still there`, JSON.stringify(n2));
   ok(JSON.stringify(await stepsOf(u.id)) === stepsBefore, `steps untouched by a food correction`);
 
-  const t3 = await say(u.id, u.phone, "How much protein must I still eat today?");
-  ok(/\d+\s*g|\bg\b/i.test(t3.reply), `the answer carries a protein number`, t3.reply.slice(0, 200));
-  ok(!/liver/i.test(t3.reply), `the answer does not cite the corrected-away food`, t3.reply.slice(0, 200));
+  // WAVE 1 (#445): "how much protein must I still eat?" is the new coach's; it is TOLD the day's protein.
+  const t3 = await say(u.id, u.phone, "How much protein must I still eat today?", { wave1: true });
+  const t3n = (await (await import("../server/core/coach")).readPreTurn(u.phone, "How much protein must I still eat today?"))?.numbers || "";
+  ok(/\d+\s*g protein/i.test(t3n), `its coach is told a protein number`, t3n.slice(0, 300));
+  ok(!/liver/i.test(t3.reply + t3n), `nothing cites the corrected-away food`, (t3.reply + " | " + t3n).slice(0, 300));
   ok(await everything(u.id) === JSON.stringify({
     meals: (await meals(u.id)).map(snapMeal),
     steps: (await stepsOf(u.id)).map(r => `${dayOf(r)}=${r.steps}`),

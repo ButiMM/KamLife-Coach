@@ -79,10 +79,9 @@ run_case "choosing a medicine is not an unsafe request" server/medication-contex
   '    return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "choosing" };' \
   '    return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: false, reason: null };' || failed=$((failed + 1))
 
-# 3. THE COMMANDS ANSWER BEFORE SCOPE IS CHECKED — the supplement command answers the antibiotic.
-run_case "commands answer before scope is checked" server/routes.ts \
-  'const miscResult = offScope ? await declineOutOfScope(' \
-  'const miscResult = false ? await declineOutOfScope(' || failed=$((failed + 1))
+# 3. RETIRED WITH #445: the supplement command that answered the antibiotic was deleted (supplement
+#    questions are the new coach's, behind the scope floor), so reverting the scope-before-commands
+#    seam no longer has a command to expose. The seam stays in routes.ts; cases 1, 2 and 4 guard scope.
 
 # 4. A LIFE EVENT THAT MENTIONS AN OFF-TOPIC THING IS DECLINED — "update my CV so I skipped gym".
 run_case "coaching words do not outrank an off-domain mention" server/understanding/domain-guard.ts \
@@ -94,4 +93,4 @@ if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-scope: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-scope: GREEN — 4/4 behavioral reverts caught"
+echo "red-on-revert-scope: GREEN — 3/3 behavioral reverts caught (case 3 retired with #445)"

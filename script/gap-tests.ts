@@ -4587,10 +4587,11 @@ test("cut9: the weight reports honour do_not_mention, each in the right way", ()
 
 // ── CUT 10: ONE FOOD PIPE FOR THE ASK ───────────────────────────────────────────────────────
 
-test("cut10 retired by #445: \"can I have X?\" reaches the new coach, not a food-context answer", () => {
+test("cut10 retired by #445: \"can I have X?\" reaches the new coach; only a stated meal keeps the ledger answer", () => {
   const fc = readFileSync("server/handlers/food-context.ts", "utf-8");
   const code = fc.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
-  assert.ok(!/answerFoodPermissionAsk\(user, message, foodsInMsg\)/.test(code), "the old permission answer is back in front of the new coach");
+  assert.ok(/if \(!forceLog\) return null; const answered = await answerFoodPermissionAsk\(user, message, foodsInMsg\)/.test(code),
+    "a pure permission ask stands aside for the new coach before the old answer can run");
 });
 
 test("cut10: the answer reads the ledger, and the verdict stays pure", () => {

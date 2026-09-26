@@ -638,10 +638,12 @@ export async function handleFoodContext(ctx: {
     console.log(`[FOOD_GATE] user=...${String(user.id || "").slice(-6)} foods=[${foodsInMsg.map(f => f.name).join("|")}] q=${isQuestion} frus=${isFrustration} emo=${isEmotionalOnly} future=${isFuturePlanning} trig=${hasLogTrigger} direct=${directFoodScan} override=${foodLogOverride} words=${m.split(/\s+/).length}`);
   }
 
-  // "CAN I HAVE X?" IS A QUESTION, NEVER A LOG (#445). The answer is the new coach's (core/coach.ts), and
-  // this door still decides one thing: nothing is written. Falling through to the logger stored the
-  // burger in "No, should I have had a burger instead?" (pg-meal-decline §4).
-  if (hasActualFood && hasSubstantiveQuestion && !isFuturePlanning && PERMISSION_ASK.test(m)) return null;
+  // "CAN I HAVE X?" IS A QUESTION, NEVER A LOG (#445): the new coach answers, nothing is written (pg-meal-decline §4).
+  // A stated meal riding with it ("I had chicken for dinner, is that ok?") keeps the ledger's answer, not the clarify.
+  if (hasActualFood && hasSubstantiveQuestion && !isFuturePlanning && PERMISSION_ASK.test(m)) {
+    if (!forceLog) return null; const answered = await answerFoodPermissionAsk(user, message, foodsInMsg);
+    if (answered) { await logChat(user.id, message, answered, "FOOD_PERMISSION"); return answered; }
+  }
 
   // ---- RETROSPECTIVE DIET HISTORY — "within the week", "usually eat", "normally I have" ----
   // These are diet audits describing routine or past eating — NOT today's food log.
