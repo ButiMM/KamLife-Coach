@@ -595,7 +595,7 @@ export function chooseAction(s: DayState): OneAction {
       const alreadyEaten = struggle === "time" || !!s.foodDayClosed;
       return {
         kind: "come_back",
-        todo: alreadyEaten ? "Tell me one thing you ate this week." : "Log one meal today. Any meal.",
+        todo: alreadyEaten ? "Tell me one thing you ate this week." : "Send me your next meal — a photo or a few words.",
         why: why(`No catching up, no starting over${because ? `, especially ${because}` : ""}. ${alreadyEaten ? "One line" : "One meal"} puts you straight back in.`, s.dreamGoal),
       };
     }
@@ -603,7 +603,7 @@ export function chooseAction(s: DayState): OneAction {
       kind: "come_back",
       todo: struggle === "time" || !!s.foodDayClosed   // …and on the shorter gap, for one reason
         ? "Log one thing today — even just what you had for lunch"
-        : "Log one meal today. Any meal.",
+        : "Send me your next meal — a photo or a few words.",
       why: why(`Nothing resets and nothing is lost${because ? ` — ${because}, a few quiet days is nothing` : " — you pick up exactly where you left off"}.`, s.dreamGoal),
     };
   }

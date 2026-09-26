@@ -4050,7 +4050,7 @@ test("cut6: the ladder is reachable for a client who has actually vanished", asy
   // today. Any meal." (29 chars) while being the longer string. The property is what the client is
   // asked to DO, so that is what is asserted: at three days we still ask for a log; at a month we
   // ask for nothing but a hello. The product had this right the whole time.
-  assert.match(gone(3).todo, /log|tell me/i, "three days gone still asks for one real log");
+  assert.match(gone(3).todo, /log|tell me|send me/i, "three days gone still asks for one real log");
   assert.ok(!/log|meal|train|weigh|walk/i.test(gone(30).todo),
     `a month gone must ask for no work at all, got: ${gone(30).todo}`);
   assert.match(gone(30).why + gone(3).why, /haven't blown anything|nothing is lost/i,
