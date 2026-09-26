@@ -222,7 +222,7 @@ export async function runMorningCheckin(): Promise<void> {
         if (marked === todaySAST()) adaptLine = adaptTargets(adaptiveInputFrom(state, client)).note || "";
       } catch (e) { console.warn("[MORNING] adapt line unavailable:", (e as Error)?.message); }
 
-      const name = client.name || "there";
+      const name = client.name?.split(" ")[0] || "there"; // first name: "Morning Lerato", not the full name
       const phone = client.phoneNumber;
       const proteinTarget = client.proteinTarget || 120;
       const yesterdayLogs = await getYesterdayLogs(client.id);
@@ -465,7 +465,11 @@ export async function runMorningCheckin(): Promise<void> {
       // 19-day food streak + 2-session streak got "Good to have you back" — trajectory is
       // workout-only, so a daily logger who trains moderately read as lapsed-and-returned).
       // Someone logging every day never left: the absence-framed lines are gated out.
-      const activelyEngaged = foodLogStreakCount >= 3;
+      // …and nor did someone who wrote to us in the last two days (replay gate: "Good to have you back"
+      // the morning after a logged day). Their last message, not users.lastActiveAt: most paths never set it.
+      const [wroteRecently] = await db.select({ at: chatHistory.createdAt }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, new Date(Date.now() - 2 * 86_400_000)))).limit(1);
+      const activelyEngaged = foodLogStreakCount >= 3 || !!wroteRecently;
       const closingLine = morningClosingLine(trajectory, { activelyEngaged, completedSessions28 });
 
       if (await claimDailySlot(client.id, "morning")) {

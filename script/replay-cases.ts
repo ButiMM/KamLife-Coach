@@ -926,6 +926,7 @@ export const CASES: ReplayCase[] = [
     checks: [
       { what: "a morning message is sent", kind: "reply_matches", pattern: "\\S" },
       { what: "no welcome-back for a client who was here yesterday", kind: "reply_not_matches", pattern: "good to have you back|welcome back|missed you|been a while", flags: "i" },
+      { what: "greeted by first name, not the full name", kind: "reply_not_matches", pattern: "Lerato Replay" },
     ],
     rubric: "A scheduled morning message to a client who logged breakfast and lunch yesterday. A good one is short, personal, uses something real from yesterday, and gives one clear thing to do today. No welcome-back, no generic list.",
   },

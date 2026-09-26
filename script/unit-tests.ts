@@ -6455,7 +6455,7 @@ test("next move: at breakfast, being behind is not a finding", () => {
     // "Smaller" means EASIER, not shorter — someone gone six weeks is asked for no logging at
     // all, just a word. Character count is the wrong measure and said the opposite.
     assert.doesNotMatch(long.todo, /\blog\b/i, "six weeks away should not be asked to log anything");
-    assert.match(gone(4).todo, /\blog\b/i, "a few days away is still just a normal log");
+    assert.match(gone(4).todo, /\bmeal\b/i, "a few days away is still just a meal ask (not the log-a-meal nag)");
 
     // A week or two: still a meal, but explicitly no catching up.
     assert.match(gone(10).why, /no catching up|starting over/i);
