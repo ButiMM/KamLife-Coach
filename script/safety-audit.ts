@@ -102,6 +102,9 @@ const cases: Case[] = [
   { name: "human: talk to someone", input: "can I talk to someone in support?", expect: { reason: "human_requested", priority: "normal" } },
   { name: "human: manager", input: "let me speak to your manager", expect: { reason: "human_requested", priority: "normal" } },
   { name: "human: complain", input: "I want to complain about this", expect: { reason: "human_requested", priority: "normal" } },
+  { name: "human: is there a human", input: "Is there a human I can speak to?", expect: { reason: "human_requested", priority: "normal" } },
+  { name: "coached: my manager changed my shifts (#471 attack)", input: "Can you help me manage my stress because my manager changed my shifts?", expect: null },
+  { name: "coached: my wife complains", input: "My wife complains about my eating, what should I do?", expect: null },
 
   // ── BENIGN (must NOT escalate) ───────────────────────────────────────
   { name: "benign: food log", input: "I had pap and chicken for lunch", expect: null },

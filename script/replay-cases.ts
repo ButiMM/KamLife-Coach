@@ -1059,6 +1059,7 @@ export const CASES: ReplayCase[] = [
     turns: ["Can I speak to a real person please"],
     checks: [
       { what: "the request reaches the founder as an escalation", kind: "sql", query: "SELECT COUNT(*)::int FROM escalations WHERE user_id = $1 AND reason = 'human_requested'", expect: "nonzero" },
+      { what: "the client is told honestly: an AI, and a person will get back to them", kind: "reply_matches", pattern: "\\bAI\\b[\\s\\S]*(?:person|team|founder)", flags: "i" },
     ],
     rubric: "The client asks for a real person. A good reply says honestly that the coach is an AI, that the founder will get back to them, and asks what it is about, in two lines.",
   },
