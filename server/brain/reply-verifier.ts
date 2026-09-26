@@ -1015,12 +1015,15 @@ export const HONOURED_SILENCE = "You asked me to leave that one alone, so I will
 // It claims no alert (Codex @ 44b007a): the founder alert is sent in the background and can be dropped.
 export const COACH_OUT_OF_CREDITS_REPLY = "My coaching side is offline right now. Anything you log still saves — tell me what you ate or trained and it's recorded.";
 
+/** The model was too slow or unreachable (#441): honest, short, and the client knows to send it again. */
+export const COACH_NETWORK_HICCUP_REPLY = "Network hiccup on my side. Send that again in a moment.";
+
 const COACH_UNAVAILABLE_REPLIES = [
   COACH_OUT_OF_CREDITS_REPLY,
   "Eish Coach K had a moment. Try that again.",
   "I'm having a technical issue on my end — give me a few minutes and try again. Your programme and targets are all saved.",
   "Coach K is a bit busy right now. Give it 30 seconds and try again.",
-  "Network hiccup on my side. Send that again in a moment.",
+  COACH_NETWORK_HICCUP_REPLY,
   "let's keep it simple — tell me what you ate or what you trained today, and I'll take it from there.",
 ];
 
