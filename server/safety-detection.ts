@@ -7,6 +7,7 @@
 //   normal  → human_requested          (inbox only, 12h SLA)
 
 import { readLifeContext } from "./life-context";
+import { isCrisisMessage } from "./crisis-reply";
 
 export type EscalationPriority = "urgent" | "high" | "normal" | "low";
 
@@ -38,7 +39,8 @@ export function detectEscalation(message: string): EscalationDecision {
   // ("sprained", "pregnancy", "epileptic"). Leading \b still prevents mid-word hits.
 
   // Crisis/self-harm — urgent
-  if (/\b(want to die|kill myself|end it all|cannot go on|can't go on|suicidal|self.?harm|cutting myself|hurting myself|not worth living|end my life|no reason to live|give up on life)\b/i.test(m))
+  // One list, crisis-reply.ts, in English and the SA languages (#476); this copy was English-only.
+  if (isCrisisMessage(m))
     return { should: true, reason: "crisis", priority: "urgent" };
   // Disordered eating — urgent (#266). The behaviour list has ONE owner, life-context.ts; this
   // reads it rather than keeping a second copy. Before this, a purging disclosure paged nobody.

@@ -21,7 +21,13 @@ export const CRISIS_PHRASES = [
   "no point in living", "better off dead", "hang myself",
   "everyone would be better off without me",
   "don't want to be here", "do not want to be here", "dont want to be here",
-  "wish i was dead", "wish i were dead", "nothing to live for", "tired of living",
+  "wish i was dead", "wish i were dead", "nothing to live for", "tired of living", "selfharm",
+  // SOUTH AFRICAN LANGUAGES (#476): clients write in them, and a crisis in isiZulu was coached as usual.
+  // Stems, so every person and tense matches: -zibulala (isiZulu/isiXhosa "kill oneself"),
+  // ipolaea/ipolaya (Sesotho/Setswana/Sepedi), selfmoord and doodmaak (Afrikaans).
+  "zibulala", "ngifuna ukufa", "ndifuna ukufa", "angisafuni ukuphila",
+  "ipolaea", "ipolaya", "batla ho shwa", "batla go swa", "batla go hwa",
+  "selfmoord", "myself doodmaak", "wil dood wees", "wil nie meer leef nie",
 ];
 
 /** `m` is the lowercased message the handler pipeline already computed. */
