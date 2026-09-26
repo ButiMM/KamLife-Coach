@@ -87,9 +87,10 @@ const said = [
   { messageIn: "Can't train in the evenings, I work nights at Bara", messageOut: "noted", createdAt: new Date("2026-09-01T07:00:00+02:00") },
 ];
 for (const m of said) await db.insert(schema.chatHistory).values({ userId: h.id, intent: "GPT", ...m } as any);
-let calls = 0, sent = "";
+let calls = 0, sent = "", failNext = 0;
 globalThis.fetch = (async (_: any, init?: any) => {
   calls++; sent = String(init?.body || "");
+  if (failNext > 0) { failNext--; return new Response(JSON.stringify({ error: { message: "upstream timeout" } }), { status: 503, headers: { "content-type": "application/json" } }); }
   const facts = [
     { kind: "injury", subject: "left knee", statement: "my left knee flares up on the stairs" },     // verbatim, their voice
     { kind: "schedule", subject: "night shifts", statement: "I work nights at Bara" },                  // verbatim, their voice
@@ -125,11 +126,22 @@ _resetHistoryTried(); // a deploy: the in-memory set is gone
 await learnFromHistory(nf.id);
 const nfCalls = calls - before;
 check("one call, and none after the restart, although nothing was learned", nfLearned === 0 && nfCalls === 1, `calls=${nfCalls} learned=${nfLearned}`);
+// A failed call is not an answer: the claim is released and the NEXT TURN of the same process retries (#472 attack).
 await pool.query("UPDATE users SET history_learned_at = NULL WHERE id = $1", [nf.id]);
 _resetHistoryTried();
+const beforeFail = calls;
+failNext = 2; // the SDK retries once: both attempts fail
+await learnFromHistory(nf.id);
+const releasedAfterFailure = (await pool.query("SELECT history_learned_at FROM users WHERE id = $1", [nf.id])).rows[0].history_learned_at === null;
+await learnFromHistory(nf.id);
+check("a failed call releases the claim, and the next turn retries in the same process", releasedAfterFailure && calls - beforeFail >= 3
+  && (await pool.query("SELECT history_learned_at FROM users WHERE id = $1", [nf.id])).rows[0].history_learned_at !== null, `calls=${calls - beforeFail}`);
+await pool.query("UPDATE users SET history_learned_at = NULL WHERE id = $1", [nf.id]);
+_resetHistoryTried();
+const beforeCap = calls;
 process.env.HISTORY_DAILY_CAP = "0";
 await learnFromHistory(nf.id);
-check("the daily cap is spent: no call, and the client is not marked learned", calls - before === 1
+check("the daily cap is spent: no call, and the client is not marked learned", calls === beforeCap
   && (await pool.query("SELECT history_learned_at FROM users WHERE id = $1", [nf.id])).rows[0].history_learned_at === null);
 delete process.env.HISTORY_DAILY_CAP;
 await pool.query("DELETE FROM users WHERE phone_number = $1", [NOFACT]);

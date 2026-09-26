@@ -249,8 +249,8 @@ export async function wave1Turn(p: { phone: string; message: string; userId: str
  * messages as one block; client-record writeHistoryFacts keeps only verbatim, own-voice facts. Never throws.
  * ONCE PER CLIENT EVER (#467): users.history_learned_at is claimed in the database BEFORE the call, so a
  * deploy (which empties historyTried) never re-runs it, even for a client whose history held no facts.
- * At most HISTORY_DAILY_CAP clients (default 40) are read per 24 hours. A failed call releases the claim
- * for a later deploy; historyTried stops it retrying on every turn of this one.
+ * At most HISTORY_DAILY_CAP clients (default 40) are read per 24 hours. A failed call releases the claim,
+ * so a later turn tries again.
  */
 const historyTried = new Set<string>();
 export function _resetHistoryTried(): void { historyTried.clear(); }
@@ -271,7 +271,8 @@ export async function learnFromHistory(userId: string): Promise<number> {
     const read = await understand(await openaiClient(), block, "KNOWN FACTS: none", 6000);
     return await rec.writeHistoryFacts(userId, read.raw, msgs);
   } catch (e) {
-    // An outage is not an answer: release the claim so a later deploy tries again.
+    // An outage is not an answer: release the claim so a later turn tries again (#472 attack).
+    historyTried.delete(userId);
     if (claimed) await db.execute(sql`UPDATE users SET history_learned_at = NULL WHERE id = ${userId}`).catch(() => {});
     console.warn("[RECORD] history skipped:", (e as Error)?.message || e);
     return 0;
