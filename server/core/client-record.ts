@@ -14,6 +14,7 @@
 import { and, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import { users, clientEvents, clientFacts } from "@shared/schema";
+import { withheldContext } from "../life-context";
 
 export const FACT_KINDS = ["goal", "injury", "constraint", "schedule", "preference", "life_event"] as const;
 export type FactKind = typeof FACT_KINDS[number];
@@ -203,10 +204,11 @@ export async function backfillFromOldStores(user: any): Promise<number> {
     const label = line.split(":")[0].trim().toLowerCase();
     // Goal and training setup are settings the snapshot already gives the coach, and they have
     // column defaults ("trains: home"): copying them would record something the client never said.
-    // "life/work" is users.life_situation, which code writes: onboarding's "office" stand-in for a client
-    // who never answered, and safety's withheld states ("pregnant", "disordered_eating"), which the
-    // safety owner and ledgerNumbers carry. None is in the client's words (#456).
-    if (label === "goal" || label === "trains" || label === "life/work") continue;
+    // "life/work" is users.life_situation. Two of its values are not the client's words (#456): onboarding's
+    // "office" stand-in for a client who never answered, and the withheld states ("pregnant",
+    // "disordered_eating") the safety owner and ledgerNumbers carry. What they did say (breastfeeding) is kept.
+    if (label === "goal" || label === "trains") continue;
+    if (label === "life/work" && (user.lifeSituation === "office" || withheldContext(user.lifeSituation))) continue;
     found.push({ kind: BACKFILL_KIND.find(([re]) => re.test(label))?.[1] ?? "life_event", subject: label, statement: line, store: "users" });
   }
   const since = user.createdAt ? new Date(user.createdAt) : new Date(Date.now() - 365 * 24 * 3600_000);

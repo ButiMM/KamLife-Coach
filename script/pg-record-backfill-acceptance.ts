@@ -79,6 +79,12 @@ await pool.query("DELETE FROM client_facts WHERE user_id = $1", [e.id]); _resetB
 await pool.query("UPDATE users SET life_situation = 'disordered_eating' WHERE id = $1", [e.id]);
 const [e2] = await db.select().from(schema.users).where(eq(schema.users.id, e.id));
 check("a withheld state in life_situation is not copied as something they told us", (await backfillFromOldStores(e2)) === 0 && !(await factsForCoach(e.id)).includes("disordered"));
+// What they DID say at onboarding ("I'm breastfeeding") is kept (#475 attack).
+await pool.query("DELETE FROM client_facts WHERE user_id = $1", [e.id]); _resetBackfillCache();
+await pool.query("UPDATE users SET life_situation = 'postpartum_breastfeeding' WHERE id = $1", [e.id]);
+const [e3] = await db.select().from(schema.users).where(eq(schema.users.id, e.id));
+await backfillFromOldStores(e3);
+check("a breastfeeding client stated at onboarding still reaches the coach", /breastfeeding/.test(await factsForCoach(e.id)));
 
 console.log("\n5. ERASED WITH THE CLIENT");
 await db.delete(schema.users).where(eq(schema.users.id, u.id));
