@@ -640,9 +640,9 @@ export async function handleFoodContext(ctx: {
 
   // ---- CUT 10: THE ASK GETS AN ANSWER, NOT A HANDOFF ----------------------------------------
   // Everything above has just worked out that this is a QUESTION about a food we can price. Until
-  // now that was the end of the deterministic road: every handler declined and the model answered
-  // without the day's ledger in front of it. This is the one place that already knows both.
-  if (hasActualFood && hasSubstantiveQuestion && !isFuturePlanning && PERMISSION_ASK.test(m) && !(await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""))) { // "can I have X?" is the new coach's when switched (#445)
+  // now every handler declined and the model answered without the ledger; this place knows both.
+  if (hasActualFood && hasSubstantiveQuestion && !isFuturePlanning && PERMISSION_ASK.test(m)) {
+    if ((await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""))) return null; // a question, never a log: the new coach answers (#445)
     const answered = await answerFoodPermissionAsk(user, message, foodsInMsg);
     if (answered) { await logChat(user.id, message, answered, "FOOD_PERMISSION"); return answered; }
   }

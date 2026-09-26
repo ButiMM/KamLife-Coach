@@ -64,6 +64,13 @@ for (const q of ["What should I eat tonight?", "How was my week?", "What should 
   const fr = await say(FOUNDER, q);
   chk(fr.includes(NEW), `the founder's "${q}" reaches the new coach, not an old handler`, fr.slice(0, 160));
 }
+// A FOOD QUESTION IS NEVER A LOG: standing the permission-ask aside must not hand it to the logger.
+const [fu] = (await pool.query("SELECT id FROM users WHERE phone_number = $1", [FOUNDER])).rows;
+const mealsBefore = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs WHERE user_id = $1", [fu.id])).rows[0].n);
+await say(FOUNDER, "No, should I have had a burger instead?");
+await say(FOUNDER, "Can I have a burger tonight?");
+const mealsAfter = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs WHERE user_id = $1", [fu.id])).rows[0].n);
+chk(mealsAfter === mealsBefore, "the founder's \"can I have a burger?\" writes no meal", `${mealsBefore} → ${mealsAfter}`);
 const tr = await say(TESTER, "What should I order at KFC?");
 chk(!tr.includes(NEW) && tr.trim().length > 0, "a tester's KFC question still meets the old restaurant guide", tr.slice(0, 160));
 
