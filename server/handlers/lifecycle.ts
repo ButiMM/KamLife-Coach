@@ -412,7 +412,8 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- RESCUE / RESET — for stuck users ----
-  if (/\b(restart|reset|start over|start again|stuck|help me start|beginning|begin again|onboard again)\b/i.test(m) ||
+  // "stuck" and "beginning" only when they are the whole message: "stuck at 82kg for three weeks" is a plateau, not a reset.
+  if (/\b(restart|reset|start over|start again|help me start|begin again|onboard again)\b|^(?:i'?m |im )?(?:so )?stuck[.!?]*$|^beginning[.!?]*$/i.test(m.trim()) ||
       m === "restart" || m === "reset" || m === "start over") {
     const currentState = user.onboardingState;
     const wantsFullReset = /start over|start again|begin again|onboard again/i.test(m);

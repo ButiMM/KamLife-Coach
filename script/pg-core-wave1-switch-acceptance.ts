@@ -60,7 +60,8 @@ const t1 = await say(TESTER, ASK);
 chk(!t1.includes(NEW) && t1.trim().length > 0, "a tester still meets the old coach", t1);
 
 REAL("\n1b. REACH (CTO attack on #445): the old wave-1 handlers stand aside for the switched client");
-for (const q of ["What should I eat tonight?", "How was my week?", "What should I order at KFC?", "Should I take creatine?"]) {
+for (const q of ["What should I eat tonight?", "How was my week?", "What should I order at KFC?", "Should I take creatine?",
+  "I've been stuck at 82kg for three weeks even though I'm eating well. What am I doing wrong?"]) {
   const fr = await say(FOUNDER, q);
   chk(fr.includes(NEW), `the founder's "${q}" reaches the new coach, not an old handler`, fr.slice(0, 160));
 }
@@ -71,6 +72,9 @@ await say(FOUNDER, "No, should I have had a burger instead?");
 await say(FOUNDER, "Can I have a burger tonight?");
 const mealsAfter = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs WHERE user_id = $1", [fu.id])).rows[0].n);
 chk(mealsAfter === mealsBefore, "the founder's \"can I have a burger?\" writes no meal", `${mealsBefore} → ${mealsAfter}`);
+// "stuck at 82kg" is a plateau, not a reset: the old restart branch sent everyone the app menu.
+const tp = await say(TESTER, "I've been stuck at 82kg for three weeks. What am I doing wrong?");
+chk(!/What do you need\?/.test(tp), "a tester's plateau is not answered with the restart menu", tp.slice(0, 160));
 const tr = await say(TESTER, "What should I order at KFC?");
 chk(!tr.includes(NEW) && tr.trim().length > 0, "a tester's KFC question still meets the old restaurant guide", tr.slice(0, 160));
 
