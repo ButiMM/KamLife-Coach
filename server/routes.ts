@@ -1026,7 +1026,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
   // A FEELING IS A BID FOR COACHING, NOT A FACT (C15, journey 1). `hasFeeling` is already computed
   // above for the composer; the close needs the same answer and must not work it out a second time.
-  if (resolved.reply) return closeCoachingTurn(resolved.reply, { coachWithoutWrite: hasFeeling });
+  if (resolved.reply) return closeCoachingTurn((resolved.committed.split("+").includes("food") && await (await import("./core/coach")).afterMealReply(phone, message, resolved.reply)) || resolved.reply, { coachWithoutWrite: hasFeeling }); // A1: the new coach's words after the proven write
 
   // ---- WEIGHT FORECAST / TRAJECTORY: deterministic math from the client's own logs. ----
   // If they logged a surplus, it says so — the plate, not the plan.

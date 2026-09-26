@@ -92,6 +92,21 @@ const f5 = await say(FOUNDER, "2");
 const left = (await pool.query("SELECT awaiting_input_type FROM users WHERE phone_number = $1", [FOUNDER])).rows[0]?.awaiting_input_type;
 chk(/2 meals/i.test(f5) && !f5.includes(NEW) && left === null, "the comeback menu's \"2\" gets the simpler plan and the pending question clears", `${f5} | pending=${left}`);
 
+REAL("\n4b. WAVE 2, A1 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (founder-only)");
+{
+  const count = async (phone: string) => Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [phone])).rows[0].n);
+  const fb = await count(FOUNDER), tb = await count(TESTER);
+  const fa = await say(FOUNDER, "I had pap and chicken for lunch");
+  const ta = await say(TESTER, "I had pap and chicken for lunch");
+  chk(await count(FOUNDER) === fb + 1, "the founder's lunch is written once, by the old owner", `${fb} → ${await count(FOUNDER)}`);
+  chk(fa.includes(NEW), "…and the founder hears the new coach, not the receipt", fa.slice(0, 200));
+  chk(await count(TESTER) === tb + 1 && !ta.includes(NEW), "a tester's lunch is written and keeps the old reply", ta.slice(0, 200));
+  process.env.CORE_WAVE2 = "off";
+  const fo = await say(FOUNDER, "I had an apple for a snack");
+  chk(!fo.includes(NEW) && await count(FOUNDER) === fb + 2, "CORE_WAVE2=off: the founder's meal is written and the old reply is back", fo.slice(0, 200));
+  delete process.env.CORE_WAVE2;
+}
+
 REAL("\n5. INSTANT ROLLBACK");
 process.env.CORE_WAVE1 = "off";
 const f4 = await say(FOUNDER, ASK);

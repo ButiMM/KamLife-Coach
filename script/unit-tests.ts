@@ -10935,6 +10935,22 @@ test("CORE_WAVE1: founder by default (#453); founder matches only the founder's 
   }
 });
 
+// ── WAVE 2, A1 (#453): founder-only by default, on is everyone, off is the rollback ──────────────
+test("CORE_WAVE2: founder by default; on is everyone; off rolls back", async () => {
+  const { coreWave2For } = await import("../server/core/coach");
+  const saved = { m: process.env.CORE_WAVE2, p: process.env.COACH_ALERT_PHONE };
+  try {
+    delete process.env.CORE_WAVE2; process.env.COACH_ALERT_PHONE = "+27829438001";
+    assert.equal(coreWave2For("whatsapp:+27829438001"), true);
+    assert.equal(coreWave2For("whatsapp:+27829438002"), false);
+    process.env.CORE_WAVE2 = "on"; assert.equal(coreWave2For("whatsapp:+27829438002"), true);
+    process.env.CORE_WAVE2 = "off"; assert.equal(coreWave2For("whatsapp:+27829438001"), false);
+  } finally {
+    if (saved.m === undefined) delete process.env.CORE_WAVE2; else process.env.CORE_WAVE2 = saved.m;
+    if (saved.p === undefined) delete process.env.COACH_ALERT_PHONE; else process.env.COACH_ALERT_PHONE = saved.p;
+  }
+});
+
 // ── EVERY WORKFLOW FILE IS VALID YAML (25 Sep) ────────────────────────────────────────────────
 // A second `env:` key on the replay job made replay-gate.yml invalid. GitHub then ran no gate at
 // all, and the watch merged `ready` PRs as if it had passed. A duplicate key is now a red test.
