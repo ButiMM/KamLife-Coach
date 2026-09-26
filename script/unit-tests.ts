@@ -10893,6 +10893,8 @@ test("ONE_VOICE rides in the new composer, askCoachK and the meaning engine", as
     assert.ok(/\$\{ONE_VOICE\}|\bONE_VOICE,/.test(readFileSync(f, "utf8")), `${f} does not use ONE_VOICE`);
   const { ONE_VOICE } = await import("../server/coach-prompt");
   assert.match(ONE_VOICE, /at most 3 short sentences and 60 words/);
+});
+
 // ── THE WAVE-1 SWITCH FLAG (#438): off by default, founder first, instant rollback ──────────────
 test("CORE_WAVE1: off by default; founder matches only the founder's number, in any format; on is everyone", async () => {
   const { coreWave1For } = await import("../server/core/coach");
