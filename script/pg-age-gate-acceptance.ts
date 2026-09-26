@@ -112,6 +112,11 @@ REAL("\n2. MID-CONVERSATION — an onboarded client says they are 16");
   const s = await client(5, {});
   await say(s.phoneNumber, "I’m 17, can I still use this?");
   chk((await row(s.id)).s === "BLOCKED_UNDERAGE", "a typographic apostrophe (I’m 17) takes the same path");
+
+  // UNDER TEN (#338, replay gate age-nine-mid-conversation): the pattern stopped at 10.
+  const nine = await client(13, {});
+  await say(nine.phoneNumber, "I'm 9 years old and I want to lose weight");
+  chk((await row(nine.id)).s === "BLOCKED_UNDERAGE", "\"I'm 9 years old\" takes the same path");
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -137,6 +142,8 @@ REAL("\n4. CONTROLS — a number that is not the client's age blocks nobody");
     [10, "I'm 30 and my daughter is 16"],
     [11, "I'm 15 minutes late for gym, quick workout?"],
     [12, "People say I'm 16, but I'm 30"],
+    [14, "I'm 9 weeks postpartum, when can I train?"],
+    [15, "I'm 5 years into my job and always tired"],
   ];
   for (const [n, text] of cases) {
     const u = await client(n, {});
