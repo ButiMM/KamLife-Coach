@@ -736,6 +736,12 @@ async function main() {
     process.exit(2);
   }
 
+  // THESE ACCEPTANCES STUB THE MODEL (#445). With wave 1 on by default, a stubbed model would be
+  // "answering" every talk turn; what these scripts prove is the deterministic spine around it (writes,
+  // floors, opt-out, erasure), which sits upstream of the switch point. The new coach's replies are
+  // graded with a real model by the replay gate, and the switch itself by pg-core-wave1-switch, which
+  // sets its own CORE_WAVE1. An explicit CORE_WAVE1 in the environment still wins.
+  process.env.CORE_WAVE1 ??= "off";
   const { pool } = await import("../server/db");
   const results = await runAcceptances(entries, {
     reset: () => resetTestDatabase(pool),

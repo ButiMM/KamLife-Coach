@@ -39,15 +39,8 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
     await logChat(user.id, message, discReply, "RESTAURANT_LIST");
     return discReply;
   }
-  // WAVE 1 (#445): for a switched client the restaurant guide is the new coach's TOOL (foodTools).
-  const switchedTalk = (await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""));
-  const restaurantHit = switchedTalk ? null : matchRestaurant(m);
-  const isRestaurantQ = restaurantHit && /\b(order|eat|eating|have|get|getting|menu|what.*should|best|healthy|smartest|good choice|low cal|protein|going to|i'?m at|at the)\b/i.test(m);
-  if (isRestaurantQ && restaurantHit) {
-    const guide = formatRestaurantGuide(restaurantHit, user.goalType || "fat_loss");
-    await logChat(user.id, message, guide, "RESTAURANT_GUIDE");
-    return guide;
-  }
+  // "What should I order at KFC?" is the new coach's (#445, A10). It reads the same guide as a
+  // tool (core/coach.ts foodTools), so the exact macros still come from server/restaurants.ts.
 
   // ---- STREET / INFORMAL EATING — taxi rank, spaza, vendor, shisa nyama (server/street-food.ts).
   // ADVICE only: a past-tense log ("I had a kota") stays with the scanner; this fires on
@@ -189,45 +182,7 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
     && /\b(don.?t like|hate|can.?t eat|swap|replace|instead of|alternative|substitute|other option|something else|what else|switch)\b/i.test(m)
     && scanForSAFoods(m, { exactOnly: true }).length > 0;
 
-  // ---- FULL FOR THE DAY — "can't eat anymore today, what does that mean for my goal?" ----
-  // The real question underneath the swap bug above, and it had no handler: the chronic
-  // under-eating path in advice-commands needs "I only eat once a day" phrasing, so a
-  // single honest day of coming up short matched nothing at all.
-  if (!switchedTalk && isFullNotFussy && /\b(what does that mean|does that matter|is that (ok|okay|bad|fine)|for my goal|teach me|explain|will that affect|affect my)\b/i.test(m)) {
-    const undereatReply = await fullForTodayReply(user);
-    await logChat(user.id, message, undereatReply, "UNDEREATING_TODAY");
-    return undereatReply;
-  }
-  if (isSwapRequest && !switchedTalk) {
-    const foods = scanForSAFoods(m);
-    const foodName = foods[0].name;
-    const category = foods[0].category;
-    const budget = user.weeklyFoodBudget || "100_300";
-    const goal = user.goalType || "fat_loss";
-
-    // Find same-category alternatives from the SA food database
-    const alternatives = SA_FOODS_SEED.filter(f =>
-      f.category === category &&
-      f.name !== foodName &&
-      f.budgetTier <= (budget === "under_100" ? 1 : budget === "100_300" ? 2 : 3)
-    ).sort((a, b) => b.proteinPer100g - a.proteinPer100g).slice(0, 4);
-
-    if (alternatives.length > 0) {
-      let swapReply = `*Swaps for ${foodName}:*\n\n`;
-      for (const alt of alternatives) {
-        swapReply += `• *${alt.name}* — ${alt.typicalPortionCalories} kcal | ${alt.typicalPortionProtein}g protein (${alt.typicalPortionDescription})\n`;
-      }
-      swapReply += `\nPick whichever one you enjoy — consistency beats perfection. I'll update your plan.`;
-      await logChat(user.id, message, swapReply, "FOOD_SWAP");
-      return swapReply;
-    }
-    // If no swap found in DB, use GPT
-    const gptSwap = await withTimeout("gpt_swap", 20000, () => askCoachK(message, user,
-      `Client doesn't want ${foodName} (${category}). Suggest 3-4 SA alternatives in the same category at a ${budget} budget. Include calories and protein per portion. Their goal is ${goal}. Be specific.`
-    ));
-    await logChat(user.id, message, gptSwap, "FOOD_SWAP");
-    return gptSwap;
-  }
+  // WAVE 1 IS THE NEW COACH'S (#445, CTO order on #391): a swap ("instead of white bread?") or "I can't eat any more today" is answered by core/coach.ts, not here.
 
   // ---- MEAL PREP PLAN — "meal prep" / "prep" / "sunday cook" ----
   if (m === "5" || m === "meal prep" || m === "prep" || m === "sunday cook" || m === "batch cook" || m === "food prep" || /\b(meal prep|food prep|batch cook|sunday cook|cook for the week|prep for the week)\b/i.test(m)) {
@@ -370,42 +325,9 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
       return waterCombined ? `${waterCombined}\n\n---\n\n${suppReply}` : suppReply;
     }
 
-    // A switched client's supplement QUESTION is the new coach's (#445); the log above and the
-    // explicit "supplements" command stay here.
-    if (switchedTalk && !["supplements", "supps", "my supplements", "vitamins", "my vitamins"].includes(m)) return null;
-
-    // Specific supplement question — give a targeted answer, not the whole guide
-    const isCreatine = /\bcreatine\b/i.test(m);
-    const isWhey = /\b(whey|protein powder|protein shake)\b/i.test(m);
-    const isOmega = /\b(omega|fish oil)\b/i.test(m);
-    const isMagnesium = /\bmagnesium\b/i.test(m);
-    const isVitD = /\b(vitamin d|vit d|vitamin d3)\b/i.test(m);
-    const isCollagen = /\bcollagen\b/i.test(m);
-    const isZinc = /\bzinc\b/i.test(m);
-    const isSpecific = isCreatine || isWhey || isOmega || isMagnesium || isVitD || isCollagen || isZinc;
-
-    if (isSpecific && m !== "supplements" && m !== "supps" && m !== "my supplements") {
-      const goal = user.goalType || "fat_loss";
-      let reply = "";
-      if (isCreatine) {
-        reply = `Yes — creatine's the most proven one there is, and it works for fat loss as well as building.\n\n5g a day with water, any time, no loading phase. Buy plain monohydrate at Dis-Chem, about R150 a month — the fancy ones are the same thing at triple the price.`;
-      } else if (isWhey) {
-        const pTarget = user.proteinTarget || 120;
-        reply = `Only if you can't get your ${pTarget}g from food — if chicken, eggs and pilchards are already in your week, you don't need it.\n\nIf you're short most days, one scoop after training closes the gap. Any plain whey from Dis-Chem does the job.`;
-      } else if (isOmega) {
-        reply = `Worth it for most people — joints and inflammation mainly.\n\n1–2g of EPA+DHA a day (read the label, not the "1000mg fish oil" on the front). Generic capsules from Clicks, R60–R80 a month.`;
-      } else if (isMagnesium) {
-        reply = `Good one for sleep, recovery and night-time cravings — most people are short on it.\n\nGet magnesium glycinate, not oxide, and take it before bed. R80–R120 a month.`;
-      } else if (isVitD) {
-        reply = `Worth it — most South Africans are short on it despite the sun, especially with an indoor job.\n\n2000–4000 IU a day with food. R50–R80 a month.`;
-      } else if (isCollagen) {
-        reply = `Decent for joints, not for building muscle — if you're over 35 or your knees complain, worth a try; otherwise food protein does more.\n\nHydrolysed peptides, 10–15g a day with something containing vitamin C.`;
-      } else if (isZinc) {
-        reply = `Most people get enough from red meat and eggs, so only worth it if you eat little or no meat.\n\n15–25mg a day — don't go higher, too much blocks copper absorption.`;
-      }
-      await logChat(user.id, message, reply, "SUPPLEMENT_GUIDE");
-      return reply;
-    }
+    // A supplement QUESTION ("is creatine worth it?") is the new coach's (#445, A10/A16). This
+    // block keeps the log above and the full guide on an explicit "supplements" command.
+    if (!["supplements", "supps", "my supplements", "vitamins", "my vitamins"].includes(m)) return null;
 
     // Generic "supplements" query — give the full goal-specific guide
     const goal = user.goalType || "fat_loss";

@@ -17,59 +17,6 @@ import { sendWhatsApp } from "../scheduler";
 import { sastDayStart, looksLikeSurplusDeficitQuestion } from "../utils";
 import { engineLive } from "../understanding/live";
 
-// SURPLUS/DEFICIT IS MATHS, NOT PROSE (2026-07-17 nightly drill caught the third
-// recurrence of this class on the model path). The client's target ALREADY contains
-// the goal adjustment — muscle gain sits ~400 above maintenance, fat loss ~450 below
-// (the same estimates the snapshot's Energy frame teaches). A model kept answering
-// with today's remaining kcal instead; now the answer is computed, never generated.
-export async function handleSurplusDeficitQuestion(ctx: { message: string; m: string; user: any }): Promise<string | null> {
-  const { message, m, user } = ctx;
-  // WAVE-1 SWITCH: for a switched client the new coach explains the numbers (A16), from the ledger.
-  if ((await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""))) return null;
-  // C16: a pure meaning question is education, not a request to log today's meals. Keep it in
-  // the existing numbers-literacy owner on the live path; the engine-off model tests retain
-  // their established question/answer path. No calorie estimate or target change is implied.
-  if (engineLive() && ["what do maintenance calories mean", "what does maintenance calories mean", "what are maintenance calories", "what is maintenance calories"].some(q => m.includes(q))) {
-    const reply = "Maintenance calories are roughly the amount of energy that keeps your weight steady over time. Judge that by the weight trend, not one day's scale reading.";
-    await logChat(user.id, message, reply, "MAINTENANCE_MEANING");
-    return reply;
-  }
-  if (!looksLikeSurplusDeficitQuestion(m)) return null;
-  const target = user.calorieTarget || 0;
-  if (!target) return null;
-  const goal = String(user.goalType || "fat_loss").toLowerCase();
-  const building = goal === "muscle_gain" || goal === "weight_gain";
-  let reply: string;
-  if (building) {
-    reply = `Your surplus is already built into your target — nothing to add on top. Your body burns roughly ~${target - 400} kcal a day (maintenance), and your ${target} kcal target sits ~400 above that. Eat to ${target} and you ARE in your building surplus.\n\nAnd it's judged on the full day — the kcal still open right now is just space left in the day, not a deficit.`;
-  } else if (goal === "fat_loss") {
-    reply = `Your deficit is already built into your target — nothing extra to cut. Your body burns roughly ~${target + 450} kcal a day (maintenance), and your ${target} kcal target sits ~450 below that. Finish the day at ${target} and you ARE in your deficit.\n\nIt's judged on the full day — being under target mid-day is normal, the day isn't done yet.`;
-  } else {
-    reply = `For your goal you eat AT maintenance — your ${target} kcal target IS the plan. No surplus or deficit to chase; hitting that number consistently is the whole game.`;
-  }
-  // Two-part asks ("what's my surplus and how are my steps today?") answer BOTH halves —
-  // dropping half the question reads as not listening (locked drill case).
-  if (/\bsteps?\b/i.test(m)) {
-    try {
-      const row = await db.select({ steps: stepLogs.steps }).from(stepLogs)
-        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart()))).limit(1);
-      const todaySteps = row[0]?.steps ?? 0;
-      reply += todaySteps > 0
-        ? `\n\nSteps today: ${todaySteps.toLocaleString()} so far vs your ${(user.stepsTarget || 8500).toLocaleString()} target.`
-        : `\n\nNo steps logged yet today — send your count when you have it.`;
-    } catch { /* the steps half is best-effort; the surplus answer stands alone */ }
-  }
-  await logChat(user.id, message, reply, "SURPLUS_EXPLAINER");
-  return reply;
-}
-
-// AUTO OPT-IN BY FLUENCY (2026-07-16 founder: "be brighter than that"). A client who
-// speaks in kcal/macros THREE times has voted with their vocabulary — flip them to
-// full numbers without making them find the magic phrase. Counter rides in
-// profileNotes (numfluent:N, same migration-free pattern as sick_until). Called
-// fire-and-forget from routes at message entry, so it counts EVERY text message no
-// matter which handler wins, and never blocks or replaces a reply — the one-time
-// notice goes out as its own WhatsApp message.
 export async function bumpNumericFluency(user: any, m: string, phone: string): Promise<void> {
   try {
     const notes = user?.profileNotes || "";
@@ -182,22 +129,13 @@ export async function handleNumbersLiteracy(ctx: { message: string; m: string; u
   const isCalorieConfusion = /\b(what(?:'?s| is| are)?\s+(?:a |the )?calories?\b|don.?t (understand|get|know)( what)? (calories|kcal|this number|these numbers|the numbers)|calories?.*confus|confus.*calories?|too many numbers|what does (the number|the numbers|kcal|calories?) mean|what(?:'?s| is)?\s+a?\s*kcal|explain (the )?calories?|i don.?t count calories|never counted calories)\b/i.test(m)
     || (/\bcalor|kcal\b/i.test(m) && /\b(confused|lost|don.?t understand|makes? no sense|too complicated|i.?m not good with numbers)\b/i.test(m));
   if (isCalorieConfusion) {
-    // WAVE 1 (#445): a switched client's explanation is the new coach's; the preference write below stays.
-    const switchedTalk = (await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""));
     if (isFull) {
       try {
         const base = (user.profileNotes || "").replace(/\s*\bnumbers:(low|full)\b/gi, "").trim();
         await db.update(users).set({ profileNotes: base || null }).where(eq(users.phoneNumber, phone));
       } catch (e) { console.error("[NUMBERS_MODE] confusion → plain failed:", e); }
     }
-    if (switchedTalk) return null;
-    const goal = user.goalType || "fat_loss";
-    const goalLine = goal === "muscle_gain"
-      ? `Yours is set a little *above* what your body burns, so there's extra to build muscle with.`
-      : `Yours is set a little *below* what your body burns, so the difference comes off as fat — without you ever going hungry.`;
-    const calmReply = `No stress${capName ? `, ${capName}` : ""} — you never have to understand calories or count anything. That's *my* job. 💛\n\nHere's the only picture you need: think of it like a *data bundle for food*. Every day you get a bundle. Every meal uses a little. When I send a number back, that's just *how much bundle is left* — nothing to work out.\n\n${goalLine}\n\nSo you just do the easy part: send me what you eat — a photo or a few words — and I'll tell you in plain language, like *"that's a solid lunch, room for a light dinner."* Deal?`;
-    await logChat(user.id, message, calmReply, "CALORIE_EXPLAINER");
-    return calmReply;
+    // The preference change above stays; the explanation is the new coach's (#445, A16).
   }
 
   return null;

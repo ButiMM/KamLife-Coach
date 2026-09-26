@@ -282,18 +282,9 @@ REAL("\n2. THE THREE DIVERGENCES, EACH ASSERTED ON ITS OWN");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n3. THE CONTROLS — the supplement handler still does its own job");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-// The repair stands the supplement branch down on a pain report and requires a named supplement
-// before it says "keep taking it". Both could have been over-subtractions; these hold the line.
-{
-  const named = await isolated(13, "should I take creatine?", "c13-creatine");
-  chk(/creatine/i.test(named.last) && !IS_STALL(named.last),
-    "CONTROL: a genuine supplement question is still answered",
-    `body=${JSON.stringify(named.last.slice(0, 200))}`);
-  const gated = await isolated(13, "what should I take for protein?", "c13-gated");
-  chk(/week 4|supplements unlock/i.test(gated.last),
-    "CONTROL: the supplement week gate still fires for a client in week 1",
-    `body=${JSON.stringify(gated.last.slice(0, 200))}`);
-}
+// RETIRED WITH #445: the supplement branch these two controls held (a named supplement is answered;
+// week 1 is gated) was deleted. Supplement questions are the new coach's, behind the safety owner
+// that still takes the pain turn (asserted above).
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n4. VOICE PARITY — the spoken forms land where the typed forms do");

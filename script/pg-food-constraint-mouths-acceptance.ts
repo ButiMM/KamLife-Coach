@@ -44,6 +44,7 @@ console.log = console.warn = console.error = () => {};
 
 const { pool, db } = await import("../server/db");
 const schema = await import("../shared/schema");
+const { eq } = await import("drizzle-orm");
 const { handleMessage } = await import("../server/routes");
 const { buildGroceryPersonalization } = await import("../server/grocery-personalize");
 const { foodConstraints } = await import("../server/food-swaps");
@@ -106,49 +107,27 @@ const loggingSince = (id: string) => pool.query(
 
 REAL("\n=== THE PLATE THE COACH NAMES ===");
 
-// ── §1 THE ASK THIS DOOR EXISTS FOR ─────────────────────────────────────────────────────────
+// ── §1–§4 SINCE #445: THE NEXT-MEAL DOOR IS THE NEW COACH ──────────────────────────────────
+//
+// The plate menu graded here was deleted with wave 1; "what should I eat" / "I'm hungry" are the
+// new coach's. Its composer reads THEIR REAL NUMBERS from ledgerNumbers (core/coach.ts), which
+// carries foodConstraints — the same owner the menu was made to consult. So the constraint is graded
+// on what the new coach is told, each prohibition still paired with its unconstrained control.
+const { ledgerNumbers } = await import("../server/core/coach");
+const told = async (id: string, msg: string) => {
+  const [row] = (await db.select().from(schema.users).where(eq(schema.users.id, id)).limit(1)) as any[];
+  return ledgerNumbers(row, msg);
+};
 const vegan = await seed({ dietaryRestrictions: "vegan" });
 for (const question of ["what should I eat", "what can I eat", "I'm hungry"]) {
-  const reply = await ask(vegan.phone, question);
-  chk(!ANIMAL.test(reply), `"${question}" offers a vegan client no animal protein`,
-    (reply.match(ANIMAL) || []).join(",") + " | " + reply.slice(0, 200));
-  chk(/\n/.test(reply.trim()) && reply.trim().length > 60,
-    `…and still answers with something — silence is not honouring a constraint`, reply.slice(0, 120));
+  chk(/Does not eat: vegan/.test(await told(vegan.id, question)), `"${question}": the new coach is told the client is vegan`);
 }
-
-// ── §2 THE CONTROL: THE SAME DOOR STILL NAMES MEAT WHEN NOTHING IS DECLARED ─────────────────
-//
-// §1 is satisfied by a coach that never names a food again. This is what stops that reading.
 const open = await seed({ dietaryRestrictions: null });
-const openReply = await ask(open.phone, "what should I eat");
-chk(ANIMAL.test(openReply), "an unconstrained client is still offered real protein by name",
-  openReply.slice(0, 200));
-chk(openReply !== await ask(vegan.phone, "what should I eat"),
-  "the two clients genuinely receive different menus");
-
-// ── §3 THE OTHER CONSTRAINTS, ON THE SAME DOOR ──────────────────────────────────────────────
+chk(!/Does not eat/.test(await told(open.id, "what should I eat")), "CONTROL: an unconstrained client carries no prohibition");
 const halaal = await seed({ dietaryRestrictions: "halaal" });
-const halaalReply = await ask(halaal.phone, "what should I eat");
-chk(!PORK.test(halaalReply), "a halaal client is offered no pork", halaalReply.slice(0, 200));
-chk(/chicken|beef|mince|fish|eggs?/i.test(halaalReply),
-  "…and is still offered the animal protein they DO eat — halaal is not vegan",
-  halaalReply.slice(0, 200));
-
+chk(/Does not eat: halaal/.test(await told(halaal.id, "what should I eat")), "a halaal client's constraint reaches the new coach");
 const noEggs = await seed({ foodDislikes: "eggs" });
-const noEggsReply = await ask(noEggs.phone, "what should I eat");
-chk(!/\beggs?\b/i.test(noEggsReply), "a literal named food from signup is honoured too",
-  noEggsReply.slice(0, 200));
-chk(/chicken|beef|mince|pilchards?/i.test(noEggsReply),
-  "…and nothing else was taken away with it", noEggsReply.slice(0, 200));
-
-// ── §4 THE CALORIE-CEILING BRANCH, WHICH NAMES A SNACK ──────────────────────────────────────
-//
-// A second branch of the same door, reached by a different day. It printed "(eggs, yoghurt,
-// biltong)" unconditionally.
-const full = await seed({ dietaryRestrictions: "vegan", calorieTarget: 600, proteinTarget: 150 });
-const fullReply = await ask(full.phone, "what should I eat");
-chk(!ANIMAL.test(fullReply), "the day-is-done branch names no animal snack either",
-  fullReply.slice(0, 220));
+chk(/Does not eat: eggs/.test(await told(noEggs.id, "what should I eat")), "a literal named food from signup reaches it too");
 
 REAL("\n=== THE GROCERY BLOCK ===");
 
@@ -248,7 +227,7 @@ chk(ANIMAL.test(openAfter), "…and an unconstrained client on the same branch i
   openAfter.slice(0, 300));
 
 await pool.query("DELETE FROM users WHERE id = ANY($1)",
-  [[vegan.id, open.id, halaal.id, noEggs.id, full.id, eater.id, nibbler.id, veganEater.id, openEater.id]]);
+  [[vegan.id, open.id, halaal.id, noEggs.id, eater.id, nibbler.id, veganEater.id, openEater.id]]);
 REAL(`\npg-food-constraint-mouths-acceptance: ${failed === 0 ? "GREEN — all checks passed" : `RED — ${failed} check(s) failed`}`);
 await pool.end();
 process.exit(failed === 0 ? 0 : 1);

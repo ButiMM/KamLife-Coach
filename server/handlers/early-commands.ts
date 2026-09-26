@@ -31,7 +31,7 @@ import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
 import { isBareGreeting } from "../constants";
 import { readHealthState } from "../health-state";
-import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion, handleVoiceReplyPreference } from "./numbers-literacy";
+import { handleNumbersLiteracy, handleToneSignal, handleVoiceReplyPreference } from "./numbers-literacy";
 import { answerSwapAsk, answerUnavailable, answerLocalListChange, foodConstraints } from "../food-swaps";
 import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
 import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from "../street-food";
@@ -106,26 +106,8 @@ export async function handleEarlyCommands(ctx: {
     return `${portionReply}\n[MEDIA:${handGuideUrl}]\n[MEDIA:${plateGuideUrl}]`;
   }
 
-  // ---- SURPLUS/DEFICIT QUESTIONS — computed, never generated; before the totals card ----
-  const surplusReply = await handleSurplusDeficitQuestion({ message, m, user });
-  if (surplusReply !== null) return surplusReply;
-
-  // ---- SWAP ASKS ("instead of mayo?") — the swap table answers; before the totals card ----
-  // WAVE 1 (#445): for a switched client the swap and substitution tables are the new coach's TOOLS
-  // (core/coach.ts foodTools), not replies of their own.
-  const switchedTalk = (await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""));
-  const swapAnswer = switchedTalk ? null : answerSwapAsk(m, user.goalType, foodConstraints(user as any));
-  if (swapAnswer !== null) { await logChat(user.id, message, swapAnswer, "SWAP_ASK"); return swapAnswer; }
-
-  // ---- "THE SHOP DIDN'T HAVE IT" — a different question from the swap above (2026-08-05).
-  // The swap table answers "this is worse for your goal, eat that instead". This answers
-  // "chicken was finished, is mince alright" — the one a client actually asks, standing in a
-  // Shoprite aisle, needing an answer in one second. Deterministic: substitution is a lookup,
-  // not a judgement, and it costs nothing. Checked AFTER the goal swap so an ordinary
-  // "instead of X" still gets the health answer it always did.
-  const subAnswer = switchedTalk ? null : answerUnavailable(message, foodConstraints(user as any));
-  if (subAnswer !== null) { await logChat(user.id, message, subAnswer, "SUBSTITUTION"); return subAnswer; }
-
+  // WAVE 1 IS THE NEW COACH'S (#445, CTO order on #391): surplus/deficit questions, swaps and "the shop didn't have it" is answered by core/coach.ts, not here.
+  
   // ---- A LOCAL CHANGE TO A LIST WE ALREADY SENT (Work Order B, 2026-08-12) ----
   // "Can I use eggs instead?" was answered with "Here's your updated list…" and a full
   // regeneration — the substitution was understood, the SCOPE of the reply was not. The two
@@ -141,8 +123,8 @@ export async function handleEarlyCommands(ctx: {
   // calorie block so "my week"/"my month" don't get read as a calorie query. Question-safe: it's a
   // read-only summary, so it fires even when the classifier flags a question.
   if (
-    // A switched client gets the card on request only; "how was my week?" is the new coach's (#445).
-    (switchedTalk ? /^(?:my week|my month)[.!]?$/i.test(m.trim()) : /\b(my week|my month)\b/i.test(m)) ||
+    // The card on request only ("my week", "weekly report"); "how was my week?" is the new coach's (#445).
+    /^(?:my week|my month)[.!]?$/i.test(m.trim()) ||
     /\b(weekly (report|scorecard|card|summary|recap)|week (report|card|scorecard)|this week.?s? (report|card|scorecard|summary))\b/i.test(m) ||
     /\b(monthly (report|scorecard|card|summary|recap)|month (report|card|scorecard)|report card|scorecard|my (monthly )?scorecard)\b/i.test(m)
   ) {
@@ -157,25 +139,8 @@ export async function handleEarlyCommands(ctx: {
     return reply;
   }
 
-  // MACRO STATUS — "how are my fats looking? is it bad?" is a NUMBERS question and must be
-  // answered from the card's own rows, never the model (2026-07-23 live: card said Fat 88/86g
-  // OVER, engine said "~100g, within a reasonable range" — wrong number AND wrong verdict).
-  {
-    const which = switchedTalk ? null : whichMacroAsked(m); // "how are my fats looking?" is the new coach's when switched (#445)
-    if (which) {
-      const { todayRows } = await import("../macro-card-attach");
-      const { getGoalProfile } = await import("../goal-profiles");
-      // A MACRO answer is a numbers answer, so this is where the macro goal-profile gate lives
-      // now — not inside todayRows, which also feeds the card a wellness client is entitled to.
-      const t = getGoalProfile(user?.goalType).usesMacros ? await todayRows(user).catch(() => null) : null;
-      if (t) {
-        const reply = macroStatusReply(t.rows as any, which, user.name?.split(" ")[0]);
-        await logChat(user.id, message, reply, "MACRO_STATUS");
-        return reply;
-      }
-    }
-  }
-
+  // WAVE 1 IS THE NEW COACH'S (#445, CTO order on #391): "how are my fats/protein looking?" is answered by core/coach.ts, not here.
+  
   // A STAND-DOWN MUST NOT END THE TURN FOR EVERYONE ELSE (2026-08-25, issue #63).
   //
   // This was computed INSIDE the branch below and answered with `return null`, which exits
@@ -906,14 +871,9 @@ export async function handleEarlyCommands(ctx: {
   // silently skipping the food logger. Meal words / eating verbs route to food logging.
   const isMealStatement = /\b(breakfast|lunch|dinner|supper|snack|brunch|i\s+had|i\s+ate|just\s+had|just\s+ate|\bhad\b|\bate\b|having|eating|i.?ll\s+have|gonna\s+have|going\s+to\s+have)\b/i.test(m);
   const isRawFoodList = !isMealStatement && m.includes(",") && (m.match(FOOD_WORDS) || []).length >= 3 && !m.includes("?") && m.split(/\s+/).length <= 25;
-  // For a switched client only a PASTED list is rebuilt: the worded trigger ("…i buy…") also caught
-  // "Which crypto should I buy?" and grocery questions, which are the new coach's (#445).
-  const isClientList = (
-    (!switchedTalk && /\b(adjust|fix|check|improve|optimize|look at|review|here.?s|heres|this is what i|what i normally|my.*grocery|my.*shopping|i usually buy|i always buy|every week i buy|i buy)\b/i.test(m)
-    && /\b(list|buy|shop|grocery|groceries|shopping|trolley|basket)\b/i.test(m)
-    && m.split(/\s+/).length >= 5)
-    || isRawFoodList
-  );
+  // A PASTED LIST ONLY (#445). The worded trigger ("…i buy…") also caught "Which crypto should I
+  // buy?" and "R400 for groceries, what should I buy?"; grocery questions are the new coach's now.
+  const isClientList = isRawFoodList;
   if (isClientList) {
     const goal = user.goalType || "fat_loss";
     const pTarget = user.proteinTarget || 120;

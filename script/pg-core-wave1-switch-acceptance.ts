@@ -76,7 +76,7 @@ chk(mealsAfter === mealsBefore, "the founder's \"can I have a burger?\" writes n
 const tp = await say(TESTER, "I've been stuck at 82kg for three weeks. What am I doing wrong?");
 chk(!/What do you need\?/.test(tp), "a tester's plateau is not answered with the restart menu", tp.slice(0, 160));
 const tr = await say(TESTER, "What should I order at KFC?");
-chk(!tr.includes(NEW) && tr.trim().length > 0, "a tester's KFC question still meets the old restaurant guide", tr.slice(0, 160));
+chk(!tr.includes(NEW) && tr.trim().length > 0, "in founder mode a tester's KFC question still meets the old coach", tr.slice(0, 160));
 
 REAL("\n2. THE SCOPE FLOOR STAYS IN FRONT (A17)");
 const f2 = await say(FOUNDER, "Can you help me with my maths homework tonight?");

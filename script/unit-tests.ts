@@ -1799,11 +1799,10 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const body = fn.slice(0, fn.indexOf("\n}\n"));
     assert.ok(!/if \(!profile\.usesMacros\) return null/.test(body),
       "the wellness gate is back in todayRows — the simplicity camp loses its card again");
-    // The macro NUMBERS reply still gates on the goal profile, because that one is about numbers.
-    const ec = readFileSync("server/handlers/early-commands.ts", "utf-8");
-    const j = ec.indexOf("whichMacroAsked(m)");
-    assert.ok(/usesMacros/.test(ec.slice(j, j + 700)),
-      "the macro-status reply must still stand down for a non-macro goal");
+    // The macro-status reply was deleted with wave 1 (#445): the new coach answers numbers questions
+    // from ledgerNumbers, which gates on the same goal profile (usesMacros).
+    const coach = readFileSync("server/core/coach.ts", "utf-8");
+    assert.ok(/usesMacros/.test(coach), "the new coach must still keep numbers from a non-macro goal");
   });
 
   test("every meal removal goes through ONE owner, and that owner writes an audit line", () => {
@@ -10912,13 +10911,12 @@ test("#441 isModelSlowOrUnreachable: timeout, dropped connection and 5xx answer 
   }
 });
 
-test("CORE_WAVE1: founder by default (#453); founder matches only the founder's number, in any format; on is everyone; off is the rollback", async () => {
+test("CORE_WAVE1: on by default (#445); founder matches only the founder's number, in any format; off is the rollback", async () => {
   const { coreWave1For } = await import("../server/core/coach");
   const saved = { m: process.env.CORE_WAVE1, p: process.env.COACH_ALERT_PHONE, a: process.env.ADMIN_PHONE_OVERRIDE };
   try {
     delete process.env.CORE_WAVE1; process.env.COACH_ALERT_PHONE = "+27 82 943 8001"; delete process.env.ADMIN_PHONE_OVERRIDE;
-    assert.equal(coreWave1For("whatsapp:+27829438001"), true, "unset means founder: the founder is switched");
-    assert.equal(coreWave1For("whatsapp:+27829438002"), false, "unset means founder: a tester is not");
+    assert.equal(coreWave1For("whatsapp:+27829438002"), true, "unset means on, for everyone");
     process.env.CORE_WAVE1 = "off";
     assert.equal(coreWave1For("whatsapp:+27829438001"), false, "off is the rollback");
     process.env.CORE_WAVE1 = "founder";

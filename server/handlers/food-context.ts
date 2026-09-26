@@ -638,12 +638,10 @@ export async function handleFoodContext(ctx: {
     console.log(`[FOOD_GATE] user=...${String(user.id || "").slice(-6)} foods=[${foodsInMsg.map(f => f.name).join("|")}] q=${isQuestion} frus=${isFrustration} emo=${isEmotionalOnly} future=${isFuturePlanning} trig=${hasLogTrigger} direct=${directFoodScan} override=${foodLogOverride} words=${m.split(/\s+/).length}`);
   }
 
-  // ---- CUT 10: THE ASK GETS AN ANSWER, NOT A HANDOFF ----------------------------------------
-  // Everything above has just worked out that this is a QUESTION about a food we can price. Until
-  // now every handler declined and the model answered without the ledger; this place knows both.
+  // "CAN I HAVE X?" IS A QUESTION, NEVER A LOG (#445): the new coach answers, nothing is written (pg-meal-decline §4).
+  // A stated meal riding with it ("I had chicken for dinner, is that ok?") keeps the ledger's answer, not the clarify.
   if (hasActualFood && hasSubstantiveQuestion && !isFuturePlanning && PERMISSION_ASK.test(m)) {
-    if ((await import("../core/coach")).coreWave1For(String(user?.phoneNumber || ""))) return null; // a question, never a log: the new coach answers (#445)
-    const answered = await answerFoodPermissionAsk(user, message, foodsInMsg);
+    if (!forceLog) return null; const answered = await answerFoodPermissionAsk(user, message, foodsInMsg);
     if (answered) { await logChat(user.id, message, answered, "FOOD_PERMISSION"); return answered; }
   }
 
@@ -1436,7 +1434,9 @@ export async function handleFoodContext(ctx: {
   // reportedInSomeClause is the floor C9 used one axis over: per-clause asking/intent tests with
   // a domain-only predicate, so "I had chicken for dinner, is that ok?" still reports eating and
   // still clarifies, while a pure question reaches the Coach. forceLog keeps its override.
-  const reportsEatingSomewhere = !!reportedInSomeClause(message, c => /\b(?:had(?!\s+to\b)|ate|eaten|eating(?!\s+(?:well|healthy|clean|right|good|better|badly|less|more)\b)|having(?!\s+to\b))\b/i.test(c)); // not "had to" / "I'm eating well" (#445)
+  // Not an obligation ("had to") or a habit ("I'm eating well"): "stuck at 82kg even though I'm eating
+  // well" and "I had to update my CV" were told "Got it — you ate something" (#445).
+  const reportsEatingSomewhere = !!reportedInSomeClause(message, c => /\b(?:had(?!\s+to\b)|ate|eaten|eating(?!\s+(?:well|healthy|clean|right|good|better|badly|less|more)\b)|having(?!\s+to\b))\b/i.test(c));
   if ((hasStrongFoodTrigger || hasNamedMealIntent || forceLog) && !isFuturePlanning && !isEmotionalOnly
       && (reportsEatingSomewhere || forceLog)) {
     console.warn(`[FOOD_GATE] strong meal signal fell through — forcing clarify: "${message.slice(0, 80)}"`);

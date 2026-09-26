@@ -20,7 +20,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 // Frozen 2026-07-29 after removing every full-name-in-prose use. LOWER THIS, NEVER RAISE IT.
-const BUDGET = 96;   // 2026-09-23 (#275): the expired-trial nudge and its raw client.name deleted
+const BUDGET = 94;   // 2026-09-25 (#445): the wave-1 handlers deleted (was 96)
 
 /** Prose shapes that put a FULL name in front of a client. These may never come back at all. */
 const FORBIDDEN: Array<[RegExp, string]> = [
