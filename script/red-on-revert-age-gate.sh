@@ -90,8 +90,8 @@ run_case "a blocked minor's age is kept" server/onboarding.ts \
 
 # 5. ANY NUMBER AFTER "I'M" IS AN AGE — "I'm 16 weeks pregnant" locks an adult out.
 run_case "a number that is not an age blocks an adult" server/onboarding.ts \
-  '|(?=\s*(?:[.,!?;)]|$|and\b|but\b|so\b|today\b)))/);' \
-  '|)/);' || failed=$((failed + 1))
+  '|(?=\s*(?:[.,!?;)]|$|and\b|but\b|so\b|today\b)))|([5-9]' \
+  '|)|([5-9]' || failed=$((failed + 1))
 
 # 6. A PHONE KEYBOARD'S APOSTROPHE HIDES THE AGE — "I’m 17".
 run_case "a typographic apostrophe hides a stated age" server/onboarding.ts \

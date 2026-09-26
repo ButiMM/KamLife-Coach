@@ -74,20 +74,23 @@ export const ONBOARDING_STATES = new Set<string>([
 // ============================================================
 export const UNDERAGE_REPLY = `Coach K is built for adults, so I can't coach you until you're 18. For now, the best people to plan your training and eating with are a parent or guardian, a school coach, or the nurse at your clinic. 💙`;
 
-const AGE_WORDS: Record<string, number> = { ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17 };
+const AGE_WORDS: Record<string, number> = { five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17 };
 
 /** A first-person age under 18 ("I'm 16", "I am a 15 year old", "I'm 17, can I…"), or null.
  *  The number must be followed by "years old" or end the clause, so "I'm 16 weeks pregnant",
  *  "I'm 17kg down" and "I'm 15 minutes late" are not ages. */
 export function statedMinorAge(text: string): number | null {
   const s = String(text || "").toLowerCase().replace(/[‘’ʼ]/g, "'");
-  const m = s.match(/\b(?:i'?m|i\s+am|my\s+age\s+is|i\s+(?:just\s+)?turned)\s+(?:only\s+|just\s+|a\s+)?(1[0-7]|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)(?:[\s-]*(?:years?|yrs?|y\/?o)\b(?:[\s-]*old)?|(?=\s*(?:[.,!?;)]|$|and\b|but\b|so\b|today\b)))/);
+  // Under ten (#338: "I'm 9 years old and I want to lose weight" was coached) only with an explicit
+  // "years old": a bare "I'm 9" is too often weeks, kilos or a time to be read as an age.
+  const m = s.match(/\b(?:i'?m|i\s+am|my\s+age\s+is|i\s+(?:just\s+)?turned)\s+(?:only\s+|just\s+|a\s+)?(?:(1[0-7]|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)(?:[\s-]*(?:years?|yrs?|y\/?o)\b(?:[\s-]*old)?|(?=\s*(?:[.,!?;)]|$|and\b|but\b|so\b|today\b)))|([5-9]|five|six|seven|eight|nine)[\s-]*(?:(?:years?|yrs?)[\s-]*old|y\/?o)\b)/);
   if (!m) return null;
   // "People say I'm 16, but I'm 30" (Codex @ 8a36f96): a first-person ADULT age anywhere in the
   // message outranks the minor one. Closing an adult's account on a contradiction is the worse
   // error, and the next plain "I'm 16" still blocks.
   if (/\b(?:i'?m|i\s+am|my\s+age\s+is|i\s+(?:just\s+)?turned)\s+(?:actually\s+|really\s+)?(?:1[89]|[2-9]\d)\b(?!\s*(?:kg|kgs|cm|%|weeks?|days?|minutes?|mins?|km))/.test(s)) return null;
-  return AGE_WORDS[m[1]] ?? Number(m[1]);
+  const age = m[1] ?? m[2];
+  return AGE_WORDS[age] ?? Number(age);
 }
 
 /** Close the account to coaching. Returns the new state so a caller can carry it forward. */
