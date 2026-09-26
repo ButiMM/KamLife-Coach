@@ -638,7 +638,10 @@ export async function handleFoodContext(ctx: {
     console.log(`[FOOD_GATE] user=...${String(user.id || "").slice(-6)} foods=[${foodsInMsg.map(f => f.name).join("|")}] q=${isQuestion} frus=${isFrustration} emo=${isEmotionalOnly} future=${isFuturePlanning} trig=${hasLogTrigger} direct=${directFoodScan} override=${foodLogOverride} words=${m.split(/\s+/).length}`);
   }
 
-  // WAVE 1 IS THE NEW COACH'S (#445, CTO order on #391): "can I have X?" (it reads the same ledger through ledgerNumbers) is answered by core/coach.ts, not here.
+  // "CAN I HAVE X?" IS A QUESTION, NEVER A LOG (#445). The answer is the new coach's (core/coach.ts), and
+  // this door still decides one thing: nothing is written. Falling through to the logger stored the
+  // burger in "No, should I have had a burger instead?" (pg-meal-decline §4).
+  if (hasActualFood && hasSubstantiveQuestion && !isFuturePlanning && PERMISSION_ASK.test(m)) return null;
 
   // ---- RETROSPECTIVE DIET HISTORY — "within the week", "usually eat", "normally I have" ----
   // These are diet audits describing routine or past eating — NOT today's food log.

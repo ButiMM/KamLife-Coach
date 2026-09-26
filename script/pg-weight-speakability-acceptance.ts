@@ -210,7 +210,8 @@ REAL("\n=== THE REACTIVE SURFACES AGREE WITH IT, AND WITH EACH OTHER ===");
   chk(/87\.2|84\.0/.test(body), "…while the readings themselves still ship",
     JSON.stringify(body.slice(0, 200)));
 
-  const progress = await ask(ill.phone, "how am I doing");
+  // "progress" is the card COMMAND; "how am I doing?" is the new coach's since #445.
+  const progress = await ask(ill.phone, "progress");
   chk(!DIRECTION.test(progress),
     "7 · the progress card does not speak a direction the body check just refused",
     JSON.stringify(progress));
@@ -220,7 +221,7 @@ REAL("\n=== THE REACTIVE SURFACES AGREE WITH IT, AND WITH EACH OTHER ===");
   const clear = await client("ClearToo");
   chk(DIRECTION.test(await ask(clear.phone, "check my body")),
     "CONTROL: a clear trend is still called on the body check");
-  chk(DIRECTION.test(await ask(clear.phone, "how am I doing")),
+  chk(DIRECTION.test(await ask(clear.phone, "progress")),
     "CONTROL: …and on the progress card");
 }
 
