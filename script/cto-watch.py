@@ -69,7 +69,9 @@ for p in open_prs:
     attacks = [c for c in human if _is_codex_review(c) and (sha[:7] in c["body"] or ts(c["created_at"]) >= head_since)]
     answers = [c for c in human if re.match(r"^[*_\s]*ANSWER", c["body"])]
     code_files = [f for f in api("GET", f"/pulls/{n}/files?per_page=100") if not (f["filename"].startswith("docs/") or f["filename"].endswith(".md"))]
-    needs_attack = any(l["name"] == "switch" for l in p["labels"]) or p["title"].startswith("[harm]")
+    # Founder decision, 26 Sep: ship each section to testers as soon as it passes. Switch PRs merge on a
+    # green gate plus the reach check; the CTO attacks them after merge. Only [harm] PRs wait for an attack.
+    needs_attack = p["title"].startswith("[harm]")
     if not code_files:
         state = "docs only: no attack needed"
         attack_ok_docs = True
