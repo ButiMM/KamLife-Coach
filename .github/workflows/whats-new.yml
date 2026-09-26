@@ -1,0 +1,30 @@
+name: whats-new
+# After every merged `switch` PR, its "Testers' note:" goes to testers through the broadcast route (#442, #459).
+# Scheduled, because a merge made with GITHUB_TOKEN starts no workflow. script/whats-new.py is idempotent.
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+concurrency:
+  group: whats-new
+  cancel-in-progress: false
+jobs:
+  note:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: script/whats-new.py
+          sparse-checkout-cone-mode: false
+      - name: Send any pending what's-new note
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          APP_URL: ${{ secrets.APP_URL }}
+          COACH_DASHBOARD_KEY: ${{ secrets.COACH_DASHBOARD_KEY }}
+        run: python3 script/whats-new.py
