@@ -229,18 +229,22 @@ async function judge(k: ReplayCase, userId: string, bodies: string[]): Promise<{
 }
 
 // THE SCHEDULED JOBS (#433): the production job, run for one seeded client, graded on what it would send.
-const JOBS: Record<NonNullable<ReplayCase["proactive"]>, () => Promise<unknown>> = {
+const JOBS: Record<NonNullable<ReplayCase["proactive"]>, (userId: string) => Promise<unknown>> = {
   morning: async () => (await import("../server/scheduler/jobs/morning")).runMorningCheckin(),
   evening: async () => (await import("../server/scheduler/jobs/evening")).runEveningAccountability(),
   weekly: async () => (await import("../server/scheduler/jobs/weekly")).runSundayWeeklyReport(),
   monday: async () => (await import("../server/scheduler/jobs/monday")).runWeightReminder(),
+  // The reminder a before-turn set becomes due now, so the job fires it as it would at that hour.
+  reminders: async userId => { await pool.query("UPDATE reminders SET fire_at = now() - interval '1 minute' WHERE user_id = $1", [userId]); return (await import("../server/scheduler/jobs/reminders")).runDueReminders(); },
+  onboarding: async () => (await import("../server/scheduler/jobs/onboarding")).runEarlyOnboarding(),
+  silence: async () => (await import("../server/scheduler/jobs/retention")).runSilenceDetection(),
 };
 async function scheduled(job: NonNullable<ReplayCase["proactive"]>, phone: string, userId: string): Promise<string> {
   // Only this client is subscribed while the job runs: every earlier case is already graded.
   await pool.query("UPDATE users SET subscription_status = 'replay_idle' WHERE id <> $1 AND subscription_status IN ('active', 'trial')", [userId]);
   const s0 = await lastShadowId();
   process.env.PROACTIVE_PAUSED = "false";
-  try { await JOBS[job](); } catch (e) { REAL(`replay-gate: the ${job} job threw: ${(e as Error)?.message || e}`); }
+  try { await JOBS[job](userId); } catch (e) { REAL(`replay-gate: the ${job} job threw: ${(e as Error)?.message || e}`); }
   finally { process.env.PROACTIVE_PAUSED = "true"; }
   return (await pool.query<{ body: string }>("SELECT body FROM shadow_replies WHERE phone = $1 AND id > $2 ORDER BY id", [phone, s0])).rows.map(r => r.body).join("\n");
 }
@@ -257,7 +261,7 @@ async function runCase(k: ReplayCase, n: number, isHeldOut: boolean): Promise<Ca
     heightCm: 164, age: 33, gender: "female", trainingMode: "home", trainingDaysPerWeek: 3,
     proteinTarget: 125, calorieTarget: 1800, dailyCalorieTarget: 1800, stepsTarget: 8000, lifeSituation: "office",
     // Cases are JSON data, so a timestamp arrives as an ISO string; the column wants a Date.
-    ...Object.fromEntries(Object.entries(k.seed || {}).map(([f, v]) => [f, /(?:At|Until)$/.test(f) && typeof v === "string" ? seedDate(v) : v])),
+    ...Object.fromEntries(Object.entries(k.seed || {}).map(([f, v]) => [f, /(?:At|Until|Date)$/.test(f) && typeof v === "string" ? seedDate(v) : v])),
   } as any).returning();
   for (const [i, t] of (k.before || []).entries()) await turn(phone, t, `RP${n}b${i}`);
   const bodies: string[] = [];

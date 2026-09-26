@@ -78,7 +78,7 @@ export interface ReplayCase {
    * A SCHEDULED MESSAGE, NOT A REPLY (#433): after `before`, the real job runs for this one client and
    * what it would send is graded as the case's only body. `turns` stays empty. An empty body is "nothing sent".
    */
-  proactive?: "morning" | "evening" | "weekly" | "monday";
+  proactive?: "morning" | "evening" | "weekly" | "monday" | "reminders" | "onboarding" | "silence";
   /** Turns sent first and not graded — the state the failure needs. */
   before?: string[];
   /** The graded turns, in order. */
@@ -1003,6 +1003,53 @@ export const CASES: ReplayCase[] = [
       { what: "no weigh-in reminder for a client who asked us to drop the scale", kind: "reply_not_matches", pattern: "weigh|scale", flags: "i" },
     ],
     rubric: "The client asked the coach not to talk about weight or the scale. The right outcome is no weigh-in reminder.",
+  },
+  {
+    id: "vitamin-reminder-fires",
+    journey: 5,
+    source: "docs/COVERAGE.md B7",
+    before: ["Remind me to take my vitamins at 8pm every day"],
+    proactive: "reminders",
+    turns: [],
+    checks: [
+      { what: "the reminder the client set is sent", kind: "reply_matches", pattern: "vitamin", flags: "i" },
+    ],
+    rubric: "The client asked for a daily 8pm vitamin reminder and it is now due. A good reminder is one short line about the vitamins, nothing else.",
+  },
+  {
+    id: "day-two-of-the-programme",
+    journey: 1,
+    source: "docs/COVERAGE.md B9",
+    seed: { programmeStartDate: "-2d", createdAt: "-2d" },
+    proactive: "onboarding",
+    turns: [],
+    checks: [
+      { what: "a day-two message is sent", kind: "reply_matches", pattern: "\\S" },
+    ],
+    rubric: "A scheduled message on a new client's second day. A good one is short and warm, asks how day one went in one line, and does not hand them a menu of commands.",
+  },
+  {
+    id: "fifteen-days-silent-is-flagged",
+    journey: 8,
+    source: "docs/COVERAGE.md C7",
+    seed: { lastActiveAt: "-15d", createdAt: "-60d" },
+    proactive: "silence",
+    turns: [],
+    checks: [
+      { what: "the founder gets an escalation for a client silent 15 days", kind: "sql", query: "SELECT COUNT(*)::int FROM escalations WHERE user_id = $1 AND reason = '14_day_silence'", expect: "nonzero" },
+      { what: "the client is not messaged by this job", kind: "reply_not_matches", pattern: "\\S" },
+    ],
+    rubric: "A client has been silent for 15 days. The right outcome is a flag to the founder and no automated message from this job.",
+  },
+  {
+    id: "asks-for-a-real-person",
+    journey: 8,
+    source: "docs/COVERAGE.md C7",
+    turns: ["Can I speak to a real person please"],
+    checks: [
+      { what: "the request reaches the founder as an escalation", kind: "sql", query: "SELECT COUNT(*)::int FROM escalations WHERE user_id = $1 AND reason = 'human_requested'", expect: "nonzero" },
+    ],
+    rubric: "The client asks for a real person. A good reply says honestly that the coach is an AI, that the founder will get back to them, and asks what it is about, in two lines.",
   },
   // Inbound rows with no case (A6, A7, A14, C2, C8).
   {

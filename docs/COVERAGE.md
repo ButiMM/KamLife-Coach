@@ -58,9 +58,9 @@ A row is **complete** when:
 | B4 | Weekly report, shopping-list card | `jobs/weekly.ts`, `weekly-recap.ts` | proactive (journey 7) | how-was-my-week, weekly-report-with-logs (scheduled) | none |
 | B5 | Programme advance / today's workout | `jobs/programme.ts`, `programme.ts` | proactive | **0** | none |
 | B6 | Re-engagement / back after a week | `morning.ts` (A/B), `engagement.ts` | proactive | back-after-a-week, morning-after-nine-silent-days (scheduled) | none |
-| B7 | Reminders firing | `jobs/reminders.ts` | proactive | **0** | none |
+| B7 | Reminders firing | `jobs/reminders.ts` | proactive | vitamin-reminder-fires (scheduled) | none |
 | B8 | Monthly narrative, CIP update | `jobs/narrative.ts`, `jobs/cip-update.ts` | retire into the record, or proactive | **0** | none |
-| B9 | Onboarding catch-ups | `jobs/onboarding.ts` | proactive | **0** | none |
+| B9 | Onboarding catch-ups | `jobs/onboarding.ts` | proactive | day-two-of-the-programme (scheduled) | none |
 | B10 | Voice broadcasts, recaps (ElevenLabs) | `routes/voice-broadcast.ts`, `tts.ts` | proactive | **0** | none |
 | B11 | The WhatsApp 24-hour window; templates outside it | `whatsapp-templates.ts`, `outbound-authority.ts` | floor | **0** (#327) | none |
 | B12 | Opt-out honoured on every send path | `outbound-authority.ts` | floor | opt-out-natural-language, opt-out-with-diagnosis, opted-out-gets-no-morning | none |
@@ -75,7 +75,7 @@ A row is **complete** when:
 | C4 | Delete my data (POPIA) | `handlers/safety.ts`, `data-export.ts` | floor | popia-delete | none |
 | C5 | Under 18 | `onboarding.ts` | floor | minor-onboarding, age-nine-mid-conversation | none |
 | C6 | Pregnancy, eating disorders, medication, crisis | `safety-detection.ts`, `medication-context.ts`, `crisis-reply.ts`, `despair.ts` | floor | pregnancy-target, purging-disclosure, insulin-omission, insulin-double, antibiotic-choice, antibiotics-train-control | none |
-| C7 | Escalation to the founder | `chat-log.ts`, the escalations table | floor | **0** (asserted inside some cases) | dashboard only |
+| C7 | Escalation to the founder | `chat-log.ts`, the escalations table | floor | fifteen-days-silent-is-flagged (scheduled), asks-for-a-real-person | dashboard only |
 | C8 | Referrals, QR joins | `onboarding-referral.ts`, `join-qr.ts` | action | invite-a-friend | none |
 
 ## D. Foundation (not client-facing, but everything rests on it)
