@@ -61,7 +61,23 @@ export function crisisAboutSomeoneElse(message: string): boolean {
   const m = SOMEBODY_ELSE.exec(text);
   // "I want to die, my friend said I should tell someone": their own words come first, so it is theirs.
   // And the friend must be REPORTED as saying or wanting it ("my friend who died, and I want to die" is theirs).
-  return !!m && !isCrisisMessage(text.slice(0, m.index)) && REPORTS.some(v => text.slice(m.index, m.index + 80).toLowerCase().includes(v));
+  if (!m || isCrisisMessage(text.slice(0, m.index)) || !REPORTS.some(v => text.slice(m.index, m.index + 80).toLowerCase().includes(v))) return false;
+  // "My husband says I am suicidal": the client speaks in the first person between the third party and
+  // the crisis words, so it is THEIR crisis (#481 attack). Words in quotes are the other person's own
+  // ('my friend said "I want to die"'), so quoted spans are left out of that check.
+  const lower = text.toLowerCase();
+  const ends = CRISIS_PHRASES.map(p => { const i = lower.indexOf(p, m.index); return i < 0 ? -1 : i + p.length; }).filter(i => i > 0);
+  if (!ends.length) return true;
+  let span = lower.slice(m.index, Math.min(...ends));
+  for (const [open, close] of [["\u201c", "\u201d"], ["\"", "\""]]) {
+    let a = span.indexOf(open);
+    while (a >= 0) {
+      const b = span.indexOf(close, a + 1);
+      span = b < 0 ? span.slice(0, a) : span.slice(0, a) + span.slice(b + 1);
+      a = span.indexOf(open);
+    }
+  }
+  return !span.split(/[^a-z']+/).some(w => ["i", "i'm", "im", "me", "myself", "i've", "ive"].includes(w));
 }
 
 export function crisisReplyForSomeoneElse(name = "friend"): string {
