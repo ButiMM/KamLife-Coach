@@ -33,6 +33,10 @@ This section outranks the rest of this file. It exists because a broad product w
 
 **Gate reporting:** never just "gate green". State the journeys covered, the corpus version, whether it ran on the live model, and what's untested (e.g. photos, voice, proactive, the 24 h window).
 
+## 0c. NO NEW SPEND UNTIL REVENUE (founder decision, 28 Sep)
+
+No separate CI OpenAI project and no paid gate runs for now. **Switches are proven on real use instead:** the switch ships behind its flag (`CORE_WAVE1` and so on), goes on for everyone through the Railway variable, is watched through real tester conversations and 👎 flags, and is rolled back instantly (`off`) if it misbehaves. Offline tests, the reach check and the safety floors still run on every PR at no cost. The paid replay gate returns only once there's paying revenue, and only on a `final` label. Deleting old code waits until a switch has run cleanly on real use for 48 hours.
+
 ## 1. The decision
 
 Keep the plumbing. Replace the coaching core behind it.
