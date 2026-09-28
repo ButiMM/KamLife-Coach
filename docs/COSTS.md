@@ -1,3 +1,33 @@
+# STANDING COST RULES: every builder, reviewer and the CTO follows these (28 Sep)
+
+The founder spent $20 of OpenAI credit in two days (25-26 Sep) after six months on $10. The causes were CI grading with the live model on every push, a history-learning leak re-run on every deploy, and CI sharing production's OpenAI account. These rules stop that from happening again.
+
+**Budgets** (at current tester volume):
+
+| Area | Budget |
+|---|---|
+| Production AI | ≤ R10 per active client per month |
+| CI | ≤ $5 per month, on its own capped OpenAI project |
+| Total OpenAI | ≈ $10 per month |
+
+**Production (the live bot):**
+1. The small model by default. `gpt-4o` only for crisis and photo reading (#474).
+2. One-off work runs once per client, ever, with the claim stored in the database, never in memory (#472).
+3. No new model call site outside the new coach (the mouth ratchet counts `model_call_sites`).
+4. **Founder action:** set Railway `GLOBAL_AI_DAILY_SOFT_CAP_USD=0.50` and `AI_MONTHLY_CEILING_ZAR`. The spend cap fails safe (#367), so a runaway day stops at the cap.
+
+**CI and the gate:**
+5. CI uses **its own OpenAI project with a hard monthly cap**, never production's account. Until the founder adds that key, the gate reports NOT TESTED; nobody reuses the production key.
+6. The live gate runs **once per switch PR**, when labelled `final` (#473): the strong judge once, the cheap judge otherwise. It never runs on docs, on every push, or on non-switch PRs.
+7. Unit, database and acceptance tests never call a live model (stubs only).
+
+**Builders and reviewers:**
+8. Claude capacity is scarce: one builder session, short status comments, batched pushes, no local re-runs of what CI runs.
+9. Attackers (Codex, the CTO) prove findings offline and never trigger the live gate.
+10. Any change that adds recurring cost states its estimated monthly cost in the PR description. No new paid service without a written case and the founder's yes.
+
+---
+
 # What KamLife costs to build and run, and how we keep it low
 
 Maintained by the CTO. MVP rule: **free first.** A paid item needs a written case and the founder's yes (`docs/SYSTEM.md`). Prices are approximate; the founder's billing pages are the truth.
