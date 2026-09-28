@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { detectEscalation } from "../server/safety-detection";
-import { crisisReply, crisisAlertBody, isCrisisMessage } from "../server/crisis-reply";
+import { crisisReply, crisisAlertBody, isCrisisMessage, crisisAboutSomeoneElse, crisisReplyForSomeoneElse } from "../server/crisis-reply";
 import { looksLikeQuitMoment } from "../server/quit-save";
 import { readLifeContext, lifeContextReply, pausesTargets } from "../server/life-context";
 
@@ -175,6 +175,20 @@ liability("crisis reply gives both helplines and nothing else", () => {
   assert.match(r, /0861 322 322/, "Lifeline must be present");
   assert.doesNotMatch(r, COACHING_WORDS, `crisis reply must stop coaching: "${r}"`);
   assert.equal(crisisReply("").startsWith("friend,"), true, "no name on file must not produce a blank greeting");
+});
+
+liability("#480: a friend's crisis quoted by the client is answered as a helper, and alerted as someone close", () => {
+  for (const m of ['My friend just said "ke batla go ipolaya". What should I do?', "my sister keeps saying she wants to kill herself and wants to die"]) {
+    assert.equal(isCrisisMessage(m), true, `still urgent: "${m}"`);
+    assert.equal(crisisAboutSomeoneElse(m), true, `someone else at risk: "${m}"`);
+    assert.match(crisisAlertBody("Thandi", "+27820000000", m, true), /someone close to the client/);
+    assert.doesNotMatch(crisisAlertBody("Thandi", "+27820000000", m, true), /Please check on this client/);
+  }
+  const r = crisisReplyForSomeoneElse("Thandi");
+  assert.match(r, /0800 567 567/); assert.match(r, /0861 322 322/); assert.match(r, /for you as well/);
+  assert.doesNotMatch(r, COACHING_WORDS, `must stop coaching: "${r}"`);
+  for (const m of ["I want to kill myself", "Ngifuna ukuzibulala", "I want to die, my friend said I should tell someone", "I keep thinking about my friend who died and I want to die"])
+    assert.equal(crisisAboutSomeoneElse(m), false, `first-person stays the client's own crisis: "${m}"`);
 });
 
 liability("the founder alert never leaks into the client reply", () => {

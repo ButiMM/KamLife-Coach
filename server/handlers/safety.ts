@@ -19,7 +19,7 @@ import { latestPayFastToken, cancelPayFastSubscription } from "../routes/payment
 import { readLifeContext, lifeContextReply, WITHHELD_SITUATION } from "../life-context";
 import { looksLikeQuitMoment, quitSaveReply, readObstacle } from "../quit-save";
 import { markLifeQuiet } from "../life-quiet";
-import { isCrisisMessage, crisisReply, crisisAlertBody } from "../crisis-reply";
+import { isCrisisMessage, crisisReply, crisisAlertBody, crisisAboutSomeoneElse, crisisReplyForSomeoneElse } from "../crisis-reply";
 import { asksForExport, formatExport } from "../data-export";
 import { sastDayKey } from "../sast";
 import { logChat, turnUser } from "./chat-log";
@@ -194,7 +194,8 @@ export async function runSafetyGuards(
   if (isCrisisMessage(m)) {
     const crisisUser = await ensureSafetyTurnUser(phone, message, context.sourceMessageId, context.boundUser);
     const crisisName = crisisUser?.name || "friend";
-    const reply = crisisReply(crisisName);
+    const aboutSomeoneElse = crisisAboutSomeoneElse(message); // #480: a friend's words, quoted by the client
+    const reply = aboutSomeoneElse ? crisisReplyForSomeoneElse(crisisName) : crisisReply(crisisName);
     try { await logChat(crisisUser?.id || "unknown", message, reply, "CRISIS"); } catch (e) { console.warn("[non-fatal]", e); }
     const coachAlertPhone = process.env.COACH_ALERT_PHONE;
     if (!coachAlertPhone) {
@@ -205,7 +206,7 @@ export async function runSafetyGuards(
         label: "CRISIS",
         from: fromNum!,
         to: `whatsapp:${coachAlertPhone}`,
-        body: crisisAlertBody(crisisName, phone, message),
+        body: crisisAlertBody(crisisName, phone, message, aboutSomeoneElse),
         phone,
         name: crisisName,
         originalMessage: message,
