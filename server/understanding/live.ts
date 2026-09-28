@@ -163,7 +163,7 @@ export async function canonicalDecision(
       Math.round((Date.parse(`${sastDayKey()}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
     const daysSinceAnyLog = foodRowToday ? 0
       : lastLoggedKey ? Math.max(0, dayGap(lastLoggedKey)) : null;
-    const { readWeighAskAndPresence, recordWeighAsk } = await import("../scheduler/shared");
+    const { readWeighAskAndPresence, markWeighAskPending } = await import("../scheduler/shared");
     const { daysSinceWeighAsk } = await readWeighAskAndPresence(user.id);
 
     const act = underPolicy(chooseAction({
@@ -236,7 +236,7 @@ export async function canonicalDecision(
          // THEY ARE TYPING TO US (#275): a reply never ends "tell me what you ate today".
          present: true, daysSinceWeighAsk,
          weekendInvestigationAnswered: weekendInvestigationAnswered(user) });
-    if (act.kind === "weigh") await recordWeighAsk(user.id);
+    if (act.kind === "weigh") markWeighAskPending(user.id); // recorded on delivery (#297)
 
     // RECORD THE PROVENANCE. The verifier needs to know what this turn's canonical decision was,
     // so it can tell a model reply that CARRIES the decision from one that invented its own.

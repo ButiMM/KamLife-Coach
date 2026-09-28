@@ -159,7 +159,7 @@ export async function oneActionCommand(
       trainingDeclined,
       foodDayClosed,
     });
-    if (decision.action.kind === "weigh") await (await import("../scheduler/shared")).recordWeighAsk(user.id);
+    if (decision.action.kind === "weigh") (await import("../scheduler/shared")).markWeighAskPending(user.id); // recorded on delivery (#297)
     return formatOneAction(decision.action, firstName);
   } catch (e: any) {
     console.error("[ONE_ACTION]", e?.message || e);

@@ -216,6 +216,14 @@ REAL("\n3. THE WEIGH-IN ASK IS RECORDED WHEN SENT AND CANNOT REPEAT DAILY");
   await pool.query("UPDATE sent_proactive SET sent_at = now() - interval '7 days' WHERE user_id = $1 AND message_key = 'weigh_ask'", [u.id]);
   const week = await canonicalNextMove(await fresh(u.phoneNumber), { hour: 7 });
   chk(week.action.kind === "weigh", "a week on, the ask may go out once more", week.action.kind);
+
+  // #297: a REACTIVE ask (chosen mid-conversation) is recorded only when the reply is delivered.
+  const { markWeighAskPending, settleWeighAsk } = await import("../server/scheduler/shared");
+  await pool.query("DELETE FROM sent_proactive WHERE user_id = $1 AND message_key = 'weigh_ask'", [u.id]);
+  markWeighAskPending(u.id); await settleWeighAsk(u.id, false);
+  chk(await asks() === 0, "#297: a reactive ask whose reply failed to send is not recorded");
+  markWeighAskPending(u.id); await settleWeighAsk(u.id, true);
+  chk(await asks() === 1, "#297: a delivered reactive ask is recorded", String(await asks()));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════

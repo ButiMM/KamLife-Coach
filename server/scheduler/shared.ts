@@ -289,6 +289,22 @@ export async function recordWeighAsk(userId: string): Promise<void> {
     .onConflictDoNothing().catch((e: any) => console.warn("[WEIGH_ASK] not recorded:", e?.message || e));
 }
 
+/**
+ * A REACTIVE ASK IS RECORDED ON DELIVERY, NOT ON DECISION (#297). The live decision and the
+ * one-action command choose the ask before the reply is composed and sent; recording it there
+ * suppressed it for a week even when the send failed. They mark it pending, and the reactive
+ * send door (routes/whatsapp.ts sendFinal) records it only when delivery was accepted. A mark
+ * older than two minutes belongs to a turn that never reached the door, and is dropped.
+ */
+const pendingWeighAsk = new Map<string, number>();
+export function markWeighAskPending(userId: string): void { if (userId) pendingWeighAsk.set(userId, Date.now()); }
+export async function settleWeighAsk(userId: string | null, accepted: boolean): Promise<void> {
+  const at = userId ? pendingWeighAsk.get(userId) : undefined;
+  if (!userId || at === undefined) return;
+  pendingWeighAsk.delete(userId);
+  if (accepted && Date.now() - at < 120_000) await recordWeighAsk(userId);
+}
+
 /** When we last asked them to weigh, and whether they have written to us today (SAST). */
 export async function readWeighAskAndPresence(userId: string): Promise<{ daysSinceWeighAsk: number | null; presentToday: boolean }> {
   const { sastDaysBetween } = await import("../sast");

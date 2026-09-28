@@ -156,6 +156,8 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   if (spoken) outMedia = [...(Array.isArray(media) ? media : media ? [media] : []), spoken];
   // THE DELIVERY OWNER'S OWN VERDICT, not an assumption that awaiting a send means it landed.
   const outcome = await sendParts(phone, splitMessage(out), outMedia);
+  // A weigh-in ask chosen this turn counts only if the client got it (#297).
+  await (await import("../scheduler/shared")).settleWeighAsk(userId, (await import("../outbound-delivery")).deliveryAccepted(outcome));
   await finalise(outcome);
 }
 

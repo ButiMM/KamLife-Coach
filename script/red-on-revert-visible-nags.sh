@@ -118,8 +118,8 @@ run_case "the price answer quotes a personal trainer at R250+" server/handlers/c
 # NOT A CASE: the trial grant, countdown job, expired-trial nudges and greeting line are DELETED,
 # not guarded — there is no seam to restore. script/unit-tests.ts "no path grants, counts down or
 # chases a free trial" and tracking-contract §3/§5 fail if any of them comes back.
-# NOT A CASE: the reactive weigh-in record in live.ts and one-action-command.ts. §3 grades the
-# proactive owner; the reactive record is the same helper, and no reactive case here asks to weigh.
+# NOT A CASE: the reactive weigh-in ask in live.ts and one-action-command.ts is marked pending and
+# recorded at the send door on accepted delivery (#297); §3 checks settleWeighAsk directly.
 
 restore_case
 if [[ $failed -ne 0 ]]; then
