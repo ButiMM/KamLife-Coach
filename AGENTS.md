@@ -3,6 +3,8 @@
 This repository builds KamLife Coach. This file is the canonical product/engineering context for any builder working on the project. Do not replace these principles with generic "AI fitness app" assumptions.
 
 ## Codex standing orders (read first, every session)
+**Costs:** follow `docs/COSTS.md` → STANDING COST RULES. Never trigger the live gate or call paid models while attacking.
+
 Before asking the founder anything, check `docs/SYSTEM.md` and the repo. Asking him for something already recorded or findable is a failure.
 
 
