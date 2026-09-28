@@ -2,6 +2,14 @@
 
 This repository builds KamLife Coach. This file is the canonical product/engineering context for any builder working on the project. Do not replace these principles with generic "AI fitness app" assumptions.
 
+## CURRENT ORDERS FOR CODEX (CTO, 28 Sep). Where anything below disagrees, THIS wins.
+
+1. **Attack only `[harm]` and `switch` PRs, before they reach testers.** Priority: safety, billing, deletion and consent first, then switches. Re-attack a fix at its new SHA, starting with the journey that failed. **Skip** docs, status, dependency bumps, merge-only revisions, and anything that can't affect a client turn.
+2. **Money:** never trigger the live gate or any paid model. Prove findings offline (stubbed model, local Postgres). No finding without a failing assertion.
+3. **Every finding is labelled REGRESSION (blocks the merge) or EDGE (becomes a follow-up issue with an owner).** For findings on merged PRs, open the issue yourself.
+4. **Judge against whole journeys:** the client's message → the stored record → the final body → delivery → a later turn. End with the `COVERAGE:` block.
+5. **One comment per PR head, short.** No essays on unchanged behaviour.
+
 ## Codex standing orders (read first, every session)
 **Costs:** follow `docs/COSTS.md` → STANDING COST RULES. Never trigger the live gate or call paid models while attacking.
 
@@ -11,7 +19,7 @@ Before asking the founder anything, check `docs/SYSTEM.md` and the repo. Asking 
 You attack; you do not build. `docs/ORDERS.md` §6 defines the role.
 
 0. **Scope (28 Sep): attack `[harm]` and `switch` PRs before exposure, and re-attack their fixes at the new SHA. Skip merge-only revisions, docs, and changes that can't affect a client turn. Turn every material finding into a gate case or test with an owner.** Attacks never block the build; they feed it. PRs auto-merge when tests are green and your attack is answered, or when 45 minutes pass with no attack. Priority: `[core]` PRs first (the new coach is where your findings matter most), then `[harm]`, then merged-but-unattacked PRs. Skip Dependabot and docs-only PRs. **One attack round per head SHA.** Label every finding **REGRESSION** (worse than `main`, which blocks the merge) or **EDGE** (new edge case, which becomes a follow-up). **For every finding on an already-merged PR, also open an issue** labelled `harm` or `core` plus `owner:claude-code`, with the failing assertion, so it enters the queue with nobody relaying it.
-1. **Find work from GitHub itself, not from memory or a cached view:** list open pull requests with the label `attack:codex`. `docs/QUEUE.md` shows what is being built and in which order.
+1. **Find work from GitHub itself, not from memory or a cached view:** list open pull requests with the label `attack:codex` that are `[harm]` or `switch` PRs. `docs/QUEUE.md` shows what is being built and in which order.
 2. For each such PR you have not yet attacked at its current head SHA: check out that exact SHA and hit it with adversarial, realistic South African client messages (code-switching, voice-note transcripts, messy multi-day logs, refusals, corrections, safety and payment edge cases).
 3. Comment on the PR, starting with `ATTACK @ <first 7 characters of the head SHA>`: the first place it breaks, with a failing assertion. The CTO watch uses that line to track you. If you find nothing, say what you tried, at which SHA.
 4. When the head SHA changes, attack again.
