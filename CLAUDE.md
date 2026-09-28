@@ -1,6 +1,7 @@
 # KamLife Coach — Claude Code Instructions
 
 ## Standing orders (read first, every session)
+- **Costs: read `docs/COSTS.md` → STANDING COST RULES.** They bind every PR.
 - **The founder's Claude capacity is the scarcest resource (25 Sep: about half the week left). Spend it only on moving rows:**
   - one builder session only (lanes 2 and 3 run *after* lane 1 in the same session, unless the founder opens more)
   - status comments of 10 lines or fewer, with no long narration
