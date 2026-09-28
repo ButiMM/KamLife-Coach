@@ -80,8 +80,9 @@ export function detectEscalation(message: string): EscalationDecision {
   // Frustration / complaint
   if (/\b(angry|furious|disgusted|worst|scam|rip.?off|waste of money|terrible|useless|report you)\b/i.test(m))
     return { should: true, reason: "frustrated", priority: "high" };
-  // Human-touch request
-  if (/\b(speak.*human|real person|talk.*someone|manager|complain|complaint)\b/i.test(m))
+  // Human-touch request: an ASK for a person or a complaint about us (#471 attack: a bare "manager" or
+  // "complains" fired on "my manager changed my shifts" and "my wife complains", and the handoff promised a person).
+  if (/\b(speak.*human|human.*speak|real person|(?:talk|speak)\w*\s+(?:to|with)\s+(?:someone|somebody|a person|a human|(?:a|the|your)\s+manager)|complain\w*\s+about\s+(?:this|you|the (?:app|service|coach))|(?:make|lodge|file|log)\s+a\s+complaint)\b/i.test(m))
     return { should: true, reason: "human_requested", priority: "normal" };
   return { should: false, reason: "", priority: "normal" };
 }
