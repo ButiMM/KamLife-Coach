@@ -10958,6 +10958,13 @@ test("every .github/workflows file parses with unique keys (an invalid workflow 
 // rate-limited coach read as a real answer. This reads askCoachK's own catch block out of the
 // source and fails if it ever returns a sentence the predicate does not recognise, so adding a
 // seventh failure string in gpt.ts turns this red instead of silently shipping the defect again.
+test("#460 attack: a meal named BEFORE its food splits too (\"For breakfast I had eggs, for dinner I had beef stew\")", async () => {
+  const { forMealSegments } = await import("../server/understanding/actions");
+  assert.deepEqual(forMealSegments("For breakfast I had eggs, for dinner I had beef stew."), [{ label: "Breakfast", text: "I had eggs" }, { label: "Dinner", text: "I had beef stew" }]);
+  assert.deepEqual(forMealSegments("eggs for breakfast and beef stew for dinner"), [{ label: "Breakfast", text: "eggs" }, { label: "Dinner", text: "beef stew" }]);
+  assert.deepEqual(forMealSegments("I had eggs for breakfast"), []);
+});
+
 test("#92 every sentence askCoachK returns on failure is recognised as an unanswered turn", async () => {
   const { readFileSync } = await import("node:fs");
   const { isCoachUnavailableReply } = await import("../server/brain/reply-verifier");

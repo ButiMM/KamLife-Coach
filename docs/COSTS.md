@@ -10,6 +10,16 @@ The founder spent $20 of OpenAI credit in two days (25-26 Sep) after six months 
 | CI | ≤ $5 per month, on its own capped OpenAI project |
 | Total OpenAI | ≈ $10 per month |
 
+**All-in cost per active client (Codex review, 28 Sep): measure the whole thing, not only tokens.**
+
+| Cost | Scenario (15 client messages and 15 replies a day) |
+|---|---|
+| Model | ~R4-R14 a month (R0.009-R0.03 a message) |
+| **Twilio WhatsApp fee** | **$0.005 per inbound or outbound message ≈ $4.50 a month (~R80), plus Meta template fees outside 24 h.** This is likely **larger than the AI.** |
+| Other | Voice (ElevenLabs), PayFast fees, hosting, human escalations, refunds |
+
+Report all-in cost per active client and per retained paying client monthly (#293 digest). Evaluate sending through Meta's WhatsApp Cloud API directly instead of Twilio (#484).
+
 **Production (the live bot):**
 1. The small model by default. `gpt-4o` only for crisis and photo reading (#474).
 2. One-off work runs once per client, ever, with the claim stored in the database, never in memory (#472).
