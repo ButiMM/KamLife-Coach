@@ -187,6 +187,8 @@ liability("#480: a friend's crisis quoted by the client is answered as a helper,
   const r = crisisReplyForSomeoneElse("Thandi");
   assert.match(r, /0800 567 567/); assert.match(r, /0861 322 322/); assert.match(r, /for you as well/);
   assert.doesNotMatch(r, COACHING_WORDS, `must stop coaching: "${r}"`);
+  for (const m of ["My phone wants to die every time load shedding hits", "This old laptop wants to die when Eskom cuts the power"])
+    assert.equal(isCrisisMessage(m), false, `a device is not a person: "${m}"`);
   for (const m of ["I want to kill myself", "Ngifuna ukuzibulala", "I want to die, my friend said I should tell someone", "I keep thinking about my friend who died and I want to die"])
     assert.equal(crisisAboutSomeoneElse(m), false, `first-person stays the client's own crisis: "${m}"`);
 });

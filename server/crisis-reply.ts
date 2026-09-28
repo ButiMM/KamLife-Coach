@@ -25,7 +25,7 @@ export const CRISIS_PHRASES = [
   "don't want to be here", "do not want to be here", "dont want to be here",
   "wish i was dead", "wish i were dead", "nothing to live for", "tired of living", "selfharm",
   // Someone else at risk, as the client reports it (#480): still urgent, answered as a helper.
-  "kill herself", "kill himself", "wants to die", "end her life", "end his life",
+  "kill herself", "kill himself", "she wants to die", "he wants to die", "end her life", "end his life",
   // SOUTH AFRICAN LANGUAGES (#476): clients write in them, and a crisis in isiZulu was coached as usual.
   // Stems, so every person and tense matches: -zibulala (isiZulu/isiXhosa "kill oneself"),
   // ipolaea/ipolaya (Sesotho/Setswana/Sepedi), selfmoord and doodmaak (Afrikaans).
