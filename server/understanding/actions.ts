@@ -66,14 +66,25 @@ export function forMealSegments(m: string): { label: string; text: string }[] {
   const matches = [...m.matchAll(new RegExp(MEAL_BOUNDARY_RE.source, "gi"))];
   if (matches.length < 2) return [];
   const out: { label: string; text: string }[] = [];
+  const tidy = (t: string) => t.replace(/^(?:[\s,;.]|\band\b)+|(?:[\s,;.]|\band\b)+$/gi, "").trim();
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  // LEADING FORM (#460 attack): "For breakfast I had eggs, for dinner I had beef stew" names each meal
+  // BEFORE its food, so each segment runs from its label to the next one.
+  if (!tidy(m.slice(0, matches[0].index!))) {
+    for (let i = 0; i < matches.length; i++) {
+      const text = tidy(m.slice(matches[i].index! + matches[i][0].length, i + 1 < matches.length ? matches[i + 1].index! : m.length));
+      if (text) out.push({ label: cap(matches[i][1]), text });
+    }
+    return out.length >= 2 ? out : [];
+  }
   for (let i = 0; i < matches.length; i++) {
-    const label = matches[i][1].charAt(0).toUpperCase() + matches[i][1].slice(1);
+    const label = cap(matches[i][1]);
     const prevEnd = i > 0 ? (matches[i - 1].index! + matches[i - 1][0].length) : 0;
-    const segText = m.slice(prevEnd, matches[i].index!).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
+    const segText = tidy(m.slice(prevEnd, matches[i].index!));
     if (segText) out.push({ label, text: segText });
   }
   const lastEnd = matches[matches.length - 1].index! + matches[matches.length - 1][0].length;
-  const trailing = m.slice(lastEnd).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
+  const trailing = tidy(m.slice(lastEnd));
   if (trailing && out.length > 0) out[out.length - 1].text += " " + trailing;
   return out;
 }
