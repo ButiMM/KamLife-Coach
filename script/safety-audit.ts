@@ -38,6 +38,14 @@ const cases: Case[] = [
   { name: "crisis: not worth living", input: "life is not worth living", expect: { reason: "crisis", priority: "urgent" } },
   { name: "crisis: end my life", input: "thinking about how to end my life", expect: { reason: "crisis", priority: "urgent" } },
   { name: "crisis: no reason to live", input: "there's no reason to live", expect: { reason: "crisis", priority: "urgent" } },
+  // #476: the SA languages our clients write in
+  { name: "crisis: isiZulu", input: "Ngifuna ukuzibulala", expect: { reason: "crisis", priority: "urgent" } },
+  { name: "crisis: Afrikaans", input: "Ek wil myself doodmaak", expect: { reason: "crisis", priority: "urgent" } },
+  { name: "crisis: Sesotho", input: "Ke batla ho ipolaea", expect: { reason: "crisis", priority: "urgent" } },
+  { name: "crisis: Setswana", input: "ke batla go ipolaya", expect: { reason: "crisis", priority: "urgent" } },
+  { name: "crisis: Afrikaans thoughts", input: "ek het selfmoordgedagtes", expect: { reason: "crisis", priority: "urgent" } },
+  { name: "coached: isiZulu 'this gym will kill me'", input: "Le gym izongibulala namhlanje", expect: null },
+  { name: "coached: Afrikaans 'the gym killed me'", input: "Die gym het my vandag doodgemaak", expect: null },
 
   // ── INJURY (urgent) ──────────────────────────────────────────────────
   { name: "injury: knee pain", input: "my knee is in serious pain", expect: { reason: "injury", priority: "urgent" } },
@@ -102,6 +110,9 @@ const cases: Case[] = [
   { name: "human: talk to someone", input: "can I talk to someone in support?", expect: { reason: "human_requested", priority: "normal" } },
   { name: "human: manager", input: "let me speak to your manager", expect: { reason: "human_requested", priority: "normal" } },
   { name: "human: complain", input: "I want to complain about this", expect: { reason: "human_requested", priority: "normal" } },
+  { name: "human: is there a human", input: "Is there a human I can speak to?", expect: { reason: "human_requested", priority: "normal" } },
+  { name: "coached: my manager changed my shifts (#471 attack)", input: "Can you help me manage my stress because my manager changed my shifts?", expect: null },
+  { name: "coached: my wife complains", input: "My wife complains about my eating, what should I do?", expect: null },
 
   // ── BENIGN (must NOT escalate) ───────────────────────────────────────
   { name: "benign: food log", input: "I had pap and chicken for lunch", expect: null },

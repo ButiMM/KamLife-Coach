@@ -58,6 +58,26 @@ const MEAL_SLOTS = new Set(["breakfast", "lunch", "dinner", "snack", "night meal
 // reorder into "whichever clause came first". The join uses a newline; clausesOf keeps each
 // clause's own terminator, and MORNING_MEAL_RE's GAP already excludes . ! ? and ; so the boundary
 // is guarded either way — the newline is belt-and-braces, not the thing doing the work.
+export const MEAL_BOUNDARY_RE = /\b(?:for|in|at|during|as)\s+(?:a\s+|my\s+|the\s+)?(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b/gi;
+
+/** "X for breakfast and Y for dinner" → one segment per meal (2+ "for <meal>" phrases), else []. One owner for
+ *  the single-day scanner and the multi-day catch-up, which wrote a day's breakfast and dinner as one row. */
+export function forMealSegments(m: string): { label: string; text: string }[] {
+  const matches = [...m.matchAll(new RegExp(MEAL_BOUNDARY_RE.source, "gi"))];
+  if (matches.length < 2) return [];
+  const out: { label: string; text: string }[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    const label = matches[i][1].charAt(0).toUpperCase() + matches[i][1].slice(1);
+    const prevEnd = i > 0 ? (matches[i - 1].index! + matches[i - 1][0].length) : 0;
+    const segText = m.slice(prevEnd, matches[i].index!).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
+    if (segText) out.push({ label, text: segText });
+  }
+  const lastEnd = matches[matches.length - 1].index! + matches[matches.length - 1][0].length;
+  const trailing = m.slice(lastEnd).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
+  if (trailing && out.length > 0) out[out.length - 1].text += " " + trailing;
+  return out;
+}
+
 export function explicitMealSlot(msg: string): "breakfast" | "lunch" | "dinner" | "snack" | null {
   const whole = String(msg || "");
   // reportedInSomeClause applies the asking and intent floors; the predicate stays domain-only,

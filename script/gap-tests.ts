@@ -1147,11 +1147,12 @@ test("hardLimit: the 3-sentence cap is lifted for long-form, and ONLY for long-f
     "hardLimit must be assembled after selectModel, or reason would be undefined");
 });
 
-test("selectModel: safety routing still outranks long-form", () => {
-  // A medical message keeps the safer model even when a list word rides along — the
-  // long-form branch is deliberately checked last.
-  const r = selectModel("Respond as Coach K.", "i have diabetes, can you send me a grocery list?");
-  assert.equal(r.model, "gpt-4o", "a medical message must keep the safer model");
+test("selectModel (#412): gpt-4o for crisis and photos only; everything else on the small model", async () => {
+  assert.equal(selectModel("Respond as Coach K.", "I want to kill myself").model, "gpt-4o", "crisis keeps the strong model");
+  for (const msg of ["i have diabetes, can you send me a grocery list?", "I had pap and a pain in my side after, what now?"])
+    assert.equal(selectModel("Respond as Coach K.", msg).model, "gpt-4o-mini", msg);
+  const { selectVisionModel } = await import("../server/cost-tracking");
+  assert.equal(selectVisionModel("food_photo", "active").model, "gpt-4o", "a paying client's food photo keeps the strong vision model");
 });
 
 // parseLiftLog tests REMOVED 2026-08-06 with the function. Lift logging is gone: training is

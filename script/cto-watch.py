@@ -105,6 +105,8 @@ for p in open_prs:
         runs = []
     latest = {}
     for r in sorted(runs, key=lambda r: r.get("started_at") or ""):
+        if r.get("conclusion") == "skipped" and r["name"] in latest:
+            continue                   # a skipped re-trigger (a label added) never replaces a real verdict
         latest[r["name"]] = r          # judge each check by its most recent run only
     runs = list(latest.values())
     failing = sorted({r["name"] for r in runs if r["conclusion"] in ("failure", "timed_out")})
@@ -130,6 +132,18 @@ for p in open_prs:
     if is_switch and not any(r["name"] == "replay" and r["conclusion"] == "success" for r in runs):
         attack_ok = False
         state += " (switch: needs a green replay gate)"
+    # The strong judge runs once, on the final head (#467): a switch PR merges only on a green gate
+    # judged with the `final` label on (adding it starts that run; later pushes keep the strong judge).
+    if is_switch:
+        # The green run must have STARTED after `final` was added, so a cheap-judge run never counts.
+        try:
+            finals = [e["created_at"] for e in api("GET", f"/issues/{n}/events?per_page=100") if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == "final"]
+        except Exception:
+            finals = []
+        on = any(l["name"] == "final" for l in p["labels"]) and finals
+        if not (on and any(r["name"] == "replay" and r["conclusion"] == "success" and (r.get("started_at") or "") >= max(finals) for r in runs)):
+            attack_ok = False
+            state += " (switch: add the label `final` when the other checks are green; that run uses the strong judge)"
     hold = any(l["name"] == "hold" for l in p["labels"]) or p.get("draft")
     # A PR labelled ready/switch/gate must show a replay check that succeeded. A missing replay run is
     # NOT "green" (25 Sep: a broken workflow ran no gate and #393 merged as if it had passed).

@@ -1,5 +1,5 @@
 import {
-  db, users, chatHistory, stepLogs, workoutLogs, weightLogs,
+  db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs,
   eq, gte, and, asc, isNotNull,
   sendWhatsApp, canSendProactive, claimProactive,
   getActiveClients, isPaused,
@@ -26,7 +26,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
       // One claim per client per week — covers the report, the shopping-list card, AND
       // the programme-week advance below, so a container recycle can't double any of them.
       if (!(await claimProactive(client.id, "sunday_report", thisWeekUTC(), { critical: true }))) continue;
-      const name = client.name || "there";
+      const name = (client.name || "there").split(" ")[0]; // first name: "Lerato", not the full name (B4)
       const [chats, workoutEntries, weightEntries, stepEntries] = await Promise.all([
         db.select().from(chatHistory).where(and(eq(chatHistory.userId, client.id), isNotNull(chatHistory.messageIn), gte(chatHistory.createdAt, weekAgo))),
         db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, weekAgo))),
@@ -79,9 +79,16 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const daysWithLogs = new Set(chats.map(c => new Date(c.createdAt!).toDateString())).size;
       if (daysWithLogs < 3) {
         const thin = await canonicalNextMove(client);
-        const opener = `${name}, ${daysWithLogs} day${daysWithLogs !== 1 ? "s" : ""} logged this week. You're in it.`;
+        // THE WEEK BY NAME (B4, replay gate): what they actually ate, from the meal rows, and one small focus when
+        // the decision holds, instead of a count and "You're in it."
+        const weekMeals = await db.select({ items: mealLogs.items }).from(mealLogs)
+          .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, weekAgo))).orderBy(asc(mealLogs.loggedAt));
+        const foods = Array.from(new Set(weekMeals.flatMap(r => (Array.isArray(r.items) ? r.items : [])
+          .map((i: any) => String(i?.name || "").replace(/\s*\(.*?\)/g, "").toLowerCase()).filter(Boolean)))).slice(0, 4);
+        const opener = `${name}, ${daysWithLogs} day${daysWithLogs !== 1 ? "s" : ""} on record this week${foods.length ? ` — ${foods.join(", ")}` : ""}.`;
+        const focus = `Next week: ${daysWithLogs + 1} days on record. That's the whole goal.`;
         const delivery = await sendWhatsApp(
-          client.phoneNumber, thin.line ? `${opener}\n\n${thin.line}` : opener,
+          client.phoneNumber, `${opener}\n\n${thin.line || focus}`,
           undefined, weeklyTemplateFor(workoutEntries.length, foodDaysFrom(chats)),
         );
         await recordCanonicalMoveOutbound(client, thin, delivery);

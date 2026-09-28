@@ -7,6 +7,7 @@
 //   normal  → human_requested          (inbox only, 12h SLA)
 
 import { readLifeContext } from "./life-context";
+import { isCrisisMessage } from "./crisis-reply";
 
 export type EscalationPriority = "urgent" | "high" | "normal" | "low";
 
@@ -38,7 +39,8 @@ export function detectEscalation(message: string): EscalationDecision {
   // ("sprained", "pregnancy", "epileptic"). Leading \b still prevents mid-word hits.
 
   // Crisis/self-harm — urgent
-  if (/\b(want to die|kill myself|end it all|cannot go on|can't go on|suicidal|self.?harm|cutting myself|hurting myself|not worth living|end my life|no reason to live|give up on life)\b/i.test(m))
+  // One list, crisis-reply.ts, in English and the SA languages (#476); this copy was English-only.
+  if (isCrisisMessage(m))
     return { should: true, reason: "crisis", priority: "urgent" };
   // Disordered eating — urgent (#266). The behaviour list has ONE owner, life-context.ts; this
   // reads it rather than keeping a second copy. Before this, a purging disclosure paged nobody.
@@ -80,8 +82,9 @@ export function detectEscalation(message: string): EscalationDecision {
   // Frustration / complaint
   if (/\b(angry|furious|disgusted|worst|scam|rip.?off|waste of money|terrible|useless|report you)\b/i.test(m))
     return { should: true, reason: "frustrated", priority: "high" };
-  // Human-touch request
-  if (/\b(speak.*human|real person|talk.*someone|manager|complain|complaint)\b/i.test(m))
+  // Human-touch request: an ASK for a person or a complaint about us (#471 attack: a bare "manager" or
+  // "complains" fired on "my manager changed my shifts" and "my wife complains", and the handoff promised a person).
+  if (/\b(speak.*human|human.*speak|real person|(?:talk|speak)\w*\s+(?:to|with)\s+(?:someone|somebody|a person|a human|(?:a|the|your)\s+manager)|complain\w*\s+about\s+(?:this|you|the (?:app|service|coach))|(?:make|lodge|file|log)\s+a\s+complaint)\b/i.test(m))
     return { should: true, reason: "human_requested", priority: "normal" };
   return { should: false, reason: "", priority: "normal" };
 }
