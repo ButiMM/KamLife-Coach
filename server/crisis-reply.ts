@@ -70,6 +70,10 @@ export function crisisAboutSomeoneElse(message: string): boolean {
   const ends = CRISIS_PHRASES.map(p => { const i = lower.indexOf(p, m.index); return i < 0 ? -1 : i + p.length; }).filter(i => i > 0);
   if (!ends.length) return true;
   let span = lower.slice(m.index, Math.min(...ends));
+  // The words just before the first quote say who it was said TO (#496; #497 attack: an earlier
+  // "told her" elsewhere in the report must not decide a later quote).
+  const firstQuote = Math.min(...["\u201c", "\""].map(q => span.indexOf(q)).filter(i => i >= 0));
+  const lead = Number.isFinite(firstQuote) ? span.slice(Math.max(0, firstQuote - 25), firstQuote) : "";
   let quoted = "";
   for (const [open, close] of [["\u201c", "\u201d"], ["\"", "\""]]) {
     let a = span.indexOf(open);
@@ -81,7 +85,10 @@ export function crisisAboutSomeoneElse(message: string): boolean {
     }
   }
   const words = (t: string) => t.split(/[^a-z']+/);
-  if (words(quoted).some(w => ["you", "you're", "youre", "u", "your", "yourself"].includes(w))) return false;
+  // ...unless the quote is addressed to someone else by name ("her husband told her, 'you sound
+  // suicidal'"): then "you" is the friend, not the client (#496).
+  const toSomeoneElse = ["told her", "told him", "told them", "said to her", "said to him", "asked her", "asked him", "texted her", "texted him"].some(p => lead.includes(p));
+  if (!toSomeoneElse && words(quoted).some(w => ["you", "you're", "youre", "u", "your", "yourself"].includes(w))) return false;
   return !words(span).some(w => ["i", "i'm", "im", "me", "myself", "i've", "ive"].includes(w));
 }
 
