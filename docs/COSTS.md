@@ -71,3 +71,51 @@ Maintained by the CTO. MVP rule: **free first.** A paid item needs a written cas
 - CI can't run the gate on docs.
 - The mouth ratchet blocks new AI call sites.
 - **Founder action (optional, recommended):** a separate capped OpenAI project for CI (`docs/SYSTEM.md`), so CI can never touch production's credits.
+
+## WhatsApp transport: Twilio or Meta Cloud API direct (#484, builder, 29 Sep)
+
+**Prices** (approximate; the billing pages are the truth):
+- **Meta (both paths pay this):** from 1 Oct 2026 a service reply inside the 24-hour window is billed at the SA utility rate, about R0.12, after 1,000 free a month per number (#488). Templates outside the window are billed as before.
+- **Twilio (only on Twilio):** about $0.005 (≈R0.09) on every message, **inbound and outbound**.
+- **Cloud API direct:** no per-message fee on top of Meta's.
+
+**Per active client per month.** C is client messages a day. Since #492, a reply is about one outbound message.
+
+| C (messages/day) | Twilio fee (in + out) | Meta fee (out, after the free 1,000) | Saved by going direct |
+|---|---|---|---|
+| 5 | ≈ R27 | ≈ R18 | ≈ R27 |
+| 10 | ≈ R54 | ≈ R36 | ≈ R54 |
+| 15 | ≈ R81 | ≈ R54 | ≈ R81 |
+
+Against R199-R249 a month, Twilio's fee is the largest cost after Meta's once C ≥ 10. It's more than the AI (≤ R10 a client, above).
+
+**Measure C first** (production, founder or CTO):
+```sql
+SELECT round(avg(n), 1) AS messages_per_client_day FROM (
+  SELECT user_id, date_trunc('day', created_at) d, count(*) n FROM chat_history
+  WHERE created_at > now() - interval '14 days' AND message_in NOT LIKE '[system]%' GROUP BY 1, 2) t;
+```
+
+**Migration surface (measured in code, 29 Sep).** Delivery already has one owner, which makes this tractable:
+
+| Part | Where | Work |
+|---|---|---|
+| Outbound send | `server/outbound-delivery.ts` `deliverTwilioMessage` (both doors) | Swap the client call for a Graph API `POST /messages`; keep the retry and verdict |
+| Inbound webhook + signature | `server/routes/whatsapp.ts` (Twilio form fields, `validateRequest`) | New JSON payload parser; `X-Hub-Signature-256` check; webhook verify handshake |
+| Media in (photos, voice notes) | `routes/whatsapp.ts` (`MediaUrl0`) | Media ID → Graph fetch with the app token |
+| Templates | 14 `contentSid` references, `server/whatsapp-templates.ts` | Map Twilio Content SIDs to Meta template names; re-approve under our own WABA |
+| Interactive, status callbacks | `server/twilio-interactive.ts`, `routes/payments.ts` `/webhook/status` | Port to Cloud API message types and status webhooks |
+| SMS fallback | `sendCriticalAlert` | Stays on Twilio SMS (founder alerts only) or moves to another SMS provider |
+
+Effort: about 4-5 small PRs behind a `WHATSAPP_TRANSPORT=twilio|meta` flag (instant rollback), plus founder work.
+
+**Risks and founder work:**
+- Meta Business verification and our own WABA.
+- Moving the number off Twilio (a short cut-over window).
+- Template re-approval.
+- Losing Twilio's queue and console. Our own retry and delivery receipts (Cut 6) already cover most of it.
+
+**Recommendation:**
+- **Go direct once C is measured at 5 or more a day with 20 or more active clients**, after wave 1 has settled. At C = 10 and 20 clients, that is about **R1,000 a month saved**.
+- Below that, Twilio's fee is small in absolute terms and the migration effort isn't worth it yet.
+- No migration without the founder's yes.
