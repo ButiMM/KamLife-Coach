@@ -64,20 +64,25 @@ export function crisisAboutSomeoneElse(message: string): boolean {
   if (!m || isCrisisMessage(text.slice(0, m.index)) || !REPORTS.some(v => text.slice(m.index, m.index + 80).toLowerCase().includes(v))) return false;
   // "My husband says I am suicidal": the client speaks in the first person between the third party and
   // the crisis words, so it is THEIR crisis (#481 attack). Words in quotes are the other person's own
-  // ('my friend said "I want to die"'), so quoted spans are left out of that check.
+  // ('my friend said "I want to die"'), so quoted spans are left out of that check. But a quote that
+  // speaks TO the client ('my friend said "you sound suicidal"') is about the client (#481 attack).
   const lower = text.toLowerCase();
   const ends = CRISIS_PHRASES.map(p => { const i = lower.indexOf(p, m.index); return i < 0 ? -1 : i + p.length; }).filter(i => i > 0);
   if (!ends.length) return true;
   let span = lower.slice(m.index, Math.min(...ends));
+  let quoted = "";
   for (const [open, close] of [["\u201c", "\u201d"], ["\"", "\""]]) {
     let a = span.indexOf(open);
     while (a >= 0) {
       const b = span.indexOf(close, a + 1);
+      quoted += " " + (b < 0 ? span.slice(a + 1) : span.slice(a + 1, b));
       span = b < 0 ? span.slice(0, a) : span.slice(0, a) + span.slice(b + 1);
       a = span.indexOf(open);
     }
   }
-  return !span.split(/[^a-z']+/).some(w => ["i", "i'm", "im", "me", "myself", "i've", "ive"].includes(w));
+  const words = (t: string) => t.split(/[^a-z']+/);
+  if (words(quoted).some(w => ["you", "you're", "youre", "u", "your", "yourself"].includes(w))) return false;
+  return !words(span).some(w => ["i", "i'm", "im", "me", "myself", "i've", "ive"].includes(w));
 }
 
 export function crisisReplyForSomeoneElse(name = "friend"): string {
