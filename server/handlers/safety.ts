@@ -415,7 +415,7 @@ export async function runSafetyGuards(
       const billingLine = !billing ? ""
         : billing.ok ? "Your subscription is cancelled at PayFast, so you won't be charged again. "
         : "PayFast didn't confirm the subscription cancel automatically, so it's flagged and we'll cancel it by hand today. ";
-      return `Done. Your account is permanently deleted — profile, messages, food logs, workouts, weight history and photos. ${billingLine}Only your payment records are kept, for five years, because tax law requires it.\n\nIf you want to start fresh, just send any message.`;
+      return `Done. Your account is permanently deleted — profile, messages, food logs, workouts, weight history and photos. ${billingLine}Only your payment records are kept, for five years, because tax law requires it. For about 30 days we also keep a random account number with nothing else attached, so no backup can bring your account back.\n\nIf you want to start fresh, just send any message.`;
     }
   }
 

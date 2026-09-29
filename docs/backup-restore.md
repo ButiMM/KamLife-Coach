@@ -99,8 +99,11 @@ export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
    ```
    **If the old database is lost (#499),** the ids also live outside it, in two places. Replay every id
    from both, whatever the backup's age (replaying an id that is already gone deletes nothing):
-   - **R2 `tombstones/`**: every backup run first saves all erased ids to a new `erased-<time>.txt`.
-     The prune never touches these files. Take the newest one:
+   - **R2 `tombstones/`**: every backup run first saves the erased ids to a new `erased-<time>.txt`:
+     every id erased since the day before the oldest backup in `daily/`, which is every id any existing
+     backup could bring back. After the backup prune, the run deletes older tombstone files and older
+     `account_erased` rows, so an id is kept only while a backup that predates its deletion exists
+     (about 30 days; longer only if backups stop being pruned). Take the newest file:
      `aws s3 ls s3://$R2_BUCKET/tombstones/ --endpoint-url $R2_ENDPOINT`.
    - **Railway logs**, for deletions since that file: the moment a client confirms with DELETE, and before
      anything is deleted, the app logs `[POPIA DELETE] User <id> requested data deletion`. In Railway →

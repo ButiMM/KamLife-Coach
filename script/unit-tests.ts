@@ -10971,6 +10971,12 @@ test("#499: the confirmed erasure logs its id outside the database before any aw
   assert.ok(saved > 0 && saved < dump, "tombstones are saved before the dump");
   assert.ok(!prune.slice(0, prune.indexOf("- name:", 5)).includes("tombstones"), "the prune never deletes them");
   assert.ok(wf.includes("steps.tombstones.outcome == 'failure'") && doc.includes("R2 `tombstones/`"), "an unsaved run fails, and the runbook reads R2");
+  // #499 attack: kept only while a backup that predates the deletion exists, then deleted in R2 and in the live row,
+  // and the deletion reply says so.
+  const tprune = wf.slice(wf.indexOf("name: Prune tombstones no backup still needs"));
+  assert.ok(tprune.indexOf("aws s3 rm") > 0 && tprune.includes("DELETE FROM admin_events WHERE action = 'account_erased'"), "old tombstones are deleted");
+  assert.ok(tprune.includes('if [ -z "$OLDEST" ]; then') && wf.indexOf("name: Prune tombstones") > wf.indexOf("name: Prune backups"), "only after the backup prune, and never with no backup list");
+  assert.ok(code.includes("we also keep a random account number"), "the reply tells the client");
 });
 
 test("every .github/workflows file parses with unique keys (an invalid workflow silently runs nothing)", async () => {
