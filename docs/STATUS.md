@@ -61,3 +61,7 @@ One line per merged PR: `HH:MM SAST · agent · PR # · what changed · gate bef
 29 Sep 05:51 UTC · Claude Code · #492 · One paid WhatsApp message per reply: "---" bubbles are packed (#488) · tests green · see PR
 29 Sep 05:52 UTC · Claude Code · #493 · COSTS: Twilio or Meta Cloud API direct, with numbers (#484) · docs · see PR
 29 Sep 11:10 UTC · Claude Code · #481 · A friend's crisis quoted by the client is answered as a helper and alerted as someone close (#480) · tests green · see PR
+29 Sep 13:07 UTC · Claude Code · #497 · A quote addressed to someone else is that person's crisis (#496) · tests green · see PR
+29 Sep 13:07 UTC · Claude Code · #494 · Backups test-restored before publishing; failures open an issue; erasure replay in the runbook (#342) · tests green · see PR
+29 Sep 14:01 UTC · Claude Code · #501 · Every scheduled coaching message through one sender; paused or cancelled clients get no Monday messages (#319) · tests green · see PR
+29 Sep 16:53 UTC · Claude Code · #502 · The weekly report no longer prints a raw [BUTTONS:] marker; evening buttons through the one sender (#319) · tests green · see PR
