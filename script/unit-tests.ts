@@ -11040,3 +11040,10 @@ test("#319: a scheduled coaching message is held for a paused or non-coaching cl
   const markers = readdirSync("server/scheduler/jobs").filter(f => code(f).includes("[BUTTONS:"));
   assert.deepEqual(markers, [], `scheduled messages carrying a raw button marker: ${markers.join(", ")}`);
 });
+
+test("day-one message: no reply shortcut the product no longer answers (\"2\" had no handler, \"3\" opened food, not steps)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync("server/scheduler/jobs/onboarding.ts", "utf8");
+  assert.ok(!src.includes('"2" to log') && !src.includes('"3" to log'), "Day 1 names a digit shortcut that does not exist");
+  assert.ok(src.includes("like *8500*, to log steps"), "it says how steps are actually logged");
+});
