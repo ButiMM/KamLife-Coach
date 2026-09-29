@@ -376,6 +376,8 @@ export async function runSafetyGuards(
     const existing = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
     if (existing.length > 0 && existing[0].awaitingInputType === "delete_confirm") {
       const uid = bindKnownSafetyUser(existing[0]).id;
+      // #499: the tombstone that survives losing the database, written before anything is deleted, so no
+      // crash can leave a deletion the restore runbook cannot see (docs/backup-restore.md step 4).
       console.log(`[POPIA DELETE] User ${uid} requested data deletion at ${new Date().toISOString()}`);
       // BILLING FIRST (#269). A deleted client must not go on being charged. The #263 cancel, and
       // the reply promises only what PayFast confirmed. The token lives on the payment record,
@@ -409,7 +411,6 @@ export async function runSafetyGuards(
       } catch (memErr: any) {
         console.warn(`[POPIA DELETE] Vector memory deletion failed (non-fatal): ${memErr.message}`);
       }
-      // #499: this line is the tombstone that survives losing the database (docs/backup-restore.md step 4).
       console.log(`[POPIA DELETE] Completed for ${uid}${billing ? ` — billing: ${billing.detail}` : ""}`);
       const billingLine = !billing ? ""
         : billing.ok ? "Your subscription is cancelled at PayFast, so you won't be charged again. "

@@ -10955,14 +10955,15 @@ test("#342: the restore runbook replays every table the POPIA erasure deletes (a
   for (const t of [...tables, "users"]) assert.ok(replay.includes(`DELETE FROM ${t}`), `runbook replay misses ${t}`);
 });
 
-test("#499: the erasure logs its id outside the database after the commit and before the reply, and the runbook reads that line", async () => {
+test("#499: the confirmed erasure logs its id outside the database before any await, and the runbook reads that line", async () => {
   const { readFileSync } = await import("node:fs");
   const code = readFileSync("server/handlers/safety.ts", "utf-8");
-  const commit = code.indexOf("tx.delete(users)");
-  const logged = code.indexOf("[POPIA DELETE] Completed for ${uid}", commit);
-  const reply = code.indexOf("const billingLine", commit);
-  assert.ok(commit > 0 && logged > commit && reply > logged, "tombstone log sits between the deletion and the confirmation");
-  assert.ok(readFileSync("docs/backup-restore.md", "utf-8").includes("search `[POPIA DELETE] Completed for`"), "runbook replays from the log line");
+  const confirmed = code.indexOf("existing[0].awaitingInputType === \"delete_confirm\"");
+  const logged = code.indexOf("[POPIA DELETE] User ${uid} requested data deletion", confirmed);
+  const firstAwait = code.indexOf("await ", code.indexOf("\n", logged));
+  assert.ok(confirmed > 0 && logged > confirmed, "the tombstone is logged once the client has confirmed");
+  assert.ok(firstAwait > logged && code.indexOf("tx.delete(users)", logged) > firstAwait, "and before billing, the transaction, or anything else a crash could interrupt");
+  assert.ok(readFileSync("docs/backup-restore.md", "utf-8").includes("search `[POPIA DELETE] User`"), "runbook replays from the log line");
 });
 
 test("every .github/workflows file parses with unique keys (an invalid workflow silently runs nothing)", async () => {
