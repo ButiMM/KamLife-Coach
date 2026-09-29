@@ -21,10 +21,25 @@ concurrency:
   group: db-backup
   cancel-in-progress: false
 
+# #342: a failed backup opens a GitHub issue (the phone alert needs secrets that aren't set).
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   backup:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    # #342: every backup is restored into this throwaway database before it counts as good.
+    services:
+      restore:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: restore
+          POSTGRES_DB: restore
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       # aws-cli (preinstalled on the runner) talks to R2 via these.
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -91,7 +106,27 @@ jobs:
             exit 1
           fi
 
-      - name: Upload to R2
+      - name: Test-restore the backup just made, before it is published (#342)
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          RESTORE_URL="postgresql://postgres:restore@127.0.0.1:5433/restore"
+          # Strict: any failed statement fails the restore, so a partial dump can't pass (#494 attack).
+          if ! gunzip -c "/tmp/${FILE}" | psql -q -v ON_ERROR_STOP=1 --single-transaction "$RESTORE_URL" > /dev/null 2> /tmp/restore.err; then
+            echo "::error::Backup ${FILE} did not restore cleanly"; tail -20 /tmp/restore.err
+            aws s3 cp "/tmp/${FILE}" "s3://${R2_BUCKET}/failed/${FILE}" --endpoint-url "$R2_ENDPOINT" || true
+            exit 1
+          fi
+          CLIENTS=$(psql -tA "$RESTORE_URL" -c "SELECT count(*) FROM users")
+          MEALS=$(psql -tA "$RESTORE_URL" -c "SELECT count(*) FROM meal_logs")
+          echo "Restored: ${CLIENTS} clients, ${MEALS} meal rows"
+          if [ "${CLIENTS:-0}" -lt 1 ]; then
+            echo "::error::Backup ${FILE} restored with no clients"
+            aws s3 cp "/tmp/${FILE}" "s3://${R2_BUCKET}/failed/${FILE}" --endpoint-url "$R2_ENDPOINT" || true
+            exit 1
+          fi
+
+      - name: Publish to R2 (only a backup that restored)
         if: steps.guard.outputs.skip != 'true'
         run: |
           set -euo pipefail
@@ -118,3 +153,17 @@ jobs:
       - name: Summary
         if: steps.guard.outputs.skip != 'true'
         run: echo "Backup complete — daily/${FILE} on R2 (retention ${RETENTION_DAYS}d)"
+
+      - name: Alert the founder when a backup fails (#342)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="Database backup failed"
+          RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          OPEN=$(gh issue list --repo "${{ github.repository }}" --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$OPEN" ]; then
+            gh issue comment "$OPEN" --repo "${{ github.repository }}" --body "Failed again: $RUN"
+          else
+            gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body "The 6-hourly database backup (or its test-restore) failed: $RUN. Founder: check the R2 and BACKUP_DATABASE_URL secrets and re-run the workflow. See docs/backup-restore.md."
+          fi

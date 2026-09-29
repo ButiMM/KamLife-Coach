@@ -10944,6 +10944,17 @@ test("CORE_WAVE1: founder by default (#453); founder matches only the founder's 
 // ── EVERY WORKFLOW FILE IS VALID YAML (25 Sep) ────────────────────────────────────────────────
 // A second `env:` key on the replay job made replay-gate.yml invalid. GitHub then ran no gate at
 // all, and the watch merged `ready` PRs as if it had passed. A duplicate key is now a red test.
+test("#342: the restore runbook replays every table the POPIA erasure deletes (a restore must not resurrect a deleted client)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const code = readFileSync("server/handlers/safety.ts", "utf-8");
+  const block = code.slice(code.indexOf("THE ROW GOES, SO EVERY CASCADE FIRES"), code.indexOf("tx.delete(users)", code.indexOf("THE ROW GOES, SO EVERY CASCADE FIRES")));
+  const tables = [...block.matchAll(/DELETE FROM (\w+)/g)].map(x => x[1]);
+  assert.ok(tables.length >= 4, `found the erasure's explicit deletes: ${tables.join(", ")}`);
+  const doc = readFileSync("docs/backup-restore.md", "utf-8");
+  const replay = doc.slice(doc.indexOf("ERASURE REPLAY"), doc.indexOf("COMMIT;", doc.indexOf("ERASURE REPLAY")));
+  for (const t of [...tables, "users"]) assert.ok(replay.includes(`DELETE FROM ${t}`), `runbook replay misses ${t}`);
+});
+
 test("every .github/workflows file parses with unique keys (an invalid workflow silently runs nothing)", async () => {
   const { parse } = await import("yaml");
   const { readdirSync, readFileSync } = await import("node:fs");

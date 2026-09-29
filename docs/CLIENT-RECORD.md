@@ -73,6 +73,8 @@ Both tables hang off `users.id` with `ON DELETE CASCADE`, so the confirmed delet
 
 No backfill runs until the erasure check is green on `main`.
 
+**Backups (#342).** Backups are kept 30 days (`db-backup.yml` prunes older ones), so a deleted client is gone from every copy within 30 days. A restore re-applies the deletions made after the backup it restored, from the `account_erased` events (account id only), per `docs/backup-restore.md` step 4.
+
 ## Backfill of existing clients (#414)
 
 Once per client, on the new coach's first read (`core/coach.ts` readPreTurn):
