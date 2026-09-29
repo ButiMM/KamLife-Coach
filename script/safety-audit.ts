@@ -178,7 +178,7 @@ liability("crisis reply gives both helplines and nothing else", () => {
 });
 
 liability("#480: a friend's crisis quoted by the client is answered as a helper, and alerted as someone close", () => {
-  for (const m of ['My friend just said "ke batla go ipolaya". What should I do?', 'My friend said “I want to kill myself”, what do I do?', "my sister keeps saying she wants to kill herself and wants to die"]) {
+  for (const m of ['My friend just said "ke batla go ipolaya". What should I do?', 'My friend says her husband told her, "You sound suicidal, please get help." What should she do?', 'My friend said “I want to kill myself”, what do I do?', "my sister keeps saying she wants to kill herself and wants to die"]) {
     assert.equal(isCrisisMessage(m), true, `still urgent: "${m}"`);
     assert.equal(crisisAboutSomeoneElse(m), true, `someone else at risk: "${m}"`);
     assert.match(crisisAlertBody("Thandi", "+27820000000", m, true), /someone close to the client/);

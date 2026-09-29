@@ -81,7 +81,10 @@ export function crisisAboutSomeoneElse(message: string): boolean {
     }
   }
   const words = (t: string) => t.split(/[^a-z']+/);
-  if (words(quoted).some(w => ["you", "you're", "youre", "u", "your", "yourself"].includes(w))) return false;
+  // ...unless the quote is addressed to someone else by name ("her husband told her, 'you sound
+  // suicidal'"): then "you" is the friend, not the client (#496).
+  const toSomeoneElse = ["told her", "told him", "told them", "said to her", "said to him", "asked her", "asked him", "texted her", "texted him"].some(p => span.includes(p));
+  if (!toSomeoneElse && words(quoted).some(w => ["you", "you're", "youre", "u", "your", "yourself"].includes(w))) return false;
   return !words(span).some(w => ["i", "i'm", "im", "me", "myself", "i've", "ive"].includes(w));
 }
 
