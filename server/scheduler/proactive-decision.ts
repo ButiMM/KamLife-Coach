@@ -36,7 +36,7 @@
 
 import { chooseAction, decideProactive, formatOneAction, underPolicy, type OneAction } from "../one-action";
 import { readHeldConstraints, NO_CONSTRAINTS, type HeldConstraints } from "../held-constraints";
-import { loadProactiveState, recordWeighAsk } from "./shared";
+import { loadProactiveState, recordWeighAsk, sendWhatsApp, claimDailySlot, claimProactive, isProactivePaused, pauseReason, type WindowTemplate } from "./shared";
 import { foodConstraints } from "../food-swaps";
 import { sastDayKey } from "../sast";
 import { ensureOpenTrainingLoop, ensureOpenWeekendInvestigation, loadOpenTrainingLoop, weekendInvestigationAnswered } from "../memory";
@@ -281,3 +281,73 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
   { job: "runDueReminders", file: "reminders", cls: "RESOURCE",
     because: "Replays a reminder the CLIENT set, in their own words. Ours to deliver, not to re-decide." },
 ] as const;
+
+/**
+ * ── THE ONE PROACTIVE SENDER (#319, lane 2).
+ *
+ * Every coaching message the coach sends first goes out through here. The job decides WHAT to say
+ * (and, through canonicalNextMove, which one instruction). This decides WHETHER it may go and sends
+ * it, the same way for every job:
+ *
+ *   1. the killswitch (PROACTIVE_PAUSED) holds everything;
+ *   2. a client's own pause ("stop messaging me for two weeks") holds everything except the notice
+ *      that the pause is ending. A health pause does not: sickness informs the decision, it does
+ *      not silence the coach (morning.ts, 2026-08-20);
+ *   3. only a coaching client is coached: onboarding complete and a live subscription or beta,
+ *      exactly the set getActiveClients returns. The Monday jobs read `users` directly and
+ *      skipped both of these checks, so a paused or cancelled client still got a weigh-in ask
+ *      and a shopping list;
+ *   4. the claim: once per job per window, inside the shared one-a-day budget;
+ *   5. the guarded send (sendWhatsApp → prepareOutbound: opt-out, the truth floor, hygiene).
+ *
+ * Billing and founder alerts are not coaching and keep their own paths (claimCritical,
+ * sendCriticalAlert). A unit test holds every other job to this one door.
+ */
+export interface CoachingClient {
+  id: string;
+  phoneNumber: string;
+  profileNotes?: string | null;
+  onboardingState?: string | null;
+  subscriptionStatus?: string | null;
+  betaBypassUntil?: Date | string | null;
+}
+
+/** `job` alone: once a day. With `window`: once per window (a week, a month, a phase). `claimed`: the job claimed before a write it must not repeat. */
+export type ProactiveClaim = { job: string; window?: string; critical?: boolean } | { claimed: string };
+
+/** The same test getActiveClients runs in SQL, for jobs that select their own clients. */
+export function isCoachingClient(c: CoachingClient, now = new Date()): boolean {
+  if (c.onboardingState !== "COMPLETE") return false;
+  if (c.subscriptionStatus === "active") return true;
+  return c.subscriptionStatus === "trial" && !!c.betaBypassUntil && new Date(c.betaBypassUntil) >= now;
+}
+
+/** Why a message may not go, before anything is claimed; null when it may. */
+export function proactiveHold(c: CoachingClient, opts?: { duringPause?: boolean }): string | null {
+  if (isProactivePaused()) return "PROACTIVE_PAUSED";
+  if (!opts?.duringPause && pauseReason(c) === "explicit") return "client paused coaching";
+  if (!isCoachingClient(c)) return "not a coaching client";
+  return null;
+}
+
+/** Sends one proactive message. Null when it was held or its claim was already spent; otherwise the delivery. */
+export async function sendProactive(
+  client: CoachingClient,
+  claim: ProactiveClaim,
+  body: string,
+  opts?: { template?: WindowTemplate; mediaUrl?: string; duringPause?: boolean },
+): Promise<DeliveryResult | null> {
+  const job = "claimed" in claim ? claim.claimed : claim.job;
+  const hold = proactiveHold(client, opts);
+  if (hold) {
+    console.log(`[PROACTIVE] held ${job} for ...${client.id.slice(-6)}: ${hold}`);
+    return null;
+  }
+  if (!("claimed" in claim)) {
+    const ok = claim.window
+      ? await claimProactive(client.id, claim.job, claim.window, { critical: claim.critical })
+      : await claimDailySlot(client.id, claim.job);
+    if (!ok) return null;
+  }
+  return sendWhatsApp(client.phoneNumber, body, opts?.mediaUrl, opts?.template);
+}
