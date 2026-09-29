@@ -26,7 +26,9 @@ The CTO reminds the founder when a review is due. The founder doesn't need to tr
 > 4. **Layers:** anything merged in the last 24 h that added a second way of doing something that already exists?
 > 5. **Width:** the biggest capability (from the tester's point of view) with no progress and no plan.
 > 6. **Cost:** anything wasting money.
-> 7. **Blind spots:** anything a strong CTO would worry about that isn't in `RISKS.md` or the open issues.
+> 7. **Getting people on board now:** given what works today, the most creative zero-cost ways to get paying people on board this week. Examples of the kind of idea wanted: trainers licensing Coach K for their own clients, stokvel-style accountability groups, employer seats. Give specifics, not generic marketing.
+> 8. **Money:** no paid tools or new spend. Say if anything in the build is spending money.
+> 9. **Blind spots:** anything a strong CTO would worry about that isn't in `RISKS.md` or the open issues.
 >
 > Finish with **the five most important next steps within the current plan**, in order. No restarts.
 
