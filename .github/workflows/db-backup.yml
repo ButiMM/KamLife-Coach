@@ -88,6 +88,20 @@ jobs:
           echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
           /usr/lib/postgresql/18/bin/pg_dump --version
 
+      # #499: every erased account id (ids only, nothing personal) goes to R2 on every run, into files
+      # the prune never touches, so a restore can re-apply deletions even after the live database and
+      # the app's logs are gone. Runs before the dump and even when the dump later fails.
+      - name: Save erasure tombstones (never pruned)
+        id: tombstones
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          T="erased-$(date -u +%Y%m%d-%H%M%S).txt"
+          psql -tA -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "SELECT meta->>'userId' FROM admin_events WHERE action = 'account_erased' ORDER BY created_at" > "/tmp/${T}"
+          aws s3 cp "/tmp/${T}" "s3://${R2_BUCKET}/tombstones/${T}" --endpoint-url "$R2_ENDPOINT"
+          echo "Saved $(wc -l < "/tmp/${T}") erased ids to tombstones/${T}"
+
       - name: Dump + compress
         if: steps.guard.outputs.skip != 'true'
         run: |
@@ -149,6 +163,11 @@ jobs:
                 aws s3 rm "s3://${R2_BUCKET}/daily/${key}" --endpoint-url "$R2_ENDPOINT"
               fi
             done
+
+      - name: Fail the run if the tombstones were not saved (#499)
+        if: steps.guard.outputs.skip != 'true' && steps.tombstones.outcome == 'failure'
+        run: |
+          echo "::error::Erasure tombstones were not saved to R2"; exit 1
 
       - name: Summary
         if: steps.guard.outputs.skip != 'true'

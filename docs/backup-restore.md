@@ -97,12 +97,19 @@ export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
    DELETE FROM users WHERE id = :'uid';   -- every other client table cascades from users
    COMMIT;
    ```
-   **If the old database is lost (#499),** the ids also live outside it. The moment a client confirms
-   with DELETE, and before anything is deleted, the app logs `[POPIA DELETE] User <id> requested data deletion`.
-   In Railway → the app service → Logs, search `[POPIA DELETE] User` from the backup's timestamp onward,
-   and replay each id as above. A confirmed request is replayed even if its deletion never finished:
-   the client asked for it. Railway keeps logs for at least 7 days and backups run every 6 hours,
-   so do this before re-opening. A unit test keeps this log line and this step in step.
+   **If the old database is lost (#499),** the ids also live outside it, in two places. Replay every id
+   from both, whatever the backup's age (replaying an id that is already gone deletes nothing):
+   - **R2 `tombstones/`**: every backup run first saves all erased ids to a new `erased-<time>.txt`.
+     The prune never touches these files. Take the newest one:
+     `aws s3 ls s3://$R2_BUCKET/tombstones/ --endpoint-url $R2_ENDPOINT`.
+   - **Railway logs**, for deletions since that file: the moment a client confirms with DELETE, and before
+     anything is deleted, the app logs `[POPIA DELETE] User <id> requested data deletion`. In Railway →
+     the app service → Logs, search `[POPIA DELETE] User` from **one hour before** the newest tombstone
+     file's time (a request logged just before a run can commit after it). A confirmed request is
+     replayed even if its deletion never finished: the client asked for it.
+   Railway keeps logs for at least 7 days, far longer than the 6 hours between runs. A run that cannot
+   save the tombstones fails and opens the "Database backup failed" issue. A unit test keeps the log
+   line, the workflow step and this step in step.
 5. Point the app's `DATABASE_URL` at the restored DB and redeploy.
 6. Unset `PROACTIVE_PAUSED`. Spot-check recent users, meal logs, and subscription status.
 

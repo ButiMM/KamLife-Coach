@@ -10963,7 +10963,14 @@ test("#499: the confirmed erasure logs its id outside the database before any aw
   const firstAwait = code.indexOf("await ", code.indexOf("\n", logged));
   assert.ok(confirmed > 0 && logged > confirmed, "the tombstone is logged once the client has confirmed");
   assert.ok(firstAwait > logged && code.indexOf("tx.delete(users)", logged) > firstAwait, "and before billing, the transaction, or anything else a crash could interrupt");
-  assert.ok(readFileSync("docs/backup-restore.md", "utf-8").includes("search `[POPIA DELETE] User`"), "runbook replays from the log line");
+  const doc = readFileSync("docs/backup-restore.md", "utf-8");
+  assert.ok(doc.includes("search `[POPIA DELETE] User` from **one hour before**"), "runbook replays from the log line, with a margin before the run");
+  // The logs keep 7 days and backups 30, so the ids also go to R2, before the dump, into files the prune skips.
+  const wf = readFileSync(".github/workflows/db-backup.yml", "utf-8");
+  const saved = wf.indexOf("tombstones/${T}"), dump = wf.indexOf("name: Dump + compress"), prune = wf.slice(wf.indexOf("name: Prune"));
+  assert.ok(saved > 0 && saved < dump, "tombstones are saved before the dump");
+  assert.ok(!prune.slice(0, prune.indexOf("- name:", 5)).includes("tombstones"), "the prune never deletes them");
+  assert.ok(wf.includes("steps.tombstones.outcome == 'failure'") && doc.includes("R2 `tombstones/`"), "an unsaved run fails, and the runbook reads R2");
 });
 
 test("every .github/workflows file parses with unique keys (an invalid workflow silently runs nothing)", async () => {
