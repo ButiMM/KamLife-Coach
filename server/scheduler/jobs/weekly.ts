@@ -213,8 +213,9 @@ export async function runSundayWeeklyReport(): Promise<void> {
       else if (totalScore >= 60) lines.push(``, `Solid week, ${name}.`);
       else lines.push(``, `${name}, below your best but you are still here. That matters.`);
       if (move.line) lines.push(``, move.line);
-      // One-tap acceptance — routes to the deterministic step-target updater. Client's call.
-      if (stepAdj) lines.push(``, `[BUTTONS:Set steps to ${stepAdj.newTarget}]`);
+      // The words to reply with, routed to the deterministic step-target updater. Client's call. This was a
+      // [BUTTONS:…] marker, which only the reply path renders: the scheduled send printed it as-is.
+      if (stepAdj) lines.push(``, `Reply *Set steps to ${stepAdj.newTarget}* to take it.`);
 
       // OUTSIDE THE WINDOW, THE WEEK'S NUMBERS STILL LAND (Cut 6, 2026-09-14). kamlife_weekly_check
       // was approved and wired with no call site, so a client who had not messaged in 24 hours got
