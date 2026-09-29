@@ -150,6 +150,8 @@ chk(!/won'?t be charged|will not be charged/i.test(body) && /by hand|cancel/i.te
 chk(/payment records?/i.test(prompt) && !/\ball your data\b/i.test(prompt), "the confirmation prompt is true about the exception too", JSON.stringify(prompt));
 // "by hand" is only true if someone can see it: the unconfirmed cancel is flagged in the admin
 // view with the PayFast token, and without the deleted client's phone.
+const erased = await pool.query("SELECT target_phone, meta->>'userId' uid FROM admin_events WHERE action = 'account_erased' AND meta->>'userId' = $1", [u.id]);
+chk(erased.rowCount === 1 && erased.rows[0].target_phone === null, "#342: the erasure is recorded by account id only (no phone), so a restore can re-apply it", JSON.stringify(erased.rows));
 const flag = await pool.query("SELECT target_phone, meta->>'token' tok FROM admin_events WHERE action = 'account_deleted_subscription_cancel_unconfirmed' ORDER BY id DESC LIMIT 1");
 chk(flag.rowCount === 1 && flag.rows[0].tok === "tok-269" && flag.rows[0].target_phone === null,
   "the unconfirmed cancel is flagged for a manual cancel, with the token and no phone", JSON.stringify(flag.rows[0] || null));

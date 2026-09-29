@@ -74,8 +74,20 @@ export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
 1. Stop writes — set `PROACTIVE_PAUSED=true` in Railway and, ideally, pause the app.
 2. Provision a fresh Postgres (or drop+recreate the schema on the existing one).
 3. `gunzip -c <backup>.sql.gz | psql "$DATABASE_URL"`
-4. Point the app's `DATABASE_URL` at the restored DB and redeploy.
-5. Unset `PROACTIVE_PAUSED`. Spot-check recent users, meal logs, and subscription status.
+4. **Re-apply every deletion made after this backup (POPIA, #342).** A client who asked to be
+   deleted after the backup was taken comes back with it. Every confirmed deletion leaves an
+   `account_erased` row holding only the account id. If the old database is still readable, copy
+   those ids across and delete them in the restored one:
+   ```sql
+   -- on the OLD database: the ids erased since the backup's timestamp
+   SELECT meta->>'userId' FROM admin_events WHERE action = 'account_erased' AND created_at >= '<backup UTC time>';
+   -- on the RESTORED database, for each id:
+   DELETE FROM users WHERE id = '<id>';   -- every client table cascades from users
+   ```
+   If the old database is lost, deletions from the last ≤ 6 hours can't be listed. Re-apply any
+   the founder knows of from the WhatsApp thread before re-opening.
+5. Point the app's `DATABASE_URL` at the restored DB and redeploy.
+6. Unset `PROACTIVE_PAUSED`. Spot-check recent users, meal logs, and subscription status.
 
 The dump is taken with `--no-owner --no-privileges`, so it restores cleanly under
 whatever role the target DB uses.
@@ -88,6 +100,7 @@ whatever role the target DB uses.
   major version or it aborts on a version mismatch). If Railway upgrades again,
   bump the `postgresql-client-NN` line in the workflow the same way.
 - **Recovery point**: backups are every 6h, so worst-case data loss is ~6 hours.
+- **Every backup is test-restored** (#342): the workflow restores it into a throwaway Postgres 18 and checks the client and meal counts. A failed backup or restore opens a GitHub issue titled "Database backup failed".
   Payment state is additionally reconstructable from PayFast ITN history + the
   `payment_events` table.
 - **Retention** is enforced in the workflow's prune step (30 days). To change it,

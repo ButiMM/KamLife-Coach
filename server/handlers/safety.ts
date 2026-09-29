@@ -394,6 +394,10 @@ export async function runSafetyGuards(
         await tx.execute(sql`DELETE FROM media_jobs WHERE user_id = ${uid} OR phone_number = ${phone}`);
         await tx.execute(sql`DELETE FROM admin_events WHERE target_phone = ${phone}`);
         await tx.delete(users).where(eq(users.id, uid));
+        // THE ERASURE SURVIVES A RESTORE (#342). Backups keep 30 days, so a restore could bring this
+        // client back. Only the random account id is kept (no phone, no name), so the restore runbook
+        // can re-apply every deletion made after the backup it restored (docs/backup-restore.md).
+        await tx.insert(adminEvents).values({ action: "account_erased", targetPhone: null, reason: null, meta: { userId: uid } });
         if (billing) await tx.insert(adminEvents).values({
           action: billing.ok ? "account_deleted_subscription_cancelled" : "account_deleted_subscription_cancel_unconfirmed",
           targetPhone: null, reason: billing.detail, meta: { token },
