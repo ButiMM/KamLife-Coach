@@ -11033,4 +11033,10 @@ test("#319: a scheduled coaching message is held for a paused or non-coaching cl
   const direct = readdirSync("server/scheduler/jobs").filter(f => !notCoaching.has(f))
     .filter(f => /\bsendWhatsApp\(/.test(readFileSync(`server/scheduler/jobs/${f}`, "utf8")));
   assert.deepEqual(direct, [], `coaching jobs sending around sendProactive: ${direct.join(", ")}`);
+  const buttons = readdirSync("server/scheduler/jobs").filter(f => /\bsendWhatsAppButtons\(/.test(readFileSync(`server/scheduler/jobs/${f}`, "utf8")));
+  assert.deepEqual(buttons, [], `button sends around sendProactive: ${buttons.join(", ")}`);
+  // Only the reply path renders a [BUTTONS:…] marker; on a scheduled send the client reads it raw (weekly report, #319).
+  const code = (f: string) => readFileSync(`server/scheduler/jobs/${f}`, "utf8").split("\n").filter(l => !/^\s*(\/\/|\*)/.test(l)).join("\n");
+  const markers = readdirSync("server/scheduler/jobs").filter(f => code(f).includes("[BUTTONS:"));
+  assert.deepEqual(markers, [], `scheduled messages carrying a raw button marker: ${markers.join(", ")}`);
 });

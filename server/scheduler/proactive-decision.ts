@@ -335,7 +335,7 @@ export async function sendProactive(
   client: CoachingClient,
   claim: ProactiveClaim,
   body: string,
-  opts?: { template?: WindowTemplate; mediaUrl?: string; duringPause?: boolean },
+  opts?: { template?: WindowTemplate; mediaUrl?: string; duringPause?: boolean; buttons?: string[] },
 ): Promise<DeliveryResult | null> {
   const job = "claimed" in claim ? claim.claimed : claim.job;
   const hold = proactiveHold(client, opts);
@@ -348,6 +348,10 @@ export async function sendProactive(
       ? await claimProactive(client.id, claim.job, claim.window, { critical: claim.critical })
       : await claimDailySlot(client.id, claim.job);
     if (!ok) return null;
+  }
+  if (opts?.buttons?.length) {
+    const { sendWhatsAppButtons } = await import("../twilio-interactive");
+    return sendWhatsAppButtons(client.phoneNumber, body, opts.buttons, { proactive: true });
   }
   return sendWhatsApp(client.phoneNumber, body, opts?.mediaUrl, opts?.template);
 }
