@@ -100,7 +100,7 @@ whatever role the target DB uses.
   major version or it aborts on a version mismatch). If Railway upgrades again,
   bump the `postgresql-client-NN` line in the workflow the same way.
 - **Recovery point**: backups are every 6h, so worst-case data loss is ~6 hours.
-- **Every backup is test-restored** (#342): the workflow restores it into a throwaway Postgres 18 and checks the client and meal counts. A failed backup or restore opens a GitHub issue titled "Database backup failed".
+- **Every backup is test-restored** (#342): the workflow restores it strictly (any failed statement fails it) into a throwaway Postgres 18 and checks the client and meal counts **before** publishing it to `daily/`. A dump that fails is kept under `failed/` for inspection and never counts as a backup. A failed backup or restore opens a GitHub issue titled "Database backup failed".
   Payment state is additionally reconstructable from PayFast ITN history + the
   `payment_events` table.
 - **Retention** is enforced in the workflow's prune step (30 days). To change it,

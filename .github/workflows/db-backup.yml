@@ -106,28 +106,32 @@ jobs:
             exit 1
           fi
 
-      - name: Upload to R2
+      - name: Test-restore the backup just made, before it is published (#342)
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          RESTORE_URL="postgresql://postgres:restore@127.0.0.1:5433/restore"
+          # Strict: any failed statement fails the restore, so a partial dump can't pass (#494 attack).
+          if ! gunzip -c "/tmp/${FILE}" | psql -q -v ON_ERROR_STOP=1 --single-transaction "$RESTORE_URL" > /dev/null 2> /tmp/restore.err; then
+            echo "::error::Backup ${FILE} did not restore cleanly"; tail -20 /tmp/restore.err
+            aws s3 cp "/tmp/${FILE}" "s3://${R2_BUCKET}/failed/${FILE}" --endpoint-url "$R2_ENDPOINT" || true
+            exit 1
+          fi
+          CLIENTS=$(psql -tA "$RESTORE_URL" -c "SELECT count(*) FROM users")
+          MEALS=$(psql -tA "$RESTORE_URL" -c "SELECT count(*) FROM meal_logs")
+          echo "Restored: ${CLIENTS} clients, ${MEALS} meal rows"
+          if [ "${CLIENTS:-0}" -lt 1 ]; then
+            echo "::error::Backup ${FILE} restored with no clients"
+            aws s3 cp "/tmp/${FILE}" "s3://${R2_BUCKET}/failed/${FILE}" --endpoint-url "$R2_ENDPOINT" || true
+            exit 1
+          fi
+
+      - name: Publish to R2 (only a backup that restored)
         if: steps.guard.outputs.skip != 'true'
         run: |
           set -euo pipefail
           aws s3 cp "/tmp/${FILE}" "s3://${R2_BUCKET}/daily/${FILE}" --endpoint-url "$R2_ENDPOINT"
           echo "Uploaded s3://${R2_BUCKET}/daily/${FILE}"
-
-      - name: Test-restore the backup just made (#342)
-        if: steps.guard.outputs.skip != 'true'
-        run: |
-          set -euo pipefail
-          RESTORE_URL="postgresql://postgres:restore@127.0.0.1:5433/restore"
-          gunzip -c "/tmp/${FILE}" | psql -q -v ON_ERROR_STOP=0 "$RESTORE_URL" > /dev/null 2> /tmp/restore.err || true
-          echo "restore warnings: $(wc -l < /tmp/restore.err)"
-          CLIENTS=$(psql -tA "$RESTORE_URL" -c "SELECT count(*) FROM users" 2>/dev/null || echo 0)
-          MEALS=$(psql -tA "$RESTORE_URL" -c "SELECT count(*) FROM meal_logs" 2>/dev/null || echo 0)
-          echo "Restored: ${CLIENTS} clients, ${MEALS} meal rows"
-          if [ "${CLIENTS:-0}" -lt 1 ]; then
-            echo "::error::Backup ${FILE} did not restore: no clients in the restored users table"
-            tail -20 /tmp/restore.err
-            exit 1
-          fi
 
       - name: Prune backups older than retention window
         if: steps.guard.outputs.skip != 'true'
