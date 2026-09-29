@@ -1,7 +1,7 @@
 import {
   db, users, chatHistory, stepLogs, workoutLogs, mealLogs, escalations,
   eq, gte, and, lt, desc, sql, asc,
-  sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot, claimProactive, pauseReason,
+  canSendProactive, recordProactiveSend, claimDailySlot, claimProactive, pauseReason,
   getActiveClients, isPaused, dayStart, getYesterdayLogs,
   TRAINING_SCHEDULES, programmeDaysSince, loadProactiveState,
   todaySAST, recordWeighAsk,
@@ -20,6 +20,7 @@ import { ensureOpenTrainingLoop, loadOpenTrainingLoop, loadSituationFrame } from
 import { readHeldConstraints } from "../../held-constraints";
 import { foodConstraints } from "../../food-swaps";
 import { deliveryAccepted } from "../../outbound-delivery";
+import { sendProactive, proactiveHold } from "../proactive-decision";
 import { getBehaviourPatternContext } from "../../intelligence/profile";
 
 /**
@@ -109,7 +110,7 @@ export async function runMorningCheckin(): Promise<void> {
         const isTomorrowEnd = pauseEnd.toISOString().slice(0, 10) === tomorrow.toISOString().slice(0, 10);
         if (isTomorrowEnd && await claimDailySlot(client.id, "morning")) {
           const name = client.name?.split(" ")[0] || "there";
-          await sendWhatsApp(client.phoneNumber, `${name}, your coaching pause ends tomorrow. Morning check-ins and workout reminders resume from tomorrow. Your programme is exactly where you left it — nothing resets.`);
+          await sendProactive(client, { claimed: "morning" }, `${name}, your coaching pause ends tomorrow. Morning check-ins and workout reminders resume from tomorrow. Your programme is exactly where you left it — nothing resets.`, { duringPause: true });
         }
       }
       continue;
@@ -189,10 +190,11 @@ export async function runMorningCheckin(): Promise<void> {
       // when they come back and lapse again, because the window is a new date.
       const rung = Math.min(4, Math.floor(daysSilent / 7));
       const absence = new Date(client.lastActiveAt as any).toISOString().slice(0, 10);
-      if (await claimProactive(client.id, `silence_w${rung}`, absence)) {
+      const hold = proactiveHold(client);
+      if (!hold && await claimProactive(client.id, `silence_w${rung}`, absence)) {
         const ask = await silenceAsk(client, daysSilent);
-        const sent = await sendWhatsApp(client.phoneNumber, ask.text);
-        if (ask.weigh && deliveryAccepted(sent)) await recordWeighAsk(client.id);
+        const sent = await sendProactive(client, { claimed: `silence_w${rung}` }, ask.text);
+        if (sent && ask.weigh && deliveryAccepted(sent)) await recordWeighAsk(client.id);
       }
       continue;
     }
@@ -544,7 +546,7 @@ export async function runMorningCheckin(): Promise<void> {
         const dailyTemplate = oneAction
           ? { name: "kamlife_daily_plan", variables: { "1": name, "2": oneAction } }
           : undefined;
-        const delivery = await sendWhatsApp(phone, composeMorning({
+        const delivery = await sendProactive(client, { claimed: "morning" }, composeMorning({
           firstName: name,
           targetFixLine,
           identityLine,
@@ -558,7 +560,8 @@ export async function runMorningCheckin(): Promise<void> {
           adaptLine,
           situationLine: await loadSituationFrame(phone).catch(() => ""),
           sickYesterday: state.health.sickYesterday,
-        }), undefined, dailyTemplate);
+        }), { template: dailyTemplate });
+        if (!delivery) continue;
         if (selectedWeigh && deliveryAccepted(delivery)) await recordWeighAsk(client.id);
         if (selectedTrainingMove && deliveryAccepted(delivery)) {
           await ensureOpenTrainingLoop(client, todaySAST(), "proactive", Date.now(), selectedTrainingIntervention);

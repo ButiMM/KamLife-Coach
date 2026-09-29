@@ -11013,3 +11013,24 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log("✓ all unit checks passed\n");
+
+// ── #319 — ONE PROACTIVE SENDER ──────────────────────────────────────────────────────────────
+test("#319: a scheduled coaching message is held for a paused or non-coaching client, and every coaching job sends through the one door", async () => {
+  const { proactiveHold } = await import("../server/scheduler/proactive-decision");
+  const live = { id: "u1", phoneNumber: "whatsapp:+27000000000", onboardingState: "COMPLETE", subscriptionStatus: "active", profileNotes: "" };
+  assert.equal(proactiveHold(live), null, "control: a live client is sent to");
+  const until = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
+  const paused = { ...live, profileNotes: `paused_until:${until}` };
+  assert.match(String(proactiveHold(paused)), /paused/, "a client who asked us to stop is held");
+  assert.equal(proactiveHold(paused, { duringPause: true }), null, "except the notice that the pause ends");
+  assert.match(String(proactiveHold({ ...live, subscriptionStatus: "cancelled" })), /not a coaching client/, "a cancelled client gets no shopping list");
+  assert.match(String(proactiveHold({ ...live, subscriptionStatus: "trial", betaBypassUntil: new Date(Date.now() - 86_400_000) })), /not a coaching client/);
+  assert.equal(proactiveHold({ ...live, subscriptionStatus: "trial", betaBypassUntil: new Date(Date.now() + 86_400_000) }), null, "a live beta tester is coached");
+
+  const { readdirSync, readFileSync } = await import("node:fs");
+  // Billing, founder alerts, client-set reminders and media apologies are not coaching.
+  const notCoaching = new Set(["business.ts", "spend-watchdog.ts", "balance-check.ts", "reminders.ts", "media-recovery.ts"]);
+  const direct = readdirSync("server/scheduler/jobs").filter(f => !notCoaching.has(f))
+    .filter(f => /\bsendWhatsApp\(/.test(readFileSync(`server/scheduler/jobs/${f}`, "utf8")));
+  assert.deepEqual(direct, [], `coaching jobs sending around sendProactive: ${direct.join(", ")}`);
+});

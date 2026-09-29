@@ -12,8 +12,9 @@
 import {
   db, clientIntelligenceProfiles,
   eq,
-  sendWhatsApp, claimProactive, isPaused, getActiveClients,
+  isPaused, getActiveClients,
 } from "../shared";
+import { sendProactive } from "../proactive-decision";
 
 export async function runMonthlyNarrative(): Promise<void> {
   console.log("[SCHEDULER] JOB: Monthly identity narrative");
@@ -31,8 +32,6 @@ export async function runMonthlyNarrative(): Promise<void> {
         : 0;
       if (weeksSinceStart < 4) continue;
 
-      if (!(await claimProactive(client.id, "monthly_narrative", monthKey))) continue;
-
       const [cipRow] = await db.select({ coachNarrative: clientIntelligenceProfiles.coachNarrative })
         .from(clientIntelligenceProfiles)
         .where(eq(clientIntelligenceProfiles.userId, client.id))
@@ -43,8 +42,8 @@ export async function runMonthlyNarrative(): Promise<void> {
 
       const name = (client.name || "there").split(" ")[0];
       const msg = `*${name} — your story so far:*\n\n${narrative}\n\n_This is what the data shows. Own it. Now go make next month's version better._`;
-      await sendWhatsApp(client.phoneNumber, msg);
-      sent++;
+      // Claimed only once there is a story to send, so a client without one keeps today's slot.
+      if (await sendProactive(client, { job: "monthly_narrative", window: monthKey }, msg)) sent++;
     } catch (err) { console.error(`[NARRATIVE] Monthly narrative error — ${client.phoneNumber}:`, err); }
   }
   console.log(`[NARRATIVE] Monthly narratives sent: ${sent}`);
