@@ -80,7 +80,7 @@ export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
    those ids across and delete them in the restored one:
    ```sql
    -- on the OLD database: the ids erased since the backup's timestamp
-   SELECT meta->>'userId' FROM admin_events WHERE action = 'account_erased' AND created_at >= '<backup UTC time>';
+   SELECT meta->>'userId' FROM admin_events WHERE action = 'account_erased' AND performed_at >= '<backup UTC time>';
    ```
    On the RESTORED database, replay the same deletion `server/handlers/safety.ts` runs, for each id.
    The tables that don't cascade from `users` go first; the phone is read from the restored row.

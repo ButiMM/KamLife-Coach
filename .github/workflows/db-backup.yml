@@ -102,7 +102,7 @@ jobs:
           OLDEST=$( (aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT" || true) | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
           SINCE=$([ -n "$OLDEST" ] && date -u -d "$OLDEST -1 day" +%Y-%m-%d || echo 1970-01-01)
           T="erased-$(date -u +%Y%m%d-%H%M%S).txt"
-          psql -tA -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "SELECT meta->>'userId' FROM admin_events WHERE action = 'account_erased' AND created_at >= '${SINCE}' ORDER BY created_at" > "/tmp/${T}"
+          psql -tA -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "SELECT meta->>'userId' FROM admin_events WHERE action = 'account_erased' AND performed_at >= '${SINCE}' ORDER BY performed_at" > "/tmp/${T}"
           aws s3 cp "/tmp/${T}" "s3://${R2_BUCKET}/tombstones/${T}" --endpoint-url "$R2_ENDPOINT"
           echo "Saved $(wc -l < "/tmp/${T}") erased ids to tombstones/${T}"
 
@@ -182,7 +182,8 @@ jobs:
             d=$(echo "$key" | sed -n 's/^erased-\([0-9]\{8\}\)-.*/\1/p')
             if [ -n "$d" ] && [ "$d" -lt "$SINCE" ]; then aws s3 rm "s3://${R2_BUCKET}/tombstones/${key}" --endpoint-url "$R2_ENDPOINT"; fi
           done
-          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "DELETE FROM admin_events WHERE action = 'account_erased' AND created_at < '$(date -u -d "$SINCE" +%Y-%m-%d)'"
+          CUT=$(date -u -d "$SINCE" +%Y-%m-%d)
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "DELETE FROM admin_events WHERE action = 'account_erased' AND performed_at < '${CUT}'"
 
       - name: Fail the run if the tombstones were not saved (#499)
         if: steps.guard.outputs.skip != 'true' && steps.tombstones.outcome == 'failure'

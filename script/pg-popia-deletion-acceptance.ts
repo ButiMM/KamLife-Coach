@@ -152,6 +152,22 @@ chk(/payment records?/i.test(prompt) && !/\ball your data\b/i.test(prompt), "the
 // view with the PayFast token, and without the deleted client's phone.
 const erased = await pool.query("SELECT target_phone, meta->>'userId' uid FROM admin_events WHERE action = 'account_erased' AND meta->>'userId' = $1", [u.id]);
 chk(erased.rowCount === 1 && erased.rows[0].target_phone === null, "#342: the erasure is recorded by account id only (no phone), so a restore can re-apply it", JSON.stringify(erased.rows));
+// #499 attack: the backup workflow's own tombstone SQL, run as written against the real schema (it named a
+// column admin_events does not have, so every run would have failed). Shell dates filled in; the prune in a
+// rolled-back transaction, and its cutoff in the past so it keeps this morning's row.
+{
+  const { readFileSync } = await import("node:fs");
+  const wf = readFileSync(".github/workflows/db-backup.yml", "utf-8");
+  const sqls = [...wf.matchAll(/-c "((?:SELECT|DELETE)[^"]*admin_events[^"]*)"/g)].map(x => x[1]
+    .replace("${SINCE}", "1970-01-01").replace("${CUT}", "1970-01-01"));
+  chk(sqls.length === 2, "the workflow saves and prunes tombstones with SQL this check can see", JSON.stringify(sqls));
+  const saved = await pool.query(sqls.find(q => q.startsWith("SELECT"))!);
+  chk(saved.rows.some((r: any) => Object.values(r)[0] === u.id), "the save query runs on the real schema and lists this erasure", JSON.stringify(saved.rows));
+  const c = await pool.connect();
+  try { await c.query("BEGIN"); await c.query(sqls.find(q => q.startsWith("DELETE"))!); chk(true, "the prune query runs on the real schema"); }
+  catch (e: any) { chk(false, "the prune query runs on the real schema", e?.message); }
+  finally { await c.query("ROLLBACK"); c.release(); }
+}
 const flag = await pool.query("SELECT target_phone, meta->>'token' tok FROM admin_events WHERE action = 'account_deleted_subscription_cancel_unconfirmed' ORDER BY id DESC LIMIT 1");
 chk(flag.rowCount === 1 && flag.rows[0].tok === "tok-269" && flag.rows[0].target_phone === null,
   "the unconfirmed cancel is flagged for a manual cancel, with the token and no phone", JSON.stringify(flag.rows[0] || null));
