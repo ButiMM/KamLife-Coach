@@ -81,8 +81,21 @@ export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
    ```sql
    -- on the OLD database: the ids erased since the backup's timestamp
    SELECT meta->>'userId' FROM admin_events WHERE action = 'account_erased' AND created_at >= '<backup UTC time>';
-   -- on the RESTORED database, for each id:
-   DELETE FROM users WHERE id = '<id>';   -- every client table cascades from users
+   ```
+   On the RESTORED database, replay the same deletion `server/handlers/safety.ts` runs, for each id.
+   The tables that don't cascade from `users` go first; the phone is read from the restored row.
+   A unit test keeps this list equal to the code's.
+   ```sql
+   \set uid '<id>'
+   SELECT phone_number AS phone FROM users WHERE id = :'uid' \gset
+   BEGIN;
+   -- ERASURE REPLAY (keep in step with safety.ts)
+   DELETE FROM quality_signals WHERE user_id = :'uid';
+   DELETE FROM shadow_replies WHERE user_id = :'uid' OR phone = :'phone';
+   DELETE FROM media_jobs WHERE user_id = :'uid' OR phone_number = :'phone';
+   DELETE FROM admin_events WHERE target_phone = :'phone';
+   DELETE FROM users WHERE id = :'uid';   -- every other client table cascades from users
+   COMMIT;
    ```
    If the old database is lost, deletions from the last ≤ 6 hours can't be listed. Re-apply any
    the founder knows of from the WhatsApp thread before re-opening.
