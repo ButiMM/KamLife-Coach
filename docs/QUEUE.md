@@ -21,18 +21,23 @@
 
 ## Open now (26 Sep evening; the watch reads the `- [ ]` lines)
 
-- [ ] #476 A crisis in isiZulu, Afrikaans, Sesotho or Setswana gets the crisis reply (C4) — PR #477
-- [ ] #456 The backfill no longer tells the new coach "life/work: office" or a withheld state (A13) — PR #475, blocks #460
-- [ ] #467 History learning once per client, ever (D11) — PR #472 (the judge-once half merged as #473)
-- [ ] #412 gpt-4o only for crisis and photos (D8) — PR #474
-- [ ] C7 "Can I speak to a real person?" answered honestly — PR #471
-- [ ] #460 Wave 1 on for everyone (A10, A11, A16, A17) — needs OpenAI credits, then the label `final` for its one strong-judge run
+- [ ] #496 A quote addressed to someone else ("told her, 'you sound suicidal'") is that person's crisis (C6) — PR #497
+- [ ] #342 Backups test-restored before they are published; deletion survives a restore (D4) — PR #494
+- [x] #488 One paid WhatsApp message per reply (D8) — #492
+- [x] #484 Twilio or Meta direct: numbers and a recommendation (D8) — #493
+- [x] #480 A friend's crisis quoted by the client is answered as a helper (C6) — #481
+- [x] #476 A crisis in isiZulu, Afrikaans, Sesotho or Setswana gets the crisis reply (C4) — PR #477
+- [x] #456 The backfill no longer tells the new coach "life/work: office" or a withheld state (A13) — PR #475, blocks #460
+- [x] #467 History learning once per client, ever (D11) — PR #472 (the judge-once half merged as #473)
+- [x] #412 gpt-4o only for crisis and photos (D8) — PR #474
+- [x] C7 "Can I speak to a real person?" answered honestly — PR #471
+- [ ] #460 Wave 1 deletions (A10, A11, A16, A17): the founder sets Railway `CORE_WAVE1=on`; the deletions merge 48 h later if clean (ORDERS §0c, no paid gate)
 - [ ] #455 Wave 2 A1, the new coach speaks after a logged meal — after #460 (wave order)
 - [ ] #466 Wave 2 A2, the new coach reads a meal correction — after #455
-- [ ] #309 SA-language refusals ("Hayi", "Aowa", "Cha") open a correction — gate case for the new core (A2)
-- [ ] #300 An explicitly named older meal in a correction — gate case (A2)
-- [ ] #292 A multi-word negated food is not written back — gate case (A2)
-- [ ] #297 A reactive weigh-in ask is recorded only after delivery (B)
+- [x] #309 SA-language refusals ("Hayi", "Aowa", "Cha") open a correction — gate case for the new core (A2)
+- [x] #300 An explicitly named older meal in a correction — gate case (A2)
+- [x] #292 A multi-word negated food is not written back — gate case (A2)
+- [ ] #297 A reactive weigh-in ask is recorded only after delivery (B): moved to lane 2 (#489 closed: needs a per-turn key)
 
 ## Live harm (always first)
 
