@@ -3264,7 +3264,7 @@ test("morning: the empty-yesterday client goes down the same path as everyone el
   // A count, on purpose: this is how many mouths this job has. It went 2 → 3 in Cut 6 and the
   // third is a REPLACEMENT, not an addition — the button menu it supersedes went out through
   // sendWhatsAppButtons, which this counter never saw. Net across the repo the cut removes sends.
-  assert.equal((code.match(/sendWhatsApp\(/g) || []).length, 3,
+  assert.equal((code.match(/sendProactive\(/g) || []).length, 3,
     "three sends: the pause notice, the ladder's one ask, and the composed brief");
   assert.ok(!/sendWhatsAppButtons\(/.test(code), "and none of them is a menu");
   // The one thing that branch really owned — the streak shield, which WRITES — must survive.
