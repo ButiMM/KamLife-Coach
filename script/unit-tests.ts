@@ -10955,6 +10955,16 @@ test("#342: the restore runbook replays every table the POPIA erasure deletes (a
   for (const t of [...tables, "users"]) assert.ok(replay.includes(`DELETE FROM ${t}`), `runbook replay misses ${t}`);
 });
 
+test("#499: the erasure logs its id outside the database after the commit and before the reply, and the runbook reads that line", async () => {
+  const { readFileSync } = await import("node:fs");
+  const code = readFileSync("server/handlers/safety.ts", "utf-8");
+  const commit = code.indexOf("tx.delete(users)");
+  const logged = code.indexOf("[POPIA DELETE] Completed for ${uid}", commit);
+  const reply = code.indexOf("const billingLine", commit);
+  assert.ok(commit > 0 && logged > commit && reply > logged, "tombstone log sits between the deletion and the confirmation");
+  assert.ok(readFileSync("docs/backup-restore.md", "utf-8").includes("search `[POPIA DELETE] Completed for`"), "runbook replays from the log line");
+});
+
 test("every .github/workflows file parses with unique keys (an invalid workflow silently runs nothing)", async () => {
   const { parse } = await import("yaml");
   const { readdirSync, readFileSync } = await import("node:fs");

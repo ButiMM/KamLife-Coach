@@ -97,8 +97,11 @@ export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
    DELETE FROM users WHERE id = :'uid';   -- every other client table cascades from users
    COMMIT;
    ```
-   If the old database is lost, deletions from the last ≤ 6 hours can't be listed. Re-apply any
-   the founder knows of from the WhatsApp thread before re-opening.
+   **If the old database is lost (#499),** the ids also live outside it: after every deletion commits, and
+   before the client is told it's done, the app logs `[POPIA DELETE] Completed for <id>`. In Railway →
+   the app service → Logs, search `[POPIA DELETE] Completed for` from the backup's timestamp onward, and
+   replay each id as above. Railway keeps logs for at least 7 days and backups run every 6 hours,
+   so do this before re-opening. A unit test keeps this log line and this step in step.
 5. Point the app's `DATABASE_URL` at the restored DB and redeploy.
 6. Unset `PROACTIVE_PAUSED`. Spot-check recent users, meal logs, and subscription status.
 

@@ -409,6 +409,7 @@ export async function runSafetyGuards(
       } catch (memErr: any) {
         console.warn(`[POPIA DELETE] Vector memory deletion failed (non-fatal): ${memErr.message}`);
       }
+      // #499: this line is the tombstone that survives losing the database (docs/backup-restore.md step 4).
       console.log(`[POPIA DELETE] Completed for ${uid}${billing ? ` — billing: ${billing.detail}` : ""}`);
       const billingLine = !billing ? ""
         : billing.ok ? "Your subscription is cancelled at PayFast, so you won't be charged again. "
