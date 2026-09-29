@@ -7719,6 +7719,12 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   // never a model's job. Measured before the fix: programme 5 and 15 bubbles, meal plan 5.
   // These tests build DELIBERATELY oversized output and prove it cannot escape the cap.
 
+  test("#488: bubbles that fit together are ONE paid WhatsApp message; only an oversized body splits", () => {
+    assert.deepEqual(splitWhatsAppBody("Logged: pap and chicken.\n\n---\n\nTonight, keep dinner light."), ["Logged: pap and chicken.\n\nTonight, keep dinner light."]);
+    const big = ["a".repeat(900), "b".repeat(900)].join("\n\n---\n\n");
+    assert.equal(splitWhatsAppBody(big).length, 2, "1,800 characters cannot fit one 1,500 body");
+  });
+
   test("message budget: 20 oversized sections cannot escape the cap", () => {
     // 20 sections × ~200 chars = ~4,000 chars, which fits 3×1500, so the cap MUST hold.
     const sections = Array.from({ length: 20 }, (_, i) => `*Section ${i + 1}*\n${"x".repeat(180)}`);
@@ -10956,6 +10962,13 @@ test("every .github/workflows file parses with unique keys (an invalid workflow 
 // rate-limited coach read as a real answer. This reads askCoachK's own catch block out of the
 // source and fails if it ever returns a sentence the predicate does not recognise, so adding a
 // seventh failure string in gpt.ts turns this red instead of silently shipping the defect again.
+test("#460 attack: a meal named BEFORE its food splits too (\"For breakfast I had eggs, for dinner I had beef stew\")", async () => {
+  const { forMealSegments } = await import("../server/understanding/actions");
+  assert.deepEqual(forMealSegments("For breakfast I had eggs, for dinner I had beef stew."), [{ label: "Breakfast", text: "I had eggs" }, { label: "Dinner", text: "I had beef stew" }]);
+  assert.deepEqual(forMealSegments("eggs for breakfast and beef stew for dinner"), [{ label: "Breakfast", text: "eggs" }, { label: "Dinner", text: "beef stew" }]);
+  assert.deepEqual(forMealSegments("I had eggs for breakfast"), []);
+});
+
 test("#92 every sentence askCoachK returns on failure is recognised as an unanswered turn", async () => {
   const { readFileSync } = await import("node:fs");
   const { isCoachUnavailableReply } = await import("../server/brain/reply-verifier");

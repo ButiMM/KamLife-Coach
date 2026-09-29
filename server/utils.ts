@@ -468,6 +468,12 @@ export function recordTwilioFailure(): void {
 // one crammed bubble with literal "---" lines, and any body over Twilio's 1600-char
 // hard cap was rejected outright (error 21617), silently killing the Sunday meal
 // plan. Every scheduler send must go through this.
+//
+// ONE PAID MESSAGE, NOT ONE PER BUBBLE (#488). From 1 Oct 2026 every reply inside the 24-hour
+// window is a billed WhatsApp message (about R0.12 Meta plus the Twilio fee), so "---" no longer
+// earns a separate bubble. Bubbles that fit together under the body limit go out as one message,
+// separated by a blank line. Only a body too long for one message is split. The reactive door
+// (routes/whatsapp.ts) uses this same function.
 export function splitWhatsAppBody(text: string, maxLen = 1500): string[] {
   const bubbles = text.split(/\n\n---\n\n/).map(b => b.trim()).filter(Boolean);
   const parts: string[] = [];
@@ -492,7 +498,13 @@ export function splitWhatsAppBody(text: string, maxLen = 1500): string[] {
     }
     if (current.trim()) parts.push(current.trim());
   }
-  return parts.length ? parts : [text.trim()].filter(Boolean);
+  const packed: string[] = [];
+  for (const part of parts) {
+    const last = packed.length ? packed[packed.length - 1] : null;
+    if (last !== null && last.length + 2 + part.length <= maxLen) packed[packed.length - 1] = `${last}\n\n${part}`;
+    else packed.push(part);
+  }
+  return packed.length ? packed : [text.trim()].filter(Boolean);
 }
 
 // ============================================================

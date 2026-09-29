@@ -65,13 +65,20 @@ for p in open_prs:
             return True   # any real Codex review counts, whatever its heading (CTO decision, #391)
         return bool(re.match(r"^[*_#\s]*ATTACK @ ", b))
     commit_times = [ts(x["commit"]["committer"]["date"]) for x in commits] if commits else []
-    head_since = head_time
-    attacks = [c for c in human if _is_codex_review(c) and (sha[:7] in c["body"] or ts(c["created_at"]) >= head_since)]
+    # Codex review, 28 Sep: don't demand a fresh attack when a PR only merged main in. An attack stays valid
+    # for the last commit that changed the PR's own code (commits whose message starts "Merge" don't count).
+    own = [x for x in commits if not x["commit"]["message"].startswith("Merge")] if commits else []
+    last_own = own[-1] if own else (commits[-1] if commits else None)
+    own_sha = last_own["sha"] if last_own else sha
+    head_since = ts(last_own["commit"]["committer"]["date"]) if last_own else head_time
+    attacks = [c for c in human if _is_codex_review(c) and (sha[:7] in c["body"] or own_sha[:7] in c["body"] or ts(c["created_at"]) >= head_since)]
     answers = [c for c in human if re.match(r"^[*_\s]*ANSWER", c["body"])]
     code_files = [f for f in api("GET", f"/pulls/{n}/files?per_page=100") if not (f["filename"].startswith("docs/") or f["filename"].endswith(".md"))]
     # Founder decision, 26 Sep: ship each section to testers as soon as it passes. Switch PRs merge on a
     # green gate plus the reach check; the CTO attacks them after merge. Only [harm] PRs wait for an attack.
-    needs_attack = p["title"].startswith("[harm]")
+    # ONE RELEASE RULE (28 Sep): harm and switch PRs get an attack before exposure. If none arrives within
+    # the window (45 min harm, 120 min switch), they merge on green checks plus the gate (ship as finished).
+    needs_attack = p["title"].startswith("[harm]") or any(l["name"] == "switch" for l in p["labels"])
     if not code_files:
         state = "docs only: no attack needed"
         attack_ok_docs = True
@@ -86,7 +93,8 @@ for p in open_prs:
     if not attacks and not attack_ok_docs:
         state = "waiting for Codex attack"
         comment_once(n, f"cto-attack-{sha}", f"**Attack owed** at head `{short}` (attacker session, docs/ATTACKER.md; or @codex when it has capacity). Start your comment with `ATTACK @ {sha[:7]}`.", comments)
-        if NOW - head_time > ATTACK_WINDOW:
+        window = dt.timedelta(minutes=120) if any(l["name"] == "switch" for l in p["labels"]) else ATTACK_WINDOW
+        if NOW - head_since > window:
             state = "attack window passed: builder may merge if tests pass; Codex attacks after merge"
             comment_once(n, f"cto-window-{sha}", f"**CTO watch:** no Codex attack at `{short}` within 45 minutes. Per CLAUDE.md, the builder may merge once tests pass; any later finding goes to the top of docs/QUEUE.md.", comments)
     elif attack_ok_docs and not attacks:
@@ -128,7 +136,7 @@ for p in open_prs:
     # Overnight rule (CTO, 25 Sep): a switch PR whose flag defaults to founder-only may merge on a green
     # gate (with the reach check) without an attack. Testers are untouched until the CTO attacks it
     # and a follow-up turns it on for everyone.
-    attack_ok = state.startswith("attack answered") or state.startswith("docs only") or state.startswith("no attack needed") or (state.startswith("attack window passed") and (not is_switch or founder_only))
+    attack_ok = state.startswith("attack answered") or state.startswith("docs only") or state.startswith("no attack needed") or state.startswith("attack window passed")
     if is_switch and not any(r["name"] == "replay" and r["conclusion"] == "success" for r in runs):
         attack_ok = False
         state += " (switch: needs a green replay gate)"

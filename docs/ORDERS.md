@@ -25,6 +25,18 @@ This section outranks the rest of this file. It exists because a broad product w
    If a week passes with no row reaching complete, stop and reassess, as in §5.
 7. **The founder does not audit this.** If the founder has to point out a gap across the product, the CTO and the builder have failed this section, and the fix is written into this section.
 
+## 0b. ONE RELEASE RULE, AND WHAT PROGRESS MEANS (28 Sep, after the Codex strategic review). This overrides any conflicting line below.
+
+**Release rule:** `[harm]` and `switch` PRs get an attack **before exposure**. Codex attacks them first; the CTO attacks when Codex is out. If no attack arrives within **45 min (harm) or 120 min (switch)** of the PR's last own commit, they merge on green checks plus, for switches, the gate with the reach check. Any later finding goes to the top of the queue. Every other PR merges on green checks, with no attack. **An attack stays valid across merge-only commits:** don't re-attack a PR just because it merged `main`. Re-attack a fix at its new SHA, starting with the failed journey.
+
+**What counts as progress:** a **whole client journey that is demonstrably better in real use**: the original message → the correct stored record → a useful final body → confirmed delivery → correct memory on a later turn. Merged PRs, green averages, fewer lines and "two calls" are guardrails, not acceptance. **Every Monday, the CTO answers on #280: which journey became demonstrably better in real use this week, and what did it cost to deliver per active client?**
+
+**Gate reporting:** never just "gate green". State the journeys covered, the corpus version, whether it ran on the live model, and what's untested (e.g. photos, voice, proactive, the 24 h window).
+
+## 0c. NO NEW SPEND UNTIL REVENUE (founder decision, 28 Sep)
+
+No separate CI OpenAI project and no paid gate runs for now. **Switches are proven on real use instead:** the switch ships behind its flag (`CORE_WAVE1` and so on), goes on for everyone through the Railway variable, is watched through real tester conversations and 👎 flags, and is rolled back instantly (`off`) if it misbehaves. Offline tests, the reach check and the safety floors still run on every PR at no cost. The paid replay gate returns only once there's paying revenue, and only on a `final` label. Deleting old code waits until a switch has run cleanly on real use for 48 hours.
+
 ## 1. The decision
 
 Keep the plumbing. Replace the coaching core behind it.

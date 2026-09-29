@@ -1,6 +1,17 @@
 # KamLife Coach — Claude Code Instructions
 
+## CURRENT ORDERS (CTO, 28 Sep). Read this first. Where anything below disagrees, THIS wins.
+
+1. **Goal:** the whole product in `docs/TESTER-EXPERIENCE.md`, every `docs/COVERAGE.md` row. Progress means a whole client journey that is better on a real phone.
+2. **Order of work:** live harm (#481 first) → **#488** (one message per turn: from 1 Oct every WhatsApp reply costs money) → **#484** (Twilio vs Meta direct) → **#342** (backups and deletion) → wave 1 deletions (#460, 48 h after the founder flips `CORE_WAVE1=on`, if clean) → wave 2 (#455, #466 are on `hold` until then) → lane 2 (proactive) → lane 3.
+3. **No new spend (ORDERS §0c):** no CI OpenAI key and no paid gate. Switches are proven on real use behind their Railway flag, with instant rollback. Offline tests, the reach check and the safety floors must pass on every PR. Follow the STANDING COST RULES in `docs/COSTS.md`.
+4. **Attacks:** put `attack:codex` and a `@codex` call **only on `[harm]` and `switch` PRs.** Every other PR merges on green checks, with no attack. Answer every attack with `ANSWER`. An attack stays valid across merge-only commits.
+5. **Reuse, don't rebuild; delete in the switch.** Every PR names its COVERAGE row and what it retires.
+6. **Capacity:** one session, 10-line status comments, batched pushes, no local re-runs of what CI runs. Never idle: re-read #391 and #280, or schedule a check-in.
+7. **Blocked on the founder?** Post `BLOCKED:` with the exact action, then keep working on something else.
+
 ## Standing orders (read first, every session)
+- **Costs: read `docs/COSTS.md` → STANDING COST RULES.** They bind every PR.
 - **The founder's Claude capacity is the scarcest resource (25 Sep: about half the week left). Spend it only on moving rows:**
   - one builder session only (lanes 2 and 3 run *after* lane 1 in the same session, unless the founder opens more)
   - status comments of 10 lines or fewer, with no long narration
@@ -35,7 +46,7 @@
 - **Lane B is the priority (CTO, 24 Sep).** Finish and merge the lane A PRs already open; start no new lane A work. All new effort goes to lane B in `docs/QUEUE.md`, in order. Old-pipeline bugs become gate cases for the new core, not new patterns.
 - **Builder lanes (25 Sep):** if you were started as "builder lane 2" or "builder lane 3", work only that lane's rows in `docs/ORDERS.md` (FULL PRODUCT, IN PARALLEL). Otherwise you are lane 1. No row is ever parked as "after launch".
 - **Your work queue is `docs/QUEUE.md`.** It has two lanes. If no other session is on lane B (no open or recent branch for #270), run lane B yourself in parallel, in a separate worktree or subagent, starting with #270. Nobody will tell you to; this line is the instruction. In each lane, take the first unchecked item, build it as one pull request, then take the next.
-- Every PR: open the description with "What testers will notice:", add the label `attack:codex`, and comment `@codex attack this PR per docs/ORDERS.md §6` with the head SHA.
+- Every PR: open the description with "What testers will notice:". **Only `[harm]` and `switch` PRs** get the `attack:codex` label and a `@codex attack this PR per docs/ORDERS.md §6` comment with the head SHA.
 - **CI is free again (public repo).** GitHub runs the full suite, including the database suite, on every PR push. **Merge when GitHub checks are green**, attacks are answered under the merge standard, and the mouth ratchet passes. Batch fixes into one push anyway: every push restarts the ~47-minute run.
 - **Merge standard:** see `docs/ORDERS.md` §6. If a Codex finding is not worse than current `main`, open a follow-up issue labelled `harm` (or `core`), add it to the top of `docs/QUEUE.md`, reply `ANSWER: follow-up #N, not a regression against main`, and merge. After two attack rounds, merge with follow-ups.
 - If `main` has moved and your PR conflicts, rebase it first; that outranks everything except answering attacks.
