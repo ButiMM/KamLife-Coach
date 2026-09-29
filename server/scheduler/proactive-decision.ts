@@ -257,14 +257,10 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
   { job: "runPaymentFailureRecovery", file: "business", cls: "OPERATIONAL", because: "Billing." },
   { job: "runSignupNudge", file: "business", cls: "OPERATIONAL", because: "Pre-subscription funnel; there is no client state to decide from." },
   { job: "runWeeklyKpiReport", file: "business", cls: "OPERATIONAL", because: "Goes to the founder, not to a client." },
-  { job: "runMonthlyNps", file: "business", cls: "OPERATIONAL", because: "One survey question." },
-  { job: "runStepLeaderboard", file: "business", cls: "RECOGNITION", because: "Standings and a rank. No instruction." },
   { job: "runAutoCalAdjust", file: "business", cls: "OPERATIONAL",
     because: "Announces a target change the adaptive-targets owner made. The change is the message." },
   { job: "runStepTargetAdaptation", file: "business", cls: "OPERATIONAL",
     because: "Announces a step-target change made by targets.ts. Same reason." },
-  { job: "runSupplementReminder", file: "business", cls: "RECOGNITION",
-    because: "Adjudicated 2026-09-05 (#180). It asks — 'creatine taken yet?' — about a supplement the CLIENT chose and logged. It decides nothing from their day and prescribes nothing; a question about their own routine is the class this doctrine calls recognition." },
 
   // ── onboarding.ts ─────────────────────────────────────────────────────────────────────────
   { job: "runEarlyOnboarding", file: "onboarding", cls: "RESOURCE",

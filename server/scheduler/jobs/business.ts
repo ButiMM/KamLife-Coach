@@ -130,49 +130,6 @@ export async function runSignupNudge(): Promise<void> {
     } catch (err) { console.error(`[SCHEDULER] Signup/win-back error — ${client.phoneNumber}:`, err); }
   }
 }
-export async function runStepLeaderboard(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Weekly step leaderboard broadcast");
-  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runStepLeaderboard blocked"); return; }
-  try {
-    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-    const allStepLogs = await db.select({ userId: stepLogs.userId, steps: stepLogs.steps }).from(stepLogs).where(gte(stepLogs.loggedAt, sevenDaysAgo));
-    const userSteps: Record<string, { total: number; days: number }> = {};
-    for (const log of allStepLogs) {
-      if (!userSteps[log.userId]) userSteps[log.userId] = { total: 0, days: 0 };
-      userSteps[log.userId].total += log.steps;
-      userSteps[log.userId].days++;
-    }
-    const participantIds = Object.keys(userSteps);
-    if (participantIds.length < 3) return;
-    const participants = await db.select({ id: users.id, name: users.name, phoneNumber: users.phoneNumber, subscriptionStatus: users.subscriptionStatus })
-      .from(users).where(inArray(users.id, participantIds));
-    const infoMap: Record<string, { name: string; phone: string; active: boolean }> = {};
-    for (const p of participants) infoMap[p.id] = { name: p.name || "Anonymous", phone: p.phoneNumber, active: p.subscriptionStatus === "active" };
-    const ranked = participantIds.map(uid => ({
-      uid, name: infoMap[uid]?.name || "Anonymous", phone: infoMap[uid]?.phone || "",
-      avg: Math.round(userSteps[uid].total / userSteps[uid].days), active: infoMap[uid]?.active || false,
-    })).sort((a, b) => b.avg - a.avg);
-    const medals = ["🥇", "🥈", "🥉"];
-    let boardBase = `*🏆 Weekly Step Leaderboard*\n\n`;
-    for (let i = 0; i < Math.min(5, ranked.length); i++) {
-      const r = ranked[i];
-      boardBase += `${i < 3 ? medals[i] : `${i + 1}.`} ${(r.name || "Member").split(" ")[0]} — ${r.avg.toLocaleString()} avg/day\n`;
-    }
-    let sent = 0;
-    for (const r of ranked) {
-      if (!r.active || !r.phone) continue;
-      const myRank = ranked.indexOf(r) + 1;
-      const personal = myRank <= 5
-        ? `\nYou are *#${myRank}*! ${myRank === 1 ? "You led the pack this week. 👑" : "Keep pushing for #1 next week."}`
-        : `\nYou are *#${myRank}* of ${ranked.length}. ${r.avg.toLocaleString()} avg steps. Log more to climb next week.`;
-      // DB claim (weekly window) so a recycle can't re-broadcast the leaderboard.
-      if (!(await claimProactive(r.uid, "step_leaderboard", thisWeekUTC()))) continue;
-      try { await sendWhatsApp(r.phone, `${boardBase}${personal}\n\nNew week starts now. Reply *leaderboard* anytime to check rankings.`); sent++; } catch {}
-      if (sent % 10 === 0) await new Promise(r => setTimeout(r, 2000));
-    }
-    console.log(`[SCHEDULER] Leaderboard sent to ${sent} clients`);
-  } catch (err) { console.error("[SCHEDULER] Leaderboard broadcast error:", err); }
-}
 
 export async function runWeeklyKpiReport(): Promise<void> {
   const coachPhone = process.env.COACH_ALERT_PHONE;
@@ -279,42 +236,6 @@ export async function runWeeklyKpiReport(): Promise<void> {
     await sendWhatsApp(`whatsapp:${coachPhone}`, report);
     console.log(`[KPI] Weekly report sent to coach`);
   } catch (e) { console.error("[KPI] Weekly report error:", e); }
-}
-
-export async function runSupplementReminder(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Supplement reminder");
-  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runSupplementReminder blocked"); return; }
-  try {
-    const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
-    const { sastDayStart } = await import("../shared");
-    const todayStart = sastDayStart();
-    const suppLoggers = await db.select({ userId: chatHistory.userId }).from(chatHistory).where(and(eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, fourteenDaysAgo)));
-    const uniqueUserIds = [...new Set(suppLoggers.map(s => s.userId))];
-    if (uniqueUserIds.length === 0) return;
-    let sent = 0;
-    for (const uid of uniqueUserIds) {
-      const todayLog = await db.select({ id: chatHistory.id }).from(chatHistory).where(and(eq(chatHistory.userId, uid), eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, todayStart))).limit(1);
-      if (todayLog.length > 0) continue;
-      const [client] = await db.select({ phoneNumber: users.phoneNumber, name: users.name, subscriptionStatus: users.subscriptionStatus }).from(users).where(eq(users.id, uid)).limit(1);
-      if (!client || client.subscriptionStatus !== "active") continue;
-      const recentSupp = await db.select({ messageIn: chatHistory.messageIn }).from(chatHistory).where(and(eq(chatHistory.userId, uid), eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, fourteenDaysAgo))).orderBy(desc(chatHistory.createdAt)).limit(3);
-      const suppText = recentSupp.map(s => s.messageIn || "").join(" ").toLowerCase();
-      let suppName = "";
-      if (/creatine/.test(suppText)) suppName = "creatine";
-      else if (/protein|whey|shake/.test(suppText)) suppName = "protein";
-      else if (/omega|fish.?oil/.test(suppText)) suppName = "omega-3s";
-      else if (/vitamin|vit\s*[cd]|multivit/.test(suppText)) suppName = "vitamins";
-      else if (/magnesium/.test(suppText)) suppName = "magnesium";
-      // No "Morning {name}" greeting — the 6am morning brief already greeted them;
-      // a second greeting 2h later reads as two bots. This is a nudge, not a hello.
-      const msg = suppName ? `Quick one — ${suppName} taken yet? Consistency is what makes it work. 💊` : `Quick one — supplements taken? One less thing to think about later. 💊`;
-      // Daily-slot claim (routine nudge) — DB-backed, restart-safe, respects the daily cap.
-      if (!(await claimDailySlot(uid, "supplement_reminder"))) continue;
-      await sendWhatsApp(client.phoneNumber, msg);
-      sent++;
-    }
-    console.log(`[SCHEDULER] Supplement reminders sent: ${sent}`);
-  } catch (err) { console.error("[SCHEDULER] Supplement reminder error:", err); }
 }
 
 export async function runAutoCalAdjust(): Promise<void> {
@@ -505,21 +426,3 @@ export async function runStepTargetAdaptation(): Promise<void> {
   } catch (err) { console.error("[SCHEDULER] Step target adaptation error:", err); }
 }
 
-export async function runMonthlyNps(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Monthly NPS survey");
-  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runMonthlyNps blocked"); return; }
-  const today = todaySAST();
-  try {
-    const activeClients = await db.select({ id: users.id, phoneNumber: users.phoneNumber, name: users.name, subscriptionStatus: users.subscriptionStatus, totalWorkoutsCompleted: users.totalWorkoutsCompleted, programmeStartDate: users.programmeStartDate }).from(users).where(eq(users.subscriptionStatus, "active"));
-    let sent = 0;
-    for (const client of activeClients) {
-      if ((client.totalWorkoutsCompleted || 0) < 3) continue;
-      // Atomic daily-slot claim replaces the non-atomic "already sent today" check.
-      if (!(await claimDailySlot(client.id, "monthly_nps"))) continue;
-      const name = client.name?.split(" ")[0] || "there";
-      await sendWhatsApp(client.phoneNumber, `${name}, one question:\n\nHow likely are you to recommend Coach K to a friend? Reply with a number from 1 to 10.\n\n1 = Not at all. 10 = Definitely.\n\nHonest answer only — I read every one.`);
-      sent++;
-    }
-    console.log(`[SCHEDULER] NPS surveys sent: ${sent}`);
-  } catch (err) { console.error("[SCHEDULER] NPS survey error:", err); }
-}
