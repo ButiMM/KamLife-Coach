@@ -178,10 +178,15 @@ jobs:
           OLDEST=$(aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT" | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
           if [ -z "$OLDEST" ]; then echo "No backups listed; keeping every tombstone"; exit 0; fi
           SINCE=$(date -u -d "$OLDEST -1 day" +%Y%m%d)
-          (aws s3 ls "s3://${R2_BUCKET}/tombstones/" --endpoint-url "$R2_ENDPOINT" || true) | awk '{print $4}' | while read -r key; do
-            d=$(echo "$key" | sed -n 's/^erased-\([0-9]\{8\}\)-.*/\1/p')
-            if [ -n "$d" ] && [ "$d" -lt "$SINCE" ]; then aws s3 rm "s3://${R2_BUCKET}/tombstones/${key}" --endpoint-url "$R2_ENDPOINT"; fi
-          done
+          # Each file is a full snapshot of the ids still needed, so once this run's file is saved every older
+          # one is redundant. Expiring files by their own date kept an id for two windows (#499 attack).
+          if [ "${{ steps.tombstones.outcome }}" = "success" ]; then
+            KEYS=$(aws s3 ls "s3://${R2_BUCKET}/tombstones/" --endpoint-url "$R2_ENDPOINT" | awk '{print $4}' | grep '^erased-' | sort)
+            NEWEST=$(echo "$KEYS" | tail -1)
+            for key in $KEYS; do
+              if [ "$key" != "$NEWEST" ]; then aws s3 rm "s3://${R2_BUCKET}/tombstones/${key}" --endpoint-url "$R2_ENDPOINT"; fi
+            done
+          fi
           CUT=$(date -u -d "$SINCE" +%Y-%m-%d)
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "DELETE FROM admin_events WHERE action = 'account_erased' AND performed_at < '${CUT}'"
 

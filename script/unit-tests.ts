@@ -10975,6 +10975,9 @@ test("#499: the confirmed erasure logs its id outside the database before any aw
   // and the deletion reply says so.
   const tprune = wf.slice(wf.indexOf("name: Prune tombstones no backup still needs"));
   assert.ok(tprune.indexOf("aws s3 rm") > 0 && tprune.includes("DELETE FROM admin_events WHERE action = 'account_erased'"), "old tombstones are deleted");
+  // Each file is a full snapshot, so only the newest survives a run that saved one; by-date expiry kept an id ~63 days.
+  assert.ok(tprune.includes('if [ "${{ steps.tombstones.outcome }}" = "success" ]') && tprune.includes('NEWEST=$(echo "$KEYS" | tail -1)'), "older snapshots go once this run's is saved");
+  assert.ok(doc.includes("INSERT INTO admin_events (action, meta) VALUES ('account_erased'"), "a replayed erasure is tombstoned again in the restored database");
   assert.ok(tprune.includes('if [ -z "$OLDEST" ]; then') && wf.indexOf("name: Prune tombstones") > wf.indexOf("name: Prune backups"), "only after the backup prune, and never with no backup list");
   assert.ok(code.includes("we also keep a random account number"), "the reply tells the client");
 });
