@@ -11004,15 +11004,6 @@ test("#92 every sentence askCoachK returns on failure is recognised as an unansw
     "CONTROL: a genuine answer is not an unavailable mouth");
 });
 
-await Promise.all(pending);
-
-console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
-if (failures.length > 0) {
-  console.log("\nFailures:");
-  console.log(failures.join("\n\n"));
-  process.exit(1);
-}
-console.log("✓ all unit checks passed\n");
 
 // ── #319 — ONE PROACTIVE SENDER ──────────────────────────────────────────────────────────────
 test("#319: a scheduled coaching message is held for a paused or non-coaching client, and every coaching job sends through the one door", async () => {
@@ -11060,3 +11051,13 @@ test("#506 evidence: usage stats are nearest-rank per client, and a logged templ
   assert.equal(templateOf(renderTemplateBody("kamlife_checking_in")), "kamlife_checking_in");
   assert.equal(templateOf("Morning Thandi — here's your brief. Protein at lunch."), null, "an ordinary freeform morning is not a template");
 });
+
+await Promise.all(pending);
+
+console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
+if (failures.length > 0) {
+  console.log("\nFailures:");
+  console.log(failures.join("\n\n"));
+  process.exit(1);
+}
+console.log("✓ all unit checks passed\n");
