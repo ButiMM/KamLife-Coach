@@ -17,7 +17,7 @@ import { runSundayWeeklyReport } from "./scheduler/jobs/weekly";
 import { runPhaseAdvancement } from "./scheduler/jobs/programme";
 import { runEarlyOnboarding, runStepSyncCatchup } from "./scheduler/jobs/onboarding";
 import { runSubscriptionExpiryCheck, runPaymentFailureRecovery, runSignupNudge, runWeeklyKpiReport, runAutoCalAdjust, runStepTargetAdaptation } from "./scheduler/jobs/business";
-import { runMondayProgress, runMondayGroceries } from "./scheduler/jobs/monday";
+import { runMondayProgress } from "./scheduler/jobs/monday";
 import { runCipUpdate } from "./scheduler/jobs/cip-update";
 import { runMonthlyNarrative } from "./scheduler/jobs/narrative";
 import { runSpendWatchdog } from "./scheduler/jobs/spend-watchdog";
@@ -234,14 +234,7 @@ export async function initScheduler(): Promise<void> {
   }, { timezone: "UTC" });
   cron.schedule("0 5 * * 1",     () => safe("runWeeklyKpiReport",     runWeeklyKpiReport, { cron: "0 5 * * 1" }),     { timezone: "UTC" }); // 7am SAST KPI report
   cron.schedule("0 5 * * 1",     () => safe("runPhaseAdvancement",    runPhaseAdvancement, { cron: "0 5 * * 1" }),    { timezone: "UTC" }); // 7am SAST phase check
-  cron.schedule("0 11 * * 1",    async () => {                        // 1pm SAST grocery list — early afternoon, in time to plan the week's shop without stacking on the morning
-    try {
-      const today = todaySAST();
-      if (hasRunToday("monday_groceries", today)) return;
-      saveState("monday_groceries", today);
-      await runMondayGroceries();
-    } catch (e) { console.error("[SCHEDULER] runMondayGroceries failed:", e); }
-  }, { timezone: "UTC" });
+  // The Monday grocery list is gone (founder, 30 Sep, #511): shopping lists only on request.
 
   // ── Weekly — Tuesday & Thursday ───────────────────────────────────────────
   // The Tue/Thu comeback fan-out is GONE (2026-08-19, Cut 6). Silence has one owner now — the
@@ -259,6 +252,10 @@ export async function initScheduler(): Promise<void> {
   // ── Weekly — Saturday ─────────────────────────────────────────────────────
 
   // ── Weekly — Sunday ───────────────────────────────────────────────────────
+  // THE WEEKLY REPORT (B4, "show it's working"). It was on the critical-jobs alert list above but had
+  // no schedule, so no client got it. 05:55 SAST, before
+  // the 06:00 morning check-in: on Sundays the report is the day's one scheduled message (#511).
+  cron.schedule("55 3 * * 0",    () => safe("runSundayWeeklyReport",  runSundayWeeklyReport, { cron: "55 3 * * 0" }),  { timezone: "UTC" });
   cron.schedule("0 20 * * 0",    () => safe("runCipUpdate",           runCipUpdate, { cron: "0 20 * * 0" }),           { timezone: "UTC" }); // 10pm SAST — rebuild all CIPs after the week closes
   cron.schedule("0 8 * * 0",     async () => {                        // 10am SAST auto cal adjust
     try {
