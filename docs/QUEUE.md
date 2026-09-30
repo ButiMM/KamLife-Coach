@@ -23,8 +23,13 @@
 
 - [x] #496 A quote addressed to someone else ("told her, 'you sound suicidal'") is that person's crisis (C6) — #497
 - [x] #342 Backups test-restored before they are published; deletion survives a restore (D4) — #494
-- [ ] #499 A deletion survives losing the live database too (D4, [harm]) — PR #500
-- [ ] #319 Lane 2: every scheduled message through one sender (B1–B12) — #501, #502 merged; #503 (Day 1 reply words), #504 (unscheduled jobs deleted) open
+- [x] #499 A deletion survives losing the live database too (D4, [harm]) — #500
+- [x] #319 Lane 2, first steps: every scheduled message through one sender (B1–B12) — #501, #502, #503, #504
+- [x] #506 Evidence admin view (D7, D8) — #513
+- [x] #507 / #508 drafts signed off by the founder (30 Sep) — #511, #512
+- [x] #511 decisions: one scheduled message a day and the weekly report scheduled (#517); monthly narrative retired (#519); photo/video beyond food frozen (no code)
+- [x] Diet break never ended: targets restored (A12, [harm]) — #518
+- [ ] #514 Consent and crisis wording (C6/C7, [harm]) — PR #522
 - [x] #488 One paid WhatsApp message per reply (D8) — #492
 - [x] #484 Twilio or Meta direct: numbers and a recommendation (D8) — #493
 - [x] #480 A friend's crisis quoted by the client is answered as a helper (C6) — #481
