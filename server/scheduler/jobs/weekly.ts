@@ -1,7 +1,7 @@
 import {
-  db, users, chatHistory, stepLogs, workoutLogs, weightLogs,
+  db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs,
   eq, gte, and, asc, isNotNull,
-  sendWhatsApp, canSendProactive, claimProactive,
+  canSendProactive, claimProactive,
   getActiveClients, isPaused,
   thisWeekUTC,
 } from "../shared";
@@ -14,7 +14,7 @@ import { getTrajectoryForUser } from "../../trajectory-report";
 import { runWeeklyRecaps } from "../../weekly-recap";
 import { generateMealPlan } from "../../meal-plan";
 import { mentionsForbidden } from "../../brain/reply-verifier";
-import { canonicalNextMove, recordCanonicalMoveOutbound } from "../proactive-decision";
+import { canonicalNextMove, recordCanonicalMoveOutbound, sendProactive } from "../proactive-decision";
 export async function runSundayWeeklyReport(): Promise<void> {
   console.log("[SCHEDULER] JOB: Sunday weekly report");
   const clients = await getActiveClients();
@@ -26,7 +26,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
       // One claim per client per week — covers the report, the shopping-list card, AND
       // the programme-week advance below, so a container recycle can't double any of them.
       if (!(await claimProactive(client.id, "sunday_report", thisWeekUTC(), { critical: true }))) continue;
-      const name = client.name || "there";
+      const name = (client.name || "there").split(" ")[0]; // first name: "Lerato", not the full name (B4)
       const [chats, workoutEntries, weightEntries, stepEntries] = await Promise.all([
         db.select().from(chatHistory).where(and(eq(chatHistory.userId, client.id), isNotNull(chatHistory.messageIn), gte(chatHistory.createdAt, weekAgo))),
         db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, weekAgo))),
@@ -68,23 +68,26 @@ export async function runSundayWeeklyReport(): Promise<void> {
         if (clientAgeDays < 2) continue; // just onboarded today — skip
         const quiet = await canonicalNextMove(client);
         if (quiet.line) {
-          const delivery = await sendWhatsApp(
-            client.phoneNumber, `${name}, nothing logged this week.\n\n${quiet.line}`,
-            undefined, weeklyTemplateFor(workoutEntries.length, 0),
-          );
-          await recordCanonicalMoveOutbound(client, quiet, delivery);
+          const delivery = await sendProactive(client, { claimed: "sunday_report" }, `${name}, nothing logged this week.\n\n${quiet.line}`,
+            { template: weeklyTemplateFor(workoutEntries.length, 0) });
+          if (delivery) await recordCanonicalMoveOutbound(client, quiet, delivery);
         }
         continue;
       }
       const daysWithLogs = new Set(chats.map(c => new Date(c.createdAt!).toDateString())).size;
       if (daysWithLogs < 3) {
         const thin = await canonicalNextMove(client);
-        const opener = `${name}, ${daysWithLogs} day${daysWithLogs !== 1 ? "s" : ""} logged this week. You're in it.`;
-        const delivery = await sendWhatsApp(
-          client.phoneNumber, thin.line ? `${opener}\n\n${thin.line}` : opener,
-          undefined, weeklyTemplateFor(workoutEntries.length, foodDaysFrom(chats)),
-        );
-        await recordCanonicalMoveOutbound(client, thin, delivery);
+        // THE WEEK BY NAME (B4, replay gate): what they actually ate, from the meal rows, and one small focus when
+        // the decision holds, instead of a count and "You're in it."
+        const weekMeals = await db.select({ items: mealLogs.items }).from(mealLogs)
+          .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, weekAgo))).orderBy(asc(mealLogs.loggedAt));
+        const foods = Array.from(new Set(weekMeals.flatMap(r => (Array.isArray(r.items) ? r.items : [])
+          .map((i: any) => String(i?.name || "").replace(/\s*\(.*?\)/g, "").toLowerCase()).filter(Boolean)))).slice(0, 4);
+        const opener = `${name}, ${daysWithLogs} day${daysWithLogs !== 1 ? "s" : ""} on record this week${foods.length ? ` — ${foods.join(", ")}` : ""}.`;
+        const focus = `Next week: ${daysWithLogs + 1} days on record. That's the whole goal.`;
+        const delivery = await sendProactive(client, { claimed: "sunday_report" }, `${opener}\n\n${thin.line || focus}`,
+          { template: weeklyTemplateFor(workoutEntries.length, foodDaysFrom(chats)) });
+        if (delivery) await recordCanonicalMoveOutbound(client, thin, delivery);
         continue;
       }
 
@@ -210,16 +213,17 @@ export async function runSundayWeeklyReport(): Promise<void> {
       else if (totalScore >= 60) lines.push(``, `Solid week, ${name}.`);
       else lines.push(``, `${name}, below your best but you are still here. That matters.`);
       if (move.line) lines.push(``, move.line);
-      // One-tap acceptance — routes to the deterministic step-target updater. Client's call.
-      if (stepAdj) lines.push(``, `[BUTTONS:Set steps to ${stepAdj.newTarget}]`);
+      // The words to reply with, routed to the deterministic step-target updater. Client's call. This was a
+      // [BUTTONS:…] marker, which only the reply path renders: the scheduled send printed it as-is.
+      if (stepAdj) lines.push(``, `Reply *Set steps to ${stepAdj.newTarget}* to take it.`);
 
       // OUTSIDE THE WINDOW, THE WEEK'S NUMBERS STILL LAND (Cut 6, 2026-09-14). kamlife_weekly_check
       // was approved and wired with no call site, so a client who had not messaged in 24 hours got
       // the generic check-in instead of their 7-day review — and this job recorded a delivery and
       // a canonical move against it. The template carries the two counts the review is built on.
       const weeklyTemplate = weeklyTemplateFor(completedSessions, foodDays);
-      const delivery = await sendWhatsApp(client.phoneNumber, lines.join("\n"), undefined, weeklyTemplate);
-      await recordCanonicalMoveOutbound(client, move, delivery);
+      const delivery = await sendProactive(client, { claimed: "sunday_report" }, lines.join("\n"), { template: weeklyTemplate });
+      if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
 
       try {
         const list = getShoppingList(budgetTierWeekly, weekNum + 1, clientGoalWeekly, foodConstraints(client as any));
@@ -231,7 +235,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
           personalization,
           constraints: foodConstraints(client as any),
         });
-        await sendWhatsApp(client.phoneNumber, shoppingMsg);
+        await sendProactive(client, { claimed: "sunday_report" }, shoppingMsg);
       } catch (shopErr) { console.warn(`[SCHEDULER] Shopping list error — ${client.phoneNumber}:`, shopErr); }
 
       try {
@@ -271,8 +275,6 @@ export async function runSundayMealPlan(): Promise<void> {
         : 999;
       if (daysSilent > 10) continue;
       if (!canSendProactive(client.id)) continue;
-      if (!(await claimProactive(client.id, "sunday_meal_plan", thisWeekUTC()))) continue;
-
       const name = (client.name || "there").split(" ")[0];
       const recentFoodLogs = await db.select({ messageIn: chatHistory.messageIn })
         .from(chatHistory)
@@ -297,8 +299,7 @@ export async function runSundayMealPlan(): Promise<void> {
       // loss". getGoalProfile gives the honest client-facing label for all five goals.
       const goalLabel = getGoalProfile(client.goalType).label.toLowerCase();
       const intro = `*${name} — your 3-day plan for the week ahead:*\n\nBuilt for your ${goalLabel} goal. Screenshot it, save it, use it. Prep protein on Sunday and your whole week is easier.\n\n---\n\n`;
-      await sendWhatsApp(client.phoneNumber, intro + plan);
-      sent++;
+      if (await sendProactive(client, { job: "sunday_meal_plan", window: thisWeekUTC() }, intro + plan)) sent++;
     } catch (err) { console.error(`[SCHEDULER] Sunday meal plan error — ${client.phoneNumber}:`, err); }
   }
   console.log(`[SCHEDULER] Sunday meal plans sent: ${sent}`);

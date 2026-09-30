@@ -71,8 +71,20 @@ check("…and so are the night shifts", !!pre && /night shift/.test(pre.facts));
 check("the copy is still made with no model call (the network throws)", true);
 
 console.log("\n4. A CLIENT WITH NOTHING IN THE OLD STORES");
-const [e] = await db.insert(schema.users).values({ ...base, phoneNumber: EMPTY, name: "Empty Client", goalType: null } as any).returning();
-check("nothing is invented (a column default like trainingMode 'home' is not something they told us)", (await backfillFromOldStores(e)) === 0 && (await factRows(e.id)).length === 0 && (await factsForCoach(e.id)) === "");
+// What onboarding writes for a client who never answered (#456): "office" and "standard" are code's stand-ins.
+const [e] = await db.insert(schema.users).values({ ...base, phoneNumber: EMPTY, name: "Empty Client", goalType: null, lifeSituation: "office", workSchedule: "standard" } as any).returning();
+check("nothing is invented (a column default like trainingMode 'home', or onboarding's 'office', is not something they told us)", (await backfillFromOldStores(e)) === 0 && (await factRows(e.id)).length === 0 && (await factsForCoach(e.id)) === "", JSON.stringify((await factRows(e.id)).map(r => r.statement)));
+// A withheld state (safety.ts writes it to users.life_situation) is the safety owner's, never a "life/work" fact.
+await pool.query("DELETE FROM client_facts WHERE user_id = $1", [e.id]); _resetBackfillCache();
+await pool.query("UPDATE users SET life_situation = 'disordered_eating' WHERE id = $1", [e.id]);
+const [e2] = await db.select().from(schema.users).where(eq(schema.users.id, e.id));
+check("a withheld state in life_situation is not copied as something they told us", (await backfillFromOldStores(e2)) === 0 && !(await factsForCoach(e.id)).includes("disordered"));
+// What they DID say at onboarding ("I'm breastfeeding") is kept (#475 attack).
+await pool.query("DELETE FROM client_facts WHERE user_id = $1", [e.id]); _resetBackfillCache();
+await pool.query("UPDATE users SET life_situation = 'postpartum_breastfeeding' WHERE id = $1", [e.id]);
+const [e3] = await db.select().from(schema.users).where(eq(schema.users.id, e.id));
+await backfillFromOldStores(e3);
+check("a breastfeeding client stated at onboarding still reaches the coach", /breastfeeding/.test(await factsForCoach(e.id)));
 
 console.log("\n5. ERASED WITH THE CLIENT");
 await db.delete(schema.users).where(eq(schema.users.id, u.id));
@@ -87,9 +99,10 @@ const said = [
   { messageIn: "Can't train in the evenings, I work nights at Bara", messageOut: "noted", createdAt: new Date("2026-09-01T07:00:00+02:00") },
 ];
 for (const m of said) await db.insert(schema.chatHistory).values({ userId: h.id, intent: "GPT", ...m } as any);
-let calls = 0, sent = "";
+let calls = 0, sent = "", failNext = 0;
 globalThis.fetch = (async (_: any, init?: any) => {
   calls++; sent = String(init?.body || "");
+  if (failNext > 0) { failNext--; return new Response(JSON.stringify({ error: { message: "upstream timeout" } }), { status: 503, headers: { "content-type": "application/json" } }); }
   const facts = [
     { kind: "injury", subject: "left knee", statement: "my left knee flares up on the stairs" },     // verbatim, their voice
     { kind: "schedule", subject: "night shifts", statement: "I work nights at Bara" },                  // verbatim, their voice
@@ -112,7 +125,40 @@ check("learned once: a later process makes no second call", (await learnFromHist
 await db.delete(schema.users).where(eq(schema.users.id, h.id));
 check("erased with the client", ((await db.select({ n: sql<number>`count(*)::int` }).from(schema.clientFacts).where(eq(schema.clientFacts.userId, h.id)))[0]?.n ?? 1) === 0);
 
-for (const p of [PHONE, EMPTY, RACE, HIST]) await pool.query("DELETE FROM users WHERE phone_number = $1", [p]);
+console.log("\n7. #467 A HISTORY WITH NO FACTS IS STILL READ ONCE, EVER: A DEPLOY DOES NOT PAY FOR IT AGAIN");
+const NOFACT = "whatsapp:+27829414005";
+await pool.query("DELETE FROM users WHERE phone_number = $1", [NOFACT]);
+const [nf] = await db.insert(schema.users).values({ ...base, phoneNumber: NOFACT, name: "Quiet Logger" } as any).returning();
+await db.insert(schema.chatHistory).values({ userId: nf.id, intent: "GPT", messageIn: "two eggs and toast for breakfast", messageOut: "ok" } as any);
+// The same stub as section 6 (the SDK keeps the fetch it was built with): none of its facts is in this
+// client's words, so nothing is learned, which is exactly the client the in-memory guard used to re-read.
+const before = calls;
+const nfLearned = await learnFromHistory(nf.id);
+_resetHistoryTried(); // a deploy: the in-memory set is gone
+await learnFromHistory(nf.id);
+const nfCalls = calls - before;
+check("one call, and none after the restart, although nothing was learned", nfLearned === 0 && nfCalls === 1, `calls=${nfCalls} learned=${nfLearned}`);
+// A failed call is not an answer: the claim is released and the NEXT TURN of the same process retries (#472 attack).
+await pool.query("UPDATE users SET history_learned_at = NULL WHERE id = $1", [nf.id]);
+_resetHistoryTried();
+const beforeFail = calls;
+failNext = 2; // the SDK retries once: both attempts fail
+await learnFromHistory(nf.id);
+const releasedAfterFailure = (await pool.query("SELECT history_learned_at FROM users WHERE id = $1", [nf.id])).rows[0].history_learned_at === null;
+await learnFromHistory(nf.id);
+check("a failed call releases the claim, and the next turn retries in the same process", releasedAfterFailure && calls - beforeFail >= 3
+  && (await pool.query("SELECT history_learned_at FROM users WHERE id = $1", [nf.id])).rows[0].history_learned_at !== null, `calls=${calls - beforeFail}`);
+await pool.query("UPDATE users SET history_learned_at = NULL WHERE id = $1", [nf.id]);
+_resetHistoryTried();
+const beforeCap = calls;
+process.env.HISTORY_DAILY_CAP = "0";
+await learnFromHistory(nf.id);
+check("the daily cap is spent: no call, and the client is not marked learned", calls === beforeCap
+  && (await pool.query("SELECT history_learned_at FROM users WHERE id = $1", [nf.id])).rows[0].history_learned_at === null);
+delete process.env.HISTORY_DAILY_CAP;
+await pool.query("DELETE FROM users WHERE phone_number = $1", [NOFACT]);
+
+for (const p of [PHONE, EMPTY, RACE, HIST])await pool.query("DELETE FROM users WHERE phone_number = $1", [p]);
 await pool.end();
 console.log(`\npg-record-backfill-acceptance: ${failed ? `FAILED — ${failed} assertion(s)` : "GREEN"}`);
 process.exit(failed ? 1 : 0);

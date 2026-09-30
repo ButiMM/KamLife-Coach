@@ -15,6 +15,7 @@ import { humanizeReply, stripInternalMarkers } from "../reply-hygiene";
 import { prepareOutbound, prepareReactiveOutbound } from "../outbound-authority";
 import { finaliseInteraction } from "../handlers/chat-log";
 import type { DeliveryResult } from "../outbound-delivery";
+import { splitWhatsAppBody } from "../utils";
 
 // The sender number and the Twilio client both moved to outbound-delivery.ts with Cut B2. This
 // file resolved its own copy of each, which is how one door can end up sending from a number the
@@ -352,42 +353,8 @@ function escapeXml(text: string): string {
 // Twilio silently rejected, while the separate image still delivered — producing the
 // "Today's workout returns a photo and no text" bug. 1500 leaves margin under 1600.
 const TWILIO_WHATSAPP_BODY_LIMIT = 1500;
-function splitMessage(text: string, maxLen = TWILIO_WHATSAPP_BODY_LIMIT): string[] {
-  if (/\n\n---\n\n/.test(text)) {
-    const days = text.split(/\n\n---\n\n/);
-    const result: string[] = [];
-    for (const day of days) {
-      if (day.trim()) result.push(...splitMessage(day.trim(), maxLen));
-    }
-    return result;
-  }
-  if (text.length <= maxLen) return [text];
-  const lines = text.split("\n");
-  const chunks: string[] = [];
-  let current = "";
-  for (const line of lines) {
-    const candidate = current ? current + "\n" + line : line;
-    if (candidate.length > maxLen) {
-      if (current) chunks.push(current.trim());
-      if (line.length > maxLen) {
-        let remaining = line;
-        while (remaining.length > maxLen) {
-          const cutAt = remaining.lastIndexOf(" ", maxLen);
-          const breakAt = cutAt > 0 ? cutAt : maxLen;
-          chunks.push(remaining.slice(0, breakAt).trim());
-          remaining = remaining.slice(breakAt).trim();
-        }
-        current = remaining;
-      } else {
-        current = line;
-      }
-    } else {
-      current = candidate;
-    }
-  }
-  if (current.trim()) chunks.push(current.trim());
-  return chunks.filter(Boolean);
-}
+// One owner for bubble splitting and packing (#488): utils.ts splitWhatsAppBody, shared with the scheduler.
+const splitMessage = (text: string, maxLen = TWILIO_WHATSAPP_BODY_LIMIT): string[] => splitWhatsAppBody(text, maxLen);
 
 // ── Per-phone album photo coalescing ──────────────────────────────────────────
 // When a client picks several photos from their gallery and sends them together,

@@ -288,12 +288,15 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
   // in the last 2 hours as one meal.
   if (recentDup.length === 0 && !params.allowIntentionalRepeat) {
     const retryWindow = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    const recentRows = await db.select({ id: mealLogs.id, items: mealLogs.items })
+    const recentRows = await db.select({ id: mealLogs.id, items: mealLogs.items, label: mealLogs.mealLabel })
       .from(mealLogs)
       .where(and(eq(mealLogs.userId, params.userId), gte(mealLogs.loggedAt, retryWindow)))
       .limit(8);
     const newerNames = correctedItems.map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean);
+    // A DIFFERENT MEAL IS NOT A RETRY (#310, gate): "a small burger for lunch" then "a large burger for dinner" was
+    // read as a resend of the lunch, so dinner was never written and the client still got "Got it — Burger".
     const hit = recentRows.find(r => {
+      if (params.mealLabel && r.label && r.label !== params.mealLabel) return false;
       const older = Array.isArray(r.items) ? (r.items as any[]).map(i => String(i?.name || i?.foodName || "")).filter(Boolean) : [];
       return isSameMealRetry(older, newerNames);
     });

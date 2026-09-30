@@ -1,13 +1,13 @@
 import {
   db, users, stepLogs, workoutLogs, mealLogs,
   eq, gte, and, desc, sql,
-  sendWhatsApp, canSendProactive, canSendRoutineNudge, recordProactiveSend, claimDailySlot,
+  canSendProactive, canSendRoutineNudge, recordProactiveSend,
   getActiveClients, isPaused, dayStart, getTodayLogs,
   TRAINING_SCHEDULES, todaySAST,
 } from "../shared";
 import { readHealthState } from "../../health-state";
-import { sendWhatsAppButtons } from "../../twilio-interactive";
-import { canonicalNextMove, recordCanonicalMoveOutbound } from "../proactive-decision";
+import { readHeldConstraints } from "../../held-constraints";
+import { canonicalNextMove, recordCanonicalMoveOutbound, sendProactive } from "../proactive-decision";
 import { sastHour } from "../../sast";
 
 /**
@@ -29,11 +29,14 @@ export function eveningRecognition(f: {
   steps: number;
   stepsTarget: number;
   sick: boolean;
+  /** What is on record today, as "lunch: pap and chicken" — so the recap names the day, not just a number. */
+  meals?: string[];
 }): string {
   if (f.sick) return `Rest up, ${f.name}. No targets today. Your data is saved — we pick up when you're better.`;
 
   const done: string[] = [];
   if (f.workedOut) done.push("session done");
+  if (f.meals?.length) done.push(f.meals.join("; "));
   if (f.proteinLogged > 0) done.push(`${f.proteinLogged}g protein`);
   else if (f.foodLogged) done.push("food logged");
   if (f.steps > 0) done.push(`${f.steps.toLocaleString()} steps`);
@@ -73,10 +76,8 @@ export async function runEveningAccountability(): Promise<void> {
       // a client who told us at 08:00 that they are not training tonight is not told to train.
       if (todayLogs.length === 0) {
         const empty = await canonicalNextMove(client, { hour: sastHour() });
-        if (empty.line && await claimDailySlot(client.id, "evening")) {
-          const delivery = await sendWhatsApp(phone, `${name}, haven't heard from you today — no stress.\n\n${empty.line}`);
-          await recordCanonicalMoveOutbound(client, empty, delivery);
-        }
+        const delivery = empty.line ? await sendProactive(client, { job: "evening" }, `${name}, haven't heard from you today — no stress.\n\n${empty.line}`) : null;
+        if (delivery) await recordCanonicalMoveOutbound(client, empty, delivery);
         continue;
       }
 
@@ -130,6 +131,13 @@ export async function runEveningAccountability(): Promise<void> {
       // Now: the facts are recognition, and the single instruction is the canonical one — which
       // reads the same held constraints the morning brief reads.
       const move = await canonicalNextMove(client, { hour: sastHour() });
+      // THE DAY BY NAME (B2, replay gate: "Lerato, today: 56g protein" to a client who logged pap and chicken).
+      const todayMeals = await db.select({ label: mealLogs.mealLabel, items: mealLogs.items })
+        .from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, todayStart))).orderBy(mealLogs.loggedAt);
+      const meals = todayMeals.map(r => {
+        const foods = (Array.isArray(r.items) ? r.items : []).map((i: any) => String(i?.name || "").replace(/\s*\(.*?\)/g, "").toLowerCase()).filter(Boolean);
+        return foods.length ? `${r.label || "a meal"} was ${foods.join(" and ")}` : "";
+      }).filter(Boolean);
       const recap = eveningRecognition({
         name,
         workedOut,
@@ -139,6 +147,7 @@ export async function runEveningAccountability(): Promise<void> {
         steps: stepCount,
         stepsTarget,
         sick,
+        meals,
       });
 
       // THE BUTTONS SURVIVE; THE DECISION TO PRESS DOES NOT. A one-tap "Doing it tonight / Swap to
@@ -147,22 +156,19 @@ export async function runEveningAccountability(): Promise<void> {
       // which is a calendar, not a coach. It now fires when, and only when, the decision owner has
       // actually chosen `train`, so a declined or sick day never renders it.
       if (move.action.kind === "train" && isTrainingDay) {
-        if (await claimDailySlot(client.id, "evening")) {
-          const delivery = await sendWhatsAppButtons(phone, `${recap}\n\n${move.line}`, [
-            "Doing it tonight",
-            "Swap to tomorrow",
-            "Rest day today",
-          ], { proactive: true });
-          await recordCanonicalMoveOutbound(client, move, delivery);
-        }
+        const delivery = await sendProactive(client, { job: "evening" }, `${recap}\n\n${move.line}`,
+          { buttons: ["Doing it tonight", "Swap to tomorrow", "Rest day today"] });
+        if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
         continue;
       }
 
-      const msg = [recap, move.line].filter(Boolean).join("\n\n");
-      if (msg && await claimDailySlot(client.id, "evening")) {
-        const delivery = await sendWhatsApp(phone, msg);
-        await recordCanonicalMoveOutbound(client, move, delivery);
-      }
+      // No move chosen (a present client is held, not nagged): one light question about the rest of the day, the
+      // evening twin of the morning's breakfast ask. Never when dinner is in or they closed the food day.
+      const dinnerIn = todayMeals.some(r => /dinner|supper/i.test(String(r.label || "")));
+      const ask = !move.line && !sick && !dinnerIn && !(await readHeldConstraints(phone, client)).foodDayClosed ? "What's dinner looking like tonight?" : "";
+      const msg = [recap, move.line || ask].filter(Boolean).join("\n\n");
+      const delivery = msg ? await sendProactive(client, { job: "evening" }, msg) : null;
+      if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
     } catch (err) {
       console.error(`[SCHEDULER] Evening accountability error — ${client.phoneNumber}:`, err);
     }
