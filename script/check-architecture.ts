@@ -32,9 +32,9 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 236,
+  modules: 235, // 30 Sep (#511): jobs/narrative.ts retired
   handlerFiles: 29,
-  cronRegistrations: 25,
+  cronRegistrations: 24, // 30 Sep (#511): the monthly narrative cron retired
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
   messageDeciders: 32,
   /** `looksLikeX` predicates: hand-written guesses at intent. */
@@ -246,7 +246,7 @@ const AT_RISK_BUDGET = 3;
 // was allowed stays on record, and the frozen-budget check below measures only the raises still owed.
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string; paidBack?: string }> = [
   {
-    key: "modules", from: 235, to: 236, date: "2026-09-24",
+    key: "modules", from: 235, to: 236, date: "2026-09-24", paidBack: "2026-09-30 (#511): modules fell to 235 when jobs/narrative.ts was retired",
     why: "THE NEW COACH (#272, ORDERS §4 Steps 4-5). server/core/coach.ts is the understanding step and the one "
       + "composer, running in read-only shadow. It is the module every switched message family will exit through; "
       + "each switch PR deletes that family's old handler exits (docs/mouths.json falls with it). #334 (PR #352) "

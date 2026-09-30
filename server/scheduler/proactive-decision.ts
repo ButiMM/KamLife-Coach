@@ -272,8 +272,6 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
   { job: "runSpendWatchdog", file: "spend-watchdog", cls: "OPERATIONAL", because: "Cost alert to the founder." },
   { job: "runMediaJobRecovery", file: "media-recovery", cls: "OPERATIONAL",
     because: "Apologises for a failed media job and asks for a resend. A system apology, not coaching." },
-  { job: "runMonthlyNarrative", file: "narrative", cls: "RECOGNITION",
-    because: "The month told back to them as a story." },
   { job: "runDueReminders", file: "reminders", cls: "RESOURCE",
     because: "Replays a reminder the CLIENT set, in their own words. Ours to deliver, not to re-decide." },
 ] as const;
