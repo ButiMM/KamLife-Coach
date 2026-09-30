@@ -18,6 +18,7 @@ import { turnMutation, turnState, logChat } from "./chat-log";
 import { adjustFoodsForSegment, rescaleLedgerItem } from "../portion-memory";
 // The ledger's own "what did this row hold" reader — see the unplaceable-correction reply below.
 import { foodsOf } from "../day-ledger-core";
+import { explicitMealSlot } from "../understanding/actions";
 
 /**
  * THE SAST DAY A CORRECTION NAMES, when it names one earlier than today (#164).
@@ -149,15 +150,20 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     // PostgreSQL: Monday kept its toast and Wednesday gained the rice. A move is different and is
     // left alone: there the client is telling us the newest meal belongs on another day.
     const correctionDay = plan.moves ? null : namedPastDay(m);
-    const [row] = await db.select({
+    // …AND SO DOES THE MEAL THEY NAMED (#300, #466 attack). "Breakfast wasn't oats, it was two eggs"
+    // after a logged lunch edited lunch, the newest meal. The slot comes from the new coach's read
+    // when it ran, else from the words; a named slot with no row falls back to the newest, as before.
+    const namedSlot = plan.moves ? null : (read?.meal ?? explicitMealSlot(m));
+    const scope = correctionDay
+      ? and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, correctionDay),
+            lt(mealLogs.loggedAt, new Date(correctionDay.getTime() + 86_400_000)))
+      : eq(mealLogs.userId, user.id);
+    const pick = (where: any) => db.select({
       id: mealLogs.id, raw: mealLogs.rawMessage, label: mealLogs.mealLabel, at: mealLogs.loggedAt,
       items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
-    }).from(mealLogs)
-      .where(correctionDay
-        ? and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, correctionDay),
-              lt(mealLogs.loggedAt, new Date(correctionDay.getTime() + 86_400_000)))
-        : eq(mealLogs.userId, user.id))
-      .orderBy(desc(mealLogs.loggedAt)).limit(1);
+    }).from(mealLogs).where(where).orderBy(desc(mealLogs.loggedAt)).limit(1);
+    let [row] = namedSlot ? await pick(and(scope, eq(mealLogs.mealLabel, namedSlot))) : [];
+    if (!row) [row] = await pick(scope);
     if (row) {
       // ── A CORRECTION IS PRICED BY THE QUANTITY AUTHORITY, NOT BY THE TABLE ROW (C11) ────────
       //

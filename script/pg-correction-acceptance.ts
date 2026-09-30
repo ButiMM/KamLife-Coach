@@ -97,6 +97,20 @@ chk(!!monAfter && monAfter.id === monBefore.id && monAfter.corrected === true, `
 chk(snap(wedAfter) === wedBefore, `Wednesday, which shares a food name, is untouched`);
 show("AFTER ADJACENT-DAY CORRECTION", afterAdj);
 
+// ── THE MEAL THEY NAMED (#300, #466 attack) ──────────────────────────────────────────────────
+// "Breakfast wasn't oats" after a logged lunch edited lunch, the newest meal.
+REAL("\n=== A NAMED OLDER MEAL IS THE ONE CORRECTED ===");
+await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [u.id]);
+await say("I had oats for breakfast.");
+await say("I had a chicken wrap for lunch.");
+const rNamed = await say("Breakfast wasn't oats, it was two eggs and toast.");
+const named = await rows(); show("AFTER NAMED-MEAL CORRECTION", named);
+const bf = named.find((r: any) => r.meal_label === "breakfast"), ln = named.find((r: any) => r.meal_label === "lunch");
+const low = (r: any) => names(r || {}).join(" ").toLowerCase();
+chk(!!bf && /egg/.test(low(bf)) && /toast/.test(low(bf)) && !/oat/.test(low(bf)), `breakfast became eggs and toast: ${JSON.stringify(names(bf || {}))}`);
+chk(!!ln && /wrap/.test(low(ln)) && !/egg|toast/.test(low(ln)), `lunch kept its wrap: ${JSON.stringify(names(ln || {}))}`);
+chk(/egg/i.test(rNamed) && /toast/i.test(rNamed), `the reply confirms the corrected breakfast: ${JSON.stringify(rNamed.slice(0, 200))}`);
+
 REAL(`\npg-correction-acceptance: ${failed === 0 ? "GREEN — all checks passed" : `RED — ${failed} check(s) failed`}`);
 await pool.end();
 process.exit(failed === 0 ? 0 : 1);

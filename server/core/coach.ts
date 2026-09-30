@@ -249,14 +249,15 @@ export function coreWave2For(phone: string): boolean {
  * burger, not pap" → pap → burger); the proven correction engine (food-log-mgmt applyCorrection, priced by the
  * quantity authority) does the write. null = the deterministic parse stands, exactly as before.
  */
-export async function correctionRead(phone: string, message: string): Promise<{ from: string; to: string } | null> {
+export async function correctionRead(phone: string, message: string): Promise<{ from: string; to: string; meal?: string } | null> {
   if (!coreWave2For(phone)) return null;
   try {
     const pre = await readPreTurn(phone, message);
     if (!pre) return null;
     const read = await understand(await openaiClient(), message, pre.known);
-    const a = (read.u?.actions ?? []).find(x => x.type === "CORRECT_MEAL") as { from?: string; to?: string } | undefined;
-    return a?.from && a?.to ? { from: a.from.toLowerCase(), to: a.to.toLowerCase() } : null;
+    const a = (read.u?.actions ?? []).find(x => x.type === "CORRECT_MEAL") as { from?: string; to?: string; meal?: string } | undefined;
+    // The meal they named travels too (#466 attack): without it the writer edited the newest meal.
+    return a?.from && a?.to ? { from: a.from.toLowerCase(), to: a.to.toLowerCase(), ...(a.meal ? { meal: a.meal } : {}) } : null;
   } catch (e) {
     console.warn("[CORE_WAVE2] correction read failed, the parser stands:", (e as Error)?.message || e);
     return null;
