@@ -150,6 +150,18 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 
 ## 6. Roles
 
+**Responsibilities from 30 Sep (founder decision). One owner per area, so no one does 20 things:**
+| Area | Owner | Where it lives |
+|---|---|---|
+| Engineering, build orders, architecture, repo | **CTO (Claude, this chat)** | `docs/ORDERS.md`, `CLAUDE.md`, #391 |
+| Building | **Claude Code** | PRs |
+| Attacks and code reviews | **Codex** | PR comments (`AGENTS.md`) |
+| Administration: Twilio/Meta templates and verification, WhatsApp billing, payments setup, POPIA paperwork | **Codex, with the founder** | issues labelled `admin` |
+| Marketing, market research, positioning | **A separate room** (not the CTO chat) | its own chat; decisions recorded in `docs/SYSTEM.md` |
+| Daily independent review | **Grok** | `docs/GROK.md` |
+**Shared memory for every room:** `docs/SYSTEM.md` (what exists and what's decided). Nobody asks the founder something that's recorded there.
+
+
 **Grok (independent reviewer, fixed rhythm):** a daily product review at ~07:00, plus a switch review whenever a `switch` PR opens. Prompts and rhythm are in `docs/GROK.md`. The CTO triages every review into the three piles and files the gaps onto `COVERAGE.md` rows.
 
 **Lean verification (founder decision, 25 Sep): the builder's capacity comes first.**
