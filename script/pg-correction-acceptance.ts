@@ -111,6 +111,16 @@ chk(!!bf && /egg/.test(low(bf)) && /toast/.test(low(bf)) && !/oat/.test(low(bf))
 chk(!!ln && /wrap/.test(low(ln)) && !/egg|toast/.test(low(ln)), `lunch kept its wrap: ${JSON.stringify(names(ln || {}))}`);
 chk(/egg/i.test(rNamed) && /toast/i.test(rNamed), `the reply confirms the corrected breakfast: ${JSON.stringify(rNamed.slice(0, 200))}`);
 
+// A named meal with no entry must not rewrite another meal (#466 attack at 3766151).
+REAL("\n=== A NAMED MEAL THAT ISN'T THERE WRITES NOTHING ===");
+await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [u.id]);
+await say("I had oats and yoghurt for lunch.");
+const lunchBefore = snap((await rows()).find((r: any) => r.meal_label === "lunch") || {});
+const rMissing = await say("Breakfast wasn't oats, it was two eggs.");
+const lunchAfter = snap((await rows()).find((r: any) => r.meal_label === "lunch") || {});
+chk(lunchAfter === lunchBefore, "lunch is untouched when no breakfast was logged");
+chk(/couldn't find a breakfast/i.test(rMissing) && !/fixed/i.test(rMissing), `the reply says no breakfast was found: ${JSON.stringify(rMissing.slice(0, 160))}`);
+
 REAL(`\npg-correction-acceptance: ${failed === 0 ? "GREEN — all checks passed" : `RED — ${failed} check(s) failed`}`);
 await pool.end();
 process.exit(failed === 0 ? 0 : 1);

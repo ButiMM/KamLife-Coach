@@ -5,7 +5,7 @@
 
 import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
-import { eq, and, gte, lt, desc, asc } from "drizzle-orm";
+import { eq, and, gte, lt, desc, asc, isNull } from "drizzle-orm";
 import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection, isRetroactiveMeal, parseMealDate, mealDateLabel } from "../utils";
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
@@ -152,7 +152,9 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     const correctionDay = plan.moves ? null : namedPastDay(m);
     // …AND SO DOES THE MEAL THEY NAMED (#300, #466 attack). "Breakfast wasn't oats, it was two eggs"
     // after a logged lunch edited lunch, the newest meal. The slot comes from the new coach's read
-    // when it ran, else from the words; a named slot with no row falls back to the newest, as before.
+    // when it ran, else from the words. A named slot with no row may fall back only to a meal logged
+    // WITHOUT a slot (it may be the one they mean), never to one labelled as another meal: that
+    // rewrote lunch and replied "Fixed" (#466 attack). Nothing left → say so, and write nothing.
     const namedSlot = plan.moves ? null : (read?.meal ?? explicitMealSlot(m));
     const scope = correctionDay
       ? and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, correctionDay),
@@ -163,7 +165,12 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
     }).from(mealLogs).where(where).orderBy(desc(mealLogs.loggedAt)).limit(1);
     let [row] = namedSlot ? await pick(and(scope, eq(mealLogs.mealLabel, namedSlot))) : [];
-    if (!row) [row] = await pick(scope);
+    if (!row) [row] = await pick(namedSlot ? and(scope, isNull(mealLogs.mealLabel)) : scope);
+    if (!row && namedSlot) {
+      const reply = `I couldn't find a ${namedSlot} on your record${correctionDay ? " for that day" : ""}. Tell me what you had for ${namedSlot} and I'll log it.`;
+      await logChat(user.id, m, reply, "FOOD_CORRECTION_UNRESOLVED").catch(() => {});
+      return reply;
+    }
     if (row) {
       // ── A CORRECTION IS PRICED BY THE QUANTITY AUTHORITY, NOT BY THE TABLE ROW (C11) ────────
       //
