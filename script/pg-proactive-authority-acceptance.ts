@@ -170,7 +170,6 @@ const clsOf = (job: string) => PROACTIVE_SENDERS.find(s => s.job === job)?.cls;
 const expected: Array<[string, string]> = [
   ["runWeightReminder", "RESOURCE"],
   ["runDietBreakCheck", "OPERATIONAL"],
-  ["runSupplementReminder", "RECOGNITION"],
   ["runStepSyncCatchup", "RESOURCE"],
 ];
 for (const [job, cls] of expected) chk(clsOf(job) === cls, `${job} → ${cls}`, `is ${clsOf(job)}`);

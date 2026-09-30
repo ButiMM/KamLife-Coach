@@ -150,6 +150,25 @@ chk(!/won'?t be charged|will not be charged/i.test(body) && /by hand|cancel/i.te
 chk(/payment records?/i.test(prompt) && !/\ball your data\b/i.test(prompt), "the confirmation prompt is true about the exception too", JSON.stringify(prompt));
 // "by hand" is only true if someone can see it: the unconfirmed cancel is flagged in the admin
 // view with the PayFast token, and without the deleted client's phone.
+const erased = await pool.query("SELECT target_phone, meta->>'userId' uid FROM admin_events WHERE action = 'account_erased' AND meta->>'userId' = $1", [u.id]);
+chk(erased.rowCount === 1 && erased.rows[0].target_phone === null, "#342: the erasure is recorded by account id only (no phone), so a restore can re-apply it", JSON.stringify(erased.rows));
+// #499 attack: the backup workflow's own tombstone SQL, run as written against the real schema (it named a
+// column admin_events does not have, so every run would have failed). Shell dates filled in; the prune in a
+// rolled-back transaction, and its cutoff in the past so it keeps this morning's row.
+{
+  const { readFileSync } = await import("node:fs");
+  const wf = readFileSync(".github/workflows/db-backup.yml", "utf-8");
+  const sqls = [...wf.matchAll(/-c "((?:SELECT|DELETE)[^"]*admin_events[^"]*)"/g)].map(x => x[1]
+    .replace("${SINCE}", "1970-01-01").replace("${CUT}", "1970-01-01"));
+  chk(sqls.length === 2, "the workflow saves and prunes tombstones with SQL this check can see", JSON.stringify(sqls));
+  const saved = await pool.query(sqls.find(q => q.startsWith("SELECT"))!);
+  chk(saved.rows.some((r: any) => /^[^,]+,\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(String(Object.values(r)[0])) && String(Object.values(r)[0]).startsWith(`${u.id},`)),
+    "the save query runs on the real schema and lists this erasure with its time", JSON.stringify(saved.rows));
+  const c = await pool.connect();
+  try { await c.query("BEGIN"); await c.query(sqls.find(q => q.startsWith("DELETE"))!); chk(true, "the prune query runs on the real schema"); }
+  catch (e: any) { chk(false, "the prune query runs on the real schema", e?.message); }
+  finally { await c.query("ROLLBACK"); c.release(); }
+}
 const flag = await pool.query("SELECT target_phone, meta->>'token' tok FROM admin_events WHERE action = 'account_deleted_subscription_cancel_unconfirmed' ORDER BY id DESC LIMIT 1");
 chk(flag.rowCount === 1 && flag.rows[0].tok === "tok-269" && flag.rows[0].target_phone === null,
   "the unconfirmed cancel is flagged for a manual cancel, with the token and no phone", JSON.stringify(flag.rows[0] || null));
@@ -163,6 +182,38 @@ await say(u.phoneNumber, "hi");
 const fresh = await pool.query("SELECT id, name, life_context, dream_goal FROM users WHERE phone_number = $1", [u.phoneNumber]);
 chk(fresh.rowCount === 1 && fresh.rows[0].id !== u.id && !fresh.rows[0].life_context && !fresh.rows[0].dream_goal,
   "a new message starts a genuinely new account with none of the old story", JSON.stringify(fresh.rows[0] || null));
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n3. THE RESTORE REPLAY ERASES EVERY LISTED CLIENT, EVEN AFTER ONE ALREADY GONE (#499)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The runbook's own script, as written, on the real schema. The first listed id (the client erased
+// above) is already absent from this "restored" database; the second (a resurrected client) must
+// still go, with its tombstone at the ORIGINAL time, and a second run must change nothing.
+{
+  const { readFileSync } = await import("node:fs");
+  const replaySql = readFileSync("script/erasure-replay.sql", "utf-8");
+  const back = await client(3);
+  const run = async () => {
+    const c = await pool.connect();
+    try {
+      await c.query("CREATE TEMP TABLE replay (uid uuid, at timestamp)");
+      await c.query("INSERT INTO replay VALUES ($1, '2026-01-05 08:00:00'), ($2, '2026-01-24 09:30:00'), ($2, '2026-01-24 09:30:00')", [u.id, back.id]);
+      await c.query(replaySql);
+      return null;
+    } catch (e: any) { await c.query("ROLLBACK").catch(() => {}); return e?.message || String(e); }
+    finally { await c.query("DROP TABLE IF EXISTS replay").catch(() => {}); c.release(); }
+  };
+  const err1 = await run();
+  chk(err1 === null, "the replay runs through an id that is already absent", String(err1));
+  const gone = await pool.query("SELECT 1 FROM users WHERE id = $1", [back.id]);
+  chk(gone.rowCount === 0, "and still erases the resurrected client listed after it");
+  const tomb = await pool.query("SELECT to_char(performed_at, 'YYYY-MM-DD HH24:MI:SS') t FROM admin_events WHERE action = 'account_erased' AND meta->>'userId' = $1", [back.id]);
+  chk(tomb.rowCount === 1 && tomb.rows[0].t === "2026-01-24 09:30:00", "its tombstone is written once, at the original erasure time", JSON.stringify(tomb.rows));
+  const before = (await pool.query("SELECT count(*)::int n FROM admin_events WHERE action = 'account_erased'")).rows[0].n;
+  const err2 = await run();
+  const after = (await pool.query("SELECT count(*)::int n FROM admin_events WHERE action = 'account_erased'")).rows[0].n;
+  chk(err2 === null && after === before, "running it twice changes nothing", `${err2} ${before}->${after}`);
+}
 
 REAL(`\npg-popia-deletion-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);
 await pool.end();

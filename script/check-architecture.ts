@@ -785,7 +785,7 @@ function unclassifiedSenders(): { missing: string[]; legacy: number } {
     const marks = [...src.matchAll(/^export (?:async )?function (\w+)/gm)];
     for (let i = 0; i < marks.length; i++) {
       const body = src.slice(marks[i].index!, marks[i + 1]?.index ?? src.length);
-      if (!/\bsendWhatsApp(?:Buttons)?\s*\(/.test(body)) continue;
+      if (!/\b(?:sendWhatsApp(?:Buttons)?|sendProactive)\s*\(/.test(body)) continue;
       if (!declared.has(marks[i][1])) missing.push(`${marks[i][1]}  server/scheduler/jobs/${f}`);
     }
   }

@@ -21,10 +21,25 @@ concurrency:
   group: db-backup
   cancel-in-progress: false
 
+# #342: a failed backup opens a GitHub issue (the phone alert needs secrets that aren't set).
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   backup:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    # #342: every backup is restored into this throwaway database before it counts as good.
+    services:
+      restore:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: restore
+          POSTGRES_DB: restore
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       # aws-cli (preinstalled on the runner) talks to R2 via these.
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -73,6 +88,24 @@ jobs:
           echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
           /usr/lib/postgresql/18/bin/pg_dump --version
 
+      # #499: every erased account id (ids only, nothing personal) goes to R2 on every run, into files
+      # the backup prune never touches, so a restore can re-apply deletions even after the live database
+      # and the app's logs are gone. Runs before the dump and even when the dump later fails.
+      # A tombstone lives exactly as long as a backup that predates it: ids erased since the day before
+      # the oldest backup in daily/. If that cannot be read, every id is kept (never fewer).
+      - name: Save erasure tombstones
+        id: tombstones
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          OLDEST=$( (aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT" || true) | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
+          SINCE=$([ -n "$OLDEST" ] && date -u -d "$OLDEST -1 day" +%Y-%m-%d || echo 1970-01-01)
+          T="erased-$(date -u +%Y%m%d-%H%M%S).txt"
+          psql -tA -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "SELECT (meta->>'userId') || ',' || to_char(performed_at, 'YYYY-MM-DD HH24:MI:SS') FROM admin_events WHERE action = 'account_erased' AND performed_at >= '${SINCE}' ORDER BY performed_at" > "/tmp/${T}"
+          aws s3 cp "/tmp/${T}" "s3://${R2_BUCKET}/tombstones/${T}" --endpoint-url "$R2_ENDPOINT"
+          echo "Saved $(wc -l < "/tmp/${T}") erased ids to tombstones/${T}"
+
       - name: Dump + compress
         if: steps.guard.outputs.skip != 'true'
         run: |
@@ -91,7 +124,27 @@ jobs:
             exit 1
           fi
 
-      - name: Upload to R2
+      - name: Test-restore the backup just made, before it is published (#342)
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          RESTORE_URL="postgresql://postgres:restore@127.0.0.1:5433/restore"
+          # Strict: any failed statement fails the restore, so a partial dump can't pass (#494 attack).
+          if ! gunzip -c "/tmp/${FILE}" | psql -q -v ON_ERROR_STOP=1 --single-transaction "$RESTORE_URL" > /dev/null 2> /tmp/restore.err; then
+            echo "::error::Backup ${FILE} did not restore cleanly"; tail -20 /tmp/restore.err
+            aws s3 cp "/tmp/${FILE}" "s3://${R2_BUCKET}/failed/${FILE}" --endpoint-url "$R2_ENDPOINT" || true
+            exit 1
+          fi
+          CLIENTS=$(psql -tA "$RESTORE_URL" -c "SELECT count(*) FROM users")
+          MEALS=$(psql -tA "$RESTORE_URL" -c "SELECT count(*) FROM meal_logs")
+          echo "Restored: ${CLIENTS} clients, ${MEALS} meal rows"
+          if [ "${CLIENTS:-0}" -lt 1 ]; then
+            echo "::error::Backup ${FILE} restored with no clients"
+            aws s3 cp "/tmp/${FILE}" "s3://${R2_BUCKET}/failed/${FILE}" --endpoint-url "$R2_ENDPOINT" || true
+            exit 1
+          fi
+
+      - name: Publish to R2 (only a backup that restored)
         if: steps.guard.outputs.skip != 'true'
         run: |
           set -euo pipefail
@@ -115,6 +168,47 @@ jobs:
               fi
             done
 
+      # #499 attack: an erased id is kept only while a backup that could bring the account back exists.
+      # Runs after the backup prune; with no readable backup list it deletes nothing. Not best-effort:
+      # a failure fails the run and opens the alert issue.
+      - name: Prune tombstones no backup still needs
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          OLDEST=$(aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT" | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
+          if [ -z "$OLDEST" ]; then echo "No backups listed; keeping every tombstone"; exit 0; fi
+          SINCE=$(date -u -d "$OLDEST -1 day" +%Y%m%d)
+          # Each file is a full snapshot of the ids still needed, so once this run's file is saved every older
+          # one is redundant. Expiring files by their own date kept an id for two windows (#499 attack).
+          if [ "${{ steps.tombstones.outcome }}" = "success" ]; then
+            KEYS=$(aws s3 ls "s3://${R2_BUCKET}/tombstones/" --endpoint-url "$R2_ENDPOINT" | awk '{print $4}' | grep '^erased-' | sort)
+            NEWEST=$(echo "$KEYS" | tail -1)
+            for key in $KEYS; do
+              if [ "$key" != "$NEWEST" ]; then aws s3 rm "s3://${R2_BUCKET}/tombstones/${key}" --endpoint-url "$R2_ENDPOINT"; fi
+            done
+          fi
+          CUT=$(date -u -d "$SINCE" +%Y-%m-%d)
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "DELETE FROM admin_events WHERE action = 'account_erased' AND performed_at < '${CUT}'"
+
+      - name: Fail the run if the tombstones were not saved (#499)
+        if: steps.guard.outputs.skip != 'true' && steps.tombstones.outcome == 'failure'
+        run: |
+          echo "::error::Erasure tombstones were not saved to R2"; exit 1
+
       - name: Summary
         if: steps.guard.outputs.skip != 'true'
         run: echo "Backup complete — daily/${FILE} on R2 (retention ${RETENTION_DAYS}d)"
+
+      - name: Alert the founder when a backup fails (#342)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="Database backup failed"
+          RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          OPEN=$(gh issue list --repo "${{ github.repository }}" --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$OPEN" ]; then
+            gh issue comment "$OPEN" --repo "${{ github.repository }}" --body "Failed again: $RUN"
+          else
+            gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body "The 6-hourly database backup (or its test-restore) failed: $RUN. Founder: check the R2 and BACKUP_DATABASE_URL secrets and re-run the workflow. See docs/backup-restore.md."
+          fi

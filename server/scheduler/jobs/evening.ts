@@ -1,14 +1,13 @@
 import {
   db, users, stepLogs, workoutLogs, mealLogs,
   eq, gte, and, desc, sql,
-  sendWhatsApp, canSendProactive, canSendRoutineNudge, recordProactiveSend, claimDailySlot,
+  canSendProactive, canSendRoutineNudge, recordProactiveSend,
   getActiveClients, isPaused, dayStart, getTodayLogs,
   TRAINING_SCHEDULES, todaySAST,
 } from "../shared";
 import { readHealthState } from "../../health-state";
 import { readHeldConstraints } from "../../held-constraints";
-import { sendWhatsAppButtons } from "../../twilio-interactive";
-import { canonicalNextMove, recordCanonicalMoveOutbound } from "../proactive-decision";
+import { canonicalNextMove, recordCanonicalMoveOutbound, sendProactive } from "../proactive-decision";
 import { sastHour } from "../../sast";
 
 /**
@@ -77,10 +76,8 @@ export async function runEveningAccountability(): Promise<void> {
       // a client who told us at 08:00 that they are not training tonight is not told to train.
       if (todayLogs.length === 0) {
         const empty = await canonicalNextMove(client, { hour: sastHour() });
-        if (empty.line && await claimDailySlot(client.id, "evening")) {
-          const delivery = await sendWhatsApp(phone, `${name}, haven't heard from you today — no stress.\n\n${empty.line}`);
-          await recordCanonicalMoveOutbound(client, empty, delivery);
-        }
+        const delivery = empty.line ? await sendProactive(client, { job: "evening" }, `${name}, haven't heard from you today — no stress.\n\n${empty.line}`) : null;
+        if (delivery) await recordCanonicalMoveOutbound(client, empty, delivery);
         continue;
       }
 
@@ -159,14 +156,9 @@ export async function runEveningAccountability(): Promise<void> {
       // which is a calendar, not a coach. It now fires when, and only when, the decision owner has
       // actually chosen `train`, so a declined or sick day never renders it.
       if (move.action.kind === "train" && isTrainingDay) {
-        if (await claimDailySlot(client.id, "evening")) {
-          const delivery = await sendWhatsAppButtons(phone, `${recap}\n\n${move.line}`, [
-            "Doing it tonight",
-            "Swap to tomorrow",
-            "Rest day today",
-          ], { proactive: true });
-          await recordCanonicalMoveOutbound(client, move, delivery);
-        }
+        const delivery = await sendProactive(client, { job: "evening" }, `${recap}\n\n${move.line}`,
+          { buttons: ["Doing it tonight", "Swap to tomorrow", "Rest day today"] });
+        if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
         continue;
       }
 
@@ -175,10 +167,8 @@ export async function runEveningAccountability(): Promise<void> {
       const dinnerIn = todayMeals.some(r => /dinner|supper/i.test(String(r.label || "")));
       const ask = !move.line && !sick && !dinnerIn && !(await readHeldConstraints(phone, client)).foodDayClosed ? "What's dinner looking like tonight?" : "";
       const msg = [recap, move.line || ask].filter(Boolean).join("\n\n");
-      if (msg && await claimDailySlot(client.id, "evening")) {
-        const delivery = await sendWhatsApp(phone, msg);
-        await recordCanonicalMoveOutbound(client, move, delivery);
-      }
+      const delivery = msg ? await sendProactive(client, { job: "evening" }, msg) : null;
+      if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
     } catch (err) {
       console.error(`[SCHEDULER] Evening accountability error — ${client.phoneNumber}:`, err);
     }

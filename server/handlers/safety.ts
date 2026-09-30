@@ -376,6 +376,8 @@ export async function runSafetyGuards(
     const existing = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
     if (existing.length > 0 && existing[0].awaitingInputType === "delete_confirm") {
       const uid = bindKnownSafetyUser(existing[0]).id;
+      // #499: the tombstone that survives losing the database, written before anything is deleted, so no
+      // crash can leave a deletion the restore runbook cannot see (docs/backup-restore.md step 4).
       console.log(`[POPIA DELETE] User ${uid} requested data deletion at ${new Date().toISOString()}`);
       // BILLING FIRST (#269). A deleted client must not go on being charged. The #263 cancel, and
       // the reply promises only what PayFast confirmed. The token lives on the payment record,
@@ -395,6 +397,10 @@ export async function runSafetyGuards(
         await tx.execute(sql`DELETE FROM media_jobs WHERE user_id = ${uid} OR phone_number = ${phone}`);
         await tx.execute(sql`DELETE FROM admin_events WHERE target_phone = ${phone}`);
         await tx.delete(users).where(eq(users.id, uid));
+        // THE ERASURE SURVIVES A RESTORE (#342). Backups keep 30 days, so a restore could bring this
+        // client back. Only the random account id is kept (no phone, no name), so the restore runbook
+        // can re-apply every deletion made after the backup it restored (docs/backup-restore.md).
+        await tx.insert(adminEvents).values({ action: "account_erased", targetPhone: null, reason: null, meta: { userId: uid } });
         if (billing) await tx.insert(adminEvents).values({
           action: billing.ok ? "account_deleted_subscription_cancelled" : "account_deleted_subscription_cancel_unconfirmed",
           targetPhone: null, reason: billing.detail, meta: { token },
@@ -409,7 +415,7 @@ export async function runSafetyGuards(
       const billingLine = !billing ? ""
         : billing.ok ? "Your subscription is cancelled at PayFast, so you won't be charged again. "
         : "PayFast didn't confirm the subscription cancel automatically, so it's flagged and we'll cancel it by hand today. ";
-      return `Done. Your account is permanently deleted — profile, messages, food logs, workouts, weight history and photos. ${billingLine}Only your payment records are kept, for five years, because tax law requires it.\n\nIf you want to start fresh, just send any message.`;
+      return `Done. Your account is permanently deleted — profile, messages, food logs, workouts, weight history and photos. ${billingLine}Only your payment records are kept, for five years, because tax law requires it. For about 30 days we also keep a random account number with nothing else attached, so no backup can bring your account back.\n\nIf you want to start fresh, just send any message.`;
     }
   }
 

@@ -1,10 +1,10 @@
 import {
   db, users, workoutLogs,
   eq, gte, and,
-  sendWhatsApp,
   getActiveClients, isPaused,
   claimProactive,
 } from "../shared";
+import { sendProactive } from "../proactive-decision";
 
 export async function runPhaseAdvancement(): Promise<void> {
   console.log("[SCHEDULER] JOB: Phase advancement check");
@@ -28,7 +28,7 @@ export async function runPhaseAdvancement(): Promise<void> {
       const phaseNames: Record<number, string> = { 1: "Foundation", 2: "Build", 3: "Push", 4: "Peak", 5: "Deload" };
       await db.update(users).set({ programmePhase: newPhase, programmeWeek: 1, programmeDayInWeek: 1, phaseReadyToAdvance: false }).where(eq(users.id, client.id));
       const name = client.name || "there";
-      await sendWhatsApp(client.phoneNumber, `${name}, you have completed Phase ${currentPhase} (${phaseNames[currentPhase]}). ${completedSessions.length} of ${plannedSessions} planned sessions done — ${Math.round(compliance * 100)}% compliance. You have earned Phase ${newPhase}: ${phaseNames[newPhase]}. Your programme has been updated. Reply "today" for your first Phase ${newPhase} session.`);
+      await sendProactive(client, { claimed: "phase_advance" }, `${name}, you have completed Phase ${currentPhase} (${phaseNames[currentPhase]}). ${completedSessions.length} of ${plannedSessions} planned sessions done — ${Math.round(compliance * 100)}% compliance. You have earned Phase ${newPhase}: ${phaseNames[newPhase]}. Your programme has been updated. Reply "today" for your first Phase ${newPhase} session.`);
     } catch (err) { console.error(`[SCHEDULER] Phase advancement error — ${client.phoneNumber}:`, err); }
   }
 }

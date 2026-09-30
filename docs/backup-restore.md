@@ -74,8 +74,46 @@ export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
 1. Stop writes — set `PROACTIVE_PAUSED=true` in Railway and, ideally, pause the app.
 2. Provision a fresh Postgres (or drop+recreate the schema on the existing one).
 3. `gunzip -c <backup>.sql.gz | psql "$DATABASE_URL"`
-4. Point the app's `DATABASE_URL` at the restored DB and redeploy.
-5. Unset `PROACTIVE_PAUSED`. Spot-check recent users, meal logs, and subscription status.
+4. **Re-apply every deletion made after this backup (POPIA, #342).** A client who asked to be
+   deleted after the backup was taken comes back with it. Every confirmed deletion leaves an
+   `account_erased` row holding only the account id. If the old database is still readable, copy
+   those ids across and delete them in the restored one:
+   ```sql
+   -- on the OLD database: the ids erased since the backup's timestamp, and when
+   SELECT meta->>'userId', performed_at FROM admin_events WHERE action = 'account_erased' AND performed_at >= '<backup UTC time>';
+   ```
+   Put every id to replay in `erased.csv`, one `<id>,<original erasure time UTC>` per line: the rows from
+   the query above (run it with `psql -tA -F,`), the newest R2 tombstone file (already in this format), and the Railway log lines
+   below (`grep -o 'User [0-9a-f-]* requested data deletion at [^ ]*' | sed 's/User \(.*\) requested data deletion at \(.*\)/\1,\2/'`).
+   Duplicates and ids already gone are fine. Then, on the RESTORED database, run the replay, which does the
+   same deletion `server/handlers/safety.ts` runs, for every id at once, and re-writes each tombstone at
+   its original time, so retention still counts from the client's DELETE, not the restore:
+   ```sh
+   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+     -c "CREATE TEMP TABLE replay (uid uuid, at timestamp)" \
+     -c "\copy replay FROM 'erased.csv' WITH (FORMAT csv)" \
+     -f script/erasure-replay.sql
+   ```
+   It is idempotent: an id that is already absent deletes nothing and never stops the others, and
+   running it twice changes nothing. `pg-popia-deletion-acceptance` runs it against the real schema.
+   **If the old database is lost (#499),** the ids also live outside it, in two places. Replay every id
+   from both, whatever the backup's age (replaying an id that is already gone deletes nothing):
+   - **R2 `tombstones/`**: every backup run first saves the erased ids, one `<id>,<erasure time UTC>` per line, to a new `erased-<time>.txt`:
+     every id erased since the day before the oldest backup in `daily/`, which is every id any existing
+     backup could bring back. After the backup prune, the run deletes every older tombstone file (the new one
+     holds every id still needed) and the older `account_erased` rows, so an id is kept only while a
+     backup that predates its deletion exists (about 30 days; longer only if backups stop being pruned). Take the newest file:
+     `aws s3 ls s3://$R2_BUCKET/tombstones/ --endpoint-url $R2_ENDPOINT`.
+   - **Railway logs**, for deletions since that file: the moment a client confirms with DELETE, and before
+     anything is deleted, the app logs `[POPIA DELETE] User <id> requested data deletion at <time>`. In Railway →
+     the app service → Logs, search `[POPIA DELETE] User` from **one hour before** the newest tombstone
+     file's time (a request logged just before a run can commit after it). A confirmed request is
+     replayed even if its deletion never finished: the client asked for it.
+   Railway keeps logs for at least 7 days, far longer than the 6 hours between runs. A run that cannot
+   save the tombstones fails and opens the "Database backup failed" issue. A unit test keeps the log
+   line, the workflow step and this step in step.
+5. Point the app's `DATABASE_URL` at the restored DB and redeploy.
+6. Unset `PROACTIVE_PAUSED`. Spot-check recent users, meal logs, and subscription status.
 
 The dump is taken with `--no-owner --no-privileges`, so it restores cleanly under
 whatever role the target DB uses.
@@ -88,6 +126,7 @@ whatever role the target DB uses.
   major version or it aborts on a version mismatch). If Railway upgrades again,
   bump the `postgresql-client-NN` line in the workflow the same way.
 - **Recovery point**: backups are every 6h, so worst-case data loss is ~6 hours.
+- **Every backup is test-restored** (#342): the workflow restores it strictly (any failed statement fails it) into a throwaway Postgres 18 and checks the client and meal counts **before** publishing it to `daily/`. A dump that fails is kept under `failed/` for inspection and never counts as a backup. A failed backup or restore opens a GitHub issue titled "Database backup failed".
   Payment state is additionally reconstructable from PayFast ITN history + the
   `payment_events` table.
 - **Retention** is enforced in the workflow's prune step (30 days). To change it,

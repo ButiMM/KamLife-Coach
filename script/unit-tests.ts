@@ -10942,6 +10942,46 @@ test("CORE_WAVE1: on by default (#445); founder matches only the founder's numbe
 // ── EVERY WORKFLOW FILE IS VALID YAML (25 Sep) ────────────────────────────────────────────────
 // A second `env:` key on the replay job made replay-gate.yml invalid. GitHub then ran no gate at
 // all, and the watch merged `ready` PRs as if it had passed. A duplicate key is now a red test.
+test("#342: the restore runbook replays every table the POPIA erasure deletes (a restore must not resurrect a deleted client)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const code = readFileSync("server/handlers/safety.ts", "utf-8");
+  const block = code.slice(code.indexOf("THE ROW GOES, SO EVERY CASCADE FIRES"), code.indexOf("tx.delete(users)", code.indexOf("THE ROW GOES, SO EVERY CASCADE FIRES")));
+  const tables = [...block.matchAll(/DELETE FROM (\w+)/g)].map(x => x[1]);
+  assert.ok(tables.length >= 4, `found the erasure's explicit deletes: ${tables.join(", ")}`);
+  const replay = readFileSync("script/erasure-replay.sql", "utf-8");
+  for (const t of [...tables, "users"]) assert.ok(replay.includes(`DELETE FROM ${t}`), `runbook replay misses ${t}`);
+  assert.ok(readFileSync("docs/backup-restore.md", "utf-8").includes("-f script/erasure-replay.sql"), "the runbook runs that file");
+});
+
+test("#499: the confirmed erasure logs its id outside the database before any await, and the runbook reads that line", async () => {
+  const { readFileSync } = await import("node:fs");
+  const code = readFileSync("server/handlers/safety.ts", "utf-8");
+  const confirmed = code.indexOf("existing[0].awaitingInputType === \"delete_confirm\"");
+  const logged = code.indexOf("[POPIA DELETE] User ${uid} requested data deletion", confirmed);
+  const firstAwait = code.indexOf("await ", code.indexOf("\n", logged));
+  assert.ok(confirmed > 0 && logged > confirmed, "the tombstone is logged once the client has confirmed");
+  assert.ok(firstAwait > logged && code.indexOf("tx.delete(users)", logged) > firstAwait, "and before billing, the transaction, or anything else a crash could interrupt");
+  const doc = readFileSync("docs/backup-restore.md", "utf-8");
+  assert.ok(doc.includes("search `[POPIA DELETE] User` from **one hour before**"), "runbook replays from the log line, with a margin before the run");
+  // The logs keep 7 days and backups 30, so the ids also go to R2, before the dump, into files the prune skips.
+  const wf = readFileSync(".github/workflows/db-backup.yml", "utf-8");
+  const saved = wf.indexOf("tombstones/${T}"), dump = wf.indexOf("name: Dump + compress"), prune = wf.slice(wf.indexOf("name: Prune"));
+  assert.ok(saved > 0 && saved < dump, "tombstones are saved before the dump");
+  assert.ok(!prune.slice(0, prune.indexOf("- name:", 5)).includes("tombstones"), "the prune never deletes them");
+  assert.ok(wf.includes("steps.tombstones.outcome == 'failure'") && doc.includes("R2 `tombstones/`"), "an unsaved run fails, and the runbook reads R2");
+  // #499 attack: kept only while a backup that predates the deletion exists, then deleted in R2 and in the live row,
+  // and the deletion reply says so.
+  const tprune = wf.slice(wf.indexOf("name: Prune tombstones no backup still needs"));
+  assert.ok(tprune.indexOf("aws s3 rm") > 0 && tprune.includes("DELETE FROM admin_events WHERE action = 'account_erased'"), "old tombstones are deleted");
+  // Each file is a full snapshot, so only the newest survives a run that saved one; by-date expiry kept an id ~63 days.
+  assert.ok(tprune.includes('if [ "${{ steps.tombstones.outcome }}" = "success" ]') && tprune.includes('NEWEST=$(echo "$KEYS" | tail -1)'), "older snapshots go once this run's is saved");
+  // …at its ORIGINAL time: stamping the restore time reset the retention clock (61 days, #499 attack).
+  assert.ok(readFileSync("script/erasure-replay.sql", "utf-8").includes("INSERT INTO admin_events (action, meta, performed_at)"), "a replayed erasure is tombstoned again at its original time (pg-popia-deletion-acceptance runs it)");
+  assert.ok(wf.includes("|| ',' || to_char(performed_at"), "the tombstone file carries each erasure's time");
+  assert.ok(tprune.includes('if [ -z "$OLDEST" ]; then') && wf.indexOf("name: Prune tombstones") > wf.indexOf("name: Prune backups"), "only after the backup prune, and never with no backup list");
+  assert.ok(code.includes("we also keep a random account number"), "the reply tells the client");
+});
+
 test("every .github/workflows file parses with unique keys (an invalid workflow silently runs nothing)", async () => {
   const { parse } = await import("yaml");
   const { readdirSync, readFileSync } = await import("node:fs");
@@ -11000,3 +11040,37 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log("✓ all unit checks passed\n");
+
+// ── #319 — ONE PROACTIVE SENDER ──────────────────────────────────────────────────────────────
+test("#319: a scheduled coaching message is held for a paused or non-coaching client, and every coaching job sends through the one door", async () => {
+  const { proactiveHold } = await import("../server/scheduler/proactive-decision");
+  const live = { id: "u1", phoneNumber: "whatsapp:+27000000000", onboardingState: "COMPLETE", subscriptionStatus: "active", profileNotes: "" };
+  assert.equal(proactiveHold(live), null, "control: a live client is sent to");
+  const until = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
+  const paused = { ...live, profileNotes: `paused_until:${until}` };
+  assert.match(String(proactiveHold(paused)), /paused/, "a client who asked us to stop is held");
+  assert.equal(proactiveHold(paused, { duringPause: true }), null, "except the notice that the pause ends");
+  assert.match(String(proactiveHold({ ...live, subscriptionStatus: "cancelled" })), /not a coaching client/, "a cancelled client gets no shopping list");
+  assert.match(String(proactiveHold({ ...live, subscriptionStatus: "trial", betaBypassUntil: new Date(Date.now() - 86_400_000) })), /not a coaching client/);
+  assert.equal(proactiveHold({ ...live, subscriptionStatus: "trial", betaBypassUntil: new Date(Date.now() + 86_400_000) }), null, "a live beta tester is coached");
+
+  const { readdirSync, readFileSync } = await import("node:fs");
+  // Billing, founder alerts, client-set reminders and media apologies are not coaching.
+  const notCoaching = new Set(["business.ts", "spend-watchdog.ts", "balance-check.ts", "reminders.ts", "media-recovery.ts"]);
+  const direct = readdirSync("server/scheduler/jobs").filter(f => !notCoaching.has(f))
+    .filter(f => /\bsendWhatsApp\(/.test(readFileSync(`server/scheduler/jobs/${f}`, "utf8")));
+  assert.deepEqual(direct, [], `coaching jobs sending around sendProactive: ${direct.join(", ")}`);
+  const buttons = readdirSync("server/scheduler/jobs").filter(f => /\bsendWhatsAppButtons\(/.test(readFileSync(`server/scheduler/jobs/${f}`, "utf8")));
+  assert.deepEqual(buttons, [], `button sends around sendProactive: ${buttons.join(", ")}`);
+  // Only the reply path renders a [BUTTONS:…] marker; on a scheduled send the client reads it raw (weekly report, #319).
+  const code = (f: string) => readFileSync(`server/scheduler/jobs/${f}`, "utf8").split("\n").filter(l => !/^\s*(\/\/|\*)/.test(l)).join("\n");
+  const markers = readdirSync("server/scheduler/jobs").filter(f => code(f).includes("[BUTTONS:"));
+  assert.deepEqual(markers, [], `scheduled messages carrying a raw button marker: ${markers.join(", ")}`);
+});
+
+test("day-one message: no reply shortcut the product no longer answers (\"2\" had no handler, \"3\" opened food, not steps)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync("server/scheduler/jobs/onboarding.ts", "utf8");
+  assert.ok(!src.includes('"2" to log') && !src.includes('"3" to log'), "Day 1 names a digit shortcut that does not exist");
+  assert.ok(src.includes("like *8500*, to log steps"), "it says how steps are actually logged");
+});
