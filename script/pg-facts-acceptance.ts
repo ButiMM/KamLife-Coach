@@ -119,9 +119,13 @@ REAL("\n=== A FACT COMMITTED THIS TURN SHAPES THIS TURN'S REPLY ===");
   // "closures no longer work", which is the constraint #194 and P0-4b exist to hold.
   const d = await client();
   await say(d.phone, "I'm not eating anymore today");
-  const after = await say(d.phone, "what should I eat");
-  chk(/done eating|leaving it there|not eating|finished/i.test(after),
-    "CONTROL: a real closure still closes the day", JSON.stringify(after.slice(0, 160)));
+  // #445: the next-meal door that answered "what should I eat" was deleted; the closure is graded on
+  // what the new coach is told (core/coach.ts ledgerNumbers reads held-constraints).
+  await say(d.phone, "what should I eat");
+  const [du] = await db.select().from(schema.users).where(eq(schema.users.phoneNumber, d.phone)).limit(1);
+  const { ledgerNumbers } = await import("../server/core/coach");
+  const told = await ledgerNumbers(du, "what should I eat");
+  chk(/Food day: CLOSED/.test(told), "CONTROL: a real closure still closes the day", told.slice(0, 200));
 }
 
 // ── C — injury truth reaches the training answer ────────────────────────────────────────────
