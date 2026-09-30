@@ -3,7 +3,7 @@
  *
  * (2026-07-29, founder: "this is a problem all around, we can't put people on this.")
  *
- * day-transcript.ts walks ONE client through ONE good day. The reply-quality-gate runs the
+ * day-transcript.ts walks ONE client through ONE good day. The (retired) reply-quality-gate ran the
  * eleven known defect detectors. Neither answers the question actually being asked, which is
  * "is this thing fit to put in front of a stranger" — because the failures that frighten a
  * founder are tone, length, weirdness and non-answers, and no detector catches those.
