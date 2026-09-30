@@ -19,7 +19,6 @@ import { runEarlyOnboarding, runStepSyncCatchup } from "./scheduler/jobs/onboard
 import { runSubscriptionExpiryCheck, runPaymentFailureRecovery, runSignupNudge, runWeeklyKpiReport, runAutoCalAdjust, runStepTargetAdaptation } from "./scheduler/jobs/business";
 import { runMondayProgress, runDietBreakCheck } from "./scheduler/jobs/monday";
 import { runCipUpdate } from "./scheduler/jobs/cip-update";
-import { runMonthlyNarrative } from "./scheduler/jobs/narrative";
 import { runSpendWatchdog } from "./scheduler/jobs/spend-watchdog";
 import { runBalanceCheck } from "./scheduler/jobs/balance-check";
 import { runDueReminders } from "./scheduler/jobs/reminders";
@@ -271,7 +270,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("0 9 * * 0",     () => safe("runStepTargetAdaptation", runStepTargetAdaptation, { cron: "0 9 * * 0" }), { timezone: "UTC" }); // 11am SAST
 
   // ── Monthly ───────────────────────────────────────────────────────────────
-  cron.schedule("0 17 1 * *",    () => safe("runMonthlyNarrative",    runMonthlyNarrative, { cron: "0 17 1 * *" }),    { timezone: "UTC" }); // 1st 7pm SAST — identity narrative
+  // The monthly narrative is retired (founder, 30 Sep, #511, B8): the weekly report and the client record carry the story.
 
   // ── Annual ────────────────────────────────────────────────────────────────
 

@@ -59,7 +59,7 @@ A row is **complete** when:
 | B5 | Programme advance / today's workout | `jobs/programme.ts`, `programme.ts` | proactive | **0** | none |
 | B6 | Re-engagement / back after a week | `morning.ts` (A/B), `engagement.ts` | proactive | back-after-a-week, morning-after-nine-silent-days (scheduled) | none |
 | B7 | Reminders firing | `jobs/reminders.ts` | proactive | vitamin-reminder-fires (scheduled) | none |
-| B8 | Monthly narrative, CIP update | `jobs/narrative.ts`, `jobs/cip-update.ts` | retire into the record, or proactive | **0** | none |
+| B8 | Monthly narrative, CIP update | `jobs/cip-update.ts` (the monthly send `jobs/narrative.ts` retired 30 Sep, #511) | retire into the record | **0** | none |
 | B9 | Onboarding catch-ups | `jobs/onboarding.ts` | proactive | day-two-of-the-programme (scheduled) | none |
 | B10 | Voice broadcasts, recaps (ElevenLabs) | `routes/voice-broadcast.ts`, `tts.ts` | proactive | **0** | none |
 | B11 | The WhatsApp 24-hour window; templates outside it | `whatsapp-templates.ts`, `outbound-authority.ts` | floor | **0** (#327) | none |
