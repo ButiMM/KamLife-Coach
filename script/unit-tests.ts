@@ -11050,6 +11050,13 @@ test("#92 every sentence askCoachK returns on failure is recognised as an unansw
     "CONTROL: a genuine answer is not an unavailable mouth");
 });
 
+test("#466: the meal the client typed beats the model's slot in a correction", async () => {
+  const { correctionSlot } = await import("../server/handlers/food-log-mgmt");
+  assert.equal(correctionSlot("Breakfast wasn't oats, it was two eggs.", { meal: "lunch" }), "breakfast", "their word wins over a wrong model slot");
+  assert.equal(correctionSlot("hayi, it was chicken not beef", { meal: "dinner" }), "dinner", "the model fills in when they named no meal");
+  assert.equal(correctionSlot("hayi, it was chicken not beef", null), null);
+});
+
 await Promise.all(pending);
 
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);

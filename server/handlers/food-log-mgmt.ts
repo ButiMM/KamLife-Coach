@@ -35,6 +35,15 @@ function namedPastDay(said: string): Date | null {
   return named.getTime() < todayStart.getTime() ? named : null;
 }
 
+/**
+ * WHICH MEAL A CORRECTION NAMES (#466). The client's own words win: a slot they typed is
+ * deterministic, and a model read that names a different meal must never override it (it rewrote
+ * lunch when they said breakfast). The model's slot fills in only when their words name none.
+ */
+export function correctionSlot(message: string, read: { meal?: string } | null | undefined): string | null {
+  return explicitMealSlot(message) ?? read?.meal ?? null;
+}
+
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
   // THE SHOP IS NOT THE FOOD LOG (2026-08-05). "They didn't have chicken at the shop" was read
   // as a removal request and answered «I don't see "chicken at the shop" in today's food log» —
@@ -155,7 +164,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     // when it ran, else from the words. A named slot with no row may fall back only to a meal logged
     // WITHOUT a slot (it may be the one they mean), never to one labelled as another meal: that
     // rewrote lunch and replied "Fixed" (#466 attack). Nothing left → say so, and write nothing.
-    const namedSlot = plan.moves ? null : (read?.meal ?? explicitMealSlot(m));
+    const namedSlot = plan.moves ? null : correctionSlot(m, read);
     const scope = correctionDay
       ? and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, correctionDay),
             lt(mealLogs.loggedAt, new Date(correctionDay.getTime() + 86_400_000)))
