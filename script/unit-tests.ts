@@ -8557,7 +8557,7 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
 
   test("surface: nudges are capped at one a day", () => {
     const src = readFileSync(join("server", "scheduler", "shared.ts"), "utf-8");
-    assert.match(src, /MAX_PROACTIVE_PER_DAY\) \|\| 1\)/, "default cap must be 1, not 3");
+    assert.match(src, /export const DAILY_PROACTIVE_CAP = 1;/, "the cap is 1, fixed (#511)");
   });
 
   test("surface: the menu promotes four things, not twelve", () => {
@@ -11079,6 +11079,20 @@ test("#506 evidence: usage stats are nearest-rank per client, and a logged templ
   assert.equal(templateOf(daily), "kamlife_daily_plan");
   assert.equal(templateOf(renderTemplateBody("kamlife_checking_in")), "kamlife_checking_in");
   assert.equal(templateOf("Morning Thandi — here's your brief. Protein at lunch."), null, "an ordinary freeform morning is not a template");
+});
+
+test("#511: one scheduled message a day — a fixed cap, the Sunday report takes Sunday's slot, and no unasked shopping list", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { DAILY_PROACTIVE_CAP } = await import("../server/scheduler/shared");
+  assert.equal(DAILY_PROACTIVE_CAP, 1, "one a day, not a setting");
+  assert.ok(!readFileSync("server/scheduler/shared.ts", "utf8").includes("MAX_PROACTIVE_PER_DAY"), "the override is gone");
+  const weekly = readFileSync("server/scheduler/jobs/weekly.ts", "utf8");
+  assert.ok(!/claimProactive\([^)]*"sunday_report"[^)]*critical/.test(weekly), "the weekly report no longer bypasses the daily slot");
+  assert.ok(!weekly.includes("formatShoppingList(") && !weekly.includes("runWeeklyRecaps()"), "no shopping list or voice recap after the report");
+  const sched = readFileSync("server/scheduler.ts", "utf8");
+  assert.ok(/cron\.schedule\("55 3 \* \* 0",\s+\(\) => safe\("runSundayWeeklyReport"/.test(sched), "the weekly report is scheduled, on Sunday");
+  assert.ok(sched.includes('cron.schedule("0 4 * * *",    () => safe("runMorningCheckin"'), "…before the 04:00 UTC morning check-in");
+  assert.ok(!sched.includes("runMondayGroceries") && !readFileSync("server/scheduler/jobs/monday.ts", "utf8").includes("runMondayGroceries"), "the Monday grocery list is gone");
 });
 
 await Promise.all(pending);

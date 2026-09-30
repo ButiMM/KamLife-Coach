@@ -241,8 +241,6 @@ export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
   // ── monday.ts ─────────────────────────────────────────────────────────────────────────────
   { job: "runMondayProgress", file: "monday", cls: "RECOGNITION",
     because: "A progress report against the record." },
-  { job: "runMondayGroceries", file: "monday", cls: "RESOURCE",
-    because: "Delivers the shopping list artefact." },
   { job: "runWeightReminder", file: "monday", cls: "RESOURCE",
     because: "Adjudicated 2026-09-05 (#180). A measurement prompt on a fixed weekly ritual — the class this doctrine already names, and the same reading as runMonthlyMeasurements. It reads no client state to pick WHAT to say, honours do_not_mention by standing down entirely, and asks for the number the scale gives. It duplicates chooseAction's `weigh` rung in the sense that both may ask; it cannot contradict it, because neither can tell the client to do anything else." },
   { job: "runDietBreakCheck", file: "monday", cls: "OPERATIONAL",
