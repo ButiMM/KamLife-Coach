@@ -2,13 +2,14 @@ import { calorieFloor } from "../../targets";
 import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs,
   eq, gte, lt, and, desc, asc, count, sql,
-  sendWhatsApp, canSendProactive, claimDailySlot, claimProactive,
+  canSendProactive, claimProactive,
   getActiveClients, isPaused,
   todaySAST, thisWeekUTC, isProactivePaused,
 } from "../shared";
 import { getGoalProfile } from "../../goal-profiles";
 import { getProgressTruth } from "../../day-ledger";
 import { mentionsForbidden } from "../../brain/reply-verifier";
+import { sendProactive } from "../proactive-decision";
 
 export async function runWeightReminder(): Promise<void> {
   console.log("[SCHEDULER] Running weight check-in reminder...");
@@ -40,9 +41,7 @@ export async function runWeightReminder(): Promise<void> {
       : `Send me the number (e.g. 75.3kg)`;
     const msg = `${name}, weigh-in day. ⚖️\n\nStep on the scale first thing — after toilet, before food, same conditions every time.\n\n${lastWeightHint}\n\nThe scale is data, not judgment. Track it so we can coach from facts, not feelings.`;
     // Once per week per client — DB-backed so a container recycle can't re-send.
-    if (!(await claimProactive(client.id, "weight_reminder", thisWeekUTC()))) continue;
-    await sendWhatsApp(client.phoneNumber, msg);
-    sent++;
+    if (await sendProactive(client, { job: "weight_reminder", window: thisWeekUTC() }, msg)) sent++;
   }
   console.log(`[SCHEDULER] Weight reminders sent: ${sent}`);
 }
@@ -149,9 +148,7 @@ export async function runMondayProgress(): Promise<void> {
       }
 
       // Claim the daily slot atomically before sending (DB-backed, restart-safe).
-      if (!(await claimDailySlot(client.id, "monday_progress"))) continue;
-      await sendWhatsApp(client.phoneNumber, lines.join("\n"));
-      sent++;
+      if (await sendProactive(client, { job: "monday_progress" }, lines.join("\n"))) sent++;
     } catch { continue; }
   }
   console.log(`[SCHEDULER] Monday progress summaries sent: ${sent}`);
@@ -166,7 +163,6 @@ export async function runMondayGroceries(): Promise<void> {
   let sent = 0;
   for (const client of activeClients) {
     try {
-      if (!(await claimDailySlot(client.id, "monday_groceries"))) continue;
       const name = (client.name || "").split(" ")[0] || "there";
       const goal = client.goalType || "fat_loss";
       const budget = client.weeklyFoodBudget || "100_300";
@@ -181,8 +177,7 @@ export async function runMondayGroceries(): Promise<void> {
       const vegItems = `☐ Spinach bunch — R8\n☐ Cabbage head — R10\n☐ Tomatoes — R15\n☐ Onions 1kg — R12`;
       const tip = isLowBudget ? `_Shoprite or Boxer first — best protein-per-rand. Batch cook this weekend._` : `_Prep protein on Sunday — cook in bulk so weekdays are easy._`;
       const msg = `*${name}'s Weekly Shopping List* 🛒\n_${getGoalProfile(goal).label} plan_\n\n*Proteins (buy first):*\n${proteinItems}\n\n*Carbs:*\n${carbItems}\n\n*Vegetables:*\n${vegItems}\n\n${tip}\n\n_Have your own list? Send it and I'll adjust it for your goals._`;
-      await sendWhatsApp(client.phoneNumber, msg);
-      sent++;
+      if (await sendProactive(client, { job: "monday_groceries" }, msg)) sent++;
     } catch { continue; }
   }
   console.log(`[SCHEDULER] Monday grocery lists sent: ${sent}`);
@@ -209,7 +204,7 @@ export async function runDietBreakCheck(): Promise<void> {
       const restored = Math.max(calorieFloor(client), client.dietBreakCalTarget!);
       await db.update(users).set({ calorieTarget: restored, dietBreakEndsAt: null, dietBreakCalTarget: null }).where(eq(users.id, client.id));
       const name = (client.name || "").split(" ")[0] || "there";
-      await sendWhatsApp(client.phoneNumber, `${name}, diet break is done. Back to the deficit.\n\n*Your targets from today:*\n• Calories: ${restored} kcal/day\n• Protein: ${client.proteinTarget || 120}g/day — unchanged\n\nYour metabolism is reset. Your glycogen is full.`).catch((e: unknown) => console.error("[monday] diet-break restore WA failed:", client.id, e));
+      await sendProactive(client, { claimed: "diet_break_end" }, `${name}, diet break is done. Back to the deficit.\n\n*Your targets from today:*\n• Calories: ${restored} kcal/day\n• Protein: ${client.proteinTarget || 120}g/day — unchanged\n\nYour metabolism is reset. Your glycogen is full.`).catch((e: unknown) => console.error("[monday] diet-break restore WA failed:", client.id, e));
       await new Promise(r => setTimeout(r, 300));
     }
     if (expired.length > 0) console.log(`[SCHEDULER] Diet break expired: ${expired.length} clients restored`);

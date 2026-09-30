@@ -58,6 +58,37 @@ const MEAL_SLOTS = new Set(["breakfast", "lunch", "dinner", "snack", "night meal
 // reorder into "whichever clause came first". The join uses a newline; clausesOf keeps each
 // clause's own terminator, and MORNING_MEAL_RE's GAP already excludes . ! ? and ; so the boundary
 // is guarded either way — the newline is belt-and-braces, not the thing doing the work.
+export const MEAL_BOUNDARY_RE = /\b(?:for|in|at|during|as)\s+(?:a\s+|my\s+|the\s+)?(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b/gi;
+
+/** "X for breakfast and Y for dinner" → one segment per meal (2+ "for <meal>" phrases), else []. One owner for
+ *  the single-day scanner and the multi-day catch-up, which wrote a day's breakfast and dinner as one row. */
+export function forMealSegments(m: string): { label: string; text: string }[] {
+  const matches = [...m.matchAll(new RegExp(MEAL_BOUNDARY_RE.source, "gi"))];
+  if (matches.length < 2) return [];
+  const out: { label: string; text: string }[] = [];
+  const tidy = (t: string) => t.replace(/^(?:[\s,;.]|\band\b)+|(?:[\s,;.]|\band\b)+$/gi, "").trim();
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  // LEADING FORM (#460 attack): "For breakfast I had eggs, for dinner I had beef stew" names each meal
+  // BEFORE its food, so each segment runs from its label to the next one.
+  if (!tidy(m.slice(0, matches[0].index!))) {
+    for (let i = 0; i < matches.length; i++) {
+      const text = tidy(m.slice(matches[i].index! + matches[i][0].length, i + 1 < matches.length ? matches[i + 1].index! : m.length));
+      if (text) out.push({ label: cap(matches[i][1]), text });
+    }
+    return out.length >= 2 ? out : [];
+  }
+  for (let i = 0; i < matches.length; i++) {
+    const label = cap(matches[i][1]);
+    const prevEnd = i > 0 ? (matches[i - 1].index! + matches[i - 1][0].length) : 0;
+    const segText = tidy(m.slice(prevEnd, matches[i].index!));
+    if (segText) out.push({ label, text: segText });
+  }
+  const lastEnd = matches[matches.length - 1].index! + matches[matches.length - 1][0].length;
+  const trailing = tidy(m.slice(lastEnd));
+  if (trailing && out.length > 0) out[out.length - 1].text += " " + trailing;
+  return out;
+}
+
 export function explicitMealSlot(msg: string): "breakfast" | "lunch" | "dinner" | "snack" | null {
   const whole = String(msg || "");
   // reportedInSomeClause applies the asking and intent floors; the predicate stays domain-only,

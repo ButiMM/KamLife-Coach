@@ -42,3 +42,26 @@ One line per merged PR: `HH:MM SAST · agent · PR # · what changed · gate bef
 25 Sep 17:16 · Claude Code · #444 · New coach: no reply without understanding (#421); its numbers come from the day ledger (#422) · tests green; gate green · +79 / −7
 26 Sep 07:58 · Claude Code · #449 · One voice during the transition: a shared style block on every talk path (#439) · tests green; merged on the 45-min rule (Codex out of credits) · see PR
 26 Sep 08:52 · Claude Code · #454 · Wave 1 founder-only: old handlers stand aside, the gate proves reach (22/22); "stuck at 82kg" no longer opens the restart menu for anyone · tests green; gate green · see PR
+26 Sep 12:23 UTC · Claude Code · #461 · What's new after every switch: the testers' note goes out through the broadcast route (#442) · tests green · see PR
+26 Sep 12:52 UTC · Claude Code · #462 · When the model is slow or down, the client still gets an answer (#441) · tests green · see PR
+26 Sep 12:56 UTC · Claude Code · #457 · Morning message: no welcome-back to someone here yesterday, first name only · tests green · see PR
+26 Sep 13:08 UTC · Claude Code · #463 · A child who says "I'm 9 years old" is not coached (#338) · tests green · see PR
+26 Sep 13:26 UTC · Claude Code · #464 · "Diagnosed with cancer, please stop messaging me" is an opt-out too (#286) · tests green · see PR
+26 Sep 18:38 UTC · Claude Code · #468 · Evening and weekly messages name the day: what they ate, first name, one light ask · tests green · see PR
+26 Sep 18:50 UTC · Claude Code · #469 · A large burger counts as more than a small one; dinner is not swallowed as a retry of lunch (#310) · tests green · see PR
+26 Sep 18:50 UTC · Claude Code · #470 · A multi-day catch-up keeps each day's breakfast and dinner as separate meals (#324) · tests green · see PR
+26 Sep 19:29 UTC · Claude Code · #473 · The replay gate's strong judge runs once per switch PR, on its final head (#467) · tests green · see PR
+28 Sep 12:04 UTC · Claude Code · #471 · "Can I speak to a real person?" is told honestly it's an AI and that a person will follow up (C7) · tests green · see PR
+28 Sep 12:04 UTC · Claude Code · #477 · A crisis in isiZulu, Afrikaans, Sesotho or Setswana gets the crisis reply and the founder alert (#476) · tests green · see PR
+27 Sep 06:08 UTC · Claude Code · #472 · History learning runs once per client, ever (#467) · tests green · see PR
+27 Sep 05:43 UTC · Claude Code · #479 · Gate cases: "Aowa" corrects dinner (#309); a correction naming breakfast leaves lunch alone (#300) · tests green · see PR
+26 Sep 21:48 UTC · Claude Code · #474 · gpt-4o only for crisis and photos; everything else on the small model (#412) · tests green · see PR
+28 Sep 13:52 UTC · Claude Code · #475 · The profile backfill no longer tells the new coach "life/work: office" or a withheld state (#456) · tests green · see PR
+28 Sep 14:47 UTC · Claude Code · #483 · "For breakfast I had eggs, for dinner I had beef stew" logs two meals · tests green · see PR
+29 Sep 05:51 UTC · Claude Code · #492 · One paid WhatsApp message per reply: "---" bubbles are packed (#488) · tests green · see PR
+29 Sep 05:52 UTC · Claude Code · #493 · COSTS: Twilio or Meta Cloud API direct, with numbers (#484) · docs · see PR
+29 Sep 11:10 UTC · Claude Code · #481 · A friend's crisis quoted by the client is answered as a helper and alerted as someone close (#480) · tests green · see PR
+29 Sep 13:07 UTC · Claude Code · #497 · A quote addressed to someone else is that person's crisis (#496) · tests green · see PR
+29 Sep 13:07 UTC · Claude Code · #494 · Backups test-restored before publishing; failures open an issue; erasure replay in the runbook (#342) · tests green · see PR
+29 Sep 14:01 UTC · Claude Code · #501 · Every scheduled coaching message through one sender; paused or cancelled clients get no Monday messages (#319) · tests green · see PR
+29 Sep 16:53 UTC · Claude Code · #502 · The weekly report no longer prints a raw [BUTTONS:] marker; evening buttons through the one sender (#319) · tests green · see PR

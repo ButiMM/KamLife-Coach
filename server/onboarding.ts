@@ -473,10 +473,9 @@ async function extractBulkIntake(text: string): Promise<BulkIntake | null> {
   try {
     const { default: OpenAI } = await import("openai");
     const client = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY });
-    // gpt-4o, not mini: this fires at most once per client, on the first impression,
-    // and a mis-parsed intake is paid for in every reply that follows it.
+    // gpt-4o-mini (#412): a JSON read of what they typed, with strict omit-if-unsure rules.
     const resp = await client.chat.completions.create({
-      model: "gpt-4o", temperature: 0, max_tokens: 400,
+      model: "gpt-4o-mini", temperature: 0, max_tokens: 400,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: BULK_SYSTEM },

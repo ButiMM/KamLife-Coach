@@ -114,7 +114,7 @@ Voice: direct, warm, SA. No exclamation marks. No "great list". No corporate ton
 
   assertAiOnline("groceryRefine");
   const resp = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: "gpt-4o-mini", // #412: gpt-4o stays for crisis and photos only
     max_tokens: 900,
     temperature: 0.4,
     messages: [

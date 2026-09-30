@@ -131,6 +131,9 @@ const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: Conte
   },
 ];
 
+/** A third party as the subject ("my sister has", "she keeps"): the same pattern, also read by crisis-reply.ts (#480). */
+export const SOMEBODY_ELSE: RegExp = P.find(p => p.context === "disordered_eating")!.thirdParty!;
+
 // Ordinary coaching talk that must NEVER be diverted — "depressed about my weight" is a
 // coaching moment, "I'm depressed" is not; "sick of pap" is a food preference.
 const ORDINARY = /\b(?:depressed|down|sad|anxious)\s+(?:about|by|with)\s+(?:my|the|these)\s+(?:weight|scale|progress|numbers|belly|results|body\s+fat)\b|\bsick\s+(?:and\s+tired\s+)?of\s+(?:pap|chicken|rice|eating|the\s+same)\b|\bkilling\s+(?:my\s+)?(?:legs|arms|quads|calves)\b|\bdying\s+after\s+(?:that|the)\s+(?:session|workout|set)\b/i;
