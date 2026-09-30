@@ -82,26 +82,20 @@ export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
    -- on the OLD database: the ids erased since the backup's timestamp, and when
    SELECT meta->>'userId', performed_at FROM admin_events WHERE action = 'account_erased' AND performed_at >= '<backup UTC time>';
    ```
-   On the RESTORED database, replay the same deletion `server/handlers/safety.ts` runs, for each id and
-   its ORIGINAL erasure time (from the query above, the tombstone file, or the log line's timestamp),
-   so the id's retention still counts from the day the client deleted, not the day of the restore.
-   The tables that don't cascade from `users` go first; the phone is read from the restored row.
-   A unit test keeps this list equal to the code's.
-   ```sql
-   \set uid '<id>'
-   \set at '<original erasure time, UTC>'
-   SELECT phone_number AS phone FROM users WHERE id = :'uid' \gset
-   BEGIN;
-   -- ERASURE REPLAY (keep in step with safety.ts)
-   DELETE FROM quality_signals WHERE user_id = :'uid';
-   DELETE FROM shadow_replies WHERE user_id = :'uid' OR phone = :'phone';
-   DELETE FROM media_jobs WHERE user_id = :'uid' OR phone_number = :'phone';
-   DELETE FROM admin_events WHERE target_phone = :'phone';
-   DELETE FROM users WHERE id = :'uid';   -- every other client table cascades from users
-   -- and the tombstone again, so the next backup run saves it (it was not in the restored backup)
-   INSERT INTO admin_events (action, meta, performed_at) VALUES ('account_erased', jsonb_build_object('userId', :'uid'), :'at');
-   COMMIT;
+   Put every id to replay in `erased.csv`, one `<id>,<original erasure time UTC>` per line: the rows from
+   the query above (run it with `psql -tA -F,`), the newest R2 tombstone file (already in this format), and the Railway log lines
+   below (`grep -o 'User [0-9a-f-]* requested data deletion at [^ ]*' | sed 's/User \(.*\) requested data deletion at \(.*\)/\1,\2/'`).
+   Duplicates and ids already gone are fine. Then, on the RESTORED database, run the replay, which does the
+   same deletion `server/handlers/safety.ts` runs, for every id at once, and re-writes each tombstone at
+   its original time, so retention still counts from the client's DELETE, not the restore:
+   ```sh
+   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+     -c "CREATE TEMP TABLE replay (uid uuid, at timestamp)" \
+     -c "\copy replay FROM 'erased.csv' WITH (FORMAT csv)" \
+     -f script/erasure-replay.sql
    ```
+   It is idempotent: an id that is already absent deletes nothing and never stops the others, and
+   running it twice changes nothing. `pg-popia-deletion-acceptance` runs it against the real schema.
    **If the old database is lost (#499),** the ids also live outside it, in two places. Replay every id
    from both, whatever the backup's age (replaying an id that is already gone deletes nothing):
    - **R2 `tombstones/`**: every backup run first saves the erased ids, one `<id>,<erasure time UTC>` per line, to a new `erased-<time>.txt`:

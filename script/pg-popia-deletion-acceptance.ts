@@ -183,6 +183,38 @@ const fresh = await pool.query("SELECT id, name, life_context, dream_goal FROM u
 chk(fresh.rowCount === 1 && fresh.rows[0].id !== u.id && !fresh.rows[0].life_context && !fresh.rows[0].dream_goal,
   "a new message starts a genuinely new account with none of the old story", JSON.stringify(fresh.rows[0] || null));
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n3. THE RESTORE REPLAY ERASES EVERY LISTED CLIENT, EVEN AFTER ONE ALREADY GONE (#499)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The runbook's own script, as written, on the real schema. The first listed id (the client erased
+// above) is already absent from this "restored" database; the second (a resurrected client) must
+// still go, with its tombstone at the ORIGINAL time, and a second run must change nothing.
+{
+  const { readFileSync } = await import("node:fs");
+  const replaySql = readFileSync("script/erasure-replay.sql", "utf-8");
+  const back = await client(3);
+  const run = async () => {
+    const c = await pool.connect();
+    try {
+      await c.query("CREATE TEMP TABLE replay (uid uuid, at timestamp)");
+      await c.query("INSERT INTO replay VALUES ($1, '2026-01-05 08:00:00'), ($2, '2026-01-24 09:30:00'), ($2, '2026-01-24 09:30:00')", [u.id, back.id]);
+      await c.query(replaySql);
+      return null;
+    } catch (e: any) { await c.query("ROLLBACK").catch(() => {}); return e?.message || String(e); }
+    finally { await c.query("DROP TABLE IF EXISTS replay").catch(() => {}); c.release(); }
+  };
+  const err1 = await run();
+  chk(err1 === null, "the replay runs through an id that is already absent", String(err1));
+  const gone = await pool.query("SELECT 1 FROM users WHERE id = $1", [back.id]);
+  chk(gone.rowCount === 0, "and still erases the resurrected client listed after it");
+  const tomb = await pool.query("SELECT to_char(performed_at, 'YYYY-MM-DD HH24:MI:SS') t FROM admin_events WHERE action = 'account_erased' AND meta->>'userId' = $1", [back.id]);
+  chk(tomb.rowCount === 1 && tomb.rows[0].t === "2026-01-24 09:30:00", "its tombstone is written once, at the original erasure time", JSON.stringify(tomb.rows));
+  const before = (await pool.query("SELECT count(*)::int n FROM admin_events WHERE action = 'account_erased'")).rows[0].n;
+  const err2 = await run();
+  const after = (await pool.query("SELECT count(*)::int n FROM admin_events WHERE action = 'account_erased'")).rows[0].n;
+  chk(err2 === null && after === before, "running it twice changes nothing", `${err2} ${before}->${after}`);
+}
+
 REAL(`\npg-popia-deletion-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);
 await pool.end();
 process.exit(failed === 0 ? 0 : 1);

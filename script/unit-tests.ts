@@ -10950,9 +10950,9 @@ test("#342: the restore runbook replays every table the POPIA erasure deletes (a
   const block = code.slice(code.indexOf("THE ROW GOES, SO EVERY CASCADE FIRES"), code.indexOf("tx.delete(users)", code.indexOf("THE ROW GOES, SO EVERY CASCADE FIRES")));
   const tables = [...block.matchAll(/DELETE FROM (\w+)/g)].map(x => x[1]);
   assert.ok(tables.length >= 4, `found the erasure's explicit deletes: ${tables.join(", ")}`);
-  const doc = readFileSync("docs/backup-restore.md", "utf-8");
-  const replay = doc.slice(doc.indexOf("ERASURE REPLAY"), doc.indexOf("COMMIT;", doc.indexOf("ERASURE REPLAY")));
+  const replay = readFileSync("script/erasure-replay.sql", "utf-8");
   for (const t of [...tables, "users"]) assert.ok(replay.includes(`DELETE FROM ${t}`), `runbook replay misses ${t}`);
+  assert.ok(readFileSync("docs/backup-restore.md", "utf-8").includes("-f script/erasure-replay.sql"), "the runbook runs that file");
 });
 
 test("#499: the confirmed erasure logs its id outside the database before any await, and the runbook reads that line", async () => {
@@ -10978,7 +10978,7 @@ test("#499: the confirmed erasure logs its id outside the database before any aw
   // Each file is a full snapshot, so only the newest survives a run that saved one; by-date expiry kept an id ~63 days.
   assert.ok(tprune.includes('if [ "${{ steps.tombstones.outcome }}" = "success" ]') && tprune.includes('NEWEST=$(echo "$KEYS" | tail -1)'), "older snapshots go once this run's is saved");
   // …at its ORIGINAL time: stamping the restore time reset the retention clock (61 days, #499 attack).
-  assert.ok(doc.includes("INSERT INTO admin_events (action, meta, performed_at) VALUES ('account_erased', jsonb_build_object('userId', :'uid'), :'at')"), "a replayed erasure is tombstoned again at its original time");
+  assert.ok(readFileSync("script/erasure-replay.sql", "utf-8").includes("INSERT INTO admin_events (action, meta, performed_at)"), "a replayed erasure is tombstoned again at its original time (pg-popia-deletion-acceptance runs it)");
   assert.ok(wf.includes("|| ',' || to_char(performed_at"), "the tombstone file carries each erasure's time");
   assert.ok(tprune.includes('if [ -z "$OLDEST" ]; then') && wf.indexOf("name: Prune tombstones") > wf.indexOf("name: Prune backups"), "only after the backup prune, and never with no backup list");
   assert.ok(code.includes("we also keep a random account number"), "the reply tells the client");
