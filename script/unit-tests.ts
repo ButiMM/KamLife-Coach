@@ -11047,3 +11047,16 @@ test("day-one message: no reply shortcut the product no longer answers (\"2\" ha
   assert.ok(!src.includes('"2" to log') && !src.includes('"3" to log'), "Day 1 names a digit shortcut that does not exist");
   assert.ok(src.includes("like *8500*, to log steps"), "it says how steps are actually logged");
 });
+
+test("#506 evidence: usage stats are nearest-rank per client, and a logged template body is named by its template", async () => {
+  const { summariseUsage, templateOf } = await import("../server/routes/admin-metrics");
+  const { renderTemplateBody } = await import("../server/whatsapp-templates");
+  const z = { inbound: 0, outboundBubbles: 0, proactive: 0, templates: 0, media: 0 };
+  const s = summariseUsage([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => ({ ...z, inbound: n }))) as any;
+  assert.deepEqual(s.inbound, { median: 5, p90: 9, max: 10 });
+  assert.deepEqual((summariseUsage([]) as any).media, { median: 0, p90: 0, max: 0 }, "no clients, no crash");
+  const daily = renderTemplateBody("kamlife_daily_plan", { "1": "Thandi", "2": "Walk 20 minutes" });
+  assert.equal(templateOf(daily), "kamlife_daily_plan");
+  assert.equal(templateOf(renderTemplateBody("kamlife_checking_in")), "kamlife_checking_in");
+  assert.equal(templateOf("Morning Thandi — here's your brief. Protein at lunch."), null, "an ordinary freeform morning is not a template");
+});

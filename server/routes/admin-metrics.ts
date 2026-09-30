@@ -1,6 +1,8 @@
 import type { Express } from "express";
 import { db } from "../db";
-import { gptCosts } from "../../shared/schema";
+import { gptCosts, adminEvents } from "../../shared/schema";
+import { splitWhatsAppBody } from "../utils";
+import { TEMPLATES } from "../whatsapp-templates";
 import { gte } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { requireAdminKey } from "./auth";
@@ -92,4 +94,82 @@ export function registerAdminMetrics(app: Express) {
       res.status(500).json({ message: "Failed to compute north-star metrics" });
     }
   });
+
+  // ── EVIDENCE (#506): read-only, for the price/channel decision and the proof gate. Real usage per
+  // active client, a sample of the final replies with their source and build, and the approved
+  // templates actually sent. Nothing leaves production; every read is audited like a turn read. ──
+  app.get("/api/admin/evidence", requireAdminKey, async (req, res) => {
+    try {
+      const days = Math.min(90, Math.max(1, Number(req.query.days) || 30));
+      const n = Math.min(100, Math.max(1, Number(req.query.n) || 30));
+      const since = sql`now() - make_interval(days => ${days})`;
+      const [inbound, replies, proactive, sample] = await Promise.all([
+        db.execute(sql`SELECT user_id::text u, count(*)::int n FROM chat_history
+          WHERE created_at >= ${since} AND message_in IS NOT NULL AND message_in <> ''
+            AND message_in NOT LIKE '[system]%' AND message_in NOT LIKE '[admin%' GROUP BY 1`),
+        db.execute(sql`SELECT user_id::text u, delivered_body b, input_type t FROM turn_ledger
+          WHERE created_at >= ${since} AND user_id IS NOT NULL`),
+        db.execute(sql`SELECT user_id::text u, message_out b FROM chat_history
+          WHERE created_at >= ${since} AND message_in IS NULL AND intent IN ('PROACTIVE', 'PROACTIVE_SUBSTITUTED')`),
+        db.execute(sql`SELECT t.created_at at, right(u.phone_number, 3) phone, left(t.input_text, 300) inbound,
+            left(t.delivered_body, 1500) reply, t.decision->>'source' source, t.version, t.delivery_outcome outcome
+          FROM turn_ledger t LEFT JOIN users u ON u.id = t.user_id
+          WHERE t.delivered_body IS NOT NULL ORDER BY t.created_at DESC LIMIT ${n}`),
+      ]);
+      const per = new Map<string, EvidenceCounts>();
+      const at = (u: string) => per.get(u) ?? per.set(u, { inbound: 0, outboundBubbles: 0, proactive: 0, templates: 0, media: 0 }).get(u)!;
+      for (const r of inbound.rows as any[]) at(r.u).inbound = Number(r.n);
+      for (const r of replies.rows as any[]) {
+        if (r.b) at(r.u).outboundBubbles += splitWhatsAppBody(String(r.b)).length;
+        if (r.t && r.t !== "text") at(r.u).media++;
+      }
+      const templateSends: Record<string, number> = {};
+      for (const r of proactive.rows as any[]) {
+        const c = at(r.u);
+        c.proactive++;
+        c.outboundBubbles += splitWhatsAppBody(String(r.b || "")).length;
+        const name = templateOf(String(r.b || ""));
+        if (name) { c.templates++; templateSends[name] = (templateSends[name] || 0) + 1; }
+      }
+      await db.insert(adminEvents).values({ action: "evidence_read", reason: "evidence view (#506)", meta: { days, n, clients: per.size } })
+        .catch((e: any) => console.warn("[EVIDENCE] audit write failed:", e?.message));
+      res.json({
+        computedAt: new Date().toISOString(), days, activeClients: per.size,
+        usagePerClient: summariseUsage([...per.values()]),
+        templates: TEMPLATES.map(t => ({ name: t.name, category: t.category, sends: templateSends[t.name] || 0 })),
+        finalReplies: sample.rows,
+        readIt: "usagePerClient is per active client over the window (median, p90, max). Bubbles are the WhatsApp messages actually billed (#492 packs up to 1,500 characters). finalReplies are the last delivered bodies with their source and build; phones show the last 3 digits only.",
+      });
+    } catch (err) {
+      console.error("[EVIDENCE]", err);
+      res.status(500).json({ message: "Failed to compute evidence" });
+    }
+  });
+}
+
+export interface EvidenceCounts { inbound: number; outboundBubbles: number; proactive: number; templates: number; media: number }
+
+/** Median, 90th percentile and max of each count across clients (nearest-rank). */
+export function summariseUsage(clients: EvidenceCounts[]) {
+  const stat = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b);
+    const rank = (p: number) => s.length ? s[Math.min(s.length - 1, Math.ceil(p * s.length) - 1)] : 0;
+    return { median: rank(0.5), p90: rank(0.9), max: s.length ? s[s.length - 1] : 0 };
+  };
+  const keys: (keyof EvidenceCounts)[] = ["inbound", "outboundBubbles", "proactive", "templates", "media"];
+  return Object.fromEntries(keys.map(k => [k, stat(clients.map(c => c[k]))]));
+}
+
+/**
+ * Which approved template a logged proactive body is, if any. The send path logs the rendered body,
+ * not the name, so a body matches a template when it holds every fixed stretch of that template's text,
+ * in order, around the {{n}} slots.
+ */
+export function templateOf(text: string): string | null {
+  for (const t of TEMPLATES) {
+    const parts = t.body.split("{{").map((p, i) => (i === 0 ? p : p.slice(p.indexOf("}}") + 2))).filter(p => p.trim());
+    let from = 0;
+    if (parts.length && parts.every(p => { const i = text.indexOf(p, from); if (i < 0) return false; from = i + p.length; return true; })) return t.name;
+  }
+  return null;
 }
