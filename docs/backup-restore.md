@@ -79,14 +79,17 @@ export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
    `account_erased` row holding only the account id. If the old database is still readable, copy
    those ids across and delete them in the restored one:
    ```sql
-   -- on the OLD database: the ids erased since the backup's timestamp
-   SELECT meta->>'userId' FROM admin_events WHERE action = 'account_erased' AND performed_at >= '<backup UTC time>';
+   -- on the OLD database: the ids erased since the backup's timestamp, and when
+   SELECT meta->>'userId', performed_at FROM admin_events WHERE action = 'account_erased' AND performed_at >= '<backup UTC time>';
    ```
-   On the RESTORED database, replay the same deletion `server/handlers/safety.ts` runs, for each id.
+   On the RESTORED database, replay the same deletion `server/handlers/safety.ts` runs, for each id and
+   its ORIGINAL erasure time (from the query above, the tombstone file, or the log line's timestamp),
+   so the id's retention still counts from the day the client deleted, not the day of the restore.
    The tables that don't cascade from `users` go first; the phone is read from the restored row.
    A unit test keeps this list equal to the code's.
    ```sql
    \set uid '<id>'
+   \set at '<original erasure time, UTC>'
    SELECT phone_number AS phone FROM users WHERE id = :'uid' \gset
    BEGIN;
    -- ERASURE REPLAY (keep in step with safety.ts)
@@ -96,19 +99,19 @@ export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
    DELETE FROM admin_events WHERE target_phone = :'phone';
    DELETE FROM users WHERE id = :'uid';   -- every other client table cascades from users
    -- and the tombstone again, so the next backup run saves it (it was not in the restored backup)
-   INSERT INTO admin_events (action, meta) VALUES ('account_erased', jsonb_build_object('userId', :'uid'));
+   INSERT INTO admin_events (action, meta, performed_at) VALUES ('account_erased', jsonb_build_object('userId', :'uid'), :'at');
    COMMIT;
    ```
    **If the old database is lost (#499),** the ids also live outside it, in two places. Replay every id
    from both, whatever the backup's age (replaying an id that is already gone deletes nothing):
-   - **R2 `tombstones/`**: every backup run first saves the erased ids to a new `erased-<time>.txt`:
+   - **R2 `tombstones/`**: every backup run first saves the erased ids, one `<id>,<erasure time UTC>` per line, to a new `erased-<time>.txt`:
      every id erased since the day before the oldest backup in `daily/`, which is every id any existing
      backup could bring back. After the backup prune, the run deletes every older tombstone file (the new one
      holds every id still needed) and the older `account_erased` rows, so an id is kept only while a
      backup that predates its deletion exists (about 30 days; longer only if backups stop being pruned). Take the newest file:
      `aws s3 ls s3://$R2_BUCKET/tombstones/ --endpoint-url $R2_ENDPOINT`.
    - **Railway logs**, for deletions since that file: the moment a client confirms with DELETE, and before
-     anything is deleted, the app logs `[POPIA DELETE] User <id> requested data deletion`. In Railway →
+     anything is deleted, the app logs `[POPIA DELETE] User <id> requested data deletion at <time>`. In Railway →
      the app service → Logs, search `[POPIA DELETE] User` from **one hour before** the newest tombstone
      file's time (a request logged just before a run can commit after it). A confirmed request is
      replayed even if its deletion never finished: the client asked for it.

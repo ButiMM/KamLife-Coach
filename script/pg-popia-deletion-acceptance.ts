@@ -162,7 +162,8 @@ chk(erased.rowCount === 1 && erased.rows[0].target_phone === null, "#342: the er
     .replace("${SINCE}", "1970-01-01").replace("${CUT}", "1970-01-01"));
   chk(sqls.length === 2, "the workflow saves and prunes tombstones with SQL this check can see", JSON.stringify(sqls));
   const saved = await pool.query(sqls.find(q => q.startsWith("SELECT"))!);
-  chk(saved.rows.some((r: any) => Object.values(r)[0] === u.id), "the save query runs on the real schema and lists this erasure", JSON.stringify(saved.rows));
+  chk(saved.rows.some((r: any) => /^[^,]+,\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(String(Object.values(r)[0])) && String(Object.values(r)[0]).startsWith(`${u.id},`)),
+    "the save query runs on the real schema and lists this erasure with its time", JSON.stringify(saved.rows));
   const c = await pool.connect();
   try { await c.query("BEGIN"); await c.query(sqls.find(q => q.startsWith("DELETE"))!); chk(true, "the prune query runs on the real schema"); }
   catch (e: any) { chk(false, "the prune query runs on the real schema", e?.message); }
