@@ -46,7 +46,7 @@ export function isCrisisMessage(m: string): boolean {
  */
 export function crisisReply(name = "friend"): string {
   const who = (name || "").trim() || "friend";
-  return `${who}, I hear you and I am concerned. Please contact SADAG right now — 0800 567 567, free, 24 hours, confidential. Lifeline SA: 0861 322 322. You matter far more than any fitness goal. Reach out to them — they are trained for exactly this moment.`;
+  return `${who}, I hear you and I am concerned. Please contact SADAG right now — 0800 567 567, free, 24 hours, confidential. Lifeline SA: 0861 322 322. In an emergency, call 10111, or 112 from a cellphone. You matter far more than any fitness goal. Reach out to them — they are trained for exactly this moment.`;
 }
 
 /**
@@ -94,7 +94,7 @@ export function crisisAboutSomeoneElse(message: string): boolean {
 
 export function crisisReplyForSomeoneElse(name = "friend"): string {
   const who = (name || "").trim() || "friend";
-  return `${who}, thank you for telling me. That is serious, and you did the right thing. Please help them contact SADAG right now: 0800 567 567, free, 24 hours, confidential. Lifeline SA: 0861 322 322. If they are in danger right now, call 10111 or get them to the nearest emergency unit, and stay with them. If you are struggling too, those lines are for you as well.`;
+  return `${who}, thank you for telling me. That is serious, and you did the right thing. Please help them contact SADAG right now: 0800 567 567, free, 24 hours, confidential. Lifeline SA: 0861 322 322. If they are in danger right now, call 10111 (or 112 from a cellphone) or get them to the nearest emergency unit, and stay with them. If you are struggling too, those lines are for you as well.`;
 }
 
 /** The alert to the founder. Separate from the client reply so neither can leak into the other. */

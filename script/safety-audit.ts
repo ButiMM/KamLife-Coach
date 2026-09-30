@@ -6,6 +6,8 @@
 // Exits non-zero on any failure so this can gate deploys.
 
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { detectEscalation } from "../server/safety-detection";
 import { crisisReply, crisisAlertBody, isCrisisMessage, crisisAboutSomeoneElse, crisisReplyForSomeoneElse } from "../server/crisis-reply";
 import { looksLikeQuitMoment } from "../server/quit-save";
@@ -175,6 +177,20 @@ liability("crisis reply gives both helplines and nothing else", () => {
   assert.match(r, /0861 322 322/, "Lifeline must be present");
   assert.doesNotMatch(r, COACHING_WORDS, `crisis reply must stop coaching: "${r}"`);
   assert.equal(crisisReply("").startsWith("friend,"), true, "no name on file must not produce a blank greeting");
+});
+
+liability("#514: no promised check-in; the approved risk wording and the emergency numbers are everywhere they belong", () => {
+  const OLD = "real coach may check in on you";
+  const NEW = "If a message suggests you may be at risk, Coach K will share helpline numbers straight away and alert the KamLife team, who will follow up as soon as they can. Coach K is not an emergency service. In an emergency, call 10111, or 112 from a cellphone. For suicidal thoughts, call the SADAG Suicide Crisis Helpline on 0800 567 567 (24 hours).";
+  const walk = (d: string): string[] => readdirSync(d).flatMap(f => { const p = join(d, f); return statSync(p).isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(f) ? [p] : []; });
+  const still = ["server", "client/src", "shared"].flatMap(walk).filter(f => readFileSync(f, "utf8").includes(OLD));
+  assert.deepEqual(still, [], `the old promise is still in: ${still.join(", ")}`);
+  for (const f of ["server/onboarding.ts", "client/src/pages/terms.tsx"]) assert.ok(readFileSync(f, "utf8").includes(NEW), `${f} carries the approved wording`);
+  for (const r of [crisisReply("Koketso"), crisisReplyForSomeoneElse("Thandi")]) {
+    for (const n of ["0800 567 567", "10111", "112 from a cellphone"]) assert.ok(r.includes(n), `crisis reply lists ${n}: "${r}"`);
+    assert.doesNotMatch(r, /within \d+|in the next \d+|check in (?:on you )?(?:today|tomorrow|soon)/i, "no check-in time is promised");
+  }
+  assert.match(crisisAlertBody("Koketso", "whatsapp:+27000000000", "I want to die"), /CRISIS ALERT/, "the team alert still fires");
 });
 
 liability("#480: a friend's crisis quoted by the client is answered as a helper, and alerted as someone close", () => {
