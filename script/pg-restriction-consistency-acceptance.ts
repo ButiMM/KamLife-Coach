@@ -140,6 +140,10 @@ const ask = (phone: string, text: string) =>
 async function proactive(id: string, job: () => Promise<void>): Promise<string> {
   await pool.query("DELETE FROM shadow_replies");
   await pool.query("DELETE FROM daily_sends").catch(() => {});
+  // One scheduled message a day (#511): each job here is graded alone, so the day's slot is freed first.
+  await pool.query("DELETE FROM sent_proactive WHERE user_id = $1", [id]);
+  const { dailyProactiveCount, weeklyKeyedSent } = await import("../server/scheduler/shared");
+  dailyProactiveCount.clear(); weeklyKeyedSent.clear();
   await job().catch(() => {});
   const { rows } = await pool.query("SELECT body FROM shadow_replies WHERE user_id = $1 ORDER BY id", [id]);
   return rows.map((r: any) => String(r.body)).join("\n---\n");
@@ -300,7 +304,7 @@ REAL("    (graded on the MESSAGE in shadow_replies, not on the decision behind i
 
   const report = await proactive(vegan.id, runSundayWeeklyReport);
   chk(report.length > 0, "the Sunday weekly report actually sends");
-  chk(!ANIMAL.test(body(report)), "…and the grocery list it carries names no animal food",
+  chk(!ANIMAL.test(body(report)), "…and names no animal food (it no longer carries a grocery list, #511)",
     (body(report).match(new RegExp(ANIMAL.source, "gi")) || []).join(", "));
 
   // THE CONTROL. Proactive food coaching must not have gone quiet or plant-only for everyone.
