@@ -61,7 +61,7 @@ export async function runEarlyOnboarding(): Promise<void> {
       const name = client.name || "there";
       let msg = "";
       if (days === 1) {
-        msg = `${name}, Day 1. Your programme is live and ready.\n\nReply:\n• "today" for your workout\n• "2" to log food\n• "3" to log your steps\n\nOne small action today is better than a perfect week planned and not started.`;
+        msg = `${name}, Day 1. Your programme is live and ready.\n\nReply:\n• "today" for your workout\n• what you ate, in your own words, to log food\n• your step count, like *8500*, to log steps\n\nOne small action today is better than a perfect week planned and not started.`;
       } else if (days === 2) {
         msg = `Day 2, ${name}. How did Day 1 go? Reply DONE if you completed the session, or just tell me what happened. No judgment — just forward.`;
       } else if (days === 3) {

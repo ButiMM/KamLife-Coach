@@ -1,14 +1,14 @@
 # KamLife Coach — Claude Code Instructions
 
-## CURRENT ORDERS (CTO, 28 Sep). Read this first. Where anything below disagrees, THIS wins.
+## CURRENT ORDERS (CTO, 29 Sep, after the strategy decision). Read this first. Where anything below disagrees, THIS wins.
 
-1. **Goal:** the whole product in `docs/TESTER-EXPERIENCE.md`, every `docs/COVERAGE.md` row. Progress means a whole client journey that is better on a real phone.
-2. **Order of work:** live harm (#481 first) → **#488** (one message per turn: from 1 Oct every WhatsApp reply costs money) → **#484** (Twilio vs Meta direct) → **#342** (backups and deletion) → wave 1 deletions (#460, 48 h after the founder flips `CORE_WAVE1=on`, if clean) → wave 2 (#455, #466 are on `hold` until then) → lane 2 (proactive) → lane 3.
-3. **No new spend (ORDERS §0c):** no CI OpenAI key and no paid gate. Switches are proven on real use behind their Railway flag, with instant rollback. Offline tests, the reach check and the safety floors must pass on every PR. Follow the STANDING COST RULES in `docs/COSTS.md`.
-4. **Attacks:** put `attack:codex` and a `@codex` call **only on `[harm]` and `switch` PRs.** Every other PR merges on green checks, with no attack. Answer every attack with `ANSWER`. An attack stays valid across merge-only commits.
-5. **Reuse, don't rebuild; delete in the switch.** Every PR names its COVERAGE row and what it retires.
-6. **Capacity:** one session, 10-line status comments, batched pushes, no local re-runs of what CI runs. Never idle: re-read #391 and #280, or schedule a check-in.
-7. **Blocked on the founder?** Post `BLOCKED:` with the exact action, then keep working on something else.
+1. **The promise (locked):** Coach K's four capabilities: **help me now**, **know my situation**, **help me follow through** (the commitment loop, spec only for now: #508), and **show it's working**. The surface is WhatsApp, with our own backend. The founder is absent from routine delivery. It's a non-clinical scope.
+2. **Order:** wave-1 watch until Thu 1 Oct 06:23 UTC, then #460's deletions → **#506 (evidence admin view)** → capability 2 = wave 2 (#455, then #466, after #460's deletions), then batch/late reports, steps and workouts → #507 (48-row reassessment draft) and #508 (loop spec) in the gaps → harm and data-integrity fixes whenever found.
+3. **Deferred (don't build):** an app or member page, the Meta-direct migration, new payment rails, a second model provider, trainers or buddies, rows marked "not needed now".
+4. **No new spend (ORDERS §0c):** no paid gate. Switches go live via their Railway flag, are proven on real use, and their old code is deleted after 48 clean hours. Follow the STANDING COST RULES.
+5. **Attacks:** `attack:codex` and `@codex` only on `[harm]` and `switch` PRs. Answer every attack with `ANSWER`.
+6. **Reuse, don't rebuild; delete in the switch; one message per reply.** Every PR names its COVERAGE row, what it retires, and what testers will notice.
+7. **Capacity and continuity:** one session, short status comments, batched pushes. Never idle: re-read #391 and #280, or schedule a check-in. Blocked on the founder? Post `BLOCKED:` and keep working.
 
 ## Standing orders (read first, every session)
 - **Costs: read `docs/COSTS.md` → STANDING COST RULES.** They bind every PR.

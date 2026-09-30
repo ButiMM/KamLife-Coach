@@ -1,13 +1,12 @@
 import {
   db, users, stepLogs, workoutLogs, mealLogs,
   eq, gte, and, desc, sql,
-  canSendProactive, canSendRoutineNudge, recordProactiveSend, claimDailySlot,
+  canSendProactive, canSendRoutineNudge, recordProactiveSend,
   getActiveClients, isPaused, dayStart, getTodayLogs,
   TRAINING_SCHEDULES, todaySAST,
 } from "../shared";
 import { readHealthState } from "../../health-state";
 import { readHeldConstraints } from "../../held-constraints";
-import { sendWhatsAppButtons } from "../../twilio-interactive";
 import { canonicalNextMove, recordCanonicalMoveOutbound, sendProactive } from "../proactive-decision";
 import { sastHour } from "../../sast";
 
@@ -157,14 +156,9 @@ export async function runEveningAccountability(): Promise<void> {
       // which is a calendar, not a coach. It now fires when, and only when, the decision owner has
       // actually chosen `train`, so a declined or sick day never renders it.
       if (move.action.kind === "train" && isTrainingDay) {
-        if (await claimDailySlot(client.id, "evening")) {
-          const delivery = await sendWhatsAppButtons(phone, `${recap}\n\n${move.line}`, [
-            "Doing it tonight",
-            "Swap to tomorrow",
-            "Rest day today",
-          ], { proactive: true });
-          await recordCanonicalMoveOutbound(client, move, delivery);
-        }
+        const delivery = await sendProactive(client, { job: "evening" }, `${recap}\n\n${move.line}`,
+          { buttons: ["Doing it tonight", "Swap to tomorrow", "Rest day today"] });
+        if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
         continue;
       }
 
