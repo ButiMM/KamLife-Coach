@@ -41,6 +41,7 @@ export default function TermsOfService() {
               <p className="font-semibold text-destructive mb-2">Important — please read this carefully.</p>
               <p className="text-muted-foreground">KamLife provides general fitness and nutrition guidance. It is <strong>not medical advice</strong> and is not a substitute for a doctor, dietitian, physiotherapist, or any other registered healthcare professional.</p>
               <p className="mt-2 text-muted-foreground">If you have a medical condition, injury, chronic illness, or are pregnant, consult a qualified healthcare provider before following any exercise or nutrition guidance from Coach K. We are not liable for any health outcome resulting from your use of the service.</p>
+              <p className="mt-2 text-muted-foreground">If a message suggests you may be at risk, Coach K will share helpline numbers straight away and alert the KamLife team, who will follow up as soon as they can. Coach K is not an emergency service. In an emergency, call 10111, or 112 from a cellphone. For suicidal thoughts, call the SADAG Suicide Crisis Helpline on 0800 567 567 (24 hours).</p>
             </div>
           </section>
 

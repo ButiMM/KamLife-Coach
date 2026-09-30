@@ -208,7 +208,7 @@ export async function mindsetAgent(user: any, message: string, memoryContext: st
   const mLower = message.toLowerCase();
   if (CRISIS_KEYWORDS.some(kw => mLower.includes(kw))) {
     const firstName = (user.name || "").split(" ")[0];
-    return `${firstName ? firstName + ", I" : "I"} hear you and I'm taking this seriously. Please reach out right now:\n\n*SADAG* 0800 567 567 — free, 24/7, confidential\n*SMS* 31393\n\nYou don't have to carry this alone. Call them now — they are trained for exactly this moment. I'll be here when you're ready.`;
+    return `${firstName ? firstName + ", I" : "I"} hear you and I'm taking this seriously. Please reach out right now:\n\n*SADAG* 0800 567 567 — free, 24/7, confidential\n*SMS* 31393\nIn an emergency, call 10111, or 112 from a cellphone.\n\nYou don't have to carry this alone. Call them now — they are trained for exactly this moment. I'll be here when you're ready.`;
   }
 
   const name = getDisplayName(user) || "there";
