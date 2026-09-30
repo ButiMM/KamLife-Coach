@@ -79,26 +79,39 @@ export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
    `account_erased` row holding only the account id. If the old database is still readable, copy
    those ids across and delete them in the restored one:
    ```sql
-   -- on the OLD database: the ids erased since the backup's timestamp
-   SELECT meta->>'userId' FROM admin_events WHERE action = 'account_erased' AND created_at >= '<backup UTC time>';
+   -- on the OLD database: the ids erased since the backup's timestamp, and when
+   SELECT meta->>'userId', performed_at FROM admin_events WHERE action = 'account_erased' AND performed_at >= '<backup UTC time>';
    ```
-   On the RESTORED database, replay the same deletion `server/handlers/safety.ts` runs, for each id.
-   The tables that don't cascade from `users` go first; the phone is read from the restored row.
-   A unit test keeps this list equal to the code's.
-   ```sql
-   \set uid '<id>'
-   SELECT phone_number AS phone FROM users WHERE id = :'uid' \gset
-   BEGIN;
-   -- ERASURE REPLAY (keep in step with safety.ts)
-   DELETE FROM quality_signals WHERE user_id = :'uid';
-   DELETE FROM shadow_replies WHERE user_id = :'uid' OR phone = :'phone';
-   DELETE FROM media_jobs WHERE user_id = :'uid' OR phone_number = :'phone';
-   DELETE FROM admin_events WHERE target_phone = :'phone';
-   DELETE FROM users WHERE id = :'uid';   -- every other client table cascades from users
-   COMMIT;
+   Put every id to replay in `erased.csv`, one `<id>,<original erasure time UTC>` per line: the rows from
+   the query above (run it with `psql -tA -F,`), the newest R2 tombstone file (already in this format), and the Railway log lines
+   below (`grep -o 'User [0-9a-f-]* requested data deletion at [^ ]*' | sed 's/User \(.*\) requested data deletion at \(.*\)/\1,\2/'`).
+   Duplicates and ids already gone are fine. Then, on the RESTORED database, run the replay, which does the
+   same deletion `server/handlers/safety.ts` runs, for every id at once, and re-writes each tombstone at
+   its original time, so retention still counts from the client's DELETE, not the restore:
+   ```sh
+   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+     -c "CREATE TEMP TABLE replay (uid uuid, at timestamp)" \
+     -c "\copy replay FROM 'erased.csv' WITH (FORMAT csv)" \
+     -f script/erasure-replay.sql
    ```
-   If the old database is lost, deletions from the last ≤ 6 hours can't be listed. Re-apply any
-   the founder knows of from the WhatsApp thread before re-opening.
+   It is idempotent: an id that is already absent deletes nothing and never stops the others, and
+   running it twice changes nothing. `pg-popia-deletion-acceptance` runs it against the real schema.
+   **If the old database is lost (#499),** the ids also live outside it, in two places. Replay every id
+   from both, whatever the backup's age (replaying an id that is already gone deletes nothing):
+   - **R2 `tombstones/`**: every backup run first saves the erased ids, one `<id>,<erasure time UTC>` per line, to a new `erased-<time>.txt`:
+     every id erased since the day before the oldest backup in `daily/`, which is every id any existing
+     backup could bring back. After the backup prune, the run deletes every older tombstone file (the new one
+     holds every id still needed) and the older `account_erased` rows, so an id is kept only while a
+     backup that predates its deletion exists (about 30 days; longer only if backups stop being pruned). Take the newest file:
+     `aws s3 ls s3://$R2_BUCKET/tombstones/ --endpoint-url $R2_ENDPOINT`.
+   - **Railway logs**, for deletions since that file: the moment a client confirms with DELETE, and before
+     anything is deleted, the app logs `[POPIA DELETE] User <id> requested data deletion at <time>`. In Railway →
+     the app service → Logs, search `[POPIA DELETE] User` from **one hour before** the newest tombstone
+     file's time (a request logged just before a run can commit after it). A confirmed request is
+     replayed even if its deletion never finished: the client asked for it.
+   Railway keeps logs for at least 7 days, far longer than the 6 hours between runs. A run that cannot
+   save the tombstones fails and opens the "Database backup failed" issue. A unit test keeps the log
+   line, the workflow step and this step in step.
 5. Point the app's `DATABASE_URL` at the restored DB and redeploy.
 6. Unset `PROACTIVE_PAUSED`. Spot-check recent users, meal logs, and subscription status.
 

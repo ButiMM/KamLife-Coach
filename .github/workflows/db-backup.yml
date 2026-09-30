@@ -88,6 +88,24 @@ jobs:
           echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
           /usr/lib/postgresql/18/bin/pg_dump --version
 
+      # #499: every erased account id (ids only, nothing personal) goes to R2 on every run, into files
+      # the backup prune never touches, so a restore can re-apply deletions even after the live database
+      # and the app's logs are gone. Runs before the dump and even when the dump later fails.
+      # A tombstone lives exactly as long as a backup that predates it: ids erased since the day before
+      # the oldest backup in daily/. If that cannot be read, every id is kept (never fewer).
+      - name: Save erasure tombstones
+        id: tombstones
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          OLDEST=$( (aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT" || true) | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
+          SINCE=$([ -n "$OLDEST" ] && date -u -d "$OLDEST -1 day" +%Y-%m-%d || echo 1970-01-01)
+          T="erased-$(date -u +%Y%m%d-%H%M%S).txt"
+          psql -tA -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "SELECT (meta->>'userId') || ',' || to_char(performed_at, 'YYYY-MM-DD HH24:MI:SS') FROM admin_events WHERE action = 'account_erased' AND performed_at >= '${SINCE}' ORDER BY performed_at" > "/tmp/${T}"
+          aws s3 cp "/tmp/${T}" "s3://${R2_BUCKET}/tombstones/${T}" --endpoint-url "$R2_ENDPOINT"
+          echo "Saved $(wc -l < "/tmp/${T}") erased ids to tombstones/${T}"
+
       - name: Dump + compress
         if: steps.guard.outputs.skip != 'true'
         run: |
@@ -149,6 +167,33 @@ jobs:
                 aws s3 rm "s3://${R2_BUCKET}/daily/${key}" --endpoint-url "$R2_ENDPOINT"
               fi
             done
+
+      # #499 attack: an erased id is kept only while a backup that could bring the account back exists.
+      # Runs after the backup prune; with no readable backup list it deletes nothing. Not best-effort:
+      # a failure fails the run and opens the alert issue.
+      - name: Prune tombstones no backup still needs
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          OLDEST=$(aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT" | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
+          if [ -z "$OLDEST" ]; then echo "No backups listed; keeping every tombstone"; exit 0; fi
+          SINCE=$(date -u -d "$OLDEST -1 day" +%Y%m%d)
+          # Each file is a full snapshot of the ids still needed, so once this run's file is saved every older
+          # one is redundant. Expiring files by their own date kept an id for two windows (#499 attack).
+          if [ "${{ steps.tombstones.outcome }}" = "success" ]; then
+            KEYS=$(aws s3 ls "s3://${R2_BUCKET}/tombstones/" --endpoint-url "$R2_ENDPOINT" | awk '{print $4}' | grep '^erased-' | sort)
+            NEWEST=$(echo "$KEYS" | tail -1)
+            for key in $KEYS; do
+              if [ "$key" != "$NEWEST" ]; then aws s3 rm "s3://${R2_BUCKET}/tombstones/${key}" --endpoint-url "$R2_ENDPOINT"; fi
+            done
+          fi
+          CUT=$(date -u -d "$SINCE" +%Y-%m-%d)
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "DELETE FROM admin_events WHERE action = 'account_erased' AND performed_at < '${CUT}'"
+
+      - name: Fail the run if the tombstones were not saved (#499)
+        if: steps.guard.outputs.skip != 'true' && steps.tombstones.outcome == 'failure'
+        run: |
+          echo "::error::Erasure tombstones were not saved to R2"; exit 1
 
       - name: Summary
         if: steps.guard.outputs.skip != 'true'

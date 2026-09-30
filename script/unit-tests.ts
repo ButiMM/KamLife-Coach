@@ -10950,9 +10950,38 @@ test("#342: the restore runbook replays every table the POPIA erasure deletes (a
   const block = code.slice(code.indexOf("THE ROW GOES, SO EVERY CASCADE FIRES"), code.indexOf("tx.delete(users)", code.indexOf("THE ROW GOES, SO EVERY CASCADE FIRES")));
   const tables = [...block.matchAll(/DELETE FROM (\w+)/g)].map(x => x[1]);
   assert.ok(tables.length >= 4, `found the erasure's explicit deletes: ${tables.join(", ")}`);
-  const doc = readFileSync("docs/backup-restore.md", "utf-8");
-  const replay = doc.slice(doc.indexOf("ERASURE REPLAY"), doc.indexOf("COMMIT;", doc.indexOf("ERASURE REPLAY")));
+  const replay = readFileSync("script/erasure-replay.sql", "utf-8");
   for (const t of [...tables, "users"]) assert.ok(replay.includes(`DELETE FROM ${t}`), `runbook replay misses ${t}`);
+  assert.ok(readFileSync("docs/backup-restore.md", "utf-8").includes("-f script/erasure-replay.sql"), "the runbook runs that file");
+});
+
+test("#499: the confirmed erasure logs its id outside the database before any await, and the runbook reads that line", async () => {
+  const { readFileSync } = await import("node:fs");
+  const code = readFileSync("server/handlers/safety.ts", "utf-8");
+  const confirmed = code.indexOf("existing[0].awaitingInputType === \"delete_confirm\"");
+  const logged = code.indexOf("[POPIA DELETE] User ${uid} requested data deletion", confirmed);
+  const firstAwait = code.indexOf("await ", code.indexOf("\n", logged));
+  assert.ok(confirmed > 0 && logged > confirmed, "the tombstone is logged once the client has confirmed");
+  assert.ok(firstAwait > logged && code.indexOf("tx.delete(users)", logged) > firstAwait, "and before billing, the transaction, or anything else a crash could interrupt");
+  const doc = readFileSync("docs/backup-restore.md", "utf-8");
+  assert.ok(doc.includes("search `[POPIA DELETE] User` from **one hour before**"), "runbook replays from the log line, with a margin before the run");
+  // The logs keep 7 days and backups 30, so the ids also go to R2, before the dump, into files the prune skips.
+  const wf = readFileSync(".github/workflows/db-backup.yml", "utf-8");
+  const saved = wf.indexOf("tombstones/${T}"), dump = wf.indexOf("name: Dump + compress"), prune = wf.slice(wf.indexOf("name: Prune"));
+  assert.ok(saved > 0 && saved < dump, "tombstones are saved before the dump");
+  assert.ok(!prune.slice(0, prune.indexOf("- name:", 5)).includes("tombstones"), "the prune never deletes them");
+  assert.ok(wf.includes("steps.tombstones.outcome == 'failure'") && doc.includes("R2 `tombstones/`"), "an unsaved run fails, and the runbook reads R2");
+  // #499 attack: kept only while a backup that predates the deletion exists, then deleted in R2 and in the live row,
+  // and the deletion reply says so.
+  const tprune = wf.slice(wf.indexOf("name: Prune tombstones no backup still needs"));
+  assert.ok(tprune.indexOf("aws s3 rm") > 0 && tprune.includes("DELETE FROM admin_events WHERE action = 'account_erased'"), "old tombstones are deleted");
+  // Each file is a full snapshot, so only the newest survives a run that saved one; by-date expiry kept an id ~63 days.
+  assert.ok(tprune.includes('if [ "${{ steps.tombstones.outcome }}" = "success" ]') && tprune.includes('NEWEST=$(echo "$KEYS" | tail -1)'), "older snapshots go once this run's is saved");
+  // …at its ORIGINAL time: stamping the restore time reset the retention clock (61 days, #499 attack).
+  assert.ok(readFileSync("script/erasure-replay.sql", "utf-8").includes("INSERT INTO admin_events (action, meta, performed_at)"), "a replayed erasure is tombstoned again at its original time (pg-popia-deletion-acceptance runs it)");
+  assert.ok(wf.includes("|| ',' || to_char(performed_at"), "the tombstone file carries each erasure's time");
+  assert.ok(tprune.includes('if [ -z "$OLDEST" ]; then') && wf.indexOf("name: Prune tombstones") > wf.indexOf("name: Prune backups"), "only after the backup prune, and never with no backup list");
+  assert.ok(code.includes("we also keep a random account number"), "the reply tells the client");
 });
 
 test("every .github/workflows file parses with unique keys (an invalid workflow silently runs nothing)", async () => {
