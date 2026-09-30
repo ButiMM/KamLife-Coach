@@ -3,7 +3,6 @@
  * Returns string if handled, null to fall through.
  */
 
-import { coreWave1For } from "../core/coach";
 import { db } from "../db";
 import { assessWeightRate } from "./weight";
 import {
@@ -207,69 +206,7 @@ export async function handleMiscCommands(ctx: {
     }
   }
 
-  // ---- SUPPLEMENT INSTANT GUIDE (Item 22) — hardcoded, no GPT ----
-  const suppKeywords: Record<string, string> = {
-    "creatine": "creatine",
-    "protein powder": "protein powder",
-    "protein shake": "protein powder",
-    "whey isolate": "whey",
-    "whey protein": "whey",
-    "whey": "whey",
-    "pre workout": "pre-workout",
-    "pre-workout": "pre-workout",
-    "preworkout": "pre-workout",
-    "bcaa": "bcaa",
-    "fat burner": "fat burner",
-    "fat burning": "fat burner",
-    "multivitamin": "multivitamin",
-    "multi vitamin": "multivitamin",
-    "vitamin": "multivitamin",
-  };
-  const suppMatch = Object.entries(suppKeywords).find(([kw]) => m.includes(kw));
-  // ── A PAINFUL JOINT IS NOT A SUPPLEMENT QUESTION (C13, 2026-09-17) ─────────────────────────
-  // "should i take" is matched as a bare substring, so "my knee is clicking and sore after the
-  // squats, should I take anti-inflammatories?" entered here — and was answered "keep it
-  // consistent", i.e. keep taking them, with the knee never mentioned. classifyPainReport already
-  // returns "soreness" for that sentence, and the triage owner is THIS FILE, further down: the
-  // supplement branch simply sits above it. Only this branch stands down, so the turn reaches the
-  // triage below rather than leaving the handler entirely. No new mouth.
-  if (!coreWave1For(String(user?.phoneNumber || "")) && classifyPainReport(m) === null && (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take"))) {
-    // ALREADY TAKING IT (2026-07-16 live: 'But I'm already taking creatine daily' was
-    // first week-gated, then SOLD the full creatine pitch — contradiction + deaf). A
-    // client already on a supplement gets acknowledgment + usage guidance, no gate, no sell.
-    // AND "SHOULD I TAKE" CONTAINS "I TAKE" (C13). A question about STARTING was read as already
-    // taking, and with nothing named suppName fell back to "it" — the literal "(it)" a client was
-    // shown. If we cannot name the thing, we cannot tell them to keep taking it.
-    if (!!suppMatch && (/\b(already|currently)\b.{0,20}\b(taking|on|using|use|drink(ing)?)\b/i.test(m) || /\bi take\b/i.test(m))) {
-      const suppName = suppMatch[1];
-      const alreadyReply = suppName === "creatine"
-        ? `Good — keep the creatine going: 5g every day (training days and rest days), any time, with water. Consistency is the whole game with it; you'll feel the full effect after 2–4 weeks. Nothing else needed.`
-        : `Good — if it's working for you and it's a basic (${suppName}), keep it consistent and keep your protein from real food the priority. If you ever notice side effects, tell me.`;
-      await logChat(user.id, message, alreadyReply, "SUPPLEMENT");
-      return alreadyReply;
-    }
-    // Supplement week gate — locked before week 4, BUT safety/medical questions always get
-    // through, and a RESET programme week never re-locks a veteran (2026-07-16: a rebuild
-    // set programmeWeek back to 1 and week-gated a 21-session client): lifetime sessions count.
-    const isSafetyQuestion = /\b(safe|safety|danger|dangerous|side effect|kidney|liver|heart|allergy|allergic|interact|reaction|risk|harm|harmful|dose|overdose|too much|cancer|blood pressure|diabetes)\b/i.test(m);
-    const progWeek = user.programmeWeek || 1;
-    const isVeteran = (user.totalWorkoutsCompleted || 0) >= 12;
-    if (progWeek < 4 && !isVeteran && !isSafetyQuestion) {
-      const weekGate = `Supplements unlock at Week 4.\n\nYou are in Week ${progWeek} — food consistency is the foundation. No supplement will out-work a solid week of eating right.\n\nFocus now: hit your ${user.proteinTarget || 120}g protein target daily from real food. When you reach Week 4, I give you the full supplement protocol — creatine, protein timing, the works.`;
-      await logChat(user.id, message, weekGate, "SUPPLEMENT_GATED");
-      return weekGate;
-    }
-    const suppKey = suppMatch ? suppMatch[1] : null;
-    let suppReply: string;
-    if (suppKey && SUPPLEMENT_GUIDE[suppKey]) {
-      suppReply = SUPPLEMENT_GUIDE[suppKey];
-    } else {
-      // General supplement overview
-      suppReply = `*Supplement priority order for ${user.goalType === "muscle_gain" ? "muscle gain" : "fat loss"}:*\n\n1. Creatine — 5g daily. R80-120/month. Proven, safe, cheap. Start here.\n2. Protein powder — only if you cannot hit your ${user.proteinTarget || 140}g protein target from food. Whey isolate, USN or Biogen.\n3. Pre-workout — replace with black coffee. Free and identical.\n4. Everything else — skip it. Food first, always.\n\nFat burners: none are proven. Do not spend money on them.`;
-    }
-    await logChat(user.id, message, suppReply, "SUPPLEMENT");
-    return suppReply;
-  }
+  // WAVE 1 IS THE NEW COACH'S (#445, CTO order on #391): supplement questions ("should I take creatine?") are answered by core/coach.ts. Logging a dose stays in food-commands.
 
   // ---- FIX 3: HANDLER 3 — Motivation and struggle ----
 
@@ -329,259 +266,8 @@ export async function handleMiscCommands(ctx: {
     return cycleReply;
   }
 
-  // ---- SMART NEXT MEAL — "what should I eat next?" based on daily gap ----
-  // A PERSON CAN ASK BY INSTRUCTING (2026-08-26, live phone trace). This accepted "suggest a meal"
-  // but not "give me a meal", so the imperative form reached no owner at all once the totals
-  // branch correctly stopped claiming it. Stopping the wrong claimant is only half the fix — the
-  // right one has to take the turn. Same request verbs as the guard in early-commands, so the two
-  // doors agree on what a meal request looks like.
-  // `what should i eat` (not `...next`): the bare form is the SAME plate-ask as "what can I eat",
-  // which this door already owns. Requiring the suffix is what sent it to the meal-plan door
-  // instead (2026-08-27). Dropping one word covers both, and adds no new vocabulary.
-  // A named meal is a plate request on the live coaching path. Keep the engine-off model
-  // fallback's established ownership, and do not price a future meal from today's ledger.
-  // "Have" needs meal context; "what should I have done" is not a food question.
-  const namesOneMeal = ["breakfast", "lunch", "dinner", "supper"].some(meal => m.includes(meal));
-  // WAVE 1 (#445): a switched client's plate-ask is the new coach's (core/coach.ts).
-  if (!coreWave1For(String(user?.phoneNumber || "")) && /\b(what should i eat|what should i have\s+for\s+(?:breakfast|lunch|dinner|supper)|next meal|(?:suggest|give|send|show|recommend)(?:\s+me)?\s*a?n?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(braai|social|tomorrow|next\s+(?:week|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i.test(m) && (engineLive() || !namesOneMeal)) {
-    const ledger = await getDayLedger(user.id, { user });
-    const todayCals = ledger.kcal;
-    const todayProt = ledger.protein;
-    const calTarget = user.calorieTarget || 1800;
-    const protTarget = user.proteinTarget || 120;
-    const calLeftRaw = calTarget - todayCals;
-    const calLeft = Math.max(0, calLeftRaw);
-    const protLeft = Math.max(0, protTarget - todayProt);
-    const budget = user.weeklyFoodBudget || "100_300";
-    const name = user.name?.split(" ")[0] || "";
-    const goal = user.goalType || "fat_loss";
-    // WHAT THIS PERSON EATS (#128). This is the door for "what should I eat?", and it was the one
-    // food surface with ZERO calls to the constraint owner: the grocery list, the meal plan and
-    // the permission-ask all consult foodConstraints, and this menu was hand-written animal
-    // protein from top to bottom. A client whose column says "vegan" was handed five plates of
-    // chicken, beef, pilchards and eggs — with "Does not eat: vegan" sitting in the same profile.
-    //
-    // No new recommender. The option sets stay hand-authored in exactly the style they were, with
-    // the alternatives a constrained client can actually eat added beside them; `allows` — the
-    // same predicate the shopping list and the swap engine use — decides which survive.
-    const constraints = foodConstraints(user);
-    const firstAllowed = (options: string[]): string | undefined => options.find(o => constraints.allows(o));
-
-    // Determine what's needed
-    const needsProtein = protLeft > 20;
-    const lowCalBudget = calLeft < 400;
-    const highCalBudget = calLeft > 800;
-
-    let suggestion = `*🍽️ Next Meal Suggestion${name ? ` — ${name}` : ""}*\n\n`;
-
-    // THE CLIENT ALREADY CLOSED THE DAY (2026-09-03, #125 sweep).
-    //
-    // "I'm done eating for the day" is a decision, and this door was the one place that did not
-    // hear it. The fact was already known and already owned: foodDayIsClosed reads it,
-    // readHeldConstraints holds it for the turn, and chooseAction guards its eat_more and protein
-    // rungs on it. This branch simply never asked, so a client who had stopped eating on 188 of
-    // 189g protein was handed two meals to close a 1g gap.
-    //
-    // THE OUTBOUND FLOOR CANNOT COVER FOR IT, which is why the fix belongs here rather than one
-    // layer out. enforceOutboundTruth refuses a reply that asksForFoodToday, and that recogniser
-    // returns FALSE on this one — it is a menu with bolded option labels, not an imperative to
-    // eat. Widening the recogniser to catch menus would make it fire on every food surface we
-    // have; the door that knows the constraint is the door that should obey it.
-    //
-    // This is the same shape as the calorie branch immediately below, which already stands down
-    // because "suggesting more food contradicts the day's assessment". The difference is only
-    // whose assessment it is: there the ledger's, here the client's own — and theirs outranks it.
-    const held = await readHeldConstraints(phone, user);
-    // ...AND THIS TURN'S OWN WORDS (#152). readHeldConstraints reads history, and the message being
-    // answered is not in it yet, so "I'm eating now, what should I eat?" carried its own reversal
-    // and was still refused. Same owner as the Meaning Engine uses, so both doors read one sentence
-    // the same way; a closure inside the utterance still wins.
-    if (foodDayClosedWith(held.foodDayClosed, message)) {
-      const landed = `You finished on *${todayCals} kcal* and *${todayProt}g protein*.`;
-      // needsProtein is this branch's existing bar for "a gap worth acting on". A 1g shortfall is
-      // not a reason to reopen a decision they made; a real one is worth naming for TOMORROW,
-      // which is a next move that does not ask them to eat now.
-      const tomorrow = needsProtein
-        ? `\n\nYou came up ${protLeft}g short on protein — start tomorrow with it at breakfast rather than chasing it tonight.`
-        : "";
-      suggestion += `You said you are done eating today, so I am leaving it there.\n\n${landed}${tomorrow}`;
-      await logChat(user.id, message, suggestion, "MEAL_SUGGESTION_DAY_CLOSED");
-      return suggestion;
-    }
-
-    // Calorie target already hit — suggesting more food contradicts the day's assessment
-    if (todayCals > 0 && calLeftRaw <= 0) {
-      const snacks = allowedAlternatives("eggs, yoghurt, biltong, hummus, roasted chickpeas", constraints);
-      const protNote = protLeft > 20
-        ? `You're about ${protLeft}g short on protein — a small protein snack${snacks ? ` (${snacks})` : ""} is a good shout if you're hungry.`
-        : "Protein's on track. ✅";
-      suggestion += `You've hit your calories for today. ${protNote}\n\nIf you're genuinely hungry, keep it light and protein-first — no need to force more food.`;
-      await logChat(user.id, message, suggestion, "MEAL_SUGGESTION");
-      return suggestion;
-    }
-
-    if (todayCals === 0) {
-      suggestion += `No food logged yet today.\n\n`;
-      const namedLaterMeal = ["lunch", "dinner", "supper"].some(meal => m.includes(meal));
-      const starts = namedLaterMeal
-        ? (budget === "under_100"
-            ? ["*Tin of pilchards + pap* (~350 kcal, 24g protein)",
-               "*Soya mince + pap + spinach* (~600 kcal, 40g protein)",
-               "*Sugar beans + lentils + pap + spinach* (~610 kcal, 26g protein)"]
-            : ["*Chicken breast + rice + spinach* (~450 kcal, 35g protein)",
-               "*Tofu stir-fry + rice* (~550 kcal, 30g protein)",
-               "*Lentil and chickpea curry + rice* (~600 kcal, 26g protein)"])
-        : budget === "under_100"
-        ? (goal === "muscle_gain"
-            ? [`*3 eggs + pap + spinach* (~420 kcal, 24g protein)\nCheap, filling, high protein to start the day.`,
-               `*Sugar beans + pap + spinach* (~450 kcal, 22g protein)\nCheap, filling, high protein to start the day.`]
-            : [`*2 eggs + oats with water* (~350 kcal, 18g protein)\nLow calorie, high protein start.`,
-               `*Oats with water + a handful of nuts* (~340 kcal, 12g protein)\nLow calorie, slow-release start.`])
-        : (goal === "muscle_gain"
-            ? [`*3 eggs + 2 toast + banana* (~550 kcal, 25g protein)\nCarbs + protein for energy and muscle.`,
-               `*Soya mince on toast + banana* (~560 kcal, 28g protein)\nCarbs + protein for energy and muscle.`,
-               `*Oats + soya milk + peanuts + banana* (~540 kcal, 22g protein)\nCarbs + protein for energy and muscle.`]
-            : [`*2 eggs + oats + coffee* (~380 kcal, 20g protein)\nBalanced, keeps you full until lunch.`,
-               `*Oats + soya milk + a handful of nuts* (~370 kcal, 14g protein)\nBalanced, keeps you full until lunch.`]);
-      // A CONSTRAINED CLIENT IS NOT LEFT WITH NOTHING. If every plate here is off their list, the
-      // honest answer is the principle rather than a plate we cannot name.
-      suggestion += firstAllowed(starts)
-        ? `Start with: ${firstAllowed(starts)}`
-        : `Start with something you actually eat, protein first — a bean or lentil base with your starch and veg will do the job.`;
-    } else if (lowCalBudget && needsProtein) {
-      suggestion += `You have ${calLeft} kcal and ${protLeft}g protein left.\n\n`;
-      // Pick a suggestion that actually fits within remaining calories
-      if (calLeft < 150) {
-        const tiny = firstAllowed([
-          "2 boiled eggs (~140 kcal, 12g protein)",
-          "50g biltong (~130 kcal, 20g protein)",
-          "Small tub of plain yoghurt (~120 kcal, 12g protein)",
-          "Half a cup of sugar beans (~120 kcal, 8g protein)",
-        ]);
-        suggestion += tiny
-          ? `*High-protein, low-cal finish:* ${tiny} — fits your budget.`
-          : `*High-protein, low-cal finish:* keep it to a small protein-first portion of something you eat — that is all the room you have left.`;
-      } else if (calLeft < 220) {
-        const fit = firstAllowed(budget === "under_100"
-          ? ["2 eggs + spinach (~160 kcal, 14g protein)", "Sugar beans + spinach (~180 kcal, 11g protein)"]
-          : ["Tuna salad, no dressing (~190 kcal, 25g protein)", "Chickpea salad, no dressing (~200 kcal, 11g protein)"]);
-        suggestion += `*Best fit:* ${fit || "a small protein-first plate of something you eat"}\nProtein first — just fits your remaining calories.`;
-      } else {
-        const best = firstAllowed(budget === "under_100"
-          ? ["Tin of tuna with lemon (~180 kcal, 22g protein)", "Sugar beans + tomato and onion (~230 kcal, 13g protein)"]
-          : ["Grilled chicken breast + salad (~250 kcal, 30g protein)", "Tofu + salad (~250 kcal, 20g protein)", "Lentils + salad (~240 kcal, 14g protein)"]);
-        suggestion += `*Best option:* ${best || "a protein-first plate of something you eat"}\nHigh protein, low calories — exactly what you need to finish the day.`;
-      }
-    } else if (lowCalBudget && !needsProtein) {
-      suggestion += `You have ${calLeft} kcal left and protein is sorted.\n\n`;
-      suggestion += `*Best option:* Vegetable stir-fry or salad (~150 kcal)\nOr just call it — you're close to target. ${goal === "fat_loss" ? "Slight deficit is fine for fat loss." : ""}`;
-    } else if (needsProtein) {
-      // THE RECOMMENDATION HAS TO ADDRESS THE NUMBER IT JUST QUOTED (2026-08-28, live trace).
-      //
-      // Observed: "You need 129g more protein today. That is the priority." followed by two eggs
-      // and pap — 18g, with 2,146 kcal still to spend. The branch printed protLeft and then never
-      // read it again, and never read calLeft at all, so a 21g gap and a 129g gap got the same
-      // two lines. A coach that states a deficit and then ignores it is not giving advice, it is
-      // reciting a menu.
-      //
-      // No new nutrition engine and no threshold. The existing per-meal options already carry
-      // their own protein and calorie figures, so the fix is to lead with the strongest option the
-      // remaining calories can actually pay for, and — when that option still does not reach the
-      // stated gap — to say so and hand the client the priority, not a prescribed meal count.
-      suggestion += `You need *${protLeft}g more protein* today. That is the priority.\n\n`;
-      // THE MENU HAD NO FULL PLATE IN IT (2026-09-01, Defect 2).
-      //
-      // Traced before changing anything: protLeft and calLeft are both read and both printed, so
-      // this is not missing evidence and not the wrong claimant. What the owner could not do was
-      // answer in proportion to the evidence it held. Driving the real path on main, a client with
-      // 2 146 kcal of headroom and one with 420 kcal were offered plates from the same 380–450
-      // kcal band, because that band was the entire menu. Headroom could only ever REMOVE an
-      // option; nothing in the list could express "you have most of a day left, eat properly".
-      //
-      // So the correction is to the option set and the ordering, not to the architecture: fuller
-      // plates in the same hand-authored style as the entries already here, and a choice rule that
-      // fits the plate to the need.
-      //
-      // EVERY ENTRY BELOW WAS ANIMAL PROTEIN (#128). The plates a constrained client can eat are
-      // added here in the same style and at the same price point, and `allows` — not a second menu
-      // and not a different door — decides which of them this person is shown.
-      const allMeals: Array<{ text: string; protein: number; kcal: number }> = budget === "under_100"
-        ? [
-            { text: "Tin of pilchards + 2 eggs + pap (~600 kcal, 42g protein)", protein: 42, kcal: 600 },
-            { text: "Sugar beans + 2 eggs + pap + spinach (~620 kcal, 30g protein)", protein: 30, kcal: 620 },
-            { text: "Soya mince + pap + spinach (~600 kcal, 40g protein)", protein: 40, kcal: 600 },
-            { text: "Sugar beans + lentils + pap + spinach (~610 kcal, 26g protein)", protein: 26, kcal: 610 },
-            { text: "Tin of pilchards + pap (~350 kcal, 24g protein)", protein: 24, kcal: 350 },
-            { text: "2 eggs + pap (~300 kcal, 18g protein)", protein: 18, kcal: 300 },
-            { text: "Sugar beans + pap (~340 kcal, 14g protein)", protein: 14, kcal: 340 },
-          ]
-        : [
-            { text: "2 chicken thighs + rice + mixed veg (~680 kcal, 55g protein)", protein: 55, kcal: 680 },
-            { text: "Soya mince + rice + mixed veg (~620 kcal, 45g protein)", protein: 45, kcal: 620 },
-            { text: "Beef mince + pap + spinach (~640 kcal, 40g protein)", protein: 40, kcal: 640 },
-            { text: "Chicken breast + rice + spinach (~450 kcal, 35g protein)", protein: 35, kcal: 450 },
-            { text: "Tofu stir-fry + rice (~550 kcal, 30g protein)", protein: 30, kcal: 550 },
-            { text: "Lentil and chickpea curry + rice (~600 kcal, 26g protein)", protein: 26, kcal: 600 },
-            { text: "Tin of pilchards + sweet potato (~380 kcal, 24g protein)", protein: 24, kcal: 380 },
-            { text: "3 eggs + brown bread + tomato (~400 kcal, 24g protein)", protein: 24, kcal: 400 },
-            { text: "Sugar beans + sweet potato + spinach (~420 kcal, 16g protein)", protein: 16, kcal: 420 },
-          ];
-      const meals = allMeals.filter(mm => constraints.allows(mm.text));
-      // FIT THE PLATE TO THE NEED, and it takes no arithmetic beyond a comparison.
-      //
-      // "Biggest protein first" was right while every option was small and becomes wrong the
-      // moment a 680 kcal plate exists: a client 22g short would be led to it. Ranking rule:
-      //   - the SMALLEST plate that actually covers the gap, if one does — enough is enough;
-      //   - otherwise the BIGGEST the day's calories can pay for, because nothing will finish it
-      //     and the largest dent is the most useful answer.
-      // No threshold, no percentage, no division, no meal count. The calorie filter is what stops
-      // the fuller plates being offered to somebody who has no room for them.
-      const affordable = meals.filter(mm => mm.kcal <= calLeft);
-      const covers = affordable.filter(mm => mm.protein >= protLeft).sort((a, b) => a.kcal - b.kcal);
-      const dents = affordable.filter(mm => mm.protein < protLeft).sort((a, b) => b.protein - a.protein);
-      // FIVE, AS BEFORE. Widening the option set so a constrained client has a real menu must not
-      // hand an unconstrained one a wall of nine plates to choose between; the ranking above
-      // already puts the right ones at the top, so the tail is what gets dropped.
-      const ordered = [...covers, ...dents].slice(0, 5);
-      if (ordered.length === 0) {
-        const only = allowedAlternatives("eggs, biltong, tuna, plain yoghurt, sugar beans, lentils", constraints);
-        suggestion += only
-          ? `You do not have the calories left for a full meal — go protein-only: ${only}, and leave the starch off the plate.`
-          : `You do not have the calories left for a full meal — go protein-only from what you do eat, and leave the starch off the plate.`;
-      } else {
-        suggestion += `Pick one:\n${ordered.map((mm, i) => `${i + 1}. ${mm.text}`).join("\n")}`;
-        if (ordered[0].protein < protLeft) {
-          // SAY IT PLAINLY RATHER THAN PRESCRIBE A NUMBER. How the client spreads the rest across
-          // the eating opportunities they have left is theirs to decide; counting meals for them
-          // would be inventing a plan out of two figures.
-          suggestion += `\n\nNone of those closes ${protLeft}g on its own, so make protein the first thing on the plate for every meal you have left today. You have *${calLeft} kcal* to work with.`;
-        }
-      }
-    } else {
-      suggestion += `${calLeft} kcal and ${protLeft}g protein to go.\n\n`;
-      const balanced = firstAllowed(budget === "under_100"
-        ? ["Pap + beans + cabbage (~400 kcal, 14g protein)"]
-        : ["Chicken + sweet potato + vegetables (~500 kcal, 30g protein)",
-           "Tofu + sweet potato + vegetables (~480 kcal, 22g protein)",
-           "Lentils + sweet potato + vegetables (~470 kcal, 18g protein)"]);
-      const second = firstAllowed(budget === "under_100"
-        ? ["2 eggs + pilchards + pap (~500 kcal, 28g protein)",
-           "Soya mince + pap + cabbage (~480 kcal, 32g protein)"]
-        : ["Greek yoghurt + banana + oats (~350 kcal, 18g protein)",
-           "Oats + soya milk + peanuts + banana (~360 kcal, 14g protein)"]);
-      const secondLabel = budget === "under_100" ? "Protein push" : "Light option";
-      const twoOptions = [
-        balanced ? `*Balanced option:* ${balanced}` : "",
-        second ? `*${secondLabel}:* ${second}` : "",
-      ].filter(Boolean).join("\n");
-      suggestion += twoOptions
-        || `Build it from what you actually eat: protein first, then your starch, then something green. That is the whole rule with this much room left.`;
-    }
-
-    await logChat(user.id, message, suggestion, "MEAL_SUGGESTION");
-    return suggestion;
-  }
-
+  // WAVE 1 IS THE NEW COACH'S (#445, CTO order on #391): "what should I eat" / "hungry" is answered by core/coach.ts, not here.
+  
   // ---- HABIT CALENDAR — visual 4-week consistency grid ----
   if (m === "calendar" || m === "habit calendar" || m === "my calendar" || m === "consistency" || m === "habit tracker" || /\b(habit\s*calendar|consistency\s*check|my\s*consistency)\b/i.test(m)) {
     try {
@@ -655,7 +341,7 @@ export async function handleMiscCommands(ctx: {
   // which the shareable report card in early-commands.ts:135 matches and answers first. Four dead
   // phrases in a block that looked like an owner. The words it can actually win are left here;
   // the numbers now come from the one source.
-  if (m === "transformation" || m === "monthly" || /\b(my transformation|30.?day\s*report)\b/i.test(m) || (!coreWave1For(String(user?.phoneNumber || "")) && /\bthis month\b/i.test(m))) { // bare "this month" caught "Which crypto should I buy this month?" (#445)
+  if (m === "transformation" || m === "monthly" || /\b(my transformation|30.?day\s*report)\b/i.test(m)) { // bare "this month" caught "Which crypto should I buy this month?" (#445)
     try {
       const { getProgressTruth } = await import("../day-ledger");
       const truth = await getProgressTruth(user, { days: 30, weightWindowDays: 30, clientMessage: message });
@@ -887,8 +573,7 @@ export async function handleMiscCommands(ctx: {
   // And it advertised "Send *this week*" — a command NO handler owned, so it fell to the model,
   // which improvised averages and handed the next move back to the client. Both doors are owned
   // here now, from the same truth.
-  const switchedTalk = coreWave1For(String(user?.phoneNumber || "")); // "how am I doing (this week)?" is the new coach's (#445)
-  const wantsToday = ["progress", "my progress", ...(switchedTalk ? [] : ["how am i doing"])].includes(m);
+  const wantsToday = ["progress", "my progress"].includes(m); // "how am i doing" is a question: the new coach answers it (#445)
   // The weekly doors this handler can actually WIN, and no others. The deleted WEEKLY PROGRESS
   // CARD block also listed "my week", "week report", "week card" and "weekly card" — but the
   // shareable report card in early-commands.ts:135 matches those and runs earlier, so that block
@@ -896,8 +581,7 @@ export async function handleMiscCommands(ctx: {
   // file to the left: code that looks like it owns a question and only loses on chain order.
   // Those four belong to the report card; production-parity asserts they still reach it.
   const wantsWeek = ["this week", "week", "weekly", "this weeks progress", "this week's progress"].includes(m)
-    || /\b(?:weekly stats|progress card|weekly progress|my weekly|my stats this week|progress this week)\b/i.test(m)
-    || (!switchedTalk && /\bhow.*i doing this week\b/i.test(m));
+    || /\b(?:weekly stats|progress card|weekly progress|my weekly|my stats this week|progress this week)\b/i.test(m); // cards on request; "how am I doing this week?" is the new coach's (#445)
   if (wantsToday || wantsWeek) {
     const name = getDisplayName(user) || "there";
     try {
@@ -1710,8 +1394,7 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- PORTION SIZE GUIDE — "portions", "how much should I eat", "serving size" ----
-  if (!wroteThisTurn && (m === "portions" || m === "portion guide" || m === "serving size" || /\b(portion\s*(?:size|guide|control)|serving\s*size|plate\s*size|hand\s*portion)\b/i.test(m)
-    || (!coreWave1For(String(user?.phoneNumber || "")) && /\bhow\s*much\s*(?:should|must|do)\s*i\s*eat\b/i.test(m)))
+  if (!wroteThisTurn && (m === "portions" || m === "portion guide" || m === "serving size" || /\b(portion\s*(?:size|guide|control)|serving\s*size|plate\s*size|hand\s*portion)\b/i.test(m))
     && !/\b(weight|gain(?:ing)?|los(?:e|ing)|per week|kg)\b/i.test(m)) {
     const goal = user.goalType || "fat_loss";
     const name = user.name?.split(" ")[0] || "";

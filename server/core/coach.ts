@@ -198,10 +198,9 @@ async function openaiClient(): Promise<OpenAI> {
  * else keeps the old one. Rollback is instant: set CORE_WAVE1=off, no deploy.
  */
 export function coreWave1For(phone: string): boolean {
-  // FOUNDER BY DEFAULT (#453, the overnight rule): the founder's number meets the new coach; every tester
-  // keeps the old one until the CTO attacks this and a follow-up turns it on with the deletions.
-  // `on` is everyone; `off` is the rollback.
-  const mode = String(process.env.CORE_WAVE1 || "founder").toLowerCase();
+  // ON BY DEFAULT (founder decision, CTO order on #391, 25 Sep): wave 1 is the new coach's for everyone.
+  // `off` is the emergency rollback to the old engine and gpt-block; `founder` limits it to one number.
+  const mode = String(process.env.CORE_WAVE1 || "on").toLowerCase();
   if (mode === "on") return true;
   if (mode !== "founder") return false;
   const digits = (p: string) => (p || "").replace(/\D/g, "").replace(/^0/, "27");

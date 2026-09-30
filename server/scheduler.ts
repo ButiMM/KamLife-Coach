@@ -17,9 +17,8 @@ import { runSundayWeeklyReport } from "./scheduler/jobs/weekly";
 import { runPhaseAdvancement } from "./scheduler/jobs/programme";
 import { runEarlyOnboarding, runStepSyncCatchup } from "./scheduler/jobs/onboarding";
 import { runSubscriptionExpiryCheck, runPaymentFailureRecovery, runSignupNudge, runWeeklyKpiReport, runAutoCalAdjust, runStepTargetAdaptation } from "./scheduler/jobs/business";
-import { runMondayProgress, runMondayGroceries } from "./scheduler/jobs/monday";
+import { runMondayProgress, runDietBreakCheck } from "./scheduler/jobs/monday";
 import { runCipUpdate } from "./scheduler/jobs/cip-update";
-import { runMonthlyNarrative } from "./scheduler/jobs/narrative";
 import { runSpendWatchdog } from "./scheduler/jobs/spend-watchdog";
 import { runBalanceCheck } from "./scheduler/jobs/balance-check";
 import { runDueReminders } from "./scheduler/jobs/reminders";
@@ -199,7 +198,10 @@ export async function initScheduler(): Promise<void> {
   // ADAPTIVE TARGETS run 15 min BEFORE the morning check-in so the day's message already
   // carries today's real numbers (sick → rest targets, stall → trim, etc). 2026-07-27.
   cron.schedule("45 3 * * *",   () => safe("runAdaptiveTargets",       runAdaptiveTargets, { critical: true, cron: "45 3 * * *" }), { timezone: "UTC" }); // 5:45am SAST
-  cron.schedule("0 4 * * *",    () => safe("runMorningCheckin",         runMorningCheckin, { critical: true, cron: "0 4 * * *" }), { timezone: "UTC" }); // 6am SAST
+  // A finished diet break restores the pre-break calories first, so the morning uses the right numbers
+  // (it was never scheduled, so breaks never ended). Its notice, if it goes, is that client's one
+  // message today. It catches its own errors, so it can never stop the morning.
+  cron.schedule("0 4 * * *",    () => safe("runMorningCheckin",         async () => { await runDietBreakCheck(); await runMorningCheckin(); }, { critical: true, cron: "0 4 * * *" }), { timezone: "UTC" }); // 6am SAST
   cron.schedule("0 17 * * *",   () => safe("runEveningAccountability",  runEveningAccountability, { cron: "0 17 * * *" }),    { timezone: "UTC" }); // 7pm SAST
   cron.schedule("0 8 * * *",    () => safe("runEarlyOnboarding",        runEarlyOnboarding, { cron: "0 8 * * *" }),          { timezone: "UTC" }); // 10am SAST
   cron.schedule("5 8 * * *",    () => safe("runSubscriptionExpiryCheck",runSubscriptionExpiryCheck, { cron: "5 8 * * *" }),  { timezone: "UTC" }); // 10am SAST
@@ -234,14 +236,7 @@ export async function initScheduler(): Promise<void> {
   }, { timezone: "UTC" });
   cron.schedule("0 5 * * 1",     () => safe("runWeeklyKpiReport",     runWeeklyKpiReport, { cron: "0 5 * * 1" }),     { timezone: "UTC" }); // 7am SAST KPI report
   cron.schedule("0 5 * * 1",     () => safe("runPhaseAdvancement",    runPhaseAdvancement, { cron: "0 5 * * 1" }),    { timezone: "UTC" }); // 7am SAST phase check
-  cron.schedule("0 11 * * 1",    async () => {                        // 1pm SAST grocery list — early afternoon, in time to plan the week's shop without stacking on the morning
-    try {
-      const today = todaySAST();
-      if (hasRunToday("monday_groceries", today)) return;
-      saveState("monday_groceries", today);
-      await runMondayGroceries();
-    } catch (e) { console.error("[SCHEDULER] runMondayGroceries failed:", e); }
-  }, { timezone: "UTC" });
+  // The Monday grocery list is gone (founder, 30 Sep, #511): shopping lists only on request.
 
   // ── Weekly — Tuesday & Thursday ───────────────────────────────────────────
   // The Tue/Thu comeback fan-out is GONE (2026-08-19, Cut 6). Silence has one owner now — the
@@ -259,6 +254,10 @@ export async function initScheduler(): Promise<void> {
   // ── Weekly — Saturday ─────────────────────────────────────────────────────
 
   // ── Weekly — Sunday ───────────────────────────────────────────────────────
+  // THE WEEKLY REPORT (B4, "show it's working"). It was on the critical-jobs alert list above but had
+  // no schedule, so no client got it. 05:55 SAST, before
+  // the 06:00 morning check-in: on Sundays the report is the day's one scheduled message (#511).
+  cron.schedule("55 3 * * 0",    () => safe("runSundayWeeklyReport",  runSundayWeeklyReport, { cron: "55 3 * * 0" }),  { timezone: "UTC" });
   cron.schedule("0 20 * * 0",    () => safe("runCipUpdate",           runCipUpdate, { cron: "0 20 * * 0" }),           { timezone: "UTC" }); // 10pm SAST — rebuild all CIPs after the week closes
   cron.schedule("0 8 * * 0",     async () => {                        // 10am SAST auto cal adjust
     try {
@@ -271,7 +270,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("0 9 * * 0",     () => safe("runStepTargetAdaptation", runStepTargetAdaptation, { cron: "0 9 * * 0" }), { timezone: "UTC" }); // 11am SAST
 
   // ── Monthly ───────────────────────────────────────────────────────────────
-  cron.schedule("0 17 1 * *",    () => safe("runMonthlyNarrative",    runMonthlyNarrative, { cron: "0 17 1 * *" }),    { timezone: "UTC" }); // 1st 7pm SAST — identity narrative
+  // The monthly narrative is retired (founder, 30 Sep, #511, B8): the weekly report and the client record carry the story.
 
   // ── Annual ────────────────────────────────────────────────────────────────
 

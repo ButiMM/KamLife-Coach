@@ -37,6 +37,10 @@ This section outranks the rest of this file. It exists because a broad product w
 
 No separate CI OpenAI project and no paid gate runs for now. **Switches are proven on real use instead:** the switch ships behind its flag (`CORE_WAVE1` and so on), goes on for everyone through the Railway variable, is watched through real tester conversations and 👎 flags, and is rolled back instantly (`off`) if it misbehaves. Offline tests, the reach check and the safety floors still run on every PR at no cost. The paid replay gate returns only once there's paying revenue, and only on a `final` label. Deleting old code waits until a switch has run cleanly on real use for 48 hours.
 
+## 0d. NO WAITING (founder decision, 30 Sep evening). This overrides every "48 hours" and "founder first" rule.
+
+**A switch and its deletion are one PR, live immediately.** When a row's switch PR is green on the offline suites, the reach check and the ratchet, and its `[harm]`/`switch` attack is answered (or its window has passed), it merges **with the old code for that row deleted in the same PR**, and the flag defaults to `on` for everyone. `off` stays the emergency rollback. There's no clean-period wait and no founder-first step. **The ratchet now also counts test lines:** new tests must be paid for by deleting obsolete ones.
+
 ## 1. The decision
 
 Keep the plumbing. Replace the coaching core behind it.
@@ -149,6 +153,18 @@ Every `[core]` PR says what it **retires**: stores, handlers, AI calls, prompt t
 If, after the gate baseline and shadow core are running, the shadow core does not beat the old path on the memory and safety cases within five working days, stop and reassess the design. Don't keep cutting. This is the rule #63 lacked.
 
 ## 6. Roles
+
+**Responsibilities from 30 Sep (founder decision). One owner per area, so no one does 20 things:**
+| Area | Owner | Where it lives |
+|---|---|---|
+| Engineering, build orders, architecture, repo | **CTO (Claude, this chat)** | `docs/ORDERS.md`, `CLAUDE.md`, #391 |
+| Building | **Claude Code** | PRs |
+| Attacks and code reviews | **Codex** | PR comments (`AGENTS.md`) |
+| Administration: Twilio/Meta templates and verification, WhatsApp billing, payments setup, POPIA paperwork | **Codex, with the founder** | issues labelled `admin` |
+| Marketing, market research, positioning | **A separate room** (not the CTO chat) | its own chat; decisions recorded in `docs/SYSTEM.md` |
+| Daily independent review | **Grok** | `docs/GROK.md` |
+**Shared memory for every room:** `docs/SYSTEM.md` (what exists and what's decided). Nobody asks the founder something that's recorded there.
+
 
 **Grok (independent reviewer, fixed rhythm):** a daily product review at ~07:00, plus a switch review whenever a `switch` PR opens. Prompts and rhythm are in `docs/GROK.md`. The CTO triages every review into the three piles and files the gaps onto `COVERAGE.md` rows.
 

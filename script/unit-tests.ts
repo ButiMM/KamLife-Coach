@@ -1799,11 +1799,10 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const body = fn.slice(0, fn.indexOf("\n}\n"));
     assert.ok(!/if \(!profile\.usesMacros\) return null/.test(body),
       "the wellness gate is back in todayRows — the simplicity camp loses its card again");
-    // The macro NUMBERS reply still gates on the goal profile, because that one is about numbers.
-    const ec = readFileSync("server/handlers/early-commands.ts", "utf-8");
-    const j = ec.indexOf("whichMacroAsked(m)");
-    assert.ok(/usesMacros/.test(ec.slice(j, j + 700)),
-      "the macro-status reply must still stand down for a non-macro goal");
+    // The macro-status reply was deleted with wave 1 (#445): the new coach answers numbers questions
+    // from ledgerNumbers, which gates on the same goal profile (usesMacros).
+    const coach = readFileSync("server/core/coach.ts", "utf-8");
+    assert.ok(/usesMacros/.test(coach), "the new coach must still keep numbers from a non-macro goal");
   });
 
   test("every meal removal goes through ONE owner, and that owner writes an audit line", () => {
@@ -6044,7 +6043,7 @@ test("onboarding: signup pitch is outcome-led (not feature-speak) and keeps the 
   // Meta-parity consent gate: age 18+, AI disclosure, human check-in path, POPIA, ToU/Privacy links.
   assert.match(src, /You're 18 or older/i, "age gate present");
   assert.match(src, /an AI coach, not a doctor/i, "AI + medical disclosure");
-  assert.match(src, /A real coach may check in on you/i, "human handoff line (the Meta-safe pattern)");
+  assert.match(src, /alert the KamLife team, who will follow up as soon as they can/i, "human path, with no promised time (#514, founder wording)");
   assert.match(src, /POPIA[\s\S]{0,120}delete my data/i, "POPIA + data deletion preserved");
   assert.match(src, /kamlife.*\/terms[\s\S]{0,40}\/privacy/i, "Terms + Privacy links present");
 });
@@ -8557,7 +8556,7 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
 
   test("surface: nudges are capped at one a day", () => {
     const src = readFileSync(join("server", "scheduler", "shared.ts"), "utf-8");
-    assert.match(src, /MAX_PROACTIVE_PER_DAY\) \|\| 1\)/, "default cap must be 1, not 3");
+    assert.match(src, /export const DAILY_PROACTIVE_CAP = 1;/, "the cap is 1, fixed (#511)");
   });
 
   test("surface: the menu promotes four things, not twelve", () => {
@@ -10918,13 +10917,12 @@ test("#441 isModelSlowOrUnreachable: timeout, dropped connection and 5xx answer 
   }
 });
 
-test("CORE_WAVE1: founder by default (#453); founder matches only the founder's number, in any format; on is everyone; off is the rollback", async () => {
+test("CORE_WAVE1: on by default (#445); founder matches only the founder's number, in any format; off is the rollback", async () => {
   const { coreWave1For } = await import("../server/core/coach");
   const saved = { m: process.env.CORE_WAVE1, p: process.env.COACH_ALERT_PHONE, a: process.env.ADMIN_PHONE_OVERRIDE };
   try {
     delete process.env.CORE_WAVE1; process.env.COACH_ALERT_PHONE = "+27 82 943 8001"; delete process.env.ADMIN_PHONE_OVERRIDE;
-    assert.equal(coreWave1For("whatsapp:+27829438001"), true, "unset means founder: the founder is switched");
-    assert.equal(coreWave1For("whatsapp:+27829438002"), false, "unset means founder: a tester is not");
+    assert.equal(coreWave1For("whatsapp:+27829438002"), true, "unset means on, for everyone");
     process.env.CORE_WAVE1 = "off";
     assert.equal(coreWave1For("whatsapp:+27829438001"), false, "off is the rollback");
     process.env.CORE_WAVE1 = "founder";
@@ -11050,15 +11048,6 @@ test("#92 every sentence askCoachK returns on failure is recognised as an unansw
     "CONTROL: a genuine answer is not an unavailable mouth");
 });
 
-await Promise.all(pending);
-
-console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
-if (failures.length > 0) {
-  console.log("\nFailures:");
-  console.log(failures.join("\n\n"));
-  process.exit(1);
-}
-console.log("✓ all unit checks passed\n");
 
 // ── #319 — ONE PROACTIVE SENDER ──────────────────────────────────────────────────────────────
 test("#319: a scheduled coaching message is held for a paused or non-coaching client, and every coaching job sends through the one door", async () => {
@@ -11093,3 +11082,40 @@ test("day-one message: no reply shortcut the product no longer answers (\"2\" ha
   assert.ok(!src.includes('"2" to log') && !src.includes('"3" to log'), "Day 1 names a digit shortcut that does not exist");
   assert.ok(src.includes("like *8500*, to log steps"), "it says how steps are actually logged");
 });
+
+test("#506 evidence: usage stats are nearest-rank per client, and a logged template body is named by its template", async () => {
+  const { summariseUsage, templateOf } = await import("../server/routes/admin-metrics");
+  const { renderTemplateBody } = await import("../server/whatsapp-templates");
+  const z = { inbound: 0, outboundBubbles: 0, proactive: 0, templates: 0, media: 0 };
+  const s = summariseUsage([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => ({ ...z, inbound: n }))) as any;
+  assert.deepEqual(s.inbound, { median: 5, p90: 9, max: 10 });
+  assert.deepEqual((summariseUsage([]) as any).media, { median: 0, p90: 0, max: 0 }, "no clients, no crash");
+  const daily = renderTemplateBody("kamlife_daily_plan", { "1": "Thandi", "2": "Walk 20 minutes" });
+  assert.equal(templateOf(daily), "kamlife_daily_plan");
+  assert.equal(templateOf(renderTemplateBody("kamlife_checking_in")), "kamlife_checking_in");
+  assert.equal(templateOf("Morning Thandi — here's your brief. Protein at lunch."), null, "an ordinary freeform morning is not a template");
+});
+
+test("#511: one scheduled message a day — a fixed cap, the Sunday report takes Sunday's slot, and no unasked shopping list", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { DAILY_PROACTIVE_CAP } = await import("../server/scheduler/shared");
+  assert.equal(DAILY_PROACTIVE_CAP, 1, "one a day, not a setting");
+  assert.ok(!readFileSync("server/scheduler/shared.ts", "utf8").includes("MAX_PROACTIVE_PER_DAY"), "the override is gone");
+  const weekly = readFileSync("server/scheduler/jobs/weekly.ts", "utf8");
+  assert.ok(!/claimProactive\([^)]*"sunday_report"[^)]*critical/.test(weekly), "the weekly report no longer bypasses the daily slot");
+  assert.ok(!weekly.includes("formatShoppingList(") && !weekly.includes("runWeeklyRecaps()"), "no shopping list or voice recap after the report");
+  const sched = readFileSync("server/scheduler.ts", "utf8");
+  assert.ok(/cron\.schedule\("55 3 \* \* 0",\s+\(\) => safe\("runSundayWeeklyReport"/.test(sched), "the weekly report is scheduled, on Sunday");
+  assert.ok(sched.includes('cron.schedule("0 4 * * *",    () => safe("runMorningCheckin"'), "…before the 04:00 UTC morning check-in");
+  assert.ok(!sched.includes("runMondayGroceries") && !readFileSync("server/scheduler/jobs/monday.ts", "utf8").includes("runMondayGroceries"), "the Monday grocery list is gone");
+});
+
+await Promise.all(pending);
+
+console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
+if (failures.length > 0) {
+  console.log("\nFailures:");
+  console.log(failures.join("\n\n"));
+  process.exit(1);
+}
+console.log("✓ all unit checks passed\n");

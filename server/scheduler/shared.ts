@@ -166,8 +166,9 @@ export function isProactivePaused(): boolean {
 // ONE A DAY (2026-07-28). At 3/day and 24 jobs a client could receive 21 unsolicited messages a
 // week from a service they pay R199 for — every one a chance to be wrong, and until this week
 // they were all state-blind. One good message beats three forgettable ones. Raise deliberately
-// via MAX_PROACTIVE_PER_DAY if the data ever says people want more, not because a job exists.
-export const DAILY_PROACTIVE_CAP = Math.max(1, Number(process.env.MAX_PROACTIVE_PER_DAY) || 1);
+// ONE, AND NOT A SETTING (founder, 30 Sep, #511): the environment override is gone. Billing
+// (claimCritical) and reminders the client set are outside the count; every coaching job is inside it.
+export const DAILY_PROACTIVE_CAP = 1;
 export const dailyProactiveCount = new Map<string, number>(); // `${today}:${clientId}` → sends today
 
 export function dailyKey(clientId: string): string {

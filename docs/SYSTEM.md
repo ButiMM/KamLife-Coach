@@ -53,6 +53,9 @@ The full list of names and code defaults is in the outgoing CTO's handover (22-2
 | 24 Sep | **No new paid services, API keys or subscriptions** without a written case from the CTO and a yes from the founder. It's an MVP: free first. The nightly paid sweep was dropped for a free one. |
 | 24 Sep | **No read-only production database access for agents.** Real tester threads reach the gate through Coach Health (#293), which runs inside production and exports de-identified cases. No credentials leave Railway. |
 | 24 Sep | Gate baseline on main (out of 10): first day 7, logging 7.2, coaching 6.2, **memory 4.0**, proactive 6.5, training 8, weekly story 5.5, safety 7.9. R0.009 a message, 2.3 s a reply. |
+| 30 Sep | **Price range: R199 to R250 a month** (founder). R149 and R99 are no longer candidates. The first paying group tests R199 against R249. |
+| 30 Sep | **WhatsApp templates:** the founder submitted templates to Twilio/Meta weeks ago and is in contact with Twilio. Status is tracked in `admin` issues, not re-asked. |
+| 30 Sep | **Responsibilities split** (see ORDERS §6): CTO (Claude, chat) = engineering and build direction; Codex = attacks, reviews and administration (Twilio/Meta, billing, POPIA paperwork); marketing and market research in a separate room; Grok = daily independent review. |
 | parked | Coach K price: founder wants R199-R249 (code says R149). Decide when the core works. |
 
 ## Founder checks still open (Railway, only the founder can see it)

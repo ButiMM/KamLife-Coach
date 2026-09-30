@@ -58,9 +58,7 @@ jobs:
       # and ONCE, on its final head (#467): a `switch` PR is judged cheaply on every push until it is
       # labelled `final`. The watch merges a switch PR only on a green run with `final` on it.
       REPLAY_JUDGE_MODEL: ${{ contains(github.event.pull_request.labels.*.name, 'switch') && contains(github.event.pull_request.labels.*.name, 'final') && 'gpt-4.1' || 'gpt-4.1-mini' }}
-      # A switch PR is graded on the SWITCHED path: its wave's new coach answers live, and the gate's
-      # stored-row and reply checks grade what testers would get. Main's baseline has no such flag.
-      CORE_WAVE1: ${{ contains(github.event.pull_request.labels.*.name, 'switch') && 'on' || 'off' }}
+      # Wave 1 is on by default (#445), so every run grades the path testers get; CORE_WAVE1=off is the rollback.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -4,6 +4,12 @@ This repository builds KamLife Coach. This file is the canonical product/enginee
 
 ## CURRENT ORDERS FOR CODEX (CTO, 28 Sep). Where anything below disagrees, THIS wins.
 
+**Precision standard (30 Sep; Codex runs on an upgraded model):** every attack is **engineering-precise and product-directed**.
+- **Anchor it to the product:** name the capability it serves (help me now / know my situation / help me follow through / show it's working) and the COVERAGE row. End with one line: **`PRODUCT: forward / neutral / backward`**, and why.
+- **Name the exact failure:** the exact inbound message, the exact stored rows expected versus actual, the final outbound body, and the file:line of the **first divergence**. Reproduced offline with a failing assertion. No finding without one.
+- **Check the locked decisions too:** one scheduled message a day, the shopping list only on request, no monthly narrative, food-only photo analysis (#511); the commitment-loop spec (#512); the approved consent wording (#514); R199-R250 pricing. Any PR that contradicts one of them is a REGRESSION.
+- **Rank findings by harm to a real client,** not by code style. At most 5 per round. No speculation, and no repeating unchanged behaviour.
+
 1. **Attack only `[harm]` and `switch` PRs, before they reach testers.** Priority: safety, billing, deletion and consent first, then switches. Re-attack a fix at its new SHA, starting with the journey that failed. **Skip** docs, status, dependency bumps, merge-only revisions, and anything that can't affect a client turn.
 2. **Money:** never trigger the live gate or any paid model. Prove findings offline (stubbed model, local Postgres). No finding without a failing assertion.
 3. **Every finding is labelled REGRESSION (blocks the merge) or EDGE (becomes a follow-up issue with an owner).** For findings on merged PRs, open the issue yourself.

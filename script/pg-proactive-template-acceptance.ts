@@ -211,6 +211,8 @@ REAL("\n4. THE REAL JOB OWNERS SELECT THEIR OWN TEMPLATE — not just sendWhatsA
   payloads = [];
   await pool.query("DELETE FROM client_actions WHERE user_id = $1", [user.id]).catch(() => {});
   await pool.query("DELETE FROM sent_proactive WHERE user_id = $1", [user.id]).catch(() => {});
+  // One scheduled message a day (#511): the morning above used today's slot, in memory as well as in the table.
+  { const { dailyProactiveCount, weeklyKeyedSent } = await import("../server/scheduler/shared"); dailyProactiveCount.clear(); weeklyKeyedSent.clear(); }
   await runSundayWeeklyReport().catch((e) => REAL(`  (weekly job threw: ${(e as any)?.message})`));
   chk(bodiesSent() > 0, "the weekly job reached this client at all", `freeform attempts: ${bodiesSent()}`);
   chk(sidsSent().includes(SID.weekly),
