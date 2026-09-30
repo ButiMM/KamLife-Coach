@@ -17,7 +17,7 @@ import { runSundayWeeklyReport } from "./scheduler/jobs/weekly";
 import { runPhaseAdvancement } from "./scheduler/jobs/programme";
 import { runEarlyOnboarding, runStepSyncCatchup } from "./scheduler/jobs/onboarding";
 import { runSubscriptionExpiryCheck, runPaymentFailureRecovery, runSignupNudge, runWeeklyKpiReport, runAutoCalAdjust, runStepTargetAdaptation } from "./scheduler/jobs/business";
-import { runMondayProgress, runMondayGroceries } from "./scheduler/jobs/monday";
+import { runMondayProgress, runMondayGroceries, runDietBreakCheck } from "./scheduler/jobs/monday";
 import { runCipUpdate } from "./scheduler/jobs/cip-update";
 import { runMonthlyNarrative } from "./scheduler/jobs/narrative";
 import { runSpendWatchdog } from "./scheduler/jobs/spend-watchdog";
@@ -199,7 +199,10 @@ export async function initScheduler(): Promise<void> {
   // ADAPTIVE TARGETS run 15 min BEFORE the morning check-in so the day's message already
   // carries today's real numbers (sick → rest targets, stall → trim, etc). 2026-07-27.
   cron.schedule("45 3 * * *",   () => safe("runAdaptiveTargets",       runAdaptiveTargets, { critical: true, cron: "45 3 * * *" }), { timezone: "UTC" }); // 5:45am SAST
-  cron.schedule("0 4 * * *",    () => safe("runMorningCheckin",         runMorningCheckin, { critical: true, cron: "0 4 * * *" }), { timezone: "UTC" }); // 6am SAST
+  // A finished diet break restores the pre-break calories first, so the morning uses the right numbers
+  // (it was never scheduled, so breaks never ended). Its notice, if it goes, is that client's one
+  // message today. It catches its own errors, so it can never stop the morning.
+  cron.schedule("0 4 * * *",    () => safe("runMorningCheckin",         async () => { await runDietBreakCheck(); await runMorningCheckin(); }, { critical: true, cron: "0 4 * * *" }), { timezone: "UTC" }); // 6am SAST
   cron.schedule("0 17 * * *",   () => safe("runEveningAccountability",  runEveningAccountability, { cron: "0 17 * * *" }),    { timezone: "UTC" }); // 7pm SAST
   cron.schedule("0 8 * * *",    () => safe("runEarlyOnboarding",        runEarlyOnboarding, { cron: "0 8 * * *" }),          { timezone: "UTC" }); // 10am SAST
   cron.schedule("5 8 * * *",    () => safe("runSubscriptionExpiryCheck",runSubscriptionExpiryCheck, { cron: "5 8 * * *" }),  { timezone: "UTC" }); // 10am SAST

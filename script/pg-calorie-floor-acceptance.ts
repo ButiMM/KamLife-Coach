@@ -99,6 +99,17 @@ REAL("\n2. THE DIET-BREAK RESTORE — a pre-break number an old writer put under
     dietBreakEndsAt: new Date(Date.now() - DAY), dietBreakCalTarget: 1550 });
   await runDietBreakCheck();
   chk(await target(w.id) === 1550, "CONTROL — a pre-break target above the floor is restored exactly", String(await target(w.id)));
+
+  // The restore is data: a paused coach (or a used daily slot) holds the notice, never the number. It used
+  // to return on PROACTIVE_PAUSED, and the job was never scheduled, so breaks never ended.
+  const p = await client(4, { gender: "female", age: 35, heightCm: 165, currentWeight: "68", calorieTarget: 2000, proteinTarget: 115,
+    dietBreakEndsAt: new Date(Date.now() - DAY), dietBreakCalTarget: 1700 });
+  const was = process.env.PROACTIVE_PAUSED;
+  process.env.PROACTIVE_PAUSED = "true";
+  try { await runDietBreakCheck(); } finally { process.env.PROACTIVE_PAUSED = was; }
+  const held = (await pool.query("SELECT 1 FROM shadow_replies WHERE phone = $1", [p.phoneNumber])).rowCount;
+  chk(await target(p.id) === 1700 && held === 0, "while paused, the target is still restored and no notice goes out",
+    `calorie_target=${await target(p.id)} notices=${held}`);
 }
 
 REAL(`\npg-calorie-floor-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);
