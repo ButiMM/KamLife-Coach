@@ -237,7 +237,9 @@ try:
              "understanding/actions", "understanding/executor", "outcomes", "trajectory", "weekly-recap", "education",
              "handlers/safety", "medication-context", "understanding/domain-guard", "understanding/sa-transcript"]
     core_src = " ".join(f.read_text(errors="ignore") for f in pathlib.Path("server/core").rglob("*.ts"))
-    used = [r for r in REUSE if re.search(r'from ["\'](?:\.\./|\./)' + re.escape(r) + r'["\']', core_src)]
+    # Static `from "../x"` AND dynamic `import("../x")`: the core loads most tools lazily, so counting
+    # only static imports read 1 of 22 when it already called five (#391, 30 Sep).
+    used = [r for r in REUSE if re.search(r'(?:from\s*|import\(\s*)["\'](?:\.\./|\./)' + re.escape(r) + r'["\']', core_src)]
     mouth_line += f"\n\n**New coach reuses existing tools:** {len(used)} of {len(REUSE)} ({', '.join(used) or 'none yet'}). Target: every tool its switched rows need. The new coach must call these, never rebuild them."
     mouth_line += f"\n\n**Size:** server {srv:,} lines (target ≤25,000 once the new core has switched), tests {tst:,} lines (target ≤20,000). Baseline 24 Sep: server 74,888, tests 57,037."
 except Exception:
