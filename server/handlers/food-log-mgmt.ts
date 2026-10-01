@@ -40,11 +40,14 @@ function namedPastDay(said: string): Date | null {
  * in the message; the new coach names the one from → to it is sure of. Replacing the parser's whole
  * plan with that pair dropped the rest ("…it was pap, and I also had spinach" lost the spinach).
  */
-export function mergeCorrectionRead(plan: { remove: string[]; add: string[] }, read: { from: string; to: string }): { remove: string[]; add: string[] } {
+export function mergeCorrectionRead(plan: { remove: string[]; add: string[] }, read: { from: string; to: string }, message = ""): { remove: string[]; add: string[] } {
   // Overlap dedupes REMOVALS ("beef" inside "beef stew" is the same removal). An ADDITION is only
   // the same food when equal once articles go: "rice cakes" is not the removed "rice" (#466 attack).
   const norm = (a: string) => a.toLowerCase().trim().replace(/^(?:a|an|some|the)\s+/, "");
   const overlaps = (a: string, b: string) => { const x = norm(a), y = norm(b); return x === y || x.includes(y) || y.includes(x); };
+  // THE MODEL MAY NOT INTRODUCE A DELETION (#466 attack). Its `from` must be a removal the client's own
+  // words support: one the parser already read, or a food they named. Otherwise the parse stands.
+  if (!plan.remove.some(r => overlaps(r, read.from)) && !message.toLowerCase().includes(norm(read.from))) return plan;
   return {
     remove: [read.from, ...plan.remove.filter(r => !overlaps(r, read.from))],
     add: [read.to, ...plan.add.filter(a => norm(a) !== norm(read.to) && norm(a) !== norm(read.from))],
@@ -167,7 +170,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   let plan = looksLikeQuestion(m) ? null : planCorrection(m, movesDay);
   // WAVE 2, A2 (#459): the new coach names from → to; this engine still does the write. The parse stands if it can't.
   const read = plan?.isCorrection && !plan.moves ? await (await import("../core/coach")).correctionRead(String(user?.phoneNumber || ""), m) : null;
-  if (plan && read) plan = { ...plan, ...mergeCorrectionRead(plan, read) };
+  if (plan && read) plan = { ...plan, ...mergeCorrectionRead(plan, read, m) };
   if (plan?.isCorrection && (plan.moves || plan.remove.length + plan.add.length >= 2)) {
     // THE DAY THEY NAMED CONSTRAINS THE CANDIDATE (#164). This took the globally newest meal and
     // consulted parseMealDate only for `target`, and only when the plan MOVES a meal. So
