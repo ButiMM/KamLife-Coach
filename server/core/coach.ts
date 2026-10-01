@@ -232,12 +232,14 @@ export function coreWave2For(_phone: string): boolean {
 }
 
 /**
- * The new words, or null to keep the receipt (#455 attack). The receipt stays when it carries an
- * honest gap ("could not price X") the words would hide, and the model's own instructions are
- * stripped by their one owner, so the canonical close stays the only move.
+ * The new words, or null to keep the receipt (#455 attack). The receipt stays when it carries a
+ * status the words could hide: an honest gap ("could not price X"), a correction ("Fixed ✅") or a
+ * past day ("Logged to Tuesday"). The model's own instructions are stripped by their one owner, so
+ * the canonical close stays the only move.
  */
-export function afterMealWords(reply: string, receipt: string, strip: (r: string) => string): string | null {
-  if (/could not price|not in the total/i.test(receipt)) return null;
+const keepsReceipt = (receipt: string) => /could not price|not in the total|Fixed ✅|_Logged to /i.test(receipt);
+export function afterLogWords(reply: string, receipt: string, strip: (r: string) => string): string | null {
+  if (keepsReceipt(receipt)) return null;
   const kept = strip(reply).trim();
   if (!kept) return null;
   const media = (receipt.match(/\[MEDIA:[^\]]+\]/g) || []).join("");
@@ -264,19 +266,24 @@ export async function correctionRead(phone: string, message: string): Promise<{ 
   }
 }
 
-/** The new coach's reply to a turn whose meal the old owner just wrote. null = keep the old receipt. */
-export async function afterMealReply(phone: string, message: string, receipt: string): Promise<string | null> {
-  if (!coreWave2For(phone) || /could not price|not in the total/i.test(receipt)) return null;
+const JUST_LOGGED = {
+  food: "they told you what they ate; acknowledge it in a few words, from today's real numbers",
+  steps: "they told you their steps; acknowledge them in a few words, from today's real step count and their target", // A5
+} as const;
+
+/** The new coach's reply to a turn whose fact the proven owner just wrote. null = keep the old receipt. */
+export async function afterLogReply(phone: string, message: string, receipt: string, kind: keyof typeof JUST_LOGGED = "food"): Promise<string | null> {
+  if (!coreWave2For(phone) || keepsReceipt(receipt)) return null;
   try {
     const pre = await readPreTurn(phone, message);
     if (!pre) return null;
     pre.numbers += `\nJUST SAVED THIS TURN (already on the ledger above; never ask them to log it again): ${receipt.replace(/\[[A-Z]+:[^\]]*\]/g, "").replace(/\s+/g, " ").slice(0, 300)}`;
-    const u: Understanding = { family: "report", wants: "they told you what they ate; acknowledge it in a few words, from today's real numbers. Give no instruction or next step: the one next move is added after your words", one_question: null, uncertainty: 0, actions: [] };
+    const u: Understanding = { family: "report", wants: `${JUST_LOGGED[kind]}. Give no instruction or next step: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
     const reply = (await compose(await openaiClient(), pre, message, u))?.trim();
     if (!reply) return null;
     // The meal card the old owner attached (a [MEDIA:…] marker) still rides with the new words.
     const { stripModelDirectives } = await import("../brain/reply-verifier");
-    return afterMealWords(reply, receipt, r => stripModelDirectives(r, { modelAuthored: true } as any).kept);
+    return afterLogWords(reply, receipt, r => stripModelDirectives(r, { modelAuthored: true } as any).kept);
   } catch (e) {
     console.warn("[CORE_WAVE2] kept the receipt:", (e as Error)?.message || e);
     return null;

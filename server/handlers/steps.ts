@@ -92,54 +92,6 @@ export async function getStepStreak(userId: string): Promise<number> {
   } catch { return 0; }
 }
 
-const STEP_RESPONSES_LOW = [
-  (steps: number, remaining: number, target: number) =>
-    `${steps.toLocaleString()} steps logged — you are ${remaining.toLocaleString()} short of your ${target.toLocaleString()} target. A 15-minute walk before bed, or taking the stairs, closes most of that gap.`,
-  (steps: number, remaining: number, target: number) =>
-    `${steps.toLocaleString()} steps today. ${remaining.toLocaleString()} more will hit your target. A 15-minute walk is about 1,500 steps — go.`,
-  (steps: number, remaining: number, target: number) =>
-    `Short day — ${steps.toLocaleString()} steps. Your target is ${target.toLocaleString()}. Set a reminder for an evening walk and hit it before you sleep.`,
-  (steps: number, remaining: number, target: number) =>
-    `${steps.toLocaleString()} steps is a start, not a finish. ${remaining.toLocaleString()} to go. Walk while you talk on the phone. Use every gap.`,
-  (steps: number, remaining: number, target: number) =>
-    `${steps.toLocaleString()} steps logged. Target: ${target.toLocaleString()}. You are ${Math.round((steps / target) * 100)}% there — finish the job tonight.`,
-];
-
-const STEP_RESPONSES_GOOD = [
-  (steps: number, target: number) =>
-    `${steps.toLocaleString()} steps — almost there. ${(target - steps).toLocaleString()} more to hit target. You are close, do not let it go.`,
-  (steps: number, target: number) =>
-    `${steps.toLocaleString()} steps is solid progress. ${(target - steps).toLocaleString()} away from your ${target.toLocaleString()} target — one more walk and you have it.`,
-  (steps: number, target: number) =>
-    `Nearly at target — ${steps.toLocaleString()} steps done. Finish line is ${(target - steps).toLocaleString()} steps away. You have come too far not to finish.`,
-  (steps: number, target: number) =>
-    `${steps.toLocaleString()} steps — ${Math.round((steps / target) * 100)}% of your target. ${(target - steps).toLocaleString()} steps left. A 10-minute walk finishes this off.`,
-  (steps: number, target: number) =>
-    `Good movement today — ${steps.toLocaleString()} steps. ${(target - steps).toLocaleString()} more to reach ${target.toLocaleString()}. Walk around the block before bed and it is yours.`,
-];
-
-const STEP_RESPONSES_TARGET = [
-  (steps: number, target: number) =>
-    `${steps.toLocaleString()} steps — target hit. ✅ That daily consistency is exactly what drives results. Same again tomorrow.`,
-  (steps: number, target: number) =>
-    `Target crushed — ${steps.toLocaleString()} steps. ✅ Every step counts toward your goal. Keep the rhythm going tomorrow.`,
-  (steps: number, target: number) =>
-    `${steps.toLocaleString()} steps done. ✅ Above target and earning it. Your body is changing because you are consistent — keep it up.`,
-  (steps: number, target: number) =>
-    `${steps.toLocaleString()} steps — you smashed the ${target.toLocaleString()} target. ✅ Lekker. Same energy tomorrow.`,
-  (steps: number, target: number) =>
-    `Target done — ${steps.toLocaleString()} steps. ✅ This is what consistency looks like. Log tomorrow and keep the streak going.`,
-];
-
-// Real-world equivalents to make calories concrete
-function _stepEquivalent(burnKcal: number): string {
-  if (burnKcal >= 300) return `That's a slice of pizza burned off.`;
-  if (burnKcal >= 200) return `That's a Coke and a half burned off.`;
-  if (burnKcal >= 120) return `That's a bag of chips burned off.`;
-  if (burnKcal >= 60)  return `That's a Bar One burned off.`;
-  return "";
-}
-
 export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0, weeklyAvg?: number, user?: any, isWorkoutDay = false): string {
   // DELETED 2026-08-04 (Slice 4). What stood here built, for every step log, forever: a random
   // pick from three response banks, an invented "~237 kcal burned", a "that's a Coke and a half"

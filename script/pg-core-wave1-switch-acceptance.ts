@@ -105,16 +105,16 @@ REAL("\n4c. WAVE 2, A2 — THE NEW COACH READS THE CORRECTION, THE PROVEN ENGINE
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
-REAL("\n4b. WAVE 2, A1 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on for everyone)");
+REAL("\n4b. WAVE 2, A1 + A5 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on for everyone)");
 {
   const count = async (phone: string) => Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [phone])).rows[0].n);
   process.env.CORE_WAVE2 = "on"; // the shipped default; the runner pins other suites to "off"
   const fb = await count(FOUNDER), tb = await count(TESTER);
   const fa = await say(FOUNDER, "I had pap and chicken for lunch");
   const ta = await say(TESTER, "I had pap and chicken for lunch");
-  chk(await count(FOUNDER) === fb + 1, "the founder's lunch is written once, by the old owner", `${fb} → ${await count(FOUNDER)}`);
-  chk(fa.includes(NEW), "…and the founder hears the new coach, not the receipt", fa.slice(0, 200));
+  chk(await count(FOUNDER) === fb + 1 && fa.includes(NEW), "the founder's lunch is written once, by the old owner, and they hear the new coach", fa.slice(0, 200));
   chk(await count(TESTER) === tb + 1 && ta.includes(NEW), "a tester's lunch is written once and they hear the new coach too", ta.slice(0, 200));
+  const sa = await say(TESTER, "I walked 7500 steps today"), st = (await pool.query("SELECT MAX(s.steps)::int n FROM step_logs s JOIN users u ON u.id = s.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n; chk(st === 7500 && sa.includes(NEW), "A5: a tester's steps are written by the step owner and they hear the new coach", `${st} | ${sa.slice(0, 200)}`);
   process.env.CORE_WAVE2 = "off";
   const fo = await say(FOUNDER, "I had an apple for a snack");
   chk(!fo.includes(NEW) && await count(FOUNDER) === fb + 2, "CORE_WAVE2=off: the founder's meal is written and the old reply is back", fo.slice(0, 200));
