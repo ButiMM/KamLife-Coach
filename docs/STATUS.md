@@ -65,3 +65,11 @@ One line per merged PR: `HH:MM SAST · agent · PR # · what changed · gate bef
 29 Sep 13:07 UTC · Claude Code · #494 · Backups test-restored before publishing; failures open an issue; erasure replay in the runbook (#342) · tests green · see PR
 29 Sep 14:01 UTC · Claude Code · #501 · Every scheduled coaching message through one sender; paused or cancelled clients get no Monday messages (#319) · tests green · see PR
 29 Sep 16:53 UTC · Claude Code · #502 · The weekly report no longer prints a raw [BUTTONS:] marker; evening buttons through the one sender (#319) · tests green · see PR
+29 Sep 16:55 UTC · Claude Code · #503 · Day 1 message names reply words that work · tests green · see PR
+29 Sep 17:01 UTC · Claude Code · #504 · Three never-scheduled jobs deleted (leaderboard, NPS, supplement) · tests green · see PR
+30 Sep 06:30 UTC · Claude Code · #500 · A deletion survives losing the live database: R2 tombstones, bounded retention, idempotent replay (#499) · tests green · see PR
+30 Sep 07:22 UTC · Claude Code · #513 · Read-only evidence view: usage per client, final replies, templates (#506) · tests green · see PR
+30 Sep 07:41 UTC · Claude Code · #511, #512 · Row reassessment and commitment-loop spec, signed off by the founder · docs · see PR
+30 Sep 08:54 UTC · Claude Code · #517 · One scheduled message a day; the weekly report is scheduled again; no unasked shopping lists · tests green · see PR
+30 Sep 15:12 UTC · Claude Code · #518 · A finished diet break restores the pre-break calories · tests green · see PR
+30 Sep 15:14 UTC · Claude Code · #519 · Monthly narrative retired · tests green · see PR

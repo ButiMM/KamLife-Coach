@@ -635,9 +635,11 @@ const MUST_WRITE: [string, string][] = [
       "suggest a meal for my remaining calories",
       "what can I eat with my remaining calories?",
     ]) {
+      // #445: SMART NEXT MEAL was deleted; the new coach owns the meal request. What still holds on
+      // every path is the precedence half of this cut: the totals door must not claim it first.
       const r = await answered(ask);
-      if (!isMealSuggestion(r)) {
-        failures.push(`A meal request did not reach SMART NEXT MEAL: "${ask}" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
+      if (isTotalsReadout(r)) {
+        failures.push(`A meal request was claimed by the totals owner: "${ask}" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
       }
     }
 
@@ -689,9 +691,10 @@ const MUST_WRITE: [string, string][] = [
       const plateAsks = ["what can I eat?", "what should I eat?", "what should i eat",
         "what should I eat next?", "I'm hungry"];
       for (const ask of plateAsks) {
+        // #445: the plate-ask is the new coach's; neither the totals nor the plan door may take it.
         const r = await answered(ask);
-        if (!isMealSuggestion(r)) {
-          failures.push(`A plate-ask did not reach the next-meal owner: "${ask}" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
+        if (isTotalsReadout(r) || /meal plan/i.test(r)) {
+          failures.push(`A plate-ask was claimed by the wrong door: "${ask}" -> "${r.replace(/\n/g, " ").slice(0, 80)}"`);
         }
       }
       // THE CONTROL: a request that actually asks for a PLAN still gets the plan.
@@ -1347,7 +1350,11 @@ const MUST_WRITE: [string, string][] = [
         const { sastDayKey: dayKeyOf } = await import("../server/sast");
         const CLOSE = "I am done eating today";
         const REOPEN = "actually I changed my mind, I'm having dinner";
-        const DAY_CLOSED = /leaving it there|done eating today/i;
+        // #445: the next-meal door that honoured the closure was deleted. The new coach is told the
+        // day's state by ledgerNumbers (core/coach.ts), from the same held-constraints owner, so the
+        // closure is graded on exactly what the composer reads.
+        const DAY_CLOSED = /Food day: CLOSED/;
+        const { ledgerNumbers } = await import("../server/core/coach");
         const askAfter = async (historyNewestFirst: string[], ask = "what should I eat?") => {
           freshTurn();
           g.__KAMLIFE_STUB_USER = { ...USER };
@@ -1374,8 +1381,7 @@ const MUST_WRITE: [string, string][] = [
           }
           // Newest last in insertion order; readHeldConstraints takes the newest per kind.
           (g.__KAMLIFE_STUB_ROWS as Map<any, any[]>).set(schema.dailyConstraints, constraintRows.reverse());
-          const reply = String(await handleMessage(USER.phoneNumber, ask).catch(() => ""));
-          delete g.__KAMLIFE_STUB_ROWS;
+          const reply = String(await ledgerNumbers({ ...USER }, ask).catch(e => `ERROR ${e?.message}`));
           delete g.__KAMLIFE_STUB_ROWS;
           return reply;
         };
@@ -1936,316 +1942,10 @@ const MUST_WRITE: [string, string][] = [
       failures.push(`A clean three-point span no longer reads as usable — the weight history would never state a direction again`);
     }
 
-    // DEFECT 1 — the recommendation must address the gap it just quoted, and must offer nothing
-    // the day's remaining calories cannot pay for. Graded on the reply the client reads, driven
-    // through handleMessage from the observed numbers. The first version of this test graded a
-    // re-implementation of the branch's own arithmetic, which is worth nothing: it would have
-    // stayed green with the handler deleted.
-    {
-      const { sastToday } = await import("../server/utils");
-      type MealPart = { kcal: number; protein: number; source?: string; label?: string };
-      const mealRows = (parts: MealPart[]) => parts.map((part, i) => ({
-        id: `meal-${i}`, userId: USER.id,
-        mealLabel: part.label || "meal", source: part.source || "sa_scanner",
-        loggedAt: new Date(dayStart.getTime() + (i + 1) * 3_600_000), corrected: false,
-        kcalInt: part.kcal, proteinInt: part.protein,
-        kcal: part.kcal, protein: part.protein, carbs: 0, fat: 0,
-      }));
-      const mealTurn = async (o: {
-        protLeft: number; calLeft: number; budget: string;
-        ledger?: MealPart[];
-        overlay?: { calories: number; protein: number };
-      }) => {
-        freshTurn();
-        const ledger = o.ledger || [{ kcal: 2400 - o.calLeft, protein: 150 - o.protLeft }];
-        const overlay = o.overlay || { calories: 2400 - o.calLeft, protein: 150 - o.protLeft };
-        g.__KAMLIFE_STUB_USER = {
-          ...USER, todayWater: "0", weeklyFoodBudget: o.budget,
-          todayCaloriesDate: sastToday(), calorieTarget: 2400, proteinTarget: 150,
-          todayCalories: overlay.calories, todayProteinG: overlay.protein,
-        };
-        g.__KAMLIFE_STUB_ROWS = new Map([
-          [schema.mealLogs, mealRows(ledger)], [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
-        ]);
-        g.__KAMLIFE_STUB_WRITES = [];
-        return String(await handleMessage(USER.phoneNumber, "what should I eat next?").catch(() => ""));
-      };
-      const flat = (r: string) => r.replace(/\n/g, " ⏎ ");
-
-      /**
-       * #127 — SMART NEXT MEAL MUST DECIDE FROM THE DAY LEDGER.
-       *
-       * Each control drives the actual route handler with deliberately disagreeing meal rows and
-       * users overlay. Reverting the owner to todayCalories/todayProteinG makes controls 1–4 read
-       * the stale overlay and fail; the matching control keeps today's rendered recommendation.
-       */
-      {
-        // 1. Protein is met and 700 kcal remain. A stale overlay must not manufacture a gap.
-        const met = await mealTurn({
-          protLeft: 0, calLeft: 700, budget: "100_300",
-          ledger: [{ kcal: 1700, protein: 150 }],
-          overlay: { calories: 400, protein: 20 },
-        });
-        if (!/700 kcal and 0g protein to go/i.test(met) || /130g more protein/i.test(met)) {
-          failures.push(`Ledger protein completion with 700 kcal left was replaced by the stale overlay: "${flat(met)}"`);
-        }
-
-        // 2. Only 200 kcal remain and protein is genuinely short: the ledger must choose a plate
-        // that fits, even when the overlay claims ample calories and protein completion.
-        const tightProtein = await mealTurn({
-          protLeft: 130, calLeft: 200, budget: "100_300",
-          ledger: [{ kcal: 2200, protein: 20 }],
-          overlay: { calories: 1700, protein: 150 },
-        });
-        if (!/200 kcal and 130g protein left/i.test(tightProtein)
-          || !/Tuna salad, no dressing/i.test(tightProtein)
-          || /\(~(?:[3-9]\d\d|[1-9]\d{3,}) kcal/i.test(tightProtein)) {
-          failures.push(`Ledger's tight protein gap did not produce an affordable protein-first plate: "${flat(tightProtein)}"`);
-        }
-
-        // 3. A photo plus another logged row folds before the decision; its stale overlay loses.
-        const photoMultiRow = await mealTurn({
-          protLeft: 0, calLeft: 700, budget: "100_300",
-          ledger: [
-            { kcal: 900, protein: 80, source: "photo", label: "lunch" },
-            { kcal: 800, protein: 70, label: "dinner" },
-          ],
-          overlay: { calories: 300, protein: 10 },
-        });
-        if (!/700 kcal and 0g protein to go/i.test(photoMultiRow) || /140g more protein/i.test(photoMultiRow)) {
-          failures.push(`Photo/multi-row ledger total lost to the stale overlay: "${flat(photoMultiRow)}"`);
-        }
-
-        // 4. Post-removal rows immediately change the same ask while the mirror still holds the
-        // old total. This is the state the correction/removal writer leaves for the next turn.
-        const beforeRemoval = await mealTurn({
-          protLeft: 130, calLeft: 200, budget: "100_300",
-          ledger: [{ kcal: 2200, protein: 20 }],
-          overlay: { calories: 2200, protein: 20 },
-        });
-        const afterRemoval = await mealTurn({
-          protLeft: 0, calLeft: 700, budget: "100_300",
-          ledger: [{ kcal: 1700, protein: 150 }],
-          overlay: { calories: 2200, protein: 20 },
-        });
-        if (!/200 kcal and 130g protein left/i.test(beforeRemoval)
-          || !/700 kcal and 0g protein to go/i.test(afterRemoval)
-          || beforeRemoval === afterRemoval) {
-          failures.push(`Post-correction/removal ledger rows did not immediately change SMART NEXT MEAL: before="${flat(beforeRemoval)}" after="${flat(afterRemoval)}"`);
-        }
-
-        // 5. The ordinary, healthy state is a control: matching mirror and ledger keep the
-        // existing rendered suggestion rather than changing policy or wording.
-        const matching = await mealTurn({
-          protLeft: 1, calLeft: 700, budget: "100_300",
-          ledger: [{ kcal: 1700, protein: 149 }],
-          overlay: { calories: 1700, protein: 149 },
-        });
-        if (!/700 kcal and 1g protein to go/i.test(matching)
-          || !/Chicken \+ sweet potato \+ vegetables/i.test(matching)) {
-          failures.push(`Matching ledger and overlay changed today's SMART NEXT MEAL policy: "${flat(matching)}"`);
-        }
-      }
-
-      // THE OBSERVED TURN: 129g short with 2 146 kcal unspent.
-      {
-        const r = await mealTurn({ protLeft: 129, calLeft: 2146, budget: "under_100" });
-        if (!/129g/.test(r)) {
-          failures.push(`The 129g meal turn no longer reaches the protein branch at all — the rest of this block is grading nothing: "${flat(r)}"`);
-        } else {
-          const strongest = r.indexOf("pilchards"), weakest = r.indexOf("2 eggs + pap");
-          if (strongest < 0 || weakest < 0 || strongest > weakest) {
-            failures.push(`A client 129g short is still led with the weaker option: "${flat(r)}"`);
-          }
-          // The observed defect: state a 129g deficit, then answer it with an 18g plate and say
-          // nothing more. Something in the reply has to acknowledge that one plate is not enough.
-          if (!/none of those closes 129g/i.test(r)) {
-            failures.push(`A 129g gap was answered with a menu and no word that one plate does not close it: "${flat(r)}"`);
-          }
-          // ...but not by inventing a plan. "about 6 protein meals" is a number the client never
-          // gave and the coach cannot stand behind.
-          if (/\bprotein meals\b/i.test(r) || /\b\d+\s*(?:more\s*)?meals\b/i.test(r)) {
-            failures.push(`The reply prescribes a meal count instead of a priority: "${flat(r)}"`);
-          }
-        }
-      }
-
-      // CONTROL — AFFORDABILITY. 420 kcal left cannot carry the 450 kcal plate, so it may not be
-      // offered. Without this, "lead with the strongest" simply moves the defect: a client is told
-      // to eat something they have no room for.
-      {
-        const r = await mealTurn({ protLeft: 129, calLeft: 420, budget: "100_300" });
-        if (/Chicken breast \+ rice/i.test(r)) {
-          failures.push(`A 450 kcal meal was offered to a client with 420 kcal left: "${flat(r)}"`);
-        }
-        if (!/pilchards/i.test(r)) {
-          failures.push(`Affordability filtering left the client with no option at all: "${flat(r)}"`);
-        }
-      }
-
-      // CONTROL — A SMALL GAP STAYS SIMPLE. 22g is closed by the option on offer, so the reply
-      // must read exactly as it always did, with no shortfall sentence bolted on.
-      {
-        const r = await mealTurn({ protLeft: 22, calLeft: 2146, budget: "under_100" });
-        if (/none of those closes/i.test(r)) {
-          failures.push(`A 22g gap the top option genuinely covers was told it falls short — the fix over-fires on ordinary days: "${flat(r)}"`);
-        }
-      }
-
-      /**
-       * #125 — "I'M DONE EATING FOR THE DAY" BINDS THE MEAL DOOR (2026-09-03).
-       *
-       * Found on the 3 Sep sweep, reproducible on 37868c1: a client who had stopped eating on
-       * 188 of 189g protein asked what to eat and was handed two meals to close a 1g gap. The
-       * constraint was not missed — foodDayIsClosed recognised it, readHeldConstraints reported
-       * foodDayClosed: true, and chooseAction was already guarding its eat_more and protein rungs
-       * on it. This one door never asked.
-       *
-       * The outbound floor could not cover for it: enforceOutboundTruth refuses a reply that
-       * asksForFoodToday, and that returns FALSE here because the reply is a MENU with bolded
-       * labels rather than an imperative to eat. So it reached the client.
-       *
-       * Graded through the real handler on the reply a client receives. The held constraint comes
-       * from recentClientMessagesStamped, which is a RAW pool.query — the drizzle stub map cannot
-       * serve it, so the fixture seeds __KAMLIFE_STUB_PGROWS. A fixture that seeds the wrong seam
-       * reports foodDayClosed: false and grades nothing, which is how this nearly went unproven.
-       */
-      {
-        const closedTurn = async (o: { kcal: number; protein: number; closed: boolean }) => {
-          freshTurn();
-          g.__KAMLIFE_STUB_USER = {
-            ...USER, todayWater: "0", weeklyFoodBudget: "100_300", goalType: "muscle_gain",
-            todayCaloriesDate: sastToday(), calorieTarget: 3000, proteinTarget: 189,
-            todayCalories: o.kcal, todayProteinG: o.protein, profileNotes: "",
-          };
-          g.__KAMLIFE_STUB_ROWS = new Map<any, any[]>([
-            [schema.mealLogs, [{
-              id: "m-closed", userId: USER.id, mealLabel: "dinner", source: "voice",
-              loggedAt: new Date(dayStart.getTime() + 19 * 3_600_000), corrected: false,
-              kcalInt: o.kcal, proteinInt: o.protein, kcal: o.kcal, protein: o.protein, carbs: 0, fat: 0,
-            }]],
-            [schema.stepLogs, []], [schema.workoutLogs, []], [schema.weightLogs, []],
-            // THE CLOSURE IS A ROW NOW (#194), not a sentence replayed out of the last 24 messages.
-            // Every assertion in this block is unchanged — including the ones that matter most,
-            // that an unrelated message must not reopen the day and that the newest decision wins.
-            [schema.dailyConstraints, o.closed
-              ? [{ userId: USER.id, day: sastToday(), kind: "food", state: "asserted", via: "said" }]
-              : []],
-          ]);
-          g.__KAMLIFE_STUB_WRITES = [];
-          const out = String(await handleMessage(USER.phoneNumber, "what should I eat next?").catch(() => ""));
-          delete g.__KAMLIFE_STUB_ROWS;
-          return out;
-        };
-        const offersFood = (r: string) => /Balanced option|Light option|Pick one:|\(~\d+ kcal/i.test(r);
-
-        // THE OBSERVED SHAPE: closed the day on a 1g gap.
-        {
-          const r = await closedTurn({ kcal: 2245, protein: 188, closed: true });
-          if (!/done eating/i.test(r)) {
-            failures.push(`The meal door did not acknowledge a closed food day — the rest of this block grades nothing: "${flat(r)}"`);
-          } else if (offersFood(r)) {
-            failures.push(`A client who said they are done eating was offered food anyway, to close a 1g protein gap: "${flat(r)}"`);
-          }
-          // The facts they logged still ship — standing down is not going quiet.
-          if (!/2245/.test(r) || !/188/.test(r)) {
-            failures.push(`Closing the day cost the client their own totals: "${flat(r)}"`);
-          }
-        }
-
-        // A REAL GAP IS STILL NAMED, but pointed at tomorrow rather than reopening tonight.
-        {
-          const r = await closedTurn({ kcal: 2245, protein: 129, closed: true });
-          if (offersFood(r)) {
-            failures.push(`A closed day with a real 60g gap still produced a meal menu: "${flat(r)}"`);
-          }
-          if (!/60g short/.test(r) || !/tomorrow/i.test(r)) {
-            failures.push(`A genuine 60g shortfall on a closed day was neither named nor carried to tomorrow: "${flat(r)}"`);
-          }
-        }
-
-        // CONTROL — AN OPEN DAY IS UNCHANGED. Without this, "never suggest food" passes every
-        // assertion above and the door goes silent on the ordinary case it exists for.
-        {
-          const open1g = await closedTurn({ kcal: 2245, protein: 188, closed: false });
-          if (!offersFood(open1g)) {
-            failures.push(`An OPEN day stopped offering meals — the fix went mute instead of obedient: "${flat(open1g)}"`);
-          }
-          if (/done eating/i.test(open1g)) {
-            failures.push(`An open day was told it was closed — the constraint is over-firing: "${flat(open1g)}"`);
-          }
-          const openGap = await closedTurn({ kcal: 1500, protein: 80, closed: false });
-          if (!/109g more protein/.test(openGap) || !offersFood(openGap)) {
-            failures.push(`An open day with a real gap lost its protein-first recommendation: "${flat(openGap)}"`);
-          }
-        }
-      }
-
-      /**
-       * DEFECT 2 — THE PLATE MUST BE PROPORTIONAL TO THE DAY THAT IS LEFT (2026-09-01).
-       *
-       * Traced before changing anything: protLeft and calLeft were both read and both printed, so
-       * this was never missing evidence or the wrong claimant. The owner simply had nothing in its
-       * option list big enough to answer with. A client holding 2 146 kcal of headroom and one
-       * holding 420 got plates from the same 380–450 kcal band, because that band WAS the menu —
-       * headroom could only ever remove an option, never size one up.
-       *
-       * Graded on the plates the client is actually offered, parsed out of the rendered reply. No
-       * threshold is asserted and none exists in the code: the property is that the two headrooms
-       * must not produce the same leading plate, which is the defect stated as a test.
-       */
-      {
-        const plates = (r: string) => [...r.matchAll(/\(~(\d+) kcal, (\d+)g protein\)/g)]
-          .map(m => ({ kcal: Number(m[1]), protein: Number(m[2]) }));
-
-        const roomy = await mealTurn({ protLeft: 129, calLeft: 2146, budget: "100_300" });
-        const tight = await mealTurn({ protLeft: 129, calLeft: 420, budget: "100_300" });
-        const roomyPlates = plates(roomy), tightPlates = plates(tight);
-        if (roomyPlates.length === 0 || tightPlates.length === 0) {
-          failures.push(`The plate-ask stopped offering plates at all — the rest of this block grades nothing: "${flat(roomy)}"`);
-        } else {
-          // THE DEFECT ITSELF: a whole day of headroom answered with the same plate as 420 kcal.
-          if (roomyPlates[0].kcal === tightPlates[0].kcal && roomyPlates[0].protein === tightPlates[0].protein) {
-            failures.push(`2 146 kcal of headroom and 420 kcal produced the same leading plate (${roomyPlates[0].kcal} kcal, ${roomyPlates[0].protein}g) — the owner still cannot answer in proportion to the evidence it holds: "${flat(roomy)}"`);
-          }
-          if (roomyPlates[0].protein <= tightPlates[0].protein) {
-            failures.push(`With most of the day's calories unspent the client was led to a plate no stronger than the one offered on 420 kcal: "${flat(roomy)}"`);
-          }
-          // AND THE MENU MUST CONTAIN A REAL MEAL, which the two comparisons above do NOT prove:
-          // the old 380–450 kcal menu satisfies both, because filtering alone already makes the
-          // two headrooms differ. 600 kcal is this suite's statement of what counts as a plate for
-          // somebody who has eaten almost nothing all day — an expectation of the product, not a
-          // rule in the code, and the number to revisit if the menu is ever re-authored. Without
-          // it, deleting every fuller plate leaves this block green, which is how the first
-          // version of this test would have shipped a defect it claimed to guard.
-          if (roomyPlates[0].kcal < 600) {
-            failures.push(`With 2 146 kcal unspent the biggest thing on offer was ${roomyPlates[0].kcal} kcal — the menu still has no plate you could call a meal: "${flat(roomy)}"`);
-          }
-          // HEADROOM STILL CONSTRAINS. A fuller plate must never be offered to somebody who has no
-          // room for it — the same defect in the other direction, and the reason the menu could
-          // not simply be made bigger.
-          const unaffordable = tightPlates.filter(p => p.kcal > 420);
-          if (unaffordable.length > 0) {
-            failures.push(`A plate of ${unaffordable[0].kcal} kcal was offered to a client with 420 kcal left: "${flat(tight)}"`);
-          }
-        }
-
-        // AND THE ORDINARY DAY IS NOT OVER-SERVED. 22g short with the same big headroom: the
-        // fuller plates exist and must not be what the client is led to. "Biggest protein first"
-        // was safe while every option was small and is exactly what goes wrong once one is not.
-        const ordinary = await mealTurn({ protLeft: 22, calLeft: 2146, budget: "100_300" });
-        const ordinaryPlates = plates(ordinary);
-        if (ordinaryPlates.length > 1) {
-          const largest = Math.max(...ordinaryPlates.map(p => p.kcal));
-          if (ordinaryPlates[0].kcal === largest) {
-            failures.push(`A client 22g short was led to the largest plate on the menu (${largest} kcal) — enough is enough, and over-serving is how a fat-loss client is talked out of their deficit: "${flat(ordinary)}"`);
-          }
-          if (ordinaryPlates[0].protein < 22) {
-            failures.push(`A client 22g short was led to a plate that does not even cover it: "${flat(ordinary)}"`);
-          }
-        }
-      }
-    }
+    // DEFECT 1 and #127 RETIRED WITH #445. They graded SMART NEXT MEAL's plates (the gap quoted,
+    // affordability, the ledger over the overlay, the closed-day acknowledgement). That door was
+    // deleted: the new coach answers the meal ask from ledgerNumbers (core/coach.ts), which reads the
+    // day ledger (#422 unit test) and the closed food day (the closure block above).
   }
 
   /**

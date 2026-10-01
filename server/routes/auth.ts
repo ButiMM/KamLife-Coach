@@ -99,7 +99,7 @@ setInterval(() => {
   for (const [ip, entry] of loginAttempts.entries()) {
     if (now > entry.lockedUntil + 60_000) loginAttempts.delete(ip);
   }
-}, 5 * 60_000);
+}, 5 * 60_000).unref(); // housekeeping only: it must not keep a script that imports this file alive
 
 const LOCKOUT_WINDOW_MS = 15 * 60_000;
 const MAX_ATTEMPTS = 5;

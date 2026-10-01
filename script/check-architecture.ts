@@ -32,9 +32,9 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 236,
+  modules: 235, // 30 Sep (#511): jobs/narrative.ts retired
   handlerFiles: 29,
-  cronRegistrations: 25,
+  cronRegistrations: 24, // 30 Sep (#511): the monthly narrative cron retired
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
   messageDeciders: 32,
   /** `looksLikeX` predicates: hand-written guesses at intent. */
@@ -62,7 +62,7 @@ const BUDGET = {
    * to the true figure in one deliberate commit. Until then this red line is the marker, and it is
    * the ONLY thing in this guard that is red — one red line means something, four never did.
    */
-  regexLiterals: 439, // 2026-09-25 (#445 founder-only): wave-1 fixes removed one
+  regexLiterals: 430, // 2026-09-25 (#445): the wave-1 handlers deleted (was 440)
   /**
    * GUARD #13 — see unreachableExports above. Sixty-two capabilities cannot be reached by a
    * client message today. This budget is deliberately set THREE BELOW that, so this guard is RED
@@ -246,7 +246,7 @@ const AT_RISK_BUDGET = 3;
 // was allowed stays on record, and the frozen-budget check below measures only the raises still owed.
 const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: string; why: string; paidBack?: string }> = [
   {
-    key: "modules", from: 235, to: 236, date: "2026-09-24",
+    key: "modules", from: 235, to: 236, date: "2026-09-24", paidBack: "2026-09-30 (#511): modules fell to 235 when jobs/narrative.ts was retired",
     why: "THE NEW COACH (#272, ORDERS §4 Steps 4-5). server/core/coach.ts is the understanding step and the one "
       + "composer, running in read-only shadow. It is the module every switched message family will exit through; "
       + "each switch PR deletes that family's old handler exits (docs/mouths.json falls with it). #334 (PR #352) "
@@ -300,7 +300,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "so 21 is the smallest truthful current baseline. FROM HERE IT FALLS ONLY.",
   },
   {
-    key: "regexLiterals", from: 318, to: 439, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12, to 441 on 2026-09-15, to 440 on 2026-09-23, to 439 on 2026-09-25)",
+    key: "regexLiterals", from: 318, to: 430, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12, to 441 on 2026-09-15, to 440 on 2026-09-23, to 430 on 2026-09-25 with the wave-1 deletions of #445)",
     why: "NOT A RAISE — A CORRECTED MEASUREMENT, and the follow-up this budget's own comment "
       + "declared owed on 2026-08-17: \"repair the matcher to see multi-line assignments and "
       + "re-baseline to the true figure in one deliberate commit.\" This is that commit. The "

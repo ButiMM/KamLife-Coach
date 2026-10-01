@@ -298,8 +298,6 @@ const CASES: Case[] = [
     reject: [/Coach K Pick|if you.?re going KFC|Streetwise 2 \(original/i] },
   { name: "takeaway: 'Yes but I had 4 pieces with pap' logs both, not just pap (prod bug 2026-07-03)", msg: "I had 4 pieces of kfc and pap",
     expect: [/kfc|chicken/i, /pap/i] },
-  { name: "takeaway: planning 'what should I order at KFC' STILL gets the guide", msg: "Going to KFC for lunch, what should I order?",
-    expect: [/Coach K Pick|Streetwise|2 pieces original/i] },
 
   // ── GAINS-FEAR / HEALTH QUICK-FIX (2026-07-23, Kam's churn buckets) ─────
   // MOVED 2026-08-06. The two cases that asserted the gains-fear PROSE tested a keyword template
@@ -330,16 +328,8 @@ const CASES: Case[] = [
   { name: "takeaway: 'Had breakfast from McDonalds with extra patties' LOGS, never the menu pick", msg: "Had South African breakfast from macdonalds. But I had extra 2 patties and extra 2 eggs with it",
     expect: [/breakfast|patt|egg/i],
     reject: [/Coach K Pick|McFeast|Grilled chicken wrap/i] },
-  { name: "takeaway: PLANNING at McDonald's still gets the order guide (regression guard)", msg: "Going to McDonalds for lunch, what should I order?",
-    expect: [/smart order|Coach K Pick|McFeast|Best for/i],
-    reject: [/Food logged/i] },
 
   // ── MACRO STATUS (2026-07-23: engine freestyled "~100g, reasonable" vs card's 88/86g) ──
-  { name: "macro-status: 'How are my fats looking for the day? Is it bad?' answers from the ledger, deterministically", msg: "How are my fats looking for the day? Is it bad?",
-    expect: [/Fat: \d+g of \d+g/i],
-    reject: [/reasonable range|within a/i] },
-  { name: "macro-status: 'how are my macros today' gives the full rundown", msg: "how are my macros today",
-    expect: [/Calories/i, /Protein/i, /Carbs/i, /Fat/i] },
   { name: "macro-status: 'how much protein in eggs' stays a food question, never a status dump", msg: "how much protein in eggs",
     reject: [/Protein: \d+g of \d+g/i] },
 
@@ -615,10 +605,11 @@ const CASES: Case[] = [
         { reject: [CALORIE_LECTURE, CONFUSION_LEAD] }),
       // OVER-FIRE CONTROLS. The explainer still owns a question that says what it is about —
       // without these, "never claim" would pass the two cases above.
-      x("naming the number still reaches the explainer", "what does the number mean?",
-        { expect: [CALORIE_LECTURE] }),
-      x("a pronoun beside a real calorie word still reaches it",
-        "I am confused about calories, what does that mean", { expect: [CALORIE_LECTURE] }),
+      // #445: the calorie explainer, swap and substitution tables, macro status, the restaurant guide
+      // and the surplus/deficit answers were WAVE-1 talk. The new coach owns them (the tables are its
+      // tools), so their routing entries here were retired; the replay gate's reach check grades them.
+      x("the calorie explainer no longer answers ahead of the new coach", "I am confused about calories, what does that mean",
+        { reject: [CALORIE_LECTURE] }),
       // "flu" in the sentence, but nobody here is sick — template must stay holstered
       x("flu going around at work", "The flu is going around at work",
         { reject: [SICK_TPL] }),
@@ -839,18 +830,8 @@ const CASES: Case[] = [
   // ── CALORIE LITERACY (2026-07-14, a tester: "it talks in calories and I don't
   // understand calories") — confusion about the concept gets the plain "data bundle"
   // explainer, never more number-talk, at any point in the journey.
-  { name: "calorie confusion: 'I don't understand calories'",
-    msg: "I don't understand calories, what does that mean?",
-    expect: [/data bundle|never have to (understand|count)|my job/i], reject: [/didn'?t catch/i] },
-  { name: "calorie confusion: 'what is a calorie'",
-    msg: "what is a calorie?",
-    expect: [/data bundle|energy in food|never have to (understand|count)|my job/i] },
   // A default client is already number-free, so "too many numbers" gets the calm
   // data-bundle reassurance (counting is our job), not a mode switch.
-  { name: "calorie confusion: 'too many numbers' gets the reassuring explanation",
-    msg: "this is too many numbers, I'm confused by the calories",
-    user: { profileNotes: "" },
-    expect: [/data bundle|never have to (understand|count)|my job|plain language/i] },
   // A normal totals question is NOT confusion — must still answer with the total.
   { name: "calorie literacy: 'how many calories left' still answers totals",
     msg: "how many calories do I have left today?",
@@ -960,32 +941,9 @@ const CASES: Case[] = [
   // ── 2026-07-17 nightly drill: 'what should my surplus be' regressed on the model
   // path for the third time. Now DETERMINISTIC — computed from their targets, the
   // model never touches it. The exact drill phrasings, on the full pipeline:
-  { name: "drill→deterministic: 'how much should my surplus be' = built-in, never today's gap",
-    msg: "On a regular normal eating day how much should my surplus be? 500 calories, 200 calories, what?",
-    user: { goalType: "muscle_gain", calorieTarget: 2996 },
-    expect: [/built into your target/i, /2596/],
-    reject: [/\b2396\b/, /deficit of/i] },
-  { name: "drill→deterministic: 'am I in a deficit' mid-morning never panics",
-    msg: "Am I in a deficit? I've only had breakfast",
-    user: { goalType: "fat_loss", calorieTarget: 1800 },
-    expect: [/built into your target/i, /2250/],
-    reject: [/deficit of [\d,]+/i, /under your (daily )?target by/i] },
-  { name: "drill→deterministic: two-part surplus + steps answers BOTH halves",
-    msg: "What's my surplus and how are my steps today?",
-    user: { goalType: "muscle_gain", calorieTarget: 2996 },
-    expect: [/surplus/i, /steps/i] },
   // ── 2026-07-17 founder: "eat this instead of that IS the coaching" — swap ASKS get
   // the deterministic table answer, never a model improvisation, never the totals card
   // (whose "what can i eat" token used to hijack exactly this phrasing).
-  { name: "swap ask: 'what can I eat instead of mayonnaise' answers from the swap table",
-    msg: "What can I eat instead of mayonnaise?",
-    user: { goalType: "fat_loss" },
-    expect: [/light mayo/i],
-    reject: [/Today so far:|kcal \| .*protein\*/i] },
-  { name: "swap ask: grocery-store 'alternative to banana' is goal-aware for fat loss",
-    msg: "Is there an alternative to banana?",
-    user: { goalType: "fat_loss" },
-    expect: [/berries/i] },
   // ── 2026-07-19 live: "I said I'm still sick until Monday why did you forget that??"
   // got the full first-report sick template — ignoring the accusation and re-committing
   // the exact failure. Must OWN it, confirm the date, never re-dump the template.
@@ -1014,14 +972,6 @@ const CASES: Case[] = [
     user: { profileNotes: "" },
     expect: [/plain words|keep the counting/i], reject: [/didn'?t catch/i, /calories and protein on every meal/i] },
   // ── SHOPPING SUBSTITUTIONS (2026-08-05) — "the shop didn't have it" is not "is this healthy".
-  { name: "substitute: 'they didn't have chicken' offers a real alternative, not a lecture", msg: "They didn't have chicken at the shop",
-    expect: [/mince|pilchards|eggs/i], reject: [/didn'?t catch/i, /kcal/i] },
-  { name: "substitute: 'couldn't find spinach' names the cheap green", msg: "I couldn't find spinach",
-    expect: [/cabbage/i] },
-  { name: "substitute: 'rice is too expensive' swaps the starch", msg: "Rice is too expensive this month",
-    expect: [/pap|samp|potato/i] },
-  { name: "substitute: a plain health swap still gets the HEALTH answer, not the shop one", msg: "What can I eat instead of mayonnaise?",
-    expect: [/light mayo/i], reject: [/No stress/i] },
 
   // ── CUT 1 — THE TWO NOTES THAT DEFINE DONE ───────────────────────────────────────────────
   // The founder sends these on the phone; these are the same notes through the real router, so

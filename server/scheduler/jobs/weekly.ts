@@ -5,13 +5,9 @@ import {
   getActiveClients, isPaused,
   thisWeekUTC,
 } from "../shared";
-import { getShoppingList, formatShoppingList } from "../../shopping-lists";
 import { getGoalProfile } from "../../goal-profiles";
-import { getGroceryPersonalization } from "../../grocery-personalize";
-import { foodConstraints } from "../../food-swaps";
 import { suggestStepTargetAdjustment } from "../../targets";
 import { getTrajectoryForUser } from "../../trajectory-report";
-import { runWeeklyRecaps } from "../../weekly-recap";
 import { generateMealPlan } from "../../meal-plan";
 import { mentionsForbidden } from "../../brain/reply-verifier";
 import { canonicalNextMove, recordCanonicalMoveOutbound, sendProactive } from "../proactive-decision";
@@ -25,7 +21,10 @@ export async function runSundayWeeklyReport(): Promise<void> {
     try {
       // One claim per client per week — covers the report, the shopping-list card, AND
       // the programme-week advance below, so a container recycle can't double any of them.
-      if (!(await claimProactive(client.id, "sunday_report", thisWeekUTC(), { critical: true }))) continue;
+      // ONE SCHEDULED MESSAGE A DAY (founder, 30 Sep, #511): the report is Sunday's message and uses the
+      // same daily slot as every other job (it used to bypass it as "critical"). It runs before the
+      // morning check-in on Sundays, so it takes the slot and the morning stands down.
+      if (!(await claimProactive(client.id, "sunday_report", thisWeekUTC()))) continue;
       const name = (client.name || "there").split(" ")[0]; // first name: "Lerato", not the full name (B4)
       const [chats, workoutEntries, weightEntries, stepEntries] = await Promise.all([
         db.select().from(chatHistory).where(and(eq(chatHistory.userId, client.id), isNotNull(chatHistory.messageIn), gte(chatHistory.createdAt, weekAgo))),
@@ -147,7 +146,6 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const noProteinDays = foodDays - proteinDays;
       const clientGoalWeekly = client.goalType || "fat_loss";
       const isMuscleGainWeekly = clientGoalWeekly === "muscle_gain";
-      const budgetTierWeekly = client.weeklyFoodBudget || "100_300";
 
       // ── TWO LADDERS BECOME ONE OBSERVATION AND ONE DECISION (2026-08-25, P0-4b) ────────────
       //
@@ -225,40 +223,17 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const delivery = await sendProactive(client, { claimed: "sunday_report" }, lines.join("\n"), { template: weeklyTemplate });
       if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
 
-      try {
-        const list = getShoppingList(budgetTierWeekly, weekNum + 1, clientGoalWeekly, foodConstraints(client as any));
-        const personalization = await getGroceryPersonalization(client.id, clientGoalWeekly, (client as any).foodDislikes, (client as any).dietaryRestrictions);
-        const shoppingMsg = formatShoppingList(list, name, clientGoalWeekly, {
-          calorieTarget: client.calorieTarget || undefined,
-          proteinTarget: client.proteinTarget || undefined,
-          budgetTier: budgetTierWeekly,
-          personalization,
-          constraints: foodConstraints(client as any),
-        });
-        await sendProactive(client, { claimed: "sunday_report" }, shoppingMsg);
-      } catch (shopErr) { console.warn(`[SCHEDULER] Shopping list error — ${client.phoneNumber}:`, shopErr); }
-
-      try {
-        const daysInCycle = client.trainingDaysPerWeek || 3;
-        const newDay = ((client.programmeDayInWeek || 1) % daysInCycle) + 1;
-        const newWeek = newDay === 1 ? (weekNum + 1) : weekNum;
-        await db.update(users).set({ programmeDayInWeek: newDay, programmeWeek: newWeek }).where(eq(users.id, client.id));
-      } catch { /* non-critical */ }
+      // THE SUNDAY SHOPPING LIST GOES ONLY ON REQUEST (founder, 30 Sep, #511): an unasked list was a
+      // second scheduled message on the one day that already has the report. "shopping list" still works.
+      // The programme day/week is advanced by the workout log (handlers/workout.ts), its one owner. This
+      // job used to advance it again every Sunday, which only stayed harmless while it was unscheduled.
     } catch (err) {
       console.error(`[SCHEDULER] Sunday report error — ${client.phoneNumber}:`, err);
     }
   }
 
-  // Personal ElevenLabs voice recap in the coach's cloned voice — the human layer
-  // after the written Report Card. Reworked 2026-07-12 (Kam: "it sounds generic"):
-  // it now names a food the client ACTUALLY logged and talks like a mate on a voice
-  // note instead of reading the scorecard back, and it no longer sends a duplicate
-  // week card (the Report Card above already carries every number). One clean bubble.
-  try {
-    await runWeeklyRecaps();
-  } catch (recapErr) {
-    console.error("[SCHEDULER] Weekly recap voice error:", recapErr);
-  }
+  // The weekly voice recap (runWeeklyRecaps) no longer follows the report: it was a second Sunday message,
+  // and voice broadcasts are "not needed now" (founder, 30 Sep, #511). It stays reachable from the admin route.
 }
 
 export async function runSundayMealPlan(): Promise<void> {

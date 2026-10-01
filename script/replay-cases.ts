@@ -584,6 +584,7 @@ export const CASES: ReplayCase[] = [
       { what: "the answer is a number", kind: "reply_matches", pattern: "\\d{3,4}", flags: "i" },
     ],
     actions: { forbid: ["LOG_MEAL", "REMOVE_LAST_MEAL"] },
+    owner: "old-path", // today's totals are the day card's (early-commands), kept by #460, until the card is a new-coach tool
     rubric: "In Afrikaans: 'How many calories have I eaten today?' Lunch (pap and chicken) is on record. A good coach answers in Afrikaans with the day's number from the record and what is left of 1800, in one or two lines.",
   },
   // A17 — off-topic: a warm line back to coaching, never the artefact.

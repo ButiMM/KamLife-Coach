@@ -154,36 +154,11 @@ export async function runMondayProgress(): Promise<void> {
   console.log(`[SCHEDULER] Monday progress summaries sent: ${sent}`);
 }
 
-export async function runMondayGroceries(): Promise<void> {
-  console.log("[SCHEDULER] Running Monday grocery list...");
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-  const activeClients = await db.select().from(users).where(
-    and(eq(users.onboardingState, "COMPLETE"), gte(users.lastActiveAt, sevenDaysAgo))
-  );
-  let sent = 0;
-  for (const client of activeClients) {
-    try {
-      const name = (client.name || "").split(" ")[0] || "there";
-      const goal = client.goalType || "fat_loss";
-      const budget = client.weeklyFoodBudget || "100_300";
-      const isLowBudget = ["under_100", "under_50", "50_100"].includes(budget);
-      const isMuscle = goal === "muscle_gain";
-      const proteinItems = isLowBudget
-        ? `☐ Eggs 12-pack — R45\n☐ Pilchards 4 tins — R48\n☐ Chicken thighs 1kg — R55`
-        : `☐ Chicken breast 1kg — R70\n☐ Eggs 12-pack — R45\n☐ Tinned tuna 3 tins — R45\n☐ Pilchards 2 tins — R24`;
-      const carbItems = isMuscle
-        ? `☐ Brown rice 1kg — R22\n☐ Oats 1kg — R25\n☐ Sweet potato 1kg — R18\n☐ Brown bread — R16`
-        : `☐ Oats 1kg — R25\n☐ Sweet potato 500g — R12\n☐ ${isLowBudget ? "Pap 2kg — R15" : "Brown rice 1kg — R22"}`;
-      const vegItems = `☐ Spinach bunch — R8\n☐ Cabbage head — R10\n☐ Tomatoes — R15\n☐ Onions 1kg — R12`;
-      const tip = isLowBudget ? `_Shoprite or Boxer first — best protein-per-rand. Batch cook this weekend._` : `_Prep protein on Sunday — cook in bulk so weekdays are easy._`;
-      const msg = `*${name}'s Weekly Shopping List* 🛒\n_${getGoalProfile(goal).label} plan_\n\n*Proteins (buy first):*\n${proteinItems}\n\n*Carbs:*\n${carbItems}\n\n*Vegetables:*\n${vegItems}\n\n${tip}\n\n_Have your own list? Send it and I'll adjust it for your goals._`;
-      if (await sendProactive(client, { job: "monday_groceries" }, msg)) sent++;
-    } catch { continue; }
-  }
-  console.log(`[SCHEDULER] Monday grocery lists sent: ${sent}`);
-}
 export async function runDietBreakCheck(): Promise<void> {
-  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runDietBreakCheck blocked"); return; }
+  // THE TARGET COMES BACK EVEN WHEN NO MESSAGE CAN GO. This job was never scheduled, and nothing else
+  // restores the pre-break target (the target audit tolerates the +300 kcal a break adds), so a client
+  // who took a diet break stayed at maintenance for good. The restore is data, so neither the
+  // killswitch nor the one-a-day slot may hold it; only the notice goes through the one sender.
   try {
     const expired = await db.select().from(users).where(
       and(
@@ -194,19 +169,16 @@ export async function runDietBreakCheck(): Promise<void> {
       )
     );
     for (const client of expired) {
-      // Claim before restoring + sending so a recycle can't double-fire the notice.
-      if (!(await claimProactive(client.id, "diet_break_end", todaySAST()))) continue;
-      // OPERATIONAL, AND NOW ACTUALLY OPERATIONAL (#180). This announced a target change — which
-      // is the adaptive-targets owner's business, exactly like runAutoCalAdjust — and then added
-      // "Log your food today", a next-move instruction chosen right here. The announcement is the
-      // message; what to do about it is canonicalNextMove's decision, on its own schedule, with
-      // the client's held constraints in front of it. One sentence removed, no ladder left.
       const restored = Math.max(calorieFloor(client), client.dietBreakCalTarget!);
-      await db.update(users).set({ calorieTarget: restored, dietBreakEndsAt: null, dietBreakCalTarget: null }).where(eq(users.id, client.id));
+      // Atomic: only the run that clears the break announces it, so a recycle can't double-fire.
+      const done = await db.update(users).set({ calorieTarget: restored, dietBreakEndsAt: null, dietBreakCalTarget: null })
+        .where(and(eq(users.id, client.id), sql`diet_break_cal_target IS NOT NULL`)).returning({ id: users.id });
+      if (!done.length) continue;
+      // OPERATIONAL (#180): the target change is the message; what to do about it is canonicalNextMove's.
       const name = (client.name || "").split(" ")[0] || "there";
-      await sendProactive(client, { claimed: "diet_break_end" }, `${name}, diet break is done. Back to the deficit.\n\n*Your targets from today:*\n• Calories: ${restored} kcal/day\n• Protein: ${client.proteinTarget || 120}g/day — unchanged\n\nYour metabolism is reset. Your glycogen is full.`).catch((e: unknown) => console.error("[monday] diet-break restore WA failed:", client.id, e));
-      await new Promise(r => setTimeout(r, 300));
+      await sendProactive(client, { job: "diet_break_end", window: todaySAST() }, `${name}, diet break is done. Back to the deficit.\n\n*Your targets from today:*\n• Calories: ${restored} kcal/day\n• Protein: ${client.proteinTarget || 120}g/day — unchanged\n\nYour metabolism is reset. Your glycogen is full.`).catch((e: unknown) => console.error("[monday] diet-break notice failed:", client.id, e));
     }
     if (expired.length > 0) console.log(`[SCHEDULER] Diet break expired: ${expired.length} clients restored`);
   } catch (err) { console.error("[SCHEDULER] Diet break check error:", err); }
 }
+

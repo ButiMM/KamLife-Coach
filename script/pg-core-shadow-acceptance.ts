@@ -19,6 +19,7 @@ process.env.ENGINE_LIVE = "on";
 process.env.PROACTIVE_PAUSED = "true";
 process.env.SHADOW = "on";
 process.env.CORE_SHADOW = "on";
+process.env.CORE_WAVE1 = "off"; // this proves SHADOW mode; wave 1 is on by default since #445
 process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000";
 process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
