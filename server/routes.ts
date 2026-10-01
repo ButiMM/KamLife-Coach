@@ -1030,7 +1030,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
   // ---- WEIGHT FORECAST / TRAJECTORY: deterministic math from the client's own logs. ----
   // If they logged a surplus, it says so — the plate, not the plan.
-  if (/^(forecast|my forecast|weight forecast|trajectory|my trajectory|projection|my projection|am i on track|will i (lose|gain|drop|pick up)|how much (weight )?(will|am|would) i (going to |gonna )?(lose|gain|drop|pick up))\b/i.test(m.trim())) {
+  if (!(await import("./core/coach")).coreWave1For(phone) && /^(forecast|my forecast|weight forecast|trajectory|my trajectory|projection|my projection|am i on track|will i (lose|gain|drop|pick up)|how much (weight )?(will|am|would) i (going to |gonna )?(lose|gain|drop|pick up))\b/i.test(m.trim())) { // A12: wave 1 answers from the trajectory (core/coach.ts ledgerNumbers)
     const { getTrajectoryForUser } = await import("./trajectory-report");
     const report = await getTrajectoryForUser(user.id);
     if (report) return report.whatsappText;
