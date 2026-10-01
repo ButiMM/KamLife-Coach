@@ -11050,7 +11050,7 @@ test("#92 every sentence askCoachK returns on failure is recognised as an unansw
 
 test("#466: the meal the client typed beats the model's slot, and the model's pair keeps the parser's other operations", async () => {
   const { correctionSlot, mergeCorrectionRead } = await import("../server/handlers/food-log-mgmt");
-  assert.deepEqual(mergeCorrectionRead({ remove: ["rice"], add: ["spinach", "pap"] }, { from: "rice", to: "pap" }), { remove: ["rice"], add: ["pap", "spinach"] }, "spinach survives");
+  assert.deepEqual(mergeCorrectionRead({ remove: ["rice"], add: ["spinach", "pap"] }, { from: "rice", to: "pap" }), { remove: ["rice"], add: ["pap", "spinach"] }, "spinach survives"); assert.deepEqual(mergeCorrectionRead({ remove: ["rice"], add: ["pap", "rice cakes"] }, { from: "rice", to: "pap" }).add, ["pap", "rice cakes"], "rice cakes is not the removed rice");
   assert.equal(correctionSlot("Breakfast wasn't oats, it was two eggs.", { meal: "lunch" }), "breakfast", "their word wins over a wrong model slot");
   assert.equal(correctionSlot("hayi, it was chicken not beef", { meal: "dinner" }), "dinner", "the model fills in when they named no meal");
   assert.equal(correctionSlot("hayi, it was chicken not beef", null), null);

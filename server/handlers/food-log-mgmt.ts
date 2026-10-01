@@ -5,7 +5,7 @@
 
 import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
-import { eq, and, gte, lt, desc, asc, isNull } from "drizzle-orm";
+import { eq, and, gte, lt, desc, asc, isNull, sql } from "drizzle-orm";
 import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection, isRetroactiveMeal, parseMealDate, mealDateLabel } from "../utils";
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
@@ -41,10 +41,13 @@ function namedPastDay(said: string): Date | null {
  * plan with that pair dropped the rest ("…it was pap, and I also had spinach" lost the spinach).
  */
 export function mergeCorrectionRead(plan: { remove: string[]; add: string[] }, read: { from: string; to: string }): { remove: string[]; add: string[] } {
-  const same = (a: string, b: string) => { const x = a.toLowerCase().trim(), y = b.toLowerCase().trim(); return x === y || x.includes(y) || y.includes(x); };
+  // Overlap dedupes REMOVALS ("beef" inside "beef stew" is the same removal). An ADDITION is only
+  // the same food when equal once articles go: "rice cakes" is not the removed "rice" (#466 attack).
+  const norm = (a: string) => a.toLowerCase().trim().replace(/^(?:a|an|some|the)\s+/, "");
+  const overlaps = (a: string, b: string) => { const x = norm(a), y = norm(b); return x === y || x.includes(y) || y.includes(x); };
   return {
-    remove: [read.from, ...plan.remove.filter(r => !same(r, read.from))],
-    add: [read.to, ...plan.add.filter(a => !same(a, read.to) && !same(a, read.from))],
+    remove: [read.from, ...plan.remove.filter(r => !overlaps(r, read.from))],
+    add: [read.to, ...plan.add.filter(a => norm(a) !== norm(read.to) && norm(a) !== norm(read.from))],
   };
 }
 
@@ -186,7 +189,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       id: mealLogs.id, raw: mealLogs.rawMessage, label: mealLogs.mealLabel, at: mealLogs.loggedAt,
       items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
     }).from(mealLogs).where(where).orderBy(desc(mealLogs.loggedAt)).limit(1);
-    let [row] = namedSlot ? await pick(and(scope, eq(mealLogs.mealLabel, namedSlot))) : [];
+    let [row] = namedSlot ? await pick(and(scope, sql`lower(${mealLogs.mealLabel}) = ${namedSlot.toLowerCase()}`)) : [];
     if (!row) [row] = await pick(namedSlot ? and(scope, isNull(mealLogs.mealLabel)) : scope);
     if (!row && namedSlot) {
       const reply = `I couldn't find a ${namedSlot} on your record${correctionDay ? " for that day" : ""}. Tell me what you had for ${namedSlot} and I'll log it.`;
