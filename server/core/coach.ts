@@ -193,19 +193,12 @@ async function openaiClient(): Promise<OpenAI> {
 }
 
 /**
- * THE WAVE-1 SWITCH (COVERAGE A10, A11, A13, A16, A17). CORE_WAVE1 = off | founder | on.
- * "founder" is the per-client rollout of #438: only COACH_ALERT_PHONE meets the new coach, everyone
- * else keeps the old one. Rollback is instant: set CORE_WAVE1=off, no deploy.
+ * THE WAVE-1 SWITCH (COVERAGE A10, A11, A13, A16, A17): on for everyone since 25 Sep (#445).
+ * CORE_WAVE1=off is the instant rollback to the old engine and gpt-block, with no deploy. The
+ * founder-first mode (#438) is gone: it had no client left to serve once wave 1 was on for all.
  */
-export function coreWave1For(phone: string): boolean {
-  // ON BY DEFAULT (founder decision, CTO order on #391, 25 Sep): wave 1 is the new coach's for everyone.
-  // `off` is the emergency rollback to the old engine and gpt-block; `founder` limits it to one number.
-  const mode = String(process.env.CORE_WAVE1 || "on").toLowerCase();
-  if (mode === "on") return true;
-  if (mode !== "founder") return false;
-  const digits = (p: string) => (p || "").replace(/\D/g, "").replace(/^0/, "27");
-  const founder = digits(process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE || "");
-  return !!founder && digits(phone) === founder;
+export function coreWave1For(_phone: string): boolean {
+  return String(process.env.CORE_WAVE1 || "on").toLowerCase() !== "off";
 }
 
 /**
@@ -239,31 +232,58 @@ export function coreWave2For(_phone: string): boolean {
 }
 
 /**
- * The new words, or null to keep the receipt (#455 attack). The receipt stays when it carries an
- * honest gap ("could not price X") the words would hide, and the model's own instructions are
- * stripped by their one owner, so the canonical close stays the only move.
+ * The new words, or null to keep the receipt (#455 attack). The receipt stays when it carries a
+ * status the words could hide: an honest gap ("could not price X"), a correction ("Fixed ✅") or a
+ * past day ("Logged to Tuesday"). The model's own instructions are stripped by their one owner, so
+ * the canonical close stays the only move.
  */
-export function afterMealWords(reply: string, receipt: string, strip: (r: string) => string): string | null {
-  if (/could not price|not in the total/i.test(receipt)) return null;
+const keepsReceipt = (receipt: string) => /could not price|not in the total|Fixed ✅|_Logged to /i.test(receipt);
+export function afterLogWords(reply: string, receipt: string, strip: (r: string) => string): string | null {
+  if (keepsReceipt(receipt)) return null;
   const kept = strip(reply).trim();
   if (!kept) return null;
   const media = (receipt.match(/\[MEDIA:[^\]]+\]/g) || []).join("");
   return media ? `${kept}\n${media}` : kept;
 }
 
-/** The new coach's reply to a turn whose meal the old owner just wrote. null = keep the old receipt. */
-export async function afterMealReply(phone: string, message: string, receipt: string): Promise<string | null> {
-  if (!coreWave2For(phone) || /could not price|not in the total/i.test(receipt)) return null;
+/**
+ * WAVE 2, ROW A2 — CORRECT A MEAL. The new coach reads WHAT was wrong and WHAT it really was ("Hayi, I had a
+ * burger, not pap" → pap → burger); the proven correction engine (food-log-mgmt applyCorrection, priced by the
+ * quantity authority) does the write. null = the deterministic parse stands, exactly as before.
+ */
+export async function correctionRead(phone: string, message: string): Promise<{ from: string; to: string; meal?: string } | null> {
+  if (!coreWave2For(phone)) return null;
+  try {
+    const pre = await readPreTurn(phone, message);
+    if (!pre) return null;
+    const read = await understand(await openaiClient(), message, pre.known);
+    const a = (read.u?.actions ?? []).find(x => x.type === "CORRECT_MEAL") as { from?: string; to?: string; meal?: string } | undefined;
+    // The meal they named travels too (#466 attack): without it the writer edited the newest meal.
+    return a?.from && a?.to ? { from: a.from.toLowerCase(), to: a.to.toLowerCase(), ...(a.meal ? { meal: a.meal } : {}) } : null;
+  } catch (e) {
+    console.warn("[CORE_WAVE2] correction read failed, the parser stands:", (e as Error)?.message || e);
+    return null;
+  }
+}
+
+const JUST_LOGGED = {
+  food: "they told you what they ate; acknowledge it in a few words, from today's real numbers",
+  steps: "they told you their steps; acknowledge them in a few words, from today's real step count and their target", // A5
+} as const;
+
+/** The new coach's reply to a turn whose fact the proven owner just wrote. null = keep the old receipt. */
+export async function afterLogReply(phone: string, message: string, receipt: string, kind: keyof typeof JUST_LOGGED = "food"): Promise<string | null> {
+  if (!coreWave2For(phone) || keepsReceipt(receipt)) return null;
   try {
     const pre = await readPreTurn(phone, message);
     if (!pre) return null;
     pre.numbers += `\nJUST SAVED THIS TURN (already on the ledger above; never ask them to log it again): ${receipt.replace(/\[[A-Z]+:[^\]]*\]/g, "").replace(/\s+/g, " ").slice(0, 300)}`;
-    const u: Understanding = { family: "report", wants: "they told you what they ate; acknowledge it in a few words, from today's real numbers. Give no instruction or next step: the one next move is added after your words", one_question: null, uncertainty: 0, actions: [] };
+    const u: Understanding = { family: "report", wants: `${JUST_LOGGED[kind]}. Give no instruction or next step: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
     const reply = (await compose(await openaiClient(), pre, message, u))?.trim();
     if (!reply) return null;
     // The meal card the old owner attached (a [MEDIA:…] marker) still rides with the new words.
     const { stripModelDirectives } = await import("../brain/reply-verifier");
-    return afterMealWords(reply, receipt, r => stripModelDirectives(r, { modelAuthored: true } as any).kept);
+    return afterLogWords(reply, receipt, r => stripModelDirectives(r, { modelAuthored: true } as any).kept);
   } catch (e) {
     console.warn("[CORE_WAVE2] kept the receipt:", (e as Error)?.message || e);
     return null;

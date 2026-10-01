@@ -339,9 +339,9 @@ test("cut 1: no handler may end a multi-fact turn", () => {
   // removed. It had not: mayEndTurn still decides whether the turn may end, which is all this
   // test is about. The identifier stays pinned so a handler cannot quietly return something else.
   for (const guard of [
-    /if \(mayEndTurn\("workout"\)\) return [\w.(]*workoutResult\)?;/,
-    /if \(mayEndTurn\("steps"\)\) return [\w.(]*stepPart\)?;/,
-    /if \(mayEndTurn\("water"\)\) return [\w.(]*waterPart\)?;/,
+    /if \(mayEndTurn\("workout"\)\) return [^;\n]*\bworkoutResult\)?;/,
+    /if \(mayEndTurn\("steps"\)\) return [^;\n]*\bstepPart\)?;/,
+    /if \(mayEndTurn\("water"\)\) return [^;\n]*\bwaterPart\)?;/,
   ]) assert.ok(guard.test(code), `a co-occurring handler still claims the turn: ${guard}`);
   assert.ok(/const mayEndTurn = \(who: string\): boolean => \{[\s\S]{0,200}?if \(multiFact\) return false;[\s\S]{0,200}?factsStillOwed\(\)/.test(code),
     "mayEndTurn must refuse on multiFact AND on any fact stated-but-unwritten");

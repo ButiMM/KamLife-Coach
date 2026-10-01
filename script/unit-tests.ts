@@ -10917,26 +10917,11 @@ test("#441 isModelSlowOrUnreachable: timeout, dropped connection and 5xx answer 
   }
 });
 
-test("CORE_WAVE1: on by default (#445); founder matches only the founder's number, in any format; off is the rollback", async () => {
+test("CORE_WAVE1: on for everyone unless off (#445; the founder-first mode is gone)", async () => {
   const { coreWave1For } = await import("../server/core/coach");
-  const saved = { m: process.env.CORE_WAVE1, p: process.env.COACH_ALERT_PHONE, a: process.env.ADMIN_PHONE_OVERRIDE };
-  try {
-    delete process.env.CORE_WAVE1; process.env.COACH_ALERT_PHONE = "+27 82 943 8001"; delete process.env.ADMIN_PHONE_OVERRIDE;
-    assert.equal(coreWave1For("whatsapp:+27829438002"), true, "unset means on, for everyone");
-    process.env.CORE_WAVE1 = "off";
-    assert.equal(coreWave1For("whatsapp:+27829438001"), false, "off is the rollback");
-    process.env.CORE_WAVE1 = "founder";
-    for (const p of ["whatsapp:+27829438001", "+27829438001", "0829438001"]) assert.equal(coreWave1For(p), true, `founder as ${p}`);
-    assert.equal(coreWave1For("whatsapp:+27829438002"), false, "a tester is not switched in founder mode");
-    delete process.env.COACH_ALERT_PHONE;
-    assert.equal(coreWave1For("whatsapp:+27829438001"), false, "founder mode with no founder number switches nobody");
-    process.env.CORE_WAVE1 = "on";
-    assert.equal(coreWave1For("whatsapp:+27829438002"), true, "on switches everyone");
-  } finally {
-    if (saved.m === undefined) delete process.env.CORE_WAVE1; else process.env.CORE_WAVE1 = saved.m;
-    if (saved.p === undefined) delete process.env.COACH_ALERT_PHONE; else process.env.COACH_ALERT_PHONE = saved.p;
-    if (saved.a !== undefined) process.env.ADMIN_PHONE_OVERRIDE = saved.a;
-  }
+  const saved = process.env.CORE_WAVE1;
+  try { delete process.env.CORE_WAVE1; assert.equal(coreWave1For("whatsapp:+27829438002"), true); process.env.CORE_WAVE1 = "off"; assert.equal(coreWave1For("whatsapp:+27829438002"), false); }
+  finally { if (saved === undefined) delete process.env.CORE_WAVE1; else process.env.CORE_WAVE1 = saved; }
 });
 
 test("CORE_WAVE2: on for everyone unless off (#455; no founder-first step, ORDERS §0d)", async () => {
@@ -10944,9 +10929,9 @@ test("CORE_WAVE2: on for everyone unless off (#455; no founder-first step, ORDER
   const saved = process.env.CORE_WAVE2;
   try { delete process.env.CORE_WAVE2; assert.equal(coreWave2For("whatsapp:+27829438002"), true); process.env.CORE_WAVE2 = "off"; assert.equal(coreWave2For("whatsapp:+27829438002"), false); }
   finally { if (saved === undefined) delete process.env.CORE_WAVE2; else process.env.CORE_WAVE2 = saved; }
-  const { afterMealWords } = await import("../server/core/coach"), { stripModelDirectives } = await import("../server/brain/reply-verifier"), w = (r: string, rc: string) => afterMealWords(r, rc, x => stripModelDirectives(x, { modelAuthored: true } as any).kept); // #455 attack
+  const { afterLogWords } = await import("../server/core/coach"), { stripModelDirectives } = await import("../server/brain/reply-verifier"), w = (r: string, rc: string) => afterLogWords(r, rc, x => stripModelDirectives(x, { modelAuthored: true } as any).kept); // #455 attack
   assert.equal(w("Pap and chicken logged.", "Got it ⚠️ I could not price *relish* — not in the total yet."), null); assert.equal(w("Have beans for dinner tonight.", "Got it — eggs 👌"), null);
-  assert.equal(w("Solid lunch. Aim for 30g protein at dinner.", "Got it [MEDIA:card]"), "Solid lunch.\n[MEDIA:card]"); // a pricing gap keeps the receipt; the model's own instruction never ships
+  assert.equal(w("Solid lunch. Aim for 30g protein at dinner.", "Got it [MEDIA:card]"), "Solid lunch.\n[MEDIA:card]"); assert.equal(w("Nice walk.", "Fixed ✅ — step count updated to *8,000*."), null); // a gap or a correction keeps the receipt; the model's own instruction never ships
 });
 
 test("#342: the restore runbook replays every table the POPIA erasure deletes (a restore must not resurrect a deleted client)", async () => {
@@ -11036,6 +11021,14 @@ test("#92 every sentence askCoachK returns on failure is recognised as an unansw
   // CONTROL: a real answer must not read as unavailability, or the guard would swallow every turn.
   assert.ok(!isCoachUnavailableReply("A pear is a fine snack and it is already on your record."),
     "CONTROL: a genuine answer is not an unavailable mouth");
+});
+
+test("#466: the meal the client typed beats the model's slot, and the model's pair keeps the parser's other operations", async () => {
+  const { correctionSlot, mergeCorrectionRead } = await import("../server/handlers/food-log-mgmt");
+  assert.deepEqual(mergeCorrectionRead({ remove: ["rice"], add: ["spinach", "pap"] }, { from: "rice", to: "pap" }), { remove: ["rice"], add: ["pap", "spinach"] }, "spinach survives"); assert.deepEqual(mergeCorrectionRead({ remove: ["rice"], add: ["pap", "rice cakes"] }, { from: "rice", to: "pap" }).add, ["pap", "rice cakes"], "rice cakes is not the removed rice"); assert.deepEqual(mergeCorrectionRead({ remove: ["rice"], add: ["pap", "spinach"] }, { from: "chicken", to: "pap" }, "Actually it wasn't rice, it was pap, and I also had spinach."), { remove: ["rice"], add: ["pap", "spinach"] }, "a model read cannot delete the chicken they never retracted");
+  assert.equal(correctionSlot("Breakfast wasn't oats, it was two eggs.", { meal: "lunch" }), "breakfast", "their word wins over a wrong model slot");
+  assert.equal(correctionSlot("hayi, it was chicken not beef", { meal: "dinner" }), "dinner", "the model fills in when they named no meal");
+  assert.equal(correctionSlot("hayi, it was chicken not beef", null), null);
 });
 
 

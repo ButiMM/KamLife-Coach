@@ -13,7 +13,7 @@
  * a forbidden sentence; it cannot make two coaches into one.
  *
  * WHAT IS GRADED HERE, AND WHAT IS NOT. The proactive jobs send; there is no capture seam for a
- * message body, and script/trace-proactive.ts already says so plainly rather than inventing one.
+ * message body, and the (since deleted) trace-proactive script said so plainly rather than inventing one.
  * So this grades the thing that actually decides — chooseAction, the single owner both the
  * reactive door and the proactive senders now consume — under identical seeded client state, and
  * the scheduling guarantees that must survive the migration. The CLASSIFICATION of each sender is

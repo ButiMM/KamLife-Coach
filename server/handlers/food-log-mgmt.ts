@@ -5,7 +5,7 @@
 
 import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
-import { eq, and, gte, lt, desc, asc } from "drizzle-orm";
+import { eq, and, gte, lt, desc, asc, isNull, sql } from "drizzle-orm";
 import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection, isRetroactiveMeal, parseMealDate, mealDateLabel } from "../utils";
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
@@ -18,6 +18,7 @@ import { turnMutation, turnState, logChat } from "./chat-log";
 import { adjustFoodsForSegment, rescaleLedgerItem } from "../portion-memory";
 // The ledger's own "what did this row hold" reader — see the unplaceable-correction reply below.
 import { foodsOf } from "../day-ledger-core";
+import { explicitMealSlot } from "../understanding/actions";
 
 /**
  * THE SAST DAY A CORRECTION NAMES, when it names one earlier than today (#164).
@@ -32,6 +33,34 @@ function namedPastDay(said: string): Date | null {
   const todayStart = sastDayStart();
   const named = sastDayStart(parseMealDate(said) || undefined);
   return named.getTime() < todayStart.getTime() ? named : null;
+}
+
+/**
+ * THE MODEL'S PAIR REPLACES ONLY THE PAIR IT NAMES (#466 attack). The parser reads every operation
+ * in the message; the new coach names the one from → to it is sure of. Replacing the parser's whole
+ * plan with that pair dropped the rest ("…it was pap, and I also had spinach" lost the spinach).
+ */
+export function mergeCorrectionRead(plan: { remove: string[]; add: string[] }, read: { from: string; to: string }, message = ""): { remove: string[]; add: string[] } {
+  // Overlap dedupes REMOVALS ("beef" inside "beef stew" is the same removal). An ADDITION is only
+  // the same food when equal once articles go: "rice cakes" is not the removed "rice" (#466 attack).
+  const norm = (a: string) => a.toLowerCase().trim().replace(/^(?:a|an|some|the)\s+/, "");
+  const overlaps = (a: string, b: string) => { const x = norm(a), y = norm(b); return x === y || x.includes(y) || y.includes(x); };
+  // THE MODEL MAY NOT INTRODUCE A DELETION (#466 attack). Its `from` must be a removal the client's own
+  // words support: one the parser already read, or a food they named. Otherwise the parse stands.
+  if (!plan.remove.some(r => overlaps(r, read.from)) && !message.toLowerCase().includes(norm(read.from))) return plan;
+  return {
+    remove: [read.from, ...plan.remove.filter(r => !overlaps(r, read.from))],
+    add: [read.to, ...plan.add.filter(a => norm(a) !== norm(read.to) && norm(a) !== norm(read.from))],
+  };
+}
+
+/**
+ * WHICH MEAL A CORRECTION NAMES (#466). The client's own words win: a slot they typed is
+ * deterministic, and a model read that names a different meal must never override it (it rewrote
+ * lunch when they said breakfast). The model's slot fills in only when their words name none.
+ */
+export function correctionSlot(message: string, read: { meal?: string } | null | undefined): string | null {
+  return explicitMealSlot(message) ?? read?.meal ?? null;
 }
 
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
@@ -138,7 +167,10 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   // left to applyIdentityCorrection below, which already scales servings properly; this owns
   // compositions and every date move. See food-identity-correction.ts for the semantics.
   const movesDay = isMealDateMove(m, isRetroactiveMeal(m));
-  const plan = looksLikeQuestion(m) ? null : planCorrection(m, movesDay);
+  let plan = looksLikeQuestion(m) ? null : planCorrection(m, movesDay);
+  // WAVE 2, A2 (#459): the new coach names from → to; this engine still does the write. The parse stands if it can't.
+  const read = plan?.isCorrection && !plan.moves ? await (await import("../core/coach")).correctionRead(String(user?.phoneNumber || ""), m) : null;
+  if (plan && read) plan = { ...plan, ...mergeCorrectionRead(plan, read, m) };
   if (plan?.isCorrection && (plan.moves || plan.remove.length + plan.add.length >= 2)) {
     // THE DAY THEY NAMED CONSTRAINS THE CANDIDATE (#164). This took the globally newest meal and
     // consulted parseMealDate only for `target`, and only when the plan MOVES a meal. So
@@ -146,15 +178,27 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     // PostgreSQL: Monday kept its toast and Wednesday gained the rice. A move is different and is
     // left alone: there the client is telling us the newest meal belongs on another day.
     const correctionDay = plan.moves ? null : namedPastDay(m);
-    const [row] = await db.select({
+    // …AND SO DOES THE MEAL THEY NAMED (#300, #466 attack). "Breakfast wasn't oats, it was two eggs"
+    // after a logged lunch edited lunch, the newest meal. The slot comes from the new coach's read
+    // when it ran, else from the words. A named slot with no row may fall back only to a meal logged
+    // WITHOUT a slot (it may be the one they mean), never to one labelled as another meal: that
+    // rewrote lunch and replied "Fixed" (#466 attack). Nothing left → say so, and write nothing.
+    const namedSlot = plan.moves ? null : correctionSlot(m, read);
+    const scope = correctionDay
+      ? and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, correctionDay),
+            lt(mealLogs.loggedAt, new Date(correctionDay.getTime() + 86_400_000)))
+      : eq(mealLogs.userId, user.id);
+    const pick = (where: any) => db.select({
       id: mealLogs.id, raw: mealLogs.rawMessage, label: mealLogs.mealLabel, at: mealLogs.loggedAt,
       items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
-    }).from(mealLogs)
-      .where(correctionDay
-        ? and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, correctionDay),
-              lt(mealLogs.loggedAt, new Date(correctionDay.getTime() + 86_400_000)))
-        : eq(mealLogs.userId, user.id))
-      .orderBy(desc(mealLogs.loggedAt)).limit(1);
+    }).from(mealLogs).where(where).orderBy(desc(mealLogs.loggedAt)).limit(1);
+    let [row] = namedSlot ? await pick(and(scope, sql`lower(${mealLogs.mealLabel}) = ${namedSlot.toLowerCase()}`)) : [];
+    if (!row) [row] = await pick(namedSlot ? and(scope, isNull(mealLogs.mealLabel)) : scope);
+    if (!row && namedSlot) {
+      const reply = `I couldn't find a ${namedSlot} on your record${correctionDay ? " for that day" : ""}. Tell me what you had for ${namedSlot} and I'll log it.`;
+      await logChat(user.id, m, reply, "FOOD_CORRECTION_UNRESOLVED").catch(() => {});
+      return reply;
+    }
     if (row) {
       // ── A CORRECTION IS PRICED BY THE QUANTITY AUTHORITY, NOT BY THE TABLE ROW (C11) ────────
       //

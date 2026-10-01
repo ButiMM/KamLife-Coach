@@ -2,7 +2,7 @@
  * REAL-POSTGRESQL ACCEPTANCE — the wave-1 switch (COVERAGE A10, A11, A13, A16, A17; #438).
  *
  * With the model stubbed at the network edge, this proves the switch's plumbing:
- *   - CORE_WAVE1=founder: only the founder's number (COACH_ALERT_PHONE) meets the new coach;
+ *   - CORE_WAVE1 on (the default): every client meets the new coach;
  *   - the new coach answers where gpt-block did, BEHIND the scope floor (an off-topic ask is still declined);
  *   - a message the new coach cannot read falls back to the old reply: never silence, never a guess (#421);
  *   - a client midway through an old flow (a menu awaiting "1/2/3") finishes it there (#440);
@@ -13,8 +13,7 @@ process.env.OPENAI_API_KEY = "sk-stub"; process.env.OFFLINE_AI = "0"; process.en
 process.env.ENGINE_LIVE = "on"; process.env.PROACTIVE_PAUSED = "true"; process.env.NODE_ENV = "production";
 process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000"; process.env.TWILIO_AUTH_TOKEN = "test"; process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 const FOUNDER = "whatsapp:+27829438001", TESTER = "whatsapp:+27829438002";
-process.env.COACH_ALERT_PHONE = "+27829438001";
-process.env.CORE_WAVE1 = "founder";
+process.env.CORE_WAVE1 = "on"; // the runner pins off for stubbed suites; this one proves the switch
 
 const NEW = "NEW-COACH-438"; // only the new coach's composer says this
 const realFetch = globalThis.fetch;
@@ -25,7 +24,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
   let content = "Old coach here, noted.";
   if (body.includes("say what they want from this turn")) {
     const msg = JSON.parse(body).messages.at(-1).content as string;
-    content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ family: "question", wants: "advice", one_question: null, uncertainty: 0.2, facts: [], actions: [] });
+    const fix = /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : [];
+    content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ family: fix.length ? "correction" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts: [], actions: fix });
   } else if (body.includes("You are Coach K, a warm, direct South African")) content = `Try pap with beans tonight. ${NEW}`;
   else if (body.includes("domain gate")) content = /homework/i.test(body) ? "NO" : "YES";
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
@@ -52,12 +52,12 @@ for (const phone of [FOUNDER, TESTER]) {
 }
 const ASK = "Any ideas for a cheap supper tonight?";
 
-REAL("\npg-core-wave1-switch-acceptance — the new coach answers wave-1 turns, founder first (#438)\n");
-REAL("1. FOUNDER FIRST");
+REAL("\npg-core-wave1-switch-acceptance — the new coach answers wave-1 turns, for everyone (#438)\n");
+REAL("1. EVERYONE");
 const f1 = await say(FOUNDER, ASK);
 chk(f1.includes(NEW), "the founder's wave-1 question is answered by the new coach", f1);
 const t1 = await say(TESTER, ASK);
-chk(!t1.includes(NEW) && t1.trim().length > 0, "a tester still meets the old coach", t1);
+chk(t1.includes(NEW), "a tester's wave-1 question is answered by the new coach too", t1);
 
 REAL("\n1b. REACH (CTO attack on #445): the old wave-1 handlers stand aside for the switched client");
 for (const q of ["What should I eat tonight?", "How was my week?", "What should I order at KFC?", "Should I take creatine?",
@@ -75,8 +75,6 @@ chk(mealsAfter === mealsBefore, "the founder's \"can I have a burger?\" writes n
 // "stuck at 82kg" is a plateau, not a reset: the old restart branch sent everyone the app menu.
 const tp = await say(TESTER, "I've been stuck at 82kg for three weeks. What am I doing wrong?");
 chk(!/What do you need\?/.test(tp), "a tester's plateau is not answered with the restart menu", tp.slice(0, 160));
-const tr = await say(TESTER, "What should I order at KFC?");
-chk(!tr.includes(NEW) && tr.trim().length > 0, "in founder mode a tester's KFC question still meets the old coach", tr.slice(0, 160));
 
 REAL("\n2. THE SCOPE FLOOR STAYS IN FRONT (A17)");
 const f2 = await say(FOUNDER, "Can you help me with my maths homework tonight?");
@@ -92,16 +90,31 @@ const f5 = await say(FOUNDER, "2");
 const left = (await pool.query("SELECT awaiting_input_type FROM users WHERE phone_number = $1", [FOUNDER])).rows[0]?.awaiting_input_type;
 chk(/2 meals/i.test(f5) && !f5.includes(NEW) && left === null, "the comeback menu's \"2\" gets the simpler plan and the pending question clears", `${f5} | pending=${left}`);
 
-REAL("\n4b. WAVE 2, A1 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on for everyone)");
+REAL("\n4c. WAVE 2, A2 — THE NEW COACH READS THE CORRECTION, THE PROVEN ENGINE WRITES IT");
+{
+  const T = "whatsapp:+27829438003";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Hayi Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  process.env.CORE_WAVE2 = "on";
+  await say(T, "I had pap for lunch");
+  await say(T, "Hayi, I had a burger, not pap.");
+  const rows = (await pool.query("SELECT items::text i FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows.map(r => String(r.i));
+  chk(rows.length === 1 && /burger/i.test(rows[0]) && !/"pap/i.test(rows[0]), "\"Hayi, I had a burger, not pap\" changes lunch in place: one meal, the burger, no pap", JSON.stringify(rows).slice(0, 300));
+  delete process.env.CORE_WAVE2;
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
+REAL("\n4b. WAVE 2, A1 + A5 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on for everyone)");
 {
   const count = async (phone: string) => Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [phone])).rows[0].n);
   process.env.CORE_WAVE2 = "on"; // the shipped default; the runner pins other suites to "off"
   const fb = await count(FOUNDER), tb = await count(TESTER);
   const fa = await say(FOUNDER, "I had pap and chicken for lunch");
   const ta = await say(TESTER, "I had pap and chicken for lunch");
-  chk(await count(FOUNDER) === fb + 1, "the founder's lunch is written once, by the old owner", `${fb} → ${await count(FOUNDER)}`);
-  chk(fa.includes(NEW), "…and the founder hears the new coach, not the receipt", fa.slice(0, 200));
+  chk(await count(FOUNDER) === fb + 1 && fa.includes(NEW), "the founder's lunch is written once, by the old owner, and they hear the new coach", fa.slice(0, 200));
   chk(await count(TESTER) === tb + 1 && ta.includes(NEW), "a tester's lunch is written once and they hear the new coach too", ta.slice(0, 200));
+  const sa = await say(TESTER, "I walked 7500 steps today"), st = (await pool.query("SELECT MAX(s.steps)::int n FROM step_logs s JOIN users u ON u.id = s.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n; chk(st === 7500 && sa.includes(NEW), "A5: a tester's steps are written by the step owner and they hear the new coach", `${st} | ${sa.slice(0, 200)}`);
   process.env.CORE_WAVE2 = "off";
   const fo = await say(FOUNDER, "I had an apple for a snack");
   chk(!fo.includes(NEW) && await count(FOUNDER) === fb + 2, "CORE_WAVE2=off: the founder's meal is written and the old reply is back", fo.slice(0, 200));
