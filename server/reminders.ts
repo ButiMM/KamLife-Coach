@@ -160,3 +160,24 @@ export function nextRecurrenceTime(fireAt: Date, recurrence: Recurrence): Date {
 export async function advanceRecurring(id: string, nextFireAt: Date): Promise<void> {
   await db.update(reminders).set({ fireAt: nextFireAt }).where(eq(reminders.id, id));
 }
+
+/**
+ * B7: A REMINDER THAT COULD NOT ARRIVE IS HELD, NOT LOST. Outside the 24-hour window WhatsApp refuses
+ * free text, and there is no approved reminder template, so a one-shot reminder is held and rides on
+ * the client's next ordinary reply, worded exactly as it would have fired. Never on a safety-floor reply.
+ */
+/** The one wording of a client's own reminder, on time or held. */
+export const reminderText = (body: string): string => `⏰ Reminder: ${body}`;
+export async function holdReminder(id: string): Promise<void> {
+  await db.update(reminders).set({ status: "held" }).where(eq(reminders.id, id));
+}
+export async function withHeldReminders(reply: string): Promise<string> {
+  const { turnFoldsRemindersFor } = await import("./handlers/chat-log");
+  const userId = turnFoldsRemindersFor();
+  if (!userId || !reply?.trim()) return reply;
+  const held = await db.select({ id: reminders.id, body: reminders.body }).from(reminders)
+    .where(and(eq(reminders.userId, userId), eq(reminders.status, "held"))).limit(3).catch(() => []);
+  if (!held.length) return reply;
+  for (const h of held) await markReminderSent(h.id);
+  return [reply, ...held.map(h => reminderText(h.body))].join("\n\n");
+}

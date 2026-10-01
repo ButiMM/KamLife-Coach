@@ -274,6 +274,16 @@ REAL("\n5. A CLIENT-SET REMINDER IS NOT OURS TO SECOND-GUESS");
     "a client-set reminder still fires for an active client", JSON.stringify(bodies));
 }
 
+REAL("\n5. B7: A CLIENT'S OWN REMINDER THAT COULD NOT ARRIVE IS HELD, THEN RIDES ON THEIR NEXT REPLY, ONCE");
+{
+  await reset();
+  await createReminder(user.id, phone, "take your vitamins", new Date(Date.now() - 60_000));
+  await runDueReminders(); // shadow mode refuses delivery, standing in for "outside the 24-hour window"
+  chk((await reminderRows())[0]?.status === "held", "an undelivered one-shot reminder is held, not lost", JSON.stringify(await reminderRows()));
+  const { handleMessage } = await import("../server/routes"); const r1 = await handleMessage(phone, "morning coach"), r2 = await handleMessage(phone, "thanks");
+  chk(/⏰ Reminder: take your vitamins/.test(r1) && !/vitamins/.test(r2) && (await reminderRows())[0]?.status === "sent", "…it rides on their next reply exactly once", `${r1.slice(-80)} | ${r2.slice(-60)}`);
+}
+
 REAL(`\npg-followup-arrives-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);
 await pool.end();
 process.exit(failed === 0 ? 0 : 1);

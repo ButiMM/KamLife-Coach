@@ -13,6 +13,7 @@ import {
   parseReminderRequest, createReminder, listPendingReminders, cancelAllReminders,
   describeFireTime, describeRecurring,
 } from "../reminders";
+import type { Recurrence } from "../reminders";
 
 async function setAwaiting(phone: string, user: any, value: string | null): Promise<void> {
   user.awaitingInputType = value;
@@ -26,6 +27,8 @@ export async function handleReminderCommand(ctx: {
   const { phone, message, m, user } = ctx;
   const firstName = (user.name || "").split(" ")[0] || "";
   const hi = firstName ? `${firstName}, ` : "";
+  // One confirmation, wherever the reminder was set: the exact time it will fire.
+  const confirm = (body: string, fireAt: Date, rec: Recurrence = null) => `Got it — I'll remind you to ${body} ${describeRecurring(fireAt, rec)}. ✅`;
 
   // ---- FOLLOW-UP: we asked for a TIME, this message supplies it ----
   const awaiting = String(user.awaitingInputType || "");
@@ -35,7 +38,7 @@ export async function handleReminderCommand(ctx: {
     if (parsed && parsed.kind === "set") {
       await setAwaiting(phone, user, null);
       await createReminder(user.id, phone, parsed.body || body, parsed.fireAt, parsed.recurrence);
-      const reply = `Got it — I'll remind you to ${parsed.body || body} ${describeRecurring(parsed.fireAt, parsed.recurrence)}. ✅`;
+      const reply = confirm(parsed.body || body, parsed.fireAt, parsed.recurrence);
       await logChat(user.id, message, reply, "REMINDER_SET");
       return reply;
     }
@@ -54,7 +57,7 @@ export async function handleReminderCommand(ctx: {
       await setAwaiting(phone, user, null);
       if (body.length >= 2) {
         await createReminder(user.id, phone, body, new Date(fireMs));
-        const reply = `Done — I'll remind you to ${body} ${describeFireTime(new Date(fireMs))}. ✅`;
+        const reply = confirm(body, new Date(fireMs));
         await logChat(user.id, message, reply, "REMINDER_SET");
         return reply;
       }
@@ -94,7 +97,7 @@ export async function handleReminderCommand(ctx: {
 
   if (parsed.kind === "set") {
     await createReminder(user.id, phone, parsed.body, parsed.fireAt, parsed.recurrence);
-    const reply = `Got it — I'll remind you to ${parsed.body} ${describeRecurring(parsed.fireAt, parsed.recurrence)}. ✅`;
+    const reply = confirm(parsed.body, parsed.fireAt, parsed.recurrence);
     await logChat(user.id, message, reply, "REMINDER_SET");
     return reply;
   }

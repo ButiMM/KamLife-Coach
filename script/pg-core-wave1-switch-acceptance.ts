@@ -24,7 +24,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
   let content = "Old coach here, noted.";
   if (body.includes("say what they want from this turn")) {
     const msg = JSON.parse(body).messages.at(-1).content as string;
-    const fix = /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : [];
+    const fix = /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : /nudge me/i.test(msg) ? [{ type: "SET_REMINDER", body: "pack my gym bag", when: "tomorrow at 7am" }] : [];
     content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ family: fix.length ? "correction" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts: [], actions: fix });
   } else if (body.includes("You are Coach K, a warm, direct South African")) content = `Try pap with beans tonight. ${NEW}`;
   else if (body.includes("domain gate")) content = /homework/i.test(body) ? "NO" : "YES";
@@ -120,6 +120,10 @@ REAL("\n4b. WAVE 2, A1 + A5 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on
   chk(!fo.includes(NEW) && await count(FOUNDER) === fb + 2, "CORE_WAVE2=off: the founder's meal is written and the old reply is back", fo.slice(0, 200));
   delete process.env.CORE_WAVE2;
 }
+
+REAL("\n4d. A14 — A REMINDER IN THEIR OWN WORDS IS READ BY THE NEW COACH AND SAVED BY THE PROVEN COMMAND");
+{ const rr = await say(TESTER, "Could you nudge me before gym tomorrow at 7am, I always forget my bag"), n = (await pool.query("SELECT COUNT(*)::int n FROM reminders r JOIN users u ON u.id = r.user_id WHERE u.phone_number = $1 AND r.kind = 'user'", [TESTER])).rows[0].n;
+  chk(n === 1 && /remind you to pack my gym bag/i.test(rr), "the reminder is a row, and the reply confirms the exact time", `${n} | ${rr.slice(0, 160)}`); }
 
 REAL("\n5. INSTANT ROLLBACK");
 process.env.CORE_WAVE1 = "off";
