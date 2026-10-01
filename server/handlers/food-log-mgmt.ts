@@ -36,6 +36,19 @@ function namedPastDay(said: string): Date | null {
 }
 
 /**
+ * THE MODEL'S PAIR REPLACES ONLY THE PAIR IT NAMES (#466 attack). The parser reads every operation
+ * in the message; the new coach names the one from → to it is sure of. Replacing the parser's whole
+ * plan with that pair dropped the rest ("…it was pap, and I also had spinach" lost the spinach).
+ */
+export function mergeCorrectionRead(plan: { remove: string[]; add: string[] }, read: { from: string; to: string }): { remove: string[]; add: string[] } {
+  const same = (a: string, b: string) => { const x = a.toLowerCase().trim(), y = b.toLowerCase().trim(); return x === y || x.includes(y) || y.includes(x); };
+  return {
+    remove: [read.from, ...plan.remove.filter(r => !same(r, read.from))],
+    add: [read.to, ...plan.add.filter(a => !same(a, read.to) && !same(a, read.from))],
+  };
+}
+
+/**
  * WHICH MEAL A CORRECTION NAMES (#466). The client's own words win: a slot they typed is
  * deterministic, and a model read that names a different meal must never override it (it rewrote
  * lunch when they said breakfast). The model's slot fills in only when their words name none.
@@ -151,7 +164,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   let plan = looksLikeQuestion(m) ? null : planCorrection(m, movesDay);
   // WAVE 2, A2 (#459): the new coach names from → to; this engine still does the write. The parse stands if it can't.
   const read = plan?.isCorrection && !plan.moves ? await (await import("../core/coach")).correctionRead(String(user?.phoneNumber || ""), m) : null;
-  if (plan && read) plan = { ...plan, remove: [read.from], add: [read.to] };
+  if (plan && read) plan = { ...plan, ...mergeCorrectionRead(plan, read) };
   if (plan?.isCorrection && (plan.moves || plan.remove.length + plan.add.length >= 2)) {
     // THE DAY THEY NAMED CONSTRAINS THE CANDIDATE (#164). This took the globally newest meal and
     // consulted parseMealDate only for `target`, and only when the plan MOVES a meal. So
