@@ -7,7 +7,8 @@
 3. **Deferred (don't build):** an app or member page, the Meta-direct migration, new payment rails, a second model provider, trainers or buddies, rows marked "not needed now".
 4. **No new spend (ORDERS §0c):** no paid gate. Switches go live via their Railway flag, are proven on real use, and their old code is deleted after 48 clean hours. Follow the STANDING COST RULES.
 5. **Attacks:** `attack:codex` and `@codex` only on `[harm]` and `switch` PRs. Answer every attack with `ANSWER`.
-6. **Reuse, don't rebuild; delete in the switch; one message per reply.** Every PR names its COVERAGE row, what it retires, and what testers will notice.
+6. **No stacked PRs (1 Oct).** Every PR is based on `main`; take the next row only after the previous one has merged to `main`. The watch never auto-merges a PR whose base isn't `main`. Never commit while a local test run is mutating files.
+7. **Reuse, don't rebuild; delete in the switch; one message per reply.** Every PR names its COVERAGE row, what it retires, and what testers will notice.
 7. **Capacity and continuity:** one session, short status comments, batched pushes. Never idle: re-read #391 and #280, or schedule a check-in. Blocked on the founder? Post `BLOCKED:` and keep working.
 
 ## Standing orders (read first, every session)

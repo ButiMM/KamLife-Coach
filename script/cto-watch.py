@@ -148,7 +148,11 @@ for p in open_prs:
         if not (on and any(r["name"] == "replay" and r["conclusion"] == "success" and (r.get("started_at") or "") >= max(finals) for r in runs)):
             attack_ok = False
             state += " (switch: add the label `final` when the other checks are green; that run uses the strong judge)"
-    hold = any(l["name"] == "hold" for l in p["labels"]) or p.get("draft")
+    # Auto-merge only into main (1 Oct: stacked PRs were merged into other PR branches and never reached
+    # testers), and never anything labelled hold.
+    hold = any(l["name"] == "hold" for l in p["labels"]) or p.get("draft") or p["base"]["ref"] != "main"
+    if p["base"]["ref"] != "main":
+        state += f" (stacked on {p['base']['ref'][:30]}: never auto-merged)"
     # A PR labelled ready/switch/gate must show a replay check that succeeded. A missing replay run is
     # NOT "green" (25 Sep: a broken workflow ran no gate and #393 merged as if it had passed).
     wants_gate = paid_gate and any(l["name"] in ("ready", "switch", "gate") for l in p["labels"])
@@ -162,6 +166,9 @@ for p in open_prs:
 
 merged_now = []
 for n, sha, title in mergeable:
+    fresh = api("GET", f"/pulls/{n}")  # re-check right before merging: labels and base can change mid-run
+    if fresh["base"]["ref"] != "main" or any(l["name"] == "hold" for l in fresh["labels"]):
+        continue
     try:
         api("PUT", f"/pulls/{n}/merge", {"merge_method": "squash", "sha": sha})
         api("POST", f"/issues/{n}/comments", {"body": f"**CTO watch: auto-merged** at `{sha[:10]}`. Checks green, attack answered or window passed, mouth ratchet green. Codex attacks the merged version next; findings go to the top of the queue.\n\n<!-- cto-automerge-{sha} -->"})
