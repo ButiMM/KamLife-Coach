@@ -781,6 +781,12 @@ export async function buildCoachHealthBrief(days: number, readBy = "coach_health
  */
 export const COACH_HEALTH_STATE_KEY = "coach_health_sweep";
 
+function isoOrEmpty(v: unknown): string {
+  if (!v) return "";
+  const d = v instanceof Date ? v : new Date(String(v));
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+}
+
 export async function runCoachHealthSweep(days = 1): Promise<{ known: number; candidates: number; fresh: string[] }> {
   const { loadState, saveState } = await import("../scheduler/shared");
   const brief = await buildCoachHealthBrief(days, "coach_health_sweep");
@@ -788,7 +794,9 @@ export async function runCoachHealthSweep(days = 1): Promise<{ known: number; ca
     ref: String(c.id),
     // The newest turn in the cluster. Already computed for the dashboard; it is what makes
     // "there is new evidence" a fact about the ledger rather than a fact about when we ran.
-    lastSeen: String(c.lastSeen || ""),
+    // ISO, so the string comparisons below are chronological. String(Date) starts with the
+    // weekday, so "Wed Sep 30" sorted after "Thu Oct 01" and old evidence read as new at night.
+    lastSeen: isoOrEmpty(c.lastSeen),
   }));
   const refs = active.map(a => a.ref);
 
@@ -817,7 +825,7 @@ export async function runCoachHealthSweep(days = 1): Promise<{ known: number; ca
   try {
     const prev = JSON.parse(loadState()[COACH_HEALTH_STATE_KEY] || "{}");
     if (prev.seen && typeof prev.seen === "object") {
-      for (const [k, v] of Object.entries(prev.seen)) seen[String(k)] = String(v ?? "");
+      for (const [k, v] of Object.entries(prev.seen)) seen[String(k)] = isoOrEmpty(v);
     }
     if (Array.isArray(prev.activeRefs)) prevActive = prev.activeRefs.map(String);
     // A snapshot written by A1 has seenRefs and neither of the above. Treat those refs as both
