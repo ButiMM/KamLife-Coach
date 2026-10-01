@@ -10917,26 +10917,11 @@ test("#441 isModelSlowOrUnreachable: timeout, dropped connection and 5xx answer 
   }
 });
 
-test("CORE_WAVE1: on by default (#445); founder matches only the founder's number, in any format; off is the rollback", async () => {
+test("CORE_WAVE1: on for everyone unless off (#445; the founder-first mode is gone)", async () => {
   const { coreWave1For } = await import("../server/core/coach");
-  const saved = { m: process.env.CORE_WAVE1, p: process.env.COACH_ALERT_PHONE, a: process.env.ADMIN_PHONE_OVERRIDE };
-  try {
-    delete process.env.CORE_WAVE1; process.env.COACH_ALERT_PHONE = "+27 82 943 8001"; delete process.env.ADMIN_PHONE_OVERRIDE;
-    assert.equal(coreWave1For("whatsapp:+27829438002"), true, "unset means on, for everyone");
-    process.env.CORE_WAVE1 = "off";
-    assert.equal(coreWave1For("whatsapp:+27829438001"), false, "off is the rollback");
-    process.env.CORE_WAVE1 = "founder";
-    for (const p of ["whatsapp:+27829438001", "+27829438001", "0829438001"]) assert.equal(coreWave1For(p), true, `founder as ${p}`);
-    assert.equal(coreWave1For("whatsapp:+27829438002"), false, "a tester is not switched in founder mode");
-    delete process.env.COACH_ALERT_PHONE;
-    assert.equal(coreWave1For("whatsapp:+27829438001"), false, "founder mode with no founder number switches nobody");
-    process.env.CORE_WAVE1 = "on";
-    assert.equal(coreWave1For("whatsapp:+27829438002"), true, "on switches everyone");
-  } finally {
-    if (saved.m === undefined) delete process.env.CORE_WAVE1; else process.env.CORE_WAVE1 = saved.m;
-    if (saved.p === undefined) delete process.env.COACH_ALERT_PHONE; else process.env.COACH_ALERT_PHONE = saved.p;
-    if (saved.a !== undefined) process.env.ADMIN_PHONE_OVERRIDE = saved.a;
-  }
+  const saved = process.env.CORE_WAVE1;
+  try { delete process.env.CORE_WAVE1; assert.equal(coreWave1For("whatsapp:+27829438002"), true); process.env.CORE_WAVE1 = "off"; assert.equal(coreWave1For("whatsapp:+27829438002"), false); }
+  finally { if (saved === undefined) delete process.env.CORE_WAVE1; else process.env.CORE_WAVE1 = saved; }
 });
 
 test("CORE_WAVE2: on for everyone unless off (#455; no founder-first step, ORDERS §0d)", async () => {
