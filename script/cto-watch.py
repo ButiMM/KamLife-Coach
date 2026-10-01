@@ -93,7 +93,7 @@ for p in open_prs:
     if not attacks and not attack_ok_docs:
         state = "waiting for Codex attack"
         comment_once(n, f"cto-attack-{sha}", f"**Attack owed** at head `{short}` (attacker session, docs/ATTACKER.md; or @codex when it has capacity). Start your comment with `ATTACK @ {sha[:7]}`.", comments)
-        window = dt.timedelta(minutes=120) if any(l["name"] == "switch" for l in p["labels"]) else ATTACK_WINDOW
+        window = ATTACK_WINDOW  # 45 min for harm and switch alike (1 Oct): CI takes ~45 min, so no extra wait
         if NOW - head_since > window:
             state = "attack window passed: builder may merge if tests pass; Codex attacks after merge"
             comment_once(n, f"cto-window-{sha}", f"**CTO watch:** no Codex attack at `{short}` within 45 minutes. Per CLAUDE.md, the builder may merge once tests pass; any later finding goes to the top of docs/QUEUE.md.", comments)
