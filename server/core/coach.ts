@@ -233,11 +233,13 @@ export function coreWave2For(_phone: string): boolean {
 
 /**
  * The new words, or null to keep the receipt (#455 attack). The receipt stays when it carries a
- * status the words could hide: an honest gap ("could not price X"), a correction ("Fixed ✅") or a
- * past day ("Logged to Tuesday"). The model's own instructions are stripped by their one owner, so
+ * status the words could hide: an honest gap ("could not price X"), a correction ("Fixed ✅"), a
+ * past day ("Logged to Tuesday") or a question the old flow is waiting on. The model's own instructions are stripped by their one owner, so
  * the canonical close stays the only move.
  */
-const keepsReceipt = (receipt: string) => /could not price|not in the total|Fixed ✅|_Logged to /i.test(receipt);
+// A receipt that ASKS something ("How did it feel?") is an old flow awaiting the answer (programme
+// progression, portions): the words would drop the question, so it stays.
+const keepsReceipt = (receipt: string) => /could not price|not in the total|Fixed ✅|_Logged to |\?/i.test(receipt.replace(/\[[A-Z]+:[^\]]*\]/g, ""));
 export function afterLogWords(reply: string, receipt: string, strip: (r: string) => string): string | null {
   if (keepsReceipt(receipt)) return null;
   const kept = strip(reply).trim();
@@ -269,6 +271,7 @@ export async function correctionRead(phone: string, message: string): Promise<{ 
 const JUST_LOGGED = {
   food: "they told you what they ate; acknowledge it in a few words, from today's real numbers",
   steps: "they told you their steps; acknowledge them in a few words, from today's real step count and their target", // A5
+  workout: "they told you they trained; acknowledge the session in a few words, from this week's real sessions", // A8
 } as const;
 
 /** The new coach's reply to a turn whose fact the proven owner just wrote. null = keep the old receipt. */

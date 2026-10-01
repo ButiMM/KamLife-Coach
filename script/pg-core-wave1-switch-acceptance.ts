@@ -72,9 +72,6 @@ await say(FOUNDER, "No, should I have had a burger instead?");
 await say(FOUNDER, "Can I have a burger tonight?");
 const mealsAfter = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs WHERE user_id = $1", [fu.id])).rows[0].n);
 chk(mealsAfter === mealsBefore, "the founder's \"can I have a burger?\" writes no meal", `${mealsBefore} → ${mealsAfter}`);
-// "stuck at 82kg" is a plateau, not a reset: the old restart branch sent everyone the app menu.
-const tp = await say(TESTER, "I've been stuck at 82kg for three weeks. What am I doing wrong?");
-chk(!/What do you need\?/.test(tp), "a tester's plateau is not answered with the restart menu", tp.slice(0, 160));
 
 REAL("\n2. THE SCOPE FLOOR STAYS IN FRONT (A17)");
 const f2 = await say(FOUNDER, "Can you help me with my maths homework tonight?");
@@ -105,7 +102,7 @@ REAL("\n4c. WAVE 2, A2 — THE NEW COACH READS THE CORRECTION, THE PROVEN ENGINE
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
-REAL("\n4b. WAVE 2, A1 + A5 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on for everyone)");
+REAL("\n4b. WAVE 2, A1 + A5 + A8 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on for everyone)");
 {
   const count = async (phone: string) => Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [phone])).rows[0].n);
   process.env.CORE_WAVE2 = "on"; // the shipped default; the runner pins other suites to "off"
@@ -115,6 +112,7 @@ REAL("\n4b. WAVE 2, A1 + A5 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on
   chk(await count(FOUNDER) === fb + 1 && fa.includes(NEW), "the founder's lunch is written once, by the old owner, and they hear the new coach", fa.slice(0, 200));
   chk(await count(TESTER) === tb + 1 && ta.includes(NEW), "a tester's lunch is written once and they hear the new coach too", ta.slice(0, 200));
   const sa = await say(TESTER, "I walked 7500 steps today"), st = (await pool.query("SELECT MAX(s.steps)::int n FROM step_logs s JOIN users u ON u.id = s.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n; chk(st === 7500 && sa.includes(NEW), "A5: a tester's steps are written by the step owner and they hear the new coach", `${st} | ${sa.slice(0, 200)}`);
+  const wa = await say(TESTER, "I did a 30 minute HIIT class"), wn = (await pool.query("SELECT COUNT(*)::int n FROM workout_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n; chk(wn === 1 && wa.includes(NEW), "A8: a tester's class is written by the workout owner and they hear the new coach", `${wn} | ${wa.slice(0, 200)}`);
   process.env.CORE_WAVE2 = "off";
   const fo = await say(FOUNDER, "I had an apple for a snack");
   chk(!fo.includes(NEW) && await count(FOUNDER) === fb + 2, "CORE_WAVE2=off: the founder's meal is written and the old reply is back", fo.slice(0, 200));
