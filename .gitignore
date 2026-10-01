@@ -65,3 +65,4 @@ replay-results/
 
 # Replit runtime state and logs: may hold phone numbers and names. Never commit (2026-09-24).
 .local/state/
+__pycache__/
