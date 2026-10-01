@@ -440,33 +440,12 @@ export function neverSilentLine(
   const label = (opts.label || "").trim().slice(0, 60);
   const amount = (opts.amount || "").trim();
   const move = (opts.move || "").trim().replace(/[.\s]*$/, "");
-  // OVER THE DAY'S CALORIES, ON CANONICAL TOTALS THE CALLER ALREADY HELD. A 2 445 kcal plate
-  // against a 1 200 kcal target used to read "Got it — Chips, Pap and Beef stew. 👌", because
-  // this function was starved of the one fact that made the plate adverse. Stated plainly, and
-  // no figure is printed: the comparison is canonical, the number would be a second claim.
-  const overForTheDay = !!opts.day && opts.day.kcalTarget > 0 && opts.day.kcal > opts.day.kcalTarget;
-
-  // CHEAT, NO SHAME (voice rule 9) — and deterministic on purpose. Someone who writes "I feel
-  // like I ruined everything" needs the second half of this sentence whether or not the model
-  // answered that turn, and the model is exactly what is missing when this function runs. The
-  // words already existed in food-context as a guilt note and never reached the log path.
-  // It outranks the over-target sentence: a person already carrying shame does not need both.
+  // THE MEAL COMMENTARY IS THE NEW COACH'S NOW (wave 2, A1, #455). "Over your calories for today" and
+  // the protein-in-the-same-breath line were this receipt coaching a logged meal; with CORE_WAVE2 on the
+  // new coach speaks after every meal write, from the ledger that holds it. What stays is the floor:
+  // someone carrying shame hears "one meal doesn't break a week" even when the model is down (rule 9).
   const head = (kind === "meal" && opts.carryingShame)
     ? (label ? `Got it — ${label}. One meal doesn't break a week. 👌` : `Got it. One meal doesn't break a week. 👌`)
-    : kind === "meal" && overForTheDay
-      // No 👌 — that emoji is the whole "blind celebration" the trace caught.
-      ? (label ? `Got it — ${label}. That puts you over your calories for today.`
-               : `Got it. That puts you over your calories for today.`)
-    : kind === "meal" && label && opts.moveKind === "protein" && (opts.wroteProtein ?? 0) > 0
-      // THE FACT THE MOVE TURNS ON, NAMED IN THE SAME BREATH. Logging eggs at breakfast and being
-      // told "start tomorrow with protein at breakfast" reads as a coach who did not look at the
-      // plate. The gram figure is this turn's own write — not a total, not an average, not a
-      // target — so the instruction arrives with its reason attached.
-      //
-      // THE 👌 STAYS. Naming the number is not a reason to go cold: an in-budget plate must still
-      // read as an ordinary, warm acknowledgement, and dropping the emoji here made the adverse
-      // case above indistinguishable from the normal one. The acceptance control caught it.
-      ? `Got it — ${label}: ${opts.wroteProtein}g protein. 👌`
     : kindLine(kind, label, amount);
 
   return move ? `${head} ${move}.` : head;

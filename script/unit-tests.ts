@@ -10939,9 +10939,16 @@ test("CORE_WAVE1: on by default (#445); founder matches only the founder's numbe
   }
 });
 
-// ── EVERY WORKFLOW FILE IS VALID YAML (25 Sep) ────────────────────────────────────────────────
-// A second `env:` key on the replay job made replay-gate.yml invalid. GitHub then ran no gate at
-// all, and the watch merged `ready` PRs as if it had passed. A duplicate key is now a red test.
+test("CORE_WAVE2: on for everyone unless off (#455; no founder-first step, ORDERS §0d)", async () => {
+  const { coreWave2For } = await import("../server/core/coach");
+  const saved = process.env.CORE_WAVE2;
+  try { delete process.env.CORE_WAVE2; assert.equal(coreWave2For("whatsapp:+27829438002"), true); process.env.CORE_WAVE2 = "off"; assert.equal(coreWave2For("whatsapp:+27829438002"), false); }
+  finally { if (saved === undefined) delete process.env.CORE_WAVE2; else process.env.CORE_WAVE2 = saved; }
+  const { afterMealWords } = await import("../server/core/coach"), { stripModelDirectives } = await import("../server/brain/reply-verifier"), w = (r: string, rc: string) => afterMealWords(r, rc, x => stripModelDirectives(x, { modelAuthored: true } as any).kept); // #455 attack
+  assert.equal(w("Pap and chicken logged.", "Got it ⚠️ I could not price *relish* — not in the total yet."), null); assert.equal(w("Have beans for dinner tonight.", "Got it — eggs 👌"), null);
+  assert.equal(w("Solid lunch. Aim for 30g protein at dinner.", "Got it [MEDIA:card]"), "Solid lunch.\n[MEDIA:card]"); // a pricing gap keeps the receipt; the model's own instruction never ships
+});
+
 test("#342: the restore runbook replays every table the POPIA erasure deletes (a restore must not resurrect a deleted client)", async () => {
   const { readFileSync } = await import("node:fs");
   const code = readFileSync("server/handlers/safety.ts", "utf-8");
