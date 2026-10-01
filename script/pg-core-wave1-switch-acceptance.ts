@@ -24,8 +24,9 @@ globalThis.fetch = (async (input: any, init?: any) => {
   let content = "Old coach here, noted.";
   if (body.includes("say what they want from this turn")) {
     const msg = JSON.parse(body).messages.at(-1).content as string;
-    const fix = /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : /nudge me/i.test(msg) ? [{ type: "SET_REMINDER", body: "pack my gym bag", when: "tomorrow at 7am" }] : [];
-    content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ family: fix.length ? "correction" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts: [], actions: fix });
+    const bag = { type: "SET_REMINDER", body: "pack my gym bag", when: "tomorrow at 7am" };
+    const fix = /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : /vitamins/i.test(msg) ? [bag, { type: "SET_REMINDER", body: "take my vitamins", when: "tomorrow at 8am" }] : /nudge me/i.test(msg) ? [bag] : [];
+    content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ family: fix.length ? "correction" : "question", wants: "advice", one_question: null, uncertainty: /maybe/i.test(msg) ? 0.99 : 0.2, facts: [], actions: fix });
   } else if (body.includes("You are Coach K, a warm, direct South African")) content = `Try pap with beans tonight. ${NEW}`;
   else if (body.includes("domain gate")) content = /homework/i.test(body) ? "NO" : "YES";
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
@@ -123,7 +124,12 @@ REAL("\n4b. WAVE 2, A1 + A5 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on
 
 REAL("\n4d. A14 — A REMINDER IN THEIR OWN WORDS IS READ BY THE NEW COACH AND SAVED BY THE PROVEN COMMAND");
 { const rr = await say(TESTER, "Could you nudge me before gym tomorrow at 7am, I always forget my bag"), n = (await pool.query("SELECT COUNT(*)::int n FROM reminders r JOIN users u ON u.id = r.user_id WHERE u.phone_number = $1 AND r.kind = 'user'", [TESTER])).rows[0].n;
-  chk(n === 1 && /remind you to pack my gym bag/i.test(rr), "the reminder is a row, and the reply confirms the exact time", `${n} | ${rr.slice(0, 160)}`); }
+  const said = (await pool.query("SELECT message_in FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.intent = 'REMINDER_SET' ORDER BY c.id DESC LIMIT 1", [TESTER])).rows[0]?.message_in;
+  chk(n === 1 && /remind you to pack my gym bag/i.test(rr) && /nudge me before gym/i.test(said || ""), "the reminder is a row, the reply confirms the exact time, the record keeps their words", `${n} | ${said} | ${rr.slice(0, 120)}`);
+  const count = async () => (await pool.query("SELECT COUNT(*)::int n FROM reminders r JOIN users u ON u.id = r.user_id WHERE u.phone_number = $1 AND r.kind = 'user'", [TESTER])).rows[0].n;
+  const um = await say(TESTER, "Maybe nudge me about my gym bag, I haven't decided when"); chk(await count() === 1 && /when should I remind you/i.test(um), "unsure of the time: it asks, and saves nothing", um.slice(0, 120));
+  await pool.query("UPDATE users SET awaiting_input_type = NULL WHERE phone_number = $1", [TESTER]);
+  const two = await say(TESTER, "Nudge me to pack my gym bag tomorrow at 7am and give me a shout for vitamins at 8am"); chk(await count() === 3 && /vitamins/i.test(two), "two reminders in one message: both saved, both confirmed", `${await count()} | ${two.slice(0, 160)}`); }
 
 REAL("\n5. INSTANT ROLLBACK");
 process.env.CORE_WAVE1 = "off";

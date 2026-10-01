@@ -216,13 +216,24 @@ export async function answerLive(phone: string, message: string): Promise<string
   // its wave-2 row switches, so nothing the client reports is ever dropped.
   const { writesState } = await import("../understanding/actions");
   const writes = (read.u.actions ?? []).filter(a => writesState(a.type));
-  // A14: a reminder asked for in their own words ("nudge me before gym on Thursday") is saved by the
-  // proven reminder command, which confirms the exact time it will fire. Never promised without a row.
-  const ask = writes.length && writes.every(a => a.type === "SET_REMINDER") ? writes[0] as { body: string; when: string } : null;
-  if (ask) {
+  // A14: reminders asked for in their own words ("nudge me before gym on Thursday") are saved by the
+  // proven reminder command, which confirms the exact fire time; every one of them, never promised
+  // without a row. Unsure of the time (the existing confidence gate), it asks rather than guesses.
+  const asks = writes.length && writes.every(a => a.type === "SET_REMINDER") ? writes as Array<{ type: "SET_REMINDER"; body: string; when: string }> : [];
+  if (asks.length) {
     const [user] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const synth = `remind me to ${ask.body} ${ask.when}`.replace(/\s+/g, " ").trim();
-    return user ? await (await import("../handlers/reminders-handler")).handleReminderCommand({ phone, message: synth, m: synth.toLowerCase(), user }) : null;
+    if (!user) return null;
+    const { handleReminderCommand } = await import("../handlers/reminders-handler");
+    const { shouldAutoExecute } = await import("../understanding/actions");
+    const confidence = 1 - (read.u.uncertainty || 0);
+    const sure = asks.every(a => shouldAutoExecute(a as any, confidence));
+    const replies: string[] = [];
+    for (const a of sure ? asks : asks.slice(0, 1)) {
+      const synth = `remind me to ${a.body}${sure ? ` ${a.when}` : ""}`.replace(/\s+/g, " ").trim();
+      const r = await handleReminderCommand({ phone, message: synth, m: synth.toLowerCase(), user, said: message });
+      if (r) replies.push(r);
+    }
+    return replies.length ? replies.join("\n\n") : null;
   }
   if (writes.length) return null;
   const reply = (await compose(openai, pre, message, read.u))?.trim();
