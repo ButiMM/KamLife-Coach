@@ -238,9 +238,22 @@ export function coreWave2For(_phone: string): boolean {
   return String(process.env.CORE_WAVE2 || "on").toLowerCase() !== "off";
 }
 
+/**
+ * The new words, or null to keep the receipt (#455 attack). The receipt stays when it carries an
+ * honest gap ("could not price X") the words would hide, and the model's own instructions are
+ * stripped by their one owner, so the canonical close stays the only move.
+ */
+export function afterMealWords(reply: string, receipt: string, strip: (r: string) => string): string | null {
+  if (/could not price|not in the total/i.test(receipt)) return null;
+  const kept = strip(reply).trim();
+  if (!kept) return null;
+  const media = (receipt.match(/\[MEDIA:[^\]]+\]/g) || []).join("");
+  return media ? `${kept}\n${media}` : kept;
+}
+
 /** The new coach's reply to a turn whose meal the old owner just wrote. null = keep the old receipt. */
 export async function afterMealReply(phone: string, message: string, receipt: string): Promise<string | null> {
-  if (!coreWave2For(phone)) return null;
+  if (!coreWave2For(phone) || /could not price|not in the total/i.test(receipt)) return null;
   try {
     const pre = await readPreTurn(phone, message);
     if (!pre) return null;
@@ -249,8 +262,8 @@ export async function afterMealReply(phone: string, message: string, receipt: st
     const reply = (await compose(await openaiClient(), pre, message, u))?.trim();
     if (!reply) return null;
     // The meal card the old owner attached (a [MEDIA:…] marker) still rides with the new words.
-    const media = (receipt.match(/\[MEDIA:[^\]]+\]/g) || []).join("");
-    return media ? `${reply}\n${media}` : reply;
+    const { stripModelDirectives } = await import("../brain/reply-verifier");
+    return afterMealWords(reply, receipt, r => stripModelDirectives(r, { modelAuthored: true } as any).kept);
   } catch (e) {
     console.warn("[CORE_WAVE2] kept the receipt:", (e as Error)?.message || e);
     return null;
