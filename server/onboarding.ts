@@ -100,7 +100,7 @@ export async function blockUnderage(phone: string): Promise<"BLOCKED_UNDERAGE"> 
   // A BLOCKED MINOR IS NOT BILLED (#306). Closing coaching left a paid subscription running. The
   // cancel goes through the same path as a client's own (#263): PayFast first, and the record says
   // whether PayFast confirmed, so the reply never promises what the product cannot keep.
-  if (false) {
+  if (u?.status === "active") {
     const { latestPayFastToken, cancelPayFastSubscription } = await import("./routes/payments");
     const token = await latestPayFastToken(phone);
     const billing = await cancelPayFastSubscription(token);
