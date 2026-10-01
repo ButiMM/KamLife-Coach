@@ -17,6 +17,8 @@ server/drill-cases.ts
 server/one-action.ts
 server/memory.ts
 server/intelligence/profile.ts
+server/machine-coach.ts
+server/handlers/equipment-vision.ts
 #
 # ── PARTIAL (the writers inside stay; the reply and decision code goes) ──
 # server/handlers/early-commands.ts
@@ -44,7 +46,5 @@ server/intelligence/profile.ts
 # server/understanding/reentry.ts
 # server/reply-contract.ts
 # server/self-check.ts
-#
-# ── FOUNDER DECISION (a live feature, frozen as "not needed now") ──
-# server/machine-coach.ts         (gym-machine photo coach, A9)
-# server/verifiers/meal-verifier.ts (meal-estimate passes; a model call site)
+# server/verifiers/meal-verifier.ts  (live: corrects model-estimated meals before they are written;
+#                                     food-context.ts:1257/1347 → gpt.ts gptFoodFallback → :811)
