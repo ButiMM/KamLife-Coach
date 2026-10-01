@@ -51,6 +51,20 @@ export function eveningRecognition(f: {
     : `${f.name}, today: ${done.join(", ")}.`;
 }
 
+/**
+ * WHAT'S NEW (#442, CTO 1 Oct): each switch PR adds one short line here, dated its live day. That
+ * evening's message carries it, so testers hear about the change with no extra message, through the
+ * same sender, opt-out, pause and daily-cap rules as every other proactive message, and no secret
+ * outside Railway.
+ */
+export const WHATS_NEW: Array<{ day: number; line: string }> = [ // day = SAST yyyymmdd, a key, never shown
+  { day: 20261001, line: "Tell me what you ate and I'll say what it means for your day. Logged the wrong food? Say \"no, it was chicken, not beef stew\" and I'll fix that meal. Steps get a real reply too." },
+];
+export const whatsNewLine = (day = Number(todaySAST().replace(/-/g, ""))): string => {
+  const lines = WHATS_NEW.filter(n => n.day === day).map(n => n.line);
+  return lines.length ? `\n\n🆕 What's new: ${lines.join(" ")}` : "";
+};
+
 export async function runEveningAccountability(): Promise<void> {
   console.log("[SCHEDULER] JOB: Evening accountability");
   const clients = await getActiveClients();
@@ -76,7 +90,7 @@ export async function runEveningAccountability(): Promise<void> {
       // a client who told us at 08:00 that they are not training tonight is not told to train.
       if (todayLogs.length === 0) {
         const empty = await canonicalNextMove(client, { hour: sastHour() });
-        const delivery = empty.line ? await sendProactive(client, { job: "evening" }, `${name}, haven't heard from you today — no stress.\n\n${empty.line}`) : null;
+        const delivery = empty.line ? await sendProactive(client, { job: "evening" }, `${name}, haven't heard from you today — no stress.\n\n${empty.line}${whatsNewLine()}`) : null;
         if (delivery) await recordCanonicalMoveOutbound(client, empty, delivery);
         continue;
       }
@@ -156,7 +170,7 @@ export async function runEveningAccountability(): Promise<void> {
       // which is a calendar, not a coach. It now fires when, and only when, the decision owner has
       // actually chosen `train`, so a declined or sick day never renders it.
       if (move.action.kind === "train" && isTrainingDay) {
-        const delivery = await sendProactive(client, { job: "evening" }, `${recap}\n\n${move.line}`,
+        const delivery = await sendProactive(client, { job: "evening" }, `${recap}\n\n${move.line}${whatsNewLine()}`,
           { buttons: ["Doing it tonight", "Swap to tomorrow", "Rest day today"] });
         if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
         continue;
@@ -167,7 +181,7 @@ export async function runEveningAccountability(): Promise<void> {
       const dinnerIn = todayMeals.some(r => /dinner|supper/i.test(String(r.label || "")));
       const ask = !move.line && !sick && !dinnerIn && !(await readHeldConstraints(phone, client)).foodDayClosed ? "What's dinner looking like tonight?" : "";
       const msg = [recap, move.line || ask].filter(Boolean).join("\n\n");
-      const delivery = msg ? await sendProactive(client, { job: "evening" }, msg) : null;
+      const delivery = msg ? await sendProactive(client, { job: "evening" }, msg + whatsNewLine()) : null;
       if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
     } catch (err) {
       console.error(`[SCHEDULER] Evening accountability error — ${client.phoneNumber}:`, err);

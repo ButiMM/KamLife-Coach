@@ -10924,6 +10924,11 @@ test("CORE_WAVE1: on for everyone unless off (#445; the founder-first mode is go
   finally { if (saved === undefined) delete process.env.CORE_WAVE1; else process.env.CORE_WAVE1 = saved; }
 });
 
+test("what's new rides in that evening's message on its live day only (#442, no extra message)", async () => {
+  const { whatsNewLine, WHATS_NEW } = await import("../server/scheduler/jobs/evening");
+  assert.match(whatsNewLine(WHATS_NEW[0].day), /^\n\n🆕 What's new: /); assert.equal(whatsNewLine(20000101), "");
+});
+
 test("CORE_WAVE2: on for everyone unless off (#455; no founder-first step, ORDERS §0d)", async () => {
   const { coreWave2For } = await import("../server/core/coach");
   const saved = process.env.CORE_WAVE2;
