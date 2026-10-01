@@ -2,7 +2,7 @@
  * REAL-POSTGRESQL ACCEPTANCE — the wave-1 switch (COVERAGE A10, A11, A13, A16, A17; #438).
  *
  * With the model stubbed at the network edge, this proves the switch's plumbing:
- *   - CORE_WAVE1=founder: only the founder's number (COACH_ALERT_PHONE) meets the new coach;
+ *   - CORE_WAVE1 on (the default): every client meets the new coach;
  *   - the new coach answers where gpt-block did, BEHIND the scope floor (an off-topic ask is still declined);
  *   - a message the new coach cannot read falls back to the old reply: never silence, never a guess (#421);
  *   - a client midway through an old flow (a menu awaiting "1/2/3") finishes it there (#440);
@@ -13,8 +13,7 @@ process.env.OPENAI_API_KEY = "sk-stub"; process.env.OFFLINE_AI = "0"; process.en
 process.env.ENGINE_LIVE = "on"; process.env.PROACTIVE_PAUSED = "true"; process.env.NODE_ENV = "production";
 process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000"; process.env.TWILIO_AUTH_TOKEN = "test"; process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 const FOUNDER = "whatsapp:+27829438001", TESTER = "whatsapp:+27829438002";
-process.env.COACH_ALERT_PHONE = "+27829438001";
-process.env.CORE_WAVE1 = "founder";
+process.env.CORE_WAVE1 = "on"; // the runner pins off for stubbed suites; this one proves the switch
 
 const NEW = "NEW-COACH-438"; // only the new coach's composer says this
 const realFetch = globalThis.fetch;
@@ -53,12 +52,12 @@ for (const phone of [FOUNDER, TESTER]) {
 }
 const ASK = "Any ideas for a cheap supper tonight?";
 
-REAL("\npg-core-wave1-switch-acceptance — the new coach answers wave-1 turns, founder first (#438)\n");
-REAL("1. FOUNDER FIRST");
+REAL("\npg-core-wave1-switch-acceptance — the new coach answers wave-1 turns, for everyone (#438)\n");
+REAL("1. EVERYONE");
 const f1 = await say(FOUNDER, ASK);
 chk(f1.includes(NEW), "the founder's wave-1 question is answered by the new coach", f1);
 const t1 = await say(TESTER, ASK);
-chk(!t1.includes(NEW) && t1.trim().length > 0, "a tester still meets the old coach", t1);
+chk(t1.includes(NEW), "a tester's wave-1 question is answered by the new coach too", t1);
 
 REAL("\n1b. REACH (CTO attack on #445): the old wave-1 handlers stand aside for the switched client");
 for (const q of ["What should I eat tonight?", "How was my week?", "What should I order at KFC?", "Should I take creatine?",
@@ -76,8 +75,6 @@ chk(mealsAfter === mealsBefore, "the founder's \"can I have a burger?\" writes n
 // "stuck at 82kg" is a plateau, not a reset: the old restart branch sent everyone the app menu.
 const tp = await say(TESTER, "I've been stuck at 82kg for three weeks. What am I doing wrong?");
 chk(!/What do you need\?/.test(tp), "a tester's plateau is not answered with the restart menu", tp.slice(0, 160));
-const tr = await say(TESTER, "What should I order at KFC?");
-chk(!tr.includes(NEW) && tr.trim().length > 0, "in founder mode a tester's KFC question still meets the old coach", tr.slice(0, 160));
 
 REAL("\n2. THE SCOPE FLOOR STAYS IN FRONT (A17)");
 const f2 = await say(FOUNDER, "Can you help me with my maths homework tonight?");

@@ -193,19 +193,12 @@ async function openaiClient(): Promise<OpenAI> {
 }
 
 /**
- * THE WAVE-1 SWITCH (COVERAGE A10, A11, A13, A16, A17). CORE_WAVE1 = off | founder | on.
- * "founder" is the per-client rollout of #438: only COACH_ALERT_PHONE meets the new coach, everyone
- * else keeps the old one. Rollback is instant: set CORE_WAVE1=off, no deploy.
+ * THE WAVE-1 SWITCH (COVERAGE A10, A11, A13, A16, A17): on for everyone since 25 Sep (#445).
+ * CORE_WAVE1=off is the instant rollback to the old engine and gpt-block, with no deploy. The
+ * founder-first mode (#438) is gone: it had no client left to serve once wave 1 was on for all.
  */
-export function coreWave1For(phone: string): boolean {
-  // ON BY DEFAULT (founder decision, CTO order on #391, 25 Sep): wave 1 is the new coach's for everyone.
-  // `off` is the emergency rollback to the old engine and gpt-block; `founder` limits it to one number.
-  const mode = String(process.env.CORE_WAVE1 || "on").toLowerCase();
-  if (mode === "on") return true;
-  if (mode !== "founder") return false;
-  const digits = (p: string) => (p || "").replace(/\D/g, "").replace(/^0/, "27");
-  const founder = digits(process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE || "");
-  return !!founder && digits(phone) === founder;
+export function coreWave1For(_phone: string): boolean {
+  return String(process.env.CORE_WAVE1 || "on").toLowerCase() !== "off";
 }
 
 /**
