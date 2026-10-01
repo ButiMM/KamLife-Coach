@@ -116,7 +116,9 @@ for p in open_prs:
         if r.get("conclusion") == "skipped" and r["name"] in latest:
             continue                   # a skipped re-trigger (a label added) never replaces a real verdict
         latest[r["name"]] = r          # judge each check by its most recent run only
-    runs = list(latest.values())
+    # §0c/§0d (28/30 Sep): no paid gate until revenue. `replay` counts only on a PR labelled `final`.
+    paid_gate = any(l["name"] == "final" for l in p["labels"])
+    runs = [r for r in latest.values() if paid_gate or r["name"] != "replay"]
     failing = sorted({r["name"] for r in runs if r["conclusion"] in ("failure", "timed_out")})
     for r in runs:
         out = (r.get("output") or {})
@@ -130,19 +132,13 @@ for p in open_prs:
         comment_once(n, f"cto-checks-{sha}", f"**CTO watch:** checks failing at `{short}`: {', '.join(failing)}. Fix these before new work (CLAUDE.md priority order).", comments)
     ratchet_ok = not any(r["name"] == "ratchet" and r["conclusion"] == "failure" for r in runs)
     is_switch = any(l["name"] == "switch" for l in p["labels"])
-    # A PR that moves real testers onto the new coach never merges on a timeout: it needs a real
-    # Codex attack, answered, and a green replay gate. Quality where it touches testers most.
-    founder_only = any(l["name"] == "founder-only" for l in p["labels"])
-    # Overnight rule (CTO, 25 Sep): a switch PR whose flag defaults to founder-only may merge on a green
-    # gate (with the reach check) without an attack. Testers are untouched until the CTO attacks it
-    # and a follow-up turns it on for everyone.
     attack_ok = state.startswith("attack answered") or state.startswith("docs only") or state.startswith("no attack needed") or state.startswith("attack window passed")
-    if is_switch and not any(r["name"] == "replay" and r["conclusion"] == "success" for r in runs):
+    if is_switch and paid_gate and not any(r["name"] == "replay" and r["conclusion"] == "success" for r in runs):
         attack_ok = False
         state += " (switch: needs a green replay gate)"
     # The strong judge runs once, on the final head (#467): a switch PR merges only on a green gate
     # judged with the `final` label on (adding it starts that run; later pushes keep the strong judge).
-    if is_switch:
+    if is_switch and paid_gate:
         # The green run must have STARTED after `final` was added, so a cheap-judge run never counts.
         try:
             finals = [e["created_at"] for e in api("GET", f"/issues/{n}/events?per_page=100") if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == "final"]
@@ -155,7 +151,7 @@ for p in open_prs:
     hold = any(l["name"] == "hold" for l in p["labels"]) or p.get("draft")
     # A PR labelled ready/switch/gate must show a replay check that succeeded. A missing replay run is
     # NOT "green" (25 Sep: a broken workflow ran no gate and #393 merged as if it had passed).
-    wants_gate = any(l["name"] in ("ready", "switch", "gate") for l in p["labels"])
+    wants_gate = paid_gate and any(l["name"] in ("ready", "switch", "gate") for l in p["labels"])
     gate_ok = (not wants_gate) or any(r["name"] == "replay" and r["conclusion"] == "success" for r in runs)
     if wants_gate and not gate_ok:
         state += " (needs a successful replay gate run)"
