@@ -30,16 +30,19 @@ export async function getTrajectoryForUser(userId: string): Promise<TrajectoryRe
     if (!userRows.length) return null;
     const u = userRows[0];
 
-    // Daily totals over the last 7 days — one row per calendar day the client actually logged.
+    // Daily totals over the last 7 days — one row per SAST day the client actually logged (#539).
+    // logged_at is UTC without a zone, so the day is converted to Johannesburg's, and returned as TEXT:
+    // a DATE comes back as a JS Date, and two Dates never match as Map keys, so steps never joined.
+    const day = `to_char((logged_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Johannesburg')::date, 'YYYY-MM-DD')`;
     const [mealRes, stepRes] = await Promise.all([
       pool.query<{ day: string; kcal: string }>(
-        `SELECT DATE(logged_at) AS day, COALESCE(SUM(kcal_int), 0) AS kcal
+        `SELECT ${day} AS day, COALESCE(SUM(kcal_int), 0) AS kcal
            FROM meal_logs WHERE user_id=$1 AND logged_at > $2
           GROUP BY 1`,
         [userId, weekAgo],
       ),
       pool.query<{ day: string; steps: string }>(
-        `SELECT DATE(logged_at) AS day, COALESCE(SUM(steps), 0) AS steps
+        `SELECT ${day} AS day, COALESCE(SUM(steps), 0) AS steps
            FROM step_logs WHERE user_id=$1 AND logged_at > $2
           GROUP BY 1`,
         [userId, weekAgo],

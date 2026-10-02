@@ -121,6 +121,7 @@ REAL("\n4b. WAVE 2, A1 + A5 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on
   delete process.env.CORE_WAVE2;
 }
 
+{ const [t] = (await pool.query("SELECT id FROM users WHERE phone_number = $1", [TESTER])).rows, at = (hm: string) => `((now() AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Johannesburg')::date - 1 + time '${hm}') AT TIME ZONE 'Africa/Johannesburg' AT TIME ZONE 'UTC'`; await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [t.id]); await pool.query("DELETE FROM step_logs WHERE user_id = $1", [t.id]); await pool.query(`INSERT INTO meal_logs (user_id, raw_message, source, kcal_int, protein_int, logged_at) VALUES ($1, 'oats', 'sa_scanner', 300, 10, ${at("00:30")})`, [t.id]); await pool.query(`INSERT INTO step_logs (user_id, steps, logged_at) VALUES ($1, 10000, ${at("23:30")})`, [t.id]); const tr = await (await import("../server/trajectory-report")).getTrajectoryForUser(t.id); chk(tr?.daysLogged === 1 && (tr?.avgStepBurn ?? 0) > 0, "#539: 00:30 oats and 23:30 steps are one SAST day, and the steps count in the trajectory", JSON.stringify({ d: tr?.daysLogged, burn: tr?.avgStepBurn })); }
 REAL("\n5. INSTANT ROLLBACK");
 process.env.CORE_WAVE1 = "off";
 const f4 = await say(FOUNDER, ASK);
