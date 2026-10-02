@@ -10900,7 +10900,6 @@ test("ONE_VOICE rides in the new composer, askCoachK and the meaning engine", as
   assert.match(ONE_VOICE, /at most 3 short sentences and 60 words/);
 });
 
-// ── THE WAVE-1 SWITCH FLAG (#438): off by default, founder first, instant rollback ──────────────
 // ── #441: a slow or unreachable model gets the honest line at once; a dead key falls through to the alerting engine ──
 test("#441 isModelSlowOrUnreachable: timeout, dropped connection and 5xx answer honestly; 401/credits/bad JSON fall through", async () => {
   const { isModelSlowOrUnreachable } = await import("../server/ai-offline");
