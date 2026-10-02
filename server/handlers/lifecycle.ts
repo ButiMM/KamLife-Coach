@@ -630,12 +630,9 @@ export async function handleLifecycle(ctx: {
     await db.update(users).set({ calorieTarget: newCals, proteinTarget: newProt }).where(eq(users.phoneNumber, phone));
     const goalLabels: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomposition" };
     const capName = user.name?.split(" ")[0] || "there";
-    const goalActionNote = pendingGoal === "fat_loss"
-      ? `Protein first, every meal. Hit ${newProt}g and the rest takes care of itself.`
-      : pendingGoal === "muscle_gain"
-        ? `Eat above ${newCals} kcal on training days. Protein every meal — target ${newProt}g.`
-        : `Protein at every meal (${newProt}g/day) with a slight calorie deficit on rest days and maintenance on training days.`;
-    const goalReply = `${capName}, locked in — ${goalLabels[pendingGoal] || pendingGoal}.\n\nNew daily targets: *${newCals} kcal | ${newProt}g protein.*\n\n${goalActionNote}\n\nReply *programme* to see your updated plan.`;
+    const receipt = `${capName}, locked in — ${goalLabels[pendingGoal] || pendingGoal}.\n\nNew daily targets: *${newCals} kcal | ${newProt}g protein.*\n\nReply *programme* to see your updated plan.`;
+    // A12: the new coach speaks after the goal and targets are written; the receipt is the fallback.
+    const goalReply = await (await import("../core/coach")).afterLogReply(phone, message, receipt, "goal").catch(() => null) || receipt;
     await logChat(user.id, message, goalReply, "PROFILE_UPDATE");
     return goalReply;
   }

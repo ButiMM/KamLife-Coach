@@ -10936,7 +10936,7 @@ test("CORE_WAVE2: on for everyone unless off (#455; no founder-first step, ORDER
   finally { if (saved === undefined) delete process.env.CORE_WAVE2; else process.env.CORE_WAVE2 = saved; }
   const { afterLogWords } = await import("../server/core/coach"), { stripModelDirectives } = await import("../server/brain/reply-verifier"), w = (r: string, rc: string) => afterLogWords(r, rc, x => stripModelDirectives(x, { modelAuthored: true } as any).kept); // #455 attack
   assert.equal(w("Pap and chicken logged.", "Got it ⚠️ I could not price *relish* — not in the total yet."), null); assert.equal(w("Have beans for dinner tonight.", "Got it — eggs 👌"), null);
-  assert.equal(w("Solid lunch. Aim for 30g protein at dinner.", "Got it [MEDIA:card]"), "Solid lunch.\n[MEDIA:card]"); assert.equal(w("Nice walk.", "Fixed ✅ — step count updated to *8,000*."), null); // a gap or a correction keeps the receipt; the model's own instruction never ships
+  assert.equal(w("Solid lunch. Aim for 30g protein at dinner.", "Got it [MEDIA:card]"), "Solid lunch.\n[MEDIA:card]"); assert.equal(w("Nice walk.", "Fixed ✅ — step count updated to *8,000*."), null); assert.equal(w("Good session — that makes two this week.", "Sipho — got it, logged to Tuesday. 2 sessions in total."), null); assert.equal(w("Good session.", "Legs logged. How did it feel — easy, about right, or too hard?[BUTTONS:Easy|Right|Hard]"), null); // a gap or a correction keeps the receipt; the model's own instruction never ships
 });
 
 test("#342: the restore runbook replays every table the POPIA erasure deletes (a restore must not resurrect a deleted client)", async () => {
