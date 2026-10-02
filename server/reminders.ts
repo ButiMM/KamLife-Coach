@@ -171,21 +171,21 @@ export const reminderText = (body: string): string => `⏰ Reminder: ${body}`;
 export async function holdReminder(id: string): Promise<void> {
   await db.update(reminders).set({ status: "held" }).where(eq(reminders.id, id));
 }
-/** phone → the held reminders riding on the reply being delivered right now (#538). */
+/** turn (rootId, else phone) → the held reminders riding on that turn's reply (#538; per turn, so a double-text cannot cross them). */
 const ridingOnReply = new Map<string, string[]>();
-export async function withHeldReminders(reply: string, phone: string): Promise<string> {
+export async function withHeldReminders(reply: string, turnKey: string): Promise<string> {
   const { turnFoldsRemindersFor } = await import("./handlers/chat-log");
   const userId = turnFoldsRemindersFor();
   if (!userId || !reply?.trim()) return reply;
   const held = await db.select({ id: reminders.id, body: reminders.body }).from(reminders)
     .where(and(eq(reminders.userId, userId), eq(reminders.status, "held"))).limit(3).catch(() => []);
   if (!held.length) return reply;
-  ridingOnReply.set(phone, held.map(h => h.id));
+  ridingOnReply.set(turnKey, held.map(h => h.id));
   return [reply, ...held.map(h => reminderText(h.body))].join("\n\n");
 }
 /** The delivery owner's verdict closes them (#538): accepted → sent; dropped, refused or shadowed → still held for next time. */
-export async function closeHeldReminders(phone: string, accepted: boolean): Promise<void> {
-  const ids = ridingOnReply.get(phone);
-  ridingOnReply.delete(phone);
+export async function closeHeldReminders(turnKey: string, accepted: boolean): Promise<void> {
+  const ids = ridingOnReply.get(turnKey);
+  ridingOnReply.delete(turnKey);
   if (accepted && ids) for (const id of ids) await markReminderSent(id);
 }

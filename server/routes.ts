@@ -104,7 +104,7 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     : /audio|ogg|voice/i.test(mediaContentType || "") ? "voice"
     : /video/i.test(mediaContentType || "") ? "video" : "photo";
   return inTurn(kind, message, async () => {
-    const reply = await (await import("./reminders")).withHeldReminders(await routeMessage(phone, message, mediaUrl, mediaContentType, allMediaUrls, sourceMessageId), phone);
+    const reply = await (await import("./reminders")).withHeldReminders(await routeMessage(phone, message, mediaUrl, mediaContentType, allMediaUrls, sourceMessageId), rootId ?? phone);
     // Never awaited into the client's path: a ledger that can delay an answer is worse than none.
     void recordTurn(reply);
     return reply;
