@@ -33,8 +33,8 @@ export function describeRecurring(fireAt: Date, recurrence: Recurrence): string 
   return one;
 }
 
-/** Still to reach the client: due later, or held for their next reply (#537). Both are listed and cancelled. */
-const OPEN = ["pending", "held"];
+/** Still to reach the client: due later, held for their next reply, or riding on one (#537). All are listed and cancelled. */
+const OPEN = ["pending", "held", "riding"];
 /** Client-facing reminders only ('my reminders' should never list system nudges). */
 export async function listPendingReminders(userId: string) {
   return db.select().from(reminders)
@@ -175,19 +175,34 @@ export async function holdReminder(id: string): Promise<void> {
 }
 /** turn (rootId, else phone) → the held reminders riding on that turn's reply (#538; per turn, so a double-text cannot cross them). */
 const ridingOnReply = new Map<string, string[]>();
+/**
+ * A held reminder is CLAIMED by the reply that carries it (#537): one atomic held → riding update,
+ * so two concurrent replies cannot both carry it. sent_at is the claim time; a claim no verdict ever
+ * resolved (a crash, a reply that left by another door) is reclaimable after ten minutes, never lost.
+ */
 export async function withHeldReminders(reply: string, turnKey: string): Promise<string> {
   const { turnFoldsRemindersFor } = await import("./handlers/chat-log");
   const userId = turnFoldsRemindersFor();
   if (!userId || !reply?.trim()) return reply;
-  const held = await db.select({ id: reminders.id, body: reminders.body }).from(reminders)
-    .where(and(eq(reminders.userId, userId), eq(reminders.status, "held"))).limit(3).catch(() => []);
-  if (!held.length) return reply;
-  ridingOnReply.set(turnKey, held.map(h => h.id));
-  return [reply, ...held.map(h => reminderText(h.body))].join("\n\n");
+  const claimed = await db.execute(sql`
+    UPDATE reminders SET status = 'riding', sent_at = now()
+     WHERE id IN (SELECT id FROM reminders WHERE user_id = ${userId}
+                    AND (status = 'held' OR (status = 'riding' AND sent_at < now() - interval '10 minutes'))
+                  ORDER BY fire_at LIMIT 3 FOR UPDATE SKIP LOCKED)
+       AND (status = 'held' OR (status = 'riding' AND sent_at < now() - interval '10 minutes'))
+    RETURNING id, body`).then((r: any) => (r?.rows ?? []) as Array<{ id: string; body: string }>).catch(() => []);
+  if (!claimed.length) return reply;
+  ridingOnReply.set(turnKey, claimed.map(h => h.id));
+  return [reply, ...claimed.map(h => reminderText(h.body))].join("\n\n");
 }
-/** The delivery owner's verdict closes them (#538): accepted → sent; dropped, refused or shadowed → still held for next time. */
+/**
+ * The delivery owner's verdict (#538): accepted → sent; dropped, refused or shadowed → held again.
+ * Only a row this turn still holds is touched, so a cancel that landed meanwhile stays cancelled.
+ */
 export async function closeHeldReminders(turnKey: string, accepted: boolean): Promise<void> {
   const ids = ridingOnReply.get(turnKey);
   ridingOnReply.delete(turnKey);
-  if (accepted && ids) for (const id of ids) await markReminderSent(id);
+  if (!ids?.length) return;
+  await db.update(reminders).set(accepted ? { status: "sent", sentAt: new Date() } : { status: "held" })
+    .where(and(inArray(reminders.id, ids), eq(reminders.status, "riding")));
 }
