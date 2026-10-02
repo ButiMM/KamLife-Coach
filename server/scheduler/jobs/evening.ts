@@ -59,6 +59,7 @@ export function eveningRecognition(f: {
  */
 export const WHATS_NEW: Array<{ day: number; line: string }> = [ // day = SAST yyyymmdd, a key, never shown
   { day: 20261001, line: "Tell me what you ate and I'll say what it means for your day. Logged the wrong food? Say \"no, it was chicken, not beef stew\" and I'll fix that meal. Steps get a real reply too." },
+  { day: 20261002, line: "Tell me you trained and I'll say what it means for your week, and ask \"am I on track?\" any time: I'll answer from what you've logged this week." },
 ];
 export const whatsNewLine = (day = Number(todaySAST().replace(/-/g, ""))): string => {
   const lines = WHATS_NEW.filter(n => n.day === day).map(n => n.line);
