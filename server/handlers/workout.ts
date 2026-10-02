@@ -346,21 +346,6 @@ export async function handleWorkoutCommands(ctx: {
       : null;
     const distanceKm = distanceMatch ? parseFloat(distanceMatch[1]) : null;
 
-    // Calorie burn estimate (kcal/min × body-weight factor)
-    const BURN_RATE: Record<string, number> = {
-      run: 10, parkrun: 10, HIIT: 11, bootcamp: 11, CrossFit: 11,
-      swim: 9, cycle: 8, spinning: 9,
-      Zumba: 7, aerobics: 7, "dance class": 7,
-      walk: 5, yoga: 4, Pilates: 4, cardio: 8,
-    };
-    const burnPerMin = BURN_RATE[cardioType] || 8;
-    const weightKg = parseFloat(String(user.currentWeight || 75));
-    const weightFactor = weightKg / 75;
-    const burnEstimate = durationMin
-      ? Math.round(durationMin * burnPerMin * weightFactor)
-      : distanceKm
-        ? Math.round(distanceKm * (/run|ran|jog|parkrun/i.test(m) ? 72 : 55) * weightFactor)
-        : null;
 
     // km → steps: log to stepLogs so step streak / target tracking reflects the activity.
     //
@@ -421,19 +406,13 @@ export async function handleWorkoutCommands(ctx: {
       aerobics: "Aerobics", "dance class": "Dance class", cardio: "Cardio" }[cardioType] || cardioType;
     const distNote = distanceKm ? ` — ${distanceKm}km` : "";
     const durNote = !distanceKm && durationMin ? ` — ${durationMin}min` : "";
-    const burnNote = burnEstimate ? ` (~${burnEstimate} kcal)` : "";
     const stepsNote = distanceKm
       ? `\n\nStep count from ${distanceKm}km: ~${Math.round(distanceKm * (/run|ran|jog|parkrun/i.test(m) ? 1100 : 1300)).toLocaleString()} steps added.`
       : "";
     const streakNote = newStreak >= 3 ? `\n\n🔥 *${newStreak}-session streak.* Keep it going.` : "";
 
-    const CARDIO_RESPONSES = [
-      `${typeLabel}${distNote || durNote} done. ✅${burnNote} Session ${newTotal} logged.`,
-      `${typeLabel}${distNote || durNote} complete. 💪${burnNote} ${newTotal} sessions in.`,
-      `Session ${newTotal} — ${typeLabel}${distNote || durNote}.${burnNote} Logged. ✅`,
-      `${typeLabel}${distNote || durNote} — logged. ✅${burnNote} ${newTotal} sessions done.`,
-    ];
-    const cardioReply = CARDIO_RESPONSES[newTotal % CARDIO_RESPONSES.length];
+    // One line, their session (A8): the coach's words come from the new core; this is the fallback.
+    const cardioReply = `${typeLabel}${distNote || durNote} logged. ✅ Session ${newTotal}.`;
 
     await logChat(user.id, message, cardioReply, "WORKOUT_DONE");
 
@@ -458,7 +437,7 @@ export async function handleWorkoutCommands(ctx: {
       }, 60_000);
     }
 
-    return `${cardioReply}${stepsNote}${streakNote}\n\nLog your food: tell me what you ate today.[BUTTONS:Log food|My progress|Tomorrow's session]`;
+    return `${cardioReply}${stepsNote}${streakNote}`; // the one next move is the canonical close's (A8)
   }
 
   // ---- RETROACTIVE WORKOUT — "trained yesterday", "did legs yesterday", "done on Sunday" ----

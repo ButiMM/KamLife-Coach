@@ -2004,9 +2004,8 @@ const MUST_WRITE: [string, string][] = [
       if (r.held !== expectHeld) {
         failures.push(`Cardio wrote the wrong count (${why}): day held ${existing}, now ${r.held}, expected ${expectHeld}`);
       }
-      // EXISTING CUSTOMER BEHAVIOUR IS PRESERVED. The cardio reply never quoted steps and must not
-      // start to — this cut moves a write, it does not change what the client reads.
-      if (!/5\s*km/i.test(r.reply) || !/kcal/i.test(r.reply)) {
+      // The cardio reply names the distance, and since A8 no invented kcal burn (the new coach speaks).
+      if (!/5\s*km/i.test(r.reply) || /kcal/i.test(r.reply)) {
         failures.push(`Cardio reply changed: "${r.reply.split("\n")[0]}"`);
       }
     }
