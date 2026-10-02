@@ -9,6 +9,7 @@
 
 import { pool } from "./db";
 import { maintenanceKcal } from "./targets";
+import { readTrustedStepDays } from "./day-ledger";
 import { predictTrajectory, type DayEnergy, type TrajectoryResult } from "./trajectory";
 
 export interface TrajectoryReport extends TrajectoryResult { whatsappText: string }
@@ -30,27 +31,20 @@ export async function getTrajectoryForUser(userId: string): Promise<TrajectoryRe
     if (!userRows.length) return null;
     const u = userRows[0];
 
-    // Daily totals over the last 7 days — one row per SAST day the client actually logged (#539).
-    // logged_at is UTC without a zone, so the day is converted to Johannesburg's, and returned as TEXT:
-    // a DATE comes back as a JS Date, and two Dates never match as Map keys, so steps never joined.
-    const day = `to_char((logged_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Johannesburg')::date, 'YYYY-MM-DD')`;
-    const [mealRes, stepRes] = await Promise.all([
+    // One row per SAST day the client logged food (#539), on day-ledger's day bucket, as TEXT: a DATE
+    // comes back as a JS Date, and two Dates never match as Map keys, so steps never joined before.
+    // Steps come from the one trusted-step owner: client-reported, resolved to a SAST day (#540).
+    const [mealRes, stepDays] = await Promise.all([
       pool.query<{ day: string; kcal: string }>(
-        `SELECT ${day} AS day, COALESCE(SUM(kcal_int), 0) AS kcal
+        `SELECT to_char(logged_at + interval '2 hours', 'YYYY-MM-DD') AS day, COALESCE(SUM(kcal_int), 0) AS kcal
            FROM meal_logs WHERE user_id=$1 AND logged_at > $2
           GROUP BY 1`,
         [userId, weekAgo],
       ),
-      pool.query<{ day: string; steps: string }>(
-        `SELECT ${day} AS day, COALESCE(SUM(steps), 0) AS steps
-           FROM step_logs WHERE user_id=$1 AND logged_at > $2
-          GROUP BY 1`,
-        [userId, weekAgo],
-      ),
+      readTrustedStepDays(userId, weekAgo),
     ]);
 
-    const stepsByDay = new Map<string, number>();
-    for (const r of stepRes.rows) stepsByDay.set(r.day, parseInt(r.steps, 10) || 0);
+    const stepsByDay = new Map<string, number>(stepDays.map(d => [d.day, d.steps]));
 
     // A day counts only if it has a food log; steps join in where present.
     const days: DayEnergy[] = mealRes.rows.map(r => ({
