@@ -280,8 +280,9 @@ REAL("\n5. B7: A CLIENT'S OWN REMINDER THAT COULD NOT ARRIVE IS HELD, THEN RIDES
   await createReminder(user.id, phone, "take your vitamins", new Date(Date.now() - 60_000));
   await runDueReminders(); // shadow mode refuses delivery, standing in for "outside the 24-hour window"
   chk((await reminderRows())[0]?.status === "held", "an undelivered one-shot reminder is held, not lost", JSON.stringify(await reminderRows()));
-  const { handleMessage } = await import("../server/routes"); const r1 = await handleMessage(phone, "morning coach"), r2 = await handleMessage(phone, "thanks");
-  chk(/⏰ Reminder: take your vitamins/.test(r1) && !/vitamins/.test(r2) && (await reminderRows())[0]?.status === "sent", "…it rides on their next reply exactly once", `${r1.slice(-80)} | ${r2.slice(-60)}`);
+  const { handleMessage } = await import("../server/routes"); const { closeHeldReminders } = await import("../server/reminders"); const r1 = await handleMessage(phone, "morning coach"); await closeHeldReminders(phone, false); // the reply carrying it was dropped
+  const r2 = await handleMessage(phone, "you there?"), still = (await reminderRows())[0]?.status; await closeHeldReminders(phone, true); const r3 = await handleMessage(phone, "thanks"); // delivered, then the next turn
+  chk([r1, r2].every(r => /⏰ Reminder: take your vitamins/.test(r)) && still === "held" && !/vitamins/.test(r3) && (await reminderRows())[0]?.status === "sent", "…it rides on their next reply, stays held if that reply is not delivered, and closes only once it is (#538)", `${still} | ${r1.slice(-50)} | ${r2.slice(-50)} | ${r3.slice(-40)}`);
 }
 
 REAL(`\npg-followup-arrives-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);

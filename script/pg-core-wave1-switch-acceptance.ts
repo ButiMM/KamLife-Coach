@@ -127,9 +127,8 @@ REAL("\n4d. A14 — A REMINDER IN THEIR OWN WORDS IS READ BY THE NEW COACH AND S
   const said = (await pool.query("SELECT message_in FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.intent = 'REMINDER_SET' ORDER BY c.id DESC LIMIT 1", [TESTER])).rows[0]?.message_in;
   chk(n === 1 && /remind you to pack my gym bag/i.test(rr) && /nudge me before gym/i.test(said || ""), "the reminder is a row, the reply confirms the exact time, the record keeps their words", `${n} | ${said} | ${rr.slice(0, 120)}`);
   const count = async () => (await pool.query("SELECT COUNT(*)::int n FROM reminders r JOIN users u ON u.id = r.user_id WHERE u.phone_number = $1 AND r.kind = 'user'", [TESTER])).rows[0].n;
-  const um = await say(TESTER, "Maybe nudge me about my gym bag, I haven't decided when"); chk(await count() === 1 && /when should I remind you/i.test(um), "unsure of the time: it asks, and saves nothing", um.slice(0, 120));
-  await pool.query("UPDATE users SET awaiting_input_type = NULL WHERE phone_number = $1", [TESTER]);
-  const two = await say(TESTER, "Nudge me to pack my gym bag tomorrow at 7am and give me a shout for vitamins at 8am"); chk(await count() === 3 && /vitamins/i.test(two), "two reminders in one message: both saved, both confirmed", `${await count()} | ${two.slice(0, 160)}`); }
+  const um = await say(TESTER, "Maybe nudge me about my gym bag, I haven't decided when"); chk(await count() === 1 && /when should I remind you/i.test(um), "unsure of the time: it asks, and saves nothing", um.slice(0, 120)); await pool.query("UPDATE users SET awaiting_input_type = NULL WHERE phone_number = $1", [TESTER]);
+  const two = await say(TESTER, "Nudge me to pack my gym bag tomorrow at 7am and give me a shout for vitamins at 8am"); const rows = (await pool.query("SELECT COUNT(*)::int n FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.message_in LIKE 'Nudge me to pack%'", [TESTER])).rows[0].n; chk(await count() === 3 && /vitamins/i.test(two) && rows === 1, "two reminders in one message: both saved, both confirmed, one row in the chat record", `${await count()} | rows=${rows} | ${two.slice(0, 120)}`); }
 
 REAL("\n5. INSTANT ROLLBACK");
 process.env.CORE_WAVE1 = "off";

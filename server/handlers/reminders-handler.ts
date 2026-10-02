@@ -25,9 +25,12 @@ export async function handleReminderCommand(ctx: {
   phone: string; message: string; m: string; user: any;
   /** The client's own words, when `message` is a canonical rewrite: the chat record keeps what they said (#537). */
   said?: string;
+  /** The caller records the turn itself (one row for a message that set several reminders, #537). */
+  noLog?: boolean;
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
   const said = ctx.said ?? message;
+  const log = (reply: string, intent: string) => ctx.noLog ? Promise.resolve() : logChat(user.id, said, reply, intent);
   const firstName = (user.name || "").split(" ")[0] || "";
   const hi = firstName ? `${firstName}, ` : "";
   // One confirmation, wherever the reminder was set: the exact time it will fire.
@@ -42,13 +45,13 @@ export async function handleReminderCommand(ctx: {
       await setAwaiting(phone, user, null);
       await createReminder(user.id, phone, parsed.body || body, parsed.fireAt, parsed.recurrence);
       const reply = confirm(parsed.body || body, parsed.fireAt, parsed.recurrence);
-      await logChat(user.id, said, reply, "REMINDER_SET");
+      await log(reply, "REMINDER_SET");
       return reply;
     }
     // Still no time — one gentle retry, then stand down so we don't trap them.
     await setAwaiting(phone, user, null);
     const reply = `${hi}I couldn't catch a time there. Try again like "remind me to ${body} at 8pm" whenever you're ready.`;
-    await logChat(user.id, said, reply, "REMINDER_NO_TIME");
+    await log(reply, "REMINDER_NO_TIME");
     return reply;
   }
 
@@ -61,7 +64,7 @@ export async function handleReminderCommand(ctx: {
       if (body.length >= 2) {
         await createReminder(user.id, phone, body, new Date(fireMs));
         const reply = confirm(body, new Date(fireMs));
-        await logChat(user.id, said, reply, "REMINDER_SET");
+        await log(reply, "REMINDER_SET");
         return reply;
       }
     }
@@ -75,12 +78,12 @@ export async function handleReminderCommand(ctx: {
     const pending = await listPendingReminders(user.id);
     if (!pending.length) {
       const reply = `${hi}you have no reminders set. Say something like "remind me to weigh in tomorrow at 7am" and I'll hold it for you.`;
-      await logChat(user.id, said, reply, "REMINDER_LIST_EMPTY");
+      await log(reply, "REMINDER_LIST_EMPTY");
       return reply;
     }
     const lines = pending.map((r) => `• ${r.body} — ${describeRecurring(new Date(r.fireAt as any), (r as any).recurrence)}`).join("\n");
     const reply = `${hi}here's what I'm holding for you:\n\n${lines}\n\nSay *cancel reminders* to clear them.`;
-    await logChat(user.id, said, reply, "REMINDER_LIST");
+    await log(reply, "REMINDER_LIST");
     return reply;
   }
 
@@ -90,7 +93,7 @@ export async function handleReminderCommand(ctx: {
     const reply = n > 0
       ? `${hi}cleared ${n === 1 ? "your reminder" : `all ${n} reminders`}. ✅`
       : `${hi}you had no reminders to clear.`;
-    await logChat(user.id, said, reply, "REMINDER_CANCEL");
+    await log(reply, "REMINDER_CANCEL");
     return reply;
   }
 
@@ -101,18 +104,18 @@ export async function handleReminderCommand(ctx: {
   if (parsed.kind === "set") {
     await createReminder(user.id, phone, parsed.body, parsed.fireAt, parsed.recurrence);
     const reply = confirm(parsed.body, parsed.fireAt, parsed.recurrence);
-    await logChat(user.id, said, reply, "REMINDER_SET");
+    await log(reply, "REMINDER_SET");
     return reply;
   }
   if (parsed.kind === "need_time") {
     await setAwaiting(phone, user, `reminder_time::${parsed.body.slice(0, 180)}`);
     const reply = `${hi}when should I remind you to ${parsed.body}? (e.g. "at 8pm", "tomorrow morning", "in 2 hours")`;
-    await logChat(user.id, said, reply, "REMINDER_ASK_TIME");
+    await log(reply, "REMINDER_ASK_TIME");
     return reply;
   }
   // need_body
   await setAwaiting(phone, user, `reminder_body::${parsed.fireAt.getTime()}`);
   const reply = `${hi}what should I remind you about ${describeFireTime(parsed.fireAt)}?`;
-  await logChat(user.id, said, reply, "REMINDER_ASK_BODY");
+  await log(reply, "REMINDER_ASK_BODY");
   return reply;
 }

@@ -230,10 +230,13 @@ export async function answerLive(phone: string, message: string): Promise<string
     const replies: string[] = [];
     for (const a of sure ? asks : asks.slice(0, 1)) {
       const synth = `remind me to ${a.body}${sure ? ` ${a.when}` : ""}`.replace(/\s+/g, " ").trim();
-      const r = await handleReminderCommand({ phone, message: synth, m: synth.toLowerCase(), user, said: message });
+      const r = await handleReminderCommand({ phone, message: synth, m: synth.toLowerCase(), user, said: message, noLog: asks.length > 1 });
       if (r) replies.push(r);
     }
-    return replies.length ? replies.join("\n\n") : null;
+    const reply = replies.join("\n\n");
+    // Several reminders, one message: one row in the chat record, holding what they actually got (#537).
+    if (asks.length > 1 && reply) await (await import("../handlers/chat-log")).logChat(user.id, message, reply, "REMINDER_SET").catch(() => {});
+    return reply || null;
   }
   if (writes.length) return null;
   const reply = (await compose(openai, pre, message, read.u))?.trim();
