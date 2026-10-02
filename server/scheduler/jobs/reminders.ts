@@ -50,7 +50,8 @@ export async function runDueReminders(): Promise<void> {
       if (rec) await advanceRecurring(r.id, nextRecurrenceTime(new Date(r.fireAt as any), rec));
       else await markReminderSent(r.id);
       const msg = isReturnKind((r as any).kind) ? r.body : reminderText(r.body);
-      const outcome = await sendWhatsApp(r.phoneNumber, msg);
+      // A send that THROWS (a terminal transport error) delivered nothing either: it is held like a refusal (#537).
+      const outcome = await sendWhatsApp(r.phoneNumber, msg).catch(e => { console.error(`[SCHEDULER] reminder ${r.id} send threw:`, e); return "dropped" as const; });
       const held = !rec && !isReturnKind((r as any).kind) && !deliveryAccepted(outcome); // B7: outside the window → held for their next message
       if (held) await holdReminder(r.id);
       await logChat(r.userId, "[reminder]", msg, held ? "REMINDER_HELD" : isReturnKind((r as any).kind) ? "RETURN_NUDGE_FIRED" : "REMINDER_FIRED");
