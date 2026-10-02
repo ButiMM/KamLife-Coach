@@ -243,7 +243,7 @@ export function coreWave2For(_phone: string): boolean {
  */
 // A receipt that ASKS something ("How did it feel?") is an old flow awaiting the answer (programme
 // progression, portions): the words would drop the question, so it stays.
-const keepsReceipt = (receipt: string) => /could not price|not in the total|Fixed ✅|_Logged to |\?/i.test(receipt.replace(/\[[A-Z]+:[^\]]*\]/g, ""));
+const keepsReceipt = (receipt: string) => /could not price|not in the total|Fixed ✅|logged to |\?/i.test(receipt.replace(/\[[A-Z]+:[^\]]*\]/g, ""));
 export function afterLogWords(reply: string, receipt: string, strip: (r: string) => string): string | null {
   if (keepsReceipt(receipt)) return null;
   const kept = strip(reply).trim();
