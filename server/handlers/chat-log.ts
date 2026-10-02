@@ -199,6 +199,8 @@ interface TurnScope {
      * runs untouched. `line` is COMPARED, never re-parsed.
      */
     receipt?: { line: string; kind: string; label?: string; amount?: string; carryingShame?: boolean } | null;
+    /** The safety floor stood down this turn, so a held reminder may ride on the reply (B7). */
+    foldReminders?: boolean;
     /**
      * THIS TURN ALREADY TOLD THE CLIENT TO CHANGE THE PLATE (#207). Set by the existing street-dish
      * evaluation when its verdict is anything but a clean win. Without it one message could say
@@ -736,6 +738,8 @@ export async function inTurn<T>(inputType: string, inputText: string, fn: () => 
 }
 
 export function turnUser(userId: string): void { const t = turnStore.getStore(); if (t) t.userId = userId; }
+/** Who this turn is for, once the safety floor has stood down; else null (B7: held reminders ride only on such a reply). */
+export function turnFoldsRemindersFor(): string | null { const t = turnStore.getStore(); return t?.evidence?.foldReminders && t.userId ? t.userId : null; }
 /**
  * WHAT THIS TURN HAS ACTUALLY WRITTEN, so far (2026-08-22).
  *

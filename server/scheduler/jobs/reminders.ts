@@ -1,7 +1,8 @@
 import { sendWhatsApp } from "../../scheduler";
 import { isProactivePaused } from "../shared";
+import { deliveryAccepted } from "../../outbound-delivery";
 import { logChat } from "../../handlers/chat-log";
-import { fetchDueReminders, markReminderSent, nextRecurrenceTime, advanceRecurring, hasReturnedSince, isReturnKind } from "../../reminders";
+import { fetchDueReminders, markReminderSent, holdReminder, reminderText, nextRecurrenceTime, advanceRecurring, hasReturnedSince, isReturnKind } from "../../reminders";
 import type { Recurrence } from "../../reminders";
 
 /**
@@ -48,9 +49,11 @@ export async function runDueReminders(): Promise<void> {
       const rec = (r as any).recurrence as Recurrence;
       if (rec) await advanceRecurring(r.id, nextRecurrenceTime(new Date(r.fireAt as any), rec));
       else await markReminderSent(r.id);
-      const msg = isReturnKind((r as any).kind) ? r.body : `⏰ Reminder: ${r.body}`;
-      await sendWhatsApp(r.phoneNumber, msg);
-      await logChat(r.userId, "[reminder]", msg, isReturnKind((r as any).kind) ? "RETURN_NUDGE_FIRED" : "REMINDER_FIRED");
+      const msg = isReturnKind((r as any).kind) ? r.body : reminderText(r.body);
+      const outcome = await sendWhatsApp(r.phoneNumber, msg);
+      const held = !rec && !isReturnKind((r as any).kind) && !deliveryAccepted(outcome); // B7: outside the window → held for their next message
+      if (held) await holdReminder(r.id);
+      await logChat(r.userId, "[reminder]", msg, held ? "REMINDER_HELD" : isReturnKind((r as any).kind) ? "RETURN_NUDGE_FIRED" : "REMINDER_FIRED");
     } catch (err) {
       console.error(`[SCHEDULER] reminder ${r.id} send failed:`, err);
     }
