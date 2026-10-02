@@ -9,7 +9,7 @@
 
 import { db } from "./db";
 import { reminders, mealLogs, workoutLogs } from "../shared/schema";
-import { eq, and, lte, like, sql } from "drizzle-orm";
+import { eq, and, lte, like, sql, inArray } from "drizzle-orm";
 
 import { returnNudgeTime, describeFireTime } from "./reminders-parse";
 import type { Recurrence } from "./reminders-parse";
@@ -33,10 +33,12 @@ export function describeRecurring(fireAt: Date, recurrence: Recurrence): string 
   return one;
 }
 
+/** Still to reach the client: due later, or held for their next reply (#537). Both are listed and cancelled. */
+const OPEN = ["pending", "held"];
 /** Client-facing reminders only ('my reminders' should never list system nudges). */
 export async function listPendingReminders(userId: string) {
   return db.select().from(reminders)
-    .where(and(eq(reminders.userId, userId), eq(reminders.status, "pending"), eq(reminders.kind, "user")))
+    .where(and(eq(reminders.userId, userId), inArray(reminders.status, OPEN), eq(reminders.kind, "user")))
     .orderBy(reminders.fireAt);
 }
 
@@ -45,7 +47,7 @@ export async function cancelAllReminders(userId: string): Promise<number> {
   const pending = await listPendingReminders(userId);
   if (!pending.length) return 0;
   await db.update(reminders).set({ status: "cancelled" })
-    .where(and(eq(reminders.userId, userId), eq(reminders.status, "pending"), eq(reminders.kind, "user")));
+    .where(and(eq(reminders.userId, userId), inArray(reminders.status, OPEN), eq(reminders.kind, "user")));
   return pending.length;
 }
 
