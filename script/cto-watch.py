@@ -198,6 +198,16 @@ try:
 except Exception as e:
     alerts.append(f"(sweep checks skipped: {str(e)[:80]})")
 
+# Operational alarms (5 Oct: backups failed silently for 6 days while issue #510 collected 17 bot comments).
+try:
+    for iss in api("GET", "/issues?state=open&per_page=50"):
+        if "pull_request" in iss: continue
+        t = iss["title"].lower()
+        if any(w in t for w in ("backup failed", "restore failed", "failed again", "production down", "ai account")):
+            alerts.insert(0, f"**🚨 OPERATIONS:** #{iss['number']} {iss['title'][:80]}: open since {iss['created_at'][:10]}, {iss['comments']} comments. Fix before new work.")
+except Exception:
+    pass
+
 queue = open("docs/QUEUE.md").read()
 todo = [l[6:] for l in queue.splitlines() if l.startswith("- [ ] ")]
 done = [l[6:] for l in queue.splitlines() if l.startswith("- [x] ")]
