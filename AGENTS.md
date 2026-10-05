@@ -2,13 +2,6 @@
 
 This repository builds KamLife Coach. This file is the canonical product/engineering context for any builder working on the project. Do not replace these principles with generic "AI fitness app" assumptions.
 
-## INTERIM: CODEX IS THE BUILDER, Fri 2 Oct → Mon 5 Oct (CTO). This overrides "you attack; you do not build" until Claude Code returns.
-
-Claude Code is out of capacity until Monday. **Codex builds**, from the handover on #391 (Fri 2 Oct ~12:10 UTC) and under **`CLAUDE.md` CURRENT ORDERS**, exactly as the builder would: one PR per row, based on `main`, **no stacking**, switch and delete in one PR with the flag defaulting on, reuse the proven writers, one message per reply, offset the `test_lines` ratchet, stay inside `routes.ts` and `admin-turns.ts` 1,200-line budgets, and never commit during a local pg-acceptance run.
-**Order:** finish #537 (A14 + B7; past round 7, so anything not worse than `main` becomes a follow-up plus `ANSWER`, and it merges) → commitment loop A19 + B2 per `docs/COMMITMENT-LOOP.md` (template SID unset until #520 confirms the name) → B1, B3, B5, B6 → A18 → A3, A4 → D2, D7 → D9.
-**While you build, you don't attack your own PRs.** The CTO attacks `[harm]` and `switch` PRs. Label them as usual; the watch's 45-min window applies.
-**Monday:** leave the handover note on #391 (what merged, what's open, head SHAs) for Claude Code.
-
 ## CURRENT ORDERS FOR CODEX (CTO, 28 Sep). Where anything below disagrees, THIS wins.
 
 **Precision standard (30 Sep; Codex runs on an upgraded model):** every attack is **engineering-precise and product-directed**.
