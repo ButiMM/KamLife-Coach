@@ -5931,6 +5931,16 @@ test("client record: extracted facts must be typed and in the client's own words
   assert.deepEqual(parseExtraction(JSON.stringify({ facts: "x" }), msg), []);
 });
 
+// A19 (#512): a commitment is movement or one food habit, due today to a week out, or the outcome of the open one.
+test("client record: a commitment needs a domain, a thing and a near due day; 'yes' can carry one", async () => {
+  const { parseExtraction } = await import("../server/core/client-record");
+  const { sastDayKey } = await import("../server/sast");
+  const c = (detail: object, statement = "yes, Thursday") => parseExtraction(JSON.stringify({ facts: [{ kind: "commitment", subject: "gym", statement, detail }] }), "Yes, Thursday after work");
+  assert.deepEqual(c({ domain: "movement", what: "a session", due: sastDayKey() }).map(f => [f.subject, (f.detail as any).state]), [["commitment", "open"]]);
+  for (const bad of [{ domain: "sleep", what: "x", due: sastDayKey() }, { domain: "food", what: "", due: sastDayKey() }, { domain: "food", what: "x", due: "2020-01-01" }]) assert.deepEqual(c(bad), []);
+  assert.deepEqual(c({ outcome: "missed" }).map(f => (f.detail as any).outcome), ["missed"]);
+});
+
 // Codex @ 4c36554: verbatim is not enough — quoted and reported words belong to someone else.
 test("client record: a quote or reported speech is not the client's own fact", async () => {
   const { parseExtraction } = await import("../server/core/client-record");

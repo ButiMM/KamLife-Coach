@@ -13,7 +13,6 @@ server/handlers/advice-commands.ts
 server/handlers/food-commands.ts
 server/handlers/numbers-literacy.ts
 server/normalizer-fidelity.ts
-server/drill-cases.ts
 server/one-action.ts
 server/memory.ts
 server/intelligence/profile.ts

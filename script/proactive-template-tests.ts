@@ -330,7 +330,7 @@ console.log("\n8. THE APPROVED PACK IS STILL SUBMITTABLE, AND THE TEMPLATES STIL
     chk(validateTemplate(t).length === 0, `"${t.name}" still passes every submission rule`,
       validateTemplate(t).join("; "));
   }
-  chk(TEMPLATES.length === 4, "the pack is still four templates — none invented for this cut",
+  chk(TEMPLATES.length === 5, "the pack is four templates plus the founder's check-in (A19) — none invented",
     `${TEMPLATES.length}`);
   chk(renderTemplateBody("kamlife_does_not_exist") === "", "an unknown template renders to nothing");
 }

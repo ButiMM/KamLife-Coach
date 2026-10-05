@@ -158,6 +158,14 @@ export async function understand(openai: OpenAI, message: string, known = "KNOWN
   } catch { return { u: null, raw }; }
 }
 
+/** A due commitment asked about inside a reply is its one follow-up (A19): it is never asked again. */
+async function foldedFollowUp(pre: PreTurn, reply: string): Promise<void> {
+  if (!pre.facts.includes("Due now and not yet asked") || !reply.includes("?")) return;
+  const { activeCommitment, markCommitment } = await import("./client-record");
+  const c = await activeCommitment(pre.userId);
+  if (c && !c.outcome && c.state === "open") await markCommitment(c.id, "asked");
+}
+
 /** The rules of the product, in the composer's own words (docs/TESTER-EXPERIENCE.md). */
 const COMPOSE_SYSTEM = `You are Coach K, a warm, direct South African health and fitness coach on WhatsApp.
 Rules — every reply:
@@ -165,6 +173,7 @@ Rules — every reply:
 - Use what they have told you (WHAT THIS CLIENT HAS TOLD YOU): injuries, goals, shifts, budget, what they don't eat. Never make them repeat it. Never contradict it.
 - Use only THEIR REAL NUMBERS. Never invent a number, a streak, a count of sessions, an absence ("it's been 14 weeks"), or a meal slot they did not say.
 - South African food and life: pap, wors, amasi, chakalaka, kota, taxi-rank food, Checkers budgets, night shifts.
+- Help them follow through (A19): when no commitment is listed and the turn has a natural next step, your one question may offer ONE small thing on a named day (a session, a walk, one food habit), for them to say yes to. Never when they are unwell, grieving, or have closed the day.
 - Medical, pregnancy, eating-disorder and minor situations: do not coach them here; say you'll get them the right help. (Those turns are answered by the safety owner before you.)
 
 ${ONE_VOICE}`;
@@ -221,6 +230,7 @@ export async function answerLive(phone: string, message: string): Promise<string
   const { writesState } = await import("../understanding/actions");
   if ((read.u.actions ?? []).some(a => writesState(a.type))) return null;
   const reply = (await compose(openai, pre, message, read.u))?.trim();
+  if (reply) await foldedFollowUp(pre, reply).catch(() => {});
   return reply || null;
 }
 
@@ -291,7 +301,9 @@ export async function afterLogReply(phone: string, message: string, receipt: str
     if (!reply) return null;
     // The meal card the old owner attached (a [MEDIA:…] marker) still rides with the new words.
     const { stripModelDirectives } = await import("../brain/reply-verifier");
-    return afterLogWords(reply, receipt, r => stripModelDirectives(r, { modelAuthored: true } as any).kept);
+    const words = afterLogWords(reply, receipt, r => stripModelDirectives(r, { modelAuthored: true } as any).kept);
+    if (words) await foldedFollowUp(pre, words).catch(() => {});
+    return words;
   } catch (e) {
     console.warn("[CORE_WAVE2] kept the receipt:", (e as Error)?.message || e);
     return null;

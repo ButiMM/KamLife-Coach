@@ -111,7 +111,20 @@ export const TEMPLATES: WaTemplate[] = [
     vars: [],
     samples: [],
   },
+  {
+    // THE COMMITMENT LOOP'S FOLLOW-UP (A19 + B2, #512): the founder's "you asked me to check in" template.
+    // The name is confirmed on #520; until its SID is set, nothing goes outside the 24-hour window and the
+    // follow-up waits for their next message instead.
+    name: "kamlife_you_asked_checkin",
+    category: "UTILITY",
+    env: "TWILIO_CHECKIN_TEMPLATE_SID",
+    unblocks: "Checking in on the one thing a client asked to be held to, when they have been quiet for a day.",
+    body: "You asked me to check in, {{1}}. You planned: {{2}}.\n\nHow did it go? Reply here, whatever happened.",
+    vars: ["Client's first name", "What they planned, in their words"],
+    samples: ["Thandi", "a 30 minute walk after work"],
+  },
 ];
+export const CHECKIN_TEMPLATE = "kamlife_you_asked_checkin";
 
 /**
  * The template sent automatically when a freeform message is rejected for being outside the

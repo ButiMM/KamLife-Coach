@@ -9,6 +9,9 @@ import { readHealthState } from "../../health-state";
 import { readHeldConstraints } from "../../held-constraints";
 import { canonicalNextMove, recordCanonicalMoveOutbound, sendProactive } from "../proactive-decision";
 import { sastHour } from "../../sast";
+import { settleCommitment, markCommitment, inWhatsAppWindow } from "../../core/client-record";
+import { CHECKIN_TEMPLATE, templateSid } from "../../whatsapp-templates";
+import { deliveryAccepted } from "../../outbound-delivery";
 
 /**
  * WHAT HAPPENED TODAY, WITH NOTHING ASKED FOR (2026-08-25, P0-4b).
@@ -60,6 +63,7 @@ export function eveningRecognition(f: {
 export const WHATS_NEW: Array<{ day: number; line: string }> = [ // day = SAST yyyymmdd, a key, never shown
   { day: 20261001, line: "Tell me what you ate and I'll say what it means for your day. Logged the wrong food? Say \"no, it was chicken, not beef stew\" and I'll fix that meal. Steps get a real reply too." },
   { day: 20261002, line: "Tell me you trained and I'll say what it means for your week, and ask \"am I on track?\" any time: I'll answer from what you've logged this week." },
+  { day: 20261006, line: "Tell me one small thing you'll do and when (\"I'll walk after work on Thursday\") and I'll check in once that evening to see how it went." },
 ];
 export const whatsNewLine = (day = Number(todaySAST().replace(/-/g, ""))): string => {
   const lines = WHATS_NEW.filter(n => n.day === day).map(n => n.line);
@@ -82,6 +86,20 @@ export async function runEveningAccountability(): Promise<void> {
       const name = (client.name || "there").split(" ")[0];
       const phone = client.phoneNumber;
       const todayLogs = await getTodayLogs(client.id);
+
+      // THE COMMITMENT LOOP (A19 + B2, #512): on the day it is due and not yet shown kept, the one
+      // follow-up REPLACES this message. Outside the 24-hour window it goes only as the approved
+      // template; without one, nothing is sent and their next reply carries it (factsForCoach).
+      const promise = await settleCommitment(client.id).catch(() => null);
+      if (promise && !promise.outcome && promise.due === todaySAST() && promise.state === "open") {
+        if (!(await inWhatsAppWindow(client.id)) && !templateSid(CHECKIN_TEMPLATE)) continue;
+        const delivery = await sendProactive(client, { job: "evening" },
+          `${name}, you planned ${promise.what} today. How did it go? If it didn't happen, tell me what got in the way and we'll make the next one easier.`,
+          { template: { name: CHECKIN_TEMPLATE, variables: { 1: name, 2: promise.what } } });
+        if (delivery && deliveryAccepted(delivery)) await markCommitment(promise.id, "asked");
+        continue;
+      }
+      const keptToday = promise?.state === "kept" && promise.due === todaySAST() ? `✅ You planned ${promise.what} today, and you did it.\n\n` : "";
 
       // THE EMPTY DAY IS A DECISION LIKE ANY OTHER (2026-08-25, P0-4b). These two branches were a
       // ladder of their own: a day-one client got "Reply *1* … get it done tonight" — a training
@@ -171,7 +189,7 @@ export async function runEveningAccountability(): Promise<void> {
       // which is a calendar, not a coach. It now fires when, and only when, the decision owner has
       // actually chosen `train`, so a declined or sick day never renders it.
       if (move.action.kind === "train" && isTrainingDay) {
-        const delivery = await sendProactive(client, { job: "evening" }, `${recap}\n\n${move.line}${whatsNewLine()}`,
+        const delivery = await sendProactive(client, { job: "evening" }, `${keptToday}${recap}\n\n${move.line}${whatsNewLine()}`,
           { buttons: ["Doing it tonight", "Swap to tomorrow", "Rest day today"] });
         if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
         continue;
@@ -181,7 +199,7 @@ export async function runEveningAccountability(): Promise<void> {
       // evening twin of the morning's breakfast ask. Never when dinner is in or they closed the food day.
       const dinnerIn = todayMeals.some(r => /dinner|supper/i.test(String(r.label || "")));
       const ask = !move.line && !sick && !dinnerIn && !(await readHeldConstraints(phone, client)).foodDayClosed ? "What's dinner looking like tonight?" : "";
-      const msg = [recap, move.line || ask].filter(Boolean).join("\n\n");
+      const msg = [keptToday + recap, move.line || ask].filter(Boolean).join("\n\n");
       const delivery = msg ? await sendProactive(client, { job: "evening" }, msg + whatsNewLine()) : null;
       if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
     } catch (err) {

@@ -32,7 +32,7 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 235, // 30 Sep (#511): jobs/narrative.ts retired
+  modules: 234, // 5 Oct (A19): drill-cases.ts deleted
   handlerFiles: 29,
   cronRegistrations: 24, // 30 Sep (#511): the monthly narrative cron retired
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
@@ -77,7 +77,7 @@ const BUDGET = {
    */
   // 41 → 28 on 2026-09-24 (#334): the unscheduled jobs and their orphaned imports went. Some of
   // those imports were the only "reach" of test-only helpers, so the honest figure is 28, not 23.
-  unreachableCapabilities: 28,
+  unreachableCapabilities: 27,
   /**
    * GUARD #14 — see unclassifiedSenders above. Six proactive senders still choose their own
    * behavioural instruction: monday's weigh-in reminder and diet-break restore, programme's weekly
@@ -636,7 +636,6 @@ const NOT_CLIENT_FACING: Array<[string, string]> = [
   // Excluded by FILE, not by "server/brain/" — coach-brain.ts is already listed separately and other
   // files in that directory may hold real mouths.
   ["server/brain/reply-verifier.ts", "a gate, not a mouth — its strings are rewrite reasons sent to the model and the admin queue"],
-  ["server/drill-cases.ts", "test fixtures"],
   ["server/self-check.ts", "boot diagnostics for the founder"],
   ["server/whatsapp-templates.ts", "Meta-approved template bodies — Meta owns this copy, not us"],
   ["server/data-export.ts", "POPIA export — a legal record, deliberately verbatim"],
