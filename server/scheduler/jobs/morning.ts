@@ -14,6 +14,7 @@ import { readHealthState } from "../../health-state";
 // (`const { text: _variantMsg }`) before sending the buttons unchanged. Every arm sent the same
 // message, so the experiment measured nothing. Deleting the send deletes an empty measurement.
 import { morningClosingLine, composeMorning, yesterdayObservation, breakfastReplayLine } from "../../morning-message";
+import { scheduledWords } from "../../core/coach";
 import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
 import { chooseAction, decideProactive, formatOneAction, underPolicy } from "../../one-action";
 import { ensureOpenTrainingLoop, loadOpenTrainingLoop, loadSituationFrame } from "../../memory";
@@ -546,7 +547,10 @@ export async function runMorningCheckin(): Promise<void> {
         const dailyTemplate = oneAction
           ? { name: "kamlife_daily_plan", variables: { "1": name, "2": oneAction } }
           : undefined;
-        const delivery = await sendProactive(client, { claimed: "morning" }, composeMorning({
+        // B1 (#319): the new coach's recognition, then the decision's one line. Old composer only on CORE_WAVE4=off.
+        const words = await scheduledWords(phone, "morning");
+        const body = words ? [targetFixLine.trim(), words, adaptLine, decisionLine || "🍳 What's for breakfast?"].filter(Boolean).join("\n\n") : null;
+        const delivery = await sendProactive(client, { claimed: "morning" }, body ?? composeMorning({
           firstName: name,
           targetFixLine,
           identityLine,
