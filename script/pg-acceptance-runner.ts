@@ -506,7 +506,7 @@ export const ACCEPTANCES: Acceptance[] = [
     // read on the new coach's first turn, erased with the client. No model call.
     command: ["npx", "tsx", "script/pg-record-backfill-acceptance.ts"] },
 
-  { id: "core-wave1-switch", title: "The wave-1 switch: founder first, behind the scope floor, instant rollback (#438)",
+  { id: "core-wave1-switch", title: "The wave-1 switch: on for everyone, behind the scope floor, instant rollback (#438)",
     command: ["npx", "tsx", "script/pg-core-wave1-switch-acceptance.ts"] },
 
   { id: "spend-cap", title: "The AI spend cap fails safe (#340)",

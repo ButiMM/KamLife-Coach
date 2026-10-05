@@ -195,6 +195,13 @@ export async function withHeldReminders(reply: string, turnKey: string): Promise
   ridingOnReply.set(turnKey, claimed.map(h => h.id));
   return [reply, ...claimed.map(h => reminderText(h.body))].join("\n\n");
 }
+/** An album is N turns and one reply (#537): a claim made under an earlier photo's root moves to the root the combined body is finalised on. */
+export function moveRidingTurn(from: string, to: string): void {
+  const ids = ridingOnReply.get(from);
+  if (!ids || from === to) return;
+  ridingOnReply.delete(from);
+  ridingOnReply.set(to, [...(ridingOnReply.get(to) ?? []), ...ids]);
+}
 /**
  * The delivery owner's verdict (#538): accepted → sent; dropped, refused or shadowed → held again.
  * Only a row this turn still holds is touched, so a cancel that landed meanwhile stays cancelled.

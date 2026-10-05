@@ -15,7 +15,7 @@ import { humanizeReply, stripInternalMarkers } from "../reply-hygiene";
 import { prepareOutbound, prepareReactiveOutbound } from "../outbound-authority";
 import { finaliseInteraction } from "../handlers/chat-log";
 import { deliveryAccepted, type DeliveryResult } from "../outbound-delivery";
-import { closeHeldReminders } from "../reminders";
+import { closeHeldReminders, moveRidingTurn } from "../reminders";
 import { splitWhatsAppBody } from "../utils";
 
 // The sender number and the Twilio client both moved to outbound-delivery.ts with Cut B2. This
@@ -400,7 +400,7 @@ function bumpImageInflight(phone: string): void {
 async function resolveImageInflight(phone: string, reply: string | null, rootId?: string): Promise<void> {
   const e = photoReplyBuffer.get(phone);
   if (!e) { if (reply) await sendFinal(phone, reply, null, rootId); return; }
-  if (rootId) e.lastRootId = rootId;
+  if (rootId) { if (e.lastRootId) moveRidingTurn(e.lastRootId, rootId); e.lastRootId = rootId; } // B7: one reply closes every photo's claim
   if (reply) e.parts.push(reply); else e.failedCount++;
   e.inflight = Math.max(0, e.inflight - 1);
   if (e.inflight === 0) {
