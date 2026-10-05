@@ -192,7 +192,7 @@ export async function withHeldReminders(reply: string, turnKey: string): Promise
        AND (status = 'held' OR (status = 'riding' AND sent_at < now() - interval '10 minutes'))
     RETURNING id, body`).then((r: any) => (r?.rows ?? []) as Array<{ id: string; body: string }>).catch(() => []);
   if (!claimed.length) return reply;
-  ridingOnReply.set(turnKey, claimed.map(h => h.id));
+  ridingOnReply.set(turnKey, [...(ridingOnReply.get(turnKey) ?? []), ...claimed.map(h => h.id)]); // nested turns share a key: merge
   return [reply, ...claimed.map(h => reminderText(h.body))].join("\n\n");
 }
 /** An album is N turns and one reply (#537): a claim made under an earlier photo's root moves to the root the combined body is finalised on. */
