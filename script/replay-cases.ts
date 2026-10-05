@@ -980,9 +980,9 @@ export const CASES: ReplayCase[] = [
     rubric: "A scheduled evening message to a client who logged lunch today. A good one knows lunch is in, asks about dinner or the day in one line, and does not nag.",
   },
   // THE COMMITMENT LOOP (A19 + B2, docs/COMMITMENT-LOOP.md §8): one promise, kept by their words, checked once.
-  { id: "commitment-accepted", journey: 5, source: "docs/COMMITMENT-LOOP.md §8.1", turns: ["I'm going to walk 30 minutes after work on Thursday, hold me to it"],
+  { id: "commitment-accepted", journey: 5, source: "docs/COMMITMENT-LOOP.md §8.1", turns: ["Ke tla tsamaya 30 minutes after work ka Labone, hold me to it"],
     checks: [{ what: "one open commitment is on their record", kind: "sql", query: "SELECT count(*)::int FROM client_facts WHERE user_id = $1 AND kind = 'commitment' AND superseded_by IS NULL", expect: { equals: 1 } }],
-    rubric: "The client commits to one small thing on a day. A good reply backs it in a line and asks nothing else about it." },
+    rubric: "Setswana and English: 'I'll walk 30 minutes after work on Thursday, hold me to it.' A good reply backs it in a line, in their language or plain English, and asks nothing else about it." },
   { id: "commitment-silence-is-not-yes", journey: 5, source: "docs/COMMITMENT-LOOP.md §8.2", turns: ["What's a good snack before gym?"],
     checks: [{ what: "a question commits them to nothing", kind: "sql", query: "SELECT count(*)::int FROM client_facts WHERE user_id = $1 AND kind = 'commitment' AND superseded_by IS NULL", expect: "zero" }],
     rubric: "A plain question. The client has promised nothing, so nothing is recorded as a promise." },
