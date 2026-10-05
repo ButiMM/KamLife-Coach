@@ -32,7 +32,7 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 234, // 30 Sep (#511): jobs/narrative.ts retired
+  modules: 234, // 5 Oct (B1): morning-message.ts deleted
   handlerFiles: 29,
   cronRegistrations: 24, // 30 Sep (#511): the monthly narrative cron retired
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
