@@ -33,7 +33,9 @@ jobs:
     # #342: every backup is restored into this throwaway database before it counts as good.
     services:
       restore:
-        image: postgres:18
+        # pgvector, as production has: `memories` uses CREATE EXTENSION vector (server/memory.ts), which plain
+        # postgres:18 lacks, so every test-restore failed from 29 Sep and no backup was published (#510).
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_PASSWORD: restore
           POSTGRES_DB: restore
@@ -131,7 +133,7 @@ jobs:
           RESTORE_URL="postgresql://postgres:restore@127.0.0.1:5433/restore"
           # Strict: any failed statement fails the restore, so a partial dump can't pass (#494 attack).
           if ! gunzip -c "/tmp/${FILE}" | psql -q -v ON_ERROR_STOP=1 --single-transaction "$RESTORE_URL" > /dev/null 2> /tmp/restore.err; then
-            echo "::error::Backup ${FILE} did not restore cleanly"; tail -20 /tmp/restore.err
+            echo "::error::Backup ${FILE} did not restore cleanly: $(grep -m1 -E 'ERROR|FATAL' /tmp/restore.err | cut -c1-300)"; tail -20 /tmp/restore.err
             aws s3 cp "/tmp/${FILE}" "s3://${R2_BUCKET}/failed/${FILE}" --endpoint-url "$R2_ENDPOINT" || true
             exit 1
           fi
