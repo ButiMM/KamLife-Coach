@@ -659,7 +659,7 @@ export function summarise(results: AcceptanceResult[]): string {
     ...rows,
     "",
     red.length
-      ? `pg-acceptance: RED — ${red.map(r => r.id).join(", ")}`
+      ? `${process.env.GITHUB_ACTIONS ? "::error::" : ""}pg-acceptance: RED — ${red.map(r => r.id).join(", ")}` // an annotation: readable without the raw log
       : "pg-acceptance: GREEN — every acceptance executed and passed",
   ].join("\n");
 }
