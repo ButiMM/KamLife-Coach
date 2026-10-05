@@ -312,7 +312,7 @@ const SCHEDULED = {
 } as const;
 
 /** The new coach's words for a scheduled message, or null (the caller sends its plain floor). Never throws. */
-export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED): Promise<string | null> {
+export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED, extra = ""): Promise<string | null> {
   if (!coreWave4For(phone)) return null;
   try {
     const pre = await readPreTurn(phone);
@@ -320,6 +320,7 @@ export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED)
     const { getDayLedger } = await import("../day-ledger");
     const y = await getDayLedger(pre.userId, { forDate: new Date(Date.now() - 86_400_000) });
     pre.numbers += `\nYESTERDAY: ${y.meals.length ? `${y.meals.map(m => `${m.label || "meal"}: ${m.foods}`).join("; ")}; about ${Math.round(y.kcal)} kcal and ${Math.round(y.protein)}g protein` : "no food logged"}; steps ${y.steps ? y.steps.toLocaleString("en-ZA") : "none logged"}.`;
+    if (extra) pre.numbers += `\nJUST HAPPENED: ${extra}`;
     const u: Understanding = { family: "other", wants: `${SCHEDULED[job]}. Ask nothing and give no instruction: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
     const words = (await compose(await openaiClient(), pre, `(No message from ${pre.name}: this is your scheduled ${job} message.)`, u))?.trim();
     if (!words) return null;

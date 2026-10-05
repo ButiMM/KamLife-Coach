@@ -3052,12 +3052,6 @@ test("proactive budget: adaptive does not speak, and its line is not lost", () =
   assert.ok(/adaptLine,/.test(morning), "the composer receives the line");
   assert.ok(!/withAdapt\(/.test(morning), "…and no per-branch wrapper decides who gets it");
 
-  // One bubble. `\n\n---\n\n` splits into a second WhatsApp message, separately billed — that is
-  // the two-messages-before-six problem again under a different job's name. Asserted against the
-  // composer's real output in the morning-composer tests below.
-  const composer = readFileSync("server/morning-message.ts", "utf-8");
-  assert.ok(!/---/.test(composer.split("export function composeMorning")[1] || ""),
-    "the composer never emits the Twilio message splitter");
 });
 
 // ── ONE PROACTIVE DECISION OWNER ────────────────────────────────────────────────────────────
@@ -3173,98 +3167,13 @@ test("proactive decision: re-entry is not met with a calorie adjustment", () => 
   // the reason the ladder's month rung could never run. Absence is now handled, not skipped.
 });
 
-// ── ONE COMPOSER FOR THE MORNING MESSAGE ────────────────────────────────────────────────────
-// Issue #49 step 5. morning.ts composed the brief across ~a dozen independent narrative branches,
-// two of which (protein, steps) prescribed action — competing with decideProactive, in the same
-// message, from different reasoning.
-
-const morningInputs = (over: any = {}) => ({
-  firstName: "Thabo", targetFixLine: "", identityLine: "", streakLine: "", workoutLine: "",
-  yesterdayLine: "", todayLines: [], closingLine: "", decisionLine: "", breakfastAsk: "🍳 What's for breakfast?",
-  adaptLine: "", sickYesterday: false, ...over,
-});
-
-test("morning composer: exactly one instruction reaches the client", async () => {
-  const { composeMorning } = await import("../server/morning-message");
-  const msg = composeMorning(morningInputs({
-    streakLine: "🔥 *6-session streak* — protect it.",
-    yesterdayLine: "120g protein logged yesterday, against a 150g target.",
-    todayLines: ["*Today:*", "👟 8,000 steps", "💪 Training day. Reply *1* for your workout."],
-    decisionLine: "*Make your next meal a proper protein meal.*\n\n_Protein is what keeps the weight you lose off your muscle._",
-  }));
-  // The old brief could carry three: the worst-slot protein fix, the steps line, and the action.
-  const instructions = [/lead dinner with/i, /anchor lunch with/i, /Steps: [\d,]+ of/i];
-  for (const re of instructions) assert.ok(!re.test(msg), `retired branch is back: ${re}`);
-  assert.ok(msg.includes("Make your next meal"), "the decision's instruction is the one that survives");
-});
-
-test("morning composer: one bubble, never a second billed message", async () => {
-  const { composeMorning } = await import("../server/morning-message");
-  const msg = composeMorning(morningInputs({
-    yesterdayLine: "No food logged yesterday — today starts now.",
-    todayLines: ["*Today:*", "👟 8,000 steps"],
-    adaptLine: "Three weeks flat, so I've adjusted your food a little.",
-    closingLine: "\n\n_Keep the chain going._",
-  }));
-  assert.ok(!msg.includes("---"), "`\\n\\n---\\n\\n` splits into a separately billed message");
-});
-
-test("morning composer: an ill client is not handed targets and an instruction", async () => {
-  const { composeMorning } = await import("../server/morning-message");
-  const msg = composeMorning(morningInputs({
-    sickYesterday: true,
-    todayLines: ["*Today:*", "👟 8,000 steps", "💪 Training day. Reply *1* for your workout."],
-    decisionLine: "*Get today's session done.*\n\n_2 more this week._",
-    streakLine: "🔥 *6-session streak* — protect it.",
-  }));
-  assert.ok(/feeling better/i.test(msg));
-  assert.ok(!/steps/i.test(msg), "no step target for someone who was ill");
-  assert.ok(!/session done/i.test(msg), "no training instruction for someone who was ill");
-  assert.ok(!/streak/i.test(msg), "and no scoreboard");
-});
-
-test("morning composer: the breakfast ask only appears when there is nothing to say", async () => {
-  const { composeMorning } = await import("../server/morning-message");
-  const quiet = composeMorning(morningInputs({ decisionLine: "" }));
-  assert.ok(quiet.includes("What's for breakfast"), "CONTINUE + hold → the ordinary ask");
-  const acting = composeMorning(morningInputs({ decisionLine: "*Stand on a scale this morning.*" }));
-  assert.ok(!acting.includes("What's for breakfast"), "two asks is two decisions before coffee");
-});
-
-test("morning composer: the observation observes and stops", async () => {
-  const { yesterdayObservation } = await import("../server/morning-message");
-  const short = yesterdayObservation({ foodLogged: true, proteinLogged: 90, proteinTarget: 150, numbersLow: false });
-  assert.ok(/90g/.test(short) && /150g/.test(short), "it still states what happened");
-  // It must not prescribe. That is decideProactive's job, and the old branch did both.
-  for (const re of [/lead (breakfast|dinner)/i, /anchor lunch/i, /get some in early/i, /tomorrow:/i]) {
-    assert.ok(!re.test(short), `observation is prescribing again: ${re}`);
-  }
-  assert.equal(
-    yesterdayObservation({ foodLogged: false, proteinLogged: 0, proteinTarget: 150, numbersLow: false }),
-    "No food logged yesterday — today starts now.");
-  // numbers:low never sees a figure — the existing contract, preserved through the collapse.
-  const low = yesterdayObservation({ foodLogged: true, proteinLogged: 90, proteinTarget: 150, numbersLow: true });
-  assert.ok(!/\d/.test(low), "numbers:low clients get no figures");
-});
-
-test("morning: the empty-yesterday client goes down the same path as everyone else", () => {
-  const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
-  const code = morning.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
-  // They used to leave down a parallel branch with its own three sends and their own greeting —
-  // no streak, no milestone, no step target, no training day and NO DECISION, because the
-  // decision was computed two hundred lines down a road they never travelled. The clients who
-  // needed the most coaching got the least.
+// ── THE MORNING MESSAGE (B1, #319): the new coach's recognition, then the decision's one line ──────
+test("morning: one composed send, one decision line, and none the morning after an illness", () => {
+  const code = readFileSync("server/scheduler/jobs/morning.ts", "utf-8").split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
   assert.ok(!/Send me your breakfast right now/.test(code), "the parallel empty-yesterday brief is gone");
-  assert.ok(/composeMorning\(\{/.test(code), "one composer");
-  // A count, on purpose: this is how many mouths this job has. It went 2 → 3 in Cut 6 and the
-  // third is a REPLACEMENT, not an addition — the button menu it supersedes went out through
-  // sendWhatsAppButtons, which this counter never saw. Net across the repo the cut removes sends.
-  assert.equal((code.match(/sendProactive\(/g) || []).length, 3,
-    "three sends: the pause notice, the ladder's one ask, and the composed brief");
+  assert.ok(/const move = sick \? "" : decisionLine \|\| "🍳 What's for breakfast\?"/.test(code), "an ill client gets no instruction (#546 attack); the breakfast ask only when nothing is decided");
+  assert.equal((code.match(/sendProactive\(/g) || []).length, 3, "three sends: the pause notice, the ladder's one ask, and the brief");
   assert.ok(!/sendWhatsAppButtons\(/.test(code), "and none of them is a menu");
-  // The one thing that branch really owned — the streak shield, which WRITES — must survive.
-  assert.ok(/streak_shield:\$\{currentMonth\}/.test(code), "the monthly streak shield still writes");
-  assert.ok(/shieldLine \|\| workoutLine/.test(code), "…and still speaks, as an input");
 });
 
 // ── PROACTIVE SWEEP: one target owner, durable health everywhere, no orphan decisions ───────
