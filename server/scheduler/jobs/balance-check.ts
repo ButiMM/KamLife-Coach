@@ -11,6 +11,7 @@
  * WhatsApp alert couldn't send. sendCriticalAlert also falls back to SMS if needed.
  */
 import { sendCriticalAlert, fetchTwilioBalance, resolveOpsAlertMsisdn } from "../shared";
+import { deliveryAccepted } from "../../outbound-delivery";
 
 // Threshold (account currency, usually USD) below which we warn. Env-tunable so the
 // founder can raise it as the base grows without a redeploy.
@@ -62,8 +63,11 @@ export async function runBalanceCheck(): Promise<void> {
  * live-quality digest (D7, routes/admin-turns.ts). Nowhere, or a client thread: nothing is sent.
  */
 export async function alertOps(text: string): Promise<boolean> {
-  const to = await resolveOpsAlertMsisdn();
-  if (!to) return false;
-  await sendCriticalAlert(to, text).catch(e => console.error("[OPS_ALERT] send failed:", e?.message || e));
-  return true;
+  const msisdn = await resolveOpsAlertMsisdn();
+  if (!msisdn) return false;
+  // The resolver returns bare digits; WhatsApp needs its channel prefix, or Twilio refuses the address
+  // and the alert falls to a 320-character SMS or nowhere (Codex @ e0017fd). True only when it went.
+  const outcome = await sendCriticalAlert(opsAddress(msisdn), text).catch(e => { console.error("[OPS_ALERT] send failed:", e?.message || e); return "dropped" as const; });
+  return deliveryAccepted(outcome);
 }
+export const opsAddress = (msisdn: string): string => `whatsapp:+${msisdn.replace(/\D/g, "")}`;

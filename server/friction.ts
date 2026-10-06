@@ -155,6 +155,7 @@ export async function sendLiveDigestOnce(now = Date.now()): Promise<boolean> {
   const text = liveDigest(scoreLiveTurns(turns, sig, isMemoryGrievance, now), turns.length, u => phone.get(u) || "???");
   await db.insert(adminEvents).values({ action: "live_digest", meta: { turns: turns.length }, reason: "turn triage" }).catch(() => {}); // a read of client turns is audited
   const sent = await (await import("./scheduler/jobs/balance-check")).alertOps(text);
-  saveState(LIVE_DIGEST_KEY, sastDayKey(now));
+  if (sent) saveState(LIVE_DIGEST_KEY, sastDayKey(now)); // undelivered: the 18:xx sweep is the only try, and it says so in the log
+  else console.warn("[LIVE_DIGEST] not delivered (no ops number, or the send was refused)");
   return sent;
 }

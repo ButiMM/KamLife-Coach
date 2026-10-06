@@ -6258,6 +6258,9 @@ test("D7: live turns are scored from what the client did next, with no model cal
   assert.match(text, /1\. …123 · corrected, "you forgot"\n   Coach: «Lunch is in/);
   assert.ok(!/\+27|whatsapp:/.test(text), "never a full number");
   assert.match(liveDigest([], 0, () => ""), /Nothing to read today/);
+  const { opsAddress } = await import("../server/scheduler/jobs/balance-check");
+  assert.equal(opsAddress("27821234567"), "whatsapp:+27821234567", "Codex @ e0017fd: the ops number keeps its WhatsApp channel");
+  assert.ok(readFileSync("server/scheduler/jobs/balance-check.ts", "utf-8").includes("return deliveryAccepted(outcome);"), "and alertOps reports the real delivery");
 });
 test("card paths: every attach site is accounted for", async () => {
   const { readFileSync } = await import("node:fs");
