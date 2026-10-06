@@ -14,7 +14,8 @@ import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply, stripInternalMarkers } from "../reply-hygiene";
 import { prepareOutbound, prepareReactiveOutbound } from "../outbound-authority";
 import { finaliseInteraction } from "../handlers/chat-log";
-import type { DeliveryResult } from "../outbound-delivery";
+import { deliveryAccepted, type DeliveryResult } from "../outbound-delivery";
+import { closeHeldReminders, moveRidingTurn } from "../reminders";
 import { splitWhatsAppBody } from "../utils";
 
 // The sender number and the Twilio client both moved to outbound-delivery.ts with Cut B2. This
@@ -146,6 +147,7 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   const isCrisisOut = out.includes("0800 567 567");
   if ((await shadowDoor(phone, out, "reply", "server/routes/whatsapp.ts", media)) && !isCrisisOut) {
     await finalise("shadow");
+    await closeHeldReminders(rootId ?? phone, false).catch(() => {}); // B7 (#538): not delivered, so still held
     return;
   }
 
@@ -158,6 +160,7 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   // THE DELIVERY OWNER'S OWN VERDICT, not an assumption that awaiting a send means it landed.
   const outcome = await sendParts(phone, splitMessage(out), outMedia);
   await finalise(outcome);
+  await closeHeldReminders(rootId ?? phone, deliveryAccepted(outcome)).catch(() => {}); // B7 (#538): closed only once delivered
 }
 
 async function sendParts(
@@ -397,7 +400,7 @@ function bumpImageInflight(phone: string): void {
 async function resolveImageInflight(phone: string, reply: string | null, rootId?: string): Promise<void> {
   const e = photoReplyBuffer.get(phone);
   if (!e) { if (reply) await sendFinal(phone, reply, null, rootId); return; }
-  if (rootId) e.lastRootId = rootId;
+  if (rootId) { if (e.lastRootId) moveRidingTurn(e.lastRootId, rootId); e.lastRootId = rootId; } // B7: one reply closes every photo's claim
   if (reply) e.parts.push(reply); else e.failedCount++;
   e.inflight = Math.max(0, e.inflight - 1);
   if (e.inflight === 0) {
