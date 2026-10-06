@@ -309,10 +309,17 @@ export function coreWave4For(_phone: string): boolean {
 }
 const SCHEDULED = {
   morning: "It is early morning: your scheduled morning message. Greet them by first name and recognise YESTERDAY in one or two short lines, only from YESTERDAY's real numbers; if nothing was logged, don't mention it. Warm, plain, no streaks or counts you can't see",
+  // B3: the weigh-in IS the ask, so its words keep it (no move is appended).
+  weigh: "It is Monday morning: their weekly weigh-in. By first name, in two or three short lines, ask for this morning's weight: after the toilet, before food, the same way each week. If a weight is on record, name their last one. The scale is information, never judgement",
+  // B6: they have gone quiet. The ladder's ask is appended after these words.
+  // B5: the programme moved up a phase; the facts of it come in `extra`, and "today" is appended as the move.
+  phase: "Their training programme has just moved up a phase (see JUST HAPPENED). By first name, in two short lines, say they earned it from the real session count and name the new phase",
+  silence: "They have not written for a few days or more (see the conversation dates). A short, warm hello by first name, in one or two lines: no guilt, no catching up, nothing about what they missed, no numbers",
 } as const;
 
 /** The new coach's words for a scheduled message, or null (the caller sends its plain floor). Never throws. */
 export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED, extra = ""): Promise<string | null> {
+  const asks = job === "weigh";
   if (!coreWave4For(phone)) return null;
   try {
     const pre = await readPreTurn(phone);
@@ -321,9 +328,9 @@ export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED,
     const y = await getDayLedger(pre.userId, { forDate: new Date(Date.now() - 86_400_000) });
     pre.numbers += `\nYESTERDAY: ${y.meals.length ? `${y.meals.map(m => `${m.label || "meal"}: ${m.foods}`).join("; ")}; about ${Math.round(y.kcal)} kcal and ${Math.round(y.protein)}g protein` : "no food logged"}; steps ${y.steps ? y.steps.toLocaleString("en-ZA") : "none logged"}.`;
     if (extra) pre.numbers += `\nJUST HAPPENED: ${extra}`;
-    const u: Understanding = { family: "other", wants: `${SCHEDULED[job]}. Ask nothing and give no instruction: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
+    const u: Understanding = { family: "other", wants: asks ? SCHEDULED[job] : `${SCHEDULED[job]}. Ask nothing and give no instruction: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
     const words = (await compose(await openaiClient(), pre, `(No message from ${pre.name}: this is your scheduled ${job} message.)`, u))?.trim();
-    if (!words) return null;
+    if (!words || asks) return words || null;
     const { stripModelDirectives } = await import("../brain/reply-verifier");
     return stripModelDirectives(words, { modelAuthored: true } as any).kept.trim() || null;
   } catch (e) {
