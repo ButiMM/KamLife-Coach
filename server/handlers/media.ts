@@ -23,7 +23,7 @@ import { askCoachK } from "../gpt";
 import { cleanSATranscript, stripKnownNoSpeechMarkers, transcriptFailsAdmission, whisperSegmentMetrics, type VoiceQuality } from "../understanding/sa-transcript";
 import { looksLikeRefusal } from "../understanding/refusal";
 import { getStepResponse, getStepStreak } from "./steps";
-import { checkPerfectDay, checkFoodPatterns } from "./checks";
+import { checkPerfectDay } from "./checks";
 import { handleWeightLog } from "./weight";
 import { handleWater } from "./water";
 import { recomputeTodayFoodTotals, scanForSAFoods, findDuplicateMealToday, parseFoodLogTotalsFromMessageOut } from "./food-scanner";
@@ -43,14 +43,11 @@ import { explicitMealSlot } from "../understanding/actions";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { cardWillAttach } from "../card-policy";
 import { remainingInMeals, goalStatusLine } from "../education";
-import { firstActionCelebration } from "../activation";
 import { sendWhatsApp } from "../scheduler/shared";
 import { coachHomeEquipmentFromPhoto } from "./equipment-vision";
-import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
 import { downscaleForVision } from "../image-downscale";
 import { checkVoiceLength, bumpVoiceFailure, clearVoiceFailure } from "../media-limits";
 export { bumpVoiceFailure, clearVoiceFailure } from "../media-limits";
-import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { commitFoodLog } from "./food-context";
 import { reconcileVisionMeal, itemsFromVisionText } from "../serving-units";
 import { tryLogDistanceScreenshot } from "./distance-log";
@@ -1139,13 +1136,6 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         });
       }
 
-      const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 120)]);
-      // DELETED 2026-08-05, live, on the founder's phone: a photo of black coffee came back with
-      // "Today so far: … Target: … still to eat" — three phrases this rebuild exists to delete.
-      // It is in the MEDIA path (Slice 4b, not yet torn down) and only renders once the day has
-      // food in it, so the same photo was clean at 08:03 and a receipt at 08:33. Totals are still
-      // written below; they are just no longer read aloud at someone who sent a picture.
-      let photoDailyTotal = "";
       try {
         const totals = photoCommit ? { calories: photoCommit.runningCals, protein: photoCommit.runningProtein } : await recomputeTodayFoodTotals(user.id);
         await db.update(users).set({
@@ -1169,24 +1159,19 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         : "";
       const retroNote = photoIsRetro ? `\n_Logged to ${mealDateLabel(photoLoggedAt)}._` : "";
 
-      let photoCoachNudge = ""; // honest nudge when a single meal eats >38% of budget (cut/recomp only)
-      if (totalPhotoKcal > 0 && (goal === "fat_loss" || goal === "recomposition")) {
-        const calTarget = user.calorieTarget || 1800;
-        if (totalPhotoKcal > Math.round(calTarget * 0.38)) {
-          photoCoachNudge = `\n\nBig meal — logged, no stress. Keep the next one lighter and you're balanced for the day.`;
-        }
-      }
-
       const photoTotalMs = Date.now() - mediaFlowStart;
       console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs} retro=${photoIsRetro}`);
       await logMediaSuccess(user.id, "photo", photoTotalMs);
-      const photoReplyRaw = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoCoachNudge}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
-      const photoReply = photoNumbersLow ? stripNumbersFromProse(photoReplyRaw) : photoReplyRaw;
-      // BRANDED MACRO CARD on the PHOTO log too (2026-07-22 live: photo-logged drink missed it). Same contract as text; title = FOODS logged, not the model's preamble.
-      const cardTitle = mealTitleFromReply(visionReply);
-      const photoCard = (!photoNumbersLow && photoDailyTotal) ? await macroCardMarker({ user, mealName: cardTitle, mealProtein: Math.round(primaryPhotoProt || 0), forDate: photoIsRetro ? photoLoggedAt : undefined }) : "";
-      const photoGuardrail = await nutritionGuardrailNudge(user); // "too much of something" nudge
-      return `${photoReply}${photoGuardrail}${await firstActionCelebration(user, phone, "meal")}${photoCard}`;
+      // A3: THE PHOTO'S MEAL IN THE NEW COACH'S WORDS, as typed meals have been since A1. The meal is on the
+      // ledger; the coach speaks from it and closeCoachingTurn adds the one canonical move. The receipt
+      // stays for an album and wherever it carries a status (a past day, a pricing gap, a question).
+      // CORE_WAVE2=off is the rollback: the plain receipt. The big-meal nudge, pattern, perfect-day,
+      // guardrail and celebration lines that rode on the photo receipt are gone with it.
+      const photoReceipt = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}`;
+      const words = extraReplies.length === 0
+        ? await (await import("../core/coach")).afterLogReply(phone, message?.trim() || "[a photo of their food]", photoReceipt, "food").catch(() => null) : null;
+      if (words) return (await import("../understanding/live")).closeCoachingTurn(user, message || "", words);
+      return photoNumbersLow ? stripNumbersFromProse(photoReceipt) : photoReceipt;
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);

@@ -6321,8 +6321,8 @@ test("card paths: every attach site is accounted for", async () => {
     "server/handlers/meal-repeat.ts", "server/handlers/lifecycle.ts", "server/handlers/media.ts",
   ];
   const attachers = files.filter(f => /(?:macroCardMarker|dailyMacroCardMarker)\(/.test(readFileSync(f, "utf-8")));
-  // If this count changes, a new card path was added — go and check its TEXT stands down too.
-  assert.equal(attachers.length, 5, `card-attaching files changed: ${attachers.join(", ")}`);
+  // If this count changes, a new card path was added — go and check its TEXT stands down too. (A3: media.ts's never-rendered photo card went.)
+  assert.equal(attachers.length, 4, `card-attaching files changed: ${attachers.join(", ")}`);
 
   // The three sites that print the day's numbers must all consult the card before repeating them.
   for (const f of ["server/handlers/food-context.ts", "server/handlers/early-commands.ts", "server/handlers/meal-repeat.ts"]) {
@@ -7088,22 +7088,6 @@ test("renderAchievementCard: a real PNG, and a wide figure still fits the ring",
 
 // CARD MEAL SUMMARY (2026-07-22, founder: the card title must name the MEAL logged — 'Tin fish,
 // Rice, Mixed veggies' — never the model's 'Based on what you mentioned…' preamble).
-test("mealTitleFromReply: summarises the foods from the bullet lines", async () => {
-  const { mealTitleFromReply } = await import("../server/macro-card-attach");
-  const reply = `Based on what you mentioned, it looks like you had a full container. Let's log that:\n\n• Tin fish (~100g): 208 kcal, 25g protein\n• Rice (~200g cooked): 260 kcal\n• Mixed veggies (~100g): 80 kcal\n\nNicely done! That's all logged for you.`;
-  assert.strictEqual(mealTitleFromReply(reply), "Tin fish, Rice, Mixed veggies");
-});
-test("mealTitleFromReply: strips the 'Based on what you mentioned' preamble when there are no bullets", async () => {
-  const { mealTitleFromReply } = await import("../server/macro-card-attach");
-  assert.match(mealTitleFromReply("Based on what you mentioned, it looks like a chicken wrap. Logged!"), /^chicken wrap/i);
-  assert.doesNotMatch(mealTitleFromReply("This is a Switch drink. Logged."), /^This is/i);
-});
-test("mealTitleFromReply: caps at three foods and never returns empty", async () => {
-  const { mealTitleFromReply } = await import("../server/macro-card-attach");
-  const four = "• Eggs\n• Toast\n• Bacon\n• Avo";
-  assert.strictEqual(mealTitleFromReply(four).split(", ").length, 3);
-  assert.strictEqual(mealTitleFromReply(""), "Meal");
-});
 
 // NUTRITION GUARDRAILS (2026-07-22, founder: "3 energy drinks and no food isn't 'good' — lead them
 // to the right path per health standards, without shaming"). Cross-day, standards-grounded nudges.
@@ -9919,37 +9903,6 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   test("meal-repeat: a genuine report still logs", () => {
     assert.equal(isAskingNotReporting("My dinner is the same as my lunch"), false);
     assert.equal(isAskingNotReporting("Same as yesterdays dinner"), false);
-  });
-}
-
-// ============================================================
-// THE CARD TITLE (2026-07-30 live). The founder's card read "tasty lunch of mince pasta! I'd
-// estimate that" — the coach's own sentence printed as the name of his food. And because
-// findDuplicateMealToday matches on NAME OVERLAP, a prose title can never match an earlier log,
-// so a photo of a meal he had ALREADY logged was logged a second time. One string, two defects.
-// ============================================================
-{
-  const { mealTitleFromReply } = await import("../server/macro-card-attach");
-
-  test("card title: THE LIVE ONE — prose becomes the food, not the sentence", () => {
-    assert.equal(mealTitleFromReply("Looks like a tasty lunch of mince pasta! I'd estimate that as macaroni with mince (~300g): roughly 600 kcal and 30g protein."), "mince pasta");
-  });
-  test("card title: a reply ending in ! or ? is still cut to one sentence", () => {
-    assert.equal(mealTitleFromReply("That looks like chicken and rice, about 550 kcal."), "chicken and rice");
-    assert.doesNotMatch(mealTitleFromReply("Looks like eggs on toast! Nicely done."), /Nicely done/);
-  });
-  test("card title: bulleted items still win over prose", () => {
-    assert.equal(mealTitleFromReply("Nicely done.\n• Bread: ~225 kcal\n• Eggs: ~150 kcal"), "Bread, Eggs");
-  });
-  test("card title: plain SA meals survive untouched", () => {
-    assert.equal(mealTitleFromReply("This is pap and wors."), "pap and wors");
-    assert.equal(mealTitleFromReply("Got it, samp and beans logged."), "samp and beans");
-  });
-  test("card title: never leaks the coach's flattery or its estimate", () => {
-    for (const s of ["Looks like a tasty lunch of mince pasta!", "That looks like chicken and rice, about 550 kcal."]) {
-      const t = mealTitleFromReply(s);
-      assert.doesNotMatch(t, /tasty|looks like|estimate|kcal|about \d/i, `leaked: ${t}`);
-    }
   });
 }
 
