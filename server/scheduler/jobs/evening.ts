@@ -99,7 +99,7 @@ export async function runEveningAccountability(): Promise<void> {
         if (!(await inWhatsAppWindow(client.id)) && !templateSid(CHECKIN_TEMPLATE)) continue;
         const delivery = await sendProactive(client, { job: "evening" },
           `${name}, you planned ${promise.what} today. How did it go? If it didn't happen, tell me what got in the way and we'll make the next one easier.`,
-          { template: { name: CHECKIN_TEMPLATE, variables: { 1: name, 2: promise.what } } });
+          { template: { name: CHECKIN_TEMPLATE, variables: { 1: name, 2: promise.what }, noSubstitute: true } });
         if (delivery && deliveryAccepted(delivery)) await markCommitment(promise.id, "asked");
         continue;
       }
