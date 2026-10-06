@@ -1,7 +1,7 @@
 import { calorieFloor } from "../../targets";
 import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs,
-  eq, gte, lt, and, desc, asc, count, sql,
+  eq, gte, lt, and, asc, count, sql,
   canSendProactive, claimProactive,
   getActiveClients, isPaused,
   todaySAST, thisWeekUTC, isProactivePaused,
@@ -10,6 +10,7 @@ import { getGoalProfile } from "../../goal-profiles";
 import { getProgressTruth } from "../../day-ledger";
 import { mentionsForbidden } from "../../brain/reply-verifier";
 import { sendProactive } from "../proactive-decision";
+import { scheduledWords } from "../../core/coach";
 
 export async function runWeightReminder(): Promise<void> {
   console.log("[SCHEDULER] Running weight check-in reminder...");
@@ -35,12 +36,9 @@ export async function runWeightReminder(): Promise<void> {
     const [recent] = await db.select({ c: count() }).from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, thirtySixHoursAgo)));
     if ((recent.c || 0) > 0) continue;
     const name = client.name?.split(" ")[0] || "there";
-    const [lastWeightRow] = await db.select({ weight: weightLogs.weight }).from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(desc(weightLogs.loggedAt)).limit(1).catch(() => [] as { weight: string | null }[]);
-    const lastWeightHint = lastWeightRow?.weight
-      ? `Last week: ${parseFloat(lastWeightRow.weight).toFixed(1)}kg — what's today's number?`
-      : `Send me the number (e.g. 75.3kg)`;
-    const msg = `${name}, weigh-in day. ⚖️\n\nStep on the scale first thing — after toilet, before food, same conditions every time.\n\n${lastWeightHint}\n\nThe scale is data, not judgment. Track it so we can coach from facts, not feelings.`;
-    // Once per week per client — DB-backed so a container recycle can't re-send.
+    // B3 (#319): the new coach asks, naming their last weight from the ledger. CORE_WAVE4=off: the plain ask.
+    const words = await scheduledWords(client.phoneNumber, "weigh");
+    const msg = words ?? `${name}, weigh-in day. ⚖️ After the toilet, before food: what does the scale say this morning?`;
     if (await sendProactive(client, { job: "weight_reminder", window: thisWeekUTC() }, msg)) sent++;
   }
   console.log(`[SCHEDULER] Weight reminders sent: ${sent}`);
