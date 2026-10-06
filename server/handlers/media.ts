@@ -41,6 +41,7 @@ import { stripVoiceDenial } from "../reply-hygiene";
 import { detectVoiceLanguageNote } from "../voice-language";
 import { explicitMealSlot } from "../understanding/actions";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
+import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { cardWillAttach } from "../card-policy";
 import { remainingInMeals, goalStatusLine } from "../education";
 import { sendWhatsApp } from "../scheduler/shared";
@@ -1153,15 +1154,17 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // A3: THE PHOTO'S MEAL IN THE NEW COACH'S WORDS, as typed meals have been since A1. The meal is on the
       // ledger; the coach speaks from it and closeCoachingTurn adds the one canonical move. The receipt
       // stays for an album and wherever it carries a status (a past day, a pricing gap, a question).
-      // CORE_WAVE2=off is the rollback: the plain receipt. The big-meal nudge, pattern, perfect-day,
-      // guardrail and celebration lines that rode on the photo receipt are gone with it.
+      // CORE_WAVE2=off is the rollback: the plain receipt. The big-meal nudge, pattern, perfect-day and
+      // celebration lines that rode on the photo receipt are gone with it. THE HEALTH-STANDARD GUARDRAIL
+      // STAYS (#550 attack @ 48f845c): deterministic, after a write, whoever speaks ("caffeine is not fuel").
       const photoReceipt = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}`;
+      const guard = photoCommit?.ok && !photoCommit.wasDup ? await nutritionGuardrailNudge(user) : "";
       // Only a photo that WROTE its meal gets "just saved" words (#550 attack: a 0 kcal black coffee wrote nothing).
       const words = extraReplies.length === 0 && photoCommit?.ok && !photoCommit.wasDup
         ? await (await import("../core/coach")).afterLogReply(phone, message?.trim() || "[a photo of their food]", photoReceipt, "food").catch(() => null) : null;
       const plain = (t: string) => photoNumbersLow ? stripNumbersFromProse(t) : t; // #550 attack: number-free mode gets the old path's scrub
-      if (words) return plain(await (await import("../understanding/live")).closeCoachingTurn(user, message || "", words));
-      return plain(photoReceipt);
+      if (words) return plain(await (await import("../understanding/live")).closeCoachingTurn(user, message || "", `${words}${guard}`));
+      return plain(`${photoReceipt}${guard}`);
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);

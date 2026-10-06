@@ -6228,6 +6228,8 @@ test("A3 (#550 attack): a number-free client's photo words get the same scrub as
   const src = readFileSync("server/handlers/media.ts", "utf-8");
   assert.match(src, /const plain = \(t: string\) => photoNumbersLow \? stripNumbersFromProse\(t\) : t;/);
   assert.match(src, /if \(words\) return plain\(await [^\n]*closeCoachingTurn\(/);
+  assert.match(src, /closeCoachingTurn\(user, message \|\| "", `\$\{words\}\$\{guard\}`\)/, "#550 @ 48f845c: the guardrail rides after the switched words");
+  assert.match(src, /const guard = photoCommit\?\.ok && !photoCommit\.wasDup \? await nutritionGuardrailNudge\(user\)/);
 });
 test("A19 (#545 attack): the voice door teaches the record from the live read, as the text door does", () => {
   const src = readFileSync("server/routes/whatsapp.ts", "utf-8");
