@@ -1168,7 +1168,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // CORE_WAVE2=off is the rollback: the plain receipt. The big-meal nudge, pattern, perfect-day,
       // guardrail and celebration lines that rode on the photo receipt are gone with it.
       const photoReceipt = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}`;
-      const words = extraReplies.length === 0
+      // Only a photo that WROTE its meal gets "just saved" words (#550 attack: a 0 kcal black coffee wrote nothing).
+      const words = extraReplies.length === 0 && photoCommit?.ok && !photoCommit.wasDup
         ? await (await import("../core/coach")).afterLogReply(phone, message?.trim() || "[a photo of their food]", photoReceipt, "food").catch(() => null) : null;
       if (words) return (await import("../understanding/live")).closeCoachingTurn(user, message || "", words);
       return photoNumbersLow ? stripNumbersFromProse(photoReceipt) : photoReceipt;
