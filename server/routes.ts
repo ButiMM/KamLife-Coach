@@ -104,11 +104,11 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     : /audio|ogg|voice/i.test(mediaContentType || "") ? "voice"
     : /video/i.test(mediaContentType || "") ? "video" : "photo";
   return inTurn(kind, message, async () => {
-    const reply = await (await import("./reminders")).withHeldReminders(await routeMessage(phone, message, mediaUrl, mediaContentType, allMediaUrls, sourceMessageId), rootId ?? sourceMessageId ?? phone); // a voice note's nested turn carries the outer MessageSid (#537)
+    const reply = await routeMessage(phone, message, mediaUrl, mediaContentType, allMediaUrls, sourceMessageId);
     // Never awaited into the client's path: a ledger that can delay an answer is worse than none.
     void recordTurn(reply);
-    return reply;
-  }, rootId || sourceMessageId);
+    return reply; // B7: held reminders fold into the RECONCILED reply; a voice note's nested turn carries the outer MessageSid
+  }, rootId || sourceMessageId, async final => (await import("./reminders")).withHeldReminders(final, rootId ?? sourceMessageId ?? phone));
 }
 
 async function routeMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[], sourceMessageId?: string): Promise<string> {

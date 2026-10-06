@@ -698,7 +698,7 @@ function ledgerText(text: string): string {
  * one. So the inner scope takes the outer's id rather than inventing its own, and `seed` (the
  * MessageSid, when the door has one) is used only when there is no scope to inherit from.
  */
-export async function inTurn<T>(inputType: string, inputText: string, fn: () => Promise<T>, seed?: string): Promise<T> {
+export async function inTurn<T>(inputType: string, inputText: string, fn: () => Promise<T>, seed?: string, finish?: (reply: string) => Promise<string>): Promise<T> {
   let resolveFinalReply!: (reply: string) => void;
   const finalReplyPromise = new Promise<string>(resolve => { resolveFinalReply = resolve; });
   const rootId = turnStore.getStore()?.rootId || seed || `turn-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
@@ -709,7 +709,10 @@ export async function inTurn<T>(inputType: string, inputText: string, fn: () => 
         resolveFinalReply(String(result ?? ""));
         return result;
       }
-      const finalReply = await reconcileTurnReply(turnStore.getStore()!, result);
+      // `finish` runs on the reconciled reply (B7, #537): a held reminder folded in BEFORE reconciliation
+      // was lost whenever the integrity floor replaced the reply, yet its claim was closed as delivered.
+      const reconciled = await reconcileTurnReply(turnStore.getStore()!, result);
+      const finalReply = finish ? await finish(reconciled) : reconciled;
       const scope = turnStore.getStore()!;
       const todo = String(scope.evidence?.canonicalTodo || "").trim();
       // A DECISION IS NOT AN OPEN ASK UNTIL IT LEAVES THE TURN (#208 post-merge repair).
