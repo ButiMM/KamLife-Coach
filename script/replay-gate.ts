@@ -251,6 +251,8 @@ const JOBS: Record<NonNullable<ReplayCase["proactive"]>, (userId: string) => Pro
   reminders: async userId => { await pool.query("UPDATE reminders SET fire_at = now() - interval '1 minute' WHERE user_id = $1", [userId]); return (await import("../server/scheduler/jobs/reminders")).runDueReminders(); },
   onboarding: async () => (await import("../server/scheduler/jobs/onboarding")).runEarlyOnboarding(),
   silence: async () => (await import("../server/scheduler/jobs/retention")).runSilenceDetection(),
+  // B5: a finished phase is 12 sessions in four weeks (3 a week at 75%+), stored as the job reads them.
+  phase: async userId => { await pool.query("INSERT INTO workout_logs (user_id, workout_completed, logged_at) SELECT $1, true, now() - make_interval(days => g * 2) FROM generate_series(1, 12) g", [userId]); return (await import("../server/scheduler/jobs/programme")).runPhaseAdvancement(); },
 };
 async function scheduled(job: NonNullable<ReplayCase["proactive"]>, phone: string, userId: string): Promise<string> {
   // Only this client is subscribed while the job runs: every earlier case is already graded.
