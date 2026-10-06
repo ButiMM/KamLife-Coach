@@ -13,10 +13,11 @@
  */
 import { and, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { db } from "../db";
-import { users, clientEvents, clientFacts } from "@shared/schema";
+import { users, clientEvents, clientFacts, turnLedger } from "@shared/schema";
 import { withheldContext } from "../life-context";
+import { sastDayKey } from "../sast";
 
-export const FACT_KINDS = ["goal", "injury", "constraint", "schedule", "preference", "life_event"] as const;
+export const FACT_KINDS = ["goal", "injury", "constraint", "schedule", "preference", "life_event", "commitment"] as const;
 export type FactKind = typeof FACT_KINDS[number];
 const EXTRACTOR = "client-record/v2 understanding-call";
 
@@ -58,13 +59,17 @@ From the client's message, list the durable facts the client states ABOUT THEMSE
 - schedule: when they can or cannot train or eat
 - preference: food or training they like or refuse
 - life_event: something happening in their life that affects coaching (bereavement, new job, exams, travel)
+- commitment: ONE small thing they commit to doing on a day, in their own words ("I'll walk after work on Thursday"), or their yes
+  to the one thing COACH K'S LAST MESSAGE suggested ("yes, Thursday"). Only movement (a session, a walk, steps) or one food habit.
+  detail: {"domain":"movement|food","what":"<the thing, a few words, as they or the coach put it>","due":"YYYY-MM-DD"}.
+  When they say how an OPEN commitment went, it is a commitment too, with detail {"outcome":"kept|missed"}. Never one they did not make.
 
 NOT facts: questions ("could my knee be the problem?"), other people ("my sister is pregnant"), hypotheticals,
 food they ate (meals are logged elsewhere), greetings, and anything you would have to guess.
 If the message corrects or replaces one of the KNOWN FACTS listed below it, set "corrects" to that known fact's subject, exactly as listed.
 A fact that only starts later ("I start night shifts in December") gets "valid_from"; one that ends ("my knee is sore this week") gets "valid_until".
 
-In your JSON, include "facts":[{"kind":"goal|injury|constraint|schedule|preference|life_event","subject":"<2-4 words, lowercase>","statement":"<the client's own words, verbatim span>","detail":{},"valid_from":"YYYY-MM-DD or null","valid_until":"YYYY-MM-DD or null","corrects":"<known subject or null>"}]}
+In your JSON, include "facts":[{"kind":"goal|injury|constraint|schedule|preference|life_event|commitment","subject":"<2-4 words, lowercase>","statement":"<the client's own words, verbatim span>","detail":{},"valid_from":"YYYY-MM-DD or null","valid_until":"YYYY-MM-DD or null","corrects":"<known subject or null>"}]}
 Use "facts":[] when there is nothing.`;
 
 type Extracted = { kind: string; subject: string; statement: string; detail?: Record<string, unknown>; valid_from?: string | null; valid_until?: string | null; corrects?: string | null };
@@ -98,6 +103,57 @@ function inOwnVoice(said: string, statement: string): boolean {
 }
 const day = (d?: string | null) => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null);
 
+/**
+ * THE COMMITMENT LOOP (A19, docs/COMMITMENT-LOOP.md). One open at a time: every commitment row has the
+ * subject "commitment", so a new one or its outcome supersedes the last. Due today to a week out, or
+ * an outcome; anything else is dropped. Released with no message two days after it was due (valid_until).
+ */
+export type Commitment = { domain: "movement" | "food"; what: string; due: string; state: "open" | "asked" | "kept" | "missed"; outcome?: "kept" | "missed" };
+function commitmentDetail(d: any, today = sastDayKey()): Partial<Commitment> | null {
+  if (d?.outcome === "kept" || d?.outcome === "missed") return { outcome: d.outcome };
+  const due = day(d?.due), what = String(d?.what || "").trim().slice(0, 80);
+  if (!due || !what || !["movement", "food"].includes(d?.domain)) return null;
+  const ahead = (Date.parse(due) - Date.parse(today)) / 86_400_000;
+  return ahead >= 0 && ahead <= 7 ? { domain: d.domain, what, due, state: "open" } : null;
+}
+const endOfDay = (d: string, plus = 0) => new Date(Date.parse(`${d}T23:59:59+02:00`) + plus * 86_400_000);
+/** The client's one active commitment (open, asked, or its outcome), or null. */
+export async function activeCommitment(userId: string): Promise<(Commitment & { id: string; statement: string }) | null> {
+  const [r] = await db.select().from(clientFacts).where(and(eq(clientFacts.userId, userId), eq(clientFacts.kind, "commitment"),
+    isNull(clientFacts.supersededBy), sql`(${clientFacts.validUntil} IS NULL OR ${clientFacts.validUntil} > now())`)).orderBy(desc(clientFacts.createdAt)).limit(1);
+  return r ? { ...(r.detail as Commitment), id: r.id, statement: r.statement } : null;
+}
+/** What the evening job saw: the ledger showed it kept, or it asked. */
+export async function markCommitment(id: string, state: "asked" | "kept"): Promise<void> {
+  await db.update(clientFacts).set({ detail: sql`${clientFacts.detail} || ${JSON.stringify({ state })}::jsonb` }).where(eq(clientFacts.id, id));
+}
+
+/** turn (rootId, else phone) → the commitment that turn's reply asks about; closed by its transport verdict (#545). */
+const followUpRiding = new Map<string, string>();
+export function followUpRides(turnKey: string, commitmentId: string): void { followUpRiding.set(turnKey, commitmentId); }
+export async function closeFollowUp(turnKey: string, accepted: boolean): Promise<void> {
+  const id = followUpRiding.get(turnKey);
+  followUpRiding.delete(turnKey);
+  if (id && accepted) await markCommitment(id, "asked");
+}
+/** The ledger is the evidence (spec §4): a movement commitment is kept by a completed session, or their step target, on its due day. */
+export async function settleCommitment(userId: string): Promise<Awaited<ReturnType<typeof activeCommitment>>> {
+  const c = await activeCommitment(userId);
+  if (!c || c.outcome || c.state === "kept" || c.domain !== "movement" || c.due > sastDayKey()) return c;
+  const r = await db.execute(sql`SELECT EXISTS (SELECT 1 FROM workout_logs WHERE user_id = ${userId} AND workout_completed
+      AND to_char(logged_at + interval '2 hours', 'YYYY-MM-DD') = ${c.due})
+    OR EXISTS (SELECT 1 FROM step_logs s JOIN users u ON u.id = s.user_id WHERE s.user_id = ${userId}
+      AND to_char(s.logged_at + interval '2 hours', 'YYYY-MM-DD') = ${c.due} AND s.steps >= coalesce(u.steps_target, 8500)) AS kept`);
+  if (!(r as any).rows?.[0]?.kept) return c;
+  await markCommitment(c.id, "kept");
+  return { ...c, state: "kept" };
+}
+/** Inside WhatsApp's 24-hour window: their last message, as the record received it. */
+export async function inWhatsAppWindow(userId: string): Promise<boolean> {
+  const [r] = await db.select({ at: sql<Date | null>`max(${clientEvents.receivedAt})` }).from(clientEvents).where(eq(clientEvents.userId, userId));
+  return !!r?.at && Date.now() - new Date(r.at).getTime() < 23 * 3600_000;
+}
+
 /** Parse and validate the extractor's answer. Anything malformed is dropped, never repaired. */
 export function parseExtraction(raw: string, message: string): Extracted[] {
   let j: any;
@@ -110,8 +166,11 @@ export function parseExtraction(raw: string, message: string): Extracted[] {
     // The WHOLE statement must be the client's words (Codex @ c5a521b: a prefix check let an
     // invented clause ride on a real opening). Case, spacing and apostrophe style aside, verbatim.
     && said.includes(norm(f.statement))
-    && inOwnVoice(said, norm(f.statement)),
-  ).map((f: any) => ({ ...f, subject: f.subject.trim().toLowerCase(), statement: f.statement.trim() }));
+    && inOwnVoice(said, norm(f.statement))
+    && (f.kind !== "commitment" || commitmentDetail(f.detail) !== null),
+  ).map((f: any) => f.kind === "commitment"
+    ? { ...f, subject: "commitment", statement: f.statement.trim(), detail: commitmentDetail(f.detail), valid_from: null, valid_until: null }
+    : { ...f, subject: f.subject.trim().toLowerCase(), statement: f.statement.trim() });
 }
 
 /** What is already known, for the understanding call: a correction can only name what it corrects if it sees it. */
@@ -119,7 +178,11 @@ export async function knownFacts(userId: string): Promise<string> {
   // CORRECTIONS NEED THE RECORD (Codex @ c5a521b): "actually the race is in May" names no prior subject.
   const known = await db.select({ kind: clientFacts.kind, subject: clientFacts.subject, statement: clientFacts.statement })
     .from(clientFacts).where(and(eq(clientFacts.userId, userId), isNull(clientFacts.supersededBy))).orderBy(desc(clientFacts.createdAt)).limit(30);
-  return known.length ? `KNOWN FACTS:\n${known.map(k => `- ${k.kind} / ${k.subject}: "${k.statement}"`).join("\n")}` : "KNOWN FACTS: none";
+  const [last] = await db.select({ said: sql<string>`coalesce(${turnLedger.deliveredBody}, ${turnLedger.reply})` }).from(turnLedger)
+    .where(eq(turnLedger.userId, userId)).orderBy(desc(turnLedger.createdAt)).limit(1);
+  const today = new Date(`${sastDayKey()}T12:00:00Z`).toLocaleDateString("en-ZA", { weekday: "long", timeZone: "UTC" });
+  const context = `TODAY: ${today} ${sastDayKey()}${last?.said ? `\nCOACH K'S LAST MESSAGE: "${String(last.said).slice(0, 400)}"` : ""}`;
+  return known.length ? `KNOWN FACTS:\n${known.map(k => `- ${k.kind} / ${k.subject}: "${k.statement}"`).join("\n")}\n${context}` : `KNOWN FACTS: none\n${context}`;
 }
 
 /**
@@ -129,18 +192,27 @@ export async function knownFacts(userId: string): Promise<string> {
 export async function applyFacts(eventId: string, raw: string): Promise<number> {
   const [ev] = await db.select().from(clientEvents).where(eq(clientEvents.id, eventId)).limit(1);
   const text = (ev?.rawText?.trim() || ev?.transcriptRaw?.trim() || "");
-  if (!ev || text.length < 12) return 0;
+  if (!ev || !text) return 0;
   const [done] = await db.select({ n: sql<number>`count(*)::int` }).from(clientFacts).where(eq(clientFacts.sourceEventId, eventId));
   if ((done?.n ?? 0) > 0) return 0;
-  const facts = parseExtraction(raw, text);
+  // A short message ("yes", "done!") can only answer a commitment; it states nothing else worth keeping.
+  const facts = parseExtraction(raw, text).filter(f => f.kind === "commitment" || text.length >= 12);
+  const open = facts.some(f => f.kind === "commitment") ? await activeCommitment(ev.userId) : null;
   let written = 0;
   for (const f of facts) {
+    if (f.kind === "commitment") {
+      const d = f.detail as Partial<Commitment>;
+      if (d.outcome && (!open || open.outcome)) continue; // an outcome of nothing open is not a fact
+      f.detail = d.outcome ? { domain: open!.domain, what: open!.what, due: open!.due, state: d.outcome, outcome: d.outcome } : d;
+      f.valid_until = d.outcome ? sastDayKey(Date.now() + 7 * 86_400_000) : null; // an outcome informs the next week's offer
+    }
     await db.transaction(async tx => {
       const [row] = await tx.insert(clientFacts).values({
         userId: ev.userId, kind: f.kind, subject: f.subject, statement: f.statement, detail: f.detail ?? null,
         sourceEventId: ev.id,
         validFrom: day(f.valid_from) ? new Date(`${day(f.valid_from)}T00:00:00+02:00`) : new Date(),
-        validUntil: day(f.valid_until) ? new Date(`${day(f.valid_until)}T23:59:59+02:00`) : null,
+        validUntil: f.kind === "commitment" && !f.valid_until ? endOfDay((f.detail as Commitment).due, 2)
+          : day(f.valid_until) ? new Date(`${day(f.valid_until)}T23:59:59+02:00`) : null,
         extractedBy: EXTRACTOR,
       }).returning({ id: clientFacts.id });
       // CORRECTIONS SUPERSEDE, within the same KIND only (Codex @ c5a521b): the same subject, or the
@@ -158,17 +230,46 @@ export async function applyFacts(eventId: string, raw: string): Promise<number> 
   return written;
 }
 
+/** What the composer does about the one commitment, by its state (model-facing, never sent as is). */
+const COMMITMENT_STATE = {
+  kept: "KEPT. If they bring it up, recognise it in one line; never ask about it.",
+  missed: "It did not happen. Any next suggestion is smaller (fewer days, shorter, easier time). No guilt words.",
+  ahead: "Open. Help them get ready if it fits; don't propose another.",
+  asked: "You already asked how it went: never ask again. If they answer, take it kindly; if it didn't happen, ask what got in the way, once.",
+  due: "Due now and not yet asked: ask once, in one line, how it went, unless they just told you.",
+} as const;
+function commitmentLine(c: Commitment, said: string, today = sastDayKey()): string {
+  const at = c.state === "open" ? (c.due > today ? "ahead" : "due") : c.state;
+  const line = `- commitment: ${c.what}, due ${c.due} (they said: "${said}"). ${COMMITMENT_STATE[at]}`;
+  return line;
+}
+
+/**
+ * TWO MISSES CHANGE THE DOMAIN (spec §6, CTO 5 Oct): the last two outcomes both missed, in one domain,
+ * the latest this week → no third of that kind for now; any offer is the other kind. Empty otherwise.
+ */
+async function restingDomain(userId: string): Promise<string> {
+  const rows = await db.select({ d: clientFacts.detail, recent: sql<boolean>`${clientFacts.createdAt} > now() - interval '7 days'` })
+    .from(clientFacts).where(and(eq(clientFacts.userId, userId), eq(clientFacts.kind, "commitment"), sql`${clientFacts.detail} ? 'outcome'`))
+    .orderBy(desc(clientFacts.createdAt)).limit(2);
+  const [a, b] = rows.map(r => r.d as Commitment);
+  const twoMissed = !!a && !!b && rows[0].recent && a.outcome === "missed" && b.outcome === "missed" && a.domain === b.domain;
+  return twoMissed ? `- two ${a.domain} commitments missed in a row: don't propose another ${a.domain} one this week; if you offer one, make it ${a.domain === "movement" ? "one small food habit" : "a short walk or session"}.` : ""; // model-facing
+}
+
 /** The active facts, for the coach. Empty string when there are none. */
 export async function factsForCoach(userId: string): Promise<string> {
+  await settleCommitment(userId).catch(() => null);
   const rows = await db.select().from(clientFacts).where(and(
     eq(clientFacts.userId, userId), isNull(clientFacts.supersededBy),
     sql`${clientFacts.validFrom} <= now()`, // a fact that starts in December is not true today
     sql`(${clientFacts.validUntil} IS NULL OR ${clientFacts.validUntil} > now())`,
   )).orderBy(desc(clientFacts.createdAt)).limit(30); // the NEWEST thirty, shown oldest first
   rows.reverse();
-  if (!rows.length) return "";
+  const resting = await restingDomain(userId).catch(() => "");
+  if (!rows.length && !resting) return "";
   return "WHAT THIS CLIENT HAS TOLD YOU (their own words; use it, never contradict it):\n"
-    + rows.map(r => `- ${r.kind}: "${r.statement}"`).join("\n");
+    + [...rows.map(r => r.kind === "commitment" ? commitmentLine(r.detail as Commitment, r.statement) : `- ${r.kind}: "${r.statement}"`), resting].filter(Boolean).join("\n");
 }
 
 /**
@@ -264,7 +365,7 @@ export async function historyToLearn(userId: string): Promise<Array<{ text: stri
 }
 
 export async function writeHistoryFacts(userId: string, raw: string, msgs: Array<{ text: string; at: Date }>): Promise<number> {
-  const placed = parseExtraction(raw, msgs.map(m => m.text).join("\n")).slice(0, 15)
+  const placed = parseExtraction(raw, msgs.map(m => m.text).join("\n")).filter(f => f.kind !== "commitment").slice(0, 15)
     // One message must hold the whole statement in the client's voice; the newest such message dates it.
     .map(f => ({ f, m: [...msgs].reverse().find(m => parseExtraction(JSON.stringify({ facts: [f] }), m.text).length > 0) }))
     .filter((x): x is { f: Extracted; m: { text: string; at: Date } } => !!x.m)

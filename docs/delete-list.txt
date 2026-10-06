@@ -9,7 +9,6 @@ server/brain/coach-brain.ts
 server/brain/client-snapshot.ts
 server/handlers/food-commands.ts
 server/normalizer-fidelity.ts
-server/drill-cases.ts
 server/one-action.ts
 server/memory.ts
 server/intelligence/profile.ts

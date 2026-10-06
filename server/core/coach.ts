@@ -99,6 +99,9 @@ export async function ledgerNumbers(user: any, message = ""): Promise<string> {
 export async function readPreTurn(phone: string, message?: string): Promise<PreTurn | null> {
   const [u] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
   if (!u || u.onboardingState !== "COMPLETE") return null; // onboarding is its own journey, not this composer's yet
+  // THE SPEND CAP COVERS THE NEW COACH TOO (#340): over the ceiling, or unable to read spend, it stands down
+  // and every caller falls back to what the cap already owns (the short degraded reply, the plain fact).
+  if (!(await (await import("../cost-tracking")).isUnderGPTCallLimit(u.id))) return null;
   const { factsForCoach, knownFacts, backfillFromOldStores } = await import("./client-record");
   await backfillFromOldStores(u).catch(e => console.warn("[RECORD] backfill skipped:", (e as Error).message)); // #414: before the first read
   void learnFromHistory(u.id); // #414: what they said in chat, in the background; the next turn reads it
@@ -160,6 +163,20 @@ export async function understand(openai: OpenAI, message: string, known = "KNOWN
   } catch { return { u: null, raw }; }
 }
 
+/**
+ * A due commitment asked about inside a reply is its one follow-up (A19). Only a reply that names it and
+ * asks counts (#545 attack @ 07f9c1f: any "?" did), and it is marked asked only once the transport
+ * accepts that reply (closeFollowUp, the same verdict B7 uses): a dropped send leaves it open.
+ */
+async function foldedFollowUp(phone: string, pre: PreTurn, reply: string): Promise<void> {
+  if (!pre.facts.includes("Due now and not yet asked") || !reply.includes("?")) return;
+  const { activeCommitment, followUpRides } = await import("./client-record");
+  const c = await activeCommitment(pre.userId);
+  const said = reply.toLowerCase(), named = (c?.what.toLowerCase().match(/[a-z]{4,}/g) ?? []).some(w => said.includes(w));
+  // Keyed by THIS turn (#545 @ 5bb55de): an unrelated reply delivered first must not close another turn's follow-up.
+  if (c && !c.outcome && c.state === "open" && named) followUpRides((await import("../handlers/chat-log")).turnRootId() ?? phone, c.id);
+}
+
 /** The rules of the product, in the composer's own words (docs/TESTER-EXPERIENCE.md). */
 const COMPOSE_SYSTEM = `You are Coach K, a warm, direct South African health and fitness coach on WhatsApp.
 Rules — every reply:
@@ -167,6 +184,7 @@ Rules — every reply:
 - Use what they have told you (WHAT THIS CLIENT HAS TOLD YOU): injuries, goals, shifts, budget, what they don't eat. Never make them repeat it. Never contradict it.
 - Use only THEIR REAL NUMBERS. Never invent a number, a streak, a count of sessions, an absence ("it's been 14 weeks"), or a meal slot they did not say.
 - South African food and life: pap, wors, amasi, chakalaka, kota, taxi-rank food, Checkers budgets, night shifts.
+- Help them follow through (A19): when no commitment is listed and the turn has a natural next step, your one question may offer ONE small thing on a named day (a session, a walk, one food habit), for them to say yes to. Never when they are unwell, grieving, or have closed the day.
 - Medical, pregnancy, eating-disorder and minor situations: do not coach them here; say you'll get them the right help. (Those turns are answered by the safety owner before you.)
 
 ${ONE_VOICE}`;
@@ -208,6 +226,7 @@ export async function answerLive(phone: string, message: string, opts: { final?:
   if (!pre) return null;
   const openai = await openaiClient();
   const read = await understand(openai, message, pre.known);
+  liveReads.set(phone, { at: Date.now(), raw: read.raw }); // the record learns from this read once the door has stored the message
   if (!read.u) return null;
   // Wave 1 only talks. A turn that needs a write (a meal, steps, a goal) stays with the old path until
   // its wave-2 row switches, so nothing the client reports is ever dropped.
@@ -238,6 +257,7 @@ export async function answerLive(phone: string, message: string, opts: { final?:
   // At the last door (`final`) every writer has already declined: answer anyway; the integrity floor stops a claimed write.
   if (!opts.final && writes.length) return null;
   const reply = (await compose(openai, pre, message, read.u))?.trim();
+  if (reply) await foldedFollowUp(phone, pre, reply).catch(() => {});
   return reply || null;
 }
 
@@ -308,7 +328,9 @@ export async function afterLogReply(phone: string, message: string, receipt: str
     if (!reply) return null;
     // The meal card the old owner attached (a [MEDIA:…] marker) still rides with the new words.
     const { stripModelDirectives } = await import("../brain/reply-verifier");
-    return afterLogWords(reply, receipt, r => stripModelDirectives(r, { modelAuthored: true } as any).kept);
+    const words = afterLogWords(reply, receipt, r => stripModelDirectives(r, { modelAuthored: true } as any).kept);
+    if (words) await foldedFollowUp(phone, pre, words).catch(() => {});
+    return words;
   } catch (e) {
     console.warn("[CORE_WAVE2] kept the receipt:", (e as Error)?.message || e);
     return null;
@@ -432,6 +454,24 @@ export async function learnFromHistory(userId: string): Promise<number> {
     console.warn("[RECORD] history skipped:", (e as Error)?.message || e);
     return 0;
   }
+}
+
+/**
+ * THE LIVE TURN TEACHES THE RECORD (#545 attack @ f63d700). Facts were stored only by runShadow, which
+ * is off unless CORE_SHADOW=on, so a commitment the live coach accepted was never written. The
+ * transport calls this after recordAtDoor has stored the message: the live understanding call's own
+ * answer goes through applyFacts, the same validation and the same once-per-message rule. No model call.
+ * Keyed by phone, not by the text (the normaliser may have rewritten it): a read paired with the wrong
+ * message stores nothing, because applyFacts keeps only statements verbatim in that event's own text.
+ */
+const liveReads = new Map<string, { at: number; raw: string }>();
+export async function learnFromLiveRead(phone: string, sourceMessageId?: string): Promise<number> {
+  const read = liveReads.get(phone);
+  liveReads.delete(phone);
+  if (!read || Date.now() - read.at > 120_000 || !sourceMessageId) return 0;
+  const [ev] = await db.select({ id: clientEvents.id }).from(clientEvents).innerJoin(users, eq(users.id, clientEvents.userId))
+    .where(and(eq(clientEvents.sourceMessageId, sourceMessageId), eq(users.phoneNumber, phone))).limit(1);
+  return ev ? (await import("./client-record")).applyFacts(ev.id, read.raw) : 0;
 }
 
 /** Run the new coach beside the old one and store what it would have said. Never throws, never sends. */

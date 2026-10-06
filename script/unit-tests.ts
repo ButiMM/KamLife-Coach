@@ -5831,6 +5831,16 @@ test("client record: extracted facts must be typed and in the client's own words
   assert.deepEqual(parseExtraction(JSON.stringify({ facts: "x" }), msg), []);
 });
 
+// A19 (#512): a commitment is movement or one food habit, due today to a week out, or the outcome of the open one.
+test("client record: a commitment needs a domain, a thing and a near due day; 'yes' can carry one", async () => {
+  const [{ parseExtraction, FACTS_INSTRUCTIONS }, { sastDayKey }] = await Promise.all([import("../server/core/client-record"), import("../server/sast")]);
+  const c = (detail: object, statement = "yes, Thursday") => parseExtraction(JSON.stringify({ facts: [{ kind: "commitment", subject: "gym", statement, detail }] }), "Yes, Thursday after work");
+  assert.deepEqual(c({ domain: "movement", what: "a session", due: sastDayKey() }).map(f => [f.subject, (f.detail as any).state]), [["commitment", "open"]]);
+  for (const bad of [{ domain: "sleep", what: "x", due: sastDayKey() }, { domain: "food", what: "", due: sastDayKey() }, { domain: "food", what: "x", due: "2020-01-01" }]) assert.deepEqual(c(bad), []);
+  assert.deepEqual(c({ outcome: "missed" }).map(f => (f.detail as any).outcome), ["missed"]);
+  assert.match(FACTS_INSTRUCTIONS, /"kind":"[^"]*\|commitment"/, "the JSON schema the model follows names the kind (Codex @ 3ca4681)");
+});
+
 // Codex @ 4c36554: verbatim is not enough — quoted and reported words belong to someone else.
 test("client record: a quote or reported speech is not the client's own fact", async () => {
   const { parseExtraction } = await import("../server/core/client-record");
@@ -6214,6 +6224,11 @@ test("dayStatusPill: a plain verdict, never a number, and it matches the bars", 
 // call site I never touched — his numbers twice, the same order four times, and a "Fat over"
 // pill above "Eat more today". Fixing one call site and calling it done is the systemic defect
 // itself. This test enumerates the paths so a new one cannot quietly join them.
+test("A19 (#545 attack): the voice door teaches the record from the live read, as the text door does", () => {
+  const src = readFileSync("server/routes/whatsapp.ts", "utf-8");
+  const voice = src.slice(src.indexOf("async function processVoiceAsync"), src.indexOf("// ── WhatsApp message splitting"));
+  assert.match(voice, /recordAtDoor\([^)]*\)[^]*?learnFromLiveRead\(phone, sourceMessageId\)/);
+});
 test("card paths: every attach site is accounted for", async () => {
   const { readFileSync } = await import("node:fs");
   const files = [

@@ -1,15 +1,25 @@
-# Grok: the independent reviewer, on a fixed rhythm
+# Grok: the independent attacker, on a fixed rhythm (CTO, 6 Oct)
 
-Grok is a different AI family from the builder (Claude) and the gate's judge (OpenAI). It reads this public repo, but it can't post to GitHub. So the founder pastes a prompt from this file into Grok, then pastes Grok's answer to the CTO in chat. The CTO sorts every point into three piles: **confirms the plan** / **gap inside the plan** (goes onto a `COVERAGE.md` row and into the queue) / **direction change** (only with evidence that beats `ORDERS.md`).
+Grok is a different AI family from the builder (Claude), the attacker session (Claude) and Codex (OpenAI). Its job is **attack, not design**: find where `main` or an open switch PR fails a real tester, with evidence.
 
-**Rhythm: at most two pastes a day.**
+**Route (no relay to the CTO):**
+1. Grok reads this public repo.
+2. The founder pastes Grok's answer, unedited, as a comment on **issue #558**.
+3. The CTO reads #558 on every builder check and sorts each point into one of three piles:
+   - **confirms the plan**;
+   - **gap**: it goes onto a `COVERAGE.md` row and into the queue;
+   - **direction change**: only with evidence that beats `ORDERS.md`.
 
-| When | Review | Purpose |
+Market and pricing questions belong to the market room (`docs/MARKET-ROOM.md`), not here.
+
+**Rhythm: two pastes a day.**
+
+| When | Prompt | Purpose |
 |---|---|---|
-| **Every morning, ~07:00** | Daily product review (below) | Is every part of the product moving forward, not just the current wave? What stalled overnight? |
-| **When a `switch` PR opens** | Switch review (below) | An independent check before testers meet the new coach on that row (the CTO also attacks it) |
+| **Morning, ~08:00** | Prompt 1 (daily attack on `main`) | What broke, stalled or regressed in the last 24 h |
+| **Afternoon, ~15:00** | Prompt 2 on the newest open `switch` PR (the list is on issue #280); if there's none, Prompt 1 again | An independent check before testers meet the new coach on that row |
 
-The CTO reminds the founder when a review is due. The founder doesn't need to track it.
+If Grok has scheduled tasks, set both up there, so the only manual step is the paste into #558.
 
 ---
 
@@ -26,7 +36,7 @@ The CTO reminds the founder when a review is due. The founder doesn't need to tr
 > 4. **Layers:** anything merged in the last 24 h that added a second way of doing something that already exists?
 > 5. **Width:** the biggest capability (from the tester's point of view) with no progress and no plan.
 > 6. **Cost:** anything wasting money.
-> 7. **Getting people on board now:** given what works today, the most creative zero-cost ways to get paying people on board this week. Examples of the kind of idea wanted: trainers licensing Coach K for their own clients, stokvel-style accountability groups, employer seats. Give specifics, not generic marketing.
+> 7. **Attack:** pick the three PRs merged in the last 24 h with the highest risk to a real tester (payments, safety, memory, deletion first). For each one, name the exact message a South African tester would send that breaks it, the file and line where it goes wrong, and what the client would see.
 > 8. **Money:** no paid tools or new spend. Say if anything in the build is spending money.
 > 9. **Blind spots:** anything a strong CTO would worry about that isn't in `RISKS.md` or the open issues.
 >
