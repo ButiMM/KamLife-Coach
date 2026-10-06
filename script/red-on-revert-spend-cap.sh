@@ -14,6 +14,7 @@ WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/spend-cap-revert.XXXXXX")"
 FILES=(
   server/cost-tracking.ts
   server/understanding/live.ts
+  server/core/coach.ts
 )
 
 for f in "${FILES[@]}"; do cp "$f" "$WORK_ROOT/$(printf '%s' "$f" | tr '/' '_')"; done
