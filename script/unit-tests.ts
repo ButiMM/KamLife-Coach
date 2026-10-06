@@ -6229,6 +6229,19 @@ test("A19 (#545 attack): the voice door teaches the record from the live read, a
   const voice = src.slice(src.indexOf("async function processVoiceAsync"), src.indexOf("// ── WhatsApp message splitting"));
   assert.match(voice, /recordAtDoor\([^)]*\)[^]*?learnFromLiveRead\(phone, sourceMessageId\)/);
 });
+test("A19 (Grok attack on #545): a commitment is stored only for a promise they made, and \"gym\" names one", async () => {
+  const { commitmentHeld, namesWhat } = await import("../server/core/client-record");
+  assert.equal(commitmentHeld("I'm not walking after work on Thursday.", "I'm not walking after work on Thursday", "a walk after work", ""), false, "a negation is not a promise");
+  assert.equal(commitmentHeld("I'm not going to the gym on Thursday", "going to the gym on Thursday", "gym", ""), false, "…even when the span leaves the 'not' out");
+  assert.equal(commitmentHeld("yes", "yes", "a walk after work", "Try pap with beans tonight, would that work?"), false, "a bare yes to pap is not a walk");
+  assert.equal(commitmentHeld("yes", "yes", "a walk after work", "Could you fit a 20-minute walk after work on Thursday?"), true, "a bare yes holds what the coach proposed");
+  assert.equal(commitmentHeld("I'll walk after work on Thursday, hold me to it", "I'll walk after work on Thursday", "a walk after work", ""), true);
+  assert.equal(commitmentHeld("I can't run, but I'll walk on Thursday", "I'll walk on Thursday", "walk", ""), true, "a 'but' starts a new clause");
+  assert.equal(commitmentHeld("I'll be better this week", "I'll be better this week", "a walk after work", ""), false, "a what not in their words or the coach's");
+  assert.equal(namesWhat("gym", "Did you make it to the gym today?"), true, "3-letter words name the promise");
+  assert.equal(namesWhat("a walk after work", "How was the walking?"), true);
+  assert.equal(namesWhat("a walk after work", "How was your day?"), false);
+});
 test("card paths: every attach site is accounted for", async () => {
   const { readFileSync } = await import("node:fs");
   const files = [

@@ -116,6 +116,34 @@ function commitmentDetail(d: any, today = sastDayKey()): Partial<Commitment> | n
   const ahead = (Date.parse(due) - Date.parse(today)) / 86_400_000;
   return ahead >= 0 && ahead <= 7 ? { domain: d.domain, what, due, state: "open" } : null;
 }
+/** The words that name what was promised: 3+ letters, without filler, days or times ("gym", "walk", "takeaways"). */
+const NOT_CONTENT = new Set(["the", "and", "for", "after", "before", "with", "from", "then", "this", "that", "each", "every", "one", "some", "today", "tomorrow", "tonight", "morning", "afternoon", "evening", "night", "week", "day", "days", "time", "minutes", "mins", "hour", "hours", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "will", "going", "get", "make", "have", "more", "less", "least"]);
+const tokens = (t: string) => t.toLowerCase().match(/[a-z]{3,}/g) ?? [];
+const words = (t: string) => tokens(t).filter(w => !NOT_CONTENT.has(w));
+/** The action, not its setting: "a walk after work" is a walk ("work" would match any "would that work?"). */
+export const whatWords = (what: string): string[] => {
+  const w = what.toLowerCase();
+  const action = words(w.split(/\b(?:after|before|during|at|on|in|by|when|while|until)\b/)[0]);
+  return action.length ? action : words(w);
+};
+/** Does `text` name the promise? A word of it, or a longer form of one ("walk" in "walking"). */
+export const namesWhat = (what: string, text: string): boolean => {
+  const said = tokens(text);
+  return whatWords(what).some(w => said.some(t => t === w || t.startsWith(w)));
+};
+const NEGATED = /\b(?:not|never|won'?t|can'?t|cannot|don'?t|didn'?t|isn'?t|aren'?t|wasn'?t|no longer)\b|n't\b/i;
+/**
+ * A PROMISE THEY MADE, IN CODE (Grok attack on #545, CTO 6 Oct). The model's read is not enough: a
+ * commitment is stored only when the clause holding their statement is not a negation ("I'm not
+ * walking on Thursday"), and a word of `what` is in their message or in the coach's message they
+ * were answering (a bare "yes" holds only what the coach just proposed).
+ */
+export function commitmentHeld(text: string, statement: string, what: string, coachLast: string): boolean {
+  const at = text.toLowerCase().indexOf(statement.toLowerCase());
+  const clause = (at > 0 ? text.slice(0, at).split(/[.!?,;\n]|\bbut\b/i).pop() ?? "" : "") + " " + statement;
+  if (NEGATED.test(clause)) return false;
+  return namesWhat(what, text) || namesWhat(what, coachLast);
+}
 const endOfDay = (d: string, plus = 0) => new Date(Date.parse(`${d}T23:59:59+02:00`) + plus * 86_400_000);
 /** The client's one active commitment (open, asked, or its outcome), or null. */
 export async function activeCommitment(userId: string): Promise<(Commitment & { id: string; statement: string }) | null> {
@@ -189,6 +217,12 @@ export async function knownFacts(userId: string): Promise<string> {
  * Validate the facts the understanding call returned for one stored event, and write them.
  * `raw` is that call's JSON answer. Writes nothing on any failure; a retried message is not learned twice.
  */
+/** The coach's last message before this one arrived: what a bare "yes" can be agreeing to. */
+async function coachSaidBefore(userId: string, at: Date | null): Promise<string> {
+  const [r] = await db.select({ said: sql<string>`coalesce(${turnLedger.deliveredBody}, ${turnLedger.reply})` }).from(turnLedger)
+    .where(and(eq(turnLedger.userId, userId), lt(turnLedger.createdAt, at ?? new Date()))).orderBy(desc(turnLedger.createdAt)).limit(1);
+  return String(r?.said || "");
+}
 export async function applyFacts(eventId: string, raw: string): Promise<number> {
   const [ev] = await db.select().from(clientEvents).where(eq(clientEvents.id, eventId)).limit(1);
   const text = (ev?.rawText?.trim() || ev?.transcriptRaw?.trim() || "");
@@ -203,6 +237,7 @@ export async function applyFacts(eventId: string, raw: string): Promise<number> 
     if (f.kind === "commitment") {
       const d = f.detail as Partial<Commitment>;
       if (d.outcome && (!open || open.outcome)) continue; // an outcome of nothing open is not a fact
+      if (!d.outcome && !commitmentHeld(text, f.statement, String(d.what || ""), await coachSaidBefore(ev.userId, ev.receivedAt))) continue;
       f.detail = d.outcome ? { domain: open!.domain, what: open!.what, due: open!.due, state: d.outcome, outcome: d.outcome } : d;
       f.valid_until = d.outcome ? sastDayKey(Date.now() + 7 * 86_400_000) : null; // an outcome informs the next week's offer
     }
