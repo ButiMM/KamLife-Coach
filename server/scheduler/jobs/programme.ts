@@ -5,6 +5,7 @@ import {
   claimProactive,
 } from "../shared";
 import { sendProactive } from "../proactive-decision";
+import { scheduledWords } from "../../core/coach";
 
 export async function runPhaseAdvancement(): Promise<void> {
   console.log("[SCHEDULER] JOB: Phase advancement check");
@@ -27,8 +28,10 @@ export async function runPhaseAdvancement(): Promise<void> {
       if (!(await claimProactive(client.id, "phase_advance", `phase${newPhase}`))) continue;
       const phaseNames: Record<number, string> = { 1: "Foundation", 2: "Build", 3: "Push", 4: "Peak", 5: "Deload" };
       await db.update(users).set({ programmePhase: newPhase, programmeWeek: 1, programmeDayInWeek: 1, phaseReadyToAdvance: false }).where(eq(users.id, client.id));
-      const name = client.name || "there";
-      await sendProactive(client, { claimed: "phase_advance" }, `${name}, you have completed Phase ${currentPhase} (${phaseNames[currentPhase]}). ${completedSessions.length} of ${plannedSessions} planned sessions done — ${Math.round(compliance * 100)}% compliance. You have earned Phase ${newPhase}: ${phaseNames[newPhase]}. Your programme has been updated. Reply "today" for your first Phase ${newPhase} session.`);
+      const name = (client.name || "there").split(" ")[0];
+      // B5 (#319): the new coach's words, then the one move. CORE_WAVE4=off: the plain fact.
+      const words = await scheduledWords(client.phoneNumber, "phase", `Phase ${currentPhase} (${phaseNames[currentPhase]}) done with ${completedSessions.length} of ${plannedSessions} planned sessions in 4 weeks; now Phase ${newPhase}: ${phaseNames[newPhase]}.`);
+      await sendProactive(client, { claimed: "phase_advance" }, `${words ?? `${name}, Phase ${newPhase}: ${phaseNames[newPhase]} is unlocked.`}\n\nReply *today* for your first Phase ${newPhase} session.`);
     } catch (err) { console.error(`[SCHEDULER] Phase advancement error — ${client.phoneNumber}:`, err); }
   }
 }
