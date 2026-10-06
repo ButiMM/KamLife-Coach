@@ -170,7 +170,7 @@ async function foldedFollowUp(phone: string, pre: PreTurn, reply: string): Promi
   if (!pre.facts.includes("Due now and not yet asked") || !reply.includes("?")) return;
   const { activeCommitment, followUpRides, namesWhat } = await import("./client-record");
   const c = await activeCommitment(pre.userId);
-  const named = !!c && namesWhat(c.what, reply); // 3+ letters: "gym" and "run" count (Grok attack on #545)
+  const named = !!c && namesWhat(c.what, reply, false); // 3+ letters ("gym", Grok on #545), the setting too ("Virgin Active", Codex @ ce85430)
   // Keyed by THIS turn (#545 @ 5bb55de): an unrelated reply delivered first must not close another turn's follow-up.
   if (c && !c.outcome && c.state === "open" && named) followUpRides((await import("../handlers/chat-log")).turnRootId() ?? phone, c.id);
 }

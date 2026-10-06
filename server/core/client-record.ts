@@ -120,17 +120,23 @@ function commitmentDetail(d: any, today = sastDayKey()): Partial<Commitment> | n
 const NOT_CONTENT = new Set(["the", "and", "for", "after", "before", "with", "from", "then", "this", "that", "each", "every", "one", "some", "today", "tomorrow", "tonight", "morning", "afternoon", "evening", "night", "week", "day", "days", "time", "minutes", "mins", "hour", "hours", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "will", "going", "get", "make", "have", "more", "less", "least"]);
 const tokens = (t: string) => t.toLowerCase().match(/[a-z]{3,}/g) ?? [];
 const words = (t: string) => tokens(t).filter(w => !NOT_CONTENT.has(w));
-/** The action, not its setting: "a walk after work" is a walk ("work" would match any "would that work?"). */
-export const whatWords = (what: string): string[] => {
+/**
+ * The words of the promise. `actionOnly`: the action without its setting, for deciding whether they
+ * promised it at all ("a walk after work" is a walk; "work" would match any "would that work?"). A
+ * reply that asks about it may name either ("How did Virgin Active go?", Codex @ ce85430).
+ */
+export const whatWords = (what: string, actionOnly = true): string[] => {
   const w = what.toLowerCase();
-  const action = words(w.split(/\b(?:after|before|during|at|on|in|by|when|while|until)\b/)[0]);
+  const action = actionOnly ? words(w.split(/\b(?:after|before|during|at|on|in|by|when|while|until)\b/)[0]) : [];
   return action.length ? action : words(w);
 };
 /** Does `text` name the promise? A word of it, or a longer form of one ("walk" in "walking"). */
-export const namesWhat = (what: string, text: string): boolean => {
+export const namesWhat = (what: string, text: string, actionOnly = true): boolean => {
   const said = tokens(text);
-  return whatWords(what).some(w => said.some(t => t === w || t.startsWith(w)));
+  return whatWords(what, actionOnly).some(w => said.some(t => t === w || t.startsWith(w)));
 };
+/** A promise to go without ("no takeaways this week"), which a "won't" states rather than refuses (Codex @ ce85430). */
+const AVOIDING = new Set(["no", "not", "avoid", "cut", "stop", "skip", "less", "fewer", "zero", "without", "never", "quit"]);
 const NEGATED = /\b(?:not|never|won'?t|can'?t|cannot|don'?t|didn'?t|isn'?t|aren'?t|wasn'?t|no longer)\b|n't\b/i;
 /**
  * A PROMISE THEY MADE, IN CODE (Grok attack on #545, CTO 6 Oct). The model's read is not enough: a
@@ -141,7 +147,7 @@ const NEGATED = /\b(?:not|never|won'?t|can'?t|cannot|don'?t|didn'?t|isn'?t|aren'
 export function commitmentHeld(text: string, statement: string, what: string, coachLast: string): boolean {
   const at = text.toLowerCase().indexOf(statement.toLowerCase());
   const clause = (at > 0 ? text.slice(0, at).split(/[.!?,;\n]|\bbut\b/i).pop() ?? "" : "") + " " + statement;
-  if (NEGATED.test(clause)) return false;
+  if (NEGATED.test(clause) && !AVOIDING.has(what.trim().toLowerCase().split(/\s+/)[0])) return false;
   return namesWhat(what, text) || namesWhat(what, coachLast);
 }
 const endOfDay = (d: string, plus = 0) => new Date(Date.parse(`${d}T23:59:59+02:00`) + plus * 86_400_000);

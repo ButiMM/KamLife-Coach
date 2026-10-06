@@ -6241,6 +6241,10 @@ test("A19 (Grok attack on #545): a commitment is stored only for a promise they 
   assert.equal(namesWhat("gym", "Did you make it to the gym today?"), true, "3-letter words name the promise");
   assert.equal(namesWhat("a walk after work", "How was the walking?"), true);
   assert.equal(namesWhat("a walk after work", "How was your day?"), false);
+  // Codex @ ce85430: a promise to go without is stated with "won't", and a reply may name the venue.
+  assert.equal(commitmentHeld("I won't have takeaways this week, ngiyakuthembisa", "I won't have takeaways this week", "no takeaways this week", ""), true, "an avoidance promise is a promise");
+  assert.equal(namesWhat("train at Virgin Active", "How did Virgin Active go?", false), true, "the fold hears the venue");
+  assert.equal(commitmentHeld("yes", "yes", "a walk after work", "Would that work for you?"), false, "the gate still ignores the setting");
 });
 test("card paths: every attach site is accounted for", async () => {
   const { readFileSync } = await import("node:fs");
