@@ -158,12 +158,17 @@ export async function understand(openai: OpenAI, message: string, known = "KNOWN
   } catch { return { u: null, raw }; }
 }
 
-/** A due commitment asked about inside a reply is its one follow-up (A19): it is never asked again. */
-async function foldedFollowUp(pre: PreTurn, reply: string): Promise<void> {
+/**
+ * A due commitment asked about inside a reply is its one follow-up (A19). Only a reply that names it and
+ * asks counts (#545 attack @ 07f9c1f: any "?" did), and it is marked asked only once the transport
+ * accepts that reply (closeFollowUp, the same verdict B7 uses): a dropped send leaves it open.
+ */
+async function foldedFollowUp(phone: string, pre: PreTurn, reply: string): Promise<void> {
   if (!pre.facts.includes("Due now and not yet asked") || !reply.includes("?")) return;
-  const { activeCommitment, markCommitment } = await import("./client-record");
+  const { activeCommitment, followUpRides } = await import("./client-record");
   const c = await activeCommitment(pre.userId);
-  if (c && !c.outcome && c.state === "open") await markCommitment(c.id, "asked");
+  const said = reply.toLowerCase(), named = (c?.what.toLowerCase().match(/[a-z]{4,}/g) ?? []).some(w => said.includes(w));
+  if (c && !c.outcome && c.state === "open" && named) followUpRides(phone, c.id);
 }
 
 /** The rules of the product, in the composer's own words (docs/TESTER-EXPERIENCE.md). */
@@ -231,7 +236,7 @@ export async function answerLive(phone: string, message: string): Promise<string
   const { writesState } = await import("../understanding/actions");
   if ((read.u.actions ?? []).some(a => writesState(a.type))) return null;
   const reply = (await compose(openai, pre, message, read.u))?.trim();
-  if (reply) await foldedFollowUp(pre, reply).catch(() => {});
+  if (reply) await foldedFollowUp(phone, pre, reply).catch(() => {});
   return reply || null;
 }
 
@@ -303,7 +308,7 @@ export async function afterLogReply(phone: string, message: string, receipt: str
     // The meal card the old owner attached (a [MEDIA:…] marker) still rides with the new words.
     const { stripModelDirectives } = await import("../brain/reply-verifier");
     const words = afterLogWords(reply, receipt, r => stripModelDirectives(r, { modelAuthored: true } as any).kept);
-    if (words) await foldedFollowUp(pre, words).catch(() => {});
+    if (words) await foldedFollowUp(phone, pre, words).catch(() => {});
     return words;
   } catch (e) {
     console.warn("[CORE_WAVE2] kept the receipt:", (e as Error)?.message || e);

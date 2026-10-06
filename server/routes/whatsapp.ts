@@ -146,6 +146,7 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   const isCrisisOut = out.includes("0800 567 567");
   if ((await shadowDoor(phone, out, "reply", "server/routes/whatsapp.ts", media)) && !isCrisisOut) {
     await finalise("shadow");
+    await (await import("../core/client-record")).closeFollowUp(phone, false).catch(() => {}); // A19: not delivered, still open
     return;
   }
 
@@ -158,6 +159,7 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   // THE DELIVERY OWNER'S OWN VERDICT, not an assumption that awaiting a send means it landed.
   const outcome = await sendParts(phone, splitMessage(out), outMedia);
   await finalise(outcome);
+  await (await import("../core/client-record")).closeFollowUp(phone, (await import("../outbound-delivery")).deliveryAccepted(outcome)).catch(() => {}); // A19: asked only once delivered
 }
 
 async function sendParts(
