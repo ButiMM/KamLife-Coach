@@ -950,14 +950,6 @@ export function dayStart(offsetDays = 0): Date {
   return sastDayStart(d);
 }
 
-export async function getYesterdayLogs(userId: string) {
-  const start = dayStart(-1);
-  const end = dayStart(0);
-  return db.select().from(chatHistory).where(
-    and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, start), lt(chatHistory.createdAt, end))
-  ).limit(20);
-}
-
 export async function getTodayLogs(userId: string) {
   return db.select().from(chatHistory).where(
     and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, dayStart(0)))
