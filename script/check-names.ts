@@ -20,7 +20,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 // Frozen 2026-07-29 after removing every full-name-in-prose use. LOWER THIS, NEVER RAISE IT.
-const BUDGET = 94;   // 2026-09-25 (#445): the wave-1 handlers deleted (was 96)
+const BUDGET = 93;   // 2026-10-06 (D9): equipment-vision deleted (was 94)
 
 /** Prose shapes that put a FULL name in front of a client. These may never come back at all. */
 const FORBIDDEN: Array<[RegExp, string]> = [
