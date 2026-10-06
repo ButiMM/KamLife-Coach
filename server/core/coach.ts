@@ -224,6 +224,7 @@ export async function answerLive(phone: string, message: string): Promise<string
   if (!pre) return null;
   const openai = await openaiClient();
   const read = await understand(openai, message, pre.known);
+  liveReads.set(phone, { at: Date.now(), raw: read.raw }); // the record learns from this read once the door has stored the message
   if (!read.u) return null;
   // Wave 1 only talks. A turn that needs a write (a meal, steps, a goal) stays with the old path until
   // its wave-2 row switches, so nothing the client reports is ever dropped.
@@ -359,6 +360,24 @@ export async function learnFromHistory(userId: string): Promise<number> {
     console.warn("[RECORD] history skipped:", (e as Error)?.message || e);
     return 0;
   }
+}
+
+/**
+ * THE LIVE TURN TEACHES THE RECORD (#545 attack @ f63d700). Facts were stored only by runShadow, which
+ * is off unless CORE_SHADOW=on, so a commitment the live coach accepted was never written. The
+ * transport calls this after recordAtDoor has stored the message: the live understanding call's own
+ * answer goes through applyFacts, the same validation and the same once-per-message rule. No model call.
+ * Keyed by phone, not by the text (the normaliser may have rewritten it): a read paired with the wrong
+ * message stores nothing, because applyFacts keeps only statements verbatim in that event's own text.
+ */
+const liveReads = new Map<string, { at: number; raw: string }>();
+export async function learnFromLiveRead(phone: string, sourceMessageId?: string): Promise<number> {
+  const read = liveReads.get(phone);
+  liveReads.delete(phone);
+  if (!read || Date.now() - read.at > 120_000 || !sourceMessageId) return 0;
+  const [ev] = await db.select({ id: clientEvents.id }).from(clientEvents).innerJoin(users, eq(users.id, clientEvents.userId))
+    .where(and(eq(clientEvents.sourceMessageId, sourceMessageId), eq(users.phoneNumber, phone))).limit(1);
+  return ev ? (await import("./client-record")).applyFacts(ev.id, read.raw) : 0;
 }
 
 /** Run the new coach beside the old one and store what it would have said. Never throws, never sends. */

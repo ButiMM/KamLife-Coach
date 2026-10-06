@@ -298,7 +298,7 @@ export async function processTextAsync(
       if (shadowPre) {
         const [pre, m] = await Promise.all([shadowPre, import("../core/coach")]);
         await m.runShadow(pre, message, rootId, sourceMessageId);
-      }
+      } else await (await import("../core/coach")).learnFromLiveRead(phone, sourceMessageId); // #545: the live read teaches the record
     })().catch(() => {});
   }
 }
