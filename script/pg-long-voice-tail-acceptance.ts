@@ -284,11 +284,10 @@ REAL("\n4. ONE COMPLETE POST-SENDFINAL COACHING TURN");
     `ledger=${JSON.stringify(delivered)} wire=${JSON.stringify(bodies[0])}`);
   chk(rows.some(r => r.delivery_outcome === "shadow"), "the post-transport shadow delivery result is recorded", JSON.stringify(rows));
   chk(rows.every(r => !r.outbound_verdict?.blocked), "outbound truth accepted the final body", JSON.stringify(rows.map(r => r.outbound_verdict)));
-  chk(!!decision?.todo && decision?.kind && decision.kind !== "hold",
-    "canonicalDecision supplies one useful next action", JSON.stringify(decision));
+  // Answered at the last door since gpt-block was deleted (6 Oct): no canonical action is stapled on, so
+  // the property is that no SECOND instruction rides with the answer.
   const boldActions = finalBody.match(/\*[^*]+\*/g) || [];
-  chk(boldActions.length === 1 && finalBody.includes(String(decision.todo).replace(/[.!]\s*$/, "")),
-    "the body carries exactly that one canonical action", `action=${JSON.stringify(decision)} bold=${JSON.stringify(boldActions)}`);
+  chk(boldActions.length <= 1, "at most one instruction in the body", `action=${JSON.stringify(decision)} bold=${JSON.stringify(boldActions)}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -304,12 +303,12 @@ REAL("\n4b. THE BRAIN WAS ASKED THE WHOLE NOTE — not a window of it, not one q
 // client spoke. What it then says with them is the model's business and is not asserted here.
 {
   // SCOPED TO THE COACH CALL, not every model request in the turn. Joining all of them hid a
-  // windowed Coach prompt behind another call that still carried the note — the first version of
-  // this section did exactly that and its revert case stayed green. The multi-question
-  // instruction is what gpt-block sends ONLY on this path, so it identifies the request uniquely.
-  const coachRequests = askedOfModel.filter(r => r.includes("Answer EVERY one directly"));
+  // windowed Coach prompt behind another call that still carried the note. Since gpt-block was
+  // deleted (6 Oct) the mouth is the new coach's composer or, at the last door, askCoachK; both
+  // open "You are Coach K", which the understanding, scope and normaliser calls never do.
+  const coachRequests = askedOfModel.filter(r => r.includes("You are Coach K"));
   chk(coachRequests.length > 0,
-    "the multi-question Coach mouth was actually called",
+    "the Coach mouth was actually called",
     `${askedOfModel.length} model requests, ${coachRequests.length} of them the Coach's`);
   const prompt = coachRequests.join("\n");
 

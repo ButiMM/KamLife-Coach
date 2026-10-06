@@ -96,7 +96,7 @@ const dayOf = (r: Row) => sastDayKey(new Date(r.logged_at));
  * WAITS for the row — bounded, and a timeout is still a hard failure, because a turn that never
  * reaches the ledger is a turn nobody can audit afterwards.
  */
-// `wave1`: a talk turn the new coach owns (#445). This lab runs with CORE_WAVE1=off (the runner's default),
+// `wave1`: a talk turn the new coach owns (#445). This lab ran with CORE_WAVE1=off (deleted 6 Oct),
 // where the old path has no owner for it by design, so only the owner check is skipped; the gate grades its words.
 async function say(uid: string, phone: string, message: string, opts: { wave1?: boolean } = {}): Promise<{ reply: string; parts: number; ledgerRow: Row | null }> {
   LOG = [];

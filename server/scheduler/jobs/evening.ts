@@ -62,6 +62,7 @@ export const WHATS_NEW: Array<{ day: number; line: string }> = [ // day = SAST y
   { day: 20261002, line: "Tell me you trained and I'll say what it means for your week, and ask \"am I on track?\" any time: I'll answer from what you've logged this week." },
   { day: 20261006, line: "Your morning message now starts from your real yesterday, in my own words, with one thing for today." },
   { day: 20261007, line: "Monday's weigh-in, a new training phase and a hello after a quiet spell now come in my own words, from what you've told me." },
+  { day: 20261009, line: "Ask me anything about food, training or your week and you'll get a straight answer, without a to-do tacked on the end." },
 ];
 export const whatsNewLine = (day = Number(todaySAST().replace(/-/g, ""))): string => {
   const lines = WHATS_NEW.filter(n => n.day === day).map(n => n.line);

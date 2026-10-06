@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 const notes = (since?: string, until?: string) =>
   [since ? `sick_since:${since}` : "", until ? `sick_until:${until}` : "", until ? `paused_until:${until}` : ""]
     .filter(Boolean).join(" | ");
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { prescribesProtein } from "./hunger-checks";
 
@@ -4075,15 +4075,12 @@ test("verifier: it still catches the thing it was built to catch", () => {
 test("cut7: durable facts commit at the front door before coaching reads the user", () => {
   const strip = (x: string) => x.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
   const routes = strip(readFileSync("server/routes.ts", "utf-8"));
-  const gptBlock = strip(readFileSync("server/handlers/gpt-block.ts", "utf-8"));
   // THE DEFECT: the detectors sat last in the pipeline, so "my knee is killing me, had chicken
   // and pap" routed to the food handler and the injury was never recorded — while programme.ts
   // kept building sessions from users.injuries, which stayed NULL.
   assert.ok(/await bindClientTruth\(phone, message, sourceMessageId\)/.test(routes),
     "every message is committed at the door, and the same turn receives the refreshed projection");
-  assert.ok(!/storeMemory\(phone, `Client reported injury/.test(gptBlock),
-    "the prose detectors in the GPT handler are gone");
-  assert.ok(!/storeMemory\(phone, `Life situation update/.test(gptBlock), "…both blocks of them");
+  assert.ok(!existsSync("server/handlers/gpt-block.ts"), "the GPT handler and its prose detectors are gone (6 Oct)");
 });
 
 // A SAFETY TURN IS STILL AN ACCEPTED TURN, AND ACCEPTED TURNS GET EXACTLY ONE REVISION.

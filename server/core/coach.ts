@@ -52,7 +52,7 @@ async function foodTools(user: any, message: string): Promise<string> {
  * Nothing here is computed a second way, and the old 7-day brain snapshot is not read.
  */
 export async function ledgerNumbers(user: any, message = ""): Promise<string> {
-  const [{ getProgressTruth }, { getGoalProfile }, { energyFrameLine, waterTargetLitres }, { readHealthState }, { foodConstraints }] = await Promise.all([
+  const [{ getProgressTruth }, { getGoalProfile }, { energyFrameLine, waterTargetLitres, stepBurnKcal }, { readHealthState }, { foodConstraints }] = await Promise.all([
     import("../day-ledger"), import("../goal-profiles"), import("../targets"), import("../health-state"), import("../food-swaps")]);
   const t = await getProgressTruth(user, { days: 7 });
   const sa = (o: Intl.DateTimeFormatOptions) => new Date().toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", ...o });
@@ -79,7 +79,9 @@ export async function ledgerNumbers(user: any, message = ""): Promise<string> {
   lines.push(d.meals.length
     ? `Food today: ${d.meals.map(m => `${m.label || "meal"}: ${m.foods}`).join("; ")}. About ${Math.round(d.kcal)} kcal and ${Math.round(d.protein)}g protein so far${cal && profile.usesMacros ? `; about ${Math.max(0, cal - Math.round(d.kcal))} kcal left in the day` : ""}.`
     : "Food today: nothing logged yet. Don't scold, don't invent intake.");
-  lines.push(`Water today: ${d.water}L of ${waterTargetLitres(user.currentWeight)}L. Steps today: ${d.steps ? d.steps.toLocaleString("en-ZA") : "none logged"}.`);
+  // Walking calories (from advice-commands, deleted 6 Oct): the estimate is stepBurnKcal's, and the target already counts activity.
+  const burn = d.steps ? stepBurnKcal(d.steps, Number(user.currentWeight) || 75) : 0;
+  lines.push(`Water today: ${d.water}L of ${waterTargetLitres(user.currentWeight)}L. Steps today: ${d.steps ? `${d.steps.toLocaleString("en-ZA")} (about ${burn} kcal burned walking; their calorie target already allows for activity, so these are not "eaten back")` : "none logged"}.`);
   const w = t.window;
   lines.push(`Last ${w.days} days: food logged on ${w.daysLogged} day(s)${w.daysLogged ? `, averaging ${Math.round(w.avgKcal)} kcal and ${Math.round(w.avgProtein)}g protein per logged day` : ""}; ${t.sessions} training session(s); steps averaging ${Math.round(t.avgSteps).toLocaleString("en-ZA")} a day. Any streak or count must come from these numbers.`);
   const wt = t.weight;
@@ -197,20 +199,11 @@ async function openaiClient(): Promise<OpenAI> {
 }
 
 /**
- * THE WAVE-1 SWITCH (COVERAGE A10, A11, A13, A16, A17): on for everyone since 25 Sep (#445).
- * CORE_WAVE1=off is the instant rollback to the old engine and gpt-block, with no deploy. The
- * founder-first mode (#438) is gone: it had no client left to serve once wave 1 was on for all.
- */
-export function coreWave1For(_phone: string): boolean {
-  return String(process.env.CORE_WAVE1 || "on").toLowerCase() !== "off";
-}
-
-/**
  * The new coach answering for real, at the one place the old gpt-block answered (behind the scope
  * floor in routes.ts). Returns null when it cannot answer honestly: no reading of the message (#421)
  * or no reply. The caller then falls back to the old reply, so a failure is never silence.
  */
-export async function answerLive(phone: string, message: string): Promise<string | null> {
+export async function answerLive(phone: string, message: string, opts: { final?: boolean } = {}): Promise<string | null> {
   const pre = await readPreTurn(phone, message);
   if (!pre) return null;
   const openai = await openaiClient();
@@ -242,7 +235,8 @@ export async function answerLive(phone: string, message: string): Promise<string
     if (asks.length > 1 && reply) await (await import("../handlers/chat-log")).logChat(user.id, message, reply, "REMINDER_SET").catch(() => {});
     return reply || null;
   }
-  if (writes.length) return null;
+  // At the last door (`final`) every writer has already declined: answer anyway; the integrity floor stops a claimed write.
+  if (!opts.final && writes.length) return null;
   const reply = (await compose(openai, pre, message, read.u))?.trim();
   return reply || null;
 }
@@ -362,6 +356,33 @@ export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED,
   }
 }
 
+/**
+ * THE LAST DOOR (wave-1 deletion, 6 Oct). gpt-block answered whatever no owner above it did; it is
+ * deleted, and the new coach answers instead, even a turn whose reading names a write no writer took.
+ * Only when the new coach cannot answer at all (no reading, the model down) does askCoachK speak: its
+ * failure path alerts the founder on a dead key or an empty balance (#395) and returns a line the
+ * turn-integrity owner recognises as unanswered (#92). `readAlready`: wave1Turn read this turn (#451).
+ */
+export async function answerFinal(phone: string, message: string, user: any, readAlready = false): Promise<string> {
+  const [{ looksLikeRecallQuestion, answerRecall }, { turnEvidence, logChat }] = await Promise.all([import("../memory"), import("../handlers/chat-log")]);
+  // "What did I tell you about…": the grounded recall answers from their own messages, as it did behind gpt-block.
+  if (looksLikeRecallQuestion(message)) { turnEvidence({ conversationalOnly: true }); return answerRecall(user, message); }
+  const reply = readAlready ? null : await answerLive(phone, message, { final: true }).catch(() => null);
+  // numbers:low still does its job at the last door, whichever mouth speaks, as it did behind gpt-block.
+  const { getNumbersMode, stripNumbersFromProse } = await import("../numbers-mode");
+  const plain = (t: string) => getNumbersMode(user) === "low" ? stripNumbersFromProse(t) : t;
+  if (reply) return plain(reply);
+  // The model is out and they only said thanks: a short ack, never "the coach is unavailable" (gpt-block's, kept).
+  if ((await import("../handlers/chat-log")).isPureReaction(message)) { turnEvidence({ conversationalOnly: true }); return ["Sharp.", "Lekker.", "Sho.", "Yebo. 👊"][Math.floor(Math.random() * 4)]; }
+  const fallback = plain(await (await import("../gpt")).askCoachK(message, user));
+  // #92: a question we could not answer is told so, with no action invented on top of it.
+  if ((await import("../brain/reply-verifier")).isCoachUnavailableReply(fallback)) {
+    turnEvidence({ conversationalOnly: true });
+    await logChat(user.id, message, fallback, "COACH_UNAVAILABLE").catch(() => {});
+  }
+  return fallback;
+}
+
 /** One switched turn: the scope floor first, then the new coach. null = let the old engine answer. */
 export async function wave1Turn(p: { phone: string; message: string; userId: string; ongoing: boolean; evidence: (f: { conversationalOnly: true }) => void }): Promise<{ reply: string; src: string } | null> {
   const { classifyDomain, declineOutOfScope } = await import("../understanding/domain-guard");
@@ -435,10 +456,11 @@ export async function runShadow(pre: PreTurn | null, message: string, rootId: st
     // reaches it. So when this turn's own last exchange was that decline, the shadow records the decline
     // instead of composing. Otherwise the gate grades a coach that answers maths homework, which is not
     // the coach testers would meet.
-    const [last] = await db.select({ intent: chatHistory.intent, out: chatHistory.messageOut }).from(chatHistory)
+    const [last] = await db.select({ intent: chatHistory.intent, out: chatHistory.messageOut, said: chatHistory.messageIn }).from(chatHistory)
       .where(and(eq(chatHistory.userId, pre.userId), sql`${chatHistory.createdAt} > now() - interval '2 minutes'`))
       .orderBy(desc(chatHistory.createdAt)).limit(1);
-    const scoped = last?.intent === "DOMAIN_REDIRECT" && !!last.out;
+    // THIS message's decline only: the live new coach writes no chat row, so the last row can be the turn before.
+    const scoped = last?.intent === "DOMAIN_REDIRECT" && !!last.out && last.said === message;
     // NO CONFIDENT REPLY WITHOUT UNDERSTANDING (#421, ORDERS §4 step 4). When the reading failed, the
     // composer would be guessing what the client meant. Record the failure with no reply; the gate
     // counts it against the new coach instead of grading a guess.

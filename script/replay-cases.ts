@@ -1148,4 +1148,29 @@ export const CASES: ReplayCase[] = [
     ],
     rubric: "The client's friend wants to join. A good coach explains in one or two lines how the friend signs up (a link or the number to message).",
   },
+  // The wave-1 deletion (6 Oct): the last door's fixed advice answers went; the new coach answers these.
+  {
+    id: "which-step-app",
+    journey: 6,
+    source: "server/handlers/advice-commands.ts (deleted with the wave-1 last door, 6 Oct)",
+    turns: ["What app should I use to count my steps?"],
+    checks: [
+      { what: "the answer names a step counter", kind: "reply_matches", pattern: "samsung health|google fit|apple health|health app|pedometer", flags: "i" },
+      { what: "a question is never a log", invariant: "no_false_writes", kind: "sql", query: "SELECT COUNT(*)::int FROM step_logs WHERE user_id = $1", expect: "zero" },
+    ],
+    actions: { forbid: ["LOG_STEPS", "LOG_MEAL"] },
+    rubric: "The client asks which app to count steps with. A good coach names the one already on their phone (Samsung Health, Google Fit, Apple Health) or a cheap pedometer, and says to send the day's count, in three lines or fewer.",
+  },
+  {
+    id: "walking-calories-eat-back",
+    journey: 3,
+    source: "server/handlers/advice-commands.ts (deleted with the wave-1 last door, 6 Oct)",
+    turns: ["How many calories did I burn walking today? Can I eat them back?"],
+    checks: [
+      { what: "they are not told to eat the walking calories back on top of the target", kind: "reply_not_matches", pattern: "\\b(?:yes|sure)\\b[^.\\n]{0,40}eat (?:them|those|it) back|add (?:them|those) to your (?:target|budget)", flags: "i" },
+      { what: "nothing is logged", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: "zero" },
+    ],
+    actions: { forbid: ["LOG_STEPS", "LOG_MEAL"] },
+    rubric: "A fat-loss client asks what their walk burned and whether to eat it back. A good coach says the calorie target already counts their activity, so walking speeds fat loss rather than earning extra food, and gives an estimate only from steps actually logged.",
+  },
 ];

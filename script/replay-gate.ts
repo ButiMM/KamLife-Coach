@@ -444,7 +444,7 @@ if (coverageRows.length) {
 const { writesState } = await import("../server/understanding/actions");
 const wave1Ids = new Set((existsSync("docs/COVERAGE.md") ? readFileSync("docs/COVERAGE.md", "utf8").split("\n").filter(l => /^\| A1[0167] \|/.test(l)) : [])
   .flatMap(l => CASES.filter(k => new RegExp(`(?:^|[\\s,(])${k.id}(?:$|[\\s,)])`).test(l.split("|")[5] || "")).map(k => k.id)));
-const reachOn = String(process.env.CORE_WAVE1 || "on").toLowerCase() !== "off";
+const reachOn = true; // the CORE_WAVE1 off-path was deleted 6 Oct
 const reachCases = results.filter(r => wave1Ids.has(r.id) && CASES.find(k => k.id === r.id)?.owner !== "old-path" && !(CASES.find(k => k.id === r.id)?.actions?.expect ?? [])
   .some(e => writesState(typeof e === "string" ? e : e.type)));
 const reachMisses = reachOn ? reachCases.filter(r => (r.sources ?? []).some(src => src !== "new coach" && src !== "scope")) : [];

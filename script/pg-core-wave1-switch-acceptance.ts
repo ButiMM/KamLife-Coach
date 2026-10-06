@@ -2,18 +2,16 @@
  * REAL-POSTGRESQL ACCEPTANCE — the wave-1 switch (COVERAGE A10, A11, A13, A16, A17; #438).
  *
  * With the model stubbed at the network edge, this proves the switch's plumbing:
- *   - CORE_WAVE1 on (the default): every client meets the new coach;
+ *   - every client meets the new coach (its CORE_WAVE1 off-path was deleted 6 Oct);
  *   - the new coach answers where gpt-block did, BEHIND the scope floor (an off-topic ask is still declined);
  *   - a message the new coach cannot read falls back to the old reply: never silence, never a guess (#421);
  *   - a client midway through an old flow (a menu awaiting "1/2/3") finishes it there (#440);
- *   - CORE_WAVE1=off is the instant rollback.
  */
 if (!process.env.DATABASE_URL) { console.log("pg-core-wave1-switch-acceptance: SKIPPED — no DATABASE_URL."); process.exit(0); }
 process.env.OPENAI_API_KEY = "sk-stub"; process.env.OFFLINE_AI = "0"; process.env.NORMALIZER = "off";
 process.env.ENGINE_LIVE = "on"; process.env.PROACTIVE_PAUSED = "true"; process.env.NODE_ENV = "production";
 process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000"; process.env.TWILIO_AUTH_TOKEN = "test"; process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 const FOUNDER = "whatsapp:+27829438001", TESTER = "whatsapp:+27829438002";
-process.env.CORE_WAVE1 = "on"; // the runner pins off for stubbed suites; this one proves the switch
 
 const NEW = "NEW-COACH-438"; // only the new coach's composer says this
 const realFetch = globalThis.fetch;
@@ -128,11 +126,6 @@ REAL("\n4d. A14 — A REMINDER IN THEIR OWN WORDS IS READ BY THE NEW COACH AND S
   const count = async () => (await pool.query("SELECT COUNT(*)::int n FROM reminders r JOIN users u ON u.id = r.user_id WHERE u.phone_number = $1 AND r.kind = 'user'", [TESTER])).rows[0].n;
   const um = await say(TESTER, "Maybe nudge me about my gym bag, I haven't decided when"); chk(await count() === 1 && /when should I remind you/i.test(um), "unsure of the time: it asks, and saves nothing", um.slice(0, 120)); await pool.query("UPDATE users SET awaiting_input_type = NULL WHERE phone_number = $1", [TESTER]);
   const two = await say(TESTER, "Nudge me to pack my gym bag tomorrow at 7am and give me a shout for vitamins at 8am"); const rows = (await pool.query("SELECT COUNT(*)::int n FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.message_in LIKE 'Nudge me to pack%'", [TESTER])).rows[0].n; chk(await count() === 3 && /vitamins/i.test(two) && rows === 1, "two reminders in one message: both saved, both confirmed, one row in the chat record", `${await count()} | rows=${rows} | ${two.slice(0, 120)}`); }
-
-REAL("\n5. INSTANT ROLLBACK");
-process.env.CORE_WAVE1 = "off";
-const f4 = await say(FOUNDER, ASK);
-chk(!f4.includes(NEW), "CORE_WAVE1=off: the founder is back on the old coach, with no deploy", f4);
 
 for (const phone of [FOUNDER, TESTER]) await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
 REAL(`\npg-core-wave1-switch-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);

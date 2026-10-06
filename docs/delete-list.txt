@@ -3,15 +3,11 @@
 # are kept below as comments, so the board counts only what can actually reach zero.
 #
 # ── DELETE WHOLE (talk and decisions the new core replaces) ──
-server/handlers/gpt-block.ts
 server/understanding/meaning-engine.ts
 server/understanding/perception.ts
 server/brain/coach-brain.ts
 server/brain/client-snapshot.ts
-server/agents.ts
-server/handlers/advice-commands.ts
 server/handlers/food-commands.ts
-server/handlers/numbers-literacy.ts
 server/normalizer-fidelity.ts
 server/drill-cases.ts
 server/one-action.ts
