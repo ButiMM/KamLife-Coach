@@ -78,7 +78,7 @@ export interface ReplayCase {
    * A SCHEDULED MESSAGE, NOT A REPLY (#433): after `before`, the real job runs for this one client and
    * what it would send is graded as the case's only body. `turns` stays empty. An empty body is "nothing sent".
    */
-  proactive?: "morning" | "evening" | "weekly" | "monday" | "reminders" | "onboarding" | "silence";
+  proactive?: "morning" | "evening" | "weekly" | "monday" | "reminders" | "onboarding" | "silence" | "phase";
   /** Turns sent first and not graded — the state the failure needs. */
   before?: string[];
   /** The graded turns, in order. */
@@ -979,6 +979,18 @@ export const CASES: ReplayCase[] = [
     ],
     rubric: "A scheduled evening message to a client who logged lunch today. A good one knows lunch is in, asks about dinner or the day in one line, and does not nag.",
   },
+  { id: "commitment-accepted", journey: 5, source: "docs/COMMITMENT-LOOP.md §8.1", turns: ["Ke tla tsamaya 30 minutes after work ka Labone, hold me to it"],
+    checks: [{ what: "one open commitment is on their record", kind: "sql", query: "SELECT count(*)::int FROM client_facts WHERE user_id = $1 AND kind = 'commitment' AND superseded_by IS NULL", expect: { equals: 1 } }],
+    rubric: "Setswana and English: 'I'll walk 30 minutes after work on Thursday, hold me to it.' A good reply backs it in a line, in their language or plain English, and asks nothing else about it." },
+  { id: "commitment-silence-is-not-yes", journey: 5, source: "docs/COMMITMENT-LOOP.md §8.2", turns: ["What's a good snack before gym?"],
+    checks: [{ what: "a question commits them to nothing", kind: "sql", query: "SELECT count(*)::int FROM client_facts WHERE user_id = $1 AND kind = 'commitment' AND superseded_by IS NULL", expect: "zero" }], rubric: "A plain question. The client has promised nothing, so nothing is recorded as a promise." },
+  { id: "commitment-evening-follow-up", journey: 5, source: "docs/COMMITMENT-LOOP.md §8.4", before: ["I'll do a 20 minute walk tonight, check on me later"], proactive: "evening", turns: [],
+    checks: [{ what: "the evening message is the one follow-up", kind: "reply_matches", pattern: "how did it go|did it happen", flags: "i" },
+      { what: "and it is marked asked, so it is never chased twice", kind: "sql", query: "SELECT count(*)::int FROM client_facts WHERE user_id = $1 AND kind = 'commitment' AND superseded_by IS NULL AND detail->>'state' = 'asked'", expect: { equals: 1 } }],
+    rubric: "The evening of the day they promised a walk, with nothing logged. A good message asks once, kindly, how it went, with no guilt words, and replaces the usual evening recap." },
+  { id: "commitment-kept-no-chase", journey: 5, source: "docs/COMMITMENT-LOOP.md §8.3", before: ["I'll train tonight, hold me to it", "Just finished my gym session, 45 minutes of legs"], proactive: "evening", turns: [],
+    checks: [{ what: "a kept promise is not asked about", kind: "reply_not_matches", pattern: "how did it go|did it happen", flags: "i" }],
+    rubric: "They promised a session and logged it. A good evening message recognises it in one line and does not ask whether it happened." },
   {
     id: "weekly-report-with-logs",
     journey: 7,
@@ -1147,5 +1159,143 @@ export const CASES: ReplayCase[] = [
       { what: "nothing is logged", invariant: "no_false_writes", kind: "sql", query: MEAL_COUNT, expect: "zero" },
     ],
     rubric: "The client's friend wants to join. A good coach explains in one or two lines how the friend signs up (a link or the number to message).",
+  },
+  // A18 (CTO 6 Oct, #391): the Promise rows in the languages testers actually write in. A voice note
+  // re-enters as its transcript (A4), so its case is the transcript; a photo (A3) has no case shape yet.
+  {
+    id: "zulu-uphuthu-lunch",
+    journey: 2,
+    source: "docs/COVERAGE.md A18 × A1",
+    turns: ["Ngidle uphuthu nenyama emini"],
+    checks: [
+      { what: "the lunch is logged", kind: "sql", query: MEAL_COUNT, expect: "nonzero" },
+    ],
+    actions: { expect: ["LOG_MEAL"] },
+    rubric: "In isiZulu: 'I ate pap (uphuthu) and meat at lunch.' A good coach logs pap and meat as lunch and says one short thing about it, in the client's language mix.",
+  },
+  {
+    id: "setswana-bogobe-dinner",
+    journey: 2,
+    source: "docs/COVERAGE.md A18 × A1",
+    turns: ["Ke jele bogobe le nama ya kgomo maitseboa"],
+    checks: [
+      { what: "the dinner is logged", kind: "sql", query: MEAL_COUNT, expect: "nonzero" },
+    ],
+    actions: { expect: ["LOG_MEAL"] },
+    rubric: "In Setswana: 'I ate pap (bogobe) and beef this evening.' A good coach logs it as dinner and replies briefly, never asking them to repeat it in English.",
+  },
+  {
+    id: "afrikaans-rys-nie-pap-nie",
+    journey: 2,
+    source: "docs/COVERAGE.md A18 × A2",
+    before: ["I had pap for lunch"],
+    turns: ["Nee wag, dit was rys, nie pap nie"],
+    checks: [
+      { what: "the rice is logged", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND (COALESCE(items::text,'') || COALESCE(raw_message,'')) ~* 'rice|rys'", expect: "nonzero" },
+      { what: "the pap the client corrected is not still counted", invariant: "no_false_writes", kind: "sql", query: "SELECT COUNT(*)::int FROM meal_logs WHERE user_id = $1 AND COALESCE(items::text,'') ~* '\"pap'", expect: "zero" },
+    ],
+    actions: { expect: [{ type: "CORRECT_MEAL", match: { to: "rice|rys" } }], forbid: ["LOG_MEAL"] },
+    rubric: "In Afrikaans: 'No wait, it was rice, not pap.' A good reply swaps lunch to rice in place and says so in one line.",
+  },
+  {
+    id: "sesotho-voice-eggs-breakfast",
+    journey: 2,
+    source: "docs/COVERAGE.md A18 × A4 (the transcript a voice note re-enters as)",
+    turns: ["eh coach so hoseng ke jele mahe a mabedi le toast, ke ne ke lapile haholo"],
+    checks: [
+      { what: "the breakfast is logged", kind: "sql", query: MEAL_COUNT, expect: "nonzero" },
+    ],
+    actions: { expect: ["LOG_MEAL"] },
+    rubric: "A Sesotho voice note, transcribed: 'eh coach, this morning I ate two eggs and toast, I was very hungry.' A good coach logs two eggs and toast as breakfast and answers the hunger in one warm line.",
+  },
+  {
+    id: "zulu-steps-8000",
+    journey: 2,
+    source: "docs/COVERAGE.md A18 × A5",
+    turns: ["Namuhla ngihambe ama-steps angu 8000"],
+    checks: [
+      { what: "the 8000 steps are stored", invariant: "no_false_writes", kind: "sql", query: "SELECT COALESCE(MAX(steps), 0) FROM step_logs WHERE user_id = $1", expect: { equals: 8000 } },
+    ],
+    actions: { expect: [{ type: "LOG_STEPS", match: { count: "^8000$" } }] },
+    rubric: "In isiZulu: 'Today I walked 8000 steps.' A good coach records it and credits it against their 8000 target, briefly.",
+  },
+  {
+    id: "afrikaans-12000-tree",
+    journey: 2,
+    source: "docs/COVERAGE.md A18 × A5",
+    turns: ["Ek het vandag 12 000 treë geloop"],
+    checks: [
+      { what: "the 12000 steps are stored", invariant: "no_false_writes", kind: "sql", query: "SELECT COALESCE(MAX(steps), 0) FROM step_logs WHERE user_id = $1", expect: { equals: 12000 } },
+      { what: "a client who walked 12k is not told to go for a walk", kind: "reply_not_matches", pattern: "go for a walk|gaan stap", flags: "i" },
+    ],
+    actions: { expect: [{ type: "LOG_STEPS", match: { count: "^12000$" } }] },
+    rubric: "In Afrikaans: 'I walked 12,000 steps today.' A good coach records it and credits it, without prescribing more walking.",
+  },
+  {
+    id: "morning-after-a-zulu-day",
+    journey: 5,
+    source: "docs/COVERAGE.md A18 × B1",
+    before: ["Ngidle ama-oats ekuseni, uphuthu nenkukhu emini"],
+    proactive: "morning",
+    turns: [],
+    checks: [
+      { what: "a morning message is sent", kind: "reply_matches", pattern: "\\S" },
+      { what: "no welcome-back for a client who was here yesterday", kind: "reply_not_matches", pattern: "good to have you back|welcome back|missed you|been a while", flags: "i" },
+    ],
+    rubric: "A scheduled morning message to a client who logged yesterday in isiZulu (oats, then pap and chicken). A good one uses something real from yesterday, may carry a word or two of isiZulu, and gives one clear thing for today.",
+  },
+  {
+    id: "evening-after-afrikaans-lunch",
+    journey: 5,
+    source: "docs/COVERAGE.md A18 × B2",
+    before: ["Ek het pap en hoender vir middagete gehad"],
+    proactive: "evening",
+    turns: [],
+    checks: [
+      { what: "an evening message is sent", kind: "reply_matches", pattern: "\\S" },
+      { what: "it does not say nothing was logged", kind: "reply_not_matches", pattern: "nothing logged|haven'?t logged|no meals? (?:logged|today)|log one meal", flags: "i" },
+      { what: "it names what they ate", kind: "reply_matches", pattern: "pap|chicken|hoender", flags: "i" },
+    ],
+    rubric: "A scheduled evening message to a client who logged lunch in Afrikaans (pap and chicken). A good one knows lunch is in, asks about dinner or the day in one line, and does not nag.",
+  },
+  {
+    id: "monday-weigh-in-setswana-client",
+    journey: 5,
+    source: "docs/COVERAGE.md A18 × B3",
+    seed: { lastActiveAt: "-1d" },
+    before: ["Dumela coach, ke tsogile sentle"],
+    proactive: "monday",
+    turns: [],
+    checks: [
+      { what: "a weigh-in reminder is sent", kind: "reply_matches", pattern: "weigh|scale|sekala|boima", flags: "i" },
+    ],
+    rubric: "The Monday weigh-in reminder to a client who greets in Setswana. A good one is short, explains consistent weighing in one line, and treats the scale as data, not judgment.",
+  },
+  {
+    id: "phase-up-xhosa-client",
+    journey: 6,
+    source: "docs/COVERAGE.md A18 × B5",
+    seed: { programmeWeek: 4, programmePhase: 1 },
+    before: ["Molo coach, ndigqibile i-workout yam namhlanje"],
+    proactive: "phase",
+    turns: [],
+    checks: [
+      { what: "the new phase is announced", kind: "reply_matches", pattern: "phase|build", flags: "i" },
+      { what: "no invented session count", invariant: "no_invented_facts", kind: "reply_not_matches", pattern: "\\b(?:1[3-9]|[2-9]\\d) (?:of \\d+ )?(?:planned )?sessions?\\b", flags: "i" },
+    ],
+    rubric: "The client (who writes in isiXhosa) finished Phase 1 with 12 sessions logged in 4 weeks and moves up to Phase 2: Build. A good message says they earned it from the real count, names the new phase, in two short lines, and offers the first session.",
+  },
+  {
+    id: "silence-after-xhosa-week",
+    journey: 5,
+    source: "docs/COVERAGE.md A18 × B6",
+    seed: { lastActiveAt: "-5d" },
+    before: ["Enkosi coach, ndiyabulela kakhulu"],
+    proactive: "silence",
+    turns: [],
+    checks: [
+      { what: "no guilt", kind: "reply_not_matches", pattern: "where have you been|you disappeared|you'?ve been quiet for|start (?:again|over)", flags: "i" },
+    ],
+    rubric: "A client who last wrote in isiXhosa ('thank you coach, I'm very grateful') has been quiet for five days. A good message is warm, guilt-free, short, and makes coming back easy with one small thing.",
   },
 ];

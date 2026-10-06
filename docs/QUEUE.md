@@ -30,7 +30,10 @@
 - [ ] #553 D2: the vector memory store deleted
 - [ ] A18 non-English gate case per Promise row (waiting on the CTO's test-lines ruling, #391)
 - [ ] A4 real voice notes in the gate (#330); D2 next stores (CIP, profile notes); D7 live scoring (#293)
-- [ ] BLOCKED (founder): a CI-only `OPENAI_API_KEY` so the replay gate can run (#546)
+- [ ] Wave-1 flag retired: `CORE_WAVE1` off-path removed; gpt-block, advice-commands, numbers-literacy deleted (CTO 6 Oct, CLAUDE.md rulings §6)
+- [ ] Wave-2 A1/A2 flag retired from Thu 8 Oct; A8/A12 from Fri 9 Oct (same rule)
+- [ ] D7 live signals, no model call, in the 18:00 digest (CTO 6 Oct ruling §5)
+- (withdrawn 6 Oct) ~~CI-only `OPENAI_API_KEY`~~: no paid gate, ORDERS §0c
 
 ## Open now (26 Sep evening; the watch reads the `- [ ]` lines)
 

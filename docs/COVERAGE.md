@@ -29,11 +29,11 @@ A row is **complete** when:
 
 | # | Capability | Owner today | New core must | Gate | Live | Retires |
 |---|---|---|---|---|---|---|
-| A1 | Log food in words ("pap and chicken for lunch") | `handlers/food-context.ts`, `food-commands.ts`, `referent-log.ts`, `meal-repeat.ts`, meaning engine | action `LOG_MEAL` | finished-dinner, a-pear, dinner-same-as-last-meal, three-days-one-message, steps-10k, same-as-lunch-same-calories, portion-size-changes-calories | none | food-commands, food-context, meal-repeat, referent-log |
-| A2 | Correct / remove a named meal ("hayi, it was chicken") | `food-log-mgmt.ts`, `food-context.ts` | action `CORRECT_MEAL` (proposed in shadow; executor wiring comes with the switch) | decline-deletes-lunch, normaliser-j5-correction, hayi-correction, negated-multiword-food | none | food-log-mgmt |
+| A1 | Log food in words ("pap and chicken for lunch") | `handlers/food-context.ts`, `food-commands.ts`, `referent-log.ts`, `meal-repeat.ts`, meaning engine | action `LOG_MEAL` | finished-dinner, a-pear, dinner-same-as-last-meal, three-days-one-message, steps-10k, same-as-lunch-same-calories, portion-size-changes-calories, zulu-uphuthu-lunch, setswana-bogobe-dinner | none | food-commands, food-context, meal-repeat, referent-log |
+| A2 | Correct / remove a named meal ("hayi, it was chicken") | `food-log-mgmt.ts`, `food-context.ts` | action `CORRECT_MEAL` (proposed in shadow; executor wiring comes with the switch) | decline-deletes-lunch, normaliser-j5-correction, hayi-correction, negated-multiword-food, afrikaans-rys-nie-pap-nie | none | food-log-mgmt |
 | A3 | Photo of food / label / menu | `handlers/media.ts`, `food-scanner.ts`, `food-vision-prompt.ts` | action from the image (the shadow skips media today) | **0** | none | — |
-| A4 | Voice note (any language) | `routes/whatsapp.ts` → transcription → re-enters as text | same as its text family | **0** (#330) | none | — |
-| A5 | Steps, distance screenshot, health sync | `steps.ts`, `distance-log.ts`, `routes/health-sync.ts` | action `LOG_STEPS` | steps-10k | none | — |
+| A4 | Voice note (any language) | `routes/whatsapp.ts` → transcription → re-enters as text | same as its text family | sesotho-voice-eggs-breakfast | none | — |
+| A5 | Steps, distance screenshot, health sync | `steps.ts`, `distance-log.ts`, `routes/health-sync.ts` | action `LOG_STEPS` | steps-10k, zulu-steps-8000, afrikaans-12000-tree | none | — |
 | A6 | Water, sleep | `water.ts`, `sleep.ts` | action `LOG_WATER`; sleep has none | water-two-litres | none | water, sleep |
 | A7 | Weight, weigh-in, body/progress photos | `weight.ts`, `media.ts`, `physique-analysis.ts`, `weight-context.ts` | action `LOG_WEIGHT`; photos have none | weigh-in-in-words | none | — |
 | A8 | Workout done / lifts / "show my workout" | `handlers/workout.ts`, `workout-state.ts` | action `SHOW_WORKOUT`, `LOG_WORKOUT` (proposed in shadow) | moved-workout, knee-hurt-on-run, finished-leg-day, skipped-gym-not-done, setswana-gym-yesterday | none | — |
@@ -46,18 +46,18 @@ A row is **complete** when:
 | A15 | Sick / injured pause, pain triage | `sick-flow.ts`, `pain-triage.ts` | action `SET_SICK`/`END_SICK` + floor for red-flag pain | knee-hurt-on-run | none | sick-flow |
 | A16 | Stats, streaks, NPS, supplements, motivation, "how was my week" | **`core/coach.ts` (wave 1 ON, #445)** from `ledgerNumbers`; explicit card commands (progress, scorecard, targets) keep their cards | reply from real numbers | how-was-my-week, protein-so-far-today, streak-one-day, creatine-question, afrikaans-calories-today, travel-week-how-am-i-doing | none | misc-commands, numbers-literacy |
 | A17 | Off-topic (CV, crypto, homework) | `understanding/domain-guard.ts` in front of **`core/coach.ts` (wave 1 ON, #445)** | floor | business-plan-for-gym, cv-skipped-gym-control, crypto-tip, maths-homework, isizulu-write-my-cv, roster-request-offtopic | none | — |
-| A18 | Mixed languages: Setswana, isiZulu, isiXhosa, Sesotho, Afrikaans, SA slang | normaliser, `sa-transcript.ts`, `voice-language.ts` | every row above | hayi-correction, afrikaans-eggs-bread-cheese, setswana-tired-of-trying, afrikaans-calories-today, isizulu-write-my-cv | none | — |
+| A18 | Mixed languages: Setswana, isiZulu, isiXhosa, Sesotho, Afrikaans, SA slang | normaliser, `sa-transcript.ts`, `voice-language.ts` | every row above | hayi-correction, afrikaans-eggs-bread-cheese, setswana-tired-of-trying, afrikaans-calories-today, isizulu-write-my-cv, zulu-uphuthu-lunch, setswana-bogobe-dinner, afrikaans-rys-nie-pap-nie, sesotho-voice-eggs-breakfast, zulu-steps-8000, afrikaans-12000-tree, morning-after-a-zulu-day, evening-after-afrikaans-lunch, monday-weigh-in-setswana-client, phase-up-xhosa-client, silence-after-xhosa-week | none | — |
 
 ## B. Messages the coach starts (proactive): **none of this is graded**
 
 | # | Capability | Owner today | New core must | Gate | Live |
 |---|---|---|---|---|---|
-| B1 | Morning message | `scheduler/jobs/morning.ts`, `morning-message.ts` | proactive via one writer (#319) | morning-after-a-logged-day | none |
-| B2 | Evening "what happened today" | `jobs/evening.ts` | proactive | evening-after-lunch-logged | none |
-| B3 | Monday weigh-in | `jobs/monday.ts` | proactive | monday-weigh-in, monday-weigh-in-withheld | none |
+| B1 | Morning message | `scheduler/jobs/morning.ts`, `morning-message.ts` | proactive via one writer (#319) | morning-after-a-logged-day, morning-after-a-zulu-day | none |
+| B2 | Evening "what happened today" | `jobs/evening.ts` | proactive | evening-after-lunch-logged, evening-after-afrikaans-lunch | none |
+| B3 | Monday weigh-in | `jobs/monday.ts` | proactive | monday-weigh-in, monday-weigh-in-withheld, monday-weigh-in-setswana-client | none |
 | B4 | Weekly report, shopping-list card | `jobs/weekly.ts`, `weekly-recap.ts` | proactive (journey 7) | how-was-my-week, weekly-report-with-logs (scheduled) | none |
-| B5 | Programme advance / today's workout | `jobs/programme.ts`, `programme.ts` | proactive | **0** | none |
-| B6 | Re-engagement / back after a week | `morning.ts` (A/B), `engagement.ts` | proactive | back-after-a-week, morning-after-nine-silent-days (scheduled) | none |
+| B5 | Programme advance / today's workout | `jobs/programme.ts`, `programme.ts` | proactive | phase-up-xhosa-client | none |
+| B6 | Re-engagement / back after a week | `morning.ts` (A/B), `engagement.ts` | proactive | back-after-a-week, morning-after-nine-silent-days (scheduled), silence-after-xhosa-week | none |
 | B7 | Reminders firing | `jobs/reminders.ts` | proactive | vitamin-reminder-fires (scheduled) | none |
 | B8 | Monthly narrative, CIP update | `jobs/cip-update.ts` (the monthly send `jobs/narrative.ts` retired 30 Sep, #511) | retire into the record | **0** | none |
 | B9 | Onboarding catch-ups | `jobs/onboarding.ts` | proactive | day-two-of-the-programme (scheduled) | none |

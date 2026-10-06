@@ -148,6 +148,7 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   if ((await shadowDoor(phone, out, "reply", "server/routes/whatsapp.ts", media)) && !isCrisisOut) {
     await finalise("shadow");
     await closeHeldReminders(rootId ?? phone, false).catch(() => {}); // B7 (#538): not delivered, so still held
+    await (await import("../core/client-record")).closeFollowUp(rootId ?? phone, false).catch(() => {}); // A19: not delivered, still open
     return;
   }
 
@@ -158,15 +159,19 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   const spoken = await voiceReplyFor(phone, out);
   if (spoken) outMedia = [...(Array.isArray(media) ? media : media ? [media] : []), spoken];
   // THE DELIVERY OWNER'S OWN VERDICT, not an assumption that awaiting a send means it landed.
-  const outcome = await sendParts(phone, splitMessage(out), outMedia);
+  // #554: a held reminder is closed by the bubble(s) that carry it, not by the worst bubble of the reply.
+  const carried: DeliveryResult[] = [];
+  const outcome = await sendParts(phone, splitMessage(out), outMedia, (t, r) => { if (t.includes("⏰ Reminder:")) carried.push(r); });
   await finalise(outcome);
-  await closeHeldReminders(rootId ?? phone, deliveryAccepted(outcome)).catch(() => {}); // B7 (#538): closed only once delivered
+  await closeHeldReminders(rootId ?? phone, carried.length ? carried.every(r => deliveryAccepted(r)) : deliveryAccepted(outcome)).catch(() => {}); // B7 (#538, #554): closed only once its bubble is delivered
+  await (await import("../core/client-record")).closeFollowUp(rootId ?? phone, deliveryAccepted(outcome)).catch(() => {}); // A19: asked only once delivered
 }
 
 async function sendParts(
   phone: string,
   parts: string[],
   replyMedia: string | string[] | null,
+  onText?: (text: string, outcome: DeliveryResult) => void,
 ): Promise<DeliveryResult> {
   const mediaUrls = Array.isArray(replyMedia) ? replyMedia.filter(Boolean) : (replyMedia ? [replyMedia] : []);
   // ONE DELIVERY OWNER (Cut B2, 2026-09-01). This built its own Twilio client, resolved its own
@@ -201,6 +206,7 @@ async function sendParts(
   let worst: DeliveryResult = textParts.length ? "sent" : "dropped";
   for (let i = 0; i < textParts.length; i++) {
     const r = await sendOne({ body: textParts[i].trim() }, `part ${i + 1}`);
+    onText?.(textParts[i], r);
     if (rank[r] > rank[worst]) worst = r;
   }
   for (let k = 0; k < mediaUrls.length; k++) {
@@ -301,7 +307,7 @@ export async function processTextAsync(
       if (shadowPre) {
         const [pre, m] = await Promise.all([shadowPre, import("../core/coach")]);
         await m.runShadow(pre, message, rootId, sourceMessageId);
-      }
+      } else await (await import("../core/coach")).learnFromLiveRead(phone, sourceMessageId); // #545: the live read teaches the record
     })().catch(() => {});
   }
 }
@@ -335,7 +341,11 @@ async function processVoiceAsync(
   } finally {
     await completeMediaJob(sourceMessageId).catch(() => {});
     // THE CLIENT RECORD (#271) — a voice note is an inbound message too; its transcript is stored.
-    void import("../core/client-record").then(m => m.recordAtDoor({ phone, rawText: message, mediaType, sourceMessageId, rootId }));
+    // Then the live read teaches the record from the transcript, as the text door does (#545 attack: a spoken promise was lost).
+    void (async () => {
+      await (await import("../core/client-record")).recordAtDoor({ phone, rawText: message, mediaType, sourceMessageId, rootId });
+      await (await import("../core/coach")).learnFromLiveRead(phone, sourceMessageId);
+    })().catch(() => {});
   }
 }
 
