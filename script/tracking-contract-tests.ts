@@ -787,7 +787,7 @@ const MUST_WRITE: [string, string][] = [
   }
 
   /**
-   * #131 — ONE COMMERCIAL CONTRACT: R149, PAID UPFRONT, 14-DAY MONEY-BACK, NO FREE TRIAL.
+   * #131 — ONE COMMERCIAL CONTRACT: R199 (#567, CTO 6 Oct; was R149), PAID UPFRONT, 14-DAY MONEY-BACK, NO FREE TRIAL.
    *
    * The website was corrected to the locked offer while product truth still said R199 and a
    * 7-day guarantee, so a customer could arrive from a truthful page and be quoted different
@@ -801,10 +801,10 @@ const MUST_WRITE: [string, string][] = [
     // 4. THE BILLING OWNER. routes/payments.ts sends this to PayFast as `amount` and
     // `recurring_amount`, and verifies the ITN against it. This is the control that goes RED if
     // the price is reverted.
-    if (PRICING.monthlyPriceZAR !== 149) {
-      failures.push(`The billing amount owner is ${PRICING.monthlyPriceZAR}, not 149 — PayFast would charge that, whatever the website says`);
+    if (PRICING.monthlyPriceZAR !== 199) {
+      failures.push(`The billing amount owner is ${PRICING.monthlyPriceZAR}, not 199 — PayFast would charge that, whatever the website says`);
     }
-    if (!/^R149\b/.test(PRICING.monthlyDisplay)) {
+    if (!/^R199\b/.test(PRICING.monthlyDisplay)) {
       failures.push(`The price display says "${PRICING.monthlyDisplay}" while the charge is R${PRICING.monthlyPriceZAR}`);
     }
     // The daily figure is a claim about the monthly price and has to follow it.
@@ -832,7 +832,7 @@ const MUST_WRITE: [string, string][] = [
     const money = say("i can't afford it");
     for (const [label, r] of [["price question", price], ["stall", stall], ["money objection", money]] as const) {
       if (!r) { failures.push(`The conversion handler no longer answers a ${label} — the rest of this block grades nothing`); continue; }
-      if (/R199|R6\.63/.test(r)) {
+      if (/R149|R4\.97/.test(r)) {
         failures.push(`A prospect asking about ${label} is still quoted the old offer: "${r.replace(/\n/g, " ⏎ ").slice(0, 160)}"`);
       }
     }
@@ -840,8 +840,8 @@ const MUST_WRITE: [string, string][] = [
     if (/R250/.test(price)) {
       failures.push(`A prospect asking the price is quoted a personal-trainer price nobody measured: "${price.replace(/\n/g, " ⏎ ").slice(0, 200)}"`);
     }
-    if (!/R149/.test(price)) {
-      failures.push(`A prospect asking the price is not told R149: "${price.replace(/\n/g, " ⏎ ").slice(0, 160)}"`);
+    if (!/R199/.test(price)) {
+      failures.push(`A prospect asking the price is not told R199: "${price.replace(/\n/g, " ⏎ ").slice(0, 160)}"`);
     }
     // 2. Risk reversal is the guarantee, not a free week.
     if (!/14-day money-back/.test(stall)) {

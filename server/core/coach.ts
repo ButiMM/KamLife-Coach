@@ -323,11 +323,15 @@ const JUST_LOGGED = {
 } as const;
 
 /** The new coach's reply to a turn whose fact the proven owner just wrote. null = keep the old receipt. */
-export async function afterLogReply(phone: string, message: string, receipt: string, kind: keyof typeof JUST_LOGGED = "food"): Promise<string | null> {
+export async function afterLogReply(phone: string, message: string, receipt: string, kind: keyof typeof JUST_LOGGED = "food", user?: any): Promise<string | null> {
   if (!coreWave2For(phone) || keepsReceipt(receipt)) return null;
   try {
     const pre = await readPreTurn(phone, message);
     if (!pre) return null;
+    // THE HEALTH-STANDARD GUARDRAIL IS DETERMINISTIC (#575): given the client, today's line ("caffeine is not
+    // fuel…") follows the new words, and is kept out of the composer's context so it is said once.
+    const guard = user ? await (await import("../nutrition-guardrails")).nutritionGuardrailNudge(user) : "";
+    if (guard) receipt = receipt.replace(guard.trim(), "");
     pre.numbers += `\nJUST SAVED THIS TURN (already on the ledger above; never ask them to log it again): ${receipt.replace(/\[[A-Z]+:[^\]]*\]/g, "").replace(/\s+/g, " ").slice(0, 300)}`;
     const u: Understanding = { family: "report", wants: `${JUST_LOGGED[kind]}. Give no instruction or next step: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
     const reply = (await compose(await openaiClient(), pre, message, u))?.trim();
@@ -336,7 +340,7 @@ export async function afterLogReply(phone: string, message: string, receipt: str
     const { stripModelDirectives } = await import("../brain/reply-verifier");
     const words = afterLogWords(reply, receipt, r => stripModelDirectives(r, { modelAuthored: true } as any).kept);
     if (words) await foldedFollowUp(phone, pre, words).catch(() => {});
-    return words;
+    return words ? `${words}${guard}` : words;
   } catch (e) {
     console.warn("[CORE_WAVE2] kept the receipt:", (e as Error)?.message || e);
     return null;

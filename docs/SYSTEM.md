@@ -56,7 +56,7 @@ The full list of names and code defaults is in the outgoing CTO's handover (22-2
 | 30 Sep | **Price range: R199 to R250 a month** (founder). R149 and R99 are no longer candidates. The first paying group tests R199 against R249. |
 | 30 Sep | **WhatsApp templates:** the founder submitted templates to Twilio/Meta weeks ago and is in contact with Twilio. Status is tracked in `admin` issues, not re-asked. |
 | 30 Sep | **Responsibilities split** (see ORDERS §6): CTO (Claude, chat) = engineering and build direction; Codex = attacks, reviews and administration (Twilio/Meta, billing, POPIA paperwork); marketing and market research in a separate room; Grok = daily independent review. |
-| parked | Coach K price: founder wants R199-R249 (code says R149). Decide when the core works. |
+| 6 Oct | **The till charges R199** (#567, CTO ruling: the low end of the decided range). Earlier subscribers' PayFast tokens keep renewing at R149 and the ITN check accepts both (`shared/pricing.ts` `legacyPricesZAR`). |
 
 ## Founder checks still open (Railway, only the founder can see it)
 

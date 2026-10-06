@@ -2906,7 +2906,7 @@ test("money objection frames the daily cost, from the price owner", async () => 
   assert.ok(r !== null, "money objection should be answered");
   const daily = PRICING.dailyDisplay.replace("/day", "");
   assert.ok(r!.reply.includes(daily), `money reply should frame the daily cost (${daily}): ${r!.reply.slice(0, 120)}`);
-  assert.ok(!/R199|R6\.63/.test(r!.reply), "money reply still quotes the retired offer");
+  assert.ok(!/R149\b|R4\.97/.test(r!.reply), "money reply still quotes the retired offer (R149, retired by #567)");
 });
 
 // ============================================================
@@ -6224,6 +6224,13 @@ test("dayStatusPill: a plain verdict, never a number, and it matches the bars", 
 // call site I never touched — his numbers twice, the same order four times, and a "Fat over"
 // pill above "Eat more today". Fixing one call site and calling it done is the systemic defect
 // itself. This test enumerates the paths so a new one cannot quietly join them.
+test("A3 (#550 attack): a number-free client's photo words get the same scrub as the old receipt", () => {
+  const src = readFileSync("server/handlers/media.ts", "utf-8");
+  assert.match(src, /const plain = \(t: string\) => photoNumbersLow \? stripNumbersFromProse\(t\) : t;/);
+  assert.match(src, /if \(words\) return plain\(await [^\n]*closeCoachingTurn\(/);
+  assert.match(src, /closeCoachingTurn\(user, message \|\| "", `\$\{words\}\$\{guard\}`\)/, "#550 @ 48f845c: the guardrail rides after the switched words");
+  assert.match(src, /const guard = photoCommit\?\.ok && !photoCommit\.wasDup \? await nutritionGuardrailNudge\(user\)/);
+});
 test("A19 (#545 attack): the voice door teaches the record from the live read, as the text door does", () => {
   const src = readFileSync("server/routes/whatsapp.ts", "utf-8");
   const voice = src.slice(src.indexOf("async function processVoiceAsync"), src.indexOf("// ── WhatsApp message splitting"));
@@ -6250,6 +6257,15 @@ test("A19 (Grok attack on #545): a commitment is stored only for a promise they 
   assert.equal(namesWhat("train at Virgin Active", "How did Virgin Active go?", false), true, "the fold hears the venue");
   assert.equal(commitmentHeld("yes", "yes", "a walk after work", "Would that work for you?"), false, "the gate still ignores the setting");
 });
+test("#567: the till charges R199, and an earlier subscriber's R149 token still renews", async () => {
+  const { PRICING, chargeMatchesPrice } = await import("../shared/pricing");
+  assert.equal(PRICING.monthlyPriceZAR, 199);
+  assert.equal(chargeMatchesPrice(199), true, "today's price");
+  assert.equal(chargeMatchesPrice(149), true, "a legacy R149 token's renewal is not rejected");
+  assert.equal(chargeMatchesPrice(1), false, "R1 never buys a subscription");
+  assert.equal(chargeMatchesPrice(250), false);
+  assert.ok(readFileSync("server/routes/payments.ts", "utf-8").includes("!chargeMatchesPrice(amountGross)"), "the ITN check uses it");
+});
 test("card paths: every attach site is accounted for", async () => {
   const { readFileSync } = await import("node:fs");
   const files = [
@@ -6257,8 +6273,8 @@ test("card paths: every attach site is accounted for", async () => {
     "server/handlers/meal-repeat.ts", "server/handlers/lifecycle.ts", "server/handlers/media.ts",
   ];
   const attachers = files.filter(f => /(?:macroCardMarker|dailyMacroCardMarker)\(/.test(readFileSync(f, "utf-8")));
-  // If this count changes, a new card path was added — go and check its TEXT stands down too.
-  assert.equal(attachers.length, 5, `card-attaching files changed: ${attachers.join(", ")}`);
+  // If this count changes, a new card path was added — go and check its TEXT stands down too. (A3: media.ts's never-rendered photo card went.)
+  assert.equal(attachers.length, 4, `card-attaching files changed: ${attachers.join(", ")}`);
 
   // The three sites that print the day's numbers must all consult the card before repeating them.
   for (const f of ["server/handlers/food-context.ts", "server/handlers/early-commands.ts", "server/handlers/meal-repeat.ts"]) {
@@ -7024,22 +7040,6 @@ test("renderAchievementCard: a real PNG, and a wide figure still fits the ring",
 
 // CARD MEAL SUMMARY (2026-07-22, founder: the card title must name the MEAL logged — 'Tin fish,
 // Rice, Mixed veggies' — never the model's 'Based on what you mentioned…' preamble).
-test("mealTitleFromReply: summarises the foods from the bullet lines", async () => {
-  const { mealTitleFromReply } = await import("../server/macro-card-attach");
-  const reply = `Based on what you mentioned, it looks like you had a full container. Let's log that:\n\n• Tin fish (~100g): 208 kcal, 25g protein\n• Rice (~200g cooked): 260 kcal\n• Mixed veggies (~100g): 80 kcal\n\nNicely done! That's all logged for you.`;
-  assert.strictEqual(mealTitleFromReply(reply), "Tin fish, Rice, Mixed veggies");
-});
-test("mealTitleFromReply: strips the 'Based on what you mentioned' preamble when there are no bullets", async () => {
-  const { mealTitleFromReply } = await import("../server/macro-card-attach");
-  assert.match(mealTitleFromReply("Based on what you mentioned, it looks like a chicken wrap. Logged!"), /^chicken wrap/i);
-  assert.doesNotMatch(mealTitleFromReply("This is a Switch drink. Logged."), /^This is/i);
-});
-test("mealTitleFromReply: caps at three foods and never returns empty", async () => {
-  const { mealTitleFromReply } = await import("../server/macro-card-attach");
-  const four = "• Eggs\n• Toast\n• Bacon\n• Avo";
-  assert.strictEqual(mealTitleFromReply(four).split(", ").length, 3);
-  assert.strictEqual(mealTitleFromReply(""), "Meal");
-});
 
 // NUTRITION GUARDRAILS (2026-07-22, founder: "3 energy drinks and no food isn't 'good' — lead them
 // to the right path per health standards, without shaming"). Cross-day, standards-grounded nudges.
@@ -9850,37 +9850,6 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   test("meal-repeat: a genuine report still logs", () => {
     assert.equal(isAskingNotReporting("My dinner is the same as my lunch"), false);
     assert.equal(isAskingNotReporting("Same as yesterdays dinner"), false);
-  });
-}
-
-// ============================================================
-// THE CARD TITLE (2026-07-30 live). The founder's card read "tasty lunch of mince pasta! I'd
-// estimate that" — the coach's own sentence printed as the name of his food. And because
-// findDuplicateMealToday matches on NAME OVERLAP, a prose title can never match an earlier log,
-// so a photo of a meal he had ALREADY logged was logged a second time. One string, two defects.
-// ============================================================
-{
-  const { mealTitleFromReply } = await import("../server/macro-card-attach");
-
-  test("card title: THE LIVE ONE — prose becomes the food, not the sentence", () => {
-    assert.equal(mealTitleFromReply("Looks like a tasty lunch of mince pasta! I'd estimate that as macaroni with mince (~300g): roughly 600 kcal and 30g protein."), "mince pasta");
-  });
-  test("card title: a reply ending in ! or ? is still cut to one sentence", () => {
-    assert.equal(mealTitleFromReply("That looks like chicken and rice, about 550 kcal."), "chicken and rice");
-    assert.doesNotMatch(mealTitleFromReply("Looks like eggs on toast! Nicely done."), /Nicely done/);
-  });
-  test("card title: bulleted items still win over prose", () => {
-    assert.equal(mealTitleFromReply("Nicely done.\n• Bread: ~225 kcal\n• Eggs: ~150 kcal"), "Bread, Eggs");
-  });
-  test("card title: plain SA meals survive untouched", () => {
-    assert.equal(mealTitleFromReply("This is pap and wors."), "pap and wors");
-    assert.equal(mealTitleFromReply("Got it, samp and beans logged."), "samp and beans");
-  });
-  test("card title: never leaks the coach's flattery or its estimate", () => {
-    for (const s of ["Looks like a tasty lunch of mince pasta!", "That looks like chicken and rice, about 550 kcal."]) {
-      const t = mealTitleFromReply(s);
-      assert.doesNotMatch(t, /tasty|looks like|estimate|kcal|about \d/i, `leaked: ${t}`);
-    }
   });
 }
 

@@ -314,6 +314,21 @@ REAL("\n7. A KEPT PROMISE IS THE WHOLE EVENING MESSAGE (Grok attack on #545)");
   chk(bodies.length === 1 && /you did it/i.test(bodies[0]) && !isEveningCoaching(bodies[0]),
     "one message: the success line, not \"haven't heard from you today\"", JSON.stringify(bodies));
   await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+REAL("\n8. A SAFETY ROUTE OUTRANKS THE SCHEDULE (#571)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// They wrote something that took the crisis route this afternoon. Tonight's scheduled message does
+// not go; once a proactive message has gone after it (or seven days pass), the schedule resumes.
+{
+  await reset();
+  stubTwilio(false);
+  await pool.query("INSERT INTO chat_history (user_id, message_in, message_out, intent) VALUES ($1, 'test crisis', 'test reply', 'CRISIS')", [user.id]);
+  await runEveningAccountability();
+  chk(freeformSent().length === 0 && templatesSent().length === 0, "after a crisis turn, the evening job sends nothing", JSON.stringify(freeformSent()));
+  await reset();
+  stubTwilio(false);
+  await pool.query("UPDATE chat_history SET created_at = now() - interval '8 days' WHERE user_id = $1 AND intent = 'CRISIS'", [user.id]);
+  await runEveningAccountability();
+  chk(freeformSent().length === 1, "eight days later, the evening message goes again", JSON.stringify(freeformSent().length));
 }
 
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);

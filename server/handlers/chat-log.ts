@@ -286,7 +286,7 @@ function extractWeightNumbers(text: string): number[] {
  * claims get the scope boundary the doctrine already owns; everything else falls back to the
  * smallest honest thing a coach can say.
  */
-const CLINICAL_REFERRAL = "That one's for a doctor or pharmacist, not me — I'm your coach, not your clinician. "
+export const CLINICAL_REFERRAL = "That one's for a doctor or pharmacist, not me — I'm your coach, not your clinician. "
   + "Speak to them about it, and I'll keep helping you with the food, training and habits around it.";
 const WITHHOLD = "Let me not guess on that one. Tell me what happened in your own words and I'll pick it up from there.";
 
