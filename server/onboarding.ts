@@ -548,14 +548,6 @@ async function commitBulkIntake(user: any, bulk: BulkIntake, source: string, pho
   const nextState = next ? next.state : "ASK_MEDICAL";
   await db.update(users).set({ onboardingState: nextState }).where(eq(users.phoneNumber, phone));
 
-  // A dislike is a preference that has to outlive onboarding — every meal suggestion
-  // from here on must respect it, so it goes to durable memory, not just a column.
-  if (bulk.foodDislikes) {
-    try {
-      const { storeMemory } = await import("./memory");
-      await storeMemory(phone, `Does not eat / dislikes: ${bulk.foodDislikes}`, "preference");
-    } catch { /* memory is best-effort; the column still holds it */ }
-  }
 
   const who = bulk.name ? ` ${bulk.name}` : "";
   const captured = describeIntake(bulk);

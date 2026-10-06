@@ -101,29 +101,20 @@ async function getClientWeekData(userId: string): Promise<ClientWeekData | null>
       console.warn("[RECAP] Top-foods fetch failed:", e.message);
     }
 
-    // Detect life events from last 14 days of chat history + memories
+    // Detect life events from the last 14 days of chat history (the vector memories store is gone, D2)
     let lifeContext: string | null = null;
     try {
-      const [chatEvents, memEvents] = await Promise.all([
-        pool.query<{ message_in: string; intent: string }>(
+      const chatEvents = await pool.query<{ message_in: string; intent: string }>(
           `SELECT message_in, intent FROM chat_history
            WHERE user_id=$1 AND created_at > NOW() - INTERVAL '14 days'
            AND (intent IN ('SICK_DAY','INJURY') OR message_in ~* $2)
            ORDER BY created_at DESC LIMIT 6`,
           [userId, '\\m(sick|ill|flu|fever|hospital|funeral|died|death|passed away|passed on|lost my|injury|injured|surgery|operation|overwhelm|depression|anxiety|emergency|bereav|griev|mourn|covid|icu|quarantine|isolat|breakdown|fracture|sprain)\\M']
-        ),
-        pool.query<{ content: string }>(
-          `SELECT content FROM memories
-           WHERE phone=$1 AND category='medical' AND created_at > NOW() - INTERVAL '14 days'
-           ORDER BY created_at DESC LIMIT 3`,
-          [u.phone_number]
-        ),
-      ]);
+      );
       const lifeMessages = chatEvents.rows.map(r => r.message_in).filter(Boolean);
-      const lifeMemories = memEvents.rows.map(r => r.content).filter(Boolean);
       const hasSick = chatEvents.rows.some(r => r.intent === 'SICK_DAY' || LIFE_EVENT_PATTERNS.test(r.message_in || ''));
       const hasInjury = chatEvents.rows.some(r => r.intent === 'INJURY');
-      const hasBereavement = [...lifeMessages, ...lifeMemories].some(t =>
+      const hasBereavement = lifeMessages.some(t =>
         /\b(funeral|died|death|passed away|passed on|lost my|granny|grandma|grandfather|gran|bereave|mourn|griev)\b/i.test(t)
       );
       const hasEmergency = lifeMessages.some(t => /\b(emergency|accident|icu|intensive care|surgery|operation)\b/i.test(t));
@@ -136,8 +127,6 @@ async function getClientWeekData(userId: string): Promise<ClientWeekData | null>
         lifeContext = `This client had an injury this week.`;
       } else if (hasSick) {
         lifeContext = `This client was sick or unwell this week.`;
-      } else if (lifeMemories.length > 0) {
-        lifeContext = `Recent medical note: ${lifeMemories[0]}`;
       }
     } catch (e: any) {
       console.warn("[RECAP] Life context fetch failed:", e.message);
