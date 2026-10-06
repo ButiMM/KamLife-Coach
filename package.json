@@ -145,7 +145,7 @@
     "vite": "^7.3.0"
   },
   "overrides": {
-    "axios": "1.18.0",
+    "axios": "1.20.0",
     "drizzle-kit": {
       "@esbuild-kit/esm-loader": "npm:tsx@^4.20.4"
     },
