@@ -6242,7 +6242,9 @@ test("A19 (Grok attack on #545): a commitment is stored only for a promise they 
   assert.equal(namesWhat("a walk after work", "How was the walking?"), true);
   assert.equal(namesWhat("a walk after work", "How was your day?"), false);
   // Codex @ ce85430: a promise to go without is stated with "won't", and a reply may name the venue.
-  assert.equal(commitmentHeld("I won't have takeaways this week, ngiyakuthembisa", "I won't have takeaways this week", "no takeaways this week", ""), true, "an avoidance promise is a promise");
+  assert.equal(commitmentHeld("I won't have takeaways this week, ngiyakuthembisa", "I won't have takeaways this week", "no takeaways this week", "", "food"), true, "a food avoidance promise is a promise");
+  assert.equal(commitmentHeld("Hayi, I'm not walking on Thursday.", "I'm not walking on Thursday", "not walking on Thursday", "", "movement"), false, "Codex @ 686bc16: an echoed refusal is still a refusal");
+  assert.equal(commitmentHeld("Hayi, no walk for me on Thursday", "no walk for me on Thursday", "no walk on Thursday", "", "movement"), false, "movement is never an avoidance");
   assert.equal(namesWhat("train at Virgin Active", "How did Virgin Active go?", false), true, "the fold hears the venue");
   assert.equal(commitmentHeld("yes", "yes", "a walk after work", "Would that work for you?"), false, "the gate still ignores the setting");
 });

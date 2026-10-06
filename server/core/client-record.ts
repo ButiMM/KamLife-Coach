@@ -135,8 +135,12 @@ export const namesWhat = (what: string, text: string, actionOnly = true): boolea
   const said = tokens(text);
   return whatWords(what, actionOnly).some(w => said.some(t => t === w || t.startsWith(w)));
 };
-/** A promise to go without ("no takeaways this week"), which a "won't" states rather than refuses (Codex @ ce85430). */
-const AVOIDING = new Set(["no", "not", "avoid", "cut", "stop", "skip", "less", "fewer", "zero", "without", "never", "quit"]);
+/**
+ * A FOOD promise to go without ("no takeaways this week"), which a "won't" states rather than refuses
+ * (Codex @ ce85430). Food only: a movement promise is never an avoidance, so "not walking on Thursday"
+ * stays a refusal (Codex @ 686bc16); and "not"/"never" are not avoidance words, they echo the refusal.
+ */
+const AVOIDING = new Set(["no", "avoid", "cut", "stop", "skip", "less", "fewer", "zero", "without", "quit"]);
 const NEGATED = /\b(?:not|never|won'?t|can'?t|cannot|don'?t|didn'?t|isn'?t|aren'?t|wasn'?t|no longer)\b|n't\b/i;
 /**
  * A PROMISE THEY MADE, IN CODE (Grok attack on #545, CTO 6 Oct). The model's read is not enough: a
@@ -144,10 +148,12 @@ const NEGATED = /\b(?:not|never|won'?t|can'?t|cannot|don'?t|didn'?t|isn'?t|aren'
  * walking on Thursday"), and a word of `what` is in their message or in the coach's message they
  * were answering (a bare "yes" holds only what the coach just proposed).
  */
-export function commitmentHeld(text: string, statement: string, what: string, coachLast: string): boolean {
+export function commitmentHeld(text: string, statement: string, what: string, coachLast: string, domain = "movement"): boolean {
   const at = text.toLowerCase().indexOf(statement.toLowerCase());
   const clause = (at > 0 ? text.slice(0, at).split(/[.!?,;\n]|\bbut\b/i).pop() ?? "" : "") + " " + statement;
-  if (NEGATED.test(clause) && !AVOIDING.has(what.trim().toLowerCase().split(/\s+/)[0])) return false;
+  const without = AVOIDING.has(what.trim().toLowerCase().split(/\s+/)[0]);
+  if (domain !== "food" && without) return false; // "no walk on Thursday" is not a movement promise
+  if (NEGATED.test(clause) && !(domain === "food" && without)) return false;
   return namesWhat(what, text) || namesWhat(what, coachLast);
 }
 const endOfDay = (d: string, plus = 0) => new Date(Date.parse(`${d}T23:59:59+02:00`) + plus * 86_400_000);
@@ -243,7 +249,7 @@ export async function applyFacts(eventId: string, raw: string): Promise<number> 
     if (f.kind === "commitment") {
       const d = f.detail as Partial<Commitment>;
       if (d.outcome && (!open || open.outcome)) continue; // an outcome of nothing open is not a fact
-      if (!d.outcome && !commitmentHeld(text, f.statement, String(d.what || ""), await coachSaidBefore(ev.userId, ev.receivedAt))) continue;
+      if (!d.outcome && !commitmentHeld(text, f.statement, String(d.what || ""), await coachSaidBefore(ev.userId, ev.receivedAt), String(d.domain || ""))) continue;
       f.detail = d.outcome ? { domain: open!.domain, what: open!.what, due: open!.due, state: d.outcome, outcome: d.outcome } : d;
       f.valid_until = d.outcome ? sastDayKey(Date.now() + 7 * 86_400_000) : null; // an outcome informs the next week's offer
     }
