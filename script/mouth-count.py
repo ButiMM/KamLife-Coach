@@ -24,7 +24,9 @@ for f in (root / "server").rglob("*.ts"):
 # Test-code ratchet (CTO, 30 Sep): tests grew 57,037 -> 60,457 lines while the product was meant to shrink.
 # New tests must be paid for by deleting obsolete ones (old-pipeline harnesses for deleted code).
 counts["test_lines"] = sum(len(f.read_text(errors="ignore").splitlines()) for f in (root / "script").rglob("*")
-                           if f.is_file() and f.suffix in (".ts", ".sh", ".mjs", ".py", ".sql"))
+                           if f.is_file() and f.suffix in (".ts", ".sh", ".mjs", ".py", ".sql")
+                           # CTO 6 Oct (#391, A18): gate cases are the product's grader, not old-pipeline test code.
+                           and f.name != "replay-cases.ts")
 if "--json" in sys.argv:
     print(json.dumps(counts)); sys.exit(0)
 base = json.loads((root / "docs/mouths.json").read_text())

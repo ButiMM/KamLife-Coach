@@ -1,5 +1,28 @@
 # KamLife Coach — Claude Code Instructions
 
+## CTO RULINGS, Tue 6 Oct (answers to #391 of 06:38 and 07:43). These win over everything below.
+
+1. **No CI OpenAI key. The "BLOCKED (founder)" on the gate key is withdrawn.** ORDERS §0c stands: no paid gate. A switch merges on tests + ratchet + attack (or the 45-minute window); it's proven on real use (evidence view, #513). Don't put `final` on PRs, and don't ask the founder for a key.
+2. **A18 test lines:** option (a). `script/replay-cases.ts` no longer counts toward `test_lines`, and the baseline drops by the same amount (this PR), so the slack isn't free. Gate cases are the product's grader. Write the ~10 non-English cases (B1, B2, B3, B5, B6, A1–A5).
+3. **#537's +21 test lines:** approved (`mouth:approved`).
+4. **D2b, the CIP:** take your proposal. There's a `pattern` fact kind in the client record, written by the existing weekly `cip-update` job from the same deterministic evidence. `getBehaviourPatternContext` reads the record, and `intelligence/profile.ts` and its narrative mouths are deleted in the same PR.
+5. **D7, live scoring:** no model call. Score live turns from signals we already have: friction events, a correction within 2 turns, "you forgot" / "I told you", opt-out after a reply, and silence after a coach question. Put them in the 18:00 digest with the worst 5 turns quoted. A sampled model judge waits for revenue (§0c).
+6. **Rollback flags expire after 7 days, and their old code goes with them.** That makes the delete list real. Server is 73,274 lines and all 16 delete-list files (6,738 lines) are still alive, because each `CORE_WAVE*=off` path keeps them reachable.
+   - **This week, one PR per wave:**
+     - **Wave 1** (on for everyone 30 Sep): remove the `CORE_WAVE1` off-path, then delete `gpt-block.ts`, `advice-commands.ts` and `numbers-literacy.ts`, plus whatever only they import.
+     - **Wave 2 A1/A2** (1 Oct): from Thu 8 Oct, `food-commands.ts`, `meaning-engine.ts` and `perception.ts`, if nothing live still needs them. Any that are still needed are named with their reader on #391.
+     - **A8/A12** (2 Oct): from Fri 9 Oct.
+   - New switches keep a flag for 7 days, then get the same treatment.
+7. **Order today:**
+   1. Answer the Codex attack on #545 (unanswered 140+ min).
+   2. Merge `main` into #550 and #551, which the watch's auto-merge refused with 405.
+   3. #537, then #554.
+   4. The wave-1 deletion PR.
+   5. A18 cases.
+   6. A4 voice.
+   7. D2b.
+8. **Housekeeping (done by the CTO, 6 Oct):** #510 is closed. The first successful backup since 29 Sep was 06:26 UTC today, after #544. Issues whose PRs merged are closed.
+
 ## CURRENT ORDERS (CTO, 29 Sep, after the strategy decision). Read this first. Where anything below disagrees, THIS wins.
 
 1. **The promise (locked):** Coach K's four capabilities: **help me now**, **know my situation**, **help me follow through** (the commitment loop, spec only for now: #508), and **show it's working**. The surface is WhatsApp, with our own backend. The founder is absent from routine delivery. It's a non-clinical scope.
