@@ -158,15 +158,18 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   const spoken = await voiceReplyFor(phone, out);
   if (spoken) outMedia = [...(Array.isArray(media) ? media : media ? [media] : []), spoken];
   // THE DELIVERY OWNER'S OWN VERDICT, not an assumption that awaiting a send means it landed.
-  const outcome = await sendParts(phone, splitMessage(out), outMedia);
+  // #554: a held reminder is closed by the bubble(s) that carry it, not by the worst bubble of the reply.
+  const carried: DeliveryResult[] = [];
+  const outcome = await sendParts(phone, splitMessage(out), outMedia, (t, r) => { if (t.includes("⏰ Reminder:")) carried.push(r); });
   await finalise(outcome);
-  await closeHeldReminders(rootId ?? phone, deliveryAccepted(outcome)).catch(() => {}); // B7 (#538): closed only once delivered
+  await closeHeldReminders(rootId ?? phone, carried.length ? carried.every(r => deliveryAccepted(r)) : deliveryAccepted(outcome)).catch(() => {}); // B7 (#538, #554): closed only once its bubble is delivered
 }
 
 async function sendParts(
   phone: string,
   parts: string[],
   replyMedia: string | string[] | null,
+  onText?: (text: string, outcome: DeliveryResult) => void,
 ): Promise<DeliveryResult> {
   const mediaUrls = Array.isArray(replyMedia) ? replyMedia.filter(Boolean) : (replyMedia ? [replyMedia] : []);
   // ONE DELIVERY OWNER (Cut B2, 2026-09-01). This built its own Twilio client, resolved its own
@@ -201,6 +204,7 @@ async function sendParts(
   let worst: DeliveryResult = textParts.length ? "sent" : "dropped";
   for (let i = 0; i < textParts.length; i++) {
     const r = await sendOne({ body: textParts[i].trim() }, `part ${i + 1}`);
+    onText?.(textParts[i], r);
     if (rank[r] > rank[worst]) worst = r;
   }
   for (let k = 0; k < mediaUrls.length; k++) {
