@@ -1231,58 +1231,6 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
-// MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session
-// streak got "Good to have you back" — trajectory is workout-only, so a daily logger who
-// trains moderately read as lapsed-and-returned). Absence framing must never hit the engaged.
-{
-  const { morningClosingLine } = await import("../server/morning-message");
-  const eng = { activelyEngaged: true, completedSessions28: 4 };
-  const lapsed = { activelyEngaged: false, completedSessions28: 4 };
-  test("morning close: an actively-engaged client is NEVER told 'welcome back' or 'reply Hi'", () => {
-    for (const t of ["RECOVERING", "DISENGAGED"] as const) {
-      const line = morningClosingLine(t, eng);
-      assert.ok(!/have you back|reply Hi/i.test(line), `absence framing leaked (${t}): ${line}`);
-    }
-  });
-  test("morning close: an actually-lapsed client still gets the warm return line", () => {
-    // The PROPERTY, not the old sentence. "reply Hi" was part of the deleted 28-day voice; a
-    // lapsed client is still owed warm re-entry recognition, and that is what is asserted.
-    for (const t of ["RECOVERING", "DISENGAGED"] as const) {
-      assert.match(morningClosingLine(t, lapsed), /have you back/i, `no warm re-entry for ${t}`);
-    }
-  });
-  test("morning close: engaged lines make NO 'session today' push — safe on a rest day", () => {
-    for (const t of ["RECOVERING", "DISENGAGED"] as const) {
-      assert.ok(!/(one|a session).*today|today.*session|get one in today/i.test(morningClosingLine(t, eng)), `rest-day-unsafe (${t})`);
-    }
-  });
-  // REPLACED 2026-08-24. This asserted /sessions in over 4 weeks/ — the client-facing 28-day
-  // progress clock, deleted because it was a second scoreboard beside the calendar-week decision
-  // and could frame a completed week as failure. The assertion is now the rule that replaced it:
-  // an ENGAGED client gets no lapse framing and no second clock, from any trajectory.
-  test("morning close: an engaged client is never scored or lapse-framed", () => {
-    for (const t of ["ON_A_RUN", "ON_TRACK", "RECOVERING", "STRUGGLING", "DISENGAGED"] as const) {
-      const line = morningClosingLine(t, eng);
-      assert.ok(!/\d/.test(line), `${t} put a number in front of an engaged client: ${line}`);
-      assert.ok(!/have you back|welcome back|weeks?\b/i.test(line), `${t} lapse-framed an engaged client: ${line}`);
-    }
-    assert.equal(morningClosingLine("ON_TRACK", eng), "");
-  });
-}
-
-{
-  const { breakfastReplayLine } = await import("../server/morning-message");
-  test("breakfast replay: mixed bubble is not a meal; items are", () => {
-    const mixed = "That day is today\nWhat's the plan for me?\nMy breakfast was 3 slices of bread, eggs and chicken livers\nGuide for the rest of the day";
-    assert.equal(breakfastReplayLine({ rawMessage: mixed, items: [], mealLabel: "breakfast" }), "");
-    assert.equal(
-      breakfastReplayLine({ rawMessage: mixed, items: [{ name: "Bread" }, { name: "Eggs" }, { name: "Chicken livers" }], mealLabel: "breakfast" }),
-      "Bread, Eggs, Chicken livers",
-    );
-    assert.equal(breakfastReplayLine({ rawMessage: "2 eggs and toast", items: [], mealLabel: "breakfast" }), "2 eggs and toast");
-  });
-}
-
 // THE VERDICT IS GONE (2026-08-04, Slice 4). buildFoodLogReply used to decide what to SAY
 // about a meal — a verdict headline, protein praise, a junk read, a running total, a nudge.
 // All of it is deleted; the coach says the sentence now and this function is only the

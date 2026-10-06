@@ -226,7 +226,7 @@ export interface ProactiveSender {
 export const PROACTIVE_SENDERS: readonly ProactiveSender[] = [
   // ── morning.ts ────────────────────────────────────────────────────────────────────────────
   { job: "runMorningCheckin", file: "morning", cls: "CANONICAL",
-    because: "The brief's only instruction is decisionLine, from decideProactive; composeMorning strips directives out of the recognition prose." },
+    because: "The brief's only instruction is decisionLine, from decideProactive; the new coach's recognition has its directives stripped (B1, scheduledWords)." },
 
   // ── evening.ts ────────────────────────────────────────────────────────────────────────────
   { job: "runEveningAccountability", file: "evening", cls: "CANONICAL",

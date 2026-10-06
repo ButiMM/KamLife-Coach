@@ -311,6 +311,40 @@ export async function afterLogReply(phone: string, message: string, receipt: str
   }
 }
 
+/**
+ * WAVE 4 (B1 first, #319): the messages the coach starts, in the new coach's words. CORE_WAVE4=off is the
+ * rollback to the old composers, with no deploy. The DECISION stays with its owner (decideProactive);
+ * the new coach writes only the recognition around it, from the record and the ledger, and the caller
+ * appends the decision's line as the one instruction.
+ */
+export function coreWave4For(_phone: string): boolean {
+  return String(process.env.CORE_WAVE4 || "on").toLowerCase() !== "off";
+}
+const SCHEDULED = {
+  morning: "It is early morning: your scheduled morning message. Greet them by first name and recognise YESTERDAY in one or two short lines, only from YESTERDAY's real numbers; if nothing was logged, don't mention it. Warm, plain, no streaks or counts you can't see",
+} as const;
+
+/** The new coach's words for a scheduled message, or null (the caller sends its plain floor). Never throws. */
+export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED, extra = ""): Promise<string | null> {
+  if (!coreWave4For(phone)) return null;
+  try {
+    const pre = await readPreTurn(phone);
+    if (!pre) return null;
+    const { getDayLedger } = await import("../day-ledger");
+    const y = await getDayLedger(pre.userId, { forDate: new Date(Date.now() - 86_400_000) });
+    pre.numbers += `\nYESTERDAY: ${y.meals.length ? `${y.meals.map(m => `${m.label || "meal"}: ${m.foods}`).join("; ")}; about ${Math.round(y.kcal)} kcal and ${Math.round(y.protein)}g protein` : "no food logged"}; steps ${y.steps ? y.steps.toLocaleString("en-ZA") : "none logged"}.`;
+    if (extra) pre.numbers += `\nJUST HAPPENED: ${extra}`;
+    const u: Understanding = { family: "other", wants: `${SCHEDULED[job]}. Ask nothing and give no instruction: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
+    const words = (await compose(await openaiClient(), pre, `(No message from ${pre.name}: this is your scheduled ${job} message.)`, u))?.trim();
+    if (!words) return null;
+    const { stripModelDirectives } = await import("../brain/reply-verifier");
+    return stripModelDirectives(words, { modelAuthored: true } as any).kept.trim() || null;
+  } catch (e) {
+    console.warn(`[CORE_WAVE4] ${job} kept the old words:`, (e as Error)?.message || e);
+    return null;
+  }
+}
+
 /** One switched turn: the scope floor first, then the new coach. null = let the old engine answer. */
 export async function wave1Turn(p: { phone: string; message: string; userId: string; ongoing: boolean; evidence: (f: { conversationalOnly: true }) => void }): Promise<{ reply: string; src: string } | null> {
   const { classifyDomain, declineOutOfScope } = await import("../understanding/domain-guard");
