@@ -36,7 +36,7 @@
 
 import { chooseAction, decideProactive, formatOneAction, underPolicy, type OneAction } from "../one-action";
 import { readHeldConstraints, NO_CONSTRAINTS, type HeldConstraints } from "../held-constraints";
-import { loadProactiveState, recordWeighAsk, sendWhatsApp, claimDailySlot, claimProactive, isProactivePaused, pauseReason, type WindowTemplate } from "./shared";
+import { db, sql, loadProactiveState, recordWeighAsk, sendWhatsApp, claimDailySlot, claimProactive, isProactivePaused, pauseReason, type WindowTemplate } from "./shared";
 import { foodConstraints } from "../food-swaps";
 import { sastDayKey } from "../sast";
 import { ensureOpenTrainingLoop, ensureOpenWeekendInvestigation, loadOpenTrainingLoop, weekendInvestigationAnswered } from "../memory";
@@ -322,6 +322,21 @@ export function proactiveHold(c: CoachingClient, opts?: { duringPause?: boolean 
   return null;
 }
 
+/**
+ * A SAFETY ROUTE OUTRANKS THE SCHEDULE (#571, #563). After a crisis, an acute medical reply, a medication
+ * referral or a life context (pregnancy, illness, grief…), no scheduled message goes until a person has
+ * written again or seven days pass: Thursday's "how did the walk go?" must not follow Tuesday's crisis.
+ */
+export async function safetyRouteSinceLastProactive(userId: string): Promise<boolean> {
+  try {
+    const r = await db.execute(sql`SELECT EXISTS (SELECT 1 FROM chat_history s WHERE s.user_id = ${userId}
+        AND (s.intent IN ('CRISIS', 'ACUTE_MEDICAL', 'MEDICATION_REFERRAL') OR s.intent LIKE 'LIFE\_%')
+        AND s.created_at > now() - interval '7 days'
+        AND s.created_at > coalesce((SELECT max(p.created_at) FROM chat_history p WHERE p.user_id = ${userId} AND p.intent = 'PROACTIVE'), 'epoch'::timestamp)) AS held`);
+    return !!(r as any).rows?.[0]?.held;
+  } catch { return true; } // unreadable: hold, the safe side
+}
+
 /** Sends one proactive message. Null when it was held or its claim was already spent; otherwise the delivery. */
 export async function sendProactive(
   client: CoachingClient,
@@ -330,7 +345,7 @@ export async function sendProactive(
   opts?: { template?: WindowTemplate; mediaUrl?: string; duringPause?: boolean; buttons?: string[] },
 ): Promise<DeliveryResult | null> {
   const job = "claimed" in claim ? claim.claimed : claim.job;
-  const hold = proactiveHold(client, opts);
+  const hold = proactiveHold(client, opts) ?? (await safetyRouteSinceLastProactive(client.id) ? "a safety route fired since the last proactive message" : null);
   if (hold) {
     console.log(`[PROACTIVE] held ${job} for ...${client.id.slice(-6)}: ${hold}`);
     return null;
