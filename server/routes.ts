@@ -143,14 +143,13 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // Page coach on crisis/injury signals immediately — fires even if onboarding/POPIA returns early
   if (message && message.length > 2) checkEscalation(user.id, message).catch(e => console.error("[ESCALATION_CHECK]", e?.message || e));
 
-  // ---- INTENT CLASSIFIER — structural reset plan item #2 ----
-  // Fire early as a background Promise. Text messages only (not photo/voice).
-  // Awaited just before the final GPT routing (line ~6590) — by then it's complete.
-  // On any error, returns { intent: "OTHER", confidence: 0 } — never blocks.
-  const intentPromise: Promise<{ intent: ClassifiedIntent; confidence: number }> =
+  // ---- INTENT CLASSIFIER (the normalizer's read): started only after the age and POPIA gates (#569), so a minor's
+  // message, an onboarding answer or a turn without consent reaches no model. Text only; errors read as OTHER.
+  const startIntent = (): Promise<{ intent: ClassifiedIntent; confidence: number }> =>
     (!mediaUrl && message.length >= 2 && message.length <= 500)
       ? classifyIntent(message, user.id).catch((e) => { console.error("[INTENT_CLASSIFY]", e?.message || e); return { intent: "OTHER" as ClassifiedIntent, confidence: 0 }; })
       : Promise.resolve({ intent: "OTHER" as ClassifiedIntent, confidence: 0 });
+  let intentPromise: Promise<{ intent: ClassifiedIntent; confidence: number }> | null = null;
 
   // ---- DAY-ZERO PHYSIQUE READ — body photos sent during onboarding. handleOnboarding
   // is text-only (mediaUrl never reaches it), so this state's photos are claimed here.
@@ -184,6 +183,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
     const name = user.name ? `${user.name}, ` : "";
     return `${name}before we continue I need your consent to process your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\nYour data is:\n- Used only for your coaching\n- Never sold to anyone\n- Deleted on request (reply "delete my data" at any time)\n\nReply *yes* or *agree* to continue. Reply "delete my data" if you would like us to remove your information.`;
   }
+  if (normalizerLive() && user.onboardingState === "COMPLETE" && !user.awaitingInputType) intentPromise = startIntent(); // early, only where the normalizer runs
 
   // ---- NUMERIC-FLUENCY DETECTOR (fire-and-forget) — a client who talks in
   // kcal/macros three times gets full numbers turned on automatically, with a
@@ -603,7 +603,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (feedbackReply !== null && mayEndTurn("workout-feedback")) return closeCoachingTurn(feedbackReply); if (feedbackReply !== null) commitFact(turn, "workout", feedbackReply); if (normalizerLive() && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
       const pre = await Promise.race([
-        intentPromise,
+        intentPromise ?? startIntent(),
         new Promise<{ intent: ClassifiedIntent; confidence: number; canonical?: string }>(res =>
           setTimeout(() => res({ intent: "OTHER" as ClassifiedIntent, confidence: 0 }), 3500)),
       ]);
@@ -1089,7 +1089,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const scope = await classifyDomain(openai, message, { ongoing: recentlyActive(user) }); // #321: fails closed
   if (scope.redirectMessage) return tag(await declineOutOfScope(user.id, message, scope.redirectMessage, turnEvidence), "scope");
   const coreReply = switched && !w1Read ? await core.answerLive(phone, message).catch(() => null) : null; // wave-1 switch, second door (#451: once per turn)
-  return tag(coreReply ?? await handleGptBlock({ phone, message, m, user, intentPromise }), coreReply ? "new coach" : "gpt fallback");
+  return tag(coreReply ?? await handleGptBlock({ phone, message, m, user, intentPromise: intentPromise ?? startIntent() }), coreReply ? "new coach" : "gpt fallback");
 
   } catch (err: any) {
     console.error("[handleMessage FATAL]", JSON.stringify({
