@@ -148,6 +148,7 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   if ((await shadowDoor(phone, out, "reply", "server/routes/whatsapp.ts", media)) && !isCrisisOut) {
     await finalise("shadow");
     await closeHeldReminders(rootId ?? phone, false).catch(() => {}); // B7 (#538): not delivered, so still held
+    await (await import("../core/client-record")).closeFollowUp(rootId ?? phone, false).catch(() => {}); // A19: not delivered, still open
     return;
   }
 
@@ -163,6 +164,7 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   const outcome = await sendParts(phone, splitMessage(out), outMedia, (t, r) => { if (t.includes("⏰ Reminder:")) carried.push(r); });
   await finalise(outcome);
   await closeHeldReminders(rootId ?? phone, carried.length ? carried.every(r => deliveryAccepted(r)) : deliveryAccepted(outcome)).catch(() => {}); // B7 (#538, #554): closed only once its bubble is delivered
+  await (await import("../core/client-record")).closeFollowUp(rootId ?? phone, deliveryAccepted(outcome)).catch(() => {}); // A19: asked only once delivered
 }
 
 async function sendParts(
@@ -305,7 +307,7 @@ export async function processTextAsync(
       if (shadowPre) {
         const [pre, m] = await Promise.all([shadowPre, import("../core/coach")]);
         await m.runShadow(pre, message, rootId, sourceMessageId);
-      }
+      } else await (await import("../core/coach")).learnFromLiveRead(phone, sourceMessageId); // #545: the live read teaches the record
     })().catch(() => {});
   }
 }
@@ -339,7 +341,11 @@ async function processVoiceAsync(
   } finally {
     await completeMediaJob(sourceMessageId).catch(() => {});
     // THE CLIENT RECORD (#271) — a voice note is an inbound message too; its transcript is stored.
-    void import("../core/client-record").then(m => m.recordAtDoor({ phone, rawText: message, mediaType, sourceMessageId, rootId }));
+    // Then the live read teaches the record from the transcript, as the text door does (#545 attack: a spoken promise was lost).
+    void (async () => {
+      await (await import("../core/client-record")).recordAtDoor({ phone, rawText: message, mediaType, sourceMessageId, rootId });
+      await (await import("../core/coach")).learnFromLiveRead(phone, sourceMessageId);
+    })().catch(() => {});
   }
 }
 

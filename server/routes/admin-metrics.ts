@@ -103,7 +103,7 @@ export function registerAdminMetrics(app: Express) {
       const days = Math.min(90, Math.max(1, Number(req.query.days) || 30));
       const n = Math.min(100, Math.max(1, Number(req.query.n) || 30));
       const since = sql`now() - make_interval(days => ${days})`;
-      const [inbound, replies, proactive, sample] = await Promise.all([
+      const [inbound, replies, proactive, sample, loop] = await Promise.all([
         db.execute(sql`SELECT user_id::text u, count(*)::int n FROM chat_history
           WHERE created_at >= ${since} AND message_in IS NOT NULL AND message_in <> ''
             AND message_in NOT LIKE '[system]%' AND message_in NOT LIKE '[admin%' GROUP BY 1`),
@@ -115,6 +115,14 @@ export function registerAdminMetrics(app: Express) {
             left(t.delivered_body, 1500) reply, t.decision->>'source' source, t.version, t.delivery_outcome outcome
           FROM turn_ledger t LEFT JOIN users u ON u.id = t.user_id
           WHERE t.delivered_body IS NOT NULL ORDER BY t.created_at DESC LIMIT ${n}`),
+        // THE COMMITMENT LOOP, PER WEEK (A19, spec §7): each promise once, by what became of it.
+        db.execute(sql`SELECT date_trunc('week', c.created_at)::date week, count(*)::int accepted,
+            count(*) FILTER (WHERE c.detail->>'state' = 'kept' OR o.detail->>'outcome' = 'kept')::int kept,
+            count(*) FILTER (WHERE o.detail->>'outcome' = 'missed')::int missed,
+            count(*) FILTER (WHERE c.superseded_by IS NULL AND c.valid_until < now() AND c.detail->>'state' <> 'kept')::int released,
+            count(*) FILTER (WHERE c.detail->>'state' = 'asked')::int followed_up
+          FROM client_facts c LEFT JOIN client_facts o ON o.id = c.superseded_by AND o.detail ? 'outcome'
+          WHERE c.kind = 'commitment' AND NOT (c.detail ? 'outcome') AND c.created_at >= ${since} GROUP BY 1 ORDER BY 1`),
       ]);
       const per = new Map<string, EvidenceCounts>();
       const at = (u: string) => per.get(u) ?? per.set(u, { inbound: 0, outboundBubbles: 0, proactive: 0, templates: 0, media: 0 }).get(u)!;
@@ -138,7 +146,8 @@ export function registerAdminMetrics(app: Express) {
         usagePerClient: summariseUsage([...per.values()]),
         templates: TEMPLATES.map(t => ({ name: t.name, category: t.category, sends: templateSends[t.name] || 0 })),
         finalReplies: sample.rows,
-        readIt: "usagePerClient is per active client over the window (median, p90, max). Bubbles are the WhatsApp messages actually billed (#492 packs up to 1,500 characters). finalReplies are the last delivered bodies with their source and build; phones show the last 3 digits only.",
+        commitmentLoop: loop.rows,
+        readIt: "usagePerClient is per active client over the window (median, p90, max). Bubbles are the WhatsApp messages actually billed (#492 packs up to 1,500 characters). finalReplies are the last delivered bodies with their source and build; phones show the last 3 digits only. commitmentLoop counts each promise once per week by what became of it: kept (the ledger or their word), missed, released (lapsed unanswered) or followed up.",
       });
     } catch (err) {
       console.error("[EVIDENCE]", err);
