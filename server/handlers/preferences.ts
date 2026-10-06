@@ -1,21 +1,22 @@
-// Numbers-literacy handlers (2026-07-14) — extracted from early-commands for the
-// file-size budget. The default is NUMBER-FREE (third-party review: "start everyone
-// in number-free mode; power users opt in"). These handlers manage the opt-in:
-//   1. SHOW ME THE NUMBERS — a power user opts into figures (sets numbers:full).
-//   2. KEEP IT SIMPLE      — a numbers client turns them back off (clears the token).
-//   3. CALORIE CONFUSION   — reassure with the plain data-bundle explanation (and
-//      turn figures off if they had opted in).
-// The mode token (numbers:full = on, else off) is read by the food reply builder.
-
+/**
+ * PREFERENCES, PLANS AND SCOPE RAILS — the writers that outlived their files (wave-1 deletion, CTO 6 Oct).
+ *
+ * numbers-literacy.ts and advice-commands.ts were delete-list files: their coaching prose became the
+ * new coach's (A16) and the files go. What they still OWNED is kept here verbatim, because each one
+ * either writes state the rest of the product reads, or carries a medical-scope guarantee:
+ *   - numbers on/off, tone, voice replies on/off, and the two auto-offers (profileNotes tokens);
+ *   - the return day a client names (back_on + the evening-before nudge) and the step target;
+ *   - the digestive-issue and health-quick-fix boundaries ("your doctor decides", never a cure promise).
+ */
 import { db } from "../db";
-import { users, stepLogs } from "../../shared/schema";
-import { eq, and, gte } from "drizzle-orm";
+import { users } from "../../shared/schema";
+import { eq } from "drizzle-orm";
 import { logChat } from "./chat-log";
 import { detectToneSignal } from "../tone-mode";
 import { messageSpeaksNumbers, wantsVoiceReplies } from "../numbers-mode";
 import { sendWhatsApp } from "../scheduler";
-import { sastDayStart, looksLikeSurplusDeficitQuestion } from "../utils";
-import { engineLive } from "../understanding/live";
+import { looksSickMention } from "./sick-flow";
+import { nextDayDate, extractStepTargetChange, looksLikeDigestiveIssue } from "../utils";
 
 export async function bumpNumericFluency(user: any, m: string, phone: string): Promise<void> {
   try {
@@ -208,4 +209,71 @@ export async function bumpVoiceNoteUse(user: any, phone: string): Promise<void> 
   } catch (e) {
     console.warn("[VOICE_PREF] non-fatal:", (e as Error)?.message || e);
   }
+}
+
+/** The client's own plans and the scope rails that must answer whoever else would (from advice-commands.ts). */
+export async function handlePlansAndScope(ctx: { message: string; m: string; user: any; phone: string }): Promise<string | null> {
+  const { message, m, user, phone } = ctx;
+  const capName = user.name?.split(" ")[0] || "there";
+  const isSick = looksSickMention(m);
+
+  // ---- RETURN PLANNING ("I'll be back Wednesday", "let's confirm I go back Monday") ----
+  const isReturnPlanning = /\b(i.?ll (be back|start|resume|return|train|come back)|let.?s confirm|confirm (i|that i)|going back|back (on|from) (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)|start(ing)? (again|back|monday|tuesday|wednesday|thursday|friday|tomorrow)|resume (on|from|monday|tuesday|wednesday|thursday|friday)|back to (training|gym|it) (on|from|monday|tuesday|wednesday|thursday|friday))\b/i.test(m)
+    && !isSick
+    && /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week|next month)\b/i.test(m);
+  // MEMORY (always, whoever replies): persist the stated return day as back_on:<date> — surfaced in the snapshot so the brain REMEMBERS it (2026-07-20 Kam).
+  const rpDay = isReturnPlanning ? m.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)\b/i) : null;
+  const rpDate = rpDay ? nextDayDate(rpDay[0]) : null;
+  if (rpDate && user.id) {
+    const rpBase = (user.profileNotes || "").replace(/\s*\|?\s*back_on:\d{4}-\d{2}-\d{2}/g, "").trim();
+    const rpNotes = `${rpBase ? rpBase + " | " : ""}back_on:${rpDate}`;
+    db.update(users).set({ profileNotes: rpNotes }).where(eq(users.id, user.id)).then(() => { user.profileNotes = rpNotes; }).catch((e: any) => console.error("[RETURN_PLAN] persist failed:", e));
+    // TEMPORAL LOOP: nudge them the evening before they said they'd be back, so we never go silent.
+    import("../reminders").then(({ scheduleReturnNudge }) => scheduleReturnNudge(user.id, phone, rpDate, "away")).catch((e: any) => console.error("[RETURN_PLAN] nudge failed:", e));
+  }
+
+  // UPDATE STEP TARGET — ONE parser (utils.extractStepTargetChange) shared with the brain gate; all SA number formats caught + persisted (2026-07-12).
+  const parsedStepTarget = extractStepTargetChange(m);
+  if (parsedStepTarget !== null) {
+    if (parsedStepTarget >= 2000 && parsedStepTarget <= 30000) {
+      const oldTarget = user.stepsTarget || 8500;
+      await db.update(users).set({ stepsTarget: parsedStepTarget }).where(eq(users.phoneNumber, phone));
+      const direction = parsedStepTarget > oldTarget ? "raised" : parsedStepTarget < oldTarget ? "lowered" : "kept";
+      const stepUpdateReply = `Step target ${direction} to *${parsedStepTarget.toLocaleString()} steps/day*. ✅ Every screenshot you log — and your morning brief — now tracks against this.`;
+      await logChat(user.id, message, stepUpdateReply, "STEP_TARGET_UPDATE");
+      return stepUpdateReply;
+    }
+    return `That step count doesn't look right (valid range: 2,000–30,000). What should your daily step goal be?`;
+  }
+
+  // ---- DIGESTIVE ISSUES — bloating / acid reflux / heartburn / indigestion (2026-07-12
+  // onboarding screenshot). Care first, practical food guidance, and a defer-to-doctor
+  // safety line. Detector (utils.looksLikeDigestiveIssue) excludes period + check-in noise.
+  // NOT GATED — same reason: it carries the "check with your doctor, I work alongside
+  // them, never instead of them" line, which is a scope boundary, not coaching flavour.
+  if (looksLikeDigestiveIssue(m)) {
+    const giReply = `Thanks for telling me${capName ? ", " + capName : ""} — that matters, and we can work with it. 💛\n\nBloating, reflux and heartburn are really common. What helps most people:\n• *Smaller meals, more often* — big meals overload the gut.\n• Eat *slower*, sit up, and don't lie down for 2–3 hours after eating.\n• Common triggers: fizzy drinks, very fatty/fried food, too much dairy, big late-night meals, eating in a rush.\n• Sip water *between* meals, not gulping during.\n\nI'll keep your meals lighter and easier on your stomach. If it's regular or you're already on tablets for it, please also check in with your doctor — I work *alongside* them, never instead of them.\n\nTell me when it hits worst and I'll help you spot the trigger.`;
+    await logChat(user.id, message, giReply, "DIGESTIVE_ISSUE");
+    return giReply;
+  }
+
+  // ---- HEALTH QUICK-FIX EXPECTATION — "will losing weight fix my BP/sugar fast?" ----
+  // (2026-07-23, Kam: clients with health problems expect a two-week cure, quit when the
+  // miracle doesn't come. Honest timeline up front keeps them — or filters them on day one.)
+  const isHealthQuickFix =
+    /\b(blood\s*pressure|bp|diabetes|diabetic|sugar\s+(?:is|levels?|problem)|cholesterol|knees?\s+(?:pain|hurt|problem))\b/i.test(m)
+    && /\b(fix|cure|heal|sort(?:\s+out)?|go\s+away|reverse|help)\b/i.test(m)
+    && /\b(weight|fat|slim|lose|losing|kg)\b/i.test(m);
+  // NOT GATED (2026-08-03). This carries a MEDICAL-SCOPE GUARANTEE — the honest timeline and
+  // "medication decisions stay with your doctor". It sat behind the engine flag, which has
+  // been on in production for weeks, so it never ran: a client asking whether losing weight
+  // fixes their blood pressure got whatever the model improvised, with no guaranteed doctor
+  // referral. A safety guarantee must never depend on a feature flag being off.
+  if (isHealthQuickFix) {
+    const healthReply = `${capName}, straight answer: *yes, losing weight genuinely improves this* — blood pressure, sugar control, joint load all respond to fat loss. Doctors see it every day.\n\nBut I owe you the honest timeline: the real improvements show up after roughly *5–10% of your body weight* comes off and stays off — that's a *12-week-plus steady project*, not a two-week fix. Anyone promising faster is selling something.\n\nWhat you'll notice early (weeks 1–3): better energy, better sleep, clothes easing. The clinic numbers follow the consistency.\n\nTwo rules while we work:\n• Keep seeing your doctor — medication decisions stay with them, always.\n• Our lane: food logged, steps walked, strength trained — every day, boring, effective.\n\nIf you're in for the real timeline, I'm in with you the whole way.`;
+    await logChat(user.id, message, healthReply, "HEALTH_QUICK_FIX");
+    return healthReply;
+  }
+
+  return null;
 }

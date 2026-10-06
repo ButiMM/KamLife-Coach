@@ -31,11 +31,10 @@ import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
 import { isBareGreeting } from "../constants";
 import { readHealthState } from "../health-state";
-import { handleNumbersLiteracy, handleToneSignal, handleVoiceReplyPreference } from "./numbers-literacy";
+import { handleNumbersLiteracy, handleToneSignal, handleVoiceReplyPreference, handlePlansAndScope } from "./preferences";
 import { answerSwapAsk, answerUnavailable, answerLocalListChange, foodConstraints } from "../food-swaps";
 import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
 import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from "../street-food";
-import { handleAdviceCommands } from "./advice-commands";
 import { handleFoodCommands } from "./food-commands";
 import { PRICE_ESTIMATE_NOTE } from "../reply-contract";
 import { resolveReentryForUser, shouldHandleComebackForUser, executionEvidenceForUser } from "../understanding/reentry-bridge";
@@ -1159,7 +1158,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return dbReply;
   }
 
-  // ---- ADAPTIVE DELIVERY (numbers-literacy.ts): numbers on/off, confusion, tone dial ----
+  // ---- ADAPTIVE DELIVERY (preferences.ts): numbers on/off, confusion, tone dial ----
   const toneReply = await handleToneSignal({ message, m, user, capName, phone });
   if (toneReply !== null) return toneReply;
   const voicePrefReply = await handleVoiceReplyPreference({ message, m, user, capName, phone });
@@ -1168,9 +1167,8 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   const literacyReply = await handleNumbersLiteracy({ message, m, user, capName, phone });
   if (literacyReply !== null) return literacyReply;
 
-  // ---- ADVICE & MASTERCLASS COMMANDS (server/handlers/advice-commands.ts) — extracted for
-  // file-size + isolation; identical behaviour, same order, same ENGINE_LIVE gates. ----
-  const adviceReply = await handleAdviceCommands({ message, m, user, phone });
+  // ---- THEIR PLANS AND THE SCOPE RAILS (preferences.ts): return day, step target, medical scope ----
+  const adviceReply = await handlePlansAndScope({ message, m, user, phone });
   if (adviceReply !== null) return adviceReply;
 
   // ---- BUTTON TAPS: Workout delivery buttons ----

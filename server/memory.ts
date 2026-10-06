@@ -776,56 +776,6 @@ function foodDayClosedIn(blob: string): boolean {
   return /won'?t be able to eat|not (?:going to|gonna) eat anymore|no more food|done eating|zero[- ]calorie drinks/.test(blob);
 }
 
-/** Day-relative: 0 = today, 1 = last night, else stale (do not coach as if it is still happening). */
-export function situationWhen(stamped: Array<{ text: string; at: Date }>, now?: Date | number): "today" | "last_night" | "stale" | "" {
-  if (!stamped.length) return "";
-  const newest = stamped.reduce((a, b) => (a.at > b.at ? a : b));
-  const days = sastDaysBetween(newest.at, now);
-  if (days <= 0) return "today";
-  if (days === 1) return "last_night";
-  return "stale";
-}
-
-/** Client-facing frame for a decision turn. Code owns this; the model does not paraphrase it. */
-export function frameSituationForClient(situationLine: string, when: "today" | "last_night" | "stale" | "" = ""): string {
-  const s = String(situationLine || "");
-  if (!s || when === "stale") return "";
-  if (/closed food/i.test(s)) {
-    return when === "last_night"
-      ? "You closed food last night. Today is a new day — we start from what's in front of you."
-      : "You've closed food for today. We're not adding another meal.";
-  }
-  if (/celebration outing/i.test(s)) {
-    return when === "last_night"
-      ? "Last night was the birthday outing. Today we start the week — no chasing yesterday."
-      : "Today is the birthday outing, so we're not trying to make the whole day perfect. Enjoy yourself — we'll keep the rest of the day sensible.";
-  }
-  if (/eat out today/i.test(s)) {
-    return when === "last_night"
-      ? "You ate out last night. Today we keep it ordinary."
-      : "You're eating out today, so we're not chasing a perfect day. Keep the rest of it sensible.";
-  }
-  return "";
-}
-
-export async function loadSalientSituation(phone: string, currentMessage?: string): Promise<string> {
-  const fromThisTurn = currentMessage ? [currentMessage] : [];
-  const prior = await recentClientMessages(phone);
-  return extractSalientSituation([...fromThisTurn, ...prior]);
-}
-
-export async function loadSituationFrame(phone: string, currentMessage?: string): Promise<string> {
-  const stamped = await recentClientMessagesStamped(phone);
-  if (currentMessage) stamped.unshift({ text: currentMessage, at: new Date() });
-  const line = extractSalientSituation(stamped.map(s => s.text));
-  if (!line) return "";
-  const when = situationWhen(stamped.filter(s => {
-    const blob = s.text.toLowerCase();
-    return /birthday|restaurant|outing|eat anymore|alcohol|zero[- ]calorie|closed food/.test(blob);
-  }));
-  return frameSituationForClient(line, when || "today");
-}
-
 export async function recentClientMessagesStamped(phone: string): Promise<Array<{ text: string; at: Date }>> {
   try {
     const result = await pool.query(
