@@ -70,7 +70,6 @@ const { runDueReminders } = await import("../server/scheduler/jobs/reminders");
 const { _resetOutboundDedupe } = await import("../server/reply-hygiene");
 
 let failed = 0;
-if (process.env.GITHUB_ACTIONS) for (const ev of ["uncaughtException", "unhandledRejection"] as const) process.on(ev, (e: any) => { REAL(`::error::followup-arrives ${ev}: ${String(e?.stack || e).replace(/\n/g, " | ").slice(0, 900)}`); process.exit(1); });
 const chk = (ok: boolean, msg: string, evidence = "") => {
   if (!ok) { failed++; if (process.env.GITHUB_ACTIONS) REAL(`::error::followup-arrives FAIL ${msg} | ${evidence}`.slice(0, 900)); }
   REAL(`  ${ok ? "PASS" : "FAIL"}  ${msg}${!ok && evidence ? `\n          ${evidence}` : ""}`);
