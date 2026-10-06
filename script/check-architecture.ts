@@ -32,8 +32,8 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 232, // 6 Oct (D9): equipment-vision, machine-coach and home-workout deleted
-  handlerFiles: 28, // 6 Oct (D9): equipment-vision deleted
+  modules: 231, // 6 Oct (D9): equipment-vision, machine-coach, home-workout deleted
+  handlerFiles: 28, // 6 Oct (D9): equipment-vision, machine-coach, home-workout deleted
   cronRegistrations: 24, // 30 Sep (#511): the monthly narrative cron retired
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
   messageDeciders: 32,
@@ -62,7 +62,7 @@ const BUDGET = {
    * to the true figure in one deliberate commit. Until then this red line is the marker, and it is
    * the ONLY thing in this guard that is red — one red line means something, four never did.
    */
-  regexLiterals: 429, // 6 Oct (D9): equipment-vision, machine-coach and home-workout deleted
+  regexLiterals: 428, // 6 Oct (D9): equipment-vision, machine-coach, home-workout deleted
   /**
    * GUARD #13 — see unreachableExports above. Sixty-two capabilities cannot be reached by a
    * client message today. This budget is deliberately set THREE BELOW that, so this guard is RED
@@ -153,7 +153,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 412,
+  authorshipPoints: 410,
   twilioCallSites: 6,
 };
 
@@ -300,7 +300,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "so 21 is the smallest truthful current baseline. FROM HERE IT FALLS ONLY.",
   },
   {
-    key: "regexLiterals", from: 318, to: 429, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12, to 441 on 2026-09-15, to 440 on 2026-09-23, to 430 on 2026-09-25 with the wave-1 deletions of #445, to 429 on 2026-10-06 with the D9 equipment deletions)",
+    key: "regexLiterals", from: 318, to: 428, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12, to 441 on 2026-09-15, to 440 on 2026-09-23, to 430 on 2026-09-25 with the wave-1 deletions of #445, to 429 on 2026-10-05 with the old morning composer, B1, to 428 with 6 Oct (D9): equipment-vision, machine-coach, home-workout deleted)",
     why: "NOT A RAISE — A CORRECTED MEASUREMENT, and the follow-up this budget's own comment "
       + "declared owed on 2026-08-17: \"repair the matcher to see multi-line assignments and "
       + "re-baseline to the true figure in one deliberate commit.\" This is that commit. The "
