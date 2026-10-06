@@ -107,8 +107,8 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     const reply = await routeMessage(phone, message, mediaUrl, mediaContentType, allMediaUrls, sourceMessageId);
     // Never awaited into the client's path: a ledger that can delay an answer is worse than none.
     void recordTurn(reply);
-    return reply;
-  }, rootId || sourceMessageId);
+    return reply; // B7: held reminders fold into the RECONCILED reply; a voice note's nested turn carries the outer MessageSid
+  }, rootId || sourceMessageId, async final => (await import("./reminders")).withHeldReminders(final, rootId ?? sourceMessageId ?? phone));
 }
 
 async function routeMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[], sourceMessageId?: string): Promise<string> {
@@ -126,7 +126,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
 
   // ---- SAFETY + DATA GUARDS (crisis, medical, terminal, delete, reset) ----
   const safetyResult = await runSafetyGuards(phone, message, m, { sourceMessageId, boundUser: user });
-  if (safetyResult !== null) return safetyResult;
+  if (safetyResult !== null) return safetyResult; turnEvidence({ foldReminders: true }); // B7: a held reminder may ride on this reply
 
   if (!user) {
     user = await getOrCreateUser(phone);

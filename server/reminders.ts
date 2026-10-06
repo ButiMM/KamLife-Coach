@@ -9,7 +9,7 @@
 
 import { db } from "./db";
 import { reminders, mealLogs, workoutLogs } from "../shared/schema";
-import { eq, and, lte, like, sql } from "drizzle-orm";
+import { eq, and, lte, like, sql, inArray } from "drizzle-orm";
 
 import { returnNudgeTime, describeFireTime } from "./reminders-parse";
 import type { Recurrence } from "./reminders-parse";
@@ -33,10 +33,12 @@ export function describeRecurring(fireAt: Date, recurrence: Recurrence): string 
   return one;
 }
 
+/** Still to reach the client: due later, held for their next reply, or riding on one (#537). All are listed and cancelled. */
+const OPEN = ["pending", "held", "riding"];
 /** Client-facing reminders only ('my reminders' should never list system nudges). */
 export async function listPendingReminders(userId: string) {
   return db.select().from(reminders)
-    .where(and(eq(reminders.userId, userId), eq(reminders.status, "pending"), eq(reminders.kind, "user")))
+    .where(and(eq(reminders.userId, userId), inArray(reminders.status, OPEN), eq(reminders.kind, "user")))
     .orderBy(reminders.fireAt);
 }
 
@@ -45,7 +47,7 @@ export async function cancelAllReminders(userId: string): Promise<number> {
   const pending = await listPendingReminders(userId);
   if (!pending.length) return 0;
   await db.update(reminders).set({ status: "cancelled" })
-    .where(and(eq(reminders.userId, userId), eq(reminders.status, "pending"), eq(reminders.kind, "user")));
+    .where(and(eq(reminders.userId, userId), inArray(reminders.status, OPEN), eq(reminders.kind, "user")));
   return pending.length;
 }
 
@@ -159,4 +161,55 @@ export function nextRecurrenceTime(fireAt: Date, recurrence: Recurrence): Date {
 /** Advance a recurring reminder to its next occurrence (stays pending). */
 export async function advanceRecurring(id: string, nextFireAt: Date): Promise<void> {
   await db.update(reminders).set({ fireAt: nextFireAt }).where(eq(reminders.id, id));
+}
+
+/**
+ * B7: A REMINDER THAT COULD NOT ARRIVE IS HELD, NOT LOST. Outside the 24-hour window WhatsApp refuses
+ * free text, and there is no approved reminder template, so a one-shot reminder is held and rides on
+ * the client's next ordinary reply, worded exactly as it would have fired. Never on a safety-floor reply.
+ */
+/** The one wording of a client's own reminder, on time or held. */
+export const reminderText = (body: string): string => `⏰ Reminder: ${body}`;
+export async function holdReminder(id: string): Promise<void> {
+  await db.update(reminders).set({ status: "held" }).where(eq(reminders.id, id));
+}
+/** turn (rootId, else phone) → the held reminders riding on that turn's reply (#538; per turn, so a double-text cannot cross them). */
+const ridingOnReply = new Map<string, string[]>();
+/**
+ * A held reminder is CLAIMED by the reply that carries it (#537): one atomic held → riding update,
+ * so two concurrent replies cannot both carry it. sent_at is the claim time; a claim no verdict ever
+ * resolved (a crash, a reply that left by another door) is reclaimable after ten minutes, never lost.
+ */
+export async function withHeldReminders(reply: string, turnKey: string): Promise<string> {
+  const { turnFoldsRemindersFor } = await import("./handlers/chat-log");
+  const userId = turnFoldsRemindersFor();
+  if (!userId || !reply?.trim()) return reply;
+  const claimed = await db.execute(sql`
+    UPDATE reminders SET status = 'riding', sent_at = now()
+     WHERE id IN (SELECT id FROM reminders WHERE user_id = ${userId}
+                    AND (status = 'held' OR (status = 'riding' AND sent_at < now() - interval '10 minutes'))
+                  ORDER BY fire_at LIMIT 3 FOR UPDATE SKIP LOCKED)
+       AND (status = 'held' OR (status = 'riding' AND sent_at < now() - interval '10 minutes'))
+    RETURNING id, body`).then((r: any) => (r?.rows ?? []) as Array<{ id: string; body: string }>).catch(() => []);
+  if (!claimed.length) return reply;
+  ridingOnReply.set(turnKey, [...(ridingOnReply.get(turnKey) ?? []), ...claimed.map(h => h.id)]); // nested turns share a key: merge
+  return [reply, ...claimed.map(h => reminderText(h.body))].join("\n\n");
+}
+/** An album is N turns and one reply (#537): a claim made under an earlier photo's root moves to the root the combined body is finalised on. */
+export function moveRidingTurn(from: string, to: string): void {
+  const ids = ridingOnReply.get(from);
+  if (!ids || from === to) return;
+  ridingOnReply.delete(from);
+  ridingOnReply.set(to, [...(ridingOnReply.get(to) ?? []), ...ids]);
+}
+/**
+ * The delivery owner's verdict (#538): accepted → sent; dropped, refused or shadowed → held again.
+ * Only a row this turn still holds is touched, so a cancel that landed meanwhile stays cancelled.
+ */
+export async function closeHeldReminders(turnKey: string, accepted: boolean): Promise<void> {
+  const ids = ridingOnReply.get(turnKey);
+  ridingOnReply.delete(turnKey);
+  if (!ids?.length) return;
+  await db.update(reminders).set(accepted ? { status: "sent", sentAt: new Date() } : { status: "held" })
+    .where(and(inArray(reminders.id, ids), eq(reminders.status, "riding")));
 }

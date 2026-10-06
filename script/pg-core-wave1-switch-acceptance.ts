@@ -24,8 +24,9 @@ globalThis.fetch = (async (input: any, init?: any) => {
   let content = "Old coach here, noted.";
   if (body.includes("say what they want from this turn")) {
     const msg = JSON.parse(body).messages.at(-1).content as string;
-    const fix = /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : [];
-    content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ family: fix.length ? "correction" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts: [], actions: fix });
+    const bag = { type: "SET_REMINDER", body: "pack my gym bag", when: "tomorrow at 7am" };
+    const fix = /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : /vitamins/i.test(msg) ? [bag, { type: "SET_REMINDER", body: "take my vitamins", when: "tomorrow at 8am" }] : /nudge me/i.test(msg) ? [bag] : [];
+    content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ family: fix.length ? "correction" : "question", wants: "advice", one_question: null, uncertainty: /maybe/i.test(msg) ? 0.99 : 0.2, facts: [], actions: fix });
   } else if (body.includes("You are Coach K, a warm, direct South African")) content = `Try pap with beans tonight. ${NEW}`;
   else if (body.includes("domain gate")) content = /homework/i.test(body) ? "NO" : "YES";
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
@@ -120,6 +121,14 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
 }
 
 { const [t] = (await pool.query("SELECT id FROM users WHERE phone_number = $1", [TESTER])).rows, at = (hm: string) => `((now() AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Johannesburg')::date - 1 + time '${hm}') AT TIME ZONE 'Africa/Johannesburg' AT TIME ZONE 'UTC'`; await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [t.id]); await pool.query("DELETE FROM step_logs WHERE user_id = $1", [t.id]); await pool.query(`INSERT INTO meal_logs (user_id, raw_message, source, kcal_int, protein_int, logged_at) VALUES ($1, 'oats', 'sa_scanner', 300, 10, ${at("00:30")})`, [t.id]); const step = (n: number, prov: string) => pool.query(`INSERT INTO step_logs (user_id, steps, provenance, logged_at) VALUES ($1, ${n}, '${prov}', ${at("23:30")})`, [t.id]), traj = async () => (await import("../server/trajectory-report")).getTrajectoryForUser(t.id); await step(10000, "client_report"); const tr = await traj(); await step(50000, "unverified"); const tu = await traj(); chk(tr?.daysLogged === 1 && (tr?.avgStepBurn ?? 0) > 0 && tu?.avgStepBurn === tr?.avgStepBurn, "#539/#540: 00:30 oats and 23:30 steps are one SAST day; trusted steps count, an unverified row changes nothing", JSON.stringify({ d: tr?.daysLogged, burn: tr?.avgStepBurn, withUnverified: tu?.avgStepBurn })); }
+REAL("\n4d. A14 — A REMINDER IN THEIR OWN WORDS IS READ BY THE NEW COACH AND SAVED BY THE PROVEN COMMAND");
+{ const rr = await say(TESTER, "Could you nudge me before gym tomorrow at 7am, I always forget my bag"), n = (await pool.query("SELECT COUNT(*)::int n FROM reminders r JOIN users u ON u.id = r.user_id WHERE u.phone_number = $1 AND r.kind = 'user'", [TESTER])).rows[0].n;
+  const said = (await pool.query("SELECT message_in FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.intent = 'REMINDER_SET' ORDER BY c.id DESC LIMIT 1", [TESTER])).rows[0]?.message_in;
+  chk(n === 1 && /remind you to pack my gym bag/i.test(rr) && /nudge me before gym/i.test(said || ""), "the reminder is a row, the reply confirms the exact time, the record keeps their words", `${n} | ${said} | ${rr.slice(0, 120)}`);
+  const count = async () => (await pool.query("SELECT COUNT(*)::int n FROM reminders r JOIN users u ON u.id = r.user_id WHERE u.phone_number = $1 AND r.kind = 'user'", [TESTER])).rows[0].n;
+  const um = await say(TESTER, "Maybe nudge me about my gym bag, I haven't decided when"); chk(await count() === 1 && /when should I remind you/i.test(um), "unsure of the time: it asks, and saves nothing", um.slice(0, 120)); await pool.query("UPDATE users SET awaiting_input_type = NULL WHERE phone_number = $1", [TESTER]);
+  const two = await say(TESTER, "Nudge me to pack my gym bag tomorrow at 7am and give me a shout for vitamins at 8am"); const rows = (await pool.query("SELECT COUNT(*)::int n FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.message_in LIKE 'Nudge me to pack%'", [TESTER])).rows[0].n; chk(await count() === 3 && /vitamins/i.test(two) && rows === 1, "two reminders in one message: both saved, both confirmed, one row in the chat record", `${await count()} | rows=${rows} | ${two.slice(0, 120)}`); }
+
 REAL("\n5. INSTANT ROLLBACK");
 process.env.CORE_WAVE1 = "off";
 const f4 = await say(FOUNDER, ASK);
