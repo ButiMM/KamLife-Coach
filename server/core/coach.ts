@@ -168,7 +168,8 @@ async function foldedFollowUp(phone: string, pre: PreTurn, reply: string): Promi
   const { activeCommitment, followUpRides } = await import("./client-record");
   const c = await activeCommitment(pre.userId);
   const said = reply.toLowerCase(), named = (c?.what.toLowerCase().match(/[a-z]{4,}/g) ?? []).some(w => said.includes(w));
-  if (c && !c.outcome && c.state === "open" && named) followUpRides(phone, c.id);
+  // Keyed by THIS turn (#545 @ 5bb55de): an unrelated reply delivered first must not close another turn's follow-up.
+  if (c && !c.outcome && c.state === "open" && named) followUpRides((await import("../handlers/chat-log")).turnRootId() ?? phone, c.id);
 }
 
 /** The rules of the product, in the composer's own words (docs/TESTER-EXPERIENCE.md). */

@@ -128,12 +128,12 @@ export async function markCommitment(id: string, state: "asked" | "kept"): Promi
   await db.update(clientFacts).set({ detail: sql`${clientFacts.detail} || ${JSON.stringify({ state })}::jsonb` }).where(eq(clientFacts.id, id));
 }
 
-/** phone → the commitment a reply on its way out asks about; closed by the transport's verdict (#545). */
+/** turn (rootId, else phone) → the commitment that turn's reply asks about; closed by its transport verdict (#545). */
 const followUpRiding = new Map<string, string>();
-export function followUpRides(phone: string, commitmentId: string): void { followUpRiding.set(phone, commitmentId); }
-export async function closeFollowUp(phone: string, accepted: boolean): Promise<void> {
-  const id = followUpRiding.get(phone);
-  followUpRiding.delete(phone);
+export function followUpRides(turnKey: string, commitmentId: string): void { followUpRiding.set(turnKey, commitmentId); }
+export async function closeFollowUp(turnKey: string, accepted: boolean): Promise<void> {
+  const id = followUpRiding.get(turnKey);
+  followUpRiding.delete(turnKey);
   if (id && accepted) await markCommitment(id, "asked");
 }
 /** The ledger is the evidence (spec §4): a movement commitment is kept by a completed session, or their step target, on its due day. */

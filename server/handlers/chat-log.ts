@@ -735,6 +735,8 @@ export async function inTurn<T>(inputType: string, inputText: string, fn: () => 
   });
 }
 
+/** This turn's interaction id (the transport's rootId when it passed one), or null outside a turn. */
+export function turnRootId(): string | null { return turnStore.getStore()?.rootId ?? null; }
 export function turnUser(userId: string): void { const t = turnStore.getStore(); if (t) t.userId = userId; }
 /**
  * WHAT THIS TURN HAS ACTUALLY WRITTEN, so far (2026-08-22).
