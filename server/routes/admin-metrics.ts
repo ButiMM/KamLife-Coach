@@ -6,6 +6,7 @@ import { TEMPLATES } from "../whatsapp-templates";
 import { gte } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { requireAdminKey } from "./auth";
+import { PRICING } from "../../shared/pricing";
 
 // North-star metrics (2026-07-14) — extracted from admin.ts for the file-size budget.
 // The money + engagement + quality layer the VC review asked for. Detailed funnel/
@@ -19,7 +20,7 @@ export function registerAdminMetrics(app: Express) {
   // live at /api/dashboard/funnel — this is the money + engagement + quality layer. ──
   app.get("/api/admin/north-star", requireAdminKey, async (_req, res) => {
     try {
-      const PRICE_ZAR = 199;      // current subscription price
+      const PRICE_ZAR = PRICING.monthlyPriceZAR; // the billing owner (#567), never a second copy
       const USD_ZAR = 18.5;       // same rate the cost logger uses
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
