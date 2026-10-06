@@ -292,7 +292,7 @@ export async function initScheduler(): Promise<void> {
   // It reads the ledger and runs pure rules — no model, no sends, no writes to the per-turn
   // verdict fields, which stay with human adjudication. Half past the hour so it does not sit on
   // top of the spend watchdog. The leader lock above already stops a second replica repeating it.
-  cron.schedule("30 * * * *",    () => safe("runCoachHealthSweep",    () => runCoachHealthSweep().then(() => undefined), { cron: "30 * * * *" }), { timezone: "UTC" });
+  cron.schedule("30 * * * *",    () => safe("runCoachHealthSweep",    () => runCoachHealthSweep().then(() => import("./friction")).then(f => f.sendLiveDigestOnce()).then(() => undefined), { cron: "30 * * * *" }), { timezone: "UTC" });
 
   // ── Daily setup-checklist reminder ────────────────────────────────────────
   // Fires once/day at 9am SAST (7am UTC). Builds a WhatsApp message listing

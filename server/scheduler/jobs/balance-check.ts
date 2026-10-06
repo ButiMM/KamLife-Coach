@@ -54,5 +54,16 @@ export async function runBalanceCheck(): Promise<void> {
     return;
   }
   console.warn(`[BALANCE] LOW — ${res.currency} ${res.balance.toFixed(2)} < ${LOW_BALANCE_THRESHOLD}, alerting founder`);
-  await sendCriticalAlert(alertTo, alert).catch(e => console.error("[BALANCE] alert send failed:", e?.message || e));
+  await alertOps(alert);
+}
+
+/**
+ * THE ONE WAY THE SERVER MESSAGES THE FOUNDER ON A SCHEDULE: the balance alarm above and the daily
+ * live-quality digest (D7, routes/admin-turns.ts). Nowhere, or a client thread: nothing is sent.
+ */
+export async function alertOps(text: string): Promise<boolean> {
+  const to = await resolveOpsAlertMsisdn();
+  if (!to) return false;
+  await sendCriticalAlert(to, text).catch(e => console.error("[OPS_ALERT] send failed:", e?.message || e));
+  return true;
 }

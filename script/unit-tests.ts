@@ -6229,6 +6229,36 @@ test("A19 (#545 attack): the voice door teaches the record from the live read, a
   const voice = src.slice(src.indexOf("async function processVoiceAsync"), src.indexOf("// ── WhatsApp message splitting"));
   assert.match(voice, /recordAtDoor\([^)]*\)[^]*?learnFromLiveRead\(phone, sourceMessageId\)/);
 });
+test("D7: live turns are scored from what the client did next, with no model call", async () => {
+  const { scoreLiveTurns, liveDigest } = await import("../server/friction");
+  const { isMemoryGrievance } = await import("../server/understanding/actions");
+  const now = Date.parse("2026-10-06T16:30:00Z"), at = (h: number) => new Date(now - h * 3600_000);
+  const turns = [
+    { id: "a1", userId: "A", at: at(10), input: "I had pap for lunch", reply: "Lunch is in. Pap gives you energy." },
+    { id: "a2", userId: "A", at: at(9.9), input: "I already told you I'm off starch this week", reply: "Got it, noted." },
+    { id: "b1", userId: "B", at: at(8), input: "What should I eat tonight?", reply: "Chicken and veg? What do you have in?" },
+    { id: "c1", userId: "C", at: at(3), input: "Walked 8000 steps", reply: "Lekker, that's your target." },
+    { id: "d1", userId: "D", at: at(5), input: "Hi", reply: "Hey! How was the walk?" },
+    { id: "d2", userId: "D", at: at(4.9), input: "fine", reply: "Good." },
+  ];
+  const signals = [
+    { userId: "A", at: at(9.9), kind: "friction_correction" },
+    { userId: "D", at: at(4.8), kind: "opt_out" },
+    { userId: "C", at: at(30), kind: "friction_frustration" }, // before the turn: not about it
+  ];
+  const scored = scoreLiveTurns(turns, signals, isMemoryGrievance, now);
+  const a1 = scored.find(t => t.id === "a1");
+  assert.ok(a1 && a1.score === 7 && a1.why.includes("corrected") && a1.why.includes("\"you forgot\""), JSON.stringify(a1));
+  assert.ok(scored.find(t => t.id === "b1")?.why.includes("silence after a question"), "a question nobody answered for 6h+");
+  assert.equal(scored.find(t => t.id === "c1"), undefined, "an earlier signal is not about a later turn");
+  assert.ok(scored.find(t => t.id === "d2")?.why.includes("opted out"), "an opt-out within two hours");
+  assert.equal(scored[0].id, "a1", "worst first");
+  const text = liveDigest(scored, turns.length, u => ({ A: "123", B: "456", D: "789" } as any)[u] ?? "???");
+  assert.match(text, /^Coach health, last 24h: 6 turns, \d+ with a bad sign/);
+  assert.match(text, /1\. …123 · corrected, "you forgot"\n   Coach: «Lunch is in/);
+  assert.ok(!/\+27|whatsapp:/.test(text), "never a full number");
+  assert.match(liveDigest([], 0, () => ""), /Nothing to read today/);
+});
 test("card paths: every attach site is accounted for", async () => {
   const { readFileSync } = await import("node:fs");
   const files = [
