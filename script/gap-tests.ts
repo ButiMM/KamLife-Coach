@@ -3162,7 +3162,7 @@ test("proactive decision: re-entry is not met with a calorie adjustment", () => 
   // The re-engagement send is now the ladder's one ask (Cut 6) rather than a button menu written
   // here. The exclusion is unchanged and matters more, not less: someone coming back after weeks
   // away must not have their first contact be an explanation of a calorie change.
-  assert.equal(carriesAdapt("await silenceAsk(client, daysSilent)"), false, "the silent client");
+  assert.equal(carriesAdapt("await silenceAsk(client, daysSilent"), false, "the silent client");
   // The >7-day skip that used to sit above all of this is gone — see the cut6 gates below. It was
   // the reason the ladder's month rung could never run. Absence is now handled, not skipped.
 });
@@ -3260,7 +3260,7 @@ test("sweep: the >7-day client's decision is used, not computed and discarded", 
   assert.ok(/const decision = decideProactive\(state, profile/.test(morning),
     "morning asks the decision owner for the client it used to drop");
   // #275: returned with a flag so the send can record a weigh-in ask — the text is still the answer.
-  assert.ok(/text: formatOneAction\(decision\.action, firstName\)/.test(morning),
+  assert.ok(/text: formatOneAction\(decision\.action, named \? firstName : undefined\)/.test(morning),
     "…and the message IS its answer, not a second wording of it");
   // The degraded fallback still SPEAKS — and since 2026-08-21 it speaks under the same policy
   // contract as the gate, so a ledger failure can no longer turn into a prescription the gate
@@ -3969,8 +3969,8 @@ test("cut6: morning runs the ladder for every absence — no skip, no menu", () 
   assert.ok(!/if \(daysSilent > 7\) continue;/.test(morning),
     "a client gone more than a week must not be skipped before the decision is made");
   assert.ok(/if \(daysSilent >= 3\) \{/.test(morning), "silence is still handled here");
-  assert.ok(/await silenceAsk\(client, daysSilent\)/.test(morning),
-    "…and the wording comes from the ladder, not from this job");
+  assert.ok(/await silenceAsk\(client, daysSilent, !hello\)/.test(morning),
+    "…and the ask comes from the ladder; B6's new-coach words only say hello");
   // Three buttons is three decisions, for someone whose problem is that deciding got expensive.
   assert.ok(!/sendWhatsAppButtons/.test(morning), "the re-engagement button menu is gone");
   assert.ok(!/I'm back, let's go|need a simpler plan/i.test(morning),
@@ -4132,15 +4132,11 @@ test("cut7: an injury reaches the column the programme actually reads", async ()
     "…and an ordinary sentence now fills it");
 });
 
-test("cut7: embeddings are off, and the conversation thread survives the mute", () => {
+test("D2: the vector store is gone, and the conversation thread survives it", () => {
   const memory = readFileSync("server/memory.ts", "utf-8");
-  assert.ok(/const EMBEDDINGS_ON = String\(process\.env\.MEMORY_EMBEDDINGS/.test(memory),
-    "one env var turns the vector store back on — muted, not deleted");
-  assert.ok(/^export async function storeMemory[\s\S]{0,120}if \(!EMBEDDINGS_ON\) return;/m.test(memory),
-    "no embedding call per stored fact");
-  // recentConversation is a plain SQL read of the last four turns and was always the honest half
-  // of retrieval. Muting the vector search must not take it out.
-  assert.ok(/if \(!EMBEDDINGS_ON\) \{[\s\S]{0,400}recentConversation\(phone\)/.test(memory),
+  assert.ok(!/embeddings\.create|storeMemory|initMemoryTable/.test(memory), "no embedding call, no vector writer (D2)");
+  // recentConversation is a plain SQL read of the last four turns and was always the honest half of retrieval.
+  assert.ok(/export async function retrieveMemories[\s\S]{0,300}recentConversation\(phone\)/.test(memory),
     "the thread still reaches the coach");
   assert.ok(/factsLine\(phone\)/.test(memory), "…alongside the six facts, which replace the prose");
 });
@@ -4763,7 +4759,7 @@ test("startup: the schema guarantee survives binding early", () => {
   const index = readFileSync("server/index.ts", "utf-8");
   const readyBranch = index.slice(index.indexOf('setStartupPhase("ready"'), index.indexOf("} catch (e: any) {", index.indexOf('setStartupPhase("ready"')));
   assert.ok(/initScheduler\(\)/.test(readyBranch), "the scheduler starts from the ready branch");
-  assert.ok(/initFoodsTable\(\)/.test(readyBranch) && /initMemoryTable\(\)/.test(readyBranch),
+  assert.ok(/initFoodsTable\(\)/.test(readyBranch),
     "…and so does everything else that touches the schema");
 });
 

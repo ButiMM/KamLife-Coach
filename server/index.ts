@@ -11,7 +11,6 @@ import { setStartupPhase, registerStartupGate } from "./routes/health";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initScheduler } from "./scheduler";
-import { initMemoryTable } from "./memory";
 import { initFoodsTable } from "./foods";
 import { pool, db } from "./db";
 import { users } from "../shared/schema";
@@ -776,7 +775,6 @@ async function verifySchemaThenServe(): Promise<void> {
     import("./self-check").then(sc => sc.logSelfCheckAtBoot()).catch(() => {});
     initScheduler().catch(e => console.error("[STARTUP] Scheduler init failed:", e));
     initFoodsTable().catch(e => console.error("[STARTUP] Foods init failed:", e));
-    initMemoryTable().catch(e => console.error("[STARTUP] Memory init failed:", e));
     activateCoachAccount().catch(e => console.error("[STARTUP] Coach activation failed:", e));
   } catch (e: any) {
     const connection = isConnectionError(e);

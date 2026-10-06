@@ -9,7 +9,7 @@ import { composeDecisionTurn, renderActionLine } from "../one-action";
 import { getToneMode, toneSteer } from "../tone-mode";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { recomputeTodayFoodTotals } from "./food-scanner";
-import { storeMemory, retrieveMemories, loadSalientSituation, loadSituationFrame, frameSituationForClient, looksLikeRecallQuestion, answerRecall } from "../memory";
+import { retrieveMemories, loadSalientSituation, loadSituationFrame, frameSituationForClient, looksLikeRecallQuestion, answerRecall } from "../memory";
 import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
 import { tellDontAsk } from "../reply-hygiene";
 import { logChat, withTimeout, turnEvidence } from "./chat-log";
