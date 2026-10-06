@@ -97,6 +97,9 @@ export async function ledgerNumbers(user: any, message = ""): Promise<string> {
 export async function readPreTurn(phone: string, message?: string): Promise<PreTurn | null> {
   const [u] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
   if (!u || u.onboardingState !== "COMPLETE") return null; // onboarding is its own journey, not this composer's yet
+  // THE SPEND CAP COVERS THE NEW COACH TOO (#340): over the ceiling, or unable to read spend, it stands down
+  // and every caller falls back to what the cap already owns (the short degraded reply, the plain fact).
+  if (!(await (await import("../cost-tracking")).isUnderGPTCallLimit(u.id))) return null;
   const { factsForCoach, knownFacts, backfillFromOldStores } = await import("./client-record");
   await backfillFromOldStores(u).catch(e => console.warn("[RECORD] backfill skipped:", (e as Error).message)); // #414: before the first read
   void learnFromHistory(u.id); // #414: what they said in chat, in the background; the next turn reads it

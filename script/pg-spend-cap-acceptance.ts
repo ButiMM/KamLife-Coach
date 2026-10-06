@@ -25,14 +25,18 @@ process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
 process.env.GLOBAL_AI_DAILY_HARD_CAP_USD = "5";
 
-let engineCalls = 0;
+let engineCalls = 0, coreCalls = 0;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
   const url = typeof input === "string" ? input : String(input?.url || input);
   if (!url.includes("api.openai.com")) return realFetch(input, init);
   const body = typeof init?.body === "string" ? init.body : "";
   if (body.includes("COACH K'S CONSTITUTION")) engineCalls++;
-  const content = body.includes("domain gate") ? "YES" : "Good question — keep it simple tonight: protein, veg, water.";
+  const coreRead = body.includes("say what they want from this turn");
+  if (coreRead || body.includes("You are Coach K, a warm, direct South African")) coreCalls++;
+  const content = body.includes("domain gate") ? "YES" : coreRead
+    ? JSON.stringify({ family: "question", wants: "advice", one_question: null, uncertainty: 0.2, facts: [], actions: [] })
+    : "Good question — keep it simple tonight: protein, veg, water.";
   return new Response(JSON.stringify({ id: "stub", object: "chat.completion", created: 1, model: "stub",
     choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }),
     { status: 200, headers: { "content-type": "application/json" } });
@@ -95,6 +99,14 @@ const capped = await say(a.phoneNumber, QUESTIONS[1]);
 chk(DEGRADED.test(capped), "over the daily ceiling, the client gets the short degraded reply", JSON.stringify(capped.slice(0, 160)));
 chk(engineCalls === 0, "…and the engine's model is not called", `engine calls ${engineCalls}`);
 chk((await pool.query("SELECT 1 FROM admin_events WHERE action = 'ai_spend_global_cap_hit'")).rows.length === 1, "…and the founder's admin view records the ceiling being hit");
+
+REAL("\n2b. THE NEW COACH IS UNDER THE SAME CEILING (production runs wave 1 on for everyone)");
+process.env.CORE_WAVE1 = "on";
+coreCalls = 0;
+const cappedCore = await say(a.phoneNumber, "What should I eat tonight?");
+chk(coreCalls === 0, "over the ceiling, the new coach makes no model call", `core calls ${coreCalls}; ${JSON.stringify(cappedCore.slice(0, 160))}`);
+chk(DEGRADED.test(cappedCore), "…and the client gets the short degraded reply", JSON.stringify(cappedCore.slice(0, 160)));
+process.env.CORE_WAVE1 = "off";
 await pool.query("DELETE FROM gpt_costs WHERE feature = 'spend-cap-acceptance'");
 
 REAL("\n3. SPEND THAT CANNOT BE READ IS NOT UNLIMITED SPEND");
