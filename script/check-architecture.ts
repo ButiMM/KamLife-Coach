@@ -118,7 +118,7 @@ const BUDGET = {
    *
    * LOWER THIS as each of those lands. Never raise it.
    */
-  directWeightReads: 9,
+  directWeightReads: 8,
   /**
    * GUARD #16 — see handRolledDayBuckets above. SQL that decides which SAST day a ledger row
    * belongs to, written somewhere other than the owner.
