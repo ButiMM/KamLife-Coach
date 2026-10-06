@@ -2906,7 +2906,7 @@ test("money objection frames the daily cost, from the price owner", async () => 
   assert.ok(r !== null, "money objection should be answered");
   const daily = PRICING.dailyDisplay.replace("/day", "");
   assert.ok(r!.reply.includes(daily), `money reply should frame the daily cost (${daily}): ${r!.reply.slice(0, 120)}`);
-  assert.ok(!/R199|R6\.63/.test(r!.reply), "money reply still quotes the retired offer");
+  assert.ok(!/R149\b|R4\.97/.test(r!.reply), "money reply still quotes the retired offer (R149, retired by #567)");
 });
 
 // ============================================================
@@ -6235,6 +6235,15 @@ test("A19 (#545 attack): the voice door teaches the record from the live read, a
   const src = readFileSync("server/routes/whatsapp.ts", "utf-8");
   const voice = src.slice(src.indexOf("async function processVoiceAsync"), src.indexOf("// ── WhatsApp message splitting"));
   assert.match(voice, /recordAtDoor\([^)]*\)[^]*?learnFromLiveRead\(phone, sourceMessageId\)/);
+});
+test("#567: the till charges R199, and an earlier subscriber's R149 token still renews", async () => {
+  const { PRICING, chargeMatchesPrice } = await import("../shared/pricing");
+  assert.equal(PRICING.monthlyPriceZAR, 199);
+  assert.equal(chargeMatchesPrice(199), true, "today's price");
+  assert.equal(chargeMatchesPrice(149), true, "a legacy R149 token's renewal is not rejected");
+  assert.equal(chargeMatchesPrice(1), false, "R1 never buys a subscription");
+  assert.equal(chargeMatchesPrice(250), false);
+  assert.ok(readFileSync("server/routes/payments.ts", "utf-8").includes("!chargeMatchesPrice(amountGross)"), "the ITN check uses it");
 });
 test("card paths: every attach site is accounted for", async () => {
   const { readFileSync } = await import("node:fs");
