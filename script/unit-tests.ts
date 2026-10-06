@@ -6224,6 +6224,11 @@ test("dayStatusPill: a plain verdict, never a number, and it matches the bars", 
 // call site I never touched — his numbers twice, the same order four times, and a "Fat over"
 // pill above "Eat more today". Fixing one call site and calling it done is the systemic defect
 // itself. This test enumerates the paths so a new one cannot quietly join them.
+test("A19 (#545 attack): the voice door teaches the record from the live read, as the text door does", () => {
+  const src = readFileSync("server/routes/whatsapp.ts", "utf-8");
+  const voice = src.slice(src.indexOf("async function processVoiceAsync"), src.indexOf("// ── WhatsApp message splitting"));
+  assert.match(voice, /recordAtDoor\([^)]*\)[^]*?learnFromLiveRead\(phone, sourceMessageId\)/);
+});
 test("card paths: every attach site is accounted for", async () => {
   const { readFileSync } = await import("node:fs");
   const files = [

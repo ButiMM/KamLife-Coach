@@ -337,7 +337,11 @@ async function processVoiceAsync(
   } finally {
     await completeMediaJob(sourceMessageId).catch(() => {});
     // THE CLIENT RECORD (#271) — a voice note is an inbound message too; its transcript is stored.
-    void import("../core/client-record").then(m => m.recordAtDoor({ phone, rawText: message, mediaType, sourceMessageId, rootId }));
+    // Then the live read teaches the record from the transcript, as the text door does (#545 attack: a spoken promise was lost).
+    void (async () => {
+      await (await import("../core/client-record")).recordAtDoor({ phone, rawText: message, mediaType, sourceMessageId, rootId });
+      await (await import("../core/coach")).learnFromLiveRead(phone, sourceMessageId);
+    })().catch(() => {});
   }
 }
 
