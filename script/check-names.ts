@@ -20,7 +20,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 // Frozen 2026-07-29 after removing every full-name-in-prose use. LOWER THIS, NEVER RAISE IT.
-const BUDGET = 93;   // 2026-10-06 (D9): equipment-vision deleted (was 94)
+const BUDGET = 91;   // 2026-10-06 (D2b): the CIP narrative and insight deleted (was 93)
 
 /** Prose shapes that put a FULL name in front of a client. These may never come back at all. */
 const FORBIDDEN: Array<[RegExp, string]> = [

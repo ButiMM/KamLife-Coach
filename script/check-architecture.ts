@@ -32,7 +32,7 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 230, // 6 Oct (A19): merged with main
+  modules: 229, // D2b: intelligence/profile.ts deleted (6 Oct)
   handlerFiles: 28, // 6 Oct (D9): equipment-vision, machine-coach, home-workout deleted
   cronRegistrations: 24, // 30 Sep (#511): the monthly narrative cron retired
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
@@ -153,7 +153,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 409,
+  authorshipPoints: 407,
   twilioCallSites: 6,
 };
 

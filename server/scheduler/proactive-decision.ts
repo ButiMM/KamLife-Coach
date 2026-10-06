@@ -41,7 +41,7 @@ import { foodConstraints } from "../food-swaps";
 import { sastDayKey } from "../sast";
 import { ensureOpenTrainingLoop, ensureOpenWeekendInvestigation, loadOpenTrainingLoop, weekendInvestigationAnswered } from "../memory";
 import { deliveryAccepted, type DeliveryResult } from "../outbound-delivery";
-import { getBehaviourPatternContext, type BehaviourPatternDecisionContext } from "../intelligence/profile";
+import { getBehaviourPatternContext, type BehaviourPatternDecisionContext } from "../core/client-record";
 
 export interface CanonicalMove {
   /** Ready to place in a message. "" when the decision is `hold` — nothing to add is an answer. */

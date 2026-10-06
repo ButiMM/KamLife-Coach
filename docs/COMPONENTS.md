@@ -43,7 +43,7 @@ The new coach (`server/core/`) **calls these**. It never re-implements them, and
 | `one-action.ts`, `scheduler/proactive-decision.ts` | one decision authority in the core | #272 / #319 |
 | Old Meaning Engine: `understanding/live.ts`, `meaning-engine.ts`, `perception.ts`, `messy-intake.ts`, `reentry.ts` | `core/coach.ts` | the last #272 switch |
 | `brain/coach-brain.ts`, `brain/client-snapshot.ts`, `brain/reply-verifier.ts` | core composer + client record | #272 |
-| Memory stores: `memory.ts` (six regex fields), `portion-memory.ts`, `held-constraints.ts`, `life-context.ts`, `health-state.ts`, `intelligence/profile.ts`, `client_understanding` | the client record (#271): one store | #272, as reads move |
+| Memory stores: `memory.ts` (six regex fields), `portion-memory.ts`, `held-constraints.ts`, `life-context.ts`, `health-state.ts`, `client_understanding` (`intelligence/profile.ts` went 6 Oct, D2b: patterns are `pattern` facts in the record) | the client record (#271): one store | #272, as reads move |
 | `coach-prompt.ts` (69k characters, sliced) | a short core prompt plus doctrine selected per turn | #320 |
 | `onboarding.ts` conversation script | composer, journey 1 | #272 |
 | Copy inside scheduled jobs (`scheduler/jobs/morning.ts`, `weekly.ts`, `monday.ts`, `programme.ts`, `onboarding.ts`), `unlogged-notice.ts`, `machine-coach.ts`, `agents.ts` | proactive decisions through the composer | #319 |

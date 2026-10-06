@@ -10609,7 +10609,8 @@ test("coach identity: one normalisation, or the founder is a stranger to his own
 
 // Every async test must finish before a single number is printed — see the note on test().
 test("#217 behavioural patterns require attributable repetition, decay, and reach one decision owner", async () => {
-  const { buildBehaviourPatternState, decisionPatterns } = await import("../server/intelligence/profile");
+  const { buildBehaviourPatterns: build } = await import("../server/scheduler/jobs/cip-update");
+  const { decisionPatterns } = await import("../server/core/client-record");
   const { chooseAction, readStruggle } = await import("../server/one-action");
   const { createOpenTrainingLoop, readOpenTrainingLoop } = await import("../server/workout-feedback");
   const at = (day: string) => new Date(`${day}T10:00:00+02:00`);
@@ -10623,10 +10624,10 @@ test("#217 behavioural patterns require attributable repetition, decay, and reac
   assert.equal(readStruggle("I couldn't do it; work was chaos and my shift ran late"), "time",
     "genuine employment pressure retains its existing classification");
 
-  const oneMiss = buildBehaviourPatternState([row(1, "2026-08-01")], [], at("2026-08-10"));
-  assert.equal(oneMiss.patterns.length, 0, "one bad weekend is an event, never a durable pattern");
+  const oneMiss = build([row(1, "2026-08-01")], [], at("2026-08-10"));
+  assert.equal(oneMiss.length, 0, "one bad weekend is an event, never a durable pattern");
 
-  const active = buildBehaviourPatternState([
+  const active = build([
     row(1, "2026-08-01"), row(2, "2026-08-08"),
     row(3, "2026-07-27", "asserted", "said_time"),
     row(4, "2026-08-03", "asserted", "said_time"),
@@ -10638,23 +10639,23 @@ test("#217 behavioural patterns require attributable repetition, decay, and reac
     workPressureTrainingMisses: true,
     minimumTrainingReengaged: true,
   });
-  assert.ok(active.patterns.every(p => p.evidence.every(e => e.source === "daily_constraints")),
+  assert.ok(active.every(p => p.evidence.every(e => e.source === "daily_constraints")),
     "every usable pattern carries exact canonical provenance");
-  assert.equal(active.patterns.find(p => p.kind === "minimum_training_reengaged")?.confidence, "observed",
+  assert.equal(active.find(p => p.kind === "minimum_training_reengaged")?.confidence, "observed",
     "one linked successful intervention is an observed outcome, not fabricated recurrence");
 
-  const superseded = buildBehaviourPatternState([
+  const superseded = build([
     row(1, "2026-07-04"), row(2, "2026-07-11"),
   ], ["2026-07-18", "2026-07-25"], at("2026-08-01"));
-  assert.equal(superseded.patterns[0]?.status, "superseded",
+  assert.equal(superseded[0]?.status, "superseded",
     "two recent contradictory weekend completions remove old pattern authority");
   assert.equal(decisionPatterns(superseded).weekendTrainingMisses, false);
 
-  const decayed = buildBehaviourPatternState([
+  const decayed = build([
     row(1, "2026-04-04", "asserted", "said_time"),
     row(2, "2026-04-11", "asserted", "said_time"),
   ], [], at("2026-08-01"));
-  assert.equal(decayed.patterns[0]?.status, "decayed", "stale evidence stays inspectable but loses authority");
+  assert.equal(decayed[0]?.status, "decayed", "stale evidence stays inspectable but loses authority");
 
   const base = {
     goal: "fat_loss" as any, weeksOnProgramme: 8, daysSinceAnyLog: 0, daysSinceWeighIn: 0,

@@ -6,7 +6,7 @@
  */
 
 import twilio from "twilio";
-import { db, pool, getOrCreateUser } from "../db";
+import { db, getOrCreateUser } from "../db";
 import {
   users, chatHistory, stepLogs, workoutLogs, weightLogs,
   weeklyCheckins, clothingCheckins, bodyMeasurements,
@@ -406,11 +406,6 @@ export async function runSafetyGuards(
           targetPhone: null, reason: billing.detail, meta: { token },
         });
       });
-      try {
-        await pool.query("DELETE FROM memories WHERE phone = $1", [phone]);
-      } catch (memErr: any) {
-        console.warn(`[POPIA DELETE] Vector memory deletion failed (non-fatal): ${memErr.message}`);
-      }
       console.log(`[POPIA DELETE] Completed for ${uid}${billing ? ` — billing: ${billing.detail}` : ""}`);
       const billingLine = !billing ? ""
         : billing.ok ? "Your subscription is cancelled at PayFast, so you won't be charged again. "
@@ -460,9 +455,6 @@ export async function runSafetyGuards(
       return created;
     });
     bindKnownSafetyUser(resetUser);
-    await pool.query("DELETE FROM memories WHERE phone = $1", [phone]).catch((e: any) =>
-      console.error("[RESET] memories delete failed (non-fatal):", e?.message)
-    );
     return "Fresh start. What's your name?";
   }
 
@@ -517,9 +509,6 @@ export async function runSafetyGuards(
       return created;
     });
     bindKnownSafetyUser(resetUser);
-    await pool.query("DELETE FROM memories WHERE phone = $1", [phone]).catch((e: any) =>
-      console.error("[RESET] memories delete failed (non-fatal):", e?.message)
-    );
     return "Fresh start. What's your name?";
   }
 
