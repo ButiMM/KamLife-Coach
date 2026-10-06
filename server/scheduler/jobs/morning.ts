@@ -1,9 +1,7 @@
 import {
-  db, users, chatHistory, stepLogs, workoutLogs, mealLogs, escalations,
-  eq, gte, and, lt, desc, sql, asc,
-  canSendProactive, recordProactiveSend, claimDailySlot, claimProactive, pauseReason,
-  getActiveClients, isPaused, dayStart, getYesterdayLogs,
-  TRAINING_SCHEDULES, programmeDaysSince, loadProactiveState,
+  db, users, escalations, eq,
+  claimDailySlot, claimProactive, pauseReason,
+  getActiveClients, TRAINING_SCHEDULES, programmeDaysSince, loadProactiveState,
   todaySAST, recordWeighAsk,
 } from "../shared";
 import { auditStoredTargets, auditStepsTarget } from "../../targets";
@@ -13,10 +11,10 @@ import { readHealthState } from "../../health-state";
 // nothing is lost: it called selectVariantMessage and then DISCARDED the text it chose
 // (`const { text: _variantMsg }`) before sending the buttons unchanged. Every arm sent the same
 // message, so the experiment measured nothing. Deleting the send deletes an empty measurement.
-import { morningClosingLine, composeMorning, yesterdayObservation, breakfastReplayLine } from "../../morning-message";
+import { scheduledWords } from "../../core/coach";
 import { adaptTargets, adaptiveInputFrom } from "../../adaptive-targets";
 import { chooseAction, decideProactive, formatOneAction, underPolicy } from "../../one-action";
-import { ensureOpenTrainingLoop, loadOpenTrainingLoop, loadSituationFrame } from "../../memory";
+import { ensureOpenTrainingLoop, loadOpenTrainingLoop } from "../../memory";
 import { readHeldConstraints } from "../../held-constraints";
 import { foodConstraints } from "../../food-swaps";
 import { deliveryAccepted } from "../../outbound-delivery";
@@ -89,7 +87,6 @@ export async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
   const todayDOW = new Date(Date.now() + 2 * 3_600_000).getDay(); // SAST = UTC+2
   void todayDOW; // Sunday check removed — clients need morning coaching 7 days a week
-  const yesterdayDOW = (todayDOW - 1 + 7) % 7;
 
   const clients = await getActiveClients();
 
@@ -202,308 +199,32 @@ export async function runMorningCheckin(): Promise<void> {
     if (client.workSchedule === "night_shift") continue;
 
     try {
-      // THE SAME SNAPSHOT THE ADAPTIVE JOB READ FIFTEEN MINUTES AGO (2026-08-18, Issue #49
-      // step 2). Two jobs speak to one client each morning and until now they assembled two
-      // different pictures of them. This is the shared one, and as of step 5 it is the only one:
-      // everything below reads from it or from the three recognition queries that remain.
+      // THE SAME SNAPSHOT THE ADAPTIVE JOB READ FIFTEEN MINUTES AGO (Issue #49): one picture of the client.
       const state = await loadProactiveState(client);
 
-      // THE ADAPTIVE JOB'S VOICE, SPOKEN HERE (2026-08-18, Issue #49 step 3). runAdaptiveTargets
-      // ran at 05:45 and sent its own WhatsApp message outside the daily budget; this job sent
-      // another at 06:00 inside it. Two messages, one coach, one of them uncounted. Adaptive now
-      // moves the numbers silently and leaves an adapt_note:<date> marker, and its line is folded
-      // into the message below — the one that claims the slot.
-      //
-      // The WORDS come from the same pure engine adaptive asked, against the same snapshot, so
-      // there is no second copy of them to drift. Baseline is what the engine reasons from and
-      // adaptive never writes it, so this re-derivation is deterministic: identical input,
-      // identical line. A marker dated anything but today is stale and ignored.
+      // THE ADAPTIVE JOB'S VOICE, SPOKEN HERE (Issue #49 step 3): adaptive moves the numbers silently and
+      // leaves an adapt_note:<date> marker; its line rides in this message, the one that claims the slot.
       let adaptLine = "";
       try {
         const marked = String(client.profileNotes || "").match(/adapt_note:(\d{4}-\d{2}-\d{2})/)?.[1];
         if (marked === todaySAST()) adaptLine = adaptTargets(adaptiveInputFrom(state, client)).note || "";
       } catch (e) { console.warn("[MORNING] adapt line unavailable:", (e as Error)?.message); }
 
-      const name = client.name?.split(" ")[0] || "there"; // first name: "Morning Lerato", not the full name
+      const name = client.name?.split(" ")[0] || "there";
       const phone = client.phoneNumber;
-      const proteinTarget = client.proteinTarget || 120;
-      const yesterdayLogs = await getYesterdayLogs(client.id);
-
-      // THE EMPTY-YESTERDAY BRANCH IS GONE (2026-08-18, Issue #49 step 5). A client who logged
-      // nothing yesterday used to leave here down a parallel path with its own three sends, its
-      // own sick check and its own greeting — a whole second morning message for the clients who
-      // need the most coaching. It produced "Send me your breakfast right now" and stopped: no
-      // streak, no milestone, no step target, no training day, and no decision, because the
-      // decision was computed two hundred lines further down a road they never travelled.
-      //
-      // They now go through the SAME path as everyone else. yesterdayObservation says "No food
-      // logged yesterday — today starts now", decideProactive gets its say, and the client who was
-      // hardest to help stops being the one who gets the least. The one thing that branch really
-      // owned — the streak shield, which WRITES — survives as an input below.
-      let shieldLine = "";
-      if (yesterdayLogs.length === 0 && !state.health.sickYesterday) {
-        const wStreak0 = client.workoutStreak || 0;
-        const currentMonth = todaySAST().slice(0, 7);
-        const shieldUsedMonth = (client.profileNotes || "").match(/streak_shield:(\d{4}-\d{2})/)?.[1];
-        const clientSchedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 4] || TRAINING_SCHEDULES[4];
-        const shieldAvailable = clientSchedule.includes(yesterdayDOW) && wStreak0 >= 3 && shieldUsedMonth !== currentMonth;
-        if (shieldAvailable) {
-          const updatedNotes = (client.profileNotes || "").replace(/streak_shield:\d{4}-\d{2}/, "").trim() + ` streak_shield:${currentMonth}`;
-          await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.id, client.id));
-          client.profileNotes = updatedNotes;
-          shieldLine = `Good news — your *${wStreak0}-session streak is safe*, your monthly shield's got yesterday covered.`;
-        }
-      }
-
-      const foodLogs = yesterdayLogs.filter(l => l.intent === "FOOD_LOG");
-      const workoutLogged = yesterdayLogs.some(l => l.intent === "WORKOUT_LOG" || (l.messageIn || "").toLowerCase().trim() === "done");
-
-      const yStart = dayStart(-1);
-      const yEnd = dayStart(0);
-      const ninetyDaysAgoSteps = new Date(Date.now() - 90 * 86_400_000);
-
-      const twentyEightDaysAgo = new Date(Date.now() - 28 * 86_400_000);
-      // TWO READS RETIRED WITH THEIR BRANCHES (2026-08-18): the yesterday step total, which only
-      // fed the steps receipt, and the fourteen-day meal-slot aggregate, which only fed the
-      // worst-slot protein prescription. A query whose sole consumer is gone is not harmless — it
-      // is a cost paid every morning for every client, for nothing.
-      const [proteinRows, recentStepLogs, monthWorkoutRows] = await Promise.all([
-        db.select({ totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int` })
-          .from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, yStart), lt(mealLogs.loggedAt, yEnd)))
-          .catch((_e: Error) => [{ totalProt: 0 }]),
-        db.select({ loggedAt: stepLogs.loggedAt })
-          .from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, ninetyDaysAgoSteps)))
-          .orderBy(desc(stepLogs.loggedAt))
-          .catch((_e: Error) => [] as { loggedAt: Date | null }[]),
-        db.select({ count: sql<number>`COUNT(*)::int` })
-          .from(workoutLogs)
-          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, twentyEightDaysAgo)))
-          .catch(() => [{ count: 0 }]),
-      ]);
-
-      const totalProtLogged = (proteinRows as { totalProt: number }[])[0]?.totalProt || 0;
-
       const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 4] || TRAINING_SCHEDULES[4];
       const isTodayTrainingDay = schedule.includes(todayDOW);
-
-      // RETIRED: seven day-of-week openers ("Day 2. Consistency beats intensity.", "Body is
-      // adapting. Do not stop."). Generic filler that read the calendar and nothing about the
-      // client — the same sentence to a woman on a nine-week streak and a man who has not logged
-      // in a fortnight. It changed no decision and said nothing true of anyone in particular.
       const progDays = programmeDaysSince(client.programmeStartDate);
-      let identityLine = "";
-      // DOMS coaching for new clients — soreness on day 2-3 is the #1 early dropout trigger
-      if (progDays === 2 && (client.workoutStreak || 0) >= 1) identityLine = " Day 2. Muscles sore? That is the repair happening — it means the session worked. Keep going.";
-      else if (progDays === 3 && (client.workoutStreak || 0) >= 1) identityLine = " Day 3. Soreness passing? That is your body adapting. That feeling goes away — the strength stays.";
-      else if (progDays === 7)  identityLine = " One week. You showed up every day this week.";
-      else if (progDays === 14) identityLine = " Two weeks consistent. You're building something real.";
-      else if (progDays === 21) identityLine = ` Week 3. This is where most people quit — not because it got too hard, but because the mirror hasn't changed yet. The change is happening in your muscle tissue and metabolism. It is not visible yet but it is real. Do not stop now.`;
-      else if (progDays === 30) identityLine = " A month. You are now the kind of person who trains for a month straight.";
-      else if (progDays === 42) identityLine = ` Week 6. This is when visible results start showing. Look closer — your clothes, your posture, your strength. The scale is the last thing to reflect it. The change is already there.`;
-      else if (progDays === 60) identityLine = " 60 days. Two months of showing up. That's rare.";
-      else if (progDays === 63) identityLine = ` Week 9. The plateau phase. Most people misread this as failure — it is not. Your body is consolidating the changes from the first 8 weeks before the next wave of results. Hold the habits. The breakthrough comes at week 10-12 for those who do not stop here.`;
-      else if (progDays === 84) identityLine = ` Week 12. Three months in. Your body has rewritten its baseline — every habit that feels automatic now used to be a deliberate choice. You are in the top 10% of people who start a programme. This is who you are now.`;
-      else if (progDays === 90) identityLine = " 90 days. You are not the same person who started this.";
-
-      const wStreak = client.workoutStreak || 0;
-      let foodLogStreakCount = 0;
-      {
-        const sixtyDaysAgo = new Date(Date.now() - 60 * 86_400_000);
-        const recentFoodLogDays = await db.select({ createdAt: chatHistory.createdAt })
-          .from(chatHistory)
-          .where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sixtyDaysAgo)))
-          .orderBy(desc(chatHistory.createdAt))
-          .catch(() => [] as { createdAt: Date | null }[]);
-        const foodDays = new Set<string>();
-        for (const l of recentFoodLogDays) {
-          if (!l.createdAt) continue;
-          const d = new Date(new Date(l.createdAt).getTime() + 2 * 3_600_000);
-          foodDays.add(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`);
-        }
-        const foodCheck = new Date(Date.now() + 2 * 3_600_000);
-        foodCheck.setUTCDate(foodCheck.getUTCDate() - 1);
-        while (true) {
-          const key = `${foodCheck.getUTCFullYear()}-${String(foodCheck.getUTCMonth() + 1).padStart(2, "0")}-${String(foodCheck.getUTCDate()).padStart(2, "0")}`;
-          if (!foodDays.has(key)) break;
-          foodLogStreakCount++;
-          foodCheck.setUTCDate(foodCheck.getUTCDate() - 1);
-        }
-      }
-      let stepStreakCount = 0;
-      {
-        const stepDays = new Set<string>();
-        for (const l of recentStepLogs as { loggedAt: Date | null }[]) {
-          if (!l.loggedAt) continue;
-          const d = new Date(new Date(l.loggedAt).getTime() + 2 * 3_600_000);
-          stepDays.add(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`);
-        }
-        const stepCheck = new Date(Date.now() + 2 * 3_600_000);
-        stepCheck.setUTCDate(stepCheck.getUTCDate() - 1);
-        while (true) {
-          const key = `${stepCheck.getUTCFullYear()}-${String(stepCheck.getUTCMonth() + 1).padStart(2, "0")}-${String(stepCheck.getUTCDate()).padStart(2, "0")}`;
-          if (!stepDays.has(key)) break;
-          stepStreakCount++;
-          stepCheck.setUTCDate(stepCheck.getUTCDate() - 1);
-        }
-      }
-
-      // ── Trajectory classification (28-day compliance) ──────────────────────
-      const completedSessions28 = (monthWorkoutRows as { count: number }[])[0]?.count || 0;
-      const plannedSessions28 = (client.trainingDaysPerWeek || 3) * 4;
-      const sessionCompliance28 = plannedSessions28 > 0 ? completedSessions28 / plannedSessions28 : 0;
-      type Trajectory = "ON_A_RUN" | "ON_TRACK" | "RECOVERING" | "STRUGGLING" | "DISENGAGED";
-      const trajectory: Trajectory =
-        sessionCompliance28 >= 0.8 && wStreak >= 4 ? "ON_A_RUN" :
-        sessionCompliance28 >= 0.65              ? "ON_TRACK" :
-        sessionCompliance28 >= 0.4 && wStreak >= 1 ? "RECOVERING" :
-        completedSessions28 === 0                ? "DISENGAGED" :
-                                                   "STRUGGLING";
-
-      // ── Loss-framed streak line ─────────────────────────────────────────────
-      // Positive framing for short streaks, loss framing for meaningful ones
-      const streakParts: string[] = [];
-      if (wStreak >= 10) {
-        streakParts.push(
-          trajectory === "ON_A_RUN" || trajectory === "ON_TRACK"
-            ? `🔥 *${wStreak}-session streak* — keep it going`
-            : `🔥 *${wStreak}-session streak* — you have built real momentum here`
-        );
-      } else if (wStreak >= 5) {
-        streakParts.push(`🔥 *${wStreak}-session streak* — protect it`);
-      } else if (wStreak >= 2) {
-        streakParts.push(`🔥 *${wStreak}-session streak*`);
-      }
-      if (stepStreakCount >= 5) {
-        streakParts.push(`🚶 *${stepStreakCount}-day step streak* — keep it alive`);
-      } else if (stepStreakCount >= 2) {
-        streakParts.push(`🚶 ${stepStreakCount}-day step streak`);
-      }
-      // Only claim a food streak when yesterday actually had food — otherwise the
-      // "No food logged yesterday" line below contradicts it ("5-day food streak" +
-      // "No food logged yesterday" was a real screenshot).
-      if (foodLogStreakCount >= 3 && foodLogs.length > 0) streakParts.push(`🍽️ ${foodLogStreakCount}-day food streak`);
-      const streakLine = streakParts.length ? ` ${streakParts.join(" · ")}.` : "";
-
-      // RETIRED: the trajectory prefix ("Today is the reset.", "Today is the day we change
-      // this."). The closing line below is already trajectory-driven, so this said the same thing
-      // about the same client twice in one message, once at each end.
-
-      // ONE OBSERVATION, NOT A SECOND PROTEIN POLICY. This was five branches ending in a
-      // fourteen-day worst-meal-slot analysis that prescribed a fix ("Your dinners average only
-      // 22g protein — tonight: lead dinner with 200g chicken…"). That is a coaching instruction,
-      // reached by completely different reasoning from decideProactive's, in the same message as
-      // decideProactive's instruction: fix dinner AND get a walk in AND log breakfast, from three
-      // parts of one message that had never met each other. Protein is the decision owner's — it
-      // already ranks protein above steps and training for exactly this reason.
-      const yesterdayLine = yesterdayObservation({
-        foodLogged: foodLogs.length > 0,
-        proteinLogged: totalProtLogged,
-        proteinTarget,
-        numbersLow,
-      });
-
-      let workoutLine = "";
-      if (workoutLogged) {
-        const totalW = client.totalWorkoutsCompleted || 0;
-        const workoutMsg =
-          totalW === 1  ? `First session in the books. That's the hardest one.` :
-          totalW === 3  ? `Three sessions done. The habit is starting.` :
-          totalW === 5  ? `Five sessions. You're past the point where most people quit.` :
-          totalW === 10 ? `Ten sessions. You've made this a real part of your life.` :
-          totalW === 25 ? `25 sessions. A quarter of a hundred. This is real now.` :
-          totalW === 50 ? `50 sessions. Halfway to a hundred. You've earned every one.` :
-          totalW === 100 ? `100 sessions. 💯 That's elite consistency.` :
-          (totalW % 10 === 0 && totalW > 0) ? `${totalW} sessions. Keep that momentum.` :
-          `Session done yesterday. Sharp.`;
-        workoutLine = workoutMsg;
-      }
-
-
-      // One-tap repeat breakfast — from the meal row, never from a chat bubble.
-      let repeatSuggestion = "";
-      try {
-        const weekAgo = new Date(Date.now() - 7 * 86_400_000);
-        const recentMeals = await db.select({
-          items: mealLogs.items,
-          rawMessage: mealLogs.rawMessage,
-          mealLabel: mealLogs.mealLabel,
-        })
-          .from(mealLogs)
-          .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, weekAgo)))
-          .orderBy(desc(mealLogs.loggedAt)).limit(14);
-        const breakfastRow = recentMeals.find(r => r.mealLabel === "breakfast");
-        const mealShort = breakfastRow ? breakfastReplayLine(breakfastRow) : "";
-        if (mealShort.length > 3 && mealShort.length <= 90) {
-          repeatSuggestion = `\n\n💡 Same breakfast as last time? Reply *"${mealShort}"* to log it instantly.`;
-        }
-      } catch { /* non-critical */ }
-
-      const stepsTarget = client.stepsTarget || 8500;
-
-      // TODAY'S PLAN — what they are being asked to do, which is not a receipt of what they did.
-      const todaySection: string[] = [];
-      todaySection.push(`*Today:*`);
-      // Voice pass (2026-07-13): the how-to-log instruction repeated EVERY morning
-      // forever — three ideas of clutter a day-60 client has read sixty times. New
-      // clients (first week) get the how-to once a day while the habit forms; after
-      // that the line is just the target. Plain, one idea.
-      const daysOnProg = client.programmeStartDate
-        ? Math.floor((Date.now() - new Date(client.programmeStartDate).getTime()) / 86_400_000)
-        : 999;
-      todaySection.push(daysOnProg <= 7
-        ? `👟 ${stepsTarget.toLocaleString()} steps — your phone counts them. Send me tonight's number or a screenshot.`
-        : `👟 ${stepsTarget.toLocaleString()} steps`);
-
-      if (isTodayTrainingDay) {
-        // No inline "preview" — slicing the first 4 lines of the workout only ever
-        // showed the header + warm-up cut off mid-sentence with "...". The full
-        // workout is one reply away and renders properly there.
-        todaySection.push(`💪 Training day. Reply *1* for your workout.`);
-      } else {
-        todaySection.push(`🛌 Rest day. No training — stay on food and steps.`);
-      }
-
-      // Trajectory-aware closing line. ENGAGEMENT-AWARE (2026-07-19 live: a client with a
-      // 19-day food streak + 2-session streak got "Good to have you back" — trajectory is
-      // workout-only, so a daily logger who trains moderately read as lapsed-and-returned).
-      // Someone logging every day never left: the absence-framed lines are gated out.
-      // …and nor did someone who wrote to us in the last two days (replay gate: "Good to have you back"
-      // the morning after a logged day). Their last message, not users.lastActiveAt: most paths never set it.
-      const [wroteRecently] = await db.select({ at: chatHistory.createdAt }).from(chatHistory)
-        .where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, new Date(Date.now() - 2 * 86_400_000)))).limit(1);
-      const activelyEngaged = foodLogStreakCount >= 3 || !!wroteRecently;
-      const closingLine = morningClosingLine(trajectory, { activelyEngaged, completedSessions28 });
 
       if (await claimDailySlot(client.id, "morning")) {
-        // THE ONE ACTION, NOT A GENERIC ASK (2026-07-29). This slot used to be
-        // "🍳 What's for breakfast?" — the same sentence to every client every morning,
-        // whether they were on a 6-day streak, three weeks silent, sick, or had never once
-        // stood on a scale. The decision that reads all of that already existed and was wired
-        // to a command nobody knows to type; this is where it reaches people.
-        //
-        // It REPLACES the breakfast question rather than joining it. Two asks in one message is
-        // two decisions for someone who hasn't had coffee, and the whole point is one.
-        // Fail-open: any error and the old ask goes out unchanged.
-        // ONE DECISION OWNER, ONE STATE (2026-08-18, Issue #49 step 4). This called
-        // buildDayState(client) — a SECOND state assembly, five more queries, run moments after
-        // loadProactiveState had already read the same ledgers. Two assemblies inside the one job
-        // that was itself the second coach. It now decides from the snapshot above, through
-        // decideProactive, which pairs the action with the SAME verdict vocabulary the reactive
-        // path uses (CONTINUE / CHANGE / INVESTIGATE / REFER).
-        //
-        // "hold" still means the breakfast question is the right ask — least intervention. The
-        // decision says so explicitly now (empty line, verdict CONTINUE) instead of the caller
-        // inferring it from a kind string.
-        const breakfastAsk = `🍳 What's for breakfast?${repeatSuggestion || ""}`;
+        // ONE DECISION OWNER, ONE STATE (Issue #49 step 4): decideProactive picks the one action from the
+        // snapshot above. "hold" means the breakfast question is the right ask (least intervention).
         let decisionLine = "";
         let selectedTrainingMove = false;
         let selectedWeigh = false;
         let selectedTrainingIntervention: "standard" | "minimum" = "standard";
         try {
-          // ONE READER FOR BOTH CONSTRAINTS (2026-08-25, P0-4b). This was an inline copy of the
-          // query that read only the food half — trainingDayIsDeclined existed and had nowhere to
-          // go, so a client who said "I'm not training today" could still be told to. Now the
-          // outbound floor and the decision read the same held state about the same day.
+          // ONE READER FOR BOTH CONSTRAINTS (P0-4b): "I'm not training today" holds here as it does outbound.
           const held = await readHeldConstraints(phone, client);
           const openTraining = await loadOpenTrainingLoop(client);
           const behaviourPatterns = await getBehaviourPatternContext(client.id);
@@ -533,35 +254,20 @@ export async function runMorningCheckin(): Promise<void> {
         } catch (e) {
           console.warn("[MORNING] one-action skipped:", (e as any)?.message || e);
         }
-        // ONE COMPOSER. Every part above is now an INPUT, not a branch that assembles its own
-        // slice of the message. The order of the message is decided in one place.
-        // OUTSIDE THE WINDOW, THE CLIENT STILL GETS THEIR ACTION (Cut 6, 2026-09-14).
-        // kamlife_daily_plan has existed, approved and wired, with no call site: a client who was
-        // quiet yesterday got the generic "Coach K checking in" instead of their morning plan, and
-        // this job recorded a delivery. The template carries the ONE thing that matters when the
-        // long body cannot be sent — their name and today's action — so the message degrades
-        // instead of disappearing. When there is no action to carry, no template is offered and
-        // the generic check-in runs, which now reports `substituted` rather than delivered.
-        const oneAction = (decisionLine || targetFixLine || "").trim();
-        const dailyTemplate = oneAction
-          ? { name: "kamlife_daily_plan", variables: { "1": name, "2": oneAction } }
-          : undefined;
-        const delivery = await sendProactive(client, { claimed: "morning" }, composeMorning({
-          firstName: name,
-          targetFixLine,
-          identityLine,
-          streakLine,
-          workoutLine: shieldLine || workoutLine,
-          yesterdayLine,
-          todayLines: todaySection,
-          closingLine,
-          decisionLine,
-          breakfastAsk,
-          adaptLine,
-          situationLine: await loadSituationFrame(phone).catch(() => ""),
-          sickYesterday: state.health.sickYesterday,
-        }), { template: dailyTemplate });
-        if (!delivery) continue;
+        // B1 (#319): the new coach's recognition, then the decision's one line. The morning after an
+        // illness carries no instruction at all (#546 attack): a recovery check-in only. CORE_WAVE4=off
+        // (or no words) leaves the plain greeting in front of the same decision.
+        const sick = state.health.sickYesterday;
+        const words = await scheduledWords(phone, "morning", sick ? "They were unwell yesterday. Ask how they feel today; nothing else." : "");
+        const greeting = words || (sick ? `Morning ${name}. Hope you're feeling better. When you're ready, just say Hi and we pick up from where you left off.` : `Morning ${name}.`);
+        const move = sick ? "" : decisionLine || "🍳 What's for breakfast?";
+        // OUTSIDE THE WINDOW, THE CLIENT STILL GETS THEIR ACTION (Cut 6): kamlife_daily_plan carries their
+        // name and today's one action; with none to carry, the generic check-in runs as `substituted`.
+        const oneAction = ((sick ? "" : decisionLine) || targetFixLine || "").trim();
+        const dailyTemplate = oneAction ? { name: "kamlife_daily_plan", variables: { "1": name, "2": oneAction } } : undefined;
+        const delivery = await sendProactive(client, { claimed: "morning" },
+          [targetFixLine.trim(), greeting, adaptLine, move].filter(Boolean).join("\n\n"), { template: dailyTemplate });
+        if (!delivery || sick) continue;
         if (selectedWeigh && deliveryAccepted(delivery)) await recordWeighAsk(client.id);
         if (selectedTrainingMove && deliveryAccepted(delivery)) {
           await ensureOpenTrainingLoop(client, todaySAST(), "proactive", Date.now(), selectedTrainingIntervention);

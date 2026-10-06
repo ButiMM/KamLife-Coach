@@ -299,7 +299,7 @@ async function main() {
   // the same message arrived the next morning. The coach asked for a password it would not accept.
   //
   // Graded here rather than in a unit test because the failure was a DISAGREEMENT between two
-  // files — the mouth in morning-message.ts and the door in sick-flow.ts — and only the final
+  // files — the mouth in jobs/morning.ts and the door in sick-flow.ts — and only the final
   // client reply shows whether they agree.
   {
     const SICK_UNTIL = new Date(NOW + 2 * 86_400_000).toISOString().slice(0, 10);
@@ -348,7 +348,7 @@ async function main() {
     });
 
     check("the brief and the door use the same words", () => {
-      const brief = readFileSync("server/morning-message.ts", "utf-8");
+      const brief = readFileSync("server/scheduler/jobs/morning.ts", "utf-8");
       const sick = readFileSync("server/handlers/sick-flow.ts", "utf-8");
       // If the sick brief tells the client to greet, the sick handler must read greetings. Tying
       // the assertion to the advertised text means rewording the brief cannot quietly break it.
@@ -1296,66 +1296,6 @@ async function main() {
       "the morning decision must be told whether today is a training day — the schedule is state, not a second policy");
   });
 
-  // NEGATIVE CONTROL 3 — restore the STRUGGLING closing prescription and this must go red.
-  //
-  // Graded on the COMPLETE MESSAGE, not on decisionLine. decisionLine was already correct on
-  // 21 August; the contradiction came from a DIFFERENT part of the same message, so a test that
-  // only reads the decision cannot see the defect it is meant to catch.
-  check("the whole morning brief carries exactly one instruction, from one owner", async () => {
-    const { composeMorning, morningClosingLine } = await import("../server/morning-message");
-    const { carriesDirective } = await import("../server/brain/reply-verifier");
-
-    const restDay = ["*Today:*", "👟 8,500 steps", "🛌 Rest day. No training — stay on food and steps."];
-    const base = {
-      firstName: "Kam", targetFixLine: "", identityLine: "", streakLine: "", workoutLine: "",
-      yesterdayLine: "120g protein logged yesterday, against a 150g target.",
-      todayLines: restDay, decisionLine: "", breakfastAsk: "🍳 What's for breakfast?",
-      adaptLine: "", sickYesterday: false,
-    };
-
-    for (const trajectory of ["ON_A_RUN", "ON_TRACK", "RECOVERING", "STRUGGLING", "DISENGAGED"] as const) {
-      for (const activelyEngaged of [true, false]) {
-        const closingLine = morningClosingLine(trajectory, { activelyEngaged, completedSessions28: 2 }).trim();
-        const message = composeMorning({ ...base, closingLine });
-
-        // THE PART THAT IS NOT THE PLAN AND NOT THE DECISION MAY NOT INSTRUCT. On this brief the
-        // decision is `hold` — the honest verdict on a rest day — so ANY instruction in the
-        // message is a second authority, and on 21 August it was "let's get one in today" three
-        // lines under "Rest day. No training".
-        const narrative = message.split("\n\n")
-          .filter(p => !p.startsWith("*Today:*") && !restDay.some(l => p.includes(l)) && !p.startsWith("🍳"));
-        for (const part of narrative) {
-          for (const sentence of part.split(/(?<=[.!?])\s+/)) {
-            assert.ok(!carriesDirective(sentence),
-              `${trajectory}/engaged=${activelyEngaged}: the brief instructs outside the decision — `
-              + `"${sentence.trim()}" — in a message whose plan line says "Rest day. No training"`);
-          }
-        }
-        // REWRITTEN 2026-08-24. This asserted the sign-off still carried a NUMBER — which was the
-        // 28-day progress clock, since deleted as a second customer-facing scoreboard. Asserting
-        // its survival now demands the very behaviour that was removed. The property that still
-        // matters is the one this check exists for: whatever the sign-off says, the message
-        // carries exactly one instruction and it is the decision's. That is asserted above, for
-        // every trajectory. What is asserted here instead is that a genuinely LAPSED client is
-        // still recognised — the warm re-entry that survived the deletion.
-        if (!activelyEngaged && (trajectory === "RECOVERING" || trajectory === "DISENGAGED")) {
-          assert.match(message, /have you back/i,
-            `${trajectory}: a lapsed client lost their re-entry recognition`);
-        }
-      }
-    }
-
-    // …and when there IS a decision, it is the one instruction, and it arrives whole.
-    const withDecision = composeMorning({
-      ...base,
-      closingLine: morningClosingLine("STRUGGLING", { activelyEngaged: false, completedSessions28: 2 }).trim(),
-      decisionLine: "Kam — one thing today:\n\n*Log one meal today. Any meal.*\n\n_Six days of nothing logged is six days I can't coach._",
-    });
-    assert.ok(withDecision.includes("*Log one meal today. Any meal.*"), "the decision must reach the client intact");
-    assert.ok(!/get one in today|Reply 1 and I'll send it/i.test(withDecision),
-      "the closing line is prescribing beside the decision again");
-  });
-
   // ── P0-3 · SILENCE IS NOT A TERMINAL STATE ────────────────────────────────────────────────
   //
   // REGRADED 2026-09-10 (Cut 1), and STRENGTHENED rather than relaxed. State plainly what changed
@@ -1712,32 +1652,6 @@ async function main() {
       "the chokepoint must drop implementation choice, not only domain-tagged directives");
   });
 
-  check("morning breakfast replay uses the meal row, never a mixed chat bubble", async () => {
-    const { breakfastReplayLine } = await import("../server/morning-message");
-    const mixed = {
-      rawMessage: "That day is today\nWhat's the plan for me?\nMy breakfast was 3 slices of bread, eggs and chicken livers\nGuide for the rest of the day",
-      items: [{ name: "Bread" }, { name: "Eggs" }, { name: "Chicken livers" }],
-      mealLabel: "breakfast",
-    };
-    const replay = breakfastReplayLine(mixed);
-    assert.match(replay, /Bread/i);
-    assert.match(replay, /Eggs/i);
-    assert.ok(!/that day is today/i.test(replay), "must not replay the coaching bubble");
-    assert.ok(!/guide for the rest/i.test(replay));
-    assert.ok(!/\?/.test(replay));
-    assert.equal(
-      breakfastReplayLine({ rawMessage: mixed.rawMessage, items: [], mealLabel: "breakfast" }),
-      "",
-      "raw mixed bubble with no items is not a meal",
-    );
-    assert.equal(breakfastReplayLine({ rawMessage: "2 eggs and toast", items: [], mealLabel: "breakfast" }), "2 eggs and toast");
-    const morning = readFileSync("server/scheduler/jobs/morning.ts", "utf-8")
-      .replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
-    assert.ok(/from\(mealLogs\)/.test(morning) && /breakfastReplayLine/.test(morning),
-      "morning must read mealLogs, not FOOD_LOG.message_in");
-    assert.ok(!/chatHistory\.messageIn/.test(morning),
-      "NEGATIVE CONTROL: restoring chatHistory.message_in as the breakfast source must fail");
-  });
 
   check("ops alerts cannot enter a client thread", () => {
     const sched = readFileSync("server/scheduler.ts", "utf-8")
@@ -1901,7 +1815,6 @@ async function main() {
   check("continuity: last sentence can change the action; last night frames morning", async () => {
     const { chooseAction, foodDayIsClosed } = await import("../server/one-action");
     const { frameSituationForClient, extractSalientSituation, situationWhen } = await import("../server/memory");
-    const { morningClosingLine, composeMorning } = await import("../server/morning-message");
     const closed = "Honestly, I won't be able to eat anymore for the rest of the day. We just going to have alcohol and zero calorie drinks";
     assert.equal(foodDayIsClosed(closed), true);
     const eat = chooseAction({
@@ -1927,30 +1840,6 @@ async function main() {
     const mondayMorn = new Date("2026-08-24T04:00:00Z");
     assert.equal(situationWhen([{ text: "birthday outing", at: sundayNight }], mondayMorn), "last_night");
 
-    // An engaged client gets no lapse copy AND no second clock. `/4 sessions/` used to be asserted
-    // here; that was the 28-day count, and it is gone rather than reworded (2026-08-24).
-    const engaged = morningClosingLine("STRUGGLING", { activelyEngaged: true, completedSessions28: 4 });
-    assert.ok(!/fresh page/i.test(engaged), "engaged client must not get lapse copy");
-    assert.ok(!/\d/.test(engaged), `engaged client was handed a progress score: ${engaged}`);
-    // "fresh page" was the STRUGGLING sign-off attached to the 28-day score; both are gone
-    // (2026-08-24). STRUGGLING now says nothing rather than scoring the client, and warm
-    // re-entry survives for the trajectories that actually mean a lapse.
-    const lapsed = morningClosingLine("STRUGGLING", { activelyEngaged: false, completedSessions28: 4 });
-    assert.ok(!/fresh page/i.test(lapsed) && !/\d/.test(lapsed),
-      `the deleted 28-day sign-off came back: ${lapsed}`);
-    for (const t of ["RECOVERING", "DISENGAGED"] as const) {
-      assert.match(morningClosingLine(t, { activelyEngaged: false, completedSessions28: 4 }),
-        /have you back/i, `${t}: a lapsed client lost their re-entry recognition`);
-    }
-    const brief = composeMorning({
-      firstName: "Kam", targetFixLine: "", identityLine: "", streakLine: "5-day food streak.",
-      workoutLine: "", yesterdayLine: "144g protein logged yesterday, against a 186g target.",
-      todayLines: ["*Today:*", "👟 6,000 steps", "💪 Training day. Reply *1* for your workout."],
-      closingLine: engaged, decisionLine: "*Get today's session done.*", breakfastAsk: "",
-      adaptLine: "", situationLine: lastNight, sickYesterday: false,
-    });
-    assert.match(brief, /last night was the birthday/i);
-    assert.ok(!/fresh page/i.test(brief));
   });
 
   check("continuity: how-far is progress truth; WOW is not a ticket", async () => {

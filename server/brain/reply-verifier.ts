@@ -668,22 +668,6 @@ function directiveDomains(sentence: string): Set<string> {
 }
 
 /**
- * THE SAME QUESTION, ASKED BY A COMPOSER RATHER THAN A VERIFIER (2026-08-22).
- *
- * The morning brief has narrative parts that are supposed to be RECOGNITION — a streak, a
- * milestone, a sign-off — and one part that is supposed to be the INSTRUCTION. One of the
- * sign-offs was quietly an instruction ("let's get one in today"), so a rest-day brief could
- * carry two. composeMorning enforces the separation with this, so it holds for every trajectory
- * and every one added later, rather than for the one branch that was caught.
- *
- * Exported rather than reimplemented: "is this English telling someone to do something" has one
- * owner and this is it. A second copy in the composer would drift from this one within a month.
- */
-export function carriesDirective(sentence: string): boolean {
-  return directiveDomains(sentence).size > 0;
-}
-
-/**
  * A TARGET WRITTEN IN PROSE. targets.ts is the only thing allowed to set a client's numbers, so
  * a model saying "drop to 1800" has both decided AND written to a domain it does not own. No
  * canonical decision can license it — chooseAction never sets a target either.
