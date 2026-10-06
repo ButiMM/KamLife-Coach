@@ -285,8 +285,9 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
     .limit(1);
   // Voice retries of the same takeaway (McDonald's breakfast x3) have different raw text
   // so exact-match never fires — 127g protein from one breakfast. Treat same-chain items
-  // in the last 2 hours as one meal.
-  if (recentDup.length === 0 && !params.allowIntentionalRepeat) {
+  // in the last 2 hours as one meal. UNLESS THEY SAY IT IS ANOTHER ONE (#578): "I had another
+  // Monster" was read as a resend of the first, written nowhere, and confirmed "Got it — Monster".
+  if (recentDup.length === 0 && !params.allowIntentionalRepeat && !/\b(?:another|one more|a second|second one|2nd|again)\b/i.test(rawSlice)) {
     const retryWindow = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const recentRows = await db.select({ id: mealLogs.id, items: mealLogs.items, label: mealLogs.mealLabel })
       .from(mealLogs)
