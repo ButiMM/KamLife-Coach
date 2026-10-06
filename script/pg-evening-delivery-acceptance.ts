@@ -296,6 +296,24 @@ REAL("\n6. THE SNAPSHOT STILL NAMES THE MESSAGE THEY ACTUALLY READ");
     "…so the model is not handed a stale message as the newest one", JSON.stringify(line.slice(0, 140)));
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n7. A SAFETY ROUTE OUTRANKS THE SCHEDULE (#571)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// They wrote something that took the crisis route this afternoon. Tonight's scheduled message does
+// not go; once a proactive message has gone after it (or seven days pass), the schedule resumes.
+{
+  await reset();
+  stubTwilio(false);
+  await pool.query("INSERT INTO chat_history (user_id, message_in, message_out, intent) VALUES ($1, 'test crisis', 'test reply', 'CRISIS')", [user.id]);
+  await runEveningAccountability();
+  chk(freeformSent().length === 0 && templatesSent().length === 0, "after a crisis turn, the evening job sends nothing", JSON.stringify(freeformSent()));
+  await reset();
+  stubTwilio(false);
+  await pool.query("UPDATE chat_history SET created_at = now() - interval '8 days' WHERE user_id = $1 AND intent = 'CRISIS'", [user.id]);
+  await runEveningAccountability();
+  chk(freeformSent().length === 1, "eight days later, the evening message goes again", JSON.stringify(freeformSent().length));
+}
+
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
 REAL(failed ? `\npg-evening-delivery-acceptance: FAILED — ${failed} assertion(s)\n`
             : "\npg-evening-delivery-acceptance: GREEN\n");
