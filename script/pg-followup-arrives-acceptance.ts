@@ -71,7 +71,7 @@ const { _resetOutboundDedupe } = await import("../server/reply-hygiene");
 
 let failed = 0;
 const chk = (ok: boolean, msg: string, evidence = "") => {
-  if (!ok) failed++;
+  if (!ok) { failed++; if (process.env.GITHUB_ACTIONS) REAL(`::error::followup-arrives FAIL ${msg} | ${evidence}`.slice(0, 900)); }
   REAL(`  ${ok ? "PASS" : "FAIL"}  ${msg}${!ok && evidence ? `\n          ${evidence}` : ""}`);
 };
 
@@ -272,6 +272,17 @@ REAL("\n5. A CLIENT-SET REMINDER IS NOT OURS TO SECOND-GUESS");
   const bodies = await wire();
   chk(bodies.length === 1 && /vitamins/i.test(bodies[0] || ""),
     "a client-set reminder still fires for an active client", JSON.stringify(bodies));
+}
+
+REAL("\n5. B7: A CLIENT'S OWN REMINDER THAT COULD NOT ARRIVE IS HELD, THEN RIDES ON THEIR NEXT REPLY, ONCE");
+{
+  await reset();
+  await createReminder(user.id, phone, "take your vitamins", new Date(Date.now() - 60_000));
+  await runDueReminders(); // shadow mode refuses delivery, standing in for "outside the 24-hour window"
+  chk((await reminderRows())[0]?.status === "held", "an undelivered one-shot reminder is held, not lost", JSON.stringify(await reminderRows()));
+  const { handleMessage } = await import("../server/routes"); const { closeHeldReminders } = await import("../server/reminders"); const say = (t: string, root: string) => handleMessage(phone, t, undefined, undefined, undefined, undefined, root);
+  const st = async () => (await reminderRows())[0]?.status, has = (r: string) => /⏰ Reminder: take your vitamins/.test(r); const r1 = await say("morning coach", "rA"), r2 = await say("also trained yesterday", "rB"); await closeHeldReminders("rB", true); await closeHeldReminders("rA", false); const back = await st(); const r3 = await say("you there?", "rC"); await closeHeldReminders("rC", true); const done = await st(), r4 = await say("thanks", "rD"); chk(has(r1) && !has(r2) && back === "held" && has(r3) && done === "sent" && !has(r4), "…one reply carries it (never two at once); dropped, it is held again; delivered, it is closed (#537, #538)", `${back} ${done} | ${[r1, r2, r3, r4].map(has)} | r3=${JSON.stringify(r3.slice(-300))}`);
+  await reset(); await createReminder(user.id, phone, "take your vitamins", new Date(Date.now() - 60_000)); await runDueReminders(); const r5 = await say("morning coach", "rE"), c = await say("cancel reminders", "rF"); await closeHeldReminders("rE", true); chk(has(r5) && !has(c) && await st() === "cancelled", "\"cancel reminders\" wins even over a reply already carrying it, and never delivers it on the way out", `${await st()} | ${c.slice(-80)}`);
 }
 
 REAL(`\npg-followup-arrives-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);
