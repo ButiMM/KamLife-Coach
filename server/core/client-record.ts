@@ -118,7 +118,7 @@ function commitmentDetail(d: any, today = sastDayKey()): Partial<Commitment> | n
 }
 /** The words that name what was promised: 3+ letters, without filler, days or times ("gym", "walk", "takeaways"). */
 const NOT_CONTENT = new Set(["the", "and", "for", "after", "before", "with", "from", "then", "this", "that", "each", "every", "one", "some", "today", "tomorrow", "tonight", "morning", "afternoon", "evening", "night", "week", "day", "days", "time", "minutes", "mins", "hour", "hours", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "will", "going", "get", "make", "have", "more", "less", "least"]);
-const tokens = (t: string) => t.toLowerCase().match(/[a-z]{3,}/g) ?? [];
+const tokens = (t: string): string[] => t.toLowerCase().match(/[a-z]{3,}/g) ?? [];
 const words = (t: string) => tokens(t).filter(w => !NOT_CONTENT.has(w));
 /**
  * The words of the promise. `actionOnly`: the action without its setting, for deciding whether they
@@ -151,9 +151,11 @@ const NEGATED = /\b(?:not|never|won'?t|can'?t|cannot|don'?t|didn'?t|isn'?t|aren'
 export function commitmentHeld(text: string, statement: string, what: string, coachLast: string, domain = "movement"): boolean {
   const at = text.toLowerCase().indexOf(statement.toLowerCase());
   const clause = (at > 0 ? text.slice(0, at).split(/[.!?,;\n]|\bbut\b/i).pop() ?? "" : "") + " " + statement;
-  const without = AVOIDING.has(what.trim().toLowerCase().split(/\s+/)[0]);
+  const first = what.trim().toLowerCase().split(/\s+/)[0], without = AVOIDING.has(first);
   if (domain !== "food" && without) return false; // "no walk on Thursday" is not a movement promise
-  if (NEGATED.test(clause) && !(domain === "food" && without)) return false;
+  // A "won't" that negates the having states the going-without ("I won't have takeaways"); one that negates
+  // the going-without itself refuses it ("I won't skip takeaways", Codex @ c1c4a52).
+  if (NEGATED.test(clause) && !(domain === "food" && without && !tokens(clause).includes(first))) return false;
   return namesWhat(what, text) || namesWhat(what, coachLast);
 }
 const endOfDay = (d: string, plus = 0) => new Date(Date.parse(`${d}T23:59:59+02:00`) + plus * 86_400_000);
