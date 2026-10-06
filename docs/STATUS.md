@@ -73,3 +73,12 @@ One line per merged PR: `HH:MM SAST · agent · PR # · what changed · gate bef
 30 Sep 08:54 UTC · Claude Code · #517 · One scheduled message a day; the weekly report is scheduled again; no unasked shopping lists · tests green · see PR
 30 Sep 15:12 UTC · Claude Code · #518 · A finished diet break restores the pre-break calories · tests green · see PR
 30 Sep 15:14 UTC · Claude Code · #519 · Monthly narrative retired · tests green · see PR
+1 Oct 15:05 UTC · Claude Code · #535 · What's new rides on the evening message (no GitHub secret) · tests green · see PR
+1 Oct 15:10 UTC · Claude Code · #536 · Honest size targets: first checkpoint <64,500 server lines, 0 delete-list files · docs · see PR
+2 Oct 06:23 UTC · Claude Code · #530 · [switch] A8 + A12: workouts, goals and "am I on track?" in the new coach's words · tests green · see PR
+2 Oct 07:12 UTC · Claude Code · #541 · What's new for #530 · tests green · see PR
+2 Oct 10:59 UTC · Claude Code · #540 · [harm] Trajectory counts steps again, on the SAST day (#539) · tests green · see PR
+2 Oct 16:35 UTC · CTO · #543 · Interim: Codex builds until Monday (no PRs resulted) · docs · see PR
+5 Oct 13:14 UTC · CTO · #547 · Watch: operational failures (backups, production, AI account) go to the top · docs · see PR
+6 Oct 05:51 UTC · Claude Code · #544 · [harm] Backups restore again: the test-restore DB has pgvector (#510; none published since 29 Sep) · tests green · +4 / −2
+6 Oct 06:50 UTC · Claude Code · #546 · [switch] B1: the morning message in the new coach's words; old composer deleted · tests green (gate NOT TESTED: no CI key) · +75 / −813
