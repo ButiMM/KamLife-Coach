@@ -76,62 +76,6 @@ export async function todayRows(user: any, includeWater = false, forDate?: Date)
   return { rows, isBulk };
 }
 
-// MEAL SUMMARY for the card title (2026-07-22, founder: "the card must summarise the MEAL —
-// tin fish, rice, veggies — not the bot's 'Based on what you mentioned…' preamble"). Pull the
-// FOODS out of a food-log reply: the bulleted item lines are the source of truth. Falls back to
-// a filler-stripped first line only when there are no bullets. Shared by every log path so the
-// title reads the same across the board — text log, photo log, on-demand.
-/**
- * THE CLIENT'S OWN WORDS FOR THEIR FOOD (2026-08-04). The reply used to carry a bulleted
- * receipt and this function scraped the title out of it — so killing the receipt would have
- * silently broken the card title AND findDuplicateMealToday, which matches on name overlap
- * and would have started double-logging again. The model now emits a machine-only ITEMS line
- * instead: same data, never shown, and phrased the way the client would say it.
- */
-export function mealTitleFromItemsLine(text: string): string {
-  const m = (text || "").match(/^\s*ITEMS:\s*(.+)$/im);
-  if (!m) return "";
-  const names = m[1].split(",").map(x => x.replace(/[*_`#]/g, "").trim()).filter(x => x.length >= 2 && x.length <= 40);
-  if (!names.length) return "";
-  // A long plate reads "toast, eggs +2", never a truncated "Some…" — a cut-off word is the
-  // machine's language leaking back in, which is the same disease in miniature.
-  return names.length > 3 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", ");
-}
-
-export function mealTitleFromReply(text: string): string {
-  const fromItems = mealTitleFromItemsLine(text);
-  if (fromItems) return fromItems;
-  const names: string[] = [];
-  for (const raw of (text || "").split("\n")) {
-    const m = raw.match(/^\s*[•·\-\*]\s*(.+)/);           // bulleted item line
-    if (!m) continue;
-    const name = stripWrapQuotes(m[1].split(/[(:]/)[0].replace(/[*_`#]/g, "").replace(/^\d+\s*x\s*/i, "").trim());
-    if (name && name.length >= 2 && name.length <= 40 && !/^\d/.test(name)) names.push(name);
-    if (names.length >= 3) break;
-  }
-  if (names.length) return names.join(", ").slice(0, 46);
-  const firstLine = (text || "Meal").replace(/[*_`#]/g, "").split("\n").find(l => l.trim().length > 3) || "Meal";
-  // (2026-07-30 live.) This produced the card title "tasty lunch of mince pasta! I'd estimate that"
-  // — the coach's own sentence, printed as the name of the client's food. Two bugs, both here:
-  // the sentence cut split on ". " so a reply ending in "!" was never trimmed, and the lead-in
-  // list had "that's" but not "That looks like".
-  //
-  // It is worse than ugly. findDuplicateMealToday matches on NAME OVERLAP, so a prose title can
-  // never match an earlier log — which is why a photo of a meal he had ALREADY logged was logged
-  // a second time. One bad string, two defects.
-  const cleaned = firstLine
-    .replace(/[.!?]\s.*$/, "").replace(/[.!?]+$/, "")                             // first sentence only
-    .replace(/^\s*based on\b.*?\b(?:looks?|seems?)\b\s*(?:like|as though|to be)?\s*/i, "") // "Based on…, it looks like "
-    .replace(/^\s*(?:that|this|it|here)?\s*(?:is|'?s)?\s*(?:looks?|seems?)\s+(?:like|to be)\s*/i, "") // "That looks like ", "Looks like "
-    .replace(/^\s*(this is|that'?s|it'?s|here'?s|i (?:can )?see|got it)[,:]?\s*/i, "")
-    .replace(/^(a|an|the)\s+/i, "")                                               // leading article
-    .replace(/^(?:tasty|lovely|nice|good|great|solid|hearty|delicious)\s+/i, "")   // flattery is not a food
-    .replace(/^(?:breakfast|lunch|dinner|supper|snack|meal|plate)\s+of\s+/i, "")   // "lunch of mince pasta"
-    .replace(/,?\s*(?:about|roughly|around|approx\w*|~)\s*\d.*$/i, "")            // ", about 550 kcal"
-    .replace(/\blogged\b.*$/i, "").replace(/[,:—–-]+\s*$/, "").trim().slice(0, 46);
-  return stripWrapQuotes(cleaned) || "Meal";
-}
-
 // Strip wrapping quote marks (straight or curly) from a food name — the vision model likes
 // to echo the caption in scare-quotes ("Skinny hot chocolate"), which read as sarcasm on
 // the card (2026-07-22, founder: "come on man"). Inner apostrophes (McDonald's) are kept.
