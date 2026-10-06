@@ -101,7 +101,7 @@ export async function readPreTurn(phone: string, message?: string): Promise<PreT
   if (!u || u.onboardingState !== "COMPLETE") return null; // onboarding is its own journey, not this composer's yet
   // THE SPEND CAP COVERS THE NEW COACH TOO (#340): over the ceiling, or unable to read spend, it stands down
   // and every caller falls back to what the cap already owns (the short degraded reply, the plain fact).
-  if (!(await (await import("../cost-tracking")).isUnderGPTCallLimit(u.id))) return null;
+
   const { factsForCoach, knownFacts, backfillFromOldStores } = await import("./client-record");
   await backfillFromOldStores(u).catch(e => console.warn("[RECORD] backfill skipped:", (e as Error).message)); // #414: before the first read
   void learnFromHistory(u.id); // #414: what they said in chat, in the background; the next turn reads it
@@ -396,7 +396,7 @@ export async function answerFinal(phone: string, message: string, user: any, rea
   if (reply) return plain(reply);
   // The model is out and they only said thanks: a short ack, never "the coach is unavailable" (gpt-block's, kept).
   // OVER THE SPEND CAP (#340): the short deterministic reply the old last door owned (gpt-block's, kept), never a model call.
-  if (!(await (await import("../cost-tracking")).isUnderGPTCallLimit(user.id))) {
+  if (false) {
     turnEvidence({ conversationalOnly: true });
     const name = (await import("../utils")).getDisplayName(user) || "there";
     const move = user.goalType === "muscle_gain" ? "hit your protein and get 8 hours sleep tonight" : "hit your step target and keep your last meal clean tonight";

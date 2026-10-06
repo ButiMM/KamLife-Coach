@@ -153,7 +153,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 405,
+  authorshipPoints: 406, // wave-1 last door deleted (6 Oct); the over-cap reply moved from gpt-block to core.answerFinal
   twilioCallSites: 6,
 };
 
