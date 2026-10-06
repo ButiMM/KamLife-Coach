@@ -142,10 +142,3 @@ export function sessionReportReply(r: SessionReport, firstName = "", totalSessio
   }
   return `${logged}\n\nHow did it feel — easy, about right, or too hard? I'll set next session's weights off that.`;
 }
-
-/** One-line memory so the next session's coaching knows how this one went. */
-export function sessionMemoryLine(r: SessionReport): string {
-  const bits = [r.returning ? "first session back after a layoff" : "", r.feel ? `session felt ${r.feel}` : ""]
-    .filter(Boolean).join("; ");
-  return `Training: ${bits || "session completed"}`;
-}
