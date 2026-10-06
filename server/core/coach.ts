@@ -394,7 +394,6 @@ export async function answerFinal(phone: string, message: string, user: any, rea
   const { getNumbersMode, stripNumbersFromProse } = await import("../numbers-mode");
   const plain = (t: string) => getNumbersMode(user) === "low" ? stripNumbersFromProse(t) : t;
   if (reply) return plain(reply);
-  // The model is out and they only said thanks: a short ack, never "the coach is unavailable" (gpt-block's, kept).
   // OVER THE SPEND CAP (#340): the short deterministic reply the old last door owned (gpt-block's, kept), never a model call.
   if (!(await (await import("../cost-tracking")).isUnderGPTCallLimit(user.id))) {
     turnEvidence({ conversationalOnly: true });
@@ -402,6 +401,7 @@ export async function answerFinal(phone: string, message: string, user: any, rea
     const move = user.goalType === "muscle_gain" ? "hit your protein and get 8 hours sleep tonight" : "hit your step target and keep your last meal clean tonight";
     return `${name}, quick answer: ${move}\n\nEverything's still live — *menu* for your programme, *my progress* for your numbers, *workout* for today's session. Anything broken? Name it and I'll fix it.`;
   }
+  // The model is out and they only said thanks: a short ack, never "the coach is unavailable" (gpt-block's, kept).
   if ((await import("../handlers/chat-log")).isPureReaction(message)) { turnEvidence({ conversationalOnly: true }); return ["Sharp.", "Lekker.", "Sho.", "Yebo. 👊"][Math.floor(Math.random() * 4)]; }
   const fallback = plain(await (await import("../gpt")).askCoachK(message, user));
   // #92: a question we could not answer is told so, with no action invented on top of it.
