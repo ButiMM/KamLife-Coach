@@ -34,7 +34,7 @@ import { getBehaviourPatternContext } from "../../intelligence/profile";
  * function from the one fact we already hold. A client who is drifting must not get silence
  * because a query timed out, and they must not get a sixth hand-written string either.
  */
-async function silenceAsk(client: any, daysSilent: number): Promise<{ text: string; weigh: boolean }> {
+async function silenceAsk(client: any, daysSilent: number, named = true): Promise<{ text: string; weigh: boolean }> {
   const firstName = client.name?.split(" ")[0] || undefined;
   const behaviourPatterns = await getBehaviourPatternContext(client.id);
   const profile = {
@@ -57,7 +57,7 @@ async function silenceAsk(client: any, daysSilent: number): Promise<{ text: stri
     if (state.food.daysSinceAnyLog === null) state.food.daysSinceAnyLog = daysSilent;
     const decision = decideProactive(state, profile, { hour: 7 });
     console.log(`[MORNING] ${client.id.slice(-6)} silent=${daysSilent}d decision=${decision.state} action=${decision.action.kind}`);
-    return { text: formatOneAction(decision.action, firstName), weigh: decision.action.kind === "weigh" };
+    return { text: formatOneAction(decision.action, named ? firstName : undefined), weigh: decision.action.kind === "weigh" };
   } catch (e) {
     console.warn(`[MORNING] silence decision unavailable for ${client.id?.slice(-6)}:`, (e as Error)?.message);
     // Only the silence rung is reachable from here — `daysSinceAnyLog >= 3` is the first branch
@@ -79,7 +79,7 @@ async function silenceAsk(client: any, daysSilent: number): Promise<{ text: stri
       // NO INVESTIGATION CONTEXT ON PURPOSE (#203). `loggedToday` and `daysSinceWeighIn` above are
       // placeholders for a ledger read that just FAILED, not facts. Handing them to the downgrade
       // would ask a client to log off a value we invented, so this keeps the gate's default: hold.
-    }), { foodSufficient: false, weightSufficient: false, dreamGoal: client.dreamGoal }), firstName) };
+    }), { foodSufficient: false, weightSufficient: false, dreamGoal: client.dreamGoal }), named ? firstName : undefined) };
   }
 }
 
@@ -189,8 +189,9 @@ export async function runMorningCheckin(): Promise<void> {
       const absence = new Date(client.lastActiveAt as any).toISOString().slice(0, 10);
       const hold = proactiveHold(client);
       if (!hold && await claimProactive(client.id, `silence_w${rung}`, absence)) {
-        const ask = await silenceAsk(client, daysSilent);
-        const sent = await sendProactive(client, { claimed: `silence_w${rung}` }, ask.text);
+        const hello = await scheduledWords(client.phoneNumber, "silence"); // B6 (#319): the ladder's ask stays the one move
+        const ask = await silenceAsk(client, daysSilent, !hello);
+        const sent = await sendProactive(client, { claimed: `silence_w${rung}` }, hello ? `${hello}\n\n${ask.text}` : ask.text);
         if (sent && ask.weigh && deliveryAccepted(sent)) await recordWeighAsk(client.id);
       }
       continue;

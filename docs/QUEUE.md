@@ -19,6 +19,19 @@
 4. [x] Wave-1 gate cases: A10, A11, A16 and A17 up to **5+ each** (#406, merged 25 Sep 07:08)
 5. [x] The first `switch` PR: #454 merged 26 Sep (founder, reach 22/22). #460 turns wave 1 on for everyone with the deletions (ship as finished, #459)
 
+## Open now (6 Oct; CTO order of 1 Oct, confirmed 5 Oct)
+
+- [ ] #554 B7 follow-up: close a riding reminder by its own bubble's outcome (Codex @ 4f52e62 on #537)
+- [ ] #537 A14 + B7: reminders in their own words; an undelivered reminder rides on the next reply
+- [ ] #545 A19 + B2: the commitment loop (live read stores facts, migration 0021, two misses, weekly numbers)
+- [ ] #552 B3 + B5 + B6: weigh-in, new phase and hello after silence in the new coach's words
+- [ ] #550 A3: a food photo's meal in the new coach's words
+- [ ] #551 D9: equipment-vision, machine-coach and home-workout deleted
+- [ ] #553 D2: the vector memory store deleted
+- [ ] A18 non-English gate case per Promise row (waiting on the CTO's test-lines ruling, #391)
+- [ ] A4 real voice notes in the gate (#330); D2 next stores (CIP, profile notes); D7 live scoring (#293)
+- [ ] BLOCKED (founder): a CI-only `OPENAI_API_KEY` so the replay gate can run (#546)
+
 ## Open now (26 Sep evening; the watch reads the `- [ ]` lines)
 
 - [x] #496 A quote addressed to someone else ("told her, 'you sound suicidal'") is that person's crisis (C6) — #497
@@ -38,9 +51,9 @@
 - [x] #467 History learning once per client, ever (D11) — PR #472 (the judge-once half merged as #473)
 - [x] #412 gpt-4o only for crisis and photos (D8) — PR #474
 - [x] C7 "Can I speak to a real person?" answered honestly — PR #471
-- [ ] #460 Wave 1 deletions (A10, A11, A16, A17): the founder sets Railway `CORE_WAVE1=on`; the deletions merge 48 h later if clean (ORDERS §0c, no paid gate)
-- [ ] #455 Wave 2 A1, the new coach speaks after a logged meal — after #460 (wave order)
-- [ ] #466 Wave 2 A2, the new coach reads a meal correction — after #455
+- [x] #460 Wave 1 deletions (A10, A11, A16, A17): the founder sets Railway `CORE_WAVE1=on`; the deletions merge 48 h later if clean (ORDERS §0c, no paid gate)
+- [x] #455 Wave 2 A1, the new coach speaks after a logged meal — after #460 (wave order)
+- [x] #466 Wave 2 A2, the new coach reads a meal correction — after #455
 - [x] #309 SA-language refusals ("Hayi", "Aowa", "Cha") open a correction — gate case for the new core (A2)
 - [x] #300 An explicitly named older meal in a correction — gate case (A2)
 - [x] #292 A multi-word negated food is not written back — gate case (A2)

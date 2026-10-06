@@ -1,6 +1,4 @@
 import { pool } from "./db";
-import OpenAI from "openai";
-import { assertAiOnline, isAiOfflineError } from "./ai-offline";
 import { sastDayKey, sastDaysBetween } from "./sast";
 import { looksLikeQuestion } from "./utils";
 import {
@@ -81,10 +79,6 @@ export async function resumeOpenWeekendInvestigation(user: any, message: string,
   return true;
 }
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
-});
-
 /**
  * Durable continuation state lives on users.awaiting_input_type. These compare-and-set helpers
  * are beside the other client-memory writes rather than inside the language recogniser: parsing
@@ -144,106 +138,9 @@ export async function restoreOpenTrainingLoop(user: any, marker: string): Promis
   return true;
 }
 
-export async function initMemoryTable(): Promise<void> {
-  try {
-    await pool.query(`CREATE EXTENSION IF NOT EXISTS vector;`);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS memories (
-        id SERIAL PRIMARY KEY,
-        phone TEXT NOT NULL,
-        content TEXT NOT NULL,
-        embedding vector(1536),
-        category TEXT NOT NULL DEFAULT 'general',
-        importance INTEGER DEFAULT 3,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    await pool.query(`
-      CREATE INDEX IF NOT EXISTS memories_phone_idx ON memories(phone);
-    `);
-    console.log("[MEMORY] Table ready with pgvector");
-  } catch (err) {
-    console.error("[MEMORY] Init failed:", err);
-  }
-}
-
-// NOTE: the `meal_logs` table is created by the canonical migration block in
-// server/index.ts (and typed in shared/schema.ts). The duplicate DDL that used to
-// live here was removed to end the schema drift — schema.ts is the source of truth.
-// `memories` (pgvector) stays raw above because Drizzle lacks stable pgvector support.
-
-const IMPORTANCE: Record<string, number> = {
-  medical: 5, milestone: 5, preference: 4, commitment: 4,
-  training: 3, nutrition: 3, mindset: 2, correction: 5,
-};
-
-async function pruneOldMemories(phone: string): Promise<void> {
-  try {
-    const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
-    const oneYearAgo = new Date(Date.now() - 365 * 86400000).toISOString();
-    await pool.query(
-      `DELETE FROM memories WHERE phone = $1 AND ((importance <= 3 AND created_at < $2) OR (importance = 4 AND created_at < $3))`,
-      [phone, ninetyDaysAgo, oneYearAgo]
-    );
-  } catch (err) {
-    console.warn("[MEMORY] Prune error:", err);
-  }
-}
-
-/**
- * EMBEDDINGS ARE OFF (2026-08-19, Cut 7). Set MEMORY_EMBEDDINGS=on in Railway to restore them.
- *
- * What this table was sold to us as: relationship. What it is: cosine similarity over chat. It
- * cost an OpenAI embedding call on every stored fact AND on every retrieval — two per coached
- * message on the GPT path — to recall a paragraph that no part of the coaching decision could act
- * on, because acting requires a field.
- *
- * The six things a coach actually has to remember — injury, condition, dietary restriction, work
- * pattern, life context, don't-mention — are now typed columns on the client, written by
- * recordClientFacts below and read by the decision. That is memory. This was search.
- *
- * Nothing is deleted: the table, the writer and the reader all still work, and one env var turns
- * them back on. What is switched off is paying per message for fog.
- */
-const EMBEDDINGS_ON = String(process.env.MEMORY_EMBEDDINGS || "").toLowerCase() === "on";
-
-export async function storeMemory(phone: string, content: string, category: string): Promise<void> {
-  if (!EMBEDDINGS_ON) return;
-  try {
-    assertAiOnline("storeMemory");
-
-    // Identical facts should not be embedded and inserted again on every turn.
-    // Keep this scoped to recent history so a genuinely repeated fact can become a
-    // fresh memory later without letting the table fill with same-turn duplicates.
-    const duplicate = await pool.query(
-      `SELECT 1
-       FROM memories
-       WHERE phone = $1
-         AND content = $2
-         AND category = $3
-         AND created_at >= NOW() - INTERVAL '30 days'
-       LIMIT 1`,
-      [phone, content, category]
-    );
-    if (duplicate.rows.length > 0) return;
-
-    const resp = await openai.embeddings.create({ model: "text-embedding-3-small", input: content });
-    const vec = resp.data[0].embedding;
-    if (!Array.isArray(vec) || vec.length !== 1536) {
-      console.warn(`[MEMORY] Unexpected embedding size: ${vec?.length} — skipping store`);
-      return;
-    }
-    const importance = IMPORTANCE[category] || 3;
-    await pool.query(
-      `INSERT INTO memories (phone, content, embedding, category, importance) VALUES ($1, $2, $3::vector, $4, $5)`,
-      [phone, content, `[${vec.join(",")}]`, category, importance]
-    );
-    // Prune stale low-importance memories occasionally (1-in-20 writes)
-    if (Math.random() < 0.05) pruneOldMemories(phone).catch(() => {});
-  } catch (err) {
-    if (!isAiOfflineError(err)) console.error("[MEMORY] Store error:", err);
-  }
-}
+// THE VECTOR STORE IS GONE (D2, 6 Oct). `memories` (pgvector) was muted on 19 Aug (MEMORY_EMBEDDINGS
+// unset, so nothing wrote to it); its writer, pruner, startup DDL and both embeddings calls are deleted.
+// The table keeps its old rows until a migration drops it; account erasure still deletes them.
 
 async function recentConversation(phone: string): Promise<string> {
   try {
@@ -287,58 +184,13 @@ async function recentConversation(phone: string): Promise<string> {
   }
 }
 
-export async function retrieveMemories(phone: string, query: string): Promise<string[]> {
-  // THE THREAD IS NOT AN EMBEDDING. recentConversation below is a plain read of the last four
-  // turns, and it is the part of this function that was always doing honest work — staying in
-  // the conversation rather than recalling a similar-sounding one. It survives the mute.
-  if (!EMBEDDINGS_ON) {
-    const [facts, thread] = await Promise.all([factsLine(phone), recentConversation(phone)]);
-    const out: string[] = [];
-    if (facts) out.push(facts);
-    if (thread) out.push(`RECENT CONVERSATION — use this to stay in the thread, not to recite it:\n${thread}`);
-    return out;
-  }
-  try {
-    assertAiOnline("retrieveMemories");
-    const resp = await openai.embeddings.create({ model: "text-embedding-3-small", input: query });
-    const vec = resp.data[0].embedding;
-    if (!Array.isArray(vec) || vec.length !== 1536) {
-      console.warn(`[MEMORY] Unexpected query embedding size: ${vec?.length} — returning empty`);
-      return [];
-    }
-    const vector = `[${vec.join(",")}]`;
-
-    // Memory should feel like a continuing relationship, not a static FAQ index.
-    // Pure semantic ranking can surface an old, beautifully matching fact while burying
-    // something the client just told us or a recent commitment. Keep semantic relevance as
-    // the dominant signal, but blend in recency and importance so recent/high-stakes context
-    // can survive retrieval when the wording is different.
-    const result = await pool.query(
-      `SELECT content,
-              embedding <=> $2::vector AS distance,
-              created_at,
-              importance,
-              (
-                0.72 * (embedding <=> $2::vector)
-                + 0.20 * LEAST(EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400.0 / 30.0, 1.0)
-                - 0.08 * (GREATEST(COALESCE(importance, 3), 1) / 5.0)
-              ) AS retrieval_score
-       FROM memories
-       WHERE phone = $1
-       ORDER BY retrieval_score ASC
-       LIMIT 8`,
-      [phone, vector]
-    );
-    const recalled = result.rows.map((r: any) => r.content as string);
-    const thread = await recentConversation(phone);
-    if (thread) {
-      recalled.push(`RECENT CONVERSATION — use this to stay in the thread, not to recite it:\n${thread}`);
-    }
-    return recalled;
-  } catch (err) {
-    if (!isAiOfflineError(err)) console.error("[MEMORY] Retrieve error:", err);
-    return [];
-  }
+/** What the old engine reads about the client: their durable facts and the last few turns of the thread. */
+export async function retrieveMemories(phone: string, _query: string): Promise<string[]> {
+  const [facts, thread] = await Promise.all([factsLine(phone), recentConversation(phone)]);
+  const out: string[] = [];
+  if (facts) out.push(facts);
+  if (thread) out.push(`RECENT CONVERSATION — use this to stay in the thread, not to recite it:\n${thread}`);
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
