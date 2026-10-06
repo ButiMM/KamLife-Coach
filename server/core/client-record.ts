@@ -236,6 +236,19 @@ function commitmentLine(c: Commitment, said: string, today = sastDayKey()): stri
   return line;
 }
 
+/**
+ * TWO MISSES CHANGE THE DOMAIN (spec §6, CTO 5 Oct): the last two outcomes both missed, in one domain,
+ * the latest this week → no third of that kind for now; any offer is the other kind. Empty otherwise.
+ */
+async function restingDomain(userId: string): Promise<string> {
+  const rows = await db.select({ d: clientFacts.detail, recent: sql<boolean>`${clientFacts.createdAt} > now() - interval '7 days'` })
+    .from(clientFacts).where(and(eq(clientFacts.userId, userId), eq(clientFacts.kind, "commitment"), sql`${clientFacts.detail} ? 'outcome'`))
+    .orderBy(desc(clientFacts.createdAt)).limit(2);
+  const [a, b] = rows.map(r => r.d as Commitment);
+  const twoMissed = !!a && !!b && rows[0].recent && a.outcome === "missed" && b.outcome === "missed" && a.domain === b.domain;
+  return twoMissed ? `- two ${a.domain} commitments missed in a row: don't propose another ${a.domain} one this week; if you offer one, make it ${a.domain === "movement" ? "one small food habit" : "a short walk or session"}.` : ""; // model-facing
+}
+
 /** The active facts, for the coach. Empty string when there are none. */
 export async function factsForCoach(userId: string): Promise<string> {
   await settleCommitment(userId).catch(() => null);
@@ -245,9 +258,10 @@ export async function factsForCoach(userId: string): Promise<string> {
     sql`(${clientFacts.validUntil} IS NULL OR ${clientFacts.validUntil} > now())`,
   )).orderBy(desc(clientFacts.createdAt)).limit(30); // the NEWEST thirty, shown oldest first
   rows.reverse();
-  if (!rows.length) return "";
+  const resting = await restingDomain(userId).catch(() => "");
+  if (!rows.length && !resting) return "";
   return "WHAT THIS CLIENT HAS TOLD YOU (their own words; use it, never contradict it):\n"
-    + rows.map(r => r.kind === "commitment" ? commitmentLine(r.detail as Commitment, r.statement) : `- ${r.kind}: "${r.statement}"`).join("\n");
+    + [...rows.map(r => r.kind === "commitment" ? commitmentLine(r.detail as Commitment, r.statement) : `- ${r.kind}: "${r.statement}"`), resting].filter(Boolean).join("\n");
 }
 
 /**
