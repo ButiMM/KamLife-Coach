@@ -16,13 +16,13 @@ import {
   reportsOpenTrainingMoveFailed,
   workoutFeedbackReply,
 } from "../workout-feedback";
-import { parseSessionReport, sessionReportReply, sessionMemoryLine, type SessionReport } from "../session-report";
+import { parseSessionReport, sessionReportReply, type SessionReport } from "../session-report";
 import {
   buildDayWorkout,
   buildFullProgramme, getKamlifeProgramme, renderSession, WORKOUT_DONE_RESPONSES,
 } from "../programme";
 import { checkPerfectDay } from "./checks";
-import { consumeOpenTrainingLoop, loadOpenTrainingLoop, restoreOpenTrainingLoop, storeMemory } from "../memory";
+import { consumeOpenTrainingLoop, loadOpenTrainingLoop, restoreOpenTrainingLoop } from "../memory";
 import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat, turnMutation, turnAlreadyWrote } from "./chat-log";
@@ -96,7 +96,6 @@ export async function resumeWorkoutFeedbackExpectation(ctx: {
 
   const firstName = getDisplayName(user);
   const reply = workoutFeedbackReply(feedbackKind, firstName);
-  storeMemory(phone, `Workout difficulty: last session felt "${feedbackKind.replace("_", " ")}"`, "workout").catch(() => {});
   await logChat(user.id, message, reply, "WORKOUT_FEEDBACK");
   return reply;
 }
@@ -214,7 +213,6 @@ export async function handleWorkoutCommands(ctx: {
     const hadWorkout = recent.some(r => ["WORKOUT_DONE", "WORKOUT_VIEW", "WORKOUT_MISSED_CATCHUP", "WORKOUT_HOLIDAY"].includes(r.intent || ""));
     if (hadWorkout) {
       const reply = workoutFeedbackReply(feedbackKind, firstName);
-      storeMemory(phone, `Workout difficulty: last session felt "${feedbackKind.replace("_", " ")}"`, "workout").catch(() => {});
       await logChat(user.id, message, reply, "WORKOUT_FEEDBACK");
       return reply;
     }
@@ -930,8 +928,6 @@ async function logProseSession(
     workoutStreak: wasYesterday ? (user.workoutStreak || 0) + 1 : 1,
   }).where(eq(users.phoneNumber, phone));
 
-  // How it felt has to outlive this message — next session's coaching depends on it.
-  storeMemory(phone, sessionMemoryLine(report), "workout").catch(() => {});
 
   const reply = sessionReportReply(report, firstName, newTotal);
   await logChat(user.id, message, reply, "WORKOUT_DONE");

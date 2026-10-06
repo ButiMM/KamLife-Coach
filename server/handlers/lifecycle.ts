@@ -29,7 +29,6 @@ import { getSleepResponse } from "./sleep";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { getGroceryPersonalization } from "../grocery-personalize";
 import { foodConstraints } from "../food-swaps";
-import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
 import { sendCriticalAlert } from "../scheduler/shared";
 import { cancelPayFastSubscription, latestPayFastToken, handleRefundRequest } from "../routes/payments";
@@ -105,12 +104,6 @@ export async function handleLifecycle(ctx: {
       try {
         await db.insert(clothingCheckins).values({ userId: user.id, jeansFit, energyLevel, stomachFeel, overallFeel, weekNumber: weekNum });
         await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
-        await storeMemory(phone, `Week ${weekNum} non-scale check-in: jeans ${jeansFit}, energy ${energyLevel}, stomach ${stomachFeel}, overall ${overallFeel}`, "milestone");
-        // Store specific win memory for positive NSV results so Coach K can reference them later
-        const isNSVPositive = ["looser", "fitting better", "baggy"].some(k => jeansFit.includes(k));
-        if (isNSVPositive) {
-          await storeMemory(phone, `NSV WIN at week ${weekNum}: jeans are ${jeansFit}, energy ${energyLevel}, stomach ${stomachFeel} — body is changing visibly`, "milestone");
-        }
       } catch (e) { console.warn("[non-fatal]", e); }
 
       // Build a specific coaching response + follow-up question based on what they reported
@@ -164,7 +157,6 @@ export async function handleLifecycle(ctx: {
   if (injuryBetter && user.injuries && user.injuries !== "none") {
     const oldInjury = user.injuries;
     await db.update(users).set({ injuries: "none" }).where(eq(users.phoneNumber, phone));
-    try { await storeMemory(phone, `Injury resolved: "${oldInjury}" — client reported recovery`, "medical"); } catch (e) { console.warn("[non-fatal]", e); }
     const injuryReply = `Noted — ${oldInjury} marked as recovered. Full programme is back.\n\n*Return protocol — do not skip this:*\n*Week 1:* 70% of your previous weights. Form only. Stop the set if anything pulls.\n*Week 2:* 85% weight. Add reps before adding load.\n*Week 3:* Back to full weight if zero pain.\n\nRule: sharp pain during a set = stop that exercise immediately. Dull ache after = acceptable. Non-negotiable: if it hurts, stop.\n\nReply "today" for your session.`;
     await logChat(user.id, message, injuryReply, "INJURY_UPDATE");
     return injuryReply;

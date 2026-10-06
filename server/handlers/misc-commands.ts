@@ -31,7 +31,7 @@ import { calculateTargets, waterTargetLitres, bmiOf } from "../targets";
 import { JUNK_WORDS } from "./checks";
 import { getStepStreak } from "./steps";
 import { scanForSAFoods } from "./food-scanner";
-import { storeMemory, addFact } from "../memory";
+import { addFact } from "../memory";
 import { sendWhatsApp } from "../scheduler";
 import { sastDayStart, classifyPainReport , getDisplayName} from "../utils";
 import { looksLikeDirectionRequest } from "../daily-direction";
