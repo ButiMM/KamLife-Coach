@@ -4132,15 +4132,11 @@ test("cut7: an injury reaches the column the programme actually reads", async ()
     "…and an ordinary sentence now fills it");
 });
 
-test("cut7: embeddings are off, and the conversation thread survives the mute", () => {
+test("D2: the vector store is gone, and the conversation thread survives it", () => {
   const memory = readFileSync("server/memory.ts", "utf-8");
-  assert.ok(/const EMBEDDINGS_ON = String\(process\.env\.MEMORY_EMBEDDINGS/.test(memory),
-    "one env var turns the vector store back on — muted, not deleted");
-  assert.ok(/^export async function storeMemory[\s\S]{0,120}if \(!EMBEDDINGS_ON\) return;/m.test(memory),
-    "no embedding call per stored fact");
-  // recentConversation is a plain SQL read of the last four turns and was always the honest half
-  // of retrieval. Muting the vector search must not take it out.
-  assert.ok(/if \(!EMBEDDINGS_ON\) \{[\s\S]{0,400}recentConversation\(phone\)/.test(memory),
+  assert.ok(!/embeddings\.create|storeMemory|initMemoryTable/.test(memory), "no embedding call, no vector writer (D2)");
+  // recentConversation is a plain SQL read of the last four turns and was always the honest half of retrieval.
+  assert.ok(/export async function retrieveMemories[\s\S]{0,300}recentConversation\(phone\)/.test(memory),
     "the thread still reaches the coach");
   assert.ok(/factsLine\(phone\)/.test(memory), "…alongside the six facts, which replace the prose");
 });
@@ -4763,7 +4759,7 @@ test("startup: the schema guarantee survives binding early", () => {
   const index = readFileSync("server/index.ts", "utf-8");
   const readyBranch = index.slice(index.indexOf('setStartupPhase("ready"'), index.indexOf("} catch (e: any) {", index.indexOf('setStartupPhase("ready"')));
   assert.ok(/initScheduler\(\)/.test(readyBranch), "the scheduler starts from the ready branch");
-  assert.ok(/initFoodsTable\(\)/.test(readyBranch) && /initMemoryTable\(\)/.test(readyBranch),
+  assert.ok(/initFoodsTable\(\)/.test(readyBranch),
     "…and so does everything else that touches the schema");
 });
 

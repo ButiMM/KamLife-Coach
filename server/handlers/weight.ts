@@ -6,7 +6,6 @@ import { trendCalorieAdjust } from "../adaptive-targets";
 import { escalationSLA } from "../safety-detection";
 import { eq, and, gte, lt, asc, desc } from "drizzle-orm";
 import { calculateTargets, calorieFloor } from "../targets";
-import { storeMemory } from "../memory";
 import { invalidatePatternCache } from "../cache";
 
 /**
@@ -239,7 +238,6 @@ export async function handleWeightLog(
     };
     for (const milestone of [2, 5, 10, 15, 20]) {
       if (!options.suppressCustomerLifecycle && totalLoss >= milestone && totalLoss < milestone + 0.6) {
-        await storeMemory(phone, `Weight loss milestone: lost ${milestone}kg total — started at ${startKg}kg, now at ${newKg}kg`, "milestone");
         milestoneCelebration = MILESTONE_MESSAGES[milestone] || "";
         generateMilestoneVoiceScript(user, "weight_loss", { kgLost: milestone, currentKg: newKg, startKg })
           .then(({ script, emotion }) => generateVoiceNote(script, emotion, user.id))
