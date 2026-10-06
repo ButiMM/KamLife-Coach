@@ -314,6 +314,9 @@ REAL("\n7. A KEPT PROMISE IS THE WHOLE EVENING MESSAGE (Grok attack on #545)");
   chk(bodies.length === 1 && /you did it/i.test(bodies[0]) && !isEveningCoaching(bodies[0]),
     "one message: the success line, not \"haven't heard from you today\"", JSON.stringify(bodies));
   await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n8. A SAFETY ROUTE OUTRANKS THE SCHEDULE (#571)");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // They wrote something that took the crisis route this afternoon. Tonight's scheduled message does
