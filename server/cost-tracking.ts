@@ -221,12 +221,9 @@ async function recordCapEvent(action: string, reason: string, meta: Record<strin
   await db.insert(adminEvents).values({ action, reason, meta }).catch(() => {});
 }
 let globalCapCache: { at: number; ok: boolean } | null = null;
-// A reset invalidates reads already in flight: one that queried before the reset must not cache its stale answer after it.
-let capGeneration = 0;
-export function _resetSpendCapCache(): void { globalCapCache = null; capAlertedAt.clear(); capGeneration++; }
+export function _resetSpendCapCache(): void { globalCapCache = null; capAlertedAt.clear(); }
 export async function isUnderGlobalDailyCap(): Promise<boolean> {
   if (globalCapCache && Date.now() - globalCapCache.at < 60_000) return globalCapCache.ok;
-  const generation = capGeneration;
   const raw = parseFloat(process.env.GLOBAL_AI_DAILY_HARD_CAP_USD || process.env.GLOBAL_AI_DAILY_SOFT_CAP_USD || "15");
   const capUsd = isFinite(raw) && raw > 0 ? raw : 15;
   let ok: boolean;
@@ -239,7 +236,7 @@ export async function isUnderGlobalDailyCap(): Promise<boolean> {
     ok = false;
     await recordCapEvent("ai_spend_cap_unreadable", `cost query failed: ${(e as Error)?.message || e}`);
   }
-  if (generation === capGeneration) globalCapCache = { at: Date.now(), ok };
+  globalCapCache = { at: Date.now(), ok };
   return ok;
 }
 
