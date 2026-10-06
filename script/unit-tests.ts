@@ -6214,6 +6214,11 @@ test("dayStatusPill: a plain verdict, never a number, and it matches the bars", 
 // call site I never touched — his numbers twice, the same order four times, and a "Fat over"
 // pill above "Eat more today". Fixing one call site and calling it done is the systemic defect
 // itself. This test enumerates the paths so a new one cannot quietly join them.
+test("A3 (#550 attack): a number-free client's photo words get the same scrub as the old receipt", () => {
+  const src = readFileSync("server/handlers/media.ts", "utf-8");
+  assert.match(src, /const plain = \(t: string\) => photoNumbersLow \? stripNumbersFromProse\(t\) : t;/);
+  assert.match(src, /if \(words\) return plain\(await [^\n]*closeCoachingTurn\(/);
+});
 test("card paths: every attach site is accounted for", async () => {
   const { readFileSync } = await import("node:fs");
   const files = [
