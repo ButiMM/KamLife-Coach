@@ -2,18 +2,16 @@
  * REAL-POSTGRESQL ACCEPTANCE — the wave-1 switch (COVERAGE A10, A11, A13, A16, A17; #438).
  *
  * With the model stubbed at the network edge, this proves the switch's plumbing:
- *   - CORE_WAVE1 on (the default): every client meets the new coach;
+ *   - every client meets the new coach (its CORE_WAVE1 off-path was deleted 6 Oct);
  *   - the new coach answers where gpt-block did, BEHIND the scope floor (an off-topic ask is still declined);
  *   - a message the new coach cannot read falls back to the old reply: never silence, never a guess (#421);
  *   - a client midway through an old flow (a menu awaiting "1/2/3") finishes it there (#440);
- *   - CORE_WAVE1=off is the instant rollback.
  */
 if (!process.env.DATABASE_URL) { console.log("pg-core-wave1-switch-acceptance: SKIPPED — no DATABASE_URL."); process.exit(0); }
 process.env.OPENAI_API_KEY = "sk-stub"; process.env.OFFLINE_AI = "0"; process.env.NORMALIZER = "off";
 process.env.ENGINE_LIVE = "on"; process.env.PROACTIVE_PAUSED = "true"; process.env.NODE_ENV = "production";
 process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000"; process.env.TWILIO_AUTH_TOKEN = "test"; process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 const FOUNDER = "whatsapp:+27829438001", TESTER = "whatsapp:+27829438002";
-process.env.CORE_WAVE1 = "on"; // the runner pins off for stubbed suites; this one proves the switch
 
 const NEW = "NEW-COACH-438"; // only the new coach's composer says this
 const realFetch = globalThis.fetch;
@@ -127,6 +125,14 @@ REAL("\n4e. #575 — A TYPED MEAL KEEPS THE HEALTH-STANDARD GUARDRAIL UNDER THE 
   chk(r.includes(NEW) && /caffeine, not fuel/i.test(r) && r.split(/caffeine, not fuel/i).length === 2, "the second energy drink: the new coach's words, then the caffeine guardrail, once", r.slice(0, 300));
   await pool.query("DELETE FROM users WHERE phone_number = $1", [G]); }
 
+REAL("\n4f. #578 — \"ANOTHER\" IS ANOTHER ONE, NOT A RESEND");
+{ const A = "whatsapp:+27829438578"; await pool.query("DELETE FROM users WHERE phone_number = $1", [A]);
+  await db.insert(schema.users).values({ phoneNumber: A, name: "Second Can", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(), subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  process.env.CORE_WAVE2 = "on"; await say(A, "I had a Monster energy drink"); await say(A, "I had another Monster energy drink"); await say(A, "I had a Monster energy drink"); delete process.env.CORE_WAVE2;
+  const n = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [A])).rows[0].n);
+  chk(n === 2, "\"I had another Monster\" writes a second can; a plain resend of the first is still one", `${n} rows`);
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [A]); }
+
 { const [t] = (await pool.query("SELECT id FROM users WHERE phone_number = $1", [TESTER])).rows, at = (hm: string) => `((now() AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Johannesburg')::date - 1 + time '${hm}') AT TIME ZONE 'Africa/Johannesburg' AT TIME ZONE 'UTC'`; await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [t.id]); await pool.query("DELETE FROM step_logs WHERE user_id = $1", [t.id]); await pool.query(`INSERT INTO meal_logs (user_id, raw_message, source, kcal_int, protein_int, logged_at) VALUES ($1, 'oats', 'sa_scanner', 300, 10, ${at("00:30")})`, [t.id]); const step = (n: number, prov: string) => pool.query(`INSERT INTO step_logs (user_id, steps, provenance, logged_at) VALUES ($1, ${n}, '${prov}', ${at("23:30")})`, [t.id]), traj = async () => (await import("../server/trajectory-report")).getTrajectoryForUser(t.id); await step(10000, "client_report"); const tr = await traj(); await step(50000, "unverified"); const tu = await traj(); chk(tr?.daysLogged === 1 && (tr?.avgStepBurn ?? 0) > 0 && tu?.avgStepBurn === tr?.avgStepBurn, "#539/#540: 00:30 oats and 23:30 steps are one SAST day; trusted steps count, an unverified row changes nothing", JSON.stringify({ d: tr?.daysLogged, burn: tr?.avgStepBurn, withUnverified: tu?.avgStepBurn })); }
 { const sid = "SM545live", said = "I'll walk after work today, hold me to it"; await handleMessage(TESTER, said, undefined, undefined, [], sid); const { recordInbound } = await import("../server/core/client-record"); await recordInbound({ phone: TESTER, rawText: said, sourceMessageId: sid }); const k = await (await import("../server/core/coach")).learnFromLiveRead(TESTER, sid); chk(k === 1 && (await pool.query("SELECT count(*)::int n FROM client_facts f JOIN users u ON u.id = f.user_id WHERE u.phone_number = $1 AND f.kind = 'commitment'", [TESTER])).rows[0].n === 1, "#545: with shadow off, the live coach's own read stores the commitment it accepted", String(k)); }
 { const [t] = (await pool.query("SELECT id FROM users WHERE phone_number = $1", [TESTER])).rows; for (const d of [3, 1]) await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, detail, extracted_by, created_at) VALUES ($1, 'commitment', 'commitment', 'no', $2, 'test', now() - make_interval(days => $3))", [t.id, JSON.stringify({ domain: "movement", what: "a walk", due: "2026-10-01", state: "missed", outcome: "missed" }), d]); const f = await (await import("../server/core/client-record")).factsForCoach(t.id); chk(/don't propose another movement one this week; if you offer one, make it one small food habit/.test(f), "A19 §6: two movement misses in a row, and the coach offers food instead", f.slice(-200)); const cr = await import("../server/core/client-record"); const [{ id }] = (await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, detail, extracted_by) VALUES ($1, 'commitment', 'commitment', 'yes', $2, 'test') RETURNING id", [t.id, JSON.stringify({ domain: "food", what: "no takeaways", due: "2026-10-06", state: "open" })])).rows; const st = async () => (await pool.query("SELECT detail->>'state' s FROM client_facts WHERE id = $1", [id])).rows[0].s; cr.followUpRides(TESTER, id); await cr.closeFollowUp(TESTER, false); const dropped = await st(); cr.followUpRides(TESTER, id); await cr.closeFollowUp(TESTER, true); chk(dropped === "open" && await st() === "asked", "#545 @ 07f9c1f: the follow-up is asked only once a reply carrying it is delivered", `${dropped} → ${await st()}`); }
@@ -137,11 +143,6 @@ REAL("\n4d. A14 — A REMINDER IN THEIR OWN WORDS IS READ BY THE NEW COACH AND S
   const count = async () => (await pool.query("SELECT COUNT(*)::int n FROM reminders r JOIN users u ON u.id = r.user_id WHERE u.phone_number = $1 AND r.kind = 'user'", [TESTER])).rows[0].n;
   const um = await say(TESTER, "Maybe nudge me about my gym bag, I haven't decided when"); chk(await count() === 1 && /when should I remind you/i.test(um), "unsure of the time: it asks, and saves nothing", um.slice(0, 120)); await pool.query("UPDATE users SET awaiting_input_type = NULL WHERE phone_number = $1", [TESTER]);
   const two = await say(TESTER, "Nudge me to pack my gym bag tomorrow at 7am and give me a shout for vitamins at 8am"); const rows = (await pool.query("SELECT COUNT(*)::int n FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.message_in LIKE 'Nudge me to pack%'", [TESTER])).rows[0].n; chk(await count() === 3 && /vitamins/i.test(two) && rows === 1, "two reminders in one message: both saved, both confirmed, one row in the chat record", `${await count()} | rows=${rows} | ${two.slice(0, 120)}`); }
-
-REAL("\n5. INSTANT ROLLBACK");
-process.env.CORE_WAVE1 = "off";
-const f4 = await say(FOUNDER, ASK);
-chk(!f4.includes(NEW), "CORE_WAVE1=off: the founder is back on the old coach, with no deploy", f4);
 
 for (const phone of [FOUNDER, TESTER]) await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
 REAL(`\npg-core-wave1-switch-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);

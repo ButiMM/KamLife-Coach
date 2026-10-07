@@ -162,7 +162,10 @@ chk(goals.length === 1 && /may now/i.test(goals[0].statement), "exactly one acti
 REAL("\n4c. NO MODEL CALL OF ITS OWN — the record adds no call per message (CTO, 24 Sep)");
 sentToModel.length = 0;
 await say(u.phoneNumber, "I'm training for the Comrades marathon in June and my knee gets sore on long runs.", `SM271${RUN}nocall`);
-chk(!sentToModel.some(b => /client's record|KNOWN FACTS/.test(b)), "storing a message sends nothing to a model on the record's behalf", `${sentToModel.length} model calls`);
+// Since the wave-1 last door went (6 Oct) every turn is read by the new coach, and that one read carries the
+// record's instructions: the record learns from it (#271). What must never happen is a call of the record's own.
+const recordCalls = sentToModel.filter(b => /client's record|KNOWN FACTS/.test(b));
+chk(recordCalls.length <= 1 && recordCalls.every(b => b.includes("say what they want from this turn")), "storing a message adds no model call of its own: the only call carrying the record is the coach's own read", `${recordCalls.length} of ${sentToModel.length} model calls carry the record`);
 
 REAL("\n5. NOT FACTS — a statement the client never wrote is dropped");
 const v = await client(2);

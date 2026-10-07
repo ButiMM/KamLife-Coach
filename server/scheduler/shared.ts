@@ -583,6 +583,11 @@ export interface WindowTemplate {
   name: string;
   /** Fills that template's {{1}},{{2}}… — sanitised and rendered like any other variables. */
   variables?: Record<string, string | number | null | undefined>;
+  /**
+   * This message or nothing (#563): if its own template cannot go, do not send the generic check-in in
+   * its place. The commitment check-in sets it, so a failed template is one missed ask, not two contacts.
+   */
+  noSubstitute?: boolean;
 }
 
 export async function sendWhatsApp(to: string, body: string, mediaUrl?: string, windowTemplate?: WindowTemplate): Promise<DeliveryResult> {
@@ -712,7 +717,7 @@ async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | unde
             console.warn(`[WA:WINDOW] "${windowTemplate!.name}" failed for ${to.slice(-8)} — trying the generic check-in`);
           }
         }
-        if (reengageTemplateSid()) {
+        if (reengageTemplateSid() && !windowTemplate?.noSubstitute) {
           console.warn(`[WA:WINDOW] outside 24h window for ${to.slice(-8)} — sending the GENERIC re-engagement template; this message's own content is NOT delivered`);
           try {
             const templateDelivery = await sendWhatsAppTemplate(to, reengageTemplateSid(), undefined, {

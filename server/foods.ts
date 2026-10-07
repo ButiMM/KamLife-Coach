@@ -1278,42 +1278,6 @@ export async function initFoodsTable(): Promise<void> {
   }
 }
 
-export interface FoodMatch {
-  name: string;
-  portionDescription: string;
-  portionCalories: number;
-  portionProtein: number;
-  notes: string;
-  category: string;
-}
-
-export async function queryFoodDatabase(foodName: string): Promise<FoodMatch[]> {
-  try {
-    const lower = foodName.toLowerCase().trim();
-    const result = await pool.query(
-      `SELECT name, typical_portion_description, typical_portion_calories, typical_portion_protein, notes, category
-       FROM sa_foods
-       WHERE LOWER(name) = $1
-          OR $1 = ANY(SELECT LOWER(a) FROM UNNEST(aliases) AS a)
-          OR LOWER(name) LIKE $2
-          OR EXISTS (SELECT 1 FROM UNNEST(aliases) AS a WHERE LOWER(a) LIKE $2)
-       LIMIT 3`,
-      [lower, `%${lower}%`]
-    );
-    return result.rows.map((r: any) => ({
-      name: r.name as string,
-      portionDescription: r.typical_portion_description as string,
-      portionCalories: parseInt(r.typical_portion_calories) as number,
-      portionProtein: parseFloat(r.typical_portion_protein) as number,
-      notes: r.notes as string,
-      category: r.category as string,
-    }));
-  } catch (err) {
-    console.error("[FOODS] Query error:", err);
-    return [];
-  }
-}
-
 /* ────────────────────────────────────────────────────────────────────────────
  * SPEECH-TO-TEXT VOCABULARY BIAS (2026-08-06, founder's STT audit).
  * Whisper's `prompt` is VOCABULARY BIAS. The one that shipped until today was 26 exercise
