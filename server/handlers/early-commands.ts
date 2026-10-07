@@ -1118,7 +1118,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // #587: "I weigh 87kg today" / "I hit 87kg" is a weigh-in, never a goal. Those two verbs set one only
   // when the client says they want it. "Get to", "reach", "goal", "target", "aim" are aspirations already (#594 attack).
   // The wish must be in the weigh-in's own clause: "I hit 87kg but my goal is still 75kg" is a weigh-in (#599).
-  const at = targetWeightMatch?.index ?? 0, stops = [",", ".", ";", " but ", " and "];
+  const at = targetWeightMatch?.index ?? 0, stops = [",", ".", ";", " but "]; // not " and ": "I want to get fitter and weigh 75kg" (#620 review)
   const clause = m.slice(Math.max(0, ...stops.map(b => m.slice(0, at).lastIndexOf(b) + 1)), Math.min(m.length, ...stops.map(b => m.indexOf(b, at)).filter(i => i >= 0)));
   const reportVerb = ["hit", "weigh"].includes((targetWeightMatch?.[0] || "").toLowerCase().split(" ")[0]) && !/\b(?:want|wanna|hop(?:e|ing)|trying|try|plan(?:ning)?|like|love|need|help|goal|target|aim(?:ing)?|dream)\b/i.test(clause);
   if (targetWeightMatch && !reportVerb) {

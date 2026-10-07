@@ -209,6 +209,9 @@ chk(/has not been calculated/i.test(noHeight),
     chk(Number(await goal()) === kg, `"${said}" sets the goal to ${kg}kg`, String(await goal()));
   }
   await pool.query("UPDATE users SET target_weight_kg = '75' WHERE phone_number = $1", [G]);
+  await ask(G, "I want to get fitter and weigh 74kg");
+  chk(Number(await goal()) === 74, "\"I want to get fitter and weigh 74kg\" sets the goal: the wish governs both halves (#620 review)", String(await goal()));
+  await pool.query("UPDATE users SET target_weight_kg = '75' WHERE phone_number = $1", [G]);
   const r3 = await ask(G, "I hit 87kg this morning but my goal is still 75kg");
   chk(Number(await goal()) === 75 && !/that's the goal|goal, done/i.test(r3), "\"I hit 87kg… but my goal is still 75kg\" keeps the 75kg goal (#599)", `${await goal()} | ${r3.slice(0, 160)}`);
   await pool.query("DELETE FROM users WHERE phone_number = $1", [G]); }
