@@ -1117,7 +1117,10 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   const targetWeightMatch = m.match(/\b(?:get(?:\s+down)?|lose\s+(?:weight\s+)?(?:to|down\s+to)|reach|hit|weigh|target(?:\s+is|\s+weight)?|goal(?:\s+is|\s+weight)?|aim(?:ing)?\s+(?:for|to\s+(?:get\s+)?to)|slim\s+down\s+to)\s+(?:to\s+)?(\d{2,3}(?:\.\d)?)\s*kg\b/i);
   // #587: "I weigh 87kg today" / "I hit 87kg" is a weigh-in, never a goal. Those two verbs set one only
   // when the client says they want it. "Get to", "reach", "goal", "target", "aim" are aspirations already (#594 attack).
-  const reportVerb = ["hit", "weigh"].includes((targetWeightMatch?.[0] || "").toLowerCase().split(" ")[0]) && !/\b(?:want|wanna|hop(?:e|ing)|trying|try|plan(?:ning)?|like|love|need|help|goal|target|aim(?:ing)?|dream)\b/i.test(m);
+  // The wish must be in the weigh-in's own clause: "I hit 87kg but my goal is still 75kg" is a weigh-in (#599).
+  const at = targetWeightMatch?.index ?? 0, stops = [",", ".", ";", " but ", " and "];
+  const clause = m.slice(Math.max(0, ...stops.map(b => m.slice(0, at).lastIndexOf(b) + 1)), Math.min(m.length, ...stops.map(b => m.indexOf(b, at)).filter(i => i >= 0)));
+  const reportVerb = ["hit", "weigh"].includes((targetWeightMatch?.[0] || "").toLowerCase().split(" ")[0]) && !/\b(?:want|wanna|hop(?:e|ing)|trying|try|plan(?:ning)?|like|love|need|help|goal|target|aim(?:ing)?|dream)\b/i.test(clause);
   if (targetWeightMatch && !reportVerb) {
     const targetKg = parseFloat(targetWeightMatch[1]);
     if (targetKg >= 35 && targetKg <= 200 && targetKg !== parseFloat(user.currentWeight || "0")) {
