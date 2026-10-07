@@ -170,9 +170,9 @@ export async function understand(openai: OpenAI, message: string, known = "KNOWN
  */
 async function foldedFollowUp(phone: string, pre: PreTurn, reply: string): Promise<void> {
   if (!pre.facts.includes("Due now and not yet asked") || !reply.includes("?")) return;
-  const { activeCommitment, followUpRides } = await import("./client-record");
+  const { activeCommitment, followUpRides, namesWhat } = await import("./client-record");
   const c = await activeCommitment(pre.userId);
-  const said = reply.toLowerCase(), named = (c?.what.toLowerCase().match(/[a-z]{4,}/g) ?? []).some(w => said.includes(w));
+  const named = !!c && namesWhat(c.what, reply, false); // 3+ letters ("gym", Grok on #545), the setting too ("Virgin Active", Codex @ ce85430)
   // Keyed by THIS turn (#545 @ 5bb55de): an unrelated reply delivered first must not close another turn's follow-up.
   if (c && !c.outcome && c.state === "open" && named) followUpRides((await import("../handlers/chat-log")).turnRootId() ?? phone, c.id);
 }

@@ -299,7 +299,27 @@ REAL("\n6. THE SNAPSHOT STILL NAMES THE MESSAGE THEY ACTUALLY READ");
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-REAL("\n7. A SAFETY ROUTE OUTRANKS THE SCHEDULE (#571)");
+REAL("\n7. A KEPT PROMISE IS THE WHOLE EVENING MESSAGE (Grok attack on #545)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// They promised a walk today and the workout ledger shows it, but they logged no food. The evening
+// says they did it, once, and never "haven't heard from you today".
+{
+  await reset();
+  stubTwilio(false);
+  const today = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+  await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, detail, extracted_by) VALUES ($1, 'commitment', 'commitment', 'I will walk after work', $2, 'test')",
+    [user.id, JSON.stringify({ domain: "movement", what: "a walk after work", due: today, state: "open" })]);
+  await pool.query("INSERT INTO workout_logs (user_id, workout_completed, logged_at) VALUES ($1, true, now())", [user.id]);
+  await runEveningAccountability();
+  const bodies = freeformSent();
+  chk(bodies.length === 1 && /you did it/i.test(bodies[0]) && !isEveningCoaching(bodies[0]),
+    "one message: the success line, not \"haven't heard from you today\"", JSON.stringify(bodies));
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n8. A SAFETY ROUTE OUTRANKS THE SCHEDULE (#571)");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // They wrote something that took the crisis route this afternoon. Tonight's scheduled message does
 // not go; once a proactive message has gone after it (or seven days pass), the schedule resumes.

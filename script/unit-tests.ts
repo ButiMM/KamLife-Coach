@@ -6236,6 +6236,27 @@ test("A19 (#545 attack): the voice door teaches the record from the live read, a
   const voice = src.slice(src.indexOf("async function processVoiceAsync"), src.indexOf("// ── WhatsApp message splitting"));
   assert.match(voice, /recordAtDoor\([^)]*\)[^]*?learnFromLiveRead\(phone, sourceMessageId\)/);
 });
+test("A19 (Grok attack on #545): a commitment is stored only for a promise they made, and \"gym\" names one", async () => {
+  const { commitmentHeld, namesWhat } = await import("../server/core/client-record");
+  assert.equal(commitmentHeld("I'm not walking after work on Thursday.", "I'm not walking after work on Thursday", "a walk after work", ""), false, "a negation is not a promise");
+  assert.equal(commitmentHeld("I'm not going to the gym on Thursday", "going to the gym on Thursday", "gym", ""), false, "…even when the span leaves the 'not' out");
+  assert.equal(commitmentHeld("yes", "yes", "a walk after work", "Try pap with beans tonight, would that work?"), false, "a bare yes to pap is not a walk");
+  assert.equal(commitmentHeld("yes", "yes", "a walk after work", "Could you fit a 20-minute walk after work on Thursday?"), true, "a bare yes holds what the coach proposed");
+  assert.equal(commitmentHeld("I'll walk after work on Thursday, hold me to it", "I'll walk after work on Thursday", "a walk after work", ""), true);
+  assert.equal(commitmentHeld("I can't run, but I'll walk on Thursday", "I'll walk on Thursday", "walk", ""), true, "a 'but' starts a new clause");
+  assert.equal(commitmentHeld("I'll be better this week", "I'll be better this week", "a walk after work", ""), false, "a what not in their words or the coach's");
+  assert.equal(namesWhat("gym", "Did you make it to the gym today?"), true, "3-letter words name the promise");
+  assert.equal(namesWhat("a walk after work", "How was the walking?"), true);
+  assert.equal(namesWhat("a walk after work", "How was your day?"), false);
+  // Codex @ ce85430: a promise to go without is stated with "won't", and a reply may name the venue.
+  assert.equal(commitmentHeld("I won't have takeaways this week, ngiyakuthembisa", "I won't have takeaways this week", "no takeaways this week", "", "food"), true, "a food avoidance promise is a promise");
+  assert.equal(commitmentHeld("Hayi, I'm not walking on Thursday.", "I'm not walking on Thursday", "not walking on Thursday", "", "movement"), false, "Codex @ 686bc16: an echoed refusal is still a refusal");
+  assert.equal(commitmentHeld("Hayi, no walk for me on Thursday", "no walk for me on Thursday", "no walk on Thursday", "", "movement"), false, "movement is never an avoidance");
+  assert.equal(commitmentHeld("Hayi, I won't skip takeaways on Thursday — ke batla KFC.", "I won't skip takeaways on Thursday", "skip takeaways on Thursday", "", "food"), false, "Codex @ c1c4a52: refusing to go without is not a promise to");
+  assert.equal(commitmentHeld("I won't stop eating takeaways", "I won't stop eating takeaways", "stop takeaways", "", "food"), false);
+  assert.equal(namesWhat("train at Virgin Active", "How did Virgin Active go?", false), true, "the fold hears the venue");
+  assert.equal(commitmentHeld("yes", "yes", "a walk after work", "Would that work for you?"), false, "the gate still ignores the setting");
+});
 test("#569: the intent classifier is started only after the age gate and the POPIA gate", () => {
   const src = readFileSync("server/routes.ts", "utf-8");
   const first = src.indexOf("startIntent()"), age = src.indexOf("blockUnderage(phone)"), popia = src.indexOf("before we continue I need your consent");
