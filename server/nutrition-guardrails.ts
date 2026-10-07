@@ -16,7 +16,7 @@
 
 import { db } from "./db";
 import { mealLogs } from "../shared/schema";
-import { eq, and, gte, asc } from "drizzle-orm";
+import { eq, and, gte, sql } from "drizzle-orm";
 import { sastDayStart, mealDayStart } from "./utils";
 import { getGoalProfile } from "./goal-profiles";
 
@@ -149,7 +149,9 @@ export async function nutritionGuardrailNudge(user: any): Promise<string> {
       .select({ raw: mealLogs.rawMessage, items: mealLogs.items })
       .from(mealLogs)
       .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, mealDayStart())))
-      .orderBy(asc(mealLogs.loggedAt)); // the last row is the meal just logged: unordered, pap and meat got the takeaway line
+      // WRITE ORDER, so the last row is the meal written this turn: unordered, pap and meat got the takeaway line (rows on two
+      // pages); by logged_at, a late "earlier today I had a burger" filed at 18:00 was not last (#622 review). xmin rises per write.
+      .orderBy(sql`${mealLogs}.xmin::text::bigint`);
     const todayFoods = rows.map(r => `${r.raw || ""} ${itemNames(r.items)}`.trim());
     const nudge = assessNutritionStandards({ todayFoods, goalType: user?.goalType });
     return nudge ? `\n\n${nudge}` : "";
