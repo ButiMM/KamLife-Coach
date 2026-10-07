@@ -72,11 +72,20 @@ chk((await meals()).length === 1 && !/can.t see/i.test(s) && !/stand on a scale/
 serve = jpeg;
 
 await fresh(); vision = "ok"; visionText = "Rice with veg and beef mince — solid plate.\nTOTAL: 520 kcal | 22g protein";
-await photo(""); const again = await photo("");
+await photo(""); await new Promise(r => setTimeout(r, 300)); await pool.query("UPDATE chat_history SET created_at = created_at - interval '31 seconds' WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [P]); const again = await photo("");
 chk((await meals()).length === 1 && /already in today's log/i.test(again) && !/NOT logged|same for lunch|name the meal/i.test(again), "the same plate sent again: a plain \"already in today's log\", no admin, one meal (founder, 7 Oct)", `${(await meals()).length} | ${again.slice(0, 160)}`);
+await new Promise(r => setTimeout(r, 500)); // the chat record is written after the reply
 await pool.query("UPDATE meal_logs SET logged_at = logged_at - interval '4 hours' WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [P]);
+await pool.query("UPDATE chat_history SET created_at = created_at - interval '4 hours' WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [P]);
 await photo("");
 chk((await meals()).length === 2, "the same dish four hours later is eating, and is logged", String((await meals()).length));
+
+await fresh(); visionText = "Pap, eggs and spinach — a good breakfast.\nTOTAL: 450 kcal | 25g protein";
+await photo(""); await new Promise(r => setTimeout(r, 300));
+await pool.query("UPDATE meal_logs SET logged_at = logged_at - interval '8 hours' WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [P]); // eaten this morning
+await pool.query("UPDATE chat_history SET created_at = created_at - interval '31 seconds' WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [P]); // sent a moment ago
+const late = await photo("");
+chk((await meals()).length === 1 && /already in today's log/i.test(late), "a resend of a meal eaten this morning is still a resend: the window is when it arrived, not when it was eaten (#613 attack)", `${(await meals()).length} | ${late.slice(0, 120)}`);
 
 await pool.query("DELETE FROM users WHERE phone_number=$1", [P]);
 REAL(`\npg-photo-door-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);

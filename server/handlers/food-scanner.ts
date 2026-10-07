@@ -701,11 +701,15 @@ export function mealsOverlap(a: string, b: string): boolean {
 export async function findDuplicateMealToday(userId: string, desc: string): Promise<{ desc: string; slot: string } | null> {
   if (mealWords(desc).size < 2) return null; // too little signal to judge — log normally
   try {
-    // A RESEND IS RECENT (7 Oct, founder): the same plate within 3 hours is the same meal sent again; the same
-    // dish at dinner after lunch is eating, and is logged. recentSpans covers a meal filed 24h back overnight.
+    // A RESEND IS RECENT BY WHEN IT ARRIVED (7 Oct, founder; #613 attack): the same plate sent within 3 hours is the
+    // same meal again, whatever time it was eaten ("this morning: …" is stored at 08:00); the same dish hours later is
+    // eating, and is logged. A meal row has no arrival time, so the chat record of the last 3 hours decides.
+    const heard = await db.select({ i: chatHistory.messageIn, o: chatHistory.messageOut }).from(chatHistory)
+      .where(and(eq(chatHistory.userId, userId), sql`${chatHistory.createdAt} > now() - interval '3 hours' AND ${chatHistory.createdAt} < now() - interval '30 seconds'`)).limit(40);
+    if (!heard.some(h => mealsOverlap(desc, h.i || "") || mealsOverlap(desc, h.o || ""))) return null;
     const rows = await db.select({ rawMessage: mealLogs.rawMessage, mealLabel: mealLogs.mealLabel })
       .from(mealLogs)
-      .where(and(eq(mealLogs.userId, userId), or(...recentSpans(3 * 3_600_000).map(([a, b]) => and(gte(mealLogs.loggedAt, a), lte(mealLogs.loggedAt, b))))))
+      .where(and(eq(mealLogs.userId, userId), or(...recentSpans(27 * 3_600_000).map(([a, b]) => and(gte(mealLogs.loggedAt, a), lte(mealLogs.loggedAt, b))))))
       .limit(20);
     for (const r of rows) {
       if (mealsOverlap(desc, r.rawMessage || "")) {
