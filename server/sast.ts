@@ -47,6 +47,23 @@ export function sastDayStart(at?: Date | number): Date {
   return new Date(`${sastDayKey(at)}T00:00:00+02:00`);
 }
 
+/**
+ * THE DAY A MEAL REPORTED NOW BELONGS TO (#582). Before 05:00 SAST a meal with no "today/tonight/now"
+ * is filed on the day that just ended (effectiveMealLoggedAt). Anything that reads "today's meals" to
+ * correct, remove, dedupe or judge them must start from the same day, or at 02:35 "Hayi, a burger, not
+ * pap" finds no pap and logs a second meal. One owner of the midnight window: this and the writer agree.
+ */
+export function mealDayStart(at: Date | number = Date.now()): Date {
+  const t = typeof at === "number" ? at : at.getTime();
+  return sastHour(t) < 5 ? sastDayStart(t - 86_400_000) : sastDayStart(t);
+}
+/** "Written in the last `ms`": before 05:00 SAST a row may have been filed 24h back, so that span counts too. */
+export function recentSpans(ms: number, at: number = Date.now()): Array<[Date, Date]> {
+  const spans: Array<[Date, Date]> = [[new Date(at - ms), new Date(at + 60_000)]];
+  if (sastHour(at) < 5) spans.push([new Date(at - ms - 86_400_000), new Date(at - 86_400_000 + 60_000)]);
+  return spans;
+}
+
 /** SAST hour, 0–23. The basis of every meal-slot and small-hours decision. */
 export function sastHour(at?: Date | number): number {
   return inSast(at).getUTCHours();

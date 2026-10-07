@@ -32,7 +32,7 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 227, // wave-1 last door deleted (6 Oct)
+  modules: 226, // D2b: intelligence/profile.ts deleted (6 Oct)
   handlerFiles: 26, // wave-1 last door deleted (6 Oct)
   cronRegistrations: 24, // 30 Sep (#511): the monthly narrative cron retired
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
@@ -62,7 +62,7 @@ const BUDGET = {
    * to the true figure in one deliberate commit. Until then this red line is the marker, and it is
    * the ONLY thing in this guard that is red — one red line means something, four never did.
    */
-  regexLiterals: 415, // wave-1 last door deleted (6 Oct)
+  regexLiterals: 416, // 7 Oct: +1, the A19 negation gate (RAISES 415 → 416)
   /**
    * GUARD #13 — see unreachableExports above. Sixty-two capabilities cannot be reached by a
    * client message today. This budget is deliberately set THREE BELOW that, so this guard is RED
@@ -153,7 +153,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 405, // wave-1 last door deleted (6 Oct); the over-cap reply moved from gpt-block to core.answerFinal
+  authorshipPoints: 403, // wave-1 last door deleted (6 Oct); the over-cap reply moved from gpt-block to core.answerFinal
   twilioCallSites: 6,
 };
 
@@ -296,6 +296,15 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "or folding either into the other. Renaming either predicate was also rejected as counter "
       + "evasion. The two questions and owners are irreducible without removing product behaviour, "
       + "so 21 is the smallest truthful current baseline. FROM HERE IT FALLS ONLY.",
+  },
+  {
+    key: "regexLiterals", from: 415, to: 416, date: "2026-10-07",
+    why: "ONE PATTERN, client-record.ts NEGATED: the A19 commitment gate (Grok attack on #545, CTO order the same day). "
+      + "\"I'm not walking after work on Thursday\" was storable as a promise to walk, and on Thursday evening the client was "
+      + "asked how the walk went. The model's read is not trusted to see the 'not', so the clause is checked in code. TRIED "
+      + "FIRST: an existing negation owner to reuse (none: the two nearby patterns are a weight-trend contradiction and a "
+      + "model-refusal detector, each bound to its own words); and the two other literals this fix needed are shared or "
+      + "inline (one tokenizer serves both readers). PAY THIS BACK when the understanding call states a promise's polarity itself, and this word rule can go.",
   },
   {
     key: "regexLiterals", from: 318, to: 415, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12, to 441 on 2026-09-15, to 440 on 2026-09-23, to 430 on 2026-09-25 with the wave-1 deletions of #445, to 429 on 2026-10-05 with the old morning composer, B1, to 428 with 6 Oct (D9): equipment-vision, machine-coach, home-workout deleted, to 415 with wave-1 last door deleted (6 Oct))",

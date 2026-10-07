@@ -13,7 +13,8 @@
 
 import { db } from "./db";
 import { mealLogs, stepLogs, users, workoutLogs, weightLogs } from "../shared/schema";
-import { and, eq, gte, lt, desc, sql } from "drizzle-orm";
+import { and, eq, gte, lt, lte, or, desc, sql } from "drizzle-orm";
+import { recentSpans } from "./sast";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { sastDayStart, sastToday } from "./utils";
 import { sastDayKey, sastDaysBetween } from "./sast";
@@ -261,7 +262,8 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
     prevCals = existingTotals.calories;
   } catch { /* non-fatal */ }
 
-  const dedupWindow = new Date(Date.now() - 4 * 60 * 1000);
+  // "Recent" by when it was written, which overnight can sit 24h back (#582): recentSpans owns that.
+  const writtenWithin = (ms: number) => or(...recentSpans(ms).map(([a, b]) => and(gte(mealLogs.loggedAt, a), lte(mealLogs.loggedAt, b))));
   const rawSlice = params.rawMessage.slice(0, 1000);
   const effLoggedAt = effectiveMealLoggedAt(params.loggedAt, params.rawMessage, params.mealLabel);
   // Twilio retries keep the inbound message id. Raw event text disambiguates multi-event text
@@ -278,7 +280,7 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
     .from(mealLogs)
     .where(and(
       eq(mealLogs.userId, params.userId),
-      gte(mealLogs.loggedAt, dedupWindow),
+      writtenWithin(4 * 60 * 1000),
       eq(mealLogs.kcalInt, effectiveKcal),
       eq(mealLogs.rawMessage, rawSlice),
     ))
@@ -288,10 +290,9 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
   // in the last 2 hours as one meal. UNLESS THEY SAY IT IS ANOTHER ONE (#578): "I had another
   // Monster" was read as a resend of the first, written nowhere, and confirmed "Got it — Monster".
   if (recentDup.length === 0 && !params.allowIntentionalRepeat && !/\b(?:another|one more|a second|second one|2nd|again)\b/i.test(rawSlice)) {
-    const retryWindow = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const recentRows = await db.select({ id: mealLogs.id, items: mealLogs.items, label: mealLogs.mealLabel })
       .from(mealLogs)
-      .where(and(eq(mealLogs.userId, params.userId), gte(mealLogs.loggedAt, retryWindow)))
+      .where(and(eq(mealLogs.userId, params.userId), writtenWithin(2 * 60 * 60 * 1000)))
       .limit(8);
     const newerNames = correctedItems.map((i: any) => String(i?.name || i?.foodName || "")).filter(Boolean);
     // A DIFFERENT MEAL IS NOT A RETRY (#310, gate): "a small burger for lunch" then "a large burger for dinner" was

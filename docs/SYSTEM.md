@@ -37,6 +37,9 @@ When the OpenAI key changes in Railway, update the GitHub secret `AI_INTEGRATION
 
 The full list of names and code defaults is in the outgoing CTO's handover (22-23 Sep), summarised in `docs/ORDERS.md` §7 context. Production values are only in Railway; only the founder can read them.
 
+- `CORE_FRONT` (#592, default on): the new coach is the front door after the floors. `off` is the one rollback: the old doors and the normalizer answer again. **It expires on 14 Oct.** On that day the flag and every door it keeps reachable are deleted (#568).
+- `BETA_TESTERS` now only extends testers' trials. Since #586, actions execute for every client, and `ENGINE_ACTIONS_ALL` is gone.
+
 ## Decisions already made (don't re-ask)
 
 | Date | Decision |

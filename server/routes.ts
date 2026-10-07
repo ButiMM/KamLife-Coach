@@ -141,14 +141,13 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // Page coach on crisis/injury signals immediately — fires even if onboarding/POPIA returns early
   if (message && message.length > 2) checkEscalation(user.id, message).catch(e => console.error("[ESCALATION_CHECK]", e?.message || e));
 
-  // ---- INTENT CLASSIFIER — structural reset plan item #2 ----
-  // Fire early as a background Promise. Text messages only (not photo/voice).
-  // Awaited just before the final GPT routing (line ~6590) — by then it's complete.
-  // On any error, returns { intent: "OTHER", confidence: 0 } — never blocks.
-  const intentPromise: Promise<{ intent: ClassifiedIntent; confidence: number }> =
+  // ---- INTENT CLASSIFIER (the normalizer's read): started only after the age and POPIA gates (#569), so a minor's
+  // message, an onboarding answer or a turn without consent reaches no model. Text only; errors read as OTHER.
+  const startIntent = (): Promise<{ intent: ClassifiedIntent; confidence: number }> =>
     (!mediaUrl && message.length >= 2 && message.length <= 500)
       ? classifyIntent(message, user.id).catch((e) => { console.error("[INTENT_CLASSIFY]", e?.message || e); return { intent: "OTHER" as ClassifiedIntent, confidence: 0 }; })
       : Promise.resolve({ intent: "OTHER" as ClassifiedIntent, confidence: 0 });
+  let intentPromise: Promise<{ intent: ClassifiedIntent; confidence: number }> | null = null;
 
   // ---- DAY-ZERO PHYSIQUE READ — body photos sent during onboarding. handleOnboarding
   // is text-only (mediaUrl never reaches it), so this state's photos are claimed here.
@@ -182,6 +181,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
     const name = user.name ? `${user.name}, ` : "";
     return `${name}before we continue I need your consent to process your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\nYour data is:\n- Used only for your coaching\n- Never sold to anyone\n- Deleted on request (reply "delete my data" at any time)\n\nReply *yes* or *agree* to continue. Reply "delete my data" if you would like us to remove your information.`;
   }
+  if (normalizerLive() && user.onboardingState === "COMPLETE" && !user.awaitingInputType && !(await import("./core/coach")).coreFront()) intentPromise = startIntent(); // early, only where the normalizer runs (#592: behind the front door it starts only if the door declines)
 
   // ---- NUMERIC-FLUENCY DETECTOR (fire-and-forget) — a client who talks in
   // kcal/macros three times gets full numbers turned on automatically, with a
@@ -336,7 +336,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // swallow a bare "yes" (2026-07-23 live: the confirm had no landing pad → "yes" looped). A
   // non-yes/no reply returns null and flows on to normal understanding.
   if (user.awaitingInputType === "engine_confirm") {
-    const confirmReply = await resumeEngineConfirm({ phone, message, m, user, sourceMessageId, actionsLive: isCoach || isBetaTester });
+    const confirmReply = await resumeEngineConfirm({ phone, message, m, user, sourceMessageId });
     // THIS BYPASSED THE RESPONSE BOUNDARY (found 2026-08-21). It hand-rolled the coach suffix
     // instead of calling tag(), so `modelAuthored` was never set on the turn — and
     // reconcileTurnReply skips the whole directive boundary when that flag is absent. An engine
@@ -397,8 +397,9 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // "Omg", "wtf", "ugh" fall through to GPT without this guard, and GPT sees recent workout
   // history and re-writes a hallucinated workout. Catch early, reply short and deterministically.
   const BRIEF_FRUSTRATION_RE = /^(omg+|o\.?m\.?g\.?|wtf|wth|ugh+|eish+|agg+|argh+|ffs|smh|seriously\??|come on\.?|what the hell\.?|what is this\.?|this is ridiculous\.?|not again\.?|unbelievable\.?|oh come on\.?|really\?+|for real\??|yoh+|yhoh+|haibo\.?)$/i;
-  if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION) {
-    captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "brief frustration outburst" });
+  const frontOn = (await import("./core/coach")).coreFront(); // #592: the front door answers frustration; it is still captured for the digest (D7)
+  if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION) captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "brief frustration outburst" });
+  if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION && !frontOn) {
     const _bfName = user.name?.split(" ")[0] || "";
     const _bfReply = bareReactionFallback(_bfName);
     await logChat(user.id, message, _bfReply, "BRIEF_FRUSTRATION");
@@ -424,8 +425,8 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // Days 31-40: when the engine is live it owns frustration/pushback moments — its
   // understand-first + "reduce shame" Constitution beats this ad-hoc prompt (the scorecard
   // won big here: "Okay no problem" 2.3→9.0). Deterministic frustration stays the fallback.
-  if ((STRONG_FRUSTRATION || (!engineLive() && frustrationSignalCount >= 2)) && !HAS_CLEAR_ACTION) { // replay 30 Jul: engine lost ALL 3 pushback cases ("I'm not sick" 4.0 vs 5.7) — strong frustration keeps its prompt
-    captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "strong frustration / bot complaint" });
+  if ((STRONG_FRUSTRATION || (!engineLive() && frustrationSignalCount >= 2)) && !HAS_CLEAR_ACTION) captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "strong frustration / bot complaint" });
+  if ((STRONG_FRUSTRATION || (!engineLive() && frustrationSignalCount >= 2)) && !HAS_CLEAR_ACTION && !frontOn) { // replay 30 Jul: engine lost ALL 3 pushback cases ("I'm not sick" 4.0 vs 5.7) — strong frustration keeps its prompt
     const firstName = user.name?.split(" ")[0] || "";
     const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
       .from(chatHistory)
@@ -598,10 +599,16 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const closeCoachingTurn = (reply: string | null, opts?: { coachWithoutWrite?: boolean }) => closeCoachingTurnFor(user, message, reply, opts); const trainingLoopOutcome = await resumeOpenTrainingLoopOutcome({ message, m, user, sourceMessageId }); await resumeOpenWeekendInvestigation(user, message);
   if (trainingLoopOutcome !== null) turnEvidence({ conversationalOnly: true });
   const feedbackReply = await resumeWorkoutFeedbackExpectation({ phone, message, m, user }); if (feedbackReply !== null) turnEvidence({ conversationalOnly: true });
-  if (feedbackReply !== null && mayEndTurn("workout-feedback")) return closeCoachingTurn(feedbackReply); if (feedbackReply !== null) commitFact(turn, "workout", feedbackReply); if (normalizerLive() && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
+  if (feedbackReply !== null && mayEndTurn("workout-feedback")) return closeCoachingTurn(feedbackReply); if (feedbackReply !== null) commitFact(turn, "workout", feedbackReply);
+  // #592 THE FRONT DOOR: past the floors and anything awaiting an answer, the new coach reads, acts through the tools, and answers.
+  const core = await import("./core/coach"); const front = feedbackReply === null && trainingLoopOutcome === null && core.coreFront() && !mediaUrl && !user.awaitingInputType && !core.isExactCommand(m)
+    ? await core.frontTurn({ phone, message, user, sourceMessageId, ongoing: recentlyActive(user), evidence: turnEvidence }) : null;
+  if (front?.reply && front.wrote) turnEvidence({ conversationalOnly: true }); // #590: an after-log turn is the new coach's words only; the ladder speaks once a day, scheduled
+  if (front?.reply) return tag(front.reply, front.src);
+  if (normalizerLive() && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
       const pre = await Promise.race([
-        intentPromise,
+        intentPromise ?? startIntent(),
         new Promise<{ intent: ClassifiedIntent; confidence: number; canonical?: string }>(res =>
           setTimeout(() => res({ intent: "OTHER" as ClassifiedIntent, confidence: 0 }), 3500)),
       ]);
@@ -1053,10 +1060,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // THE ENGINE IS A MOUTH ABOVE THE WRITERS, so it stands down on an owed fact for the same
   // reason every other handler does: a freeform reply must never be composed from state that is
   // missing a fact the client stated in this very message (2026-08-22).
-  const core = await import("./core/coach"); let w1Read = false; // the new coach (wave 1 for everyone; its off-path deleted 6 Oct)
+  let w1Read = !!front?.read; // the new coach (wave 1 for everyone; its off-path deleted 6 Oct)
   if (!multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const w1 = await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), evidence: turnEvidence }); w1Read = true; // #451: read once
-    const engineReply = w1?.reply ?? (engineLive() ? await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester }) : null);
+    const w1 = w1Read ? null : await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), sourceMessageId, evidence: turnEvidence }); w1Read = true; // #451/#592: read once
+    const engineReply = w1?.reply ?? (engineLive() ? await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId }) : null);
     if (engineReply !== null) return tag(engineReply, w1?.src ?? "🧠 new engine");
   }
 
@@ -1079,7 +1086,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const scope = await classifyDomain(openai, message, { ongoing: recentlyActive(user) }); // #321: fails closed
   if (scope.redirectMessage) return tag(await declineOutOfScope(user.id, message, scope.redirectMessage, turnEvidence), "scope");
   // THE LAST DOOR (wave-1 deletion, 6 Oct): gpt-block is gone; the new coach answers what nothing else did.
-  return tag(await core.answerFinal(phone, message, user, w1Read), "new coach");
+  return tag(await core.answerFinal(phone, message, user, w1Read, sourceMessageId), "new coach");
 
   } catch (err: any) {
     console.error("[handleMessage FATAL]", JSON.stringify({

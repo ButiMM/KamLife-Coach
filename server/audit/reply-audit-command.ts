@@ -12,7 +12,7 @@
 import { desc, isNotNull } from "drizzle-orm";
 import { db } from "../db";
 import { chatHistory } from "../../shared/schema";
-import { summarise } from "./reply-defects";
+import { summarise, scanReply } from "./reply-defects";
 import { guardStatsLine } from "../malformed-guard";
 import { assessJobs, jobHealthLines } from "../job-health";
 import { replyPathLines } from "../self-check";
@@ -105,4 +105,103 @@ export async function replyAuditCommand(message: string, _user?: unknown): Promi
     : "";
 
   return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies — *${s.defects}* carry a defect (${pct}%).\n\n${lines}${trend}${example}\n\n${guardStatsLine()}\n\n${await replyPathLines()}\n\n${provenanceStatsLine()}\n\n${jobs}${wider}`;
+}
+
+/**
+ * TESTER TRUTH (CTO, 7 Oct). What testers actually received, measured every day with no model call:
+ * each delivered reply (turn_ledger) is run through the same defect scanner as *audit*, and
+ * attributed to the handler that produced it (decision.source, the tag the turn already records).
+ * The founder gets the day's numbers and the five worst replies at 07:00; the aggregate-only
+ * version (no client words) is what docs/TESTER-TRUTH.md is built from.
+ */
+export type TruthTurn = { id: string; at: Date; userId: string; phone3: string; input: string; reply: string; source: string };
+export type TruthReport = {
+  scanned: number; defects: number;
+  byDetector: Array<{ code: string; label: string; count: number }>;
+  bySource: Array<{ source: string; replies: number; share: number; defects: number }>;
+  worst: Array<TruthTurn & { why: string[] }>;
+};
+export function testerTruth(turns: TruthTurn[], since: Date, signalWorst: Array<{ id: string; why: string[] }> = []): TruthReport {
+  const byDetector = new Map<string, number>(), bySource = new Map<string, { replies: number; defects: number }>();
+  const flagged: Array<TruthTurn & { why: string[] }> = [];
+  let defects = 0;
+  for (const t of turns) {
+    const hits = scanReply({ messageIn: t.input, messageOut: t.reply });
+    const src = bySource.get(t.source) ?? { replies: 0, defects: 0 };
+    src.replies++;
+    if (hits.length) { defects++; src.defects++; for (const h of hits) byDetector.set(h.code, (byDetector.get(h.code) ?? 0) + 1); }
+    bySource.set(t.source, src);
+    if (hits.length && t.at >= since) flagged.push({ ...t, why: hits.map(h => LABELS[h.code] || h.code) });
+  }
+  // The worst five: defective replies first (most defects, newest), then the turns the client
+  // reacted badly to (D7's signals), so a bad reply no detector names still shows.
+  flagged.sort((a, b) => b.why.length - a.why.length || b.at.getTime() - a.at.getTime());
+  const byId = new Map(turns.map(t => [t.id, t]));
+  for (const s of signalWorst) {
+    if (flagged.length >= 5) break;
+    const t = byId.get(s.id);
+    if (t && t.at >= since && !flagged.some(f => f.id === t.id)) flagged.push({ ...t, why: s.why });
+  }
+  const total = turns.length || 1;
+  return {
+    scanned: turns.length, defects,
+    byDetector: [...byDetector].map(([code, count]) => ({ code, label: LABELS[code] || code, count })).sort((a, b) => b.count - a.count),
+    bySource: [...bySource].map(([source, v]) => ({ source, replies: v.replies, share: Math.round(v.replies / total * 100), defects: v.defects })).sort((a, b) => b.replies - a.replies),
+    worst: flagged.slice(0, 5),
+  };
+}
+
+const clip = (t: string, n: number) => { const s = t.replace(/\s+/g, " ").trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
+/** The founder's 07:00 message: today's numbers, the handlers, and the five worst replies quoted (last 3 digits only). */
+export function truthDigest(r: TruthReport): string {
+  const pct = r.scanned ? Math.round(r.defects / r.scanned * 100) : 0;
+  const head = `🔍 *Tester truth, last 24h:* ${r.scanned} replies, ${r.defects} with a known defect (${pct}%).`;
+  const handlers = r.bySource.slice(0, 6).map(s => `• ${s.source}: ${s.share}% of replies${s.defects ? `, ${s.defects} defective` : ""}`).join("\n");
+  const kinds = r.byDetector.slice(0, 5).map(d => `• ${d.count}× ${d.label}`).join("\n");
+  const worst = r.worst.map((t, i) => `${i + 1}. …${t.phone3} · ${t.source} · ${t.why.join(", ")}\n   Them: «${clip(t.input, 90)}»\n   Coach: «${clip(t.reply, 160)}»`).join("\n\n");
+  return [head, handlers && `*Who answered:*\n${handlers}`, kinds && `*Defects:*\n${kinds}`, worst ? `*Worst ${r.worst.length}:*\n${worst}` : "*Worst:* nothing flagged."].filter(Boolean).join("\n\n");
+}
+/** The same report with no client words and no numbers that identify anyone: what docs/TESTER-TRUTH.md holds. */
+export function truthMarkdown(r: TruthReport, days: number, at = new Date()): string {
+  const pct = r.scanned ? (r.defects / r.scanned * 100).toFixed(1) : "0.0";
+  return [`# Tester truth: the last ${days} days`, `Generated ${at.toISOString().slice(0, 16).replace("T", " ")} UTC from turn_ledger. ${r.scanned} delivered replies, ${r.defects} with a known defect (${pct}%).`,
+    "## Who answered (handler → share of replies)", "| Handler | Share | Replies | Defective |", "|---|---|---|---|",
+    ...r.bySource.map(s => `| ${s.source} | ${s.share}% | ${s.replies} | ${s.defects} |`),
+    "## Defects by detector", "| Detector | Count |", "|---|---|", ...r.byDetector.map(d => `| ${d.label} | ${d.count} |`)].join("\n");
+}
+
+/** Delivered replies since `days` ago, with the handler that produced each. */
+export async function loadTruthTurns(days: number, now = Date.now()): Promise<TruthTurn[]> {
+  const { sql } = await import("drizzle-orm");
+  const r = await db.execute(sql`SELECT t.id::text id, t.created_at at, t.user_id::text u, right(u.phone_number, 3) p3, coalesce(t.input_text, '') i,
+      coalesce(t.delivered_body, t.reply) b, coalesce(t.decision->>'source', 'unknown') s
+    FROM turn_ledger t LEFT JOIN users u ON u.id = t.user_id
+    WHERE t.created_at >= ${new Date(now - days * 86_400_000)} AND coalesce(t.delivered_body, t.reply) IS NOT NULL`);
+  return (r.rows as any[]).map(x => ({ id: x.id, at: new Date(x.at), userId: x.u, phone3: x.p3 || "???", input: x.i, reply: String(x.b), source: x.s }));
+}
+
+/** Media failures grouped by step and error, newest error text kept: "3× photo_vision: The model `gpt-4o` does not exist…". */
+export function mediaFailures(rows: Array<{ stage: string; detail: string }>): string {
+  const by = new Map<string, number>();
+  for (const r of rows) { const k = `${r.stage.replace(/^\[MEDIA_FAIL:|\]$/g, "")}: ${(r.detail.split(" err=")[1] || r.detail).slice(0, 140)}`; by.set(k, (by.get(k) ?? 0) + 1); }
+  return by.size ? `📸 *Media failures, last 24h:* ${rows.length}\n${[...by].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, n]) => `• ${n}× ${k}`).join("\n")}` : "";
+}
+
+/** The 07:00 send: today's truth plus who went quiet after a reply, to the founder's ops number. */
+export async function sendTesterTruth(now = Date.now()): Promise<boolean> {
+  const turns = await loadTruthTurns(1, now);
+  const { scoreLiveTurns } = await import("../friction");
+  const { isMemoryGrievance } = await import("../understanding/actions");
+  const signals = (await db.execute((await import("drizzle-orm")).sql`SELECT user_id::text u, created_at at, kind FROM quality_signals
+      WHERE created_at >= ${new Date(now - 86_400_000)} AND kind LIKE 'friction_%' AND user_id IS NOT NULL`)).rows as any[];
+  const scored = scoreLiveTurns(turns.map(t => ({ id: t.id, userId: t.userId, at: t.at, input: t.input, reply: t.reply })),
+    signals.map(s => ({ userId: String(s.u), at: new Date(s.at), kind: String(s.kind) })), isMemoryGrievance, now);
+  const { adminEvents } = await import("../../shared/schema");
+  await db.insert(adminEvents).values({ action: "tester_truth", meta: { turns: turns.length }, reason: "turn triage" }).catch(() => {}); // a read of client turns is audited
+  // #596: what broke on photos and voice notes, with the stored error, so a live failure is seen the next morning.
+  const media = (await db.execute((await import("drizzle-orm")).sql`SELECT message_in s, message_out o FROM chat_history
+      WHERE intent = 'MEDIA_FAILURE' AND created_at >= ${new Date(now - 86_400_000)} ORDER BY created_at DESC LIMIT 50`)).rows as any[];
+  const failures = mediaFailures(media.map(m => ({ stage: String(m.s), detail: String(m.o) })));
+  const text = `${truthDigest(testerTruth(turns, new Date(now - 86_400_000), scored))}${failures ? `\n\n${failures}` : ""}\n\n${await (await import("./engagement-command")).engagementCommand()}`;
+  return (await import("../scheduler/jobs/balance-check")).alertOps(text);
 }

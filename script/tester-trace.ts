@@ -8,6 +8,9 @@ process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000";
 process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
+const STUB = process.env.TRACE_MODEL === "stub"; // #592: the new coach's reading, stubbed at the network edge
+if (STUB) process.env.OFFLINE_AI = "0";
+const calls = STUB ? (await import("./trace-model-stub")).modelCalls : { n: 0 };
 const OUT = console.log.bind(console);
 let LOG: string[] = [];
 console.log = console.warn = console.error = (...a: any[]) => { LOG.push(a.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(" ")); };
@@ -31,18 +34,24 @@ async function freshUser(over: Record<string, any> = {}) {
 }
 const q = async (sql: string, p: any[]) => (await pool.query(sql, p)).rows;
 async function say(u: { id: string; phone: string }, msg: string) {
-  LOG = [];
+  LOG = []; calls.n = 0;
   const mealsBefore = (await q(`SELECT count(*)::int n FROM meal_logs WHERE user_id=$1`, [u.id]))[0].n;
   const factsBefore = (await q(`SELECT count(*)::int n FROM client_facts WHERE user_id=$1`, [u.id]).catch(() => [{ n: -1 }]))[0].n;
-  const reply = String(await handleMessage(u.phone, msg).catch((e: any) => `__THREW__ ${e?.message}`) ?? "");
+  const sid = `SMtrace${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+  const reply = String(await handleMessage(u.phone, msg, undefined, undefined, [], sid).catch((e: any) => `__THREW__ ${e?.message}`) ?? "");
+  if (STUB) { // as the WhatsApp door does: the message is stored, then the record learns from the coach's own read
+    await (await import("../server/core/client-record")).recordInbound({ phone: u.phone, rawText: msg, sourceMessageId: sid }).catch(() => {});
+    await (await import("../server/core/coach")).learnFromLiveRead(u.phone, sid).catch(() => 0);
+  }
   await new Promise(r => setTimeout(r, 400));
-  const newMeals = await q(`SELECT meal_label, kcal_int, protein_int, items FROM meal_logs WHERE user_id=$1 ORDER BY id DESC LIMIT GREATEST(0, (SELECT count(*) FROM meal_logs WHERE user_id=$1) - $2)`, [u.id, mealsBefore]);
+  const newMeals = await q(`SELECT meal_label, kcal_int, protein_int, items FROM meal_logs WHERE user_id=$1 ORDER BY logged_at DESC LIMIT GREATEST(0, (SELECT count(*) FROM meal_logs WHERE user_id=$1) - $2)`, [u.id, mealsBefore]);
   const facts = (await q(`SELECT count(*)::int n FROM client_facts WHERE user_id=$1`, [u.id]).catch(() => [{ n: -1 }]))[0].n;
   const led = (await q(`SELECT mutations FROM turn_ledger WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1`, [u.id]))[0];
   const src = LOG.filter(l => /replySource|\[TURN\]|\[CORE|WAVE|reply path|owner|\[ROUTE|engine/i.test(l)).slice(-4).map(l => l.slice(0, 160));
   OUT(`\n▶ "${msg}"`);
   OUT(`  reply: ${reply.replace(/\n+/g, " ⏎ ").slice(0, 400)}`);
   OUT(`  meals written: ${newMeals.length ? newMeals.map((m: any) => `${m.meal_label}: ${(m.items || []).map((i: any) => i?.name).join(", ")} (${m.kcal_int} kcal)`).join(" | ") : "NONE"}`);
+  if (STUB) OUT(`  model calls: ${calls.n}`);
   OUT(`  facts: ${factsBefore} → ${facts}; mutations: ${JSON.stringify(led?.mutations ?? null).slice(0, 220)}`);
   if (src.length) OUT(`  log: ${src.join(" ‖ ")}`);
   return reply;

@@ -67,6 +67,7 @@ export const WHATS_NEW: Array<{ day: number; line: string }> = [ // day = SAST y
   { day: 20261007, line: "Monday's weigh-in, a new training phase and a hello after a quiet spell now come in my own words, from what you've told me." },
   { day: 20261009, line: "Ask me anything about food, training or your week and you'll get a straight answer, without a to-do tacked on the end." },
   { day: 20261007, line: "Send a photo of your plate and I'll tell you what it means for your day, in my own words, not a receipt." },
+  { day: 20261008, line: "Tell me what you ate, walked or weighed in your own words, in any language (\"kota from the spaza\", \"ndidle ipapa\"), and I'll log it and answer you, without a to-do stapled on." },
   { day: 20261006, line: "Tell me one small thing you'll do and when (\"I'll walk after work on Thursday\") and I'll check in once that evening to see how it went." },
 ];
 export const whatsNewLine = (day = Number(todaySAST().replace(/-/g, ""))): string => {
@@ -103,7 +104,11 @@ export async function runEveningAccountability(): Promise<void> {
         if (delivery && deliveryAccepted(delivery)) await markCommitment(promise.id, "asked");
         continue;
       }
-      const keptToday = promise?.state === "kept" && promise.due === todaySAST() ? `✅ You planned ${promise.what} today, and you did it.\n\n` : "";
+      // KEPT IS THE WHOLE MESSAGE (Grok attack on #545): one success line, never "haven't heard from you today".
+      if (promise?.state === "kept" && promise.due === todaySAST()) {
+        await sendProactive(client, { job: "evening" }, `✅ ${name}, you planned ${promise.what} today, and you did it.${whatsNewLine()}`);
+        continue;
+      }
 
       // THE EMPTY DAY IS A DECISION LIKE ANY OTHER (2026-08-25, P0-4b). These two branches were a
       // ladder of their own: a day-one client got "Reply *1* … get it done tonight" — a training
@@ -193,7 +198,7 @@ export async function runEveningAccountability(): Promise<void> {
       // which is a calendar, not a coach. It now fires when, and only when, the decision owner has
       // actually chosen `train`, so a declined or sick day never renders it.
       if (move.action.kind === "train" && isTrainingDay) {
-        const delivery = await sendProactive(client, { job: "evening" }, `${keptToday}${recap}\n\n${move.line}${whatsNewLine()}`,
+        const delivery = await sendProactive(client, { job: "evening" }, `${recap}\n\n${move.line}${whatsNewLine()}`,
           { buttons: ["Doing it tonight", "Swap to tomorrow", "Rest day today"] });
         if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
         continue;
@@ -203,7 +208,7 @@ export async function runEveningAccountability(): Promise<void> {
       // evening twin of the morning's breakfast ask. Never when dinner is in or they closed the food day.
       const dinnerIn = todayMeals.some(r => /dinner|supper/i.test(String(r.label || "")));
       const ask = !move.line && !sick && !dinnerIn && !(await readHeldConstraints(phone, client)).foodDayClosed ? "What's dinner looking like tonight?" : "";
-      const msg = [keptToday + recap, move.line || ask].filter(Boolean).join("\n\n");
+      const msg = [recap, move.line || ask].filter(Boolean).join("\n\n");
       const delivery = msg ? await sendProactive(client, { job: "evening" }, msg + whatsNewLine()) : null;
       if (delivery) await recordCanonicalMoveOutbound(client, move, delivery);
     } catch (err) {

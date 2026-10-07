@@ -2108,8 +2108,9 @@ async function main() {
     const { weightLogs } = await import("../shared/schema");
     const { getWeightTruth } = await import("../server/day-ledger");
     const result = await serialise(async () => {
-      const prevNorm = process.env.NORMALIZER;
+      const prevNorm = process.env.NORMALIZER, prevFront = process.env.CORE_FRONT;
       delete process.env.NORMALIZER;
+      process.env.CORE_FRONT = "off"; // #592: the normalizer is the old path's, behind the front door's rollback
       g.__KAMLIFE_INTENT_FIXTURES = {
         [msg.toLowerCase()]: { intent: "GOAL_CHANGE", confidence: 0.95, canonical: "change my goal to muscle gain" },
       };
@@ -2124,6 +2125,7 @@ async function main() {
         g.__KAMLIFE_STUB_ROWS = new Map([[weightLogs, [{ ...events[0].values, at: new Date() }]]]);
         return { currentWeight: g.__KAMLIFE_STUB_USER.currentWeight, truth: await getWeightTruth(g.__KAMLIFE_STUB_USER) };
       } finally {
+        if (prevFront === undefined) delete process.env.CORE_FRONT; else process.env.CORE_FRONT = prevFront;
         delete g.__KAMLIFE_INTENT_FIXTURES;
         delete g.__KAMLIFE_STUB_ROWS;
         delete g.__KAMLIFE_STUB_WRITES;

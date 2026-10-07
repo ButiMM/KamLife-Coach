@@ -26,6 +26,7 @@ process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.APP_URL = "https://kamlife-coach-production.up.railway.app";
 process.env.NODE_ENV = "production";
+process.env.CORE_FRONT = "off"; // #592: the normalizer runs only on the front door's rollback path, which this replays
 // THE POINT OF THE SUITE: the front door is ON here, unlike every other offline harness.
 delete process.env.NORMALIZER;
 process.env.NORMALIZER_FIXTURES_STRICT = "1";

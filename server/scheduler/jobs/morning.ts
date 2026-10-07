@@ -19,7 +19,7 @@ import { readHeldConstraints } from "../../held-constraints";
 import { foodConstraints } from "../../food-swaps";
 import { deliveryAccepted } from "../../outbound-delivery";
 import { sendProactive, proactiveHold } from "../proactive-decision";
-import { getBehaviourPatternContext } from "../../intelligence/profile";
+import { getBehaviourPatternContext } from "../../core/client-record";
 
 /**
  * WHAT WE SAY TO SOMEONE WHO HAS GONE — decided by the ladder, not written here.

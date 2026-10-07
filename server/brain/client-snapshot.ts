@@ -287,13 +287,5 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     if (mem.pause === "explicit") lines.push(`Client is on a PAUSE/break until ${mem.pausedUntil}. Respect it — no programme pressure until then.`);
   } catch { /* memory lines are bonus */ }
 
-  try {
-    const { getClientNarrative } = await import("../intelligence/profile");
-    const narrative = await getClientNarrative(user.id);
-    if (narrative && narrative.trim()) {
-      lines.push(`WHAT YOU'VE LEARNED ABOUT THIS CLIENT OVER TIME (their durable patterns — use it to sound like you know them, never recite it back): ${narrative.trim()}`);
-    }
-  } catch { /* the long-term narrative is a bonus — never blocks the snapshot */ }
-
   return lines.join("\n");
 }

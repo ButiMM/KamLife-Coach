@@ -35,7 +35,7 @@ import { mentionsForbidden } from "./brain/reply-verifier";
 // Pure as well, and already the owner of "what may this client be offered" for every plate,
 // grocery list and swap in the product (Cut 9, #177, #128).
 import { allowedAlternatives, NO_CONSTRAINTS, type FoodConstraints } from "./food-swaps";
-import type { BehaviourPatternDecisionContext } from "./intelligence/profile";
+import type { BehaviourPatternDecisionContext } from "./core/client-record";
 
 export interface DayState {
   firstName?: string;

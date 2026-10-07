@@ -94,6 +94,9 @@ export const ACCEPTANCES: Acceptance[] = [
     // fixture that answers every query the same way puts every client on one branch.
     command: ["npx", "tsx", "script/pg-food-constraint-mouths-acceptance.ts"] },
 
+  { id: "photo-door", title: "A food photo gets a real reply",
+    // #596: live photos answered "cannot read" and the failure row kept only a code.
+    command: ["npx", "tsx", "script/pg-photo-door-acceptance.ts"] },
   { id: "weight-authority", title: "One weight-direction authority",
     // ONE ANSWER TO "WHICH WAY IS THE SCALE GOING" (#128). The verdict is computed from weigh-in
     // ROWS — how many, how far apart, how recent — against an illness window in profile_notes, and
