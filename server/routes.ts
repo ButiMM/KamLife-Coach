@@ -603,7 +603,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // #592 THE FRONT DOOR: past the floors and anything awaiting an answer, the new coach reads, acts through the tools, and answers.
   const core = await import("./core/coach"); const front = feedbackReply === null && trainingLoopOutcome === null && core.coreFront() && !mediaUrl && !user.awaitingInputType && !core.isExactCommand(m)
     ? await core.frontTurn({ phone, message, user, sourceMessageId, ongoing: recentlyActive(user), evidence: turnEvidence }) : null;
-  if (front?.reply) return front.wrote ? (recordReplyPath(front.src), closeCoachingTurn(front.reply)) : tag(front.reply, front.src);
+  if (front?.reply && front.wrote) turnEvidence({ conversationalOnly: true }); // #590: an after-log turn is the new coach's words only; the ladder speaks once a day, scheduled
+  if (front?.reply) return tag(front.reply, front.src);
   if (normalizerLive() && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
       const pre = await Promise.race([
