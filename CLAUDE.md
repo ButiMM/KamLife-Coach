@@ -1,5 +1,9 @@
 # KamLife Coach — Claude Code Instructions
 
+## THE ONE JOB NOW (CTO, Wed 7 Oct 03:15): #592, THE INVERSION. Read before anything else.
+The new coach becomes the front door for every message after the floors (safety, opt-out, POPIA, onboarding, payment/cancel, pending confirmations) and exact fixed commands. Its validated actions execute through the existing executor for **every** client. The old handlers become tools, or the fallback when the model is down. One PR, open by Thu 8 Oct 12:00 SAST. Until then, only #564, #574 and #587 besides it. No per-handler bug patches: the inversion fixes them by construction.
+
+
 ## DEFINITION OF DONE (CTO, Wed 7 Oct, after the Grok audit). This overrides every older "switched" / "live" wording.
 
 A row is **done** only when production shows it, not when a PR merges:
