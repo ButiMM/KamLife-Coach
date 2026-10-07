@@ -606,7 +606,7 @@ export function isExactCommand(m: string): boolean {
 }
 
 export async function frontTurn(p: { phone: string; message: string; user: any; sourceMessageId?: string; ongoing: boolean;
-  evidence: (f: { conversationalOnly: true }) => void }): Promise<{ reply: string; src: string; wrote: boolean } | null> {
+  evidence: (f: { conversationalOnly: true }) => void }): Promise<{ reply: string; src: string; wrote: boolean; read?: boolean } | null> {
   const { phone, message, user } = p;
   const guard = await import("../understanding/domain-guard");
   const ask = await guard.deterministicScope(message, p.ongoing); // the human hand-off and the off-domain asks, in code
@@ -617,13 +617,14 @@ export async function frontTurn(p: { phone: string; message: string; user: any; 
     const openai = await openaiClient();
     const read = await understand(openai, message, pre.known);
     liveReads.set(phone, { at: Date.now(), raw: read.raw });
-    if (!read.u) return null;
+    const unanswered = { reply: "", src: "core front", wrote: false, read: true }; // read once: no later door reads it again (#271)
+    if (!read.u) return unanswered;
     if (read.u.scope === "out") return { reply: await guard.declineOutOfScope(user.id, message, guard.scopeRedirect(p.ongoing), p.evidence), src: "scope", wrote: false };
     frontReads.set(phone, { message, u: read.u });
     const done = await runActions(p, read.u, openai);
-    if (done) return done;
+    if (done?.reply) return done;
     const reply = (await compose(openai, pre, message, read.u))?.trim();
-    if (!reply) return null;
+    if (!reply) return unanswered;
     await foldedFollowUp(phone, pre, reply).catch(() => {});
     return { reply, src: "core front", wrote: false };
   } catch (e) {

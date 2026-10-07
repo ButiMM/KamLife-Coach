@@ -603,7 +603,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // #592 THE FRONT DOOR: past the floors and anything awaiting an answer, the new coach reads, acts through the tools, and answers.
   const core = await import("./core/coach"); const front = feedbackReply === null && trainingLoopOutcome === null && core.coreFront() && !mediaUrl && !user.awaitingInputType && !core.isExactCommand(m)
     ? await core.frontTurn({ phone, message, user, sourceMessageId, ongoing: recentlyActive(user), evidence: turnEvidence }) : null;
-  if (front) return front.wrote ? (recordReplyPath(front.src), closeCoachingTurn(front.reply)) : tag(front.reply, front.src);
+  if (front?.reply) return front.wrote ? (recordReplyPath(front.src), closeCoachingTurn(front.reply)) : tag(front.reply, front.src);
   if (normalizerLive() && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
       const pre = await Promise.race([
@@ -1059,8 +1059,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // THE ENGINE IS A MOUTH ABOVE THE WRITERS, so it stands down on an owed fact for the same
   // reason every other handler does: a freeform reply must never be composed from state that is
   // missing a fact the client stated in this very message (2026-08-22).
-  let w1Read = false; // the new coach (wave 1 for everyone; its off-path deleted 6 Oct)
-  if (!multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+  let w1Read = !!front?.read; // the new coach (wave 1 for everyone; its off-path deleted 6 Oct)
+  if (!w1Read && !multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const w1 = await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), sourceMessageId, evidence: turnEvidence }); w1Read = true; // #451: read once
     const engineReply = w1?.reply ?? (engineLive() ? await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId }) : null);
     if (engineReply !== null) return tag(engineReply, w1?.src ?? "🧠 new engine");
