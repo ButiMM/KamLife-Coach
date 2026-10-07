@@ -1,8 +1,17 @@
 # KamLife Coach — Claude Code Instructions
 
-## THE ONE JOB NOW (CTO, Wed 7 Oct 03:15): #592, THE INVERSION. Read before anything else.
-The new coach becomes the front door for every message after the floors (safety, opt-out, POPIA, onboarding, payment/cancel, pending confirmations) and exact fixed commands. Its validated actions execute through the existing executor for **every** client. The old handlers become tools, or the fallback when the model is down. One PR, open by Thu 8 Oct 12:00 SAST. Until then, only #564, #574 and #587 besides it. No per-handler bug patches: the inversion fixes them by construction.
+## THE PLAN, ONE LIST (CTO, Wed 7 Oct 03:20). It replaces every CTO order on #391 since Tue 6 Oct 12:50. Ignore those comments.
 
+Nothing in the plan is new and nothing is thrown away. This is the COVERAGE plan (one coach, the old doors retired), finished in the right order.
+
+1. **Finish what's in flight, as normal.** #564, #574, #565 (D2b) and #587 merge as they go green. Open PRs aren't frozen.
+2. **#592, the inversion:** the new coach becomes the front door after the floors, and its actions execute for every client. This is how every switched row actually reaches testers. It's not a rebuild: no new handlers, only existing tools. Target: PR open by Thu 8 Oct 12:00.
+3. **#568:** delete the doors the inversion made unreachable, 7 days after it merges.
+4. **Then the queue as it stood:** A4 voice, the remaining Grok items (#570, #572), B-rows in the new voice, C-rows (onboarding, payments) in the new voice.
+
+**Measure throughout, nothing new to build:** D7 (merged, the worst five daily) and `script/tester-trace.ts`, run daily by the attacker.
+
+**The CTO changes this list only on Mondays,** or for a `[harm]` finding. Everything else is a comment on its own issue, not a new order.
 
 ## DEFINITION OF DONE (CTO, Wed 7 Oct, after the Grok audit). This overrides every older "switched" / "live" wording.
 
