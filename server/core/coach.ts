@@ -15,9 +15,9 @@
  * on for the gate and for a measured tester sample, not by default.
  */
 import type OpenAI from "openai";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
-import { users, coreShadow, turnLedger, clientEvents, chatHistory } from "@shared/schema";
+import { users, coreShadow, turnLedger, clientEvents, chatHistory, mealLogs } from "@shared/schema";
 import { assertAiOnline } from "../ai-offline";
 import { validateActions, type CoachAction } from "../understanding/actions";
 import { ONE_VOICE } from "../coach-prompt";
@@ -247,6 +247,14 @@ const LOGS = new Set(["LOG_MEAL", "LOG_STEPS", "LOG_WEIGHT", "LOG_WATER"]);
  * cohort only. A vague amount or a shaky reading gets the executor's confirm question, parked so the
  * client's "yes" lands in resumeEngineConfirm. `card` is the meal card marker the receipt carried.
  */
+/** The meals a redrawn card names: those written, on the last written meal's day; the biggest one's protein (#616 review). */
+export function cardMeals(written: Array<{ name: string; sid: string }>, rows: Array<{ sid: string | null; protein: number | null; at: Date | null }>, dayKey: (d: Date) => string) {
+  const last = rows.find(r => r.sid === written[written.length - 1]?.sid);
+  if (!last?.at) return null;
+  const onDay = rows.filter(r => r.at && dayKey(r.at) === dayKey(last.at!));
+  return { at: last.at, name: written.filter(w => onDay.some(r => r.sid === w.sid)).map(w => w.name).join(" + ").slice(0, 40), protein: Math.max(0, ...onDay.map(r => Number(r.protein) || 0)) };
+}
+
 async function logThroughExecutor(phone: string, message: string, actions: CoachAction[], confidence: number, sourceMessageId?: string):
   Promise<{ performed: boolean; confirm: string | null; reply: string; card: string; user?: any }> {
   const [user] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
@@ -254,11 +262,10 @@ async function logThroughExecutor(phone: string, message: string, actions: Coach
   if (!user) return out;
   const [{ executeAction, setPendingConfirm }, { describeAction }, { deriveSourceId }, { logChat }] = await Promise.all([
     import("../understanding/executor"), import("../understanding/actions"), import("../understanding/live"), import("../handlers/chat-log")]);
+  const written: Array<{ name: string; sid: string }> = [];
   for (const action of actions) {
-    const exec = await executeAction(action, {
-      user, phone, confidence, clientMessage: message,
-      sourceMessageId: `${sourceMessageId || deriveSourceId(user.id, message)}#${describeAction(action)}`,
-    });
+    const sid = `${sourceMessageId || deriveSourceId(user.id, message)}#${describeAction(action)}`;
+    const exec = await executeAction(action, { user, phone, confidence, clientMessage: message, sourceMessageId: sid });
     await logChat(user.id, message, `${describeAction(action)} → ${exec.performed ? "performed" : exec.confirmed ? "confirm" : exec.skipped ? "skip" : exec.error ? "error" : "noop"}`, "ENGINE_ACTION").catch(() => {});
     if (exec.unwritten && exec.reply && !out.confirm) out.confirm = exec.reply; // the owner's own question: nothing is claimed
     if (exec.confirmed && !out.confirm) {
@@ -268,20 +275,25 @@ async function logThroughExecutor(phone: string, message: string, actions: Coach
     }
     if (exec.performed) {
       out.performed = true;
+      if (action.type === "LOG_MEAL") written.push({ name: action.foodText, sid });
       const card = (exec.reply.match(/\[MEDIA:[^\]]+\]/) || [""])[0];
       if (!out.card) out.card = card;
       if (!out.reply) out.reply = exec.reply.replace(card, "").trim();
     }
   }
   // SEVERAL MEALS IN ONE MESSAGE (7 Oct, founder: people send lists): the card drawn after the first meal held only that
-  // meal. Once every meal is written, it is drawn again from the day's real totals (the last meal's day for a list).
-  const meals = actions.filter((a): a is Extract<CoachAction, { type: "LOG_MEAL" }> => a.type === "LOG_MEAL");
-  if (out.card && meals.length > 1) {
-    const [{ forgetCard }, { macroCardMarker }, { parseMealDate }] = await Promise.all([import("../card-policy"), import("../macro-card-attach"), import("../utils")]);
-    const last = meals[meals.length - 1];
-    forgetCard(user.id);
-    const day = last.retro ? parseMealDate(last.retro) || undefined : undefined;
-    out.card = await macroCardMarker({ user, mealName: meals.map(m => m.foodText).join(" + ").slice(0, 40), mealProtein: 0, forDate: day }).catch(() => out.card) || out.card;
+  // meal. Once every meal is written, it is drawn again from the day's real totals: the last written meal's day, naming
+  // only the meals written on that day (never one waiting for a yes), with the biggest one's protein (#616 review).
+  if (out.card && written.length > 1) {
+    const [{ forgetCard }, { macroCardMarker }, { sastDayKey, isPastSastDay }] = await Promise.all([
+      import("../card-policy"), import("../macro-card-attach"), import("../sast")]);
+    const rows = await db.select({ sid: mealLogs.sourceMessageId, protein: mealLogs.proteinInt, at: mealLogs.loggedAt }).from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), inArray(mealLogs.sourceMessageId, written.map(w => w.sid)))).catch(() => []);
+    const pick = cardMeals(written, rows, sastDayKey);
+    if (pick) {
+      forgetCard(user.id);
+      out.card = await macroCardMarker({ user, mealName: pick.name, mealProtein: pick.protein, forDate: isPastSastDay(pick.at) ? pick.at : undefined }).catch(() => out.card) || out.card;
+    }
   }
   return out;
 }

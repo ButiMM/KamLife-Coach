@@ -174,6 +174,9 @@ REAL("\n4g. #586 — A MEAL THE OLD KEYWORDS MISS IS WRITTEN FOR AN ORDINARY CLI
   process.env.APP_URL = "https://kamlife.example"; (await import("../server/card-policy"))._resetDumpWindow();
   const two = await say(K, "two meals, one card"); delete process.env.APP_URL;
   chk((two.match(/\[MEDIA:https:\/\/kamlife\.example\/card\//g) || []).length === 1, "two meals in one message get one card, drawn after both are written (founder, 7 Oct: people send lists)", two.slice(0, 200));
+  { const { cardMeals } = await import("../server/core/coach"), { sastDayKey } = await import("../server/sast"), mon = new Date(Date.now() - 2 * 864e5), now = new Date();
+    const pick = cardMeals([{ name: "pap", sid: "a" }, { name: "rice", sid: "b" }, { name: "eggs", sid: "c" }], [{ sid: "a", protein: 9, at: mon }, { sid: "b", protein: 30, at: now }, { sid: "c", protein: 12, at: now }], sastDayKey);
+    chk(pick?.name === "rice + eggs" && pick.protein === 30, "a list's card names only the meals on its own day, with the biggest one's protein, never 0 (#616 review)", JSON.stringify(pick)); }
   const kw = await say(K, "Ndizilinganise, 82 not sure"), w82 = (await pool.query("SELECT COUNT(*)::int n FROM weight_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [K])).rows[0].n;
   chk(w82 === 0 && /82kg\*\? Reply \*yes\*/i.test(kw), "a reading that does not say how sure it is asks before writing a weight (#593 attack)", `${w82} rows | ${kw.slice(0, 120)}`);
   await pool.query("UPDATE users SET awaiting_input_type = NULL WHERE phone_number = $1", [K]);
