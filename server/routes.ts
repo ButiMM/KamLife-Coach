@@ -181,7 +181,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
     const name = user.name ? `${user.name}, ` : "";
     return `${name}before we continue I need your consent to process your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\nYour data is:\n- Used only for your coaching\n- Never sold to anyone\n- Deleted on request (reply "delete my data" at any time)\n\nReply *yes* or *agree* to continue. Reply "delete my data" if you would like us to remove your information.`;
   }
-  if (normalizerLive() && user.onboardingState === "COMPLETE" && !user.awaitingInputType) intentPromise = startIntent(); // early, only where the normalizer runs
+  if (normalizerLive() && user.onboardingState === "COMPLETE" && !user.awaitingInputType && !(await import("./core/coach")).coreFront()) intentPromise = startIntent(); // early, only where the normalizer runs (#592: behind the front door it starts only if the door declines)
 
   // ---- NUMERIC-FLUENCY DETECTOR (fire-and-forget) — a client who talks in
   // kcal/macros three times gets full numbers turned on automatically, with a
@@ -397,8 +397,9 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // "Omg", "wtf", "ugh" fall through to GPT without this guard, and GPT sees recent workout
   // history and re-writes a hallucinated workout. Catch early, reply short and deterministically.
   const BRIEF_FRUSTRATION_RE = /^(omg+|o\.?m\.?g\.?|wtf|wth|ugh+|eish+|agg+|argh+|ffs|smh|seriously\??|come on\.?|what the hell\.?|what is this\.?|this is ridiculous\.?|not again\.?|unbelievable\.?|oh come on\.?|really\?+|for real\??|yoh+|yhoh+|haibo\.?)$/i;
-  if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION) {
-    captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "brief frustration outburst" });
+  const frontOn = (await import("./core/coach")).coreFront(); // #592: the front door answers frustration; it is still captured for the digest (D7)
+  if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION) captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "brief frustration outburst" });
+  if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION && !frontOn) {
     const _bfName = user.name?.split(" ")[0] || "";
     const _bfReply = bareReactionFallback(_bfName);
     await logChat(user.id, message, _bfReply, "BRIEF_FRUSTRATION");
@@ -424,8 +425,8 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // Days 31-40: when the engine is live it owns frustration/pushback moments — its
   // understand-first + "reduce shame" Constitution beats this ad-hoc prompt (the scorecard
   // won big here: "Okay no problem" 2.3→9.0). Deterministic frustration stays the fallback.
-  if ((STRONG_FRUSTRATION || (!engineLive() && frustrationSignalCount >= 2)) && !HAS_CLEAR_ACTION) { // replay 30 Jul: engine lost ALL 3 pushback cases ("I'm not sick" 4.0 vs 5.7) — strong frustration keeps its prompt
-    captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "strong frustration / bot complaint" });
+  if ((STRONG_FRUSTRATION || (!engineLive() && frustrationSignalCount >= 2)) && !HAS_CLEAR_ACTION) captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "strong frustration / bot complaint" });
+  if ((STRONG_FRUSTRATION || (!engineLive() && frustrationSignalCount >= 2)) && !HAS_CLEAR_ACTION && !frontOn) { // replay 30 Jul: engine lost ALL 3 pushback cases ("I'm not sick" 4.0 vs 5.7) — strong frustration keeps its prompt
     const firstName = user.name?.split(" ")[0] || "";
     const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
       .from(chatHistory)
@@ -598,7 +599,12 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const closeCoachingTurn = (reply: string | null, opts?: { coachWithoutWrite?: boolean }) => closeCoachingTurnFor(user, message, reply, opts); const trainingLoopOutcome = await resumeOpenTrainingLoopOutcome({ message, m, user, sourceMessageId }); await resumeOpenWeekendInvestigation(user, message);
   if (trainingLoopOutcome !== null) turnEvidence({ conversationalOnly: true });
   const feedbackReply = await resumeWorkoutFeedbackExpectation({ phone, message, m, user }); if (feedbackReply !== null) turnEvidence({ conversationalOnly: true });
-  if (feedbackReply !== null && mayEndTurn("workout-feedback")) return closeCoachingTurn(feedbackReply); if (feedbackReply !== null) commitFact(turn, "workout", feedbackReply); if (normalizerLive() && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
+  if (feedbackReply !== null && mayEndTurn("workout-feedback")) return closeCoachingTurn(feedbackReply); if (feedbackReply !== null) commitFact(turn, "workout", feedbackReply);
+  // #592 THE FRONT DOOR: past the floors and anything awaiting an answer, the new coach reads, acts through the tools, and answers.
+  const core = await import("./core/coach"); const front = feedbackReply === null && trainingLoopOutcome === null && core.coreFront() && !mediaUrl && !user.awaitingInputType && !core.isExactCommand(m)
+    ? await core.frontTurn({ phone, message, user, sourceMessageId, ongoing: recentlyActive(user), evidence: turnEvidence }) : null;
+  if (front) return front.wrote ? (recordReplyPath(front.src), closeCoachingTurn(front.reply)) : tag(front.reply, front.src);
+  if (normalizerLive() && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
       const pre = await Promise.race([
         intentPromise ?? startIntent(),
@@ -1053,7 +1059,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // THE ENGINE IS A MOUTH ABOVE THE WRITERS, so it stands down on an owed fact for the same
   // reason every other handler does: a freeform reply must never be composed from state that is
   // missing a fact the client stated in this very message (2026-08-22).
-  const core = await import("./core/coach"); let w1Read = false; // the new coach (wave 1 for everyone; its off-path deleted 6 Oct)
+  let w1Read = false; // the new coach (wave 1 for everyone; its off-path deleted 6 Oct)
   if (!multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const w1 = await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), sourceMessageId, evidence: turnEvidence }); w1Read = true; // #451: read once
     const engineReply = w1?.reply ?? (engineLive() ? await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId }) : null);

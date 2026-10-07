@@ -123,7 +123,8 @@ export async function readPreTurn(phone: string, message?: string): Promise<PreT
 }
 
 const UNDERSTAND_SYSTEM = `You read one WhatsApp message from a coaching client and say what they want from this turn.
-Return ONLY JSON: {"family":"report|question|plan|feeling|correction|other","wants":"<one short sentence>","one_question":"<the single question worth asking, or null>","uncertainty":<0..1>,"facts":[...],"actions":[...]}
+Return ONLY JSON: {"family":"report|question|plan|feeling|correction|other","scope":"in|out","wants":"<one short sentence>","one_question":"<the single question worth asking, or null>","uncertainty":<0..1>,"facts":[...],"actions":[...]}
+- scope: "out" ONLY when they ask for help with something that is not their health, body, food, training, sleep, stress, mood or wellbeing (homework, a CV, coding, a legal or money question). Anything in their life that touches those is "in".
 - report: they are telling you what they ate, did, weighed or felt, and want it noted.
 - question: they ask for advice or information.
 - plan: they want a plan (a day of eating, a session, a week).
@@ -140,7 +141,7 @@ Ask one_question ONLY if the answer would change the advice.
 
 /** `actions` are what the new core WOULD do, validated by the existing permission gate (understanding/actions.ts).
  *  In shadow they are recorded, never performed; the gate compares them with what the old path stored (#391). */
-export type Understanding = { family: string; wants: string; one_question: string | null; uncertainty: number; actions: CoachAction[] };
+export type Understanding = { family: string; wants: string; one_question: string | null; uncertainty: number; actions: CoachAction[]; scope?: "in" | "out" };
 
 /**
  * ONE CALL READS THE MESSAGE (CTO, 24 Sep): what the client wants from this turn AND the durable facts
@@ -161,7 +162,7 @@ export async function understand(openai: OpenAI, message: string, known = "KNOWN
     // A reading that does not say how sure it is fails closed (#593 attack): fully uncertain, so a write is confirmed first.
     const unsure = typeof j.uncertainty === "number" && j.uncertainty >= 0 && j.uncertainty <= 1 ? j.uncertainty : 1;
     return { u: { family: j.family, wants: String(j.wants || ""), one_question: j.one_question ? String(j.one_question) : null, uncertainty: unsure,
-      actions: validateActions(j.actions ?? []) }, raw };
+      actions: validateActions(j.actions ?? []), scope: j.scope === "out" ? "out" : "in" }, raw };
   } catch { return { u: null, raw }; }
 }
 
@@ -348,9 +349,10 @@ export function afterLogWords(reply: string, receipt: string, strip: (r: string)
 export async function correctionRead(phone: string, message: string): Promise<{ from: string; to: string; meal?: string } | null> {
   if (!coreWave2For(phone)) return null;
   try {
-    const pre = await readPreTurn(phone, message);
-    if (!pre) return null;
-    const read = await understand(await openaiClient(), message, pre.known);
+    const held = frontReads.get(phone); // #592: the front door already read this message; never a second call
+    const pre = held?.message === message ? null : await readPreTurn(phone, message);
+    if (!held && !pre) return null;
+    const read = held?.message === message ? held : await understand(await openaiClient(), message, pre!.known);
     const a = (read.u?.actions ?? []).find(x => x.type === "CORRECT_MEAL") as { from?: string; to?: string; meal?: string } | undefined;
     // The meal they named travels too (#466 attack): without it the writer edited the newest meal.
     return a?.from && a?.to ? { from: a.from.toLowerCase(), to: a.to.toLowerCase(), ...(a.meal ? { meal: a.meal } : {}) } : null;
@@ -578,4 +580,91 @@ export async function runShadow(pre: PreTurn | null, message: string, rootId: st
     const { isAiOfflineError } = await import("../ai-offline");
     if (!isAiOfflineError(e)) console.warn("[CORE_SHADOW]", (e as Error)?.message || e);
   }
+}
+
+/**
+ * #592, THE INVERSION — the new coach is the front door. Behind the floors (safety, consent, onboarding,
+ * billing, anything awaiting an answer) and the exact commands, every text message is read once
+ * (understand: meaning, scope, facts, actions), its validated actions run through the existing tools
+ * for every client, and the reply is composed from the record. Two model calls a turn. null = the
+ * old doors answer: no reading, over the spend cap, or the model down. CORE_FRONT=off is the rollback
+ * (expires 14 Oct; the doors it keeps reachable are deleted then, #568).
+ */
+export function coreFront(): boolean {
+  return String(process.env.CORE_FRONT || "on").toLowerCase() !== "off";
+}
+
+const frontReads = new Map<string, { message: string; u: Understanding | null }>();
+const EXACT_COMMANDS = new Set(["menu", "progress", "my progress", "targets", "my targets", "cancel", "stop", "start", "help", "workout",
+  "today's workout", "todays workout", "my workout", "my meals", "meals", "diary", "status", "pause", "resume", "unsubscribe", "shopping list"]);
+/** The whole message is a fixed command or a button/number reply: the old command owns it. */
+export function isExactCommand(m: string): boolean {
+  const t = m.trim().toLowerCase().replace(/[.!?\s]+$/, "");
+  return EXACT_COMMANDS.has(t) || (t.length > 0 && t.length <= 2 && Number.isFinite(Number(t)));
+}
+
+export async function frontTurn(p: { phone: string; message: string; user: any; sourceMessageId?: string; ongoing: boolean;
+  evidence: (f: { conversationalOnly: true }) => void }): Promise<{ reply: string; src: string; wrote: boolean } | null> {
+  const { phone, message, user } = p;
+  const guard = await import("../understanding/domain-guard");
+  const ask = await guard.deterministicScope(message, p.ongoing); // the human hand-off and the off-domain asks, in code
+  if (ask) return { reply: await guard.declineOutOfScope(user.id, message, ask, p.evidence), src: "scope", wrote: false };
+  try {
+    const pre = await readPreTurn(phone, message);
+    if (!pre) return null;
+    const openai = await openaiClient();
+    const read = await understand(openai, message, pre.known);
+    liveReads.set(phone, { at: Date.now(), raw: read.raw });
+    if (!read.u) return null;
+    if (read.u.scope === "out") return { reply: await guard.declineOutOfScope(user.id, message, guard.scopeRedirect(p.ongoing), p.evidence), src: "scope", wrote: false };
+    frontReads.set(phone, { message, u: read.u });
+    const done = await runActions(p, read.u, openai);
+    if (done) return done;
+    const reply = (await compose(openai, pre, message, read.u))?.trim();
+    if (!reply) return null;
+    await foldedFollowUp(phone, pre, reply).catch(() => {});
+    return { reply, src: "core front", wrote: false };
+  } catch (e) {
+    console.warn("[CORE_FRONT] the old doors answer:", (e as Error)?.message || e);
+    return null;
+  } finally { frontReads.delete(phone); }
+}
+
+/** The read's writes, each through the tool that already owns it. null = nothing to write (a question, a feeling). */
+async function runActions(p: { phone: string; message: string; user: any; sourceMessageId?: string }, u: Understanding, openai: OpenAI):
+  Promise<{ reply: string; src: string; wrote: boolean } | null> {
+  const { phone, message, user } = p;
+  const { writesState } = await import("../understanding/actions");
+  const acts = u.actions.filter(a => a.type !== "JUST_REPLY");
+  if (!acts.length) return null;
+  const m = message.toLowerCase().replace(/\s+/g, " ").trim();
+  const one = acts.length === 1 ? acts[0] : null;
+  // Owners that take the client's words, not a value: the correction engine, the workout log, the goal confirm.
+  if (one?.type === "CORRECT_MEAL") {
+    const r = await (await import("../handlers/food-log-mgmt")).handleFoodLogMgmt(user, m);
+    return r ? { reply: r, src: "core front: correction", wrote: true } : null;
+  }
+  if (one?.type === "LOG_WORKOUT") {
+    const { handleWorkoutCommands } = await import("../handlers/workout");
+    const said = `I did ${one.what || "my workout"}${one.retro ? ` ${one.retro}` : ""}`;
+    const r = await handleWorkoutCommands({ phone, message, m, user, sourceMessageId: p.sourceMessageId })
+      ?? await handleWorkoutCommands({ phone, message: said, m: said.toLowerCase(), user, sourceMessageId: p.sourceMessageId });
+    if (!r) return null;
+    return { reply: (await afterLogReply(phone, message, r, "workout")) || r, src: "core front: workout", wrote: true };
+  }
+  if (one?.type === "SET_GOAL") {
+    const said = `change my goal to ${one.goal.replace("_", " ")}`;
+    const r = await (await import("../handlers/lifecycle")).handleLifecycle({ phone, message: said, m: said, user, isQuestion: false });
+    return r ? { reply: r, src: "core front: goal", wrote: false } : null;
+  }
+  // Everything else is the executor's (meals, steps, weight, water, reminders, sick days, show and undo).
+  if (acts.some(a => ["CORRECT_MEAL", "LOG_WORKOUT", "SET_GOAL"].includes(a.type))) return null; // mixed with a words-owner: compose, never half-write
+  const confidence = 1 - (u.uncertainty || 0);
+  const logged = await logThroughExecutor(phone, message, acts, confidence, p.sourceMessageId);
+  if (logged.confirm) return { reply: logged.card + [logged.reply, logged.confirm].filter(Boolean).join("\n\n"), src: "core front: confirm", wrote: false };
+  const receipt = (logged.card + logged.reply).trim();
+  if (!logged.performed) return receipt ? { reply: receipt, src: "core front: tool", wrote: false } : null;
+  const kind = acts.every(a => a.type === "LOG_STEPS") ? "steps" : acts.some(a => a.type === "LOG_MEAL") ? "food" : null;
+  const words = kind ? await afterLogReply(phone, message, receipt, kind, logged.user) : null;
+  return { reply: words || receipt, src: "core front", wrote: acts.some(a => writesState(a.type)) };
 }
