@@ -11,7 +11,6 @@ server/handlers/food-commands.ts
 server/normalizer-fidelity.ts
 server/one-action.ts
 server/memory.ts
-server/intelligence/profile.ts
 #
 # ── PARTIAL (the writers inside stay; the reply and decision code goes) ──
 # server/handlers/early-commands.ts

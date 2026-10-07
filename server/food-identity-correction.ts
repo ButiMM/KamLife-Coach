@@ -437,12 +437,13 @@ export async function amendRecentMeal(
   try {
     const { db } = await import("./db");
     const { mealLogs } = await import("../shared/schema");
-    const { eq, and, gte, desc } = await import("drizzle-orm");
+    const { eq, and, gte, lte, or, desc } = await import("drizzle-orm");
+    const { recentSpans } = await import("./sast");
     // 30 minutes: long enough to remember an avocado, short enough that tonight's supper can
-    // never absorb this morning's toast.
+    // never absorb this morning's toast. Overnight the row may be filed 24h back (#582).
     const rows = await db.select({ id: mealLogs.id, items: mealLogs.items })
       .from(mealLogs)
-      .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, new Date(Date.now() - 30 * 60 * 1000))))
+      .where(and(eq(mealLogs.userId, userId), or(...recentSpans(30 * 60 * 1000).map(([a, b]) => and(gte(mealLogs.loggedAt, a), lte(mealLogs.loggedAt, b))))))
       .orderBy(desc(mealLogs.loggedAt))
       .limit(6);
     const namesOf = (raw: unknown): string[] => (Array.isArray(raw) ? raw : [])

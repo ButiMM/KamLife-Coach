@@ -22,7 +22,7 @@ import { readHealthState } from "../health-state";
 import { foodConstraints } from "../food-swaps";
 import { loadOpenTrainingLoop } from "../memory";
 import { readHeldConstraints, NO_CONSTRAINTS } from "../held-constraints";
-import { getBehaviourPatternContext } from "../intelligence/profile";
+import { getBehaviourPatternContext } from "../core/client-record";
 
 /** Is this client inside a declared sick window? Asked of the state owner, not of the text. */
 const isSick = (user: any): boolean => readHealthState(user).isSick;
