@@ -24,6 +24,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
     const msg = JSON.parse(body).messages.at(-1).content as string;
     const bag = { type: "SET_REMINDER", body: "pack my gym bag", when: "tomorrow at 7am" };
     const log586 = /kota from the spaza/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", needsConfirmation: false }] : /ndidle ipapa/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and meat", needsConfirmation: false }]
+      : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
+      : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
       : /some rice from mama/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "some rice", needsConfirmation: true }] : /ndihambe 6200/i.test(msg) ? [{ type: "LOG_STEPS", count: 6200 }] : null;
     const fix = log586 ? log586 : /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : /vitamins/i.test(msg) ? [bag, { type: "SET_REMINDER", body: "take my vitamins", when: "tomorrow at 8am" }] : /nudge me/i.test(msg) ? [bag] : [];
@@ -146,6 +148,10 @@ REAL("\n4g. #586 — A MEAL THE OLD KEYWORDS MISS IS WRITTEN FOR AN ORDINARY CLI
   chk(st === 6200 && ks.includes(NEW), "isiXhosa steps are written by the step tool", `${st} | ${ks.slice(0, 120)}`);
   const kv = await say(K, "Some rice from mama's pot"), held = (await meals()).length, ky = await say(K, "yes"), after = (await meals()).length;
   chk(/reply \*yes\*/i.test(kv) && held === 2 && after === 3 && ky.trim().length > 0, "a vague amount asks first; the client's \"yes\" writes it (the cohort gate is gone)", `${held} → ${after} | ${kv.slice(0, 120)} | ${ky.slice(0, 120)}`);
+  const before = (await meals()).length, rb = await say(K, "Ndisele i-Red Bull"), withRb = await meals();
+  chk(withRb.length === before + 1 && withRb.some(r => /red bull/i.test(r)) && rb.includes(NEW), "a drink read as a meal is written (the writer is handed \"I had …\", #593)", `${before} → ${withRb.length} | ${rb.slice(0, 120)}`);
+  const sm = await say(K, "Ndityile into"), afterSm = (await meals()).length;
+  chk(afterSm === withRb.length && !sm.includes(NEW) && sm.trim().length > 0, "a meal the writer could not write is never answered as logged: the client gets the writer's own question (#593)", `${withRb.length} → ${afterSm} | ${sm.slice(0, 160)}`);
   const kw = await say(K, "Ndizilinganise, 82 not sure"), w82 = (await pool.query("SELECT COUNT(*)::int n FROM weight_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [K])).rows[0].n;
   chk(w82 === 0 && /82kg\*\? Reply \*yes\*/i.test(kw), "a reading that does not say how sure it is asks before writing a weight (#593 attack)", `${w82} rows | ${kw.slice(0, 120)}`);
   await pool.query("UPDATE users SET awaiting_input_type = NULL WHERE phone_number = $1", [K]);

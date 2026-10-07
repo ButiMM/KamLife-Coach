@@ -239,6 +239,7 @@ async function logThroughExecutor(phone: string, message: string, actions: Coach
       sourceMessageId: `${sourceMessageId || deriveSourceId(user.id, message)}#${describeAction(action)}`,
     });
     await logChat(user.id, message, `${describeAction(action)} → ${exec.performed ? "performed" : exec.confirmed ? "confirm" : exec.skipped ? "skip" : exec.error ? "error" : "noop"}`, "ENGINE_ACTION").catch(() => {});
+    if (exec.unwritten && exec.reply && !out.confirm) out.confirm = exec.reply; // the owner's own question: nothing is claimed
     if (exec.confirmed && !out.confirm) {
       setPendingConfirm(user.id, action);
       await db.update(users).set({ awaitingInputType: "engine_confirm" }).where(eq(users.id, user.id)).catch(() => {});
