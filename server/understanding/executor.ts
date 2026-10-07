@@ -24,7 +24,7 @@
 
 import { type CoachAction, type ToolOutcome, refsAreLabels, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported, explicitMealSlot } from "./actions";
 import { neverSilentLine } from "../reply-hygiene";
-import { sastHour } from "../sast";
+import { sastHour, slotFromSastHour, isNightWorker } from "../sast";
 import { turnMutation, turnMutations, turnRecording } from "../handlers/chat-log";
 
 export interface ExecuteContext {
@@ -225,7 +225,8 @@ async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx:
     return true; // snack, brunch, night meal — plausible at any hour
   };
   const clockFits = !!action.meal && slotFitsClock(String(action.meal));
-  const slot = explicitSlot || (clockFits ? action.meal : undefined);
+  // No slot named and no past day: the clock's slot, the same rule a typed meal gets (#597 review: kota and KFC had none).
+  const slot = explicitSlot || (clockFits ? action.meal : undefined) || (action.retro ? undefined : slotFromSastHour(new Date(), { nightWorker: isNightWorker(ctx.user) }));
   if (action.meal && !clockFits && !explicitSlot) {
     console.warn(`[ENGINE_ACTION] dropped impossible slot "${action.meal}" at ${hourSAST}h SAST — letting the clock decide`);
   }

@@ -77,6 +77,10 @@ export function assessNutritionStandards(input: NutritionDayInput): string | nul
   // the "two energy drinks and no food" rule — the founder's exact case, the reason this file
   // exists — could never fire for two of the SAME drink. How many you had is the whole question.
   const countRaw = (re: RegExp) => raw.filter(f => has(f, re)).length;
+  // CROSSING MEANS THE LOG JUST MADE IS THE KIND COUNTED (#597 review): at count === 3 every later
+  // meal repeated "A few takeaways in the log today", pap and meat included.
+  const last = raw[raw.length - 1] || "";
+  const now = (re: RegExp) => has(last, re);
   const energy = countRaw(ENERGY_DRINK_RE);
   const coffee = countRaw(COFFEE_RE);
   const caffeine = energy + coffee;
@@ -89,40 +93,40 @@ export function assessNutritionStandards(input: NutritionDayInput): string | nul
   const isCut = getGoalProfile(input.goalType).energyStance === "deficit";
 
   // 1. Energy drinks INSTEAD of food — the founder's exact case. Fuel first, kindly.
-  if (energy === 2 && realMeals === 0) {
+  if (energy === 2 && realMeals === 0 && now(ENERGY_DRINK_RE)) {
     return "_That's caffeine, not fuel — and on an empty stomach it hits your energy harder later. Your body's asking for a real meal, not a boost. Grab some protein first, then swap the next one for water. 💧_";
   }
   // 2. Caffeine over the daily line. EFSA/WHO: ~400mg/day for adults (~4 coffees or ~3 energy
   //    drinks). Above it, sleep, heart rate and anxiety pay for it — flag it plainly, no shame.
-  if (caffeine === 3 && energy >= 2) {
+  if (caffeine === 3 && energy >= 2 && (now(ENERGY_DRINK_RE) || now(COFFEE_RE))) {
     return "_That's about 3 caffeine hits today — right around the healthy daily limit (roughly 400mg). More than this and your sleep and heart rate feel it. Water or rooibos from here, and you're sorted. 💧_";
   }
   // 3. Alcohol on a fat-loss goal — it doesn't ruin a day, but it pauses fat-burning. Honest, warm.
-  if (alcohol === 1 && isCut) {
+  if (alcohol === 1 && isCut && now(ALCOHOL_RE)) {
     return "_No judgment on the drink — just so you know, while there's alcohol in the system your body pauses fat-burning to deal with it first. Have water alongside and you're back on track tomorrow._";
   }
-  if (alcohol === 3) {
+  if (alcohol === 3 && now(ALCOHOL_RE)) {
     return "_A few drinks in — line each one with a glass of water and eat something proper. Future-you will thank you in the morning. 💧_";
   }
   // 4. Added sugar from drinks. WHO: free sugars ideally under ~25g/day — one regular soft drink is
   //    already there. Two is worth a gentle nudge to the zero version (same taste, none of the sugar).
-  if (sugary === 2) {
+  if (sugary === 2 && now(SUGARY_FULL_RE)) {
     return "_Two sugary drinks today — that's most of a day's sugar in liquid alone, and it doesn't fill you up. The zero/sugar-free version tastes the same with none of it. Small swap, big win._";
   }
   // 5. Fried / takeaway repeating. No shame — but three in a day isn't a plate, it's a pattern.
-  if (fried === 3) {
+  if (fried === 3 && now(FRIED_TAKEAWAY_RE)) {
     return "_A few takeaways in the log today — it's counted, no drama. Next plate: protein, veg, a carb. That's enough._";
   }
-  if (fried === 2 && isCut) {
+  if (fried === 2 && isCut && now(FRIED_TAKEAWAY_RE)) {
     return "_Second takeaway today — easily done, no drama. For your goal, make the next meal a simple home plate (grilled protein + veg) and the day balances out nicely._";
   }
   // 6. Processed meat repeating. WHO/IARC flags daily processed meat — keep it gentle and cultural.
-  if (procMeat === 3) {
+  if (procMeat === 3 && now(PROCESSED_MEAT_RE)) {
     return "_Lots of processed meat today (polony, viennas, that kind) — fine now and then, but they're high in salt and preservatives. Fresh chicken, eggs, fish or beans give you more protein for less of the bad stuff._";
   }
   // 7. Sweets / chocolate / crisps stacking up. WHO free sugars — one treat is fine, a handful
   //    across the day is where it adds up. Founder: "two instead of six, one chocolate now and then."
-  if (sweets === 3) {
+  if (sweets === 3 && now(SWEETS_RE)) {
     return "_A few sweet treats today — and honestly, one now and then is completely fine, that's balance. It's when they stack up that the sugar quietly adds up. Enjoy the one, skip the next, and you're golden._";
   }
   return null;
