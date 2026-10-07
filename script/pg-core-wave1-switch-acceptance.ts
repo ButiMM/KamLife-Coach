@@ -28,6 +28,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
     const log586 = /kota from the spaza/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", needsConfirmation: false }] : /ndidle ipapa/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and meat", needsConfirmation: false }]
       : /recalculate everything|remove my last meal/i.test(msg) ? [{ type: "REMOVE_LAST_MEAL" }]
       : msg === LIST ? [{ type: "LOG_MEAL", foodText: "pap and wors", retro: DOW(2), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "eggs and toast", retro: DOW(1), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "chicken and rice", retro: DOW(0), needsConfirmation: false }]
+      : /^two meals, one card$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "rice and chicken", meal: "lunch", needsConfirmation: false }, { type: "LOG_MEAL", foodText: "samp and beans", meal: "dinner", needsConfirmation: false }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -170,6 +171,9 @@ REAL("\n4g. #586 — A MEAL THE OLD KEYWORDS MISS IS WRITTEN FOR AN ORDINARY CLI
   await pool.query("DELETE FROM meal_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [K]);
   const li = await say(K, LIST), days = (await pool.query("SELECT ((now() AT TIME ZONE 'Africa/Johannesburg')::date - (logged_at AT TIME ZONE 'Africa/Johannesburg')::date) back FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [K])).rows.map(r => Number(r.back));
   chk(JSON.stringify(days) === "[2,1,0]" && li.includes(NEW), "a three-day list lands on its three days, today's own weekday name included, in one reply (founder, 7 Oct)", `${JSON.stringify(days)} | ${li.slice(0, 100)}`);
+  process.env.APP_URL = "https://kamlife.example"; (await import("../server/card-policy"))._resetDumpWindow();
+  const two = await say(K, "two meals, one card"); delete process.env.APP_URL;
+  chk((two.match(/\[MEDIA:https:\/\/kamlife\.example\/card\//g) || []).length === 1, "two meals in one message get one card, drawn after both are written (founder, 7 Oct: people send lists)", two.slice(0, 200));
   const kw = await say(K, "Ndizilinganise, 82 not sure"), w82 = (await pool.query("SELECT COUNT(*)::int n FROM weight_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [K])).rows[0].n;
   chk(w82 === 0 && /82kg\*\? Reply \*yes\*/i.test(kw), "a reading that does not say how sure it is asks before writing a weight (#593 attack)", `${w82} rows | ${kw.slice(0, 120)}`);
   await pool.query("UPDATE users SET awaiting_input_type = NULL WHERE phone_number = $1", [K]);

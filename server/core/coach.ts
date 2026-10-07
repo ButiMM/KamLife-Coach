@@ -273,6 +273,16 @@ async function logThroughExecutor(phone: string, message: string, actions: Coach
       if (!out.reply) out.reply = exec.reply.replace(card, "").trim();
     }
   }
+  // SEVERAL MEALS IN ONE MESSAGE (7 Oct, founder: people send lists): the card drawn after the first meal held only that
+  // meal. Once every meal is written, it is drawn again from the day's real totals (the last meal's day for a list).
+  const meals = actions.filter((a): a is Extract<CoachAction, { type: "LOG_MEAL" }> => a.type === "LOG_MEAL");
+  if (out.card && meals.length > 1) {
+    const [{ forgetCard }, { macroCardMarker }, { parseMealDate }] = await Promise.all([import("../card-policy"), import("../macro-card-attach"), import("../utils")]);
+    const last = meals[meals.length - 1];
+    forgetCard(user.id);
+    const day = last.retro ? parseMealDate(last.retro) || undefined : undefined;
+    out.card = await macroCardMarker({ user, mealName: meals.map(m => m.foodText).join(" + ").slice(0, 40), mealProtein: 0, forDate: day }).catch(() => out.card) || out.card;
+  }
   return out;
 }
 
