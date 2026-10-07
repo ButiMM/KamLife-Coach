@@ -73,7 +73,9 @@ export async function logChat(userId: string, messageIn: string, messageOut: str
 
 export async function logMediaFailure(userId: string, stage: string, rawError?: unknown, latencyMs?: number): Promise<void> {
   const code = classifyMediaFailure(stage, rawError);
-  const payload = latencyMs !== undefined ? `${code} latency=${latencyMs}ms` : code;
+  // #596: the error itself, so a failure says what happened (a code alone hid every live photo failure).
+  const said = String((rawError as Error)?.message ?? rawError ?? "").replace(/\s+/g, " ").slice(0, 300);
+  const payload = `${latencyMs !== undefined ? `${code} latency=${latencyMs}ms` : code}${said ? ` err=${said}` : ""}`;
   try { await logChat(userId, `[MEDIA_FAIL:${stage}]`, payload, "MEDIA_FAILURE"); }
   catch (e) { console.warn("[media-failure-log]", e); }
 }

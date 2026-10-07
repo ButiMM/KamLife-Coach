@@ -164,6 +164,7 @@ export async function handleMediaMessage(ctx: {
 
   // ---- IMAGE (food photo, steps screenshot, progress photo) ----
   if (ctype.startsWith("image/")) {
+    let photoStage = "download"; // #596: which step failed is stored with the failure, not guessed
     try {
       const twilioSid = process.env.TWILIO_ACCOUNT_SID || "";
       const twilioToken = process.env.TWILIO_AUTH_TOKEN || "";
@@ -197,6 +198,7 @@ export async function handleMediaMessage(ctx: {
       const imgDownloadMs = Date.now() - imgDownloadStart;
       console.log(`[MEDIA][${mediaTrace}] image_download_ok bytes=${buffer.byteLength} ms=${imgDownloadMs}`);
       // DOWNSCALE ONCE, HERE (2026-07-28, CFO review): vision charges per tile, so a 4000px phone photo costs several times a 1024px one and reads a plate no better. Doing it at the download means every reader below gets the cheap image for free. Fail-open.
+      photoStage = "classify";
       const shrunk = await downscaleForVision(Buffer.from(buffer).toString("base64"), imageResponse.headers.get("content-type") || "image/jpeg");
       if (shrunk.resized) console.log(`[MEDIA][${mediaTrace}] image_downscaled ${shrunk.fromEdge}px -> ${shrunk.toEdge}px bytes=${Buffer.byteLength(shrunk.b64, "base64")}`);
       const base64 = shrunk.b64;
@@ -777,8 +779,10 @@ export async function handleMediaMessage(ctx: {
       }
       console.log(`[VISION][${mediaTrace}] food model=${foodVisionDecision.model} tier=${user.subscriptionStatus}`);
       const foodVisionStart = Date.now();
-      const visionResponse = await withTimeout("food_vision", 22000, () => openai.chat.completions.create({
-        model: foodVisionDecision.model,
+      photoStage = "vision";
+      // #596: if the paid vision model is refused, the one production already answers text with reads it.
+      const foodVision = (model: string) => withTimeout("food_vision", 22000, () => openai.chat.completions.create({
+        model,
         max_tokens: foodVisionDecision.maxTokens,
         messages: [
           {
@@ -797,6 +801,11 @@ export async function handleMediaMessage(ctx: {
           },
         ],
       }));
+      const visionResponse = await foodVision(foodVisionDecision.model).catch(async (e) => {
+        if (foodVisionDecision.model === "gpt-4o-mini" || /timeout/i.test(String((e as Error)?.message))) throw e;
+        console.error(`[MEDIA][${mediaTrace}] food_vision ${foodVisionDecision.model} refused, retrying gpt-4o-mini:`, (e as Error)?.message);
+        return foodVision("gpt-4o-mini");
+      });
       const foodVisionTokens = visionResponse.usage?.completion_tokens || 0;
       const foodVisionMs = Date.now() - foodVisionStart;
       console.log(`[COST][${mediaTrace}] food_vision ~$${estimateVisionCostUSD(foodVisionDecision, foodVisionTokens).toFixed(5)} ms=${foodVisionMs} (${foodVisionDecision.reason})`);
@@ -1117,6 +1126,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         // one, else null — a 19:49 batch-send says nothing about when the plate was eaten (Cut 2).
         const photoLabel = explicitMealSlot(message || "");
         // Structured items from the vision reply — names in "my meals", scalable corrections.
+        photoStage = "commit";
         photoCommit = await commitFoodLog({   // items own the total; vision TOTAL is a cross-check (C11)
           userId: user.id, phone, rawMessage: extraImageUrls.length > 0 ? `[Album photo 1] ${photoDesc}` : photoDesc, source: "photo",
           ...reconcileVisionMeal(visionDisplay, primaryPhotoKcal, primaryPhotoProt), carbsInt: 0, fatInt: 0,
@@ -1167,10 +1177,14 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       return plain(`${photoReceipt}${guard}`);
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;
-      console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);
-      await logMediaFailure(user.id, "vision", err, photoFailMs);
+      console.error(`[MEDIA][${mediaTrace}] photo_error stage=${photoStage} ms=${photoFailMs}:`, err, (err as Error)?.stack);
+      await logMediaFailure(user.id, `photo_${photoStage}`, err, photoFailMs);
       // Only steer to "what you ate" if the caption was about food — a gym/step photo must not.
       const hadFoodContext = !!(message && message.trim() && scanForSAFoods(message).length > 0);
+      // #596: nothing written yet and the caption names the food ("Black coffee"): log the caption, as the
+      // unreadable-photo path already does, rather than "I cannot read that photo".
+      // The photo says they had it, so the writer gets the report it logs ("I had Black coffee").
+      if (hadFoodContext && photoStage !== "commit") return handleMessage(phone, /^i (?:had|ate|drank)\b/i.test(message.trim()) ? message : `I had ${message.trim()}`, undefined, undefined, undefined, mediaSourceId);
       return hadFoodContext
         ? "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown."
         : "Eish, I couldn't process that image right now. If it's a meal, type what you ate (e.g. *chicken and rice*). If it's a gym machine, tell me which one — or reply *workout* for today's session. If it's your steps, send a clear screenshot of the step count.";

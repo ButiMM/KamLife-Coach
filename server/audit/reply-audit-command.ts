@@ -180,6 +180,13 @@ export async function loadTruthTurns(days: number, now = Date.now()): Promise<Tr
   return (r.rows as any[]).map(x => ({ id: x.id, at: new Date(x.at), userId: x.u, phone3: x.p3 || "???", input: x.i, reply: String(x.b), source: x.s }));
 }
 
+/** Media failures grouped by step and error, newest error text kept: "3× photo_vision: The model `gpt-4o` does not exist…". */
+export function mediaFailures(rows: Array<{ stage: string; detail: string }>): string {
+  const by = new Map<string, number>();
+  for (const r of rows) { const k = `${r.stage.replace(/^\[MEDIA_FAIL:|\]$/g, "")}: ${(r.detail.split(" err=")[1] || r.detail).slice(0, 140)}`; by.set(k, (by.get(k) ?? 0) + 1); }
+  return by.size ? `📸 *Media failures, last 24h:* ${rows.length}\n${[...by].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, n]) => `• ${n}× ${k}`).join("\n")}` : "";
+}
+
 /** The 07:00 send: today's truth plus who went quiet after a reply, to the founder's ops number. */
 export async function sendTesterTruth(now = Date.now()): Promise<boolean> {
   const turns = await loadTruthTurns(1, now);
@@ -191,6 +198,10 @@ export async function sendTesterTruth(now = Date.now()): Promise<boolean> {
     signals.map(s => ({ userId: String(s.u), at: new Date(s.at), kind: String(s.kind) })), isMemoryGrievance, now);
   const { adminEvents } = await import("../../shared/schema");
   await db.insert(adminEvents).values({ action: "tester_truth", meta: { turns: turns.length }, reason: "turn triage" }).catch(() => {}); // a read of client turns is audited
-  const text = `${truthDigest(testerTruth(turns, new Date(now - 86_400_000), scored))}\n\n${await (await import("./engagement-command")).engagementCommand()}`;
+  // #596: what broke on photos and voice notes, with the stored error, so a live failure is seen the next morning.
+  const media = (await db.execute((await import("drizzle-orm")).sql`SELECT message_in s, message_out o FROM chat_history
+      WHERE intent = 'MEDIA_FAILURE' AND created_at >= ${new Date(now - 86_400_000)} ORDER BY created_at DESC LIMIT 50`)).rows as any[];
+  const failures = mediaFailures(media.map(m => ({ stage: String(m.s), detail: String(m.o) })));
+  const text = `${truthDigest(testerTruth(turns, new Date(now - 86_400_000), scored))}${failures ? `\n\n${failures}` : ""}\n\n${await (await import("./engagement-command")).engagementCommand()}`;
   return (await import("../scheduler/jobs/balance-check")).alertOps(text);
 }

@@ -6266,6 +6266,13 @@ test("#569: the intent classifier is started only after the age gate and the POP
   assert.ok(src.indexOf("classifyIntent(message, user.id)") > src.indexOf("const startIntent ="), "and it is startIntent's body, not an eager start");
   assert.ok(!readFileSync("server/gpt.ts", "utf-8").includes("YOUTH CLIENT"), "no youth prompt: under-18s are never coached");
 });
+test("#596: the 07:00 report groups media failures by step and real error", async () => {
+  const { mediaFailures } = await import("../server/audit/reply-audit-command");
+  const out = mediaFailures([{ stage: "[MEDIA_FAIL:photo_vision]", detail: "PHOTO_VISION_FAIL latency=900ms err=model gpt-4o not found" }, { stage: "[MEDIA_FAIL:photo_vision]", detail: "PHOTO_VISION_FAIL err=model gpt-4o not found" }, { stage: "[MEDIA_FAIL:image_download]", detail: "IMAGE_DOWNLOAD_FAIL latency=3ms err=403" }]);
+  assert.match(out, /Media failures, last 24h:\* 3/);
+  assert.match(out, /2× photo_vision: model gpt-4o not found/);
+  assert.equal(mediaFailures([]), "");
+});
 test("D7: live turns are scored from what the client did next, with no model call", async () => {
   const { scoreLiveTurns, liveDigest } = await import("../server/friction");
   const { isMemoryGrievance } = await import("../server/understanding/actions");
