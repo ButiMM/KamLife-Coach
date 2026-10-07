@@ -744,6 +744,7 @@ export async function inTurn<T>(inputType: string, inputText: string, fn: () => 
 /** This turn's interaction id (the transport's rootId when it passed one), or null outside a turn. */
 export function turnRootId(): string | null { return turnStore.getStore()?.rootId ?? null; }
 export function turnUser(userId: string): void { const t = turnStore.getStore(); if (t) t.userId = userId; }
+export const turnUserId = (): string | null => turnStore.getStore()?.userId ?? null;
 /** Who this turn is for, once the safety floor has stood down; else null (B7: held reminders ride only on such a reply). */
 export function turnFoldsRemindersFor(): string | null { const t = turnStore.getStore(); return t?.evidence?.foldReminders && t.userId ? t.userId : null; }
 /**

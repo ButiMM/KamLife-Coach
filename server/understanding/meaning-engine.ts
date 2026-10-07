@@ -21,7 +21,6 @@
 
 import type OpenAI from "openai";
 import { assertAiOnline, isAiOfflineError } from "../ai-offline";
-import { recordGptCost } from "../gpt";
 import { BRAIN_SYSTEM } from "../brain/coach-brain";
 import { ONE_VOICE } from "../coach-prompt";
 import { type UnderstandingState } from "./state";
@@ -277,13 +276,6 @@ Rules: CONTINUE means do not invent a change merely to create novelty. INVESTIGA
       messages,
       ...(input.emitActions ? { tools: COACH_ACTION_TOOLS as any, tool_choice: "auto" as const } : {}),
     });
-    recordGptCost({
-      userId: user?.id ?? null,
-      model,
-      feature: "meaning_engine",
-      promptTokens: resp.usage?.prompt_tokens ?? 0,
-      completionTokens: resp.usage?.completion_tokens ?? 0,
-    });
 
     const msg = resp.choices[0]?.message;
     let actions: CoachAction[] = [];
@@ -333,10 +325,6 @@ Rules: CONTINUE means do not invent a change merely to create novelty. INVESTIGA
               { role: "system", content: `Your draft broke a hard rule — ${verdict.violation} Rewrite the reply now without the violation. Short, Coach K voice, no apology tour, no new exercises.` },
             ],
           });
-          recordGptCost({
-            userId: user?.id ?? null, model, feature: "meaning_engine_rewrite",
-            promptTokens: fix.usage?.prompt_tokens ?? 0, completionTokens: fix.usage?.completion_tokens ?? 0,
-          });
           const rewritten = (fix.choices[0]?.message?.content || "").trim();
           if (rewritten && verifyBrainReply(rewritten, { goalType: user?.goalType, clientMessage: message }).ok) {
             finalReply = rewritten;
@@ -381,10 +369,6 @@ export async function writeReplyAfterTools(input: {
         ...toolCalls.map((t, i) => ({ role: "tool" as const, tool_call_id: t.id, content: JSON.stringify(results[i] ?? {}) })),
         { role: "system" as const, content: "The tools have run and their results are above. Now write your reply to the client — ONE or two sentences, their words, their numbers exactly, no receipt, no list, no menu. Do not restate the data back at them." },
       ] as any,
-    });
-    recordGptCost({
-      userId: user?.id ?? null, model, feature: "meaning_engine_after_tools",
-      promptTokens: resp.usage?.prompt_tokens ?? 0, completionTokens: resp.usage?.completion_tokens ?? 0,
     });
     return (resp.choices[0]?.message?.content || "").trim();
   } catch (e) {
