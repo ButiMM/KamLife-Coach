@@ -747,6 +747,8 @@ export function turnFoldsRemindersFor(): string | null { const t = turnStore.get
  * reader. It is the same list the write-integrity boundary already trusts.
  */
 export function turnMutations(): string[] { return turnStore.getStore()?.mutations ?? []; }
+/** Whether a turn is recording (outside one, turnMutations() is always empty and proves nothing). */
+export const turnRecording = (): boolean => !!turnStore.getStore();
 /**
  * ONE DURABLE WRITE PER DOMAIN PER TURN (2026-08-25).
  *

@@ -336,7 +336,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // swallow a bare "yes" (2026-07-23 live: the confirm had no landing pad → "yes" looped). A
   // non-yes/no reply returns null and flows on to normal understanding.
   if (user.awaitingInputType === "engine_confirm") {
-    const confirmReply = await resumeEngineConfirm({ phone, message, m, user, sourceMessageId, actionsLive: isCoach || isBetaTester });
+    const confirmReply = await resumeEngineConfirm({ phone, message, m, user, sourceMessageId });
     // THIS BYPASSED THE RESPONSE BOUNDARY (found 2026-08-21). It hand-rolled the coach suffix
     // instead of calling tag(), so `modelAuthored` was never set on the turn — and
     // reconcileTurnReply skips the whole directive boundary when that flag is absent. An engine
@@ -1055,8 +1055,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // missing a fact the client stated in this very message (2026-08-22).
   const core = await import("./core/coach"); let w1Read = false; // the new coach (wave 1 for everyone; its off-path deleted 6 Oct)
   if (!multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const w1 = await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), evidence: turnEvidence }); w1Read = true; // #451: read once
-    const engineReply = w1?.reply ?? (engineLive() ? await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester }) : null);
+    const w1 = await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), sourceMessageId, evidence: turnEvidence }); w1Read = true; // #451: read once
+    const engineReply = w1?.reply ?? (engineLive() ? await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId }) : null);
     if (engineReply !== null) return tag(engineReply, w1?.src ?? "🧠 new engine");
   }
 
@@ -1079,7 +1079,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const scope = await classifyDomain(openai, message, { ongoing: recentlyActive(user) }); // #321: fails closed
   if (scope.redirectMessage) return tag(await declineOutOfScope(user.id, message, scope.redirectMessage, turnEvidence), "scope");
   // THE LAST DOOR (wave-1 deletion, 6 Oct): gpt-block is gone; the new coach answers what nothing else did.
-  return tag(await core.answerFinal(phone, message, user, w1Read), "new coach");
+  return tag(await core.answerFinal(phone, message, user, w1Read, sourceMessageId), "new coach");
 
   } catch (err: any) {
     console.error("[handleMessage FATAL]", JSON.stringify({

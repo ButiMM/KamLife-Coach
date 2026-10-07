@@ -25,7 +25,7 @@
 import { type CoachAction, type ToolOutcome, refsAreLabels, actionFingerprint, shouldAutoExecute, writesState, describeAction, actionNumberIsClientReported, explicitMealSlot } from "./actions";
 import { neverSilentLine } from "../reply-hygiene";
 import { sastHour } from "../sast";
-import { turnMutation } from "../handlers/chat-log";
+import { turnMutation, turnMutations, turnRecording } from "../handlers/chat-log";
 
 export interface ExecuteContext {
   user: any;
@@ -49,6 +49,7 @@ export interface ExecuteContext {
 
 export interface ExecuteResult {
   performed: boolean;   // did we actually write state?
+  unwritten?: boolean;  // the owner answered but wrote nothing (#593): `reply` is its own words, never a "logged"
   confirmed: boolean;   // did we ask for confirmation instead of writing?
   skipped: boolean;     // idempotency: this exact action already ran (a retry)
   reply: string;        // what Coach K relays to the client
@@ -109,6 +110,8 @@ function confirmQuestion(action: CoachAction, user: any): string {
   }
 }
 
+class NotWritten extends Error { constructor(readonly ownerReply: string) { super("not written"); } }
+
 export async function executeAction(action: CoachAction, ctx: ExecuteContext): Promise<ExecuteResult> {
   // NUMBER BRAKE — a step count, weight or water volume the client never said is not a log,
   // it is the model filling in a schema from context. Refuse it and let the pipeline run:
@@ -124,7 +127,8 @@ export async function executeAction(action: CoachAction, ctx: ExecuteContext): P
   if (action.type === "JUST_REPLY") return { ...base, reply: "" };
 
   // 1. CONFIDENCE GATE — an uncertain state-write is confirmed, not written.
-  if (!shouldAutoExecute(action, ctx.confidence)) {
+  // An explicit "yes" to the parked question IS the confirmation: asking again looped (#586).
+  if (!ctx.preConfirmed && !shouldAutoExecute(action, ctx.confidence)) {
     return { ...base, confirmed: true, reply: confirmQuestion(action, ctx.user) };
   }
 
@@ -147,6 +151,7 @@ export async function executeAction(action: CoachAction, ctx: ExecuteContext): P
     }
     return { ...base, performed: writesState(action.type), reply: reply || "" };
   } catch (e) {
+    if (e instanceof NotWritten) return { ...base, unwritten: true, reply: e.ownerReply };
     console.error(`[EXECUTOR] ${action.type} failed:`, (e as Error)?.message || e);
     return { ...base, reply: "Something went wrong on my side — send that again and I'll get it.", error: String((e as Error)?.message || e) };
   }
@@ -220,7 +225,8 @@ async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx:
   if (action.meal && !clockFits && !explicitSlot) {
     console.warn(`[ENGINE_ACTION] dropped impossible slot "${action.meal}" at ${hourSAST}h SAST — letting the clock decide`);
   }
-  const text = `${action.foodText}${slot ? ` for ${slot}` : ""}${action.retro ? ` ${action.retro}` : ""}`;
+  // "I had …" is the report the writer was built for: a bare "Red Bull" was asked about and never written (#593).
+  const text = `I had ${action.foodText}${slot ? ` for ${slot}` : ""}${action.retro ? ` ${action.retro}` : ""}`;
   // forceLog: this is an EXPLICIT log action — never let an advisory branch (the restaurant
   // ordering guide) answer it. The rewritten text carries no past-tense marker, so
   // "breakfast from McDonald's…" returned a menu pick instead of logging (2026-07-27 live).
@@ -229,8 +235,14 @@ async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx:
   // a [MEDIA:…] marker, so the gate flip silently took the card with it. A client logging a meal
   // got no card at all, which is a regression, not a simplification. The PROSE is still binned;
   // only the picture is kept.
+  const before = turnMutations().length;
   const discarded = await handleFoodContext({ phone: ctx.phone, message: text, m: text.toLowerCase(), user: ctx.user, handleMessage: async () => "", forceLog: true, sourceMessageId: ctx.sourceMessageId });
   lastCardMarker = (String(discarded || "").match(/\[MEDIA:[^\]]+\]/) || [""])[0];
+  // THE WRITE IS READ OFF THE TURN'S RECORD, NOT ASSUMED (#593): the owner can ask instead of writing.
+  if (turnRecording() && !turnMutations().slice(before).some(x => /^(?:INSERT|UPDATE) meal\b/.test(x))) {
+    lastCardMarker = "";
+    throw new NotWritten(String(discarded || "").replace(/\[[A-Z]+:[^\]]*\]/g, "").trim());
+  }
   const refs: Record<string, string> = { mealName: String(action.foodText || "").slice(0, 60) };
   if (slot) refs.slot = String(slot).slice(0, 20);
   if (action.retro) refs.dayLabel = String(action.retro).slice(0, 20);
