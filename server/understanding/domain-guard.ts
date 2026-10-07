@@ -174,15 +174,20 @@ Reply with ONE word only:
 A complaint, correction, or reference to Coach K's OWN previous reply ("no, reverse that", "that's wrong", "you misunderstood", "look at the picture again") is ALWAYS part of the coaching conversation → YES.
 Lean YES/PARTIALLY when unsure — this is a coaching client, not a search engine.`;
 
+/** The scope verdicts decided in code (no model): a request for a human, or a known off-domain ask. */
+export async function deterministicScope(message: string, ongoing?: boolean): Promise<string | null> {
+  // A REQUEST, not a report that mentions a manager ("my manager is stressing me out" is coached, not handed off).
+  if ((await import("../safety-detection")).detectEscalation(message).reason === "human_requested" && (await import("../utils")).isAskingNotReporting(message)) return HUMAN_HANDOFF;
+  return offDomainRedirect(message, ongoing);
+}
+/** The model's "out of scope" reply (#592: the new coach's reading now carries the verdict). */
+export const scopeRedirect = (ongoing?: boolean) => ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT;
+
 export async function classifyDomain(
   openai: OpenAI, message: string, opts?: { ongoing?: boolean },
 ): Promise<DomainVerdict> {
-  // A REQUEST, not a report that mentions a manager ("my manager is stressing me out" is coached, not handed off).
-  if ((await import("../safety-detection")).detectEscalation(message).reason === "human_requested" && (await import("../utils")).isAskingNotReporting(message)) {
-    return { classification: "out-of-domain", reasoning: "human requested: escalated by chat-log", redirectMessage: HUMAN_HANDOFF };
-  }
-  const ask = offDomainRedirect(message, opts?.ongoing);
-  if (ask) return { classification: "out-of-domain", reasoning: "deterministic off-domain ask", redirectMessage: ask };
+  const ask = await deterministicScope(message, opts?.ongoing);
+  if (ask) return { classification: "out-of-domain", reasoning: ask === HUMAN_HANDOFF ? "human requested: escalated by chat-log" : "deterministic off-domain ask", redirectMessage: ask };
   if (killswitchOff() || isObviouslyInDomain(message)) {
     return { classification: "in-domain", reasoning: "fast-path / killswitch" };
   }

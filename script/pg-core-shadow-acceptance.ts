@@ -48,7 +48,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
          { type: "DELETE_ACCOUNT" }, { type: "LOG_MEAL", foodText: "", needsConfirmation: false }]
       : /protein/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 70 }] : [];
     content = /garbled/i.test(msg) ? "not json at all" // #421: the reading fails
-      : JSON.stringify({ family: /comrades|pap and chicken/i.test(msg) ? "report" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts, actions });
+      : JSON.stringify({ scope: /homework/i.test(msg) ? "out" : "in", family: /comrades|pap and chicken/i.test(msg) ? "report" : "question", wants: "advice", one_question: null, uncertainty: 0.2, facts, actions });
   }
   else if (body.includes("You are Coach K, a warm, direct South African")) { composerRequests.push(body); content = `Great question. ${SENTINEL} One move today.`; }
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;

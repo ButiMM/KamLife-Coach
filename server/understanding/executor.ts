@@ -211,7 +211,11 @@ async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx:
   // to the clock on text that no longer carried it (Work Order A, live: "lunch" at 9h SAST →
   // dropped → label=breakfast). The client's raw message is the one place "did they actually say
   // it" can be answered from, so check THAT before ever asking the clock.
-  const explicitSlot = explicitMealSlot(ctx.clientMessage || "");
+  // A message naming two meals ("for lunch rice… and for supper samp") gives each action its own slot: the
+  // whole-message rule would file both under the first (#592 trace). The action's slot stands when they said it.
+  const said = (ctx.clientMessage || "").toLowerCase();
+  const ownSlot = action.meal && (action.meal === "dinner" ? ["dinner", "supper"] : [String(action.meal).toLowerCase()]).some(w => said.includes(w));
+  const explicitSlot = ownSlot ? action.meal : explicitMealSlot(ctx.clientMessage || "");
   const hourSAST = sastHour();
   const slotFitsClock = (slot: string): boolean => {
     const s = slot.toLowerCase();

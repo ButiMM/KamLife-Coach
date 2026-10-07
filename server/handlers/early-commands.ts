@@ -481,7 +481,7 @@ export async function handleEarlyCommands(ctx: {
     else if (/\b(halaal|halal)\b/.test(_dietTruth)) _newDietFlag = "diet:halal";
     // The column is the authority on WHAT they are; it does not carry "I stopped eating meat", so
     // that phrasing is still read off the message — and only when the column has not answered.
-    else if (/\b(don.?t|no longer|stopped|gave up)\s+eat(ing)?\b.*\b(meat|chicken|beef|fish|pilchards|animal)\b/i.test(m)) _newDietFlag = "diet:vegetarian";
+    else if (/\b(don.?t|no longer|stopped|gave up)\s+eat(ing)?\s+(?:any\s+)?(meat|animal)/i.test(m)) _newDietFlag = "diet:vegetarian";
     else if (!_dietTruth && /\b(muslim|islam|haram)\b/i.test(m)) _newDietFlag = "diet:halal";
 
     if (_newDietFlag) {
