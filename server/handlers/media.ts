@@ -813,8 +813,7 @@ export async function handleMediaMessage(ctx: {
       recordServiceCost({ userId: user.id, feature: "vision", costUsd: estimateVisionCostUSD(foodVisionDecision, foodVisionTokens) }); // per-member cost + governor counting
 
       // The AI saying it cannot see a SHRUNK photo means the shrink broke it: one retry with the original (7 Oct, live).
-      const saysUnseen = (t: string) => ["can't see", "can’t see", "cannot see", "unable to see", "can't view", "no image", "cannot view"].some(w => t.toLowerCase().includes(w));
-      if (shrunk.resized && saysUnseen(visionResponse.choices[0]?.message?.content || "")) {
+      if (shrunk.resized && ["can't see", "can’t see", "cannot see", "unable to see", "can't view", "no image"].some(w => (visionResponse.choices[0]?.message?.content || "").toLowerCase().includes(w))) {
         console.error(`[MEDIA][${mediaTrace}] food_vision could not see the shrunk photo; retrying with the original`);
         visionResponse = await foodVision(foodVisionDecision.model, { b64: originalB64, ct: originalCt });
       }
