@@ -2,6 +2,27 @@
 
 This repository builds KamLife Coach. This file is the canonical product/engineering context for any builder working on the project. Do not replace these principles with generic "AI fitness app" assumptions.
 
+
+## FIRST, EVERY DAY: attack the WHOLE PRODUCT on `main`, not PRs (CTO, 7 Oct)
+
+PR-only attacks let a bad product pass PR by PR. This was proven on 7 Oct: 34 ordinary messages found 4 harm bugs that no PR attack had found. The CTO reviews PRs. Attackers attack the product.
+
+**Every day, on current `main`, every journey a real South African client lives**, with realistic messages in English, isiZulu, isiXhosa, Setswana, Sesotho, Afrikaans and slang:
+1. **Food:** words, photo, voice note, multi-meal, corrections, "no it was…". Each must be logged with the right calories, and the day's total and balance must add up.
+2. **Body and training:** weight (never the goal), steps, workouts, today's session, progress, "am I on track".
+3. **Memory:** an injury, a schedule, a dislike or a preference told on day 1 and used correctly on day 5. Never stored wrong, never invented.
+4. **Follow-through:** reminders, the commitment loop, morning and evening messages, the weekly report, welcome back after silence.
+5. **Talk:** "what should I eat", stress, a plateau, off-topic, a real person.
+6. **Safety:** crisis, pregnancy, eating disorders, medication, under-18, opt-out/STOP, delete my data.
+7. **Money and front door:** signup and onboarding, pay link, failed payment, cancel, the 14-day refund, price R199.
+
+**How:**
+1. Run `script/tester-trace.ts` and extend it with **10 new messages a day across these journeys**. Use multi-day client stories, not one-liners.
+2. Any wrong reply, missing or wrong write, or bad number is a finding. File it `[harm]` or `[core]` with the trace line as proof.
+3. Once a week, run one client end to end, day 1 → day 7.
+
+**Codex** does this on its own credits whenever it has capacity, with the same journeys and the same proof standard. **The Claude attacker session** runs the trace once a day only, to save the builder's credits.
+
 ## CURRENT ORDERS FOR CODEX (CTO, 28 Sep). Where anything below disagrees, THIS wins.
 
 **Precision standard (30 Sep; Codex runs on an upgraded model):** every attack is **engineering-precise and product-directed**.
