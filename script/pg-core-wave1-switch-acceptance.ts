@@ -143,6 +143,20 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   chk(!sk.includes(NEW) && sk.trim().length > 0, "the \"Skip today\" button is answered by the programme's skip, not the model", sk.slice(0, 160));
   const nx = await say(TESTER, "Tomorrow's session");
   chk(!nx.includes(NEW) && /Warm-up|sets|Week/i.test(nx), "the \"Tomorrow's session\" button shows the programme's next session, not the model's", nx.slice(0, 200));
+  { // The takeaway line belongs to the meal written this turn, whatever the disk order or the time it is filed at (#622).
+    const tu = (await pool.query("SELECT * FROM users WHERE phone_number = $1", [TESTER])).rows[0];
+    const add = (raw: string, hoursAgo: number) => pool.query("INSERT INTO meal_logs (user_id, raw_message, items, kcal_int, protein_int, source, logged_at) VALUES ($1, $2, '[]', 500, 20, 'text', now() - make_interval(mins => $3))", [tu.id, raw, Math.round(hoursAgo * 60)]);
+    const nudge = async () => { await pool.query("CLUSTER meal_logs USING meal_logs_user_date_idx"); // disk order = filed order, as after a vacuum
+      return (await import("../server/nutrition-guardrails")).nutritionGuardrailNudge({ id: tu.id, goalType: "fat_loss" }); };
+    await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [tu.id]);
+    await add("kota from the spaza", 3); await add("bunny chow", 2); await add("2 pieces of KFC", 1); await add("pap and meat for breakfast", 6);
+    const home = await nudge();
+    chk(!/takeaway/i.test(home), "a home plate sent last, filed at breakfast, gets no takeaway line after three takeaways", home);
+    await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [tu.id]);
+    await add("2 pieces of KFC", 3); await add("bunny chow", 2); await add("pap and meat", 0.2); await add("earlier today I had a burger", 1);
+    const late = await nudge();
+    chk(/takeaway/i.test(late), "a third takeaway sent late (\"earlier today I had a burger\") still gets the takeaway line (#622 review)", late || "(none)");
+  }
   const ot = await say(TESTER, "Am I on track?"); await say(TESTER, "change my goal to muscle gain"); const gy = await say(TESTER, "yes"), g = (await pool.query("SELECT goal_type FROM users WHERE phone_number = $1", [TESTER])).rows[0].goal_type;
   chk(ot.includes(NEW) && g === "muscle_gain" && gy.includes(NEW), "A12: \"am I on track?\" and a confirmed goal change are the new coach's words (the goal still written)", `${g} | ${ot.slice(0, 120)} | ${gy.slice(0, 120)}`);
   process.env.CORE_WAVE2 = "off";
