@@ -493,7 +493,7 @@ export const FEELING_ACK = "Heard you on how you're feeling. Showing up still co
  * that can be false is worse than no internal truth, because everything downstream believes it.
  */
 const DURABLE_WRITE: Array<[string, RegExp]> = [
-  ["food", /INSERT meal/i],
+  ["food", /INSERT meal|CORRECT removed/i], // a correction that wrote is the food they stated (#600)
   // Steps are one row per day that a client tops up ("5k so far" at noon, "9k" at night), so the
   // RAISE is as durable as the first report and owes the same next move (2026-08-27). Same anchor
   // discipline as water below: the verb is what keeps "TURN committed steps" out of this.

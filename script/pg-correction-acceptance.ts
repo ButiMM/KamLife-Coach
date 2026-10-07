@@ -124,6 +124,14 @@ const lunchAfter = snap((await rows()).find((r: any) => r.meal_label === "lunch"
 chk(lunchAfter === lunchBefore, "lunch is untouched when no breakfast was logged");
 chk(/couldn't find a breakfast/i.test(rMissing) && !/fixed/i.test(rMissing), `the reply says no breakfast was found: ${JSON.stringify(rMissing.slice(0, 160))}`);
 
+// #600: with no model, "Hayi, lunch was rice not pap" appended a second lunch of rice and kept the pap.
+REAL("\n=== A MEAL NAMED IN PLACE OF \"IT\" IS CORRECTED, NOT ADDED ===");
+await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [u.id]);
+await say("I had pap and chicken for lunch");
+const rHayi = await say("Hayi, lunch was rice not pap"), hayi = await rows();
+chk(hayi.length === 1 && !names(hayi[0]).some((n: string) => /pap/i.test(n)) && names(hayi[0]).some((n: string) => /rice/i.test(n)),
+  `one lunch, rice in place of pap (#600): ${JSON.stringify(hayi.map((r: any) => names(r)))} | ${JSON.stringify(rHayi.slice(0, 120))}`);
+
 REAL(`\npg-correction-acceptance: ${failed === 0 ? "GREEN — all checks passed" : `RED — ${failed} check(s) failed`}`);
 await pool.end();
 process.exit(failed === 0 ? 0 : 1);
