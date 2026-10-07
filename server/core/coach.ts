@@ -597,11 +597,11 @@ export function coreFront(): boolean {
 }
 
 const frontReads = new Map<string, { message: string; u: Understanding | null }>();
-const EXACT_COMMANDS = new Set(["menu", "progress", "my progress", "targets", "my targets", "cancel", "stop", "start", "help", "workout",
-  "today's workout", "todays workout", "my workout", "my meals", "meals", "diary", "status", "pause", "resume", "unsubscribe", "shopping list"]);
+const EXACT_COMMANDS = new Set(["menu", "progress", "targets", "cancel", "stop", "start", "help", "workout", "today's workout",
+  "todays workout", "meals", "diary", "status", "pause", "resume", "unsubscribe", "shopping list"]);
 /** The whole message is a fixed command or a button/number reply: the old command owns it. */
 export function isExactCommand(m: string): boolean {
-  const t = m.trim().toLowerCase().replace(/[.!?\s]+$/, "");
+  const t = m.trim().toLowerCase().replace(/[.!?\s]+$/, "").replace(/^my /, "");
   return EXACT_COMMANDS.has(t) || (t.length > 0 && t.length <= 2 && Number.isFinite(Number(t)));
 }
 
