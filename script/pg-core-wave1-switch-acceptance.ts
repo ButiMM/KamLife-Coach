@@ -28,6 +28,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
     const log586 = /kota from the spaza/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", needsConfirmation: false }] : /ndidle ipapa/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and meat", needsConfirmation: false }]
       : /recalculate everything|remove my last meal/i.test(msg) ? [{ type: "REMOVE_LAST_MEAL" }]
       : msg === LIST ? [{ type: "LOG_MEAL", foodText: "pap and wors", retro: DOW(2), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "eggs and toast", retro: DOW(1), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "chicken and rice", retro: DOW(0), needsConfirmation: false }]
+      : /^two meals, one card$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "rice and chicken", meal: "lunch", needsConfirmation: false }, { type: "LOG_MEAL", foodText: "samp and beans", meal: "dinner", needsConfirmation: false }]
       : /^Had pap and wors for lunch and did a 30 min home workout$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", needsConfirmation: false }, { type: "LOG_WORKOUT", what: "a 30 min home workout" }]
       : /^what'?s my workout today\??$/i.test(msg) ? [{ type: "SHOW_WORKOUT" }]
       : /^I have diabetes\. Had a kota for lunch$|^I’m diabetic\. Log my kota$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", meal: "lunch", needsConfirmation: false }]
@@ -136,12 +137,19 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   chk(/zone|keep these weights/i.test(f2), "\"2\" answers the numbered \"How did that session feel?\" as Just right (founder's Monday plan, item 4)", f2.slice(0, 200));
   const sw = await say(TESTER, "what's my workout today?");
   chk(/✅|Warm-up/i.test(sw) && !sw.includes(NEW) && !/haven't written/i.test(sw), "\"what's my workout today?\" is the programme's answer (here: today's session is done), not the model's guess (item 4)", sw.slice(0, 200));
+  await pool.query("DELETE FROM workout_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [TESTER]);
+  const dn = await say(TESTER, "Done 💪"), dw = (await pool.query("SELECT COUNT(*)::int n FROM workout_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n;
+  chk(dw === 1 && !dn.includes(NEW), "the \"Done 💪\" button under today's session logs it, by the workout owner", `${dw} | ${dn.slice(0, 160)}`);
+  const sk = await say(TESTER, "Skip today");
+  chk(!sk.includes(NEW) && sk.trim().length > 0, "the \"Skip today\" button is answered by the programme's skip, not the model", sk.slice(0, 160));
+  const nx = await say(TESTER, "Tomorrow's session");
+  chk(!nx.includes(NEW) && /Warm-up|sets|Week/i.test(nx), "the \"Tomorrow's session\" button shows the programme's next session, not the model's", nx.slice(0, 200));
   const db0 = await count(TESTER), dk = await say(TESTER, "I have diabetes. Had a kota for lunch");
   chk(await count(TESTER) === db0 + 1 && dk.includes(NEW), "a condition mentioned with a meal: the meal is written and the new coach answers (#610)", dk.slice(0, 200));
   const d2 = await count(TESTER), dl = await say(TESTER, "I’m diabetic. Log my kota");
   chk(await count(TESTER) === d2 + 1, "\"I’m diabetic. Log my kota\" logs the kota too (#619 review)", dl.slice(0, 200));
-  const dw = await say(TESTER, "I'm diabetic");
-  chk(/lifestyle coach, not a medical service/i.test(dw), "control: the disclosure on its own still gets the non-clinical welcome", dw.slice(0, 200));
+  const dsc = await say(TESTER, "I'm diabetic");
+  chk(/lifestyle coach, not a medical service/i.test(dsc), "control: the disclosure on its own still gets the non-clinical welcome", dsc.slice(0, 200));
   const ot = await say(TESTER, "Am I on track?"); await say(TESTER, "change my goal to muscle gain"); const gy = await say(TESTER, "yes"), g = (await pool.query("SELECT goal_type FROM users WHERE phone_number = $1", [TESTER])).rows[0].goal_type;
   chk(ot.includes(NEW) && g === "muscle_gain" && gy.includes(NEW), "A12: \"am I on track?\" and a confirmed goal change are the new coach's words (the goal still written)", `${g} | ${ot.slice(0, 120)} | ${gy.slice(0, 120)}`);
   process.env.CORE_WAVE2 = "off";
@@ -186,6 +194,12 @@ REAL("\n4g. #586 — A MEAL THE OLD KEYWORDS MISS IS WRITTEN FOR AN ORDINARY CLI
   await pool.query("DELETE FROM meal_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [K]);
   const li = await say(K, LIST), days = (await pool.query("SELECT ((now() AT TIME ZONE 'Africa/Johannesburg')::date - (logged_at AT TIME ZONE 'Africa/Johannesburg')::date) back FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [K])).rows.map(r => Number(r.back));
   chk(JSON.stringify(days) === "[2,1,0]" && li.includes(NEW), "a three-day list lands on its three days, today's own weekday name included, in one reply (founder, 7 Oct)", `${JSON.stringify(days)} | ${li.slice(0, 100)}`);
+  process.env.APP_URL = "https://kamlife.example"; (await import("../server/card-policy"))._resetDumpWindow();
+  const two = await say(K, "two meals, one card"); delete process.env.APP_URL;
+  chk((two.match(/\[MEDIA:https:\/\/kamlife\.example\/card\//g) || []).length === 1, "two meals in one message get one card, drawn after both are written (founder, 7 Oct: people send lists)", two.slice(0, 200));
+  { const { cardMeals } = await import("../server/core/coach"), { sastDayKey } = await import("../server/sast"), mon = new Date(Date.now() - 2 * 864e5), now = new Date();
+    const pick = cardMeals([{ name: "pap", sid: "a" }, { name: "rice", sid: "b" }, { name: "eggs", sid: "c" }], [{ sid: "a", protein: 9, at: mon }, { sid: "b", protein: 30, at: now }, { sid: "c", protein: 12, at: now }], sastDayKey);
+    chk(pick?.name === "rice + eggs" && pick.protein === 30, "a list's card names only the meals on its own day, with the biggest one's protein, never 0 (#616 review)", JSON.stringify(pick)); }
   const kw = await say(K, "Ndizilinganise, 82 not sure"), w82 = (await pool.query("SELECT COUNT(*)::int n FROM weight_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [K])).rows[0].n;
   chk(w82 === 0 && /82kg\*\? Reply \*yes\*/i.test(kw), "a reading that does not say how sure it is asks before writing a weight (#593 attack)", `${w82} rows | ${kw.slice(0, 120)}`);
   await pool.query("UPDATE users SET awaiting_input_type = NULL WHERE phone_number = $1", [K]);
