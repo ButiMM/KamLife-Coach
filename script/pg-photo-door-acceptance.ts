@@ -71,6 +71,13 @@ const s = await photo("");
 chk((await meals()).length === 1 && !/can.t see/i.test(s) && !/stand on a scale/i.test(s), "the AI can't see the shrunk photo: it reads the original, the meal is logged, and no canned move is stapled under the words (7 Oct, live)", `${JSON.stringify(await meals())} | ${s.slice(0, 160)}`);
 serve = jpeg;
 
+await fresh(); vision = "ok"; visionText = "Rice with veg and beef mince — solid plate.\nTOTAL: 520 kcal | 22g protein";
+await photo(""); const again = await photo("");
+chk((await meals()).length === 1 && /already in today's log/i.test(again) && !/NOT logged|same for lunch|name the meal/i.test(again), "the same plate sent again: a plain \"already in today's log\", no admin, one meal (founder, 7 Oct)", `${(await meals()).length} | ${again.slice(0, 160)}`);
+await pool.query("UPDATE meal_logs SET logged_at = logged_at - interval '4 hours' WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [P]);
+await photo("");
+chk((await meals()).length === 2, "the same dish four hours later is eating, and is logged", String((await meals()).length));
+
 await pool.query("DELETE FROM users WHERE phone_number=$1", [P]);
 REAL(`\npg-photo-door-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);
 await pool.end(); process.exit(failed === 0 ? 0 : 1);

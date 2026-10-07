@@ -1,5 +1,5 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
-import { sastDayKey, sastDayKeyBefore } from "../sast";
+import { sastDayKey, sastDayKeyBefore, recentSpans } from "../sast";
 import { neverSilentLine } from "../reply-hygiene";
 import { carriesFeelingClause } from "../unlogged-notice";
 import { enforceCoachGuardrails } from "../coach-guardrails";
@@ -11,7 +11,7 @@ import { guardMalformed, safeFallback, recordGuardResult } from "../malformed-gu
 import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../food-fuzzy";
 import { db } from "../db";
 import { mealLogs, chatHistory, users } from "../../shared/schema";
-import { eq, and, gte, sql, desc, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, gte, lte, or, sql, desc, inArray, isNotNull } from "drizzle-orm";
 import { sastDayStart, sastToday } from "../utils";
 import { turnMutation, turnEvidence } from "./chat-log";
 import { isBareReaction, isDiagnosticQuestion, bareReactionFallback } from "../reaction-guard";
@@ -701,9 +701,11 @@ export function mealsOverlap(a: string, b: string): boolean {
 export async function findDuplicateMealToday(userId: string, desc: string): Promise<{ desc: string; slot: string } | null> {
   if (mealWords(desc).size < 2) return null; // too little signal to judge — log normally
   try {
+    // A RESEND IS RECENT (7 Oct, founder): the same plate within 3 hours is the same meal sent again; the same
+    // dish at dinner after lunch is eating, and is logged. recentSpans covers a meal filed 24h back overnight.
     const rows = await db.select({ rawMessage: mealLogs.rawMessage, mealLabel: mealLogs.mealLabel })
       .from(mealLogs)
-      .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, sastDayStart())))
+      .where(and(eq(mealLogs.userId, userId), or(...recentSpans(3 * 3_600_000).map(([a, b]) => and(gte(mealLogs.loggedAt, a), lte(mealLogs.loggedAt, b))))))
       .limit(20);
     for (const r of rows) {
       if (mealsOverlap(desc, r.rawMessage || "")) {
