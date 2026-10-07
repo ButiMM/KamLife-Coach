@@ -190,6 +190,21 @@ const noHeight = await ask(lost.phone, "my bmi");
 chk(/has not been calculated/i.test(noHeight),
   "no height means no BMI — never one invented off a default", noHeight.slice(0, 160));
 
+// #587 — A WEIGH-IN IS NEVER A GOAL. "I weigh 87kg today" used to match the goal-setter, write
+// target_weight_kg = 87 and answer "you hit 87kg — that's the goal". Paired with its control.
+{ const G = "whatsapp:+27829438587"; await pool.query("DELETE FROM users WHERE phone_number = $1", [G]);
+  await db.insert(schema.users).values({ phoneNumber: G, name: "Scale Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", currentWeight: "88", targetWeightKg: "75", heightCm: 175, calorieTarget: 1800, proteinTarget: 120 } as any);
+  const goal = async () => (await pool.query("SELECT target_weight_kg t FROM users WHERE phone_number = $1", [G])).rows[0].t;
+  const r = await ask(G, "I weigh 87kg today");
+  chk(Number(await goal()) === 75 && !/that's the goal|goal, done/i.test(r), "\"I weigh 87kg today\" keeps the 75kg goal and never says the goal is reached", `${await goal()} | ${r.slice(0, 160)}`);
+  await pool.query("UPDATE users SET target_weight_kg = NULL WHERE phone_number = $1", [G]);
+  const r2 = await ask(G, "I hit 86kg this morning");
+  chk(await goal() === null && !/that's the goal|goal, done/i.test(r2), "with no goal set, a weigh-in leaves it unset", `${await goal()} | ${r2.slice(0, 160)}`);
+  await ask(G, "I want to get to 75kg");
+  chk(Number(await goal()) === 75, "CONTROL: \"I want to get to 75kg\" still sets the goal", String(await goal()));
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [G]); }
+
 await pool.query("DELETE FROM users WHERE id = ANY($1)", [[clear.id, ill.id, lost.id]]);
 REAL(`\npg-weight-authority-acceptance: ${failed === 0 ? "GREEN — all checks passed" : `RED — ${failed} check(s) failed`}`);
 await pool.end();
