@@ -96,6 +96,18 @@ export function registerAdminMetrics(app: Express) {
     }
   });
 
+  // ── TESTER TRUTH (CTO, 7 Oct): the aggregate-only report docs/TESTER-TRUTH.md is built from. No client words. ──
+  app.get("/api/admin/tester-truth", requireAdminKey, async (req, res) => {
+    try {
+      const days = Math.min(30, Math.max(1, Number(req.query.days) || 7));
+      const { loadTruthTurns, testerTruth, truthMarkdown } = await import("../audit/reply-audit-command");
+      res.type("text/markdown").send(truthMarkdown(testerTruth(await loadTruthTurns(days), new Date(Date.now() - 86_400_000)), days));
+    } catch (err) {
+      console.error("[TESTER_TRUTH]", err);
+      res.status(500).json({ message: "Failed to compute tester truth" });
+    }
+  });
+
   // ── EVIDENCE (#506): read-only, for the price/channel decision and the proof gate. Real usage per
   // active client, a sample of the final replies with their source and build, and the approved
   // templates actually sent. Nothing leaves production; every read is audited like a turn read. ──

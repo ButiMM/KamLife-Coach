@@ -6278,6 +6278,29 @@ test("#567: the till charges R199, and an earlier subscriber's R149 token still 
   assert.equal(chargeMatchesPrice(250), false);
   assert.ok(readFileSync("server/routes/payments.ts", "utf-8").includes("!chargeMatchesPrice(amountGross)"), "the ITN check uses it");
 });
+test("tester truth: every delivered reply is scanned and attributed to its handler; the worst five are quoted, masked", async () => {
+  const { testerTruth, truthDigest, truthMarkdown } = await import("../server/audit/reply-audit-command");
+  const now = new Date("2026-10-07T05:00:00Z"), since = new Date(now.getTime() - 86_400_000);
+  const t = (id: string, h: number, source: string, input: string, reply: string) => ({ id, at: new Date(now.getTime() - h * 3600_000), userId: "U" + id, phone3: "123", input, reply, source });
+  const wall = "word ".repeat(140);
+  const turns = [
+    t("1", 2, "new coach", "what should I eat tonight", "Chicken and veg, sorted."),
+    t("2", 3, "food-context", "I had pap", wall),
+    t("3", 30, "food-context", "I had rice", wall),
+    t("4", 4, "new coach", "hi", "Hey! How was the walk?"),
+  ];
+  const r = testerTruth(turns, since, [{ id: "4", why: ["frustrated"] }]);
+  assert.equal(r.scanned, 4);
+  assert.deepEqual(r.bySource.map(s => [s.source, s.share]), [["new coach", 50], ["food-context", 50]]);
+  assert.ok(r.byDetector.some(d => d.code === "wall-of-text" && d.count === 2), JSON.stringify(r.byDetector));
+  assert.deepEqual(r.worst.map(w => w.id), ["2", "4"], "today's defective reply first, then a signalled one; yesterday's stays out of the day's five");
+  const text = truthDigest(r);
+  assert.match(text, /Tester truth, last 24h:\* 4 replies, 2 with a known defect/);
+  assert.match(text, /1\. …123 · food-context · .*wall of text/i);
+  const md = truthMarkdown(r, 7, now);
+  assert.match(md, /\| food-context \| 50% \| 2 \| 2 \|/);
+  assert.ok(!md.includes("pap") && !md.includes("123"), "the markdown holds no client words and no number");
+});
 test("card paths: every attach site is accounted for", async () => {
   const { readFileSync } = await import("node:fs");
   const files = [
