@@ -41,6 +41,18 @@ export async function latestPayFastToken(phone: string, excludeEventKey = ""): P
   return rows[0]?.token ?? null;
 }
 
+/** A subscription that ended this way stays ended when its old token is charged again (#607: a guarantee refund was undone). */
+const ENDED_FOR_GOOD = new Set(["client_cancelled", "refund_guarantee", "refunded", "payfast_cancelled"]);
+
+/** Has this PayFast token been charged before this ITN? An earlier subscriber's has; a new one has not (#612). */
+async function tokenPaidBefore(token: string, excludeEventKey: string): Promise<boolean> {
+  const { pool } = await import("../db");
+  const { rowCount } = await pool.query(
+    `SELECT 1 FROM payment_events WHERE provider = 'payfast' AND payment_status = 'COMPLETE' AND raw_body->>'token' = $1 AND provider_payment_id <> $2 LIMIT 1`,
+    [token, excludeEventKey]);
+  return !!rowCount;
+}
+
 /**
  * CANCEL THE RECURRING BILLING AT PAYFAST (2026-09-22). Until this existed, "yes, cancel" set the
  * row inactive and told the client "you will not be charged again" while the PayFast subscription
@@ -271,7 +283,9 @@ export function registerPaymentRoutes(app: Express) {
       // Amount validation — must match the subscription price within R5 tolerance.
       // Accepting any amount between R1–500 would allow someone to pay R1 and get a subscription.
       // An earlier subscriber's token renews at the price it was created with (#567), so those count too.
-      if (paymentStatus === "COMPLETE" && !chargeMatchesPrice(amountGross)) {
+      // THE LEGACY PRICE IS ONLY FOR A TOKEN THAT WAS CHARGED BEFORE (#612): a brand-new subscription pays today's price.
+      const legacyOnly = chargeMatchesPrice(amountGross) && Math.abs(amountGross - PRICING.monthlyPriceZAR) > 5;
+      if (paymentStatus === "COMPLETE" && (!chargeMatchesPrice(amountGross) || (legacyOnly && !(data.token && await tokenPaidBefore(data.token, pfPaymentId || data.m_payment_id || ""))))) {
         console.error(`[PAYFAST:${itnId}] REJECTED — amount R${amountGross} doesn't match expected R${PRICING.monthlyPriceZAR} (tolerance ±R5)`);
         return;
       }
@@ -323,7 +337,7 @@ export function registerPaymentRoutes(app: Express) {
       // on when they cancelled means this is that subscription, still billing. A different token
       // is a new subscription they chose, and activates as normal.
       // A MINOR BLOCKED BY THE AGE GATE (#306) is never reactivated by a charge, whatever the token.
-      if (paymentStatus === "COMPLETE" && (targetUser.onboardingState === "BLOCKED_UNDERAGE" || (targetUser.subscriptionEndReason === "client_cancelled" && data.token
+      if (paymentStatus === "COMPLETE" && (targetUser.onboardingState === "BLOCKED_UNDERAGE" || (ENDED_FOR_GOOD.has(targetUser.subscriptionEndReason || "") && data.token
         && data.token === await latestPayFastToken(normalisedPhone, eventKey)))) {
         const retry = await cancelPayFastSubscription(data.token);
         await db.insert(adminEvents).values({
@@ -335,7 +349,7 @@ export function registerPaymentRoutes(app: Express) {
         console.error(`[PAYFAST:${itnId}] CHARGED AFTER CANCELLATION — ${safePhone} R${amountGross} pf_id=${pfPaymentId} — client left inactive`);
         const coachAlertPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
         if (coachAlertPhone) {
-          await sendCriticalAlert(`whatsapp:+${coachAlertPhone.replace(/\D/g, "")}`, `[BILLING] ${targetUser.name || "Client"} (${normalisedPhone}) was charged R${amountGross} (pf ${pfPaymentId}) on a subscription they cancelled. They are still cancelled. Refund this payment. PayFast cancel retry: ${retry.ok ? "confirmed" : `FAILED — cancel token ${data.token} by hand`}.`)
+          await sendCriticalAlert(`whatsapp:+${coachAlertPhone.replace(/\D/g, "")}`, `[BILLING] ${targetUser.name || "Client"} (${normalisedPhone}) was charged R${amountGross} (pf ${pfPaymentId}) on a subscription that ended (${targetUser.subscriptionEndReason || "blocked"}). They are still cancelled. Refund this payment${/refund/.test(targetUser.subscriptionEndReason || "") ? ", on top of the refund already owed" : ""}. PayFast cancel retry: ${retry.ok ? "confirmed" : `FAILED — cancel token ${data.token} by hand`}.`)
             .catch(e => console.error("[PAYFAST] founder alert failed:", e));
         }
         return;
@@ -416,9 +430,12 @@ export function registerPaymentRoutes(app: Express) {
             const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomp" };
             const modeLabel: Record<string, string> = { gym: "Gym", gym_dumbbell: "Dumbbell gym", home: "Home", walk_only: "Walk + home" };
             const welcomeMsg = `Payment confirmed, ${name}. Welcome to KamLife Coach.\n\nGoal: ${goalLabel[targetUser.goalType || "fat_loss"] || "fat loss"} · Mode: ${modeLabel[targetUser.trainingMode || "home"] || "Home"} · Phase 1\n\n*What to expect:*\nWeek 1–2: Your body adapts. Energy improves. Scale may not move yet — this is normal.\nWeek 3: The hard week. Mirror hasn't changed. Most people quit here. Don't.\nWeek 4–6: Visible changes start. This is where the work pays off.\nWeek 8–12: Real transformation. Clothes fit differently. Strength up.\n\nCoach K checks in every morning and evening. Log everything — meals, steps, workouts. The more you log, the better I coach you.\n\n_Coach K is AI-powered — not a human coach and not a doctor. Always consult your doctor for medical advice._\n\nYour Day 1 workout is below. Do it today and reply *done* when finished.`;
-            await notify(normalisedPhone, welcomeMsg);
-
-            try {
+            // THROUGH THE OUTBOUND FLOOR (#608): a pregnant payer was sent "Goal: fat loss" and a Day 1 workout. When the floor
+            // refuses the welcome, the client gets the plain payment confirmation and no programme.
+            const { prepareOutbound } = await import("../outbound-authority");
+            const welcome = await prepareOutbound("proactive", targetUser.id, normalisedPhone, welcomeMsg, targetUser);
+            await notify(normalisedPhone, welcome.blocked ? `Payment confirmed, ${name}. Welcome to KamLife Coach.` : welcome.text);
+            if (!welcome.blocked) try {
               const { buildDay1Workout } = await import("../programme");
               const day1 = buildDay1Workout(targetUser);
               if (day1) {
@@ -427,7 +444,8 @@ export function registerPaymentRoutes(app: Express) {
                 // the new client's first workout silently never arrived). Send each bubble.
                 for (const part of day1.split(/\n\n---\n\n/)) {
                   const p = part.trim();
-                  if (p) await notify(normalisedPhone, p);
+                  const ready = p ? await prepareOutbound("proactive", targetUser.id, normalisedPhone, p, targetUser) : null;
+                  if (ready && !ready.blocked) await notify(normalisedPhone, ready.text);
                 }
               }
             } catch (e) {
