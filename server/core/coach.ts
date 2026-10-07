@@ -225,9 +225,9 @@ const LOGS = new Set(["LOG_MEAL", "LOG_STEPS", "LOG_WEIGHT", "LOG_WATER"]);
  * client's "yes" lands in resumeEngineConfirm. `card` is the meal card marker the receipt carried.
  */
 async function logThroughExecutor(phone: string, message: string, actions: CoachAction[], confidence: number, sourceMessageId?: string):
-  Promise<{ performed: boolean; confirm: string | null; reply: string; card: string }> {
-  const out = { performed: false, confirm: null as string | null, reply: "", card: "" };
+  Promise<{ performed: boolean; confirm: string | null; reply: string; card: string; user?: any }> {
   const [user] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+  const out = { performed: false, confirm: null as string | null, reply: "", card: "", user };
   if (!user) return out;
   const [{ executeAction, setPendingConfirm }, { describeAction }, { deriveSourceId }, { logChat }] = await Promise.all([
     import("../understanding/executor"), import("../understanding/actions"), import("../understanding/live"), import("../handlers/chat-log")]);
@@ -296,9 +296,10 @@ export async function answerLive(phone: string, message: string, opts: { final?:
     const logged = await logThroughExecutor(phone, message, writes, 1 - (read.u.uncertainty || 0), opts.sourceMessageId);
     if (logged.confirm) return logged.card + [logged.reply, logged.confirm].filter(Boolean).join("\n\n");
     if (logged.performed) {
-      const after = await readPreTurn(phone, message).catch(() => null);
-      const composed = after ? (await compose(openai, after, message, read.u).catch(() => null))?.trim() : null;
-      return (logged.card + (composed || logged.reply)).trim() || null;
+      // The proven post-write composer (A1/A5): it knows the fact is saved, keeps the card and the guardrail.
+      const receipt = logged.card + logged.reply;
+      const kind = writes.every(a => a.type === "LOG_STEPS") ? "steps" : writes.some(a => a.type === "LOG_MEAL") ? "food" : null;
+      return (kind ? await afterLogReply(phone, message, receipt, kind, logged.user) : null) ?? (receipt.trim() || null);
     }
   }
   // At the last door (`final`) every writer has already declined: answer anyway; the integrity floor stops a claimed write.
