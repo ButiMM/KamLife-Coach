@@ -145,6 +145,7 @@ _resetOutboundDedupe();
 _resetInteractionCorrelation();
 // A deterministic reply that carries buttons: the goal-hit weigh-in (target 85). The old fixture, the
 // gibberish clarify menu, went with gpt-block (wave-1 deletion, 6 Oct).
+await pool.query("UPDATE users SET target_weight_kg = '85' WHERE phone_number = $1", [phone]); // the goal the weigh-in reaches; a weigh-in never sets one (#594)
 await say("I weigh 84kg this morning", "sid-btn-1");
 await settle();
 {
