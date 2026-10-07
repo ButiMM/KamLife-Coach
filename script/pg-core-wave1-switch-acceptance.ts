@@ -143,6 +143,9 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   chk(!sk.includes(NEW) && sk.trim().length > 0, "the \"Skip today\" button is answered by the programme's skip, not the model", sk.slice(0, 160));
   const nx = await say(TESTER, "Tomorrow's session");
   chk(!nx.includes(NEW) && /Warm-up|sets|Week/i.test(nx), "the \"Tomorrow's session\" button shows the programme's next session, not the model's", nx.slice(0, 200));
+  const r0 = await count(TESTER); await say(TESTER, "I had samp and beans for supper"); const r1 = await count(TESTER);
+  const rs = await say(TESTER, "I had samp and beans for supper");
+  chk(r1 === r0 + 1 && await count(TESTER) === r1 && /already in today's log/i.test(rs) && !/chakalaka|solid meal/i.test(rs), "a resent meal is not logged twice and gets a plain \"already in today's log\", not the old receipt", rs.slice(0, 200));
   const ot = await say(TESTER, "Am I on track?"); await say(TESTER, "change my goal to muscle gain"); const gy = await say(TESTER, "yes"), g = (await pool.query("SELECT goal_type FROM users WHERE phone_number = $1", [TESTER])).rows[0].goal_type;
   chk(ot.includes(NEW) && g === "muscle_gain" && gy.includes(NEW), "A12: \"am I on track?\" and a confirmed goal change are the new coach's words (the goal still written)", `${g} | ${ot.slice(0, 120)} | ${gy.slice(0, 120)}`);
   process.env.CORE_WAVE2 = "off";

@@ -320,6 +320,7 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
   if (amendedId) { invalidatePatternCache(params.userId); invalidateFoodTotalsCache(params.userId); }
   let insertOk = true;
   const wasDup = recentDup.length > 0 || !!amendedId;
+  if (recentDup.length > 0) turnMutation("HELD meal resend: already on the ledger"); // the turn can say so instead of guessing
   if (!wasDup) {
     try {
       await db.insert(mealLogs).values({
