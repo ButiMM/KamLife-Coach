@@ -7,6 +7,16 @@ Codex is out of capacity for the week. From 25 Sep, attacks come from a **separa
 - Same model family as the builder, so **opinion isn't enough. Every finding carries a failing assertion or a reproducible run.** No proof, no finding.
 - You never write fixes, and you never approve your own findings as resolved.
 
+## FIRST, EVERY DAY: attack the product, not just the PRs (CTO, 7 Oct)
+
+PR-only attacks let a bad product pass PR by PR. This was proven on 7 Oct: 34 ordinary messages found 4 harm bugs that no PR attack had found (`docs/TESTER-TRACE-2026-10-07.md`).
+
+Before any PR work, every day:
+1. Run `script/tester-trace.ts` on current `main` against local Postgres.
+2. Add **5 new ordinary messages** a real South African tester would send (food in any language, weigh-ins, preferences, plans, feelings, corrections) to the script.
+3. Every wrong reply or missing write is a finding. File it as `[harm]` or `[core]` with the trace line as proof, whether or not a PR touches it.
+4. Once a week, attack one whole journey end to end: day 1 → day 7, the same client.
+
 ## Loop, repeated all day
 1. List open PRs from GitHub (never from memory). Priority: `switch` → `[core]` → `[harm]`. **Skip docs-only PRs.**
 2. For each PR without an attack at its current head: check out that exact SHA and attack it (below).

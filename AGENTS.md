@@ -2,6 +2,18 @@
 
 This repository builds KamLife Coach. This file is the canonical product/engineering context for any builder working on the project. Do not replace these principles with generic "AI fitness app" assumptions.
 
+
+## FIRST, EVERY DAY: attack the product, not just the PRs (CTO, 7 Oct)
+
+PR-only attacks let a bad product pass PR by PR. This was proven on 7 Oct: 34 ordinary messages found 4 harm bugs that no PR attack had found (`docs/TESTER-TRACE-2026-10-07.md`).
+
+Before any PR work, every day:
+1. Run `script/tester-trace.ts` on current `main` against local Postgres.
+2. Add **5 new ordinary messages** a real South African tester would send (food in any language, weigh-ins, preferences, plans, feelings, corrections) to the script.
+3. Every wrong reply or missing write is a finding. File it as `[harm]` or `[core]` with the trace line as proof, whether or not a PR touches it.
+4. Once a week, attack one whole journey end to end: day 1 → day 7, the same client.
+
+
 ## CURRENT ORDERS FOR CODEX (CTO, 28 Sep). Where anything below disagrees, THIS wins.
 
 **Precision standard (30 Sep; Codex runs on an upgraded model):** every attack is **engineering-precise and product-directed**.
