@@ -1189,13 +1189,14 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(routes, /\^shadow\(\?:\\s\+\(\\d\{1,2\}\)\)\?\$/, "the 'shadow' coach command must be wired");
     assert.match(routes, /recentShadowDecisions/, "and call the reader");
   });
-  test("cohort gate: ENGINE_ACTIONS=on only executes for real for coach/beta-testers until opened", () => {
+  test("#586: no cohort gate — the new coach's logs and a confirmed \"yes\" execute for every client", () => {
     const live = readFileSync(join("server", "understanding", "live.ts"), "utf-8");
-    assert.match(live, /engineActionsAll/, "the widen-to-all switch must exist");
-    assert.match(live, /const cohortLive = ctx\.actionsLive === true \|\| engineActionsAll\(\)/, "real execution is gated to the cohort");
-    assert.match(live, /const runDry = actionMode === "shadow" \|\| !cohortLive/, "non-cohort users run dry even in on mode");
+    assert.doesNotMatch(live, /engineActionsAll|actionsLive|cohortLive/, "the coach/beta-tester cohort gate is deleted");
+    const coach = readFileSync(join("server", "core", "coach.ts"), "utf-8");
+    assert.match(coach, /writes\.every\(a => LOGS\.has\(a\.type\)\)[\s\S]{0,200}logThroughExecutor\(/, "the new coach's logs go through the executor");
+    assert.match(coach, /setPendingConfirm\(user\.id, action\)/, "a vague amount parks the confirm so the yes lands");
     const routes = readFileSync(join("server", "routes.ts"), "utf-8");
-    assert.match(routes, /actionsLive: isCoach \|\| isBetaTester/, "the cohort is coach + beta testers");
+    assert.doesNotMatch(routes, /actionsLive/, "routes passes no cohort");
   });
   test("growth engine: transformation 'story' + 'cohort' commands are wired (thread #1)", () => {
     const t = readFileSync(join("server", "transformation.ts"), "utf-8");

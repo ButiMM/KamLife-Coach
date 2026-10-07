@@ -321,22 +321,12 @@ export function engineActionMode(): ActionMode {
   return v === "on" ? "on" : v === "shadow" ? "shadow" : "off";
 }
 
-// COHORT GATE for the `on` rollout. Even with ENGINE_ACTIONS=on, real execution is limited
-// to the coach + beta testers (people who opted into testing) UNLESS ENGINE_ACTIONS_ALL=on
-// widens it to everyone. So "flip it on now" is safe: a wrong action on unseen live phrasing
-// can only ever touch a tester, never a real client, until you deliberately open the gate.
-// A non-cohort client in `on` mode runs the action DRY (byte-identical to today) — we still
-// log the would-be decision so `shadow` review shows the whole base, not just testers.
-export function engineActionsAll(): boolean {
-  return (process.env.ENGINE_ACTIONS_ALL || "").toLowerCase() === "on";
-}
-
 // Idempotency source id. The inbound WhatsApp MessageSid is now threaded from the webhook
 // (ctx.sourceMessageId) and is the stable key we prefer — the SAME identifier Twilio uses,
 // and the one our webhook-level dedup already trusts. This derived hash is only the
 // fallback for entrypoints without a SID (admin test-webhook, internal recursion): a
 // literal retry of the same text within the dedup window still collapses correctly.
-function deriveSourceId(userId: string, message: string): string {
+export function deriveSourceId(userId: string, message: string): string {
   let h = 0;
   const s = `${userId}:${message}`;
   for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
@@ -348,7 +338,7 @@ function deriveSourceId(userId: string, message: string): string {
 // cancel line, or null — null meaning "not a yes/no, let the pipeline understand it fresh".
 // This is the landing pad the confirm question never had (2026-07-23 live: "yes" looped forever).
 export async function resumeEngineConfirm(ctx: {
-  phone: string; message: string; m: string; user: any; sourceMessageId?: string; actionsLive?: boolean;
+  phone: string; message: string; m: string; user: any; sourceMessageId?: string;
 }): Promise<string | null> {
   const { user } = ctx;
   if (user?.awaitingInputType !== "engine_confirm") return null;
@@ -364,13 +354,12 @@ export async function resumeEngineConfirm(ctx: {
   if (verdict === "no") return `${hi}left it as it was — nothing logged. 👍`;
   if (!pending) return null; // "yes" but the offer expired (restart) → let the pipeline reparse
 
-  const cohortLive = ctx.actionsLive === true || engineActionsAll();
+  // #586: a "yes" is executed for every client; the coach/beta-tester cohort gate is deleted.
   const exec = await executeAction(pending, {
     user, phone: ctx.phone,
     preConfirmed: true, // they said yes to a number we already validated when we offered it
     sourceMessageId: ctx.sourceMessageId || deriveSourceId(user.id, ctx.message),
     confidence: 0.99, // the client explicitly confirmed
-    dryRun: !cohortLive,
   });
   await logChat(user.id, ctx.message,
     `CONFIRM ${describeAction(pending)} → ${exec.performed ? "performed" : exec.error ? "error" : "noop"}`,
@@ -439,9 +428,6 @@ export async function runMeaningEngineLive(ctx: {
    *  idempotency key so a Twilio retry can never double-write. Absent for admin/test and
    *  internal recursion, where we fall back to a user+message hash. */
   sourceMessageId?: string;
-  /** May this user's actions REALLY execute in `on` mode? True for coach + beta testers.
-   *  Non-cohort users run dry (until ENGINE_ACTIONS_ALL=on), so `on` is safe to flip today. */
-  actionsLive?: boolean;
 }): Promise<string | null> {
   const { message, m, user, openai } = ctx;
   // THE SPEND CAP COVERS THE ENGINE TOO (#340): over the ceiling, or unable to read spend, the
@@ -644,11 +630,8 @@ export async function runMeaningEngineLive(ctx: {
 
     if (actionMode !== "off" && result.actions.length > 0) {
       try {
-        // Cohort gate: execute for real only in `on` mode AND when this user is allowed
-        // (coach/beta-tester, or ENGINE_ACTIONS_ALL). Everyone else runs DRY — so flipping
-        // ENGINE_ACTIONS=on can only touch a tester until the gate is deliberately opened.
-        const cohortLive = ctx.actionsLive === true || engineActionsAll();
-        const runDry = actionMode === "shadow" || !cohortLive;
+        // `on` executes for every client (#586 deleted the coach/beta-tester cohort gate); `shadow` runs dry.
+        const runDry = actionMode === "shadow";
         // EVERY transaction the client reported, in the order they said them (Slice 2).
         // Each write is independent: one failing must never swallow the others, because the
         // client said all of them and a half-logged day is worse than a visibly failed one.

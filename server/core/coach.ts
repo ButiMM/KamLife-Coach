@@ -216,12 +216,48 @@ async function openaiClient(): Promise<OpenAI> {
   return client;
 }
 
+/** What the executor can write from the new coach's reading. LOG_WORKOUT has no executor tool yet (A8). */
+const LOGS = new Set(["LOG_MEAL", "LOG_STEPS", "LOG_WEIGHT", "LOG_WATER"]);
+
+/**
+ * #586: the new coach's validated logs through executeAction, the tool the meaning engine used for its
+ * cohort only. A vague amount or a shaky reading gets the executor's confirm question, parked so the
+ * client's "yes" lands in resumeEngineConfirm. `card` is the meal card marker the receipt carried.
+ */
+async function logThroughExecutor(phone: string, message: string, actions: CoachAction[], confidence: number, sourceMessageId?: string):
+  Promise<{ performed: boolean; confirm: string | null; reply: string; card: string }> {
+  const out = { performed: false, confirm: null as string | null, reply: "", card: "" };
+  const [user] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+  if (!user) return out;
+  const [{ executeAction, setPendingConfirm }, { describeAction }, { deriveSourceId }, { logChat }] = await Promise.all([
+    import("../understanding/executor"), import("../understanding/actions"), import("../understanding/live"), import("../handlers/chat-log")]);
+  for (const action of actions) {
+    const exec = await executeAction(action, {
+      user, phone, confidence, clientMessage: message,
+      sourceMessageId: `${sourceMessageId || deriveSourceId(user.id, message)}#${describeAction(action)}`,
+    });
+    await logChat(user.id, message, `${describeAction(action)} → ${exec.performed ? "performed" : exec.confirmed ? "confirm" : exec.skipped ? "skip" : exec.error ? "error" : "noop"}`, "ENGINE_ACTION").catch(() => {});
+    if (exec.confirmed && !out.confirm) {
+      setPendingConfirm(user.id, action);
+      await db.update(users).set({ awaitingInputType: "engine_confirm" }).where(eq(users.id, user.id)).catch(() => {});
+      out.confirm = exec.reply;
+    }
+    if (exec.performed) {
+      out.performed = true;
+      const card = (exec.reply.match(/\[MEDIA:[^\]]+\]/) || [""])[0];
+      if (!out.card) out.card = card;
+      if (!out.reply) out.reply = exec.reply.replace(card, "").trim();
+    }
+  }
+  return out;
+}
+
 /**
  * The new coach answering for real, at the one place the old gpt-block answered (behind the scope
  * floor in routes.ts). Returns null when it cannot answer honestly: no reading of the message (#421)
  * or no reply. The caller then falls back to the old reply, so a failure is never silence.
  */
-export async function answerLive(phone: string, message: string, opts: { final?: boolean } = {}): Promise<string | null> {
+export async function answerLive(phone: string, message: string, opts: { final?: boolean; sourceMessageId?: string } = {}): Promise<string | null> {
   const pre = await readPreTurn(phone, message);
   if (!pre) return null;
   const openai = await openaiClient();
@@ -253,6 +289,17 @@ export async function answerLive(phone: string, message: string, opts: { final?:
     // Several reminders, one message: one row in the chat record, holding what they actually got (#537).
     if (asks.length > 1 && reply) await (await import("../handlers/chat-log")).logChat(user.id, message, reply, "REMINDER_SET").catch(() => {});
     return reply || null;
+  }
+  // #586: a meal, steps, a weight or water that no writer above took ("kota from the spaza", isiXhosa)
+  // is written by the proven executor for every client, then the reply is composed from the record.
+  if (writes.length && writes.every(a => LOGS.has(a.type))) {
+    const logged = await logThroughExecutor(phone, message, writes, 1 - (read.u.uncertainty || 0), opts.sourceMessageId);
+    if (logged.confirm) return logged.card + [logged.reply, logged.confirm].filter(Boolean).join("\n\n");
+    if (logged.performed) {
+      const after = await readPreTurn(phone, message).catch(() => null);
+      const composed = after ? (await compose(openai, after, message, read.u).catch(() => null))?.trim() : null;
+      return (logged.card + (composed || logged.reply)).trim() || null;
+    }
   }
   // At the last door (`final`) every writer has already declined: answer anyway; the integrity floor stops a claimed write.
   if (!opts.final && writes.length) return null;
@@ -389,11 +436,11 @@ export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED,
  * failure path alerts the founder on a dead key or an empty balance (#395) and returns a line the
  * turn-integrity owner recognises as unanswered (#92). `readAlready`: wave1Turn read this turn (#451).
  */
-export async function answerFinal(phone: string, message: string, user: any, readAlready = false): Promise<string> {
+export async function answerFinal(phone: string, message: string, user: any, readAlready = false, sourceMessageId?: string): Promise<string> {
   const [{ looksLikeRecallQuestion, answerRecall }, { turnEvidence, logChat }] = await Promise.all([import("../memory"), import("../handlers/chat-log")]);
   // "What did I tell you about…": the grounded recall answers from their own messages, as it did behind gpt-block.
   if (looksLikeRecallQuestion(message)) { turnEvidence({ conversationalOnly: true }); return answerRecall(user, message); }
-  const reply = readAlready ? null : await answerLive(phone, message, { final: true }).catch(() => null);
+  const reply = readAlready ? null : await answerLive(phone, message, { final: true, sourceMessageId }).catch(() => null);
   // numbers:low still does its job at the last door, whichever mouth speaks, as it did behind gpt-block.
   const { getNumbersMode, stripNumbersFromProse } = await import("../numbers-mode");
   const plain = (t: string) => getNumbersMode(user) === "low" ? stripNumbersFromProse(t) : t;
@@ -417,12 +464,12 @@ export async function answerFinal(phone: string, message: string, user: any, rea
 }
 
 /** One switched turn: the scope floor first, then the new coach. null = let the old engine answer. */
-export async function wave1Turn(p: { phone: string; message: string; userId: string; ongoing: boolean; evidence: (f: { conversationalOnly: true }) => void }): Promise<{ reply: string; src: string } | null> {
+export async function wave1Turn(p: { phone: string; message: string; userId: string; ongoing: boolean; sourceMessageId?: string; evidence: (f: { conversationalOnly: true }) => void }): Promise<{ reply: string; src: string } | null> {
   const { classifyDomain, declineOutOfScope } = await import("../understanding/domain-guard");
   const scope = await classifyDomain(await openaiClient(), p.message, { ongoing: p.ongoing });
   if (scope.redirectMessage) return { reply: await declineOutOfScope(p.userId, p.message, scope.redirectMessage, p.evidence), src: "scope" };
   let down: string | null = null;
-  const reply = await answerLive(p.phone, p.message).catch(async e => {
+  const reply = await answerLive(p.phone, p.message, { sourceMessageId: p.sourceMessageId }).catch(async e => {
     console.warn("[CORE_WAVE1] fell back:", (e as Error)?.message);
     // #441: slow or unreachable, answer honestly now; a dead key or no credits falls through to the engine that alerts.
     if ((await import("../ai-offline")).isModelSlowOrUnreachable(e)) down = (await import("../brain/reply-verifier")).COACH_NETWORK_HICCUP_REPLY;

@@ -124,7 +124,8 @@ export async function executeAction(action: CoachAction, ctx: ExecuteContext): P
   if (action.type === "JUST_REPLY") return { ...base, reply: "" };
 
   // 1. CONFIDENCE GATE — an uncertain state-write is confirmed, not written.
-  if (!shouldAutoExecute(action, ctx.confidence)) {
+  // An explicit "yes" to the parked question IS the confirmation: asking again looped (#586).
+  if (!ctx.preConfirmed && !shouldAutoExecute(action, ctx.confidence)) {
     return { ...base, confirmed: true, reply: confirmQuestion(action, ctx.user) };
   }
 
