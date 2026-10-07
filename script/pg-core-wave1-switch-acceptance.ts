@@ -30,7 +30,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : msg === LIST ? [{ type: "LOG_MEAL", foodText: "pap and wors", retro: DOW(2), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "eggs and toast", retro: DOW(1), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "chicken and rice", retro: DOW(0), needsConfirmation: false }]
       : /^Had pap and wors for lunch and did a 30 min home workout$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", needsConfirmation: false }, { type: "LOG_WORKOUT", what: "a 30 min home workout" }]
       : /^what'?s my workout today\??$/i.test(msg) ? [{ type: "SHOW_WORKOUT" }]
-      : /^I have diabetes\. Had a kota for lunch$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", meal: "lunch", needsConfirmation: false }]
+      : /^I have diabetes\. Had a kota for lunch$|^I’m diabetic\. Log my kota$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", meal: "lunch", needsConfirmation: false }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -138,6 +138,8 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   chk(/✅|Warm-up/i.test(sw) && !sw.includes(NEW) && !/haven't written/i.test(sw), "\"what's my workout today?\" is the programme's answer (here: today's session is done), not the model's guess (item 4)", sw.slice(0, 200));
   const db0 = await count(TESTER), dk = await say(TESTER, "I have diabetes. Had a kota for lunch");
   chk(await count(TESTER) === db0 + 1 && dk.includes(NEW), "a condition mentioned with a meal: the meal is written and the new coach answers (#610)", dk.slice(0, 200));
+  const d2 = await count(TESTER), dl = await say(TESTER, "I’m diabetic. Log my kota");
+  chk(await count(TESTER) === d2 + 1, "\"I’m diabetic. Log my kota\" logs the kota too (#619 review)", dl.slice(0, 200));
   const dw = await say(TESTER, "I'm diabetic");
   chk(/lifestyle coach, not a medical service/i.test(dw), "control: the disclosure on its own still gets the non-clinical welcome", dw.slice(0, 200));
   const ot = await say(TESTER, "Am I on track?"); await say(TESTER, "change my goal to muscle gain"); const gy = await say(TESTER, "yes"), g = (await pool.query("SELECT goal_type FROM users WHERE phone_number = $1", [TESTER])).rows[0].goal_type;
