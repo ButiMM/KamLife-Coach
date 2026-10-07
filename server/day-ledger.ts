@@ -14,7 +14,7 @@
 import { db } from "./db";
 import { mealLogs, stepLogs, users, workoutLogs, weightLogs } from "../shared/schema";
 import { and, eq, gte, lt, lte, or, desc, sql } from "drizzle-orm";
-import { recentSpans } from "./sast";
+import { recentSpans, mealDayStart } from "./sast";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { sastDayStart, sastToday } from "./utils";
 import { sastDayKey, sastDaysBetween } from "./sast";
@@ -39,12 +39,15 @@ export type { DayLedger, LedgerMeal, LedgerRow } from "./day-ledger-core";
 export async function getDayLedger(userId: string, opts?: { forDate?: Date; user?: any }): Promise<DayLedger> {
   const dayStart = opts?.forDate ? sastDayStart(opts.forDate) : sastDayStart();
   const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+  // Before 05:00 a meal is filed on the day that just ended, so "today's food" is that day's (#582: at 03:41 the
+  // coach was told "nothing logged yet" right after a meal). Steps and water stay on the calendar day they're stored on.
+  const mealStart = opts?.forDate ? dayStart : mealDayStart(), mealEnd = new Date(mealStart.getTime() + 86_400_000);
   const rows = await db.select({
     label: mealLogs.mealLabel, kcal: mealLogs.kcalInt, protein: mealLogs.proteinInt,
     carbs: mealLogs.carbsInt, fat: mealLogs.fatInt, loggedAt: mealLogs.loggedAt,
     source: mealLogs.source, items: mealLogs.items, rawMessage: mealLogs.rawMessage,
   }).from(mealLogs)
-    .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, dayStart), lt(mealLogs.loggedAt, dayEnd)))
+    .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, mealStart), lt(mealLogs.loggedAt, mealEnd)))
     .orderBy(desc(mealLogs.loggedAt));
 
   const [stepRow] = await db.select({ steps: sql<number>`COALESCE(MAX(${stepLogs.steps}),0)::int` })

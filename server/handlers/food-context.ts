@@ -8,7 +8,7 @@
 import { db } from "../db";
 import { journeyMustKeepFacts } from "../understanding/messy-intake";
 import { users, mealLogs, chatHistory, stepLogs } from "../../shared/schema";
-import { eq, and, gte, lt, desc } from "drizzle-orm";
+import { eq, and, gte, lt, desc, or } from "drizzle-orm";
 import { type SAFood } from "../foods";
 import {
   scanForSAFoods, recomputeTodayFoodTotals, buildFoodLogReply, escapeRegex,
@@ -26,7 +26,7 @@ import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from 
 import { logChat, withTimeout, turnMutation } from "./chat-log";
 import { unloggedFoodNotice, carriesFeelingClause } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
-import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting, reportedInSomeClause, mentionsNotDone } from "../utils";
+import { sastDayStart, mealDayStart, sastToday, parseMealDate, isRetroactiveMeal, SAYS_TODAY_RE, mealDateLabel, statedWhen, looksLikeDeepEmotionalShare, effectiveMealLoggedAt, spaceName, isAskingNotReporting, reportedInSomeClause, mentionsNotDone } from "../utils";
 import { explicitMealSlot, forMealSegments, MEAL_BOUNDARY_RE } from "../understanding/actions";
 // The canonical item shape — the nutritional ledger's own definition (C11).
 import { itemsFromAdjusted } from "../day-ledger-core";
@@ -297,7 +297,7 @@ export async function handleFoodContext(ctx: {
       await logChat(user.id, message, gptRef, "FOOD_CORRECTION_REF");
       return gptRef;
     } else {
-      const todayStartCorr = sastDayStart();
+      const todayStartCorr = mealDayStart(); // overnight, today's meals are still filed on the day just ended (#582)
       const relabelTo = slotOnly ? slotOnly[1].toLowerCase() : null;
       // The last FOOD_LOG chat entry pins the RIGHT meal: the one logged within 2 minutes of it.
       const [lastFoodLog] = await db.select({ id: chatHistory.id, createdAt: chatHistory.createdAt }).from(chatHistory)
@@ -305,8 +305,12 @@ export async function handleFoodContext(ctx: {
         .orderBy(desc(chatHistory.createdAt)).limit(1);
       const corrWindowStart = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() - 120_000) : todayStartCorr;
       const corrWindowEnd   = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() + 120_000) : new Date();
-      const [target] = await db.select().from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, corrWindowStart),
-        lt(mealLogs.loggedAt, corrWindowEnd))).orderBy(desc(mealLogs.loggedAt)).limit(1);
+      // A meal logged before 05:00 is filed 24h back (effectiveMealLoggedAt), so its row sits a day before its chat
+      // line; look there too, or "No, I had a burger" at 01:00 finds nothing and lands as a second meal (#582).
+      const DAY = 86_400_000, inWindow = (back: number) => and(gte(mealLogs.loggedAt, new Date(corrWindowStart.getTime() - back)), lt(mealLogs.loggedAt, new Date(corrWindowEnd.getTime() - back)));
+      const [target] = await db.select().from(mealLogs).where(and(eq(mealLogs.userId, user.id),
+        lastFoodLog && mealDayStart(corrWindowStart).getTime() < sastDayStart(corrWindowStart).getTime() ? or(inWindow(0), inWindow(DAY)) : inWindow(0)))
+        .orderBy(desc(mealLogs.loggedAt)).limit(1);
       // NAMING WHAT IS ALREADY THERE CORRECTS NOTHING ("No, the pap and chicken were lekker" — Codex @ 7f93588).
       const heldNames = new Set([...scanForSAFoods(String(target?.rawMessage || "")), ...(Array.isArray(target?.items) ? target!.items as any[] : [])].map(f => String(f?.name || "").toLowerCase()));
       const namedNow = scanForSAFoods(candidateSansNot).map(f => f.name.toLowerCase());
