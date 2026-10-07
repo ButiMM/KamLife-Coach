@@ -14,7 +14,6 @@
 
 import type OpenAI from "openai";
 import { assertAiOnline, isAiOfflineError } from "../ai-offline";
-import { recordGptCost } from "../gpt";
 import { looksLikeRefusal } from "./refusal";
 export { looksLikeRefusal } from "./refusal";
 
@@ -343,13 +342,6 @@ export async function cleanSATranscript(openai: OpenAI, raw: string, userId?: st
         { role: "system", content: SA_CLEAN_SYSTEM },
         { role: "user", content: head },
       ],
-    });
-    recordGptCost({
-      userId: userId ?? null,
-      model: "gpt-4o-mini",
-      feature: "sa_transcript_clean",
-      promptTokens: resp.usage?.prompt_tokens ?? 0,
-      completionTokens: resp.usage?.completion_tokens ?? 0,
     });
     const cleaned = (resp.choices[0]?.message?.content || "").trim();
     const finishReason = resp.choices[0]?.finish_reason;

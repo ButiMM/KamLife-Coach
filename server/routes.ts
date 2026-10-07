@@ -11,7 +11,7 @@ import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide } from "./exercise-media";
 import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, getDayType } from "./programme";
-import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, classifyIntent, type ClassifiedIntent, type IntentClassification } from "./gpt";
+import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, classifyIntent, metered, type ClassifiedIntent, type IntentClassification } from "./gpt";
 import { calculateTargets, getDailyStepContext } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan, statedMinorAge, blockUnderage } from "./onboarding";
 import { saysNotWorking } from "./despair";
@@ -71,7 +71,7 @@ if (!openaiKey) {
   console.error("[FATAL] OPENAI_API_KEY is not set. Server cannot start without it.");
   process.exit(1);
 }
-const openai = new OpenAI({ apiKey: openaiKey });
+const openai = metered(new OpenAI({ apiKey: openaiKey }), "routes"); // photos, voice clean-up, the old engine (#570)
 
 // Programme constants, workout builders, and GPT functions moved to dedicated modules (see imports above)
 // detectEscalation + escalationSLA now live in ./safety-detection for unit testing

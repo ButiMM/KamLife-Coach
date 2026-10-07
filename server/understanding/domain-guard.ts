@@ -202,8 +202,6 @@ export async function classifyDomain(
         { role: "user", content: message.slice(0, 500) },
       ],
     });
-    const { recordGptCost } = await import("../gpt"); // lazy — keeps the pure fast-path db-free
-    recordGptCost({ userId: null, model: "gpt-4o-mini", feature: "domain_guard", promptTokens: resp.usage?.prompt_tokens ?? 0, completionTokens: resp.usage?.completion_tokens ?? 0 });
     const word = (resp.choices[0]?.message?.content || "").trim().toUpperCase();
     if (word.startsWith("SAFETY")) return { classification: "safety", reasoning: "classifier: SAFETY" };
     if (word.startsWith("PART")) return { classification: "partially-related", reasoning: "classifier: PARTIALLY" };

@@ -112,7 +112,8 @@ export function recordGptCost(opts: {
   completionTokens: number;
 }): void {
   const { userId, model, feature, promptTokens, completionTokens } = opts;
-  const prices = GPT_PRICE_PER_1M[model] ?? GPT_PRICE_PER_1M["gpt-4o-mini"];
+  // A dated snapshot ("gpt-4o-2024-08-06") is priced as its family, never as the cheap model (#570).
+  const prices = GPT_PRICE_PER_1M[model] ?? GPT_PRICE_PER_1M[model.startsWith("gpt-4o-mini") ? "gpt-4o-mini" : model.startsWith("gpt-4o") ? "gpt-4o" : "gpt-4o-mini"];
   const costUsd = (promptTokens * prices.prompt + completionTokens * prices.completion) / 1_000_000;
   db.insert(gptCosts).values({
     userId: userId ?? null,
@@ -122,6 +123,25 @@ export function recordGptCost(opts: {
     completionTokens,
     costUsd: costUsd.toFixed(6),
   }).catch(e => console.warn("[gptCosts] insert failed (non-fatal):", e?.message || e));
+}
+
+/**
+ * EVERY CALL ON THIS CLIENT IS PRICED (#570). The daily cap sums gpt_costs, and the new coach's two calls a turn and every
+ * photo read went through clients that recorded nothing, so the cap could not see most of the spend. Wrapped once where
+ * the client is made; the client of the turn is read from the turn, so per-client cost stays attributed.
+ */
+export function metered<T extends OpenAI>(client: T, feature: string): T {
+  const completions = client.chat.completions as any;
+  const create = completions.create.bind(completions);
+  completions.create = async (body: any, opts?: any) => {
+    const r = await create(body, opts);
+    if (r?.usage) {
+      const { turnUserId } = await import("./handlers/chat-log");
+      recordGptCost({ userId: turnUserId(), model: String(body?.model || r.model || ""), feature, promptTokens: r.usage.prompt_tokens || 0, completionTokens: r.usage.completion_tokens || 0 });
+    }
+    return r;
+  };
+  return client;
 }
 
 export async function buildContext(user: any): Promise<string> {
