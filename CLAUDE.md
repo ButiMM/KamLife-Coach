@@ -1,156 +1,35 @@
-# KamLife Coach — Claude Code Instructions
+# KamLife Coach — Claude Code Instructions (one page)
 
-## THE PLAN, ONE LIST (CTO, Wed 7 Oct 03:20). It replaces every CTO order on #391 since Tue 6 Oct 12:50. Ignore those comments.
+**Freeze, 7 Oct – 21 Oct (founder and CTO, #391).** No new rules, gates, ratchets, harnesses, planning docs or measurement tools. `docs/QUEUE.md`, `docs/STATUS.md` and `docs/ORDERS.md` are frozen: don't update them. Status is a few lines a day on #391, and nowhere else.
 
-Nothing in the plan is new and nothing is thrown away. This is the COVERAGE plan (one coach, the old doors retired), finished in the right order.
+## The job
+Make what testers experience right. Done means **a tester sees it**: the change shows in the daily tester trace (`TRACE_MODEL=stub npx tsx script/tester-trace.ts`, and on `main`) and on the founder's phone. "Merged" and "green" are not done.
 
-1. **Finish what's in flight, as normal.** #564, #574, #565 (D2b) and #587 merge as they go green. Open PRs aren't frozen.
-2. **#592, the inversion:** the new coach becomes the front door after the floors, and its actions execute for every client. This is how every switched row actually reaches testers. It's not a rebuild: no new handlers, only existing tools. Target: PR open by Thu 8 Oct 12:00.
-3. **#568:** delete the doors the inversion made unreachable, 7 days after it merges.
-4. **Then the queue as it stood:** A4 voice, the remaining Grok items (#570, #572), B-rows in the new voice, C-rows (onboarding, payments) in the new voice.
+## Every PR
+- It opens with **"What testers will notice:"**. If the honest answer is "nothing", don't open it. The exceptions are safety, billing and data loss.
+- **One test per fix**: the case that broke, failing without the fix. No revert harnesses, ratchet entries or budget essays for ordinary changes.
+- It's based on `main`, small, and one task. Never push to `main` (it deploys straight to Railway).
+- **Delete before adding.** If a change makes old code unreachable, delete that code in the same PR.
+- `[harm]` and `switch` PRs are reviewed by the CTO. Answer a review with a comment starting `ANSWER`.
+- Keep these green: the safety and billing pg suites (`safety-routing`, `opt-out`, `cancel-menu`, `payments-cancel-truth`, `refund-guarantee`, `spend-cap`), unit tests, and `core-wave1-switch`.
 
-**Measure throughout, nothing new to build:** D7 (merged, the worst five daily) and `script/tester-trace.ts`, run daily by the attacker.
+## How a message is answered (the front door, #592)
+1. **Floors, in code:** safety (crisis, pregnancy, eating disorders, medication, minors), STOP and opt-out, POPIA, onboarding, billing and cancel menus, heart clearance, pending answers (`awaitingInputType`, engine confirm), founder commands.
+2. **Exact commands, the whole message only:** `menu`, `progress`, `targets`, `help`, `stop`, button numbers.
+3. **Everything else goes to the new coach** (`core/coach.ts` `frontTurn`): one `understand()` read covers meaning, scope, facts and actions. The actions run through the existing tools for every client (executor → scanner, steps, weight, water; corrections; workouts; goal confirm; reminders). Then `compose()`. Two model calls a turn.
+4. **The old handlers answer only when** the coach declines: there's no read, the model is down, the spend cap is hit, or `CORE_FRONT=off`. That rollback expires 14 Oct; after 48 clean hours the old handlers behind it are deleted.
 
-**The CTO changes this list only on Mondays,** or for a `[harm]` finding. Everything else is a comment on its own issue, not a new order.
+A write is claimed only when it happened (the turn's mutation record). A delete needs the client's own removal words.
 
-## DEFINITION OF DONE (CTO, Wed 7 Oct, after the Grok audit). This overrides every older "switched" / "live" wording.
+## Stack and env
+TypeScript, Node and Express on Railway; PostgreSQL with Drizzle (migrations run on start). WhatsApp via Twilio (`\n\n---\n\n` splits a reply into separate messages).
+Railway vars: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`, `TWILIO_SMS_NUMBER`, `MEDIA_BASE_URL`, `PAYFAST_MERCHANT_ID`, `APP_URL`, `PROACTIVE_PAUSED` (must not be `true`), `CORE_FRONT`, `CORE_WAVE2` / `CORE_WAVE4` (must not be `off`), `GLOBAL_AI_DAILY_HARD_CAP_USD`. The founder checks the live build by sending `version`. More in `docs/SYSTEM.md`, and check there before asking the founder anything.
+Costs: `docs/COSTS.md` (no new paid spend until revenue).
 
-A row is **done** only when production shows it, not when a PR merges:
-1. **Reach:** in the 07:00 tester-truth report, the new coach produced at least 80% of that row's real replies over the last 3 days. Use the handler `src` tag.
-2. **Quality:** zero replies flagged by the defect scan (`server/audit/reply-defects`) on that row over the same 3 days, or every flag traced and fixed.
-3. **The founder's phone test:** the founder sent the row's 3 standard messages from his own number, and the replies were right.
+## Never change without full understanding
+- `server/coach-prompt.ts`: the goal-aware food philosophy and coaching voice.
+- `server/onboarding.ts`: `completeOnboarding()` is the first impression.
+- Billing: `server/routes/` payment flows and `server/scheduler/jobs/business.ts`.
 
-Until then, STATUS, QUEUE, #280 and every report call the row **"merged, not proven"**. Nobody, including the CTO, reports a row as live for testers on merge alone. **The weekly whole-product attack (GROK.md Prompt 3) and the CTO's own whole-product trace both run every Monday.** PR-level attacks don't replace them.
-
-## CTO RULINGS, Tue 6 Oct (answers to #391 of 06:38 and 07:43). These win over everything below.
-
-1. **No CI OpenAI key. The "BLOCKED (founder)" on the gate key is withdrawn.** ORDERS §0c stands: no paid gate. A switch merges on tests + ratchet + attack (or the 45-minute window); it's proven on real use (evidence view, #513). Don't put `final` on PRs, and don't ask the founder for a key.
-2. **A18 test lines:** option (a). `script/replay-cases.ts` no longer counts toward `test_lines`, and the baseline drops by the same amount (this PR), so the slack isn't free. Gate cases are the product's grader. Write the ~10 non-English cases (B1, B2, B3, B5, B6, A1–A5).
-3. **#537's +21 test lines:** approved (`mouth:approved`).
-4. **D2b, the CIP:** take your proposal. There's a `pattern` fact kind in the client record, written by the existing weekly `cip-update` job from the same deterministic evidence. `getBehaviourPatternContext` reads the record, and `intelligence/profile.ts` and its narrative mouths are deleted in the same PR.
-5. **D7, live scoring:** no model call. Score live turns from signals we already have: friction events, a correction within 2 turns, "you forgot" / "I told you", opt-out after a reply, and silence after a coach question. Put them in the 18:00 digest with the worst 5 turns quoted. A sampled model judge waits for revenue (§0c).
-6. **Rollback flags expire after 7 days, and their old code goes with them.** That makes the delete list real. Server is 73,274 lines and all 16 delete-list files (6,738 lines) are still alive, because each `CORE_WAVE*=off` path keeps them reachable.
-   - **This week, one PR per wave:**
-     - **Wave 1** (on for everyone 30 Sep): remove the `CORE_WAVE1` off-path, then delete `gpt-block.ts`, `advice-commands.ts` and `numbers-literacy.ts`, plus whatever only they import.
-     - **Wave 2 A1/A2** (1 Oct): from Thu 8 Oct, `food-commands.ts`, `meaning-engine.ts` and `perception.ts`, if nothing live still needs them. Any that are still needed are named with their reader on #391.
-     - **A8/A12** (2 Oct): from Fri 9 Oct.
-   - New switches keep a flag for 7 days, then get the same treatment.
-7. **Order today:**
-   1. Answer the Codex attack on #545 (unanswered 140+ min).
-   2. Merge `main` into #550 and #551, which the watch's auto-merge refused with 405.
-   3. #537, then #554.
-   4. The wave-1 deletion PR.
-   5. A18 cases.
-   6. A4 voice.
-   7. D2b.
-8. **Housekeeping (done by the CTO, 6 Oct):** #510 is closed. The first successful backup since 29 Sep was 06:26 UTC today, after #544. Issues whose PRs merged are closed.
-
-## CURRENT ORDERS (CTO, 29 Sep, after the strategy decision). Read this first. Where anything below disagrees, THIS wins.
-
-1. **The promise (locked):** Coach K's four capabilities: **help me now**, **know my situation**, **help me follow through** (the commitment loop, spec only for now: #508), and **show it's working**. The surface is WhatsApp, with our own backend. The founder is absent from routine delivery. It's a non-clinical scope.
-2. **Order (founder sign-off 30 Sep on #511 and #512):** wave-1 watch until Thu 1 Oct 06:23 UTC, then #460's deletions → **the #511 decisions** (small PRs): one scheduled message a day; the Sunday shopping list only on request; retire the monthly narrative; freeze photo and video analysis beyond food (rows marked "not needed now" leave the order) → capability 2 = wave 2 (#455, then #466), then batch/late reports, steps and workouts → **capability 3, the commitment loop, per the approved spec (#512):** movement plus one food habit first, the follow-up replaces the evening message on due days, and one "you asked me to check in" template (the founder submits it) → harm and data-integrity fixes whenever found.
-3. **Deferred (don't build):** an app or member page, the Meta-direct migration, new payment rails, a second model provider, trainers or buddies, rows marked "not needed now".
-4. **No new spend (ORDERS §0c):** no paid gate. Switches go live via their Railway flag, are proven on real use, and their old code is deleted after 48 clean hours. Follow the STANDING COST RULES.
-5. **Attacks:** `attack:codex` and `@codex` only on `[harm]` and `switch` PRs. Answer every attack with `ANSWER`.
-6. **No stacked PRs (1 Oct).** Every PR is based on `main`; take the next row only after the previous one has merged to `main`. The watch never auto-merges a PR whose base isn't `main`. Never commit while a local test run is mutating files.
-7. **Reuse, don't rebuild; delete in the switch; one message per reply.** Every PR names its COVERAGE row, what it retires, and what testers will notice.
-7. **Capacity and continuity:** one session, short status comments, batched pushes. Never idle: re-read #391 and #280, or schedule a check-in. Blocked on the founder? Post `BLOCKED:` and keep working.
-
-## Standing orders (read first, every session)
-- **Costs: read `docs/COSTS.md` → STANDING COST RULES.** They bind every PR.
-- **The founder's Claude capacity is the scarcest resource (25 Sep: about half the week left). Spend it only on moving rows:**
-  - one builder session only (lanes 2 and 3 run *after* lane 1 in the same session, unless the founder opens more)
-  - status comments of 10 lines or fewer, with no long narration
-  - don't re-run full suites locally when CI will run them
-  - read only the files the row needs
-  - batch fixes into one push
-  - don't re-explain the plan back
-  - if a task can wait for CI, wait with a scheduled check-in, not by exploring
-- **Never go idle while there's work (25 Sep).** Nothing outside this session can wake you. The watch and the CTO can only write in GitHub. So before you ever end a turn:
-  1. Re-read the latest comments on #391 and the top of #280 (CTO orders and alerts land there).
-  2. If the queue has an item you can work, start it now.
-  3. If you're only waiting (CI, a merge, credits), **schedule your own check-in in 15-20 minutes**, and at that check-in repeat from step 1.
-
-  End a turn with nothing scheduled only when the queue is empty **and** nothing is pending.
-- **Two roles share this file.** If this session was started as the **attacker**, follow `docs/ATTACKER.md` only: never build, fix or merge. Otherwise you are the **builder**, and everything below applies. Since 25 Sep, **only `switch` and `[harm]` PRs need an attack** (done by the CTO, or Codex when it has capacity). Every other PR merges on green tests, the ratchet and, where labelled, the replay gate. Don't wait for attacks on them, and don't call @codex on them.
-- **The product is the goal (`docs/ORDERS.md` §0, founder 24 Sep night).**
-  - Pick work from `docs/COVERAGE.md`: live harm first, then the least complete row with the most tester impact.
-  - Every PR description carries `Coverage row:` and `Reuses:` lines.
-  - Before writing anything new, search the repo for code that already does the job, and finish or reuse it. Never start a foundation while one for the same job sits unwired.
-  - Answering attacks deeper and deeper in one spot is not progress. Map each finding to a row, and move the product forward across the map.
-- **When you're blocked on the founder** (a secret, an account, a decision), post a PR comment starting `BLOCKED:` with the exact action he must take. The watch puts it at the top of the status issue. Keep working on something else meanwhile.
-- **See a blind spot? File it.** Anything that could hurt the product or company and that nobody asked about gets an issue labelled `blind-spot`, one line of evidence, and the row it touches. That's part of your job, not a distraction from it.
-- **Before asking the founder anything, check `docs/SYSTEM.md` and the repo.** Asking him for something already recorded or findable is a failure. Add anything durable you learn to `docs/SYSTEM.md`.
-- `docs/ORDERS.md` is the plan. It overrides every other doc.
-- **The watch merges for you (24 Sep).** When a PR's checks are all green, the mouth ratchet passes, and its Codex attack is answered (or 45 minutes passed with no attack), `.github/workflows/cto-watch.yml` merges it within minutes of the tests finishing. Don't wait on it. Add the label `hold` to stop a PR auto-merging. Label any PR that moves real testers onto the new coach `switch`. **Ship as finished (26 Sep):** the switch is on for everyone and deletes the old code in the same PR, and it merges on a green replay gate plus the reach check. **Add the label `final`** once its other checks are green: only that run uses the strong (paid) judge, and the watch merges a switch only on a green gate run started after `final` (#467). There's no founder-only step and no waiting for an attack; the CTO attacks after merge. Its "what's new" note for testers is one dated line added to `WHATS_NEW` in `server/scheduler/jobs/evening.ts` in the same PR; that evening's message carries it (no extra message, no secret in GitHub).
-- **Don't call Codex on docs-only PRs** (status, queue, docs). The watch merges those without an attack. Codex's review capacity is limited; spend it on `[core]`, `[harm]` and `switch` PRs.
-- **Run three worktrees in parallel, all day:** **A** (attack follow-ups and security), **B1** (#270 gate, then #293 Coach Health) and **B2** (#271 client record, then #272 understanding and composer). File ownership rules in `docs/ORDERS.md` apply between them. Never let one lane wait on another.
-- **Test diet (24 Sep):** code the new core will replace gets a **minimal** failing-then-passing test, with no new red-on-revert harness. Heavy acceptances and revert harnesses are only for code that survives: plumbing, safety, billing, and the new core. For coaching behaviour, add a **gate case** (a journey in `docs/TESTER-EXPERIENCE.md`), not a handler acceptance. Script code is already 57k lines against 75k of server code.
-- **No new model calls outside the new core.** `model_call_sites` is now in the mouth ratchet.
-- **Keep PRs small** (under ~600 changed lines where possible), so a test run and an attack each take minutes, not hours.
-- **Reuse, don't rebuild; replace, don't add.** `docs/COMPONENTS.md` says what the new core calls as tools (food data, targets, day maths, programmes, vision, voice) and what each switch PR deletes. When you delete a file listed in `docs/delete-list.txt`, remove its line in the same PR.
-- **Lane B is the priority (CTO, 24 Sep).** Finish and merge the lane A PRs already open; start no new lane A work. All new effort goes to lane B in `docs/QUEUE.md`, in order. Old-pipeline bugs become gate cases for the new core, not new patterns.
-- **Builder lanes (25 Sep):** if you were started as "builder lane 2" or "builder lane 3", work only that lane's rows in `docs/ORDERS.md` (FULL PRODUCT, IN PARALLEL). Otherwise you are lane 1. No row is ever parked as "after launch".
-- **Your work queue is `docs/QUEUE.md`.** It has two lanes. If no other session is on lane B (no open or recent branch for #270), run lane B yourself in parallel, in a separate worktree or subagent, starting with #270. Nobody will tell you to; this line is the instruction. In each lane, take the first unchecked item, build it as one pull request, then take the next.
-- Every PR: open the description with "What testers will notice:". **Only `[harm]` and `switch` PRs** get the `attack:codex` label and a `@codex attack this PR per docs/ORDERS.md §6` comment with the head SHA.
-- **CI is free again (public repo).** GitHub runs the full suite, including the database suite, on every PR push. **Merge when GitHub checks are green**, attacks are answered under the merge standard, and the mouth ratchet passes. Batch fixes into one push anyway: every push restarts the ~47-minute run.
-- **Merge standard:** see `docs/ORDERS.md` §6. If a Codex finding is not worse than current `main`, open a follow-up issue labelled `harm` (or `core`), add it to the top of `docs/QUEUE.md`, reply `ANSWER: follow-up #N, not a regression against main`, and merge. After two attack rounds, merge with follow-ups.
-- If `main` has moved and your PR conflicts, rebase it first; that outranks everything except answering attacks.
-- **Priority order, checked before every new task:** (1) answer every open Codex attack on your PRs, (2) merge every PR whose attack is answered and whose tests pass, (3) only then start the next queue item. Nothing reaches testers until it merges, so an unanswered attack outranks new work.
-- **Never sit idle waiting for a review.** After opening a PR, start the next queue item on a new branch. Come back when Codex attacks.
-- Answer every Codex attack with a comment starting `ANSWER`: the fix commit, or why it doesn't apply.
-- Merge when tests pass (and the gate, once #270 exists) and the attack is answered. If Codex hasn't attacked within 45 minutes of your last push, you may merge; any later finding goes to the top of `docs/QUEUE.md`.
-- The CTO watch (`.github/workflows/cto-watch.yml`) comments on your PRs when something is missing. Treat those comments as orders.
-- After merging: tick the item in `docs/QUEUE.md` and append a line to `docs/STATUS.md`.
-
-## Git workflow
-- **Never push to `main`.** `main` deploys straight to production (Railway), so anything pushed there reaches testers with no checks.
-- Every change: create a branch from `main`, commit there, push the branch, and open a pull request.
-- One task per pull request. Keep them small.
-- Every pull request description states: what changed, why, how it was verified, and lines added / removed.
-- Do not merge your own pull request until the tests pass on it and the other builder has reviewed it.
-- Never write "fixed" or "done" in a commit or pull request unless a test shows it.
-- These rules override any older instruction in this repo that says otherwise.
-
-## Stack
-- TypeScript / Node.js / Express — deployed on Railway
-- PostgreSQL + Drizzle ORM
-- WhatsApp via Twilio (`\n\n---\n\n` splits into separate WA messages)
-- SMS fallback via `sendCriticalAlert()` — requires `TWILIO_SMS_NUMBER` env var
-
-## Key env vars (Railway)
-- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`
-- `TWILIO_SMS_NUMBER` — SMS fallback for critical payment alerts
-- `MEDIA_BASE_URL` — CDN root for exercise GIFs and portion images
-- `PAYFAST_MERCHANT_ID`, `APP_URL`
-- `PROACTIVE_PAUSED=true` — global killswitch for all proactive messages
-
-## GIF setup (pending human task)
-Set `MEDIA_BASE_URL` in Railway, then upload files to `MEDIA_BASE_URL/ex/<slug>.gif`.
-IMPORTANT final step: gifs only serve once each uploaded slug is added to
-`UPLOADED_GIF_SLUGS` in `server/exercise-media.ts` (tell Claude — 1-line change).
-Without it the code keeps using the safe fallback and uploads do nothing.
-Slugs: `squat`, `hip-thrust`, `leg-press`, `leg-curl`, `leg-extension`, `calf-raise`,
-`rdl`, `bulgarian-split-squat`, `chest-press`, `chest-fly`, `lat-pulldown`,
-`seated-row`, `face-pull`, `lateral-raise`, `shoulder-press`, `bicep-curl`,
-`tricep-pushdown`, `cable-kickback`, `push-up`, `plank`, `dead-bug`
-
-## Handler pipeline order
-Safety → Onboarding → POPIA → Subscription → Frustration → **Normalizer** → FoodLogMgmt →
-EarlyCommands → Media → Workout → Steps → Water → FoodContext → Progress →
-Misc → Lifecycle → GPT
-
-### Normalizer (front-door brain)
-`classifyIntent` (gpt-4o-mini, fired in background at message entry) classifies AND
-rewrites messy phrasing into the canonical forms the deterministic handlers expect —
-"I want to go into a building phase" → "change my goal to muscle gain". Applied in
-routes.ts before FoodLogMgmt. High-confidence action intents only; numbers in the
-canonical must exist in the original (hallucination brake); on timeout/error the
-original message proceeds unchanged. Killswitch: `NORMALIZER=off` in Railway.
-QUESTION classification also guards the step logger from eating questions.
-Voice transcripts get normalized too — media recursion re-enters handleMessage as text.
-
-## Never touch without full understanding
-- `server/coach-prompt.ts` — any change to food philosophy or coaching voice must preserve goal-aware logic (fat_loss gets portion context, muscle_gain gets encouragement)
-- `server/onboarding.ts` — completeOnboarding() is the first impression
-- Payment/billing flows in `server/routes/` and `server/scheduler/jobs/business.ts`
+## Working rhythm
+One builder session. Never idle while there's work: when waiting on CI, take the next tester-visible fix. When blocked on the founder, post `BLOCKED:` with the exact action he must take. If you're started as the attacker, follow `docs/ATTACKER.md` only. Client words and phone numbers never go into the public repo.

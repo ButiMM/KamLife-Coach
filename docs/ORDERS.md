@@ -1,3 +1,5 @@
+> **Frozen 7 Oct (founder + CTO, #391): not updated during the two-week freeze. Status lives on #391; the rules are the one page in `CLAUDE.md`.**
+
 # ORDERS — Coach K
 
 **Owner:** CTO (Claude, chat). **Version 3, 23 September 2026.** Incorporates the Grok review, the Claude Code audit (`AUDIT.md`) and the outgoing CTO's handover.

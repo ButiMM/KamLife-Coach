@@ -1,3 +1,5 @@
+> **Frozen 7 Oct (founder + CTO, #391): not updated during the two-week freeze. Status lives on #391; the rules are the one page in `CLAUDE.md`.**
+
 # Status log
 
 One line per merged PR: `HH:MM SAST · agent · PR # · what changed · gate before → after · +lines / −lines`.
