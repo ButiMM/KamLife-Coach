@@ -12,7 +12,7 @@ Grok is a different AI family from the builder (Claude), the attacker session (C
 
 Market and pricing questions belong to the market room (`docs/MARKET-ROOM.md`), not here.
 
-**Rhythm: two pastes a day.**
+**Rhythm: two pastes a day, plus Prompt 3 (the whole-product attack) every Monday.**
 
 | When | Prompt | Purpose |
 |---|---|---|
@@ -53,3 +53,30 @@ If Grok has scheduled tasks, set both up there, so the only manual step is the p
 > 4. Do the gate results on the PR meet the switch rule in `docs/ORDERS.md`: 5+ cases per row, the new coach ahead on the 3-run average, zero hard failures, and the held-out set included?
 > 5. What would a real South African tester send, for these rows, that no case covers?
 > 6. Verdict: **merge** / **merge after these fixes** / **don't merge**, with the reasons.
+
+---
+
+## Prompt 3: the whole-product attack (founder's call, 6 Oct). Run it once now, then every Monday. Prompts 1 and 2 stay daily.
+
+> You are the independent auditor of https://github.com/ButiMM/KamLife-Coach, the `main` branch as it is now. KamLife's Coach K is a WhatsApp fat-loss coach for South Africans (R199–R250/month, non-clinical, no app). Production runs on Railway with Postgres, Twilio WhatsApp, OpenAI and PayFast. A new coaching core (`server/core/`) is replacing an old pipeline, row by row (`docs/COVERAGE.md`). You're a different AI family from the builder. **Your job is to find what will stop this from becoming a product people pay for and keep, across the whole system, not one PR.** Don't propose a rewrite. Every finding needs evidence: file and line, issue or PR, or a numbered reproduction. No evidence, no finding.
+>
+> Read first: `docs/TESTER-EXPERIENCE.md`, `docs/COVERAGE.md`, `docs/ORDERS.md`, `CLAUDE.md` (top blocks), `docs/COMPONENTS.md`, `docs/delete-list.txt`, `docs/RISKS.md`, `docs/COSTS.md`, `docs/SYSTEM.md`, `docs/MARKET-ROOM.md`, and issue #280.
+>
+> Audit all twelve. For each, give a verdict (**sound / weak / broken**) and the worst finding:
+> 1. **Architecture.** Is there truly one path from inbound message to reply? Count the doors where old code can still answer. Name every place two components decide the same thing (two memories, two senders, two target writers). Is `server/core/` actually thin, or is it re-growing the old pipeline?
+> 2. **Memory and truth.** Can Coach K state a fact the client never said? Can a correction be lost? Trace one fact from inbound to the client record and back into a reply.
+> 3. **Coaching quality.** Using real South African messages (code-switching, voice transcripts, shift work, takeaways, taxi-rank food, braai weekends), show 5 exchanges where the reply would be wrong, generic, repetitive or preachy, and the line that causes each.
+> 4. **Safety.** Crisis, pregnancy, eating disorders, minors, medication, opt-out. Is every one enforced in code before any model call, and on every outbound path, scheduled sends included?
+> 5. **Proactive messaging.** Every scheduled job: could a client get two messages in a day, a message after cancelling, or a message outside WhatsApp's 24-hour window without an approved template?
+> 6. **Money.** Signup → pay → renew → failed charge → cancel → 14-day refund, end to end. Any path that charges wrongly, keeps access after cancelling, or cuts off a payer? Where does the price (R199–R250) live, and does any old R149 survive in code or copy?
+> 7. **Cost per client.** Count model calls and WhatsApp messages per typical day for an active client. Name any path that multiplies them. Is the spend cap enforced on every model call?
+> 8. **Infrastructure and operations.** Deploys, migrations, backups (restore tested?), health checks, alerting to the founder, secrets handling, rate limits, what happens when OpenAI or Twilio is down. What breaks at 100 clients that works at 10?
+> 9. **Security and POPIA.** Webhook authentication, admin routes, data stored about health, retention, deletion that actually deletes (including backups), anything that could leak one client's data to another.
+> 10. **Quality system.** Do the tests, gate cases, ratchet and attacks actually catch regressions? Name a class of bug that could ship today with every check green. Which tests are dead weight?
+> 11. **Size and deletion.** Server line count against the 64,500 checkpoint, and what's still alive on the delete list. Which 3 deletions would remove the most risk for the least work?
+> 12. **Launch readiness.** If 50 paying strangers joined on Monday, what would fail first, in what order?
+>
+> Finish with:
+> - **Top 10 findings, ranked by harm to a paying client.** Each one gets severity (P0 kills trust or money now / P1 hurts this month / P2 later), evidence, the smallest fix, and the `COVERAGE.md` row it belongs to.
+> - **The 5 things that would move the project forward most this week**, in order, within the current plan.
+> - **What's genuinely good** (one short list), so it isn't broken by mistake.
