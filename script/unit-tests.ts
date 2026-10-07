@@ -1467,6 +1467,8 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const { isMealDateMove } = await import("../server/food-identity-correction");
     const { isRetroactiveMeal, parseMealDate } = await import("../server/utils");
     const move = (s: string) => isMealDateMove(s, isRetroactiveMeal(s));
+    assert.equal(move("sunday wasn't toast, it was rice"), false, "#614: a food after 'it was' corrects the meal, it does not move it");
+    assert.equal(move("actually that was sunday"), true, "#614: a day after 'that was' still moves it");
     for (const s of ["actually that was yesterday", "no that was yesterday", "actually, that was last night",
                      "move that to yesterday", "that was yesterday", "sorry that was last night"]) {
       assert.ok(move(s), `should be a move: "${s}"`);

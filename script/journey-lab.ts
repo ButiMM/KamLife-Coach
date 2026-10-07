@@ -291,8 +291,10 @@ await journey("2 · MULTI-DAY / CORRECTION — catch up three days, correct the 
   const u = await freshUser("multiday");
   const by = await bystander("multiday");
 
+  // Three PAST days by name, on any date: a fixed "Monday…Wednesday" includes today early in the week (#614).
+  const DAY = (back: number) => new Intl.DateTimeFormat("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" }).format(new Date(Date.now() - back * 86_400_000));
   const t1 = await say(u.id, u.phone,
-    "Monday I had eggs and toast. Tuesday I had rice and chicken. Wednesday I had pap and livers.");
+    `${DAY(3)} I had eggs and toast. ${DAY(2)} I had rice and chicken. ${DAY(1)} I had pap and livers.`);
   const before = await meals(u.id);
   ok(before.length === 3, `three days produced three rows (${before.length})`, JSON.stringify(before.map(dayOf)));
   const days = before.map(dayOf);
@@ -315,7 +317,7 @@ await journey("2 · MULTI-DAY / CORRECTION — catch up three days, correct the 
   const wedBefore = byDay(before, wed).map(snapMeal).join("|");
   const tueBefore = byDay(before, tue)[0];
 
-  const t2 = await say(u.id, u.phone, "Tuesday wasn't rice, it was pap.");
+  const t2 = await say(u.id, u.phone, `${DAY(2)} wasn't rice, it was pap.`);
   const after = await meals(u.id);
   ok(after.length === 3, `the correction added no row (${after.length})`);
   ok(byDay(after, mon).map(snapMeal).join("|") === monBefore, `the day BEFORE the target is byte-identical`);

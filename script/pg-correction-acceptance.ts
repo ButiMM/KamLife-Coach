@@ -50,12 +50,15 @@ const snap = (r: any) => JSON.stringify({ id: r.id, at: new Date(r.logged_at).to
 
 const say = async (m: string) => String(await handleMessage(PHONE, m).catch((e: any) => `THREW ${e?.message}`) ?? "");
 
-const r1 = await say("Monday I had eggs and toast. Tuesday I had rice and chicken. Wednesday I had pap and livers.");
+// Three PAST days, named the way a client would on any date (a fixed "Monday…Wednesday" catch-up includes today on Mon–Wed, #614).
+const DAY = (back: number) => new Intl.DateTimeFormat("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" }).format(new Date(Date.now() - back * 86_400_000));
+const [A, B, C] = [DAY(3), DAY(2), DAY(1)], [A3, B3, C3] = [A, B, C].map(d => d.slice(0, 3));
+const r1 = await say(`${A} I had eggs and toast. ${B} I had rice and chicken. ${C} I had pap and livers.`);
 REAL(`REPLY-1 (${r1.split("\n\n---\n\n").length} WA msg) ${JSON.stringify(r1.slice(0,180))}`);
 const before = await rows(); show("BEFORE", before);
 const beforeSnap = new Map(before.map((r: any) => [new Date(r.logged_at).toDateString(), snap(r)]));
 
-const r2 = await say("Tuesday wasn't rice, it was pap.");
+const r2 = await say(`${B} wasn't rice, it was pap.`);
 REAL(`\nREPLY-2 (${r2.split("\n\n---\n\n").length} WA msg) ${JSON.stringify(r2.slice(0,180))}`);
 const after = await rows(); show("AFTER", after);
 
@@ -65,12 +68,12 @@ let failed = 0;
 const chk = (ok: boolean, msg: string) => { if (!ok) failed++; REAL(`  ${ok ? "PASS" : "FAIL"}  ${msg}`); };
 chk(before.length === 3, `three rows before (${before.length})`);
 chk(after.length === 3, `no duplicate row after correction (${after.length})`);
-for (const d of ["Mon", "Wed"]) {
+for (const d of [A3, C3]) {
   const b = beforeSnap.get(day(before, d)[0] ? new Date(day(before,d)[0].logged_at).toDateString() : "");
   const a = day(after, d)[0];
   chk(!!a && snap(a) === b, `${d} is byte-identical to its pre-correction snapshot`);
 }
-const tueB = day(before, "Tue")[0], tueA = day(after, "Tue")[0];
+const tueB = day(before, B3)[0], tueA = day(after, B3)[0];
 chk(!!tueA && tueB && tueA.id === tueB.id, `the SAME Tuesday row was updated (not replaced)`);
 chk(!!tueA && !names(tueA).some((n: string) => /rice/i.test(n)), `Tuesday no longer contains the denied rice`);
 chk(!!tueA && names(tueA).some((n: string) => /pap/i.test(n)), `Tuesday now contains pap`);
@@ -87,11 +90,11 @@ chk(JSON.stringify(await rows()) === beforeNoise, `a non-correction "wasn't" sen
 
 // The same food on an adjacent day must not let the newest chronological row win. Wednesday
 // also holds pap; correcting MONDAY's toast must move Monday, not Wednesday.
-const monBefore = day(await rows(), "Mon")[0];
-const wedBefore = snap(day(await rows(), "Wed")[0]);
-await say("Monday wasn't toast, it was rice.");
+const monBefore = day(await rows(), A3)[0];
+const wedBefore = snap(day(await rows(), C3)[0]);
+await say(`${A} wasn't toast, it was rice.`);
 const afterAdj = await rows();
-const monAfter = day(afterAdj, "Mon")[0], wedAfter = day(afterAdj, "Wed")[0];
+const monAfter = day(afterAdj, A3)[0], wedAfter = day(afterAdj, C3)[0];
 chk(afterAdj.length === 3, `adjacent-day correction added no row (${afterAdj.length})`);
 chk(!!monAfter && monAfter.id === monBefore.id && monAfter.corrected === true, `Monday's own row was the one updated`);
 chk(snap(wedAfter) === wedBefore, `Wednesday, which shares a food name, is untouched`);
