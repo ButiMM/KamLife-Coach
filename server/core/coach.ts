@@ -240,7 +240,7 @@ async function saveReminders(phone: string, message: string, asks: Reminder[], c
 }
 
 /** What the executor can write from the new coach's reading. LOG_WORKOUT has no executor tool yet (A8). */
-const LOGS = new Set(["LOG_MEAL", "LOG_STEPS", "LOG_WEIGHT", "LOG_WATER"]);
+const LOGS = new Set(["LOG_MEAL", "LOG_STEPS", "LOG_WEIGHT", "LOG_WATER"]), READS = new Set(["SHOW_WORKOUT"]);
 
 /**
  * #586: the new coach's validated logs through executeAction, the tool the meaning engine used for its
@@ -261,6 +261,9 @@ async function logThroughExecutor(phone: string, message: string, actions: Coach
     });
     await logChat(user.id, message, `${describeAction(action)} → ${exec.performed ? "performed" : exec.confirmed ? "confirm" : exec.skipped ? "skip" : exec.error ? "error" : "noop"}`, "ENGINE_ACTION").catch(() => {});
     if (exec.unwritten && exec.reply && !out.confirm) out.confirm = exec.reply; // the owner's own question: nothing is claimed
+    // A READ ("what's my workout today?") is the owner's answer, shown as it is: it was dropped, and
+    // the model answered without the programme (founder's Monday plan, item 4).
+    if (!exec.performed && !exec.confirmed && !exec.unwritten && !exec.skipped && !exec.error && exec.reply && READS.has(action.type)) out.reply = [out.reply, exec.reply].filter(Boolean).join("\n\n");
     if (exec.confirmed && !out.confirm) {
       setPendingConfirm(user.id, action);
       await db.update(users).set({ awaitingInputType: "engine_confirm" }).where(eq(users.id, user.id)).catch(() => {});
@@ -622,6 +625,7 @@ export async function frontTurn(p: { phone: string; message: string; user: any; 
     if (read.u.scope === "out") return { reply: await guard.declineOutOfScope(user.id, message, guard.scopeRedirect(p.ongoing), p.evidence), src: "scope", wrote: false };
     frontReads.set(phone, { message, u: read.u });
     const done = await runActions(p, read.u, openai);
+    if (done?.src === "core front: read") p.evidence({ conversationalOnly: true }); // the programme's own text, not a claim of a write
     if (done?.reply) return done;
     const reply = (await compose(openai, pre, message, read.u))?.trim();
     if (!reply) return unanswered;
@@ -655,17 +659,32 @@ async function runActions(p: { phone: string; message: string; user: any; source
     const r = await (await import("../handlers/food-log-mgmt")).handleFoodLogMgmt(user, m);
     return r ? { reply: r, src: "core front: correction", wrote: true } : null;
   }
-  if (one?.type === "LOG_WORKOUT") {
+  // The workout log takes the client's words; with a meal in the same message (#609) only the session's own words.
+  const workoutTool = async (w: Extract<CoachAction, { type: "LOG_WORKOUT" }>, whole: boolean) => {
     const { handleWorkoutCommands } = await import("../handlers/workout");
-    const said = `I did ${one.what || "my workout"}${one.retro ? ` ${one.retro}` : ""}`;
-    const r = await handleWorkoutCommands({ phone, message, m, user, sourceMessageId: p.sourceMessageId })
+    const said = `I did ${w.what || "my workout"}${w.retro ? ` ${w.retro}` : ""}`;
+    const r = (whole ? await handleWorkoutCommands({ phone, message, m, user, sourceMessageId: p.sourceMessageId }) : null)
       ?? await handleWorkoutCommands({ phone, message: said, m: said.toLowerCase(), user, sourceMessageId: p.sourceMessageId });
     if (!r) return null;
     // The receipt's closing question ("How did that session feel?" + buttons) is the progression flow's: it stays,
     // after the new coach's words about the session (#597 review: the reply was still the old tool's).
     const parts = r.split("\n\n"), ask = parts.length > 1 && parts[parts.length - 1].includes("?") ? parts.pop()! : "";
-    const words = await afterLogReply(phone, message, parts.join("\n\n"), "workout");
-    return { reply: words ? [words, ask].filter(Boolean).join("\n\n") : r, src: "core front: workout", wrote: true };
+    return { r, receipt: parts.join("\n\n"), ask };
+  };
+  if (one?.type === "LOG_WORKOUT") {
+    const w = await workoutTool(one, true);
+    if (!w) return null;
+    const words = await afterLogReply(phone, message, w.receipt, "workout");
+    return { reply: words ? [words, w.ask].filter(Boolean).join("\n\n") : w.r, src: "core front: workout", wrote: true };
+  }
+  const session = acts.filter(a => a.type === "LOG_WORKOUT"), logs = acts.filter(a => LOGS.has(a.type));
+  if (session.length === 1 && logs.length === acts.length - 1) { // "pap and wors for lunch and a 30 min home workout" (#609)
+    const logged = await logThroughExecutor(phone, message, logs, 1 - (u.uncertainty || 0), p.sourceMessageId);
+    const w = await workoutTool(session[0] as Extract<CoachAction, { type: "LOG_WORKOUT" }>, false);
+    if (!logged.performed && !w) return logged.confirm ? { reply: logged.confirm, src: "core front: confirm", wrote: false } : null;
+    const receipt = [(logged.card + logged.reply).trim(), w?.receipt].filter(Boolean).join("\n\n");
+    const words = await afterLogReply(phone, message, receipt, logged.performed ? "food" : "workout", logged.user);
+    return { reply: [words || receipt, logged.confirm || w?.ask].filter(Boolean).join("\n\n"), src: "core front: log + workout", wrote: true };
   }
   if (one?.type === "SET_GOAL") {
     const said = `change my goal to ${one.goal.replace("_", " ")}`;
@@ -682,7 +701,7 @@ async function runActions(p: { phone: string; message: string; user: any; source
   const logged = await logThroughExecutor(phone, message, acts, confidence, p.sourceMessageId);
   if (logged.confirm) return { reply: logged.card + [logged.reply, logged.confirm].filter(Boolean).join("\n\n"), src: "core front: confirm", wrote: false };
   const receipt = (logged.card + logged.reply).trim();
-  if (!logged.performed) return receipt ? { reply: receipt, src: "core front: tool", wrote: false } : null;
+  if (!logged.performed) return receipt ? { reply: receipt, src: "core front: read", wrote: false } : null;
   const kind = acts.every(a => a.type === "LOG_STEPS") ? "steps" : acts.some(a => a.type === "LOG_MEAL") ? "food" : null;
   const words = kind ? await afterLogReply(phone, message, receipt, kind, logged.user) : null;
   return { reply: words || receipt, src: "core front", wrote: acts.some(a => writesState(a.type)) };

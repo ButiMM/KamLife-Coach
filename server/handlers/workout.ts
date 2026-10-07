@@ -68,7 +68,9 @@ export async function resumeWorkoutFeedbackExpectation(ctx: {
   if (!isWorkoutFeedbackExpectation(marker)) return null;
 
   const expectation = readWorkoutFeedbackExpectation(marker);
-  const feedbackKind = expectation ? classifyWorkoutFeedbackAnswer(message) : null;
+  // The buttons' text fallback numbers them (*1.* Too easy, *2.* Just right, *3.* Too hard), so a number answers too.
+  const numbered = ({ "1": "too_easy", "2": "just_right", "3": "too_hard" } as const)[message.trim().replace(/[.)️⃣\u20e3]/g, "") as "1" | "2" | "3"];
+  const feedbackKind = expectation ? numbered ?? classifyWorkoutFeedbackAnswer(message) : null;
 
   // Expiry and a clear subject change both release the one-slot expectation. Do not make a later
   // "too hard" answer a session question the client has already moved on from.
