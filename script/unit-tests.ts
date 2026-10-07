@@ -7115,6 +7115,12 @@ test("renderAchievementCard: a real PNG, and a wide figure still fits the ring",
 
 // NUTRITION GUARDRAILS (2026-07-22, founder: "3 energy drinks and no food isn't 'good' — lead them
 // to the right path per health standards, without shaming"). Cross-day, standards-grounded nudges.
+test("#597 review: a takeaway nudge fires on the takeaway that crosses the line, not on the home plate after it", async () => {
+  const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
+  const three = ["kota", "vetkoek with mince", "KFC 2 pieces and chips"];
+  assert.match(assessNutritionStandards({ todayFoods: three, goalType: "maintain" }) || "", /takeaways/i, "the third takeaway crosses the line");
+  assert.equal(assessNutritionStandards({ todayFoods: [...three, "pap and meat"], goalType: "maintain" }), null, "pap and meat after it is not a takeaway");
+});
 test("nutrition-guardrails: energy drinks with no food nudge toward fuel + water", async () => {
   const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
   const n = assessNutritionStandards({ todayFoods: ["Monster Zero", "Monster Zero"], goalType: "fat_loss" });
@@ -7135,7 +7141,7 @@ test("nutrition-guardrails: a sugar-FREE drink is not treated as added sugar", a
 });
 test("nutrition-guardrails: two full-sugar drinks nudge toward the zero version", async () => {
   const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
-  const n = assessNutritionStandards({ todayFoods: ["Coke 500ml", "Fanta", "chicken and rice"], goalType: "fat_loss" });
+  const n = assessNutritionStandards({ todayFoods: ["chicken and rice", "Coke 500ml", "Fanta"], goalType: "fat_loss" });
   assert.ok(n && /sugar|zero|sugar-free/i.test(n));
 });
 test("nutrition-guardrails: three fried/takeaway meals get a no-shame balance nudge", async () => {
@@ -7150,7 +7156,7 @@ test("nutrition-guardrails: alcohol on a cut gets an honest, non-shaming note", 
 });
 test("nutrition-guardrails: sweets stacking up gets a balanced 'one is fine, skip the next' nudge", async () => {
   const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
-  const n = assessNutritionStandards({ todayFoods: ["chocolate", "cake", "ice cream", "chicken and rice"], goalType: "general" });
+  const n = assessNutritionStandards({ todayFoods: ["chicken and rice", "chocolate", "cake", "ice cream"], goalType: "general" });
   assert.ok(n && /one now and then|balance|treat/i.test(n), "kind, non-shaming");
   // whole fruit is real food, never flagged as a sweet
   assert.strictEqual(assessNutritionStandards({ todayFoods: ["apple", "banana", "orange"], goalType: "general" }), null);

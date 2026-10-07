@@ -661,7 +661,11 @@ async function runActions(p: { phone: string; message: string; user: any; source
     const r = await handleWorkoutCommands({ phone, message, m, user, sourceMessageId: p.sourceMessageId })
       ?? await handleWorkoutCommands({ phone, message: said, m: said.toLowerCase(), user, sourceMessageId: p.sourceMessageId });
     if (!r) return null;
-    return { reply: (await afterLogReply(phone, message, r, "workout")) || r, src: "core front: workout", wrote: true };
+    // The receipt's closing question ("How did that session feel?" + buttons) is the progression flow's: it stays,
+    // after the new coach's words about the session (#597 review: the reply was still the old tool's).
+    const parts = r.split("\n\n"), ask = parts.length > 1 && parts[parts.length - 1].includes("?") ? parts.pop()! : "";
+    const words = await afterLogReply(phone, message, parts.join("\n\n"), "workout");
+    return { reply: words ? [words, ask].filter(Boolean).join("\n\n") : r, src: "core front: workout", wrote: true };
   }
   if (one?.type === "SET_GOAL") {
     const said = `change my goal to ${one.goal.replace("_", " ")}`;
