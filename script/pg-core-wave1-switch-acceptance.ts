@@ -28,6 +28,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
     const log586 = /kota from the spaza/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", needsConfirmation: false }] : /ndidle ipapa/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and meat", needsConfirmation: false }]
       : /recalculate everything|remove my last meal/i.test(msg) ? [{ type: "REMOVE_LAST_MEAL" }]
       : msg === LIST ? [{ type: "LOG_MEAL", foodText: "pap and wors", retro: DOW(2), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "eggs and toast", retro: DOW(1), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "chicken and rice", retro: DOW(0), needsConfirmation: false }]
+      : /^I have diabetes\. Had a kota for lunch$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", meal: "lunch", needsConfirmation: false }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -126,6 +127,10 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   chk(await count(TESTER) === tb + 1 && ta.includes(NEW), "a tester's lunch is written once and they hear the new coach too", ta.slice(0, 200));
   const sa = await say(TESTER, "I walked 7500 steps today"), st = (await pool.query("SELECT MAX(s.steps)::int n FROM step_logs s JOIN users u ON u.id = s.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n; chk(st === 7500 && sa.includes(NEW), "A5: a tester's steps are written by the step owner and they hear the new coach", `${st} | ${sa.slice(0, 200)}`);
   const wa = await say(TESTER, "I did a 30 minute HIIT class"), wn = (await pool.query("SELECT COUNT(*)::int n FROM workout_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n; chk(wn === 1 && wa.includes(NEW), "A8: a tester's class is written by the workout owner and they hear the new coach", `${wn} | ${wa.slice(0, 200)}`);
+  const db0 = await count(TESTER), dk = await say(TESTER, "I have diabetes. Had a kota for lunch");
+  chk(await count(TESTER) === db0 + 1 && dk.includes(NEW), "a condition mentioned with a meal: the meal is written and the new coach answers (#610)", dk.slice(0, 200));
+  const dw = await say(TESTER, "I'm diabetic");
+  chk(/lifestyle coach, not a medical service/i.test(dw), "control: the disclosure on its own still gets the non-clinical welcome", dw.slice(0, 200));
   const ot = await say(TESTER, "Am I on track?"); await say(TESTER, "change my goal to muscle gain"); const gy = await say(TESTER, "yes"), g = (await pool.query("SELECT goal_type FROM users WHERE phone_number = $1", [TESTER])).rows[0].goal_type;
   chk(ot.includes(NEW) && g === "muscle_gain" && gy.includes(NEW), "A12: \"am I on track?\" and a confirmed goal change are the new coach's words (the goal still written)", `${g} | ${ot.slice(0, 120)} | ${gy.slice(0, 120)}`);
   process.env.CORE_WAVE2 = "off";

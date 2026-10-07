@@ -70,6 +70,7 @@ const groups: Record<string, string[]> = {
     "just finished 2 pieces of KFC and a small chips",
     "no it was chicken not beef",
     "what did I eat today?",
+    "I have diabetes. Had a kota for lunch",
   ],
 };
 const u1 = await freshUser();

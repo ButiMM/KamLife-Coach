@@ -27,6 +27,12 @@ export function mentionsConditionOrMedication(message: string): boolean {
   return MEDICATION_SIGNAL.test(m) || CHRONIC_CONDITION_SIGNAL.test(m);
 }
 
+/** Only the disclosure, nothing else to answer or log? "I have diabetes. Had a kota for lunch" is not (#610). */
+export function conditionIsWholeMessage(message: string): boolean {
+  const rest = (message || "").replace(MEDICATION_SIGNAL, " ").replace(CHRONIC_CONDITION_SIGNAL, " ");
+  return rest.split(" ").filter(w => w.length > 1).length < 4;
+}
+
 /**
  * The reply: welcome first, boundary second, back to coaching third. It never names their
  * condition back at them, never comments on medicine, and never claims anything is "safe for"

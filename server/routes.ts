@@ -57,7 +57,7 @@ import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity, normalizerLive } from "./normalizer-fidelity";
 import { carriesFeelingClause } from "./unlogged-notice";import { recordDailyConstraint } from "./held-constraints";import { looksLikeDirectionRequest } from "./daily-direction";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, isMultiPartAsk, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, reportedInSomeClause, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
-import { conditionWelcome, mentionsConditionOrMedication } from "./condition-welcome";
+import { conditionWelcome, mentionsConditionOrMedication, conditionIsWholeMessage } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
 import { reportsHunger } from "./unlogged-notice";
 import { PRICING, GUARANTEE_PHRASE } from "../shared/pricing";   // commercial terms have one owner
@@ -382,7 +382,8 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // ---- MEDICAL CONDITION / MEDICATION DISCLAIMER ----
   // When a client mentions medication, a new diagnosis, or asks for condition-specific advice —
   // return a clear disclaimer and redirect. Still logs (triggers escalation → coach alert).
-  if (mentionsConditionOrMedication(m)) {
+  // With the front door on, a condition mentioned alongside a log or a question goes on, and the log is written (#610).
+  if (mentionsConditionOrMedication(m) && (conditionIsWholeMessage(m) || !(await import("./core/coach")).coreFront())) {
     const welcome = conditionWelcome(user.name?.split(" ")[0] || "");
     await logChat(user.id, message, welcome, "MEDICAL_DISCLAIMER");
     return welcome;
