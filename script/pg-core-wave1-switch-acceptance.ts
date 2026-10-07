@@ -29,6 +29,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /recalculate everything|remove my last meal/i.test(msg) ? [{ type: "REMOVE_LAST_MEAL" }]
       : msg === LIST ? [{ type: "LOG_MEAL", foodText: "pap and wors", retro: DOW(2), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "eggs and toast", retro: DOW(1), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "chicken and rice", retro: DOW(0), needsConfirmation: false }]
       : /^two meals, one card$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "rice and chicken", meal: "lunch", needsConfirmation: false }, { type: "LOG_MEAL", foodText: "samp and beans", meal: "dinner", needsConfirmation: false }]
+      : /^Had pap and wors for lunch and did a 30 min home workout$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", needsConfirmation: false }, { type: "LOG_WORKOUT", what: "a 30 min home workout" }]
+      : /^what'?s my workout today\??$/i.test(msg) ? [{ type: "SHOW_WORKOUT" }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -127,6 +129,13 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   chk(await count(TESTER) === tb + 1 && ta.includes(NEW), "a tester's lunch is written once and they hear the new coach too", ta.slice(0, 200));
   const sa = await say(TESTER, "I walked 7500 steps today"), st = (await pool.query("SELECT MAX(s.steps)::int n FROM step_logs s JOIN users u ON u.id = s.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n; chk(st === 7500 && sa.includes(NEW), "A5: a tester's steps are written by the step owner and they hear the new coach", `${st} | ${sa.slice(0, 200)}`);
   const wa = await say(TESTER, "I did a 30 minute HIIT class"), wn = (await pool.query("SELECT COUNT(*)::int n FROM workout_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n; chk(wn === 1 && wa.includes(NEW), "A8: a tester's class is written by the workout owner and they hear the new coach", `${wn} | ${wa.slice(0, 200)}`);
+  await pool.query("DELETE FROM workout_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [TESTER]);
+  const mb = await count(TESTER), both = await say(TESTER, "Had pap and wors for lunch and did a 30 min home workout"), wb = (await pool.query("SELECT COUNT(*)::int n FROM workout_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n;
+  chk(await count(TESTER) === mb + 1 && wb === 1 && both.includes(NEW), "a meal and a workout in one message are both written, in one reply (#609)", `${wb} | ${both.slice(0, 200)}`);
+  const f2 = await say(TESTER, "2");
+  chk(/zone|keep these weights/i.test(f2), "\"2\" answers the numbered \"How did that session feel?\" as Just right (founder's Monday plan, item 4)", f2.slice(0, 200));
+  const sw = await say(TESTER, "what's my workout today?");
+  chk(/✅|Warm-up/i.test(sw) && !sw.includes(NEW) && !/haven't written/i.test(sw), "\"what's my workout today?\" is the programme's answer (here: today's session is done), not the model's guess (item 4)", sw.slice(0, 200));
   const ot = await say(TESTER, "Am I on track?"); await say(TESTER, "change my goal to muscle gain"); const gy = await say(TESTER, "yes"), g = (await pool.query("SELECT goal_type FROM users WHERE phone_number = $1", [TESTER])).rows[0].goal_type;
   chk(ot.includes(NEW) && g === "muscle_gain" && gy.includes(NEW), "A12: \"am I on track?\" and a confirmed goal change are the new coach's words (the goal still written)", `${g} | ${ot.slice(0, 120)} | ${gy.slice(0, 120)}`);
   process.env.CORE_WAVE2 = "off";
