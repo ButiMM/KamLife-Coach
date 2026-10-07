@@ -1171,8 +1171,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // CORE_WAVE2=off is the rollback. The health-standard guardrail stays (#550 attack @ 48f845c).
       const photoReceipt = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}`;
       const guard = photoCommit?.ok && !photoCommit.wasDup ? await nutritionGuardrailNudge(user) : "";
-      // THE MEAL CARD, as a typed meal gets it (photos lost theirs on 5 Aug with the daily-total line it hung on; founder, 7 Oct).
-      const itemsLine = visionReply.split("\n").find(l => l.trim().toUpperCase().startsWith("ITEMS:"))?.trim().slice(6).trim();
+      const itemsLine = /* THE MEAL CARD, as a typed meal gets it (lost 5 Aug; founder, 7 Oct) */ visionReply.split("\n").find(l => l.trim().toUpperCase().startsWith("ITEMS:"))?.trim().slice(6).trim();
       const cardName = (itemsLine || photoMeal.items.map(i => i.name).join(", ") || visionDisplay.split("\n").find(l => l.trim().length > 3) || "Meal").replaceAll("*", "").replaceAll("_", "").trim().slice(0, 40);
       const cardDue = photoCommit?.ok && !photoCommit.wasDup && cardWillAttach(user, photoMeal.kcalInt, !!(process.env.APP_URL || process.env.APP_BASE_URL));
       const card = cardDue ? await (await import("../macro-card-attach")).macroCardMarker({ user, mealName: cardName, mealProtein: photoMeal.proteinInt, forDate: photoIsRetro ? photoLoggedAt : undefined }) : "";
