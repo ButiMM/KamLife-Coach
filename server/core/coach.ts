@@ -219,6 +219,26 @@ async function openaiClient(): Promise<OpenAI> {
   return client;
 }
 
+type Reminder = { type: "SET_REMINDER"; body: string; when: string };
+/** A14: reminders in their own words, each saved by the proven reminder command, which confirms the time. */
+async function saveReminders(phone: string, message: string, asks: Reminder[], confidence: number): Promise<string | null> {
+  const [user] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+  if (!user) return null;
+  const { handleReminderCommand } = await import("../handlers/reminders-handler");
+  const { shouldAutoExecute } = await import("../understanding/actions");
+  const sure = asks.every(a => shouldAutoExecute(a as any, confidence));
+  const replies: string[] = [];
+  for (const a of sure ? asks : asks.slice(0, 1)) {
+    const synth = `remind me to ${a.body}${sure ? ` ${a.when}` : ""}`.replace(/\s+/g, " ").trim();
+    const r = await handleReminderCommand({ phone, message: synth, m: synth.toLowerCase(), user, said: message, noLog: asks.length > 1 });
+    if (r) replies.push(r);
+  }
+  const reply = replies.join("\n\n");
+  // Several reminders, one message: one row in the chat record, holding what they actually got (#537).
+  if (asks.length > 1 && reply) await (await import("../handlers/chat-log")).logChat(user.id, message, reply, "REMINDER_SET").catch(() => {});
+  return reply || null;
+}
+
 /** What the executor can write from the new coach's reading. LOG_WORKOUT has no executor tool yet (A8). */
 const LOGS = new Set(["LOG_MEAL", "LOG_STEPS", "LOG_WEIGHT", "LOG_WATER"]);
 
@@ -275,25 +295,7 @@ export async function answerLive(phone: string, message: string, opts: { final?:
   // A14: reminders asked for in their own words ("nudge me before gym on Thursday") are saved by the
   // proven reminder command, which confirms the exact fire time; every one of them, never promised
   // without a row. Unsure of the time (the existing confidence gate), it asks rather than guesses.
-  const asks = writes.length && writes.every(a => a.type === "SET_REMINDER") ? writes as Array<{ type: "SET_REMINDER"; body: string; when: string }> : [];
-  if (asks.length) {
-    const [user] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    if (!user) return null;
-    const { handleReminderCommand } = await import("../handlers/reminders-handler");
-    const { shouldAutoExecute } = await import("../understanding/actions");
-    const confidence = 1 - (read.u.uncertainty || 0);
-    const sure = asks.every(a => shouldAutoExecute(a as any, confidence));
-    const replies: string[] = [];
-    for (const a of sure ? asks : asks.slice(0, 1)) {
-      const synth = `remind me to ${a.body}${sure ? ` ${a.when}` : ""}`.replace(/\s+/g, " ").trim();
-      const r = await handleReminderCommand({ phone, message: synth, m: synth.toLowerCase(), user, said: message, noLog: asks.length > 1 });
-      if (r) replies.push(r);
-    }
-    const reply = replies.join("\n\n");
-    // Several reminders, one message: one row in the chat record, holding what they actually got (#537).
-    if (asks.length > 1 && reply) await (await import("../handlers/chat-log")).logChat(user.id, message, reply, "REMINDER_SET").catch(() => {});
-    return reply || null;
-  }
+  if (writes.length && writes.every(a => a.type === "SET_REMINDER")) return saveReminders(phone, message, writes as Reminder[], 1 - (read.u.uncertainty || 0));
   // #586: a meal, steps, a weight or water that no writer above took ("kota from the spaza", isiXhosa)
   // is written by the proven executor for every client, then the reply is composed from the record.
   if (writes.length && writes.every(a => LOGS.has(a.type))) {
@@ -657,7 +659,11 @@ async function runActions(p: { phone: string; message: string; user: any; source
     const r = await (await import("../handlers/lifecycle")).handleLifecycle({ phone, message: said, m: said, user, isQuestion: false });
     return r ? { reply: r, src: "core front: goal", wrote: false } : null;
   }
-  // Everything else is the executor's (meals, steps, weight, water, reminders, sick days, show and undo).
+  if (acts.every(a => a.type === "SET_REMINDER")) {
+    const r = await saveReminders(phone, message, acts as Reminder[], 1 - (u.uncertainty || 0));
+    return r ? { reply: r, src: "core front: reminder", wrote: false } : null;
+  }
+  // Everything else is the executor's (meals, steps, weight, water, sick days, show and undo).
   if (acts.some(a => ["CORRECT_MEAL", "LOG_WORKOUT", "SET_GOAL"].includes(a.type))) return null; // mixed with a words-owner: compose, never half-write
   const confidence = 1 - (u.uncertainty || 0);
   const logged = await logThroughExecutor(phone, message, acts, confidence, p.sourceMessageId);

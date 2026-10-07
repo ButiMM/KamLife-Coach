@@ -28,8 +28,13 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
       : /some rice from mama/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "some rice", needsConfirmation: true }] : /ndihambe 6200/i.test(msg) ? [{ type: "LOG_STEPS", count: 6200 }] : null;
-    const fix = log586 ? log586 : /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : /vitamins/i.test(msg) ? [bag, { type: "SET_REMINDER", body: "take my vitamins", when: "tomorrow at 8am" }] : /nudge me/i.test(msg) ? [bag] : [];
-    content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ family: fix.length ? "correction" : "question", wants: "advice", one_question: null, ...(/not sure/i.test(msg) ? {} : { uncertainty: /maybe/i.test(msg) ? 0.99 : 0.2 }), facts: /hold me to it/i.test(msg) ? [{ kind: "commitment", subject: "walk", statement: "hold me to it", detail: { domain: "movement", what: "a walk after work", due: new Date(Date.now() + 7_200_000).toISOString().slice(0, 10) } }] : [], actions: fix });
+    // #592: the front door reads every message, so the stub reads the suite's reports as a model would.
+    const meal = msg.match(/^(?:then )?I had (?:an? )?(.+?)(?: for (lunch|a snack|snack))?\.?$/i);
+    const front = /not pap/i.test(msg) ? null : meal ? [{ type: "LOG_MEAL", foodText: meal[1], ...(meal[2] ? { meal: meal[2].replace("a ", "") } : {}), needsConfirmation: false }]
+      : /^I walked (\d+) steps/i.test(msg) ? [{ type: "LOG_STEPS", count: Number(msg.match(/\d+/)![0]) }] : /^I did a (.+)$/i.test(msg) ? [{ type: "LOG_WORKOUT", what: msg.slice(8) }]
+      : /^change my goal to muscle gain$/i.test(msg) ? [{ type: "SET_GOAL", goal: "muscle_gain" }] : null;
+    const fix = log586 ? log586 : front ? front : /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : /vitamins/i.test(msg) ? [bag, { type: "SET_REMINDER", body: "take my vitamins", when: "tomorrow at 8am" }] : /nudge me/i.test(msg) ? [bag] : [];
+    content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ scope: /homework/i.test(msg) ? "out" : "in", family: fix.length ? "correction" : "question", wants: "advice", one_question: null, ...(/not sure/i.test(msg) ? {} : { uncertainty: /maybe/i.test(msg) ? 0.99 : 0.2 }), facts: /hold me to it/i.test(msg) ? [{ kind: "commitment", subject: "walk", statement: "hold me to it", detail: { domain: "movement", what: "a walk after work", due: new Date(Date.now() + 7_200_000).toISOString().slice(0, 10) } }] : [], actions: fix });
   } else if (body.includes("You are Coach K, a warm, direct South African")) content = `Try pap with beans tonight. ${NEW}`;
   else if (body.includes("domain gate")) content = /homework/i.test(body) ? "NO" : "YES";
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
