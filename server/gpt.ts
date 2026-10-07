@@ -175,7 +175,6 @@ export async function buildContext(user: any): Promise<string> {
       return Number((row as any)?.n || 0);
     } catch { return 0; }
   })();
-  const isYouth = age < 18;
   const isElderly = age >= 60;
   const gender = user.gender || "unknown";
 
@@ -193,9 +192,8 @@ export async function buildContext(user: any): Promise<string> {
 
   // Age-specific coaching guidelines
   let ageGuidelines = "";
-  if (isYouth) {
-    ageGuidelines = "YOUTH CLIENT (under 18): Use energetic, fun language. No heavy 1RM lifts — focus on form, bodyweight, and building habits. Celebrate effort over results. Never body-shame. Frame everything as 'getting stronger' not 'losing weight'. Use slang naturally (sharp, eish, let's go).";
-  } else if (isElderly) {
+  // No youth branch (#569): under-18s are closed at the age gate (#267) and are never coached.
+  if (isElderly) {
     ageGuidelines = "SENIOR CLIENT (60+): Respectful but not patronizing. Joint-friendly alternatives for every exercise. Emphasize mobility, balance, and independence. Lower impact cardio. Always remind to listen to their body. Never push through pain. Warm-up is mandatory, not optional.";
   } else if (age >= 40) {
     ageGuidelines = "40+ CLIENT: Recovery matters more. Warm-ups are essential. Mention joint care when relevant. Don't assume they can't perform — many are at their strongest. Respect their time constraints.";
