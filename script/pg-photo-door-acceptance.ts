@@ -21,7 +21,10 @@ globalThis.fetch = (async (input: any, init?: any) => {
   if (isVision && (vision === "down" || (vision === "4o-refused" && JSON.parse(body).model === "gpt-4o")))
     return new Response(JSON.stringify({ error: { message: "The model `gpt-4o` does not exist or you do not have access to it.", type: "invalid_request_error", code: "model_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
   let content = "Noted.";
-  if (body.includes("say what they want from this turn")) content = JSON.stringify({ scope: "in", family: "report", wants: "log", one_question: null, uncertainty: 0.1, facts: [], actions: [] });
+  if (body.includes("say what they want from this turn")) { // the front door's reading (#597): "I had X" is a meal, as a model reads it
+    const said = String(JSON.parse(body).messages.at(-1).content || ""), had = said.match(/^I had (.+)$/i);
+    content = JSON.stringify({ scope: "in", family: "report", wants: "log", one_question: null, uncertainty: 0.1, facts: [], actions: had ? [{ type: "LOG_MEAL", foodText: had[1], needsConfirmation: false }] : [] });
+  }
   else if (body.includes("You are Coach K, a warm, direct South African")) content = "NEW-COACH-596";
   else if (isVision) content = visionText;
   return new Response(JSON.stringify({ id: "s", object: "chat.completion", created: 1, model: "stub", choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }), { status: 200, headers: { "content-type": "application/json" } });
@@ -56,6 +59,10 @@ const d = await photo("Black coffee");
 const row = (await pool.query("SELECT message_in i, message_out o FROM chat_history c JOIN users u ON u.id=c.user_id WHERE u.phone_number=$1 AND intent='MEDIA_FAILURE'", [P])).rows[0];
 chk(!CANNOT.test(d) && (await meals()).some(m => /coffee/i.test(m)), "vision down: the caption \"Black coffee\" is logged instead of \"cannot read\"", `${d.slice(0, 160)} | ${JSON.stringify(await meals())}`);
 chk(/photo_vision/.test(row?.i || "") && /does not exist or you do not have access/.test(row?.o || ""), "the failure row says which step failed and the real error", JSON.stringify(row));
+
+await fresh(); vision = "down";
+const q = await photo("Can I eat this chicken?");
+chk((await meals()).length === 0 && CANNOT.test(q), "vision down and the caption asks a question: nothing logged, no verdict on unseen food, the honest \"cannot read\" (#598 attack)", `${JSON.stringify(await meals())} | ${q.slice(0, 160)}`);
 
 await pool.query("DELETE FROM users WHERE phone_number=$1", [P]);
 REAL(`\npg-photo-door-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);
