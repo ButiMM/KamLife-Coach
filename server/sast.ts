@@ -213,7 +213,8 @@ export function parseMealDate(message: string): Date {
     const nowSASTDate = new Date(nowSAST);
     const currentDow = nowSASTDate.getUTCDay();
     let daysBack = (currentDow - targetDow + 7) % 7;
-    if (daysBack === 0) daysBack = 7; // same day name = last week's occurrence
+    // Today's own name is today ("Monday pap, Tuesday eggs, Wednesday rice" sent on a Wednesday, 7 Oct); "last Wednesday" is a week back.
+    if (daysBack === 0 && dowMatch[2]) daysBack = 7;
     // SAST midnight of the target day + SAST wall-clock time. Anchoring the DATE
     // to UTC-now put day-name meals one day off between 00:00–02:00 SAST (same
     // midnight-window family as the "yesterday" bug, 2026-07-07).
