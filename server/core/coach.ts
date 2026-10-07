@@ -158,7 +158,9 @@ export async function understand(openai: OpenAI, message: string, known = "KNOWN
   try {
     const j = JSON.parse(raw);
     if (typeof j.family !== "string") return { u: null, raw };
-    return { u: { family: j.family, wants: String(j.wants || ""), one_question: j.one_question ? String(j.one_question) : null, uncertainty: Number(j.uncertainty) || 0,
+    // A reading that does not say how sure it is fails closed (#593 attack): fully uncertain, so a write is confirmed first.
+    const unsure = typeof j.uncertainty === "number" && j.uncertainty >= 0 && j.uncertainty <= 1 ? j.uncertainty : 1;
+    return { u: { family: j.family, wants: String(j.wants || ""), one_question: j.one_question ? String(j.one_question) : null, uncertainty: unsure,
       actions: validateActions(j.actions ?? []) }, raw };
   } catch { return { u: null, raw }; }
 }
