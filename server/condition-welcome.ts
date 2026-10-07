@@ -27,6 +27,16 @@ export function mentionsConditionOrMedication(message: string): boolean {
   return MEDICATION_SIGNAL.test(m) || CHRONIC_CONDITION_SIGNAL.test(m);
 }
 
+/** Only the disclosure, nothing else to answer or log? "I have diabetes. Had a kota for lunch" and "I'm diabetic. Log my
+ *  kota" are not (#610, #619 review): two content words beyond the disclosure send the message on. */
+const FILLER = new Set(["i", "i'm", "im", "am", "on", "now", "also", "and", "so", "just", "have", "has", "been", "was", "with",
+  "my", "the", "a", "an", "too", "still", "since", "recently", "currently", "what", "it", "is", "this", "that", "of", "for"]);
+export function conditionIsWholeMessage(message: string): boolean {
+  const rest = (message || "").replace(MEDICATION_SIGNAL, " ").replace(CHRONIC_CONDITION_SIGNAL, " ").toLowerCase();
+  const words = rest.split(" ").map(w => [...w].filter(c => c !== c.toUpperCase() || (c >= "0" && c <= "9") || c === "'").join(""));
+  return words.filter(w => w && !FILLER.has(w)).length < 2;
+}
+
 /**
  * The reply: welcome first, boundary second, back to coaching third. It never names their
  * condition back at them, never comments on medicine, and never claims anything is "safe for"

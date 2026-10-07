@@ -31,6 +31,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^two meals, one card$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "rice and chicken", meal: "lunch", needsConfirmation: false }, { type: "LOG_MEAL", foodText: "samp and beans", meal: "dinner", needsConfirmation: false }]
       : /^Had pap and wors for lunch and did a 30 min home workout$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", needsConfirmation: false }, { type: "LOG_WORKOUT", what: "a 30 min home workout" }]
       : /^what'?s my workout today\??$/i.test(msg) ? [{ type: "SHOW_WORKOUT" }]
+      : /^I have diabetes\. Had a kota for lunch$|^I’m diabetic\. Log my kota$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", meal: "lunch", needsConfirmation: false }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -143,6 +144,12 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   chk(!sk.includes(NEW) && sk.trim().length > 0, "the \"Skip today\" button is answered by the programme's skip, not the model", sk.slice(0, 160));
   const nx = await say(TESTER, "Tomorrow's session");
   chk(!nx.includes(NEW) && /Warm-up|sets|Week/i.test(nx), "the \"Tomorrow's session\" button shows the programme's next session, not the model's", nx.slice(0, 200));
+  const db0 = await count(TESTER), dk = await say(TESTER, "I have diabetes. Had a kota for lunch");
+  chk(await count(TESTER) === db0 + 1 && dk.includes(NEW), "a condition mentioned with a meal: the meal is written and the new coach answers (#610)", dk.slice(0, 200));
+  const d2 = await count(TESTER), dl = await say(TESTER, "I’m diabetic. Log my kota");
+  chk(await count(TESTER) === d2 + 1, "\"I’m diabetic. Log my kota\" logs the kota too (#619 review)", dl.slice(0, 200));
+  const dsc = await say(TESTER, "I'm diabetic");
+  chk(/lifestyle coach, not a medical service/i.test(dsc), "control: the disclosure on its own still gets the non-clinical welcome", dsc.slice(0, 200));
   const ot = await say(TESTER, "Am I on track?"); await say(TESTER, "change my goal to muscle gain"); const gy = await say(TESTER, "yes"), g = (await pool.query("SELECT goal_type FROM users WHERE phone_number = $1", [TESTER])).rows[0].goal_type;
   chk(ot.includes(NEW) && g === "muscle_gain" && gy.includes(NEW), "A12: \"am I on track?\" and a confirmed goal change are the new coach's words (the goal still written)", `${g} | ${ot.slice(0, 120)} | ${gy.slice(0, 120)}`);
   process.env.CORE_WAVE2 = "off";
