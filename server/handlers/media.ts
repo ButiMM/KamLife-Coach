@@ -1121,10 +1121,9 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         const photoDesc = (message && message.trim().length > 2 ? message.trim().slice(0, 110) : "")
           || (visionDisplay.split("\n").find(l => l.trim().length > 5) || "").replace(/[*_•]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110)
           || "[Photo]";
-        // NAME-overlap dupe guard: a photo of a meal ALREADY logged today must not double-log.
         const dupe = extraImageUrls.length === 0 ? await findDuplicateMealToday(user.id, photoDesc) : null;
         if (dupe) {
-          const dupeReply = `📸 That looks like the *${dupe.desc}* you already logged today — I have NOT logged it again, your totals are safe.\n\nIf this is a second helping, ${dupe.slot ? `say *"same as ${dupe.slot}"*` : `name the meal — *"same for lunch"*, or whichever it is`} and I'll log it properly.`;
+          const dupeReply = `Got it — that's already in today's log ✅`; // a resend gets a plain yes, never admin (founder, 7 Oct)
           await logChat(user.id, "[Food Photo — duplicate held]", dupeReply, "FOOD_PHOTO_DUPE");
           return dupeReply;
         }

@@ -1,5 +1,5 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
-import { sastDayKey, sastDayKeyBefore } from "../sast";
+import { sastDayKey, sastDayKeyBefore, recentSpans } from "../sast";
 import { neverSilentLine } from "../reply-hygiene";
 import { carriesFeelingClause } from "../unlogged-notice";
 import { enforceCoachGuardrails } from "../coach-guardrails";
@@ -11,7 +11,7 @@ import { guardMalformed, safeFallback, recordGuardResult } from "../malformed-gu
 import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../food-fuzzy";
 import { db } from "../db";
 import { mealLogs, chatHistory, users } from "../../shared/schema";
-import { eq, and, gte, sql, desc, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, gte, lte, or, sql, desc, inArray, isNotNull } from "drizzle-orm";
 import { sastDayStart, sastToday } from "../utils";
 import { turnMutation, turnEvidence } from "./chat-log";
 import { isBareReaction, isDiagnosticQuestion, bareReactionFallback } from "../reaction-guard";
@@ -701,9 +701,15 @@ export function mealsOverlap(a: string, b: string): boolean {
 export async function findDuplicateMealToday(userId: string, desc: string): Promise<{ desc: string; slot: string } | null> {
   if (mealWords(desc).size < 2) return null; // too little signal to judge — log normally
   try {
+    // A RESEND IS RECENT BY WHEN IT ARRIVED (7 Oct, founder; #613 attack): the same plate sent within 3 hours is the
+    // same meal again, whatever time it was eaten ("this morning: …" is stored at 08:00); the same dish hours later is
+    // eating, and is logged. A meal row has no arrival time, so the chat record of the last 3 hours decides.
+    const heard = await db.select({ i: chatHistory.messageIn, o: chatHistory.messageOut }).from(chatHistory)
+      .where(and(eq(chatHistory.userId, userId), sql`${chatHistory.createdAt} > now() - interval '3 hours' AND ${chatHistory.createdAt} < now() - interval '30 seconds'`)).limit(40);
+    if (!heard.some(h => mealsOverlap(desc, h.i || "") || mealsOverlap(desc, h.o || ""))) return null;
     const rows = await db.select({ rawMessage: mealLogs.rawMessage, mealLabel: mealLogs.mealLabel })
       .from(mealLogs)
-      .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, sastDayStart())))
+      .where(and(eq(mealLogs.userId, userId), or(...recentSpans(27 * 3_600_000).map(([a, b]) => and(gte(mealLogs.loggedAt, a), lte(mealLogs.loggedAt, b))))))
       .limit(20);
     for (const r of rows) {
       if (mealsOverlap(desc, r.rawMessage || "")) {
