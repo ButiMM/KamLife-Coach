@@ -6,6 +6,7 @@
  */
 if (!process.env.DATABASE_URL) { console.log("pg-photo-door-acceptance: SKIPPED — no DATABASE_URL."); process.exit(0); }
 process.env.OPENAI_API_KEY = "sk-stub"; process.env.OFFLINE_AI = "0"; process.env.NORMALIZER = "off"; process.env.PROACTIVE_PAUSED = "true"; process.env.NODE_ENV = "production";
+process.env.APP_URL = "https://kamlife.example"; // cards are served from here
 process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000"; process.env.TWILIO_AUTH_TOKEN = "test"; process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 await import("./sast-noon-clock"); // #404
 const { createCanvas } = await import("@napi-rs/canvas");
@@ -49,7 +50,9 @@ await fresh(); vision = "ok"; visionText = "Black coffee, about 250ml — basica
 const c = await photo("Black coffee");
 chk(!CANNOT.test(c) && c.trim().length > 0, "a captioned black-coffee photo gets a real reply, never \"cannot read\"", c.slice(0, 160));
 visionText = "Pap, chicken and spinach — a solid plate.\nTOTAL: 650 kcal | 45g protein";
+(await import("../server/card-policy"))._resetDumpWindow();
 const p = await photo("");
+chk(/\[MEDIA:https:\/\/kamlife\.example\/card\//.test(p), "a plate photo gets its meal card, as a typed meal does (lost 5 Aug; founder, 7 Oct)", p.slice(0, 200));
 chk(!CANNOT.test(p) && (await meals()).length >= 1, "a plate photo is logged and answered", `${p.slice(0, 160)} | ${JSON.stringify(await meals())}`);
 
 await fresh(); vision = "4o-refused";

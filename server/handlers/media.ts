@@ -1167,20 +1167,20 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs} retro=${photoIsRetro}`);
       await logMediaSuccess(user.id, "photo", photoTotalMs);
       // A3: THE PHOTO'S MEAL IN THE NEW COACH'S WORDS, as typed meals have been since A1. The meal is on the
-      // ledger; the coach speaks from it and closeCoachingTurn adds the one canonical move. The receipt
-      // stays for an album and wherever it carries a status (a past day, a pricing gap, a question).
-      // CORE_WAVE2=off is the rollback: the plain receipt. The big-meal nudge, pattern, perfect-day and
-      // celebration lines that rode on the photo receipt are gone with it. THE HEALTH-STANDARD GUARDRAIL
-      // STAYS (#550 attack @ 48f845c): deterministic, after a write, whoever speaks ("caffeine is not fuel").
+      // ledger and the coach speaks from it; the receipt stays for an album or a status (past day, pricing gap, question).
+      // CORE_WAVE2=off is the rollback. The health-standard guardrail stays (#550 attack @ 48f845c).
       const photoReceipt = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}`;
       const guard = photoCommit?.ok && !photoCommit.wasDup ? await nutritionGuardrailNudge(user) : "";
+      // THE MEAL CARD, as a typed meal gets it (photos lost theirs on 5 Aug with the daily-total line it hung on; founder, 7 Oct).
+      const cardName = (visionDisplay.split("\n").find(l => l.trim().length > 3) || "Meal").replaceAll("*", "").replaceAll("_", "").trim().slice(0, 40);
+      const card = photoCommit?.ok && !photoCommit.wasDup ? await (await import("../macro-card-attach")).macroCardMarker({ user, mealName: cardName, mealProtein: Math.round(primaryPhotoProt || 0), forDate: photoIsRetro ? photoLoggedAt : undefined }) : "";
       // Only a photo that WROTE its meal gets "just saved" words (#550 attack: a 0 kcal black coffee wrote nothing).
       const words = extraReplies.length === 0 && photoCommit?.ok && !photoCommit.wasDup
         ? await (await import("../core/coach")).afterLogReply(phone, message?.trim() || "[a photo of their food]", photoReceipt, "food").catch(() => null) : null;
       const plain = (t: string) => photoNumbersLow ? stripNumbersFromProse(t) : t; // #550 attack: number-free mode gets the old path's scrub
       // #590: a photo's reply is the coach's words only; no canned next move stapled under it ("Stand on a scale…").
-      if (words) return plain(`${words}${guard}`);
-      return plain(`${photoReceipt}${guard}`);
+      if (words) return plain(`${words}${guard}`) + card;
+      return plain(`${photoReceipt}${guard}`) + card;
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] photo_error stage=${photoStage} ms=${photoFailMs}:`, err, (err as Error)?.stack);

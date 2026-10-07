@@ -6230,7 +6230,7 @@ test("dayStatusPill: a plain verdict, never a number, and it matches the bars", 
 test("A3 (#550 attack): a number-free client's photo words get the same scrub as the old receipt", () => {
   const src = readFileSync("server/handlers/media.ts", "utf-8");
   assert.match(src, /const plain = \(t: string\) => photoNumbersLow \? stripNumbersFromProse\(t\) : t;/);
-  assert.match(src, /if \(words\) return plain\(`\$\{words\}\$\{guard\}`\);/, "#550 @ 48f845c: the guardrail rides after the switched words (#590: no move stapled under them)");
+  assert.match(src, /if \(words\) return plain\(`\$\{words\}\$\{guard\}`\) \+ card;/, "#550 @ 48f845c: the guardrail rides after the switched words (#590: no move stapled under them); the meal card after both");
   assert.match(src, /const guard = photoCommit\?\.ok && !photoCommit\.wasDup \? await nutritionGuardrailNudge\(user\)/);
 });
 test("A19 (#545 attack): the voice door teaches the record from the live read, as the text door does", () => {
@@ -6362,8 +6362,9 @@ test("card paths: every attach site is accounted for", async () => {
     "server/handlers/meal-repeat.ts", "server/handlers/lifecycle.ts", "server/handlers/media.ts",
   ];
   const attachers = files.filter(f => /(?:macroCardMarker|dailyMacroCardMarker)\(/.test(readFileSync(f, "utf-8")));
-  // If this count changes, a new card path was added — go and check its TEXT stands down too. (A3: media.ts's never-rendered photo card went.)
-  assert.equal(attachers.length, 4, `card-attaching files changed: ${attachers.join(", ")}`);
+  // If this count changes, a new card path was added — go and check its TEXT stands down too. (7 Oct: the photo card is back in media.ts;
+  // its words come from the new coach and print no day totals.)
+  assert.equal(attachers.length, 5, `card-attaching files changed: ${attachers.join(", ")}`);
 
   // The three sites that print the day's numbers must all consult the card before repeating them.
   for (const f of ["server/handlers/food-context.ts", "server/handlers/early-commands.ts", "server/handlers/meal-repeat.ts"]) {
