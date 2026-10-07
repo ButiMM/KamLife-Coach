@@ -1060,8 +1060,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // reason every other handler does: a freeform reply must never be composed from state that is
   // missing a fact the client stated in this very message (2026-08-22).
   let w1Read = !!front?.read; // the new coach (wave 1 for everyone; its off-path deleted 6 Oct)
-  if (!w1Read && !multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const w1 = await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), sourceMessageId, evidence: turnEvidence }); w1Read = true; // #451: read once
+  if (!multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+    const w1 = w1Read ? null : await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), sourceMessageId, evidence: turnEvidence }); w1Read = true; // #451/#592: read once
     const engineReply = w1?.reply ?? (engineLive() ? await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId }) : null);
     if (engineReply !== null) return tag(engineReply, w1?.src ?? "🧠 new engine");
   }
