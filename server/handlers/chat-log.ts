@@ -168,13 +168,6 @@ interface TurnScope {
      * Rendered by code from extractSalientSituation — not GPT prose.
      */
     situationFrame?: string | null;
-    /**
-     * THIS TURN ALREADY COMPOSED ITS DECISION TURN (C10, 2026-09-15). Set by the exits that call
-     * composeDecisionTurn themselves; read only by reconcileTurnReply, to stand its own rebuild
-     * down rather than say the same sentence a second way. Absent on the exits that compose
-     * nothing, which is exactly the set the rebuild exists for.
-     */
-    decisionComposed?: boolean;
     modelAuthored?: boolean;
     /**
      * This turn is a CLARIFICATION or a de-escalation, not a coaching turn. It still gets its
@@ -225,6 +218,9 @@ const NO_CURRENT_STEPS_CLAIM = /\b(?:haven'?t|have not|no|zero)\b[^.\n]{0,30}\b(
 const CONTRADICTORY_WEIGHT_TREND = /\b(?:not|won'?t|will not|can'?t|cannot)\b[^.\n]{0,50}\btrend\b[^.\n]{0,80}\b(?:scale|weight)\s+(?:is\s+)?going\s+up\b/i;
 const EXPLICIT_STEP_QUERY = /\b(?:how many steps|what (?:are|is) my steps?|what'?s my step count|what is my step count|my steps|step progress|step total)\b/i;
 const EXPLICIT_WEIGHT_QUERY = /\b(?:what(?:'s| is) my (?:current )?weight|how much do i weigh|what weight am i|my weight today|weight trend)\b/i;
+
+/** A bare thank-you or reaction ("ngiyabonga", "lekker"): nothing to answer but the thanks. */
+export const isPureReaction = (message: string): boolean => PURE_REACTION_INPUTS.has(message.trim().toLowerCase());
 
 function isMeaningfulClientMessage(message: string): boolean {
   const m = message.trim().toLowerCase();
@@ -286,7 +282,7 @@ function extractWeightNumbers(text: string): number[] {
  * claims get the scope boundary the doctrine already owns; everything else falls back to the
  * smallest honest thing a coach can say.
  */
-const CLINICAL_REFERRAL = "That one's for a doctor or pharmacist, not me — I'm your coach, not your clinician. "
+export const CLINICAL_REFERRAL = "That one's for a doctor or pharmacist, not me — I'm your coach, not your clinician. "
   + "Speak to them about it, and I'll keep helping you with the food, training and habits around it.";
 const WITHHOLD = "Let me not guess on that one. Tell me what happened in your own words and I'll pick it up from there.";
 
@@ -423,12 +419,9 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
       if (integrityRepair) integrityRepair = kept;
     }
 
-    // A TURN THAT COMPOSED ITSELF IS NOT RECOMPOSED (C10). The exception is a write-integrity
-    // repair: that one REPLACES the reply, so the composed turn it replaces must be rebuilt
-    // around the honest sentence — otherwise the false confirmation ships with the action under
-    // it. Every other composed turn is already stripped, already delivered-shaped, and already
-    // carries its answer; rebuilding it here could only lose one of those.
-    if (decisionTurn && (!scope.evidence.decisionComposed || integrityRepair)) {
+    // The exits that composed their own decision turn (and set `decisionComposed`) went with the
+    // wave-1 last door, so every decision turn left is rebuilt here.
+    if (decisionTurn) {
       // STRUCTURAL MOUTH (2026-08-23). The model body is discarded. Context is the
       // situation frame code already owns. The action is the canonical line. Concatenating
       // `kept` in front of the action is the leak the reviewer proved ("Eggs tonight").

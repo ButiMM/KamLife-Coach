@@ -7,7 +7,7 @@ revert_db_require_safe
 
 ACC=script/pg-long-voice-tail-acceptance.ts
 WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/cut5-revert.XXXXXX")"
-FILES=(server/routes.ts server/backfill.ts server/handlers/gpt-block.ts)
+FILES=(server/routes.ts server/backfill.ts server/core/coach.ts)
 
 for f in "${FILES[@]}"; do cp "$f" "$WORK_ROOT/$(printf '%s' "$f" | tr '/' '_')"; done
 restore_case () {
@@ -72,22 +72,16 @@ run_case "workout correction stops replacing the earlier belief" server/backfill
 # same line. Same file, same branch, same mutation, same claim.
 run_case "single-question renderer reclaims the complete turn" server/routes.ts \
   ': multiQuestionTurn ? null' ': false ? null' || failed=$((failed + 1))
-# THE SEAM MOVED, THE MECHANISM DID NOT (#92, 2026-09-15). This branch is still the one that asks
-# the Coach mouth for context on a decision turn and lets the composer append the canonical action;
-# only the gate in front of it was renamed, from isMultiPartAsk to the owner routes.ts already uses.
-# Re-anchored, not relaxed: same file, same branch, same mutation, same claim.
-run_case "Coach context no longer answers both questions" server/handlers/gpt-block.ts \
-  'if (looksLikeQuestion(message)) {' 'if (false) {' || failed=$((failed + 1))
 # THE BRAIN IS HANDED A WINDOW AGAIN — the defect this whole cut is named for, moved one stage
 # later. The mouth is stubbed in the acceptance, so it answers whatever it is asked and every
 # delivery check stays green; only §4b, which reads the outbound request body, can see this.
-run_case "the model is given a window of the note instead of the note" server/handlers/gpt-block.ts \
-  '() => askCoachK(message, user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));' \
-  '() => askCoachK(message.slice(0, 500), user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));' || failed=$((failed + 1))
+run_case "the model is given a window of the note instead of the note" server/core/coach.ts \
+  '(await import("../gpt")).askCoachK(message, user)' \
+  '(await import("../gpt")).askCoachK(message.slice(0, 500), user)' || failed=$((failed + 1))
 
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-cut5-long-turn: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-cut5-long-turn: GREEN — 5/5 behavioral reverts caught"
+echo "red-on-revert-cut5-long-turn: GREEN — 4/4 behavioral reverts caught"

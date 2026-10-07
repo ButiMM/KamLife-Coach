@@ -22,7 +22,8 @@ import { markLifeQuiet } from "../life-quiet";
 import { isCrisisMessage, crisisReply, crisisAlertBody, crisisAboutSomeoneElse, crisisReplyForSomeoneElse } from "../crisis-reply";
 import { asksForExport, formatExport } from "../data-export";
 import { sastDayKey } from "../sast";
-import { logChat, turnUser } from "./chat-log";
+import { logChat, turnUser, CLINICAL_REFERRAL } from "./chat-log";
+import { detectMedicationContext } from "../medication-context";
 import { recordClientFacts } from "../memory";
 import { setOptOut, clearPause } from "../health-state";
 
@@ -245,6 +246,20 @@ export async function runSafetyGuards(
       });
     }
     return acuteReply;
+  }
+
+  // ---- MEDICATION, BEFORE ANY MODEL (#571) ----
+  // A dose, a change, stopping or starting, sourcing, choosing a medicine, or a GLP-1 reaction: the
+  // coach never answers it, so no model is asked. The verifier caught these only after a model had
+  // answered (reply-verifier medicationBoundaryViolation); this is the same boundary, in front.
+  const med = detectMedicationContext(message);
+  if (med.unsafeRequest) {
+    const mu = await ensureSafetyTurnUser(phone, message, context.sourceMessageId, context.boundUser);
+    const medReply = med.reason === "adverse_reaction"
+      ? "If it's severe — vomiting you can't stop, bad stomach pain, or you can't keep fluids down — go to your nearest emergency room or call *10177* now. Otherwise, speak to your doctor or pharmacist today, before your next dose."
+      : CLINICAL_REFERRAL;
+    try { await logChat(mu?.id || "unknown", message, medReply, "MEDICATION_REFERRAL"); } catch (e) { console.warn("[non-fatal]", e); }
+    return medReply;
   }
 
   // ---- OPT-OUT, IN THE CLIENT'S OWN WORDS (#265, moved from lifecycle.ts) ----

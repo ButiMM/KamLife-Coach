@@ -6,7 +6,7 @@ import { escalationSLA } from "../safety-detection";
 import { sastDayKey } from "../sast";
 import { eq, and, asc } from "drizzle-orm";
 import twilio from "twilio";
-import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
+import { PRICING, GUARANTEE_PHRASE, chargeMatchesPrice } from "../../shared/pricing";
 import { sendCriticalAlert } from "../scheduler/shared";
 import { deliverTwilioMessage } from "../outbound-delivery";
 import { isOptedOut } from "../health-state";
@@ -270,7 +270,8 @@ export function registerPaymentRoutes(app: Express) {
 
       // Amount validation — must match the subscription price within R5 tolerance.
       // Accepting any amount between R1–500 would allow someone to pay R1 and get a subscription.
-      if (paymentStatus === "COMPLETE" && Math.abs(amountGross - PRICING.monthlyPriceZAR) > 5) {
+      // An earlier subscriber's token renews at the price it was created with (#567), so those count too.
+      if (paymentStatus === "COMPLETE" && !chargeMatchesPrice(amountGross)) {
         console.error(`[PAYFAST:${itnId}] REJECTED — amount R${amountGross} doesn't match expected R${PRICING.monthlyPriceZAR} (tolerance ±R5)`);
         return;
       }

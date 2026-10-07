@@ -2,7 +2,7 @@
 // SINGLE SOURCE OF TRUTH — PRICING & PLAN CONFIGURATION
 // ============================================================
 // Every price, tier, and revenue formula in the entire codebase
-// should import from this file. Never hardcode R149 or any price
+// should import from this file. Never hardcode a price
 // in routes, scheduler, dashboard, or frontend.
 // ============================================================
 
@@ -12,13 +12,19 @@ export const PRICING = {
    * routes/payments.ts sends it to PayFast as both `amount` and `recurring_amount`, and
    * verifies the ITN against it. Changing it changes what a customer is charged.
    */
-  monthlyPriceZAR: 149,
+  monthlyPriceZAR: 199, // #567 (CTO 6 Oct): the decided range is R199–R250; the till takes the low end
+
+  /**
+   * Prices earlier subscribers' PayFast tokens still renew at. Their recurring amount is fixed on the
+   * token, so the ITN check accepts these too; a new payment link only ever carries monthlyPriceZAR.
+   */
+  legacyPricesZAR: [149] as readonly number[],
 
   /** Display string for UI/messages */
-  monthlyDisplay: "R149/month",
+  monthlyDisplay: "R199/month",
 
-  /** Daily equivalent (for marketing) — 149 / 30, rounded to the cent. */
-  dailyDisplay: "R4.97/day",
+  /** Daily equivalent (for marketing) — 199 / 30, rounded to the cent. */
+  dailyDisplay: "R6.63/day",
 
   /** Currency code */
   currency: "ZAR",
@@ -33,6 +39,11 @@ export const PRICING = {
    */
   guaranteeDays: 14,
 } as const;
+
+/** Does a COMPLETE PayFast charge match a price we sell at (today's, or a legacy token's), within R5? */
+export function chargeMatchesPrice(amountZAR: number): boolean {
+  return [PRICING.monthlyPriceZAR, ...PRICING.legacyPricesZAR].some(p => Math.abs(amountZAR - p) <= 5);
+}
 
 /** "14-day money-back guarantee" — written once so five surfaces cannot disagree. */
 export const GUARANTEE_PHRASE = `${PRICING.guaranteeDays}-day money-back guarantee`;

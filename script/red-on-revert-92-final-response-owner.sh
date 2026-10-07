@@ -72,71 +72,11 @@ run_case () {
 
 mkdir -p "$PATCH_DIR"
 
-# 1. THE DEFECT ITSELF, exactly as it stood on b7908c7. The mouth is gated on isMultiPartAsk, so a
-#    single question on a decision turn never reaches the Coach and the turn ships the action line
-#    alone — the same body for a pear, a definition and a catch-up.
-cat > "$PATCH_DIR/1.py" <<'PYEOF'
-p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
-s=s.replace("      if (looksLikeQuestion(message)) {",
-            "      if (looksLikeQuestion(message) && message.trim().length >= 60 && (message.match(/\\?/g)||[]).length >= 2) {")
-assert s!=b, "no match"; open(p,"w").write(s)
-PYEOF
 
-# 2. THE MOUTH IS CALLED AND ITS ANSWER IS THROWN AWAY. The composer takes the situation frame
-#    instead of what the Coach said — the defect moved one stage later, and every §7 check stays
-#    green through it because the model really was asked.
-cat > "$PATCH_DIR/2.py" <<'PYEOF'
-p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
-old = """        const context = stripModelDirectives(questionContext, {
-          modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
-        } as any).kept || situationFrame;"""
-new = """        const context = situationFrame;"""
-s=s.replace(old, new, 1)
-assert s!=b, "no match"; open(p,"w").write(s)
-PYEOF
 
-# 3. THE CANONICAL ACTION IS DROPPED FROM THE ANSWERED TURN. The client gets a good answer and no
-#    next move — the ONE NEXT MOVE law broken by the same change that fixed the question.
-cat > "$PATCH_DIR/3.py" <<'PYEOF'
-p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
-old="""        gptReply = composeDecisionTurn(
-          context,
-          decision.reply || renderActionLine(decision.todo),
-        );"""
-new="""        gptReply = composeDecisionTurn(
-          context,
-          "",
-        );"""
-s=s.replace(old, new, 1)
-assert s!=b, "no match"; open(p,"w").write(s)
-PYEOF
 
-# 4. THE MODEL IS GIVEN A WINDOW OF THE MESSAGE instead of the message. Every delivery check in
-#    §1/§2 stays green — the stub answers whatever it is handed — and only §7 sees it. This is the
-#    case that makes §1/§2 mean something.
-cat > "$PATCH_DIR/4.py" <<'PYEOF'
-p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
-s=s.replace("          () => askCoachK(message, user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));",
-            "          () => askCoachK(message.slice(0, 20), user, questionContextInstruction, memoryContext, SCENARIO_GUIDE));")
-assert s!=b, "no match"; open(p,"w").write(s)
-PYEOF
 
-# 5. THE MOUTH IS NO LONGER TOLD THE TURN ALREADY WROTE THE FACTS. This is the sentence that stops
-#    the answer asking for the pear back, and nothing else in the prompt carries it.
-cat > "$PATCH_DIR/5.py" <<'PYEOF'
-p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
-s=s.replace("The facts in this same message have already been committed: never ask the client to report them again.\n", "")
-assert s!=b, "no match"; open(p,"w").write(s)
-PYEOF
 
-# 6. CONTROL — THE GATE OPENS TO EVERY DECISION TURN. A client who asked nothing gets model prose
-#    in front of their action line, and every log costs a model call. This satisfies "the question
-#    is answered" completely and is the wrong fix; §4 exists to say so.
-cat > "$PATCH_DIR/6.py" <<'PYEOF'
-p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
-s=s.replace("      if (looksLikeQuestion(message)) {", "      if (true) {")
-assert s!=b, "no match"; open(p,"w").write(s)
-PYEOF
 
 # 7. CONTROL — A TURN THAT ALREADY HAS A DETERMINISTIC OWNER IS RE-ROUTED. The missed-session owner
 #    stands down and "I didn't train today" falls through to the Coach. §5 is the assertion that
@@ -147,34 +87,6 @@ s=s.replace("  } else if (isMissedWorkout) {", "  } else if (false) {")
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 
-# 8. THE MODEL'S PRESCRIPTION IS NO LONGER REMOVED. The mouth's own imperative reaches the client
-#    with the canonical action underneath it — two next moves, the review finding this cut took on.
-#
-#    RE-AIMED AT BOTH STRIPPERS (C10, 2026-09-15), and the reason is recorded rather than the case
-#    quietly relaxed. This reverted gpt-block's strip alone and STAYED GREEN. Not because the
-#    product regressed: because C10 made the SECOND stripper live. reconcileTurnReply always
-#    stripped directives into `draft` and then returned `reply`, so the boundary that this
-#    codebase calls "the one place every reply crosses" was inert; now it returns `draft`, and it
-#    catches the prescription that gpt-block's strip used to catch alone.
-#
-#    So the mechanism is guarded twice, and a revert of either one alone is no longer a
-#    client-visible defect. The claim this case makes — the model's prescription does not reach
-#    the client — is only falsifiable by removing both. That is what it now does.
-cat > "$PATCH_DIR/8.py" <<'PYEOF2'
-p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
-old = """        const context = stripModelDirectives(questionContext, {
-          modelAuthored: true, canonicalTodo: decision.todo, canonicalKind: decision.kind,
-        } as any).kept || situationFrame;"""
-new = """        const context = questionContext;"""
-s=s.replace(old, new, 1)
-assert s!=b, "no match"; open(p,"w").write(s)
-
-p2="server/handlers/chat-log.ts"; s2=open(p2).read(); b2=s2
-old2 = """    const { kept, removed } = stripModelDirectives(draft, scope.evidence);"""
-new2 = """    const { kept, removed } = { kept: draft, removed: [] as string[] };"""
-s2=s2.replace(old2, new2, 1)
-assert s2!=b2, "no match (boundary stripper)"; open(p2,"w").write(s2)
-PYEOF2
 
 
 # 9. THE LEADING ADVERB DEFEATS THE IMPERATIVE AGAIN. The verb is re-anchored to the start of a
@@ -189,15 +101,6 @@ s=s[:i] + 'const IMPERATIVE_LEAD = "(?:(?:for\\\\s+(?:dinner|lunch|breakfast|sup
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF2
 
-# 10. THE UNAVAILABLE-MOUTH CHECK GOES BACK TO ONE STRING. A rate-limited coach reads as a real
-#     answer, gets composed as context, and the canonical action is appended underneath it — a
-#     question the coach never answered delivered as a confident instruction to log food.
-cat > "$PATCH_DIR/10.py" <<'PYEOF2'
-p="server/handlers/gpt-block.ts"; s=open(p).read(); b=s
-s=s.replace("        if (isCoachUnavailableReply(questionContext)) {",
-            "        if (questionContext === AGENT_ERROR) {", 1)
-assert s!=b, "no match"; open(p,"w").write(s)
-PYEOF2
 
 # 11. THE BARE PLATE PICK IS NO LONGER A CHOICE. "Have grilled chicken and rice tonight." names no
 #     BEHAVIOUR_DOMAINS noun, so with this shape removed nothing recognises it and the model picks
@@ -247,11 +150,11 @@ echo "CONTROL: the acceptance is GREEN unmodified — detections below are real.
 
 echo "RED-ON-REVERT — #92. Every case below must be caught by the acceptance."
 failed=0
-for i in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
+for i in 7 9 11 12 13; do  # 1-6, 8, 10 patched gpt-block.ts, deleted 6 Oct
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "RED-ON-REVERT: FAILED — $failed case(s) left the acceptance green, crashed, or would not patch."
   exit 1
 fi
-echo "RED-ON-REVERT: GREEN — 13/13 cases caught."
+echo "RED-ON-REVERT: GREEN — 5/5 cases caught."

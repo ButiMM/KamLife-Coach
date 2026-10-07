@@ -143,7 +143,9 @@ REAL("\n3. RENDERED BUTTONS ARE RECORDED AS THE CUSTOMER SAW THEM");
 await clear();
 _resetOutboundDedupe();
 _resetInteractionCorrelation();
-await say("zzqq flurblewump gribbet", "sid-btn-1");
+// A deterministic reply that carries buttons: the goal-hit weigh-in (target 85). The old fixture, the
+// gibberish clarify menu, went with gpt-block (wave-1 deletion, 6 Oct).
+await say("I weigh 84kg this morning", "sid-btn-1");
 await settle();
 {
   const [w] = await wire();

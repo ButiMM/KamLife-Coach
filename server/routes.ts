@@ -16,7 +16,6 @@ import { calculateTargets, getDailyStepContext } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan, statedMinorAge, blockUnderage } from "./onboarding";
 import { saysNotWorking } from "./despair";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
-import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
 import { recordClientFacts, bindClientTruth, resumeOpenWeekendInvestigation } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { sendWhatsApp } from "./scheduler";
@@ -27,7 +26,7 @@ import { getSleepResponse } from "./handlers/sleep";
 import { handleMediaMessage, bumpVoiceFailure, clearVoiceFailure } from "./handlers/media";
 import { runSafetyGuards } from "./handlers/safety";
 import { handleFoodLogMgmt } from "./handlers/food-log-mgmt";
-import { bumpNumericFluency, bumpVoiceNoteUse } from "./handlers/numbers-literacy";
+import { bumpNumericFluency, bumpVoiceNoteUse } from "./handlers/preferences";
 import { handleOnboardingBodyPhotos } from "./onboarding-physique";
 import { verifyBrainReply } from "./brain/reply-verifier";
 import { cardFontLoaded } from "./macro-card";
@@ -45,7 +44,6 @@ import { handleMiscCommands } from "./handlers/misc-commands";
 import { handleLifecycle, handlePendingCancel } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleReminderCommand } from "./handlers/reminders-handler";
-import { handleGptBlock } from "./handlers/gpt-block";
 import { runMeaningEngineLive, engineLive, resumeEngineConfirm, closeCoachingTurn as closeCoachingTurnFor } from "./understanding/live";
 import { classifyDomain, offDomainRedirect, recentlyActive, declineOutOfScope } from "./understanding/domain-guard";
 import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedger, commitFact, resolveTurn, detectStepLog, journeyMustKeepFacts, durableDomains, clausesOf } from "./understanding/messy-intake";
@@ -1026,15 +1024,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
   // A FEELING IS A BID FOR COACHING, NOT A FACT (C15, journey 1). `hasFeeling` is already computed
   // above for the composer; the close needs the same answer and must not work it out a second time.
-  if (resolved.reply) return closeCoachingTurn((resolved.committed === "food" && await (await import("./core/coach")).afterLogReply(phone, message, resolved.reply)) || resolved.reply, { coachWithoutWrite: hasFeeling }); // A1: the new coach's words after a food-only write; mixed turns keep every receipt part
-
-  // ---- WEIGHT FORECAST / TRAJECTORY: deterministic math from the client's own logs. ----
-  // If they logged a surplus, it says so — the plate, not the plan.
-  if (!(await import("./core/coach")).coreWave1For(phone) && /^(forecast|my forecast|weight forecast|trajectory|my trajectory|projection|my projection|am i on track|will i (lose|gain|drop|pick up)|how much (weight )?(will|am|would) i (going to |gonna )?(lose|gain|drop|pick up))\b/i.test(m.trim())) { // A12: wave 1 answers from the trajectory (core/coach.ts ledgerNumbers)
-    const { getTrajectoryForUser } = await import("./trajectory-report");
-    const report = await getTrajectoryForUser(user.id);
-    if (report) return report.whatsappText;
-  }
+  if (resolved.reply) return closeCoachingTurn((resolved.committed === "food" && await (await import("./core/coach")).afterLogReply(phone, message, resolved.reply, "food", user)) || resolved.reply, { coachWithoutWrite: hasFeeling }); // A1: the new coach's words after a food-only write; mixed turns keep every receipt part
 
   // ---- PROGRESS CHECK: the live engine owns snapshot-grounded, sick-aware progress. ----
   // Deterministic progress remains the ENGINE_LIVE=off fallback.
@@ -1063,9 +1053,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // THE ENGINE IS A MOUTH ABOVE THE WRITERS, so it stands down on an owed fact for the same
   // reason every other handler does: a freeform reply must never be composed from state that is
   // missing a fact the client stated in this very message (2026-08-22).
-  const core = await import("./core/coach"), switched = core.coreWave1For(phone); let w1Read = false; // wave-1 switch: core/coach.ts wave1Turn
-  if ((engineLive() || switched) && !multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const w1 = switched ? await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), evidence: turnEvidence }) : null; w1Read = switched; // #451: read once
+  const core = await import("./core/coach"); let w1Read = false; // the new coach (wave 1 for everyone; its off-path deleted 6 Oct)
+  if (!multiFact && factsStillOwed().length === 0 && !mustStayDeterministic(m, normalizedQuestion) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+    const w1 = await core.wave1Turn({ phone, message, userId: user.id, ongoing: recentlyActive(user), evidence: turnEvidence }); w1Read = true; // #451: read once
     const engineReply = w1?.reply ?? (engineLive() ? await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester }) : null);
     if (engineReply !== null) return tag(engineReply, w1?.src ?? "🧠 new engine");
   }
@@ -1088,8 +1078,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
   const scope = await classifyDomain(openai, message, { ongoing: recentlyActive(user) }); // #321: fails closed
   if (scope.redirectMessage) return tag(await declineOutOfScope(user.id, message, scope.redirectMessage, turnEvidence), "scope");
-  const coreReply = switched && !w1Read ? await core.answerLive(phone, message).catch(() => null) : null; // wave-1 switch, second door (#451: once per turn)
-  return tag(coreReply ?? await handleGptBlock({ phone, message, m, user, intentPromise }), coreReply ? "new coach" : "gpt fallback");
+  // THE LAST DOOR (wave-1 deletion, 6 Oct): gpt-block is gone; the new coach answers what nothing else did.
+  return tag(await core.answerFinal(phone, message, user, w1Read), "new coach");
 
   } catch (err: any) {
     console.error("[handleMessage FATAL]", JSON.stringify({

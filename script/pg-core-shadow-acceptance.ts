@@ -19,7 +19,6 @@ process.env.ENGINE_LIVE = "on";
 process.env.PROACTIVE_PAUSED = "true";
 process.env.SHADOW = "on";
 process.env.CORE_SHADOW = "on";
-process.env.CORE_WAVE1 = "off"; // this proves SHADOW mode; wave 1 is on by default since #445
 process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000";
 process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
@@ -136,7 +135,10 @@ chk((row?.facts_read ?? 0) >= 1, "facts read are counted", String(row?.facts_rea
 
 REAL("\n3. IT NEVER SENDS, AND NEVER WRITES CLIENT STATE");
 const sent = await q("SELECT body FROM shadow_replies WHERE phone = $1", [u.phoneNumber]);
-chk(sent.length > 0 && !sent.some((r: any) => r.body.includes(SENTINEL)), "nothing the shadow wrote reached the transport", JSON.stringify(sent.map((r: any) => r.body.slice(0, 60))));
+// Since the CORE_WAVE1 off-path went (6 Oct) the LIVE reply is the new coach's too, so the stub's sentinel reaches the
+// transport by design. What must hold is structural: runShadow has no door to the transport at all.
+const shadowSrc = (await import("node:fs")).readFileSync("server/core/coach.ts", "utf-8").split("export async function runShadow")[1]?.split("\nexport ")[0] ?? "";
+chk(sent.length > 0 && shadowSrc.length > 100 && !/send(WhatsApp|Parts|Final|Proactive)\(|deliverTwilioMessage\(/.test(shadowSrc), "the shadow has no path to the transport", shadowSrc.slice(0, 80));
 const before = (await q("SELECT current_weight, goal_type, profile_notes FROM users WHERE id = $1", [u.id]))[0];
 const meals0 = (await q("SELECT count(*)::int n FROM meal_logs WHERE user_id = $1", [u.id]))[0].n;
 const s3 = await say(u.phoneNumber, "How much protein do I need today?");
@@ -162,7 +164,8 @@ chk(composerRequests.length === composed0 && !String(scopedRow?.reply).includes(
 chk(scopedRow?.understanding?.floor === "scope", "the row says a floor answered, so the gate can tell", JSON.stringify(scopedRow?.understanding));
 const s3c = await say(u.phoneNumber, "What should I have for lunch tomorrow?");
 await settle(async () => (await q("SELECT 1 FROM core_shadow WHERE root_id = $1", [s3c])).length > 0);
-chk(String((await q("SELECT reply FROM core_shadow WHERE root_id = $1", [s3c]))[0]?.reply).includes(SENTINEL), "CONTROL: the next in-scope turn is composed as usual");
+const s3cRow = (await q("SELECT reply, understanding FROM core_shadow WHERE root_id = $1", [s3c]))[0];
+chk(String(s3cRow?.reply).includes(SENTINEL), "CONTROL: the next in-scope turn is composed as usual", JSON.stringify(s3cRow));
 
 REAL("\n3c. NO CONFIDENT REPLY WITHOUT UNDERSTANDING (#421)");
 const composedBefore = composerRequests.length;

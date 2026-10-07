@@ -359,9 +359,9 @@ export const ACCEPTANCES: Acceptance[] = [
     command: ["npx", "tsx", "script/pg-turn-reply-integrity-acceptance.ts"] },
 
   { id: "turn-reply-integrity-reverts", title: "Every C10 reply-integrity seam turns the acceptance red",
-    // The ordinary exit, the held repair, the second mouth and the flag it reads — reverted
-    // independently — plus the other owner on the same journey: an under-eating warning that
-    // swallowed the client's question entirely.
+    // The ordinary exit, plus the other owner on the same journey: an under-eating warning that
+    // swallowed the client's question entirely. (The held-repair and rebuild cases retired with the
+    // wave-1 last door: see the harness.)
     command: ["bash", "script/red-on-revert-c10-turn-reply-integrity.sh"] },
 
   { id: "age-gate", title: "Under-18s cannot complete signup or keep being coached",
@@ -739,12 +739,9 @@ async function main() {
     process.exit(2);
   }
 
-  // THESE ACCEPTANCES STUB THE MODEL (#445). With wave 1 on by default, a stubbed model would be
-  // "answering" every talk turn; what these scripts prove is the deterministic spine around it (writes,
-  // floors, opt-out, erasure), which sits upstream of the switch point. The new coach's replies are
-  // graded with a real model by the replay gate, and the switch itself by pg-core-wave1-switch, which
-  // sets its own CORE_WAVE1. An explicit CORE_WAVE1 in the environment still wins.
-  process.env.CORE_WAVE1 ??= "off";
+  // THESE ACCEPTANCES STUB THE MODEL (#445). What they prove is the deterministic spine (writes, floors,
+  // opt-out, erasure), upstream of the new coach; its replies are graded with a real model by the replay
+  // gate. The CORE_WAVE1 off-path they used to pin went with gpt-block (6 Oct).
   const { pool } = await import("../server/db");
   const results = await runAcceptances(entries, {
     reset: () => resetTestDatabase(pool),

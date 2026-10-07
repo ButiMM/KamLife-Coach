@@ -59,9 +59,10 @@ process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 // A template SID must be HX + 32 hex characters or templateSid() fails closed and NO template is
 // sent — which reads identically to "the window recovery is broken".
-const SID = { daily: "HX0000000000000000000000000000000a", reengage: "HX0000000000000000000000000000000d" };
+const SID = { daily: "HX0000000000000000000000000000000a", reengage: "HX0000000000000000000000000000000d", checkin: "HX0000000000000000000000000000000c" };
 process.env.TWILIO_DAILY_TEMPLATE_SID = SID.daily;
 process.env.TWILIO_REENGAGE_TEMPLATE_SID = SID.reengage;
+process.env.TWILIO_CHECKIN_TEMPLATE_SID = SID.checkin;
 process.env.NODE_ENV = "production";
 
 const REAL = console.log.bind(console);
@@ -98,12 +99,13 @@ const isEveningCoaching = (b: string) => /haven'?t heard from you today/i.test(S
 
 let payloads: Array<Record<string, any>> = [];
 /** windowShut=true makes every freeform rejected with 63016, exactly as a closed window does. */
-function stubTwilio(windowShut: boolean) {
+function stubTwilio(windowShut: boolean, failingTemplate?: string) {
   payloads = [];
   _setTwilioClientForTests({
     messages: {
       create: async (p: Record<string, any>) => {
         payloads.push(p);
+        if (failingTemplate && p.contentSid === failingTemplate) throw Object.assign(new Error("simulated template rejection"), { code: 63027, status: 400 });
         if (windowShut && typeof p.body === "string") {
           const err: any = new Error("simulated 63016"); err.code = 63016; err.status = 400; throw err;
         }
@@ -294,6 +296,42 @@ REAL("\n6. THE SNAPSHOT STILL NAMES THE MESSAGE THEY ACTUALLY READ");
     JSON.stringify(line.slice(0, 140)));
   chk(!/your plan for today is ready/i.test(line),
     "…so the model is not handed a stale message as the newest one", JSON.stringify(line.slice(0, 140)));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n7. A SAFETY ROUTE OUTRANKS THE SCHEDULE (#571)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// They wrote something that took the crisis route this afternoon. Tonight's scheduled message does
+// not go; once a proactive message has gone after it (or seven days pass), the schedule resumes.
+{
+  await reset();
+  stubTwilio(false);
+  await pool.query("INSERT INTO chat_history (user_id, message_in, message_out, intent) VALUES ($1, 'test crisis', 'test reply', 'CRISIS')", [user.id]);
+  await runEveningAccountability();
+  chk(freeformSent().length === 0 && templatesSent().length === 0, "after a crisis turn, the evening job sends nothing", JSON.stringify(freeformSent()));
+  await reset();
+  stubTwilio(false);
+  await pool.query("UPDATE chat_history SET created_at = now() - interval '8 days' WHERE user_id = $1 AND intent = 'CRISIS'", [user.id]);
+  await runEveningAccountability();
+  chk(freeformSent().length === 1, "eight days later, the evening message goes again", JSON.stringify(freeformSent().length));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n9. A COMMITMENT CHECK-IN IS THAT MESSAGE OR NOTHING (#563)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Outside the window, the check-in goes as its own template. If that template is refused, the
+// generic "checking in" template does NOT go in its place: one missed ask, not two contacts.
+{
+  await reset();
+  stubTwilio(true, SID.checkin);
+  const today = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+  await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, detail, extracted_by) VALUES ($1, 'commitment', 'commitment', 'I will walk after work', $2, 'test')",
+    [user.id, JSON.stringify({ domain: "movement", what: "a walk after work", due: today, state: "open" })]);
+  await runEveningAccountability();
+  chk(templatesSent().includes(SID.checkin), "the check-in's own template is tried", JSON.stringify(templatesSent()));
+  chk(!templatesSent().includes(SID.reengage), "…and when it is refused, the generic check-in is not sent instead", JSON.stringify(templatesSent()));
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
 }
 
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);

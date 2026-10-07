@@ -21,7 +21,7 @@ const CANONICAL = ["server/sast.ts"];
 
 // Today's count, 2026-07-28. LOWER THIS as call sites migrate. Never raise it: a rise means a
 // new hand-rolled day boundary was written, which is the exact bug this exists to stop.
-const BUDGET = 44;  // 2026-10-06 (D2b): three went with intelligence/profile.ts — 47 → 44.
+const BUDGET = 42;  // 2026-10-07 (D2b): three went with intelligence/profile.ts — 45 → 42.
 // 2026-09-11 (Cut 2): the clock-derived meal-slot inference is gone — 59 → 55
                     // 2026-08-13: client-snapshot dropped its local SAST key for sast.sastDayKey
 
