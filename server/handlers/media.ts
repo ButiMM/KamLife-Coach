@@ -199,7 +199,8 @@ export async function handleMediaMessage(ctx: {
       console.log(`[MEDIA][${mediaTrace}] image_download_ok bytes=${buffer.byteLength} ms=${imgDownloadMs}`);
       // DOWNSCALE ONCE, HERE (2026-07-28, CFO review): vision charges per tile, so a 4000px phone photo costs several times a 1024px one and reads a plate no better. Doing it at the download means every reader below gets the cheap image for free. Fail-open.
       photoStage = "classify";
-      const shrunk = await downscaleForVision(Buffer.from(buffer).toString("base64"), imageResponse.headers.get("content-type") || "image/jpeg");
+      const originalB64 = Buffer.from(buffer).toString("base64"), originalCt = imageResponse.headers.get("content-type") || "image/jpeg";
+      const shrunk = await downscaleForVision(originalB64, originalCt);
       if (shrunk.resized) console.log(`[MEDIA][${mediaTrace}] image_downscaled ${shrunk.fromEdge}px -> ${shrunk.toEdge}px bytes=${Buffer.byteLength(shrunk.b64, "base64")}`);
       const base64 = shrunk.b64;
       const contentType = shrunk.ct;
@@ -781,7 +782,7 @@ export async function handleMediaMessage(ctx: {
       const foodVisionStart = Date.now();
       photoStage = "vision";
       // #596: if the paid vision model is refused, the one production already answers text with reads it.
-      const foodVision = (model: string) => withTimeout("food_vision", 22000, () => openai.chat.completions.create({
+      const foodVision = (model: string, img = { b64: base64, ct: contentType }) => withTimeout("food_vision", 22000, () => openai.chat.completions.create({
         model,
         max_tokens: foodVisionDecision.maxTokens,
         messages: [
@@ -796,12 +797,12 @@ export async function handleMediaMessage(ctx: {
                 type: "text",
                 text: buildFoodVisionUserPrompt({ message, isApprovalCaption, liveCal, liveProt, numbersLow: photoNumbersLow, remainingToday, cardComing: photoCardComing }),
               },
-              { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: foodVisionDecision.detail } },
+              { type: "image_url", image_url: { url: `data:${img.ct};base64,${img.b64}`, detail: foodVisionDecision.detail } },
             ],
           },
         ],
       }));
-      const visionResponse = await foodVision(foodVisionDecision.model).catch(async (e) => {
+      let visionResponse = await foodVision(foodVisionDecision.model).catch(async (e) => {
         if (foodVisionDecision.model === "gpt-4o-mini" || /timeout/i.test(String((e as Error)?.message))) throw e;
         console.error(`[MEDIA][${mediaTrace}] food_vision ${foodVisionDecision.model} refused, retrying gpt-4o-mini:`, (e as Error)?.message);
         return foodVision("gpt-4o-mini");
@@ -811,6 +812,12 @@ export async function handleMediaMessage(ctx: {
       console.log(`[COST][${mediaTrace}] food_vision ~$${estimateVisionCostUSD(foodVisionDecision, foodVisionTokens).toFixed(5)} ms=${foodVisionMs} (${foodVisionDecision.reason})`);
       recordServiceCost({ userId: user.id, feature: "vision", costUsd: estimateVisionCostUSD(foodVisionDecision, foodVisionTokens) }); // per-member cost + governor counting
 
+      // The AI saying it cannot see a SHRUNK photo means the shrink broke it: one retry with the original (7 Oct, live).
+      const saysUnseen = (t: string) => ["can't see", "can’t see", "cannot see", "unable to see", "can't view", "no image", "cannot view"].some(w => t.toLowerCase().includes(w));
+      if (shrunk.resized && saysUnseen(visionResponse.choices[0]?.message?.content || "")) {
+        console.error(`[MEDIA][${mediaTrace}] food_vision could not see the shrunk photo; retrying with the original`);
+        visionResponse = await foodVision(foodVisionDecision.model, { b64: originalB64, ct: originalCt });
+      }
       const visionReply = visionResponse.choices[0]?.message?.content?.trim();
       // Unreadable photo + caption naming food → log from the caption (no double log).
       const captionHasFood = !!(message && message.trim().length > 1 && scanForSAFoods(message).length > 0);
@@ -1173,7 +1180,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const words = extraReplies.length === 0 && photoCommit?.ok && !photoCommit.wasDup
         ? await (await import("../core/coach")).afterLogReply(phone, message?.trim() || "[a photo of their food]", photoReceipt, "food").catch(() => null) : null;
       const plain = (t: string) => photoNumbersLow ? stripNumbersFromProse(t) : t; // #550 attack: number-free mode gets the old path's scrub
-      if (words) return plain(await (await import("../understanding/live")).closeCoachingTurn(user, message || "", `${words}${guard}`));
+      // #590: a photo's reply is the coach's words only; no canned next move stapled under it ("Stand on a scale…").
+      if (words) return plain(`${words}${guard}`);
       return plain(`${photoReceipt}${guard}`);
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;

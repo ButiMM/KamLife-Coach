@@ -53,6 +53,12 @@ export async function downscaleForVision(b64: string, ct: string, maxEdge = MAX_
     const canvas = createCanvas(nw, nh);
     const ctx = canvas.getContext("2d");
     ctx.drawImage(img as any, 0, 0, nw, nh);
+    // A BLANK RESULT IS A FAILED DECODE (7 Oct, live: the AI answered "I can't see the photo"). If the shrunk
+    // image is one flat colour, send the original: it costs more and it is readable.
+    const px = ctx.getImageData(0, 0, nw, nh).data;
+    let lo = 765, hi = 0;
+    for (let i = 0; i < px.length; i += 4 * 97) { const v = px[i] + px[i + 1] + px[i + 2]; if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (hi - lo < 24) return original;
     const out = canvas.toBuffer("image/jpeg", 82);
     // Guard against the pathological case where the re-encode is somehow bigger.
     if (out.length >= Buffer.byteLength(b64, "base64")) return original;

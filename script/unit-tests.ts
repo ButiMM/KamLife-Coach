@@ -6228,8 +6228,7 @@ test("dayStatusPill: a plain verdict, never a number, and it matches the bars", 
 test("A3 (#550 attack): a number-free client's photo words get the same scrub as the old receipt", () => {
   const src = readFileSync("server/handlers/media.ts", "utf-8");
   assert.match(src, /const plain = \(t: string\) => photoNumbersLow \? stripNumbersFromProse\(t\) : t;/);
-  assert.match(src, /if \(words\) return plain\(await [^\n]*closeCoachingTurn\(/);
-  assert.match(src, /closeCoachingTurn\(user, message \|\| "", `\$\{words\}\$\{guard\}`\)/, "#550 @ 48f845c: the guardrail rides after the switched words");
+  assert.match(src, /if \(words\) return plain\(`\$\{words\}\$\{guard\}`\);/, "#550 @ 48f845c: the guardrail rides after the switched words (#590: no move stapled under them)");
   assert.match(src, /const guard = photoCommit\?\.ok && !photoCommit\.wasDup \? await nutritionGuardrailNudge\(user\)/);
 });
 test("A19 (#545 attack): the voice door teaches the record from the live read, as the text door does", () => {
@@ -6265,6 +6264,15 @@ test("#569: the intent classifier is started only after the age gate and the POP
   assert.equal(src.split("classifyIntent(message, user.id)").length - 1, 1, "one call site, inside startIntent");
   assert.ok(src.indexOf("classifyIntent(message, user.id)") > src.indexOf("const startIntent ="), "and it is startIntent's body, not an eager start");
   assert.ok(!readFileSync("server/gpt.ts", "utf-8").includes("YOUTH CLIENT"), "no youth prompt: under-18s are never coached");
+});
+test("7 Oct live: a photo that shrinks to one flat colour is sent as the original", async () => {
+  const { createCanvas } = await import("@napi-rs/canvas");
+  const { downscaleForVision } = await import("../server/image-downscale");
+  const flat = createCanvas(3000, 3000); const g = flat.getContext("2d"); g.fillStyle = "#808080"; g.fillRect(0, 0, 3000, 3000);
+  const r = await downscaleForVision((await flat.encode("jpeg")).toString("base64"), "image/jpeg");
+  assert.equal(r.resized, false, "a blank result is never sent");
+  const busy = createCanvas(3000, 3000); const h = busy.getContext("2d"); for (let i = 0; i < 50; i++) { h.fillStyle = `hsl(${i * 7},60%,50%)`; h.fillRect(i * 55, i * 55, 300, 300); }
+  assert.equal((await downscaleForVision((await busy.encode("jpeg")).toString("base64"), "image/jpeg")).resized, true, "a real photo is still shrunk");
 });
 test("#596: the 07:00 report groups media failures by step and real error", async () => {
   const { mediaFailures } = await import("../server/audit/reply-audit-command");
