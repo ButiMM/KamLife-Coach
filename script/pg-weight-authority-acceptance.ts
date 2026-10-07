@@ -203,6 +203,11 @@ chk(/has not been calculated/i.test(noHeight),
   chk(await goal() === null && !/that's the goal|goal, done/i.test(r2), "with no goal set, a weigh-in leaves it unset", `${await goal()} | ${r2.slice(0, 160)}`);
   await ask(G, "I want to get to 75kg");
   chk(Number(await goal()) === 75, "CONTROL: \"I want to get to 75kg\" still sets the goal", String(await goal()));
+  // #594 attack: a goal asked for in other words is still a goal, including a held-out and a code-switched phrasing.
+  for (const [said, kg] of [["Can you help me get to 74kg?", 74], ["Please help me get down to 73kg", 73], ["I'd love to reach 72kg by December", 72], ["Ngifuna u-get to 71kg", 71], ["Help me hit 70kg", 70]] as const) {
+    await ask(G, said);
+    chk(Number(await goal()) === kg, `"${said}" sets the goal to ${kg}kg`, String(await goal()));
+  }
   await pool.query("DELETE FROM users WHERE phone_number = $1", [G]); }
 
 await pool.query("DELETE FROM users WHERE id = ANY($1)", [[clear.id, ill.id, lost.id]]);

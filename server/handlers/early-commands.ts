@@ -1115,9 +1115,9 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
   // ---- TARGET WEIGHT DETECTION — "I want to get to 70kg", "my goal is 75kg" ----
   const targetWeightMatch = m.match(/\b(?:get(?:\s+down)?|lose\s+(?:weight\s+)?(?:to|down\s+to)|reach|hit|weigh|target(?:\s+is|\s+weight)?|goal(?:\s+is|\s+weight)?|aim(?:ing)?\s+(?:for|to\s+(?:get\s+)?to)|slim\s+down\s+to)\s+(?:to\s+)?(\d{2,3}(?:\.\d)?)\s*kg\b/i);
-  // #587: "I weigh 87kg today" / "I hit 87kg" is a weigh-in, never a goal. Those verbs set one only
-  // when the client says they want it; "goal", "target", "aim" and "slim down to" say so themselves.
-  const reportVerb = ["get", "reach", "hit", "weigh"].includes((targetWeightMatch?.[0] || "").toLowerCase().split(" ")[0]) && !/\b(?:want|wanna|hop(?:e|ing)|trying|try|plan(?:ning)?|like|need|goal|target|aim(?:ing)?|dream)\b/i.test(m);
+  // #587: "I weigh 87kg today" / "I hit 87kg" is a weigh-in, never a goal. Those two verbs set one only
+  // when the client says they want it. "Get to", "reach", "goal", "target", "aim" are aspirations already (#594 attack).
+  const reportVerb = ["hit", "weigh"].includes((targetWeightMatch?.[0] || "").toLowerCase().split(" ")[0]) && !/\b(?:want|wanna|hop(?:e|ing)|trying|try|plan(?:ning)?|like|love|need|help|goal|target|aim(?:ing)?|dream)\b/i.test(m);
   if (targetWeightMatch && !reportVerb) {
     const targetKg = parseFloat(targetWeightMatch[1]);
     if (targetKg >= 35 && targetKg <= 200 && targetKg !== parseFloat(user.currentWeight || "0")) {
