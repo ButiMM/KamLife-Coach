@@ -10,11 +10,13 @@ process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000"; process.env
 await import("./sast-noon-clock"); // #404
 const { createCanvas } = await import("@napi-rs/canvas");
 const jpeg = await (() => { const cv = createCanvas(64, 64); const g = cv.getContext("2d"); g.fillStyle = "#333"; g.fillRect(0, 0, 64, 64); return cv.encode("jpeg"); })();
-let vision: "ok" | "4o-refused" | "down" = "ok"; let visionText = "";
+let vision: "ok" | "4o-refused" | "down" | "shrunk-unseen" = "ok"; let visionText = "";
+const big = await (() => { const cv = createCanvas(3000, 4000); const g = cv.getContext("2d"); for (let i = 0; i < 300; i++) { g.fillStyle = `hsl(${i * 7},60%,50%)`; g.fillRect((i * 97) % 2800, (i * 131) % 3800, 200, 200); } return cv.encode("jpeg", 90); })();
+let serve = jpeg;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
   const url = typeof input === "string" ? input : String(input?.url || input);
-  if (url.includes("twilio.com") && url.includes("/Media/")) return new Response(jpeg, { status: 200, headers: { "content-type": "image/jpeg", "content-length": String(jpeg.length) } });
+  if (url.includes("twilio.com") && url.includes("/Media/")) return new Response(serve, { status: 200, headers: { "content-type": "image/jpeg", "content-length": String(serve.length) } });
   if (!url.includes("api.openai.com")) return realFetch(input, init);
   const body = typeof init?.body === "string" ? init.body : "";
   const isVision = body.includes("image_url");
@@ -26,7 +28,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
     content = JSON.stringify({ scope: "in", family: "report", wants: "log", one_question: null, uncertainty: 0.1, facts: [], actions: had ? [{ type: "LOG_MEAL", foodText: had[1], needsConfirmation: false }] : [] });
   }
   else if (body.includes("You are Coach K, a warm, direct South African")) content = "NEW-COACH-596";
-  else if (isVision) content = visionText;
+  else if (isVision) content = vision === "shrunk-unseen" && body.length < big.length ? "I can't see the photo right now. Please tell me what you had." : visionText;
   return new Response(JSON.stringify({ id: "s", object: "chat.completion", created: 1, model: "stub", choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }), { status: 200, headers: { "content-type": "application/json" } });
 }) as typeof fetch;
 const REAL = console.log.bind(console);
@@ -63,6 +65,11 @@ chk(/photo_vision/.test(row?.i || "") && /does not exist or you do not have acce
 await fresh(); vision = "down";
 const q = await photo("Can I eat this chicken?");
 chk((await meals()).length === 0 && CANNOT.test(q), "vision down and the caption asks a question: nothing logged, no verdict on unseen food, the honest \"cannot read\" (#598 attack)", `${JSON.stringify(await meals())} | ${q.slice(0, 160)}`);
+
+await fresh(); vision = "shrunk-unseen"; serve = big; visionText = "Rice with veg and mince — solid.\nTOTAL: 520 kcal | 22g protein";
+const s = await photo("");
+chk((await meals()).length === 1 && !/can.t see/i.test(s) && !/stand on a scale/i.test(s), "the AI can't see the shrunk photo: it reads the original, the meal is logged, and no canned move is stapled under the words (7 Oct, live)", `${JSON.stringify(await meals())} | ${s.slice(0, 160)}`);
+serve = jpeg;
 
 await pool.query("DELETE FROM users WHERE phone_number=$1", [P]);
 REAL(`\npg-photo-door-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);

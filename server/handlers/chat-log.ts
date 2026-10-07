@@ -71,6 +71,7 @@ export async function logChat(userId: string, messageIn: string, messageOut: str
   catch (err) { console.error("Chat log error:", err); }
 }
 
+let lastMediaAlert = 0;
 export async function logMediaFailure(userId: string, stage: string, rawError?: unknown, latencyMs?: number): Promise<void> {
   const code = classifyMediaFailure(stage, rawError);
   // #596: the error itself, so a failure says what happened (a code alone hid every live photo failure).
@@ -78,6 +79,11 @@ export async function logMediaFailure(userId: string, stage: string, rawError?: 
   const payload = `${latencyMs !== undefined ? `${code} latency=${latencyMs}ms` : code}${said ? ` err=${said}` : ""}`;
   try { await logChat(userId, `[MEDIA_FAIL:${stage}]`, payload, "MEDIA_FAILURE"); }
   catch (e) { console.warn("[media-failure-log]", e); }
+  // The founder sees it as it happens (CTO, 7 Oct): the step and the real error, no client, at most one per 5 minutes.
+  if (Date.now() - lastMediaAlert > 5 * 60_000) {
+    lastMediaAlert = Date.now();
+    void import("../scheduler/jobs/balance-check").then(m => m.alertOps(`📸 A client's ${stage.replace("_", " ")} just failed: ${payload.slice(0, 400)}`)).catch(() => {});
+  }
 }
 
 export async function logMediaSuccess(userId: string, flow: string, totalMs: number): Promise<void> {
