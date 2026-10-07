@@ -89,5 +89,8 @@ for (const m of ["what workout should I do today?", "what should I eat for suppe
 OUT("\n════ DOES IT DO ANYTHING ════");
 const u3 = await freshUser({ name: "Lerato" });
 for (const m of ["hi", "help", "I'm struggling this week", "how am I doing?", "what are my targets?", "I walked 6000 steps", "I weigh 87kg today", "I did a 30 min home workout", "remind me to drink water at 3pm", "thanks coach"]) await say(u3, m);
+OUT("\n════ WORKOUTS ════");
+const u4 = await freshUser({ name: "Thandi" });
+for (const m of ["what's my workout today?", "Had pap and wors for lunch and did a 30 min home workout", "2"]) await say(u4, m);
 await pool.end();
 process.exit(0);

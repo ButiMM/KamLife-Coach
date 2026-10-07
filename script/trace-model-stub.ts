@@ -27,6 +27,8 @@ const READINGS: Array<[RegExp, { family: string; actions?: unknown[]; facts?: un
   [/^I don't eat fish$/i, { family: "report", facts: [fact("preference", "no fish", "I don't eat fish")] }],
   [/^I walked 6000 steps$/i, { family: "report", actions: [{ type: "LOG_STEPS", count: 6000 }] }],
   [/^I weigh 87kg today$/i, { family: "report", actions: [{ type: "LOG_WEIGHT", kg: 87 }] }],
+  [/^Had pap and wors for lunch and did a 30 min home workout$/i, { family: "report", actions: [meal("pap and wors", "lunch"), { type: "LOG_WORKOUT", what: "a 30 min home workout" }] }],
+  [/^what'?s my workout today\??$/i, { family: "question", actions: [{ type: "SHOW_WORKOUT" }] }],
   [/^I did a 30 min home workout$/i, { family: "report", actions: [{ type: "LOG_WORKOUT", what: "a 30 min home workout" }] }],
   [/^remind me to drink water at 3pm$/i, { family: "plan", actions: [{ type: "SET_REMINDER", body: "drink water", when: "at 3pm" }] }],
 ];
