@@ -85,6 +85,8 @@ cron.schedule("0 5 * * *", async () => {
       }
     }
   } catch (slaErr) { console.error("[SCHEDULER] SLA digest failed:", slaErr); }
+  // TESTER TRUTH (CTO, 7 Oct): what testers received yesterday, to the founder with the morning inbox.
+  await (await import("./audit/reply-audit-command")).sendTesterTruth().catch(e => console.error("[TESTER_TRUTH]", e?.message || e));
 }, { timezone: "UTC" });
 
 // ============================================================

@@ -155,6 +155,13 @@
       "when": 1790474400000,
       "tag": "0021_commitment_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1790560800000,
+      "tag": "0022_pattern_kind_drop_memories",
+      "breakpoints": true
     }
   ]
 }

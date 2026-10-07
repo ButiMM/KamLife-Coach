@@ -9,7 +9,6 @@ import { getPhaseNames } from "./programme";
 import { calculateTargets } from "./targets";
 import { getDisplayName, sastDayStart, findFabricatedComposites, findUngroundedFoodItems } from "./utils";
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
-import { getClientNarrative } from "./intelligence/profile";
 import { verifyBrainReply, COACH_OUT_OF_CREDITS_REPLY } from "./brain/reply-verifier";
 import { weightInContextLine } from "./weight-context";
 import { getWeightTruth, sastDayBucketSql, readTrustedStepDays } from "./day-ledger";
@@ -175,7 +174,6 @@ export async function buildContext(user: any): Promise<string> {
       return Number((row as any)?.n || 0);
     } catch { return 0; }
   })();
-  const isYouth = age < 18;
   const isElderly = age >= 60;
   const gender = user.gender || "unknown";
 
@@ -193,9 +191,8 @@ export async function buildContext(user: any): Promise<string> {
 
   // Age-specific coaching guidelines
   let ageGuidelines = "";
-  if (isYouth) {
-    ageGuidelines = "YOUTH CLIENT (under 18): Use energetic, fun language. No heavy 1RM lifts — focus on form, bodyweight, and building habits. Celebrate effort over results. Never body-shame. Frame everything as 'getting stronger' not 'losing weight'. Use slang naturally (sharp, eish, let's go).";
-  } else if (isElderly) {
+  // No youth branch (#569): under-18s are closed at the age gate (#267) and are never coached.
+  if (isElderly) {
     ageGuidelines = "SENIOR CLIENT (60+): Respectful but not patronizing. Joint-friendly alternatives for every exercise. Emphasize mobility, balance, and independence. Lower impact cardio. Always remind to listen to their body. Never push through pain. Warm-up is mandatory, not optional.";
   } else if (age >= 40) {
     ageGuidelines = "40+ CLIENT: Recovery matters more. Warm-ups are essential. Mention joint care when relevant. Don't assume they can't perform — many are at their strongest. Respect their time constraints.";
@@ -963,10 +960,7 @@ const STATIC_HOT_BRAIN = `${COACH_K_SYSTEM.slice(0, 20_000)}\n\n${ONE_VOICE}`;
 
 export async function askCoachK(userMessage: string, user: any, extraInstruction?: string, memoryContext?: string, staticGuide?: string): Promise<string> {
   const context = await buildContext(user);
-  const [patternSummary, cipNarrative] = await Promise.all([
-    buildPatternSummary(user),
-    getClientNarrative(user.id).catch(() => null),
-  ]);
+  const patternSummary = await buildPatternSummary(user);
   console.log(`[PATTERN] ${patternSummary}`);
   const saFlags = getSAContextFlags(user);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
@@ -1017,11 +1011,8 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
 
   const cappedMemory = winMemory.length > 2000 ? winMemory.slice(0, 2000) + "\n[Memory truncated — older entries omitted]" : winMemory;
   // Prompt layout for OpenAI prefix-caching: static brain byte-identical across calls (cached ~50%),
-  // per-client data in the tail. Client data never truncated (memory 2k, narrative 6k).
-  const cipBlock = cipNarrative
-    ? `\n\nCLIENT JOURNEY MEMORY (full history — use this to reference specific past achievements, patterns, and progress. Be precise: if they lost 4kg, say 4kg. Never fabricate):\n${cipNarrative.slice(0, 6000)}`
-    : "";
-  const clientContext = `${getNowContextSA()}\n\n${context}\n\n${patternSummary}${cipBlock}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}`;
+  // per-client data in the tail. Client data never truncated (memory 2k).
+  const clientContext = `${getNowContextSA()}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}`;
   // The length rule must know what was ASKED (Work Order D follow-up): the raised ceiling stopped
   // the API cutting a list mid-price, but the prompt still ordered "Max 3 sentences" at a
   // twenty-item ask. Only the length clause swaps — the voice rules after it never change.
@@ -1034,7 +1025,6 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   console.log("[PROMPT] " + JSON.stringify({
     staticBrain: STATIC_HOT_BRAIN.length, staticGuide: staticGuide?.length || 0,
     context: context.length, patternSummary: patternSummary.length,
-    cipNarrative: cipNarrative?.length || 0, cipBlockSent: cipBlock.length,
     saFlags: saFlags?.length || 0, todayFoodContext: todayFoodContext.length,
     memory: cappedMemory.length, tail: tail.length, systemContent: systemContent.length,
   }));

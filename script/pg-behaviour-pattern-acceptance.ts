@@ -4,6 +4,7 @@
  * Failures and successes are first produced through the existing open-loop/front-door owners.
  * Historical dates are test setup only; the profile builder and canonical decision then read the
  * real rows exactly as production does. Nothing here treats silence or missing logs as behaviour.
+ * D2b (6 Oct): the patterns live in the client record as `pattern` facts, written by jobs/cip-update.ts.
  */
 if (!process.env.DATABASE_URL) {
   console.log("pg-behaviour-pattern-acceptance: SKIPPED — no DATABASE_URL. This proof needs a real database.");
@@ -30,7 +31,8 @@ const { ensureOpenTrainingLoop, loadOpenTrainingLoop } = await import("../server
 const {
   recordDailyConstraint, recordOpenTrainingSuccess,
 } = await import("../server/held-constraints");
-const { buildClientProfile, decisionPatterns } = await import("../server/intelligence/profile");
+const { updateClientPatterns } = await import("../server/scheduler/jobs/cip-update");
+const { decisionPatterns, getBehaviourPatternContext, writePatternFacts, factsForCoach } = await import("../server/core/client-record");
 const { canonicalNextMove } = await import("../server/scheduler/proactive-decision");
 const { sastDayKey, sastDayStart } = await import("../server/sast");
 
@@ -84,11 +86,9 @@ async function failOpenMove(user: any, targetDay: string, message: string, id: s
   await handleMessage(user.phoneNumber, message, undefined, undefined, undefined, id);
 }
 
-const profileRow = async (id: string) => (await db.select({
-  patternFlags: schema.clientIntelligenceProfiles.patternFlags,
-  coachNarrative: schema.clientIntelligenceProfiles.coachNarrative,
-}).from(schema.clientIntelligenceProfiles)
-  .where(eq(schema.clientIntelligenceProfiles.userId, id)).limit(1))[0];
+// The live pattern facts' details, as the decision reads them.
+const patternsOf = async (id: string): Promise<any[]> => (await pool.query(
+  "SELECT detail FROM client_facts WHERE user_id = $1 AND kind = 'pattern' AND superseded_by IS NULL AND (valid_until IS NULL OR valid_until > now())", [id])).rows.map(r => r.detail);
 
 REAL("\n=== REPEATED WEEKEND + WORK-PRESSURE OUTCOMES ===");
 const active = await freshUser();
@@ -104,9 +104,9 @@ const [activeForMinimum] = await db.select().from(schema.users)
   .where(eq(schema.users.id, active.id)).limit(1);
 await ensureOpenTrainingLoop(activeForMinimum, sastDayKey(), "reactive", Date.now(), "minimum");
 await handleMessage(active.phoneNumber, "workout done", undefined, undefined, undefined, "SM-pattern-a5");
-await buildClientProfile(active);
-const activeProfile = await profileRow(active.id);
-const activeContext = decisionPatterns(activeProfile?.patternFlags);
+await updateClientPatterns(active.id);
+const activePatterns = await patternsOf(active.id);
+const activeContext = await getBehaviourPatternContext(active.id);
 const rows = await db.select().from(schema.dailyConstraints)
   .where(and(eq(schema.dailyConstraints.userId, active.id), eq(schema.dailyConstraints.kind, "training")));
 check(rows.filter((r: any) => r.state === "asserted" && r.via === "said_time").length >= 4,
@@ -114,9 +114,10 @@ check(rows.filter((r: any) => r.state === "asserted" && r.via === "said_time").l
 check(rows.some((r: any) => r.state === "released" && r.via === "workout_logged_minimum"),
   "the completed minimum intervention is linked to workout truth", JSON.stringify(rows));
 check(activeContext.weekendTrainingMisses && activeContext.workPressureTrainingMisses,
-  "two distinct weeks earn active weekend and work-pressure patterns", JSON.stringify(activeProfile?.patternFlags));
+  "two distinct weeks earn active weekend and work-pressure patterns", JSON.stringify(activePatterns));
 check(activeContext.minimumTrainingReengaged,
-  "the attributed intervention outcome is available to the decision", JSON.stringify(activeProfile?.patternFlags));
+  "the attributed intervention outcome is available to the decision", JSON.stringify(activePatterns));
+check(await updateClientPatterns(active.id) === 0, "an unchanged week writes no new pattern rows");
 
 const adapted = await canonicalNextMove(active, { hour: 14 });
 check(adapted.action.kind === "train"
@@ -124,9 +125,9 @@ check(adapted.action.kind === "train"
     && adapted.action.intervention === "minimum_training",
   "the existing canonical decision owner selects the existing minimum action",
   JSON.stringify(adapted.action));
-check(!/weekend training|work[- ]pressure training|minimum training/i.test(String(activeProfile?.coachNarrative || "")),
-  "structured pattern state is not copied into model-authored client prose",
-  JSON.stringify(activeProfile?.coachNarrative));
+const told = await factsForCoach(active.id);
+check(!/weekend training|work[- ]pressure|minimum session|pattern/i.test(told),
+  "pattern state is never presented to the coach as the client's own words", told.slice(0, 300));
 
 REAL("\n=== REVIEW CONTROLS — REASON AND IDEMPOTENCY COLLISIONS ===");
 const workoutWords = await freshUser();
@@ -134,13 +135,13 @@ await failOpenMove(workoutWords, priorDay(1, 3),
   "I couldn't do it; that workout was too hard", "SM-pattern-workout-1");
 await failOpenMove(workoutWords, priorDay(1, 2),
   "I couldn't do it; the workout was too hard again", "SM-pattern-workout-2");
-await buildClientProfile(workoutWords);
+await updateClientPatterns(workoutWords.id);
 const workoutRows = await db.select().from(schema.dailyConstraints)
   .where(and(eq(schema.dailyConstraints.userId, workoutWords.id), eq(schema.dailyConstraints.kind, "training")));
 check(workoutRows.length === 2 && workoutRows.every((r: any) => r.via === "said_open"),
   "workout difficulty is retained as an open failure, never fabricated as work pressure",
   JSON.stringify(workoutRows));
-check(!decisionPatterns((await profileRow(workoutWords.id))?.patternFlags).workPressureTrainingMisses,
+check(!(await getBehaviourPatternContext(workoutWords.id)).workPressureTrainingMisses,
   "two workout-difficulty outcomes cannot earn a work-pressure pattern");
 
 const collision = await freshUser();
@@ -240,8 +241,8 @@ REAL("\n=== ONE EVENT AND SILENCE ARE NOT PATTERNS ===");
 const isolatedMiss = await freshUser();
 await seedDecisionEvidence(isolatedMiss.id);
 await failOpenMove(isolatedMiss, priorDay(6, 2), "I couldn't do it, work was chaos", "SM-pattern-one");
-await buildClientProfile(isolatedMiss);
-const oneContext = decisionPatterns((await profileRow(isolatedMiss.id))?.patternFlags);
+await updateClientPatterns(isolatedMiss.id);
+const oneContext = await getBehaviourPatternContext(isolatedMiss.id);
 check(!oneContext.weekendTrainingMisses && !oneContext.workPressureTrainingMisses,
   "one bad weekend remains one outcome, not a durable pattern", JSON.stringify(oneContext));
 
@@ -252,13 +253,10 @@ for (let i = 0; i < 20; i++) {
     createdAt: ago(i),
   });
 }
-await buildClientProfile(silent);
-const silentProfile = await profileRow(silent.id);
-check(Object.values(decisionPatterns(silentProfile?.patternFlags)).every(v => !v),
-  "missing reports and uneven engagement create no behavioural truth",
-  JSON.stringify(silentProfile?.patternFlags));
-check(!/go quiet|tend to slip/i.test(String(silentProfile?.coachNarrative || "")),
-  "the model narrative no longer converts silence into failure", JSON.stringify(silentProfile?.coachNarrative));
+await updateClientPatterns(silent.id);
+const silentPatterns = await patternsOf(silent.id);
+check(silentPatterns.length === 0,
+  "missing reports and uneven engagement create no behavioural truth", JSON.stringify(silentPatterns));
 
 REAL("\n=== CONTRADICTION, DECAY, ISOLATION, AND PRECEDENCE ===");
 const contradicted = await freshUser();
@@ -270,9 +268,9 @@ await db.insert(schema.workoutLogs).values([
   { userId: contradicted.id, workoutCompleted: true, loggedAt: new Date(`${priorDay(6, 4)}T10:00:00+02:00`) },
   { userId: contradicted.id, workoutCompleted: true, loggedAt: new Date(`${priorDay(6, 3)}T10:00:00+02:00`) },
 ]);
-await buildClientProfile(contradicted);
-const contradictedState: any = (await profileRow(contradicted.id))?.patternFlags;
-check(contradictedState.patterns.some((p: any) => p.kind === "weekend_training_misses"
+await updateClientPatterns(contradicted.id);
+const contradictedState = await patternsOf(contradicted.id);
+check(contradictedState.some((p: any) => p.kind === "weekend_training_misses"
     && p.status === "superseded" && p.contradictionCount >= 2)
     && !decisionPatterns(contradictedState).weekendTrainingMisses,
   "recent contradictory action removes an old pattern's authority without erasing provenance",
@@ -283,25 +281,20 @@ await db.insert(schema.dailyConstraints).values([
   { userId: stale.id, day: priorDay(1, 11), kind: "training", state: "asserted", via: "said_time", sourceMessageId: "SM-pattern-s1" },
   { userId: stale.id, day: priorDay(1, 10), kind: "training", state: "asserted", via: "said_time", sourceMessageId: "SM-pattern-s2" },
 ]);
-await buildClientProfile(stale);
-const staleState: any = (await profileRow(stale.id))?.patternFlags;
-check(staleState.patterns.some((p: any) => p.kind === "work_pressure_training_misses" && p.status === "decayed")
+await updateClientPatterns(stale.id);
+const staleState = await patternsOf(stale.id);
+check(staleState.some((p: any) => p.kind === "work_pressure_training_misses" && p.status === "decayed")
     && !decisionPatterns(staleState).workPressureTrainingMisses,
   "stale pattern evidence remains attributable but cannot decide", JSON.stringify(staleState));
 
 const unrelated = await freshUser();
-await buildClientProfile(unrelated);
-check(Object.values(decisionPatterns((await profileRow(unrelated.id))?.patternFlags)).every(v => !v),
+await updateClientPatterns(unrelated.id);
+check(Object.values(await getBehaviourPatternContext(unrelated.id)).every(v => !v),
   "one client never inherits another client's pattern state");
 
 const openControl = await freshUser();
 await seedDecisionEvidence(openControl.id);
-await db.insert(schema.clientIntelligenceProfiles).values({
-  userId: openControl.id, patternFlags: activeProfile.patternFlags,
-}).onConflictDoUpdate({
-  target: schema.clientIntelligenceProfiles.userId,
-  set: { patternFlags: activeProfile.patternFlags },
-});
+await writePatternFacts(openControl.id, activePatterns);
 const openedControl = await ensureOpenTrainingLoop(openControl, sastDayKey(), "reactive");
 check(!!openedControl, "the #208 precedence control starts with a real durable open loop");
 const whileOpen = await canonicalNextMove(openControl, { hour: 14 });
@@ -311,17 +304,13 @@ const sick = await freshUser({
   profileNotes: `sick_since:${sastDayKey()} | sick_until:${sastDayKey()} | paused_until:${sastDayKey()}`,
 });
 await seedDecisionEvidence(sick.id);
-await db.insert(schema.clientIntelligenceProfiles).values({
-  userId: sick.id, patternFlags: activeProfile.patternFlags,
-}).onConflictDoUpdate({ target: schema.clientIntelligenceProfiles.userId, set: { patternFlags: activeProfile.patternFlags } });
+await writePatternFacts(sick.id, activePatterns);
 check((await canonicalNextMove(sick, { hour: 14 })).action.kind === "rest",
   "illness retains precedence over an active training pattern");
 
 const forbidden = await freshUser({ doNotMention: "training and the gym" });
 await seedDecisionEvidence(forbidden.id);
-await db.insert(schema.clientIntelligenceProfiles).values({
-  userId: forbidden.id, patternFlags: activeProfile.patternFlags,
-}).onConflictDoUpdate({ target: schema.clientIntelligenceProfiles.userId, set: { patternFlags: activeProfile.patternFlags } });
+await writePatternFacts(forbidden.id, activePatterns);
 check((await canonicalNextMove(forbidden, { hour: 14 })).action.kind !== "train",
   "doNotMention prevents pattern state from reissuing training");
 

@@ -6237,6 +6237,14 @@ test("A19 (#545 attack): the voice door teaches the record from the live read, a
   const voice = src.slice(src.indexOf("async function processVoiceAsync"), src.indexOf("// ── WhatsApp message splitting"));
   assert.match(voice, /recordAtDoor\([^)]*\)[^]*?learnFromLiveRead\(phone, sourceMessageId\)/);
 });
+test("#569: the intent classifier is started only after the age gate and the POPIA gate", () => {
+  const src = readFileSync("server/routes.ts", "utf-8");
+  const first = src.indexOf("startIntent()"), age = src.indexOf("blockUnderage(phone)"), popia = src.indexOf("before we continue I need your consent");
+  assert.ok(age > 0 && popia > 0 && first > popia && first > age, `first start at ${first}, age gate ${age}, POPIA ${popia}`);
+  assert.equal(src.split("classifyIntent(message, user.id)").length - 1, 1, "one call site, inside startIntent");
+  assert.ok(src.indexOf("classifyIntent(message, user.id)") > src.indexOf("const startIntent ="), "and it is startIntent's body, not an eager start");
+  assert.ok(!readFileSync("server/gpt.ts", "utf-8").includes("YOUTH CLIENT"), "no youth prompt: under-18s are never coached");
+});
 test("D7: live turns are scored from what the client did next, with no model call", async () => {
   const { scoreLiveTurns, liveDigest } = await import("../server/friction");
   const { isMemoryGrievance } = await import("../server/understanding/actions");
@@ -6278,6 +6286,29 @@ test("#567: the till charges R199, and an earlier subscriber's R149 token still 
   assert.equal(chargeMatchesPrice(1), false, "R1 never buys a subscription");
   assert.equal(chargeMatchesPrice(250), false);
   assert.ok(readFileSync("server/routes/payments.ts", "utf-8").includes("!chargeMatchesPrice(amountGross)"), "the ITN check uses it");
+});
+test("tester truth: every delivered reply is scanned and attributed to its handler; the worst five are quoted, masked", async () => {
+  const { testerTruth, truthDigest, truthMarkdown } = await import("../server/audit/reply-audit-command");
+  const now = new Date("2026-10-07T05:00:00Z"), since = new Date(now.getTime() - 86_400_000);
+  const t = (id: string, h: number, source: string, input: string, reply: string) => ({ id, at: new Date(now.getTime() - h * 3600_000), userId: "U" + id, phone3: "123", input, reply, source });
+  const wall = "word ".repeat(140);
+  const turns = [
+    t("1", 2, "new coach", "what should I eat tonight", "Chicken and veg, sorted."),
+    t("2", 3, "food-context", "I had pap", wall),
+    t("3", 30, "food-context", "I had rice", wall),
+    t("4", 4, "new coach", "hi", "Hey! How was the walk?"),
+  ];
+  const r = testerTruth(turns, since, [{ id: "4", why: ["frustrated"] }]);
+  assert.equal(r.scanned, 4);
+  assert.deepEqual(r.bySource.map(s => [s.source, s.share]), [["new coach", 50], ["food-context", 50]]);
+  assert.ok(r.byDetector.some(d => d.code === "wall-of-text" && d.count === 2), JSON.stringify(r.byDetector));
+  assert.deepEqual(r.worst.map(w => w.id), ["2", "4"], "today's defective reply first, then a signalled one; yesterday's stays out of the day's five");
+  const text = truthDigest(r);
+  assert.match(text, /Tester truth, last 24h:\* 4 replies, 2 with a known defect/);
+  assert.match(text, /1\. …123 · food-context · .*wall of text/i);
+  const md = truthMarkdown(r, 7, now);
+  assert.match(md, /\| food-context \| 50% \| 2 \| 2 \|/);
+  assert.ok(!md.includes("pap") && !md.includes("123"), "the markdown holds no client words and no number");
 });
 test("card paths: every attach site is accounted for", async () => {
   const { readFileSync } = await import("node:fs");
@@ -10612,7 +10643,8 @@ test("coach identity: one normalisation, or the founder is a stranger to his own
 
 // Every async test must finish before a single number is printed — see the note on test().
 test("#217 behavioural patterns require attributable repetition, decay, and reach one decision owner", async () => {
-  const { buildBehaviourPatternState, decisionPatterns } = await import("../server/intelligence/profile");
+  const { buildBehaviourPatterns: build } = await import("../server/scheduler/jobs/cip-update");
+  const { decisionPatterns } = await import("../server/core/client-record");
   const { chooseAction, readStruggle } = await import("../server/one-action");
   const { createOpenTrainingLoop, readOpenTrainingLoop } = await import("../server/workout-feedback");
   const at = (day: string) => new Date(`${day}T10:00:00+02:00`);
@@ -10626,10 +10658,10 @@ test("#217 behavioural patterns require attributable repetition, decay, and reac
   assert.equal(readStruggle("I couldn't do it; work was chaos and my shift ran late"), "time",
     "genuine employment pressure retains its existing classification");
 
-  const oneMiss = buildBehaviourPatternState([row(1, "2026-08-01")], [], at("2026-08-10"));
-  assert.equal(oneMiss.patterns.length, 0, "one bad weekend is an event, never a durable pattern");
+  const oneMiss = build([row(1, "2026-08-01")], [], at("2026-08-10"));
+  assert.equal(oneMiss.length, 0, "one bad weekend is an event, never a durable pattern");
 
-  const active = buildBehaviourPatternState([
+  const active = build([
     row(1, "2026-08-01"), row(2, "2026-08-08"),
     row(3, "2026-07-27", "asserted", "said_time"),
     row(4, "2026-08-03", "asserted", "said_time"),
@@ -10641,23 +10673,23 @@ test("#217 behavioural patterns require attributable repetition, decay, and reac
     workPressureTrainingMisses: true,
     minimumTrainingReengaged: true,
   });
-  assert.ok(active.patterns.every(p => p.evidence.every(e => e.source === "daily_constraints")),
+  assert.ok(active.every(p => p.evidence.every(e => e.source === "daily_constraints")),
     "every usable pattern carries exact canonical provenance");
-  assert.equal(active.patterns.find(p => p.kind === "minimum_training_reengaged")?.confidence, "observed",
+  assert.equal(active.find(p => p.kind === "minimum_training_reengaged")?.confidence, "observed",
     "one linked successful intervention is an observed outcome, not fabricated recurrence");
 
-  const superseded = buildBehaviourPatternState([
+  const superseded = build([
     row(1, "2026-07-04"), row(2, "2026-07-11"),
   ], ["2026-07-18", "2026-07-25"], at("2026-08-01"));
-  assert.equal(superseded.patterns[0]?.status, "superseded",
+  assert.equal(superseded[0]?.status, "superseded",
     "two recent contradictory weekend completions remove old pattern authority");
   assert.equal(decisionPatterns(superseded).weekendTrainingMisses, false);
 
-  const decayed = buildBehaviourPatternState([
+  const decayed = build([
     row(1, "2026-04-04", "asserted", "said_time"),
     row(2, "2026-04-11", "asserted", "said_time"),
   ], [], at("2026-08-01"));
-  assert.equal(decayed.patterns[0]?.status, "decayed", "stale evidence stays inspectable but loses authority");
+  assert.equal(decayed[0]?.status, "decayed", "stale evidence stays inspectable but loses authority");
 
   const base = {
     goal: "fat_loss" as any, weeksOnProgramme: 8, daysSinceAnyLog: 0, daysSinceWeighIn: 0,

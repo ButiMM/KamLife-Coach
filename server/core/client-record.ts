@@ -177,7 +177,7 @@ export function parseExtraction(raw: string, message: string): Extracted[] {
 export async function knownFacts(userId: string): Promise<string> {
   // CORRECTIONS NEED THE RECORD (Codex @ c5a521b): "actually the race is in May" names no prior subject.
   const known = await db.select({ kind: clientFacts.kind, subject: clientFacts.subject, statement: clientFacts.statement })
-    .from(clientFacts).where(and(eq(clientFacts.userId, userId), isNull(clientFacts.supersededBy))).orderBy(desc(clientFacts.createdAt)).limit(30);
+    .from(clientFacts).where(and(eq(clientFacts.userId, userId), isNull(clientFacts.supersededBy), ne(clientFacts.kind, "pattern"))).orderBy(desc(clientFacts.createdAt)).limit(30);
   const [last] = await db.select({ said: sql<string>`coalesce(${turnLedger.deliveredBody}, ${turnLedger.reply})` }).from(turnLedger)
     .where(eq(turnLedger.userId, userId)).orderBy(desc(turnLedger.createdAt)).limit(1);
   const today = new Date(`${sastDayKey()}T12:00:00Z`).toLocaleDateString("en-ZA", { weekday: "long", timeZone: "UTC" });
@@ -261,7 +261,7 @@ async function restingDomain(userId: string): Promise<string> {
 export async function factsForCoach(userId: string): Promise<string> {
   await settleCommitment(userId).catch(() => null);
   const rows = await db.select().from(clientFacts).where(and(
-    eq(clientFacts.userId, userId), isNull(clientFacts.supersededBy),
+    eq(clientFacts.userId, userId), isNull(clientFacts.supersededBy), ne(clientFacts.kind, "pattern"), // a pattern is ours, not their words
     sql`${clientFacts.validFrom} <= now()`, // a fact that starts in December is not true today
     sql`(${clientFacts.validUntil} IS NULL OR ${clientFacts.validUntil} > now())`,
   )).orderBy(desc(clientFacts.createdAt)).limit(30); // the NEWEST thirty, shown oldest first
@@ -425,4 +425,77 @@ export async function recordAtDoor(p: { phone: string; rawText: string; mediaTyp
   } catch (e) {
     console.warn("[CLIENT_RECORD]", (e as Error)?.message || e);
   }
+}
+
+/**
+ * WHAT THE WEEKS SHOW (D2b, CTO 6 Oct). A behaviour pattern is a client_facts row of kind 'pattern',
+ * one per kind (the subject), written weekly by jobs/cip-update.ts from attributable training outcomes
+ * and never by a model. The decision reads only active ones; a pattern that lapses is superseded, so
+ * its evidence stays inspectable. It replaces client_intelligence_profiles.pattern_flags.
+ */
+export type BehaviourPatternKind = "weekend_training_misses" | "work_pressure_training_misses" | "minimum_training_reengaged";
+export interface BehaviourPatternEvidence { id: number; day: string; source: "daily_constraints"; outcome: "failed" | "completed"; reason?: "time"; intervention?: "minimum" }
+export interface BehaviourPattern {
+  kind: BehaviourPatternKind;
+  /** Inactive records stay visible for provenance but have no decision authority. */
+  status: "active" | "decayed" | "superseded";
+  supportCount: number; contradictionCount: number;
+  confidence: "observed" | "supported" | "strong";
+  firstObservedDay: string; lastObservedDay: string;
+  evidence: BehaviourPatternEvidence[];
+}
+export interface BehaviourPatternDecisionContext { weekendTrainingMisses: boolean; workPressureTrainingMisses: boolean; minimumTrainingReengaged: boolean }
+export const NO_BEHAVIOUR_PATTERNS: BehaviourPatternDecisionContext = { weekendTrainingMisses: false, workPressureTrainingMisses: false, minimumTrainingReengaged: false };
+
+export function decisionPatterns(patterns: Array<Partial<BehaviourPattern>>): BehaviourPatternDecisionContext {
+  const active = patterns.filter(p => p?.status === "active").map(p => p.kind);
+  return {
+    weekendTrainingMisses: active.includes("weekend_training_misses"),
+    workPressureTrainingMisses: active.includes("work_pressure_training_misses"),
+    minimumTrainingReengaged: active.includes("minimum_training_reengaged"),
+  };
+}
+
+/** The patterns the decision may act on, from the record. A failed read is "no pattern", never a guess. */
+export async function getBehaviourPatternContext(userId: string): Promise<BehaviourPatternDecisionContext> {
+  try {
+    const rows = await db.select({ detail: clientFacts.detail }).from(clientFacts)
+      .where(and(eq(clientFacts.userId, userId), eq(clientFacts.kind, "pattern"), isNull(clientFacts.supersededBy), sql`(${clientFacts.validUntil} IS NULL OR ${clientFacts.validUntil} > now())`));
+    return decisionPatterns(rows.map(r => (r.detail || {}) as Partial<BehaviourPattern>));
+  } catch {
+    return { ...NO_BEHAVIOUR_PATTERNS };
+  }
+}
+
+const PATTERN_SAYS: Record<BehaviourPatternKind, string> = {
+  weekend_training_misses: "misses weekend training sessions",
+  work_pressure_training_misses: "misses training when work leaves no time",
+  minimum_training_reengaged: "comes back through the minimum session",
+};
+
+/**
+ * Write this week's pattern state: a changed or new pattern is a new row that supersedes the old one,
+ * and a pattern the evidence no longer shows expires today (its row stays, without authority).
+ * Unchanged patterns are left alone. Returns the number of rows written.
+ */
+export async function writePatternFacts(userId: string, patterns: BehaviourPattern[]): Promise<number> {
+  const open = await db.select().from(clientFacts).where(and(eq(clientFacts.userId, userId), eq(clientFacts.kind, "pattern"), isNull(clientFacts.supersededBy), sql`(${clientFacts.validUntil} IS NULL OR ${clientFacts.validUntil} > now())`));
+  // jsonb stores keys in its own order, so compare with sorted keys.
+  const canon = (v: unknown): string => Array.isArray(v) ? `[${v.map(canon).join(",")}]`
+    : v && typeof v === "object" ? `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canon((v as any)[k])}`).join(",")}}` : JSON.stringify(v);
+  const same = (a: unknown, b: unknown) => canon(a) === canon(b);
+  let written = 0;
+  for (const p of patterns) {
+    const prior = open.find(r => r.subject === p.kind);
+    if (prior && same(prior.detail, p)) continue;
+    const [row] = await db.insert(clientFacts).values({
+      userId, kind: "pattern", subject: p.kind, statement: `${p.status}: ${PATTERN_SAYS[p.kind]} (${p.supportCount} weeks, ${p.firstObservedDay} to ${p.lastObservedDay})`,
+      detail: p, extractedBy: "cip-update",
+    }).returning({ id: clientFacts.id });
+    if (prior) await db.update(clientFacts).set({ supersededBy: row.id, supersededAt: new Date() }).where(eq(clientFacts.id, prior.id));
+    written++;
+  }
+  const gone = open.filter(r => !patterns.some(p => p.kind === r.subject)).map(r => r.id);
+  if (gone.length) await db.update(clientFacts).set({ validUntil: new Date() }).where(inArray(clientFacts.id, gone));
+  return written;
 }

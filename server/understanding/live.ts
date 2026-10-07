@@ -89,7 +89,7 @@ export async function canonicalDecision(
     const { getDisplayName } = await import("../utils");
     const { loadOpenTrainingLoop, weekendInvestigationAnswered } = await import("../memory");
     const { getGoalProfile } = await import("../goal-profiles");
-    const { getBehaviourPatternContext } = await import("../intelligence/profile");
+    const { getBehaviourPatternContext } = await import("../core/client-record");
 
     const truth = await getProgressTruth(user, { days: 7, weightWindowDays: 28 });
     const weightVerdict = await weightDirectionSpeakable(truth.weight.points, user);

@@ -6,7 +6,7 @@
 import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
 import { eq, and, gte, lt, desc, asc, isNull, sql } from "drizzle-orm";
-import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection, isRetroactiveMeal, parseMealDate, mealDateLabel } from "../utils";
+import { sastDayStart, mealDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection, isRetroactiveMeal, parseMealDate, mealDateLabel } from "../utils";
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine, scanForSAFoods, dropMeals } from "./food-scanner";
@@ -109,7 +109,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     const denied = (DENIED_INGREDIENT_RE.exec(m) || [])[0]?.trim().toLowerCase();
     if (denied) {
       try {
-        const todayStart = sastDayStart();
+        const todayStart = mealDayStart();
         const todayMealLogs = await db.select({
           id: mealLogs.id, rawMessage: mealLogs.rawMessage, items: mealLogs.items,
           kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
@@ -301,7 +301,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   const qc = !looksLikeQuestion(m) ? parseQuantityCorrection(m) : null;
   if (qc) {
     try {
-      const todayStartQC = sastDayStart();
+      const todayStartQC = mealDayStart();
       const foodSingular = singularFood(qc.food);
       const rowsQC = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage, mealLabel: mealLogs.mealLabel, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt })
         .from(mealLogs)
@@ -392,7 +392,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   // "that wasn't a big mac" — drop the invented item from the last meal, no "remove" keyword.
   const dropName = parseDropLoggedItem(m);
   if (dropName) {
-    const todayStart = sastDayStart();
+    const todayStart = mealDayStart();
     const last = await db.select({
       id: mealLogs.id, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt, rawMessage: mealLogs.rawMessage,
     }).from(mealLogs)
@@ -430,7 +430,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   // row is held, not dropped, because a client who never re-sends must not lose the meal.
   const noJustMatch = m.match(/^no[,!]?\s+just\s+(.{2,40})$/i);
   if (noJustMatch) {
-    const todayStart = sastDayStart();
+    const todayStart = mealDayStart();
     const lastMealLog = await db.select({ id: mealLogs.id })
       .from(mealLogs)
       .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
@@ -453,7 +453,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       !/\b(last|previous)\s+(meal|entry|one|log)\b/i.test(m)) {
     // Confirm before wiping the whole day — this used to delete everything instantly on a
     // phrase like "start fresh", with no undo. Ask first; the confirm-gate above does the wipe.
-    const todayStart = sastDayStart();
+    const todayStart = mealDayStart();
     const todayMeals = await db.select({ id: mealLogs.id }).from(mealLogs)
       .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)));
     if (todayMeals.length === 0) {
@@ -469,7 +469,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   const multiRemove = m.match(/\b(?:remove|delete|undo|take\s+(?:off|out)|get\s+rid\s+of)\b[^.!?]*\b(both|two|three|last\s*(?:2|3|two|three)|2|3)\b[^.!?]*\bmeals?\b/i);
   if (multiRemove) {
     const n = /three|3/i.test(multiRemove[1]) ? 3 : 2;
-    const todayStartMR = sastDayStart();
+    const todayStartMR = mealDayStart();
     const rowsMR = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage })
       .from(mealLogs)
       .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartMR)))
@@ -517,7 +517,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   const mealTimeRemoveMatch = m.trim().match(/^(?:remove|delete|undo)\s+(?:my\s+)?(breakfast|lunch|dinner|supper|snack)\s*(?:meal|log|entry)?$/i);
   if (mealTimeRemoveMatch) {
     const label = mealTimeRemoveMatch[1].toLowerCase();
-    const todayStart = sastDayStart();
+    const todayStart = mealDayStart();
     const mealLogRows = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage, mealLabel: mealLogs.mealLabel })
       .from(mealLogs)
       .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
@@ -650,7 +650,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     const foodToRemove = capturedFood;
     if (foodToRemove.length >= 2) {
       try {
-        const todayStart = sastDayStart();
+        const todayStart = mealDayStart();
         const mealLogRows = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage, items: mealLogs.items })
           .from(mealLogs)
           .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
@@ -743,7 +743,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     /^(my|today'?s?)\s+meals?\s*[.!?]*$/i.test(m.trim()) ||
     /^(meal|food)\s+log$/i.test(m.trim());
   if (asksMealList) {
-    const todayStart = sastDayStart();
+    const todayStart = mealDayStart();
     const logs = await db.select({
       kcalInt: mealLogs.kcalInt,
       proteinInt: mealLogs.proteinInt,
