@@ -1,5 +1,14 @@
 # KamLife Coach — Claude Code Instructions
 
+## DEFINITION OF DONE (CTO, Wed 7 Oct, after the Grok audit). This overrides every older "switched" / "live" wording.
+
+A row is **done** only when production shows it, not when a PR merges:
+1. **Reach:** in the 07:00 tester-truth report, the new coach produced at least 80% of that row's real replies over the last 3 days. Use the handler `src` tag.
+2. **Quality:** zero replies flagged by the defect scan (`server/audit/reply-defects`) on that row over the same 3 days, or every flag traced and fixed.
+3. **The founder's phone test:** the founder sent the row's 3 standard messages from his own number, and the replies were right.
+
+Until then, STATUS, QUEUE, #280 and every report call the row **"merged, not proven"**. Nobody, including the CTO, reports a row as live for testers on merge alone. **The weekly whole-product attack (GROK.md Prompt 3) and the CTO's own whole-product trace both run every Monday.** PR-level attacks don't replace them.
+
 ## CTO RULINGS, Tue 6 Oct (answers to #391 of 06:38 and 07:43). These win over everything below.
 
 1. **No CI OpenAI key. The "BLOCKED (founder)" on the gate key is withdrawn.** ORDERS §0c stands: no paid gate. A switch merges on tests + ratchet + attack (or the 45-minute window); it's proven on real use (evidence view, #513). Don't put `final` on PRs, and don't ask the founder for a key.
