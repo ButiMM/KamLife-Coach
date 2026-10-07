@@ -623,7 +623,11 @@ export function coreFront(): boolean {
 
 const frontReads = new Map<string, { message: string; u: Understanding | null }>();
 const EXACT_COMMANDS = new Set(["menu", "progress", "targets", "cancel", "stop", "start", "help", "workout", "today's workout",
-  "todays workout", "meals", "diary", "status", "pause", "resume", "unsubscribe", "shopping list"]);
+  "todays workout", "meals", "diary", "status", "pause", "resume", "unsubscribe", "shopping list",
+  // The workout buttons: under every session (Done 💪 | Too hard — modify | Skip today) and after one is logged
+  // (Tomorrow's session). Their owners log, modify or skip the programme's session; the model can only guess.
+  "done", "done 💪", "too hard — modify", "too hard - modify", "skip today",
+  "tomorrow's session", "tomorrows session", "tomorrow's workout", "tomorrows workout", "next workout", "next session"]);
 /** The whole message is a fixed command or a button/number reply: the old command owns it. */
 export function isExactCommand(m: string): boolean {
   const t = m.trim().toLowerCase().replace(/[.!?\s]+$/, "").replace(/^my /, "");

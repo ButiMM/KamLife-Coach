@@ -640,7 +640,7 @@ export async function handleWorkoutCommands(ctx: {
   // the anchored short forms — an invariant on the write, not a guard bolted to one matcher.
   const isDone = !alreadyLoggedThisTurn && when.when === "today" && (reportsOneSession || (
     /^(done|finished|complete|completed|trained)[.!?]?$/i.test(m)
-    || /^done\s*[💪✅🔥][.!?]?$/.test(m)
+    || /^done\s*[💪✅🔥][.!?]?$/u.test(m) // u: without it the class holds UTF-16 halves and the "Done 💪" button never matched
     // THE COPULA FORM (2026-08-26, issue #63). This was anchored to the bare "workout done", so
     // "my workout is done" and "my session is done" — ordinary phrasing — matched nothing here and
     // fell all the way to the model, which logged no session. Same construction that broke steps
