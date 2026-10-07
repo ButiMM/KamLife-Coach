@@ -1116,6 +1116,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         }
       }
 
+      const photoMeal = reconcileVisionMeal(visionDisplay, primaryPhotoKcal, primaryPhotoProt); // what's stored is what the card shows
       if (primaryPhotoKcal > 0 || primaryPhotoProt > 0) {
         // Readable description: caption wins, else vision's first real line. (kcal dedup banned.)
         const photoDesc = (message && message.trim().length > 2 ? message.trim().slice(0, 110) : "")
@@ -1130,11 +1131,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         // ONE WRITE DOOR (Box 2): commitFoodLog dedups; the slot is the caption's when it NAMES
         // one, else null — a 19:49 batch-send says nothing about when the plate was eaten (Cut 2).
         const photoLabel = explicitMealSlot(message || "");
-        // Structured items from the vision reply — names in "my meals", scalable corrections.
         photoStage = "commit";
         photoCommit = await commitFoodLog({   // items own the total; vision TOTAL is a cross-check (C11)
           userId: user.id, phone, rawMessage: extraImageUrls.length > 0 ? `[Album photo 1] ${photoDesc}` : photoDesc, source: "photo",
-          ...reconcileVisionMeal(visionDisplay, primaryPhotoKcal, primaryPhotoProt), carbsInt: 0, fatInt: 0,
+          ...photoMeal, carbsInt: 0, fatInt: 0,
           mealLabel: photoLabel, loggedAt: photoLoggedAt,
           sourceMessageId: mediaSourceId, allowIntentionalRepeat: extraImageUrls.length > 0,
         });
@@ -1172,8 +1172,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoReceipt = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}`;
       const guard = photoCommit?.ok && !photoCommit.wasDup ? await nutritionGuardrailNudge(user) : "";
       // THE MEAL CARD, as a typed meal gets it (photos lost theirs on 5 Aug with the daily-total line it hung on; founder, 7 Oct).
-      const cardName = (visionDisplay.split("\n").find(l => l.trim().length > 3) || "Meal").replaceAll("*", "").replaceAll("_", "").trim().slice(0, 40);
-      const card = photoCommit?.ok && !photoCommit.wasDup ? await (await import("../macro-card-attach")).macroCardMarker({ user, mealName: cardName, mealProtein: Math.round(primaryPhotoProt || 0), forDate: photoIsRetro ? photoLoggedAt : undefined }) : "";
+      const itemsLine = visionReply.split("\n").find(l => l.trim().toUpperCase().startsWith("ITEMS:"))?.trim().slice(6).trim();
+      const cardName = (itemsLine || photoMeal.items.map(i => i.name).join(", ") || visionDisplay.split("\n").find(l => l.trim().length > 3) || "Meal").replaceAll("*", "").replaceAll("_", "").trim().slice(0, 40);
+      const cardDue = photoCommit?.ok && !photoCommit.wasDup && cardWillAttach(user, photoMeal.kcalInt, !!(process.env.APP_URL || process.env.APP_BASE_URL));
+      const card = cardDue ? await (await import("../macro-card-attach")).macroCardMarker({ user, mealName: cardName, mealProtein: photoMeal.proteinInt, forDate: photoIsRetro ? photoLoggedAt : undefined }) : "";
       // Only a photo that WROTE its meal gets "just saved" words (#550 attack: a 0 kcal black coffee wrote nothing).
       const words = extraReplies.length === 0 && photoCommit?.ok && !photoCommit.wasDup
         ? await (await import("../core/coach")).afterLogReply(phone, message?.trim() || "[a photo of their food]", photoReceipt, "food").catch(() => null) : null;

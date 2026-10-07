@@ -54,6 +54,9 @@ visionText = "Pap, chicken and spinach — a solid plate.\nTOTAL: 650 kcal | 45g
 const p = await photo("");
 chk(/\[MEDIA:https:\/\/kamlife\.example\/card\//.test(p), "a plate photo gets its meal card, as a typed meal does (lost 5 Aug; founder, 7 Oct)", p.slice(0, 200));
 chk(!CANNOT.test(p) && (await meals()).length >= 1, "a plate photo is logged and answered", `${p.slice(0, 160)} | ${JSON.stringify(await meals())}`);
+visionText = "Rooibos with a splash of milk.\n- Rooibos with milk (250ml): 40 kcal, 1g protein\nTOTAL: 40 kcal | 1g protein\nITEMS: rooibos"; (await import("../server/card-policy"))._resetDumpWindow();
+const t = await photo("");
+chk(!t.includes("[MEDIA:"), "a 40 kcal tea photo gets no meal card, as a typed tea gets none (#615 review)", `${t.slice(0, 200)} | ${JSON.stringify(await meals())}`);
 
 await fresh(); vision = "4o-refused";
 const r = await photo("Lunch");
