@@ -305,6 +305,10 @@ import { verifyBrainReply } from "../brain/reply-verifier";
 import { classifyConfirmReply } from "./confirm-reply";
 export { classifyConfirmReply } from "./confirm-reply";
 
+/** A delete runs only when the client's own words ask for one (2026-07-22: "No fix it. Recalculate everything" deleted a meal). */
+export const asksToRemove = (message: string): boolean => EXPLICIT_REMOVE_RE.test(message);
+const EXPLICIT_REMOVE_RE = /\b(remove|delete|undo|scrap|erase|unlog|take (?:it|that|them|this) out|take out|get rid of|take (?:it|that) off|don'?t log|cancel (?:that|it|the last))\b/i;
+
 export function engineLive(): boolean {
   return process.env.ENGINE_LIVE === "on";
 }
@@ -563,7 +567,7 @@ export async function runMeaningEngineLive(ctx: {
     // 2526 → 1971 kcal). A delete may ONLY run when the client's ACTUAL words ask to remove
     // something — never the model's reading of "fix it" / "recalculate" / "that's wrong". If the
     // words aren't there, veto the write and let the conversational reply stand.
-    const EXPLICIT_REMOVE_RE = /\b(remove|delete|undo|scrap|erase|unlog|take (?:it|that|them|this) out|take out|get rid of|take (?:it|that) off|don'?t log|cancel (?:that|it|the last))\b/i;
+    // EXPLICIT_REMOVE_RE: module level, so the front door (core/coach.ts) applies the same bouncer.
     //
     // SLICE 2 WIDENED THIS, AND IT HAD TO BE. The check was `result.action?.type` — the FIRST
     // action only. The moment the engine could emit several, a REMOVE_LAST_MEAL sitting in

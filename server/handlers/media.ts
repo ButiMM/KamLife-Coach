@@ -1184,7 +1184,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // #596: nothing written yet and the caption names the food ("Black coffee"): log the caption, as the
       // unreadable-photo path already does, rather than "I cannot read that photo".
       // The photo says they had it, so the writer gets the report it logs ("I had Black coffee").
-      if (hadFoodContext && photoStage !== "commit") return handleMessage(phone, /^i (?:had|ate|drank)\b/i.test(message.trim()) ? message : `I had ${message.trim()}`, undefined, undefined, undefined, mediaSourceId);
+      // A question about the photo ("Can I eat this chicken?") is never turned into a log or a verdict (#598 attack).
+      if (hadFoodContext && photoStage !== "commit" && !isAskingNotReporting(message)) return handleMessage(phone, /^i (?:had|ate|drank)\b/i.test(message.trim()) ? message : `I had ${message.trim()}`, undefined, undefined, undefined, mediaSourceId);
       return hadFoodContext
         ? "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown."
         : "Eish, I couldn't process that image right now. If it's a meal, type what you ate (e.g. *chicken and rice*). If it's a gym machine, tell me which one — or reply *workout* for today's session. If it's your steps, send a clear screenshot of the step count.";

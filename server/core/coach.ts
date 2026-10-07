@@ -638,9 +638,17 @@ async function runActions(p: { phone: string; message: string; user: any; source
   Promise<{ reply: string; src: string; wrote: boolean } | null> {
   const { phone, message, user } = p;
   const { writesState } = await import("../understanding/actions");
-  const acts = u.actions.filter(a => a.type !== "JUST_REPLY");
-  if (!acts.length) return null;
   const m = message.toLowerCase().replace(/\s+/g, " ").trim();
+  // THE DESTRUCTIVE-ACTION BOUNCER, as the old engine had it (#597 attack): a delete needs the client's own
+  // removal words. Vetoed, a correction still goes to the correction engine; anything else is talk.
+  const { asksToRemove } = await import("../understanding/live");
+  const vetoed = u.actions.some(a => a.type === "REMOVE_LAST_MEAL") && !asksToRemove(message);
+  const acts = u.actions.filter(a => a.type !== "JUST_REPLY" && !(vetoed && a.type === "REMOVE_LAST_MEAL"));
+  if (vetoed && !acts.length) {
+    const r = await (await import("../handlers/food-log-mgmt")).handleFoodLogMgmt(user, m);
+    return r ? { reply: r, src: "core front: correction", wrote: true } : null;
+  }
+  if (!acts.length) return null;
   const one = acts.length === 1 ? acts[0] : null;
   // Owners that take the client's words, not a value: the correction engine, the workout log, the goal confirm.
   if (one?.type === "CORRECT_MEAL") {

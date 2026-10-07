@@ -24,6 +24,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
     const msg = JSON.parse(body).messages.at(-1).content as string;
     const bag = { type: "SET_REMINDER", body: "pack my gym bag", when: "tomorrow at 7am" };
     const log586 = /kota from the spaza/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", needsConfirmation: false }] : /ndidle ipapa/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and meat", needsConfirmation: false }]
+      : /recalculate everything|remove my last meal/i.test(msg) ? [{ type: "REMOVE_LAST_MEAL" }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -159,6 +160,10 @@ REAL("\n4g. #586 — A MEAL THE OLD KEYWORDS MISS IS WRITTEN FOR AN ORDINARY CLI
   chk(withRb.length === before + 1 && withRb.some(r => /red bull/i.test(r)) && rb.includes(NEW), "a drink read as a meal is written (the writer is handed \"I had …\", #593)", `${before} → ${withRb.length} | ${rb.slice(0, 120)}`);
   const sm = await say(K, "Ndityile into"), afterSm = (await meals()).length;
   chk(afterSm === withRb.length && !sm.includes(NEW) && sm.trim().length > 0, "a meal the writer could not write is never answered as logged: the client gets the writer's own question (#593)", `${withRb.length} → ${afterSm} | ${sm.slice(0, 160)}`);
+  const keep = (await meals()).length, fx = await say(K, "No fix it. Recalculate everything");
+  chk((await meals()).length === keep && !/removed/i.test(fx), "\"No fix it. Recalculate everything\" read as a removal deletes nothing: the bouncer needs their own removal words (#597 attack)", `${keep} → ${(await meals()).length} | ${fx.slice(0, 120)}`);
+  await say(K, "Please remove my last meal");
+  chk((await meals()).length === keep - 1, "CONTROL: \"Please remove my last meal\" still removes it", `${keep} → ${(await meals()).length}`);
   const kw = await say(K, "Ndizilinganise, 82 not sure"), w82 = (await pool.query("SELECT COUNT(*)::int n FROM weight_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [K])).rows[0].n;
   chk(w82 === 0 && /82kg\*\? Reply \*yes\*/i.test(kw), "a reading that does not say how sure it is asks before writing a weight (#593 attack)", `${w82} rows | ${kw.slice(0, 120)}`);
   await pool.query("UPDATE users SET awaiting_input_type = NULL WHERE phone_number = $1", [K]);
