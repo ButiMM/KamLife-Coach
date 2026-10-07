@@ -354,6 +354,32 @@ REAL("\n9. A COMMITMENT CHECK-IN IS THAT MESSAGE OR NOTHING (#563)");
   await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════
+REAL("\n10. A PROMISE MADE BEFORE A PREGNANCY OR EATING-DISORDER DISCLOSURE IS NOT CHASED (#563)");
+// ═════════════════════════════════════════════════════════════════════════════════════
+// They promised a walk, then told us they are pregnant: the programme is paused for their doctor, so
+// tonight does not ask how the walk went, and the promise is released, not asked again on their next reply.
+{
+  await reset();
+  stubTwilio(false);
+  const today = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+  await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, detail, extracted_by) VALUES ($1, 'commitment', 'commitment', 'I will walk after work', $2, 'test')",
+    [user.id, JSON.stringify({ domain: "movement", what: "a walk after work", due: today, state: "open" })]);
+  await pool.query("UPDATE users SET life_situation = 'pregnant' WHERE id = $1", [user.id]);
+  await runEveningAccountability();
+  const live = (await pool.query("SELECT count(*)::int n FROM client_facts WHERE user_id = $1 AND kind = 'commitment' AND (valid_until IS NULL OR valid_until > now())", [user.id])).rows[0].n;
+  chk(!freeformSent().some(b => /you planned/i.test(b)) && !templatesSent().includes(SID.checkin) && live === 0,
+    "no \"you planned a walk… how did it go?\" after a pregnancy disclosure, and the promise is released", `${JSON.stringify(freeformSent())} | live=${live}`);
+  // …and the coach's own reply does not ask either: the promise is gone from what the composer is told.
+  await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, detail, extracted_by) VALUES ($1, 'commitment', 'commitment', 'I will walk after work', $2, 'test')",
+    [user.id, JSON.stringify({ domain: "movement", what: "a walk after work", due: today, state: "open" })]);
+  const told = await (await import("../server/core/client-record")).factsForCoach(user.id);
+  chk(!told.includes("commitment:"), "the reply path is not told to ask about it either", told.slice(0, 200));
+  await pool.query("UPDATE users SET life_situation = NULL WHERE id = $1", [user.id]);
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+}
+
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
 REAL(failed ? `\npg-evening-delivery-acceptance: FAILED — ${failed} assertion(s)\n`
             : "\npg-evening-delivery-acceptance: GREEN\n");

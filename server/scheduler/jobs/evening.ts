@@ -9,7 +9,8 @@ import { readHealthState } from "../../health-state";
 import { readHeldConstraints } from "../../held-constraints";
 import { canonicalNextMove, recordCanonicalMoveOutbound, sendProactive } from "../proactive-decision";
 import { sastHour } from "../../sast";
-import { settleCommitment, markCommitment, inWhatsAppWindow } from "../../core/client-record";
+import { settleCommitment, markCommitment, releaseCommitment, inWhatsAppWindow } from "../../core/client-record";
+import { withheldContext } from "../../life-context";
 import { CHECKIN_TEMPLATE, templateSid } from "../../whatsapp-templates";
 import { deliveryAccepted } from "../../outbound-delivery";
 
@@ -95,7 +96,9 @@ export async function runEveningAccountability(): Promise<void> {
       // THE COMMITMENT LOOP (A19 + B2, #512): on the day it is due and not yet shown kept, the one
       // follow-up REPLACES this message. Outside the 24-hour window it goes only as the approved
       // template; without one, nothing is sent and their next reply carries it (factsForCoach).
-      const promise = await settleCommitment(client.id).catch(() => null);
+      let promise = await settleCommitment(client.id).catch(() => null);
+      // A PREGNANCY OR EATING-DISORDER DISCLOSURE PAUSES THE PROGRAMME (#266): a walk promised before it is not chased (#563).
+      if (promise && withheldContext(client.lifeSituation)) { await releaseCommitment(promise.id).catch(() => {}); promise = null; }
       if (promise && !promise.outcome && promise.due === todaySAST() && promise.state === "open") {
         if (!(await inWhatsAppWindow(client.id)) && !templateSid(CHECKIN_TEMPLATE)) continue;
         const delivery = await sendProactive(client, { job: "evening" },

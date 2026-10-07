@@ -165,6 +165,10 @@ export async function activeCommitment(userId: string): Promise<(Commitment & { 
     isNull(clientFacts.supersededBy), sql`(${clientFacts.validUntil} IS NULL OR ${clientFacts.validUntil} > now())`)).orderBy(desc(clientFacts.createdAt)).limit(1);
   return r ? { ...(r.detail as Commitment), id: r.id, statement: r.statement } : null;
 }
+/** Released: never asked about again (a safety route paused the programme after it was made, #563). */
+export async function releaseCommitment(id: string): Promise<void> {
+  await db.update(clientFacts).set({ validUntil: new Date() }).where(eq(clientFacts.id, id));
+}
 /** What the evening job saw: the ledger showed it kept, or it asked. */
 export async function markCommitment(id: string, state: "asked" | "kept"): Promise<void> {
   await db.update(clientFacts).set({ detail: sql`${clientFacts.detail} || ${JSON.stringify({ state })}::jsonb` }).where(eq(clientFacts.id, id));
@@ -308,7 +312,11 @@ async function restingDomain(userId: string): Promise<string> {
 
 /** The active facts, for the coach. Empty string when there are none. */
 export async function factsForCoach(userId: string): Promise<string> {
-  await settleCommitment(userId).catch(() => null);
+  const settled = await settleCommitment(userId).catch(() => null);
+  if (settled) { // the reply path, as the evening job (#563): a disclosure that pauses the programme releases the promise
+    const [u] = await db.select({ ls: users.lifeSituation }).from(users).where(eq(users.id, userId)).limit(1);
+    if (withheldContext(u?.ls)) await releaseCommitment(settled.id);
+  }
   const rows = await db.select().from(clientFacts).where(and(
     eq(clientFacts.userId, userId), isNull(clientFacts.supersededBy), ne(clientFacts.kind, "pattern"), // a pattern is ours, not their words
     sql`${clientFacts.validFrom} <= now()`, // a fact that starts in December is not true today
