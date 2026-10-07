@@ -32,11 +32,11 @@ import { join } from "node:path";
 // Frozen 2026-07-30. LOWER THESE AS THINGS COLLAPSE. NEVER RAISE ONE.
 // A raise is not a merge conflict to resolve — it is the moment to stop and ask why.
 const BUDGET = {
-  modules: 230, // 6 Oct (A19): merged with main
-  handlerFiles: 28, // 6 Oct (D9): equipment-vision, machine-coach, home-workout deleted
+  modules: 227, // wave-1 last door deleted (6 Oct)
+  handlerFiles: 26, // wave-1 last door deleted (6 Oct)
   cronRegistrations: 24, // 30 Sep (#511): the monthly narrative cron retired
   /** Files that run a regex against the client's message — i.e. that hold an opinion on meaning. */
-  messageDeciders: 32,
+  messageDeciders: 30,
   /** `looksLikeX` predicates: hand-written guesses at intent. */
   looksLikePredicates: 21,
   /**
@@ -62,7 +62,7 @@ const BUDGET = {
    * to the true figure in one deliberate commit. Until then this red line is the marker, and it is
    * the ONLY thing in this guard that is red — one red line means something, four never did.
    */
-  regexLiterals: 429, // 6 Oct: +1, the A19 negation gate (RAISES); #560's wave-1 deletion takes 14 back
+  regexLiterals: 416, // 7 Oct: +1, the A19 negation gate (RAISES 415 → 416)
   /**
    * GUARD #13 — see unreachableExports above. Sixty-two capabilities cannot be reached by a
    * client message today. This budget is deliberately set THREE BELOW that, so this guard is RED
@@ -153,7 +153,7 @@ const BUDGET = {
    * shrink and a new mouth is a build failure rather than next week's screenshot. Report it
    * with [GUARD8] daily: those two numbers are the whole truth about authorship.
    */
-  authorshipPoints: 408,
+  authorshipPoints: 405, // wave-1 last door deleted (6 Oct); the over-cap reply moved from gpt-block to core.answerFinal
   twilioCallSites: 6,
 };
 
@@ -208,9 +208,7 @@ const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT 
   "server/onboarding.ts": "must-act",
   "server/handlers/reminders-handler.ts": "must-act",
   "server/gpt.ts": "bookkeeping",
-  "server/handlers/gpt-block.ts": "bookkeeping",
   "server/understanding/live.ts": "bookkeeping",
-  "server/handlers/numbers-literacy.ts": "bookkeeping",
   // 2026-08-07: dropMeals moved here, so this file now writes. It never decides — it takes row
   // ids its caller already resolved (behind that caller's guard), removes them, resyncs the
   // day's accounting columns, and records what left in [MEAL_DROP]. The message-matching half
@@ -223,7 +221,7 @@ const ACTION_FILES: Record<string, "guarded" | "must-act" | "bookkeeping" | "AT 
   "server/handlers/chat-log.ts": "bookkeeping",
   // Named backlog. Each mutates something the client feels, from a message match, with no guard:
   "server/handlers/early-commands.ts": "AT RISK",   // trainingMode, trainingDaysPerWeek, targetWeightKg
-  "server/handlers/advice-commands.ts": "AT RISK",  // stepsTarget
+  "server/handlers/preferences.ts": "AT RISK",     // stepsTarget (moved from advice-commands.ts, 6 Oct)
   "server/handlers/misc-commands.ts": "AT RISK",    // injuries
 };
 
@@ -267,7 +265,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "users are what it replaces, one fact kind at a time, in #272. Paid back when those columns' writers go.",
   },
   {
-    key: "messageDeciders", from: 31, to: 32, date: "2026-09-04",
+    key: "messageDeciders", from: 31, to: 32, date: "2026-09-04", paidBack: "2026-10-06 (wave-1 last door, #391): messageDeciders fell to 30 when handlers/gpt-block.ts and handlers/advice-commands.ts were deleted",
     why: "RELEASE CLOSURE, AFTER EXACT INVENTORY — the 31-file inventory at the last legitimate "
       + "baseline (c9474132) and the current 32-file inventory differ by one file only: "
       + "server/handlers/chat-log.ts. That file now makes live, distinct message decisions at the "
@@ -300,16 +298,16 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
       + "so 21 is the smallest truthful current baseline. FROM HERE IT FALLS ONLY.",
   },
   {
-    key: "regexLiterals", from: 428, to: 429, date: "2026-10-06",
+    key: "regexLiterals", from: 415, to: 416, date: "2026-10-07",
     why: "ONE PATTERN, client-record.ts NEGATED: the A19 commitment gate (Grok attack on #545, CTO order the same day). "
       + "\"I'm not walking after work on Thursday\" was storable as a promise to walk, and on Thursday evening the client was "
       + "asked how the walk went. The model's read is not trusted to see the 'not', so the clause is checked in code. TRIED "
       + "FIRST: an existing negation owner to reuse (none: the two nearby patterns are a weight-trend contradiction and a "
       + "model-refusal detector, each bound to its own words); and the two other literals this fix needed are shared or "
-      + "inline (one tokenizer serves both readers). PAY THIS BACK with the wave-1 deletion (#560), which removes 14.",
+      + "inline (one tokenizer serves both readers). PAY THIS BACK when the understanding call states a promise's polarity itself, and this word rule can go.",
   },
   {
-    key: "regexLiterals", from: 318, to: 428, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12, to 441 on 2026-09-15, to 440 on 2026-09-23, to 430 on 2026-09-25 with the wave-1 deletions of #445, to 429 on 2026-10-05 with the old morning composer, B1, to 428 with 6 Oct (D9): equipment-vision, machine-coach, home-workout deleted)",
+    key: "regexLiterals", from: 318, to: 415, date: "2026-08-24 (fell to 448 on 2026-09-05, to 447 on 2026-09-07, to 446 on 2026-09-09, to 442 on 2026-09-12, to 441 on 2026-09-15, to 440 on 2026-09-23, to 430 on 2026-09-25 with the wave-1 deletions of #445, to 429 on 2026-10-05 with the old morning composer, B1, to 428 with 6 Oct (D9): equipment-vision, machine-coach, home-workout deleted, to 415 with wave-1 last door deleted (6 Oct))",
     why: "NOT A RAISE — A CORRECTED MEASUREMENT, and the follow-up this budget's own comment "
       + "declared owed on 2026-08-17: \"repair the matcher to see multi-line assignments and "
       + "re-baseline to the true figure in one deliberate commit.\" This is that commit. The "
@@ -374,7 +372,7 @@ const RAISES: Array<{ key: keyof typeof BUDGET; from: number; to: number; date: 
     why: "GLP-1 MEDICATION SAFETY — ONE CAPABILITY, THREE COUPLED DIMENSIONS. server/medication-context.ts (21e8c44) is a new deterministic owner of one question: is this message about medication, and is the request unsafe? Nothing answered that question before — there was no existing owner to extend. Because the answer is derived from the client's own words, the module necessarily (a) is a module, (b) runs regexes against the message so it counts as a message-deciding owner, and (c) names those regexes as constants. modules, messageDeciders and regexLiterals therefore moved TOGETHER in a single commit. They are three measurements of one boundary, not three independent architecture decisions, and the diagnosis that established this walked every one of the 95 commits between 77fe0a7 and c52eac7 to attribute each delta. TRIED FIRST, and REJECTED: folding the detection into brain/reply-verifier.ts, which would couple CLASSIFICATION to ENFORCEMENT and leave the safety detector untestable apart from the gate that consumes it; and into handlers/early-commands.ts, which would make a safety boundary a routing concern. Both would have optimised for the counter instead of the architecture. THE GOVERNOR WAS CORRECTED BEFORE IT WAS RAISED: authorshipPoints also read over budget at 423/420, and those three points were the violation strings in medicationBoundaryViolation() — rewrite REASONS sent to the model and the admin queue, never to a client, traced through all six consumers of `.violation`. reply-verifier.ts is now excluded as the gate it is, and that counter returned to 420/420 by losing false positives rather than by moving a ceiling. Only the three deltas that survived an honest measurement are raised here. NOT PAID BACK BY DELETING SOMETHING ELSE. Compressing an unrelated file to reach 236/30/316 would be cargo-cult accounting; the governor exists to force a conscious account of complexity, and this is that account. Pay it back the day medication safety can be expressed by an owner that already exists. Evidence: all correctness suites pass on this commit, the safety boundary is required by CONSTITUTION law 4, and the whole delta traces to 21e8c44.",
   },
   {
-    key: "messageDeciders", from: 30, to: 31, date: "2026-08-17",
+    key: "messageDeciders", from: 30, to: 31, date: "2026-08-17", paidBack: "2026-10-06 (wave-1 last door, #391): messageDeciders fell to 30 when handlers/gpt-block.ts and handlers/advice-commands.ts were deleted",
     why: "GLP-1 MEDICATION SAFETY — ONE CAPABILITY, THREE COUPLED DIMENSIONS. server/medication-context.ts (21e8c44) is a new deterministic owner of one question: is this message about medication, and is the request unsafe? Nothing answered that question before — there was no existing owner to extend. Because the answer is derived from the client's own words, the module necessarily (a) is a module, (b) runs regexes against the message so it counts as a message-deciding owner, and (c) names those regexes as constants. modules, messageDeciders and regexLiterals therefore moved TOGETHER in a single commit. They are three measurements of one boundary, not three independent architecture decisions, and the diagnosis that established this walked every one of the 95 commits between 77fe0a7 and c52eac7 to attribute each delta. TRIED FIRST, and REJECTED: folding the detection into brain/reply-verifier.ts, which would couple CLASSIFICATION to ENFORCEMENT and leave the safety detector untestable apart from the gate that consumes it; and into handlers/early-commands.ts, which would make a safety boundary a routing concern. Both would have optimised for the counter instead of the architecture. THE GOVERNOR WAS CORRECTED BEFORE IT WAS RAISED: authorshipPoints also read over budget at 423/420, and those three points were the violation strings in medicationBoundaryViolation() — rewrite REASONS sent to the model and the admin queue, never to a client, traced through all six consumers of `.violation`. reply-verifier.ts is now excluded as the gate it is, and that counter returned to 420/420 by losing false positives rather than by moving a ceiling. Only the three deltas that survived an honest measurement are raised here. NOT PAID BACK BY DELETING SOMETHING ELSE. Compressing an unrelated file to reach 236/30/316 would be cargo-cult accounting; the governor exists to force a conscious account of complexity, and this is that account. Pay it back the day medication safety can be expressed by an owner that already exists. Evidence: all correctness suites pass on this commit, the safety boundary is required by CONSTITUTION law 4, and the whole delta traces to 21e8c44.",
   },
   {
@@ -1108,7 +1106,7 @@ for (const rule of ONE_OWNER) {
     // what makes a declared owner an owner rather than a preference.
     if (d.engineSurface.length > 0) {
       const chain = readFileSync("server/routes.ts", "utf-8");
-      const engineAt = chain.indexOf("handleGptBlock(");
+      const engineAt = chain.indexOf("core.answerFinal("); // the last door (gpt-block deleted 6 Oct)
       for (const owner of d.owners) {
         const handler = `handle${owner.replace(/.*\//, "").replace(/-([a-z])/g, (_, c) => c.toUpperCase()).replace(/\.ts$/, "").replace(/^./, ch => ch.toUpperCase())}(`;
         const at = chain.indexOf(handler);

@@ -858,7 +858,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 
   test("keyword-wall sweep: the judgment fallbacks are DELETED, not merely gated", () => {
-    const src = readFileSync(join("server", "handlers", "advice-commands.ts"), "utf-8");
+    const src = readFileSync(join("server", "handlers", "preferences.ts"), "utf-8");
     // INVERTED 2026-08-06. This used to REQUIRE each fallback to exist behind an
     // `ENGINE_LIVE !== "on"` gate. The gate was the rollout's revert path; ENGINE_LIVE has
     // been on for every client for weeks, so those 30 branches could not execute and were
@@ -867,8 +867,8 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     // Comments stripped first: this asserts on CODE. A comment may say the word (the header
     // explains what was removed and why) — a live gate may not exist.
     const codeOnly = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
-    for (const f of ["advice-commands.ts", "misc-commands.ts"]) {
-      const code = codeOnly(f === "advice-commands.ts" ? src : readFileSync(join("server", "handlers", f), "utf-8"));
+    for (const f of ["preferences.ts", "misc-commands.ts"]) {
+      const code = codeOnly(f === "preferences.ts" ? src : readFileSync(join("server", "handlers", f), "utf-8"));
       assert.doesNotMatch(code, /ENGINE_LIVE/,
         `a flag-gated fallback is back in ${f} — the engine owns these, delete it`);
     }
@@ -905,7 +905,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const sick = readFileSync(join("server", "handlers", "sick-flow.ts"), "utf-8");
     assert.match(sick, /scheduleReturnNudge\(user\.id, user\.phoneNumber, sickUntil, "sick"\)/, "sick_until schedules the nudge");
     assert.match(sick, /cancelReturnNudges\(user\.id\)/, "recovery cancels the pending nudge");
-    const early = readFileSync(join("server", "handlers", "advice-commands.ts"), "utf-8");
+    const early = readFileSync(join("server", "handlers", "preferences.ts"), "utf-8");
     assert.match(early, /scheduleReturnNudge\(user\.id, phone, rpDate, "away"\)/, "back_on schedules the nudge");
   });
   test("intent bouncer: a STRATEGY message about training never dumps the programme (the running voice-note miss, 2026-07-21)", () => {
@@ -1116,7 +1116,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(!DEFER.test("i'm back and ready to train"), "a real return still clears");
   });
   test("numbers toggle: a PLAN ask ('give me numbers on how we go about it') is NOT a display toggle", () => {
-    const src = readFileSync(join("server", "handlers", "numbers-literacy.ts"), "utf-8");
+    const src = readFileSync(join("server", "handlers", "preferences.ts"), "utf-8");
     assert.match(src, /isPlanAsk/, "the plan-context guard exists");
     const PLAN = /\b(plan|programme|program|roadmap|go about|how (we|are we|you)|strategy|approach|ease (me )?back)\b/i;
     assert.ok(PLAN.test("no i need the whole plan, give me numbers on how we are going to go about it"), "the exact hijack is caught");
@@ -1139,7 +1139,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(d && /^\d{4}-\d{2}-\d{2}$/.test(d), "a day name becomes a real date");
     assert.ok(nextDayDate("tomorrow"), "tomorrow works");
     assert.equal(nextDayDate("someday"), null, "junk is rejected");
-    const ec = readFileSync(join("server", "handlers", "advice-commands.ts"), "utf-8");
+    const ec = readFileSync(join("server", "handlers", "preferences.ts"), "utf-8");
     assert.match(ec, /back_on:\$\{rpDate\}/, "the date is persisted whoever replies");
     const snap = readFileSync(join("server", "brain", "client-snapshot.ts"), "utf-8");
     assert.match(snap, /back_on:\(\\d\{4\}-\\d\{2\}-\\d\{2\}\)/, "and the snapshot surfaces it to the brain");
@@ -1148,7 +1148,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   // (b3) Kam's manual-coaching masterclasses must live in BOTH mouths, identically framed.
   test("coach voice: deficit-resistance hard case encoded in BRAIN_SYSTEM and SCENARIO_GUIDE", () => {
     const brain = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8");
-    const guide = readFileSync(join("server", "handlers", "gpt-block.ts"), "utf-8");
+    const guide = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8"); // SCENARIO_GUIDE moved here (6 Oct)
     for (const src of [brain, guide]) {
       assert.match(src, /DEFICIT RESISTANCE/, "the hard case must exist");
       assert.match(src, /spot-reduce/, "the spot-reduction truth");
@@ -1159,7 +1159,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
   test("coach voice: holiday/away masterclass encoded in BOTH mouths (list from THEIR foods)", () => {
     const brain = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8");
-    const guide = readFileSync(join("server", "handlers", "gpt-block.ts"), "utf-8");
+    const guide = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8"); // SCENARIO_GUIDE moved here (6 Oct)
     for (const src of [brain, guide]) {
       assert.match(src, /HOLIDAY \/ VACATION/, "the away case must exist");
       assert.match(src, /FROM THEIR OWN LIST/, "the plan is built from the client's own named foods");
@@ -2098,7 +2098,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   // stayed green through the entire failure, so this asserts the WIRING.
   test("tell don't ask: EVERY reply-composition path applies the guard, not just the engine", async () => {
     const { readFileSync } = await import("node:fs");
-    const paths = ["server/understanding/live.ts", "server/handlers/gpt-block.ts"];
+    const paths = ["server/understanding/live.ts"]; // gpt-block.ts deleted 6 Oct
     for (const p of paths) {
       assert.match(readFileSync(p, "utf-8"), /tellDontAsk\(/,
         `${p} composes a client-facing reply but never applies the hand-back guard`);
@@ -6256,6 +6256,39 @@ test("A19 (Grok attack on #545): a commitment is stored only for a promise they 
   assert.equal(commitmentHeld("I won't stop eating takeaways", "I won't stop eating takeaways", "stop takeaways", "", "food"), false);
   assert.equal(namesWhat("train at Virgin Active", "How did Virgin Active go?", false), true, "the fold hears the venue");
   assert.equal(commitmentHeld("yes", "yes", "a walk after work", "Would that work for you?"), false, "the gate still ignores the setting");
+});
+test("D7: live turns are scored from what the client did next, with no model call", async () => {
+  const { scoreLiveTurns, liveDigest } = await import("../server/friction");
+  const { isMemoryGrievance } = await import("../server/understanding/actions");
+  const now = Date.parse("2026-10-06T16:30:00Z"), at = (h: number) => new Date(now - h * 3600_000);
+  const turns = [
+    { id: "a1", userId: "A", at: at(10), input: "I had pap for lunch", reply: "Lunch is in. Pap gives you energy." },
+    { id: "a2", userId: "A", at: at(9.9), input: "I already told you I'm off starch this week", reply: "Got it, noted." },
+    { id: "b1", userId: "B", at: at(8), input: "What should I eat tonight?", reply: "Chicken and veg? What do you have in?" },
+    { id: "c1", userId: "C", at: at(3), input: "Walked 8000 steps", reply: "Lekker, that's your target." },
+    { id: "d1", userId: "D", at: at(5), input: "Hi", reply: "Hey! How was the walk?" },
+    { id: "d2", userId: "D", at: at(4.9), input: "fine", reply: "Good." },
+  ];
+  const signals = [
+    { userId: "A", at: at(9.9), kind: "friction_correction" },
+    { userId: "D", at: at(4.8), kind: "opt_out" },
+    { userId: "C", at: at(30), kind: "friction_frustration" }, // before the turn: not about it
+  ];
+  const scored = scoreLiveTurns(turns, signals, isMemoryGrievance, now);
+  const a1 = scored.find(t => t.id === "a1");
+  assert.ok(a1 && a1.score === 7 && a1.why.includes("corrected") && a1.why.includes("\"you forgot\""), JSON.stringify(a1));
+  assert.ok(scored.find(t => t.id === "b1")?.why.includes("silence after a question"), "a question nobody answered for 6h+");
+  assert.equal(scored.find(t => t.id === "c1"), undefined, "an earlier signal is not about a later turn");
+  assert.ok(scored.find(t => t.id === "d2")?.why.includes("opted out"), "an opt-out within two hours");
+  assert.equal(scored[0].id, "a1", "worst first");
+  const text = liveDigest(scored, turns.length, u => ({ A: "123", B: "456", D: "789" } as any)[u] ?? "???");
+  assert.match(text, /^Coach health, last 24h: 6 turns, \d+ with a bad sign/);
+  assert.match(text, /1\. …123 · corrected, "you forgot"\n   Coach: «Lunch is in/);
+  assert.ok(!/\+27|whatsapp:/.test(text), "never a full number");
+  assert.match(liveDigest([], 0, () => ""), /Nothing to read today/);
+  const { opsAddress } = await import("../server/scheduler/jobs/balance-check");
+  assert.equal(opsAddress("27821234567"), "whatsapp:+27821234567", "Codex @ e0017fd: the ops number keeps its WhatsApp channel");
+  assert.ok(readFileSync("server/scheduler/jobs/balance-check.ts", "utf-8").includes("return deliveryAccepted(outcome);"), "and alertOps reports the real delivery");
 });
 test("#567: the till charges R199, and an earlier subscriber's R149 token still renews", async () => {
   const { PRICING, chargeMatchesPrice } = await import("../shared/pricing");
@@ -10814,13 +10847,6 @@ test("#441 isModelSlowOrUnreachable: timeout, dropped connection and 5xx answer 
   for (const e of [{ status: 401, message: "Incorrect API key" }, { status: 429, code: "insufficient_quota", message: "quota" }, new SyntaxError("Unexpected token")]) {
     assert.equal(isModelSlowOrUnreachable(e), false, `falls through to the engine that alerts: ${String((e as any)?.message)}`);
   }
-});
-
-test("CORE_WAVE1: on for everyone unless off (#445; the founder-first mode is gone)", async () => {
-  const { coreWave1For } = await import("../server/core/coach");
-  const saved = process.env.CORE_WAVE1;
-  try { delete process.env.CORE_WAVE1; assert.equal(coreWave1For("whatsapp:+27829438002"), true); process.env.CORE_WAVE1 = "off"; assert.equal(coreWave1For("whatsapp:+27829438002"), false); }
-  finally { if (saved === undefined) delete process.env.CORE_WAVE1; else process.env.CORE_WAVE1 = saved; }
 });
 
 test("what's new rides in that evening's message on its live day only (#442, no extra message)", async () => {

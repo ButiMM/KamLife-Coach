@@ -65,6 +65,7 @@ export const WHATS_NEW: Array<{ day: number; line: string }> = [ // day = SAST y
   { day: 20261002, line: "Tell me you trained and I'll say what it means for your week, and ask \"am I on track?\" any time: I'll answer from what you've logged this week." },
   { day: 20261006, line: "Your morning message now starts from your real yesterday, in my own words, with one thing for today." },
   { day: 20261007, line: "Monday's weigh-in, a new training phase and a hello after a quiet spell now come in my own words, from what you've told me." },
+  { day: 20261009, line: "Ask me anything about food, training or your week and you'll get a straight answer, without a to-do tacked on the end." },
   { day: 20261007, line: "Send a photo of your plate and I'll tell you what it means for your day, in my own words, not a receipt." },
   { day: 20261006, line: "Tell me one small thing you'll do and when (\"I'll walk after work on Thursday\") and I'll check in once that evening to see how it went." },
 ];
@@ -98,7 +99,7 @@ export async function runEveningAccountability(): Promise<void> {
         if (!(await inWhatsAppWindow(client.id)) && !templateSid(CHECKIN_TEMPLATE)) continue;
         const delivery = await sendProactive(client, { job: "evening" },
           `${name}, you planned ${promise.what} today. How did it go? If it didn't happen, tell me what got in the way and we'll make the next one easier.`,
-          { template: { name: CHECKIN_TEMPLATE, variables: { 1: name, 2: promise.what } } });
+          { template: { name: CHECKIN_TEMPLATE, variables: { 1: name, 2: promise.what }, noSubstitute: true } });
         if (delivery && deliveryAccepted(delivery)) await markCommitment(promise.id, "asked");
         continue;
       }

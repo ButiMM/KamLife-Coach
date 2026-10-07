@@ -28,7 +28,7 @@ export interface DomainOwnership {
   /**
    * The model path. It may DISCUSS a domain — its prompts name these phrases — but it must never
    * be the first claimant, and the guard proves that structurally: every owner must sit earlier in
-   * the handler chain than handleGptBlock, so a declared question can never reach the model.
+   * the handler chain than the last door (core.answerFinal), so a declared question can never reach the model.
    *
    * Listed rather than ignored, because "deterministic handler vs model fallback" is exactly the
    * authority conflict that produced "this week": no owner, so the model answered, invented
@@ -83,7 +83,6 @@ export const NON_CLAIMANTS = [
   "script/",
   "server/scheduler/",
   "server/weekly-recap.ts",
-  "server/agents.ts",          // admin keyword list, never a client reply path
 ];
 
 /**

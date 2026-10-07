@@ -13,7 +13,7 @@
  */
 
 import { db } from "./db";
-import { qualitySignals } from "../shared/schema";
+import { qualitySignals, turnLedger, users, adminEvents } from "../shared/schema";
 import { and, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { captureQualitySignal } from "./quality-signals";
 
@@ -88,4 +88,74 @@ export function frictionFlag(count: number): FrictionFlag {
     };
   }
   return null;
+}
+
+/**
+ * LIVE SCORING FROM SIGNALS (D7, CTO 6 Oct). No model call: every delivered turn is scored by what
+ * the client did next, from signals we already record. Friction after it (a correction, a rejection,
+ * venting, a cold redirect), "you forgot" / "I told you" within their next two messages, an opt-out
+ * within two hours, and silence after a coach question. The worst turns go to the founder once a day.
+ */
+export type LiveTurn = { id: string; userId: string; at: Date; input: string; reply: string };
+export type LiveSignal = { userId: string; at: Date; kind: string };
+export type ScoredTurn = LiveTurn & { score: number; why: string[]; next: string };
+const SIGNAL_WEIGHT: Record<string, [number, string]> = {
+  friction_correction: [3, "corrected"], friction_rejection: [3, "rejected"], friction_frustration: [4, "frustrated"],
+  friction_redirect: [1, "redirected"], opt_out: [5, "opted out"],
+};
+export function scoreLiveTurns(turns: LiveTurn[], signals: LiveSignal[], isMemoryGrievance: (m: string) => boolean, now = Date.now()): ScoredTurn[] {
+  const byUser = new Map<string, LiveTurn[]>();
+  for (const t of [...turns].sort((a, b) => a.at.getTime() - b.at.getTime())) byUser.set(t.userId, [...(byUser.get(t.userId) ?? []), t]);
+  const out: ScoredTurn[] = [];
+  for (const list of byUser.values()) list.forEach((t, i) => {
+    const after = list.slice(i + 1, i + 3);
+    const until = after.length ? after[after.length - 1].at.getTime() + 60_000 : t.at.getTime() + 6 * 3600_000;
+    const why: string[] = [];
+    let score = 0;
+    for (const sg of signals) {
+      const at = sg.at.getTime(), w = SIGNAL_WEIGHT[sg.kind];
+      if (!w || sg.userId !== t.userId || at <= t.at.getTime()) continue;
+      if (at <= (sg.kind === "opt_out" ? Math.min(until, t.at.getTime() + 120 * 60_000) : until)) { score += w[0]; why.push(w[1]); }
+    }
+    if (after.some(n => isMemoryGrievance(n.input))) { score += 4; why.push("\"you forgot\""); }
+    if (!after.length && t.reply.includes("?") && now - t.at.getTime() > 6 * 3600_000) { score += 1; why.push("silence after a question"); }
+    if (score > 0) out.push({ ...t, score, why: [...new Set(why)], next: after[0]?.input ?? "" });
+  });
+  return out.sort((a, b) => b.score - a.score || b.at.getTime() - a.at.getTime());
+}
+const quote = (t: string, n: number) => { const s = t.replace(/\s+/g, " ").trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
+/** The digest text: counts, then the worst five, each with the client's last 3 digits, why, and both sides quoted. */
+export function liveDigest(scored: ScoredTurn[], turns: number, phoneOf: (userId: string) => string): string {
+  const head = `Coach health, last 24h: ${turns} turns, ${scored.length} with a bad sign after them.`;
+  if (!scored.length) return `${head} Nothing to read today.`;
+  return [head, "Worst " + Math.min(5, scored.length) + ":", ...scored.slice(0, 5).map((t, i) =>
+    `${i + 1}. …${phoneOf(t.userId)} · ${t.why.join(", ")}\n   Coach: «${quote(t.reply, 140)}»${t.next ? `\n   Then: «${quote(t.next, 100)}»` : ""}`)].join("\n\n");
+}
+const LIVE_DIGEST_KEY = "live_digest_day";
+/** Build and send today's digest once, from the sweep that runs in the 18:00 SAST hour. */
+export async function sendLiveDigestOnce(now = Date.now()): Promise<boolean> {
+  const { sastHour, sastDayKey } = await import("./sast");
+  const { loadState, saveState } = await import("./scheduler/shared");
+  if (sastHour(now) !== 18 || loadState()[LIVE_DIGEST_KEY] === sastDayKey(now)) return false;
+  const since = new Date(now - 24 * 3600_000);
+  const [rows, signals, opts, phones] = await Promise.all([
+    db.select({ id: turnLedger.id, userId: turnLedger.userId, at: turnLedger.createdAt, input: turnLedger.inputText, reply: sql<string>`coalesce(${turnLedger.deliveredBody}, ${turnLedger.reply})` })
+      .from(turnLedger).where(gte(turnLedger.createdAt, since)),
+    db.execute(sql`SELECT user_id::text u, created_at at, kind FROM quality_signals WHERE created_at >= ${since} AND kind LIKE 'friction_%' AND user_id IS NOT NULL`),
+    db.execute(sql`SELECT user_id::text u, created_at at FROM chat_history WHERE created_at >= ${since} AND intent = 'OPT_OUT'`),
+    db.select({ id: users.id, phone: users.phoneNumber }).from(users),
+  ]);
+  const turns: LiveTurn[] = rows.filter(r => r.at && r.reply).map(r => ({ id: String(r.id), userId: String(r.userId), at: new Date(r.at!), input: String(r.input || ""), reply: String(r.reply) }));
+  const sig: LiveSignal[] = [
+    ...(signals.rows as any[]).map(r => ({ userId: String(r.u), at: new Date(r.at), kind: String(r.kind) })),
+    ...(opts.rows as any[]).map(r => ({ userId: String(r.u), at: new Date(r.at), kind: "opt_out" })),
+  ];
+  const { isMemoryGrievance } = await import("./understanding/actions");
+  const phone = new Map(phones.map(p => [String(p.id), String(p.phone || "").slice(-3)]));
+  const text = liveDigest(scoreLiveTurns(turns, sig, isMemoryGrievance, now), turns.length, u => phone.get(u) || "???");
+  await db.insert(adminEvents).values({ action: "live_digest", meta: { turns: turns.length }, reason: "turn triage" }).catch(() => {}); // a read of client turns is audited
+  const sent = await (await import("./scheduler/jobs/balance-check")).alertOps(text);
+  if (sent) saveState(LIVE_DIGEST_KEY, sastDayKey(now)); // undelivered: the 18:xx sweep is the only try, and it says so in the log
+  else console.warn("[LIVE_DIGEST] not delivered (no ops number, or the send was refused)");
+  return sent;
 }

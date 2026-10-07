@@ -11,7 +11,7 @@ revert_db_require_safe
 
 ACC=script/pg-turn-reply-integrity-acceptance.ts
 WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/c10-revert.XXXXXX")"
-FILES=(server/handlers/chat-log.ts server/handlers/gpt-block.ts server/handlers/lifecycle.ts)
+FILES=(server/handlers/chat-log.ts server/handlers/lifecycle.ts)
 
 for f in "${FILES[@]}"; do cp "$f" "$WORK_ROOT/$(printf '%s' "$f" | tr '/' '_')"; done
 restore_case () {
@@ -84,18 +84,13 @@ run_case "the ordinary exit returns the original reply again" server/handlers/ch
 #    claimed as guarded. An unfailable revert case is worse than an absent one: it reports a
 #    mechanism as protected when nothing would notice if it broke.
 
-# 3. The repair is computed but not held, so the decision rebuild composes over it. This is the
-#    second half of the defect — the half that only became visible once the draft actually
-#    shipped — and it must be caught independently of case 1.
-run_case "the write-integrity repair is not held for the rebuild" server/handlers/chat-log.ts \
-  '      integrityRepair = draft;' \
-  '' || failed=$((failed + 1))
-
-# 4. The second mouth is let loose again: the rebuild recomposes every decision turn from the
-#    generic frame, so a question turn loses its answer and a numbers:low delivery strip is undone.
-run_case "the rebuild recomposes a turn that already composed itself" server/handlers/chat-log.ts \
-  'if (decisionTurn && (!scope.evidence.decisionComposed || integrityRepair)) {' \
-  'if (decisionTurn) {' || failed=$((failed + 1))
+# 3 and 4. RETIRED WITH THE WAVE-1 LAST DOOR (CTO order 6 Oct, #391), FOR THE SAME REASON AS 2.
+#    Both guarded the decision rebuild on a turn whose reply the write-integrity rule replaced. The
+#    last door no longer staples a canonical action, so a last-door turn is never a decision turn
+#    and the rebuild is not reached on any journey this acceptance can drive: reverted, both stayed
+#    GREEN (measured on the deletion branch). The exits that set `decisionComposed` were deleted
+#    with it, so that flag went too. The repair is still held for consistency, and NOT claimed as
+#    guarded.
 
 # 5. CONTROL, THE OTHER OWNER. The under-eating warning swallows the turn again, so the client's
 #    question is never answered at all. C9's corrected date is what makes this branch reachable;
@@ -104,18 +99,10 @@ run_case "the under-eating warning swallows the question again" server/handlers/
   '    !looksLikeQuestion(message) &&' \
   '' || failed=$((failed + 1))
 
-# 6. The composed-turn flag is never set, which is case 4 reached from the other side: the
-#    reconciler behaves correctly and the handler simply stops telling it the turn is done.
-run_case "the composing exit stops declaring itself" server/handlers/gpt-block.ts \
-  '        turnEvidence({ decisionComposed: true });
-        gptReply = composeDecisionTurn(
-          context,' \
-  '        gptReply = composeDecisionTurn(
-          context,' || failed=$((failed + 1))
 
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-c10-turn-reply-integrity: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-c10-turn-reply-integrity: GREEN — 5/5 behavioral reverts caught"
+echo "red-on-revert-c10-turn-reply-integrity: GREEN — 2/2 behavioral reverts caught"

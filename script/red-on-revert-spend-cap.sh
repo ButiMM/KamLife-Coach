@@ -14,6 +14,7 @@ WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/spend-cap-revert.XXXXXX")"
 FILES=(
   server/cost-tracking.ts
   server/understanding/live.ts
+  server/core/coach.ts
 )
 
 for f in "${FILES[@]}"; do cp "$f" "$WORK_ROOT/$(printf '%s' "$f" | tr '/' '_')"; done
@@ -94,9 +95,19 @@ run_case "the meaning engine ignores the cap" server/understanding/live.ts \
   '  if (user?.id && !(await isUnderGPTCallLimit(user.id))) return null;' \
   '' || failed=$((failed + 1))
 
+# 4 and 5. THE NEW COACH (#562, and the wave-1 deletion): it answers every turn now, so both of its seams
+#    are guarded: its read stands down over the cap, and the last door's fallback gives the short reply.
+run_case "the new coach's read ignores the cap" server/core/coach.ts \
+  '  if (!(await (await import("../cost-tracking")).isUnderGPTCallLimit(u.id))) return null;' \
+  '' || failed=$((failed + 1))
+
+run_case "the last door's fallback ignores the cap" server/core/coach.ts \
+  '  if (!(await (await import("../cost-tracking")).isUnderGPTCallLimit(user.id))) {' \
+  '  if (false) {' || failed=$((failed + 1))
+
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-spend-cap: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-spend-cap: GREEN — 3/3 behavioral reverts caught"
+echo "red-on-revert-spend-cap: GREEN — 5/5 behavioral reverts caught"

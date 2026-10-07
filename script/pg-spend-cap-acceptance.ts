@@ -88,44 +88,42 @@ REAL("\npg-spend-cap-acceptance — the AI spend cap fails safe (#340)\n");
 
 REAL("1. CONTROL — under the ceiling, the coach answers with the model");
 const a = await client(1);
-engineCalls = 0;
+engineCalls = 0; coreCalls = 0;
 const ok = await say(a.phoneNumber, QUESTIONS[0]);
-chk(!DEGRADED.test(ok) && engineCalls > 0, "an ordinary question reaches the model", `engine calls ${engineCalls}; ${JSON.stringify(ok.slice(0, 160))}`);
+chk(!DEGRADED.test(ok) && engineCalls + coreCalls > 0, "an ordinary question reaches the model (the engine or the new coach)", `engine ${engineCalls}, core ${coreCalls}; ${JSON.stringify(ok.slice(0, 160))}`);
 
 REAL("\n2. THE ACCOUNT-WIDE CEILING IS A HARD STOP");
 await pool.query("INSERT INTO gpt_costs (user_id, model, feature, cost_usd) VALUES (NULL, 'gpt-4o', 'spend-cap-acceptance', 6)");
-engineCalls = 0;
+engineCalls = 0; coreCalls = 0;
 const capped = await say(a.phoneNumber, QUESTIONS[1]);
 chk(DEGRADED.test(capped), "over the daily ceiling, the client gets the short degraded reply", JSON.stringify(capped.slice(0, 160)));
-chk(engineCalls === 0, "…and the engine's model is not called", `engine calls ${engineCalls}`);
+chk(engineCalls + coreCalls === 0, "…and no model is called, the engine's or the new coach's", `engine ${engineCalls}, core ${coreCalls}`);
 chk((await pool.query("SELECT 1 FROM admin_events WHERE action = 'ai_spend_global_cap_hit'")).rows.length === 1, "…and the founder's admin view records the ceiling being hit");
 
-REAL("\n2b. THE NEW COACH IS UNDER THE SAME CEILING (production runs wave 1 on for everyone)");
-process.env.CORE_WAVE1 = "on";
+REAL("\n2b. THE NEW COACH IS UNDER THE SAME CEILING (it answers every turn since the wave-1 last door went)");
 coreCalls = 0;
 const cappedCore = await say(a.phoneNumber, "What should I eat tonight?");
 chk(coreCalls === 0, "over the ceiling, the new coach makes no model call", `core calls ${coreCalls}; ${JSON.stringify(cappedCore.slice(0, 160))}`);
 chk(DEGRADED.test(cappedCore), "…and the client gets the short degraded reply", JSON.stringify(cappedCore.slice(0, 160)));
-process.env.CORE_WAVE1 = "off";
 await pool.query("DELETE FROM gpt_costs WHERE feature = 'spend-cap-acceptance'");
 
 REAL("\n3. SPEND THAT CANNOT BE READ IS NOT UNLIMITED SPEND");
 await pool.query("ALTER TABLE gpt_costs RENAME TO gpt_costs_hidden");
 let unreadable = "";
 try {
-  engineCalls = 0;
+  engineCalls = 0; coreCalls = 0;
   unreadable = await say(a.phoneNumber, QUESTIONS[2]);
 } finally {
   await pool.query("ALTER TABLE gpt_costs_hidden RENAME TO gpt_costs");
 }
 chk(DEGRADED.test(unreadable), "when the cost query fails, the client gets the degraded reply, not an unbounded call", JSON.stringify(unreadable.slice(0, 160)));
-chk(engineCalls === 0, "…and the engine's model is not called", `engine calls ${engineCalls}`);
+chk(engineCalls + coreCalls === 0, "…and no model is called, the engine's or the new coach's", `engine ${engineCalls}, core ${coreCalls}`);
 chk((await pool.query("SELECT 1 FROM admin_events WHERE action = 'ai_spend_cap_unreadable'")).rows.length >= 1, "…and the failure is recorded for the founder");
 
 REAL("\n4. CONTROL — back under the ceiling with spend readable, coaching resumes");
-engineCalls = 0;
+engineCalls = 0; coreCalls = 0;
 const back = await say(a.phoneNumber, QUESTIONS[3]);
-chk(!DEGRADED.test(back) && engineCalls > 0, "the model answers again", `engine calls ${engineCalls}; ${JSON.stringify(back.slice(0, 160))}`);
+chk(!DEGRADED.test(back) && engineCalls + coreCalls > 0, "the model answers again", `engine ${engineCalls}, core ${coreCalls}; ${JSON.stringify(back.slice(0, 160))}`);
 
 REAL(`\npg-spend-cap-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);
 await pool.end();
