@@ -1,3 +1,5 @@
+> **Frozen 7 Oct (founder + CTO, #391): not updated during the two-week freeze. Status lives on #391; the rules are the one page in `CLAUDE.md`.**
+
 # Build queue
 
 **Derived from `docs/COVERAGE.md` (the plan, `docs/ORDERS.md` §0).**
