@@ -168,7 +168,8 @@ export function isMealAmendment(olderItems: string[], newerItems: string[]): boo
  * corrections, because the question it answers is "what shape of fix is this?" — parseMealDate
  * in utils.ts stays the single owner of "which day", and this asks the caller to consult it.
  */
-const MOVE_FRAME = /\b(?:actually|no|sorry|oops|wait|correction)\b[,.!]?\s*(?:that|it|this|those)\s*(?:'s|s|was|were|is|are)\b|\bmove\s+(?:that|it|this|the\s+last\s+(?:one|meal|entry)|that\s+meal)\s+to\b|\b(?:that|it|this)\s+(?:was|were)\s+(?:actually\s+)?(?:on\s+)?(?=\w)/i;
+const MOVE_FRAME = /\b(?:actually|no|sorry|oops|wait|correction)\b[,.!]?\s*(?:that|it|this|those)\s*(?:'s|s|was|were|is|are)\b|\bmove\s+(?:that|it|this|the\s+last\s+(?:one|meal|entry)|that\s+meal)\s+to\b|\b(?:that|it|this)\s+(?:was|were)\s+(?:actually\s+)?(?:on\s+|for\s+)?(?:yesterday|last\s+night|(?:last\s+)?(?:sun|mon|tues|wednes|thurs|fri|satur)day|\d+\s+days?\s+ago|the\s+day\s+before)\b/i;
+// "It was <day>" moves a meal; "Sunday wasn't toast, it was rice" names a FOOD after "it was", and corrects it (#614).
 export function isMealDateMove(message: string, namesAnotherDay: boolean): boolean {
   return namesAnotherDay && MOVE_FRAME.test(String(message || "").toLowerCase());
 }

@@ -1467,6 +1467,8 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const { isMealDateMove } = await import("../server/food-identity-correction");
     const { isRetroactiveMeal, parseMealDate } = await import("../server/utils");
     const move = (s: string) => isMealDateMove(s, isRetroactiveMeal(s));
+    assert.equal(move("sunday wasn't toast, it was rice"), false, "#614: a food after 'it was' corrects the meal, it does not move it");
+    assert.equal(move("actually that was sunday"), true, "#614: a day after 'that was' still moves it");
     for (const s of ["actually that was yesterday", "no that was yesterday", "actually, that was last night",
                      "move that to yesterday", "that was yesterday", "sorry that was last night"]) {
       assert.ok(move(s), `should be a move: "${s}"`);
@@ -6273,6 +6275,13 @@ test("7 Oct live: a photo that shrinks to one flat colour is sent as the origina
   assert.equal(r.resized, false, "a blank result is never sent");
   const busy = createCanvas(3000, 3000); const h = busy.getContext("2d"); for (let i = 0; i < 50; i++) { h.fillStyle = `hsl(${i * 7},60%,50%)`; h.fillRect(i * 55, i * 55, 300, 300); }
   assert.equal((await downscaleForVision((await busy.encode("jpeg")).toString("base64"), "image/jpeg")).resized, true, "a real photo is still shrunk");
+});
+test("#614: today's own weekday name is today; 'last <day>' and '<day> last week' are a week back", () => {
+  const today = new Intl.DateTimeFormat("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" }).format(new Date()).toLowerCase();
+  const back = (t: string) => Math.round((sastDayStart().getTime() - sastDayStart(parseMealDate(t)!).getTime()) / 86_400_000);
+  assert.equal(back(`i had chicken and rice ${today}`), 0, "a list's today");
+  assert.equal(back(`i had pap last ${today}`), 7);
+  assert.equal(back(`i had pap on ${today} last week`), 7, "Codex @ #614: postposed 'last week'");
 });
 test("#596: the 07:00 report groups media failures by step and real error", async () => {
   const { mediaFailures } = await import("../server/audit/reply-audit-command");
