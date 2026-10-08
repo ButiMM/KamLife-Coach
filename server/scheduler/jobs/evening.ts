@@ -68,6 +68,7 @@ export const WHATS_NEW: Array<{ day: number; line: string }> = [ // day = SAST y
   { day: 20261009, line: "Ask me anything about food, training or your week and you'll get a straight answer, without a to-do tacked on the end." },
   { day: 20261007, line: "Send a photo of your plate and I'll tell you what it means for your day, in my own words, not a receipt." },
   { day: 20261008, line: "Tell me what you ate, walked or weighed in your own words, in any language (\"kota from the spaza\", \"ndidle ipapa\"), and I'll log it and answer you, without a to-do stapled on." },
+  { day: 20261008, line: "Send a few days of meals in one message and each lands on its own day. A plate photo gets its meal card again, and sending the same photo twice just gets a quick \"already in today's log\". Ask \"what's my workout today?\" and you'll get your actual session." },
   { day: 20261006, line: "Tell me one small thing you'll do and when (\"I'll walk after work on Thursday\") and I'll check in once that evening to see how it went." },
 ];
 export const whatsNewLine = (day = Number(todaySAST().replace(/-/g, ""))): string => {
