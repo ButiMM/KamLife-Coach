@@ -1337,9 +1337,11 @@ test("parseMealDate: no time reference → approximately now (< 10 minutes ago)"
 });
 
 test("parseMealDate: day-of-week reference maps to a past date (< 8 days ago)", () => {
-  // A past day name maps 1–7 days back (today's own name means today since #614, so name two days ago).
-  const past = new Intl.DateTimeFormat("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" }).format(new Date(Date.now() - 2 * 86_400_000));
-  const d = parseMealDate(`had pap on ${past}`);
+  // Any day name other than today's should map to 1–7 days back. Use the day three days ago (SAST),
+  // so the case doesn't fail on the one weekday it names (it went red every Monday).
+  const names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const threeAgo = names[(new Date(Date.now() + 2 * 3600_000).getUTCDay() + 4) % 7];
+  const d = parseMealDate(`had pap on ${threeAgo}`);
   assert.ok(daysDiff(d) >= 1 && daysDiff(d) <= 8, `days diff: ${daysDiff(d)}`);
 });
 
