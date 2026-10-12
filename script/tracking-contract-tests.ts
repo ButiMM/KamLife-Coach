@@ -175,6 +175,9 @@ const MUST_WRITE: [string, string][] = [
 
 (async () => {
   const g = globalThis as any;
+  // #404: midday SAST on the same day, whatever the hour CI runs. At 00:38 the "lunch" fixture (today 01:00) was still
+  // in the future, so a calorie question read "nothing logged yet today" and four contract checks went red at night.
+  await import("./sast-noon-clock");
   const { handleMessage } = await import("../server/routes");
   const schema = await import("../shared/schema");
   // EVERY GRADED TURN STARTS FROM CLEAN PROCESS STATE, and this is not housekeeping — without it
