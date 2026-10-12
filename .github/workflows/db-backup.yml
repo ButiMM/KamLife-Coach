@@ -94,14 +94,15 @@ jobs:
       # the backup prune never touches, so a restore can re-apply deletions even after the live database
       # and the app's logs are gone. Runs before the dump and even when the dump later fails.
       # A tombstone lives exactly as long as a backup that predates it: ids erased since the day before
-      # the oldest backup in daily/. If that cannot be read, every id is kept (never fewer).
+      # the oldest backup in daily/ or failed/. If that cannot be read, every id is kept (never fewer).
       - name: Save erasure tombstones
         id: tombstones
         if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         run: |
           set -euo pipefail
-          OLDEST=$( (aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT" || true) | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
+          # The same horizon the prune uses: a retained failed/ dump can bring an account back too (#625 review).
+          OLDEST=$( (aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT"; aws s3 ls "s3://${R2_BUCKET}/failed/" --endpoint-url "$R2_ENDPOINT" || true) | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
           SINCE=$([ -n "$OLDEST" ] && date -u -d "$OLDEST -1 day" +%Y-%m-%d || echo 1970-01-01)
           T="erased-$(date -u +%Y%m%d-%H%M%S).txt"
           psql -tA -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "SELECT (meta->>'userId') || ',' || to_char(performed_at, 'YYYY-MM-DD HH24:MI:SS') FROM admin_events WHERE action = 'account_erased' AND performed_at >= '${SINCE}' ORDER BY performed_at" > "/tmp/${T}"
@@ -159,16 +160,19 @@ jobs:
         run: |
           set -euo pipefail
           CUTOFF=$(date -u -d "-${RETENTION_DAYS} days" +%Y%m%d)
-          echo "Deleting daily backups dated before ${CUTOFF}"
-          aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT" \
-            | awk '{print $4}' | while read -r key; do
-              [ -z "$key" ] && continue
-              d=$(echo "$key" | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p')
-              if [ -n "$d" ] && [ "$d" -lt "$CUTOFF" ]; then
-                echo "  pruning $key"
-                aws s3 rm "s3://${R2_BUCKET}/daily/${key}" --endpoint-url "$R2_ENDPOINT"
-              fi
-            done
+          # failed/ holds the same client data as daily/, so it expires on the same window (#611).
+          for prefix in daily failed; do
+            echo "Deleting ${prefix} backups dated before ${CUTOFF}"
+            { aws s3 ls "s3://${R2_BUCKET}/${prefix}/" --endpoint-url "$R2_ENDPOINT" || true; } \
+              | awk '{print $4}' | while read -r key; do
+                [ -z "$key" ] && continue
+                d=$(echo "$key" | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p')
+                if [ -n "$d" ] && [ "$d" -lt "$CUTOFF" ]; then
+                  echo "  pruning ${prefix}/${key}"
+                  aws s3 rm "s3://${R2_BUCKET}/${prefix}/${key}" --endpoint-url "$R2_ENDPOINT"
+                fi
+              done
+          done
 
       # #499 attack: an erased id is kept only while a backup that could bring the account back exists.
       # Runs after the backup prune; with no readable backup list it deletes nothing. Not best-effort:
@@ -177,7 +181,8 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: |
           set -euo pipefail
-          OLDEST=$(aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT" | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
+          # A retained failed dump can bring an erased account back too, so it counts toward the horizon (#611).
+          OLDEST=$({ aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT"; aws s3 ls "s3://${R2_BUCKET}/failed/" --endpoint-url "$R2_ENDPOINT" || true; } | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
           if [ -z "$OLDEST" ]; then echo "No backups listed; keeping every tombstone"; exit 0; fi
           SINCE=$(date -u -d "$OLDEST -1 day" +%Y%m%d)
           # Each file is a full snapshot of the ids still needed, so once this run's file is saved every older
