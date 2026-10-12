@@ -1196,5 +1196,4 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   //   routes/payments.ts  — /webhook/payfast, /webhook/status, /api/payfast/link
   //   routes/coach.ts     — /coach (HTML admin dashboard)
   // See server/routes/index.ts for the registry.
-
 }
