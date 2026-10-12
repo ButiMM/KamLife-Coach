@@ -28,10 +28,11 @@ globalThis.fetch = (async (input: any, init?: any) => {
     const log586 = /kota from the spaza/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", needsConfirmation: false }] : /ndidle ipapa/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and meat", needsConfirmation: false }]
       : /recalculate everything|remove my last meal/i.test(msg) ? [{ type: "REMOVE_LAST_MEAL" }]
       : msg === LIST ? [{ type: "LOG_MEAL", foodText: "pap and wors", retro: DOW(2), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "eggs and toast", retro: DOW(1), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "chicken and rice", retro: DOW(0), needsConfirmation: false }]
-      : /^two meals, one card$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "rice and chicken", meal: "lunch", needsConfirmation: false }, { type: "LOG_MEAL", foodText: "samp and beans", meal: "dinner", needsConfirmation: false }]
+      : /^two meals, one card$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "oats and banana", meal: "breakfast", needsConfirmation: false }, { type: "LOG_MEAL", foodText: "samp and beans", meal: "dinner", needsConfirmation: false }]
       : /^Had pap and wors for lunch and did a 30 min home workout$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", needsConfirmation: false }, { type: "LOG_WORKOUT", what: "a 30 min home workout" }]
       : /^what'?s my workout today\??$/i.test(msg) ? [{ type: "SHOW_WORKOUT" }]
-      : /^I have diabetes\. Had a kota for lunch$|^I’m diabetic\. Log my kota$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", meal: "lunch", needsConfirmation: false }]
+      : /^I have diabetes\. Had a kota for lunch$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", meal: "lunch", needsConfirmation: false }]
+      : /^I’m diabetic\. Log my apple$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "an apple", meal: "snack", needsConfirmation: false }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -136,7 +137,7 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   const f2 = await say(TESTER, "2");
   chk(/zone|keep these weights/i.test(f2), "\"2\" answers the numbered \"How did that session feel?\" as Just right (founder's Monday plan, item 4)", f2.slice(0, 200));
   const sw = await say(TESTER, "what's my workout today?");
-  chk(/✅|Warm-up/i.test(sw) && !sw.includes(NEW) && !/haven't written/i.test(sw), "\"what's my workout today?\" is the programme's answer (here: today's session is done), not the model's guess (item 4)", sw.slice(0, 200));
+  chk(/✅|Warm-up|Rest Day/i.test(sw) && !sw.includes(NEW) && !/haven't written/i.test(sw), "\"what's my workout today?\" is the programme's answer (here: today's session is done), not the model's guess (item 4)", sw.slice(0, 200));
   await pool.query("DELETE FROM workout_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [TESTER]);
   const dn = await say(TESTER, "Done 💪"), dw = (await pool.query("SELECT COUNT(*)::int n FROM workout_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n;
   chk(dw === 1 && !dn.includes(NEW), "the \"Done 💪\" button under today's session logs it, by the workout owner", `${dw} | ${dn.slice(0, 160)}`);
@@ -146,8 +147,8 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   chk(!nx.includes(NEW) && /Warm-up|sets|Week/i.test(nx), "the \"Tomorrow's session\" button shows the programme's next session, not the model's", nx.slice(0, 200));
   const db0 = await count(TESTER), dk = await say(TESTER, "I have diabetes. Had a kota for lunch");
   chk(await count(TESTER) === db0 + 1 && dk.includes(NEW), "a condition mentioned with a meal: the meal is written and the new coach answers (#610)", dk.slice(0, 200));
-  const d2 = await count(TESTER), dl = await say(TESTER, "I’m diabetic. Log my kota");
-  chk(await count(TESTER) === d2 + 1, "\"I’m diabetic. Log my kota\" logs the kota too (#619 review)", dl.slice(0, 200));
+  const d2 = await count(TESTER), dl = await say(TESTER, "I’m diabetic. Log my apple"); // not kota again: at lunchtime a second kota lunch is a resend
+  chk(await count(TESTER) === d2 + 1, "\"I’m diabetic. Log my apple\" logs the apple too (#619 review)", dl.slice(0, 200));
   const dsc = await say(TESTER, "I'm diabetic");
   chk(/lifestyle coach, not a medical service/i.test(dsc), "control: the disclosure on its own still gets the non-clinical welcome", dsc.slice(0, 200));
   const r0 = await count(TESTER); await say(TESTER, "I had samp and beans for supper"); const r1 = await count(TESTER);
