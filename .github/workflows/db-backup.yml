@@ -94,14 +94,15 @@ jobs:
       # the backup prune never touches, so a restore can re-apply deletions even after the live database
       # and the app's logs are gone. Runs before the dump and even when the dump later fails.
       # A tombstone lives exactly as long as a backup that predates it: ids erased since the day before
-      # the oldest backup in daily/. If that cannot be read, every id is kept (never fewer).
+      # the oldest backup in daily/ or failed/. If that cannot be read, every id is kept (never fewer).
       - name: Save erasure tombstones
         id: tombstones
         if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         run: |
           set -euo pipefail
-          OLDEST=$( (aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT" || true) | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
+          # The same horizon the prune uses: a retained failed/ dump can bring an account back too (#625 review).
+          OLDEST=$( (aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT"; aws s3 ls "s3://${R2_BUCKET}/failed/" --endpoint-url "$R2_ENDPOINT" || true) | awk '{print $4}' | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p' | sort | head -1)
           SINCE=$([ -n "$OLDEST" ] && date -u -d "$OLDEST -1 day" +%Y-%m-%d || echo 1970-01-01)
           T="erased-$(date -u +%Y%m%d-%H%M%S).txt"
           psql -tA -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "SELECT (meta->>'userId') || ',' || to_char(performed_at, 'YYYY-MM-DD HH24:MI:SS') FROM admin_events WHERE action = 'account_erased' AND performed_at >= '${SINCE}' ORDER BY performed_at" > "/tmp/${T}"

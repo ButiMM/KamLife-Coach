@@ -10969,6 +10969,8 @@ test("#499: the confirmed erasure logs its id outside the database before any aw
   const bprune = wf.slice(wf.indexOf("name: Prune backups"), wf.indexOf("name: Prune tombstones"));
   assert.ok(bprune.includes("for prefix in daily failed; do") && bprune.includes('aws s3 rm "s3://${R2_BUCKET}/${prefix}/${key}"'), "failed/ dumps expire like daily/ ones");
   assert.ok(tprune.slice(0, tprune.indexOf("OLDEST\" ]")).includes('s3://${R2_BUCKET}/failed/'), "a retained failed dump keeps its tombstones");
+  const tsave = wf.slice(wf.indexOf("name: Save erasure tombstones"), wf.indexOf("name: Dump + compress"));
+  assert.ok(tsave.slice(0, tsave.indexOf("SINCE=")).includes('s3://${R2_BUCKET}/failed/'), "the saved snapshot starts from the same horizon, failed/ included (#625 review)");
   assert.ok(code.includes("we also keep a random account number"), "the reply tells the client");
 });
 
