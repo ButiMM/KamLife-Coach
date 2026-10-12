@@ -805,8 +805,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (foodLogMgmtResult !== null) {
     // This is where the street-food educator claimed the 11:24 turn. It may still answer — after
     // the fact it is talking about has been written, not instead of it.
-    // A one-sentence correction that wrote IS the food they stated ("Hayi, lunch was rice not pap"): no second meal from the
-    // logger (#600). A further sentence ("For supper I had chicken") is still owed to the logger (#621 review).
+    // A written one-sentence correction IS the food they stated (#600); a further sentence is still owed to the logger (#621).
     const oneSentence = ![". ", "! ", "? ", "\n"].some(b => message.trim().includes(b));
     if (mayEndTurn("food-log-mgmt") || (oneSentence && turnMutations().some(w => w.startsWith("CORRECT ")))) return closeCoachingTurn(foodLogMgmtResult);
     // STOOD DOWN FOR AN OWED WRITE ≠ CONTRIBUTED A PART. Under multiFact this handler's answer
