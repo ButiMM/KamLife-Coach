@@ -10965,6 +10965,12 @@ test("#499: the confirmed erasure logs its id outside the database before any aw
   assert.ok(readFileSync("script/erasure-replay.sql", "utf-8").includes("INSERT INTO admin_events (action, meta, performed_at)"), "a replayed erasure is tombstoned again at its original time (pg-popia-deletion-acceptance runs it)");
   assert.ok(wf.includes("|| ',' || to_char(performed_at"), "the tombstone file carries each erasure's time");
   assert.ok(tprune.includes('if [ -z "$OLDEST" ]; then') && wf.indexOf("name: Prune tombstones") > wf.indexOf("name: Prune backups"), "only after the backup prune, and never with no backup list");
+  // #611: failed/ dumps hold the same data: they expire on the same window and count toward the tombstone horizon.
+  const bprune = wf.slice(wf.indexOf("name: Prune backups"), wf.indexOf("name: Prune tombstones"));
+  assert.ok(bprune.includes("for prefix in daily failed; do") && bprune.includes('aws s3 rm "s3://${R2_BUCKET}/${prefix}/${key}"'), "failed/ dumps expire like daily/ ones");
+  assert.ok(tprune.slice(0, tprune.indexOf("OLDEST\" ]")).includes('s3://${R2_BUCKET}/failed/'), "a retained failed dump keeps its tombstones");
+  const tsave = wf.slice(wf.indexOf("name: Save erasure tombstones"), wf.indexOf("name: Dump + compress"));
+  assert.ok(tsave.slice(0, tsave.indexOf("SINCE=")).includes('s3://${R2_BUCKET}/failed/'), "the saved snapshot starts from the same horizon, failed/ included (#625 review)");
   assert.ok(code.includes("we also keep a random account number"), "the reply tells the client");
 });
 
