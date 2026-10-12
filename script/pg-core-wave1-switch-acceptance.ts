@@ -36,6 +36,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^Lunch was rice not pap and for supper I had chicken$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not samp\. For supper I had beef\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "samp", to: "rice" }, { type: "LOG_MEAL", foodText: "beef stew", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
+      : /^I'm sick with flu, need 3 days off$/i.test(msg) ? [{ type: "SET_SICK", days: 3 }]
+      : /^I'm feeling better now$/i.test(msg) ? [{ type: "END_SICK" }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -148,6 +150,19 @@ REAL("\n4d. A CORRECTION AND A NEW MEAL IN ONE MESSAGE (#624)");
   const nf = await say(T, "Lunch was rice not samp. For supper I had beef.");
   chk(/couldn't find/i.test(nf) && !nf.includes(NEW), "a correction that didn't land keeps its warning; the supper still logs", nf.slice(0, 200));
   delete process.env.CORE_WAVE2;
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
+REAL("\n4h. SICK AND BACK THROUGH THE FRONT DOOR (A15)");
+{
+  const T = "whatsapp:+27829438015";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Sick Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  const off = await say(T, "I'm sick with flu, need 3 days off");
+  const back = await say(T, "I'm feeling better now");
+  chk(/paused|better/i.test(off) && /welcome back/i.test(back) && !/not guess/i.test(back),
+    "sick, then \"I'm feeling better now\": the pause is set, and the welcome back reaches them (it was blocked as a false \"1 session\" claim)", `${off.slice(0, 80)} | ${back.slice(0, 120)}`);
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
