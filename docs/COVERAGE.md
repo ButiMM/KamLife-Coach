@@ -10,7 +10,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 - **Open**: still broken or not built.
 - **Frozen**: a founder decision not to build it now.
 
-**CI note:** `main` was red from 7 Oct 22:37 (#619) to 12 Oct (#632). Nothing could merge for four days. The daily run now checks `main`'s own CI first.
+**CI note:** `main` was red from 7 Oct 22:37 (#619) to 12 Oct 14:03 (#632, merged). Nothing could merge for four days. The daily run now checks `main`'s own CI first.
 
 ### A. What the client sends
 | Row | What testers need | Status | What's left | Where | Week |
@@ -27,7 +27,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | A10 | What to eat, swaps, restaurants | Built (new coach) | Restaurant card and early commands still answer before the coach | #568 | C |
 | A11 | Coaching talk: stress, shame, plateaus | Built (new coach) | Live quality only via the 07:00 worst-five (D7) | — | I |
 | A12 | Goal change, "am I on track" | Partly old (`misc-commands`) | SET_GOAL through the coach with confirm; trace case | #568 | C |
-| A13 | **Memory**: uses what they told it | Built: facts stored and read every turn (Codex verified) | Old doors don't read it (#568); facts inside other messages (L2); "fine now" and "forget X" (L3); live proof (L4); 9 old stores still exist (D2) | #568 | **L** |
+| A13 | **Memory**: uses what they told it | Built: facts stored and read every turn (Codex verified). **Open: "forget X" can't retire a fact (#636, Codex 12 Oct)** | Old doors don't read it (#568); facts inside other messages (L2); "fine now" and "forget X" (L3); live proof (L4); 9 old stores still exist (D2) | #568 | **L** |
 | A14 | Reminders | Built (#537) | — | — | — |
 | A15 | Sick or injured pause, pain | Old `sick-flow` | Through the coach; trace case | — | B |
 | A16 | Stats, "how was my week" | Built (new coach, from the ledger) | — | — | I |
