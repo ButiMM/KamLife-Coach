@@ -33,6 +33,9 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^what'?s my workout today\??$/i.test(msg) ? [{ type: "SHOW_WORKOUT" }]
       : /^I have diabetes\. Had a kota for lunch$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", meal: "lunch", needsConfirmation: false }]
       : /^I’m diabetic\. Log my apple$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "an apple", meal: "snack", needsConfirmation: false }]
+      : /^Lunch was rice not pap and for supper I had chicken$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
+      : /^Lunch was rice not samp\. For supper I had beef\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "samp", to: "rice" }, { type: "LOG_MEAL", foodText: "beef stew", meal: "dinner", needsConfirmation: false }]
+      : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -120,6 +123,34 @@ REAL("\n4c. WAVE 2, A2 — THE NEW COACH READS THE CORRECTION, THE PROVEN ENGINE
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
+REAL("\n4d. A CORRECTION AND A NEW MEAL IN ONE MESSAGE (#624)");
+{
+  const T = "whatsapp:+27829438624";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Mix Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  process.env.CORE_WAVE2 = "on";
+  await say(T, "I had pap and chicken for lunch");
+  const mix = await say(T, "Lunch was rice not pap. For supper I had chicken.");
+  const rows = (await pool.query("SELECT meal_label l, items::text i FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [T])).rows;
+  const lunch = rows.find(r => r.l === "lunch")?.i || "";
+  chk(rows.length === 2 && /rice/i.test(lunch) && !/"pap/i.test(lunch) && rows.some(r => r.l === "dinner" && /chicken/i.test(r.i)),
+    "\"Lunch was rice not pap. For supper I had chicken.\": lunch becomes rice, and the supper is logged", `${JSON.stringify(rows).slice(0, 300)} | ${mix.slice(0, 120)}`);
+  // A voice note has no full stops (#631 review, Codex P1).
+  await pool.query("DELETE FROM meal_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [T]);
+  await say(T, "I had pap and chicken for lunch");
+  const vn = await say(T, "Lunch was rice not pap and for supper I had chicken");
+  const r2 = (await pool.query("SELECT meal_label l, items::text i FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [T])).rows;
+  const l2 = r2.find(r => r.l === "lunch")?.i || "";
+  chk(r2.length === 2 && /rice/i.test(l2) && !/"pap/i.test(l2) && r2.some(r => r.l === "dinner" && /chicken/i.test(r.i)),
+    "the same, unpunctuated, as a voice note: lunch becomes rice, and the supper is logged", `${JSON.stringify(r2).slice(0, 300)} | ${vn.slice(0, 120)}`);
+  // A correction that can't land says so, even when the new meal did (#631 review, Codex P1).
+  const nf = await say(T, "Lunch was rice not samp. For supper I had beef.");
+  chk(/couldn't find/i.test(nf) && !nf.includes(NEW), "a correction that didn't land keeps its warning; the supper still logs", nf.slice(0, 200));
+  delete process.env.CORE_WAVE2;
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
 REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on for everyone)");
 {
   const count = async (phone: string) => Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [phone])).rows[0].n);
@@ -151,6 +182,20 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   chk(await count(TESTER) === d2 + 1, "\"I’m diabetic. Log my apple\" logs the apple too (#619 review)", dl.slice(0, 200));
   const dsc = await say(TESTER, "I'm diabetic");
   chk(/lifestyle coach, not a medical service/i.test(dsc), "control: the disclosure on its own still gets the non-clinical welcome", dsc.slice(0, 200));
+  { // The takeaway line belongs to the meal written this turn, whatever the disk order or the time it is filed at (#622).
+    const tu = (await pool.query("SELECT * FROM users WHERE phone_number = $1", [TESTER])).rows[0];
+    const add = (raw: string, hoursAgo: number) => pool.query("INSERT INTO meal_logs (user_id, raw_message, items, kcal_int, protein_int, source, logged_at) VALUES ($1, $2, '[]', 500, 20, 'text', now() - make_interval(mins => $3))", [tu.id, raw, Math.round(hoursAgo * 60)]);
+    const nudge = async () => { await pool.query("CLUSTER meal_logs USING meal_logs_user_date_idx"); // disk order = filed order, as after a vacuum
+      return (await import("../server/nutrition-guardrails")).nutritionGuardrailNudge({ id: tu.id, goalType: "fat_loss" }); };
+    await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [tu.id]);
+    await add("kota from the spaza", 3); await add("bunny chow", 2); await add("2 pieces of KFC", 1); await add("pap and meat for breakfast", 6);
+    const home = await nudge();
+    chk(!/takeaway/i.test(home), "a home plate sent last, filed at breakfast, gets no takeaway line after three takeaways", home);
+    await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [tu.id]);
+    await add("2 pieces of KFC", 3); await add("bunny chow", 2); await add("pap and meat", 0.2); await add("earlier today I had a burger", 1);
+    const late = await nudge();
+    chk(/takeaway/i.test(late), "a third takeaway sent late (\"earlier today I had a burger\") still gets the takeaway line (#622 review)", late || "(none)");
+  }
   const costRows = async () => Number((await pool.query("SELECT COUNT(*)::int n FROM gpt_costs g JOIN users u ON u.id = g.user_id WHERE u.phone_number = $1 AND g.feature = 'core'", [TESTER])).rows[0].n);
   const c0 = await costRows();
   const ot = await say(TESTER, "Am I on track?");

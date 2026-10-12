@@ -722,6 +722,27 @@ async function runActions(p: { phone: string; message: string; user: any; source
     return r ? { reply: r, src: "core front: reminder", wrote: false } : null;
   }
   // Everything else is the executor's (meals, steps, weight, water, sick days, show and undo).
+  // A CORRECTION AND A NEW MEAL IN ONE MESSAGE (#624): "Lunch was rice not pap. For supper I had chicken." The correction
+  // engine gets its own sentence, the executor the new meal; read whole, the lunch kept its pap and the rice became a new meal.
+  const fixes = acts.filter(a => a.type === "CORRECT_MEAL"), adds = acts.filter(a => a.type !== "CORRECT_MEAL");
+  if (fixes.length && adds.length && adds.every(a => LOGS.has(a.type))) {
+    const { planCorrection } = await import("../food-identity-correction");
+    // Clauses, not only sentences: a voice note has no full stops ("Lunch was rice not pap and for supper I had chicken").
+    const sentences = message.replaceAll("!", ".").replaceAll("?", ".").replaceAll("\n", ".").split(".")
+      .flatMap(s => s.split(/,\s*|\s+and\s+(?=(?:for|at|then|after|later|tonight)\b)|\s+then\s+/i)).map(s => s.trim()).filter(Boolean);
+    const said = sentences.filter(s => planCorrection(s.toLowerCase(), false).isCorrection);
+    if (said.length && said.length < sentences.length) {
+      const { turnMutations } = await import("../handlers/chat-log");
+      const fixed = await (await import("../handlers/food-log-mgmt")).handleFoodLogMgmt(user, said.join(". ").toLowerCase());
+      const corrected = turnMutations().some(w => w.startsWith("CORRECT "));
+      const logged = await logThroughExecutor(phone, message, adds, 1 - (u.uncertainty || 0), p.sourceMessageId);
+      if (!fixed && !logged.performed) return null;
+      const receipt = [fixed, (logged.card + logged.reply).trim()].filter(Boolean).join("\n\n");
+      // A correction that didn't land keeps its own words: the client must see that lunch wasn't fixed (#631 review).
+      const words = logged.performed && (corrected || !fixed) ? await afterLogReply(phone, message, receipt, "food", logged.user) : null;
+      return { reply: [words || receipt, logged.confirm].filter(Boolean).join("\n\n"), src: "core front: correction + log", wrote: true };
+    }
+  }
   if (acts.some(a => ["CORRECT_MEAL", "LOG_WORKOUT", "SET_GOAL"].includes(a.type))) return null; // mixed with a words-owner: compose, never half-write
   const confidence = 1 - (u.uncertainty || 0);
   const logged = await logThroughExecutor(phone, message, acts, confidence, p.sourceMessageId);
