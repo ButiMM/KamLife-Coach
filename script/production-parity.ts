@@ -1051,12 +1051,15 @@ async function main() {
       };
     });
 
-    // 1. "I trained Monday" — a day is named. It may NOT become today.
-    assert.equal(statedWhen("I trained Monday").when, "historical");
-    const monday = await writesFor("I trained Monday");
-    assert.ok(!monday.today, "a session reported for Monday was written to today");
+    // 1. "I trained <a past weekday>": a day is named, and it may NOT become today. Name the day three
+    // days ago: today's own weekday name means today (#614), so a fixed "Monday" went red every Monday.
+    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const pastDay = dayNames[(new Date(Date.now() + 2 * 3600_000).getUTCDay() + 4) % 7];
+    assert.equal(statedWhen(`I trained ${pastDay}`).when, "historical");
+    const monday = await writesFor(`I trained ${pastDay}`);
+    assert.ok(!monday.today, `a session reported for ${pastDay} was written to today`);
     assert.ok(monday.retro.length === 0 || monday.retro.every(d => d !== today),
-      `the Monday session landed on today: ${monday.retro.join(",")}`);
+      `the ${pastDay} session landed on today: ${monday.retro.join(",")}`);
 
     // 2. "I trained last week" — a SPAN. No day to write, so nothing is written.
     assert.equal(statedWhen("I trained last week").when, "ambiguous");
