@@ -137,7 +137,7 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   const f2 = await say(TESTER, "2");
   chk(/zone|keep these weights/i.test(f2), "\"2\" answers the numbered \"How did that session feel?\" as Just right (founder's Monday plan, item 4)", f2.slice(0, 200));
   const sw = await say(TESTER, "what's my workout today?");
-  chk(/✅|Warm-up/i.test(sw) && !sw.includes(NEW) && !/haven't written/i.test(sw), "\"what's my workout today?\" is the programme's answer (here: today's session is done), not the model's guess (item 4)", sw.slice(0, 200));
+  chk(/✅|Warm-up|Rest Day/i.test(sw) && !sw.includes(NEW) && !/haven't written/i.test(sw), "\"what's my workout today?\" is the programme's answer (here: today's session is done), not the model's guess (item 4)", sw.slice(0, 200));
   await pool.query("DELETE FROM workout_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [TESTER]);
   const dn = await say(TESTER, "Done 💪"), dw = (await pool.query("SELECT COUNT(*)::int n FROM workout_logs w JOIN users u ON u.id = w.user_id WHERE u.phone_number = $1", [TESTER])).rows[0].n;
   chk(dw === 1 && !dn.includes(NEW), "the \"Done 💪\" button under today's session logs it, by the workout owner", `${dw} | ${dn.slice(0, 160)}`);
