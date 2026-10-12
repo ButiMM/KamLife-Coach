@@ -33,6 +33,9 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^what'?s my workout today\??$/i.test(msg) ? [{ type: "SHOW_WORKOUT" }]
       : /^I have diabetes\. Had a kota for lunch$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", meal: "lunch", needsConfirmation: false }]
       : /^I’m diabetic\. Log my apple$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "an apple", meal: "snack", needsConfirmation: false }]
+      : /^Lunch was rice not pap and for supper I had chicken$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
+      : /^Lunch was rice not samp\. For supper I had beef\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "samp", to: "rice" }, { type: "LOG_MEAL", foodText: "beef stew", meal: "dinner", needsConfirmation: false }]
+      : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -116,6 +119,34 @@ REAL("\n4c. WAVE 2, A2 — THE NEW COACH READS THE CORRECTION, THE PROVEN ENGINE
   await say(T, "Hayi, I had a burger, not pap.");
   const rows = (await pool.query("SELECT items::text i FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows.map(r => String(r.i));
   chk(rows.length === 1 && /burger/i.test(rows[0]) && !/"pap/i.test(rows[0]), "\"Hayi, I had a burger, not pap\" changes lunch in place: one meal, the burger, no pap", JSON.stringify(rows).slice(0, 300));
+  delete process.env.CORE_WAVE2;
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
+REAL("\n4d. A CORRECTION AND A NEW MEAL IN ONE MESSAGE (#624)");
+{
+  const T = "whatsapp:+27829438624";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Mix Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  process.env.CORE_WAVE2 = "on";
+  await say(T, "I had pap and chicken for lunch");
+  const mix = await say(T, "Lunch was rice not pap. For supper I had chicken.");
+  const rows = (await pool.query("SELECT meal_label l, items::text i FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [T])).rows;
+  const lunch = rows.find(r => r.l === "lunch")?.i || "";
+  chk(rows.length === 2 && /rice/i.test(lunch) && !/"pap/i.test(lunch) && rows.some(r => r.l === "dinner" && /chicken/i.test(r.i)),
+    "\"Lunch was rice not pap. For supper I had chicken.\": lunch becomes rice, and the supper is logged", `${JSON.stringify(rows).slice(0, 300)} | ${mix.slice(0, 120)}`);
+  // A voice note has no full stops (#631 review, Codex P1).
+  await pool.query("DELETE FROM meal_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [T]);
+  await say(T, "I had pap and chicken for lunch");
+  const vn = await say(T, "Lunch was rice not pap and for supper I had chicken");
+  const r2 = (await pool.query("SELECT meal_label l, items::text i FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [T])).rows;
+  const l2 = r2.find(r => r.l === "lunch")?.i || "";
+  chk(r2.length === 2 && /rice/i.test(l2) && !/"pap/i.test(l2) && r2.some(r => r.l === "dinner" && /chicken/i.test(r.i)),
+    "the same, unpunctuated, as a voice note: lunch becomes rice, and the supper is logged", `${JSON.stringify(r2).slice(0, 300)} | ${vn.slice(0, 120)}`);
+  // A correction that can't land says so, even when the new meal did (#631 review, Codex P1).
+  const nf = await say(T, "Lunch was rice not samp. For supper I had beef.");
+  chk(/couldn't find/i.test(nf) && !nf.includes(NEW), "a correction that didn't land keeps its warning; the supper still logs", nf.slice(0, 200));
   delete process.env.CORE_WAVE2;
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
