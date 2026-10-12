@@ -201,6 +201,18 @@ let lastCardMarker = "";
 
 async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx: ExecuteContext): Promise<ToolOutcome> {
   const { handleFoodContext } = await import("../handlers/food-context");
+  // "DINNER WAS THE SAME AS LUNCH" (#326): the reading names no food, only another meal. The repeat owner copies it with
+  // its own calories; the scanner asked the client to type the items out, which is admin.
+  const repeatText = `${action.meal || ""} ${action.foodText || ""}`.trim().toLowerCase();
+  if (repeatText.includes("same")) {
+    const before = turnMutations().length;
+    const { handleMealRepeat } = await import("../handlers/meal-repeat");
+    const copied = await handleMealRepeat({ phone: ctx.phone, message: repeatText, m: repeatText, user: ctx.user, sourceMessageId: ctx.sourceMessageId });
+    if (copied !== null) {
+      if (turnRecording() && !turnMutations().slice(before).some(x => x.startsWith("INSERT meal") || x.startsWith("UPDATE meal"))) throw new NotWritten(copied);
+      return { performed: true, facts: {}, refs: { mealName: String(action.foodText || "").slice(0, 60), ...(action.meal ? { slot: String(action.meal).slice(0, 20) } : {}) } };
+    }
+  }
   // THE CLOCK OVERRULES A GUESSED SLOT, NEVER AN EXPLICIT ONE (2026-08-06, live: an apple at
   // 19:03 was logged "for breakfast" — the MODEL'S guess, trusted blindly — and the client's
   // next message was "Breakfast? It's 7pm come on"). That fix dropped any action.meal the clock
