@@ -247,7 +247,7 @@ async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx:
   if (turnRecording() && !turnMutations().slice(before).some(x => /^(?:INSERT|UPDATE) meal\b/.test(x))) {
     lastCardMarker = "";
     // A resend is already on the ledger: say so plainly, as a resent photo is answered (founder, 7 Oct), not the old receipt.
-    if (turnMutations().slice(before).some(x => x.startsWith("HELD meal resend"))) throw new NotWritten("Got it — that's already in today's log ✅");
+    if (turnMutations().slice(before).some(x => x.startsWith("HELD meal resend"))) throw new NotWritten("Got it — that's already in your log ✅"); // not "today's": "I had pap yesterday" twice (#628 review)
     throw new NotWritten(String(discarded || "").replace(/\[[A-Z]+:[^\]]*\]/g, "").trim());
   }
   const refs: Record<string, string> = { mealName: String(action.foodText || "").slice(0, 60) };
