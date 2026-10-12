@@ -25,11 +25,11 @@ export interface IdentityCorrection {
   subject: string;
 }
 
-// Three explicit frames. Deliberately NOT a bare "A not B" — that shape matches ordinary
+// Three explicit frames ("lunch was rice not pap" names its meal in place of "it", #600). Deliberately NOT a bare "A not B" — that shape matches ordinary
 // sentences ("I did not train") and the cost of a false positive here is rewriting someone's
 // food log, so the correction must be framed as one.
 const WITH_SUBJECT = /\bthe\s+([\w-]+(?:\s+[\w-]+)?)\s+(?:was|were|is|are)\s+([\w][\w\s-]{0,20}?)\s*,?\s*\bnot\b\s+([\w][\w\s-]{0,20}?)\s*(?:$|[,.!?])/i;
-const NO_SUBJECT = /\b(?:it|that|this|they|those)\s*(?:'?s|was|were|is|are)\s+([\w][\w\s-]{0,20}?)\s*,?\s*\bnot\b\s+([\w][\w\s-]{0,20}?)\s*(?:$|[,.!?])/i;
+const NO_SUBJECT = /\b(?:it|that|this|they|those|(?:my\s+)?(?:breakfast|lunch|dinner|supper|brekkie))\s*(?:'?s|was|were|is|are)\s+([\w][\w\s-]{0,20}?)\s*,?\s*\bnot\b\s+([\w][\w\s-]{0,20}?)\s*(?:$|[,.!?])/i;
 // The reversed order people also use: "not brown, it was white".
 const REVERSED = /\bnot\s+([\w][\w\s-]{0,20}?)\s*(?:,|\.)\s*(?:it\s+(?:was|is)|it'?s|that\s+was)\s+([\w][\w\s-]{0,20}?)\s*(?:$|[,.!?])/i;
 

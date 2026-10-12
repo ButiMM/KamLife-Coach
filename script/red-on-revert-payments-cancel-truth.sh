@@ -87,9 +87,9 @@ run_case "\"you will not be charged again\" is promised when PayFast refused" se
   '${billing.ok ? "and your recurring billing is cancelled' \
   '${true ? "and your recurring billing is cancelled' || failed=$((failed + 1))
 
-# 4. A CHARGE ON THE CANCELLED SUBSCRIPTION REACTIVATES AGAIN, nulling cancelled_at.
+# 4. A CHARGE ON THE CANCELLED SUBSCRIPTION REACTIVATES AGAIN, nulling cancelled_at. (#607: every terminal end, not only a cancel.)
 run_case "a charge after cancellation reactivates the client" server/routes/payments.ts \
-  'targetUser.subscriptionEndReason === "client_cancelled" && data.token' \
+  'ENDED_FOR_GOOD.has(targetUser.subscriptionEndReason || "") && data.token' \
   'false && data.token' || failed=$((failed + 1))
 
 # 5. THE GUARD STOPS ASKING WHICH SUBSCRIPTION WAS CHARGED — so a client who comes back through a
@@ -157,8 +157,8 @@ run_case "a blocked minor stays subscribed" server/onboarding.ts \
 
 # 16. A CHARGE REACTIVATES A BLOCKED MINOR (#306) — only a client's own cancellation was guarded.
 run_case "a charge reactivates a blocked minor" server/routes/payments.ts \
-  'targetUser.onboardingState === "BLOCKED_UNDERAGE" || (targetUser.subscriptionEndReason' \
-  'false || (targetUser.subscriptionEndReason' || failed=$((failed + 1))
+  'targetUser.onboardingState === "BLOCKED_UNDERAGE" || (ENDED_FOR_GOOD.has(targetUser.subscriptionEndReason' \
+  'false || (ENDED_FOR_GOOD.has(targetUser.subscriptionEndReason' || failed=$((failed + 1))
 
 restore_case
 if [[ $failed -ne 0 ]]; then
