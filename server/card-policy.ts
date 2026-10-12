@@ -72,5 +72,8 @@ export function cardSuppressedByDump(userId: string, at = Date.now()): boolean {
   return last !== undefined && at - last < DUMP_WINDOW_MS;
 }
 
+/** One message that logged several meals re-draws its card once all are written (the first card held only the first meal). */
+export function forgetCard(userId: string): void { _lastCard.delete(userId); }
+
 /** Test/ops hook — clear the dump memory. */
 export function _resetDumpWindow(): void { _lastCard.clear(); }

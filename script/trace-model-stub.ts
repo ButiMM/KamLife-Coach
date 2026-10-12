@@ -23,6 +23,7 @@ const READINGS: Array<[RegExp, { family: string; actions?: unknown[]; facts?: un
   [/^what did I eat today\?$/i, { family: "question", actions: [{ type: "SHOW_MEALS" }] }],
   [/bad knee/i, { family: "report", facts: [fact("injury", "knee", "I have a bad knee, it gets sore on stairs")] }],
   [/night shifts/i, { family: "report", facts: [fact("schedule", "night shifts", "I work night shifts this month")] }],
+  [/^I have diabetes\. Had a kota for lunch$/i, { family: "report", actions: [meal("kota", "lunch")] }],
   [/^I don't eat fish$/i, { family: "report", facts: [fact("preference", "no fish", "I don't eat fish")] }],
   [/^I walked 6000 steps$/i, { family: "report", actions: [{ type: "LOG_STEPS", count: 6000 }] }],
   [/^I weigh 87kg today$/i, { family: "report", actions: [{ type: "LOG_WEIGHT", kg: 87 }] }],

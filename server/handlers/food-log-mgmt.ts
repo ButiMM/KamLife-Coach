@@ -187,6 +187,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     const scope = correctionDay
       ? and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, correctionDay),
             lt(mealLogs.loggedAt, new Date(correctionDay.getTime() + 86_400_000)))
+      : namedSlot ? and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, mealDayStart())) // "lunch was…" is today's lunch (#621 review)
       : eq(mealLogs.userId, user.id);
     const pick = (where: any) => db.select({
       id: mealLogs.id, raw: mealLogs.rawMessage, label: mealLogs.mealLabel, at: mealLogs.loggedAt,

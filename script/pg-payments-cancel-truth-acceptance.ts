@@ -162,9 +162,8 @@ await new Promise(r => server.once("listening", r));
 const port = (server.address() as any).port;
 
 let seq = 0;
-const amount = `${PRICING.monthlyPriceZAR}.00`;
 /** One ITN. `order: "payfast"` sends PayFast's real field order; "alpha" sends sorted fields. */
-function itnFields(phoneDigits: string, status: string, token: string, pfId: string, order: "payfast" | "alpha"): [string, string][] {
+function itnFields(phoneDigits: string, status: string, token: string, pfId: string, order: "payfast" | "alpha", amount = `${PRICING.monthlyPriceZAR}.00`): [string, string][] {
   const byName: Record<string, string> = {
     m_payment_id: `KAMLIFE-${phoneDigits}-${++seq}`, pf_payment_id: pfId, payment_status: status,
     item_name: "KamLife Coach Monthly Subscription", amount_gross: amount, amount_fee: "-5.00",
@@ -177,12 +176,12 @@ function itnFields(phoneDigits: string, status: string, token: string, pfId: str
   const keys = order === "payfast" ? payfastOrder : [...payfastOrder].sort();
   return keys.map(k => [k, byName[k]]);
 }
-async function postItn(fields: [string, string][]): Promise<void> {
+async function postItn(fields: [string, string][], talk = false): Promise<void> {
   const pfId = fields.find(([k]) => k === "pf_payment_id")?.[1] || "";
   // The ITN route's own welcome / renewal sends go straight to Twilio, outside every door this
   // proof can read. Unset only for the POST so they are skipped rather than attempted.
   const saved = process.env.TWILIO_WHATSAPP_NUMBER;
-  delete process.env.TWILIO_WHATSAPP_NUMBER;
+  if (!talk) delete process.env.TWILIO_WHATSAPP_NUMBER;
   try {
     await realFetch(`http://127.0.0.1:${port}/webhook/payfast`, {
       method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -497,6 +496,40 @@ REAL("\n11. A MINOR BLOCKED BY THE AGE GATE IS NOT BILLED (#306)");
   const n1 = await endReason(N.phone);
   chk(n1.subscription_status === "inactive" && n1.subscription_end_reason === "underage", "with PayFast's confirmation the cancel is recorded as confirmed", JSON.stringify(n1));
   chk(promisesNoCharge(reply2), "and the minor is told they won't be charged again", JSON.stringify(reply2.slice(0, 300)));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n12. CODEX AUDIT #606 — a refund stays a refund, a pregnant payer gets no fat-loss welcome, R149 is for old tokens");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+{
+  const G = await makeClient("27820000981", "Gugu Refund");
+  await postItn(signItn(itnFields(G.digits, "COMPLETE", "tok-gugu-1", "pf-gugu-1", "alpha")));
+  await pool.query("UPDATE users SET subscription_status = 'inactive', cancelled_at = now(), subscription_end_reason = 'refund_guarantee' WHERE phone_number = $1", [G.phone]);
+  await postItn(signItn(itnFields(G.digits, "COMPLETE", "tok-gugu-1", "pf-gugu-2", "alpha")));
+  chk((await row(G.phone)).subscription_status === "inactive" && (await adminActions(G.phone)).includes("charged_after_cancellation"),
+    "a charge on a refunded subscription's token leaves the client refunded, and is recorded for a refund (#607)", JSON.stringify(await row(G.phone)));
+
+  const wire: Array<{ to: string; body: string }> = [];
+  const { _setTwilioClientForTests } = await import("../server/outbound-delivery");
+  _setTwilioClientForTests({ messages: { create: async (m: any) => { wire.push({ to: String(m.to), body: String(m.body || "") }); return { sid: `SMwire${wire.length}` }; } } });
+  const sentTo = (phone: string) => wire.filter(w => w.to === phone).map(w => w.body).join("\n---\n");
+  const P = await makeClient("27820000982", "Palesa Expecting", { lifeSituation: "pregnant" });
+  await postItn(signItn(itnFields(P.digits, "COMPLETE", "tok-palesa-1", "pf-palesa-1", "alpha")), true);
+  const toP = sentTo(P.phone);
+  chk((await row(P.phone)).subscription_status === "active" && /Payment confirmed/.test(toP) && !/fat loss|workout|Phase 1/i.test(toP),
+    "a pregnant client who pays gets the payment confirmation only: no fat-loss goal, no workout (#608)", JSON.stringify(toP.slice(0, 300)));
+  const Q = await makeClient("27820000983", "Queen Welcome");
+  await postItn(signItn(itnFields(Q.digits, "COMPLETE", "tok-queen-1", "pf-queen-1", "alpha")), true);
+  chk(/Welcome to KamLife Coach[\s\S]*Goal: fat loss/.test(sentTo(Q.phone)), "control: an ordinary new payer still gets the full welcome", JSON.stringify(sentTo(Q.phone).slice(0, 200)));
+  _setTwilioClientForTests(null);
+
+  const R = await makeClient("27820000984", "Refilwe New");
+  await postItn(signItn(itnFields(R.digits, "COMPLETE", "tok-refilwe-1", "pf-refilwe-1", "alpha", "149.00")));
+  chk((await row(R.phone)).subscription_status === "inactive", "a brand-new subscription paying the old R149 does not activate (#612)");
+  const S = await makeClient("27820000985", "Sipho Legacy");
+  await pool.query("INSERT INTO payment_events (provider, provider_payment_id, phone, amount_gross, payment_status, raw_body) VALUES ('payfast', 'pf-sipho-0', $1, '149', 'COMPLETE', $2)", [S.phone, JSON.stringify({ token: "tok-sipho-1" })]);
+  await postItn(signItn(itnFields(S.digits, "COMPLETE", "tok-sipho-1", "pf-sipho-1", "alpha", "149.00")));
+  chk((await row(S.phone)).subscription_status === "active", "control: an earlier subscriber's token still renews at R149");
 }
 
 server.close();
