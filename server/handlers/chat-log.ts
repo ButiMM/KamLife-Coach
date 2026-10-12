@@ -500,7 +500,8 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   const { durableDomains } = await import("../understanding/messy-intake");
   const verifier = verifyBrainReply(draft, {
     clientMessage: scope.inputText,
-    evidence: { ...(scope.evidence || {}), writtenDomains: durableDomains(scope.mutations) },
+    // A correction that wrote is this turn's food write: "Fixed — … Today: ~534 kcal" is anchored by it (#600).
+    evidence: { ...(scope.evidence || {}), writtenDomains: [...durableDomains(scope.mutations), ...(scope.mutations.some(w => w.startsWith("CORRECT ")) ? ["food"] : [])] },
   });
 
   // ════════════════════════════════════════════════════════════════════════════════════════

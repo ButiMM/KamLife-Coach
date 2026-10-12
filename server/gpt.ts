@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import OpenAI from "openai";
 import { contactState } from "./understanding/reentry";
 import { readHealthState } from "./health-state";
@@ -130,6 +131,9 @@ export function recordGptCost(opts: {
  * photo read went through clients that recorded nothing, so the cap could not see most of the spend. Wrapped once where
  * the client is made; the client of the turn is read from the turn, so per-client cost stays attributed.
  */
+const meterLabel = new AsyncLocalStorage<string>();
+/** Price the calls made inside `fn` under `feature` ("vision" is what the per-client photo cap counts, #626 review). */
+export const meterAs = <R>(feature: string, fn: () => Promise<R>): Promise<R> => meterLabel.run(feature, fn);
 export function metered<T extends OpenAI>(client: T, feature: string): T {
   const completions = client.chat.completions as any;
   const create = completions.create.bind(completions);
@@ -137,7 +141,7 @@ export function metered<T extends OpenAI>(client: T, feature: string): T {
     const r = await create(body, opts);
     if (r?.usage) {
       const { turnUserId } = await import("./handlers/chat-log");
-      recordGptCost({ userId: turnUserId(), model: String(body?.model || r.model || ""), feature, promptTokens: r.usage.prompt_tokens || 0, completionTokens: r.usage.completion_tokens || 0 });
+      recordGptCost({ userId: turnUserId(), model: String(body?.model || r.model || ""), feature: meterLabel.getStore() ?? feature, promptTokens: r.usage.prompt_tokens || 0, completionTokens: r.usage.completion_tokens || 0 });
     }
     return r;
   };

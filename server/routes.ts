@@ -57,7 +57,7 @@ import { recordMessageSeen, recordReplyPath } from "./self-check";
 import { normalizerFidelity, normalizerLive } from "./normalizer-fidelity";
 import { carriesFeelingClause } from "./unlogged-notice";import { recordDailyConstraint } from "./held-constraints";import { looksLikeDirectionRequest } from "./daily-direction";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, isMultiPartAsk, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, reportedInSomeClause, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
-import { conditionWelcome, mentionsConditionOrMedication } from "./condition-welcome";
+import { conditionWelcome, mentionsConditionOrMedication, conditionIsWholeMessage } from "./condition-welcome";
 import { captureSymptom } from "./quality-signals";
 import { reportsHunger } from "./unlogged-notice";
 import { PRICING, GUARANTEE_PHRASE } from "../shared/pricing";   // commercial terms have one owner
@@ -382,7 +382,8 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // ---- MEDICAL CONDITION / MEDICATION DISCLAIMER ----
   // When a client mentions medication, a new diagnosis, or asks for condition-specific advice —
   // return a clear disclaimer and redirect. Still logs (triggers escalation → coach alert).
-  if (mentionsConditionOrMedication(m)) {
+  // With the front door on, a condition mentioned alongside a log or a question goes on, and the log is written (#610).
+  if (mentionsConditionOrMedication(m) && (conditionIsWholeMessage(m) || !(await import("./core/coach")).coreFront())) {
     const welcome = conditionWelcome(user.name?.split(" ")[0] || "");
     await logChat(user.id, message, welcome, "MEDICAL_DISCLAIMER");
     return welcome;
@@ -804,7 +805,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (foodLogMgmtResult !== null) {
     // This is where the street-food educator claimed the 11:24 turn. It may still answer — after
     // the fact it is talking about has been written, not instead of it.
-    if (mayEndTurn("food-log-mgmt")) return closeCoachingTurn(foodLogMgmtResult);
+    // A written one-sentence correction IS the food they stated (#600); a further sentence is still owed to the logger (#621).
+    const oneSentence = ![". ", "! ", "? ", "\n"].some(b => message.trim().includes(b));
+    if (mayEndTurn("food-log-mgmt") || (oneSentence && turnMutations().some(w => w.startsWith("CORRECT ")))) return closeCoachingTurn(foodLogMgmtResult);
     // STOOD DOWN FOR AN OWED WRITE ≠ CONTRIBUTED A PART. Under multiFact this handler's answer
     // is one voice in a composed reply and still belongs in the ledger. When it stood down
     // because a stated fact is unwritten, its answer DESCRIBED that fact without recording it —
