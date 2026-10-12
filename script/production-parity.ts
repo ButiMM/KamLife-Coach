@@ -1051,9 +1051,11 @@ async function main() {
       };
     });
 
-    // 1. "I trained Monday" — a day is named. It may NOT become today.
-    assert.equal(statedWhen("I trained Monday").when, "historical");
-    const monday = await writesFor("I trained Monday");
+    // 1. "I trained Monday" — a day is named. It may NOT become today. (Two days ago's name: on a Monday,
+    //    "Monday" means today since #614, which is the founder's rule, not this defect.)
+    const pastDay = new Intl.DateTimeFormat("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" }).format(new Date(Date.now() - 2 * 86_400_000));
+    assert.equal(statedWhen(`I trained ${pastDay}`).when, "historical");
+    const monday = await writesFor(`I trained ${pastDay}`);
     assert.ok(!monday.today, "a session reported for Monday was written to today");
     assert.ok(monday.retro.length === 0 || monday.retro.every(d => d !== today),
       `the Monday session landed on today: ${monday.retro.join(",")}`);
