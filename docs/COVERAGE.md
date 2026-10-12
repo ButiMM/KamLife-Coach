@@ -1,5 +1,104 @@
 # Coverage map: the whole product, one row per capability
 
+## THE WHOLE LIST: status of every row on `main`, 12 Oct 2026 (CTO). Read this first, every day.
+
+This table is the single list. Every row of the map below, every Codex and Grok finding, every open issue and every tester complaint is in it, and nothing lives only in a chat. The CTO's daily morning run walks every line and updates the **Status** column. The builder's week (#391, items A–L) is the lines that aren't **Proven**.
+
+**Status words:**
+- **Proven**: a tester or the trace shows it on `main`.
+- **Built**: merged, but no live proof yet.
+- **Open**: still broken or not built.
+- **Frozen**: a founder decision not to build it now.
+
+**CI note:** `main` was red from 7 Oct 22:37 (#619) to 12 Oct (#632). Nothing could merge for four days. The daily run now checks `main`'s own CI first.
+
+### A. What the client sends
+| Row | What testers need | Status | What's left | Where | Week |
+|---|---|---|---|---|---|
+| A1 | A meal in words is logged (any language, any phrasing) | Built (#593, #597, #618, #619); trace proves the writes with a stub model | Correction plus new meal in one message (#624, PR #631 has 2 Codex P1s); same meal, same calories (#326); receipt cut to 300 chars in the coach's context (#532); live proof | #624 #326 #532 | B, I |
+| A2 | Corrections ("Hayi, it was rice") | Built (#621, #604) | #624 (mixed correction plus meal) | #624 | B |
+| A3 | Food photo | Built (#605, #613, #615) | Live proof on the founder's phone: a plate and black coffee | #596 | I |
+| A4 | Voice note in any language | Open: the real audio path is not proven | Prove the real Twilio audio path, isiZulu and Setswana | #330 | G |
+| A5 | Steps, distance screenshot | Built (steps proven in trace) | Screenshot path not proven | — | B |
+| A6 | Water, sleep | Water built; sleep has no new-coach action | Sleep via the coach | — | B |
+| A7 | Weigh-in; progress photos | Weigh-in built (#594, #620) | Progress photos have no action | — | B |
+| A8 | Workout done, show today's workout | Built (#618, #623) | "My knee hurt" changes the next plan: not proven (old programme card ignores the record, #568) | #568 | C, L |
+| A9 | Equipment and form check | Frozen (founder, 30 Sep; files deleted #551) | — | — | — |
+| A10 | What to eat, swaps, restaurants | Built (new coach) | Restaurant card and early commands still answer before the coach | #568 | C |
+| A11 | Coaching talk: stress, shame, plateaus | Built (new coach) | Live quality only via the 07:00 worst-five (D7) | — | I |
+| A12 | Goal change, "am I on track" | Partly old (`misc-commands`) | SET_GOAL through the coach with confirm; trace case | #568 | C |
+| A13 | **Memory**: uses what they told it | Built: facts stored and read every turn (Codex verified) | Old doors don't read it (#568); facts inside other messages (L2); "fine now" and "forget X" (L3); live proof (L4); 9 old stores still exist (D2) | #568 | **L** |
+| A14 | Reminders | Built (#537) | — | — | — |
+| A15 | Sick or injured pause, pain | Old `sick-flow` | Through the coach; trace case | — | B |
+| A16 | Stats, "how was my week" | Built (new coach, from the ledger) | — | — | I |
+| A17 | Off-topic redirect | Built | A coaching word vetoes a real off-topic ask | #354 | D |
+| A18 | SA languages everywhere | Built (11 gate cases, isiXhosa in trace) | Live proof per language | — | I |
+| A19 | Promises followed up | Built (#545, #564, #629) | Shame filter on the reply after a miss | #563 | D |
+
+### B. What the coach sends first (**proactive**)
+| Row | What testers need | Status | What's left | Where | Week |
+|---|---|---|---|---|---|
+| B1 | Morning message, useful, never generic | Built, one coaching check-in a day | Due-day morning plus evening (Grok 6): verify | #563 | F |
+| B2 | Evening | Built | "They trained but logged no food, evening says silent" (Grok 4): verify fixed | #563 | F |
+| B3 | Monday weigh-in | Built | Ask recorded before it's delivered | #297 | B |
+| B4 | Weekly true story | Scheduled (#517) | In the coach's words, from the record | — | F |
+| B5 | Programme advance | Old | Coach's words | #319 | F |
+| B6 | Welcome back after silence | Built, not proven | Trace case | #319 | F |
+| B7 | Reminders fire | Built | — | — | — |
+| B8 | Monthly narrative | Retired (#511) | — | — | — |
+| B9 | Onboarding catch-ups | Old | Coach's words | — | F |
+| B10 | Voice broadcasts (ElevenLabs) | Unknown if on | Check: off unless the founder wants it (cost) | — | H |
+| B11 | Outside 24h: approved template or nothing | Open: generic template substitution still reachable (Codex R7) | No generic substitute; check-in template SID approved (founder) | #327 #415 | F, J |
+| B12 | Opt-out on every path | Built | — | — | — |
+| — | Every scheduled send through one owner | Open | — | #319 | F |
+
+### C. Money, trust, safety
+| Row | What testers need | Status | What's left | Where | Week |
+|---|---|---|---|---|---|
+| C1 | Signup: three natural questions, no "reply 1/2/3" | **Open: still numeric menus** (Codex) | Natural onboarding; keep consent and age gates | — | E |
+| C2 | Pay: R199, one clear message | Price built (#576, #617) | Payment welcome is five bubbles (Codex) | — | E |
+| C3 | Cancel and refund do what they say | Built (#617) | An owed refund or unconfirmed cancel shows every morning | #572 | E |
+| C4 | Delete my data | Built | Failed backups never expire (R8) | #611, PR #625 | H |
+| C5 | Under 18 | Built (#574) | — | — | — |
+| C6 | Pregnancy, ED, crisis, medication | Built (#579, #617, #629) | "Can I take an antibiotic…" phrasing; nutrition direction with no professional | #353 #329 | D |
+| C7 | Founder alerted | Built | Dashboard key strength (founder) | #417 | J |
+| C8 | Referrals | Old | Coach's words | — | E |
+
+### D. Foundation, cost and quality
+| Row | Need | Status | What's left | Where | Week |
+|---|---|---|---|---|---|
+| D1 | One door: only floors and the coach answer | Open: old doors still answer talk | Inventory and delete | #568 | C |
+| D2 | One client record | Partly (D2b #565) | `memory.ts` (904 lines) and other stores | #568 | C |
+| D3 | One schema | Open | — | #343 | H |
+| D4 | Backups restore-tested | Built | R8 (above) | #611 | H |
+| D5 | Stale docs | Open | Archive | #331 | H |
+| D7 | **Coach Health**: every live turn scored, worst five to the founder at 07:00 | Built (#573, #584) | One-tap "bad reply" flag from testers | #360 | K |
+| D8 | **Cost**: every model call counted and capped | Open: the new coach's and photo calls aren't counted | PR #626, then my daily cost-per-client line | #570 PR #626 | H |
+| D9 | Dead code | Open: 8 files, 4,068 lines; server 71k vs 64.5k checkpoint | Delete with #568 | #568 | C |
+| D10 | Admin pages | Unchecked | Check escalations and finance pages | — | H |
+| D11 | CI can't spend production's AI budget | Built | — | — | — |
+| D12 | **Retention**: still here at 14 and 30 days | **Open: not measured anywhere** | One number in the 07:00 report | #423 | F |
+| — | Pending answers survive a redeploy | Open | — | #322 | C |
+| — | Tests fail after midnight | Open | — | #404 | A |
+| — | Each piece of advice linked to what happened next | Open | — | #369 | K |
+
+### Business and founder
+| Item | Status | Where | Week |
+|---|---|---|---|
+| POPIA Information Officer and privacy policy | Founder | #416 | J |
+| Meta template approvals, check-in template SID | Founder | #415 | J |
+| Dashboard key | Founder | #417 | J |
+| Business registration, PayFast live | Founder | — | J |
+| Manual clients vs bot comparison | Next week | #485 | K |
+| Twilio vs Meta direct at 20 paying clients | Decided (#493) | #484 | K |
+| Daily market, competitor and pricing check | CTO daily run | — | — |
+
+### The never-see list (TESTER-EXPERIENCE), checked in every 07:00 worst-five and every Codex journey
+"Reply 1/2/3" menus (**open: C1**) · a receipt as the whole reply · "log a meal" nags · invented facts · generic "checking in" (**open: B11**) · two contradicting messages (**open: C2's five bubbles**) · a shopping list on cancel · asked again for something already told (A13) · a weight-loss target when pregnant (built).
+
+---
+
+
 **Status:** agreed by the founder on 24 Sep night as the map of the whole product (`docs/ORDERS.md` §0). The CTO corrects rows. The builder keeps it current in the same PR that moves a row.
 - The queue is derived from its rows.
 - A message family switches to the new core only when its row is complete.
