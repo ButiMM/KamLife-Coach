@@ -11102,3 +11102,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log("✓ all unit checks passed\n");
+process.exit(0); // a priced model call (#570) leaves its fire-and-forget cost write's pool open; the run is over

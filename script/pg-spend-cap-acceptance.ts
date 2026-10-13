@@ -125,6 +125,17 @@ engineCalls = 0; coreCalls = 0;
 const back = await say(a.phoneNumber, QUESTIONS[3]);
 chk(!DEGRADED.test(back) && engineCalls + coreCalls > 0, "the model answers again", `engine ${engineCalls}, core ${coreCalls}; ${JSON.stringify(back.slice(0, 160))}`);
 
+REAL("\n5. EVERY MODEL CLIENT IS PRICED WHERE THE CAP READS (#570)");
+{
+  const priced = async (f: string) => Number((await pool.query("SELECT COUNT(*)::int n FROM gpt_costs WHERE feature = $1", [f])).rows[0].n);
+  const [g0, r0] = [await priced("gpt"), await priced("grocery")];
+  await gptMod.gptFoodFallback("3 eggs and toast", { goalType: "fat_loss" }).catch(() => null);
+  await (await import("../server/grocery-refine")).refineGroceryList(["pap", "eggs"], { goalType: "fat_loss" }).catch(() => "");
+  await new Promise(r => setTimeout(r, 300)); // cost rows are written fire-and-forget
+  chk(await priced("gpt") > g0 && await priced("grocery") > r0, "a food estimate and a grocery refine are each priced into gpt_costs (they recorded nothing)",
+    `gpt ${g0} → ${await priced("gpt")}, grocery ${r0} → ${await priced("grocery")}`);
+}
+
 REAL(`\npg-spend-cap-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);
 await pool.end();
 process.exit(failed === 0 ? 0 : 1);

@@ -22,6 +22,7 @@
  */
 
 import OpenAI from "openai";
+import { metered } from "../gpt";
 import { extractBodyParts, checkExercisesAgainstInjuries } from "./injury-rules";
 import { splitSentences } from "../reply-hygiene";
 import { readHealthState } from "../health-state";
@@ -31,9 +32,9 @@ import { db } from "../db";
 import { users, weightLogs, mealLogs, shadowReplies } from "../../shared/schema";
 import { sastDayStart } from "../sast";
 
-const openai = new OpenAI({
+const openai = metered(new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
-});
+}), "response-gate"); // priced where the daily cap reads (#570)
 
 // Injury → contraindicated-exercise knowledge lives in ./injury-rules so the
 // programme validator and this response gate reason about injuries identically.
