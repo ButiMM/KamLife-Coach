@@ -163,9 +163,9 @@ console.log("\n3. A GENERIC CHECK-IN IS NEVER RECORDED AS DELIVERY OF THE ORIGIN
 {
   reset();
   const outcome = await sendWhatsApp("whatsapp:+27820000004", "Morning Thandi — here is your plan.");
-  chk(template()?.contentSid === SID.reengage,
-    "with no template for this message, the generic check-in goes", `got ${template()?.contentSid}`);
-  chk(outcome === "substituted", "…and the outcome says SUBSTITUTED, not delivered", `outcome=${outcome}`);
+  chk(template()?.contentSid !== SID.reengage,
+    "with no template for this message, the generic check-in is NOT sent in its place (#327)", `got ${template()?.contentSid}`);
+  chk(outcome === "dropped", "…and the outcome says DROPPED, not delivered", `outcome=${outcome}`);
   chk(!deliveryAccepted(outcome),
     "…so deliveryAccepted() is FALSE and no caller records this as the message landing");
 
@@ -294,14 +294,14 @@ console.log("\n7. MISSING OR MALFORMED SID CONFIGURATION FAILS LOUDLY, NOT SILEN
   process.env.TWILIO_DAILY_TEMPLATE_SID = "   ";
   chk(templateSid("kamlife_daily_plan") === "", "…and so does a blank one");
 
-  // AND THE SEND FALLS BACK HONESTLY: no daily template, so the generic check-in runs and the
+  // AND THE SEND FALLS BACK HONESTLY: no daily template, so nothing goes in its place (#327) and the
   // caller is told the morning plan did NOT land.
   reset();
   const outcome = await sendWhatsApp("whatsapp:+27820000010", "Morning.", undefined, {
     name: "kamlife_daily_plan", variables: { "1": "Thandi", "2": "Walk 20 minutes" },
   });
-  chk(template()?.contentSid === SID.reengage && outcome === "substituted",
-    "a misconfigured template degrades to the check-in AND reports it honestly",
+  chk(template()?.contentSid !== SID.reengage && outcome === "dropped",
+    "a misconfigured template sends no generic check-in AND reports the plan dropped",
     `sid=${template()?.contentSid} outcome=${outcome}`);
   process.env.TWILIO_DAILY_TEMPLATE_SID = real;
   chk(templateSid("kamlife_daily_plan") === SID.daily, "…and a valid SID still reads back");
