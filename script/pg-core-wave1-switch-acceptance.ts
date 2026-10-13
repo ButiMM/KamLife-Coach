@@ -16,6 +16,9 @@ const FOUNDER = "whatsapp:+27829438001", TESTER = "whatsapp:+27829438002";
 const NEW = "NEW-COACH-438"; // only the new coach's composer says this
 const DOW = (back: number) => new Intl.DateTimeFormat("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" }).format(new Date(Date.now() - back * 86_400_000));
 const LIST = `${DOW(2)} pap and wors, ${DOW(1)} eggs and toast, ${DOW(0)} chicken and rice`;
+// Five days after a silence (CTO list B6): a long receipt, so the coach must be told all of it (#532).
+const FIVE = [["oats and banana", 5], ["vetkoek with mince", 4], ["samp and beans", 3], ["bunny chow", 2], ["chakalaka and pap", 1]] as const;
+const LIST5 = FIVE.map(([f, d]) => `${DOW(d)} I had ${f}`).join(". ");
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
   const url = typeof input === "string" ? input : String(input?.url || input);
@@ -27,6 +30,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
     const bag = { type: "SET_REMINDER", body: "pack my gym bag", when: "tomorrow at 7am" };
     const log586 = /kota from the spaza/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", needsConfirmation: false }] : /ndidle ipapa/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and meat", needsConfirmation: false }]
       : /recalculate everything|remove my last meal/i.test(msg) ? [{ type: "REMOVE_LAST_MEAL" }]
+      : msg === LIST5 ? FIVE.map(([f, d]) => ({ type: "LOG_MEAL", foodText: f, retro: DOW(d), needsConfirmation: false }))
       : msg === LIST ? [{ type: "LOG_MEAL", foodText: "pap and wors", retro: DOW(2), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "eggs and toast", retro: DOW(1), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "chicken and rice", retro: DOW(0), needsConfirmation: false }]
       : /^two meals, one card$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "oats and banana", meal: "breakfast", needsConfirmation: false }, { type: "LOG_MEAL", foodText: "samp and beans", meal: "dinner", needsConfirmation: false }]
       : /^Had pap and wors for lunch and did a 30 min home workout$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", needsConfirmation: false }, { type: "LOG_WORKOUT", what: "a 30 min home workout" }]
@@ -37,6 +41,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^Lunch was rice not samp\. For supper I had beef\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "samp", to: "rice" }, { type: "LOG_MEAL", foodText: "beef stew", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /^(dinner was the same as lunch|should my dinner be the same as lunch\?)$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "the same as lunch", meal: "dinner", needsConfirmation: false }]
+      : /^I'm sick with flu, need 3 days off$/i.test(msg) ? [{ type: "SET_SICK", days: 3 }]
+      : /^I'm feeling better now$/i.test(msg) ? [{ type: "END_SICK" }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -50,7 +56,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^change my goal to muscle gain$/i.test(msg) ? [{ type: "SET_GOAL", goal: "muscle_gain" }] : null;
     const fix = log586 ? log586 : front ? front : /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : /vitamins/i.test(msg) ? [bag, { type: "SET_REMINDER", body: "take my vitamins", when: "tomorrow at 8am" }] : /nudge me/i.test(msg) ? [bag] : [];
     content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ scope: /homework/i.test(msg) ? "out" : "in", family: fix.length ? "correction" : "question", wants: "advice", one_question: null, ...(/not sure/i.test(msg) ? {} : { uncertainty: /maybe/i.test(msg) ? 0.99 : 0.2 }), facts: /^I don't eat fish$/i.test(msg) ? [{ kind: "preference", subject: "no fish", statement: "I don't eat fish", detail: {} }] : /hold me to it/i.test(msg) ? [{ kind: "commitment", subject: "walk", statement: "hold me to it", detail: { domain: "movement", what: "a walk after work", due: new Date(Date.now() + 7_200_000).toISOString().slice(0, 10) } }] : [], actions: fix });
-  } else if (body.includes("You are Coach K, a warm, direct South African")) content = `Try pap with beans tonight. ${NEW}`;
+  } else if (body.includes("You are Coach K, a warm, direct South African")) { content = `Try pap with beans tonight. ${NEW}`; (globalThis as any).__lastCompose = body; }
   else if (body.includes("domain gate")) content = /homework/i.test(body) ? "NO" : "YES";
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
   return new Response(JSON.stringify({ id: "stub", object: "chat.completion", created: 1, model: "stub",
@@ -174,6 +180,19 @@ REAL("\n4e. \"DINNER WAS THE SAME AS LUNCH\" COPIES LUNCH (#326)");
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
+REAL("\n4h. SICK AND BACK THROUGH THE FRONT DOOR (A15)");
+{
+  const T = "whatsapp:+27829438015";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Sick Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  const off = await say(T, "I'm sick with flu, need 3 days off");
+  const back = await say(T, "I'm feeling better now");
+  chk(/paused|better/i.test(off) && /welcome back/i.test(back) && !/not guess/i.test(back),
+    "sick, then \"I'm feeling better now\": the pause is set, and the welcome back reaches them (it was blocked as a false \"1 session\" claim)", `${off.slice(0, 80)} | ${back.slice(0, 120)}`);
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
 REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on for everyone)");
 {
   const count = async (phone: string) => Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [phone])).rows[0].n);
@@ -219,7 +238,16 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
     const late = await nudge();
     chk(/takeaway/i.test(late), "a third takeaway sent late (\"earlier today I had a burger\") still gets the takeaway line (#622 review)", late || "(none)");
   }
-  const ot = await say(TESTER, "Am I on track?"); await say(TESTER, "change my goal to muscle gain"); const gy = await say(TESTER, "yes"), g = (await pool.query("SELECT goal_type FROM users WHERE phone_number = $1", [TESTER])).rows[0].goal_type;
+  const r0 = await count(TESTER); await say(TESTER, "I had samp and beans for supper"); const r1 = await count(TESTER);
+  const rs = await say(TESTER, "I had samp and beans for supper");
+  chk(r1 === r0 + 1 && await count(TESTER) === r1 && /already in your log/i.test(rs) && !/chakalaka|solid meal/i.test(rs), "a resent meal is not logged twice and gets a plain \"already in your log\", not the old receipt", rs.slice(0, 200));
+  const y0 = await count(TESTER); await say(TESTER, "I had pap and spinach yesterday"); const yr = await say(TESTER, "I had pap and spinach yesterday");
+  chk(await count(TESTER) === y0 + 1 && /already in your log/i.test(yr) && !/today/i.test(yr), "a resent \"…yesterday\" meal is not called today's (#628 review)", `${y0}→${await count(TESTER)} | ${yr.slice(0, 160)} | ${JSON.stringify((await pool.query("SELECT raw_message, logged_at::date d FROM meal_logs m JOIN users u ON u.id=m.user_id WHERE u.phone_number=$1 AND raw_message ILIKE $2", [TESTER, "%spinach%"])).rows)}`);
+  const costRows = async () => Number((await pool.query("SELECT COUNT(*)::int n FROM gpt_costs g JOIN users u ON u.id = g.user_id WHERE u.phone_number = $1 AND g.feature = 'core'", [TESTER])).rows[0].n);
+  const c0 = await costRows();
+  const ot = await say(TESTER, "Am I on track?");
+  await new Promise(r => setTimeout(r, 300)); // the cost row is written fire-and-forget
+  chk(await costRows() >= c0 + 2, "the new coach's model calls are priced into gpt_costs, where the daily cap reads (#570)", `${c0} → ${await costRows()}`); await say(TESTER, "change my goal to muscle gain"); const gy = await say(TESTER, "yes"), g = (await pool.query("SELECT goal_type FROM users WHERE phone_number = $1", [TESTER])).rows[0].goal_type;
   chk(ot.includes(NEW) && g === "muscle_gain" && gy.includes(NEW), "A12: \"am I on track?\" and a confirmed goal change are the new coach's words (the goal still written)", `${g} | ${ot.slice(0, 120)} | ${gy.slice(0, 120)}`);
   process.env.CORE_WAVE2 = "off";
   const fo = await say(FOUNDER, "I had an apple for a snack");
@@ -260,6 +288,12 @@ REAL("\n4g. #586 — A MEAL THE OLD KEYWORDS MISS IS WRITTEN FOR AN ORDINARY CLI
   chk((await meals()).length === keep && !/removed/i.test(fx), "\"No fix it. Recalculate everything\" read as a removal deletes nothing: the bouncer needs their own removal words (#597 attack)", `${keep} → ${(await meals()).length} | ${fx.slice(0, 120)}`);
   await say(K, "Please remove my last meal");
   chk((await meals()).length === keep - 1, "CONTROL: \"Please remove my last meal\" still removes it", `${keep} → ${(await meals()).length}`);
+  await pool.query("DELETE FROM meal_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [K]);
+  (globalThis as any).__lastCompose = "";
+  await say(K, LIST5); const told = (String((globalThis as any).__lastCompose).split("JUST SAVED THIS TURN")[1] || "").split("\\n")[0];
+  chk(FIVE.every(([f]) => told.toLowerCase().includes(f.split(" ")[0])), "five days of food after a silence: the coach is told every day saved, not the first 300 characters (#532)", told.slice(0, 700));
+  const back5 = (await pool.query("SELECT ((now() AT TIME ZONE 'Africa/Johannesburg')::date - (logged_at AT TIME ZONE 'Africa/Johannesburg')::date) back FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [K])).rows.map(r => Number(r.back));
+  chk(JSON.stringify(back5) === "[5,4,3,2,1]", "…and each of the five days is filed on its own day (CTO list B6)", JSON.stringify(back5));
   await pool.query("DELETE FROM meal_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [K]);
   const li = await say(K, LIST), days = (await pool.query("SELECT ((now() AT TIME ZONE 'Africa/Johannesburg')::date - (logged_at AT TIME ZONE 'Africa/Johannesburg')::date) back FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [K])).rows.map(r => Number(r.back));
   chk(JSON.stringify(days) === "[2,1,0]" && li.includes(NEW), "a three-day list lands on its three days, today's own weekday name included, in one reply (founder, 7 Oct)", `${JSON.stringify(days)} | ${li.slice(0, 100)}`);

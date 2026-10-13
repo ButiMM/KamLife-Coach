@@ -13,6 +13,7 @@
  */
 
 import OpenAI from "openai";
+import { metered } from "./gpt";
 import { assertAiOnline } from "./ai-offline";
 import { getGoalProfile } from "./goal-profiles";
 import { pool } from "./db";
@@ -21,9 +22,9 @@ import { isProactivePaused, claimProactive } from "./scheduler/shared";
 import { textToSpeech, isElevenLabsConfigured } from "./elevenlabs";
 import { recordServiceCost, voiceCostUsd } from "./cost-tracking";
 
-const openai = new OpenAI({
+const openai = metered(new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
-});
+}), "weekly-recap"); // priced where the daily cap reads (#570)
 
 interface ClientWeekData {
   id: string;

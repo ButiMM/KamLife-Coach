@@ -10,13 +10,12 @@
  */
 
 import OpenAI from "openai";
-import { db } from "../db";
-import { gptCosts } from "../../shared/schema";
+import { metered } from "../gpt";
 
 // ── OpenAI client (module-level, shared) ─────────────────────────────────────
-const openai = new OpenAI({
+const openai = metered(new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
-});
+}), "meal_verify"); // priced where the daily cap reads (#570)
 
 // ── Re-declared types (mirrors GptFoodItem / GptFoodFallbackResult in gpt.ts) ─
 // Kept local to avoid circular imports — keep in sync if gpt.ts changes the shape.
@@ -128,28 +127,6 @@ function recomputeTotals(result: GptFoodFallbackResultLike): GptFoodFallbackResu
 /** Deep-clone a result so passes don't mutate the original */
 function cloneResult(r: GptFoodFallbackResultLike): GptFoodFallbackResultLike {
   return { ...r, foods: r.foods.map(f => ({ ...f })) };
-}
-
-/** GPT-4o-mini gpt_costs row insert — best-effort, never throws */
-async function recordLLMCost(
-  userId: string | null | undefined,
-  promptTokens: number,
-  completionTokens: number,
-): Promise<void> {
-  // gpt-4o-mini pricing as of 2025: $0.15/1M prompt, $0.60/1M completion
-  const costUsd = ((promptTokens * 0.15 + completionTokens * 0.60) / 1_000_000).toFixed(6);
-  try {
-    await db.insert(gptCosts).values({
-      userId: userId ?? null,
-      model: "gpt-4o-mini",
-      feature: "meal_verify",
-      promptTokens,
-      completionTokens,
-      costUsd,
-    });
-  } catch {
-    // fire-and-forget — never surface cost-logging errors to the caller
-  }
 }
 
 // ── Pass 1 — Math check ───────────────────────────────────────────────────────
@@ -282,12 +259,6 @@ async function runPass3(
         setTimeout(() => reject(new Error("pass3_timeout")), 700)
       ),
     ]);
-
-    // Record cost (best-effort)
-    const usage = resp.usage;
-    if (usage) {
-      void recordLLMCost(userId, usage.prompt_tokens, usage.completion_tokens);
-    }
 
     const raw = resp.choices[0]?.message?.content ?? "{}";
     let parsed: P3Response;

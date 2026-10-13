@@ -128,7 +128,7 @@ export async function handleOnboardingBodyPhotos(opts: {
 }
 
 async function analyseAndAdvance(user: any, phone: string, openai: OpenAI): Promise<void> {
-  const { sendWhatsApp, recordGptCost } = await deps();
+  const { sendWhatsApp } = await deps();
   const all = await db.select().from(progressPhotos).where(eq(progressPhotos.userId, user.id)).limit(10);
   const set = all.slice(-3);
   if (set.length === 0) return;
@@ -147,7 +147,6 @@ async function analyseAndAdvance(user: any, phone: string, openai: OpenAI): Prom
       ] },
     ],
   });
-  recordGptCost({ userId: user.id, model: "gpt-4o", feature: "onboard_physique", promptTokens: resp.usage?.prompt_tokens ?? 0, completionTokens: resp.usage?.completion_tokens ?? 0 });
   const raw = resp.choices[0]?.message?.content?.trim() || "";
   const analysis = parsePhysiqueAnalysis(raw, user.gender);
   const bodyState = parseBodyState(raw);
