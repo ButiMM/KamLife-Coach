@@ -41,7 +41,9 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^Lunch was rice not samp\. For supper I had beef\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "samp", to: "rice" }, { type: "LOG_MEAL", foodText: "beef stew", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /^I slept (maybe )?5 hours (last night|2 days ago)$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
+      : /^Had pap and wors for lunch yesterday and slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", retro: "yesterday", needsConfirmation: false }, { type: "LOG_SLEEP" }]
       : /^For supper I had chicken and I slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }, { type: "LOG_SLEEP" }]
+      : /^(dinner was the same as lunch|should my dinner be the same as lunch\?)$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "the same as lunch", meal: "dinner", needsConfirmation: false }]
       : /^I'm sick with flu, need 3 days off$/i.test(msg) ? [{ type: "SET_SICK", days: 3 }]
       : /^I'm feeling better now$/i.test(msg) ? [{ type: "END_SICK" }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
@@ -176,6 +178,31 @@ REAL("\n4j. SLEEP THROUGH THE FRONT DOOR (A6)");
   const both = await say(T, "For supper I had chicken and I slept 5 hours last night");
   const supper = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows[0].n);
   chk(supper === 1 && await sleeps() === 2, "supper and sleep in one message: both are written (#643 review)", `${supper} meal(s), ${await sleeps()} sleep(s) | ${both.slice(0, 160)}`);
+  const past = await say(T, "Had pap and wors for lunch yesterday and slept 5 hours last night");
+  const meals = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows[0].n);
+  chk(meals === 2 && await sleeps() === 2, "yesterday's lunch with last night's sleep: the meal is written, only the sleep is dropped (#643 CTO attack)", `${meals} meal(s), ${await sleeps()} sleep(s) | ${past.slice(0, 160)}`);
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
+REAL("\n4e. \"DINNER WAS THE SAME AS LUNCH\" COPIES LUNCH (#326)");
+{
+  const T = "whatsapp:+27829438326";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Same Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  process.env.CORE_WAVE2 = "on";
+  await say(T, "I had pap and wors for lunch");
+  const asked = await say(T, "Should my dinner be the same as lunch?");
+  const afterAsk = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows[0].n);
+  chk(afterAsk === 1, "\"Should my dinner be the same as lunch?\" copies nothing: a question is not a report (#639 review)", `${afterAsk} rows | ${asked.slice(0, 120)}`);
+  process.env.APP_URL = "https://kamlife.example"; (await import("../server/card-policy"))._resetDumpWindow();
+  const same = await say(T, "dinner was the same as lunch"); delete process.env.APP_URL;
+  chk(/\[MEDIA:https:\/\/kamlife\.example\/card\//.test(same), "the copied dinner gets its card, like any meal (#639 review)", same.slice(0, 200));
+  const rows = (await pool.query("SELECT meal_label l, kcal_int k FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [T])).rows;
+  const lunch = rows.find(r => r.l === "lunch"), dinner = rows.find(r => r.l === "dinner");
+  chk(rows.length === 2 && !!dinner && dinner.k === lunch?.k && !/items a bit clearer/i.test(same),
+    "\"dinner was the same as lunch\" logs dinner with lunch's calories, and never asks them to type the items", `${JSON.stringify(rows)} | ${same.slice(0, 120)}`);
+  delete process.env.CORE_WAVE2;
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 

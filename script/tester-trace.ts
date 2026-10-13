@@ -69,6 +69,7 @@ const groups: Record<string, string[]> = {
     "Ndidle ipapa nenyama",
     "just finished 2 pieces of KFC and a small chips",
     "no it was chicken not beef",
+    "dinner was the same as lunch",
     "what did I eat today?",
     "I have diabetes. Had a kota for lunch",
   ],

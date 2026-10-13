@@ -718,11 +718,13 @@ async function runActions(p: { phone: string; message: string; user: any; source
   const sleep = acts.find(a => a.type === "LOG_SLEEP");
   if (sleep && acts.every(a => a === sleep || LOGS.has(a.type))) { // the sleep log reads the hours from their words and keeps the weekly trend (B5)
     const conf = 1 - (u.uncertainty || 0), rest = acts.filter(a => a !== sleep);
-    if (!(await import("../understanding/actions")).shouldAutoExecute(sleep, conf)) return null; // unsure: words, never a record (#643 review)
-    // The sleep log has no date of its own: "on Monday" is not written as tonight's (#643 review). Last night's sleep is today's.
-    if ((await import("../sast")).statedWhen(message.replace(/\blast night\b/gi, "")).when !== "today") return null;
+    // Unsure, or a past day (the sleep log has no date of its own; last night's sleep is today's): no sleep record (#643 review).
+    // Only the sleep is dropped: a meal said in the same message is still written.
+    const sleepOk = (await import("../understanding/actions")).shouldAutoExecute(sleep, conf)
+      && (await import("../sast")).statedWhen(message.replace(/\blast night\b/gi, "")).when === "today";
+    if (!sleepOk && !rest.length) return null;
     const logged = rest.length ? await logThroughExecutor(phone, message, rest, conf, p.sourceMessageId) : null; // "chicken for supper and I slept 5 hours"
-    const r = await (await import("../handlers/lifecycle")).handleLifecycle({ phone, message, m, user, isQuestion: false });
+    const r = sleepOk ? await (await import("../handlers/lifecycle")).handleLifecycle({ phone, message, m, user, isQuestion: false }) : null;
     if (!logged) return r ? { reply: r, src: "core front: sleep", wrote: true } : null;
     if (!logged.performed && !r) return logged.confirm ? { reply: logged.confirm, src: "core front: confirm", wrote: false } : null;
     const receipt = [(logged.card + logged.reply).trim(), r].filter(Boolean).join("\n\n");

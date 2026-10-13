@@ -131,8 +131,8 @@ REAL("\n3. THE OUTCOME VOCABULARY SAYS WHAT IT MEANS (source)");
   chk(/"substituted"/.test(delivery), "the delivery vocabulary carries a name for 'not this message'");
   chk(!/result === "substituted"/.test(delivery.split("export function deliveryAccepted")[1]?.split("}")[0] || ""),
     "…and deliveryAccepted does NOT count it as an accepted delivery");
-  chk(/return templateDelivery === "dropped" \? "dropped" : "substituted";/.test(shared),
-    "the generic re-engagement path reports it");
+  chk(!/WINDOW_RECOVERY_TEMPLATE|reengageTemplateSid/.test(shared),
+    "no send puts the generic check-in in place of its own message (#327)");
   chk(/templateSid\(windowTemplate\.name\)/.test(shared),
     "…and the message's own approved template is consulted first");
 }
