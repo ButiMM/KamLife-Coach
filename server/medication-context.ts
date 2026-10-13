@@ -37,7 +37,8 @@ export function detectMedicationContext(message: string): MedicationContextDecis
   }
   // CHOOSING A MEDICINE (#321): "what antibiotic should I take for a sore throat" asks the coach to
   // prescribe. Not an emergency, not coaching — the scope gate points it to a doctor or pharmacist.
-  if (/\b(what|which)\s+(antibiotics?|medication|medicine|meds|pills?|tablets?|painkillers?|antidepressants?)\b[^.!?]{0,40}\b(should|can|must|do)\s+i\s+(take|use|get|buy)\b/i.test(m)) {
+  // …and auxiliary-first (#353): "Can I take an antibiotic for my sore throat?", "Should I use painkillers for this headache?".
+  if (/\b(what|which)\s+(antibiotics?|medication|medicine|meds|pills?|tablets?|painkillers?|antidepressants?)\b[^.!?]{0,40}\b(should|can|must|do)\s+i\s+(take|use|get|buy)\b|\b(can|could|should|may|do)\s+i\s+(take|use|get|buy|have)\s+(?:an?\s+|some\s+)?(antibiotics?|medication|medicine|meds|pills?|tablets?|painkillers?|antidepressants?)\b[^.!?]{0,30}\bfor\b/i.test(m)) {
     return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "choosing" };
   }
   return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: false, reason: null };
