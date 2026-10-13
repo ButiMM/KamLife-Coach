@@ -259,7 +259,9 @@ export async function applyFacts(eventId: string, raw: string): Promise<number> 
     // now and nothing replaces it; the sentence itself is never stored as a new fact the coach would then repeat.
     if (f.retires === true && f.kind !== "commitment") {
       // The client's own words for ending it are required, as for a delete: the model alone never retires a fact.
-      if (!/\b(forget|stop using|don'?t use|ignore|drop|delete|remove|no longer|not any ?more|fine now|better now|healed|recovered|all good now)\b/i.test(text)) continue;
+      // Not negated either: "please don't forget my knee" keeps it (#651 attack).
+      const said = norm(text), w = said.match(/\b(forget|stop using|don'?t use|ignore|drop|delete|remove|no longer|not any ?more|fine now|better now|healed|recovered|all good now)\b/);
+      if (!w || NEGATED.test(said.slice(Math.max(0, (w.index ?? 0) - 24), w.index))) continue;
       const ended = await db.update(clientFacts).set({ validUntil: sql`now()` }).where(and( // the readers' clock
         eq(clientFacts.userId, ev.userId), isNull(clientFacts.supersededBy), eq(clientFacts.kind, f.kind),
         inArray(clientFacts.subject, [f.subject, (f.corrects || "").trim().toLowerCase()].filter(Boolean)),

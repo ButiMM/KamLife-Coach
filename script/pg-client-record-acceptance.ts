@@ -58,6 +58,7 @@ const EXTRACT: Record<string, unknown> = {
   // Every KNOWN FACT about it, as listed to the model: theirs, and the two copied from their profile.
   "Forget that I said I work night shifts.": { facts: [["schedule", "night shifts"], ["schedule", "work pattern"], ["life_event", "life right now"]]
     .map(([kind, subject]) => ({ kind, subject, statement: "Forget that I said I work night shifts", detail: {}, retires: true })) },
+  "Please don’t forget that I said my knee gets sore on stairs.": { facts: [{ kind: "injury", subject: "knee", statement: "don’t forget that I said my knee gets sore on stairs", detail: {}, retires: true }] },
   "My knee is fine now.": { facts: [{ kind: "injury", subject: "knee", statement: "My knee is fine now", detail: {}, retires: true }] },
   // The extractor "invents" a statement the client never wrote: it must be dropped, not stored.
   "My sister is pregnant and wants to know if she can squat.": { facts: [
@@ -222,6 +223,8 @@ REAL("\n5e. FORGET IT, OR IT'S OVER — the known fact ends and nothing replaces
   const { factsForCoach } = await import("../server/core/client-record");
   await settle(async () => /knee/.test(await factsForCoach(f.id)));
   await say(f.phoneNumber, "Forget that I said I work night shifts.");
+  await say(f.phoneNumber, "Please don’t forget that I said my knee gets sore on stairs.");
+  chk(/knee/.test(await factsForCoach(f.id)), "\"please don't forget… my knee\" keeps the knee: a negated forget retires nothing (#651 attack)", await factsForCoach(f.id));
   await say(f.phoneNumber, "My knee is fine now.");
   const shown = await factsForCoach(f.id), known = await knownFacts(f.id);
   chk(!/night shift|knee|forget/i.test(shown) && !/night shift|knee/i.test(known),
