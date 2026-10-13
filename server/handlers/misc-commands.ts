@@ -721,7 +721,7 @@ export async function handleMiscCommands(ctx: {
 
 
   // ---- JOIN CHALLENGE (friend accepting an invite) ----
-  if (/^join\s+([A-Z]{3}\d{4})$/i.test(m.trim())) {
+  if (/^join\s+([A-Z0-9]{6,7})$/i.test(m.trim())) { // C8: KAM7XQ (after a first workout) as well as THA1234
     const challengeCode = m.trim().split(/\s+/)[1].toUpperCase();
     const [inviter] = await db.select({ id: users.id, name: users.name, phoneNumber: users.phoneNumber })
       .from(users).where(eq(users.referralCode, challengeCode)).limit(1);
