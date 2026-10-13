@@ -4789,13 +4789,12 @@ test("early-hours: daytime logs are never shifted", () => {
   const lunch = new Date(Date.UTC(2026, 6, 23, 11, 0)); // 13:00 SAST
   assert.equal(effectiveMealLoggedAt(lunch, "rice and chicken", "lunch").getTime(), lunch.getTime());
 });
-test("early-hours: an explicit 'now'/'today' keeps the small-hours log on today", () => {
-  const at = new Date(Date.UTC(2026, 6, 23, 1, 0)); // 03:00 SAST
-  assert.equal(effectiveMealLoggedAt(at, "having my dinner now", "dinner").getTime(), at.getTime());
-});
-test("early-hours: a genuine 4am breakfast stays on today", () => {
-  const at = new Date(Date.UTC(2026, 6, 23, 2, 0)); // 04:00 SAST
-  assert.equal(effectiveMealLoggedAt(at, "Breakfast before my shift", "breakfast").getTime(), at.getTime());
+test("early-hours: before 05:00 'this morning', 'now' and a breakfast are the ending day too (CTO on #641)", () => {
+  const at = new Date(Date.UTC(2026, 6, 22, 22, 40)); // 00:40 SAST, Thu 23 Jul
+  for (const [msg, label] of [["this morning I had 3 eggs", "breakfast"], ["having my dinner now", "dinner"], ["Breakfast before my shift", "breakfast"]] as const)
+    assert.equal(sastDayStart(effectiveMealLoggedAt(at, msg, label)).getTime(), sastDayStart(new Date(at.getTime() - 86_400_000)).getTime(), msg);
+  const six = new Date(Date.UTC(2026, 6, 23, 4, 0)); // 06:00 SAST: a real new day
+  assert.equal(effectiveMealLoggedAt(six, "this morning I had 3 eggs", "breakfast").getTime(), six.getTime());
 });
 
 // ============================================================

@@ -411,9 +411,34 @@ REAL("\n7. NO SECOND MIDNIGHT-WINDOW OWNER WAS ADDED (source-graded, and it says
   chk(pastNight !== "" && !/tonight/.test(pastNight),
     "parseMealDate's past-night branch no longer claims \"tonight\"",
     `branch=${JSON.stringify(pastNight.trim())}`);
-  chk(/tonight/.test(live.match(/export function effectiveMealLoggedAt[\s\S]{0,600}/)?.[0] || ""),
-    "effectiveMealLoggedAt still owns \"tonight\" in the midnight window");
+  chk(/sastHour\(loggedAt\) < 5/.test(live.match(/export function effectiveMealLoggedAt[\s\S]{0,600}/)?.[0] || ""),
+    "effectiveMealLoggedAt still owns the midnight window (\"tonight\" included, CTO on #641)");
   chk(/SAYS_TODAY_RE[^\n]*tonight/.test(live), "SAYS_TODAY_RE still says tonight means today");
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+REAL("\n8. BEFORE 05:00 THE FOOD DAY IS THE DAY THAT'S ENDING, \"THIS MORNING\" INCLUDED (CTO on #641)");
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Yesterday's 1,800 kcal lunch, then "This morning I had 3 eggs". At 00:30 it is still that day, so
+// the eggs file there and one day's total holds both; at 06:30 it is a new day and the eggs stand alone.
+{
+  const { commitFoodLog, getDayLedger } = await import("../server/day-ledger");
+  for (const [hour, eggsDay, total] of [[0, YESTERDAY, 2100], [6, TODAY, 300]] as const) {
+    await clear();
+    await pool.query(`INSERT INTO meal_logs (user_id, raw_message, meal_label, kcal_int, protein_int, logged_at, source)
+      VALUES ($1, 'lunch', 'lunch', 1800, 60, $2, 'text')`, [user.id, new RealDate(`${YESTERDAY}T10:30:00Z`)]);
+    const unfreeze = freezeSast(hour);
+    let kcal = -1;
+    try {
+      await commitFoodLog({ userId: user.id, phone, rawMessage: "This morning I had 3 eggs", source: "text",
+        kcalInt: 300, proteinInt: 18, carbsInt: 0, fatInt: 0, mealLabel: "breakfast", loggedAt: new Date(),
+        items: [{ name: "eggs", grams: 150, kcal: 300, protein: 18, category: "protein" }] });
+      kcal = (await getDayLedger(user.id, { user })).kcal;
+    } finally { unfreeze(); }
+    const eggs = (await meals()).find(m => /eggs/.test(m.raw_message || ""));
+    chk(!!eggs && dayOf(eggs.logged_at) === eggsDay, `at ${hour}:30 the eggs file on ${eggsDay}`, `row=${eggs && dayOf(eggs.logged_at)}`);
+    chk(kcal === total, `at ${hour}:30 the day's total is ${total} kcal`, `kcal=${kcal}`);
+  }
 }
 
 REAL(`\n${failed === 0 ? "pg-meal-date-slot-acceptance: GREEN" : `pg-meal-date-slot-acceptance: ${failed} FAILED`}\n`);
