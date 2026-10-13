@@ -532,6 +532,26 @@ REAL("\n12. CODEX AUDIT #606 — a refund stays a refund, a pregnant payer gets 
   chk((await row(S.phone)).subscription_status === "active", "control: an earlier subscriber's token still renews at R149");
 }
 
+// ════════════════════════════════════════════════════════════════════════
+REAL("\n13. A REFERRAL WORKS END TO END (C8): the friend's first message names the code, their payment earns the inviter a month");
+// ════════════════════════════════════════════════════════════════════════
+{
+  const I = await makeClient("27820000987", "Inviter Kam", { subscriptionStatus: "active", referralCode: "KAM7XQ" }); // a code workout.ts issues
+  const renews0 = new Date(Date.now() + 10 * 86_400_000);
+  await pool.query("UPDATE users SET subscription_renews_at = $2 WHERE id = $1", [I.id, renews0]);
+  const F = { digits: "27820000988", phone: "whatsapp:+27820000988" };
+  for (const t of ["users", "payment_events", "shadow_replies"]) await pool.query(`DELETE FROM ${t} WHERE ${t === "users" ? "phone_number" : "phone"} = $1`, [F.phone]);
+  _resetOutboundDedupe(); _resetInteractionCorrelation();
+  await processTextAsync(F.phone, "Hi, I was referred by KAM7XQ", null, null, [], handleMessage as any, "SMref1");
+  await new Promise(r => setTimeout(r, 1500));
+  const friend = (await pool.query("SELECT id, referred_by FROM users WHERE phone_number = $1", [F.phone])).rows[0];
+  chk(friend?.referred_by === I.id, "the share link's \"Hi, I was referred by KAM7XQ\" records who referred them", JSON.stringify(friend));
+  await postItn(signItn(itnFields(F.digits, "COMPLETE", "tok-friend-1", "pf-friend-1", "alpha")));
+  const renews1 = new Date((await pool.query("SELECT subscription_renews_at r FROM users WHERE id = $1", [I.id])).rows[0].r);
+  chk(renews1.getTime() - renews0.getTime() > 29 * 86_400_000, "…and when the friend pays, the inviter gets the free month they were promised",
+    `${renews0.toISOString().slice(0, 10)} → ${renews1.toISOString().slice(0, 10)}`);
+}
+
 server.close();
 await pool.end().catch(() => {});
 REAL(`\npg-payments-cancel-truth-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}`);
