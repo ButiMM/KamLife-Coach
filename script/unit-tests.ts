@@ -1557,40 +1557,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
       `a bare removal must not be routed as a compound correction: ${JSON.stringify(bare)}`);
   });
 
-  test("normalizer fidelity: the two rewrites the Reality Test caught are REJECTED", async () => {
-    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
-    // J5, verbatim from the baseline run. Tin fish and mixed veggies were invented, the correction
-    // framing was destroyed, and the chicken was dropped because a fresh log has nothing to retain.
-    const j5 = normalizerFidelity(
-      "Actually no, that was yesterday. And it wasn't rice, it was pap. And I had spinach too.",
-      "i had tin fish, pap, spinach and mixed veggies for lunch yesterday");
-    assert.equal(j5.ok, false, "J5's rewrite must not be allowed to speak for the client");
-    assert.match(j5.reason, /CORRECTION/i, `expected the correction gate to fire first: ${j5.reason}`);
 
-    // J4, verbatim. The question and the emotion were discarded pre-routing.
-    const j4 = normalizerFidelity(
-      "Ok so yesterday I had pap and beef stew for supper, and this morning just tea, I think I "
-      + "walked about 6000 steps maybe more I'm not sure, I missed gym on Monday because my back "
-      + "was sore, I'm feeling a bit useless honestly, and tonight there's a family thing with "
-      + "lots of food. What do I do about tonight?",
-      "i had pap and beef stew for supper yesterday");
-    assert.equal(j4.ok, false, "J4's rewrite must not be allowed to speak for the client");
-    assert.match(j4.reason, /question|emotion/i, `expected the question/emotion gate: ${j4.reason}`);
-  });
-
-  test("normalizer fidelity: invention is caught even when the framing is innocent", async () => {
-    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
-    // Every output food must trace to the client's words.
-    assert.equal(normalizerFidelity("Lunch: tin fish and rice", "i had tin fish, rice and mixed veggies for lunch").ok, false);
-    assert.match(normalizerFidelity("Lunch: tin fish and rice", "i had tin fish, rice and avocado for lunch").reason, /invents "avocado"/);
-    // …and a faithful restatement of the SAME words is allowed, which is the feature.
-    assert.equal(normalizerFidelity("Luch\nTin fish\nRice\nMixed veggies", "i had tin fish, rice and mixed veggies for lunch").ok, true);
-    assert.equal(normalizerFidelity("Breakfast, four eggs and a black coffee", "i had 4 eggs and a black coffee for breakfast").ok, true);
-    // Multilingual canonicalisation is a TRANSLATION, not an invention — it must survive.
-    assert.equal(normalizerFidelity("Ngidle ipapa nenyama namuhla", "i had pap and meat").ok, true);
-    assert.equal(normalizerFidelity("Ke jele papa le nama", "i had pap and meat").ok, true);
-    assert.equal(normalizerFidelity("Nditye isonka namaqanda kusasa", "i had bread and eggs for breakfast").ok, true);
-  });
 
   // ── THE SEMANTIC-ADDITION CLASS (#234) ──────────────────────────────────────────────────────
   //
@@ -1599,76 +1566,9 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   // from the invention check, so the gate waved through every rewrite that ADDED meaning of those
   // kinds. Each row below was ALLOWED before this cut. They are asserted as a class, because a
   // gate that only knows about pears is the same gate with one more special case.
-  test("normalizer fidelity: unsupported semantic additions fail closed", async () => {
-    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
-    const invented: Array<[string, string, string]> = [
-      ["meal slot (the founder turn)", "I had a pear", "i had a pear for breakfast"],
-      ["meal slot, second phrasing", "ate chicken and rice", "i had chicken and rice for dinner"],
-      ["a day the client never named", "I trained", "i trained yesterday"],
-      ["a time of day", "had eggs", "i had eggs in the morning"],
-      ["a goal change never asked for", "I want to build a bit", "change my goal to muscle gain"],
-      ["a session that never happened", "I was busy", "i did my workout"],
-    ];
-    for (const [why, raw, canon] of invented) {
-      assert.equal(normalizerFidelity(raw, canon).ok, false, `${why}: "${raw}" -> "${canon}"`);
-    }
 
-    // NEGATION IS NOT A WORD, IT IS THE SIGN OF THE CLAIM. Every word of "i did my workout" traces
-    // to "I didn't train" — "did" to "didn't", the rest is structure — so the invention check
-    // could never have caught the client's No being reversed. It has its own rule.
-    assert.equal(normalizerFidelity("I didn't train", "i did my workout").ok, false);
-    assert.equal(normalizerFidelity("I didn't train", "i did train").ok, false);
-    assert.match(normalizerFidelity("I didn't train", "i did train").reason, /negates/i);
 
-    // …and the other direction of rule 2: a canonical may not ASK what the client did not ask.
-    assert.equal(normalizerFidelity("pap and eggs", "pap and eggs?").ok, false);
-  });
 
-  test("normalizer fidelity: legitimate rewrites still survive the tightening", async () => {
-    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
-    // A gate that refuses everything would satisfy every assertion above. These are the rewrites
-    // the normalizer exists to make, and each one must still pass.
-    const kept: Array<[string, string, string]> = [
-      ["client stated the slot", "had a pear for breakfast", "i had a pear for breakfast"],
-      ["client stated the day", "I trained yesterday", "i trained yesterday"],
-      ["retro timing, translated", "I had pap last night", "i had pap yesterday"],
-      ["SA-language translation", "ngidle ipapa", "i had pap"],
-      ["a verb in another form", "workout done", "i did my workout"],
-      ["a typo is still their word", "Luch\nTin fish\nRice", "i had tin fish and rice for lunch"],
-    ];
-    for (const [why, raw, canon] of kept) {
-      assert.equal(normalizerFidelity(raw, canon).ok, true,
-        `${why}: "${raw}" -> "${canon}" was refused: ${normalizerFidelity(raw, canon).reason}`);
-    }
-
-    // A CORRECTION ABOUT OUR RECORD IS NOT THE CLIENT NEGATING THEMSELVES. "you missed X" says we
-    // failed to log it, and the food was really eaten — reading it as their No refused an honest
-    // rewrite, which the recorded corpus caught the moment the negation rule went in.
-    assert.equal(normalizerFidelity("you missed the black coffee", "i had black coffee").ok, true);
-  });
-
-  test("normalizer fidelity: a pure question may still become a lookup", async () => {
-    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
-    // Nothing is discarded when the question IS the whole message, so this rewrite stays legal —
-    // the deterministic totals handler answers it better than the model does.
-    assert.equal(normalizerFidelity("how many calories do I have left?", "today's calories").ok, true);
-    assert.equal(normalizerFidelity("what's my protein today", "today's calories").ok, true);
-    // A bare log with no question and no emotion is untouched by the gate.
-    assert.equal(normalizerFidelity("10000 steps yesterday", "10000 steps yesterday").ok, true);
-  });
-
-  test("normalizer fidelity: it fails CLOSED, never partially", async () => {
-    const { normalizerFidelity } = await import("../server/normalizer-fidelity");
-    assert.equal(normalizerFidelity("anything at all", "").ok, false, "no canonical is not a pass");
-    // The gate is wired at the ONE place the canonical is applied, and rejection drops the whole
-    // rewrite rather than trimming it — half a rewrite is the same defect, smaller.
-    const routes = readFileSync("server/routes.ts", "utf-8");
-    assert.ok(/normalizerFidelity\(/.test(routes), "the gate is not wired");
-    const i = routes.indexOf("normalizerFidelity(");
-    const near = routes.slice(i, i + 420);
-    assert.ok(/canon = ""/.test(near), "a rejected rewrite must drop the canonical entirely");
-    assert.equal((routes.match(/message = canon;/g) || []).length, 1, "the canonical may be applied in exactly ONE place");
-  });
 
   test("a correction is a MUTATION: remove, retain, add, replace, move — composed in one turn", async () => {
     const { planCorrection, applyCorrection } = await import("../server/food-identity-correction");
@@ -6259,12 +6159,11 @@ test("A19 (Grok attack on #545): a commitment is stored only for a promise they 
   assert.equal(namesWhat("train at Virgin Active", "How did Virgin Active go?", false), true, "the fold hears the venue");
   assert.equal(commitmentHeld("yes", "yes", "a walk after work", "Would that work for you?"), false, "the gate still ignores the setting");
 });
-test("#569: the intent classifier is started only after the age gate and the POPIA gate", () => {
+test("#569: no model reads a message before the age gate and the POPIA gate (the front door's read comes after both)", () => {
   const src = readFileSync("server/routes.ts", "utf-8");
-  const first = src.indexOf("startIntent()"), age = src.indexOf("blockUnderage(phone)"), popia = src.indexOf("before we continue I need your consent");
-  assert.ok(age > 0 && popia > 0 && first > popia && first > age, `first start at ${first}, age gate ${age}, POPIA ${popia}`);
-  assert.equal(src.split("classifyIntent(message, user.id)").length - 1, 1, "one call site, inside startIntent");
-  assert.ok(src.indexOf("classifyIntent(message, user.id)") > src.indexOf("const startIntent ="), "and it is startIntent's body, not an eager start");
+  const first = src.indexOf("core.frontTurn("), age = src.indexOf("blockUnderage(phone)"), popia = src.indexOf("before we continue I need your consent");
+  assert.ok(age > 0 && popia > 0 && first > popia && first > age, `front door at ${first}, age gate ${age}, POPIA ${popia}`);
+  assert.ok(!src.includes("classifyIntent("), "the normalizer's classifier is gone (#568)");
   assert.ok(!readFileSync("server/gpt.ts", "utf-8").includes("YOUTH CLIENT"), "no youth prompt: under-18s are never coached");
 });
 test("7 Oct live: a photo that shrinks to one flat colour is sent as the original", async () => {
@@ -6634,10 +6533,9 @@ test("multi-part ask: a four-part voice note never reaches a single-fact handler
 
   test("self-check: the killswitches report themselves", async () => {
     const { runSelfCheck } = await import("../server/self-check");
-    await withEnv({ PROACTIVE_PAUSED: "true", NORMALIZER: "off" }, () => {
+    await withEnv({ PROACTIVE_PAUSED: "true" }, () => {
       const names = runSelfCheck().off.map(c => c.name);
       assert.ok(names.includes("Proactive messages"), "a global killswitch must never be invisible");
-      assert.ok(names.includes("Message understanding"));
     });
   });
 }

@@ -11,7 +11,7 @@ import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide } from "./exercise-media";
 import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, getDayType } from "./programme";
-import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, classifyIntent, metered, type ClassifiedIntent, type IntentClassification } from "./gpt";
+import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, metered } from "./gpt";
 import { calculateTargets, getDailyStepContext } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan, statedMinorAge, blockUnderage } from "./onboarding";
 import { saysNotWorking } from "./despair";
@@ -50,11 +50,9 @@ import { parseMessyIntake, withKnownFood, mentionedWalkWithoutCount, newTurnLedg
 import { foodDayIsClosed, readTrainingDay } from "./one-action";
 import { backfillAttributedDays } from "./backfill";
 import { isCoachCriticism } from "./reaction-guard";
-import { bareReactionFallback } from "./reaction-guard";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { attributeMultiDayReport } from "./understanding/day-relative-situation";
 import { recordMessageSeen, recordReplyPath } from "./self-check";
-import { normalizerFidelity, normalizerLive } from "./normalizer-fidelity";
 import { carriesFeelingClause } from "./unlogged-notice";import { recordDailyConstraint } from "./held-constraints";import { looksLikeDirectionRequest } from "./daily-direction";import { looksLikeQuestion, looksLikeSurplusDeficitQuestion, getDisplayName, checkGptRateLimit, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, isMultiPartAsk, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, reportedInSomeClause, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 import { conditionWelcome, mentionsConditionOrMedication, conditionIsWholeMessage } from "./condition-welcome";
@@ -141,13 +139,6 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // Page coach on crisis/injury signals immediately — fires even if onboarding/POPIA returns early
   if (message && message.length > 2) checkEscalation(user.id, message).catch(e => console.error("[ESCALATION_CHECK]", e?.message || e));
 
-  // ---- INTENT CLASSIFIER (the normalizer's read): started only after the age and POPIA gates (#569), so a minor's
-  // message, an onboarding answer or a turn without consent reaches no model. Text only; errors read as OTHER.
-  const startIntent = (): Promise<{ intent: ClassifiedIntent; confidence: number }> =>
-    (!mediaUrl && message.length >= 2 && message.length <= 500)
-      ? classifyIntent(message, user.id).catch((e) => { console.error("[INTENT_CLASSIFY]", e?.message || e); return { intent: "OTHER" as ClassifiedIntent, confidence: 0 }; })
-      : Promise.resolve({ intent: "OTHER" as ClassifiedIntent, confidence: 0 });
-  let intentPromise: Promise<{ intent: ClassifiedIntent; confidence: number }> | null = null;
 
   // ---- DAY-ZERO PHYSIQUE READ — body photos sent during onboarding. handleOnboarding
   // is text-only (mediaUrl never reaches it), so this state's photos are claimed here.
@@ -181,7 +172,6 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
     const name = user.name ? `${user.name}, ` : "";
     return `${name}before we continue I need your consent to process your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\nYour data is:\n- Used only for your coaching\n- Never sold to anyone\n- Deleted on request (reply "delete my data" at any time)\n\nReply *yes* or *agree* to continue. Reply "delete my data" if you would like us to remove your information.`;
   }
-  if (normalizerLive() && user.onboardingState === "COMPLETE" && !user.awaitingInputType && !(await import("./core/coach")).coreFront()) intentPromise = startIntent(); // early, only where the normalizer runs (#592: behind the front door it starts only if the door declines)
 
   // ---- NUMERIC-FLUENCY DETECTOR (fire-and-forget) — a client who talks in
   // kcal/macros three times gets full numbers turned on automatically, with a
@@ -382,8 +372,8 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // ---- MEDICAL CONDITION / MEDICATION DISCLAIMER ----
   // When a client mentions medication, a new diagnosis, or asks for condition-specific advice —
   // return a clear disclaimer and redirect. Still logs (triggers escalation → coach alert).
-  // With the front door on, a condition mentioned alongside a log or a question goes on, and the log is written (#610).
-  if (mentionsConditionOrMedication(m) && (conditionIsWholeMessage(m) || !(await import("./core/coach")).coreFront())) {
+  // A condition mentioned alongside a log or a question goes on to the front door, and the log is written (#610).
+  if (mentionsConditionOrMedication(m) && conditionIsWholeMessage(m)) {
     const welcome = conditionWelcome(user.name?.split(" ")[0] || "");
     await logChat(user.id, message, welcome, "MEDICAL_DISCLAIMER");
     return welcome;
@@ -398,14 +388,8 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // "Omg", "wtf", "ugh" fall through to GPT without this guard, and GPT sees recent workout
   // history and re-writes a hallucinated workout. Catch early, reply short and deterministically.
   const BRIEF_FRUSTRATION_RE = /^(omg+|o\.?m\.?g\.?|wtf|wth|ugh+|eish+|agg+|argh+|ffs|smh|seriously\??|come on\.?|what the hell\.?|what is this\.?|this is ridiculous\.?|not again\.?|unbelievable\.?|oh come on\.?|really\?+|for real\??|yoh+|yhoh+|haibo\.?)$/i;
-  const frontOn = (await import("./core/coach")).coreFront(); // #592: the front door answers frustration; it is still captured for the digest (D7)
+  // The front door answers frustration (#592); it is still captured for the digest (D7).
   if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION) captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "brief frustration outburst" });
-  if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION && !frontOn) {
-    const _bfName = user.name?.split(" ")[0] || "";
-    const _bfReply = bareReactionFallback(_bfName);
-    await logChat(user.id, message, _bfReply, "BRIEF_FRUSTRATION");
-    return _bfReply;
-  }
 
   // ---- SEVERE FRUSTRATION EARLY-INTERCEPT — before ANY coaching/workout/food handlers ----
   // Stops the bot replying to frustration with a workout programme or payment link. A single
@@ -427,68 +411,6 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // understand-first + "reduce shame" Constitution beats this ad-hoc prompt (the scorecard
   // won big here: "Okay no problem" 2.3→9.0). Deterministic frustration stays the fallback.
   if ((STRONG_FRUSTRATION || (!engineLive() && frustrationSignalCount >= 2)) && !HAS_CLEAR_ACTION) captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "strong frustration / bot complaint" });
-  if ((STRONG_FRUSTRATION || (!engineLive() && frustrationSignalCount >= 2)) && !HAS_CLEAR_ACTION && !frontOn) { // replay 30 Jul: engine lost ALL 3 pushback cases ("I'm not sick" 4.0 vs 5.7) — strong frustration keeps its prompt
-    const firstName = user.name?.split(" ")[0] || "";
-    const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
-      .from(chatHistory)
-      .where(eq(chatHistory.userId, user.id))
-      .orderBy(desc(chatHistory.createdAt))
-      .limit(3);
-    const lastIntent = lastBotMsgs[0]?.intent || "";
-    const lastOut = (lastBotMsgs[0]?.messageOut || "").slice(0, 200);
-    const streak = user.workoutStreak || 0;
-    const totalW = user.totalWorkoutsCompleted || 0;
-
-    // Detect when the complaint is about the BOT ITSELF being confusing/generic/useless
-    // vs. frustration with a specific coaching output (wrong calories, bad workout, etc.)
-    // When it's a bot-complaint, we must NOT pivot to workout instructions — that proves their point.
-    const BOT_COMPLAINT = /\b(this (coach|bot|thing|it|app) is|you are just|you.?re just|just a (bot|calculator|robot|machine)|nothing makes sense|you are (useless|garbage|terrible|pathetic|nonsense|generic|confusing)|this is (nonsense|garbage|useless|terrible|pathetic)|confused calculator|generic (bot|coach)?|makes no sense|doesn.?t make sense|not making sense|whole lot of nonsense|a lot of nonsense)\b/i.test(m)
-      || /\b(entire coach|whole (coach|bot)|this whole|this entire)\b/i.test(m);
-
-    const severeCtx = BOT_COMPLAINT
-      ? `You are Coach K. Client ${firstName || "this client"} just said: "${message}".
-
-They are saying the ENTIRE COACH is confusing, generic, or not making sense — this is a complaint about the bot itself, not about one specific bad reply.
-
-Your last reply was (${lastIntent}): "${lastOut}"
-
-DO NOT suggest an exercise. DO NOT ask "What exercise will you start with?" DO NOT pivot to workout. That would prove their point that you are generic and confused.
-
-WRITE TWO SENTENCES ONLY:
-1. Acknowledge that your responses have been unclear or unhelpful — be direct and specific, not defensive
-2. Name exactly ONE thing they can type right now to get something useful (e.g. "Type *today's workout* to get your programme" or "Type *menu* to see your options" — pick the most relevant for their goal: ${user.goalType || "fat_loss"})
-
-BANNED — never write any of these: "What exercise will you start with?", "Let's get back on track", "Focus on today's workout", "I hear you", "You need support", "Let's focus on", "wellness", "recovery", "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"
-
-Coach K tone: direct, accountable, SA voice. Two sentences. Nothing else.`
-      : `You are Coach K. Client ${firstName || "this client"} just said: "${message}".
-
-Your last message (${lastIntent}): "${lastOut}"
-
-They are frustrated with a specific coaching response — NOT sick, NOT in crisis. They want better coaching, not wellness support.
-
-REAL DATA: ${totalW} total sessions logged. ${streak > 0 ? `${streak}-session streak.` : ""} Goal: ${user.goalType || "fat_loss"}. Protein target: ${user.proteinTarget || 120}g.
-
-WRITE TWO SENTENCES ONLY:
-1. Name the specific thing that went wrong or that they're unhappy about (based on your last message and their reaction)
-2. Give one concrete next step using their actual numbers above (e.g. a specific food to log, their actual protein number, a specific lift target — NOT a vague "let's get back on track" and NEVER "What exercise will you start with?")
-
-BANNED — never write any of these: "What exercise will you start with?", "I hear you", "You need support", "Let's focus on", "Prioritize", "I understand your", "wellness", "recovery" (unless they said they were sick), "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"
-
-Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
-
-    try {
-      const severeReply = await withTimeout("gpt_severe", 20000, () => askCoachK(message, user, severeCtx));
-      await logChat(user.id, message, severeReply, "SEVERE_FRUSTRATION");
-      return severeReply;
-    } catch (e) {
-      const fallback = BOT_COMPLAINT
-        ? `${firstName ? `${firstName}, ` : ""}my responses clearly weren't making sense. Type *menu* to see exactly what I can do, or *today's workout* to get your programme.`
-        : `${firstName ? `${firstName}, ` : ""}that response wasn't good enough. Type *menu* to see your options or tell me specifically what you need.`;
-      await logChat(user.id, message, fallback, "SEVERE_FRUSTRATION");
-      return fallback;
-    }
-  }
 
   // ---- A/B CONVERSION ATTRIBUTION — fire-and-forget, never blocks message handling ----
   // Any inbound message from an onboarded user that reaches this point counts as a
@@ -502,14 +424,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     recordConversion(user.id, abAction).catch(() => {/* non-fatal */});
   }
 
-  // ---- FRONT-DOOR NORMALIZER — the classifier's verdict applied BEFORE routing ----
-  // The brain decides what the message IS; the deterministic handlers stay the hands.
-  // Messy human phrasing ("I want to go into a building phase", "Breakfast, four fish
-  // fingers...") is rewritten into the canonical form the handlers were built for —
-  // so infinite phrasing variety maps onto the finite patterns that log correctly.
-  // Conservative: high confidence only, never accepts invented numbers, and the
-  // original message always proceeds untouched on timeout/error. Killswitch: NORMALIZER=off.
-  let normalizedQuestion = false;
+  const normalizedQuestion = false; // the normalizer is gone (#568): a question in words is the front door's to read
   const originalMBeforeNorm = m; // save before any normalization rewrite — used for supplementary extraction
   // The fidelity gate judges the rewrite against what the client actually WROTE, punctuation and
   // capitalisation intact — `m` is already lower-cased and whitespace-collapsed, which is fine for
@@ -602,152 +517,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const feedbackReply = await resumeWorkoutFeedbackExpectation({ phone, message, m, user }); if (feedbackReply !== null) turnEvidence({ conversationalOnly: true });
   if (feedbackReply !== null && mayEndTurn("workout-feedback")) return closeCoachingTurn(feedbackReply); if (feedbackReply !== null) commitFact(turn, "workout", feedbackReply);
   // #592 THE FRONT DOOR: past the floors and anything awaiting an answer, the new coach reads, acts through the tools, and answers.
-  const core = await import("./core/coach"); const front = feedbackReply === null && trainingLoopOutcome === null && core.coreFront() && !mediaUrl && !user.awaitingInputType && !core.isExactCommand(m)
+  // No rollback since 14 Oct (#568). A turn it could not read still reaches the doors below until they are deleted (batch 2).
+  const core = await import("./core/coach"); const front = feedbackReply === null && trainingLoopOutcome === null && !mediaUrl && !user.awaitingInputType && !core.isExactCommand(m)
     ? await core.frontTurn({ phone, message, user, sourceMessageId, ongoing: recentlyActive(user), evidence: turnEvidence }) : null;
   if (front?.reply && front.wrote) turnEvidence({ conversationalOnly: true }); // #590: an after-log turn is the new coach's words only; the ladder speaks once a day, scheduled
   if (front?.reply) return tag(front.reply, front.src);
-  if (normalizerLive() && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
-    try {
-      const pre = await Promise.race([
-        intentPromise ?? startIntent(),
-        new Promise<{ intent: ClassifiedIntent; confidence: number; canonical?: string }>(res =>
-          setTimeout(() => res({ intent: "OTHER" as ClassifiedIntent, confidence: 0 }), 3500)),
-      ]);
-      normalizedQuestion = pre.intent === "QUESTION" && pre.confidence >= 0.8;
-      const ACTION_INTENTS = new Set<ClassifiedIntent>(["FOOD_LOG", "FOOD_PLANNED", "MEAL_COPY", "STEPS", "WORKOUT_LOG", "WEIGHT", "GOAL_CHANGE", "TOTALS_QUERY"]);
-      let canon = ((pre as IntentClassification).canonical || "").trim();
-      // Retrospective-weight brake: "last week it was 83kg", "I used to weigh 90kg",
-      // "I started at 95kg" are HISTORICAL context, not today's weigh-in. The classifier
-      // sees "83kg" and wants to rewrite it to a current WEIGHT log — which would overwrite
-      // currentWeight, recalc targets off a past number, and print a bogus "down 0.3kg".
-      // Drop the canonical so the original message falls through to a conversational reply.
-      if (pre.intent === "WEIGHT" && /\b(last\s+(?:week|month|year|time)|used\s+to|back\s+(?:then|in|when)|previously|a\s+(?:week|month|year)\s+ago|(?:weeks?|months?|years?)\s+ago|started\s+(?:at|on|out|off)|when\s+i\s+(?:started|began|was)|before\s+i|in\s+\d{4}|earlier\s+this|was\s+\d{2,3}(?:\.\d+)?\s*kg)\b/i.test(originalMBeforeNorm)) {
-        canon = "";
-      }
-      // Tense brake: FOOD_PLANNED is only valid when the CLIENT used future words.
-      // A bare food list ("Lunch / Tin fish / Rice / Mixed veggies") is an eaten meal —
-      // the most common logging format. If the classifier guessed future tense the
-      // client never wrote, convert the canonical to past so the meal logs immediately
-      // instead of being held hostage behind an "ate it" confirmation.
-      if (pre.intent === "FOOD_PLANNED" && canon) {
-        const FUTURE_RE = /\b(i.?ll\s+have|i\s+will|gonna|going\s+to|planning|will\s+be|later|tonight|this\s+evening|about\s+to|busy\s+(?:cooking|making)|in\s+the\s+oven|on\s+the\s+stove)\b/i;
-        if (!FUTURE_RE.test(originalMBeforeNorm)) {
-          canon = canon.replace(/\b(i.?m\s+)?(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|will\s+be\s+(?:eating|having))\b/gi, "i had");
-        }
-      }
-      // GOAL_CHANGE keyword brake: rewriting into "change my goal to X" flips the ENTIRE programme +
-      // targets — the most destructive normalizer output (2026-07-07 "10,000 steps now" became
-      // "change my goal to fat loss"). Only honour it when the ORIGINAL has goal vocabulary; else drop.
-      if (pre.intent === "GOAL_CHANGE" && !hasGoalChangeVocabulary(originalMBeforeNorm)) {
-        console.log(`[NORMALIZER] GOAL_CHANGE brake — no goal vocabulary in "${originalMBeforeNorm.slice(0, 60)}" — dropping canonical`);
-        canon = "";
-      }
-      // TOTALS_QUERY brake (2026-07-16 live): "how do my calories ADJUST when I'm sick?" is a
-      // coaching QUESTION, not a totals lookup — reasoning vocabulary keeps the original message.
-      if (pre.intent === "TOTALS_QUERY" && /\b(adjust|change|why|what happens|should|if i|when i.?m|sick|ill|holiday|rest|not (walking|training)|stay the same|missing the point)\b/i.test(originalMBeforeNorm)) {
-        console.log(`[NORMALIZER] TOTALS brake — reasoning vocabulary in "${originalMBeforeNorm.slice(0, 60)}" — dropping canonical`);
-        canon = "";
-      }
-      // A canonical is ONE command; this note is several facts, so any rewrite is a deletion
-      // however faithful it looks. Fidelity below stays a tripwire for single-fact notes.
-      if (multiFact && canon) {
-        console.log(`[NORMALIZER] ${turnFacts.factTypes.join("+")} — multi-fact note is never rewritten; raw text proceeds`);
-        canon = "";
-      }
-      // …AND SEVERAL DAYS IS SEVERAL REPORTS (2026-08-25, issue #63 Phase 2.2).
-      //
-      // The brake above counts DOMAINS: multiFact is factTypes.length >= 2. Three days of meals is
-      // one domain — `["food"]`, length 1 — so a client catching up on Monday, Tuesday and
-      // Wednesday sailed straight past it and the rewrite was free to speak for all three days at
-      // once. The batch logger downstream is CORRECT: it answers "Logged 3 days ✅" on the raw
-      // text. It simply never saw the raw text.
-      //
-      // That is mechanism 2 in #63 — a capability made unreachable by an earlier transformation,
-      // rather than a wrong rule anywhere. The reported failure is ~7,700 kcal landing on a single
-      // day against a ~2,700 target.
-      //
-      // The day question already has an owner — attributeMultiDayReport, which backfill.ts uses to
-      // decide the same thing — so this consults it rather than adding a second opinion about what
-      // "multiple days" means. The comment above states the principle exactly; it was only ever
-      // applied to one of the two ways a note can carry more than one report.
-      if (canon && attributeMultiDayReport(originalMBeforeNorm).hasMultipleDays) {
-        console.log(`[NORMALIZER] multi-DAY note is never rewritten; raw text proceeds — "${originalMBeforeNorm.slice(0, 60)}"`);
-        canon = "";
-      }
-      if (ACTION_INTENTS.has(pre.intent) && pre.confidence >= 0.75 && canon.length >= 3 && canon.length <= message.length * 2.5 + 20) {
-        const canonLower = canon.toLowerCase();
-        if (canonLower !== m) {
-          // Hallucination brake: every number in the canonical must exist in the original. Number-
-          // words whitelist ONLY their own derived values (singles, pairs, word+thousand compounds);
-          // anything else fails closed to the original message (never invent a number, never lose data).
-          const digitGroups = canonLower.match(/\d+/g) || [];
-          const mStripped = m.replace(/[.,\s]/g, "");
-          const WORD_VALS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100, thousand: 1000 };
-          const wordVals = (m.match(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)\b/gi) || []).map(w => WORD_VALS[w.toLowerCase()]);
-          const allowedNums = new Set<string>();
-          wordVals.forEach((v, i) => {
-            allowedNums.add(String(v));
-            if (i + 1 < wordVals.length) {
-              allowedNums.add(String(v + wordVals[i + 1]));
-              allowedNums.add(String(v * wordVals[i + 1]));
-              if (i + 2 < wordVals.length) allowedNums.add(String((v + wordVals[i + 1]) * wordVals[i + 2]));
-            }
-          });
-          const inventsNumbers = digitGroups.some(d => !mStripped.includes(d) && !allowedNums.has(String(parseInt(d, 10))));
-          // Retro-date brake: strip an invented "yesterday" the classifier added to a WORKOUT_LOG
-          // canonical when the original had no temporal reference (else a same-day PB reads as retro).
-          // NEW-FOOD vs REPEAT brake (2026-07-22 live): "...4 slices of pizza, add to yesterday" is
-          // a NEW food to log — the normalizer rewrote it to a repeat, which copied the last meal
-          // (tin fish) and needed shouting. Original names a quantified food + canon is a repeat →
-          // drop canon, let the real logger parse the actual food (with its date + card).
-          const origHasQuantifiedFood = /\b\d+\s*(?:slices?|pieces?|plates?|cups?|scoops?|tins?|cans?|bowls?|bars?|packets?|servings?)\b/i.test(originalMBeforeNorm);
-          const canonIsRepeat = /\b(same|again|repeat|copy)\b/i.test(canon.toLowerCase());
-          if (origHasQuantifiedFood && canonIsRepeat) {
-            console.log(`[NORMALIZER] new-food brake — original names a quantified food but canon is a repeat — dropping "${canon.slice(0, 60)}"`);
-            canon = "";
-          }
-          if (!inventsNumbers && canon) {
-            if (pre.intent === "WORKOUT_LOG") {
-              canon = stripInventedRetroDate(canon, originalMBeforeNorm);
-            }
-            // MAY THIS REWRITE SPEAK FOR THE CLIENT? (Work Order 1.) A rewrite REPLACES their
-            // words before any handler sees them, so an unfaithful one is not a bad guess — it is
-            // the message destroyed in transit. Fails CLOSED: the original proceeds untouched.
-            const fid = normalizerFidelity(originalMessageForFidelity, canon);
-            if (!fid.ok) {
-              console.log(`[NORMALIZER] fidelity gate REJECTED the rewrite — ${fid.reason}. Raw text proceeds: "${originalMessageForFidelity.slice(0, 80)}"`);
-              canon = "";
-            } else {
-              console.log(`[NORMALIZER] ${pre.intent}(${Math.round(pre.confidence * 100)}%) "${message.slice(0, 80)}" → "${canon.slice(0, 80)}"`);
-              message = canon; turnCanonicalInput(message);
-              m = canon.toLowerCase().replace(/\s+/g, " ").trim();
-            }
-          }
-        }
-      }
-      // Supplementary extraction: when a GOAL_CHANGE is normalized, the canonical
-      // captures the goal but drops other context from the original voice note.
-      // Extract gym membership and body weight from the original and apply immediately
-      // so the handler response references the correct training mode and targets.
-      if (pre.intent === "GOAL_CHANGE" && pre.confidence >= 0.75) {
-        const gymInOriginal = /\b(joined.*gym|back.*gym|back at.*gym|at.*gym|now.*gym|got.*gym|started.*gym|i.?ve.*joined|gym.*member)\b/i.test(originalMBeforeNorm);
-        if (gymInOriginal && user.trainingMode !== "gym") {
-          await db.update(users).set({ trainingMode: "gym" }).where(eq(users.phoneNumber, phone));
-          user.trainingMode = "gym";
-          console.log("[NORMALIZER] supplementary: training mode → gym from GOAL_CHANGE original");
-        }
-        const wtMatch = originalMBeforeNorm.match(/\bmy\s+(?:current\s+)?weight\s+(?:is\s+)?(\d{2,3}(?:\.\d+)?)\s*(?:kg|kgs)?\b/i)
-          || originalMBeforeNorm.match(/\bi\s+(?:currently\s+)?weigh\s+(\d{2,3}(?:\.\d+)?)\s*kg/i);
-        if (wtMatch) {
-          const wt = parseFloat(wtMatch[1]);
-          if (wt >= 30 && wt <= 250) {
-            await handleWeightLog(phone, user, wt);
-            console.log(`[NORMALIZER] supplementary: weight → ${wt}kg from GOAL_CHANGE original`);
-          }
-        }
-      }
-    } catch (normErr) { console.warn("[NORMALIZER] exception — original message proceeds:", normErr instanceof Error ? normErr.message : normErr); }
-  }
   // CUT 1 — ONE TURN COMMITS EVERY EVENT. The facts were parsed from the client's raw text
   // above, before the rewriter. If the note carries two or more, no handler below may end the
   // turn: each COMMITS what it did and control continues, and one composer builds one reply.

@@ -48,7 +48,7 @@ export const SUITES = [
   "reentry-state-tests", "reentry-bridge-tests", "reaction-guard-tests", "current-date-tests", "day-relative-situation-tests", "multi-day-attribution-tests",
   // The decision-engine-p0 workflow's four. Here so local and CI cover the same surface.
   "decision-state-tests", "decision-runtime-tests", "reply-context-verifier-tests", "decision-doctrine-guard",
-  "turn-triage-tests", "normalizer-replay-tests", "tracking-contract-tests",
+  "turn-triage-tests", "tracking-contract-tests",
   "expectation-continuity-tests", "voice-provenance-tests", "proactive-template-tests",
   "production-parity", "cut-a-regression-tests", "status-webhook-auth-tests", "check-architecture",
 ];
@@ -74,8 +74,8 @@ for (const name of SUITES) {
   const timedOut = r.status === null;
   const ok = !timedOut && r.status === 0;
   // A SUITE THAT COVERED NOTHING IS NOT A SUITE THAT PASSED (2026-08-25).
-  // normalizer-replay exits 0 when its recording is absent — correctly, because a missing
-  // recording is not a product failure. But it was rendering as `✓`, and a green tick on a suite
+  // A suite that exits 0 because its recording is absent is not a product failure. But it rendered
+  // as `✓`, and a green tick on a suite
   // that asserted nothing is precisely the vacuous pass this chain exists to catch. A suite that
   // stood down says so, every run, so the gap cannot quietly become "covered".
   const skipped = ok && /^SUITE_SKIPPED:/m.test(output);
