@@ -168,6 +168,7 @@ console.log("\n3. A GENERIC CHECK-IN IS NEVER RECORDED AS DELIVERY OF THE ORIGIN
   chk(outcome === "dropped", "…and the outcome says DROPPED, not delivered", `outcome=${outcome}`);
   chk(!deliveryAccepted(outcome),
     "…so deliveryAccepted() is FALSE and no caller records this as the message landing");
+  chk(!deliveryAccepted("substituted"), "…and a substitute, should one ever be reported, is never an accepted delivery");
 
   // THE OPPOSITE CONTROL: a matched template must NOT report substituted, or §1's acceptance is
   // satisfied by a door that reports failure for everything.
