@@ -157,6 +157,26 @@ REAL("\n4d. A CORRECTION AND A NEW MEAL IN ONE MESSAGE (#624)");
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
+REAL("\n4i. \"REMOVE MY LAST MEAL\" AFTER A CORRECTION REMOVES THE LAST ONE SENT (#637)");
+{
+  const T = "whatsapp:+27829438637";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Last Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  const rows = async () => (await pool.query("SELECT meal_label l, raw_message r FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY m.created_at", [T])).rows;
+  process.env.CORE_WAVE2 = "on";
+  await say(T, "I had pap and wors for lunch");
+  await say(T, "I had chicken and rice for supper");
+  await say(T, "Lunch was a burger not pap"); // the correction rewrites lunch's row in place
+  const before = await rows();
+  await say(T, "Please remove my last meal");
+  const after = await rows();
+  chk(before.length === 2 && after.length === 1 && after[0].l === "lunch",
+    "supper, then a lunch correction, then \"remove my last meal\": supper goes and lunch stays", `${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+  delete process.env.CORE_WAVE2;
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
 REAL("\n4h. SICK AND BACK THROUGH THE FRONT DOOR (A15)");
 {
   const T = "whatsapp:+27829438015";
