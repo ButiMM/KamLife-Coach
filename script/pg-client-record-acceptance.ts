@@ -229,6 +229,13 @@ REAL("\n5e. FORGET IT, OR IT'S OVER — the known fact ends and nothing replaces
   const shown = await factsForCoach(f.id), known = await knownFacts(f.id);
   chk(!/night shift|knee|forget/i.test(shown) && !/night shift|knee/i.test(known),
     "\"forget that I said I work night shifts\" and \"my knee is fine now\" end those facts; the coach is told neither, nor the forget sentence", `${shown} | ${known}`);
+  // Out of order (Codex P1 on 8b2f676): "my knee is fine now" processed after a newer "my knee is sore again"
+  // ends only what was known when it was said, never the newer fact.
+  const [a] = await q("INSERT INTO client_events (user_id, raw_text, received_at) VALUES ($1, 'Forget my knee, it is fine now.', now() - interval '1 minute') RETURNING id", [f.id]);
+  const [b] = await q("INSERT INTO client_events (user_id, raw_text) VALUES ($1, 'My knee is sore again.') RETURNING id", [f.id]);
+  await q("INSERT INTO client_facts (user_id, kind, subject, statement, source_event_id, extracted_by) VALUES ($1, 'injury', 'knee', 'My knee is sore again', $2, 'test')", [f.id, b.id]);
+  await applyFacts(a.id, JSON.stringify({ facts: [{ kind: "injury", subject: "knee", statement: "Forget my knee, it is fine now", detail: {}, retires: true }] }));
+  chk(/sore again/.test(await factsForCoach(f.id)), "a late-processed \"fine now\" never ends a fact the client stated after it", await factsForCoach(f.id));
 }
 
 REAL("\n6. ERASURE — \"delete my data\" removes the record");

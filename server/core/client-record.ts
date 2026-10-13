@@ -266,6 +266,8 @@ export async function applyFacts(eventId: string, raw: string): Promise<number> 
         eq(clientFacts.userId, ev.userId), isNull(clientFacts.supersededBy), eq(clientFacts.kind, f.kind),
         inArray(clientFacts.subject, [f.subject, (f.corrects || "").trim().toLowerCase()].filter(Boolean)),
         sql`(${clientFacts.validUntil} IS NULL OR ${clientFacts.validUntil} > now())`,
+        // Only what was known when they said it: a newer fact processed first is never ended (Codex P1 on 8b2f676).
+        sql`coalesce((SELECT ce.received_at FROM client_events ce WHERE ce.id = ${clientFacts.sourceEventId}), ${clientFacts.createdAt}) < ${ev.receivedAt}`,
       )).returning({ id: clientFacts.id });
       written += ended.length;
       continue;
