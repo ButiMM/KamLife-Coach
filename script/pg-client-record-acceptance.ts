@@ -50,6 +50,15 @@ const EXTRACT: Record<string, unknown> = {
   "I can only do home workouts because I have no gym.": { facts: [{ kind: "constraint", subject: "home workouts", statement: "I can only do home workouts because I have no gym", detail: {}, valid_until: null, corrects: null }] },
   // A fact that starts later is not true today.
   "I start night shifts in December.": { facts: [{ kind: "schedule", subject: "night shifts", statement: "I start night shifts in December", detail: {}, valid_from: "2099-12-01", valid_until: null, corrects: null }] },
+  // Forget, and no longer true (#636): the known fact ends and nothing replaces it.
+  "I work night shifts this month and my knee is sore.": { facts: [
+    { kind: "schedule", subject: "night shifts", statement: "I work night shifts this month", detail: {}, valid_until: null, corrects: null },
+    { kind: "injury", subject: "knee", statement: "my knee is sore", detail: {}, valid_until: null, corrects: null },
+  ] },
+  // Every KNOWN FACT about it, as listed to the model: theirs, and the two copied from their profile.
+  "Forget that I said I work night shifts.": { facts: [["schedule", "night shifts"], ["schedule", "work pattern"], ["life_event", "life right now"]]
+    .map(([kind, subject]) => ({ kind, subject, statement: "Forget that I said I work night shifts", detail: {}, retires: true })) },
+  "My knee is fine now.": { facts: [{ kind: "injury", subject: "knee", statement: "My knee is fine now", detail: {}, retires: true }] },
   // The extractor "invents" a statement the client never wrote: it must be dropped, not stored.
   "My sister is pregnant and wants to know if she can squat.": { facts: [
     { kind: "life_event", subject: "pregnancy", statement: "I am pregnant", detail: {}, valid_until: null, corrects: null },
@@ -205,6 +214,19 @@ await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, e
 await purgeExpired();
 const aged = (await q("SELECT (SELECT count(*) FROM client_events WHERE user_id = $1 AND raw_text = 'an old message')::int e, (SELECT count(*) FROM client_facts WHERE user_id = $1 AND subject = 'old goal')::int f, (SELECT count(*) FROM client_events WHERE user_id = $1)::int kept", [w.id]))[0];
 chk(aged.e === 0 && aged.f === 0 && aged.kept > 0, "the year-old message and superseded fact are gone; recent ones stay", JSON.stringify(aged));
+
+REAL("\n5e. FORGET IT, OR IT'S OVER — the known fact ends and nothing replaces it (#636)");
+{
+  const f = await client(4);
+  await say(f.phoneNumber, "I work night shifts this month and my knee is sore.");
+  const { factsForCoach } = await import("../server/core/client-record");
+  await settle(async () => /knee/.test(await factsForCoach(f.id)));
+  await say(f.phoneNumber, "Forget that I said I work night shifts.");
+  await say(f.phoneNumber, "My knee is fine now.");
+  const shown = await factsForCoach(f.id), known = await knownFacts(f.id);
+  chk(!/night shift|knee|forget/i.test(shown) && !/night shift|knee/i.test(known),
+    "\"forget that I said I work night shifts\" and \"my knee is fine now\" end those facts; the coach is told neither, nor the forget sentence", `${shown} | ${known}`);
+}
 
 REAL("\n6. ERASURE — \"delete my data\" removes the record");
 await say(u.phoneNumber, "delete my data");
