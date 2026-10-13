@@ -36,6 +36,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^Lunch was rice not pap and for supper I had chicken$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not samp\. For supper I had beef\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "samp", to: "rice" }, { type: "LOG_MEAL", foodText: "beef stew", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
+      : /^I'm sick with flu, need 3 days off$/i.test(msg) ? [{ type: "SET_SICK", days: 3 }]
+      : /^I'm feeling better now$/i.test(msg) ? [{ type: "END_SICK" }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -151,6 +153,19 @@ REAL("\n4d. A CORRECTION AND A NEW MEAL IN ONE MESSAGE (#624)");
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
+REAL("\n4h. SICK AND BACK THROUGH THE FRONT DOOR (A15)");
+{
+  const T = "whatsapp:+27829438015";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Sick Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  const off = await say(T, "I'm sick with flu, need 3 days off");
+  const back = await say(T, "I'm feeling better now");
+  chk(/paused|better/i.test(off) && /welcome back/i.test(back) && !/not guess/i.test(back),
+    "sick, then \"I'm feeling better now\": the pause is set, and the welcome back reaches them (it was blocked as a false \"1 session\" claim)", `${off.slice(0, 80)} | ${back.slice(0, 120)}`);
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
 REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH SPEAKS (on for everyone)");
 {
   const count = async (phone: string) => Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [phone])).rows[0].n);
@@ -201,7 +216,11 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   chk(r1 === r0 + 1 && await count(TESTER) === r1 && /already in your log/i.test(rs) && !/chakalaka|solid meal/i.test(rs), "a resent meal is not logged twice and gets a plain \"already in your log\", not the old receipt", rs.slice(0, 200));
   const y0 = await count(TESTER); await say(TESTER, "I had pap and spinach yesterday"); const yr = await say(TESTER, "I had pap and spinach yesterday");
   chk(await count(TESTER) === y0 + 1 && /already in your log/i.test(yr) && !/today/i.test(yr), "a resent \"…yesterday\" meal is not called today's (#628 review)", `${y0}→${await count(TESTER)} | ${yr.slice(0, 160)} | ${JSON.stringify((await pool.query("SELECT raw_message, logged_at::date d FROM meal_logs m JOIN users u ON u.id=m.user_id WHERE u.phone_number=$1 AND raw_message ILIKE $2", [TESTER, "%spinach%"])).rows)}`);
-  const ot = await say(TESTER, "Am I on track?"); await say(TESTER, "change my goal to muscle gain"); const gy = await say(TESTER, "yes"), g = (await pool.query("SELECT goal_type FROM users WHERE phone_number = $1", [TESTER])).rows[0].goal_type;
+  const costRows = async () => Number((await pool.query("SELECT COUNT(*)::int n FROM gpt_costs g JOIN users u ON u.id = g.user_id WHERE u.phone_number = $1 AND g.feature = 'core'", [TESTER])).rows[0].n);
+  const c0 = await costRows();
+  const ot = await say(TESTER, "Am I on track?");
+  await new Promise(r => setTimeout(r, 300)); // the cost row is written fire-and-forget
+  chk(await costRows() >= c0 + 2, "the new coach's model calls are priced into gpt_costs, where the daily cap reads (#570)", `${c0} → ${await costRows()}`); await say(TESTER, "change my goal to muscle gain"); const gy = await say(TESTER, "yes"), g = (await pool.query("SELECT goal_type FROM users WHERE phone_number = $1", [TESTER])).rows[0].goal_type;
   chk(ot.includes(NEW) && g === "muscle_gain" && gy.includes(NEW), "A12: \"am I on track?\" and a confirmed goal change are the new coach's words (the goal still written)", `${g} | ${ot.slice(0, 120)} | ${gy.slice(0, 120)}`);
   process.env.CORE_WAVE2 = "off";
   const fo = await say(FOUNDER, "I had an apple for a snack");

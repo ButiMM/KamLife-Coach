@@ -214,7 +214,7 @@ async function openaiClient(): Promise<OpenAI> {
   if (!client) {
     const OpenAI = (await import("openai")).default;
     // #441: never hang a WhatsApp turn on a slow model (the SDK default is ten minutes and two retries).
-    client = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY, timeout: 20_000, maxRetries: 1 });
+    client = (await import("../gpt")).metered(new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY, timeout: 20_000, maxRetries: 1 }), "core");
   }
   return client;
 }

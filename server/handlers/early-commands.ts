@@ -22,7 +22,7 @@ import { replyWithButtons } from "../twilio-interactive";
 // exact label as a message, which the deterministic handlers already understand.
 const MENU_BUTTONS = ["Log food", "Today's workout", "My progress"];
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, nextDayDate, isMultiPartAsk, looksLikeQuestion, spaceName} from "../utils";
+import { sastDayStart, mealDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, nextDayDate, isMultiPartAsk, looksLikeQuestion, spaceName} from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
@@ -270,7 +270,7 @@ export async function handleEarlyCommands(ctx: {
       // empty day when the table agrees the day is empty; if rows are there, the totals are
       // what's wrong, and the client hears that instead of being called a liar.
       const [rowCheck] = await db.select({ n: sql<number>`COUNT(*)::int` }).from(mealLogs)
-        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sastDayStart())))
+        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, mealDayStart())))
         .catch(() => [{ n: 0 }] as any);
       if ((rowCheck?.n || 0) === 0) return `${name}all ${cal} kcal — nothing logged yet today.`;
       console.warn(`[CALORIE_QUERY] totals say 0 but ${rowCheck.n} meal row(s) exist today — user=${String(user.id).slice(-6)}`);
