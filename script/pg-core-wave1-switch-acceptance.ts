@@ -36,7 +36,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^Lunch was rice not pap and for supper I had chicken$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not samp\. For supper I had beef\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "samp", to: "rice" }, { type: "LOG_MEAL", foodText: "beef stew", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
-      : /^dinner was the same as lunch$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "the same as lunch", meal: "dinner", needsConfirmation: false }]
+      : /^(dinner was the same as lunch|should my dinner be the same as lunch\?)$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "the same as lunch", meal: "dinner", needsConfirmation: false }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -160,7 +160,12 @@ REAL("\n4e. \"DINNER WAS THE SAME AS LUNCH\" COPIES LUNCH (#326)");
     subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
   process.env.CORE_WAVE2 = "on";
   await say(T, "I had pap and wors for lunch");
-  const same = await say(T, "dinner was the same as lunch");
+  const asked = await say(T, "Should my dinner be the same as lunch?");
+  const afterAsk = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows[0].n);
+  chk(afterAsk === 1, "\"Should my dinner be the same as lunch?\" copies nothing: a question is not a report (#639 review)", `${afterAsk} rows | ${asked.slice(0, 120)}`);
+  process.env.APP_URL = "https://kamlife.example"; (await import("../server/card-policy"))._resetDumpWindow();
+  const same = await say(T, "dinner was the same as lunch"); delete process.env.APP_URL;
+  chk(/\[MEDIA:https:\/\/kamlife\.example\/card\//.test(same), "the copied dinner gets its card, like any meal (#639 review)", same.slice(0, 200));
   const rows = (await pool.query("SELECT meal_label l, kcal_int k FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [T])).rows;
   const lunch = rows.find(r => r.l === "lunch"), dinner = rows.find(r => r.l === "dinner");
   chk(rows.length === 2 && !!dinner && dinner.k === lunch?.k && !/items a bit clearer/i.test(same),
