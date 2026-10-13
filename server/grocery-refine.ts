@@ -12,12 +12,13 @@
 // ============================================================
 
 import OpenAI from "openai";
+import { metered } from "./gpt";
 import { assertAiOnline } from "./ai-offline";
 import { bmiOf } from "./targets";
 
-const openai = new OpenAI({
+const openai = metered(new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
-});
+}), "grocery"); // priced where the daily cap reads (#570)
 
 const BUDGET_LABELS: Record<string, string> = {
   under_100: "tight budget — Shoprite/Boxer",

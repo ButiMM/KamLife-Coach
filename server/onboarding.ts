@@ -472,7 +472,7 @@ RULES: omit a key entirely rather than guessing it. Never calculate a value they
 async function extractBulkIntake(text: string): Promise<BulkIntake | null> {
   try {
     const { default: OpenAI } = await import("openai");
-    const client = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY });
+    const client = (await import("./gpt")).metered(new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY }), "onboarding"); // #570
     // gpt-4o-mini (#412): a JSON read of what they typed, with strict omit-if-unsure rules.
     const resp = await client.chat.completions.create({
       model: "gpt-4o-mini", temperature: 0, max_tokens: 400,
